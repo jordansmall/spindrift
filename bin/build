@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Build the agent OCI image with nix and load it into podman.
+#
+# On macOS this realises a Linux image, which needs a Linux builder configured
+# in nix (see README.md > "Building on macOS"). On Linux it just works.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+echo "==> nix build .#spindrift  (bakes the pinned toolchain into an OCI image)"
+nix build .#spindrift "$@"
+
+echo "==> podman load -i result"
+podman load -i result
+
+echo "==> done: spindrift:latest"
