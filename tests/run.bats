@@ -77,6 +77,47 @@ EOF
   grep -q 'BASE_BRANCH=main' "$PODMAN_LOG"
 }
 
+@test "a non-default baked label changes which issues run queries" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  run "$CUSTOM_RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q -- '--label custom-label' "$GH_LOG"
+}
+
+@test "env var overrides a non-default baked default" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export LABEL=env-label
+  run "$CUSTOM_RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q -- '--label env-label' "$GH_LOG"
+  ! grep -q -- '--label custom-label' "$GH_LOG"
+}
+
+@test "baked defaults flow through to the container env" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  run "$CUSTOM_RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'BASE_BRANCH=develop' "$PODMAN_LOG"
+  grep -q 'BRANCH_PREFIX=bot/' "$PODMAN_LOG"
+}
+
+@test "runtime=docker invokes the docker fake, never podman" {
+  export FAKE_DOCKER_IMAGE_PRESENT=1
+  run "$DOCKER_RUN_CMD"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^run ' "$DOCKER_LOG")" -eq 2 ]
+  grep -q 'ISSUE_NUMBER=1' "$DOCKER_LOG"
+  [ ! -s "$PODMAN_LOG" ]
+}
+
+@test "runtime=docker auto-loads the image via docker" {
+  export FAKE_DOCKER_IMAGE_PRESENT=0
+  run "$DOCKER_RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'load -i /nix/store/' "$DOCKER_LOG"
+  [ ! -s "$PODMAN_LOG" ]
+}
+
 @test "run does not bind-mount the entrypoint or prompts (baked into image)" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"

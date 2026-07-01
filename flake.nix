@@ -51,6 +51,25 @@
             inherit nixpkgs system;
             packages = p: [ p.hello ];
           };
+
+          # Exercise the run knobs (#3): non-default baked `defaults` and a
+          # docker `runtime`. Eval-only, consumed by the checks below.
+          customHarness = import ./lib/mkHarness.nix {
+            inherit nixpkgs system;
+            defaults = {
+              label = "custom-label";
+              baseBranch = "develop";
+              maxParallel = 5;
+              branchPrefix = "bot/";
+            };
+            packages = p: [ p.hello ];
+          };
+
+          dockerHarness = import ./lib/mkHarness.nix {
+            inherit nixpkgs system;
+            runtime = "docker";
+            packages = p: [ p.hello ];
+          };
         in
         {
           inherit (harness) packages apps;
@@ -68,6 +87,7 @@
                     ${./lib/scripts/build.sh} \
                     ${./agent/entrypoint.sh} \
                     ${./tests/fakes/podman} \
+                    ${./tests/fakes/docker} \
                     ${./tests/fakes/gh} \
                     ${./tests/fakes/claude} \
                     ${./tests/helper.bash}
@@ -90,6 +110,8 @@
                   ];
                   RUN_CMD = "${harness.run}/bin/run";
                   BUILD_CMD = "${harness.build}/bin/build";
+                  CUSTOM_RUN_CMD = "${customHarness.run}/bin/run";
+                  DOCKER_RUN_CMD = "${dockerHarness.run}/bin/run";
                   IMAGE_PATH = harness.imagePath;
                   FAKES_DIR = ./tests/fakes;
                   ENTRYPOINT = ./agent/entrypoint.sh;
@@ -119,6 +141,23 @@
                 /nix/store/*spindrift*) : ;;
                 *) echo "unexpected image path: ${harness.imagePath}" >&2; exit 1 ;;
               esac
+              touch $out
+            '';
+
+            # The configured `defaults` and `runtime` are baked into the
+            # generated `run` command text (eval-only; no Linux builder). Same
+            # idiom as mkharness-substitution above.
+            mkharness-defaults = pkgs.runCommand "mkharness-defaults" { } ''
+              runCmd=${customHarness.run}/bin/run
+              ! grep -q -- '@label@' "$runCmd"
+              grep -q 'LABEL:-custom-label' "$runCmd"
+              grep -q 'BASE_BRANCH:-develop' "$runCmd"
+              grep -q 'MAX_PARALLEL:-5' "$runCmd"
+              grep -q 'BRANCH_PREFIX:-bot/' "$runCmd"
+
+              # Default runtime is podman; the docker harness bakes docker.
+              grep -q 'RUNTIME="podman"' ${harness.run}/bin/run
+              grep -q 'RUNTIME="docker"' ${dockerHarness.run}/bin/run
               touch $out
             '';
 
