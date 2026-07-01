@@ -1,0 +1,15 @@
+# nix build output
+result
+result-*
+
+# per-run agent logs
+logs/
+
+# local config + secrets — never commit this
+harness.env
+
+# direnv
+.direnv/
+
+# OS
+.DS_Store
