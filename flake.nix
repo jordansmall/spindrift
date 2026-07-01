@@ -24,104 +24,104 @@
         "aarch64-linux"
         "x86_64-linux"
       ];
+
+      # The engine, exposed for Consumer flakes to import.
+      flake.lib.mkHarness = import ./lib/mkHarness.nix;
+
       perSystem =
-        { system, ... }:
+        { system, pkgs, ... }:
         let
-          # OCI images are Linux-only. Map a darwin host to its Linux twin so
-          # `nix build .#spindrift` yields a runnable image no matter where
-          # it's invoked. On darwin this realises through a Linux builder —
-          # see README.md ("Building on macOS").
-          linuxSystem =
-            {
-              "aarch64-darwin" = "aarch64-linux";
-              "x86_64-darwin" = "x86_64-linux";
-              "aarch64-linux" = "aarch64-linux";
-              "x86_64-linux" = "x86_64-linux";
-            }
-            .${system};
-
-          pkgs = import nixpkgs {
-            system = linuxSystem;
+          # Dogfood: build spindrift's own harness through mkHarness. Rust stays
+          # wired here for now (parameterized in #2).
+          harness = import ./lib/mkHarness.nix {
+            inherit nixpkgs system;
             overlays = [ (import rust-overlay) ];
-            # Claude Code ships under an unfree license.
             config.allowUnfree = true;
-          };
-
-          # Pinned language toolchain. Edit toolchain/rust-toolchain.toml to
-          # change channel/targets; for a non-Rust project, drop this and its
-          # reference in `agentEnv` below.
-          rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./toolchain/rust-toolchain.toml;
-
-          # Project-specific tools the agent needs to build & test the target
-          # repo. EDIT toolchain/packages.nix for your stack.
-          projectPackages = import ./toolchain/packages.nix { inherit pkgs; };
-
-          # Plumbing every agent needs regardless of language: a shell, the VCS
-          # + GitHub CLIs, Claude Code, CA certs, and the unix tools the
-          # entrypoint relies on. Leave this list alone.
-          harnessPackages = with pkgs; [
-            bashInteractive
-            coreutils
-            gnugrep
-            gnused
-            findutils
-            gettext # envsubst, used by agent/entrypoint.sh
-            git
-            gh
-            claude-code
-            cacert
-          ];
-
-          agentEnv = pkgs.buildEnv {
-            name = "agent-env";
-            paths = [ rustToolchain ] ++ harnessPackages ++ projectPackages;
-            pathsToLink = [
-              "/bin"
-              "/lib"
-              "/etc"
-              "/share"
-              "/include"
-            ];
+            packages =
+              p:
+              [ (p.rust-bin.fromRustupToolchainFile ./toolchain/rust-toolchain.toml) ]
+              ++ import ./toolchain/packages.nix { pkgs = p; };
           };
         in
         {
-          # The disposable agent container: the pinned toolchain baked into a
-          # minimal OCI image. `bin/build` runs this and loads it into podman.
-          packages.spindrift = pkgs.dockerTools.buildLayeredImage {
-            name = "spindrift";
-            tag = "latest";
-            contents = [ agentEnv ];
-            extraCommands = ''
-              mkdir -p tmp home/agent work
-              chmod 1777 tmp
+          inherit (harness) packages apps;
+
+          checks = {
+            # shellcheck the bash layers (scripts, entrypoint, fakes, helper).
+            shellcheck =
+              pkgs.runCommand "shellcheck"
+                {
+                  nativeBuildInputs = [ pkgs.shellcheck ];
+                }
+                ''
+                  shellcheck --shell=bash \
+                    ${./lib/scripts/run.sh} \
+                    ${./lib/scripts/build.sh} \
+                    ${./agent/entrypoint.sh} \
+                    ${./tests/fakes/podman} \
+                    ${./tests/fakes/gh} \
+                    ${./tests/fakes/claude} \
+                    ${./tests/helper.bash}
+                  touch $out
+                '';
+
+            # The bash layers under bats, driven entirely through fakes — no real
+            # container, network, or LLM.
+            bats =
+              pkgs.runCommand "bats"
+                {
+                  nativeBuildInputs = [
+                    pkgs.bats
+                    pkgs.bash
+                    pkgs.git
+                    pkgs.gettext
+                    pkgs.coreutils
+                    pkgs.gnugrep
+                    pkgs.gnused
+                  ];
+                  RUN_CMD = "${harness.run}/bin/run";
+                  BUILD_CMD = "${harness.build}/bin/build";
+                  IMAGE_PATH = harness.imagePath;
+                  FAKES_DIR = ./tests/fakes;
+                  ENTRYPOINT = ./agent/entrypoint.sh;
+                  PROMPTS_DIR = ./prompts;
+                }
+                ''
+                  export HOME="$TMPDIR/home"
+                  mkdir -p "$HOME"
+                  cp -r ${./tests} tests
+                  chmod -R +w tests
+                  bats tests/
+                  touch $out
+                '';
+
+            # Pure-eval-style assertion: the image store path is substituted into
+            # the generated commands and the placeholder is gone.
+            mkharness-substitution = pkgs.runCommand "mkharness-substitution" { } ''
+              buildCmd=${harness.build}/bin/build
+              runCmd=${harness.run}/bin/run
+
+              grep -q '${harness.imagePath}' "$buildCmd"
+              grep -q '${harness.imagePath}' "$runCmd"
+              ! grep -q '@imagePath@' "$buildCmd"
+              ! grep -q '@imagePath@' "$runCmd"
+
+              case '${harness.imagePath}' in
+                /nix/store/*spindrift*) : ;;
+                *) echo "unexpected image path: ${harness.imagePath}" >&2; exit 1 ;;
+              esac
+              touch $out
             '';
-            config = {
-              Entrypoint = [ "/bin/bash" ];
-              WorkingDir = "/";
-              Env = [
-                "PATH=/bin"
-                "HOME=/home/agent"
-                "CARGO_HOME=/home/agent/.cargo"
-                "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-                "GIT_SSL_CAINFO=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-                "PKG_CONFIG_PATH=/lib/pkgconfig"
-              ];
-            };
           };
 
-          # For hacking ON the harness itself (host-side). Uses the native
-          # system's pkgs, not the Linux image set above.
-          devShells.default =
-            let
-              hostPkgs = import nixpkgs { inherit system; };
-            in
-            hostPkgs.mkShell {
-              packages = [
-                hostPkgs.git
-                hostPkgs.gh
-                hostPkgs.jq
-              ];
-            };
+          # For hacking ON the harness itself (host-side).
+          devShells.default = pkgs.mkShell {
+            packages = [
+              pkgs.git
+              pkgs.gh
+              pkgs.jq
+            ];
+          };
         };
     };
 }
