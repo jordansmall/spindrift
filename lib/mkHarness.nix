@@ -20,6 +20,13 @@
   # caches the toolchain wants (e.g. a fetch of pinned dependencies). Baked
   # into the image; default is a no-op.
   prefetch ? "",
+  # The agent prompt template, a Consumer-owned artifact (it is mutated per
+  # project). Rendered to a store path and mounted into the container at
+  # runtime — NOT baked into the image — so it can be re-pointed via
+  # SPINDRIFT_PROMPT_DIR with zero rebuilds (see scripts/run.sh). The default
+  # is the scaffolded issue-prompt.md, a working starting point out of the box.
+  # The entrypoint substitutes the per-issue variables into it at run time.
+  prompt ? builtins.readFile ../prompts/issue-prompt.md,
   # Non-secret run configuration baked into the generated `run` command as its
   # built-in defaults. A matching env var (LABEL/BASE_BRANCH/MAX_PARALLEL/
   # BRANCH_PREFIX) still wins at runtime, so one built command can be
@@ -97,13 +104,20 @@ let
   };
 
   # Baked into the image at /agent — there is no working tree to bind-mount from
-  # once spindrift is a store path.
+  # once spindrift is a store path. The prompt is deliberately NOT baked here:
+  # it is a runtime mount (see promptDir + scripts/run.sh) so it can be tuned
+  # per project and hot-overridden without rebuilding the image.
   agentFiles = pkgs.runCommand "spindrift-agent-files" { } ''
-    mkdir -p $out/agent/prompts
+    mkdir -p $out/agent
     cp ${../agent/entrypoint.sh} $out/agent/entrypoint.sh
     chmod +x $out/agent/entrypoint.sh
-    cp -r ${../prompts}/. $out/agent/prompts/
   '';
+
+  # The rendered prompt as a host store-path directory (native-buildable on
+  # darwin, so it needs no Linux builder). The `run` command bakes this path in
+  # and bind-mounts it at /agent/prompts, where the entrypoint reads
+  # issue-prompt.md and substitutes the per-issue variables.
+  promptDir = hostPkgs.writeTextDir "issue-prompt.md" prompt;
 
   image = pkgs.dockerTools.buildLayeredImage {
     name = "spindrift";
@@ -163,6 +177,9 @@ let
       "--replace-fail '@baseBranch@' '${mergedDefaults.baseBranch}'"
       "--replace-fail '@maxParallel@' '${toString mergedDefaults.maxParallel}'"
       "--replace-fail '@branchPrefix@' '${mergedDefaults.branchPrefix}'"
+      # Baked with string context so `nix build .#run` realises the prompt dir
+      # into the store; SPINDRIFT_PROMPT_DIR can still override it at run time.
+      "--replace-fail '@promptDir@' '${promptDir}'"
     ]
   );
 
@@ -179,6 +196,7 @@ in
     build
     run
     imagePath
+    promptDir
     ;
 
   packages = {

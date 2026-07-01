@@ -3,8 +3,10 @@
 # fresh — zero shared host filesystem — cuts a branch, then hands off to a
 # headless Claude Code agent that implements the issue and opens a PR.
 #
-# Baked into the image at /agent/entrypoint.sh alongside /agent/prompts (see
-# lib/mkHarness.nix); nothing is bind-mounted from a source checkout.
+# Baked into the image at /agent/entrypoint.sh (see lib/mkHarness.nix). The
+# prompt template is bind-mounted at /agent/prompts by the `run` command — a
+# Consumer-owned artifact, hot-overridable via SPINDRIFT_PROMPT_DIR — and we
+# substitute the per-issue variables into it below.
 #
 # --dangerously-skip-permissions is safe here precisely because the container
 # IS the isolation boundary: the agent can do anything it likes, but only to a
