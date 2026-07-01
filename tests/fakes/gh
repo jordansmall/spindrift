@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Fake gh for tests. Records every invocation to $GH_LOG and answers the two
+# calls the harness makes: `issue list` (prints the scripted TSV in
+# $FAKE_GH_ISSUES) and `pr create` / `auth setup-git` (recorded, no-op).
+set -euo pipefail
+
+: "${GH_LOG:?GH_LOG must point at a log file}"
+printf '%s\n' "$*" >>"$GH_LOG"
+
+case "${1:-}" in
+  issue)
+    if [ "${2:-}" = "list" ]; then
+      printf '%s' "${FAKE_GH_ISSUES:-}"
+    fi
+    ;;
+esac
+
+exit 0
