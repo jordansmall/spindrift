@@ -25,14 +25,29 @@
         "x86_64-linux"
       ];
 
+      # Dogfood the declarative surface: our own packages/apps are produced by
+      # the flake-parts shim, not a direct mkHarness call.
+      imports = [ ./lib/flakeModule.nix ];
+
       # The engine, exposed for Consumer flakes to import.
       flake.lib.mkHarness = import ./lib/mkHarness.nix;
 
+      # The flake-parts shim, exposed for Consumer flakes that want the
+      # declarative option surface (ADR 0001).
+      flake.flakeModules.default = ./lib/flakeModule.nix;
+
       perSystem =
-        { system, pkgs, ... }:
+        {
+          system,
+          pkgs,
+          config,
+          ...
+        }:
         let
-          # Dogfood: build spindrift's own harness through mkHarness. Rust stays
-          # wired here for now (parameterized in #2).
+          # The rust dogfood expressed as module options — this drives the real
+          # packages/apps (see `spindrift = { ... }` below). Kept here as a
+          # direct call too, so the equivalence check can prove the module path
+          # and the direct path yield byte-identical outputs.
           harness = import ./lib/mkHarness.nix {
             inherit nixpkgs system;
             overlays = [ (import rust-overlay) ];
@@ -82,9 +97,41 @@
             '';
             packages = p: [ p.hello ];
           };
+
+          # A minimal flake-parts consumer fixture (#5). It imports the shim and
+          # configures nothing but a non-Rust `packages` set, standing in for a
+          # downstream flake. Evaluated in-repo (no separate lock / no network)
+          # via a nested `mkFlake`; the checks compare its outputs to the
+          # equivalent direct `mkHarness` call.
+          minimalDirect = import ./lib/mkHarness.nix {
+            inherit nixpkgs system;
+            packages = p: [ p.hello ];
+          };
+          moduleConsumer = flake-parts.lib.mkFlake {
+            inputs = {
+              inherit nixpkgs;
+              self = { outPath = ./.; };
+            };
+          } {
+            systems = [ system ];
+            imports = [ ./lib/flakeModule.nix ];
+            perSystem.spindrift.packages = p: [ p.hello ];
+          };
+          consumerPkgs = moduleConsumer.packages.${system};
         in
         {
-          inherit (harness) packages apps;
+          # The dogfood's real packages/apps flow through the flake-parts shim.
+          spindrift = {
+            overlays = [ (import rust-overlay) ];
+            config = {
+              allowUnfree = true;
+            };
+            prefetch = "cargo fetch --locked || true";
+            packages =
+              p:
+              [ (p.rust-bin.fromRustupToolchainFile ./toolchain/rust-toolchain.toml) ]
+              ++ import ./toolchain/packages.nix { pkgs = p; };
+          };
 
           checks = {
             # shellcheck the bash layers (scripts, entrypoint, fakes, helper).
@@ -120,8 +167,8 @@
                     pkgs.gnugrep
                     pkgs.gnused
                   ];
-                  RUN_CMD = "${harness.run}/bin/run";
-                  BUILD_CMD = "${harness.build}/bin/build";
+                  RUN_CMD = "${config.packages.run}/bin/run";
+                  BUILD_CMD = "${config.packages.build}/bin/build";
                   CUSTOM_RUN_CMD = "${customHarness.run}/bin/run";
                   DOCKER_RUN_CMD = "${dockerHarness.run}/bin/run";
                   IMAGE_PATH = harness.imagePath;
@@ -160,6 +207,51 @@
               esac
               touch $out
             '';
+
+            # The declarative shim must produce byte-identical outputs to a
+            # direct `mkHarness` call with the same inputs (#5). Compare store
+            # paths at eval time — no Linux builder needed, since the launcher
+            # commands are native and the image path is baked into them as text.
+            flakemodule-equivalence =
+              pkgs.runCommand "flakemodule-equivalence"
+                {
+                  moduleBuild = config.packages.build;
+                  directBuild = harness.build;
+                  moduleRun = config.packages.run;
+                  directRun = harness.run;
+                  imagePath = harness.imagePath;
+                }
+                ''
+                  [ "$moduleBuild" = "$directBuild" ] \
+                    || { echo "build mismatch: $moduleBuild != $directBuild" >&2; exit 1; }
+                  [ "$moduleRun" = "$directRun" ] \
+                    || { echo "run mismatch: $moduleRun != $directRun" >&2; exit 1; }
+                  # The module bakes the very same (Linux) image store path.
+                  grep -q "$imagePath" "$moduleRun/bin/run"
+                  touch $out
+                '';
+
+            # A minimal flake-parts consumer that imports the shim evaluates and
+            # yields the same outputs as the equivalent direct call (#5).
+            flakemodule-fixture =
+              pkgs.runCommand "flakemodule-fixture"
+                {
+                  fixtureBuild = consumerPkgs.build;
+                  directBuild = minimalDirect.build;
+                  fixtureRun = consumerPkgs.run;
+                  directRun = minimalDirect.run;
+                  imagePath = minimalDirect.imagePath;
+                }
+                ''
+                  [ "$fixtureBuild" = "$directBuild" ] \
+                    || { echo "build mismatch: $fixtureBuild != $directBuild" >&2; exit 1; }
+                  [ "$fixtureRun" = "$directRun" ] \
+                    || { echo "run mismatch: $fixtureRun != $directRun" >&2; exit 1; }
+                  # The fixture's image store path matches the direct call's,
+                  # asserted via the path baked into its `run` command.
+                  grep -q "$imagePath" "$fixtureRun/bin/run"
+                  touch $out
+                '';
 
             # The configured `defaults` and `runtime` are baked into the
             # generated `run` command text (eval-only; no Linux builder). Same
