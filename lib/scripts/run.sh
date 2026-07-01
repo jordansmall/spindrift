@@ -9,6 +9,9 @@
 set -euo pipefail
 
 IMAGE_ARCHIVE="@imagePath@"
+# Container runtime baked in at build time (podman or docker). A build-time
+# choice, not runtime env — the image path it loads is runtime-specific anyway.
+RUNTIME="@runtime@"
 
 # Config + secrets (gitignored). Read from the current working directory, since
 # the harness is a store path with no working tree. Also overridable via the
@@ -21,10 +24,12 @@ if [ -f "$PWD/harness.env" ]; then
 fi
 
 IMAGE="${IMAGE:-spindrift:latest}"
-LABEL="${LABEL:-ready-for-agent}"
-BASE_BRANCH="${BASE_BRANCH:-main}"
-MAX_PARALLEL="${MAX_PARALLEL:-3}"
-BRANCH_PREFIX="${BRANCH_PREFIX:-agent/issue-}"
+# Baked defaults (@label@ etc. substituted by lib/mkHarness.nix from the
+# Consumer's `defaults`); a matching env var still wins at runtime.
+LABEL="${LABEL:-@label@}"
+BASE_BRANCH="${BASE_BRANCH:-@baseBranch@}"
+MAX_PARALLEL="${MAX_PARALLEL:-@maxParallel@}"
+BRANCH_PREFIX="${BRANCH_PREFIX:-@branchPrefix@}"
 
 # Commit identity: explicit override wins, else inherit the host's git config.
 # Required — there is no built-in default.
@@ -40,15 +45,15 @@ if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; the
   exit 1
 fi
 
-command -v podman >/dev/null 2>&1 || {
-  echo "podman not found on PATH." >&2
+command -v "$RUNTIME" >/dev/null 2>&1 || {
+  echo "$RUNTIME not found on PATH." >&2
   exit 1
 }
 
 # Auto-load the baked image on first use (the old launcher errored instead).
-if ! podman image exists "$IMAGE"; then
+if ! "$RUNTIME" image exists "$IMAGE"; then
   echo "==> image '$IMAGE' not loaded; loading from $IMAGE_ARCHIVE"
-  podman load -i "$IMAGE_ARCHIVE"
+  "$RUNTIME" load -i "$IMAGE_ARCHIVE"
 fi
 
 # Pass through whichever auth the host has set.
@@ -77,7 +82,7 @@ run_one() {
   local num="$1" title="$2"
   local log="$PWD/logs/issue-$num.log"
   echo "    -> #$num: $title"
-  if podman run --rm \
+  if "$RUNTIME" run --rm \
     --name "agent-issue-$num" \
     -e GH_TOKEN "${auth_args[@]}" "${git_args[@]}" \
     -e REPO_SLUG="$REPO_SLUG" \
