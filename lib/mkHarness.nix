@@ -12,10 +12,14 @@
   system,
   overlays ? [ ],
   config ? { },
-  # Project-specific tools baked into the image, as a function of the (Linux)
-  # pkgs. Stays wired to Rust in spindrift's own flake for now; parameterized
-  # further in later issues.
+  # Project-specific tools baked into the image on top of the harness plumbing,
+  # as a function of the (Linux) pkgs. This is the language-toolchain surface:
+  # the Consumer supplies its own compiler and build tools here.
   packages ? (_pkgs: [ ]),
+  # Optional shell snippet the entrypoint runs after cloning, to warm any
+  # caches the toolchain wants (e.g. a fetch of pinned dependencies). Baked
+  # into the image; default is a no-op.
+  prefetch ? "",
 }:
 let
   # OCI images are Linux-only. Map the Consumer's (possibly darwin) system to
@@ -99,10 +103,12 @@ let
       Env = [
         "PATH=/bin"
         "HOME=/home/agent"
-        "CARGO_HOME=/home/agent/.cargo"
         "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         "GIT_SSL_CAINFO=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         "PKG_CONFIG_PATH=/lib/pkgconfig"
+        # Consumer-supplied cache warm-up snippet; the entrypoint runs it after
+        # cloning. Empty by default (no-op).
+        "PREFETCH=${prefetch}"
       ];
     };
   };
@@ -135,6 +141,7 @@ in
 {
   inherit
     image
+    agentEnv
     build
     run
     imagePath
