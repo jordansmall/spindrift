@@ -55,8 +55,8 @@
             prefetch = "cargo fetch --locked || true";
             packages =
               p:
-              [ (p.rust-bin.fromRustupToolchainFile ./toolchain/rust-toolchain.toml) ]
-              ++ import ./toolchain/packages.nix { pkgs = p; };
+              [ (p.rust-bin.fromRustupToolchainFile ./templates/default/toolchain/rust-toolchain.toml) ]
+              ++ import ./templates/default/toolchain/packages.nix { pkgs = p; };
           };
 
           # A minimal, non-Rust consumer, proving the engine bakes an arbitrary
@@ -107,16 +107,21 @@
             inherit nixpkgs system;
             packages = p: [ p.hello ];
           };
-          moduleConsumer = flake-parts.lib.mkFlake {
-            inputs = {
-              inherit nixpkgs;
-              self = { outPath = ./.; };
-            };
-          } {
-            systems = [ system ];
-            imports = [ ./lib/flakeModule.nix ];
-            perSystem.spindrift.packages = p: [ p.hello ];
-          };
+          moduleConsumer =
+            flake-parts.lib.mkFlake
+              {
+                inputs = {
+                  inherit nixpkgs;
+                  self = {
+                    outPath = ./.;
+                  };
+                };
+              }
+              {
+                systems = [ system ];
+                imports = [ ./lib/flakeModule.nix ];
+                perSystem.spindrift.packages = p: [ p.hello ];
+              };
           consumerPkgs = moduleConsumer.packages.${system};
         in
         {
@@ -129,8 +134,8 @@
             prefetch = "cargo fetch --locked || true";
             packages =
               p:
-              [ (p.rust-bin.fromRustupToolchainFile ./toolchain/rust-toolchain.toml) ]
-              ++ import ./toolchain/packages.nix { pkgs = p; };
+              [ (p.rust-bin.fromRustupToolchainFile ./templates/default/toolchain/rust-toolchain.toml) ]
+              ++ import ./templates/default/toolchain/packages.nix { pkgs = p; };
           };
 
           checks = {
@@ -174,7 +179,7 @@
                   IMAGE_PATH = harness.imagePath;
                   FAKES_DIR = ./tests/fakes;
                   ENTRYPOINT = ./agent/entrypoint.sh;
-                  PROMPTS_DIR = ./prompts;
+                  PROMPTS_DIR = ./templates/default/prompts;
                   # The baked default prompt dir the `run` command mounts, and a
                   # Consumer-configured one whose rendered content flows through
                   # to the stubbed agent (#4).
