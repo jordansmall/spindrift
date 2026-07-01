@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Fake podman for tests. Records every invocation's arguments to $PODMAN_LOG
+# (one line per call) and simulates just enough behaviour for the harness
+# scripts: `image exists`, `load`, and `run`. Never touches a real container.
+set -euo pipefail
+
+: "${PODMAN_LOG:?PODMAN_LOG must point at a log file}"
+printf '%s\n' "$*" >>"$PODMAN_LOG"
+
+case "${1:-}" in
+  image)
+    # `podman image exists <ref>` — presence is controlled by the test.
+    if [ "${2:-}" = "exists" ]; then
+      [ "${FAKE_PODMAN_IMAGE_PRESENT:-0}" = "1" ]
+      exit $?
+    fi
+    ;;
+esac
+
+exit 0

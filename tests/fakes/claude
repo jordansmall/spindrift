@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Stub-agent fake `claude` for tests. NEVER calls a real LLM.
+#
+# It records the rendered prompt (the value passed after -p) to
+# $CLAUDE_PROMPT_FILE and a marker to $CLAUDE_LOG. When FAKE_CLAUDE_COMMIT=1 it
+# also plays the scripted agent: make a change, commit it, push the current
+# branch, and open a (faked) PR — exercising the full clone -> branch -> agent
+# -> commit -> push -> PR pipeline against a local bare repo.
+set -euo pipefail
+
+: "${CLAUDE_LOG:?CLAUDE_LOG must point at a log file}"
+printf '%s\n' "$*" >>"$CLAUDE_LOG"
+
+prompt=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p)
+      prompt="${2:-}"
+      shift 2
+      ;;
+    *) shift ;;
+  esac
+done
+
+printf '%s' "$prompt" >"${CLAUDE_PROMPT_FILE:-/dev/null}"
+printf 'claude invoked for issue #%s\n' "${ISSUE_NUMBER:-?}" >>"$CLAUDE_LOG"
+
+if [ "${FAKE_CLAUDE_COMMIT:-0}" = "1" ]; then
+  branch="$(git rev-parse --abbrev-ref HEAD)"
+  printf 'stub agent change for issue #%s\n' "${ISSUE_NUMBER:-0}" >agent-change.txt
+  git add -A
+  git commit -m "feat: stub agent commit for #${ISSUE_NUMBER:-0}" >/dev/null
+  git push origin "$branch" >/dev/null 2>&1
+  gh pr create \
+    --base "${BASE_BRANCH:-main}" \
+    --head "$branch" \
+    --title "feat: resolve issue #${ISSUE_NUMBER:-0}" \
+    --body "Closes #${ISSUE_NUMBER:-0}"
+fi
+
+exit 0
