@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
-# Launcher. Lists open issues with the configured label
-# on the target repo and fans out one disposable container per issue, capped at
-# MAX_PARALLEL. Each container clones fresh, implements its issue, and opens a
-# PR — see agent/entrypoint.sh.
+# Launcher. Lists open issues with the configured label on the target repo and
+# fans out one disposable container per issue, capped at MAX_PARALLEL. Each
+# container clones fresh, implements its issue, and opens a PR — see the baked
+# /agent/entrypoint.sh.
+#
+# The agent image is a nix store path baked in at build time (@imagePath@ is
+# substituted by lib/mkHarness.nix); it is auto-loaded if not already present.
 set -euo pipefail
 
-HARNESS_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$HARNESS_ROOT"
+IMAGE_ARCHIVE="@imagePath@"
 
-# Config + secrets (gitignored). Also overridable via the environment.
-if [ -f "$HARNESS_ROOT/harness.env" ]; then
+# Config + secrets (gitignored). Read from the current working directory, since
+# the harness is a store path with no working tree. Also overridable via the
+# environment, which takes precedence over the file.
+if [ -f "$PWD/harness.env" ]; then
   set -a
   # shellcheck disable=SC1091
-  . "$HARNESS_ROOT/harness.env"
+  . "$PWD/harness.env"
   set +a
 fi
 
@@ -40,9 +44,11 @@ command -v podman >/dev/null 2>&1 || {
   echo "podman not found on PATH." >&2
   exit 1
 }
+
+# Auto-load the baked image on first use (the old launcher errored instead).
 if ! podman image exists "$IMAGE"; then
-  echo "image '$IMAGE' not loaded — build it first:  bin/build" >&2
-  exit 1
+  echo "==> image '$IMAGE' not loaded; loading from $IMAGE_ARCHIVE"
+  podman load -i "$IMAGE_ARCHIVE"
 fi
 
 # Pass through whichever auth the host has set.
@@ -65,11 +71,11 @@ fi
 
 count="$(printf '%s\n' "$issues_tsv" | wc -l | tr -d ' ')"
 echo "==> $count issue(s); launching up to $MAX_PARALLEL container(s) at a time"
-mkdir -p "$HARNESS_ROOT/logs"
+mkdir -p "$PWD/logs"
 
 run_one() {
   local num="$1" title="$2"
-  local log="$HARNESS_ROOT/logs/issue-$num.log"
+  local log="$PWD/logs/issue-$num.log"
   echo "    -> #$num: $title"
   if podman run --rm \
     --name "agent-issue-$num" \
@@ -79,8 +85,6 @@ run_one() {
     -e ISSUE_TITLE="$title" \
     -e BASE_BRANCH="$BASE_BRANCH" \
     -e BRANCH_PREFIX="$BRANCH_PREFIX" \
-    -v "$HARNESS_ROOT/agent/entrypoint.sh:/agent/entrypoint.sh:ro" \
-    -v "$HARNESS_ROOT/prompts:/agent/prompts:ro" \
     "$IMAGE" /agent/entrypoint.sh >"$log" 2>&1; then
     echo "    <- #$num done  (logs/issue-$num.log)"
   else
