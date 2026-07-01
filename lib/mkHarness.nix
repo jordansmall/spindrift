@@ -20,6 +20,15 @@
   # caches the toolchain wants (e.g. a fetch of pinned dependencies). Baked
   # into the image; default is a no-op.
   prefetch ? "",
+  # Non-secret run configuration baked into the generated `run` command as its
+  # built-in defaults. A matching env var (LABEL/BASE_BRANCH/MAX_PARALLEL/
+  # BRANCH_PREFIX) still wins at runtime, so one built command can be
+  # re-pointed without a rebuild.
+  defaults ? { },
+  # Container runtime the launcher commands drive: "podman" (default) or
+  # "docker". Baked in — it selects which binary `build`/`run` invoke for image
+  # existence checks, load, and run.
+  runtime ? "podman",
 }:
 let
   # OCI images are Linux-only. Map the Consumer's (possibly darwin) system to
@@ -49,6 +58,16 @@ let
   };
 
   inherit (pkgs) lib;
+
+  # Built-in run defaults; the Consumer's `defaults` override them per key, and a
+  # matching env var overrides those again at runtime (see scripts/run.sh).
+  mergedDefaults = {
+    label = "ready-for-agent";
+    baseBranch = "main";
+    maxParallel = 3;
+    branchPrefix = "agent/issue-";
+  }
+  // defaults;
 
   # Plumbing every agent needs regardless of language: a shell, the VCS + GitHub
   # CLIs, Claude Code, CA certs, and the unix tools the entrypoint relies on.
@@ -120,17 +139,32 @@ let
   # `nix build .#spindrift`.
   imagePath = builtins.unsafeDiscardStringContext (toString image);
 
+  # `replacements` is the list of `--replace-fail '@k@' 'v'` flags for this
+  # script; every placeholder listed must be present in the source (that is what
+  # `--replace-fail` guarantees), keeping the scripts and their bakes in sync.
   mkCommand =
-    name: src:
+    name: src: replacements:
     hostPkgs.runCommand "spindrift-${name}" { } ''
       mkdir -p $out/bin
-      substitute ${src} $out/bin/${name} \
-        --replace-fail '@imagePath@' '${imagePath}'
+      substitute ${src} $out/bin/${name} ${lib.concatStringsSep " " replacements}
       chmod +x $out/bin/${name}
     '';
 
-  build = mkCommand "build" ./scripts/build.sh;
-  run = mkCommand "run" ./scripts/run.sh;
+  commonReplace = [
+    "--replace-fail '@imagePath@' '${imagePath}'"
+    "--replace-fail '@runtime@' '${runtime}'"
+  ];
+
+  build = mkCommand "build" ./scripts/build.sh commonReplace;
+  run = mkCommand "run" ./scripts/run.sh (
+    commonReplace
+    ++ [
+      "--replace-fail '@label@' '${mergedDefaults.label}'"
+      "--replace-fail '@baseBranch@' '${mergedDefaults.baseBranch}'"
+      "--replace-fail '@maxParallel@' '${toString mergedDefaults.maxParallel}'"
+      "--replace-fail '@branchPrefix@' '${mergedDefaults.branchPrefix}'"
+    ]
+  );
 
   # Realising the Linux image on darwin needs a Linux builder, so only offer it
   # as a package where it can actually build; the launcher commands (which merely

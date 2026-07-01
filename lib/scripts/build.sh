@@ -3,16 +3,19 @@
 #
 # The image is a nix store path baked in at build time (@imagePath@ is
 # substituted by lib/mkHarness.nix). Build the image itself with
-# `nix build .#spindrift`; this command only loads that store path into podman.
+# `nix build .#spindrift`; this command only loads that store path into the
+# configured container runtime.
 set -euo pipefail
 
 IMAGE_ARCHIVE="@imagePath@"
+# Container runtime baked in at build time (podman or docker).
+RUNTIME="@runtime@"
 
-command -v podman >/dev/null 2>&1 || {
-  echo "podman not found on PATH." >&2
+command -v "$RUNTIME" >/dev/null 2>&1 || {
+  echo "$RUNTIME not found on PATH." >&2
   exit 1
 }
 
 echo "==> loading spindrift image from $IMAGE_ARCHIVE"
-podman load -i "$IMAGE_ARCHIVE"
+"$RUNTIME" load -i "$IMAGE_ARCHIVE"
 echo "==> done: spindrift:latest"
