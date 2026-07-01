@@ -33,8 +33,13 @@ BRANCH_PREFIX="${BRANCH_PREFIX:-@branchPrefix@}"
 
 # Prompt template directory, mounted into the container at /agent/prompts. The
 # baked default is a nix store path (@promptDir@, substituted by
-# lib/mkHarness.nix).
+# lib/mkHarness.nix). Point SPINDRIFT_PROMPT_DIR at a real directory to iterate
+# on the prompt with zero rebuilds; anything else falls back to the default.
 PROMPT_DIR="@promptDir@"
+if [ -n "${SPINDRIFT_PROMPT_DIR:-}" ] && [ -d "$SPINDRIFT_PROMPT_DIR" ]; then
+  echo "==> SPINDRIFT_PROMPT_DIR set; mounting $SPINDRIFT_PROMPT_DIR instead of baked prompt"
+  PROMPT_DIR="$SPINDRIFT_PROMPT_DIR"
+fi
 
 # Commit identity: explicit override wins, else inherit the host's git config.
 # Required — there is no built-in default.
