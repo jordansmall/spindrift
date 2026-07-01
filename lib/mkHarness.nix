@@ -26,7 +26,7 @@
   # SPINDRIFT_PROMPT_DIR with zero rebuilds (see scripts/run.sh). The default
   # is the scaffolded issue-prompt.md, a working starting point out of the box.
   # The entrypoint substitutes the per-issue variables into it at run time.
-  prompt ? builtins.readFile ../prompts/issue-prompt.md,
+  prompt ? builtins.readFile ../templates/default/prompts/issue-prompt.md,
   # Non-secret run configuration baked into the generated `run` command as its
   # built-in defaults. A matching env var (LABEL/BASE_BRANCH/MAX_PARALLEL/
   # BRANCH_PREFIX) still wins at runtime, so one built command can be
@@ -49,7 +49,10 @@ let
     }
     .${system};
 
-  mergedConfig = { allowUnfree = true; } // config;
+  mergedConfig = {
+    allowUnfree = true;
+  }
+  // config;
 
   # Image toolset: the Consumer's locked nixpkgs, re-instantiated for Linux.
   pkgs = import nixpkgs {
