@@ -36,6 +36,15 @@
       # declarative option surface (ADR 0001).
       flake.flakeModules.default = ./lib/flakeModule.nix;
 
+      # A ready-to-edit starter (`nix flake init -t github:jordansmall/spindrift`):
+      # a Consumer flake importing the shim, a tunable prompt, a sample toolchain,
+      # and a harness.env.example. This is spindrift's own scaffold — the dogfood
+      # above consumes the very same templates/default toolchain and prompt.
+      flake.templates.default = {
+        path = ./templates/default;
+        description = "spindrift consumer starter: flake + prompts + toolchain + harness.env.example";
+      };
+
       perSystem =
         {
           system,
@@ -123,6 +132,25 @@
                 perSystem.spindrift.packages = p: [ p.hello ];
               };
           consumerPkgs = moduleConsumer.packages.${system};
+
+          # The `templates.default` starter, evaluated as a fixture (#6). We call
+          # its real `outputs` function directly — no `nix flake init`, no network
+          # — wiring `spindrift` to THIS checkout instead of the github input, so
+          # the starter is proven to import the shim and produce a buildable
+          # harness with zero network/agent. The full Linux image realise is
+          # verified out-of-band via the podman builder; here we assert eval + the
+          # image store path resolving into the launcher commands.
+          templateOutputs = (import ./templates/default/flake.nix).outputs {
+            inherit nixpkgs flake-parts rust-overlay;
+            self = {
+              outPath = ./templates/default;
+            };
+            spindrift = {
+              flakeModules.default = ./lib/flakeModule.nix;
+              lib.mkHarness = import ./lib/mkHarness.nix;
+            };
+          };
+          templatePkgs = templateOutputs.packages.${system};
         in
         {
           # The dogfood's real packages/apps flow through the flake-parts shim.
@@ -255,6 +283,43 @@
                   # The fixture's image store path matches the direct call's,
                   # asserted via the path baked into its `run` command.
                   grep -q "$imagePath" "$fixtureRun/bin/run"
+                  touch $out
+                '';
+
+            # The `templates.default` starter evaluates and yields a buildable
+            # harness (#6): its `build`/`run` commands must have the Linux image
+            # store path substituted in (placeholder gone, path resolves to a
+            # spindrift store path). Since the starter's config mirrors the
+            # dogfood's, its commands are byte-identical to the direct call —
+            # asserted too. Eval-only; the Linux realise is done on the podman
+            # builder against an instantiated copy.
+            template-fixture =
+              pkgs.runCommand "template-fixture"
+                {
+                  templateBuild = templatePkgs.build;
+                  templateRun = templatePkgs.run;
+                  directBuild = harness.build;
+                  directRun = harness.run;
+                  imagePath = harness.imagePath;
+                }
+                ''
+                  buildCmd="$templateBuild/bin/build"
+                  runCmd="$templateRun/bin/run"
+
+                  ! grep -q '@imagePath@' "$buildCmd"
+                  ! grep -q '@imagePath@' "$runCmd"
+                  grep -q "$imagePath" "$buildCmd"
+                  grep -q "$imagePath" "$runCmd"
+                  case "$imagePath" in
+                    /nix/store/*spindrift*) : ;;
+                    *) echo "unexpected image path: $imagePath" >&2; exit 1 ;;
+                  esac
+
+                  # Same config as the dogfood ⇒ identical launcher commands.
+                  [ "$templateBuild" = "$directBuild" ] \
+                    || { echo "build mismatch: $templateBuild != $directBuild" >&2; exit 1; }
+                  [ "$templateRun" = "$directRun" ] \
+                    || { echo "run mismatch: $templateRun != $directRun" >&2; exit 1; }
                   touch $out
                 '';
 
