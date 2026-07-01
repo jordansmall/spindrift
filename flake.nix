@@ -70,6 +70,18 @@
             runtime = "docker";
             packages = p: [ p.hello ];
           };
+
+          # A Consumer-configured prompt (#4): proves the `prompt` argument is
+          # what gets rendered to the store path and flows through to the agent.
+          # The per-issue placeholders are escaped so they survive to run time.
+          promptHarness = import ./lib/mkHarness.nix {
+            inherit nixpkgs system;
+            prompt = ''
+              CONFIGURED-PROMPT-MARKER
+              Implement issue #''${ISSUE_NUMBER}: ''${ISSUE_TITLE} on ''${BRANCH}
+            '';
+            packages = p: [ p.hello ];
+          };
         in
         {
           inherit (harness) packages apps;
@@ -116,6 +128,11 @@
                   FAKES_DIR = ./tests/fakes;
                   ENTRYPOINT = ./agent/entrypoint.sh;
                   PROMPTS_DIR = ./prompts;
+                  # The baked default prompt dir the `run` command mounts, and a
+                  # Consumer-configured one whose rendered content flows through
+                  # to the stubbed agent (#4).
+                  PROMPT_PATH = harness.promptDir;
+                  PROMPT_HARNESS_DIR = promptHarness.promptDir;
                 }
                 ''
                   export HOME="$TMPDIR/home"
@@ -158,6 +175,24 @@
               # Default runtime is podman; the docker harness bakes docker.
               grep -q 'RUNTIME="podman"' ${harness.run}/bin/run
               grep -q 'RUNTIME="docker"' ${dockerHarness.run}/bin/run
+              touch $out
+            '';
+
+            # The configured `prompt` is rendered to a store-path directory and
+            # its exact path baked into the `run` command's mount (#4). Eval/
+            # native only — no Linux builder needed (the prompt dir is a host
+            # store path).
+            mkharness-prompt = pkgs.runCommand "mkharness-prompt" { } ''
+              # The Consumer's prompt text is what lands in the rendered file.
+              grep -q 'CONFIGURED-PROMPT-MARKER' \
+                ${promptHarness.promptDir}/issue-prompt.md
+
+              # The default prompt dir path is baked into `run` (placeholder
+              # gone) and `run` mounts $PROMPT_DIR at /agent/prompts.
+              runCmd=${harness.run}/bin/run
+              ! grep -q -- '@promptDir@' "$runCmd"
+              grep -q 'PROMPT_DIR="${harness.promptDir}"' "$runCmd"
+              grep -q -- '-v "$PROMPT_DIR:/agent/prompts:ro"' "$runCmd"
               touch $out
             '';
 

@@ -118,12 +118,15 @@ EOF
   [ ! -s "$PODMAN_LOG" ]
 }
 
-@test "run does not bind-mount the entrypoint or prompts (baked into image)" {
+@test "run invokes the baked entrypoint but mounts the prompt (not baked)" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
+  # entrypoint stays baked into the image (never bind-mounted) ...
   ! grep -q 'entrypoint.sh:/agent' "$PODMAN_LOG"
   grep -q '/agent/entrypoint.sh' "$PODMAN_LOG"
+  # ... while the prompt is a runtime mount at /agent/prompts.
+  grep -q ':/agent/prompts' "$PODMAN_LOG"
 }
 
 @test "run exits cleanly when there are no matching issues" {

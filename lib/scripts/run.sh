@@ -31,6 +31,11 @@ BASE_BRANCH="${BASE_BRANCH:-@baseBranch@}"
 MAX_PARALLEL="${MAX_PARALLEL:-@maxParallel@}"
 BRANCH_PREFIX="${BRANCH_PREFIX:-@branchPrefix@}"
 
+# Prompt template directory, mounted into the container at /agent/prompts. The
+# baked default is a nix store path (@promptDir@, substituted by
+# lib/mkHarness.nix).
+PROMPT_DIR="@promptDir@"
+
 # Commit identity: explicit override wins, else inherit the host's git config.
 # Required — there is no built-in default.
 GIT_USER_NAME="${GIT_USER_NAME:-$(git config --get user.name 2>/dev/null || true)}"
@@ -90,6 +95,7 @@ run_one() {
     -e ISSUE_TITLE="$title" \
     -e BASE_BRANCH="$BASE_BRANCH" \
     -e BRANCH_PREFIX="$BRANCH_PREFIX" \
+    -v "$PROMPT_DIR:/agent/prompts:ro" \
     "$IMAGE" /agent/entrypoint.sh >"$log" 2>&1; then
     echo "    <- #$num done  (logs/issue-$num.log)"
   else
