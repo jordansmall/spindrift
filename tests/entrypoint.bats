@@ -41,3 +41,31 @@ setup() {
   grep -q "claude invoked for issue #7" "$CLAUDE_LOG"
   grep -q -- "--dangerously-skip-permissions" "$CLAUDE_LOG"
 }
+
+@test "entrypoint runs the configured prefetch hook inside the work tree" {
+  export PREFETCH_LOG="$BATS_TEST_TMPDIR/prefetch.log"
+  cat >"$FAKE_BIN/warm-cache" <<'FAKE'
+#!/usr/bin/env bash
+echo "warmed $PWD for #${ISSUE_NUMBER:-?}" >>"$PREFETCH_LOG"
+FAKE
+  chmod +x "$FAKE_BIN/warm-cache"
+  export PREFETCH="warm-cache"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "warmed" "$PREFETCH_LOG"
+  # runs after the clone, from within the cloned work tree
+  grep -q "$WORK_DIR" "$PREFETCH_LOG"
+}
+
+@test "entrypoint skips the prefetch hook when it is empty" {
+  export PREFETCH_LOG="$BATS_TEST_TMPDIR/prefetch.log"
+  cat >"$FAKE_BIN/warm-cache" <<'FAKE'
+#!/usr/bin/env bash
+echo ran >>"$PREFETCH_LOG"
+FAKE
+  chmod +x "$FAKE_BIN/warm-cache"
+  export PREFETCH=""
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ ! -f "$PREFETCH_LOG" ]
+}

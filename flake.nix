@@ -42,6 +42,14 @@
               [ (p.rust-bin.fromRustupToolchainFile ./toolchain/rust-toolchain.toml) ]
               ++ import ./toolchain/packages.nix { pkgs = p; };
           };
+
+          # A minimal, non-Rust consumer, proving the engine bakes an arbitrary
+          # `packages` set with no language-specific machinery. Kept off the
+          # public outputs — the checks introspect it at eval time only.
+          nonRustHarness = import ./lib/mkHarness.nix {
+            inherit nixpkgs system;
+            packages = p: [ p.hello ];
+          };
         in
         {
           inherit (harness) packages apps;
@@ -112,6 +120,35 @@
               esac
               touch $out
             '';
+
+            # The engine must carry nothing language-specific: a Go/Node/Python
+            # consumer inherits no Rust machinery (ADR 0003).
+            engine-language-agnostic =
+              pkgs.runCommand "engine-language-agnostic" { engine = ./lib/mkHarness.nix; }
+                ''
+                  if grep -Eni 'rust|cargo' "$engine"; then
+                    echo "lib/mkHarness.nix must not reference rust/cargo symbols" >&2
+                    exit 1
+                  fi
+                  touch $out
+                '';
+
+            # A non-Rust `packages` set is baked into the image on top of the
+            # harness plumbing. Asserted by grepping the (eval-only, Linux) env
+            # derivation, so it needs no Linux builder.
+            packages-baked =
+              pkgs.runCommand "packages-baked"
+                {
+                  envDrv = builtins.unsafeDiscardStringContext nonRustHarness.agentEnv.drvPath;
+                }
+                ''
+                  test -f "$envDrv"
+                  grep -q -- '-hello-' "$envDrv" \
+                    || { echo "expected the hello package baked into the env" >&2; exit 1; }
+                  # engine plumbing is still layered on, language-agnostically
+                  grep -q -- '-git-' "$envDrv"
+                  touch $out
+                '';
           };
 
           # For hacking ON the harness itself (host-side).
