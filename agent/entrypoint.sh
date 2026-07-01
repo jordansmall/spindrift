@@ -37,9 +37,10 @@ git clone "https://github.com/${REPO_SLUG}.git" "$WORK_DIR"
 cd "$WORK_DIR"
 git checkout -b "$BRANCH" "origin/${BASE_BRANCH}"
 
-# Warm the crate cache for cargo workspaces; harmless / skipped otherwise.
-if [ -f Cargo.toml ]; then
-  cargo fetch --locked || true
+# Optional cache warm-up, configured via mkHarness `prefetch` (baked into the
+# image env). Runs in the freshly cloned work tree; no-op when unset.
+if [ -n "${PREFETCH:-}" ]; then
+  eval "$PREFETCH"
 fi
 
 # Only substitute our known placeholders so any literal `$` in the prompt body

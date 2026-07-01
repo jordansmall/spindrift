@@ -37,6 +37,7 @@
             inherit nixpkgs system;
             overlays = [ (import rust-overlay) ];
             config.allowUnfree = true;
+            prefetch = "cargo fetch --locked || true";
             packages =
               p:
               [ (p.rust-bin.fromRustupToolchainFile ./toolchain/rust-toolchain.toml) ]

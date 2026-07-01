@@ -1,6 +1,7 @@
-# Project-specific tools baked into the agent container, on top of the Rust
-# toolchain wired in flake.nix. EDIT this list for your target repo's build and
-# test needs (swap in node/go/python tooling for a non-Rust project).
+# Example scaffold: spindrift's own (Rust) dogfood toolchain, fed to mkHarness
+# via `packages` in flake.nix the way any Consumer would. The engine itself is
+# language-agnostic (ADR 0003) — a non-Rust project swaps this whole file for
+# its own node/go/python tooling.
 { pkgs }:
 with pkgs;
 [
