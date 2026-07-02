@@ -60,7 +60,11 @@
           ghFakeOverlay = _final: prev: {
             gh = prev.runCommand "fake-gh" { } ''
               mkdir -p $out/bin
-              cp ${./tests/fakes/gh} $out/bin/gh
+              # The launcher execs this by path, so rewrite the fake's
+              # `#!/usr/bin/env bash` to the store bash — a sandboxed Linux
+              # build has no /usr/bin/env.
+              substitute ${./tests/fakes/gh} $out/bin/gh \
+                --replace '#!/usr/bin/env bash' "#!${prev.bash}/bin/bash"
               chmod +x $out/bin/gh
             '';
           };
@@ -246,7 +250,6 @@
                   CUSTOM_RUN_CMD = "${customHarness.run}/bin/run";
                   DOCKER_RUN_CMD = "${dockerHarness.run}/bin/run";
                   IMAGE_PATH = batsHarness.imagePath;
-                  FAKES_DIR = ./tests/fakes;
                   ENTRYPOINT = ./agent/entrypoint.sh;
                   PROMPTS_DIR = ./templates/default/prompts;
                   # The baked default prompt dir the `run` command mounts, and a
@@ -260,7 +263,15 @@
                   mkdir -p "$HOME"
                   cp -r ${./tests} tests
                   chmod -R +w tests
-                  bats tests/
+                  # The fakes ship a `#!/usr/bin/env bash` shebang, which the
+                  # host's launchers exec by path. A sandboxed Linux build has no
+                  # /usr/bin/env, so rewrite them to the store bash before use.
+                  for f in tests/fakes/*; do
+                    substituteInPlace "$f" \
+                      --replace '#!/usr/bin/env bash' "#!${pkgs.bash}/bin/bash"
+                  done
+                  export FAKES_DIR="$PWD/tests/fakes"
+                  bats --print-output-on-failure tests/
                   touch $out
                 '';
 

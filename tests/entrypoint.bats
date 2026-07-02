@@ -69,10 +69,12 @@ setup() {
 
 @test "entrypoint runs the configured prefetch hook inside the work tree" {
   export PREFETCH_LOG="$BATS_TEST_TMPDIR/prefetch.log"
-  cat >"$FAKE_BIN/warm-cache" <<'FAKE'
-#!/usr/bin/env bash
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    cat <<'FAKE'
 echo "warmed $PWD for #${ISSUE_NUMBER:-?}" >>"$PREFETCH_LOG"
 FAKE
+  } >"$FAKE_BIN/warm-cache"
   chmod +x "$FAKE_BIN/warm-cache"
   export PREFETCH="warm-cache"
   run bash "$ENTRYPOINT"
@@ -84,10 +86,12 @@ FAKE
 
 @test "entrypoint skips the prefetch hook when it is empty" {
   export PREFETCH_LOG="$BATS_TEST_TMPDIR/prefetch.log"
-  cat >"$FAKE_BIN/warm-cache" <<'FAKE'
-#!/usr/bin/env bash
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    cat <<'FAKE'
 echo ran >>"$PREFETCH_LOG"
 FAKE
+  } >"$FAKE_BIN/warm-cache"
   chmod +x "$FAKE_BIN/warm-cache"
   export PREFETCH=""
   run bash "$ENTRYPOINT"
