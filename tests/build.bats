@@ -17,9 +17,7 @@ setup() {
   export FAKE_NIX_BUILD_OK=1
   run "$BUILD_CMD"
   [ "$status" -eq 0 ]
-  # It realised the image derivation ...
   grep -q 'build' "$NIX_LOG"
-  # ... then loaded the baked image store path (no container fallback).
   grep -q "load -i $IMAGE_PATH" "$PODMAN_LOG"
   ! grep -q '^run ' "$PODMAN_LOG"
 }
@@ -37,9 +35,7 @@ setup() {
   export FAKE_NIX_BUILD_OK=0
   run "$BUILD_CMD"
   [ "$status" -eq 0 ]
-  # It tried the host first ...
   grep -q 'build' "$NIX_LOG"
-  # ... then built inside the runtime with a named /nix volume, and loaded.
   grep -q '^run ' "$PODMAN_LOG"
   grep -q 'spindrift-nix:/nix' "$PODMAN_LOG"
   grep -q 'load -i' "$PODMAN_LOG"

@@ -29,7 +29,6 @@ setup() {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  # One `podman run` per issue (2), plus the `image exists` probe.
   [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
   grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
   grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
@@ -138,10 +137,8 @@ EOF
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  # entrypoint stays baked into the image (never bind-mounted) ...
   ! grep -q 'entrypoint.sh:/agent' "$PODMAN_LOG"
   grep -q '/agent/entrypoint.sh' "$PODMAN_LOG"
-  # ... while the prompt is a runtime mount at /agent/prompts.
   grep -q ':/agent/prompts' "$PODMAN_LOG"
 }
 
