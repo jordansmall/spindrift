@@ -29,8 +29,8 @@
   prompt ? builtins.readFile ../templates/default/prompts/issue-prompt.md,
   # Non-secret run configuration baked into the generated `run` command as its
   # built-in defaults. A matching env var (LABEL/BASE_BRANCH/MAX_PARALLEL/
-  # BRANCH_PREFIX) still wins at runtime, so one built command can be
-  # re-pointed without a rebuild.
+  # BRANCH_PREFIX/IN_PROGRESS_LABEL/FAILED_LABEL) still wins at runtime, so one
+  # built command can be re-pointed without a rebuild.
   defaults ? { },
   # Container runtime the launcher commands drive: "podman" (default) or
   # "docker". Baked in — it selects which binary `build`/`run` invoke for image
@@ -94,6 +94,11 @@ let
     baseBranch = "main";
     maxParallel = 3;
     branchPrefix = "agent/issue-";
+    # Label lifecycle (issue #15): dispatch swaps `label` -> `inProgressLabel` so
+    # the query stays idempotent; a non-zero Box swaps it -> `failedLabel` for
+    # human triage.
+    inProgressLabel = "agent-in-progress";
+    failedLabel = "agent-failed";
   }
   // defaults;
 
@@ -235,6 +240,8 @@ let
         BASE_BRANCH = mergedDefaults.baseBranch;
         MAX_PARALLEL = mergedDefaults.maxParallel;
         BRANCH_PREFIX = mergedDefaults.branchPrefix;
+        IN_PROGRESS_LABEL = mergedDefaults.inProgressLabel;
+        FAILED_LABEL = mergedDefaults.failedLabel;
       }
   );
 

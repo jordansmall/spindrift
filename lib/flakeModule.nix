@@ -78,6 +78,14 @@ in
               type = types.nullOr types.str;
               default = null;
             };
+            inProgressLabel = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+            };
+            failedLabel = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+            };
           };
         };
         default = { };
