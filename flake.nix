@@ -440,6 +440,23 @@
               assert assertMsg (baked "git-")
                 "expected git plumbing layered into the env";
               pkgs.runCommand "packages-baked" { } "touch $out";
+          }
+          # The entrypoint baked at /agent/entrypoint.sh must carry a store-path
+          # shebang, not the source's `#!/usr/bin/env bash` — the Box has no
+          # /usr/bin/env. Guards against baking the raw source instead of the
+          # writeShellApplication output. Realises the tiny agent-files layer, so
+          # it is gated to a Linux builder and omitted from `nix flake check` on
+          # darwin.
+          // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            entrypoint-shebang = pkgs.runCommand "entrypoint-shebang" { } ''
+              shebang=$(head -1 ${nonRustHarness.agentFiles}/agent/entrypoint.sh)
+              case "$shebang" in
+                '#!'/nix/store/*bash*) : ;;
+                *) echo "entrypoint shebang is not a store bash: $shebang" >&2
+                   exit 1 ;;
+              esac
+              touch $out
+            '';
           };
 
           # For hacking ON the harness itself (host-side).
