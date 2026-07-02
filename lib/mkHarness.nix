@@ -29,8 +29,8 @@
   prompt ? builtins.readFile ../templates/default/prompts/issue-prompt.md,
   # Non-secret run configuration baked into the generated `run` command as its
   # built-in defaults. A matching env var (LABEL/BASE_BRANCH/MAX_PARALLEL/
-  # BRANCH_PREFIX/IN_PROGRESS_LABEL/FAILED_LABEL) still wins at runtime, so one
-  # built command can be re-pointed without a rebuild.
+  # BRANCH_PREFIX/IN_PROGRESS_LABEL/FAILED_LABEL/MODEL) still wins at runtime, so
+  # one built command can be re-pointed without a rebuild.
   defaults ? { },
   # Container runtime the launcher commands drive: "podman" (default) or
   # "docker". Baked in — it selects which binary `build`/`run` invoke for image
@@ -99,6 +99,10 @@ let
     # human triage.
     inProgressLabel = "agent-in-progress";
     failedLabel = "agent-failed";
+    # The agent model (issue #16). The only material knob baked into the
+    # entrypoint image; promoting it here lets `MODEL=...` switch models at
+    # runtime with zero image rebuild.
+    model = "claude-opus-4-8";
   }
   // defaults;
 
@@ -242,6 +246,7 @@ let
         BRANCH_PREFIX = mergedDefaults.branchPrefix;
         IN_PROGRESS_LABEL = mergedDefaults.inProgressLabel;
         FAILED_LABEL = mergedDefaults.failedLabel;
+        MODEL = mergedDefaults.model;
       }
   );
 

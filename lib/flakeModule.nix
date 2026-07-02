@@ -86,6 +86,10 @@ in
               type = types.nullOr types.str;
               default = null;
             };
+            model = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+            };
           };
         };
         default = { };

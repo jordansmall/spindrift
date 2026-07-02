@@ -129,7 +129,7 @@ knobs. Unset options fall through to `mkHarness`'s own defaults.
 | `packages`  | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
 | `prefetch`  | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
 | `prompt`    | string                      | bundled starter    | agent prompt template; rendered to a store path, mounted at run time |
-| `defaults`  | `{ label; baseBranch; maxParallel; branchPrefix; inProgressLabel; failedLabel; }` | see below | non-secret run defaults baked into `run` |
+| `defaults`  | `{ label; baseBranch; maxParallel; branchPrefix; inProgressLabel; failedLabel; model; }` | see below | non-secret run defaults baked into `run` |
 | `runtime`   | `"podman"` \| `"docker"`    | `"podman"`         | container runtime the `build`/`run` commands drive                   |
 | `nixBuilderImage` | string                | `"docker.io/nixos/nix:latest"` | Nix image `build` uses as a fallback Linux builder when the host can't realise the image |
 
@@ -137,8 +137,11 @@ The `defaults` submodule bakes the run knobs into the `run` command; a matching
 env var still wins at runtime, so one built command can be re-pointed without a
 rebuild. Baked defaults: `label = "ready-for-agent"`, `baseBranch = "main"`,
 `maxParallel = 3`, `branchPrefix = "agent/issue-"`,
-`inProgressLabel = "agent-in-progress"`, `failedLabel = "agent-failed"`. The last
-two drive the [label lifecycle](#label-lifecycle).
+`inProgressLabel = "agent-in-progress"`, `failedLabel = "agent-failed"`,
+`model = "claude-opus-4-8"`. `inProgressLabel`/`failedLabel` drive the
+[label lifecycle](#label-lifecycle); `model` is the Claude model the in-container
+agent runs, threaded into the container as `MODEL` so `MODEL=...` switches models
+at runtime with no image rebuild.
 
 The **prompt is a runtime mount**, not baked into the image: edit
 `prompts/issue-prompt.md` and re-run with no image rebuild, or point
@@ -164,10 +167,11 @@ a rebuild (ADR 0001):
 | `BRANCH_PREFIX`           | `agent/issue-`         | branch name = prefix + issue number      |
 | `IN_PROGRESS_LABEL`       | `agent-in-progress`    | label a dispatched issue is swapped to   |
 | `FAILED_LABEL`            | `agent-failed`         | label an issue gets when its Box fails   |
+| `MODEL`                   | `claude-opus-4-8`      | Claude model the in-container agent runs |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
 | `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | hot-override the mounted prompt dir     |
 
-`LABEL`/`BASE_BRANCH`/`MAX_PARALLEL`/`BRANCH_PREFIX`/`IN_PROGRESS_LABEL`/`FAILED_LABEL`
+`LABEL`/`BASE_BRANCH`/`MAX_PARALLEL`/`BRANCH_PREFIX`/`IN_PROGRESS_LABEL`/`FAILED_LABEL`/`MODEL`
 override whatever was baked
 via `defaults`. Commit identity is **required**: an override wins, else the
 host's `git config user.name`/`user.email` is inherited; if neither is set,

@@ -23,6 +23,10 @@ BASE_BRANCH="${BASE_BRANCH:-main}"
 BRANCH_PREFIX="${BRANCH_PREFIX:-agent/issue-}"
 BRANCH="${BRANCH_PREFIX}${ISSUE_NUMBER}"
 
+# The agent model. `run` passes MODEL in per issue (baked default overridable by
+# a matching env var); this fallback keeps the entrypoint runnable standalone.
+MODEL="${MODEL:-claude-opus-4-8}"
+
 # Baked-in locations; overridable only so the harness can be exercised on the
 # host without a container. Production leaves these at their defaults.
 WORK_DIR="${WORK_DIR:-/work}"
@@ -60,7 +64,7 @@ prompt="$(
 
 echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
 claude -p "$prompt" \
-  --model claude-opus-4-8 \
+  --model "$MODEL" \
   --dangerously-skip-permissions
 
 echo "==> entrypoint complete for issue #$ISSUE_NUMBER"
