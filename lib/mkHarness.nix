@@ -36,6 +36,10 @@
   # "docker". Baked in — it selects which binary `build`/`run` invoke for image
   # existence checks, load, and run.
   runtime ? "podman",
+  # The Nix container image `build` uses as a fallback Linux builder when the
+  # host can't realise the Linux image itself (the stock-mac case). Fully
+  # qualified so podman resolves it without a default-registry assumption.
+  nixBuilderImage ? "docker.io/nixos/nix:latest",
 }:
 let
   # OCI images are Linux-only. Map the Consumer's (possibly darwin) system to
@@ -187,6 +191,14 @@ let
   # `nix build .#spindrift`.
   imagePath = builtins.unsafeDiscardStringContext (toString image);
 
+  # The image's `.drv` path, also context-discarded. `build` realises this with
+  # `nix build "<drv>^*"` before loading, so a fresh machine builds the image
+  # instead of failing on an unrealised path — while discarding the context
+  # keeps `nix flake check` and the launcher builds off any Linux build. Reading
+  # `.drvPath` instantiates the derivation at eval time, so the .drv exists in
+  # the store by the time `build` runs; only realising it needs a Linux builder.
+  imageDrv = builtins.unsafeDiscardStringContext image.drvPath;
+
   # Nix-rendered shell preamble: the baked config the launchers consume, in place
   # of the old @placeholder@/--replace-fail lists. Every value is interpolated
   # straight into shell and gets shellcheck'd as part of the generated script.
@@ -197,6 +209,18 @@ let
   imagePreamble = ''
     IMAGE_ARCHIVE="${imagePath}"
     RUNTIME="${runtime}"
+  '';
+
+  # Build-only config, layered on top of imagePreamble for the `build` launcher.
+  # IMAGE_DRV is the derivation `build` realises; NIX_BUILDER_IMAGE/NIX_VOLUME
+  # drive the ephemeral-container fallback (a named /nix volume keeps it
+  # incremental); FLAKE_IMAGE_ATTR is the Linux image attribute that fallback
+  # builds from the Consumer flake in $PWD.
+  buildPreamble = ''
+    IMAGE_DRV="${imageDrv}"
+    NIX_BUILDER_IMAGE="${nixBuilderImage}"
+    NIX_VOLUME="spindrift-nix"
+    FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.spindrift"
   '';
 
   # Each run default renders as `NAME="''${NAME:-<baked>}"`, derived from the
@@ -221,7 +245,7 @@ let
   build = hostPkgs.writeShellApplication {
     name = "build";
     runtimeInputs = [ hostPkgs.coreutils ];
-    text = imagePreamble + builtins.readFile ./scripts/build.sh;
+    text = imagePreamble + buildPreamble + builtins.readFile ./scripts/build.sh;
   };
 
   run = hostPkgs.writeShellApplication {
