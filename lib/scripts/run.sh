@@ -1,21 +1,20 @@
-#!/usr/bin/env bash
 # Launcher. Lists open issues with the configured label on the target repo and
 # fans out one disposable container per issue, capped at MAX_PARALLEL. Each
 # container clones fresh, implements its issue, and opens a PR — see the baked
 # /agent/entrypoint.sh.
 #
-# The agent image is a nix store path baked in at build time (@imagePath@ is
-# substituted by lib/mkHarness.nix); it is auto-loaded if not already present.
-set -euo pipefail
-
-IMAGE_ARCHIVE="@imagePath@"
-# Container runtime baked in at build time (podman or docker). A build-time
-# choice, not runtime env — the image path it loads is runtime-specific anyway.
-RUNTIME="@runtime@"
+# This is a body fragment: nix (lib/mkHarness.nix) wraps it with
+# writeShellApplication, which prepends the shebang, `set -euo pipefail`, the
+# pinned runtimeInputs PATH (gh + git + coreutils), and a nix-rendered preamble
+# that defines the baked config: IMAGE_ARCHIVE (the image store path), RUNTIME
+# (podman or docker — a checked host install, not pinned), the run defaults
+# LABEL/BASE_BRANCH/MAX_PARALLEL/BRANCH_PREFIX as `NAME="${NAME:-<default>}"`,
+# and PROMPT_DIR (the baked prompt store path). A matching env var — or
+# harness.env, sourced just below — therefore still wins at runtime.
 
 # Config + secrets (gitignored). Read from the current working directory, since
-# the harness is a store path with no working tree. Also overridable via the
-# environment, which takes precedence over the file.
+# the harness is a store path with no working tree. Sourced with `set -a` so its
+# assignments override the environment (and thus the baked defaults above).
 if [ -f "$PWD/harness.env" ]; then
   set -a
   # shellcheck disable=SC1091
@@ -24,18 +23,11 @@ if [ -f "$PWD/harness.env" ]; then
 fi
 
 IMAGE="${IMAGE:-spindrift:latest}"
-# Baked defaults (@label@ etc. substituted by lib/mkHarness.nix from the
-# Consumer's `defaults`); a matching env var still wins at runtime.
-LABEL="${LABEL:-@label@}"
-BASE_BRANCH="${BASE_BRANCH:-@baseBranch@}"
-MAX_PARALLEL="${MAX_PARALLEL:-@maxParallel@}"
-BRANCH_PREFIX="${BRANCH_PREFIX:-@branchPrefix@}"
 
 # Prompt template directory, mounted into the container at /agent/prompts. The
-# baked default is a nix store path (@promptDir@, substituted by
-# lib/mkHarness.nix). Point SPINDRIFT_PROMPT_DIR at a real directory to iterate
-# on the prompt with zero rebuilds; anything else falls back to the default.
-PROMPT_DIR="@promptDir@"
+# baked default (PROMPT_DIR, a nix store path from the preamble) is overridden
+# by pointing SPINDRIFT_PROMPT_DIR at a real directory, to iterate on the prompt
+# with zero rebuilds; anything else falls back to the default.
 if [ -n "${SPINDRIFT_PROMPT_DIR:-}" ] && [ -d "$SPINDRIFT_PROMPT_DIR" ]; then
   echo "==> SPINDRIFT_PROMPT_DIR set; mounting $SPINDRIFT_PROMPT_DIR instead of baked prompt"
   PROMPT_DIR="$SPINDRIFT_PROMPT_DIR"

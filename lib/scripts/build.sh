@@ -1,15 +1,11 @@
-#!/usr/bin/env bash
 # Load the spindrift agent image into the container runtime.
 #
-# The image is a nix store path baked in at build time (@imagePath@ is
-# substituted by lib/mkHarness.nix). Build the image itself with
-# `nix build .#spindrift`; this command only loads that store path into the
-# configured container runtime.
-set -euo pipefail
-
-IMAGE_ARCHIVE="@imagePath@"
-# Container runtime baked in at build time (podman or docker).
-RUNTIME="@runtime@"
+# This is a body fragment: nix (lib/mkHarness.nix) wraps it with
+# writeShellApplication, which prepends the shebang, `set -euo pipefail`, the
+# pinned runtimeInputs PATH, and a nix-rendered preamble that defines
+# IMAGE_ARCHIVE (the baked image store path) and RUNTIME (podman or docker).
+# Build the image itself with `nix build .#spindrift`; this command only loads
+# that store path into the configured container runtime.
 
 command -v "$RUNTIME" >/dev/null 2>&1 || {
   echo "$RUNTIME not found on PATH." >&2
