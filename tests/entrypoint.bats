@@ -53,6 +53,20 @@ setup() {
   grep -q -- "--dangerously-skip-permissions" "$CLAUDE_LOG"
 }
 
+@test "entrypoint invokes claude with the baked default model when MODEL is unset" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- "--model claude-opus-4-8" "$CLAUDE_LOG"
+}
+
+@test "MODEL env overrides the baked default model at runtime" {
+  export MODEL="claude-sonnet-4-6"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- "--model claude-sonnet-4-6" "$CLAUDE_LOG"
+  ! grep -q -- "--model claude-opus-4-8" "$CLAUDE_LOG"
+}
+
 @test "entrypoint runs the configured prefetch hook inside the work tree" {
   export PREFETCH_LOG="$BATS_TEST_TMPDIR/prefetch.log"
   cat >"$FAKE_BIN/warm-cache" <<'FAKE'

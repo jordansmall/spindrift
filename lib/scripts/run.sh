@@ -8,8 +8,9 @@
 # pinned runtimeInputs PATH (gh + git + coreutils), and a nix-rendered preamble
 # that defines the baked config: IMAGE_ARCHIVE (the image store path), RUNTIME
 # (podman or docker — a checked host install, not pinned), the run defaults
-# LABEL/BASE_BRANCH/MAX_PARALLEL/BRANCH_PREFIX/IN_PROGRESS_LABEL/FAILED_LABEL as
-# `NAME="${NAME:-<default>}"`, and PROMPT_DIR (the baked prompt store path). A
+# LABEL/BASE_BRANCH/MAX_PARALLEL/BRANCH_PREFIX/IN_PROGRESS_LABEL/FAILED_LABEL/
+# MODEL as `NAME="${NAME:-<default>}"`, and PROMPT_DIR (the baked prompt store
+# path). A
 # matching env var — or harness.env, sourced just below — therefore still wins
 # at runtime.
 
@@ -102,6 +103,7 @@ run_one() {
     -e ISSUE_TITLE="$title" \
     -e BASE_BRANCH="$BASE_BRANCH" \
     -e BRANCH_PREFIX="$BRANCH_PREFIX" \
+    -e MODEL="$MODEL" \
     -v "$PROMPT_DIR:/agent/prompts:ro" \
     "$IMAGE" /agent/entrypoint.sh >"$log" 2>&1; then
     # Success needs no terminal label — the merged PR's `Closes #N` closes it.
