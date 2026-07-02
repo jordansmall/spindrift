@@ -46,13 +46,24 @@ That drops a ready-to-edit starter: a `flake.nix` importing the harness, a
 $EDITOR flake.nix                        # tune the toolchain/packages for your stack
 $EDITOR prompts/issue-prompt.md          # tune the agent's workflow
 cp harness.env.example harness.env       # fill in REPO_SLUG, GH_TOKEN, Claude auth
-nix run .#build                          # nix build + load  (slow first time)
+nix run .#build                          # realise the image, then load it  (slow first time)
 nix run .#run                            # fan out one container per ready-for-agent issue
 ```
 
-Per-issue logs land in `logs/issue-<n>.log`. `.#build`/`.#run` are also exposed
-as `packages`, so you can drop them into `devShells.default.packages` instead of
-using `nix run`.
+Run both commands **from your Consumer flake's directory**: `build` reads the
+flake from `$PWD` for its container fallback, and `run` reads `harness.env` from
+`$PWD` (the same convention). Per-issue logs land in `logs/issue-<n>.log`.
+`.#build`/`.#run` are also exposed as `packages`, so you can drop them into
+`devShells.default.packages` instead of using `nix run`.
+
+`build` **realises** the image derivation and then loads it into your container
+runtime. On a host with a Linux builder (any Linux machine, or a Mac with a
+Linux builder configured) it realises the image directly. On a stock Mac — no
+Linux builder — it transparently falls back to building the image inside an
+**ephemeral Nix container** on the same runtime it already requires, keeping a
+named `/nix` volume so rebuilds stay incremental. Either way the result is
+`spindrift:latest`, loaded and ready for `run`. If the host has neither a Linux
+builder nor a container runtime, `build` exits with instructions.
 
 ## Adding spindrift to your flake
 
@@ -120,6 +131,7 @@ knobs. Unset options fall through to `mkHarness`'s own defaults.
 | `prompt`    | string                      | bundled starter    | agent prompt template; rendered to a store path, mounted at run time |
 | `defaults`  | `{ label; baseBranch; maxParallel; branchPrefix; }` | see below | non-secret run defaults baked into `run`             |
 | `runtime`   | `"podman"` \| `"docker"`    | `"podman"`         | container runtime the `build`/`run` commands drive                   |
+| `nixBuilderImage` | string                | `"docker.io/nixos/nix:latest"` | Nix image `build` uses as a fallback Linux builder when the host can't realise the image |
 
 The `defaults` submodule bakes the run knobs into the `run` command; a matching
 env var still wins at runtime, so one built command can be re-pointed without a
@@ -224,16 +236,24 @@ deliberate, not oversights — write them down so you can honour them:
 ## Building on macOS
 
 OCI images are Linux-only, so the `spindrift` image is a *Linux* derivation even
-on a Mac, and nix can't realise it on darwin without a Linux builder. The
-launcher commands (`build`/`run`) are native and only *reference* the image
-path, so `nix flake check` never forces a Linux build — but `nix run .#build`
-(which realises the image) does. Options:
+on a Mac. The launcher commands (`build`/`run`) are native and only *reference*
+the image path, so `nix flake check` never forces a Linux build. Realising the
+image is `build`'s job, and it handles the Mac case for you:
 
-- **nix-darwin**: enable `nix.linux-builder.enable = true;` (a small Linux VM
-  nix uses automatically). Simplest if you're on nix-darwin.
-- **Remote builder**: point nix at any Linux box via
-  `nix.buildMachines` / `--builders`.
-- **Just build on Linux / CI** and load the result on the Mac.
+- **Out of the box**: with no Linux builder, `nix run .#build` builds the image
+  inside an **ephemeral Nix container** on your `podman`/`docker` runtime (the
+  machine that can *run* the Box can always *build* it), reusing a named `/nix`
+  volume so rebuilds are incremental. Nothing to configure beyond the runtime
+  you already need — just run it from your Consumer flake's directory.
+- **Faster with a real Linux builder** (skips the container round-trip):
+  - **nix-darwin**: enable `nix.linux-builder.enable = true;` (a small Linux VM
+    nix uses automatically). `build` then realises the image directly.
+  - **Remote builder**: point nix at any Linux box via
+    `nix.buildMachines` / `--builders`.
+  - **Just build on Linux / CI** and load the result on the Mac.
+
+The Nix container image the fallback uses is `docker.io/nixos/nix:latest` by
+default; override it with the `nixBuilderImage` option.
 
 ## Customizing the template
 
