@@ -37,9 +37,9 @@
       perSystem = _: {
         spindrift = {
           # ---- Toolchain baked into the agent's image -----------------------
-          # This sample bakes a Rust toolchain. Swap the overlay/config/packages
-          # for your stack (node, go, python, …) — the engine is language
-          # agnostic. `packages` is a function of the (Linux) pkgs.
+          # Swap the overlay/config/packages for your stack (node, go, python,
+          # …) — the engine is language agnostic. `packages` is a function of
+          # the (Linux) pkgs.
           overlays = [ (import rust-overlay) ];
           config.allowUnfree = true;
           packages =

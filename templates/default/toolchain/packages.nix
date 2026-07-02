@@ -1,7 +1,5 @@
-# Example scaffold: spindrift's own (Rust) dogfood toolchain, fed to mkHarness
-# via `packages` in flake.nix the way any Consumer would. The engine itself is
-# language-agnostic (ADR 0003) — a non-Rust project swaps this whole file for
-# its own node/go/python tooling.
+# Sample packages fed to `packages` in flake.nix; swap this whole file for
+# your stack's own tooling.
 { pkgs }:
 with pkgs;
 [
