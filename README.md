@@ -193,6 +193,27 @@ host.
 | Metadata          | Read           | mandatory baseline, auto-selected            |
 | Workflows         | Read and write | **only if** an issue edits `.github/workflows/*` — omit otherwise |
 
+## Threat model
+
+The isolation story leaves a few trust assumptions on the repo side. They are
+deliberate, not oversights — write them down so you can honour them:
+
+1. **The label is the launch button.** Anyone who can apply the label on the
+   Target repo dispatches an Agent holding a repo-write token. GitHub requires
+   the triage role to label, so treat every label-applier (triage and up) as a
+   trusted operator — the label *is* the authorization step.
+2. **Issue content is untrusted input.** Reading the issue is the Agent's whole
+   job, so prompt injection is inherent to the design, not a bug to patch. What
+   bounds it is the blast radius: exactly what the token allows and nothing
+   more, because the Box has no host access.
+3. **Branch protection is the required backstop.** The token needs Contents RW
+   to push its `agent/issue-N` branch, and that same scope permits pushing to
+   the base branch. Enable branch protection on the base branch so Agents
+   *physically* cannot push to it — the PR is the only way in.
+4. **Scope the token.** Use a fine-grained PAT restricted to the single Target
+   repo (Issues RW, Contents RW, Pull requests RW, Metadata R). Repo scoping is
+   what turns "the Agent can do anything" into "anything, to one repo."
+
 ## Prerequisites
 
 - **nix** with flakes enabled.
