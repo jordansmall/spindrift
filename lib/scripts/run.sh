@@ -8,9 +8,10 @@
 # pinned runtimeInputs PATH (gh + git + coreutils), and a nix-rendered preamble
 # that defines the baked config: IMAGE_ARCHIVE (the image store path), RUNTIME
 # (podman or docker — a checked host install, not pinned), the run defaults
-# LABEL/BASE_BRANCH/MAX_PARALLEL/BRANCH_PREFIX as `NAME="${NAME:-<default>}"`,
-# and PROMPT_DIR (the baked prompt store path). A matching env var — or
-# harness.env, sourced just below — therefore still wins at runtime.
+# LABEL/BASE_BRANCH/MAX_PARALLEL/BRANCH_PREFIX/IN_PROGRESS_LABEL/FAILED_LABEL as
+# `NAME="${NAME:-<default>}"`, and PROMPT_DIR (the baked prompt store path). A
+# matching env var — or harness.env, sourced just below — therefore still wins
+# at runtime.
 
 # Config + secrets (gitignored). Read from the current working directory, since
 # the harness is a store path with no working tree. Sourced with `set -a` so its
@@ -80,6 +81,15 @@ count="$(printf '%s\n' "$issues_tsv" | wc -l | tr -d ' ')"
 echo "==> $count issue(s); launching up to $MAX_PARALLEL container(s) at a time"
 mkdir -p "$PWD/logs"
 
+# Move an issue between lifecycle labels (issue #15). Best-effort: `set -e` is
+# active, so a labelling hiccup must not abort the run — warn and carry on.
+swap_label() {
+  local num="$1" add="$2" remove="$3"
+  gh issue edit "$num" --repo "$REPO_SLUG" \
+    --add-label "$add" --remove-label "$remove" >/dev/null 2>&1 ||
+    echo "    ?? #$num: could not set label '$add' (remove '$remove')" >&2
+}
+
 run_one() {
   local num="$1" title="$2"
   local log="$PWD/logs/issue-$num.log"
@@ -94,15 +104,23 @@ run_one() {
     -e BRANCH_PREFIX="$BRANCH_PREFIX" \
     -v "$PROMPT_DIR:/agent/prompts:ro" \
     "$IMAGE" /agent/entrypoint.sh >"$log" 2>&1; then
+    # Success needs no terminal label — the merged PR's `Closes #N` closes it.
     echo "    <- #$num done  (logs/issue-$num.log)"
   else
+    # Hand the Box's failure to human triage; re-labelling $LABEL retries. No
+    # automatic retry.
     echo "    !! #$num FAILED (logs/issue-$num.log)"
+    swap_label "$num" "$FAILED_LABEL" "$IN_PROGRESS_LABEL"
   fi
 }
 
 # bash 3.2-compatible parallelism cap (macOS ships 3.2; no `wait -n`).
 while IFS=$'\t' read -r num title; do
   [ -n "$num" ] || continue
+  # Claim the issue up front — synchronously, before backgrounding — so it drops
+  # out of the $LABEL query immediately. Re-running `run` mid-flight then skips
+  # it instead of re-dispatching a duplicate Box.
+  swap_label "$num" "$IN_PROGRESS_LABEL" "$LABEL"
   run_one "$num" "$title" &
   while [ "$(jobs -r | wc -l | tr -d ' ')" -ge "$MAX_PARALLEL" ]; do sleep 1; done
 done <<EOF
