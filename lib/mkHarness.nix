@@ -288,6 +288,7 @@ in
   inherit
     image
     agentEnv
+    agentFiles
     build
     run
     imagePath
