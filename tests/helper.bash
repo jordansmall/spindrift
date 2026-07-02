@@ -6,7 +6,6 @@
 # in-container script), PROMPTS_DIR (the baked prompt templates), and IMAGE_PATH
 # (the image archive store path substituted into the commands).
 
-# Put the fakes first on PATH and point their record logs at the test tmpdir.
 setup_fakes() {
   : "${FAKES_DIR:?FAKES_DIR must be set (dir holding fake podman/gh/claude)}"
   FAKE_BIN="$BATS_TEST_TMPDIR/bin"

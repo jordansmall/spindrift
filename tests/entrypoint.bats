@@ -40,9 +40,7 @@ setup() {
   export PROMPTS_DIR="$PROMPT_HARNESS_DIR"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # The Consumer-configured prompt body flows through to `claude -p` ...
   grep -q "CONFIGURED-PROMPT-MARKER" "$CLAUDE_PROMPT_FILE"
-  # ... with the per-issue variables still interpolated inside it.
   grep -q "Implement issue #7: Do the thing on agent/issue-7" "$CLAUDE_PROMPT_FILE"
 }
 
@@ -80,7 +78,6 @@ FAKE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q "warmed" "$PREFETCH_LOG"
-  # runs after the clone, from within the cloned work tree
   grep -q "$WORK_DIR" "$PREFETCH_LOG"
 }
 
