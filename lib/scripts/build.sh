@@ -1,24 +1,16 @@
 # Realise the spindrift agent image, then load it into the container runtime.
 #
-# This is a body fragment: nix (lib/mkHarness.nix) wraps it with
-# writeShellApplication, which prepends the shebang, `set -euo pipefail`, the
-# pinned runtimeInputs PATH, and a nix-rendered preamble that defines
-# IMAGE_ARCHIVE (the baked image store path), IMAGE_DRV (the baked image .drv
-# path, context-discarded), RUNTIME (podman or docker), NIX_BUILDER_IMAGE (the
-# ephemeral Nix container used as a fallback Linux builder), NIX_VOLUME (the
-# named /nix volume that keeps that fallback incremental), and FLAKE_IMAGE_ATTR
-# (the Linux image attribute to build inside it).
+# Body fragment: nix (lib/mkHarness.nix) wraps it with writeShellApplication,
+# prepending the shebang, `set -euo pipefail`, the pinned runtimeInputs PATH, and
+# a preamble defining IMAGE_ARCHIVE, IMAGE_DRV, RUNTIME, NIX_BUILDER_IMAGE,
+# NIX_VOLUME, and FLAKE_IMAGE_ATTR.
 #
-# The image is a Linux (OCI) derivation. We first try to realise it on the host
-# — which works on Linux, or on darwin with a configured Linux builder — and
-# load the resulting store path. When the host has no Linux builder (the stock
-# mac case), we fall back to building it inside an ephemeral Nix container on
-# the runtime we already require, from the Consumer flake in $PWD. Pure eval
-# guarantees the in-container build yields the exact store path baked in above.
-# If neither path is possible we exit non-zero with an actionable message.
+# The image is a Linux (OCI) derivation. Realise it on the host (Linux, or darwin
+# with a Linux builder); failing that, build it inside an ephemeral Nix container
+# on the required runtime, from the Consumer flake in $PWD. Pure eval guarantees
+# the in-container build yields the exact store path baked in above.
 #
-# Run this from your Consumer flake's directory (the same $PWD convention
-# harness.env uses).
+# Run this from your Consumer flake's directory.
 
 load_image() {
   local archive="$1"
@@ -27,10 +19,9 @@ load_image() {
   echo "==> done: spindrift:latest"
 }
 
-# Build the image inside an ephemeral Nix container and load the resulting
-# tarball. A named volume for /nix keeps rebuilds incremental across runs; the
-# Consumer flake is mounted from $PWD, and the built tarball is copied out to a
-# host-visible path so the host runtime can load it.
+# Build the image inside an ephemeral Nix container and load the tarball. The
+# named /nix volume keeps rebuilds incremental; the built tarball is copied out
+# to a host-visible path so the host runtime can load it.
 build_in_container() {
   local tar="$PWD/.spindrift-image.tar"
   local pathfile=".spindrift-image-path"
@@ -73,9 +64,8 @@ EOF
   exit 1
 }
 
-# 1. Try to realise the baked image derivation on the host. Succeeds on Linux,
-#    or on darwin with a Linux builder; the '^*' selects the derivation's
-#    outputs. On success the image is realised at IMAGE_ARCHIVE.
+# 1. Realise the baked image derivation on the host (Linux, or darwin with a
+#    Linux builder). '^*' selects the derivation's outputs.
 if nix build "${IMAGE_DRV}^*" --no-link >/dev/null 2>&1; then
   echo "==> realised image derivation on the host"
   load_image "$IMAGE_ARCHIVE"
