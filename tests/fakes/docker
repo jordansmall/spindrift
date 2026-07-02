@@ -17,6 +17,11 @@ case "${1:-}" in
       exit $?
     fi
     ;;
+  run)
+    # `docker run ...` — scripted exit code, so tests can drive run.sh's failure
+    # path (the on-failure label swap).
+    exit "${FAKE_DOCKER_RUN_EXIT:-0}"
+    ;;
 esac
 
 exit 0

@@ -1,17 +1,55 @@
 #!/usr/bin/env bash
-# Fake gh for tests. Records every invocation to $GH_LOG and answers the two
-# calls the harness makes: `issue list` (prints the scripted TSV in
-# $FAKE_GH_ISSUES) and `pr create` / `auth setup-git` (recorded, no-op).
+# Fake gh for tests. Records every invocation to $GH_LOG and models just enough
+# of the issue label lifecycle (issue #15) to prove `run` idempotency:
+#
+#   * `issue list --label L` prints the FAKE_GH_ISSUES rows whose *current*
+#     lifecycle label is L. An issue that has never been edited is treated as
+#     carrying whatever label is queried (its initial "ready" state), so a first
+#     run sees every seeded issue regardless of the query label. Once an issue
+#     has been edited it matches only its recorded label.
+#   * `issue edit N --add-label A --remove-label R` records N's new label A in
+#     $GH_STATE, so a subsequent `issue list --label R` no longer matches it.
+#   * `pr create` / `auth setup-git` are recorded, no-op.
 set -euo pipefail
 
 : "${GH_LOG:?GH_LOG must point at a log file}"
 printf '%s\n' "$*" >>"$GH_LOG"
 
+# Per-test label state (issue number -> current lifecycle label), kept beside the
+# log so it is isolated per test yet persists across two `run` invocations.
+GH_STATE="${GH_STATE:-$GH_LOG.state}"
+
 case "${1:-}" in
   issue)
-    if [ "${2:-}" = "list" ]; then
-      printf '%s' "${FAKE_GH_ISSUES:-}"
-    fi
+    case "${2:-}" in
+      list)
+        want=""
+        args=("$@")
+        for ((i = 0; i < ${#args[@]}; i++)); do
+          [ "${args[i]}" = "--label" ] && want="${args[i + 1]:-}"
+        done
+        while IFS=$'\t' read -r num title; do
+          [ -n "$num" ] || continue
+          cur=""
+          [ -f "$GH_STATE" ] &&
+            cur="$(awk -F'\t' -v n="$num" '$1==n{v=$2} END{print v}' "$GH_STATE")"
+          if [ -z "$cur" ] || [ "$cur" = "$want" ]; then
+            printf '%s\t%s\n' "$num" "$title"
+          fi
+        done <<EOF
+${FAKE_GH_ISSUES:-}
+EOF
+        ;;
+      edit)
+        num="${3:-}"
+        add=""
+        args=("$@")
+        for ((i = 0; i < ${#args[@]}; i++)); do
+          [ "${args[i]}" = "--add-label" ] && add="${args[i + 1]:-}"
+        done
+        [ -n "$num" ] && [ -n "$add" ] && printf '%s\t%s\n' "$num" "$add" >>"$GH_STATE"
+        ;;
+    esac
     ;;
 esac
 

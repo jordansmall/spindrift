@@ -15,6 +15,11 @@ case "${1:-}" in
       exit $?
     fi
     ;;
+  run)
+    # `podman run ...` — the container's exit code is scripted so tests can drive
+    # the run.sh failure path (the on-failure label swap).
+    exit "${FAKE_PODMAN_RUN_EXIT:-0}"
+    ;;
 esac
 
 exit 0
