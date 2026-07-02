@@ -414,21 +414,21 @@
                 '';
 
             # A non-Rust `packages` set is baked into the image on top of the
-            # harness plumbing. Asserted by grepping the (eval-only, Linux) env
-            # derivation, so it needs no Linux builder.
+            # harness plumbing. Asserted by matching the (Linux) env's `paths`
+            # names in nix — pure eval, so it needs no Linux builder and no
+            # sandboxed read of the env derivation.
             packages-baked =
-              pkgs.runCommand "packages-baked"
-                {
-                  envDrv = builtins.unsafeDiscardStringContext nonRustHarness.agentEnv.drvPath;
-                }
-                ''
-                  test -f "$envDrv"
-                  grep -q -- '-hello-' "$envDrv" \
-                    || { echo "expected the hello package baked into the env" >&2; exit 1; }
-                  # engine plumbing is still layered on, language-agnostically
-                  grep -q -- '-git-' "$envDrv"
-                  touch $out
-                '';
+              let
+                inherit (pkgs.lib) assertMsg any hasInfix;
+                names = map (p: p.name or "") nonRustHarness.agentEnv.paths;
+                baked = frag: any (n: hasInfix frag n) names;
+              in
+              assert assertMsg (baked "hello-")
+                "expected the hello package baked into the env";
+              # engine plumbing is still layered on, language-agnostically
+              assert assertMsg (baked "git-")
+                "expected git plumbing layered into the env";
+              pkgs.runCommand "packages-baked" { } "touch $out";
           };
 
           # For hacking ON the harness itself (host-side).
