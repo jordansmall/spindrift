@@ -53,6 +53,26 @@
           ...
         }:
         let
+          # The launchers pin the real `gh` via runtimeInputs, which would shadow
+          # a PATH-injected fake; so the bats-driven harnesses below overlay `gh`
+          # with the recording fake, keeping the suite offline. podman/docker stay
+          # unpinned host installs, so their fakes still resolve through PATH.
+          ghFakeOverlay = _final: prev: {
+            gh = prev.runCommand "fake-gh" { } ''
+              mkdir -p $out/bin
+              cp ${./tests/fakes/gh} $out/bin/gh
+              chmod +x $out/bin/gh
+            '';
+          };
+
+          # A plain harness whose launcher commands drive the bats suite: default
+          # run knobs, a trivial toolchain, and the fake `gh` overlaid in.
+          batsHarness = import ./lib/mkHarness.nix {
+            inherit nixpkgs system;
+            overlays = [ ghFakeOverlay ];
+            packages = p: [ p.hello ];
+          };
+
           # The rust dogfood expressed as module options — this drives the real
           # packages/apps (see `spindrift = { ... }` below). Kept here as a
           # direct call too, so the equivalence check can prove the module path
@@ -80,6 +100,7 @@
           # docker `runtime`. Eval-only, consumed by the checks below.
           customHarness = import ./lib/mkHarness.nix {
             inherit nixpkgs system;
+            overlays = [ ghFakeOverlay ];
             defaults = {
               label = "custom-label";
               baseBranch = "develop";
@@ -91,6 +112,7 @@
 
           dockerHarness = import ./lib/mkHarness.nix {
             inherit nixpkgs system;
+            overlays = [ ghFakeOverlay ];
             runtime = "docker";
             packages = p: [ p.hello ];
           };
@@ -174,9 +196,10 @@
                   nativeBuildInputs = [ pkgs.shellcheck ];
                 }
                 ''
+                  # The launcher scripts are body fragments (they reference the
+                  # nix-rendered preamble), so they are shellcheck'd by
+                  # writeShellApplication at build time, not standalone here.
                   shellcheck --shell=bash \
-                    ${./lib/scripts/run.sh} \
-                    ${./lib/scripts/build.sh} \
                     ${./agent/entrypoint.sh} \
                     ${./tests/fakes/podman} \
                     ${./tests/fakes/docker} \
@@ -200,18 +223,22 @@
                     pkgs.gnugrep
                     pkgs.gnused
                   ];
-                  RUN_CMD = "${config.packages.run}/bin/run";
-                  BUILD_CMD = "${config.packages.build}/bin/build";
+                  # The launcher commands under test overlay `gh` with the fake
+                  # (batsHarness/customHarness/dockerHarness), since the real `gh`
+                  # is pinned into their runtimeInputs PATH and would otherwise
+                  # shadow a PATH-injected fake.
+                  RUN_CMD = "${batsHarness.run}/bin/run";
+                  BUILD_CMD = "${batsHarness.build}/bin/build";
                   CUSTOM_RUN_CMD = "${customHarness.run}/bin/run";
                   DOCKER_RUN_CMD = "${dockerHarness.run}/bin/run";
-                  IMAGE_PATH = harness.imagePath;
+                  IMAGE_PATH = batsHarness.imagePath;
                   FAKES_DIR = ./tests/fakes;
                   ENTRYPOINT = ./agent/entrypoint.sh;
                   PROMPTS_DIR = ./templates/default/prompts;
                   # The baked default prompt dir the `run` command mounts, and a
                   # Consumer-configured one whose rendered content flows through
                   # to the stubbed agent (#4).
-                  PROMPT_PATH = harness.promptDir;
+                  PROMPT_PATH = batsHarness.promptDir;
                   PROMPT_HARNESS_DIR = promptHarness.promptDir;
                 }
                 ''
