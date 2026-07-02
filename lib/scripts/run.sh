@@ -41,7 +41,7 @@ GIT_USER_EMAIL="${GIT_USER_EMAIL:-$(git config --get user.email 2>/dev/null || t
 : "${REPO_SLUG:?set REPO_SLUG=owner/repo (the target GitHub repository)}"
 : "${GIT_USER_NAME:?set GIT_USER_NAME, or configure git user.name on the host}"
 : "${GIT_USER_EMAIL:?set GIT_USER_EMAIL, or configure git user.email on the host}"
-: "${GH_TOKEN:?set GH_TOKEN (repo perms: Issues RW, Contents RW, Pull requests RW, Metadata R)}"
+: "${GH_TOKEN:?set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)}"
 if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
   echo "set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY" >&2
   exit 1
