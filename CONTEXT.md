@@ -31,3 +31,11 @@ one issue inside one container.
 The disposable per-issue podman container — the isolation boundary that makes
 `--dangerously-skip-permissions` safe.
 _Avoid_: sandbox, runner, worker.
+
+**Label lifecycle**:
+The dispatch states of an issue, carried as labels on the Target repo:
+`ready-for-agent` (a human marks the issue dispatchable — the label is the
+launch button) → `agent-in-progress` (a Box has been dispatched; re-runs skip
+it) → `agent-failed` (the Box exited non-zero; human triage, re-label to
+retry). Success needs no terminal label — the merged PR closes the issue.
+_Avoid_: status, queue, state machine.
