@@ -106,6 +106,8 @@
               baseBranch = "develop";
               maxParallel = 5;
               branchPrefix = "bot/";
+              inProgressLabel = "custom-wip";
+              failedLabel = "custom-broken";
             };
             packages = p: [ p.hello ];
           };
@@ -372,6 +374,8 @@
               grep -q 'BASE_BRANCH:-develop' "$runCmd"
               grep -q 'MAX_PARALLEL:-5' "$runCmd"
               grep -q 'BRANCH_PREFIX:-bot/' "$runCmd"
+              grep -q 'IN_PROGRESS_LABEL:-custom-wip' "$runCmd"
+              grep -q 'FAILED_LABEL:-custom-broken' "$runCmd"
 
               # Default runtime is podman; the docker harness bakes docker.
               grep -q 'RUNTIME="podman"' ${harness.run}/bin/run
