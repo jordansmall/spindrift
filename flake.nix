@@ -36,10 +36,10 @@
       # declarative option surface (ADR 0001).
       flake.flakeModules.default = ./lib/flakeModule.nix;
 
-      # A ready-to-edit starter (`nix flake init -t github:jordansmall/spindrift`):
-      # a Consumer flake importing the shim, a tunable prompt, a sample toolchain,
-      # and a harness.env.example. This is spindrift's own scaffold — the dogfood
-      # above consumes the very same templates/default toolchain and prompt.
+      # A ready-to-edit consumer starter (`nix flake init -t
+      # github:jordansmall/spindrift`). This is spindrift's own scaffold — the
+      # dogfood above consumes the very same templates/default toolchain and
+      # prompt.
       flake.templates.default = {
         path = ./templates/default;
         description = "spindrift consumer starter: flake + prompts + toolchain + harness.env.example";
@@ -77,10 +77,9 @@
             packages = p: [ p.hello ];
           };
 
-          # The rust dogfood expressed as module options — this drives the real
-          # packages/apps (see `spindrift = { ... }` below). Kept here as a
-          # direct call too, so the equivalence check can prove the module path
-          # and the direct path yield byte-identical outputs.
+          # The rust dogfood as a direct call, mirroring the `spindrift = { ... }`
+          # module config below. Kept so the equivalence check can prove the
+          # module and direct paths yield byte-identical outputs.
           harness = import ./lib/mkHarness.nix {
             inherit nixpkgs system;
             overlays = [ (import rust-overlay) ];
@@ -145,8 +144,7 @@
             packages = p: [ p.hello ];
           };
 
-          # A minimal flake-parts consumer fixture (#5). It imports the shim and
-          # configures nothing but a non-Rust `packages` set, standing in for a
+          # A minimal flake-parts consumer fixture (#5), standing in for a
           # downstream flake. Evaluated in-repo (no separate lock / no network)
           # via a nested `mkFlake`; the checks compare its outputs to the
           # equivalent direct `mkHarness` call.
@@ -171,13 +169,12 @@
               };
           consumerPkgs = moduleConsumer.packages.${system};
 
-          # The `templates.default` starter, evaluated as a fixture (#6). We call
-          # its real `outputs` function directly — no `nix flake init`, no network
-          # — wiring `spindrift` to THIS checkout instead of the github input, so
-          # the starter is proven to import the shim and produce a buildable
-          # harness with zero network/agent. The full Linux image realise is
-          # verified out-of-band via the podman builder; here we assert eval + the
-          # image store path resolving into the launcher commands.
+          # The `templates.default` starter, evaluated as a fixture (#6): call
+          # its real `outputs` directly — no `nix flake init`, no network —
+          # wiring `spindrift` to THIS checkout instead of the github input. The
+          # full Linux image realise is verified out-of-band via the podman
+          # builder; here we assert eval + the image store path resolving into
+          # the launcher commands.
           templateOutputs = (import ./templates/default/flake.nix).outputs {
             inherit nixpkgs flake-parts rust-overlay;
             self = {
@@ -205,7 +202,6 @@
           };
 
           checks = {
-            # shellcheck the bash layers (scripts, entrypoint, fakes, helper).
             shellcheck =
               pkgs.runCommand "shellcheck"
                 {
@@ -338,13 +334,11 @@
                   touch $out
                 '';
 
-            # The `templates.default` starter evaluates and yields a buildable
-            # harness (#6): its `build`/`run` commands must have the Linux image
-            # store path substituted in (placeholder gone, path resolves to a
-            # spindrift store path). Since the starter's config mirrors the
-            # dogfood's, its commands are byte-identical to the direct call —
-            # asserted too. Eval-only; the Linux realise is done on the podman
-            # builder against an instantiated copy.
+            # The `templates.default` starter (#6): its `build`/`run` commands
+            # must have the Linux image store path substituted in, and — since
+            # its config mirrors the dogfood's — be byte-identical to the direct
+            # call. Eval-only; the Linux realise is done on the podman builder
+            # against an instantiated copy.
             template-fixture =
               pkgs.runCommand "template-fixture"
                 {
@@ -376,8 +370,7 @@
                 '';
 
             # The configured `defaults` and `runtime` are baked into the
-            # generated `run` command text (eval-only; no Linux builder). Same
-            # idiom as mkharness-substitution above.
+            # generated `run` command text (eval-only; no Linux builder).
             mkharness-defaults = pkgs.runCommand "mkharness-defaults" { } ''
               runCmd=${customHarness.run}/bin/run
               ! grep -q -- '@label@' "$runCmd"
@@ -441,12 +434,11 @@
                 "expected git plumbing layered into the env";
               pkgs.runCommand "packages-baked" { } "touch $out";
           }
-          # The entrypoint baked at /agent/entrypoint.sh must carry a store-path
-          # shebang, not the source's `#!/usr/bin/env bash` — the Box has no
-          # /usr/bin/env. Guards against baking the raw source instead of the
-          # writeShellApplication output. Realises the tiny agent-files layer, so
-          # it is gated to a Linux builder and omitted from `nix flake check` on
-          # darwin.
+          # The baked entrypoint must carry a store-path shebang, not the
+          # source's `#!/usr/bin/env bash` — the Box has no /usr/bin/env. Guards
+          # against baking the raw source instead of the writeShellApplication
+          # output. Realises the agent-files layer, so it is gated to a Linux
+          # builder and omitted from `nix flake check` on darwin.
           // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
             entrypoint-shebang = pkgs.runCommand "entrypoint-shebang" { } ''
               shebang=$(head -1 ${nonRustHarness.agentFiles}/agent/entrypoint.sh)
