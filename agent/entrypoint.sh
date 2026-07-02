@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Runs INSIDE the disposable container (one per issue). Clones the target repo
+# Runs INSIDE the disposable container (one per issue): clones the target repo
 # fresh — zero shared host filesystem — cuts a branch, then hands off to a
 # headless Claude Code agent that implements the issue and opens a PR.
 #
-# Baked into the image at /agent/entrypoint.sh (see lib/mkHarness.nix). The
-# prompt template is bind-mounted at /agent/prompts by the `run` command — a
-# Consumer-owned artifact, hot-overridable via SPINDRIFT_PROMPT_DIR — and we
-# substitute the per-issue variables into it below.
+# Baked into the image at /agent/entrypoint.sh (see lib/mkHarness.nix); the
+# prompt template is bind-mounted at /agent/prompts by `run`, hot-overridable
+# via SPINDRIFT_PROMPT_DIR.
 #
 # --dangerously-skip-permissions is safe here precisely because the container
-# IS the isolation boundary: the agent can do anything it likes, but only to a
-# throwaway clone with a scoped token and no host access.
+# IS the isolation boundary: the agent can do anything, but only to a throwaway
+# clone with a scoped token and no host access.
 set -euo pipefail
 
 : "${REPO_SLUG:?REPO_SLUG (owner/repo) is required}"
@@ -23,12 +22,12 @@ BASE_BRANCH="${BASE_BRANCH:-main}"
 BRANCH_PREFIX="${BRANCH_PREFIX:-agent/issue-}"
 BRANCH="${BRANCH_PREFIX}${ISSUE_NUMBER}"
 
-# The agent model. `run` passes MODEL in per issue (baked default overridable by
-# a matching env var); this fallback keeps the entrypoint runnable standalone.
+# `run` passes MODEL per issue; this fallback keeps the entrypoint runnable
+# standalone.
 MODEL="${MODEL:-claude-opus-4-8}"
 
 # Baked-in locations; overridable only so the harness can be exercised on the
-# host without a container. Production leaves these at their defaults.
+# host without a container.
 WORK_DIR="${WORK_DIR:-/work}"
 PROMPTS_DIR="${PROMPTS_DIR:-/agent/prompts}"
 
@@ -43,15 +42,15 @@ git clone "https://github.com/${REPO_SLUG}.git" "$WORK_DIR"
 cd "$WORK_DIR"
 git checkout -b "$BRANCH" "origin/${BASE_BRANCH}"
 
-# Optional cache warm-up, configured via mkHarness `prefetch` (baked into the
-# image env). Runs in the freshly cloned work tree; no-op when unset.
+# Optional cache warm-up (mkHarness `prefetch`, baked into the image env); no-op
+# when unset.
 if [ -n "${PREFETCH:-}" ]; then
   eval "$PREFETCH"
 fi
 
-# Only substitute our known placeholders so any literal `$` in the prompt body
-# (shell snippets, etc.) is left untouched. envsubst's variable list is meant to
-# be a literal, not expanded — hence the single quotes.
+# Substitute only known placeholders so literal `$` in the prompt body (shell
+# snippets, etc.) survives. The single-quoted variable list is envsubst's
+# literal, not a shell expansion — hence SC2016.
 # shellcheck disable=SC2016
 prompt="$(
   ISSUE_NUMBER="$ISSUE_NUMBER" \

@@ -1,22 +1,14 @@
-# Launcher. Lists open issues with the configured label on the target repo and
-# fans out one disposable container per issue, capped at MAX_PARALLEL. Each
-# container clones fresh, implements its issue, and opens a PR — see the baked
-# /agent/entrypoint.sh.
+# Lists open $LABEL issues on the target repo and fans out one disposable
+# container per issue, capped at MAX_PARALLEL; each clones fresh and opens a PR.
 #
-# This is a body fragment: nix (lib/mkHarness.nix) wraps it with
-# writeShellApplication, which prepends the shebang, `set -euo pipefail`, the
-# pinned runtimeInputs PATH (gh + git + coreutils), and a nix-rendered preamble
-# that defines the baked config: IMAGE_ARCHIVE (the image store path), RUNTIME
-# (podman or docker — a checked host install, not pinned), the run defaults
-# LABEL/BASE_BRANCH/MAX_PARALLEL/BRANCH_PREFIX/IN_PROGRESS_LABEL/FAILED_LABEL/
-# MODEL as `NAME="${NAME:-<default>}"`, and PROMPT_DIR (the baked prompt store
-# path). A
-# matching env var — or harness.env, sourced just below — therefore still wins
-# at runtime.
+# Body fragment: nix (lib/mkHarness.nix) wraps it with writeShellApplication,
+# prepending the shebang, `set -euo pipefail`, the pinned runtimeInputs PATH, and
+# a preamble defining the baked config (IMAGE_ARCHIVE, RUNTIME, the run defaults
+# as `NAME="${NAME:-<default>}"`, PROMPT_DIR). A matching env var — or
+# harness.env below — therefore wins at runtime.
 
-# Config + secrets (gitignored). Read from the current working directory, since
-# the harness is a store path with no working tree. Sourced with `set -a` so its
-# assignments override the environment (and thus the baked defaults above).
+# Config + secrets (gitignored), read from $PWD since the harness is a store path
+# with no working tree. `set -a` makes its assignments override the baked defaults.
 if [ -f "$PWD/harness.env" ]; then
   set -a
   # shellcheck disable=SC1091
@@ -26,10 +18,8 @@ fi
 
 IMAGE="${IMAGE:-spindrift:latest}"
 
-# Prompt template directory, mounted into the container at /agent/prompts. The
-# baked default (PROMPT_DIR, a nix store path from the preamble) is overridden
-# by pointing SPINDRIFT_PROMPT_DIR at a real directory, to iterate on the prompt
-# with zero rebuilds; anything else falls back to the default.
+# Point SPINDRIFT_PROMPT_DIR at a real directory to override the baked prompt
+# store path and iterate on the prompt with zero rebuilds.
 if [ -n "${SPINDRIFT_PROMPT_DIR:-}" ] && [ -d "$SPINDRIFT_PROMPT_DIR" ]; then
   echo "==> SPINDRIFT_PROMPT_DIR set; mounting $SPINDRIFT_PROMPT_DIR instead of baked prompt"
   PROMPT_DIR="$SPINDRIFT_PROMPT_DIR"
@@ -54,18 +44,16 @@ command -v "$RUNTIME" >/dev/null 2>&1 || {
   exit 1
 }
 
-# Auto-load the baked image on first use (the old launcher errored instead).
+# Auto-load the baked image on first use.
 if ! "$RUNTIME" image exists "$IMAGE"; then
   echo "==> image '$IMAGE' not loaded; loading from $IMAGE_ARCHIVE"
   "$RUNTIME" load -i "$IMAGE_ARCHIVE"
 fi
 
-# Pass through whichever auth the host has set.
 auth_args=()
 [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && auth_args+=(-e CLAUDE_CODE_OAUTH_TOKEN)
 [ -n "${ANTHROPIC_API_KEY:-}" ] && auth_args+=(-e ANTHROPIC_API_KEY)
 
-# Pass the resolved (and required) commit identity through.
 git_args=(-e "GIT_USER_NAME=$GIT_USER_NAME" -e "GIT_USER_EMAIL=$GIT_USER_EMAIL")
 
 echo "==> querying open '$LABEL' issues in $REPO_SLUG"
@@ -82,8 +70,8 @@ count="$(printf '%s\n' "$issues_tsv" | wc -l | tr -d ' ')"
 echo "==> $count issue(s); launching up to $MAX_PARALLEL container(s) at a time"
 mkdir -p "$PWD/logs"
 
-# Move an issue between lifecycle labels (issue #15). Best-effort: `set -e` is
-# active, so a labelling hiccup must not abort the run — warn and carry on.
+# Move an issue between lifecycle labels. Best-effort: `set -e` is active, so a
+# labelling hiccup must not abort the run — warn and carry on.
 swap_label() {
   local num="$1" add="$2" remove="$3"
   gh issue edit "$num" --repo "$REPO_SLUG" \
@@ -109,8 +97,7 @@ run_one() {
     # Success needs no terminal label — the merged PR's `Closes #N` closes it.
     echo "    <- #$num done  (logs/issue-$num.log)"
   else
-    # Hand the Box's failure to human triage; re-labelling $LABEL retries. No
-    # automatic retry.
+    # Hand failures to human triage; re-labelling $LABEL retries. No auto-retry.
     echo "    !! #$num FAILED (logs/issue-$num.log)"
     swap_label "$num" "$FAILED_LABEL" "$IN_PROGRESS_LABEL"
   fi

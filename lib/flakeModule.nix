@@ -1,11 +1,10 @@
-# A thin flake-parts shim over lib/mkHarness.nix. Importing it exposes every
-# mkHarness knob as a `perSystem.spindrift.*` option and wires the resulting
-# image and launcher commands into `packages`/`apps` (ADR 0001).
+# A thin flake-parts shim over lib/mkHarness.nix: exposes every mkHarness knob as
+# a `perSystem.spindrift.*` option and wires the image and launcher commands into
+# `packages`/`apps` (ADR 0001).
 #
-# Options left unset are simply not forwarded, so mkHarness's own defaults apply
-# — the shim deliberately declares no defaults of its own, keeping the two in
-# lockstep. That is also what makes the shim's outputs byte-identical to a direct
-# mkHarness call: with the same inputs, both take the same code path.
+# The shim declares no defaults of its own — unset options are simply not
+# forwarded, so mkHarness's defaults apply and the outputs stay byte-identical to
+# a direct mkHarness call.
 {
   lib,
   flake-parts-lib,
