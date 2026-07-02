@@ -117,6 +117,16 @@
             packages = p: [ p.hello ];
           };
 
+          # A harness whose baked runtime is never on PATH, so `build`'s
+          # container fallback is unavailable — used to exercise the
+          # both-paths-impossible error (the host build is faked to fail too).
+          noRuntimeHarness = import ./lib/mkHarness.nix {
+            inherit nixpkgs system;
+            overlays = [ ghFakeOverlay ];
+            runtime = "no-such-runtime";
+            packages = p: [ p.hello ];
+          };
+
           # A Consumer-configured prompt (#4): proves the `prompt` argument is
           # what gets rendered to the store path and flows through to the agent.
           # The per-issue placeholders are escaped so they survive to run time.
@@ -205,6 +215,7 @@
                     ${./tests/fakes/docker} \
                     ${./tests/fakes/gh} \
                     ${./tests/fakes/claude} \
+                    ${./tests/fakes/nix} \
                     ${./tests/helper.bash}
                   touch $out
                 '';
@@ -229,6 +240,7 @@
                   # shadow a PATH-injected fake.
                   RUN_CMD = "${batsHarness.run}/bin/run";
                   BUILD_CMD = "${batsHarness.build}/bin/build";
+                  BUILD_NO_RUNTIME_CMD = "${noRuntimeHarness.build}/bin/build";
                   CUSTOM_RUN_CMD = "${customHarness.run}/bin/run";
                   DOCKER_RUN_CMD = "${dockerHarness.run}/bin/run";
                   IMAGE_PATH = batsHarness.imagePath;

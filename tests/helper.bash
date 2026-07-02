@@ -11,7 +11,8 @@ setup_fakes() {
   : "${FAKES_DIR:?FAKES_DIR must be set (dir holding fake podman/gh/claude)}"
   FAKE_BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$FAKE_BIN"
-  cp "$FAKES_DIR"/podman "$FAKES_DIR"/docker "$FAKES_DIR"/gh "$FAKES_DIR"/claude "$FAKE_BIN"/
+  cp "$FAKES_DIR"/podman "$FAKES_DIR"/docker "$FAKES_DIR"/gh "$FAKES_DIR"/claude \
+    "$FAKES_DIR"/nix "$FAKE_BIN"/
   chmod +x "$FAKE_BIN"/*
   export PATH="$FAKE_BIN:$PATH"
 
@@ -19,11 +20,13 @@ setup_fakes() {
   export DOCKER_LOG="$BATS_TEST_TMPDIR/docker.log"
   export GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   export CLAUDE_LOG="$BATS_TEST_TMPDIR/claude.log"
+  export NIX_LOG="$BATS_TEST_TMPDIR/nix.log"
   export CLAUDE_PROMPT_FILE="$BATS_TEST_TMPDIR/claude-prompt.txt"
   : >"$PODMAN_LOG"
   : >"$DOCKER_LOG"
   : >"$GH_LOG"
   : >"$CLAUDE_LOG"
+  : >"$NIX_LOG"
 }
 
 # Minimal env so the `run` command's required-var guards pass. Individual tests

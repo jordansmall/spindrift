@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Fake nix for the `build` tests. Records every invocation to $NIX_LOG and
+# simulates whether this host can realise a Linux derivation: `nix build`
+# succeeds only when FAKE_NIX_BUILD_OK=1 (a host with a Linux builder),
+# otherwise it fails the way a builder-less darwin host does — driving the
+# ephemeral-container fallback. Never touches the real nix store.
+set -euo pipefail
+
+: "${NIX_LOG:?NIX_LOG must point at a log file}"
+printf '%s\n' "$*" >>"$NIX_LOG"
+
+case "${1:-}" in
+  build)
+    if [ "${FAKE_NIX_BUILD_OK:-0}" = "1" ]; then
+      exit 0
+    fi
+    echo "error: a 'aarch64-linux' with features {} is required to build, but I am a 'aarch64-darwin'" >&2
+    exit 1
+    ;;
+esac
+
+exit 0
