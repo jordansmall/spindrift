@@ -129,14 +129,16 @@ knobs. Unset options fall through to `mkHarness`'s own defaults.
 | `packages`  | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
 | `prefetch`  | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
 | `prompt`    | string                      | bundled starter    | agent prompt template; rendered to a store path, mounted at run time |
-| `defaults`  | `{ label; baseBranch; maxParallel; branchPrefix; }` | see below | non-secret run defaults baked into `run`             |
+| `defaults`  | `{ label; baseBranch; maxParallel; branchPrefix; inProgressLabel; failedLabel; }` | see below | non-secret run defaults baked into `run` |
 | `runtime`   | `"podman"` \| `"docker"`    | `"podman"`         | container runtime the `build`/`run` commands drive                   |
 | `nixBuilderImage` | string                | `"docker.io/nixos/nix:latest"` | Nix image `build` uses as a fallback Linux builder when the host can't realise the image |
 
 The `defaults` submodule bakes the run knobs into the `run` command; a matching
 env var still wins at runtime, so one built command can be re-pointed without a
 rebuild. Baked defaults: `label = "ready-for-agent"`, `baseBranch = "main"`,
-`maxParallel = 3`, `branchPrefix = "agent/issue-"`.
+`maxParallel = 3`, `branchPrefix = "agent/issue-"`,
+`inProgressLabel = "agent-in-progress"`, `failedLabel = "agent-failed"`. The last
+two drive the [label lifecycle](#label-lifecycle).
 
 The **prompt is a runtime mount**, not baked into the image: edit
 `prompts/issue-prompt.md` and re-run with no image rebuild, or point
@@ -160,10 +162,13 @@ a rebuild (ADR 0001):
 | `BASE_BRANCH`             | `main`                 | branch to cut from and PR into           |
 | `MAX_PARALLEL`            | `3`                    | concurrent containers                    |
 | `BRANCH_PREFIX`           | `agent/issue-`         | branch name = prefix + issue number      |
+| `IN_PROGRESS_LABEL`       | `agent-in-progress`    | label a dispatched issue is swapped to   |
+| `FAILED_LABEL`            | `agent-failed`         | label an issue gets when its Box fails   |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
 | `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | hot-override the mounted prompt dir     |
 
-`LABEL`/`BASE_BRANCH`/`MAX_PARALLEL`/`BRANCH_PREFIX` override whatever was baked
+`LABEL`/`BASE_BRANCH`/`MAX_PARALLEL`/`BRANCH_PREFIX`/`IN_PROGRESS_LABEL`/`FAILED_LABEL`
+override whatever was baked
 via `defaults`. Commit identity is **required**: an override wins, else the
 host's `git config user.name`/`user.email` is inherited; if neither is set,
 `run` exits rather than committing under an arbitrary identity.
@@ -184,10 +189,66 @@ nix run .#run
 
 The harness never touches the Target repo's working tree on your host — it all
 happens through fresh clones inside containers — so it can drive **any** GitHub
-repo you point `REPO_SLUG` at. Each run is idempotent per issue: re-running
-re-clones and updates the same `agent/issue-N` branch / PR. The agent never
-merges the PR or closes the issue (`Closes #N` closes it on merge), so no admin
-or merge scope is needed.
+repo you point `REPO_SLUG` at. The agent never merges the PR or closes the issue
+(`Closes #N` closes it on merge), so no admin or merge scope is needed.
+
+## Label lifecycle
+
+`run` uses labels on the Target repo as the dispatch state of each issue, which
+is what makes re-running it safe. `run` queries only `LABEL`
+(`ready-for-agent`), so the labels below are what keep an issue from being picked
+up twice:
+
+```
+ready-for-agent ──dispatch──▶ agent-in-progress ──Box exits ≠0──▶ agent-failed
+   (launch button)              (a Box is running;                  (human triage;
+                                 re-runs skip it)                    re-label to retry)
+                                       │
+                                  Box exits 0
+                                       ▼
+                              (no terminal label — the
+                               merged PR's `Closes #N`
+                               closes the issue)
+```
+
+- **Dispatch is idempotent.** As `run` hands each issue to a container it swaps
+  `ready-for-agent` → `agent-in-progress`. Because the issue query matches only
+  `ready-for-agent`, re-running `run` while PRs are still in review re-dispatches
+  nothing — in-progress issues are no longer selected. (Without this, every
+  re-run would burn a full agent run per issue before dying on a non-fast-forward
+  push.)
+- **Failures surface for triage.** If the container exits non-zero, `run` swaps
+  `agent-in-progress` → `agent-failed` and stops. There are **no automatic
+  retries**: a human inspects `logs/issue-<n>.log`, and re-labelling the issue
+  `ready-for-agent` re-arms it for the next run.
+- **Success is silent.** A successful Box leaves the labels untouched; the merged
+  PR's `Closes #N` closes the issue.
+
+Rename either label with the `inProgressLabel` / `failedLabel` `defaults` (baked)
+or the `IN_PROGRESS_LABEL` / `FAILED_LABEL` env vars (runtime).
+
+### Prerequisite: create the labels on the Target repo
+
+`gh issue edit` cannot invent a label, so all three must already exist on the
+Target repo. Create them once:
+
+```sh
+gh label create ready-for-agent   --repo owner/repo --color 0e8a16 --description "dispatch to a spindrift agent"
+gh label create agent-in-progress --repo owner/repo --color fbca04 --description "a spindrift Box is working this issue"
+gh label create agent-failed      --repo owner/repo --color b60205 --description "the Box exited non-zero; needs triage"
+```
+
+### Caveat: a killed launcher can strand an issue
+
+The swaps are best-effort and there is **no reconciliation loop**. If the
+launcher is killed mid-run (Ctrl-C, a crashed host, a laptop closing), an issue
+can be left in `agent-in-progress` with no container running — so `run` will keep
+skipping it. The unstick is a **manual label flip**: move it back to
+`ready-for-agent` to re-dispatch (or to `agent-failed` to park it).
+
+```sh
+gh issue edit <n> --repo owner/repo --add-label ready-for-agent --remove-label agent-in-progress
+```
 
 ## GitHub token
 
