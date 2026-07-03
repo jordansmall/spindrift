@@ -171,7 +171,8 @@ run_one_bwrap() {
     --setenv IN_PROGRESS_LABEL "$IN_PROGRESS_LABEL" \
     --setenv COMPLETE_LABEL "$COMPLETE_LABEL" \
     --setenv PREFETCH "$BAKED_PREFETCH" \
-    --uid 1000 --gid 1000 \
+    --unshare-user --uid 1000 --gid 1000 \
+    --unshare-pid --unshare-ipc --unshare-uts \
     -- /agent/entrypoint.sh >"$log" 2>&1; then
     echo "    <- #$num done  (logs/issue-$num.log)"
   else
