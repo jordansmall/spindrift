@@ -31,6 +31,11 @@
   # Fallback Linux builder for when the host can't realise the Linux image itself
   # (the stock-mac case). Fully qualified so podman needs no default registry.
   nixBuilderImage ? "docker.io/nixos/nix:latest",
+  # Bake a usable nix into the box (binary + a registered store DB + a
+  # single-user, sandbox-off nix.conf) so `nix flake check` and `nix develop`
+  # run inside the unprivileged throwaway container. On by default — this is the
+  # nix-centric baseline every box gets; set to false for a lean, nix-free image.
+  nixInBox ? true,
 }:
 let
   # OCI images are Linux-only. Map the Consumer's (possibly darwin) system to
@@ -103,18 +108,22 @@ let
 
   # Plumbing every agent needs regardless of language: a shell, the VCS + GitHub
   # CLIs, Claude Code, CA certs, and the unix tools the entrypoint relies on.
-  harnessPackages = with pkgs; [
-    bashInteractive
-    coreutils
-    gnugrep
-    gnused
-    findutils
-    gettext # envsubst, used by agent/entrypoint.sh
-    git
-    gh
-    claude-code
-    cacert
-  ];
+  harnessPackages =
+    (with pkgs; [
+      bashInteractive
+      coreutils
+      gnugrep
+      gnused
+      findutils
+      gettext # envsubst, used by agent/entrypoint.sh
+      git
+      gh
+      claude-code
+      cacert
+    ])
+    # The nix CLI is included by default so `nix flake check` / `nix develop`
+    # work inside the box. Omitted only when the Consumer opts into the lean image.
+    ++ lib.optional nixInBox pkgs.nix;
 
   agentEnv = pkgs.buildEnv {
     name = "agent-env";
@@ -183,12 +192,25 @@ let
       agentEnv
       agentFiles
     ];
-    extraCommands = ''
-      mkdir -p tmp home/agent work etc
-      chmod 1777 tmp
-      cp ${passwdFile} etc/passwd
-      cp ${groupFile} etc/group
-    '';
+    extraCommands =
+      ''
+        mkdir -p tmp home/agent work etc
+        chmod 1777 tmp
+        cp ${passwdFile} etc/passwd
+        cp ${groupFile} etc/group
+      ''
+      # Make nix operable in an unprivileged throwaway container: a single-user,
+      # sandbox-off nix.conf and a store DB registered from the baked closure, so
+      # `nix flake check` reuses the image's store instead of treating it as empty.
+      + lib.optionalString nixInBox ''
+        mkdir -p etc/nix nix/var/nix/gcroots nix/var/nix/profiles nix/var/nix/temproots nix/var/log/nix
+        printf '%s\n' \
+          'experimental-features = nix-command flakes' \
+          'sandbox = false' \
+          'filter-syscalls = false' > etc/nix/nix.conf
+        export NIX_REMOTE="local?root=$PWD"
+        ${pkgs.buildPackages.nix}/bin/nix-store --load-db < ${pkgs.closureInfo { rootPaths = [ agentEnv agentFiles ]; }}/registration
+      '';
     # chown must be recorded in the image layer, so it runs under fakeroot after
     # the tree is staged. HOME and the clone dir must be writable by the agent.
     fakeRootCommands = ''
