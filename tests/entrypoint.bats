@@ -148,6 +148,46 @@ EOF
   grep -q 'if available\|if it.*available\|when.*available' "$CLAUDE_PROMPT_FILE"
 }
 
+@test "default prompt blocks on CI and never merges on red" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'pr checks\|watch.*ci\|ci.*watch\|watch.*check\|check.*watch' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'never.*merg.*red\|red.*never.*merg\|do not.*merg.*red\|merg.*only.*green\|green.*merg' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt merges with rebase and deletes the branch on green" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- '--rebase' "$CLAUDE_PROMPT_FILE"
+  grep -q -- '--delete-branch' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt relabels in-progress to complete on success" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'COMPLETE_LABEL\|agent-complete' "$CLAUDE_PROMPT_FILE"
+  grep -q -- '--remove-label.*IN_PROGRESS_LABEL\|--remove-label.*agent-in-progress\|--add-label.*COMPLETE_LABEL\|--add-label.*agent-complete' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt emits exactly one SPINDRIFT_OUTCOME line" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -c 'SPINDRIFT_OUTCOME' "$CLAUDE_PROMPT_FILE" | grep -q '^[1-9]'
+}
+
+@test "default prompt emits SPINDRIFT_OUTCOME with status=blocked in the blocked path" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'status=blocked' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt opens a draft PR and comments on the issue when blocked" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- '--draft' "$CLAUDE_PROMPT_FILE"
+  grep -q 'issue comment\|pr comment\|comment.*issue\|comment.*blocked' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "entrypoint skips the prefetch hook when it is empty" {
   export PREFETCH_LOG="$BATS_TEST_TMPDIR/prefetch.log"
   {
