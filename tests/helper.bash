@@ -46,12 +46,17 @@ setup_bare_repo() {
   mkdir -p "$HOME"
   export REMOTE_ROOT="$BATS_TEST_TMPDIR/remote"
   mkdir -p "$REMOTE_ROOT/owner"
-  git init --bare -q "$REMOTE_ROOT/owner/repo.git"
 
+  # Configure git before `init` so the bare repo's HEAD tracks `main`, not the
+  # built-in `master` default. A plain `git clone` (seed_flake_repo) resolves
+  # the branch via remote HEAD; a `master` HEAD with a `main`-only ref leaves it
+  # on an orphan branch, and the follow-up push is then non-fast-forward.
   git config --global init.defaultBranch main
   git config --global user.name "Seed"
   git config --global user.email "seed@example.com"
   git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://github.com/"
+
+  git init --bare -q "$REMOTE_ROOT/owner/repo.git"
 
   local seed="$BATS_TEST_TMPDIR/seed"
   git clone -q "https://github.com/owner/repo.git" "$seed"
