@@ -524,11 +524,15 @@
             nix-conf-in-image =
               pkgs.runCommand "nix-conf-in-image" { nativeBuildInputs = [ pkgs.jq ]; } ''
                 mkdir img && tar -xf ${nonRustHarness.image} -C img
-                # Walk the layer tars to find etc/nix/nix.conf
+                # Walk the layer tars for nix.conf. buildLayeredImage packs its
+                # customisation layer with `tar -cf layer.tar .`, so members carry
+                # a leading `./`; match and extract using the real member name.
                 found=0
                 for layer in img/*/layer.tar; do
-                  if tar -tf "$layer" 2>/dev/null | grep -q '^etc/nix/nix.conf$'; then
-                    tar -xOf "$layer" etc/nix/nix.conf > nix.conf
+                  member="$(tar -tf "$layer" 2>/dev/null \
+                    | grep -E '^(\./)?etc/nix/nix\.conf$' | head -1 || true)"
+                  if [ -n "$member" ]; then
+                    tar -xOf "$layer" "$member" > nix.conf
                     found=1
                     break
                   fi
