@@ -18,11 +18,15 @@ fi
 
 IMAGE="${IMAGE:-spindrift:latest}"
 
-# Point SPINDRIFT_PROMPT_DIR at a real directory to override the baked prompt
-# store path and iterate on the prompt with zero rebuilds.
+# The prompt is baked into the image at /agent/prompts. Point
+# SPINDRIFT_PROMPT_DIR at a real directory to bind-mount an override on top of it
+# and iterate on the prompt with zero rebuilds. Empty by default so the box runs
+# the baked prompt — which is what lets it work where the host /nix/store is not
+# visible to the container runtime (e.g. a macOS podman machine).
+prompt_args=()
 if [ -n "${SPINDRIFT_PROMPT_DIR:-}" ] && [ -d "$SPINDRIFT_PROMPT_DIR" ]; then
-  echo "==> SPINDRIFT_PROMPT_DIR set; mounting $SPINDRIFT_PROMPT_DIR instead of baked prompt"
-  PROMPT_DIR="$SPINDRIFT_PROMPT_DIR"
+  echo "==> SPINDRIFT_PROMPT_DIR set; mounting $SPINDRIFT_PROMPT_DIR over the baked prompt"
+  prompt_args=(-v "$SPINDRIFT_PROMPT_DIR:/agent/prompts:ro")
 fi
 
 # Commit identity: explicit override wins, else inherit the host's git config.
@@ -57,9 +61,12 @@ auth_args=()
 git_args=(-e "GIT_USER_NAME=$GIT_USER_NAME" -e "GIT_USER_EMAIL=$GIT_USER_EMAIL")
 
 echo "==> querying open '$LABEL' issues in $REPO_SLUG"
+# Dispatch oldest-first (age order). gh returns newest-first; sort_by(.number)
+# is ascending, and issue numbers are monotonic in creation. Dependency waves
+# then reorder within this by blocker readiness.
 issues_tsv="$(gh issue list \
   --repo "$REPO_SLUG" --state open --label "$LABEL" --limit 100 \
-  --json number,title --jq '.[] | [.number, .title] | @tsv')"
+  --json number,title --jq 'sort_by(.number) | .[] | [.number, .title] | @tsv')"
 
 if [ -z "$issues_tsv" ]; then
   echo "no open '$LABEL' issues — nothing to do."
@@ -96,7 +103,7 @@ run_one() {
     -e REVIEW_MODEL="$REVIEW_MODEL" \
     -e IN_PROGRESS_LABEL="$IN_PROGRESS_LABEL" \
     -e COMPLETE_LABEL="$COMPLETE_LABEL" \
-    -v "$PROMPT_DIR:/agent/prompts:ro" \
+    ${prompt_args[@]+"${prompt_args[@]}"} \
     "$IMAGE" /agent/entrypoint.sh >"$log" 2>&1; then
     # Success needs no terminal label — the merged PR's `Closes #N` closes it.
     echo "    <- #$num done  (logs/issue-$num.log)"
