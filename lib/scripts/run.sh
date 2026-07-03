@@ -239,6 +239,35 @@ dispatch_waves() {
   done
 }
 
+# Reads each per-issue log for its SPINDRIFT_OUTCOME line and prints a roll-up.
+# Issues with no outcome line (e.g. a hard crash) are flagged as missing.
+print_outcome_report() {
+  echo "==> outcome report"
+  while IFS=$'\t' read -r num _; do
+    [ -n "$num" ] || continue
+    local log="$PWD/logs/issue-$num.log"
+    local outcome_line=""
+    [ -f "$log" ] && outcome_line="$(grep '^SPINDRIFT_OUTCOME ' "$log" 2>/dev/null | tail -1 || true)"
+    if [ -z "$outcome_line" ]; then
+      printf '    #%s  status=missing  note=no SPINDRIFT_OUTCOME in log\n' "$num"
+      continue
+    fi
+    local pr
+    local status
+    local note
+    pr="$(printf '%s' "$outcome_line" | grep -oE 'pr=[^ ]+' | cut -d= -f2-)"
+    status="$(printf '%s' "$outcome_line" | grep -oE 'status=[^ ]+' | cut -d= -f2-)"
+    note="$(printf '%s' "$outcome_line" | sed 's/.*note=//')"
+    if [ "$status" = "blocked" ]; then
+      printf '    #%s  pr=%s  status=%s  !! %s\n' "$num" "$pr" "$status" "$note"
+    else
+      printf '    #%s  pr=%s  status=%s\n' "$num" "$pr" "$status"
+    fi
+  done <<EOF
+$issues_tsv
+EOF
+}
+
 # Build the dependency graph for the ready batch, then dispatch in waves when
 # edges are present or fall through to the original single-wave fan-out.
 DEPS_FILE="$PWD/logs/deps.$$"
@@ -271,4 +300,5 @@ EOF
   wait
 fi
 
+print_outcome_report
 echo "==> all agents finished — branches pushed and PRs opened on $REPO_SLUG."
