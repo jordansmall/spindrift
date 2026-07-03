@@ -134,11 +134,23 @@ gh issue edit ${ISSUE_NUMBER} --remove-label ${IN_PROGRESS_LABEL} --add-label ${
 
 # OUTCOME
 
-As your **final action**, print exactly one machine-readable line:
+Before emitting the outcome line, **verify both postconditions** from observed
+external state — a passing review is the halfway gate, not the finish line:
+
+1. **PR is merged**: `gh pr view <pr-number> --json state --jq '.state'` must
+   return `MERGED`.
+2. **Issue is labelled**: `gh issue view ${ISSUE_NUMBER} --json labels --jq '.labels[].name'`
+   must include `${COMPLETE_LABEL}`.
+
+If **both** checks pass, print exactly one machine-readable line as your
+**final output**:
 
 ```
 SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} pr=<pr-url> status=merged note=<short reason>
 ```
+
+If **either** check fails, do NOT emit `status=merged` — take the **IF BLOCKED**
+path instead.
 
 # IF BLOCKED
 
