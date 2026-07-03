@@ -205,6 +205,26 @@ EOF
   grep -q 'status=blocked' "$CLAUDE_PROMPT_FILE"
 }
 
+@test "default prompt verifies PR is MERGED before emitting the outcome line" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'MERGED' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'gh pr view' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt verifies COMPLETE_LABEL on the issue before emitting the outcome line" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'postcondition\|verify.*label\|label.*verif\|confirm.*label\|label.*confirm' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt takes the blocked path when a postcondition check fails" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'either.*fail\|fail.*verif\|verif.*fail\|check.*fail\|fail.*check\|either.*check\|check.*either' "$CLAUDE_PROMPT_FILE"
+  grep -q 'status=blocked' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "default prompt opens a draft PR and comments on the issue when blocked" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
