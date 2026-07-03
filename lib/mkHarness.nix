@@ -240,6 +240,12 @@ let
   # `nix build .#spindrift`.
   imagePath = builtins.unsafeDiscardStringContext (toString image);
 
+  # The 32-char nix store hash extracted from imagePath. Nix store paths are
+  # always `/nix/store/<32-char-base32-hash>-<name>`, so characters 11–42
+  # (0-indexed) are the hash. Used as the content-hash image tag so that a
+  # changed flake produces a new hash → the old tag is absent → run rebuilds.
+  imageHash = builtins.substring 11 32 imagePath;
+
   # The image's `.drv` path, also context-discarded. `build` realises this with
   # `nix build "<drv>^*"` before loading, so a fresh machine builds the image
   # instead of failing on an unrealised path — while discarding the context
@@ -262,7 +268,9 @@ let
   # RUNTIME is deliberately NOT a runtimeInput — it stays a checked host install
   # (see the `command -v "$RUNTIME"` guard in the scripts).
   #
-  # OCI path: IMAGE_ARCHIVE + RUNTIME baked into both launchers.
+  # OCI path: IMAGE_ARCHIVE + IMAGE_TAG + RUNTIME baked into both launchers.
+  # IMAGE_TAG carries the nix content hash so a stale image (different hash) is
+  # treated as missing by `run`, collapsing staleness into the missing code path.
   # bwrap path: RUNTIME + AGENT_FILES + AGENT_ENV baked into run only (via
   # bwrapRunPreamble); the build launcher gets neither. bwrap-build.sh never
   # reads RUNTIME, so baking it there trips shellcheck SC2034 (unused).
@@ -272,6 +280,7 @@ let
     else
       ''
         IMAGE_ARCHIVE="${imagePath}"
+        IMAGE_TAG="spindrift:${imageHash}"
         RUNTIME="${runtime}"
       '';
 
