@@ -2,7 +2,8 @@
 #
 # Body fragment: nix (lib/mkHarness.nix) wraps it with writeShellApplication,
 # prepending the shebang, `set -euo pipefail`, the pinned runtimeInputs PATH,
-# and a preamble defining RUNTIME, AGENT_FILES_DRV, and AGENT_ENV_DRV.
+# and a preamble defining AGENT_FILES_DRV and AGENT_ENV_DRV. (RUNTIME is baked
+# only into the run launcher, which branches on it; build never reads it.)
 #
 # No OCI image is built or loaded — the nix store closures are all the bwrap
 # runner needs. Run this from your Consumer flake's directory.
