@@ -46,6 +46,18 @@ git clone "https://github.com/${REPO_SLUG}.git" "$WORK_DIR"
 cd "$WORK_DIR"
 git checkout -b "$BRANCH" "origin/${BASE_BRANCH}"
 
+# Detect a Nix devShell in the cloned repo. When found the prompt guides the
+# agent to run checks inside `nix develop`; absence or probe failure degrades
+# gracefully to the baked toolchain.
+if [ -f "flake.nix" ]; then
+  echo "==> flake.nix found in cloned repo; probing for devShell"
+  if command -v nix >/dev/null 2>&1 && nix develop --command true 2>/dev/null; then
+    echo "==> devShell found — agent will use nix develop for checks"
+  else
+    echo "==> no devShell in flake (or nix develop failed) — using baked toolchain"
+  fi
+fi
+
 # Optional cache warm-up (mkHarness `prefetch`, baked into the image env); no-op
 # when unset.
 if [ -n "${PREFETCH:-}" ]; then

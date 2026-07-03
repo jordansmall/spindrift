@@ -36,8 +36,16 @@ Using the scout's map, work test-first in a tight red→green→refactor loop:
 # CHECK
 
 Before each commit, run the repo's own checks and make them pass. Use whatever
-the project actually defines (package scripts, a Makefile, CI config). For a
-Rust workspace that is:
+the project actually defines (package scripts, a Makefile, CI config).
+
+If the repo has a `flake.nix` with a devShell, prefer the project's own pinned
+toolchain — the harness has probed and logged whether one is available:
+
+  nix develop -c <check-command>   # run any check inside the devShell
+  nix flake check                  # validate the full flake
+
+If `nix develop` is unavailable or fails, fall back to the baked toolchain and
+log the fallback clearly. For a Rust workspace without a devShell that is:
 
 - `cargo fmt --all --check`
 - `cargo clippy --all-targets --all-features -- -D warnings`
