@@ -2,14 +2,16 @@
 # (or fall back to an ephemeral Nix container) and load it into the runtime.
 #
 # Fragment: included verbatim by mkHarness.nix into the `build` and `run`
-# commands (OCI mode only). The preamble defines IMAGE_ARCHIVE, IMAGE_DRV,
-# RUNTIME, NIX_BUILDER_IMAGE, NIX_VOLUME, and FLAKE_IMAGE_ATTR before this.
+# commands (OCI mode only). The preamble defines IMAGE_ARCHIVE, IMAGE_TAG,
+# IMAGE_DRV, RUNTIME, NIX_BUILDER_IMAGE, NIX_VOLUME, and FLAKE_IMAGE_ATTR
+# before this.
 
 load_image() {
   local archive="$1"
   echo "==> loading spindrift image from $archive"
   "$RUNTIME" load -i "$archive"
-  echo "==> done: spindrift:latest"
+  "$RUNTIME" tag spindrift:latest "$IMAGE_TAG"
+  echo "==> done: spindrift:latest + $IMAGE_TAG"
 }
 
 # Build the image inside an ephemeral Nix container and load the tarball. The

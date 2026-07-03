@@ -3,9 +3,9 @@
 #
 # Body fragment: nix (lib/mkHarness.nix) wraps it with writeShellApplication,
 # prepending the shebang, `set -euo pipefail`, the pinned runtimeInputs PATH, and
-# a preamble defining the baked config (IMAGE_ARCHIVE, RUNTIME, the run defaults
-# as `NAME="${NAME:-<default>}"`, PROMPT_DIR). A matching env var — or
-# harness.env below — therefore wins at runtime.
+# a preamble defining the baked config (IMAGE_ARCHIVE, IMAGE_TAG, RUNTIME, the
+# run defaults as `NAME="${NAME:-<default>}"`, PROMPT_DIR). A matching env var —
+# or harness.env below — therefore wins at runtime.
 
 # Config + secrets (gitignored), read from $PWD since the harness is a store path
 # with no working tree. `set -a` makes its assignments override the baked defaults.
@@ -18,7 +18,8 @@ fi
 
 # Variables defined by the OCI preamble; absent (empty) in bwrap mode.
 IMAGE_ARCHIVE="${IMAGE_ARCHIVE:-}"
-IMAGE="${IMAGE:-spindrift:latest}"
+IMAGE_TAG="${IMAGE_TAG:-spindrift:latest}"
+IMAGE="${IMAGE:-$IMAGE_TAG}"
 
 # Variables defined by the bwrap preamble (imagePreamble + bwrapRunPreamble);
 # absent (empty) in OCI mode. The runtime guard in run_one() ensures they are
