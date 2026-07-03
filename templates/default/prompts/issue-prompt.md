@@ -94,13 +94,21 @@ Non-blocking findings (style nits, suggestions) may be noted in the PR body.
 
 # WATCH CI
 
-After opening the PR, block on CI until it completes:
+After opening the PR, wait for CI to **register** before you trust it. Run right
+after `gh pr create`, `gh pr checks --watch` finds no checks yet, prints "no
+checks" and exits 0 — and treating that as green merges before CI even starts.
+So first block until at least one check appears, then watch it to completion:
 
 ```
+# "no checks" yet means not-started, NOT green — wait for a check to register
+until gh pr checks <pr-number> 2>/dev/null | grep -q .; do sleep 10; done
 gh pr checks <pr-number> --watch
 ```
 
-**Never merge on red.** If any check fails:
+If no check ever registers within a few minutes, do NOT merge — treat it as a
+blocker and follow IF BLOCKED.
+
+**Never merge on red, and never merge on "no checks".** If any check fails:
 
 1. Fix the code on the branch, run local checks, commit, and push.
 2. Re-watch: `gh pr checks <pr-number> --watch`.
