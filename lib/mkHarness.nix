@@ -160,6 +160,19 @@ let
   # issue-prompt.md and substitutes the per-issue variables.
   promptDir = hostPkgs.writeTextDir "issue-prompt.md" prompt;
 
+  # A non-root `agent` user (uid/gid 1000). Claude Code refuses
+  # --dangerously-skip-permissions under root/sudo, and the Box relies on that
+  # flag; since the container itself IS the isolation boundary, running as an
+  # unprivileged in-container user costs nothing and satisfies the check.
+  passwdFile = pkgs.writeText "passwd" ''
+    root:x:0:0:root:/root:/bin/bash
+    agent:x:1000:1000:agent:/home/agent:/bin/bash
+  '';
+  groupFile = pkgs.writeText "group" ''
+    root:x:0:
+    agent:x:1000:
+  '';
+
   image = pkgs.dockerTools.buildLayeredImage {
     name = "spindrift";
     tag = "latest";
@@ -168,11 +181,19 @@ let
       agentFiles
     ];
     extraCommands = ''
-      mkdir -p tmp home/agent work
+      mkdir -p tmp home/agent work etc
       chmod 1777 tmp
+      cp ${passwdFile} etc/passwd
+      cp ${groupFile} etc/group
+    '';
+    # chown must be recorded in the image layer, so it runs under fakeroot after
+    # the tree is staged. HOME and the clone dir must be writable by the agent.
+    fakeRootCommands = ''
+      chown -R 1000:1000 home/agent work
     '';
     config = {
       Entrypoint = [ "/bin/bash" ];
+      User = "agent";
       WorkingDir = "/";
       Env = [
         "PATH=/bin"

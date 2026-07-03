@@ -458,6 +458,23 @@
               esac
               touch $out
             '';
+
+            # The Box must run unprivileged: Claude Code refuses
+            # --dangerously-skip-permissions under root. Assert the image config
+            # runs as the non-root `agent` user. Realises the image, so it is
+            # Linux-gated like the shebang check.
+            box-runs-as-non-root =
+              pkgs.runCommand "box-runs-as-non-root" { nativeBuildInputs = [ pkgs.jq ]; } ''
+                mkdir img && tar -xf ${nonRustHarness.image} -C img
+                cfg=$(jq -r '.[0].Config' img/manifest.json)
+                user=$(jq -r '.config.User // ""' "img/$cfg")
+                echo "image config User = '$user'"
+                [ "$user" = "agent" ] || {
+                  echo "expected the Box to run as non-root 'agent', got '$user'" >&2
+                  exit 1
+                }
+                touch $out
+              '';
           };
 
           # For hacking ON the harness itself (host-side).
