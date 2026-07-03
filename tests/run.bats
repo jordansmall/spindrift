@@ -47,6 +47,25 @@ setup() {
   ! grep -q "load -i" "$PODMAN_LOG"
 }
 
+@test "run gates on the content-hash tag, not spindrift:latest" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  # IMAGE_PATH is /nix/store/<32-char-hash>-spindrift; extract the hash
+  image_hash="${IMAGE_PATH:11:32}"
+  grep -q "image exists spindrift:$image_hash" "$PODMAN_LOG"
+  ! grep -q 'image exists spindrift:latest' "$PODMAN_LOG"
+}
+
+@test "run also tags the image with the content-hash tag when building" {
+  export FAKE_PODMAN_IMAGE_PRESENT=0
+  export FAKE_NIX_BUILD_OK=1
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  image_hash="${IMAGE_PATH:11:32}"
+  grep -q "^tag spindrift:latest spindrift:$image_hash" "$PODMAN_LOG"
+}
+
 @test "run fans out one container per issue" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"
