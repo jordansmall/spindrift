@@ -133,6 +133,15 @@
             packages = p: [ p.hello ];
           };
 
+          # The daemonless bubblewrap runner fixture (issue #54): exercises the
+          # bwrap build/run path through the bats suite.
+          bwrapHarness = import ./lib/mkHarness.nix {
+            inherit nixpkgs system;
+            overlays = [ ghFakeOverlay ];
+            runtime = "bwrap";
+            packages = p: [ p.hello ];
+          };
+
           # A harness whose baked runtime is never on PATH, so `build`'s
           # container fallback is unavailable — used to exercise the
           # both-paths-impossible error (the host build is faked to fail too).
@@ -226,6 +235,7 @@
                     ${./agent/entrypoint.sh} \
                     ${./tests/fakes/podman} \
                     ${./tests/fakes/docker} \
+                    ${./tests/fakes/bwrap} \
                     ${./tests/fakes/gh} \
                     ${./tests/fakes/claude} \
                     ${./tests/fakes/nix} \
@@ -256,6 +266,8 @@
                   BUILD_NO_RUNTIME_CMD = "${noRuntimeHarness.build}/bin/build";
                   CUSTOM_RUN_CMD = "${customHarness.run}/bin/run";
                   DOCKER_RUN_CMD = "${dockerHarness.run}/bin/run";
+                  BWRAP_RUN_CMD = "${bwrapHarness.run}/bin/run";
+                  BWRAP_BUILD_CMD = "${bwrapHarness.build}/bin/build";
                   IMAGE_PATH = batsHarness.imagePath;
                   ENTRYPOINT = ./agent/entrypoint.sh;
                   PROMPTS_DIR = ./templates/default/prompts;
@@ -401,6 +413,16 @@
               # Default runtime is podman; the docker harness bakes docker.
               grep -q 'RUNTIME="podman"' ${harness.run}/bin/run
               grep -q 'RUNTIME="docker"' ${dockerHarness.run}/bin/run
+
+              # bwrap harness bakes bwrap runtime and agent store paths; no OCI store paths.
+              grep -q 'RUNTIME="bwrap"' ${bwrapHarness.run}/bin/run
+              grep -q 'AGENT_FILES=' ${bwrapHarness.run}/bin/run
+              grep -q 'AGENT_ENV=' ${bwrapHarness.run}/bin/run
+              # IMAGE_ARCHIVE is not baked as a store path (empty-default guard is fine).
+              ! grep -q 'IMAGE_ARCHIVE="/nix/store/' ${bwrapHarness.run}/bin/run
+              grep -q 'AGENT_FILES_DRV=' ${bwrapHarness.build}/bin/build
+              grep -q 'AGENT_ENV_DRV=' ${bwrapHarness.build}/bin/build
+              ! grep -q 'IMAGE_DRV=' ${bwrapHarness.build}/bin/build
               touch $out
             '';
 

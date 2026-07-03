@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Fake bwrap for tests. Records every invocation to $BWRAP_LOG and simulates
+# just enough behaviour for the harness scripts: parses --setenv KEY VAL pairs
+# (bwrap's env-var injection), emits scripted SPINDRIFT_OUTCOME lines per
+# issue, and exits with FAKE_BWRAP_RUN_EXIT. Never spawns a real sandbox.
+set -euo pipefail
+
+: "${BWRAP_LOG:?BWRAP_LOG must point at a log file}"
+printf '%s\n' "$*" >>"$BWRAP_LOG"
+
+issue_num=""
+args=("$@")
+i=0
+while [ "$i" -lt "${#args[@]}" ]; do
+  if [ "${args[$i]}" = "--setenv" ]; then
+    key="${args[$((i + 1))]}"
+    val="${args[$((i + 2))]}"
+    case "$key" in
+      ISSUE_NUMBER) issue_num="$val" ;;
+    esac
+    i=$((i + 3))
+  else
+    i=$((i + 1))
+  fi
+done
+
+if [ -n "$issue_num" ]; then
+  outcome_var="FAKE_BWRAP_OUTCOME_${issue_num}"
+  outcome_val="${!outcome_var:-}"
+  [ -n "$outcome_val" ] && printf '%s\n' "$outcome_val"
+fi
+
+exit "${FAKE_BWRAP_RUN_EXIT:-0}"

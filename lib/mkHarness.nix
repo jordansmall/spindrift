@@ -248,26 +248,57 @@ let
   # the store by the time `build` runs; only realising it needs a Linux builder.
   imageDrv = builtins.unsafeDiscardStringContext image.drvPath;
 
+  # bwrap runner: store paths for the agent files and env, context-discarded so
+  # the launcher commands embed the exact paths without a build-time dependency.
+  # Reading `.drvPath` instantiates each derivation at eval time (creating the
+  # .drv file) but does not realise the output — `bwrap build` does that.
+  agentFilesPath = builtins.unsafeDiscardStringContext (toString agentFiles);
+  agentFilesDrv = builtins.unsafeDiscardStringContext agentFiles.drvPath;
+  agentEnvPath = builtins.unsafeDiscardStringContext (toString agentEnv);
+  agentEnvDrv = builtins.unsafeDiscardStringContext agentEnv.drvPath;
+
   # Nix-rendered shell preamble of baked config the launchers consume; every
   # value is interpolated straight into shell and shellcheck'd with the script.
-  # IMAGE_ARCHIVE + RUNTIME are shared by both launchers. RUNTIME is deliberately
-  # NOT a runtimeInput — it stays a checked host install (see the
-  # `command -v "$RUNTIME"` guard in the scripts).
-  imagePreamble = ''
-    IMAGE_ARCHIVE="${imagePath}"
-    RUNTIME="${runtime}"
-  '';
+  # RUNTIME is deliberately NOT a runtimeInput — it stays a checked host install
+  # (see the `command -v "$RUNTIME"` guard in the scripts).
+  #
+  # OCI path: IMAGE_ARCHIVE + RUNTIME baked into both launchers.
+  # bwrap path: AGENT_FILES + AGENT_ENV + RUNTIME baked into run; build gets its
+  # own preamble (no image archive needed).
+  imagePreamble =
+    if runtime == "bwrap" then
+      ''
+        RUNTIME="bwrap"
+      ''
+    else
+      ''
+        IMAGE_ARCHIVE="${imagePath}"
+        RUNTIME="${runtime}"
+      '';
 
-  # Build-only config, layered on top of imagePreamble for the `build` launcher.
-  # IMAGE_DRV is the derivation `build` realises; NIX_BUILDER_IMAGE/NIX_VOLUME
-  # drive the ephemeral-container fallback (a named /nix volume keeps it
-  # incremental); FLAKE_IMAGE_ATTR is the Linux image attribute that fallback
-  # builds from the Consumer flake in $PWD.
-  buildPreamble = ''
-    IMAGE_DRV="${imageDrv}"
-    NIX_BUILDER_IMAGE="${nixBuilderImage}"
-    NIX_VOLUME="spindrift-nix"
-    FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.spindrift"
+  # Build-only addendum baked on top of imagePreamble.
+  # OCI: IMAGE_DRV + fallback container config.
+  # bwrap: the two store-closure .drv paths; no image/load step.
+  buildPreamble =
+    if runtime == "bwrap" then
+      ''
+        AGENT_FILES_DRV="${agentFilesDrv}"
+        AGENT_ENV_DRV="${agentEnvDrv}"
+      ''
+    else
+      ''
+        IMAGE_DRV="${imageDrv}"
+        NIX_BUILDER_IMAGE="${nixBuilderImage}"
+        NIX_VOLUME="spindrift-nix"
+        FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.spindrift"
+      '';
+
+  # Run-only addendum for the bwrap path: the agent store paths and the baked
+  # prefetch snippet (supplied to the entrypoint via --setenv PREFETCH).
+  bwrapRunPreamble = lib.optionalString (runtime == "bwrap") ''
+    AGENT_FILES="${agentFilesPath}"
+    AGENT_ENV="${agentEnvPath}"
+    BAKED_PREFETCH=${lib.escapeShellArg prefetch}
   '';
 
   # Each run default renders as `NAME="''${NAME:-<baked>}"`, derived from the
@@ -297,7 +328,15 @@ let
   build = hostPkgs.writeShellApplication {
     name = "build";
     runtimeInputs = [ hostPkgs.coreutils ];
-    text = imagePreamble + buildPreamble + builtins.readFile ./scripts/build.sh;
+    text =
+      imagePreamble
+      + buildPreamble
+      + (
+        if runtime == "bwrap" then
+          builtins.readFile ./scripts/bwrap-build.sh
+        else
+          builtins.readFile ./scripts/build.sh
+      );
   };
 
   run = hostPkgs.writeShellApplication {
@@ -309,6 +348,7 @@ let
     ];
     text =
       imagePreamble
+      + bwrapRunPreamble
       + runDefaultsPreamble
       # The prompt is baked into the image (see agentFiles); the launcher only
       # needs to bind-mount a dir when SPINDRIFT_PROMPT_DIR overrides it.
@@ -335,7 +375,8 @@ in
   packages = {
     inherit build run;
   }
-  // lib.optionalAttrs isLinux { spindrift = image; };
+  # The OCI image is not relevant for the bwrap runner (no image build/load).
+  // lib.optionalAttrs (isLinux && runtime != "bwrap") { spindrift = image; };
 
   apps = {
     build = {

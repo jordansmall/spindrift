@@ -16,15 +16,27 @@ if [ -f "$PWD/harness.env" ]; then
   set +a
 fi
 
+# Variables defined by the OCI preamble; absent (empty) in bwrap mode.
+IMAGE_ARCHIVE="${IMAGE_ARCHIVE:-}"
 IMAGE="${IMAGE:-spindrift:latest}"
 
-# The prompt is baked into the image at /agent/prompts. Point
-# SPINDRIFT_PROMPT_DIR at a real directory to bind-mount an override on top of it
-# and iterate on the prompt with zero rebuilds. Empty by default so the box runs
-# the baked prompt — which is what lets it work where the host /nix/store is not
-# visible to the container runtime (e.g. a macOS podman machine).
+# Variables defined by the bwrap preamble (imagePreamble + bwrapRunPreamble);
+# absent (empty) in OCI mode. The runtime guard in run_one() ensures they are
+# never dereferenced on the wrong path.
+AGENT_FILES="${AGENT_FILES:-}"
+AGENT_ENV="${AGENT_ENV:-}"
+BAKED_PREFETCH="${BAKED_PREFETCH:-}"
+
+# OCI path: the prompt is baked into the image at /agent/prompts. Point
+# SPINDRIFT_PROMPT_DIR at a real directory to bind-mount an override on top of
+# it and iterate on the prompt with zero rebuilds. Empty by default so the box
+# runs the baked prompt — which is what lets it work where the host /nix/store
+# is not visible to the container runtime (e.g. a macOS podman machine).
+# bwrap path: the baked prompt lives at ${AGENT_FILES}/agent/prompts, which is
+# already bind-mounted at /agent; SPINDRIFT_PROMPT_DIR is handled inside
+# run_one_bwrap() where the bwrap-specific --ro-bind flag is available.
 prompt_args=()
-if [ -n "${SPINDRIFT_PROMPT_DIR:-}" ] && [ -d "$SPINDRIFT_PROMPT_DIR" ]; then
+if [ "$RUNTIME" != "bwrap" ] && [ -n "${SPINDRIFT_PROMPT_DIR:-}" ] && [ -d "$SPINDRIFT_PROMPT_DIR" ]; then
   echo "==> SPINDRIFT_PROMPT_DIR set; mounting $SPINDRIFT_PROMPT_DIR over the baked prompt"
   prompt_args=(-v "$SPINDRIFT_PROMPT_DIR:/agent/prompts:ro")
 fi
@@ -48,10 +60,12 @@ command -v "$RUNTIME" >/dev/null 2>&1 || {
   exit 1
 }
 
-# Auto-load the baked image on first use.
-if ! "$RUNTIME" image exists "$IMAGE"; then
-  echo "==> image '$IMAGE' not loaded; loading from $IMAGE_ARCHIVE"
-  "$RUNTIME" load -i "$IMAGE_ARCHIVE"
+# Auto-load the baked image on first use (OCI path only; bwrap has no image).
+if [ "$RUNTIME" != "bwrap" ]; then
+  if ! "$RUNTIME" image exists "$IMAGE"; then
+    echo "==> image '$IMAGE' not loaded; loading from $IMAGE_ARCHIVE"
+    "$RUNTIME" load -i "$IMAGE_ARCHIVE"
+  fi
 fi
 
 auth_args=()
@@ -95,8 +109,84 @@ swap_label() {
     echo "    ?? #$num: could not set label '$add' (remove '$remove')" >&2
 }
 
+run_one_bwrap() {
+  local num="$1" title="$2"
+  local log="$PWD/logs/issue-$num.log"
+  echo "    -> #$num: $title"
+
+  # Provide minimal /etc for uid mapping so the agent runs as uid 1000 inside
+  # the sandbox regardless of the host uid (Claude Code refuses
+  # --dangerously-skip-permissions under root).
+  local etc_dir
+  etc_dir="$(mktemp -d)"
+  printf 'root:x:0:0:root:/root:/bin/bash\nagent:x:1000:1000:agent:/home/agent:/bin/bash\n' \
+    >"$etc_dir/passwd"
+  printf 'root:x:0:\nagent:x:1000:\n' >"$etc_dir/group"
+
+  # Bind-mount /etc/resolv.conf for DNS if it exists on the host.
+  local resolv_args=()
+  [ -f /etc/resolv.conf ] && resolv_args=(--ro-bind /etc/resolv.conf /etc/resolv.conf)
+
+  # Prompt override: SPINDRIFT_PROMPT_DIR shadows the baked prompt at /agent/prompts.
+  local bwrap_prompt_args=()
+  if [ -n "${SPINDRIFT_PROMPT_DIR:-}" ] && [ -d "$SPINDRIFT_PROMPT_DIR" ]; then
+    echo "==> SPINDRIFT_PROMPT_DIR set; mounting $SPINDRIFT_PROMPT_DIR over the baked prompt"
+    bwrap_prompt_args=(--ro-bind "$SPINDRIFT_PROMPT_DIR" /agent/prompts)
+  fi
+
+  local bwrap_auth_args=()
+  [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && bwrap_auth_args+=(--setenv CLAUDE_CODE_OAUTH_TOKEN "$CLAUDE_CODE_OAUTH_TOKEN")
+  [ -n "${ANTHROPIC_API_KEY:-}" ] && bwrap_auth_args+=(--setenv ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY")
+
+  if bwrap \
+    --ro-bind /nix/store /nix/store \
+    --tmpfs /tmp \
+    --tmpfs /work \
+    --tmpfs /home/agent \
+    --proc /proc \
+    --dev /dev \
+    --dir /etc \
+    --ro-bind "$etc_dir/passwd" /etc/passwd \
+    --ro-bind "$etc_dir/group" /etc/group \
+    ${resolv_args[@]+"${resolv_args[@]}"} \
+    --ro-bind "$AGENT_FILES/agent" /agent \
+    ${bwrap_prompt_args[@]+"${bwrap_prompt_args[@]}"} \
+    --clearenv \
+    --setenv HOME /home/agent \
+    --setenv PATH "$AGENT_ENV/bin" \
+    --setenv SSL_CERT_FILE "$AGENT_ENV/etc/ssl/certs/ca-bundle.crt" \
+    --setenv GIT_SSL_CAINFO "$AGENT_ENV/etc/ssl/certs/ca-bundle.crt" \
+    --setenv GH_TOKEN "$GH_TOKEN" \
+    "${bwrap_auth_args[@]}" \
+    --setenv GIT_USER_NAME "$GIT_USER_NAME" \
+    --setenv GIT_USER_EMAIL "$GIT_USER_EMAIL" \
+    --setenv REPO_SLUG "$REPO_SLUG" \
+    --setenv ISSUE_NUMBER "$num" \
+    --setenv ISSUE_TITLE "$title" \
+    --setenv BASE_BRANCH "$BASE_BRANCH" \
+    --setenv BRANCH_PREFIX "$BRANCH_PREFIX" \
+    --setenv MODEL "$MODEL" \
+    --setenv SCOUT_MODEL "$SCOUT_MODEL" \
+    --setenv REVIEW_MODEL "$REVIEW_MODEL" \
+    --setenv IN_PROGRESS_LABEL "$IN_PROGRESS_LABEL" \
+    --setenv COMPLETE_LABEL "$COMPLETE_LABEL" \
+    --setenv PREFETCH "$BAKED_PREFETCH" \
+    --uid 1000 --gid 1000 \
+    -- /agent/entrypoint.sh >"$log" 2>&1; then
+    echo "    <- #$num done  (logs/issue-$num.log)"
+  else
+    echo "    !! #$num FAILED (logs/issue-$num.log)"
+    swap_label "$num" "$FAILED_LABEL" "$IN_PROGRESS_LABEL"
+  fi
+  rm -rf "$etc_dir"
+}
+
 run_one() {
   local num="$1" title="$2"
+  if [ "$RUNTIME" = "bwrap" ]; then
+    run_one_bwrap "$num" "$title"
+    return
+  fi
   local log="$PWD/logs/issue-$num.log"
   echo "    -> #$num: $title"
   # `--rm` only fires on a clean exit; an interrupted prior run (Ctrl-C, reboot,

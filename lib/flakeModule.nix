@@ -99,9 +99,10 @@ in
         type = types.nullOr (types.enum [
           "podman"
           "docker"
+          "bwrap"
         ]);
         default = null;
-        description = "Container runtime the launcher commands drive.";
+        description = "Runner the launcher commands drive: OCI runtimes (podman/docker) or the daemonless bubblewrap runner (bwrap, Linux-only).";
       };
 
       nixInBox = mkOption {
