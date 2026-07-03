@@ -111,6 +111,9 @@
               branchPrefix = "bot/";
               inProgressLabel = "custom-wip";
               failedLabel = "custom-broken";
+              scoutModel = "custom-scout";
+              reviewModel = "custom-reviewer";
+              completeLabel = "custom-done";
             };
             packages = p: [ p.hello ];
           };
@@ -380,6 +383,12 @@
               grep -q 'BRANCH_PREFIX:-bot/' "$runCmd"
               grep -q 'IN_PROGRESS_LABEL:-custom-wip' "$runCmd"
               grep -q 'FAILED_LABEL:-custom-broken' "$runCmd"
+              grep -q 'SCOUT_MODEL:-custom-scout' "$runCmd"
+              grep -q 'REVIEW_MODEL:-custom-reviewer' "$runCmd"
+              grep -q 'COMPLETE_LABEL:-custom-done' "$runCmd"
+
+              # Default COMPLETE_LABEL baked into a default harness.
+              grep -q 'COMPLETE_LABEL:-agent-complete' ${harness.run}/bin/run
 
               # Default runtime is podman; the docker harness bakes docker.
               grep -q 'RUNTIME="podman"' ${harness.run}/bin/run

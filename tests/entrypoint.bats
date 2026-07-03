@@ -81,6 +81,47 @@ FAKE
   grep -q "$WORK_DIR" "$PREFETCH_LOG"
 }
 
+@test "entrypoint passes --agents to claude when SCOUT_MODEL and REVIEW_MODEL are set" {
+  export SCOUT_MODEL="claude-haiku-3-5"
+  export REVIEW_MODEL="claude-opus-4-5"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- '--agents' "$CLAUDE_LOG"
+  grep -q 'scout' "$CLAUDE_LOG"
+  grep -q 'reviewer' "$CLAUDE_LOG"
+}
+
+@test "entrypoint omits --agents when SCOUT_MODEL is unset" {
+  unset SCOUT_MODEL
+  export REVIEW_MODEL="claude-opus-4-5"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--agents' "$CLAUDE_LOG"
+}
+
+@test "entrypoint omits --agents when REVIEW_MODEL is unset" {
+  export SCOUT_MODEL="claude-haiku-3-5"
+  unset REVIEW_MODEL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--agents' "$CLAUDE_LOG"
+}
+
+@test "IN_PROGRESS_LABEL and COMPLETE_LABEL are substituted in the prompt" {
+  local prompt_dir="$BATS_TEST_TMPDIR/prompts"
+  mkdir -p "$prompt_dir"
+  cat >"$prompt_dir/issue-prompt.md" <<'EOF'
+label: ${IN_PROGRESS_LABEL} complete: ${COMPLETE_LABEL}
+EOF
+  export PROMPTS_DIR="$prompt_dir"
+  export IN_PROGRESS_LABEL="wip"
+  export COMPLETE_LABEL="done"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'label: wip' "$CLAUDE_PROMPT_FILE"
+  grep -q 'complete: done' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "entrypoint skips the prefetch hook when it is empty" {
   export PREFETCH_LOG="$BATS_TEST_TMPDIR/prefetch.log"
   {

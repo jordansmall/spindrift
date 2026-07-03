@@ -25,6 +25,10 @@ BRANCH="${BRANCH_PREFIX}${ISSUE_NUMBER}"
 # `run` passes MODEL per issue; this fallback keeps the entrypoint runnable
 # standalone.
 MODEL="${MODEL:-claude-opus-4-8}"
+SCOUT_MODEL="${SCOUT_MODEL:-}"
+REVIEW_MODEL="${REVIEW_MODEL:-}"
+IN_PROGRESS_LABEL="${IN_PROGRESS_LABEL:-agent-in-progress}"
+COMPLETE_LABEL="${COMPLETE_LABEL:-agent-complete}"
 
 # Baked-in locations; overridable only so the harness can be exercised on the
 # host without a container.
@@ -57,13 +61,24 @@ prompt="$(
     ISSUE_TITLE="${ISSUE_TITLE:-}" \
     BRANCH="$BRANCH" \
     BASE_BRANCH="$BASE_BRANCH" \
-    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH' \
+    IN_PROGRESS_LABEL="$IN_PROGRESS_LABEL" \
+    COMPLETE_LABEL="$COMPLETE_LABEL" \
+    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL' \
     <"${PROMPTS_DIR}/issue-prompt.md"
 )"
+
+# Build --agents JSON when both subagent models are configured; omit the flag
+# entirely when either is unset so single-model runs are unaffected.
+agents_args=()
+if [ -n "$SCOUT_MODEL" ] && [ -n "$REVIEW_MODEL" ]; then
+  agents_json='[{"name":"scout","model":"'"$SCOUT_MODEL"'"},{"name":"reviewer","model":"'"$REVIEW_MODEL"'"}]'
+  agents_args=(--agents "$agents_json")
+fi
 
 echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
 claude -p "$prompt" \
   --model "$MODEL" \
+  "${agents_args[@]}" \
   --dangerously-skip-permissions
 
 echo "==> entrypoint complete for issue #$ISSUE_NUMBER"

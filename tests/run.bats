@@ -208,3 +208,38 @@ EOF
   grep -q -- 'issue edit 1 --repo owner/repo --add-label wip --remove-label ready-for-agent' "$GH_LOG"
   grep -q -- 'issue edit 1 --repo owner/repo --add-label broken --remove-label wip' "$GH_LOG"
 }
+
+# --- Model tiers and complete label (issue #36) ----------------------------
+
+@test "run passes IN_PROGRESS_LABEL into each container" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'IN_PROGRESS_LABEL=agent-in-progress' "$PODMAN_LOG"
+}
+
+@test "run passes the baked default COMPLETE_LABEL into each container" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'COMPLETE_LABEL=agent-complete' "$PODMAN_LOG"
+}
+
+@test "COMPLETE_LABEL env overrides the baked default into the container" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export COMPLETE_LABEL=done
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'COMPLETE_LABEL=done' "$PODMAN_LOG"
+  ! grep -q 'COMPLETE_LABEL=agent-complete' "$PODMAN_LOG"
+}
+
+@test "run passes SCOUT_MODEL and REVIEW_MODEL into each container" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export SCOUT_MODEL=claude-haiku-3-5
+  export REVIEW_MODEL=claude-opus-4-5
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'SCOUT_MODEL=claude-haiku-3-5' "$PODMAN_LOG"
+  grep -q 'REVIEW_MODEL=claude-opus-4-5' "$PODMAN_LOG"
+}
