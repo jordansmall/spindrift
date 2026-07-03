@@ -60,11 +60,12 @@ command -v "$RUNTIME" >/dev/null 2>&1 || {
   exit 1
 }
 
-# Auto-load the baked image on first use (OCI path only; bwrap has no image).
+# Build and load the image on demand (OCI path only; bwrap has no image).
+# build_box_image is defined by the OCI preamble (build-image.sh).
 if [ "$RUNTIME" != "bwrap" ]; then
   if ! "$RUNTIME" image exists "$IMAGE"; then
-    echo "==> image '$IMAGE' not loaded; loading from $IMAGE_ARCHIVE"
-    "$RUNTIME" load -i "$IMAGE_ARCHIVE"
+    echo "==> image '$IMAGE' not found — building first"
+    build_box_image
   fi
 fi
 

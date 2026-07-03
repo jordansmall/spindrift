@@ -10,12 +10,34 @@ setup() {
   export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
 }
 
-@test "run auto-loads the image (with a log line) when it is absent" {
+@test "run builds and loads the image (with a log line) when it is absent" {
   export FAKE_PODMAN_IMAGE_PRESENT=0
+  export FAKE_NIX_BUILD_OK=1
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"loading"* ]]
+  [[ "$output" == *"building"* ]]
+  grep -q 'build' "$NIX_LOG"
   grep -q "load -i $IMAGE_PATH" "$PODMAN_LOG"
+}
+
+@test "run falls back to container build when host cannot realise the image" {
+  export FAKE_PODMAN_IMAGE_PRESENT=0
+  export FAKE_NIX_BUILD_OK=0
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'build' "$NIX_LOG"
+  grep -q 'spindrift-nix:/nix' "$PODMAN_LOG"
+  grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
+}
+
+@test "run aborts with an error and does not launch containers when the build fails" {
+  export FAKE_PODMAN_IMAGE_PRESENT=0
+  export FAKE_NIX_BUILD_OK=0
+  export FAKE_PODMAN_RUN_EXIT=1
+  run "$RUN_CMD"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"container build failed"* ]]
+  ! grep -q 'ISSUE_NUMBER' "$PODMAN_LOG"
 }
 
 @test "run does not load the image when it is already present" {
@@ -137,8 +159,9 @@ EOF
   [ ! -s "$PODMAN_LOG" ]
 }
 
-@test "runtime=docker auto-loads the image via docker" {
+@test "runtime=docker builds and loads the image via docker when absent" {
   export FAKE_DOCKER_IMAGE_PRESENT=0
+  export FAKE_NIX_BUILD_OK=1
   run "$DOCKER_RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'load -i /nix/store/' "$DOCKER_LOG"

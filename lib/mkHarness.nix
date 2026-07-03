@@ -337,7 +337,11 @@ let
         if runtime == "bwrap" then
           builtins.readFile ./scripts/bwrap-build.sh
         else
-          builtins.readFile ./scripts/build.sh
+          # build-image.sh defines the shared build helpers (load_image,
+          # build_in_container, fail_no_builder, build_box_image); build.sh
+          # then calls build_box_image to drive the realise-and-load sequence.
+          builtins.readFile ./scripts/build-image.sh
+          + builtins.readFile ./scripts/build.sh
       );
   };
 
@@ -351,6 +355,12 @@ let
     text =
       imagePreamble
       + bwrapRunPreamble
+      # OCI only: bake in the build variables and helper functions so run can
+      # build the image on demand when it is absent. Excluded for bwrap (no
+      # OCI image involved) to keep the shellcheck clean.
+      + lib.optionalString (runtime != "bwrap") (
+        buildPreamble + builtins.readFile ./scripts/build-image.sh
+      )
       + runDefaultsPreamble
       # The prompt is baked into the image (see agentFiles); the launcher only
       # needs to bind-mount a dir when SPINDRIFT_PROMPT_DIR overrides it.
