@@ -29,6 +29,14 @@ setup() {
   grep -q 'load -i /nix/store/' "$PODMAN_LOG"
 }
 
+@test "build tags the image with the content-hash tag after loading" {
+  export FAKE_NIX_BUILD_OK=1
+  run "$BUILD_CMD"
+  [ "$status" -eq 0 ]
+  image_hash="${IMAGE_PATH:11:32}"
+  grep -q "^tag spindrift:latest spindrift:$image_hash" "$PODMAN_LOG"
+}
+
 # --- container-fallback path (a host WITHOUT a Linux builder) -----------------
 
 @test "build falls back to an ephemeral Nix container when the host can't realise it" {
