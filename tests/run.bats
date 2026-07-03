@@ -34,6 +34,18 @@ setup() {
   grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
 }
 
+@test "run reaps a stale same-named container before launching (interrupted prior run)" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tOnly issue'
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q -- 'rm -f agent-issue-1' "$PODMAN_LOG"
+  # The reap must precede the run, or the --name collision still fires.
+  rm_line="$(grep -n -- 'rm -f agent-issue-1' "$PODMAN_LOG" | head -1 | cut -d: -f1)"
+  run_line="$(grep -n '^run .*ISSUE_NUMBER=1' "$PODMAN_LOG" | head -1 | cut -d: -f1)"
+  [ "$rm_line" -lt "$run_line" ]
+}
+
 @test "run reads config from \$PWD/harness.env" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   unset REPO_SLUG
