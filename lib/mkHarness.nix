@@ -203,12 +203,14 @@ let
       # sandbox-off nix.conf and a store DB registered from the baked closure, so
       # `nix flake check` reuses the image's store instead of treating it as empty.
       + lib.optionalString nixInBox ''
-        mkdir -p etc/nix nix/var/nix/gcroots nix/var/nix/profiles nix/var/nix/temproots nix/var/log/nix
+        mkdir -p etc/nix nix/var/nix/db nix/var/nix/gcroots nix/var/nix/profiles nix/var/nix/temproots nix/var/log/nix
         printf '%s\n' \
           'experimental-features = nix-command flakes' \
           'sandbox = false' \
           'filter-syscalls = false' > etc/nix/nix.conf
         export NIX_REMOTE="local?root=$PWD"
+        # buildPackages.nix runs at image-build time on the builder host;
+        # pkgs.nix (above) is what gets baked into the container's PATH.
         ${pkgs.buildPackages.nix}/bin/nix-store --load-db < ${pkgs.closureInfo { rootPaths = [ agentEnv agentFiles ]; }}/registration
       '';
     # chown must be recorded in the image layer, so it runs under fakeroot after
