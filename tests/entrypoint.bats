@@ -136,6 +136,18 @@ EOF
   grep -q 'STANDARDS' "$CLAUDE_PROMPT_FILE"
 }
 
+@test "default prompt explains why inline review risks a premature stop" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'turn.ending\|halfway gate\|finish.line' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt requires the reviewer subagent and restricts inline to a fallback" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'do not review inline\|not inline\|inline.*only.*when\|only.*inline.*when' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "default prompt specifies a review-build loop that never advances with a blocking finding" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]

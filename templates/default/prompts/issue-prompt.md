@@ -55,9 +55,15 @@ change isn't self-evident.
 
 # REVIEW
 
-Before opening the PR, spawn a fresh `reviewer` subagent (if available in this
-session; otherwise review in-context) to evaluate the branch diff against
-`${BASE_BRANCH}` with this rubric:
+Before opening the PR, spawn a fresh `reviewer` subagent to evaluate the branch
+diff against `${BASE_BRANCH}` with this rubric.
+
+**Do not review inline.** An inline review writes the findings as your
+turn-ending message — the review looks like the finish line when it is only the
+halfway gate. Delegating to the `reviewer` subagent returns a result you act on,
+not a conclusion you end on. The `reviewer` is pre-provisioned via `--agents`
+when `REVIEW_MODEL` is set; fall back to inline review only when the reviewer
+subagent is not available (tier models genuinely unset).
 
 **SPEC** — Does the diff do exactly what issue #${ISSUE_NUMBER} asked and
 nothing more? Are all acceptance criteria satisfied?
