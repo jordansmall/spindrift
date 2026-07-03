@@ -86,12 +86,57 @@ Non-blocking findings (style nits, suggestions) may be noted in the PR body.
 3. The PR body MUST contain `Closes #${ISSUE_NUMBER}` so merging it closes the
    issue. Summarize what changed and flag anything a reviewer should know.
 
-Do NOT merge the PR and do NOT close the issue — a human reviews and merges.
+# WATCH CI
+
+After opening the PR, block on CI until it completes:
+
+```
+gh pr checks <pr-number> --watch
+```
+
+**Never merge on red.** If any check fails:
+
+1. Fix the code on the branch, run local checks, commit, and push.
+2. Re-watch: `gh pr checks <pr-number> --watch`.
+3. Repeat until all checks are green.
+
+# MERGE
+
+Once all checks are green, merge with rebase and delete the branch:
+
+```
+gh pr merge <pr-number> --rebase --delete-branch
+```
+
+Do not use auto-merge. Hold the thread open for the entire fix-on-red loop.
+
+# COMPLETE
+
+After merging, swap the lifecycle label:
+
+```
+gh issue edit ${ISSUE_NUMBER} --remove-label ${IN_PROGRESS_LABEL} --add-label ${COMPLETE_LABEL}
+```
+
+# OUTCOME
+
+As your **final action**, print exactly one machine-readable line:
+
+```
+SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} pr=<pr-url> status=merged note=<short reason>
+```
 
 # IF BLOCKED
 
-If you can't finish, push what you have, open the PR as a draft (add `--draft`),
-and comment on the issue describing what's done and what remains. Never close
-the issue.
+If you cannot finish (review never clears, CI stays red after repeated fixes, or
+any other blocker):
 
-When the PR is open, you're done — stop.
+1. Push what you have.
+2. Open the PR as a draft (add `--draft`).
+3. Leave the issue in-progress — do NOT close it.
+4. Comment on the issue: `gh issue comment ${ISSUE_NUMBER} --body "<what's done, what remains>"`.
+5. Print exactly one outcome line and stop:
+
+```
+SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} pr=<pr-url> status=blocked note=<short reason>
+```
