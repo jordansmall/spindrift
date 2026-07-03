@@ -133,13 +133,13 @@ EOF
   [ ! -s "$PODMAN_LOG" ]
 }
 
-@test "run invokes the baked entrypoint but mounts the prompt (not baked)" {
+@test "run invokes the baked entrypoint and baked prompt (no prompt mount)" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   ! grep -q 'entrypoint.sh:/agent' "$PODMAN_LOG"
   grep -q '/agent/entrypoint.sh' "$PODMAN_LOG"
-  grep -q ':/agent/prompts' "$PODMAN_LOG"
+  ! grep -q ':/agent/prompts' "$PODMAN_LOG"
 }
 
 @test "run exits cleanly when there are no matching issues" {
