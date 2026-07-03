@@ -307,3 +307,34 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
 }
+
+# --- Outcome report (issue #41) --------------------------------------------
+
+@test "outcome report lists every dispatched issue with number pr and status" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=merged note=ok"
+  export FAKE_PODMAN_OUTCOME_2="SPINDRIFT_OUTCOME issue=2 pr=https://github.com/owner/repo/pull/2 status=merged note=ok"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"#1"* ]]
+  [[ "$output" == *"#2"* ]]
+  [[ "$output" == *"status=merged"* ]]
+}
+
+@test "outcome report flags blocked issue distinctly with its note" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tBlocker'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=blocked note=stalled"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"!!"* ]]
+  [[ "$output" == *"stalled"* ]]
+}
+
+@test "outcome report reports missing outcome line when log has none" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tOrphan'
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"missing"* ]]
+}

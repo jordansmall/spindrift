@@ -17,23 +17,26 @@ case "${1:-}" in
     ;;
   run)
     # `podman run ...` — scripted exit code drives run.sh's failure path.
+    issue_num=""
+    complete_label=""
+    for arg in "$@"; do
+      case "$arg" in
+        ISSUE_NUMBER=*) issue_num="${arg#ISSUE_NUMBER=}" ;;
+        COMPLETE_LABEL=*) complete_label="${arg#COMPLETE_LABEL=}" ;;
+      esac
+    done
     # When FAKE_PODMAN_AUTO_COMPLETE=1 and the run succeeds, simulate the agent
-    # reaching the complete label by writing it to GH_STATE (mirrors what the
-    # real agent does via `gh issue edit --add-label $COMPLETE_LABEL`).
+    # reaching the complete label by writing it to GH_STATE.
     if [ "${FAKE_PODMAN_AUTO_COMPLETE:-0}" = "1" ] &&
        [ "${FAKE_PODMAN_RUN_EXIT:-0}" = "0" ] &&
-       [ -n "${GH_STATE:-}" ]; then
-      issue_num=""
-      complete_label=""
-      for arg in "$@"; do
-        case "$arg" in
-          ISSUE_NUMBER=*) issue_num="${arg#ISSUE_NUMBER=}" ;;
-          COMPLETE_LABEL=*) complete_label="${arg#COMPLETE_LABEL=}" ;;
-        esac
-      done
-      if [ -n "$issue_num" ] && [ -n "$complete_label" ]; then
-        printf '%s\t%s\n' "$issue_num" "$complete_label" >>"$GH_STATE"
-      fi
+       [ -n "${GH_STATE:-}" ] &&
+       [ -n "$issue_num" ] && [ -n "$complete_label" ]; then
+      printf '%s\t%s\n' "$issue_num" "$complete_label" >>"$GH_STATE"
+    fi
+    # Emit a scripted SPINDRIFT_OUTCOME line per issue (captured into the issue log).
+    if [ -n "$issue_num" ]; then
+      outcome_var="FAKE_PODMAN_OUTCOME_${issue_num}"
+      [ -n "${!outcome_var:-}" ] && printf '%s\n' "${!outcome_var}"
     fi
     exit "${FAKE_PODMAN_RUN_EXIT:-0}"
     ;;
