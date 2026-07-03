@@ -90,9 +90,14 @@ let
     # human triage.
     inProgressLabel = "agent-in-progress";
     failedLabel = "agent-failed";
+    completeLabel = "agent-complete";
     # Agent model (issue #16), promoted out of the image so `MODEL=...` switches
     # models at runtime with zero image rebuild.
     model = "claude-opus-4-8";
+    # Subagent model tiers (issue #36): empty by default so --agents is omitted
+    # unless the caller explicitly pins scout/reviewer models.
+    scoutModel = "";
+    reviewModel = "";
   }
   // defaults;
 
@@ -231,7 +236,10 @@ let
         BRANCH_PREFIX = mergedDefaults.branchPrefix;
         IN_PROGRESS_LABEL = mergedDefaults.inProgressLabel;
         FAILED_LABEL = mergedDefaults.failedLabel;
+        COMPLETE_LABEL = mergedDefaults.completeLabel;
         MODEL = mergedDefaults.model;
+        SCOUT_MODEL = mergedDefaults.scoutModel;
+        REVIEW_MODEL = mergedDefaults.reviewModel;
       }
   );
 

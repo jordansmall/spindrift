@@ -92,6 +92,10 @@ run_one() {
     -e BASE_BRANCH="$BASE_BRANCH" \
     -e BRANCH_PREFIX="$BRANCH_PREFIX" \
     -e MODEL="$MODEL" \
+    -e SCOUT_MODEL="$SCOUT_MODEL" \
+    -e REVIEW_MODEL="$REVIEW_MODEL" \
+    -e IN_PROGRESS_LABEL="$IN_PROGRESS_LABEL" \
+    -e COMPLETE_LABEL="$COMPLETE_LABEL" \
     -v "$PROMPT_DIR:/agent/prompts:ro" \
     "$IMAGE" /agent/entrypoint.sh >"$log" 2>&1; then
     # Success needs no terminal label — the merged PR's `Closes #N` closes it.
