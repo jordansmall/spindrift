@@ -81,14 +81,17 @@ FAKE
   grep -q "$WORK_DIR" "$PREFETCH_LOG"
 }
 
+# CLAUDE_LOG records the whole argv, including the -p prompt text — and the
+# prompt itself mentions the word "--agents". So match the flag's JSON payload
+# ("name":"scout"/"reviewer"), which the prompt prose never contains, not the
+# bare flag string.
 @test "entrypoint passes --agents to claude when SCOUT_MODEL and REVIEW_MODEL are set" {
   export SCOUT_MODEL="claude-haiku-3-5"
   export REVIEW_MODEL="claude-opus-4-5"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- '--agents' "$CLAUDE_LOG"
-  grep -q 'scout' "$CLAUDE_LOG"
-  grep -q 'reviewer' "$CLAUDE_LOG"
+  grep -qF '"name":"scout"' "$CLAUDE_LOG"
+  grep -qF '"name":"reviewer"' "$CLAUDE_LOG"
 }
 
 @test "entrypoint omits --agents when SCOUT_MODEL is unset" {
@@ -96,7 +99,7 @@ FAKE
   export REVIEW_MODEL="claude-opus-4-5"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q -- '--agents' "$CLAUDE_LOG"
+  ! grep -qF '"name":"reviewer"' "$CLAUDE_LOG"
 }
 
 @test "entrypoint omits --agents when REVIEW_MODEL is unset" {
@@ -104,7 +107,7 @@ FAKE
   unset REVIEW_MODEL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q -- '--agents' "$CLAUDE_LOG"
+  ! grep -qF '"name":"scout"' "$CLAUDE_LOG"
 }
 
 @test "IN_PROGRESS_LABEL and COMPLETE_LABEL are substituted in the prompt" {
