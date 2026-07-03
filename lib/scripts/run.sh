@@ -73,6 +73,15 @@ if [ -z "$issues_tsv" ]; then
   exit 0
 fi
 
+# Cap the batch to the oldest N ready issues when MAX_JOBS > 0 (0 = no limit).
+# Dogfooding sets MAX_JOBS=1 so each invocation drains a single issue, letting an
+# outer loop git-pull the just-merged change and rebuild before the next issue —
+# otherwise later issues in the batch run against the pre-fix image.
+MAX_JOBS="${MAX_JOBS:-0}"
+if [ "$MAX_JOBS" -gt 0 ]; then
+  issues_tsv="$(printf '%s\n' "$issues_tsv" | head -n "$MAX_JOBS")"
+fi
+
 count="$(printf '%s\n' "$issues_tsv" | wc -l | tr -d ' ')"
 echo "==> $count issue(s); launching up to $MAX_PARALLEL container(s) at a time"
 mkdir -p "$PWD/logs"

@@ -320,6 +320,26 @@ EOF
   [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
 }
 
+# --- MAX_JOBS batch cap (dogfood serial loop) ------------------------------
+
+@test "MAX_JOBS=1 dispatches only the oldest ready issue" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export MAX_JOBS=1
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 1 ]
+  grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
+  ! grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
+}
+
+@test "MAX_JOBS=0 dispatches the whole batch (no limit)" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export MAX_JOBS=0
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
+}
+
 # --- Outcome report (issue #41) --------------------------------------------
 
 @test "outcome report lists every dispatched issue with number pr and status" {
