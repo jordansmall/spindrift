@@ -63,3 +63,15 @@ setup_bare_repo() {
     git push -q origin HEAD:main
   )
 }
+
+# Push a minimal flake.nix to the remote's main branch so the entrypoint clones
+# a repo that exposes a devShell. Call after setup_bare_repo.
+seed_flake_repo() {
+  local seed="$BATS_TEST_TMPDIR/seed-flake"
+  git clone -q "https://github.com/owner/repo.git" "$seed"
+  printf '{ outputs = _: { devShells.x86_64-linux.default = {}; }; }\n' \
+    >"$seed/flake.nix"
+  git -C "$seed" add flake.nix
+  git -C "$seed" commit -q -m "chore: add flake"
+  git -C "$seed" push -q origin HEAD:main
+}
