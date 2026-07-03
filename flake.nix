@@ -99,6 +99,14 @@
             packages = p: [ p.hello ];
           };
 
+          # The lean/no-nix escape hatch: a Consumer that opts out of the
+          # nix-in-box default for the smallest possible image. Eval-only.
+          leanHarness = import ./lib/mkHarness.nix {
+            inherit nixpkgs system;
+            nixInBox = false;
+            packages = p: [ p.hello ];
+          };
+
           # Exercise the run knobs (#3): non-default baked `defaults` and a
           # docker `runtime`. Eval-only, consumed by the checks below.
           customHarness = import ./lib/mkHarness.nix {
@@ -443,6 +451,29 @@
               assert assertMsg (baked "git-")
                 "expected git plumbing layered into the env";
               pkgs.runCommand "packages-baked" { } "touch $out";
+
+            # Nix is the first-class default: every box ships the nix CLI unless
+            # the Consumer opts into the lean escape hatch (nixInBox = false).
+            nix-baked-by-default =
+              let
+                inherit (pkgs.lib) assertMsg any hasInfix;
+                names = map (p: p.name or "") nonRustHarness.agentEnv.paths;
+                hasNix = any (n: hasInfix "nix-" n || n == "nix") names;
+              in
+              assert assertMsg hasNix
+                "expected the nix CLI to be baked into the default box";
+              pkgs.runCommand "nix-baked-by-default" { } "touch $out";
+
+            # The lean/no-nix escape hatch must not include the nix CLI.
+            lean-escape-hatch =
+              let
+                inherit (pkgs.lib) assertMsg any hasInfix;
+                names = map (p: p.name or "") leanHarness.agentEnv.paths;
+                hasNix = any (n: hasInfix "nix-" n || n == "nix") names;
+              in
+              assert assertMsg (!hasNix)
+                "lean harness (nixInBox = false) must not bake in the nix CLI";
+              pkgs.runCommand "lean-escape-hatch" { } "touch $out";
           }
           # The baked entrypoint must carry a store-path shebang, not the
           # source's `#!/usr/bin/env bash` — the Box has no /usr/bin/env. Guards
