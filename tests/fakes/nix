@@ -17,6 +17,13 @@ case "${1:-}" in
     echo "error: a 'aarch64-linux' with features {} is required to build, but I am a 'aarch64-darwin'" >&2
     exit 1
     ;;
+  develop)
+    if [ "${FAKE_NIX_DEV_SHELL_OK:-0}" = "1" ]; then
+      exit 0
+    fi
+    echo "error: flake 'path:.' does not provide attribute 'devShells.x86_64-linux.default'" >&2
+    exit 1
+    ;;
 esac
 
 exit 0
