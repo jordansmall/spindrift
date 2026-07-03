@@ -122,6 +122,32 @@ EOF
   grep -q 'complete: done' "$CLAUDE_PROMPT_FILE"
 }
 
+@test "default prompt delegates exploration to the scout subagent" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'scout' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt spawns a reviewer subagent with SPEC and STANDARDS rubric" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'reviewer' "$CLAUDE_PROMPT_FILE"
+  grep -q 'SPEC' "$CLAUDE_PROMPT_FILE"
+  grep -q 'STANDARDS' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt specifies a review-build loop that never advances with a blocking finding" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'BLOCKING\|blocking' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt degrades gracefully when tier models are unavailable" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'if available\|if it.*available\|when.*available' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "entrypoint skips the prefetch hook when it is empty" {
   export PREFETCH_LOG="$BATS_TEST_TMPDIR/prefetch.log"
   {
