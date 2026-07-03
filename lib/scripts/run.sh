@@ -90,6 +90,11 @@ run_one() {
   local num="$1" title="$2"
   local log="$PWD/logs/issue-$num.log"
   echo "    -> #$num: $title"
+  # `--rm` only fires on a clean exit; an interrupted prior run (Ctrl-C, reboot,
+  # OOM) leaves the named container behind and the next `--name` collides. Reap
+  # any stale one first. `rm -f` is a no-op when absent and works on both
+  # runtimes (podman `--replace` would be podman-only).
+  "$RUNTIME" rm -f "agent-issue-$num" >/dev/null 2>&1 || true
   if "$RUNTIME" run --rm \
     --name "agent-issue-$num" \
     -e GH_TOKEN "${auth_args[@]}" "${git_args[@]}" \
