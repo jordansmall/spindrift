@@ -517,6 +517,36 @@
                 ${promptHarness.agentFiles}/agent/prompts/issue-prompt.md
               touch $out
             '';
+
+            # The nix.conf and store DB must be present in the image so
+            # `nix flake check` reuses the baked closure instead of re-substituting.
+            # Realises the default image; Linux-gated like the other image checks.
+            nix-conf-in-image =
+              pkgs.runCommand "nix-conf-in-image" { nativeBuildInputs = [ pkgs.jq ]; } ''
+                mkdir img && tar -xf ${nonRustHarness.image} -C img
+                # Walk the layer tars to find etc/nix/nix.conf
+                found=0
+                for layer in img/*/layer.tar; do
+                  if tar -tf "$layer" 2>/dev/null | grep -q '^etc/nix/nix.conf$'; then
+                    tar -xOf "$layer" etc/nix/nix.conf > nix.conf
+                    found=1
+                    break
+                  fi
+                done
+                [ "$found" -eq 1 ] || {
+                  echo "etc/nix/nix.conf not found in any image layer" >&2
+                  exit 1
+                }
+                grep -q 'experimental-features = nix-command flakes' nix.conf || {
+                  echo "nix.conf is missing experimental-features" >&2
+                  exit 1
+                }
+                grep -q 'sandbox = false' nix.conf || {
+                  echo "nix.conf is missing sandbox = false" >&2
+                  exit 1
+                }
+                touch $out
+              '';
           };
 
           # For hacking ON the harness itself (host-side).
