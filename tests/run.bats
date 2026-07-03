@@ -478,8 +478,10 @@ EOF
 @test "runtime=bwrap outcome report lists dispatched issues" {
   export FAKE_GH_ISSUES=$'1\tSingle'
   export FAKE_BWRAP_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=merged note=ok"
+  export FAKE_GH_PR_STATE_1="MERGED"
+  export FAKE_GH_ISSUE_LABELS_1="agent-complete"
   run "$BWRAP_RUN_CMD"
   [ "$status" -eq 0 ]
   [[ "$output" == *"#1"* ]]
-  [[ "$output" == *"status=merged"* ]]
+  [[ "$output" == *"status=verified-merged"* ]]
 }
