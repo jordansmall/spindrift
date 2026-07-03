@@ -170,6 +170,15 @@ EOF
   grep -qi 'never.*merg.*red\|red.*never.*merg\|do not.*merg.*red\|merg.*only.*green\|green.*merg' "$CLAUDE_PROMPT_FILE"
 }
 
+@test "default prompt waits for CI to register before trusting the watch" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # "no checks" right after opening the PR must not read as green — the prompt
+  # tells the agent to wait for a check to register before merging.
+  grep -qi 'register' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'no checks' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "default prompt merges with rebase and deletes the branch on green" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
