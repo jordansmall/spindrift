@@ -145,13 +145,16 @@ let
   };
 
   # Baked into the image at /agent — there is no working tree to bind-mount from
-  # once spindrift is a store path. The prompt is deliberately NOT baked here:
-  # it is a runtime mount (see promptDir + scripts/run.sh) so it can be tuned
-  # per project and hot-overridden without rebuilding the image.
+  # once spindrift is a store path. The prompt is baked in alongside the
+  # entrypoint (not a host-path mount) so the Box is self-contained: a macOS
+  # podman machine cannot bind-mount the host /nix/store into its Linux VM.
+  # SPINDRIFT_PROMPT_DIR still mounts an override dir for zero-rebuild iteration
+  # (see scripts/run.sh).
   agentFiles = pkgs.runCommand "spindrift-agent-files" { } ''
-    mkdir -p $out/agent
+    mkdir -p $out/agent/prompts
     cp ${entrypoint}/bin/entrypoint $out/agent/entrypoint.sh
     chmod +x $out/agent/entrypoint.sh
+    cp ${pkgs.writeText "issue-prompt.md" prompt} $out/agent/prompts/issue-prompt.md
   '';
 
   # The rendered prompt as a host store-path directory (native-buildable on
@@ -283,11 +286,8 @@ let
     text =
       imagePreamble
       + runDefaultsPreamble
-      # Baked with string context so `nix build .#run` realises the prompt dir
-      # into the store; SPINDRIFT_PROMPT_DIR can still override it at run time.
-      + ''
-        PROMPT_DIR="${promptDir}"
-      ''
+      # The prompt is baked into the image (see agentFiles); the launcher only
+      # needs to bind-mount a dir when SPINDRIFT_PROMPT_DIR overrides it.
       + builtins.readFile ./scripts/run.sh;
   };
 

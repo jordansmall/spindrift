@@ -396,21 +396,22 @@
               touch $out
             '';
 
-            # The configured `prompt` is rendered to a store-path directory and
-            # its exact path baked into the `run` command's mount (#4). Eval/
-            # native only — no Linux builder needed (the prompt dir is a host
-            # store path).
+            # The configured `prompt` is rendered to a store-path directory and,
+            # by default, baked into the image (see agentFiles) rather than
+            # mounted — `run` only bind-mounts a dir under the
+            # SPINDRIFT_PROMPT_DIR override. Eval/native only (the rendered
+            # prompt dir is a host store path; the image bake is checked
+            # Linux-side by prompt-baked-into-image below).
             mkharness-prompt = pkgs.runCommand "mkharness-prompt" { } ''
               # The Consumer's prompt text is what lands in the rendered file.
               grep -q 'CONFIGURED-PROMPT-MARKER' \
                 ${promptHarness.promptDir}/issue-prompt.md
 
-              # The default prompt dir path is baked into `run` (placeholder
-              # gone) and `run` mounts $PROMPT_DIR at /agent/prompts.
+              # `run` mounts /agent/prompts only when SPINDRIFT_PROMPT_DIR
+              # overrides the baked prompt — never an unconditional host mount.
               runCmd=${harness.run}/bin/run
-              ! grep -q -- '@promptDir@' "$runCmd"
-              grep -q 'PROMPT_DIR="${harness.promptDir}"' "$runCmd"
-              grep -q -- '-v "$PROMPT_DIR:/agent/prompts:ro"' "$runCmd"
+              grep -q -- '-v "$SPINDRIFT_PROMPT_DIR:/agent/prompts:ro"' "$runCmd"
+              ! grep -q -- '-v "$PROMPT_DIR:/agent/prompts:ro"' "$runCmd"
               touch $out
             '';
 
@@ -475,6 +476,16 @@
                 }
                 touch $out
               '';
+
+            # The rendered prompt must be baked into the agent-files layer at
+            # /agent/prompts, so the Box is self-contained and needs no host
+            # /nix/store mount (which a macOS podman VM cannot provide). Realises
+            # the agent-files layer, so it is Linux-gated like the shebang check.
+            prompt-baked-into-image = pkgs.runCommand "prompt-baked-into-image" { } ''
+              grep -q 'CONFIGURED-PROMPT-MARKER' \
+                ${promptHarness.agentFiles}/agent/prompts/issue-prompt.md
+              touch $out
+            '';
           };
 
           # For hacking ON the harness itself (host-side).
