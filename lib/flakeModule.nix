@@ -103,6 +103,17 @@ in
         default = null;
         description = "Container runtime the launcher commands drive.";
       };
+
+      nixInBox = mkOption {
+        type = types.nullOr types.bool;
+        default = null;
+        description = ''
+          Bake nix (binary + registered store DB + sandbox-off config) into the
+          box so `nix flake check` and `nix develop` work inside the container.
+          Defaults to true (the nix-centric baseline); set to false for a lean,
+          nix-free image.
+        '';
+      };
     };
   };
 
@@ -125,7 +136,8 @@ in
         // lib.optionalAttrs (cfg.prefetch != null) { inherit (cfg) prefetch; }
         // lib.optionalAttrs (cfg.prompt != null) { inherit (cfg) prompt; }
         // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; }
-        // lib.optionalAttrs (cfg.runtime != null) { inherit (cfg) runtime; };
+        // lib.optionalAttrs (cfg.runtime != null) { inherit (cfg) runtime; }
+        // lib.optionalAttrs (cfg.nixInBox != null) { inherit (cfg) nixInBox; };
       harness = mkHarness args;
     in
     {
