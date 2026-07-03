@@ -62,3 +62,28 @@ setup() {
   [[ "$output" == *"Linux builder"* ]]
   [[ "$output" == *"container runtime"* ]]
 }
+
+# --- bwrap build path (issue #54) --------------------------------------------
+
+@test "bwrap build realises agent store closures without loading an OCI image" {
+  export FAKE_NIX_BUILD_OK=1
+  run "$BWRAP_BUILD_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'build' "$NIX_LOG"
+  ! grep -q 'load' "$PODMAN_LOG"
+}
+
+@test "bwrap build invokes nix build for both AGENT_FILES_DRV and AGENT_ENV_DRV" {
+  export FAKE_NIX_BUILD_OK=1
+  run "$BWRAP_BUILD_CMD"
+  [ "$status" -eq 0 ]
+  # Two separate nix build calls: one for agent-files, one for agent-env
+  [ "$(grep -c '^build' "$NIX_LOG")" -ge 2 ]
+}
+
+@test "bwrap build never invokes podman or docker" {
+  export FAKE_NIX_BUILD_OK=1
+  run "$BWRAP_BUILD_CMD"
+  [ "$status" -eq 0 ]
+  [ ! -s "$PODMAN_LOG" ]
+}
