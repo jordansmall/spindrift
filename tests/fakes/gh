@@ -31,8 +31,11 @@ case "${1:-}" in
         while IFS=$'\t' read -r num title; do
           [ -n "$num" ] || continue
           cur=""
-          [ -f "$GH_STATE" ] &&
-            cur="$(awk -F'\t' -v n="$num" '$1==n{v=$2} END{print v}' "$GH_STATE")"
+          if [ -f "$GH_STATE" ]; then
+            while IFS=$'\t' read -r k v; do
+              [ "$k" = "$num" ] && cur="$v"
+            done < "$GH_STATE"
+          fi
           if [ -z "$cur" ] || [ "$cur" = "$want" ]; then
             printf '%s\t%s\n' "$num" "$title"
           fi
@@ -63,11 +66,33 @@ EOF
             ;;
           labels)
             cur=""
-            [ -f "$GH_STATE" ] && \
-              cur="$(awk -F'\t' -v n="$num" '$1==n{v=$2} END{if (v!="") print v}' "$GH_STATE")"
+            if [ -f "$GH_STATE" ]; then
+              while IFS=$'\t' read -r k v; do
+                [ "$k" = "$num" ] && cur="$v"
+              done < "$GH_STATE"
+            fi
             [ -n "$cur" ] && printf '%s\n' "$cur"
             labelsvar="FAKE_GH_ISSUE_LABELS_${num}"
             [ -n "${!labelsvar:-}" ] && printf '%s\n' "${!labelsvar:-}"
+            ;;
+        esac
+        ;;
+    esac
+    ;;
+  pr)
+    case "${2:-}" in
+      view)
+        pr_ref="${3:-}"
+        json_field=""
+        args=("$@")
+        for ((i = 0; i < ${#args[@]}; i++)); do
+          [ "${args[i]}" = "--json" ] && json_field="${args[i + 1]:-}"
+        done
+        pr_num="${pr_ref##*/}"
+        case "$json_field" in
+          state)
+            statevar="FAKE_GH_PR_STATE_${pr_num}"
+            printf '%s\n' "${!statevar:-}"
             ;;
         esac
         ;;
