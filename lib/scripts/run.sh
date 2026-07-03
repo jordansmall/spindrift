@@ -118,12 +118,14 @@ parse_blockers() {
     body="$(gh issue view "$num" --repo "$REPO_SLUG" \
       --json body --jq '.body // ""' 2>/dev/null || true)"
     [ -n "$body" ] || continue
+    # `|| true`: a blocker-less body makes grep exit 1, which pipefail + set -e
+    # would turn into a silent whole-script abort before any container launches.
     printf '%s\n' "$body" \
       | grep -oiE '(depends on|blocked by):? *#[0-9]+' \
       | grep -oE '[0-9]+' \
       | while IFS= read -r dep; do
           printf '%s %s\n' "$num" "$dep"
-        done
+        done || true
   done <<EOF
 $issues_tsv
 EOF
