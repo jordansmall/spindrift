@@ -107,18 +107,168 @@ run_one() {
   fi
 }
 
-# bash 3.2-compatible parallelism cap (macOS ships 3.2; no `wait -n`).
-while IFS=$'\t' read -r num title; do
-  [ -n "$num" ] || continue
-  # Claim the issue up front — synchronously, before backgrounding — so it drops
-  # out of the $LABEL query immediately. Re-running `run` mid-flight then skips
-  # it instead of re-dispatching a duplicate Box.
-  swap_label "$num" "$IN_PROGRESS_LABEL" "$LABEL"
-  run_one "$num" "$title" &
-  while [ "$(jobs -r | wc -l | tr -d ' ')" -ge "$MAX_PARALLEL" ]; do sleep 1; done
-done <<EOF
+# --- Dependency-wave helpers -------------------------------------------
+
+# Scans each ready issue's body for blocker references ("depends on #N" or
+# "blocked by #N", case-insensitive) and prints "child blocker" pairs to stdout.
+parse_blockers() {
+  local num body
+  while IFS=$'\t' read -r num _; do
+    [ -n "$num" ] || continue
+    body="$(gh issue view "$num" --repo "$REPO_SLUG" \
+      --json body --jq '.body // ""' 2>/dev/null || true)"
+    [ -n "$body" ] || continue
+    printf '%s\n' "$body" \
+      | grep -oiE '(depends on|blocked by):? *#[0-9]+' \
+      | grep -oE '[0-9]+' \
+      | while IFS= read -r dep; do
+          printf '%s %s\n' "$num" "$dep"
+        done
+  done <<EOF
 $issues_tsv
 EOF
+}
 
-wait
+# Detects intra-batch cycles via Kahn's algorithm. Prints a cycle-member issue
+# number and returns 1 if a cycle exists; returns 0 for an acyclic graph.
+detect_cycle() {
+  local deps_file="$1"
+  local batch_nums cycle_member rc
+  batch_nums="$(printf '%s\n' "$issues_tsv" | awk -F'\t' '{if ($1) print $1}')"
+  cycle_member="$(printf '%s\n' "$batch_nums" | awk -v df="$deps_file" '
+    { batch[$1] = 1 }
+    END {
+      while ((getline line < df) > 0) {
+        n = split(line, f)
+        if (n >= 2 && (f[1] in batch) && (f[2] in batch)) {
+          indegree[f[1]]++
+          adj[f[2]] = adj[f[2]] " " f[1]
+          if (!(f[2] in indegree)) indegree[f[2]] = 0
+        }
+      }
+      for (nd in batch) if (!(nd in indegree)) indegree[nd] = 0
+      qs = 0
+      for (nd in batch) if (indegree[nd] == 0) queue[++qs] = nd
+      done = 0
+      while (qs > 0) {
+        node = queue[qs--]; done++
+        m = split(adj[node], ch)
+        for (i = 1; i <= m; i++)
+          if (ch[i] != "" && --indegree[ch[i]] == 0) queue[++qs] = ch[i]
+      }
+      for (nd in batch) if (indegree[nd] > 0) { print nd; exit 1 }
+      exit 0
+    }
+  ')"
+  rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  printf '%s\n' "$cycle_member"
+  return 1
+}
+
+# Returns 0 (blocked) if any blocker of issue $1 lacks $COMPLETE_LABEL on
+# GitHub; returns 1 (unblocked) when all blockers are complete or there are none.
+# Reads edges from the global $DEPS_FILE.
+is_blocked() {
+  local num="$1" dep
+  local dep_nums
+  dep_nums="$(grep "^${num} " "$DEPS_FILE" | awk '{print $2}' || true)"
+  [ -n "$dep_nums" ] || return 1
+  while IFS= read -r dep; do
+    [ -n "$dep" ] || continue
+    if ! gh issue view "$dep" --repo "$REPO_SLUG" --json labels \
+        --jq '.labels[].name' 2>/dev/null | grep -qxF "$COMPLETE_LABEL"; then
+      return 0
+    fi
+  done <<EOF
+$dep_nums
+EOF
+  return 1
+}
+
+# Dispatches all issues in remaining_file in dependency order: issues with no
+# pending blockers fan out in parallel (up to MAX_PARALLEL); blocked issues are
+# held and rechecked every DEPS_POLL_SECS seconds. Errors out after
+# DEPS_WAIT_SECS seconds without progress (surfaces cycles/stalls).
+dispatch_waves() {
+  local remaining_file="$1"
+  local wait_secs="${DEPS_WAIT_SECS:-7200}"
+  local poll_secs="${DEPS_POLL_SECS:-30}"
+  local elapsed=0 ready_file
+
+  while [ -s "$remaining_file" ]; do
+    ready_file="$PWD/logs/ready.$$"
+    : >"$ready_file"
+
+    while IFS=$'\t' read -r num title; do
+      [ -n "$num" ] || continue
+      if ! is_blocked "$num"; then
+        printf '%s\t%s\n' "$num" "$title" >>"$ready_file"
+      fi
+    done <"$remaining_file"
+
+    if [ ! -s "$ready_file" ]; then
+      rm -f "$ready_file"
+      if [ "$elapsed" -ge "$wait_secs" ]; then
+        echo "ERROR: dependency deadlock — blockers did not reach '$COMPLETE_LABEL' after ${wait_secs}s" >&2
+        cat "$remaining_file" >&2
+        return 1
+      fi
+      echo "    .. all remaining issues blocked; retrying in ${poll_secs}s (${elapsed}s elapsed)"
+      sleep "$poll_secs"
+      elapsed=$((elapsed + poll_secs))
+      continue
+    fi
+
+    elapsed=0
+    while IFS=$'\t' read -r num title; do
+      [ -n "$num" ] || continue
+      swap_label "$num" "$IN_PROGRESS_LABEL" "$LABEL"
+      run_one "$num" "$title" &
+      while [ "$(jobs -r | wc -l | tr -d ' ')" -ge "$MAX_PARALLEL" ]; do sleep 1; done
+    done <"$ready_file"
+    wait
+
+    while IFS=$'\t' read -r num _; do
+      [ -n "$num" ] || continue
+      awk -F'\t' -v n="$num" 'NF > 0 && $1 != n' "$remaining_file" \
+        >"${remaining_file}.tmp" \
+        && mv "${remaining_file}.tmp" "$remaining_file"
+    done <"$ready_file"
+    rm -f "$ready_file"
+  done
+}
+
+# Build the dependency graph for the ready batch, then dispatch in waves when
+# edges are present or fall through to the original single-wave fan-out.
+DEPS_FILE="$PWD/logs/deps.$$"
+trap 'rm -f "$DEPS_FILE"' EXIT
+parse_blockers >"$DEPS_FILE"
+
+if [ -s "$DEPS_FILE" ]; then
+  cycle_num=""
+  if ! cycle_num="$(detect_cycle "$DEPS_FILE")"; then
+    echo "ERROR: dependency cycle detected (issue #${cycle_num} is in the cycle)" >&2
+    exit 1
+  fi
+  echo "==> dependency edges found; dispatching in waves"
+  remaining="$PWD/logs/remaining.$$"
+  printf '%s\n' "$issues_tsv" >"$remaining"
+  dispatch_waves "$remaining" || exit 1
+  rm -f "$remaining"
+else
+  # No declared deps — original single-wave fan-out (bash 3.2, no `wait -n`).
+  while IFS=$'\t' read -r num title; do
+    [ -n "$num" ] || continue
+    # Claim synchronously before backgrounding so the issue drops out of the
+    # $LABEL query immediately; re-running mid-flight then skips it.
+    swap_label "$num" "$IN_PROGRESS_LABEL" "$LABEL"
+    run_one "$num" "$title" &
+    while [ "$(jobs -r | wc -l | tr -d ' ')" -ge "$MAX_PARALLEL" ]; do sleep 1; done
+  done <<EOF
+$issues_tsv
+EOF
+  wait
+fi
+
 echo "==> all agents finished — branches pushed and PRs opened on $REPO_SLUG."
