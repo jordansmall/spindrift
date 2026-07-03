@@ -49,6 +49,28 @@ EOF
         done
         [ -n "$num" ] && [ -n "$add" ] && printf '%s\t%s\n' "$num" "$add" >>"$GH_STATE"
         ;;
+      view)
+        num="${3:-}"
+        json_field=""
+        args=("$@")
+        for ((i = 0; i < ${#args[@]}; i++)); do
+          [ "${args[i]}" = "--json" ] && json_field="${args[i + 1]:-}"
+        done
+        case "$json_field" in
+          body)
+            bodyvar="FAKE_GH_ISSUE_BODY_${num}"
+            printf '%s\n' "${!bodyvar:-}"
+            ;;
+          labels)
+            cur=""
+            [ -f "$GH_STATE" ] && \
+              cur="$(awk -F'\t' -v n="$num" '$1==n{v=$2} END{if (v!="") print v}' "$GH_STATE")"
+            [ -n "$cur" ] && printf '%s\n' "$cur"
+            labelsvar="FAKE_GH_ISSUE_LABELS_${num}"
+            [ -n "${!labelsvar:-}" ] && printf '%s\n' "${!labelsvar:-}"
+            ;;
+        esac
+        ;;
     esac
     ;;
 esac

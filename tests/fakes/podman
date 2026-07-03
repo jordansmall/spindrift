@@ -16,8 +16,25 @@ case "${1:-}" in
     fi
     ;;
   run)
-    # `podman run ...` — the container's exit code is scripted so tests can drive
-    # the run.sh failure path (the on-failure label swap).
+    # `podman run ...` — scripted exit code drives run.sh's failure path.
+    # When FAKE_PODMAN_AUTO_COMPLETE=1 and the run succeeds, simulate the agent
+    # reaching the complete label by writing it to GH_STATE (mirrors what the
+    # real agent does via `gh issue edit --add-label $COMPLETE_LABEL`).
+    if [ "${FAKE_PODMAN_AUTO_COMPLETE:-0}" = "1" ] &&
+       [ "${FAKE_PODMAN_RUN_EXIT:-0}" = "0" ] &&
+       [ -n "${GH_STATE:-}" ]; then
+      issue_num=""
+      complete_label=""
+      for arg in "$@"; do
+        case "$arg" in
+          ISSUE_NUMBER=*) issue_num="${arg#ISSUE_NUMBER=}" ;;
+          COMPLETE_LABEL=*) complete_label="${arg#COMPLETE_LABEL=}" ;;
+        esac
+      done
+      if [ -n "$issue_num" ] && [ -n "$complete_label" ]; then
+        printf '%s\t%s\n' "$issue_num" "$complete_label" >>"$GH_STATE"
+      fi
+    fi
     exit "${FAKE_PODMAN_RUN_EXIT:-0}"
     ;;
 esac
