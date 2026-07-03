@@ -212,6 +212,38 @@ EOF
   grep -q 'issue comment\|pr comment\|comment.*issue\|comment.*blocked' "$CLAUDE_PROMPT_FILE"
 }
 
+@test "entrypoint detects devShell and logs when flake.nix has a devShell" {
+  seed_flake_repo
+  export FAKE_NIX_DEV_SHELL_OK=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "devShell"
+  echo "$output" | grep -q "nix develop"
+}
+
+@test "entrypoint logs fallback when flake.nix has no devShell" {
+  seed_flake_repo
+  # FAKE_NIX_DEV_SHELL_OK defaults to 0 — nix develop will fail
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "flake.nix"
+  echo "$output" | grep -q "baked toolchain"
+}
+
+@test "entrypoint skips devShell probe when repo has no flake.nix" {
+  # standard setup_bare_repo has no flake.nix
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q "devShell"
+}
+
+@test "default prompt mentions nix develop and nix flake check for flake projects" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'nix develop' "$CLAUDE_PROMPT_FILE"
+  grep -q 'nix flake check' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "entrypoint skips the prefetch hook when it is empty" {
   export PREFETCH_LOG="$BATS_TEST_TMPDIR/prefetch.log"
   {
