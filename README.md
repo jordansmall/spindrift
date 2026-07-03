@@ -188,13 +188,14 @@ nix run .#run
              ├─ git clone <REPO_SLUG>  +  git checkout -b agent/issue-N
              ├─ run PREFETCH (optional cache warm-up)
              └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
-                └─ implement → check → commit → push → open PR (Closes #N)
+                └─ implement → check → commit → push → open PR → review → merge (rebase)
 ```
 
 The harness never touches the Target repo's working tree on your host — it all
 happens through fresh clones inside containers — so it can drive **any** GitHub
-repo you point `REPO_SLUG` at. The agent never merges the PR or closes the issue
-(`Closes #N` closes it on merge), so no admin or merge scope is needed.
+repo you point `REPO_SLUG` at. After its own review and green CI, the agent
+merges the PR via rebase; `Closes #N` in the PR description closes the issue on
+merge.
 
 ## Label lifecycle
 
@@ -265,7 +266,7 @@ host.
 | permission        | level          | why                                          |
 | ----------------- | -------------- | -------------------------------------------- |
 | Contents          | Read and write | clone the repo + push the branch             |
-| Pull requests     | Read and write | open the PR (including drafts)               |
+| Pull requests     | Read and write | open PRs (including drafts) + merge via rebase |
 | Issues            | Read and write | read the issue; **write only** for the "if blocked" path that comments on it — drop that fallback and Read suffices |
 | Metadata          | Read           | mandatory baseline, auto-selected            |
 | Workflows         | Read and write | **only if** an issue edits `.github/workflows/*` — omit otherwise |
@@ -285,8 +286,12 @@ deliberate, not oversights — write them down so you can honour them:
    more, because the Box has no host access.
 3. **Branch protection is the required backstop.** The token needs Contents RW
    to push its `agent/issue-N` branch, and that same scope permits pushing to
-   the base branch. Enable branch protection on the base branch so Agents
-   *physically* cannot push to it — the PR is the only way in.
+   the base branch. Enable branch protection on the base branch with these
+   settings: block direct pushes (the PR is the only path in); require CI
+   status checks to pass before merge; and **do not require an external
+   approving review** — a bot cannot approve its own PR, so that rule deadlocks
+   autonomous self-merge. In repository settings, enable rebase merge (and
+   optionally disable merge commits and squash) to keep a linear history.
 4. **Scope the token.** Use a fine-grained PAT restricted to the single Target
    repo (Issues RW, Contents RW, Pull requests RW, Metadata R). Repo scoping is
    what turns "the Agent can do anything" into "anything, to one repo."
