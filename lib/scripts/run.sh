@@ -263,7 +263,8 @@ dispatch_waves() {
 }
 
 # Reads each per-issue log for its SPINDRIFT_OUTCOME line and prints a roll-up.
-# Issues with no outcome line (e.g. a hard crash) are flagged as missing.
+# For issues that claim to be merged, independently verifies the PR state and
+# issue label against GitHub rather than trusting the container's self-report.
 print_outcome_report() {
   echo "==> outcome report"
   while IFS=$'\t' read -r num _; do
@@ -275,14 +276,30 @@ print_outcome_report() {
       printf '    #%s  status=missing  note=no SPINDRIFT_OUTCOME in log\n' "$num"
       continue
     fi
-    local pr
-    local status
-    local note
+    local pr status note
     pr="$(printf '%s' "$outcome_line" | grep -oE 'pr=[^ ]+' | cut -d= -f2-)"
     status="$(printf '%s' "$outcome_line" | grep -oE 'status=[^ ]+' | cut -d= -f2-)"
     note="$(printf '%s' "$outcome_line" | sed 's/.*note=//')"
     if [ "$status" = "blocked" ]; then
       printf '    #%s  pr=%s  status=%s  !! %s\n' "$num" "$pr" "$status" "$note"
+    elif [ "$status" = "merged" ]; then
+      local pr_state issue_labels
+      pr_state="$(gh pr view "$pr" --json state --jq '.state' 2>/dev/null || true)"
+      issue_labels="$(gh issue view "$num" --repo "$REPO_SLUG" --json labels \
+        --jq '.labels[].name' 2>/dev/null || true)"
+      if [ "$pr_state" = "MERGED" ] && \
+         printf '%s\n' "$issue_labels" | grep -qxF "$COMPLETE_LABEL"; then
+        printf '    #%s  pr=%s  status=verified-merged\n' "$num" "$pr"
+      else
+        local reason
+        if [ "$pr_state" != "MERGED" ]; then
+          reason="PR state is '${pr_state:-unknown}', expected MERGED"
+        else
+          reason="issue does not carry '$COMPLETE_LABEL'"
+        fi
+        printf '    #%s  pr=%s  status=failed  !! %s\n' "$num" "$pr" "$reason"
+        swap_label "$num" "$FAILED_LABEL" "$IN_PROGRESS_LABEL"
+      fi
     else
       printf '    #%s  pr=%s  status=%s\n' "$num" "$pr" "$status"
     fi
