@@ -263,13 +263,12 @@ let
   # (see the `command -v "$RUNTIME"` guard in the scripts).
   #
   # OCI path: IMAGE_ARCHIVE + RUNTIME baked into both launchers.
-  # bwrap path: AGENT_FILES + AGENT_ENV + RUNTIME baked into run; build gets its
-  # own preamble (no image archive needed).
+  # bwrap path: RUNTIME + AGENT_FILES + AGENT_ENV baked into run only (via
+  # bwrapRunPreamble); the build launcher gets neither. bwrap-build.sh never
+  # reads RUNTIME, so baking it there trips shellcheck SC2034 (unused).
   imagePreamble =
     if runtime == "bwrap" then
-      ''
-        RUNTIME="bwrap"
-      ''
+      ""
     else
       ''
         IMAGE_ARCHIVE="${imagePath}"
@@ -293,9 +292,12 @@ let
         FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.spindrift"
       '';
 
-  # Run-only addendum for the bwrap path: the agent store paths and the baked
-  # prefetch snippet (supplied to the entrypoint via --setenv PREFETCH).
+  # Run-only addendum for the bwrap path: the runtime marker, the agent store
+  # paths, and the baked prefetch snippet (fed to the entrypoint via --setenv
+  # PREFETCH). RUNTIME lives here rather than in imagePreamble so it is baked
+  # into run (which branches on it) but not build (which never reads it).
   bwrapRunPreamble = lib.optionalString (runtime == "bwrap") ''
+    RUNTIME="bwrap"
     AGENT_FILES="${agentFilesPath}"
     AGENT_ENV="${agentEnvPath}"
     BAKED_PREFETCH=${lib.escapeShellArg prefetch}
