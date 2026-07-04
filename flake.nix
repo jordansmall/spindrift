@@ -434,16 +434,13 @@
             # SPINDRIFT_PROMPT_DIR override. Eval/native only (the rendered
             # prompt dir is a host store path; the image bake is checked
             # Linux-side by prompt-baked-into-image below).
+            # The conditional prompt mount is handled by the Go launcher binary,
+            # so the bats suite verifies runtime behaviour rather than grepping
+            # the wrapper's source.
             mkharness-prompt = pkgs.runCommand "mkharness-prompt" { } ''
               # The Consumer's prompt text is what lands in the rendered file.
               grep -q 'CONFIGURED-PROMPT-MARKER' \
                 ${promptHarness.promptDir}/issue-prompt.md
-
-              # `run` mounts /agent/prompts only when SPINDRIFT_PROMPT_DIR
-              # overrides the baked prompt — never an unconditional host mount.
-              runCmd=${harness.run}/bin/run
-              grep -q -- '-v "$SPINDRIFT_PROMPT_DIR:/agent/prompts:ro"' "$runCmd"
-              ! grep -q -- '-v "$PROMPT_DIR:/agent/prompts:ro"' "$runCmd"
               touch $out
             '';
 
