@@ -20,6 +20,7 @@ type PR struct {
 // RollupState is the aggregate CI status of a PR's head commit.
 type RollupState string
 
+// Known RollupState values returned by the GitHub API or by the fake.
 const (
 	StateSuccess  RollupState = "SUCCESS"
 	StatePending  RollupState = "PENDING"
