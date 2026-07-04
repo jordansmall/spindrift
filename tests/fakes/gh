@@ -86,6 +86,19 @@ EOF
     ;;
   pr)
     case "${2:-}" in
+      list)
+        # Supports --head <branch> to look up a PR by head branch name.
+        head_branch=""
+        args=("$@")
+        for ((i = 0; i < ${#args[@]}; i++)); do
+          [ "${args[i]}" = "--head" ] && head_branch="${args[i + 1]:-}"
+        done
+        if [ -n "$head_branch" ]; then
+          issue_num="${head_branch##*/issue-}"
+          listvar="FAKE_GH_PR_LIST_${issue_num}"
+          printf '%s\n' "${!listvar:-}"
+        fi
+        ;;
       view)
         pr_ref="${3:-}"
         json_field=""
@@ -109,6 +122,10 @@ EOF
               statevar="FAKE_GH_PR_STATE_${pr_num}"
               printf '%s\n' "${!statevar:-}"
             fi
+            ;;
+          isDraft)
+            draftvar="FAKE_GH_PR_DRAFT_${pr_num}"
+            printf '%s\n' "${!draftvar:-false}"
             ;;
         esac
         ;;
