@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,6 +50,10 @@ type config struct {
 	scoutModel      string
 	reviewModel     string
 	maxJobs         int
+
+	// Dependency-wave knobs
+	depsPollSecs int
+	depsWaitSecs int
 
 	// Merge gate polling knobs
 	mergePollInterval int
@@ -126,6 +131,9 @@ func loadConfig() config {
 		scoutModel:      os.Getenv("SCOUT_MODEL"),
 		reviewModel:     os.Getenv("REVIEW_MODEL"),
 		maxJobs:         atoiNonneg(os.Getenv("MAX_JOBS"), 0),
+
+		depsPollSecs: atoiNonneg(getenv("DEPS_POLL_SECS", "30"), 30),
+		depsWaitSecs: atoiNonneg(getenv("DEPS_WAIT_SECS", "7200"), 7200),
 
 		mergePollInterval: atoiNonneg(getenv("MERGE_POLL_INTERVAL", "30"), 30),
 		mergePollTimeout:  atoiNonneg(getenv("MERGE_POLL_TIMEOUT", "1800"), 1800),
@@ -639,6 +647,274 @@ func printOutcomeReport(c config, pwd string, issues []issue) {
 	}
 }
 
+// Compiled once; shared by all parseBlockerRefs calls.
+var (
+	// Matches inline keyword patterns. The keyword must be followed by optional
+	// whitespace and colon before any issue refs are scanned.
+	blockKeyword = regexp.MustCompile(`(?i)(?:depends on|blocked by)\s*:?\s*`)
+	// Matches "#NNN" issue references.
+	issueRef = regexp.MustCompile(`#([0-9]+)`)
+	// Matches "## Blocked by" (or similar) section headers.
+	blockedByHeader = regexp.MustCompile(`(?i)^#+\s*blocked by\s*:?\s*$`)
+	// Matches any markdown heading line (to end the "Blocked by" section).
+	anyHeading = regexp.MustCompile(`^#+`)
+	// Matches a bullet list item line.
+	bulletItem = regexp.MustCompile(`^[ \t]*[-*][ \t]*`)
+)
+
+// parseBlockerRefs extracts all blocker issue numbers referenced in a body.
+// Recognises two formats:
+//   - Inline: "depends on #N" or "blocked by #N" anywhere in the body.
+//     All issue refs after the keyword (to end of line) are captured.
+//   - Section: a "## Blocked by" header followed by "- #N" list items.
+//     All issue refs in each list item are captured.
+//
+// Fixes two bugs present in the bash parser: (1) header+list edges were
+// silently dropped because the old single-line regex required the keyword and
+// the ref on the same line; (2) only the first ref on a "blocked by #12 #13"
+// line was captured.
+func parseBlockerRefs(body string) []string {
+	seen := map[string]bool{}
+	var refs []string
+	addRef := func(n string) {
+		if !seen[n] {
+			seen[n] = true
+			refs = append(refs, n)
+		}
+	}
+
+	inSection := false
+	for _, rawLine := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
+		line := strings.TrimRight(rawLine, "\r")
+
+		// "## Blocked by" section header — enter the section.
+		if blockedByHeader.MatchString(strings.TrimSpace(line)) {
+			inSection = true
+			continue
+		}
+		// Any other heading ends the section.
+		if anyHeading.MatchString(line) {
+			inSection = false
+		}
+
+		// List item inside the "Blocked by" section: extract all #N refs.
+		if inSection && bulletItem.MatchString(line) {
+			for _, m := range issueRef.FindAllStringSubmatch(line, -1) {
+				addRef(m[1])
+			}
+		}
+
+		// Inline keyword anywhere in the line: extract all #N refs that follow.
+		remaining := line
+		for {
+			loc := blockKeyword.FindStringIndex(remaining)
+			if loc == nil {
+				break
+			}
+			after := remaining[loc[1]:]
+			for _, m := range issueRef.FindAllStringSubmatch(after, -1) {
+				addRef(m[1])
+			}
+			remaining = after
+		}
+	}
+	return refs
+}
+
+// parseBlockers fetches each issue body from GitHub and returns a map from
+// issue number to the slice of issue numbers that must complete first.
+func parseBlockers(c config, issues []issue) (map[string][]string, error) {
+	edges := map[string][]string{}
+	for _, iss := range issues {
+		cmd := exec.Command("gh", "issue", "view", iss.number,
+			"--repo", c.repoSlug,
+			"--json", "body",
+			"--jq", `.body // ""`,
+		)
+		out, err := cmd.Output()
+		if err != nil {
+			// Non-fatal: skip issues whose body cannot be fetched.
+			continue
+		}
+		refs := parseBlockerRefs(strings.TrimRight(string(out), "\n"))
+		if len(refs) > 0 {
+			edges[iss.number] = refs
+		}
+	}
+	return edges, nil
+}
+
+// detectCycle runs Kahn's algorithm on the in-batch portion of the dependency
+// graph. Only edges where both endpoints appear in nums are considered; external
+// blockers (not in the batch) are ignored. Returns a cycle-member issue number
+// and true when a cycle exists; returns "" and false for an acyclic graph.
+func detectCycle(edges map[string][]string, nums []string) (string, bool) {
+	inBatch := make(map[string]bool, len(nums))
+	for _, n := range nums {
+		inBatch[n] = true
+	}
+
+	indegree := make(map[string]int, len(nums))
+	adj := map[string][]string{}
+	for _, n := range nums {
+		indegree[n] = 0
+	}
+	for child, blockers := range edges {
+		if !inBatch[child] {
+			continue
+		}
+		for _, blocker := range blockers {
+			if !inBatch[blocker] {
+				continue
+			}
+			indegree[child]++
+			adj[blocker] = append(adj[blocker], child)
+		}
+	}
+
+	queue := make([]string, 0, len(nums))
+	for _, n := range nums {
+		if indegree[n] == 0 {
+			queue = append(queue, n)
+		}
+	}
+	done := 0
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+		done++
+		for _, dep := range adj[node] {
+			indegree[dep]--
+			if indegree[dep] == 0 {
+				queue = append(queue, dep)
+			}
+		}
+	}
+	if done < len(nums) {
+		for _, n := range nums {
+			if indegree[n] > 0 {
+				return n, true
+			}
+		}
+	}
+	return "", false
+}
+
+// queryIssueState returns the GitHub state of an issue ("OPEN", "CLOSED", "").
+func queryIssueState(c config, num string) string {
+	cmd := exec.Command("gh", "issue", "view", num,
+		"--repo", c.repoSlug,
+		"--json", "state",
+		"--jq", ".state",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// blockerReady returns true when blocker dep carries COMPLETE_LABEL or is closed
+// (a closed blocker without the label is treated as satisfied, with a log note).
+func blockerReady(c config, dep string) bool {
+	if containsLabel(queryIssueLabels(c, dep), c.completeLabel) {
+		return true
+	}
+	if queryIssueState(c, dep) == "CLOSED" {
+		fmt.Printf("    .. blocker #%s is closed without '%s'; treating as satisfied\n", dep, c.completeLabel)
+		return true
+	}
+	return false
+}
+
+// issueIsReady returns true when all of num's declared blockers are ready.
+func issueIsReady(c config, num string, edges map[string][]string) bool {
+	for _, dep := range edges[num] {
+		if !blockerReady(c, dep) {
+			return false
+		}
+	}
+	return true
+}
+
+// issueNums returns the number strings from a slice of issues.
+func issueNums(issues []issue) []string {
+	nums := make([]string, len(issues))
+	for i, iss := range issues {
+		nums[i] = iss.number
+	}
+	return nums
+}
+
+// fanOut dispatches a batch of issues in parallel (up to maxParallel at once),
+// claiming the in-progress label before each goroutine launches.
+func fanOut(c config, pwd string, batch []issue) {
+	sem := make(chan struct{}, c.maxParallel)
+	var wg sync.WaitGroup
+	for _, iss := range batch {
+		swapLabel(c, iss.number, c.inProgressLabel, c.label)
+		wg.Add(1)
+		iss := iss
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if err := runOne(c, pwd, iss); err != nil {
+				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.number, iss.number)
+				swapLabel(c, iss.number, c.failedLabel, c.inProgressLabel)
+			} else {
+				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.number, iss.number)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// dispatchWaves fans issues out in dependency order. Each wave dispatches the
+// currently unblocked set; blocked issues are held and rechecked after
+// depsPollSecs. The deadlock timer resets on any progress; if no issue becomes
+// ready within depsWaitSecs the function returns an error rather than blocking
+// forever. Dispatched issues leave the remaining set even when they fail.
+func dispatchWaves(c config, pwd string, issues []issue, edges map[string][]string) error {
+	remaining := make([]issue, len(issues))
+	copy(remaining, issues)
+	elapsed := 0
+
+	for len(remaining) > 0 {
+		var ready, held []issue
+		for _, iss := range remaining {
+			if issueIsReady(c, iss.number, edges) {
+				ready = append(ready, iss)
+			} else {
+				held = append(held, iss)
+			}
+		}
+
+		if len(ready) == 0 {
+			if elapsed >= c.depsWaitSecs {
+				fmt.Fprintf(os.Stderr,
+					"ERROR: dependency deadlock — blockers did not reach '%s' after %ds\n",
+					c.completeLabel, c.depsWaitSecs)
+				for _, iss := range remaining {
+					fmt.Fprintf(os.Stderr, "    #%s %s\n", iss.number, iss.title)
+				}
+				return fmt.Errorf("dependency deadlock")
+			}
+			fmt.Printf("    .. all remaining issues blocked; retrying in %ds (%ds elapsed)\n",
+				c.depsPollSecs, elapsed)
+			time.Sleep(time.Duration(c.depsPollSecs) * time.Second)
+			elapsed += c.depsPollSecs
+			continue
+		}
+
+		// Progress: reset the deadlock timer.
+		elapsed = 0
+		fanOut(c, pwd, ready)
+		remaining = held
+	}
+	return nil
+}
+
 func run() error {
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -666,42 +942,61 @@ func run() error {
 		return nil
 	}
 
-	// Apply MAX_JOBS cap (single-wave: no in-process blocker polling).
-	// MAX_JOBS=0 means no cap.
-	if c.maxJobs > 0 && len(issues) > c.maxJobs {
-		issues = issues[:c.maxJobs]
-		fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(issues), c.maxJobs)
-	} else {
-		fmt.Printf("==> %d issue(s); launching up to %d container(s) at a time\n", len(issues), c.maxParallel)
+	// Build the dependency graph for the batch.
+	edges, err := parseBlockers(c, issues)
+	if err != nil {
+		return err
 	}
+	hasEdges := len(edges) > 0
 
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
 		return err
 	}
 
-	// Claim the lifecycle label synchronously before goroutine launch so a
-	// concurrent `run` invocation skips the issue immediately.
-	sem := make(chan struct{}, c.maxParallel)
-	var wg sync.WaitGroup
-	for _, iss := range issues {
-		swapLabel(c, iss.number, c.inProgressLabel, c.label)
-		wg.Add(1)
-		iss := iss
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			if err := runOne(c, pwd, iss); err != nil {
-				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.number, iss.number)
-				swapLabel(c, iss.number, c.failedLabel, c.inProgressLabel)
-			} else {
-				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.number, iss.number)
+	if c.maxJobs > 0 {
+		// MAX_JOBS > 0: drain up to N currently-unblocked issues, then exit.
+		// A blocked oldest issue is skipped so no slot is wasted on a
+		// dependency that hasn't merged yet; it waits for the next invocation.
+		if hasEdges {
+			if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
+				return fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
 			}
-		}()
+		}
+		var selected []issue
+		for _, iss := range issues {
+			if issueIsReady(c, iss.number, edges) {
+				selected = append(selected, iss)
+				if len(selected) >= c.maxJobs {
+					break
+				}
+			} else {
+				fmt.Printf("    ~~ #%s blocked (a blocker is not '%s'); skipping\n", iss.number, c.completeLabel)
+			}
+		}
+		if len(selected) == 0 {
+			fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", c.label)
+			return nil
+		}
+		fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), c.maxJobs)
+		fanOut(c, pwd, selected)
+		printOutcomeReport(c, pwd, selected)
+	} else if hasEdges {
+		// MAX_JOBS = 0 with dependency edges: multi-wave dispatch.
+		if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
+			return fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
+		}
+		fmt.Println("==> dependency edges found; dispatching in waves")
+		if err := dispatchWaves(c, pwd, issues, edges); err != nil {
+			return err
+		}
+		printOutcomeReport(c, pwd, issues)
+	} else {
+		// MAX_JOBS = 0, no declared edges: original single-wave fan-out.
+		fmt.Printf("==> %d issue(s); launching up to %d container(s) at a time\n", len(issues), c.maxParallel)
+		fanOut(c, pwd, issues)
+		printOutcomeReport(c, pwd, issues)
 	}
-	wg.Wait()
 
-	printOutcomeReport(c, pwd, issues)
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
 	return nil
 }
