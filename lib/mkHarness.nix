@@ -333,68 +333,6 @@ let
       }
   );
 
-  # Exported-variable variants of the preambles for the Go launcher wrapper.
-  # `export` is required so the exec'd Go binary inherits each value; plain
-  # assignments without export would be visible only to the shell wrapper.
-
-  goImagePreamble =
-    if runtime == "bwrap" then
-      ""
-    else
-      ''
-        export IMAGE_ARCHIVE="${imagePath}"
-        export IMAGE_TAG="spindrift:${imageHash}"
-        export RUNTIME="${runtime}"
-      '';
-
-  goBwrapRunPreamble = lib.optionalString (runtime == "bwrap") ''
-    export RUNTIME="bwrap"
-    export AGENT_FILES="${agentFilesPath}"
-    export AGENT_ENV="${agentEnvPath}"
-    BAKED_PREFETCH=${lib.escapeShellArg prefetch}
-    export BAKED_PREFETCH
-  '';
-
-  # OCI-only build vars the Go binary uses for image build-on-demand.
-  goRunBuildPreamble =
-    if runtime == "bwrap" then
-      ""
-    else
-      ''
-        export IMAGE_DRV="${imageDrv}"
-        export NIX_BUILDER_IMAGE="${nixBuilderImage}"
-        export NIX_VOLUME="spindrift-nix"
-        export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.spindrift"
-      '';
-
-  # Exported run defaults; a matching env var (or harness.env) still wins.
-  goRunDefaultsPreamble = lib.concatStrings (
-    lib.mapAttrsToList (envName: value: ''
-      export ${envName}="''${${envName}:-${toString value}}"
-    '')
-      {
-        LABEL = mergedDefaults.label;
-        BASE_BRANCH = mergedDefaults.baseBranch;
-        MAX_PARALLEL = mergedDefaults.maxParallel;
-        BRANCH_PREFIX = mergedDefaults.branchPrefix;
-        IN_PROGRESS_LABEL = mergedDefaults.inProgressLabel;
-        FAILED_LABEL = mergedDefaults.failedLabel;
-        COMPLETE_LABEL = mergedDefaults.completeLabel;
-        MODEL = mergedDefaults.model;
-        SCOUT_MODEL = mergedDefaults.scoutModel;
-        REVIEW_MODEL = mergedDefaults.reviewModel;
-      }
-  );
-
-  # The Go launcher binary, built hermetically by buildGoModule.
-  # No external dependencies → vendorHash = null.
-  launcherBin = hostPkgs.buildGoModule {
-    pname = "spindrift-launcher";
-    version = "0.1.0";
-    src = ../cmd/launcher;
-    vendorHash = null;
-  };
-
   # The launcher commands: a nix-rendered preamble + the script body, wrapped by
   # writeShellApplication (shebang, `set -euo pipefail`, a build-time shellcheck,
   # and a runtimeInputs PATH that pins the host tools they call).
@@ -416,10 +354,6 @@ let
       );
   };
 
-  # The run command: a thin shell wrapper that bakes nix-computed config into
-  # env vars, sources harness.env for runtime overrides, then execs the Go
-  # binary. The binary contains no baked store paths of its own beyond those
-  # injected here (ADR 0007).
   run = hostPkgs.writeShellApplication {
     name = "run";
     runtimeInputs = with hostPkgs; [
@@ -428,25 +362,18 @@ let
       coreutils
     ];
     text =
-      goImagePreamble
-      + goBwrapRunPreamble
-      + goRunBuildPreamble
-      + goRunDefaultsPreamble
-      + ''
-        # Config + secrets (gitignored), read from $PWD since the harness is a
-        # store path with no working tree. `set -a` overrides the baked defaults.
-        if [ -f "$PWD/harness.env" ]; then
-          set -a
-          # shellcheck disable=SC1091
-          . "$PWD/harness.env"
-          set +a
-        fi
-        # Commit identity: explicit override wins, else inherit the host git config.
-        GIT_USER_NAME="''${GIT_USER_NAME:-$(git config --get user.name 2>/dev/null || true)}"
-        GIT_USER_EMAIL="''${GIT_USER_EMAIL:-$(git config --get user.email 2>/dev/null || true)}"
-        export GIT_USER_NAME GIT_USER_EMAIL
-        exec ${launcherBin}/bin/launcher
-      '';
+      imagePreamble
+      + bwrapRunPreamble
+      # OCI only: bake in the build variables and helper functions so run can
+      # build the image on demand when it is absent. Excluded for bwrap (no
+      # OCI image involved) to keep the shellcheck clean.
+      + lib.optionalString (runtime != "bwrap") (
+        buildPreamble + builtins.readFile ./scripts/build-image.sh
+      )
+      + runDefaultsPreamble
+      # The prompt is baked into the image (see agentFiles); the launcher only
+      # needs to bind-mount a dir when SPINDRIFT_PROMPT_DIR overrides it.
+      + builtins.readFile ./scripts/run.sh;
   };
 
   # Realising the Linux image on darwin needs a Linux builder, so only offer it
