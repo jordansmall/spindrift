@@ -545,24 +545,24 @@
             # Realises the default image; Linux-gated like the other image checks.
             nix-conf-in-image =
               pkgs.runCommand "nix-conf-in-image" { nativeBuildInputs = [ pkgs.jq ]; } ''
-                mkdir img && tar -xf ${nonRustHarness.image} -C img
-                # Walk the layer tars for nix.conf. buildLayeredImage packs its
-                # customisation layer with `tar -cf layer.tar .`, so members carry
-                # a leading `./`; match and extract using the real member name.
-                found=0
-                for layer in img/*/layer.tar; do
-                  member="$(tar -tf "$layer" 2>/dev/null \
-                    | grep -E '^(\./)?etc/nix/nix\.conf$' | head -1 || true)"
-                  if [ -n "$member" ]; then
-                    tar -xOf "$layer" "$member" > nix.conf
-                    found=1
-                    break
-                  fi
-                done
-                [ "$found" -eq 1 ] || {
-                  echo "etc/nix/nix.conf not found in any image layer" >&2
+                # nix.conf is written by extraCommands, which buildLayeredImage
+                # packs into the top "customisation" layer. Read the manifest and
+                # inspect only that layer: untarring the whole image and scanning
+                # all ~98 store layers is O(image) disk I/O that wedges CI for
+                # 8-28min on throttled runners.
+                mkdir img
+                tar -xf ${nonRustHarness.image} -C img manifest.json
+                layer="$(jq -r '.[0].Layers[-1]' img/manifest.json)"
+                tar -xf ${nonRustHarness.image} -C img "$layer"
+                # The customisation layer is packed with `tar -cf layer.tar .`, so
+                # members carry a leading `./`; match and extract the real name.
+                member="$(tar -tf "img/$layer" \
+                  | grep -E '^(\./)?etc/nix/nix\.conf$' | head -1 || true)"
+                [ -n "$member" ] || {
+                  echo "etc/nix/nix.conf not in the image's top (customisation) layer" >&2
                   exit 1
                 }
+                tar -xOf "img/$layer" "$member" > nix.conf
                 grep -q 'experimental-features = nix-command flakes' nix.conf || {
                   echo "nix.conf is missing experimental-features" >&2
                   exit 1
