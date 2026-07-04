@@ -27,11 +27,18 @@ Re-scout only if a later finding reveals the change sits in the wrong place.
 
 # IMPLEMENT
 
-Using the scout's map, work test-first in a tight red→green→refactor loop:
+Using the scout's map, work test-first in a tight red→green→refactor loop. This
+is a hard rule, not a preference:
 
-1. RED: write one failing test for the next slice of behaviour.
-2. GREEN: write the minimal code to make it pass.
-3. REPEAT until the issue is satisfied, then REFACTOR.
+1. RED: write ONE failing test for the next slice of behaviour, then run it and
+   confirm it fails for the right reason. Never write implementation code before
+   a failing test exists.
+2. GREEN: write the minimal code to make that one test pass.
+3. REFACTOR, then REPEAT for the next slice.
+
+Do not batch the work: never write several tests up front, and never write all
+the tests and then all the implementation. One failing test, one change, at a
+time.
 
 # CHECK
 
@@ -53,8 +60,8 @@ log the fallback clearly. For a Rust workspace without a devShell that is:
 
 # COMMIT
 
-If the repo provides a `commit` skill, use it. Otherwise write strict
-Conventional Commits v1.0.0 messages, hard-wrapped.
+Write strict Conventional Commits v1.0.0 messages, hard-wrapped (subject ≤50
+chars, body wrapped at 72).
 
 Prefer several small, focused commits over one big commit — commit each logical
 unit (e.g. a domain change, then the wiring, then tests) so each stands alone

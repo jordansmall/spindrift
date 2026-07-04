@@ -150,6 +150,28 @@ EOF
   grep -qi 'scout' "$CLAUDE_PROMPT_FILE"
 }
 
+# The container has none of the operator's user/project skills, so the prompt
+# must be self-contained: spell the process out, never reference a skill.
+@test "default prompt makes TDD a hard rule, not a preference" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'hard rule' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'never write implementation code before' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt forbids batching tests and implementation" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'one failing test, one change' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt is self-contained: commit convention stated directly, no skill references" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'Conventional Commits' "$CLAUDE_PROMPT_FILE"
+  ! grep -qi 'skill' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "default prompt spawns a reviewer subagent with SPEC and STANDARDS rubric" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
