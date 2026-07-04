@@ -493,6 +493,33 @@ func queryPRState(pr string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// queryOpenPRByBranch looks up the first open PR on the given head branch.
+// Returns (url, isDraft, found). found is false when no open PR exists.
+func queryOpenPRByBranch(c config, branch string) (string, bool, bool) {
+	cmd := exec.Command("gh", "pr", "list",
+		"--repo", c.repoSlug,
+		"--head", branch,
+		"--state", "open",
+		"--json", "url",
+		"--jq", ".[0].url",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false, false
+	}
+	url := strings.TrimSpace(string(out))
+	if url == "" {
+		return "", false, false
+	}
+	viewCmd := exec.Command("gh", "pr", "view", url, "--json", "isDraft", "--jq", ".isDraft")
+	out, err = viewCmd.Output()
+	if err != nil {
+		return url, false, true
+	}
+	isDraft := strings.TrimSpace(string(out)) == "true"
+	return url, isDraft, true
+}
+
 func queryIssueLabels(c config, num string) []string {
 	cmd := exec.Command("gh", "issue", "view", num,
 		"--repo", c.repoSlug,
@@ -621,7 +648,22 @@ func printOutcomeReport(c config, pwd string, issues []issue) {
 		logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
 		line := outcomeLine(logPath)
 		if line == "" {
-			fmt.Printf("    #%s  status=missing  note=no SPINDRIFT_OUTCOME in log\n", iss.number)
+			branch := c.branchPrefix + iss.number
+			prURL, isDraft, found := queryOpenPRByBranch(c, branch)
+			if !found {
+				fmt.Printf("    #%s  status=missing  note=no SPINDRIFT_OUTCOME in log\n", iss.number)
+				continue
+			}
+			if isDraft {
+				fmt.Printf("    #%s  pr=%s  status=blocked  note=draft PR on %s; no outcome line\n", iss.number, prURL, branch)
+				continue
+			}
+			fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", iss.number, prURL, branch)
+			if mergeWhenGreen(c, iss.number, prURL) {
+				verifyMerged(c, iss.number, prURL)
+			} else {
+				fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, prURL)
+			}
 			continue
 		}
 		pr := field(line, "pr")
