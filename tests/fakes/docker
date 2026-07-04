@@ -11,8 +11,10 @@ printf '%s\n' "$*" >>"$DOCKER_LOG"
 
 case "${1:-}" in
   image)
-    # `docker image exists <ref>` — presence is controlled by the test.
-    if [ "${2:-}" = "exists" ]; then
+    # `docker image inspect <ref>` — presence is controlled by the test.
+    # docker has no `image exists` verb; using `image inspect` is portable
+    # across podman and docker (fixes #92).
+    if [ "${2:-}" = "inspect" ]; then
       [ "${FAKE_DOCKER_IMAGE_PRESENT:-0}" = "1" ]
       exit $?
     fi

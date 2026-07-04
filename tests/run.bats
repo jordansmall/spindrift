@@ -53,8 +53,8 @@ setup() {
   [ "$status" -eq 0 ]
   # IMAGE_PATH is /nix/store/<32-char-hash>-spindrift; extract the hash
   image_hash="${IMAGE_PATH:11:32}"
-  grep -q "image exists spindrift:$image_hash" "$PODMAN_LOG"
-  ! grep -q 'image exists spindrift:latest' "$PODMAN_LOG"
+  grep -q "image inspect spindrift:$image_hash" "$PODMAN_LOG"
+  ! grep -q 'image inspect spindrift:latest' "$PODMAN_LOG"
 }
 
 @test "run also tags the image with the content-hash tag when building" {
