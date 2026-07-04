@@ -438,6 +438,8 @@ func runOne(c config, pwd string, iss issue) error {
 }
 
 // outcomeLine returns the last SPINDRIFT_OUTCOME line from the issue log.
+// Uses a 4 MiB scanner buffer so that large tool-output lines (JSON, file
+// reads) before the outcome line do not silently truncate the scan.
 func outcomeLine(logPath string) string {
 	f, err := os.Open(logPath)
 	if err != nil {
@@ -446,6 +448,7 @@ func outcomeLine(logPath string) string {
 	defer f.Close()
 	var last string
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 	for scanner.Scan() {
 		if line := scanner.Text(); strings.HasPrefix(line, "SPINDRIFT_OUTCOME ") {
 			last = line
