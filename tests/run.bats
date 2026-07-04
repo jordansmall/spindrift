@@ -541,3 +541,16 @@ EOF
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
   [[ "$output" == *"status=verified-merged"* ]]
 }
+
+@test "status=ready + pr checks failure → does NOT merge, swaps to agent-failed" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_GH_PR_CHECKS_1="failure"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  ! grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
+  [[ "$output" == *"status=failed"* ]]
+}
+
