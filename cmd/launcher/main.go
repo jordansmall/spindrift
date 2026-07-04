@@ -73,7 +73,7 @@ func getenv(key, def string) string {
 }
 
 func atoi(s string, def int) int {
-	if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+	if n, err := strconv.Atoi(s); err == nil && n > 0 {
 		return n
 	}
 	return def
