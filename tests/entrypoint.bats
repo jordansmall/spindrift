@@ -179,18 +179,18 @@ EOF
   grep -qi 'no checks' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "default prompt merges with rebase and deletes the branch on green" {
+@test "default prompt states the launcher owns the merge" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- '--rebase' "$CLAUDE_PROMPT_FILE"
-  grep -q -- '--delete-branch' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'launcher.*owns\|launcher.*rebase\|rebase.*launcher\|launcher.*merge\|merge.*launcher' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'do not run.*gh pr merge\|do not.*merge\|not.*run.*pr merge' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "default prompt relabels in-progress to complete on success" {
+@test "default prompt instructs agent the launcher owns the complete-label swap" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'COMPLETE_LABEL\|agent-complete' "$CLAUDE_PROMPT_FILE"
-  grep -q -- '--remove-label.*IN_PROGRESS_LABEL\|--remove-label.*agent-in-progress\|--add-label.*COMPLETE_LABEL\|--add-label.*agent-complete' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'launcher.*complete\|complete.*launcher\|launcher.*owns\|owns.*complete' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'do not.*add-label\|do not run.*issue edit' "$CLAUDE_PROMPT_FILE"
 }
 
 @test "default prompt emits exactly one SPINDRIFT_OUTCOME line" {
@@ -205,23 +205,23 @@ EOF
   grep -q 'status=blocked' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "default prompt verifies PR is MERGED before emitting the outcome line" {
+@test "default prompt emits status=ready as the success outcome" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'MERGED' "$CLAUDE_PROMPT_FILE"
-  grep -qi 'gh pr view' "$CLAUDE_PROMPT_FILE"
+  grep -q 'status=ready' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'status=merged' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "default prompt verifies COMPLETE_LABEL on the issue before emitting the outcome line" {
+@test "default prompt states the launcher owns the CI-green decision" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qi 'postcondition\|verify.*label\|label.*verif\|confirm.*label\|label.*confirm' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'launcher.*ci\|launcher.*green\|launcher.*owns\|ci.*launcher\|green.*launcher' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "default prompt takes the blocked path when a postcondition check fails" {
+@test "default prompt takes the blocked path when CI fails to register" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qi 'either.*fail\|fail.*verif\|verif.*fail\|check.*fail\|fail.*check\|either.*check\|check.*either' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'no check.*register\|if no check\|never.*register\|not.*register' "$CLAUDE_PROMPT_FILE"
   grep -q 'status=blocked' "$CLAUDE_PROMPT_FILE"
 }
 

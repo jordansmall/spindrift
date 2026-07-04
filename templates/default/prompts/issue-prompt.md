@@ -102,63 +102,36 @@ Non-blocking findings (style nits, suggestions) may be noted in the PR body.
 
 # WATCH CI
 
-After opening the PR, wait for CI to **register** before you trust it. Run right
+After opening the PR, wait for CI to **register** before you stop. Run right
 after `gh pr create`, `gh pr checks --watch` finds no checks yet, prints "no
 checks" and exits 0 — and treating that as green merges before CI even starts.
-So first block until at least one check appears, then watch it to completion:
+So first block until at least one check appears:
 
 ```
 # "no checks" yet means not-started, NOT green — wait for a check to register
 until gh pr checks <pr-number> 2>/dev/null | grep -q .; do sleep 10; done
-gh pr checks <pr-number> --watch
 ```
 
-If no check ever registers within a few minutes, do NOT merge — treat it as a
-blocker and follow IF BLOCKED.
+If no check ever registers within a few minutes, do NOT emit `status=ready` —
+follow IF BLOCKED instead.
 
-**Never merge on red, and never merge on "no checks".** If any check fails:
-
-1. Fix the code on the branch, run local checks, commit, and push.
-2. Re-watch: `gh pr checks <pr-number> --watch`.
-3. Repeat until all checks are green.
-
-# MERGE
-
-Once all checks are green, merge with rebase and delete the branch:
-
-```
-gh pr merge <pr-number> --rebase --delete-branch
-```
-
-Do not use auto-merge. Hold the thread open for the entire fix-on-red loop.
-
-# COMPLETE
-
-After merging, swap the lifecycle label:
-
-```
-gh issue edit ${ISSUE_NUMBER} --remove-label ${IN_PROGRESS_LABEL} --add-label ${COMPLETE_LABEL}
-```
+**Never merge on red, and never merge on "no checks".** The LAUNCHER (outside
+this container) owns the final CI-green decision, the rebase-merge, and the
+complete-label swap. Stop here once CI has registered — do not wait for checks
+to complete and do not run `gh pr merge`.
 
 # OUTCOME
 
-Before emitting the outcome line, **verify both postconditions** from observed
-external state — a passing review is the halfway gate, not the finish line:
-
-1. **PR is merged**: `gh pr view <pr-number> --json state --jq '.state'` must
-   return `MERGED`.
-2. **Issue is labelled**: `gh issue view ${ISSUE_NUMBER} --json labels --jq '.labels[].name'`
-   must include `${COMPLETE_LABEL}`.
-
-If **both** checks pass, print exactly one machine-readable line as your
-**final output**:
+Once CI has registered (at least one check appeared in the WATCH CI step), print
+exactly one machine-readable line as your **final output**:
 
 ```
-SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} pr=<pr-url> status=merged note=<short reason>
+SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} pr=<pr-url> status=ready note=<short reason>
 ```
 
-If **either** check fails, do NOT emit `status=merged` — take the **IF BLOCKED**
-path instead.
+`status=ready` means: branch pushed, PR open, CI started. The LAUNCHER owns
+the merge and the complete-label swap.
+Do NOT run `gh issue edit ... --add-label ${COMPLETE_LABEL}` or `gh pr merge`.
 
 # IF BLOCKED
 
