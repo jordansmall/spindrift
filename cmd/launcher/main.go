@@ -501,7 +501,7 @@ func queryOpenPRByBranch(c config, branch string) (string, bool, bool) {
 		"--head", branch,
 		"--state", "open",
 		"--json", "url",
-		"--jq", ".[0].url",
+		"--jq", ".[0].url // \"\"",
 	)
 	out, err := cmd.Output()
 	if err != nil {
@@ -514,7 +514,8 @@ func queryOpenPRByBranch(c config, branch string) (string, bool, bool) {
 	viewCmd := exec.Command("gh", "pr", "view", url, "--json", "isDraft", "--jq", ".isDraft")
 	out, err = viewCmd.Output()
 	if err != nil {
-		return url, false, true
+		// Cannot determine draft status — do not adopt; fall back to status=missing.
+		return "", false, false
 	}
 	isDraft := strings.TrimSpace(string(out)) == "true"
 	return url, isDraft, true
