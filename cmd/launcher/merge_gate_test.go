@@ -24,55 +24,62 @@ const testPR = "https://github.com/owner/repo/pull/42"
 
 func TestMergeWhenGreen(t *testing.T) {
 	cases := []struct {
-		name        string
-		timeout     int
-		checkStates []forge.RollupState
-		mergeErr    error
-		wantMerged  bool
-		wantSwapAdd string // expected label added in last SwapLabel call
+		name           string
+		timeout        int
+		checkStates    []forge.RollupState
+		mergeErr       error
+		wantMerged     bool
+		wantGenuineRed bool
+		wantSwapAdd    string // expected label added in last SwapLabel call; "" = no swap
 	}{
 		{
-			name:        "SUCCESS on first poll merges and completes",
-			timeout:     100,
-			checkStates: []forge.RollupState{forge.StateSuccess},
-			wantMerged:  true,
-			wantSwapAdd: "agent-complete",
+			name:           "SUCCESS on first poll merges and completes",
+			timeout:        100,
+			checkStates:    []forge.RollupState{forge.StateSuccess},
+			wantMerged:     true,
+			wantGenuineRed: false,
+			wantSwapAdd:    "agent-complete",
 		},
 		{
-			name:        "PENDING then SUCCESS merges after one wait iteration",
-			timeout:     100,
-			checkStates: []forge.RollupState{forge.StatePending, forge.StateSuccess},
-			wantMerged:  true,
-			wantSwapAdd: "agent-complete",
+			name:           "PENDING then SUCCESS merges after one wait iteration",
+			timeout:        100,
+			checkStates:    []forge.RollupState{forge.StatePending, forge.StateSuccess},
+			wantMerged:     true,
+			wantGenuineRed: false,
+			wantSwapAdd:    "agent-complete",
 		},
 		{
-			name:        "FAILURE refuses immediately and labels agent-failed",
-			timeout:     100,
-			checkStates: []forge.RollupState{forge.StateFailure},
-			wantMerged:  false,
-			wantSwapAdd: "agent-failed",
+			name:           "FAILURE returns genuine-red signal without label swap",
+			timeout:        100,
+			checkStates:    []forge.RollupState{forge.StateFailure},
+			wantMerged:     false,
+			wantGenuineRed: true,
+			wantSwapAdd:    "", // selfHeal owns the label swap
 		},
 		{
-			name:        "ERROR refuses immediately and labels agent-failed",
-			timeout:     100,
-			checkStates: []forge.RollupState{forge.StateError},
-			wantMerged:  false,
-			wantSwapAdd: "agent-failed",
+			name:           "ERROR returns genuine-red signal without label swap",
+			timeout:        100,
+			checkStates:    []forge.RollupState{forge.StateError},
+			wantMerged:     false,
+			wantGenuineRed: true,
+			wantSwapAdd:    "", // selfHeal owns the label swap
 		},
 		{
-			name:        "NONE (no checks registered) times out and labels agent-failed",
-			timeout:     0, // expires on first iteration
-			checkStates: nil,
-			wantMerged:  false,
-			wantSwapAdd: "agent-failed",
+			name:           "NONE (no checks registered) times out — non-genuine failure",
+			timeout:        0, // expires on first iteration
+			checkStates:    nil,
+			wantMerged:     false,
+			wantGenuineRed: false,
+			wantSwapAdd:    "", // selfHeal owns the label swap
 		},
 		{
-			name:        "merge command failure surfaces as refusal not success",
-			timeout:     100,
-			checkStates: []forge.RollupState{forge.StateSuccess},
-			mergeErr:    errors.New("merge failed"),
-			wantMerged:  false,
-			wantSwapAdd: "agent-failed",
+			name:           "merge command failure is non-genuine (not a CI red)",
+			timeout:        100,
+			checkStates:    []forge.RollupState{forge.StateSuccess},
+			mergeErr:       errors.New("merge failed"),
+			wantMerged:     false,
+			wantGenuineRed: false,
+			wantSwapAdd:    "", // selfHeal owns the label swap
 		},
 	}
 
@@ -89,10 +96,13 @@ func TestMergeWhenGreen(t *testing.T) {
 				fc.SetCheckStates(testPR, tc.checkStates)
 			}
 
-			got := mergeWhenGreen(c, fc, "1", testPR)
+			got, genuineRed := mergeWhenGreen(c, fc, "1", testPR)
 
 			if got != tc.wantMerged {
-				t.Errorf("mergeWhenGreen returned %v, want %v", got, tc.wantMerged)
+				t.Errorf("mergeWhenGreen merged=%v, want %v", got, tc.wantMerged)
+			}
+			if genuineRed != tc.wantGenuineRed {
+				t.Errorf("mergeWhenGreen genuineRed=%v, want %v", genuineRed, tc.wantGenuineRed)
 			}
 			if tc.wantMerged && fc.Merged != testPR {
 				t.Errorf("Merge not called with PR URL; fc.Merged=%q", fc.Merged)
@@ -101,12 +111,18 @@ func TestMergeWhenGreen(t *testing.T) {
 				t.Errorf("Merge should not have been called; fc.Merged=%q", fc.Merged)
 			}
 
-			if len(fc.SwapCalls) == 0 {
-				t.Fatalf("no SwapLabel calls recorded")
-			}
-			last := fc.SwapCalls[len(fc.SwapCalls)-1]
-			if last.Add != tc.wantSwapAdd {
-				t.Errorf("last swap add=%q, want %q", last.Add, tc.wantSwapAdd)
+			if tc.wantSwapAdd != "" {
+				if len(fc.SwapCalls) == 0 {
+					t.Fatalf("expected SwapLabel call but got none")
+				}
+				last := fc.SwapCalls[len(fc.SwapCalls)-1]
+				if last.Add != tc.wantSwapAdd {
+					t.Errorf("last swap add=%q, want %q", last.Add, tc.wantSwapAdd)
+				}
+			} else {
+				if len(fc.SwapCalls) > 0 {
+					t.Errorf("expected no SwapLabel calls, got %d: %+v", len(fc.SwapCalls), fc.SwapCalls)
+				}
 			}
 		})
 	}

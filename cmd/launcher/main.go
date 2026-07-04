@@ -60,6 +60,7 @@ type config struct {
 	// Merge gate polling knobs
 	mergePollInterval int
 	mergePollTimeout  int
+	maxFixAttempts    int
 
 	// Secrets / identity
 	ghToken          string
@@ -73,8 +74,9 @@ type config struct {
 }
 
 type issue struct {
-	number string
-	title  string
+	number  string
+	title   string
+	fixPass int // 0 = initial run; >0 = fix-pass number (sets FIX_PASS env)
 }
 
 func getenv(key, def string) string {
@@ -139,6 +141,7 @@ func loadConfig() config {
 
 		mergePollInterval: atoiNonneg(getenv("MERGE_POLL_INTERVAL", "30"), 30),
 		mergePollTimeout:  atoiNonneg(getenv("MERGE_POLL_TIMEOUT", "1800"), 1800),
+		maxFixAttempts:    atoiNonneg(getenv("MAX_FIX_ATTEMPTS", "3"), 3),
 
 		ghToken:          os.Getenv("GH_TOKEN"),
 		claudeOAuthToken: os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
@@ -305,6 +308,9 @@ func runOneOCI(c config, iss issue, logFile *os.File) error {
 		"-e", "IN_PROGRESS_LABEL="+c.inProgressLabel,
 		"-e", "COMPLETE_LABEL="+c.completeLabel,
 	)
+	if iss.fixPass > 0 {
+		args = append(args, "-e", fmt.Sprintf("FIX_PASS=%d", iss.fixPass))
+	}
 	if c.spindriftPromptDir != "" {
 		if info, err := os.Stat(c.spindriftPromptDir); err == nil && info.IsDir() {
 			fmt.Printf("==> SPINDRIFT_PROMPT_DIR set; mounting %s over the baked prompt\n", c.spindriftPromptDir)
@@ -385,6 +391,11 @@ func runOneBwrap(c config, iss issue, logFile *os.File) error {
 		"--setenv", "IN_PROGRESS_LABEL", c.inProgressLabel,
 		"--setenv", "COMPLETE_LABEL", c.completeLabel,
 		"--setenv", "PREFETCH", c.bakedPrefetch,
+	)
+	if iss.fixPass > 0 {
+		args = append(args, "--setenv", "FIX_PASS", strconv.Itoa(iss.fixPass))
+	}
+	args = append(args,
 		"--unshare-user", "--uid", "1000", "--gid", "1000",
 		"--unshare-pid", "--unshare-ipc", "--unshare-uts",
 		"--", "/agent/entrypoint.sh",
@@ -411,6 +422,27 @@ func runOne(c config, pwd string, iss issue) error {
 		return runOneBwrap(c, iss, logFile)
 	}
 	return runOneOCI(c, iss, logFile)
+}
+
+// runFix dispatches a fix box for issue iss, writing output to a per-attempt
+// log file. The fix box receives FIX_PASS=fixPass so the entrypoint can
+// distinguish fix runs and check out the existing branch rather than creating a
+// new one.
+func runFix(c config, pwd string, iss issue, fixPass int) error {
+	logPath := filepath.Join(pwd, "logs", fmt.Sprintf("issue-%s-fix-%d.log", iss.number, fixPass))
+	fmt.Printf("    -> #%s (fix-pass-%d): %s\n", iss.number, fixPass, iss.title)
+
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		return fmt.Errorf("create fix log: %w", err)
+	}
+	defer logFile.Close()
+
+	fixIss := issue{number: iss.number, title: iss.title, fixPass: fixPass}
+	if c.runtime == "bwrap" {
+		return runOneBwrap(c, fixIss, logFile)
+	}
+	return runOneOCI(c, fixIss, logFile)
 }
 
 // outcomeLine returns the last SPINDRIFT_OUTCOME line from the issue log.
@@ -453,10 +485,15 @@ func noteField(line string) string {
 }
 
 // mergeWhenGreen polls CheckState on the PR's head commit until the state
-// reaches SUCCESS, a terminal failure, or mergePollTimeout seconds elapse. On
-// SUCCESS it merges via rebase and swaps the issue to completeLabel; on any
-// failure or timeout it swaps to failedLabel. Returns true when merged.
-func mergeWhenGreen(c config, fc forge.Client, num, pr string) bool {
+// reaches SUCCESS, a terminal failure, or mergePollTimeout seconds elapse.
+//
+// Returns (merged, genuineRed):
+//   - (true, false)  — CI green, PR merged, issue swapped to completeLabel.
+//   - (false, true)  — CI red (FAILURE or ERROR); caller decides whether to
+//     dispatch a fix box. No label swap performed.
+//   - (false, false) — non-retriable outcome (timeout, merge command failure);
+//     no label swap performed. Caller must swap to failedLabel.
+func mergeWhenGreen(c config, fc forge.Client, num, pr string) (bool, bool) {
 	pollIv := c.mergePollInterval
 	deadline := c.mergePollTimeout
 	// actualIv is used for elapsed tracking; floor to 1 so we don't
@@ -475,14 +512,13 @@ func mergeWhenGreen(c config, fc forge.Client, num, pr string) bool {
 		case forge.StateSuccess:
 			if err := fc.Merge(pr); err == nil {
 				swapLabel(fc, num, c.completeLabel, c.inProgressLabel)
-				return true
+				return true, false
 			}
-			swapLabel(fc, num, c.failedLabel, c.inProgressLabel)
-			return false
+			// Merge command failed — not a genuine CI red; no retry.
+			return false, false
 		case forge.StateFailure, forge.StateError:
-			// Hard failure — refuse without further polling.
-			swapLabel(fc, num, c.failedLabel, c.inProgressLabel)
-			return false
+			// Genuine red — signal caller so it can dispatch a fix pass.
+			return false, true
 		}
 
 		// PENDING, EXPECTED, NONE (no checks yet), or unrecognised — keep
@@ -495,8 +531,34 @@ func mergeWhenGreen(c config, fc forge.Client, num, pr string) bool {
 		time.Sleep(time.Duration(pollIv) * time.Second)
 		elapsed += actualIv
 	}
-	swapLabel(fc, num, c.failedLabel, c.inProgressLabel)
-	return false
+	return false, false
+}
+
+// selfHeal polls the merge gate, dispatching fix boxes on genuine red up to
+// maxFixAttempts times. It owns all label swaps on the failure path;
+// mergeWhenGreen owns the completeLabel swap on success.
+//
+// runFix is called with the 1-based fix-pass number and must dispatch the fix
+// box synchronously (it blocks until the box exits).
+func selfHeal(c config, fc forge.Client, runFixFn func(int) error, num, pr string) bool {
+	for attempt := 0; ; attempt++ {
+		merged, genuineRed := mergeWhenGreen(c, fc, num, pr)
+		if merged {
+			return true
+		}
+		if !genuineRed || attempt >= c.maxFixAttempts {
+			if genuineRed && c.maxFixAttempts > 0 {
+				fmt.Printf("    #%s  pr=%s  status=fix-exhausted  !! exhausted %d fix pass(es)\n",
+					num, pr, c.maxFixAttempts)
+			}
+			swapLabel(fc, num, c.failedLabel, c.inProgressLabel)
+			return false
+		}
+		fmt.Printf("    #%s  pr=%s  fix-pass=%d/%d\n", num, pr, attempt+1, c.maxFixAttempts)
+		if err := runFixFn(attempt + 1); err != nil {
+			fmt.Printf("    !! #%s fix-pass-%d exited non-zero\n", num, attempt+1)
+		}
+	}
 }
 
 func verifyMerged(c config, fc forge.Client, num, pr string) {
@@ -537,7 +599,8 @@ func printOutcomeReport(c config, fc forge.Client, pwd string, issues []issue) {
 				continue
 			}
 			fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", iss.number, pr, branch)
-			if mergeWhenGreen(c, fc, iss.number, pr) {
+			fixFn := func(fixPass int) error { return runFix(c, pwd, iss, fixPass) }
+			if selfHeal(c, fc, fixFn, iss.number, pr) {
 				verifyMerged(c, fc, iss.number, pr)
 			} else {
 				fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, pr)
@@ -552,8 +615,9 @@ func printOutcomeReport(c config, fc forge.Client, pwd string, issues []issue) {
 		case "blocked":
 			fmt.Printf("    #%s  pr=%s  status=%s  !! %s\n", iss.number, pr, status, note)
 		case "ready":
-			// Agent pushed a PR but left CI to the launcher — poll and merge.
-			if mergeWhenGreen(c, fc, iss.number, pr) {
+			// Agent pushed a PR but left CI to the launcher — poll, self-heal, and merge.
+			fixFn := func(fixPass int) error { return runFix(c, pwd, iss, fixPass) }
+			if selfHeal(c, fc, fixFn, iss.number, pr) {
 				verifyMerged(c, fc, iss.number, pr)
 			} else {
 				fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, pr)
