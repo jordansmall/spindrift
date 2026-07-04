@@ -320,6 +320,18 @@ EOF
   grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
 }
 
+@test "run parses the header-plus-list blocked-by format from /to-issues" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'2\tDependent'
+  # /to-issues renders "## Blocked by" as a section header with "- #N" items —
+  # the format the original shell regex missed entirely (issue #60).
+  export FAKE_GH_ISSUE_BODY_2=$'## Blocked by\n\n- #1 (some prerequisite issue)'
+  export FAKE_GH_ISSUE_LABELS_1="agent-complete"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
+}
+
 @test "run errors on a dependency cycle in the ready batch" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tA\n2\tB'

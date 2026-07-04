@@ -279,9 +279,9 @@ let
       ""
     else
       ''
-        IMAGE_ARCHIVE="${imagePath}"
-        IMAGE_TAG="spindrift:${imageHash}"
-        RUNTIME="${runtime}"
+        export IMAGE_ARCHIVE="${imagePath}"
+        export IMAGE_TAG="spindrift:${imageHash}"
+        export RUNTIME="${runtime}"
       '';
 
   # Build-only addendum baked on top of imagePreamble.
@@ -290,15 +290,15 @@ let
   buildPreamble =
     if runtime == "bwrap" then
       ''
-        AGENT_FILES_DRV="${agentFilesDrv}"
-        AGENT_ENV_DRV="${agentEnvDrv}"
+        export AGENT_FILES_DRV="${agentFilesDrv}"
+        export AGENT_ENV_DRV="${agentEnvDrv}"
       ''
     else
       ''
-        IMAGE_DRV="${imageDrv}"
-        NIX_BUILDER_IMAGE="${nixBuilderImage}"
-        NIX_VOLUME="spindrift-nix"
-        FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.spindrift"
+        export IMAGE_DRV="${imageDrv}"
+        export NIX_BUILDER_IMAGE="${nixBuilderImage}"
+        export NIX_VOLUME="spindrift-nix"
+        export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.spindrift"
       '';
 
   # Run-only addendum for the bwrap path: the runtime marker, the agent store
@@ -306,10 +306,10 @@ let
   # PREFETCH). RUNTIME lives here rather than in imagePreamble so it is baked
   # into run (which branches on it) but not build (which never reads it).
   bwrapRunPreamble = lib.optionalString (runtime == "bwrap") ''
-    RUNTIME="bwrap"
-    AGENT_FILES="${agentFilesPath}"
-    AGENT_ENV="${agentEnvPath}"
-    BAKED_PREFETCH=${lib.escapeShellArg prefetch}
+    export RUNTIME="bwrap"
+    export AGENT_FILES="${agentFilesPath}"
+    export AGENT_ENV="${agentEnvPath}"
+    export BAKED_PREFETCH=${lib.escapeShellArg prefetch}
   '';
 
   # Each run default renders as `NAME="''${NAME:-<baked>}"`, derived from the
@@ -317,7 +317,7 @@ let
   # the script) still wins at runtime.
   runDefaultsPreamble = lib.concatStrings (
     lib.mapAttrsToList (envName: value: ''
-      ${envName}="''${${envName}:-${toString value}}"
+      export ${envName}="''${${envName}:-${toString value}}"
     '')
       {
         LABEL = mergedDefaults.label;
@@ -332,6 +332,18 @@ let
         REVIEW_MODEL = mergedDefaults.reviewModel;
       }
   );
+
+  # The Go orchestrator binary. `buildGoModule` with vendorHash = null signals
+  # no external dependencies; nix resolves all deps from the standard library.
+  # The binary reads env vars set by the shell preamble and handles the full
+  # launch sequence: image-ensure, issue-query, dep-graph, wave-dispatch,
+  # outcome-report (ADR 0007).
+  spindriftRun = hostPkgs.buildGoModule {
+    pname = "spindrift-run";
+    version = "0.0.1";
+    src = ./launcher;
+    vendorHash = null;
+  };
 
   # The launcher commands: a nix-rendered preamble + the script body, wrapped by
   # writeShellApplication (shebang, `set -euo pipefail`, a build-time shellcheck,
@@ -356,23 +368,23 @@ let
 
   run = hostPkgs.writeShellApplication {
     name = "run";
+    # The Go binary (spindrift-run) is added to PATH via runtimeInputs so the
+    # thin shell wrapper can `exec spindrift-run`.  nix and the container
+    # runtime are NOT pinned here — they are expected as host-installed tools
+    # (nix is universal on spindrift hosts; the runtime is user-chosen).
     runtimeInputs = with hostPkgs; [
       gh
       git
       coreutils
+      spindriftRun
     ];
     text =
       imagePreamble
       + bwrapRunPreamble
-      # OCI only: bake in the build variables and helper functions so run can
-      # build the image on demand when it is absent. Excluded for bwrap (no
-      # OCI image involved) to keep the shellcheck clean.
-      + lib.optionalString (runtime != "bwrap") (
-        buildPreamble + builtins.readFile ./scripts/build-image.sh
-      )
+      # OCI only: bake the image build variables into the env so the Go binary
+      # can call `nix build` and the runtime to ensure the image is present.
+      + lib.optionalString (runtime != "bwrap") buildPreamble
       + runDefaultsPreamble
-      # The prompt is baked into the image (see agentFiles); the launcher only
-      # needs to bind-mount a dir when SPINDRIFT_PROMPT_DIR overrides it.
       + builtins.readFile ./scripts/run.sh;
   };
 
