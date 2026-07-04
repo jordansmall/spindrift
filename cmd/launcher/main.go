@@ -549,10 +549,37 @@ func containsLabel(labels []string, target string) bool {
 	return false
 }
 
-// mergeWhenGreen polls gh pr checks for pr until all checks pass, one fails,
-// or mergePollTimeout seconds elapse. On all-success it merges via rebase and
-// swaps the issue to completeLabel; on any failure or timeout it swaps to
-// failedLabel. Returns true when the merge was performed.
+// queryRollupState fetches the aggregate CI status of pr's head commit via
+// GraphQL statusCheckRollup. Returns the rollup state (SUCCESS, PENDING,
+// EXPECTED, FAILURE, ERROR) or "" when there is no rollup or the query fails.
+// Using the rollup instead of per-check contexts allows a fine-grained PAT
+// without the Checks-API read permission to still gate on CI greenness.
+func queryRollupState(pr string) string {
+	// Parse https://github.com/OWNER/REPO/pull/NUMBER
+	parts := strings.Split(pr, "/")
+	if len(parts) < 7 {
+		return ""
+	}
+	owner, repo, number := parts[3], parts[4], parts[6]
+	const gql = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}`
+	cmd := exec.Command("gh", "api", "graphql",
+		"-f", "query="+gql,
+		"-f", "owner="+owner,
+		"-f", "repo="+repo,
+		"-F", "number="+number,
+		"--jq", `.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state // ""`,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// mergeWhenGreen polls statusCheckRollup.state on the PR's head commit until
+// the state reaches SUCCESS, a terminal failure, or mergePollTimeout seconds
+// elapse. On SUCCESS it merges via rebase and swaps the issue to completeLabel;
+// on any failure or timeout it swaps to failedLabel. Returns true when merged.
 func mergeWhenGreen(c config, num, pr string) bool {
 	pollIv := c.mergePollInterval
 	deadline := c.mergePollTimeout
@@ -565,58 +592,29 @@ func mergeWhenGreen(c config, num, pr string) bool {
 	elapsed := 0
 
 	for {
-		cmd := exec.Command("gh", "pr", "checks", pr,
-			"--json", "bucket",
-			"--jq", ".[].bucket",
-		)
-		out, _ := cmd.Output()
-		buckets := strings.TrimSpace(string(out))
+		state := queryRollupState(pr)
 
-		if buckets == "" {
-			// No checks registered yet — wait.
-			if elapsed >= deadline {
-				break
+		switch state {
+		case "SUCCESS":
+			mergeCmd := exec.Command("gh", "pr", "merge", pr, "--rebase", "--delete-branch")
+			if err := mergeCmd.Run(); err == nil {
+				swapLabel(c, num, c.completeLabel, c.inProgressLabel)
+				return true
 			}
-			time.Sleep(time.Duration(actualIv) * time.Second)
-			elapsed += actualIv
-			continue
-		}
-
-		hasFail := false
-		hasPending := false
-		for _, l := range strings.Split(buckets, "\n") {
-			l = strings.TrimSpace(l)
-			switch l {
-			case "fail", "cancel":
-				hasFail = true
-			case "pending":
-				hasPending = true
-			}
-		}
-
-		if hasFail {
+			swapLabel(c, num, c.failedLabel, c.inProgressLabel)
+			return false
+		case "FAILURE", "ERROR":
 			// Hard failure — refuse without further polling.
 			swapLabel(c, num, c.failedLabel, c.inProgressLabel)
 			return false
 		}
-		if hasPending {
-			// At least one check still in progress — wait.
-			if elapsed >= deadline {
-				break
-			}
-			time.Sleep(time.Duration(actualIv) * time.Second)
-			elapsed += actualIv
-			continue
-		}
 
-		// All buckets ∈ {pass, skipping} with at least one check — merge.
-		mergeCmd := exec.Command("gh", "pr", "merge", pr, "--rebase", "--delete-branch")
-		if err := mergeCmd.Run(); err == nil {
-			swapLabel(c, num, c.completeLabel, c.inProgressLabel)
-			return true
+		// PENDING, EXPECTED, or empty rollup (no checks yet) — keep waiting.
+		if elapsed >= deadline {
+			break
 		}
-		swapLabel(c, num, c.failedLabel, c.inProgressLabel)
-		return false
+		time.Sleep(time.Duration(actualIv) * time.Second)
+		elapsed += actualIv
 	}
 	swapLabel(c, num, c.failedLabel, c.inProgressLabel)
 	return false
