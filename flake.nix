@@ -545,15 +545,13 @@
             # Realises the default image; Linux-gated like the other image checks.
             nix-conf-in-image =
               pkgs.runCommand "nix-conf-in-image" { nativeBuildInputs = [ pkgs.jq ]; } ''
-                # nix.conf is written by extraCommands, which buildLayeredImage
-                # packs into the top "customisation" layer. Read the manifest and
-                # inspect only that layer: untarring the whole image and scanning
-                # all ~98 store layers is O(image) disk I/O that wedges CI for
-                # 8-28min on throttled runners.
-                mkdir img
-                tar -xf ${nonRustHarness.image} -C img manifest.json
+                # Extract the image ONCE (like box-runs-as-non-root), then read
+                # only the top "customisation" layer where extraCommands writes
+                # nix.conf. Reading the compressed image more than once exhausts
+                # the runner's disk burst credits and wedges CI for minutes;
+                # re-reading all ~98 extracted layers is just as slow.
+                mkdir img && tar -xf ${nonRustHarness.image} -C img
                 layer="$(jq -r '.[0].Layers[-1]' img/manifest.json)"
-                tar -xf ${nonRustHarness.image} -C img "$layer"
                 # The customisation layer is packed with `tar -cf layer.tar .`, so
                 # members carry a leading `./`; match and extract the real name.
                 member="$(tar -tf "img/$layer" \
