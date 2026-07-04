@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
 type config struct {
@@ -265,44 +267,10 @@ Run 'build' from your Consumer flake's directory.
 	return fmt.Errorf("cannot build image: no Linux builder and no container runtime")
 }
 
-// queryIssues returns open issues with the configured label, oldest first.
-func queryIssues(c config) ([]issue, error) {
-	cmd := exec.Command("gh", "issue", "list",
-		"--repo", c.repoSlug,
-		"--state", "open",
-		"--label", c.label,
-		"--limit", "100",
-		"--json", "number,title",
-		"--jq", "sort_by(.number) | .[] | [.number, .title] | @tsv",
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("gh issue list: %w", err)
-	}
-	var issues []issue
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) < 2 {
-			continue
-		}
-		issues = append(issues, issue{number: parts[0], title: parts[1]})
-	}
-	return issues, nil
-}
-
-// swapLabel transitions an issue between lifecycle labels. Best-effort.
-func swapLabel(c config, num, add, remove string) {
-	cmd := exec.Command("gh", "issue", "edit", num,
-		"--repo", c.repoSlug,
-		"--add-label", add,
-		"--remove-label", remove,
-	)
-	if err := cmd.Run(); err != nil {
+// swapLabel is a best-effort label transition that logs but does not propagate
+// errors, matching the original behaviour.
+func swapLabel(fc forge.Client, num, add, remove string) {
+	if err := fc.SwapLabel(num, add, remove); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not set label '%s' (remove '%s')\n", num, add, remove)
 	}
 }
@@ -484,107 +452,16 @@ func noteField(line string) string {
 	return ""
 }
 
-func queryPRState(pr string) string {
-	cmd := exec.Command("gh", "pr", "view", pr, "--json", "state", "--jq", ".state")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// queryOpenPRByBranch looks up the first open PR on the given head branch.
-// Returns (url, isDraft, found). found is false when no open PR exists.
-func queryOpenPRByBranch(c config, branch string) (string, bool, bool) {
-	cmd := exec.Command("gh", "pr", "list",
-		"--repo", c.repoSlug,
-		"--head", branch,
-		"--state", "open",
-		"--json", "url",
-		"--jq", ".[0].url // \"\"",
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", false, false
-	}
-	url := strings.TrimSpace(string(out))
-	if url == "" {
-		return "", false, false
-	}
-	viewCmd := exec.Command("gh", "pr", "view", url, "--json", "isDraft", "--jq", ".isDraft")
-	out, err = viewCmd.Output()
-	if err != nil {
-		// Cannot determine draft status — do not adopt; fall back to status=missing.
-		return "", false, false
-	}
-	isDraft := strings.TrimSpace(string(out)) == "true"
-	return url, isDraft, true
-}
-
-func queryIssueLabels(c config, num string) []string {
-	cmd := exec.Command("gh", "issue", "view", num,
-		"--repo", c.repoSlug,
-		"--json", "labels",
-		"--jq", ".labels[].name",
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil
-	}
-	var labels []string
-	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if l = strings.TrimSpace(l); l != "" {
-			labels = append(labels, l)
-		}
-	}
-	return labels
-}
-
-func containsLabel(labels []string, target string) bool {
-	for _, l := range labels {
-		if l == target {
-			return true
-		}
-	}
-	return false
-}
-
-// queryRollupState fetches the aggregate CI status of pr's head commit via
-// GraphQL statusCheckRollup. Returns the rollup state (SUCCESS, PENDING,
-// EXPECTED, FAILURE, ERROR) or "" when there is no rollup or the query fails.
-// Using the rollup instead of per-check contexts allows a fine-grained PAT
-// without the Checks-API read permission to still gate on CI greenness.
-func queryRollupState(pr string) string {
-	// Parse https://github.com/OWNER/REPO/pull/NUMBER
-	parts := strings.Split(pr, "/")
-	if len(parts) < 7 {
-		return ""
-	}
-	owner, repo, number := parts[3], parts[4], parts[6]
-	const gql = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}`
-	cmd := exec.Command("gh", "api", "graphql",
-		"-f", "query="+gql,
-		"-f", "owner="+owner,
-		"-f", "repo="+repo,
-		"-F", "number="+number,
-		"--jq", `.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state // ""`,
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// mergeWhenGreen polls statusCheckRollup.state on the PR's head commit until
-// the state reaches SUCCESS, a terminal failure, or mergePollTimeout seconds
-// elapse. On SUCCESS it merges via rebase and swaps the issue to completeLabel;
-// on any failure or timeout it swaps to failedLabel. Returns true when merged.
-func mergeWhenGreen(c config, num, pr string) bool {
+// mergeWhenGreen polls CheckState on the PR's head commit until the state
+// reaches SUCCESS, a terminal failure, or mergePollTimeout seconds elapse. On
+// SUCCESS it merges via rebase and swaps the issue to completeLabel; on any
+// failure or timeout it swaps to failedLabel. Returns true when merged.
+func mergeWhenGreen(c config, fc forge.Client, num, pr string) bool {
 	pollIv := c.mergePollInterval
 	deadline := c.mergePollTimeout
-	// Floor so INTERVAL=0 doesn't hot-spin; tests set TIMEOUT=0 so the loop
-	// breaks before reaching the sleep.
+	// actualIv is used for elapsed tracking; floor to 1 so we don't
+	// hot-spin. When pollIv is 0 (test mode) the sleep duration is also 0,
+	// so elapsed still advances and the loop terminates.
 	actualIv := pollIv
 	if actualIv <= 0 {
 		actualIv = 1
@@ -592,38 +469,40 @@ func mergeWhenGreen(c config, num, pr string) bool {
 	elapsed := 0
 
 	for {
-		state := queryRollupState(pr)
+		state, _ := fc.CheckState(pr)
 
 		switch state {
-		case "SUCCESS":
-			mergeCmd := exec.Command("gh", "pr", "merge", pr, "--rebase", "--delete-branch")
-			if err := mergeCmd.Run(); err == nil {
-				swapLabel(c, num, c.completeLabel, c.inProgressLabel)
+		case forge.StateSuccess:
+			if err := fc.Merge(pr); err == nil {
+				swapLabel(fc, num, c.completeLabel, c.inProgressLabel)
 				return true
 			}
-			swapLabel(c, num, c.failedLabel, c.inProgressLabel)
+			swapLabel(fc, num, c.failedLabel, c.inProgressLabel)
 			return false
-		case "FAILURE", "ERROR":
+		case forge.StateFailure, forge.StateError:
 			// Hard failure — refuse without further polling.
-			swapLabel(c, num, c.failedLabel, c.inProgressLabel)
+			swapLabel(fc, num, c.failedLabel, c.inProgressLabel)
 			return false
 		}
 
-		// PENDING, EXPECTED, or empty rollup (no checks yet) — keep waiting.
+		// PENDING, EXPECTED, NONE (no checks yet), or unrecognised — keep
+		// waiting until timeout.
 		if elapsed >= deadline {
 			break
 		}
-		time.Sleep(time.Duration(actualIv) * time.Second)
+		// Sleep 0 when pollIv is 0 (test mode) so tests run without real
+		// delays; actualIv still advances elapsed to prevent a tight loop.
+		time.Sleep(time.Duration(pollIv) * time.Second)
 		elapsed += actualIv
 	}
-	swapLabel(c, num, c.failedLabel, c.inProgressLabel)
+	swapLabel(fc, num, c.failedLabel, c.inProgressLabel)
 	return false
 }
 
-func verifyMerged(c config, num, pr string) {
-	prState := queryPRState(pr)
-	issueLabels := queryIssueLabels(c, num)
-	if prState == "MERGED" && containsLabel(issueLabels, c.completeLabel) {
+func verifyMerged(c config, fc forge.Client, num, pr string) {
+	prState, _ := fc.PRState(pr)
+	iss, _ := fc.Issue(num)
+	if prState == "MERGED" && containsLabel(iss.Labels, c.completeLabel) {
 		fmt.Printf("    #%s  pr=%s  status=verified-merged\n", num, pr)
 		return
 	}
@@ -638,30 +517,30 @@ func verifyMerged(c config, num, pr string) {
 		reason = fmt.Sprintf("issue does not carry '%s'", c.completeLabel)
 	}
 	fmt.Printf("    #%s  pr=%s  status=failed  !! %s\n", num, pr, reason)
-	swapLabel(c, num, c.failedLabel, c.inProgressLabel)
+	swapLabel(fc, num, c.failedLabel, c.inProgressLabel)
 }
 
-func printOutcomeReport(c config, pwd string, issues []issue) {
+func printOutcomeReport(c config, fc forge.Client, pwd string, issues []issue) {
 	fmt.Println("==> outcome report")
 	for _, iss := range issues {
 		logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
 		line := outcomeLine(logPath)
 		if line == "" {
 			branch := c.branchPrefix + iss.number
-			prURL, isDraft, found := queryOpenPRByBranch(c, branch)
-			if !found {
+			pr, isDraft, found, err := openPRForBranch(fc, branch)
+			if err != nil || !found {
 				fmt.Printf("    #%s  status=missing  note=no SPINDRIFT_OUTCOME in log\n", iss.number)
 				continue
 			}
 			if isDraft {
-				fmt.Printf("    #%s  pr=%s  status=blocked  note=draft PR on %s; no outcome line\n", iss.number, prURL, branch)
+				fmt.Printf("    #%s  pr=%s  status=blocked  note=draft PR on %s; no outcome line\n", iss.number, pr, branch)
 				continue
 			}
-			fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", iss.number, prURL, branch)
-			if mergeWhenGreen(c, iss.number, prURL) {
-				verifyMerged(c, iss.number, prURL)
+			fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", iss.number, pr, branch)
+			if mergeWhenGreen(c, fc, iss.number, pr) {
+				verifyMerged(c, fc, iss.number, pr)
 			} else {
-				fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, prURL)
+				fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, pr)
 			}
 			continue
 		}
@@ -674,18 +553,28 @@ func printOutcomeReport(c config, pwd string, issues []issue) {
 			fmt.Printf("    #%s  pr=%s  status=%s  !! %s\n", iss.number, pr, status, note)
 		case "ready":
 			// Agent pushed a PR but left CI to the launcher — poll and merge.
-			if mergeWhenGreen(c, iss.number, pr) {
-				verifyMerged(c, iss.number, pr)
+			if mergeWhenGreen(c, fc, iss.number, pr) {
+				verifyMerged(c, fc, iss.number, pr)
 			} else {
 				fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, pr)
 			}
 		case "merged":
 			// Agent already merged (legacy path) — verify the GitHub state.
-			verifyMerged(c, iss.number, pr)
+			verifyMerged(c, fc, iss.number, pr)
 		default:
 			fmt.Printf("    #%s  pr=%s  status=%s\n", iss.number, pr, status)
 		}
 	}
+}
+
+// openPRForBranch wraps fc.OpenPRForBranch to unpack the PR struct for callers
+// that need the URL and draft flag separately.
+func openPRForBranch(fc forge.Client, branch string) (url string, isDraft bool, found bool, err error) {
+	pr, ok, err := fc.OpenPRForBranch(branch)
+	if err != nil || !ok {
+		return "", false, false, err
+	}
+	return pr.URL, pr.IsDraft, true, nil
 }
 
 // Compiled once; shared by all parseBlockerRefs calls.
@@ -762,22 +651,18 @@ func parseBlockerRefs(body string) []string {
 	return refs
 }
 
-// parseBlockers fetches each issue body from GitHub and returns a map from
-// issue number to the slice of issue numbers that must complete first.
-func parseBlockers(c config, issues []issue) (map[string][]string, error) {
+// parseBlockers fetches each issue's body from GitHub via the forge seam and
+// returns a map from issue number to the slice of issue numbers that must
+// complete first.
+func parseBlockers(fc forge.Client, issues []issue) (map[string][]string, error) {
 	edges := map[string][]string{}
 	for _, iss := range issues {
-		cmd := exec.Command("gh", "issue", "view", iss.number,
-			"--repo", c.repoSlug,
-			"--json", "body",
-			"--jq", `.body // ""`,
-		)
-		out, err := cmd.Output()
+		fi, err := fc.Issue(iss.number)
 		if err != nil {
-			// Non-fatal: skip issues whose body cannot be fetched.
+			// Non-fatal: skip issues whose data cannot be fetched.
 			continue
 		}
-		refs := parseBlockerRefs(strings.TrimRight(string(out), "\n"))
+		refs := parseBlockerRefs(fi.Body)
 		if len(refs) > 0 {
 			edges[iss.number] = refs
 		}
@@ -841,27 +726,26 @@ func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 	return "", false
 }
 
-// queryIssueState returns the GitHub state of an issue ("OPEN", "CLOSED", "").
-func queryIssueState(c config, num string) string {
-	cmd := exec.Command("gh", "issue", "view", num,
-		"--repo", c.repoSlug,
-		"--json", "state",
-		"--jq", ".state",
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
+func containsLabel(labels []string, target string) bool {
+	for _, l := range labels {
+		if l == target {
+			return true
+		}
 	}
-	return strings.TrimSpace(string(out))
+	return false
 }
 
-// blockerReady returns true when blocker dep carries COMPLETE_LABEL or is closed
-// (a closed blocker without the label is treated as satisfied, with a log note).
-func blockerReady(c config, dep string) bool {
-	if containsLabel(queryIssueLabels(c, dep), c.completeLabel) {
+// blockerReady returns true when dep carries completeLabel or is closed (a
+// closed blocker without the label is treated as satisfied, with a log note).
+func blockerReady(c config, fc forge.Client, dep string) bool {
+	fi, err := fc.Issue(dep)
+	if err != nil {
+		return false
+	}
+	if containsLabel(fi.Labels, c.completeLabel) {
 		return true
 	}
-	if queryIssueState(c, dep) == "CLOSED" {
+	if fi.State == "CLOSED" {
 		fmt.Printf("    .. blocker #%s is closed without '%s'; treating as satisfied\n", dep, c.completeLabel)
 		return true
 	}
@@ -869,9 +753,9 @@ func blockerReady(c config, dep string) bool {
 }
 
 // issueIsReady returns true when all of num's declared blockers are ready.
-func issueIsReady(c config, num string, edges map[string][]string) bool {
+func issueIsReady(c config, fc forge.Client, num string, edges map[string][]string) bool {
 	for _, dep := range edges[num] {
-		if !blockerReady(c, dep) {
+		if !blockerReady(c, fc, dep) {
 			return false
 		}
 	}
@@ -889,11 +773,11 @@ func issueNums(issues []issue) []string {
 
 // fanOut dispatches a batch of issues in parallel (up to maxParallel at once),
 // claiming the in-progress label before each goroutine launches.
-func fanOut(c config, pwd string, batch []issue) {
+func fanOut(c config, fc forge.Client, pwd string, batch []issue) {
 	sem := make(chan struct{}, c.maxParallel)
 	var wg sync.WaitGroup
 	for _, iss := range batch {
-		swapLabel(c, iss.number, c.inProgressLabel, c.label)
+		swapLabel(fc, iss.number, c.inProgressLabel, c.label)
 		wg.Add(1)
 		iss := iss
 		go func() {
@@ -902,7 +786,7 @@ func fanOut(c config, pwd string, batch []issue) {
 			defer func() { <-sem }()
 			if err := runOne(c, pwd, iss); err != nil {
 				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.number, iss.number)
-				swapLabel(c, iss.number, c.failedLabel, c.inProgressLabel)
+				swapLabel(fc, iss.number, c.failedLabel, c.inProgressLabel)
 			} else {
 				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.number, iss.number)
 			}
@@ -916,7 +800,7 @@ func fanOut(c config, pwd string, batch []issue) {
 // depsPollSecs. The deadlock timer resets on any progress; if no issue becomes
 // ready within depsWaitSecs the function returns an error rather than blocking
 // forever. Dispatched issues leave the remaining set even when they fail.
-func dispatchWaves(c config, pwd string, issues []issue, edges map[string][]string) error {
+func dispatchWaves(c config, fc forge.Client, pwd string, issues []issue, edges map[string][]string) error {
 	remaining := make([]issue, len(issues))
 	copy(remaining, issues)
 	elapsed := 0
@@ -924,7 +808,7 @@ func dispatchWaves(c config, pwd string, issues []issue, edges map[string][]stri
 	for len(remaining) > 0 {
 		var ready, held []issue
 		for _, iss := range remaining {
-			if issueIsReady(c, iss.number, edges) {
+			if issueIsReady(c, fc, iss.number, edges) {
 				ready = append(ready, iss)
 			} else {
 				held = append(held, iss)
@@ -950,7 +834,7 @@ func dispatchWaves(c config, pwd string, issues []issue, edges map[string][]stri
 
 		// Progress: reset the deadlock timer.
 		elapsed = 0
-		fanOut(c, pwd, ready)
+		fanOut(c, fc, pwd, ready)
 		remaining = held
 	}
 	return nil
@@ -973,10 +857,16 @@ func run() error {
 		}
 	}
 
+	fc := forge.NewExecClient(c.repoSlug)
+
 	fmt.Printf("==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
-	issues, err := queryIssues(c)
+	rawIssues, err := fc.ListIssues(c.label)
 	if err != nil {
 		return err
+	}
+	var issues []issue
+	for _, fi := range rawIssues {
+		issues = append(issues, issue{number: fi.Number, title: fi.Title})
 	}
 	if len(issues) == 0 {
 		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
@@ -984,7 +874,7 @@ func run() error {
 	}
 
 	// Build the dependency graph for the batch.
-	edges, err := parseBlockers(c, issues)
+	edges, err := parseBlockers(fc, issues)
 	if err != nil {
 		return err
 	}
@@ -1005,7 +895,7 @@ func run() error {
 		}
 		var selected []issue
 		for _, iss := range issues {
-			if issueIsReady(c, iss.number, edges) {
+			if issueIsReady(c, fc, iss.number, edges) {
 				selected = append(selected, iss)
 				if len(selected) >= c.maxJobs {
 					break
@@ -1019,23 +909,23 @@ func run() error {
 			return nil
 		}
 		fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), c.maxJobs)
-		fanOut(c, pwd, selected)
-		printOutcomeReport(c, pwd, selected)
+		fanOut(c, fc, pwd, selected)
+		printOutcomeReport(c, fc, pwd, selected)
 	} else if hasEdges {
 		// MAX_JOBS = 0 with dependency edges: multi-wave dispatch.
 		if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
 			return fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
 		}
 		fmt.Println("==> dependency edges found; dispatching in waves")
-		if err := dispatchWaves(c, pwd, issues, edges); err != nil {
+		if err := dispatchWaves(c, fc, pwd, issues, edges); err != nil {
 			return err
 		}
-		printOutcomeReport(c, pwd, issues)
+		printOutcomeReport(c, fc, pwd, issues)
 	} else {
 		// MAX_JOBS = 0, no declared edges: original single-wave fan-out.
 		fmt.Printf("==> %d issue(s); launching up to %d container(s) at a time\n", len(issues), c.maxParallel)
-		fanOut(c, pwd, issues)
-		printOutcomeReport(c, pwd, issues)
+		fanOut(c, fc, pwd, issues)
+		printOutcomeReport(c, fc, pwd, issues)
 	}
 
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
