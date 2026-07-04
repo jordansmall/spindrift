@@ -27,3 +27,10 @@ only `build` pays for realisation. The container fallback assumes `build` is
 invoked from the Consumer flake's directory (the same `$PWD` convention
 `harness.env` already uses) and keeps a named volume for `/nix` so rebuilds are
 incremental.
+
+**Implementation tier (amended by #111):** the realise-and-load logic and the
+container fallback now live in the Go OCI adapter (`internal/runner/oci.go`)
+rather than in bash (`build-image.sh` + `build.sh`). `nix run .#build` execs
+`launcher build`, which calls `runner.EnsureReady()`; the same call is made by
+`launcher` (the run command) before fanning out. The bash scripts are deleted;
+both paths share one implementation.
