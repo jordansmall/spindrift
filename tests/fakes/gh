@@ -111,12 +111,35 @@ EOF
         pr_ref="${3:-}"
         pr_num="${pr_ref##*/}"
         checksvar="FAKE_GH_PR_CHECKS_${pr_num}"
-        case "${!checksvar:-none}" in
-          success) printf 'CI\tpass\thttps://example.com\n' ;;
-          failure) printf 'CI\tfail\thttps://example.com\n' ;;
-          pending) printf 'CI\tpending\thttps://example.com\n' ;;
-          none) ;; # no output — "not started"
-        esac
+        # Detect --json bucket (structured output mode used by merge_when_green).
+        json_bucket=0
+        args=("$@")
+        for ((i = 0; i < ${#args[@]}; i++)); do
+          [ "${args[i]}" = "--json" ] && [ "${args[i+1]:-}" = "bucket" ] && json_bucket=1
+        done
+        if [ "$json_bucket" = "1" ]; then
+          # Emit one bucket word per line — exactly what the launcher reads.
+          case "${!checksvar:-none}" in
+            success)      printf 'pass\n' ;;
+            failure)      printf 'fail\n' ;;
+            pending)      printf 'pending\n' ;;
+            cancel)       printf 'cancel\n' ;;
+            skipping)     printf 'skipping\n' ;;
+            pass-skipping) printf 'pass\nskipping\n' ;;
+            pass-pending) printf 'pass\npending\n' ;;
+            none)         ;; # no output — checks not yet registered
+          esac
+        else
+          # Plain output retained for any caller that does not use --json bucket.
+          case "${!checksvar:-none}" in
+            success)  printf 'CI\tpass\thttps://example.com\n' ;;
+            failure)  printf 'CI\tfail\thttps://example.com\n' ;;
+            pending)  printf 'CI\tpending\thttps://example.com\n' ;;
+            cancel)   printf 'CI\tcancel\thttps://example.com\n' ;;
+            skipping) printf 'CI\tskipping\thttps://example.com\n' ;;
+            none)     ;; # no output — "not started"
+          esac
+        fi
         ;;
       merge)
         pr_ref="${3:-}"
