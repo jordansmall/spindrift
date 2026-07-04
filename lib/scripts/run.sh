@@ -61,12 +61,12 @@ command -v "$RUNTIME" >/dev/null 2>&1 || {
   exit 1
 }
 
-# Build and load the image on demand (OCI path only; bwrap has no image).
-# build_box_image is defined by the OCI preamble (build-image.sh).
+# Verify the image is present (OCI path only; bwrap has no image).
+# Build and load it first with `nix run .#build` (or `launcher build`).
 if [ "$RUNTIME" != "bwrap" ]; then
-  if ! "$RUNTIME" image exists "$IMAGE"; then
-    echo "==> image '$IMAGE' not found — building first"
-    build_box_image
+  if ! "$RUNTIME" image inspect "$IMAGE" >/dev/null 2>&1; then
+    echo "==> image '$IMAGE' not found — run 'nix run .#build' first" >&2
+    exit 1
   fi
 fi
 
