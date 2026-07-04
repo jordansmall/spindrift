@@ -220,6 +220,15 @@ EOF
   grep -qi 'no checks' "$CLAUDE_PROMPT_FILE"
 }
 
+@test "default prompt requires the CI-registration wait to run in the foreground" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # A backgrounded wait ends the agent's turn before CI registers, so the final
+  # outcome line is never printed and the launcher can never learn the PR to merge.
+  grep -qi 'foreground' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'background' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "default prompt states the launcher owns the merge" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -232,6 +241,14 @@ EOF
   [ "$status" -eq 0 ]
   grep -qi 'launcher.*complete\|complete.*launcher\|launcher.*owns\|owns.*complete' "$CLAUDE_PROMPT_FILE"
   grep -qi 'do not.*add-label\|do not run.*issue edit' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt requires the outcome line be the literal final output" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # The launcher only learns the PR from this line; the agent must not end its
+  # turn with prose or defer the line to a background task.
+  grep -qi 'do not end your turn\|must be the last\|literal.*final\|final.*message\|nothing after' "$CLAUDE_PROMPT_FILE"
 }
 
 @test "default prompt emits exactly one SPINDRIFT_OUTCOME line" {

@@ -119,6 +119,11 @@ So first block until at least one check appears:
 until gh pr checks <pr-number> 2>/dev/null | grep -q .; do sleep 10; done
 ```
 
+Run this wait **in the foreground and block on it yourself** — do NOT launch it
+as a background task, a background shell (`&`), or a detached job. If you
+background the wait your turn ends before CI registers, the OUTCOME line below is
+never printed, and the launcher never learns which PR to merge — the run is lost.
+
 If no check ever registers within a few minutes, do NOT emit `status=ready` —
 follow IF BLOCKED instead.
 
@@ -135,6 +140,11 @@ exactly one machine-readable line as your **final output**:
 ```
 SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} pr=<pr-url> status=ready note=<short reason>
 ```
+
+This line must be the **literal final message** you output — end your turn with
+it and nothing after. Do not close with a prose summary, and do not defer it to a
+background task. The launcher parses this one line to learn your PR; if it is
+missing, the PR is never merged and the entire run is wasted.
 
 `status=ready` means: branch pushed, PR open, CI started. The LAUNCHER owns
 the merge and the complete-label swap.
