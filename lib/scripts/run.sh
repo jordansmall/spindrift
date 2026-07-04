@@ -387,31 +387,53 @@ dispatch_waves() {
 # Returns 0 when the merge was performed, 1 otherwise.
 # Best-effort: every internal error path swaps the label and returns cleanly so
 # `set -e` in the caller does not abort the run.
+#
+# Decision logic (positive-success, per-bucket):
+#   empty             → not registered yet; keep polling until timeout
+#   any fail|cancel   → refuse immediately (swap FAILED_LABEL, return 1)
+#   any pending       → still in progress; keep polling until timeout
+#   otherwise         → all ∈ {pass,skipping}, at least one present → merge
 merge_when_green() {
   local num="$1" pr="$2"
   local poll_iv="${MERGE_POLL_INTERVAL:-30}"
   local deadline="${MERGE_POLL_TIMEOUT:-1800}"
-  local elapsed=0 checks_out
+  # Floor the sleep interval so INTERVAL=0 with a nonzero TIMEOUT does not
+  # hot-spin the gh API; tests set TIMEOUT=0 so the loop breaks before sleeping.
+  local actual_iv=$(( poll_iv > 0 ? poll_iv : 1 ))
+  local elapsed=0 buckets
   while true; do
-    checks_out="$(gh pr checks "$pr" 2>/dev/null || true)"
-    if printf '%s\n' "$checks_out" | grep -q 'fail'; then
+    buckets="$(gh pr checks "$pr" --json bucket --jq '.[].bucket' 2>/dev/null || true)"
+
+    if [ -z "$buckets" ]; then
+      # No checks registered yet — wait.
+      [ "$elapsed" -ge "$deadline" ] && break
+      sleep "$actual_iv"
+      elapsed=$(( elapsed + actual_iv ))
+      continue
+    fi
+
+    if printf '%s\n' "$buckets" | grep -qxE 'fail|cancel'; then
+      # Hard failure — refuse without further polling.
       swap_label "$num" "$FAILED_LABEL" "$IN_PROGRESS_LABEL"
       return 1
     fi
-    if [ -n "$checks_out" ] && ! printf '%s\n' "$checks_out" | grep -qE 'pending|queued'; then
-      if gh pr merge "$pr" --rebase --delete-branch >/dev/null 2>&1; then
-        swap_label "$num" "$COMPLETE_LABEL" "$IN_PROGRESS_LABEL"
-        return 0
-      else
-        swap_label "$num" "$FAILED_LABEL" "$IN_PROGRESS_LABEL"
-        return 1
-      fi
+
+    if printf '%s\n' "$buckets" | grep -qx 'pending'; then
+      # At least one check still in progress — wait.
+      [ "$elapsed" -ge "$deadline" ] && break
+      sleep "$actual_iv"
+      elapsed=$(( elapsed + actual_iv ))
+      continue
     fi
-    [ "$elapsed" -ge "$deadline" ] && break
-    sleep "$poll_iv"
-    # Advance elapsed by at least 1 so the deadline is always reachable even
-    # when MERGE_POLL_INTERVAL=0 (used in tests to skip the sleep).
-    elapsed=$(( elapsed + poll_iv + 1 ))
+
+    # All buckets ∈ {pass, skipping} with at least one check present — merge.
+    if gh pr merge "$pr" --rebase --delete-branch >/dev/null 2>&1; then
+      swap_label "$num" "$COMPLETE_LABEL" "$IN_PROGRESS_LABEL"
+      return 0
+    else
+      swap_label "$num" "$FAILED_LABEL" "$IN_PROGRESS_LABEL"
+      return 1
+    fi
   done
   swap_label "$num" "$FAILED_LABEL" "$IN_PROGRESS_LABEL"
   return 1
