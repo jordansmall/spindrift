@@ -163,3 +163,48 @@ func TestNoGhExecOutsideForge(t *testing.T) {
 		t.Fatalf("walk: %v", err)
 	}
 }
+
+// TestNoContainerExecOutsideRunner walks all non-test Go source files in
+// cmd/launcher, excluding internal/runner, and fails if any invoke the
+// container CLI, bwrap, or nix via exec.Command — all such calls must go
+// through the runner.Runner seam.
+func TestNoContainerExecOutsideRunner(t *testing.T) {
+	// Patterns whose presence outside internal/runner is forbidden.
+	forbidden := []string{
+		`exec.Command("nix"`,
+		`exec.Command("bwrap"`,
+		`exec.Command(c.runtime`,
+		`exec.Command(runtime`,
+	}
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(filepath.ToSlash(path), "internal/runner") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		if strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		src := string(data)
+		for _, pat := range forbidden {
+			if strings.Contains(src, pat) {
+				t.Errorf("%s: contains %q — all container/nix exec calls must go through runner.Runner", path, pat)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+}
