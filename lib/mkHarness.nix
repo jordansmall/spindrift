@@ -116,6 +116,7 @@ let
       gnused
       findutils
       gettext # envsubst, used by agent/entrypoint.sh
+      jq # extracts the outcome line from the agent's stream-json transcript
       git
       gh
       claude-code
@@ -149,6 +150,7 @@ let
       claude-code
       gettext # envsubst
       coreutils
+      jq # extracts the outcome from the stream-json transcript
     ];
     text = stripShebang (builtins.readFile ../agent/entrypoint.sh);
   };
