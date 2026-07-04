@@ -14,6 +14,18 @@
 let
   inherit (lib) mkOption types;
   mkHarness = import ./mkHarness.nix;
+  schema = import ./env-schema.nix;
+  # flakeOption entries are the Consumer-tunable subset that becomes `defaults.*`.
+  flakeOptionEntries = lib.filterAttrs (_: e: e.flakeOption or false) schema;
+  # Generate one mkOption per flakeOption schema entry; type is nullOr str/int so
+  # unset options fall through to mkHarness's schema defaults.
+  mkDefaultOption =
+    _key: entry:
+    mkOption {
+      type = if builtins.isInt (entry.default or "") then types.nullOr types.int else types.nullOr types.str;
+      default = null;
+      description = entry.doc;
+    };
 in
 {
   options.perSystem = flake-parts-lib.mkPerSystemOption {
@@ -58,38 +70,11 @@ in
         description = "Agent prompt template rendered to a store path and mounted at run time.";
       };
 
+      # One sub-option per schema flakeOption entry — generated so adding a knob
+      # to env-schema.nix propagates here automatically.
       defaults = mkOption {
         type = types.submodule {
-          options = {
-            label = mkOption {
-              type = types.nullOr types.str;
-              default = null;
-            };
-            baseBranch = mkOption {
-              type = types.nullOr types.str;
-              default = null;
-            };
-            maxParallel = mkOption {
-              type = types.nullOr types.int;
-              default = null;
-            };
-            branchPrefix = mkOption {
-              type = types.nullOr types.str;
-              default = null;
-            };
-            inProgressLabel = mkOption {
-              type = types.nullOr types.str;
-              default = null;
-            };
-            failedLabel = mkOption {
-              type = types.nullOr types.str;
-              default = null;
-            };
-            model = mkOption {
-              type = types.nullOr types.str;
-              default = null;
-            };
-          };
+          options = lib.mapAttrs mkDefaultOption flakeOptionEntries;
         };
         default = { };
         description = "Non-secret run defaults baked into the generated `run` command.";

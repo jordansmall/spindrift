@@ -13,6 +13,13 @@ setup() {
   export GIT_USER_EMAIL="bot@example.com"
   export BASE_BRANCH="main"
   export BRANCH_PREFIX="agent/issue-"
+  # These are baked by the nix preamble at image-build time (env-schema.nix defaults);
+  # set explicitly here so the raw script runs correctly in the bats suite.
+  export MODEL="claude-opus-4-8"
+  export SCOUT_MODEL=""
+  export REVIEW_MODEL=""
+  export IN_PROGRESS_LABEL="agent-in-progress"
+  export COMPLETE_LABEL="agent-complete"
   export ISSUE_NUMBER="7"
   export ISSUE_TITLE="Do the thing"
   export WORK_DIR="$BATS_TEST_TMPDIR/work"
@@ -51,7 +58,7 @@ setup() {
   grep -q -- "--dangerously-skip-permissions" "$CLAUDE_LOG"
 }
 
-@test "entrypoint invokes claude with the baked default model when MODEL is unset" {
+@test "entrypoint passes MODEL env var to claude" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q -- "--model claude-opus-4-8" "$CLAUDE_LOG"

@@ -71,6 +71,11 @@ type config struct {
 
 	// Optional prompt override
 	spindriftPromptDir string
+
+	// Space-separated list of env var names to forward into each Box container.
+	// Set by the nix-rendered preamble from the schema's boxEnv=true entries so
+	// the Go source never needs to enumerate them by hand.
+	boxEnvVars string
 }
 
 type issue struct {
@@ -150,6 +155,8 @@ func loadConfig() config {
 		gitUserEmail:     os.Getenv("GIT_USER_EMAIL"),
 
 		spindriftPromptDir: os.Getenv("SPINDRIFT_PROMPT_DIR"),
+
+		boxEnvVars: os.Getenv("BOX_ENV_VARS"),
 	}
 }
 
@@ -286,27 +293,15 @@ func runOneOCI(c config, iss issue, logFile *os.File) error {
 
 	args := []string{"run", "--rm",
 		"--name", "agent-issue-" + iss.number,
-		"-e", "GH_TOKEN",
 	}
-	if c.claudeOAuthToken != "" {
-		args = append(args, "-e", "CLAUDE_CODE_OAUTH_TOKEN")
+	// Forward schema boxEnv=true vars from BOX_ENV_VARS (nix-rendered list).
+	for _, envName := range strings.Fields(c.boxEnvVars) {
+		args = append(args, "-e", envName+"="+os.Getenv(envName))
 	}
-	if c.anthropicAPIKey != "" {
-		args = append(args, "-e", "ANTHROPIC_API_KEY")
-	}
+	// Per-issue vars forwarded individually (not schema knobs).
 	args = append(args,
-		"-e", "GIT_USER_NAME="+c.gitUserName,
-		"-e", "GIT_USER_EMAIL="+c.gitUserEmail,
-		"-e", "REPO_SLUG="+c.repoSlug,
 		"-e", "ISSUE_NUMBER="+iss.number,
 		"-e", "ISSUE_TITLE="+iss.title,
-		"-e", "BASE_BRANCH="+c.baseBranch,
-		"-e", "BRANCH_PREFIX="+c.branchPrefix,
-		"-e", "MODEL="+c.model,
-		"-e", "SCOUT_MODEL="+c.scoutModel,
-		"-e", "REVIEW_MODEL="+c.reviewModel,
-		"-e", "IN_PROGRESS_LABEL="+c.inProgressLabel,
-		"-e", "COMPLETE_LABEL="+c.completeLabel,
 	)
 	if iss.fixPass > 0 {
 		args = append(args, "-e", fmt.Sprintf("FIX_PASS=%d", iss.fixPass))
@@ -369,27 +364,15 @@ func runOneBwrap(c config, iss issue, logFile *os.File) error {
 		"--setenv", "PATH", c.agentEnv+"/bin",
 		"--setenv", "SSL_CERT_FILE", c.agentEnv+"/etc/ssl/certs/ca-bundle.crt",
 		"--setenv", "GIT_SSL_CAINFO", c.agentEnv+"/etc/ssl/certs/ca-bundle.crt",
-		"--setenv", "GH_TOKEN", c.ghToken,
 	)
-	if c.claudeOAuthToken != "" {
-		args = append(args, "--setenv", "CLAUDE_CODE_OAUTH_TOKEN", c.claudeOAuthToken)
+	// Forward schema boxEnv=true vars from BOX_ENV_VARS (nix-rendered list).
+	for _, envName := range strings.Fields(c.boxEnvVars) {
+		args = append(args, "--setenv", envName, os.Getenv(envName))
 	}
-	if c.anthropicAPIKey != "" {
-		args = append(args, "--setenv", "ANTHROPIC_API_KEY", c.anthropicAPIKey)
-	}
+	// Per-issue vars and bwrap-specific runtime vars forwarded individually.
 	args = append(args,
-		"--setenv", "GIT_USER_NAME", c.gitUserName,
-		"--setenv", "GIT_USER_EMAIL", c.gitUserEmail,
-		"--setenv", "REPO_SLUG", c.repoSlug,
 		"--setenv", "ISSUE_NUMBER", iss.number,
 		"--setenv", "ISSUE_TITLE", iss.title,
-		"--setenv", "BASE_BRANCH", c.baseBranch,
-		"--setenv", "BRANCH_PREFIX", c.branchPrefix,
-		"--setenv", "MODEL", c.model,
-		"--setenv", "SCOUT_MODEL", c.scoutModel,
-		"--setenv", "REVIEW_MODEL", c.reviewModel,
-		"--setenv", "IN_PROGRESS_LABEL", c.inProgressLabel,
-		"--setenv", "COMPLETE_LABEL", c.completeLabel,
 		"--setenv", "PREFETCH", c.bakedPrefetch,
 	)
 	if iss.fixPass > 0 {
