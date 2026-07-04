@@ -89,14 +89,12 @@ if [ -z "$issues_tsv" ]; then
   exit 0
 fi
 
-# Cap the batch to the oldest N ready issues when MAX_JOBS > 0 (0 = no limit).
-# Dogfooding sets MAX_JOBS=1 so each invocation drains a single issue, letting an
-# outer loop git-pull the just-merged change and rebuild before the next issue —
-# otherwise later issues in the batch run against the pre-fix image.
+# MAX_JOBS caps how many *unblocked* issues one invocation drains (0 = no limit).
+# The selection happens after the dependency graph is built (below) so a blocked
+# oldest issue is skipped rather than blindly head-capped — dogfooding sets
+# MAX_JOBS=1 so each invocation drains a single unblocked issue, letting an outer
+# loop git-pull the merged change and rebuild before the next.
 MAX_JOBS="${MAX_JOBS:-0}"
-if [ "$MAX_JOBS" -gt 0 ]; then
-  issues_tsv="$(printf '%s\n' "$issues_tsv" | head -n "$MAX_JOBS")"
-fi
 
 count="$(printf '%s\n' "$issues_tsv" | wc -l | tr -d ' ')"
 echo "==> $count issue(s); launching up to $MAX_PARALLEL container(s) at a time"
@@ -232,13 +230,41 @@ parse_blockers() {
     body="$(gh issue view "$num" --repo "$REPO_SLUG" \
       --json body --jq '.body // ""' 2>/dev/null || true)"
     [ -n "$body" ] || continue
-    # `|| true`: a blocker-less body makes grep exit 1, which pipefail + set -e
-    # would turn into a silent whole-script abort before any container launches.
+    # Two blocker shapes: inline ("depends on #N" / "blocked by #N") and the
+    # /to-issues filed format — a "## Blocked by" header followed by "- #N" list
+    # items (a list line may name several: "- #56 (...) and #57 (...)"). The old
+    # single-line regex matched only the inline shape, so header+list edges — the
+    # format /to-issues actually files — went undetected. `|| true` keeps a
+    # blocker-less body from aborting the run under pipefail + set -e.
     printf '%s\n' "$body" \
-      | grep -oiE '(depends on|blocked by):? *#[0-9]+' \
-      | grep -oE '[0-9]+' \
+      | awk '
+          function emit(str) {
+            while (match(str, /#[0-9]+/)) {
+              print substr(str, RSTART + 1, RLENGTH - 1)
+              str = substr(str, RSTART + RLENGTH)
+            }
+          }
+          {
+            low = tolower($0)
+            if (low ~ /^#+[ \t]*blocked by[ \t]*:?[ \t]*$/) { insec = 1; next }
+            if (low ~ /^#+[ \t]+/) insec = 0
+            s = low
+            # emit() calls match(), clobbering the global RSTART/RLENGTH; the
+            # final failed match leaves RSTART+RLENGTH = -1 and substr(s, -1)
+            # re-yields the whole string — an infinite loop. Save the cursor
+            # before emitting.
+            while (match(s, /(depends on|blocked by)[ \t]*:?[ \t]*#[0-9]+/)) {
+              seg = substr(s, RSTART, RLENGTH)
+              nxt = RSTART + RLENGTH
+              emit(seg)
+              s = substr(s, nxt)
+            }
+            if (insec && $0 ~ /^[ \t]*[-*][ \t]*#[0-9]+/) emit($0)
+          }
+        ' \
+      | sort -u \
       | while IFS= read -r dep; do
-          printf '%s %s\n' "$num" "$dep"
+          [ -n "$dep" ] && printf '%s %s\n' "$num" "$dep"
         done || true
   done <<EOF
 $issues_tsv
@@ -406,6 +432,54 @@ EOF
 DEPS_FILE="$PWD/logs/deps.$$"
 trap 'rm -f "$DEPS_FILE"' EXIT
 parse_blockers >"$DEPS_FILE"
+
+# MAX_JOBS > 0: drain up to N currently-unblocked issues, then exit — no in-
+# process polling. A blocked oldest issue is skipped (never dispatched against an
+# un-merged blocker, nor left stalling the slot); it waits for a later
+# invocation, after the outer loop has merged its blocker and rebuilt. Blocker
+# completion thus happens across invocations, which is the dogfood cadence.
+if [ "$MAX_JOBS" -gt 0 ]; then
+  if [ -s "$DEPS_FILE" ]; then
+    cycle_num=""
+    if ! cycle_num="$(detect_cycle "$DEPS_FILE")"; then
+      echo "ERROR: dependency cycle detected (issue #${cycle_num} is in the cycle)" >&2
+      exit 1
+    fi
+  fi
+  selected=""
+  selected_count=0
+  while IFS=$'\t' read -r num title; do
+    [ -n "$num" ] || continue
+    if is_blocked "$num"; then
+      echo "    ~~ #$num blocked (a blocker is not '$COMPLETE_LABEL'); skipping"
+      continue
+    fi
+    selected="$selected$(printf '%s\t%s' "$num" "$title")
+"
+    selected_count=$((selected_count + 1))
+    [ "$selected_count" -ge "$MAX_JOBS" ] && break
+  done <<EOF
+$issues_tsv
+EOF
+  if [ "$selected_count" -eq 0 ]; then
+    echo "no unblocked '$LABEL' issues to drain — nothing to do."
+    exit 0
+  fi
+  issues_tsv="$selected"
+  echo "==> draining $selected_count unblocked issue(s) (MAX_JOBS=$MAX_JOBS)"
+  while IFS=$'\t' read -r num title; do
+    [ -n "$num" ] || continue
+    swap_label "$num" "$IN_PROGRESS_LABEL" "$LABEL"
+    run_one "$num" "$title" &
+    while [ "$(jobs -r | wc -l | tr -d ' ')" -ge "$MAX_PARALLEL" ]; do sleep 1; done
+  done <<EOF
+$issues_tsv
+EOF
+  wait
+  print_outcome_report
+  echo "==> all agents finished — branches pushed and PRs opened on $REPO_SLUG."
+  exit 0
+fi
 
 if [ -s "$DEPS_FILE" ]; then
   cycle_num=""
