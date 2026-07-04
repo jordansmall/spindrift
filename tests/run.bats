@@ -650,3 +650,61 @@ EOF
   [[ "$output" == *"status=verified-merged"* ]]
 }
 
+# --- Self-heal fix-agent (issue #136) -----------------------------------------
+
+# Red-then-green: launcher dispatches one fix box, CI turns green, PR merges.
+@test "self-heal: red-then-green → dispatches fix box and merges" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  # First GraphQL call returns FAILURE (triggers fix box); second returns SUCCESS.
+  export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="FAILURE,SUCCESS"
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=100
+  export MAX_FIX_ATTEMPTS=3
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  # Exactly 2 container runs: initial box + 1 fix box.
+  [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
+  grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
+  [[ "$output" == *"status=verified-merged"* ]]
+}
+
+# Red-through-cap: all fix passes fail, issue is marked agent-failed.
+@test "self-heal: red-through-cap → exhausts passes and marks agent-failed" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  # CI is always FAILURE — never recovers.
+  export FAKE_GH_GRAPHQL_ROLLUP_1="FAILURE"
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=100
+  export MAX_FIX_ATTEMPTS=3
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  # 1 initial run + 3 fix passes = 4 total.
+  [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 4 ]
+  ! grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
+  [[ "$output" == *"status=failed"* ]]
+}
+
+# Pending-timeout: no fix passes consumed, gate timeout marks agent-failed.
+@test "self-heal: pending timeout does not consume fix passes" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_GH_GRAPHQL_ROLLUP_1="PENDING"
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=0
+  export MAX_FIX_ATTEMPTS=3
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  # Only 1 container run (the initial box); no fix passes dispatched.
+  [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 1 ]
+  ! grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
+  [[ "$output" == *"status=failed"* ]]
+}
+
