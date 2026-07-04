@@ -75,6 +75,11 @@ EOF
             labelsvar="FAKE_GH_ISSUE_LABELS_${num}"
             [ -n "${!labelsvar:-}" ] && printf '%s\n' "${!labelsvar:-}"
             ;;
+          state)
+            # FAKE_GH_ISSUE_STATE_N overrides; default is OPEN.
+            statevar="FAKE_GH_ISSUE_STATE_${num}"
+            printf '%s\n' "${!statevar:-OPEN}"
+            ;;
         esac
         ;;
     esac
