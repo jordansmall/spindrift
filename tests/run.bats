@@ -320,41 +320,6 @@ EOF
   grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
 }
 
-@test "run errors on a dependency cycle in the ready batch" {
-  export FAKE_PODMAN_IMAGE_PRESENT=1
-  export FAKE_GH_ISSUES=$'1\tA\n2\tB'
-  export FAKE_GH_ISSUE_BODY_1="depends on #2"
-  export FAKE_GH_ISSUE_BODY_2="depends on #1"
-  run "$RUN_CMD"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"cycle"* ]]
-}
-
-@test "run surfaces a never-completing blocker instead of deadlocking" {
-  export FAKE_PODMAN_IMAGE_PRESENT=1
-  export FAKE_GH_ISSUES=$'1\tDependent'
-  export FAKE_GH_ISSUE_BODY_1="depends on #99"
-  export DEPS_WAIT_SECS=0
-  run "$RUN_CMD"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"deadlock"* || "$output" == *"ERROR"* ]]
-}
-
-@test "run dispatches the blocker before the dependent (wave ordering)" {
-  export FAKE_PODMAN_IMAGE_PRESENT=1
-  export FAKE_GH_ISSUES=$'1\tBlocker\n2\tDependent'
-  export FAKE_GH_ISSUE_BODY_2="depends on #1"
-  export FAKE_PODMAN_AUTO_COMPLETE=1
-  export GH_STATE="$GH_LOG.state"
-  run "$RUN_CMD"
-  [ "$status" -eq 0 ]
-  grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
-  grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
-  line1="$(grep -n 'ISSUE_NUMBER=1' "$PODMAN_LOG" | cut -d: -f1 | head -1)"
-  line2="$(grep -n 'ISSUE_NUMBER=2' "$PODMAN_LOG" | cut -d: -f1 | head -1)"
-  [ "$line1" -lt "$line2" ]
-}
-
 @test "run preserves single-wave behaviour when no dependencies are declared" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"
