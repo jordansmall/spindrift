@@ -495,6 +495,142 @@
               assert assertMsg (!hasNix)
                 "lean harness (nixInBox = false) must not bake in the nix CLI";
               pkgs.runCommand "lean-escape-hatch" { } "touch $out";
+
+            # The flakeModule must expose scoutModel, reviewModel, and completeLabel
+            # as declarative options (today's drift class, issue #105). A consumer
+            # that sets those three gets byte-identical outputs to a direct mkHarness
+            # call with the same defaults.
+            flakemodule-schema-options =
+              let
+                consumer105 = flake-parts.lib.mkFlake
+                  {
+                    inputs = {
+                      inherit nixpkgs;
+                      self = {
+                        outPath = ./.;
+                      };
+                    };
+                  }
+                  {
+                    systems = [ system ];
+                    imports = [ ./lib/flakeModule.nix ];
+                    perSystem.spindrift = {
+                      packages = p: [ p.hello ];
+                      defaults = {
+                        scoutModel = "scout-test";
+                        reviewModel = "review-test";
+                        completeLabel = "done-test";
+                      };
+                    };
+                  };
+                direct105 = import ./lib/mkHarness.nix {
+                  inherit nixpkgs system;
+                  packages = p: [ p.hello ];
+                  defaults = {
+                    scoutModel = "scout-test";
+                    reviewModel = "review-test";
+                    completeLabel = "done-test";
+                  };
+                };
+                consumerPkgs105 = consumer105.packages.${system};
+              in
+              pkgs.runCommand "flakemodule-schema-options"
+                {
+                  moduleBuild = consumerPkgs105.build;
+                  directBuild = direct105.build;
+                  moduleRun = consumerPkgs105.run;
+                  directRun = direct105.run;
+                }
+                ''
+                  [ "$moduleBuild" = "$directBuild" ] \
+                    || { echo "build mismatch: $moduleBuild != $directBuild" >&2; exit 1; }
+                  [ "$moduleRun" = "$directRun" ] \
+                    || { echo "run mismatch: $moduleRun != $directRun" >&2; exit 1; }
+                  touch $out
+                '';
+
+            # harness.env.example must match the content generated from env-schema.nix.
+            # Fails when a new schema knob is added but the committed file is not
+            # regenerated (golden-file drift; resolves issue #109).
+            harness-env-example =
+              let
+                schema = import ./lib/env-schema.nix;
+                inherit (pkgs.lib)
+                  attrValues
+                  concatStrings
+                  filterAttrs
+                  mapAttrsToList
+                  ;
+                # Render one entry: required/secret → uncommented; optional → commented.
+                renderEntry =
+                  _key: entry:
+                  let
+                    active = (entry.required or false) || (entry.secret or false);
+                    value =
+                      if (entry.required or false) && !(entry.secret or false) then
+                        entry.placeholder or ""
+                      else
+                        toString (entry.default or "");
+                    prefix = if active then "" else "# ";
+                  in
+                  "# ${entry.doc}\n${prefix}${entry.env}=${value}\n\n";
+                generated = pkgs.writeText "harness.env.example.generated" (
+                  "# Copy to harness.env (gitignored) and fill in — or export these in your shell.\n\n"
+                  + concatStrings (mapAttrsToList renderEntry schema)
+                );
+              in
+              pkgs.runCommand "harness-env-example"
+                {
+                  inherit generated;
+                  committed = ./templates/default/harness.env.example;
+                }
+                ''
+                  diff "$generated" "$committed" \
+                    || { echo "templates/default/harness.env.example is out of sync with lib/env-schema.nix — regenerate it" >&2; exit 1; }
+                  touch $out
+                '';
+
+            # Every env-var string literal in cmd/launcher/main.go must have a
+            # matching entry in lib/env-schema.nix, and vice-versa (presence-only;
+            # value-level pinning would be refactor-brittle).  A set of known
+            # nix-baked vars is excluded from the main.go side.
+            launcher-env-coverage =
+              let
+                schema = import ./lib/env-schema.nix;
+                inherit (pkgs.lib)
+                  attrValues
+                  concatStringsSep
+                  filter
+                  subtractLists
+                  ;
+                mainGoSrc = builtins.readFile ./cmd/launcher/main.go;
+                # Env var names that main.go reads but that are nix-generated
+                # (not user-facing knobs): excluded from the schema-coverage check.
+                nixBaked = [
+                  "IMAGE_ARCHIVE"
+                  "IMAGE_TAG"
+                  "IMAGE_DRV"
+                  "NIX_BUILDER_IMAGE"
+                  "NIX_VOLUME"
+                  "FLAKE_IMAGE_ATTR"
+                  "AGENT_FILES"
+                  "AGENT_ENV"
+                  "BAKED_PREFETCH"
+                  "RUNTIME"
+                  "IMAGE"
+                  "BOX_ENV_VARS"
+                ];
+                schemaEnvNames = map (e: e.env) (attrValues schema);
+                # Forward: every schema name must appear as a string literal in main.go.
+                missingFromGo = filter (name: !pkgs.lib.hasInfix ''"${name}"'' mainGoSrc) schemaEnvNames;
+                # Reverse: extract names from os.Getenv/getenv calls in main.go.
+                parts = builtins.split ''(os\.Getenv|getenv)\("([A-Z_][A-Z0-9_]*)"\)'' mainGoSrc;
+                goEnvNames = map (m: builtins.elemAt m 1) (filter builtins.isList parts);
+                extraInGo = subtractLists (schemaEnvNames ++ nixBaked) goEnvNames;
+              in
+              assert pkgs.lib.assertMsg (missingFromGo == [ ]) "schema knobs absent from main.go: ${concatStringsSep ", " missingFromGo}";
+              assert pkgs.lib.assertMsg (extraInGo == [ ]) "main.go reads env vars absent from schema: ${concatStringsSep ", " extraInGo}";
+              pkgs.runCommand "launcher-env-coverage" { } "touch $out";
           }
           # The baked entrypoint must carry a store-path shebang, not the
           # source's `#!/usr/bin/env bash` — the Box has no /usr/bin/env. Guards

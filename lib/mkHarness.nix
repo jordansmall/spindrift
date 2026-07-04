@@ -83,28 +83,18 @@ let
     else
       text;
 
-  # Built-in run defaults; the Consumer's `defaults` override them per key, and a
-  # matching env var overrides those again at runtime (see scripts/run.sh).
-  mergedDefaults = {
-    label = "ready-for-agent";
-    baseBranch = "main";
-    maxParallel = 3;
-    branchPrefix = "agent/issue-";
-    # Label lifecycle (issue #15): dispatch swaps `label` -> `inProgressLabel` so
-    # the query stays idempotent; a non-zero Box swaps it -> `failedLabel` for
-    # human triage.
-    inProgressLabel = "agent-in-progress";
-    failedLabel = "agent-failed";
-    completeLabel = "agent-complete";
-    # Agent model (issue #16), promoted out of the image so `MODEL=...` switches
-    # models at runtime with zero image rebuild.
-    model = "claude-opus-4-8";
-    # Subagent model tiers (issue #36): empty by default so --agents is omitted
-    # unless the caller explicitly pins scout/reviewer models.
-    scoutModel = "";
-    reviewModel = "";
-  }
-  // defaults;
+  # Single source of truth for every runtime knob — name mapping, defaults, scope.
+  # Generators below derive all per-knob output from this registry; no per-knob
+  # lines appear anywhere else in this file.
+  schema = import ./env-schema.nix;
+
+  # flakeOption entries are the Consumer-tunable subset.
+  flakeOptionEntries = lib.filterAttrs (_: e: e.flakeOption or false) schema;
+
+  # Built-in run defaults derived from the schema; the Consumer's `defaults` arg
+  # overrides them per key, and a matching env var overrides those again at runtime.
+  schemaDefaults = lib.mapAttrs (_: e: e.default or "") flakeOptionEntries;
+  mergedDefaults = schemaDefaults // defaults;
 
   # Plumbing every agent needs regardless of language: a shell, the VCS + GitHub
   # CLIs, Claude Code, CA certs, and the unix tools the entrypoint relies on.
@@ -152,7 +142,9 @@ let
       coreutils
       jq # extracts the outcome from the stream-json transcript
     ];
-    text = stripShebang (builtins.readFile ../agent/entrypoint.sh);
+    # Prepend the schema-derived defaults block so the entrypoint carries the
+    # baked values without hardcoding them in the source script.
+    text = renderDefaultsPreamble { } + stripShebang (builtins.readFile ../agent/entrypoint.sh);
   };
 
   # Baked into the image at /agent — there is no working tree to bind-mount from
@@ -314,25 +306,28 @@ let
     BAKED_PREFETCH=${lib.escapeShellArg prefetch}
   '';
 
-  # Each run default renders as `NAME="''${NAME:-<baked>}"`, derived from the
-  # merged defaults attrset, so a matching env var (or harness.env, sourced by
-  # the script) still wins at runtime.
-  runDefaultsPreamble = lib.concatStrings (
-    lib.mapAttrsToList (envName: value: ''
-      ${envName}="''${${envName}:-${toString value}}"
-    '')
-      {
-        LABEL = mergedDefaults.label;
-        BASE_BRANCH = mergedDefaults.baseBranch;
-        MAX_PARALLEL = mergedDefaults.maxParallel;
-        BRANCH_PREFIX = mergedDefaults.branchPrefix;
-        IN_PROGRESS_LABEL = mergedDefaults.inProgressLabel;
-        FAILED_LABEL = mergedDefaults.failedLabel;
-        COMPLETE_LABEL = mergedDefaults.completeLabel;
-        MODEL = mergedDefaults.model;
-        SCOUT_MODEL = mergedDefaults.scoutModel;
-        REVIEW_MODEL = mergedDefaults.reviewModel;
-      }
+  # One renderer used by both the shell and Go preamble families: iterates over
+  # flakeOption schema entries and emits `[export ]VAR="${VAR:-<baked>}"` lines.
+  # A matching env var (or harness.env, sourced by the wrapper) still wins at runtime.
+  renderDefaultsPreamble =
+    { export ? false }:
+    lib.concatStrings (
+      lib.mapAttrsToList (key: entry:
+        let
+          value = mergedDefaults.${key};
+          prefix = if export then "export " else "";
+        in
+        ''${prefix}${entry.env}="''${${entry.env}:-${toString value}}"
+        ''
+      ) flakeOptionEntries
+    );
+
+  # Space-separated list of env var names forwarded from the host into the Box,
+  # derived from schema boxEnv=true entries.  The Go launcher reads BOX_ENV_VARS
+  # and builds its container-arg list from it, eliminating the hand-enumerated
+  # forwarding lists in runOneOCI / runOneBwrap.
+  boxEnvVarsList = lib.concatStringsSep " " (
+    map (e: e.env) (lib.filter (e: e.boxEnv or false) (lib.attrValues schema))
   );
 
   # Exported-variable variants of the preambles for the Go launcher wrapper.
@@ -369,24 +364,14 @@ let
         export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.spindrift"
       '';
 
-  # Exported run defaults; a matching env var (or harness.env) still wins.
-  goRunDefaultsPreamble = lib.concatStrings (
-    lib.mapAttrsToList (envName: value: ''
-      export ${envName}="''${${envName}:-${toString value}}"
-    '')
-      {
-        LABEL = mergedDefaults.label;
-        BASE_BRANCH = mergedDefaults.baseBranch;
-        MAX_PARALLEL = mergedDefaults.maxParallel;
-        BRANCH_PREFIX = mergedDefaults.branchPrefix;
-        IN_PROGRESS_LABEL = mergedDefaults.inProgressLabel;
-        FAILED_LABEL = mergedDefaults.failedLabel;
-        COMPLETE_LABEL = mergedDefaults.completeLabel;
-        MODEL = mergedDefaults.model;
-        SCOUT_MODEL = mergedDefaults.scoutModel;
-        REVIEW_MODEL = mergedDefaults.reviewModel;
-      }
-  );
+  # Exported run defaults for the Go launcher wrapper.
+  goRunDefaultsPreamble = renderDefaultsPreamble { export = true; };
+
+  # BOX_ENV_VARS exported for the Go binary: the list of env vars it must forward
+  # into each container, derived from schema boxEnv=true entries.
+  boxEnvVarsPreamble = ''
+    export BOX_ENV_VARS="${boxEnvVarsList}"
+  '';
 
   # The Go launcher binary, built hermetically by buildGoModule.
   # No external dependencies → vendorHash = null.
@@ -434,6 +419,7 @@ let
       + goBwrapRunPreamble
       + goRunBuildPreamble
       + goRunDefaultsPreamble
+      + boxEnvVarsPreamble
       + ''
         # Config + secrets (gitignored), read from $PWD since the harness is a
         # store path with no working tree. `set -a` overrides the baked defaults.

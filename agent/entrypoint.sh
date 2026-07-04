@@ -18,17 +18,11 @@ set -euo pipefail
 : "${GIT_USER_NAME:?GIT_USER_NAME is required}"
 : "${GIT_USER_EMAIL:?GIT_USER_EMAIL is required}"
 
-BASE_BRANCH="${BASE_BRANCH:-main}"
-BRANCH_PREFIX="${BRANCH_PREFIX:-agent/issue-}"
-BRANCH="${BRANCH_PREFIX}${ISSUE_NUMBER}"
-
-# `run` passes MODEL per issue; this fallback keeps the entrypoint runnable
-# standalone.
-MODEL="${MODEL:-claude-opus-4-8}"
-SCOUT_MODEL="${SCOUT_MODEL:-}"
-REVIEW_MODEL="${REVIEW_MODEL:-}"
-IN_PROGRESS_LABEL="${IN_PROGRESS_LABEL:-agent-in-progress}"
-COMPLETE_LABEL="${COMPLETE_LABEL:-agent-complete}"
+# BASE_BRANCH, BRANCH_PREFIX, MODEL, SCOUT_MODEL, REVIEW_MODEL,
+# IN_PROGRESS_LABEL, and COMPLETE_LABEL are injected by the nix-rendered
+# defaults preamble prepended at image-build time (env-schema.nix).  The
+# :-  expansions below keep shellcheck and `set -u` happy for standalone use.
+BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
 
 # Baked-in locations; overridable only so the harness can be exercised on the
 # host without a container.
@@ -44,7 +38,7 @@ gh auth setup-git
 echo "==> cloning $REPO_SLUG"
 git clone "https://github.com/${REPO_SLUG}.git" "$WORK_DIR"
 cd "$WORK_DIR"
-git checkout -b "$BRANCH" "origin/${BASE_BRANCH}"
+git checkout -b "$BRANCH" "origin/${BASE_BRANCH:-}"
 
 # Detect a Nix devShell in the cloned repo. When found the prompt guides the
 # agent to run checks inside `nix develop`; absence or probe failure degrades
@@ -72,9 +66,9 @@ prompt="$(
   ISSUE_NUMBER="$ISSUE_NUMBER" \
     ISSUE_TITLE="${ISSUE_TITLE:-}" \
     BRANCH="$BRANCH" \
-    BASE_BRANCH="$BASE_BRANCH" \
-    IN_PROGRESS_LABEL="$IN_PROGRESS_LABEL" \
-    COMPLETE_LABEL="$COMPLETE_LABEL" \
+    BASE_BRANCH="${BASE_BRANCH:-}" \
+    IN_PROGRESS_LABEL="${IN_PROGRESS_LABEL:-}" \
+    COMPLETE_LABEL="${COMPLETE_LABEL:-}" \
     envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL' \
     <"${PROMPTS_DIR}/issue-prompt.md"
 )"
@@ -82,8 +76,8 @@ prompt="$(
 # Build --agents JSON when both subagent models are configured; omit the flag
 # entirely when either is unset so single-model runs are unaffected.
 agents_args=()
-if [ -n "$SCOUT_MODEL" ] && [ -n "$REVIEW_MODEL" ]; then
-  agents_json='[{"name":"scout","model":"'"$SCOUT_MODEL"'"},{"name":"reviewer","model":"'"$REVIEW_MODEL"'"}]'
+if [ -n "${SCOUT_MODEL:-}" ] && [ -n "${REVIEW_MODEL:-}" ]; then
+  agents_json='[{"name":"scout","model":"'"${SCOUT_MODEL:-}"'"},{"name":"reviewer","model":"'"${REVIEW_MODEL:-}"'"}]'
   agents_args=(--agents "$agents_json")
 fi
 
@@ -94,7 +88,7 @@ echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
 stream_log="$(mktemp)"
 set +e
 claude -p "$prompt" \
-  --model "$MODEL" \
+  --model "${MODEL:-}" \
   "${agents_args[@]}" \
   --verbose \
   --output-format stream-json \
