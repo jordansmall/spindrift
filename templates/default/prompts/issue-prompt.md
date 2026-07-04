@@ -115,10 +115,10 @@ until gh pr checks <pr-number> 2>/dev/null | grep -q .; do sleep 10; done
 If no check ever registers within a few minutes, do NOT emit `status=ready` —
 follow IF BLOCKED instead.
 
-**Never merge on red, and never merge on "no checks".** The LAUNCHER (outside
-this container) owns the final CI-green decision, the rebase-merge, and the
-complete-label swap. Stop here once CI has registered — do not wait for checks
-to complete and do not run `gh pr merge`.
+**Do not merge — at all.** The LAUNCHER (outside this container) owns the final
+CI-green decision, the rebase-merge, and the complete-label swap. Stop here once
+CI has registered — do not wait for checks to complete and do not run
+`gh pr merge`.
 
 # OUTCOME
 
