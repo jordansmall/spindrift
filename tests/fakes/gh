@@ -80,6 +80,43 @@ EOF
             statevar="FAKE_GH_ISSUE_STATE_${num}"
             printf '%s\n' "${!statevar:-OPEN}"
             ;;
+          number,title,body,state,labels)
+            # Combined response for execClient.Issue(): return a JSON object.
+            # Look up the title from FAKE_GH_ISSUES (tab-separated num\ttitle).
+            title=""
+            while IFS=$'\t' read -r n t; do
+              [ "$n" = "$num" ] && title="$t" && break
+            done <<< "${FAKE_GH_ISSUES:-}"
+            statevar="FAKE_GH_ISSUE_STATE_${num}"
+            state="${!statevar:-OPEN}"
+            bodyvar="FAKE_GH_ISSUE_BODY_${num}"
+            body="${!bodyvar:-}"
+            # Collect labels: lifecycle label from GH_STATE, plus any static label.
+            cur=""
+            if [ -f "$GH_STATE" ]; then
+              while IFS=$'\t' read -r k v; do
+                [ "$k" = "$num" ] && cur="$v"
+              done < "$GH_STATE"
+            fi
+            labelsvar="FAKE_GH_ISSUE_LABELS_${num}"
+            extra_label="${!labelsvar:-}"
+            # Build labels array JSON using jq for safe escaping.
+            labels_json="[]"
+            if [ -n "$cur" ] && [ -n "$extra_label" ]; then
+              labels_json=$(jq -cn '[{"name":$a},{"name":$b}]' --arg a "$cur" --arg b "$extra_label")
+            elif [ -n "$cur" ]; then
+              labels_json=$(jq -cn '[{"name":$a}]' --arg a "$cur")
+            elif [ -n "$extra_label" ]; then
+              labels_json=$(jq -cn '[{"name":$a}]' --arg a "$extra_label")
+            fi
+            jq -cn \
+              --argjson num "$num" \
+              --arg title "$title" \
+              --arg body "$body" \
+              --arg state "$state" \
+              --argjson labels "$labels_json" \
+              '{"number":$num,"title":$title,"body":$body,"state":$state,"labels":$labels}'
+            ;;
         esac
         ;;
     esac
