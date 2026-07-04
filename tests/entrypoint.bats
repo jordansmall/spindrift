@@ -65,6 +65,25 @@ setup() {
   ! grep -q -- "--model claude-opus-4-8" "$CLAUDE_LOG"
 }
 
+# Observability (#113): text --print emits nothing until the end, so the box
+# looks dead under `podman logs -f`. stream-json is the only --print mode that
+# emits events in realtime.
+@test "entrypoint runs claude in stream-json mode so activity streams live" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- "--output-format stream-json" "$CLAUDE_LOG"
+  grep -q -- "--verbose" "$CLAUDE_LOG"
+}
+
+# The launcher greps '^SPINDRIFT_OUTCOME ' from the container log. Under
+# stream-json the outcome is buried in a JSON result event, so the entrypoint
+# must surface it as a bare line to keep that contract.
+@test "entrypoint re-emits the agent's SPINDRIFT_OUTCOME as a bare line" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -q '^SPINDRIFT_OUTCOME .*status=ready'
+}
+
 @test "entrypoint runs the configured prefetch hook inside the work tree" {
   export PREFETCH_LOG="$BATS_TEST_TMPDIR/prefetch.log"
   {

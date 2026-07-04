@@ -88,9 +88,27 @@ if [ -n "$SCOUT_MODEL" ] && [ -n "$REVIEW_MODEL" ]; then
 fi
 
 echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
+# Stream the transcript live (visible via `podman logs -f`) while capturing it.
+# stream-json is the only --print format that emits events in realtime; plain
+# text stays silent until the very end, so the box looks dead for the whole run.
+stream_log="$(mktemp)"
+set +e
 claude -p "$prompt" \
   --model "$MODEL" \
   "${agents_args[@]}" \
-  --dangerously-skip-permissions
+  --verbose \
+  --output-format stream-json \
+  --dangerously-skip-permissions \
+  | tee "$stream_log"
+claude_rc="${PIPESTATUS[0]}"
+set -e
 
+# The launcher greps '^SPINDRIFT_OUTCOME ' from the container log, but under
+# stream-json the agent's final line is wrapped in a result event. Surface it as
+# a bare line so that contract is unchanged.
+jq -r 'select(.type == "result") | .result // empty' "$stream_log" 2>/dev/null \
+  | grep '^SPINDRIFT_OUTCOME ' | tail -1 || true
+rm -f "$stream_log"
+
+[ "$claude_rc" -eq 0 ] || exit "$claude_rc"
 echo "==> entrypoint complete for issue #$ISSUE_NUMBER"

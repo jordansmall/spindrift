@@ -38,4 +38,12 @@ if [ "${FAKE_CLAUDE_COMMIT:-0}" = "1" ]; then
     --body "Closes #${ISSUE_NUMBER:-0}"
 fi
 
+# Emit a stream-json transcript to stdout, matching `--output-format stream-json`:
+# NDJSON events ending in a `result` event whose `.result` holds the agent's final
+# message — here a status=ready outcome line the entrypoint must surface.
+printf '{"type":"system","subtype":"init","session_id":"fake"}\n'
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"implementing #%s"}]}}\n' "${ISSUE_NUMBER:-0}"
+printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME issue=%s pr=https://github.com/%s/pull/1 status=ready note=fake"}\n' \
+  "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
+
 exit 0

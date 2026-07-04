@@ -256,6 +256,7 @@
                     pkgs.coreutils
                     pkgs.gnugrep
                     pkgs.gnused
+                    pkgs.jq
                   ];
                   # The launcher commands under test overlay `gh` with the fake
                   # (batsHarness/customHarness/dockerHarness), since the real `gh`
