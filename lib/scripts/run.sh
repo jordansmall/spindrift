@@ -381,6 +381,42 @@ dispatch_waves() {
   done
 }
 
+# Polls gh pr checks for <pr> until checks pass, fail, or <MERGE_POLL_TIMEOUT>
+# seconds elapse. On all-success: merges with rebase + delete-branch and swaps
+# the issue to COMPLETE_LABEL; on failure or timeout: swaps to FAILED_LABEL.
+# Returns 0 when the merge was performed, 1 otherwise.
+# Best-effort: every internal error path swaps the label and returns cleanly so
+# `set -e` in the caller does not abort the run.
+merge_when_green() {
+  local num="$1" pr="$2"
+  local poll_iv="${MERGE_POLL_INTERVAL:-30}"
+  local deadline="${MERGE_POLL_TIMEOUT:-1800}"
+  local elapsed=0 checks_out
+  while true; do
+    checks_out="$(gh pr checks "$pr" 2>/dev/null || true)"
+    if printf '%s\n' "$checks_out" | grep -q 'fail'; then
+      swap_label "$num" "$FAILED_LABEL" "$IN_PROGRESS_LABEL"
+      return 1
+    fi
+    if [ -n "$checks_out" ] && ! printf '%s\n' "$checks_out" | grep -qE 'pending|queued'; then
+      if gh pr merge "$pr" --rebase --delete-branch >/dev/null 2>&1; then
+        swap_label "$num" "$COMPLETE_LABEL" "$IN_PROGRESS_LABEL"
+        return 0
+      else
+        swap_label "$num" "$FAILED_LABEL" "$IN_PROGRESS_LABEL"
+        return 1
+      fi
+    fi
+    [ "$elapsed" -ge "$deadline" ] && break
+    sleep "$poll_iv"
+    # Advance elapsed by at least 1 so the deadline is always reachable even
+    # when MERGE_POLL_INTERVAL=0 (used in tests to skip the sleep).
+    elapsed=$(( elapsed + poll_iv + 1 ))
+  done
+  swap_label "$num" "$FAILED_LABEL" "$IN_PROGRESS_LABEL"
+  return 1
+}
+
 # Reads each per-issue log for its SPINDRIFT_OUTCOME line and prints a roll-up.
 # For issues that claim to be merged, independently verifies the PR state and
 # issue label against GitHub rather than trusting the container's self-report.
@@ -401,6 +437,28 @@ print_outcome_report() {
     note="$(printf '%s' "$outcome_line" | sed 's/.*note=//')"
     if [ "$status" = "blocked" ]; then
       printf '    #%s  pr=%s  status=%s  !! %s\n' "$num" "$pr" "$status" "$note"
+    elif [ "$status" = "ready" ]; then
+      local pr_state issue_labels
+      if merge_when_green "$num" "$pr"; then
+        pr_state="$(gh pr view "$pr" --json state --jq '.state' 2>/dev/null || true)"
+        issue_labels="$(gh issue view "$num" --repo "$REPO_SLUG" --json labels \
+          --jq '.labels[].name' 2>/dev/null || true)"
+        if [ "$pr_state" = "MERGED" ] && \
+           printf '%s\n' "$issue_labels" | grep -qxF "$COMPLETE_LABEL"; then
+          printf '    #%s  pr=%s  status=verified-merged\n' "$num" "$pr"
+        else
+          local reason
+          if [ "$pr_state" != "MERGED" ]; then
+            reason="PR state is '${pr_state:-unknown}', expected MERGED"
+          else
+            reason="issue does not carry '$COMPLETE_LABEL'"
+          fi
+          printf '    #%s  pr=%s  status=failed  !! %s\n' "$num" "$pr" "$reason"
+          swap_label "$num" "$FAILED_LABEL" "$IN_PROGRESS_LABEL"
+        fi
+      else
+        printf '    #%s  pr=%s  status=failed  !! CI or merge failed\n' "$num" "$pr"
+      fi
     elif [ "$status" = "merged" ]; then
       local pr_state issue_labels
       pr_state="$(gh pr view "$pr" --json state --jq '.state' 2>/dev/null || true)"
