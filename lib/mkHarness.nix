@@ -257,54 +257,56 @@ let
   agentEnvPath = builtins.unsafeDiscardStringContext (toString agentEnv);
   agentEnvDrv = builtins.unsafeDiscardStringContext agentEnv.drvPath;
 
-  # Nix-rendered shell preamble of baked config the launchers consume; every
-  # value is interpolated straight into shell and shellcheck'd with the script.
-  # RUNTIME is deliberately NOT a runtimeInput — it stays a checked host install
-  # (see the `command -v "$RUNTIME"` guard in the scripts).
+  # Runner adapter record: selected once from the runtime, then rendered into
+  # shell exports for both the `build` and `run` wrappers. No per-runtime
+  # conditionals appear after this point (ADR 0006).
   #
-  # OCI path: IMAGE_ARCHIVE + IMAGE_TAG + RUNTIME baked into both launchers.
-  # IMAGE_TAG carries the nix content hash so a stale image (different hash) is
-  # treated as missing by `run`, collapsing staleness into the missing code path.
-  # bwrap path: RUNTIME + AGENT_FILES + AGENT_ENV baked into run only (via
-  # bwrapRunPreamble); the build launcher gets neither. bwrap-build.sh never
-  # reads RUNTIME, so baking it there trips shellcheck SC2034 (unused).
-  imagePreamble =
-    if runtime == "bwrap" then
-      ""
-    else
-      ''
-        IMAGE_ARCHIVE="${imagePath}"
-        IMAGE_TAG="spindrift:${imageHash}"
-        RUNTIME="${runtime}"
+  # vars:         simple-string baked facts, rendered as export VAR="value".
+  # extraExports: optional snippet for values that need special shell quoting
+  #               (e.g. multi-line BAKED_PREFETCH) — appended verbatim.
+  #
+  # RUNTIME is a baked fact (not a runtimeInput) so the runtime CLI remains a
+  # checked host install; the scripts branch on it, not on a nix-provided binary.
+  runnerKind = if runtime == "bwrap" then "bwrap" else "oci";
+  runners = {
+    oci = {
+      vars = {
+        RUNTIME = runtime;
+        IMAGE_ARCHIVE = imagePath;
+        IMAGE_TAG = "spindrift:${imageHash}";
+        IMAGE_DRV = imageDrv;
+        NIX_BUILDER_IMAGE = nixBuilderImage;
+        NIX_VOLUME = "spindrift-nix";
+        FLAKE_IMAGE_ATTR = ".#packages.${linuxSystem}.spindrift";
+      };
+      extraExports = "";
+    };
+    bwrap = {
+      vars = {
+        RUNTIME = "bwrap";
+        AGENT_FILES = agentFilesPath;
+        AGENT_ENV = agentEnvPath;
+        AGENT_FILES_DRV = agentFilesDrv;
+        AGENT_ENV_DRV = agentEnvDrv;
+      };
+      # BAKED_PREFETCH is an arbitrary multi-line shell snippet; escapeShellArg
+      # produces a safely single-quoted assignment.
+      extraExports = ''
+        BAKED_PREFETCH=${lib.escapeShellArg prefetch}
+        export BAKED_PREFETCH
       '';
+    };
+  };
+  selectedRunner = runners.${runnerKind};
 
-  # Build-only addendum baked on top of imagePreamble.
-  # OCI: IMAGE_DRV + fallback container config.
-  # bwrap: the two store-closure .drv paths; no image/load step.
-  buildPreamble =
-    if runtime == "bwrap" then
-      ''
-        AGENT_FILES_DRV="${agentFilesDrv}"
-        AGENT_ENV_DRV="${agentEnvDrv}"
-      ''
-    else
-      ''
-        IMAGE_DRV="${imageDrv}"
-        NIX_BUILDER_IMAGE="${nixBuilderImage}"
-        NIX_VOLUME="spindrift-nix"
-        FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.spindrift"
-      '';
-
-  # Run-only addendum for the bwrap path: the runtime marker, the agent store
-  # paths, and the baked prefetch snippet (fed to the entrypoint via --setenv
-  # PREFETCH). RUNTIME lives here rather than in imagePreamble so it is baked
-  # into run (which branches on it) but not build (which never reads it).
-  bwrapRunPreamble = lib.optionalString (runtime == "bwrap") ''
-    RUNTIME="bwrap"
-    AGENT_FILES="${agentFilesPath}"
-    AGENT_ENV="${agentEnvPath}"
-    BAKED_PREFETCH=${lib.escapeShellArg prefetch}
-  '';
+  # Render the selected runner's vars as `export VAR="value"` lines plus any
+  # extraExports snippet.  `export` is required so the exec'd Go binary inherits
+  # each value; plain assignments would be visible only to the shell wrapper.
+  renderRunnerVars =
+    rec:
+    lib.concatMapStrings (k: ''export ${k}="${rec.vars.${k}}"'' + "\n") (lib.attrNames rec.vars)
+    + rec.extraExports;
+  goRunnerPreamble = renderRunnerVars selectedRunner;
 
   # One renderer used by both the shell and Go preamble families: iterates over
   # flakeOption schema entries and emits `[export ]VAR="${VAR:-<baked>}"` lines.
@@ -330,40 +332,6 @@ let
     map (e: e.env) (lib.filter (e: e.boxEnv or false) (lib.attrValues schema))
   );
 
-  # Exported-variable variants of the preambles for the Go launcher wrapper.
-  # `export` is required so the exec'd Go binary inherits each value; plain
-  # assignments without export would be visible only to the shell wrapper.
-
-  goImagePreamble =
-    if runtime == "bwrap" then
-      ""
-    else
-      ''
-        export IMAGE_ARCHIVE="${imagePath}"
-        export IMAGE_TAG="spindrift:${imageHash}"
-        export RUNTIME="${runtime}"
-      '';
-
-  goBwrapRunPreamble = lib.optionalString (runtime == "bwrap") ''
-    export RUNTIME="bwrap"
-    export AGENT_FILES="${agentFilesPath}"
-    export AGENT_ENV="${agentEnvPath}"
-    BAKED_PREFETCH=${lib.escapeShellArg prefetch}
-    export BAKED_PREFETCH
-  '';
-
-  # OCI-only build vars the Go binary uses for image build-on-demand.
-  goRunBuildPreamble =
-    if runtime == "bwrap" then
-      ""
-    else
-      ''
-        export IMAGE_DRV="${imageDrv}"
-        export NIX_BUILDER_IMAGE="${nixBuilderImage}"
-        export NIX_VOLUME="spindrift-nix"
-        export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.spindrift"
-      '';
-
   # Exported run defaults for the Go launcher wrapper.
   goRunDefaultsPreamble = renderDefaultsPreamble { export = true; };
 
@@ -382,25 +350,18 @@ let
     vendorHash = null;
   };
 
-  # The launcher commands: a nix-rendered preamble + the script body, wrapped by
-  # writeShellApplication (shebang, `set -euo pipefail`, a build-time shellcheck,
-  # and a runtimeInputs PATH that pins the host tools they call).
+  # The build command: bake runner vars, then exec `launcher build`.
+  # `launcher build` calls runner.EnsureReady() — OCI: ensure image present
+  # (host-build or container-fallback); bwrap: realise agent store closures.
+  # Both `run` and `build` share the same EnsureReady path (ADR 0004).
   build = hostPkgs.writeShellApplication {
     name = "build";
-    runtimeInputs = [ hostPkgs.coreutils ];
+    runtimeInputs = [ ];
     text =
-      imagePreamble
-      + buildPreamble
-      + (
-        if runtime == "bwrap" then
-          builtins.readFile ./scripts/bwrap-build.sh
-        else
-          # build-image.sh defines the shared build helpers (load_image,
-          # build_in_container, fail_no_builder, build_box_image); build.sh
-          # then calls build_box_image to drive the realise-and-load sequence.
-          builtins.readFile ./scripts/build-image.sh
-          + builtins.readFile ./scripts/build.sh
-      );
+      goRunnerPreamble
+      + ''
+        exec ${launcherBin}/bin/launcher build
+      '';
   };
 
   # The run command: a thin shell wrapper that bakes nix-computed config into
@@ -415,9 +376,7 @@ let
       coreutils
     ];
     text =
-      goImagePreamble
-      + goBwrapRunPreamble
-      + goRunBuildPreamble
+      goRunnerPreamble
       + goRunDefaultsPreamble
       + boxEnvVarsPreamble
       + ''
