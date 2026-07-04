@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Dogfood loop: spindrift building spindrift, one issue at a time.
 #
-# The box's behaviour — entrypoint, toolchain, and the merge gate (which lives in
-# the prompt text) — is baked into the OCI image at `nix run .#build` time. When
-# an agent merges a fix to main, later issues stay blind to it until the image is
-# rebuilt from an updated tree. This loop closes both staleness sources:
+# The box's behaviour — entrypoint, toolchain, and prompt — is baked into the OCI
+# image at `nix run .#build` time (the merge gate itself lives in the launcher).
+# When an agent merges a fix to the base branch, later issues stay blind to it
+# until the image is rebuilt from an updated tree. This loop closes both
+# staleness sources:
 #
-#   1. `git pull --ff-only`  — pull the just-merged change into the local tree,
-#                              which is what `nix run .#build` reads from ($PWD).
+#   1. `git checkout $BASE_BRANCH && git pull --ff-only`
+#                              — reset to the base branch and pull the just-merged
+#                                change into the local tree, which is what
+#                                `nix run .#build` reads from ($PWD).
 #   2. `nix run .#build`     — re-bake the image from that updated tree.
 #
 # It runs MAX_JOBS=1 so each `nix run .#run` drains exactly one issue; the pull +
@@ -26,6 +29,7 @@ if [ -f harness.env ]; then
   set +a
 fi
 LABEL="${LABEL:-ready-for-agent}"
+BASE_BRANCH="${BASE_BRANCH:-main}"
 : "${REPO_SLUG:?set REPO_SLUG=owner/repo in harness.env}"
 
 if [ -n "$(git status --porcelain)" ]; then
@@ -44,7 +48,11 @@ while :; do
   iteration=$((iteration + 1))
   echo "==> dogfood iteration $iteration: $remaining '$LABEL' issue(s) remaining"
 
-  echo "==> dogfood: git pull --ff-only"
+  echo "==> dogfood: git checkout $BASE_BRANCH && git pull --ff-only"
+  # An agent's PR merges on $BASE_BRANCH, and the build reads $PWD — so reset to
+  # the base branch first. A host left on a feature branch (a merged PR's branch,
+  # a leftover checkout) has no upstream to fast-forward and would break the pull.
+  git checkout "$BASE_BRANCH"
   git pull --ff-only
 
   echo "==> dogfood: nix run .#build"
