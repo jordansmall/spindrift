@@ -425,7 +425,7 @@ EOF
   # No FAKE_PODMAN_OUTCOME_1 → no SPINDRIFT_OUTCOME in log
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   # FAKE_GH_PR_DRAFT_1 not set → defaults to "false" (non-draft)
-  export FAKE_GH_PR_CHECKS_1="success"
+  export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'pr merge' "$GH_LOG"
@@ -568,13 +568,13 @@ EOF
   [[ "$output" == *"status=verified-merged"* ]]
 }
 
-# --- Launcher merge gate (issue #90) -----------------------------------------
+# --- Launcher merge gate (issue #135) ----------------------------------------
 
-@test "status=ready + pr checks all-success → merges PR and reports verified-merged" {
+@test "rollup SUCCESS → merges PR and reports verified-merged" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
-  export FAKE_GH_PR_CHECKS_1="success"
+  export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'pr merge' "$GH_LOG"
@@ -582,11 +582,11 @@ EOF
   [[ "$output" == *"status=verified-merged"* ]]
 }
 
-@test "status=ready + pr checks failure → does NOT merge, swaps to agent-failed" {
+@test "rollup FAILURE → does NOT merge, swaps to agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
-  export FAKE_GH_PR_CHECKS_1="failure"
+  export FAKE_GH_GRAPHQL_ROLLUP_1="FAILURE"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   ! grep -q 'pr merge' "$GH_LOG"
@@ -594,11 +594,24 @@ EOF
   [[ "$output" == *"status=failed"* ]]
 }
 
-@test "status=ready + pr checks pending (timeout) → does NOT merge, swaps to agent-failed" {
+# R1 regression guard: ERROR state (e.g. cancelled run) must not trigger a merge.
+@test "rollup ERROR → does NOT merge, swaps to agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
-  export FAKE_GH_PR_CHECKS_1="pending"
+  export FAKE_GH_GRAPHQL_ROLLUP_1="ERROR"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  ! grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
+  [[ "$output" == *"status=failed"* ]]
+}
+
+@test "rollup PENDING (timeout) → does NOT merge, swaps to agent-failed" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_GH_GRAPHQL_ROLLUP_1="PENDING"
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=0
   run "$RUN_CMD"
@@ -608,11 +621,11 @@ EOF
   [[ "$output" == *"status=failed"* ]]
 }
 
-@test "status=ready + no pr checks at all (absent/timeout) → does NOT merge, swaps to agent-failed" {
+@test "rollup null/no checks (timeout) → does NOT merge, swaps to agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
-  # FAKE_GH_PR_CHECKS_1 unset → no output (not started / absent)
+  # FAKE_GH_GRAPHQL_ROLLUP_1 unset → empty rollup (no checks registered yet)
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=0
   run "$RUN_CMD"
@@ -622,45 +635,18 @@ EOF
   [[ "$output" == *"status=failed"* ]]
 }
 
-# R1 regression guard: a cancelled check must NOT trigger a merge.
-@test "status=ready + pr checks cancelled → does NOT merge, swaps to agent-failed" {
+# PENDING-then-SUCCESS: gate waits through one pending poll then merges.
+@test "rollup PENDING then SUCCESS → waits and eventually merges" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
-  export FAKE_GH_PR_CHECKS_1="cancel"
-  run "$RUN_CMD"
-  [ "$status" -eq 0 ]
-  ! grep -q 'pr merge' "$GH_LOG"
-  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
-  [[ "$output" == *"status=failed"* ]]
-}
-
-# A skipped check is benign — pass + skipping must still merge.
-@test "status=ready + pr checks pass and skipping → merges and reports verified-merged" {
-  export FAKE_PODMAN_IMAGE_PRESENT=1
-  export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
-  export FAKE_GH_PR_CHECKS_1="pass-skipping"
+  export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING,SUCCESS"
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=3
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'pr merge' "$GH_LOG"
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
   [[ "$output" == *"status=verified-merged"* ]]
-}
-
-# One green check must not trigger a merge while another is still pending
-# (the #89 premature-merge mode).
-@test "status=ready + pr checks pass but one pending (timeout) → does NOT merge" {
-  export FAKE_PODMAN_IMAGE_PRESENT=1
-  export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
-  export FAKE_GH_PR_CHECKS_1="pass-pending"
-  export MERGE_POLL_INTERVAL=0
-  export MERGE_POLL_TIMEOUT=0
-  run "$RUN_CMD"
-  [ "$status" -eq 0 ]
-  ! grep -q 'pr merge' "$GH_LOG"
-  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
-  [[ "$output" == *"status=failed"* ]]
 }
 

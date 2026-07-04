@@ -133,40 +133,56 @@ EOF
         pr_ref="${3:-}"
         pr_num="${pr_ref##*/}"
         checksvar="FAKE_GH_PR_CHECKS_${pr_num}"
-        # Detect --json bucket (structured output mode used by merge_when_green).
-        json_bucket=0
-        args=("$@")
-        for ((i = 0; i < ${#args[@]}; i++)); do
-          [ "${args[i]}" = "--json" ] && [ "${args[i+1]:-}" = "bucket" ] && json_bucket=1
-        done
-        if [ "$json_bucket" = "1" ]; then
-          # Emit one bucket word per line — exactly what the launcher reads.
-          case "${!checksvar:-none}" in
-            success)      printf 'pass\n' ;;
-            failure)      printf 'fail\n' ;;
-            pending)      printf 'pending\n' ;;
-            cancel)       printf 'cancel\n' ;;
-            skipping)     printf 'skipping\n' ;;
-            pass-skipping) printf 'pass\nskipping\n' ;;
-            pass-pending) printf 'pass\npending\n' ;;
-            none)         ;; # no output — checks not yet registered
-          esac
-        else
-          # Plain output retained for any caller that does not use --json bucket.
-          case "${!checksvar:-none}" in
-            success)  printf 'CI\tpass\thttps://example.com\n' ;;
-            failure)  printf 'CI\tfail\thttps://example.com\n' ;;
-            pending)  printf 'CI\tpending\thttps://example.com\n' ;;
-            cancel)   printf 'CI\tcancel\thttps://example.com\n' ;;
-            skipping) printf 'CI\tskipping\thttps://example.com\n' ;;
-            none)     ;; # no output — "not started"
-          esac
-        fi
+        # Plain output for any caller that uses gh pr checks directly.
+        case "${!checksvar:-none}" in
+          success)  printf 'CI\tpass\thttps://example.com\n' ;;
+          failure)  printf 'CI\tfail\thttps://example.com\n' ;;
+          pending)  printf 'CI\tpending\thttps://example.com\n' ;;
+          cancel)   printf 'CI\tcancel\thttps://example.com\n' ;;
+          skipping) printf 'CI\tskipping\thttps://example.com\n' ;;
+          none)     ;; # no output — "not started"
+        esac
         ;;
       merge)
         pr_ref="${3:-}"
         pr_num="${pr_ref##*/}"
         printf 'pr-state-%s\tMERGED\n' "$pr_num" >>"$GH_STATE"
+        ;;
+    esac
+    ;;
+  api)
+    case "${2:-}" in
+      graphql)
+        # Extract PR number from -F number=N.
+        pr_num=""
+        args=("$@")
+        for ((i = 0; i < ${#args[@]}; i++)); do
+          if [ "${args[i]}" = "-F" ] && [[ "${args[i+1]:-}" = number=* ]]; then
+            pr_num="${args[i+1]#number=}"
+          fi
+        done
+        # Advance per-PR call counter (enables sequence tests).
+        counter_key="graphql-count-${pr_num}"
+        count=0
+        if [ -f "$GH_STATE" ]; then
+          while IFS=$'\t' read -r k v; do
+            [ "$k" = "$counter_key" ] && count="$v"
+          done < "$GH_STATE"
+        fi
+        count=$((count + 1))
+        printf '%s\t%s\n' "$counter_key" "$count" >> "$GH_STATE"
+        # FAKE_GH_GRAPHQL_ROLLUP_SEQ_N is a comma-separated list of states
+        # returned in order; sticks on the last element once exhausted.
+        seqvar="FAKE_GH_GRAPHQL_ROLLUP_SEQ_${pr_num}"
+        if [ -n "${!seqvar:-}" ]; then
+          IFS=',' read -ra seq <<< "${!seqvar}"
+          idx=$((count - 1))
+          [ "$idx" -ge "${#seq[@]}" ] && idx=$(( ${#seq[@]} - 1 ))
+          printf '%s\n' "${seq[$idx]}"
+        else
+          rollupvar="FAKE_GH_GRAPHQL_ROLLUP_${pr_num}"
+          [ -n "${!rollupvar:-}" ] && printf '%s\n' "${!rollupvar}"
+        fi
         ;;
     esac
     ;;
