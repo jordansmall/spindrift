@@ -32,6 +32,14 @@ The disposable per-issue podman container — the isolation boundary that makes
 `--dangerously-skip-permissions` safe.
 _Avoid_: sandbox, runner, worker.
 
+**Forge**:
+The seam through which the Harness speaks to the Target repo's host. Today's
+only adapter is `gh`-exec (the GitHub CLI); the `forge.Client` interface in
+`cmd/launcher/internal/forge` isolates all GitHub API calls so the merge gate
+and dispatch logic are testable without the real CLI. The name is intentionally
+abstract — a future adapter could speak REST or GraphQL directly.
+_Avoid_: GitHub adapter, API layer, client wrapper.
+
 **Label lifecycle**:
 The dispatch states of an issue, carried as labels on the Target repo:
 `ready-for-agent` (a human marks the issue dispatchable — the label is the
