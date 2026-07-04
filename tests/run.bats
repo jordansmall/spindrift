@@ -417,6 +417,46 @@ EOF
   [[ "$output" == *"missing"* ]]
 }
 
+# --- PR adoption when outcome line is absent (issue #122) --------------------
+
+@test "missing outcome line + open non-draft PR → adopted and merged when CI passes" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  # No FAKE_PODMAN_OUTCOME_1 → no SPINDRIFT_OUTCOME in log
+  export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
+  # FAKE_GH_PR_DRAFT_1 not set → defaults to "false" (non-draft)
+  export FAKE_GH_PR_CHECKS_1="success"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
+  [[ "$output" == *"status=adopted"* ]]
+  [[ "$output" == *"status=verified-merged"* ]]
+}
+
+@test "missing outcome line + draft PR → not adopted, reported as blocked" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  # No FAKE_PODMAN_OUTCOME_1 → no SPINDRIFT_OUTCOME in log
+  export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
+  export FAKE_GH_PR_DRAFT_1="true"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  ! grep -q 'pr merge' "$GH_LOG"
+  [[ "$output" == *"status=blocked"* ]]
+  [[ "$output" != *"status=adopted"* ]]
+}
+
+@test "missing outcome line + no open PR → status=missing unchanged" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  # No FAKE_PODMAN_OUTCOME_1, no FAKE_GH_PR_LIST_1 → no PR found
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=missing"* ]]
+  ! grep -q 'pr merge' "$GH_LOG"
+}
+
 # --- Outcome verification (issue #51) ----------------------------------------
 
 @test "outcome report flags as failed when PR is not MERGED on GitHub" {
