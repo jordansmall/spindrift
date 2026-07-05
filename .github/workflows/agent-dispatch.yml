@@ -1,9 +1,10 @@
 name: Agent dispatch
 
 # Adding the `agent-trigger` label to an issue fires one dogfood run against it:
-# build the image, drain that single issue (open PR, poll checks, rebase-merge on
-# green). The launcher swaps `agent-trigger` off the issue when it claims the work,
-# so the label self-clears and will not re-fire.
+# claim the issue (swap `agent-trigger` -> `agent-in-progress` up front), build
+# the image, then drain that single issue (open PR, poll checks, rebase-merge on
+# green). The claim clears `agent-trigger` before any build work, so the label
+# self-clears and will not re-fire.
 on:
   issues:
     types: [labeled]
@@ -25,7 +26,12 @@ jobs:
     env:
       # nix run .#run reads these directly; env wins over the image's baked defaults.
       RUNTIME: docker
-      LABEL: agent-trigger
+      # The claim step below swaps the issue onto agent-in-progress before the
+      # build, so the launcher targets it by number rather than a label query.
+      # LABEL still names the in-progress label so fanOut skips the redundant
+      # re-claim of an already-claimed issue.
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      LABEL: agent-in-progress
       MAX_JOBS: "1"
       REPO_SLUG: ${{ github.repository }}
       BASE_BRANCH: ${{ github.event.repository.default_branch }}
@@ -40,6 +46,19 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v16
+
+      # Claim the issue before the ~2m40s build so ownership is atomic and
+      # visible the instant dispatch begins — nothing else can grab it during
+      # the build window. Targets only the triggering issue: never scans or
+      # strips ready-for-agent across other issues (a local dogfood run drains
+      # that pool and must be left untouched).
+      - name: Claim the issue
+        run: |
+          gh issue edit "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --add-label agent-in-progress \
+            --remove-label agent-trigger \
+            --remove-label ready-for-agent
 
       # ~2m40s cold on a GitHub runner (nixpkgs closure is substituted, not compiled).
       - name: Build the agent image
