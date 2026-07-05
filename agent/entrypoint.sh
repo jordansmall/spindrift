@@ -23,7 +23,7 @@ set -euo pipefail
 # defaults preamble prepended at image-build time (env-schema.nix).
 # AGENTS_JSON_TEMPLATE is a nix-computed derived value also prepended at
 # image-build time; it is not a schema knob.  The :-  expansions below keep
-# shellcheck and `set -u` happy for standalone use.
+# set -u and the linter happy for standalone use.
 BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
 
 # Baked-in locations; overridable only so the harness can be exercised on the
