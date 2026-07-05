@@ -47,3 +47,13 @@ launch button) → `agent-in-progress` (a Box has been dispatched; re-runs skip
 it) → `agent-failed` (the Box exited non-zero; human triage, re-label to
 retry). Success needs no terminal label — the merged PR closes the issue.
 _Avoid_: status, queue, state machine.
+
+**Outcome line**:
+The machine-readable final line a Box writes to stdout, parsed by the Launcher
+to learn whether a PR is ready for CI-watch-and-merge, blocked, or failed.
+Grammar: `SPINDRIFT_OUTCOME issue=<num> pr=<url> status=<status> note=<text>`
+where `note` may contain spaces and `=`. The `cmd/launcher/internal/outcome`
+package is the authoritative spec and implementation: `Parse` validates the
+grammar, `Line` produces the canonical form, and `LastInLog` scans a Box log
+while gracefully skipping lines too large for the scanner buffer.
+_Avoid_: result line, output line, status line.

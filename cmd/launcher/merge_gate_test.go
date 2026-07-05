@@ -163,3 +163,39 @@ func TestNoGhExecOutsideForge(t *testing.T) {
 		t.Fatalf("walk: %v", err)
 	}
 }
+
+// TestNoOutcomeParsingOutsidePackage walks all non-test Go source files in
+// cmd/launcher, excluding internal/outcome, and fails if any contain the
+// SPINDRIFT_OUTCOME prefix literal — keeping all outcome parsing behind the
+// outcome seam.
+func TestNoOutcomeParsingOutsidePackage(t *testing.T) {
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// Skip the outcome package — that's where the parsing lives.
+		if strings.HasPrefix(filepath.ToSlash(path), "internal/outcome") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		if strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(data), `"SPINDRIFT_OUTCOME "`) {
+			t.Errorf("%s: contains SPINDRIFT_OUTCOME parsing — all outcome parsing must go through internal/outcome", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+}
