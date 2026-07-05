@@ -47,7 +47,7 @@ git checkout -b "$BRANCH" "origin/${BASE_BRANCH:-}"
 if git rev-parse --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
   # Fail hard on gh errors: a silent empty response (network/auth failure)
   # is indistinguishable from "no PR" and must not trigger the force-reset.
-  open_prs="$(gh pr list --repo "$REPO_SLUG" --head "$BRANCH" --state open 2>/dev/null)" || {
+  open_prs="$(gh pr list --repo "$REPO_SLUG" --head "$BRANCH" --state open)" || {
     echo "==> gh pr list failed on $BRANCH; aborting to protect any open PR"
     exit 1
   }
@@ -55,7 +55,7 @@ if git rev-parse --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
     echo "==> open PR exists on $BRANCH; skipping force-reset (adoption path)"
   else
     echo "==> stale remote branch $BRANCH found (no open PR); force-resetting to ${BASE_BRANCH:-}"
-    git push --force origin "$BRANCH"
+    git push --force-with-lease origin "$BRANCH"
   fi
 fi
 

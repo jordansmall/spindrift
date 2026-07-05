@@ -320,7 +320,7 @@ EOF
   [ "$status" -eq 0 ]
 
   # Entrypoint logged the force-reset.
-  echo "$output" | grep -q "force-resetting"
+  [[ "$output" == *"force-resetting"* ]]
 
   # The remote branch was force-reset, so a plain push from the clean
   # work-tree succeeds without a non-fast-forward rejection.
@@ -348,7 +348,7 @@ EOF
   [ "$status" -eq 0 ]
 
   # Entrypoint logged that it skipped the force-reset.
-  echo "$output" | grep -q "skipping force-reset"
+  [[ "$output" == *"skipping force-reset"* ]]
 
   # The stale commit is still on the remote branch (not force-reset).
   stale_sha="$(git -C "$BATS_TEST_TMPDIR/prior" rev-parse HEAD)"
