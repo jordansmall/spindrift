@@ -46,14 +46,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
-
-      # Claim the issue before the ~2m40s build so ownership is atomic and
-      # visible the instant dispatch begins — nothing else can grab it during
-      # the build window. Targets only the triggering issue: never scans or
-      # strips ready-for-agent across other issues (a local dogfood run drains
-      # that pool and must be left untouched).
+      # Claim the issue up front — before nix install and the ~2m40s build — so
+      # ownership is atomic and visible the instant the runner has the repo:
+      # nothing else can grab it during the install or build window. Targets
+      # only the triggering issue: never scans or strips ready-for-agent across
+      # other issues (a local dogfood run drains that pool and must be left
+      # untouched).
       - name: Claim the issue
         run: |
           gh issue edit "${{ github.event.issue.number }}" \
@@ -61,6 +59,9 @@ jobs:
             --add-label agent-in-progress \
             --remove-label agent-trigger \
             --remove-label ready-for-agent
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
 
       # ~2m40s cold on a GitHub runner (nixpkgs closure is substituted, not compiled).
       - name: Build the agent image
