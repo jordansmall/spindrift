@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -52,13 +53,21 @@ func (a *ociAdapter) EnsureReady() error {
 	}
 	fmt.Printf("==> image '%s' not found — building first\n", a.image)
 
-	// 1. Try host build (nix build <drv>^* --no-link).
+	// 1. Try host build; tee stderr so errors are visible AND inspectable.
+	var hostStderr bytes.Buffer
 	nixBuild := exec.Command("nix", "build", a.imageDrv+"^*", "--no-link")
 	nixBuild.Stdout = os.Stdout
-	nixBuild.Stderr = os.Stderr
+	nixBuild.Stderr = io.MultiWriter(os.Stderr, &hostStderr)
 	if err := nixBuild.Run(); err == nil {
 		fmt.Println("==> realised image derivation on the host")
 		return a.loadImage(a.imageArchive)
+	}
+
+	// Host build failed: only fall back to the container for builder-missing
+	// errors. A genuine derivation error is already printed to stderr above —
+	// stop here so the real message is not buried by a slow, doomed retry.
+	if !isNoBuilderError(hostStderr.String()) {
+		return fmt.Errorf("nix build failed")
 	}
 
 	// 2. Fall back to ephemeral nix container if the runtime is on PATH.
@@ -87,6 +96,14 @@ Run 'build' from your Consumer flake's directory.
 	return fmt.Errorf("cannot build image: no Linux builder and no container runtime")
 }
 
+// isNoBuilderError reports whether nix stderr indicates a missing Linux
+// builder rather than a genuine derivation error. Only builder-missing failures
+// should trigger the container fallback; real errors must surface immediately.
+func isNoBuilderError(stderr string) bool {
+	return strings.Contains(stderr, "required to build") ||
+		strings.Contains(stderr, "no build machines")
+}
+
 func (a *ociAdapter) loadImage(archive string) error {
 	fmt.Printf("==> loading spindrift image from %s\n", archive)
 	load := exec.Command(a.cli, "load", "-i", archive)
@@ -106,18 +123,24 @@ func (a *ociAdapter) loadImage(archive string) error {
 }
 
 func (a *ociAdapter) buildInContainer() error {
-	tar := filepath.Join(a.pwd, ".spindrift-image.tar")
-	pathfile := ".spindrift-image-path"
+	// Stage under a temp dir so interruption never litters the consumer tree.
+	tmpDir, err := os.MkdirTemp("", "spindrift-build-*")
+	if err != nil {
+		return fmt.Errorf("mktemp: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
 	fmt.Printf("==> no host Linux builder; building the image inside a %s container\n", a.nixBuilderImage)
 	fmt.Printf("    (reusing the '%s' volume for /nix so rebuilds are incremental)\n", a.nixVolume)
 
 	shCmd := fmt.Sprintf(
-		"nix --extra-experimental-features 'nix-command flakes' build '%s' --print-out-paths --no-link >%s && cp \"$(cat %s)\" .spindrift-image.tar",
-		a.flakeImageAttr, pathfile, pathfile,
+		"nix --extra-experimental-features 'nix-command flakes' build '%s' --print-out-paths --no-link >/build-output/image-path && cp \"$(cat /build-output/image-path)\" /build-output/image.tar",
+		a.flakeImageAttr,
 	)
 	build := exec.Command(a.cli, "run", "--rm",
 		"-v", a.nixVolume+":/nix",
 		"-v", a.pwd+":/workspace",
+		"-v", tmpDir+":/build-output",
 		"-w", "/workspace",
 		a.nixBuilderImage,
 		"sh", "-euc", shCmd,
@@ -126,16 +149,9 @@ func (a *ociAdapter) buildInContainer() error {
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "==> container build failed — see the %s output above.\n", a.cli)
-		_ = os.Remove(tar)
-		_ = os.Remove(filepath.Join(a.pwd, pathfile))
 		return fmt.Errorf("container build failed")
 	}
-	if err := a.loadImage(tar); err != nil {
-		return err
-	}
-	_ = os.Remove(tar)
-	_ = os.Remove(filepath.Join(a.pwd, pathfile))
-	return nil
+	return a.loadImage(filepath.Join(tmpDir, "image.tar"))
 }
 
 // containerIsRunning reports whether name is currently in the "running" state.
