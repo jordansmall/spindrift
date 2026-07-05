@@ -61,7 +61,7 @@ setup() {
   [[ "$output" != *"1 turns"* ]]
 }
 
-@test "long tool input is truncated to at most 130 chars in the glyph line" {
+@test "long tool input is truncated to at most 120 chars in the glyph line" {
   local long_cmd
   long_cmd="$(printf 'x%.0s' {1..200})"
   run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
