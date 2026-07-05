@@ -17,6 +17,13 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
 - `agent-complete` — agent work merged and green.
 - `agent-failed` — the Box exited non-zero; needs human triage, re-label to retry.
 
+### Comment injection trust boundary
+
+The label gates which issues get dispatched — only triage-role holders can apply
+it. But once labeled, the issue body and **every comment from any GitHub user**
+feed the agent as prompt input. The trust boundary is the label, not the issue or
+comment author.
+
 ## Running `gh`
 
 `gh` commands need network + the macOS keychain, which the command sandbox blocks
