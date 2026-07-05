@@ -436,6 +436,20 @@
               touch $out
             '';
 
+            # An unknown key in `defaults` must throw at eval time so typos
+            # hard-error instead of being silently ignored (issue #97).
+            mkharness-rejects-unknown-key =
+              let
+                inherit (pkgs.lib) assertMsg;
+                result = builtins.tryEval (import ./lib/mkHarness.nix {
+                  inherit nixpkgs system;
+                  defaults = { typoLabel = "oops"; };
+                });
+              in
+              assert assertMsg (!result.success)
+                "mkHarness must throw on unknown defaults key 'typoLabel'";
+              pkgs.runCommand "mkharness-rejects-unknown-key" { } "touch $out";
+
             # The configured `prompt` is rendered to a store-path directory and,
             # by default, baked into the image (see agentFiles) rather than
             # mounted — `run` only bind-mounts a dir under the

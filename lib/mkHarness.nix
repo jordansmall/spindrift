@@ -100,6 +100,10 @@ let
   schemaDefaults = lib.mapAttrs (_: e: e.default or "") flakeOptionEntries;
   mergedDefaults = schemaDefaults // defaults;
 
+  # Unknown defaults keys are caught at eval time — a typo like `basebranch`
+  # would otherwise be silently ignored, never baked, never surfaced.
+  unknownDefaultKeys = lib.filter (k: !(lib.hasAttr k flakeOptionEntries)) (lib.attrNames defaults);
+
   # --agents JSON baked at eval time via builtins.toJSON so model names are never
   # string-interpolated in bash (ADR 0007 tier-1). Empty string when either model
   # is unset — the conditional is resolved at build time, not in the entrypoint.
@@ -441,6 +445,10 @@ let
   # never forces a Linux build.
   isLinux = system == linuxSystem;
 in
+if unknownDefaultKeys != [ ] then
+  throw
+    "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
+else
 {
   inherit
     image
