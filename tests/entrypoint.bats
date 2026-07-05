@@ -303,6 +303,34 @@ EOF
   grep -qi 'push.*after.*commit\|push.*every.*commit\|push.*each.*commit\|after.*commit.*push' "$CLAUDE_PROMPT_FILE"
 }
 
+@test "re-dispatched box force-resets a stale remote branch to base" {
+  # Simulate a prior run that pushed agent/issue-7 with a commit, then died.
+  local prior="$BATS_TEST_TMPDIR/prior"
+  git clone -q "https://github.com/owner/repo.git" "$prior"
+  git -C "$prior" checkout -b "agent/issue-7" "origin/main"
+  echo "stale content from prior run" > "$prior/stale.txt"
+  git -C "$prior" add -A
+  git -C "$prior" commit -q -m "feat: prior run commit"
+  git -C "$prior" push -q origin "agent/issue-7"
+
+  # A re-dispatch should succeed and start clean from main.
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  # Work dir is on the correct branch, not the stale commits.
+  run git -C "$WORK_DIR" rev-parse --abbrev-ref HEAD
+  [ "$output" = "agent/issue-7" ]
+  [ ! -f "$WORK_DIR/stale.txt" ]
+
+  # The remote branch was force-reset, so a plain push from the clean
+  # work-tree succeeds without a non-fast-forward rejection.
+  echo "new work" > "$WORK_DIR/new.txt"
+  git -C "$WORK_DIR" add -A
+  git -C "$WORK_DIR" commit -q -m "feat: new work"
+  run git -C "$WORK_DIR" push origin "agent/issue-7"
+  [ "$status" -eq 0 ]
+}
+
 @test "entrypoint detects devShell and logs when flake.nix has a devShell" {
   seed_flake_repo
   export FAKE_NIX_DEV_SHELL_OK=1
