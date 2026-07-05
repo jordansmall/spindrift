@@ -20,6 +20,7 @@ setup() {
   export REVIEW_MODEL=""
   export IN_PROGRESS_LABEL="agent-in-progress"
   export COMPLETE_LABEL="agent-complete"
+  export DEV_SHELL_PROBE_TIMEOUT=300
   export ISSUE_NUMBER="7"
   export ISSUE_TITLE="Do the thing"
   export WORK_DIR="$BATS_TEST_TMPDIR/work"
