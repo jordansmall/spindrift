@@ -54,6 +54,11 @@ type config struct {
 	completeLabel   string
 	maxJobs         int
 
+	// Transient-exit retry knobs
+	transientRetryMax    int
+	transientBackoffSecs int
+	holdJitterSecs       int
+
 	// Dependency-wave knobs
 	depsPollSecs int
 	depsWaitSecs int
@@ -141,6 +146,10 @@ func loadConfig() config {
 		failedLabel:     getenv("FAILED_LABEL", "agent-failed"),
 		completeLabel:   getenv("COMPLETE_LABEL", "agent-complete"),
 		maxJobs:         atoiNonneg(os.Getenv("MAX_JOBS"), 0),
+
+		transientRetryMax:    atoi(getenv("TRANSIENT_RETRY_MAX", "3"), 3),
+		transientBackoffSecs: atoi(getenv("TRANSIENT_BACKOFF_SECS", "30"), 30),
+		holdJitterSecs:       atoiNonneg(getenv("HOLD_JITTER_SECS", "5"), 5),
 
 		depsPollSecs: atoiNonneg(getenv("DEPS_POLL_SECS", "30"), 30),
 		depsWaitSecs: atoiNonneg(getenv("DEPS_WAIT_SECS", "7200"), 7200),
@@ -685,6 +694,84 @@ func issueNums(issues []issue) []string {
 	return nums
 }
 
+// sleepFn and nowFn are injectable for tests; they default to the real
+// time.Sleep and time.Now so production behaviour is unchanged.
+var sleepFn func(time.Duration) = time.Sleep
+var nowFn func() time.Time = time.Now
+
+// classifyFn is injectable for tests so callers can supply predetermined
+// classifications without writing log files on disk.
+var classifyFn func(string) (outcome.Classification, error) = outcome.Classify
+
+// runWithRetry dispatches iss, retrying transient failures according to
+// config limits. It returns true when the box exits zero, false after a
+// terminal failure or once the retry cap is exhausted.
+//
+//   - 429 with a known resetsAt: hold until the reset time (+ holdJitterSecs),
+//     then re-dispatch. Consecutive holds that end in another 429 count toward
+//     the cap; a hold that ends in success or terminal does not.
+//   - Other transients (529/overloaded, network, 429 without resetsAt): linear
+//     backoff retry up to transientRetryMax, then agent-failed.
+//   - Terminal: agent-failed immediately, no retry.
+func runWithRetry(c config, pwd string, r runner.Runner, iss issue) bool {
+	holdCount := 0     // consecutive "hold → still 429" cycles counted toward cap
+	transientCount := 0 // non-hold transient retry count
+	prevWasHold := false
+
+	for {
+		if err := runOne(c, pwd, r, iss); err == nil {
+			return true
+		}
+
+		logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
+		cl, err := classifyFn(logPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: classify error: %v\n", iss.number, err)
+			return false
+		}
+
+		if cl.Class == outcome.Terminal {
+			return false
+		}
+
+		// Transient exit: branch on reason.
+		if cl.Reason == outcome.RateLimit && cl.ResetAt != nil {
+			// 429 with known reset: hold until reset + jitter.
+			if prevWasHold {
+				// Previous hold also ended in a 429 → no progress; consume cap.
+				holdCount++
+			}
+			if holdCount >= c.transientRetryMax {
+				fmt.Printf("    !! #%s: hold cap exhausted (%d consecutive no-progress hold(s))\n",
+					iss.number, c.transientRetryMax)
+				return false
+			}
+			wait := cl.ResetAt.Sub(nowFn()) + time.Duration(c.holdJitterSecs)*time.Second
+			if wait < 0 {
+				wait = time.Duration(c.holdJitterSecs) * time.Second
+			}
+			fmt.Printf("    .. #%s: rate limit; holding until %s\n",
+				iss.number, cl.ResetAt.UTC().Format("15:04 UTC"))
+			sleepFn(wait)
+			prevWasHold = true
+			continue
+		}
+
+		// 529/overloaded, network, or 429 without a known reset time → backoff retry.
+		prevWasHold = false
+		transientCount++
+		if transientCount > c.transientRetryMax {
+			fmt.Printf("    !! #%s: transient retry cap exhausted (%d)\n",
+				iss.number, c.transientRetryMax)
+			return false
+		}
+		backoff := time.Duration(c.transientBackoffSecs) * time.Second * time.Duration(transientCount)
+		fmt.Printf("    .. #%s: transient (%s); retry %d/%d in %s\n",
+			iss.number, cl.Reason, transientCount, c.transientRetryMax, backoff)
+		sleepFn(backoff)
+	}
+}
+
 // fanOut dispatches a batch of issues in parallel (up to maxParallel at once),
 // claiming the in-progress label before each goroutine launches.
 func fanOut(c config, fc forge.Client, pwd string, r runner.Runner, batch []issue) {
@@ -698,7 +785,7 @@ func fanOut(c config, fc forge.Client, pwd string, r runner.Runner, batch []issu
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			if err := runOne(c, pwd, r, iss); err != nil {
+			if ok := runWithRetry(c, pwd, r, iss); !ok {
 				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.number, iss.number)
 				swapLabel(fc, iss.number, c.failedLabel, c.inProgressLabel)
 			} else {
