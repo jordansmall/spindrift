@@ -44,16 +44,22 @@ type Classification struct {
 var resetsAtRe = regexp.MustCompile(`"resetsAt"\s*:\s*(\d+)`)
 
 // transientPatterns lists log-line substrings that mark a transient failure.
+// Patterns are deliberately specific to avoid matching ordinary log content
+// (issue numbers, byte counts, port numbers, etc. containing digit sequences).
 // The first match in the ordered list wins when multiple markers appear.
 var transientPatterns = []struct {
 	substr string
 	reason Reason
 }{
-	{"429", RateLimit},
+	// Structured API error types — highest specificity, check first.
 	{"rate_limit_error", RateLimit},
-	{"529", Overloaded},
 	{"overloaded_error", Overloaded},
+	// HTTP status phrase patterns — specific enough to avoid false positives.
+	{"429 Too Many Requests", RateLimit},
+	{"529 Overloaded", Overloaded},
+	// Claude plain-text error message.
 	{"Overloaded", Overloaded},
+	// Network-level failures logged by the Go HTTP client or stdlib.
 	{"connection refused", Network},
 	{"connection reset", Network},
 	{"dial tcp", Network},
@@ -69,18 +75,18 @@ type scanResult struct {
 	resetsAt *time.Time
 }
 
-// Classify scans the box log at logPath and, combined with the container exit
-// code, returns a Classification describing whether the failure is transient
-// (retryable) or terminal (genuine).
+// Classify scans the box log at logPath and returns a Classification
+// describing whether the failure is transient (retryable) or terminal
+// (genuine).
 //
 // When the log contains a 429 rate-limit marker with a "resetsAt" field, the
 // returned Classification carries a non-nil ResetAt so callers can hold until
 // the known reset time.
 //
 // A missing log file is treated as terminal/taskFailed. Lines larger than the
-// 4 MiB scan buffer are skipped, matching the same resilience contract as
-// LastInLog.
-func Classify(logPath string, exitCode int) (Classification, error) {
+// 4 MiB scan buffer are processed in chunks, matching the same resilience
+// contract as LastInLog.
+func Classify(logPath string) (Classification, error) {
 	f, err := os.Open(logPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -106,9 +112,10 @@ func Classify(logPath string, exitCode int) (Classification, error) {
 	return cl, nil
 }
 
-// scanLog reads r line by line (skipping oversized lines) and returns a
-// scanResult with the first transient reason found and any resetsAt extracted
-// from anywhere in the log.
+// scanLog reads r line by line and returns a scanResult with the first
+// transient reason found and any resetsAt timestamp extracted from anywhere in
+// the log. Oversized lines (> 4 MiB) are processed in chunks rather than
+// skipped, so markers in large JSON blobs are still detected.
 func scanLog(r io.Reader) (scanResult, error) {
 	const bufSize = 4 * 1024 * 1024
 	br := bufio.NewReaderSize(r, bufSize)
@@ -131,12 +138,18 @@ func scanLog(r io.Reader) (scanResult, error) {
 
 	for {
 		line, isPrefix, err := br.ReadLine()
-		processChunk(string(line))
+		// Process data only when the read succeeded or ended cleanly at EOF;
+		// skip partial data from real I/O errors.
+		if err == nil || errors.Is(err, io.EOF) {
+			processChunk(string(line))
+		}
 		if isPrefix {
 			for isPrefix {
 				var chunk []byte
 				chunk, isPrefix, err = br.ReadLine()
-				processChunk(string(chunk))
+				if err == nil || errors.Is(err, io.EOF) {
+					processChunk(string(chunk))
+				}
 				if err != nil {
 					break
 				}
