@@ -65,7 +65,9 @@ func (a *ociAdapter) EnsureReady() error {
 		return a.buildInContainer()
 	}
 
-	// 3. Neither path is possible.
+	// 3. Neither path is possible. Reachable only from `build`, which skips
+	//    validate() (main.go) and so does not guarantee the runtime is on PATH;
+	//    from `run` validate() already guaranteed it, making branch 2 succeed.
 	fmt.Fprintf(os.Stderr, `==> cannot build the spindrift image.
 
 The image is a Linux (OCI) derivation, and this host can neither realise it
