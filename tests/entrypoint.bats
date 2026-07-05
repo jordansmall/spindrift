@@ -297,6 +297,12 @@ EOF
   grep -q 'issue comment\|pr comment\|comment.*issue\|comment.*blocked' "$CLAUDE_PROMPT_FILE"
 }
 
+@test "default prompt instructs agent to push the branch after every substantive commit" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'push.*after.*commit\|push.*every.*commit\|push.*each.*commit\|after.*commit.*push' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "entrypoint detects devShell and logs when flake.nix has a devShell" {
   seed_flake_repo
   export FAKE_NIX_DEV_SHELL_OK=1

@@ -68,6 +68,15 @@ unit (e.g. a domain change, then the wiring, then tests) so each stands alone
 and is reviewable in isolation. Add a body explaining the what/why only when the
 change isn't self-evident.
 
+**Push after every substantive commit** — do not wait until the PR step:
+
+```
+git push -u origin ${BRANCH}   # first push
+git push                        # subsequent pushes
+```
+
+A dying box then loses minutes of work, not the whole run.
+
 # REVIEW
 
 Before opening the PR, spawn a fresh `reviewer` subagent to evaluate the branch
