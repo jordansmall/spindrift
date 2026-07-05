@@ -100,6 +100,31 @@ let
   schemaDefaults = lib.mapAttrs (_: e: e.default or "") flakeOptionEntries;
   mergedDefaults = schemaDefaults // defaults;
 
+  # --agents JSON baked at eval time via builtins.toJSON so model names are never
+  # string-interpolated in bash (ADR 0007 tier-1). Empty string when either model
+  # is unset — the conditional is resolved at build time, not in the entrypoint.
+  agentsJsonTemplate =
+    let
+      sm = mergedDefaults.scoutModel or "";
+      rm = mergedDefaults.reviewModel or "";
+    in
+    if sm != "" && rm != "" then
+      builtins.toJSON {
+        scout = {
+          description = "Map relevant files, seams, and tests; return a structured brief";
+          prompt = "";
+          tools = [ "Read" "Bash" "WebFetch" "WebSearch" "Glob" "Grep" ];
+          model = sm;
+        };
+        reviewer = {
+          description = "Review the branch diff for spec compliance and coding standards";
+          prompt = "";
+          tools = [ "Read" "Bash" "WebFetch" ];
+          model = rm;
+        };
+      }
+    else "";
+
   # Plumbing every agent needs regardless of language: a shell, the VCS + GitHub
   # CLIs, Claude Code, CA certs, and the unix tools the entrypoint relies on.
   harnessPackages =
@@ -148,7 +173,12 @@ let
     ];
     # Prepend the schema-derived defaults block so the entrypoint carries the
     # baked values without hardcoding them in the source script.
-    text = renderDefaultsPreamble { } + stripShebang (builtins.readFile ../agent/entrypoint.sh);
+    # AGENTS_JSON_TEMPLATE is baked as a fixed value (not a :-default) because it
+    # is derived from the configured models, not a standalone knob.
+    text =
+      "AGENTS_JSON_TEMPLATE=" + lib.escapeShellArg agentsJsonTemplate + "\n"
+      + renderDefaultsPreamble { }
+      + stripShebang (builtins.readFile ../agent/entrypoint.sh);
   };
 
   # Baked into the image at /agent — there is no working tree to bind-mount from

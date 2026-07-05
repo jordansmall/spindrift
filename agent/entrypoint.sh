@@ -20,8 +20,10 @@ set -euo pipefail
 
 # BASE_BRANCH, BRANCH_PREFIX, MODEL, SCOUT_MODEL, REVIEW_MODEL,
 # IN_PROGRESS_LABEL, and COMPLETE_LABEL are injected by the nix-rendered
-# defaults preamble prepended at image-build time (env-schema.nix).  The
-# :-  expansions below keep shellcheck and `set -u` happy for standalone use.
+# defaults preamble prepended at image-build time (env-schema.nix).
+# AGENTS_JSON_TEMPLATE is a nix-computed derived value also prepended at
+# image-build time; it is not a schema knob.  The :-  expansions below keep
+# shellcheck and `set -u` happy for standalone use.
 BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
 
 # Baked-in locations; overridable only so the harness can be exercised on the
@@ -96,33 +98,23 @@ _subst() {
 }
 prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
 
-# Build --agents JSON as an object keyed by agent name. Both subagents are
-# always provisioned; `model` is omitted when the tier knob is unset so they
-# inherit the session model. Prompts are read from the mounted prompt dir and
-# envsubst-substituted like the main prompt. Tools are read-only: no Edit,
-# Write, or commit surfaces.
-scout_prompt="$(_subst "${PROMPTS_DIR}/scout-prompt.md")"
-review_prompt="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
-agents_json="$(
-  jq -n \
+# Forward the nix-baked --agents JSON to the Agent. AGENTS_JSON_TEMPLATE is
+# computed by nix (builtins.toJSON) and set to empty when either subagent model
+# is unset, so the conditional is resolved at build time, not here.
+# When the template is present, inject the runtime-substituted prompts and
+# forward the completed JSON; otherwise omit the flag entirely.
+if [ -n "${AGENTS_JSON_TEMPLATE:-}" ]; then
+  scout_prompt="$(_subst "${PROMPTS_DIR}/scout-prompt.md")"
+  review_prompt="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
+  agents_json="$(jq -n \
+    --argjson template "$AGENTS_JSON_TEMPLATE" \
     --arg scout_prompt "$scout_prompt" \
     --arg review_prompt "$review_prompt" \
-    --arg scout_model "${SCOUT_MODEL:-}" \
-    --arg review_model "${REVIEW_MODEL:-}" \
-    '{
-      scout: ({
-        description: "Map relevant files, seams, and tests; return a structured brief",
-        prompt: $scout_prompt,
-        tools: ["Read","Bash","WebFetch","WebSearch","Glob","Grep"]
-      } + if $scout_model != "" then {model: $scout_model} else {} end),
-      reviewer: ({
-        description: "Review the branch diff for spec compliance and coding standards",
-        prompt: $review_prompt,
-        tools: ["Read","Bash","WebFetch"]
-      } + if $review_model != "" then {model: $review_model} else {} end)
-    }'
-)"
-agents_args=(--agents "$agents_json")
+    '$template | .scout.prompt = $scout_prompt | .reviewer.prompt = $review_prompt')"
+  agents_args=(--agents "$agents_json")
+else
+  agents_args=()
+fi
 
 echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
 # Stream the transcript live (visible via `podman logs -f`) while capturing it.
