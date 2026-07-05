@@ -303,9 +303,9 @@ let
   # extraExports snippet.  `export` is required so the exec'd Go binary inherits
   # each value; plain assignments would be visible only to the shell wrapper.
   renderRunnerVars =
-    rec:
-    lib.concatMapStrings (k: ''export ${k}="${rec.vars.${k}}"'' + "\n") (lib.attrNames rec.vars)
-    + rec.extraExports;
+    runner:
+    lib.concatMapStrings (k: ''export ${k}="${runner.vars.${k}}"'' + "\n") (lib.attrNames runner.vars)
+    + runner.extraExports;
   goRunnerPreamble = renderRunnerVars selectedRunner;
 
   # One renderer used by both the shell and Go preamble families: iterates over
