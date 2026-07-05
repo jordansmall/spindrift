@@ -107,33 +107,50 @@ FAKE
   grep -q "$WORK_DIR" "$PREFETCH_LOG"
 }
 
-# CLAUDE_LOG records the whole argv, including the -p prompt text — and the
-# prompt itself mentions the word "--agents". So match the flag's JSON payload
-# ("name":"scout"/"reviewer"), which the prompt prose never contains, not the
-# bare flag string.
-@test "entrypoint passes --agents to claude when SCOUT_MODEL and REVIEW_MODEL are set" {
+# --agents JSON: object keyed by agent name, built from mounted prompt files.
+# The fake claude records the --agents value to $CLAUDE_AGENTS_FILE for
+# structural assertions without grepping a log that also contains prompt prose.
+@test "entrypoint always passes --agents as a JSON object with scout and reviewer" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -s "$CLAUDE_AGENTS_FILE" ]
+  jq -e 'has("scout") and has("reviewer")' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.scout.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+}
+
+@test "entrypoint includes model in agents JSON only when model env var is set" {
   export SCOUT_MODEL="claude-haiku-3-5"
   export REVIEW_MODEL="claude-opus-4-5"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF '"name":"scout"' "$CLAUDE_LOG"
-  grep -qF '"name":"reviewer"' "$CLAUDE_LOG"
+  jq -e '.scout.model == "claude-haiku-3-5"' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.model == "claude-opus-4-5"' "$CLAUDE_AGENTS_FILE" >/dev/null
 }
 
-@test "entrypoint omits --agents when SCOUT_MODEL is unset" {
+@test "entrypoint omits model from agents JSON when SCOUT_MODEL is unset" {
   unset SCOUT_MODEL
-  export REVIEW_MODEL="claude-opus-4-5"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qF '"name":"reviewer"' "$CLAUDE_LOG"
+  jq -e '.scout | has("model") | not' "$CLAUDE_AGENTS_FILE" >/dev/null
 }
 
-@test "entrypoint omits --agents when REVIEW_MODEL is unset" {
-  export SCOUT_MODEL="claude-haiku-3-5"
+@test "entrypoint omits model from agents JSON when REVIEW_MODEL is unset" {
   unset REVIEW_MODEL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qF '"name":"scout"' "$CLAUDE_LOG"
+  jq -e '.reviewer | has("model") | not' "$CLAUDE_AGENTS_FILE" >/dev/null
+}
+
+@test "entrypoint includes a read-only tools whitelist in agents JSON" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  jq -e '.scout.tools | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.tools | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.scout.tools | contains(["Edit"]) | not' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.scout.tools | contains(["Write"]) | not' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.tools | contains(["Edit"]) | not' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.tools | contains(["Write"]) | not' "$CLAUDE_AGENTS_FILE" >/dev/null
 }
 
 @test "IN_PROGRESS_LABEL and COMPLETE_LABEL are substituted in the prompt" {
@@ -142,6 +159,8 @@ FAKE
   cat >"$prompt_dir/issue-prompt.md" <<'EOF'
 label: ${IN_PROGRESS_LABEL} complete: ${COMPLETE_LABEL}
 EOF
+  printf 'scout stub\n' >"$prompt_dir/scout-prompt.md"
+  printf 'reviewer stub\n' >"$prompt_dir/review-prompt.md"
   export PROMPTS_DIR="$prompt_dir"
   export IN_PROGRESS_LABEL="wip"
   export COMPLETE_LABEL="done"
@@ -149,6 +168,19 @@ EOF
   [ "$status" -eq 0 ]
   grep -q 'label: wip' "$CLAUDE_PROMPT_FILE"
   grep -q 'complete: done' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "envsubst substitutes placeholders in scout and review prompt files" {
+  local prompt_dir="$BATS_TEST_TMPDIR/prompts"
+  mkdir -p "$prompt_dir"
+  printf 'issue stub\n' >"$prompt_dir/issue-prompt.md"
+  printf 'scout for issue ${ISSUE_NUMBER}\n' >"$prompt_dir/scout-prompt.md"
+  printf 'review base ${BASE_BRANCH}\n' >"$prompt_dir/review-prompt.md"
+  export PROMPTS_DIR="$prompt_dir"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  jq -e '.scout.prompt | contains("scout for issue 7")' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.prompt | contains("review base main")' "$CLAUDE_AGENTS_FILE" >/dev/null
 }
 
 @test "default prompt delegates exploration to the scout subagent" {
@@ -179,12 +211,10 @@ EOF
   ! grep -qi 'skill' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "default prompt spawns a reviewer subagent with SPEC and STANDARDS rubric" {
+@test "default prompt spawns a reviewer subagent" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qi 'reviewer' "$CLAUDE_PROMPT_FILE"
-  grep -q 'SPEC' "$CLAUDE_PROMPT_FILE"
-  grep -q 'STANDARDS' "$CLAUDE_PROMPT_FILE"
 }
 
 @test "default prompt explains why inline review risks a premature stop" {
@@ -193,22 +223,34 @@ EOF
   grep -qi 'turn.ending\|halfway gate\|finish.line' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "default prompt requires the reviewer subagent and restricts inline to a fallback" {
+@test "default prompt forbids inline review" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qi 'do not review inline\|not inline\|inline.*only.*when\|only.*inline.*when' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "default prompt specifies a review-build loop that never advances with a blocking finding" {
+@test "default prompt specifies a review loop keyed on VERDICT: BLOCK" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'BLOCKING\|blocking' "$CLAUDE_PROMPT_FILE"
+  grep -q 'VERDICT.*BLOCK\|BLOCK.*VERDICT' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "default prompt degrades gracefully when tier models are unavailable" {
+@test "default prompt states both subagents are always pre-provisioned" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q 'if available\|if it.*available\|when.*available' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'always.*provisioned\|pre-provisioned\|always pre' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt instructs saving the scout brief outside the repo" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi '/tmp/brief\|outside.*repo\|outside the repo' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt CHECK section routes bulk output to a file" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'test.log\|/tmp/.*log\|route.*output\|output.*file\|tail.*log\|log.*tail' "$CLAUDE_PROMPT_FILE"
 }
 
 @test "default prompt blocks on CI and never merges on red" {

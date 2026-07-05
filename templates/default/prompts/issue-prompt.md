@@ -16,14 +16,16 @@ Start by reading the issue and recent history (run these yourself):
 # SCOUT
 
 Before reading any source files yourself, delegate exploration to the `scout`
-subagent (if available in this session; otherwise explore inline):
+subagent:
 
 > Use the `scout` subagent: map the files, seams, and existing tests relevant
 > to this issue. Return file paths and line references — do not implement
 > anything.
 
-Use the scout's map to load only the relevant parts into your own context.
-Re-scout only if a later finding reveals the change sits in the wrong place.
+Persist the brief to `/tmp/brief.md` (outside the repo) so it survives
+compaction — never commit it. Trust the brief — jump directly to the file
+pointers, re-search only when a pointer is wrong or missing. Re-scout only
+if a later finding shows the change sits in the wrong place.
 
 # IMPLEMENT
 
@@ -43,7 +45,10 @@ time.
 # CHECK
 
 Before each commit, run the repo's own checks and make them pass. Use whatever
-the project actually defines (package scripts, a Makefile, CI config).
+the project actually defines (package scripts, a Makefile, CI config). Route
+bulk check output to a file and load only the failing excerpt, e.g.:
+
+  cargo test > /tmp/test.log 2>&1 || tail -50 /tmp/test.log
 
 If the repo has a `flake.nix` with a devShell, prefer the project's own pinned
 toolchain — the harness has probed and logged whether one is available:
@@ -80,25 +85,17 @@ A dying box then loses minutes of work, not the whole run.
 # REVIEW
 
 Before opening the PR, spawn a fresh `reviewer` subagent to evaluate the branch
-diff against `${BASE_BRANCH}` with this rubric.
+diff against `${BASE_BRANCH}`.
 
 **Do not review inline.** An inline review writes the findings as your
 turn-ending message — the review looks like the finish line when it is only the
 halfway gate. Delegating to the `reviewer` subagent returns a result you act on,
-not a conclusion you end on. The `reviewer` is pre-provisioned via `--agents`
-when `REVIEW_MODEL` is set; fall back to inline review only when the reviewer
-subagent is not available (tier models genuinely unset).
+not a conclusion you end on. The `reviewer` subagent is always pre-provisioned
+via `--agents`; pass only the issue number in the delegation message.
 
-**SPEC** — Does the diff do exactly what issue #${ISSUE_NUMBER} asked and
-nothing more? Are all acceptance criteria satisfied?
+The reviewer's final message begins with `VERDICT: APPROVE` or `VERDICT: BLOCK`.
 
-**STANDARDS** — Does the code follow the repo's documented coding standards,
-test conventions, and commit style?
-
-The reviewer must be a fresh subagent with clean context — not the same context
-that did the building.
-
-If the reviewer surfaces a BLOCKING finding:
+If the verdict is `VERDICT: BLOCK`:
 
 1. Fix the code on this branch, run checks, recommit.
 2. Re-invoke the `reviewer` subagent (fresh instance, not the same one).

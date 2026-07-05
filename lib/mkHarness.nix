@@ -23,6 +23,10 @@
   # so it can be re-pointed via SPINDRIFT_PROMPT_DIR with zero rebuilds (see
   # scripts/run.sh).
   prompt ? builtins.readFile ../templates/default/prompts/issue-prompt.md,
+  # Subagent system prompts. Defaults ship with the harness; Consumers can
+  # override via the `prompt` directory mechanism (SPINDRIFT_PROMPT_DIR).
+  scoutPrompt ? builtins.readFile ../templates/default/prompts/scout-prompt.md,
+  reviewPrompt ? builtins.readFile ../templates/default/prompts/review-prompt.md,
   # Non-secret run config baked into the `run` command as its built-in defaults;
   # a matching env var still wins at runtime, so one build can be re-pointed.
   defaults ? { },
@@ -158,13 +162,20 @@ let
     cp ${entrypoint}/bin/entrypoint $out/agent/entrypoint.sh
     chmod +x $out/agent/entrypoint.sh
     cp ${pkgs.writeText "issue-prompt.md" prompt} $out/agent/prompts/issue-prompt.md
+    cp ${pkgs.writeText "scout-prompt.md" scoutPrompt} $out/agent/prompts/scout-prompt.md
+    cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md
   '';
 
-  # The rendered prompt as a host store-path directory (native-buildable on
+  # The rendered prompt directory as a host store path (native-buildable on
   # darwin, so it needs no Linux builder). The `run` command bakes this path in
-  # and bind-mounts it at /agent/prompts, where the entrypoint reads
-  # issue-prompt.md and substitutes the per-issue variables.
-  promptDir = hostPkgs.writeTextDir "issue-prompt.md" prompt;
+  # and bind-mounts it at /agent/prompts, where the entrypoint reads all three
+  # prompt files and substitutes the per-issue variables.
+  promptDir = hostPkgs.runCommand "prompt-dir" { } ''
+    mkdir -p $out
+    cp ${hostPkgs.writeText "issue-prompt.md" prompt} $out/issue-prompt.md
+    cp ${hostPkgs.writeText "scout-prompt.md" scoutPrompt} $out/scout-prompt.md
+    cp ${hostPkgs.writeText "review-prompt.md" reviewPrompt} $out/review-prompt.md
+  '';
 
   # A non-root `agent` user (uid/gid 1000). Claude Code refuses
   # --dangerously-skip-permissions under root/sudo, and the Box relies on that

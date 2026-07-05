@@ -83,8 +83,8 @@ fi
 # Substitute only known placeholders so literal `$` in the prompt body (shell
 # snippets, etc.) survives. The single-quoted variable list is envsubst's
 # literal, not a shell expansion — hence SC2016.
-# shellcheck disable=SC2016
-prompt="$(
+_subst() {
+  # shellcheck disable=SC2016
   ISSUE_NUMBER="$ISSUE_NUMBER" \
     ISSUE_TITLE="${ISSUE_TITLE:-}" \
     BRANCH="$BRANCH" \
@@ -92,16 +92,37 @@ prompt="$(
     IN_PROGRESS_LABEL="${IN_PROGRESS_LABEL:-}" \
     COMPLETE_LABEL="${COMPLETE_LABEL:-}" \
     envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL' \
-    <"${PROMPTS_DIR}/issue-prompt.md"
-)"
+    <"$1"
+}
+prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
 
-# Build --agents JSON when both subagent models are configured; omit the flag
-# entirely when either is unset so single-model runs are unaffected.
-agents_args=()
-if [ -n "${SCOUT_MODEL:-}" ] && [ -n "${REVIEW_MODEL:-}" ]; then
-  agents_json='[{"name":"scout","model":"'"${SCOUT_MODEL:-}"'"},{"name":"reviewer","model":"'"${REVIEW_MODEL:-}"'"}]'
-  agents_args=(--agents "$agents_json")
-fi
+# Build --agents JSON as an object keyed by agent name. Both subagents are
+# always provisioned; `model` is omitted when the tier knob is unset so they
+# inherit the session model. Prompts are read from the mounted prompt dir and
+# envsubst-substituted like the main prompt. Tools are read-only: no Edit,
+# Write, or commit surfaces.
+scout_prompt="$(_subst "${PROMPTS_DIR}/scout-prompt.md")"
+review_prompt="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
+agents_json="$(
+  jq -n \
+    --arg scout_prompt "$scout_prompt" \
+    --arg review_prompt "$review_prompt" \
+    --arg scout_model "${SCOUT_MODEL:-}" \
+    --arg review_model "${REVIEW_MODEL:-}" \
+    '{
+      scout: ({
+        description: "Map relevant files, seams, and tests; return a structured brief",
+        prompt: $scout_prompt,
+        tools: ["Read","Bash","WebFetch","WebSearch","Glob","Grep"]
+      } + if $scout_model != "" then {model: $scout_model} else {} end),
+      reviewer: ({
+        description: "Review the branch diff for spec compliance and coding standards",
+        prompt: $review_prompt,
+        tools: ["Read","Bash","WebFetch"]
+      } + if $review_model != "" then {model: $review_model} else {} end)
+    }'
+)"
+agents_args=(--agents "$agents_json")
 
 echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
 # Stream the transcript live (visible via `podman logs -f`) while capturing it.
