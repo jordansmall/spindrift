@@ -401,6 +401,22 @@ EOF
   [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
 }
 
+# --- Issue query cap and oldest-first ordering (issue #96) -------------------
+
+@test "full window of 100 issues emits a cap warning" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export MAX_JOBS=1
+  ISSUES=""
+  for i in $(seq 1 100); do
+    ISSUES+="${i}"$'\t'"Issue ${i}"$'\n'
+  done
+  export FAKE_GH_ISSUES="$ISSUES"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARNING"* ]]
+  [[ "$output" == *"100"* ]]
+}
+
 # --- Outcome report (issue #41) --------------------------------------------
 
 @test "outcome report lists every dispatched issue with number pr and status" {
