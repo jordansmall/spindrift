@@ -51,8 +51,9 @@
           prefetch = "cargo fetch --locked || true";
 
           # ---- Agent behaviour ---------------------------------------------
-          # The prompt is a runtime mount, not baked into the image, so editing
-          # prompts/issue-prompt.md and re-running needs no image rebuild.
+          # The prompt is baked into the image; changing it requires an image
+          # rebuild (nix run .#build). Set SPINDRIFT_PROMPT_DIR at runtime to
+          # point at a local directory for zero-rebuild iteration.
           prompt = builtins.readFile ./prompts/issue-prompt.md;
 
           # ---- Non-secret run defaults (optional) --------------------------

@@ -4,8 +4,8 @@
 # headless Claude Code agent that implements the issue and opens a PR.
 #
 # Baked into the image at /agent/entrypoint.sh (see lib/mkHarness.nix); the
-# prompt template is bind-mounted at /agent/prompts by `run`, hot-overridable
-# via SPINDRIFT_PROMPT_DIR.
+# prompt templates are baked into the image at /agent/prompts. Set
+# SPINDRIFT_PROMPT_DIR to override with a host directory without a rebuild.
 #
 # --dangerously-skip-permissions is safe here precisely because the container
 # IS the isolation boundary: the agent can do anything, but only to a throwaway
