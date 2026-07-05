@@ -427,6 +427,16 @@ EOF
   echo "$output" | grep -q "baked toolchain"
 }
 
+@test "entrypoint times out the devShell probe and falls back to baked toolchain" {
+  seed_flake_repo
+  export FAKE_NIX_DEV_SHELL_HANG=1
+  export DEV_SHELL_PROBE_TIMEOUT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "timed out"
+  echo "$output" | grep -q "baked toolchain"
+}
+
 @test "entrypoint skips devShell probe when repo has no flake.nix" {
   # standard setup_bare_repo has no flake.nix
   run bash "$ENTRYPOINT"
