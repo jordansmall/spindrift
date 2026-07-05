@@ -615,6 +615,8 @@
                   "FLAKE_IMAGE_ATTR"
                   "AGENT_FILES"
                   "AGENT_ENV"
+                  "AGENT_FILES_DRV"
+                  "AGENT_ENV_DRV"
                   "BAKED_PREFETCH"
                   "RUNTIME"
                   "IMAGE"

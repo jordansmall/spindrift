@@ -9,8 +9,9 @@ printf '%s\n' "$*" >>"$PODMAN_LOG"
 
 case "${1:-}" in
   image)
-    # `podman image exists <ref>` — presence is controlled by the test.
-    if [ "${2:-}" = "exists" ]; then
+    # `podman image inspect <ref>` — presence is controlled by the test.
+    # Also accept the legacy `image exists` verb for any tests not yet updated.
+    if [ "${2:-}" = "inspect" ] || [ "${2:-}" = "exists" ]; then
       [ "${FAKE_PODMAN_IMAGE_PRESENT:-0}" = "1" ]
       exit $?
     fi
