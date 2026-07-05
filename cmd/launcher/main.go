@@ -414,9 +414,11 @@ func printOutcomeReport(c config, fc forge.Client, pwd string, r runner.Runner, 
 			branch := c.branchPrefix + iss.number
 			pr, isDraft, prFound, prErr := openPRForBranch(fc, branch)
 			if prErr != nil || !prFound {
-				cls, clsErr := outcome.Classify(logPath, 0)
+				cls, clsErr := outcome.Classify(logPath)
 				clsNote := ""
-				if clsErr == nil {
+				if clsErr != nil {
+					fmt.Fprintf(os.Stderr, "    ?? #%s: classify: %v\n", iss.number, clsErr)
+				} else {
 					clsNote = fmt.Sprintf("  class=%s  reason=%s", cls.Class, cls.Reason)
 					if cls.ResetAt != nil {
 						clsNote += "  resetsAt=" + cls.ResetAt.UTC().Format(time.RFC3339)

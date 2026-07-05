@@ -27,11 +27,10 @@ func writeClassifyLog(t *testing.T, lines ...string) string {
 }
 
 var classifyTests = []struct {
-	name      string
-	lines     []string
-	exitCode  int
-	wantClass outcome.Class
-	wantReason outcome.Reason
+	name        string
+	lines       []string
+	wantClass   outcome.Class
+	wantReason  outcome.Reason
 	wantResetAt *time.Time // nil means expect nil
 }{
 	{
@@ -40,9 +39,8 @@ var classifyTests = []struct {
 			`{"type":"error","error":{"type":"rate_limit_error","message":"Rate limit exceeded"},"resetsAt":1783192800}`,
 			`Error: 429 Too Many Requests`,
 		},
-		exitCode:  1,
-		wantClass:  outcome.Transient,
-		wantReason: outcome.RateLimit,
+		wantClass:   outcome.Transient,
+		wantReason:  outcome.RateLimit,
 		wantResetAt: func() *time.Time { t := time.Unix(1783192800, 0).UTC(); return &t }(),
 	},
 	{
@@ -51,9 +49,8 @@ var classifyTests = []struct {
 			`Error: 429 Too Many Requests`,
 			`{"resetsAt":1783192800}`,
 		},
-		exitCode:  1,
-		wantClass:  outcome.Transient,
-		wantReason: outcome.RateLimit,
+		wantClass:   outcome.Transient,
+		wantReason:  outcome.RateLimit,
 		wantResetAt: func() *time.Time { t := time.Unix(1783192800, 0).UTC(); return &t }(),
 	},
 	{
@@ -62,7 +59,6 @@ var classifyTests = []struct {
 			`Error: 429 Too Many Requests`,
 			`rate limit exceeded, please retry later`,
 		},
-		exitCode:    1,
 		wantClass:   outcome.Transient,
 		wantReason:  outcome.RateLimit,
 		wantResetAt: nil,
@@ -73,7 +69,6 @@ var classifyTests = []struct {
 			`Error: 529 Overloaded`,
 			`The server is temporarily overloaded.`,
 		},
-		exitCode:    1,
 		wantClass:   outcome.Transient,
 		wantReason:  outcome.Overloaded,
 		wantResetAt: nil,
@@ -83,7 +78,6 @@ var classifyTests = []struct {
 		lines: []string{
 			`{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
 		},
-		exitCode:    1,
 		wantClass:   outcome.Transient,
 		wantReason:  outcome.Overloaded,
 		wantResetAt: nil,
@@ -94,7 +88,6 @@ var classifyTests = []struct {
 			`dial tcp: connection refused`,
 			`retrying...`,
 		},
-		exitCode:    1,
 		wantClass:   outcome.Transient,
 		wantReason:  outcome.Network,
 		wantResetAt: nil,
@@ -105,23 +98,34 @@ var classifyTests = []struct {
 			`Agent completed with no valid outcome.`,
 			`SPINDRIFT_OUTCOME issue=1 pr= status=blocked note=failed to open PR`,
 		},
-		exitCode:    1,
 		wantClass:   outcome.Terminal,
 		wantReason:  outcome.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
-		name: "Terminal_NoLog",
+		name:        "Terminal_NoLog",
 		lines:       nil, // no lines — will use a nonexistent file
-		exitCode:    1,
 		wantClass:   outcome.Terminal,
 		wantReason:  outcome.TaskFailed,
 		wantResetAt: nil,
 	},
 	{
-		name: "Terminal_EmptyLog",
+		name:        "Terminal_EmptyLog",
 		lines:       []string{},
-		exitCode:    1,
+		wantClass:   outcome.Terminal,
+		wantReason:  outcome.TaskFailed,
+		wantResetAt: nil,
+	},
+	{
+		// Issue numbers, byte counts, or port numbers containing "429" or "529"
+		// must not be mistaken for API rate-limit / overload errors.
+		name: "Terminal_NoBareDigitFalsePositive",
+		lines: []string{
+			`Closes #1429`,
+			`wrote 4290 bytes`,
+			`listening on port 5290`,
+			`gcc: error at line 529 in module.c`,
+		},
 		wantClass:   outcome.Terminal,
 		wantReason:  outcome.TaskFailed,
 		wantResetAt: nil,
@@ -138,7 +142,7 @@ func TestClassify(t *testing.T) {
 				logPath = writeClassifyLog(t, tc.lines...)
 			}
 
-			c, err := outcome.Classify(logPath, tc.exitCode)
+			c, err := outcome.Classify(logPath)
 			if err != nil {
 				t.Fatalf("Classify() error: %v", err)
 			}
