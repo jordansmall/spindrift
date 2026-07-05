@@ -164,6 +164,50 @@ func TestNoGhExecOutsideForge(t *testing.T) {
 	}
 }
 
+// TestNoRunnerExecOutsidePackage walks all non-test Go source files in
+// cmd/launcher, excluding internal/runner, and fails if any contain an
+// exec.Command literal for the container CLI or system tools — keeping all
+// sandbox life-cycle calls behind the runner seam.
+func TestNoRunnerExecOutsidePackage(t *testing.T) {
+	forbidden := []string{
+		`exec.Command("bwrap"`,
+		`exec.Command("nix"`,
+		`exec.Command("podman"`,
+		`exec.Command("docker"`,
+	}
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(filepath.ToSlash(path), "internal/runner") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		if strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		content := string(data)
+		for _, needle := range forbidden {
+			if strings.Contains(content, needle) {
+				t.Errorf("%s: contains %q — all sandbox exec calls must go through runner.Runner", path, needle)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+}
+
 // TestNoOutcomeParsingOutsidePackage walks all non-test Go source files in
 // cmd/launcher, excluding internal/outcome, and fails if any contain the
 // SPINDRIFT_OUTCOME prefix literal — keeping all outcome parsing behind the
