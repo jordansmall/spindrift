@@ -532,14 +532,14 @@ func printOutcomeReport(c config, fc forge.Client, pwd string, issues []issue) {
 		logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
 		o, found, err := outcome.LastInLog(logPath)
 		if err != nil {
-			fmt.Printf("    #%s  status=missing  note=no SPINDRIFT_OUTCOME in log\n", iss.number)
+			fmt.Printf("    #%s  status=missing  note=no outcome in log\n", iss.number)
 			continue
 		}
 		if !found {
 			branch := c.branchPrefix + iss.number
 			pr, isDraft, prFound, prErr := openPRForBranch(fc, branch)
 			if prErr != nil || !prFound {
-				fmt.Printf("    #%s  status=missing  note=no SPINDRIFT_OUTCOME in log\n", iss.number)
+				fmt.Printf("    #%s  status=missing  note=no outcome in log\n", iss.number)
 				continue
 			}
 			if isDraft {
