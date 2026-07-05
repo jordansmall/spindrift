@@ -71,6 +71,26 @@ setup() {
   [[ "$output" == *"container runtime"* ]]
 }
 
+# --- error surfacing (issue #98) ---------------------------------------------
+
+@test "build surfaces the real nix error and does not attempt the container fallback" {
+  export FAKE_NIX_BUILD_OK=0
+  export FAKE_NIX_BUILD_STDERR="error: attribute 'spindrift' missing"
+  run "$BUILD_CMD"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"attribute 'spindrift' missing"* ]]
+  ! grep -q '^run ' "$PODMAN_LOG"
+}
+
+@test "container build stages artifacts in a temp dir, not in the consumer tree" {
+  export FAKE_NIX_BUILD_OK=0
+  run "$BUILD_CMD"
+  [ "$status" -eq 0 ]
+  grep -q '/build-output' "$PODMAN_LOG"
+  [ ! -f ".spindrift-image.tar" ]
+  [ ! -f ".spindrift-image-path" ]
+}
+
 # --- bwrap build path (issue #54) --------------------------------------------
 
 @test "bwrap build realises agent store closures without loading an OCI image" {

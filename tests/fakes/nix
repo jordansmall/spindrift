@@ -14,7 +14,13 @@ case "${1:-}" in
     if [ "${FAKE_NIX_BUILD_OK:-0}" = "1" ]; then
       exit 0
     fi
-    echo "error: a 'aarch64-linux' with features {} is required to build, but I am a 'aarch64-darwin'" >&2
+    # FAKE_NIX_BUILD_STDERR overrides the default builder-missing message so
+    # tests can inject genuine derivation errors (non-builder failures).
+    if [ -n "${FAKE_NIX_BUILD_STDERR:-}" ]; then
+      printf '%s\n' "$FAKE_NIX_BUILD_STDERR" >&2
+    else
+      echo "error: a 'aarch64-linux' with features {} is required to build, but I am a 'aarch64-darwin'" >&2
+    fi
     exit 1
     ;;
   develop)
