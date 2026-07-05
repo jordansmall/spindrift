@@ -414,7 +414,15 @@ func printOutcomeReport(c config, fc forge.Client, pwd string, r runner.Runner, 
 			branch := c.branchPrefix + iss.number
 			pr, isDraft, prFound, prErr := openPRForBranch(fc, branch)
 			if prErr != nil || !prFound {
-				fmt.Printf("    #%s  status=missing  note=no outcome in log\n", iss.number)
+				cls, clsErr := outcome.Classify(logPath, 0)
+				clsNote := ""
+				if clsErr == nil {
+					clsNote = fmt.Sprintf("  class=%s  reason=%s", cls.Class, cls.Reason)
+					if cls.ResetAt != nil {
+						clsNote += "  resetsAt=" + cls.ResetAt.UTC().Format(time.RFC3339)
+					}
+				}
+				fmt.Printf("    #%s  status=missing%s  note=no outcome in log\n", iss.number, clsNote)
 				continue
 			}
 			if isDraft {
