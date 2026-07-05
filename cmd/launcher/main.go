@@ -85,6 +85,10 @@ type config struct {
 	podmanNetwork   string // optional --network value for podman run
 	bwrapUnshareNet bool   // when true, adds --unshare-net to bwrap
 
+	// OCI container resource / security caps
+	pidsLimit   string // --pids-limit value; empty omits the flag
+	memoryLimit string // --memory value; empty omits the flag
+
 	// Space-separated list of env var names to forward into each Box container.
 	// Set by the nix-rendered preamble from the schema's boxEnv=true entries so
 	// the Go source never needs to enumerate them by hand.
@@ -177,6 +181,8 @@ func loadConfig() config {
 
 		podmanNetwork:   os.Getenv("PODMAN_NETWORK"),
 		bwrapUnshareNet: os.Getenv("BWRAP_UNSHARE_NET") != "",
+		pidsLimit:       getenv("PIDS_LIMIT", "512"),
+		memoryLimit:     getenv("MEMORY_LIMIT", "4g"),
 
 		boxEnvVars: os.Getenv("BOX_ENV_VARS"),
 	}
@@ -213,7 +219,8 @@ func newRunner(c config, pwd string) runner.Runner {
 		return runner.NewBwrap(c.agentFiles, c.agentEnv, c.bakedPrefetch, c.spindriftPromptDir, c.bwrapUnshareNet)
 	}
 	return runner.NewOCI(c.runtime, c.image, c.imageArchive, c.imageDrv, c.imageTag,
-		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, c.spindriftPromptDir, c.podmanNetwork)
+		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, c.spindriftPromptDir,
+		c.podmanNetwork, c.pidsLimit, c.memoryLimit)
 }
 
 // newBuildRunner constructs the runner adapter for the `build` subcommand.
@@ -222,7 +229,8 @@ func newBuildRunner(c config, pwd string) runner.Runner {
 		return runner.NewBwrapBuild(c.agentFilesDrv, c.agentEnvDrv)
 	}
 	return runner.NewOCI(c.runtime, c.image, c.imageArchive, c.imageDrv, c.imageTag,
-		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, "", "")
+		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, "", "",
+		c.pidsLimit, c.memoryLimit)
 }
 
 // buildBoxEnv assembles the env map forwarded into a Box. It combines the
