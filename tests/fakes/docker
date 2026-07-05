@@ -19,8 +19,8 @@ case "${1:-}" in
     fi
     ;;
   run)
-    # `docker run ...` — scripted exit code, so tests can drive run.sh's failure
-    # path (the on-failure label swap).
+    # `docker run ...` — scripted exit code, so tests can drive the Go launcher's
+    # failure path (the on-failure label swap).
     exit "${FAKE_DOCKER_RUN_EXIT:-0}"
     ;;
 esac
