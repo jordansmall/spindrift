@@ -81,6 +81,10 @@ type config struct {
 
 	barrierLabel string
 
+	// Network egress restriction knobs
+	podmanNetwork   string // optional --network value for podman run
+	bwrapUnshareNet bool   // when true, adds --unshare-net to bwrap
+
 	// Space-separated list of env var names to forward into each Box container.
 	// Set by the nix-rendered preamble from the schema's boxEnv=true entries so
 	// the Go source never needs to enumerate them by hand.
@@ -171,6 +175,9 @@ func loadConfig() config {
 
 		barrierLabel: os.Getenv("BARRIER_LABEL"),
 
+		podmanNetwork:   os.Getenv("PODMAN_NETWORK"),
+		bwrapUnshareNet: os.Getenv("BWRAP_UNSHARE_NET") != "",
+
 		boxEnvVars: os.Getenv("BOX_ENV_VARS"),
 	}
 }
@@ -203,10 +210,10 @@ func validate(c config) error {
 // newRunner constructs the runner adapter for the `run` subcommand.
 func newRunner(c config, pwd string) runner.Runner {
 	if c.runtime == "bwrap" {
-		return runner.NewBwrap(c.agentFiles, c.agentEnv, c.bakedPrefetch, c.spindriftPromptDir)
+		return runner.NewBwrap(c.agentFiles, c.agentEnv, c.bakedPrefetch, c.spindriftPromptDir, c.bwrapUnshareNet)
 	}
 	return runner.NewOCI(c.runtime, c.image, c.imageArchive, c.imageDrv, c.imageTag,
-		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, c.spindriftPromptDir)
+		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, c.spindriftPromptDir, c.podmanNetwork)
 }
 
 // newBuildRunner constructs the runner adapter for the `build` subcommand.
@@ -215,7 +222,7 @@ func newBuildRunner(c config, pwd string) runner.Runner {
 		return runner.NewBwrapBuild(c.agentFilesDrv, c.agentEnvDrv)
 	}
 	return runner.NewOCI(c.runtime, c.image, c.imageArchive, c.imageDrv, c.imageTag,
-		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, "")
+		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, "", "")
 }
 
 // buildBoxEnv assembles the env map forwarded into a Box. It combines the

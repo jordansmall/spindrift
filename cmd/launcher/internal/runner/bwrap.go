@@ -15,16 +15,20 @@ type bwrapAdapter struct {
 	agentEnv      string // baked nix store path for the agent env (PATH, SSL, …)
 	bakedPrefetch string // baked prefetch snippet fed to the entrypoint
 	promptDir     string // optional host path to bind-mount over /agent/prompts
+	unshareNet    bool   // when true, adds --unshare-net (isolates from host netns)
 }
 
 // NewBwrap constructs a bwrap adapter for the run command.
 // EnsureReady is a no-op; call NewBwrapBuild for the build command.
-func NewBwrap(agentFiles, agentEnv, bakedPrefetch, promptDir string) Runner {
+// unshareNet adds --unshare-net to isolate from the host network namespace;
+// when false, the sandbox shares the host netns (host-loopback reachable).
+func NewBwrap(agentFiles, agentEnv, bakedPrefetch, promptDir string, unshareNet bool) Runner {
 	return &bwrapAdapter{
 		agentFiles:    agentFiles,
 		agentEnv:      agentEnv,
 		bakedPrefetch: bakedPrefetch,
 		promptDir:     promptDir,
+		unshareNet:    unshareNet,
 	}
 }
 
@@ -60,8 +64,10 @@ func (a *bwrapAdapter) Run(box Box) error {
 		"--ro-bind", filepath.Join(etcDir, "passwd"), "/etc/passwd",
 		"--ro-bind", filepath.Join(etcDir, "group"), "/etc/group",
 	}
-	if _, err := os.Stat("/etc/resolv.conf"); err == nil {
-		args = append(args, "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf")
+	if !a.unshareNet {
+		if _, err := os.Stat("/etc/resolv.conf"); err == nil {
+			args = append(args, "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf")
+		}
 	}
 	args = append(args, "--ro-bind", a.agentFiles+"/agent", "/agent")
 	if a.promptDir != "" {
@@ -81,11 +87,13 @@ func (a *bwrapAdapter) Run(box Box) error {
 	for k, v := range box.Env {
 		args = append(args, "--setenv", k, v)
 	}
-	args = append(args,
-		"--unshare-user", "--uid", "1000", "--gid", "1000",
-		"--unshare-pid", "--unshare-ipc", "--unshare-uts",
-		"--", "/agent/entrypoint.sh",
-	)
+	unshareFlags := []string{"--unshare-user", "--uid", "1000", "--gid", "1000",
+		"--unshare-pid", "--unshare-ipc", "--unshare-uts"}
+	if a.unshareNet {
+		unshareFlags = append(unshareFlags, "--unshare-net")
+	}
+	args = append(args, unshareFlags...)
+	args = append(args, "--", "/agent/entrypoint.sh")
 
 	out := box.Output
 	if out == nil {

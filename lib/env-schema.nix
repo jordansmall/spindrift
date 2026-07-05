@@ -99,6 +99,18 @@
     flakeOption = true;
     boxEnv = false;
   };
+  podmanNetwork = {
+    env = "PODMAN_NETWORK";
+    doc = "--network value for podman run; empty applies no flag (podman NAT default); set to 'pasta' to restrict egress";
+    flakeOption = true;
+    boxEnv = false;
+  };
+  bwrapUnshareNet = {
+    env = "BWRAP_UNSHARE_NET";
+    doc = "when non-empty, adds --unshare-net to bwrap; requires slirp/pasta for DNS; by default bwrap shares the host network namespace (host-loopback reachable)";
+    flakeOption = true;
+    boxEnv = false;
+  };
   # ── Required runtime inputs ────────────────────────────────────────────────
   repoSlug = {
     env = "REPO_SLUG";

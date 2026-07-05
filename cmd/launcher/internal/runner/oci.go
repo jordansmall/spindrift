@@ -23,11 +23,13 @@ type ociAdapter struct {
 	flakeImageAttr  string // nix flake attr for the image (.#packages.x.spindrift)
 	pwd             string // $PWD; container-fallback mounts this as /workspace
 	promptDir       string // optional host path to mount over /agent/prompts
+	podmanNetwork   string // optional --network value; empty omits the flag
 }
 
 // NewOCI constructs an OCI adapter. pwd is the working directory (used for the
-// container-fallback path); promptDir is the optional SPINDRIFT_PROMPT_DIR.
-func NewOCI(cli, image, imageArchive, imageDrv, imageTag, nixBuilderImage, nixVolume, flakeImageAttr, pwd, promptDir string) Runner {
+// container-fallback path); promptDir is the optional SPINDRIFT_PROMPT_DIR;
+// podmanNetwork is the optional --network value (empty omits the flag).
+func NewOCI(cli, image, imageArchive, imageDrv, imageTag, nixBuilderImage, nixVolume, flakeImageAttr, pwd, promptDir, podmanNetwork string) Runner {
 	return &ociAdapter{
 		cli:             cli,
 		image:           image,
@@ -39,6 +41,7 @@ func NewOCI(cli, image, imageArchive, imageDrv, imageTag, nixBuilderImage, nixVo
 		flakeImageAttr:  flakeImageAttr,
 		pwd:             pwd,
 		promptDir:       promptDir,
+		podmanNetwork:   podmanNetwork,
 	}
 }
 
@@ -181,6 +184,9 @@ func (a *ociAdapter) Run(box Box) error {
 	}
 
 	args := []string{"run", "--rm", "--name", box.Name}
+	if a.podmanNetwork != "" {
+		args = append(args, "--network", a.podmanNetwork)
+	}
 	for k, v := range box.Env {
 		args = append(args, "-e", k+"="+v)
 	}
