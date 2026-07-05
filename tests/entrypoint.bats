@@ -107,10 +107,20 @@ FAKE
   grep -q "$WORK_DIR" "$PREFETCH_LOG"
 }
 
-# --agents JSON: object keyed by agent name, built from mounted prompt files.
+# --agents JSON: produced by nix (builtins.toJSON) when both subagent models are
+# configured; forwarded by the entrypoint as-is after prompt injection.
 # The fake claude records the --agents value to $CLAUDE_AGENTS_FILE for
 # structural assertions without grepping a log that also contains prompt prose.
-@test "entrypoint always passes --agents as a JSON object with scout and reviewer" {
+@test "entrypoint omits --agents when AGENTS_JSON_TEMPLATE is not set" {
+  # Default setup: SCOUT_MODEL="" REVIEW_MODEL="" → AGENTS_JSON_TEMPLATE not set
+  # The entrypoint must not build JSON itself; with no template, no flag is passed.
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ ! -s "$CLAUDE_AGENTS_FILE" ]
+}
+
+@test "entrypoint passes --agents as a JSON object with scout and reviewer when template is set" {
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -s "$CLAUDE_AGENTS_FILE" ]
@@ -119,30 +129,16 @@ FAKE
   jq -e '.reviewer.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
 }
 
-@test "entrypoint includes model in agents JSON only when model env var is set" {
-  export SCOUT_MODEL="claude-haiku-3-5"
-  export REVIEW_MODEL="claude-opus-4-5"
+@test "entrypoint forwards model fields from the nix-baked agents JSON template" {
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"claude-opus-4-5","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"scout","model":"claude-haiku-3-5","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   jq -e '.scout.model == "claude-haiku-3-5"' "$CLAUDE_AGENTS_FILE" >/dev/null
   jq -e '.reviewer.model == "claude-opus-4-5"' "$CLAUDE_AGENTS_FILE" >/dev/null
 }
 
-@test "entrypoint omits model from agents JSON when SCOUT_MODEL is unset" {
-  unset SCOUT_MODEL
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  jq -e '.scout | has("model") | not' "$CLAUDE_AGENTS_FILE" >/dev/null
-}
-
-@test "entrypoint omits model from agents JSON when REVIEW_MODEL is unset" {
-  unset REVIEW_MODEL
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  jq -e '.reviewer | has("model") | not' "$CLAUDE_AGENTS_FILE" >/dev/null
-}
-
 @test "entrypoint includes a read-only tools whitelist in agents JSON" {
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   jq -e '.scout.tools | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
@@ -177,6 +173,7 @@ EOF
   printf 'scout for issue ${ISSUE_NUMBER}\n' >"$prompt_dir/scout-prompt.md"
   printf 'review base ${BASE_BRANCH}\n' >"$prompt_dir/review-prompt.md"
   export PROMPTS_DIR="$prompt_dir"
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"r","model":"opus","prompt":"","tools":["Read"]},"scout":{"description":"s","model":"haiku","prompt":"","tools":["Read"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   jq -e '.scout.prompt | contains("scout for issue 7")' "$CLAUDE_AGENTS_FILE" >/dev/null

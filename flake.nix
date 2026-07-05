@@ -650,6 +650,27 @@
               touch $out
             '';
 
+            # AGENTS_JSON_TEMPLATE baked into the entrypoint by nix (ADR 0007):
+            # when both models are configured it contains the JSON produced by
+            # builtins.toJSON; when either is unset it is the empty string.
+            agents-json-baked = pkgs.runCommand "agents-json-baked" { } ''
+              ep=${customHarness.agentFiles}/agent/entrypoint.sh
+
+              # The custom harness bakes both models — template must contain them.
+              grep -q 'custom-scout' "$ep" \
+                || { echo "scout model not found in baked entrypoint" >&2; exit 1; }
+              grep -q 'custom-reviewer' "$ep" \
+                || { echo "reviewer model not found in baked entrypoint" >&2; exit 1; }
+              grep -q 'AGENTS_JSON_TEMPLATE=' "$ep" \
+                || { echo "AGENTS_JSON_TEMPLATE assignment missing from entrypoint" >&2; exit 1; }
+
+              # Default harness bakes no models → template must not contain JSON content.
+              ! grep -q 'AGENTS_JSON_TEMPLATE=.*{' ${nonRustHarness.agentFiles}/agent/entrypoint.sh \
+                || { echo "AGENTS_JSON_TEMPLATE is non-empty for no-model harness" >&2; exit 1; }
+
+              touch $out
+            '';
+
             # The Box must run unprivileged: Claude Code refuses
             # --dangerously-skip-permissions under root. Assert the image config
             # runs as the non-root `agent` user. Realises the image, so it is
