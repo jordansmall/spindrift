@@ -21,12 +21,15 @@ func NewExecClient(repo string) Client {
 	return &execClient{repo: repo}
 }
 
+const issueQueryLimit = 100
+
 func (e *execClient) ListIssues(label string) ([]Issue, error) {
 	cmd := exec.Command("gh", "issue", "list",
 		"--repo", e.repo,
 		"--state", "open",
 		"--label", label,
-		"--limit", "100",
+		"--limit", strconv.Itoa(issueQueryLimit),
+		"--search", "sort:created-asc",
 		"--json", "number,title",
 		"--jq", "sort_by(.number) | .[] | [.number, .title] | @tsv",
 	)
@@ -46,6 +49,10 @@ func (e *execClient) ListIssues(label string) ([]Issue, error) {
 			continue
 		}
 		issues = append(issues, Issue{Number: parts[0], Title: parts[1]})
+	}
+	if len(issues) >= issueQueryLimit {
+		fmt.Printf("WARNING: issue list returned %d issues (limit %d); backlog may be larger — rerun to drain\n",
+			len(issues), issueQueryLimit)
 	}
 	return issues, nil
 }
