@@ -11,5 +11,9 @@ harness.env
 # direnv
 .direnv/
 
+# container-fallback build artifacts (staged under tmpdir; listed here as safety net)
+.spindrift-image.tar
+.spindrift-image-path
+
 # OS
 .DS_Store
