@@ -628,13 +628,23 @@ EOF
   ! grep -q 'load -i' "$PODMAN_LOG"
 }
 
-@test "runtime=bwrap passes required env vars via --setenv" {
+@test "runtime=bwrap passes non-secret env vars via --setenv" {
   run "$BWRAP_RUN_CMD"
   [ "$status" -eq 0 ]
-  grep -q 'GH_TOKEN' "$BWRAP_LOG"
   grep -q 'REPO_SLUG' "$BWRAP_LOG"
   grep -q 'GIT_USER_NAME' "$BWRAP_LOG"
   grep -q 'GIT_USER_EMAIL' "$BWRAP_LOG"
+}
+
+@test "runtime=bwrap secrets are not on the command line" {
+  run "$BWRAP_RUN_CMD"
+  [ "$status" -eq 0 ]
+  # Values must not appear in bwrap argv; names must appear as ENV_SECRET entries.
+  ! grep -qF -- '--setenv GH_TOKEN' "$BWRAP_LOG"
+  ! grep -qF -- '--setenv CLAUDE_CODE_OAUTH_TOKEN' "$BWRAP_LOG"
+  ! grep -qF -- '--setenv ANTHROPIC_API_KEY' "$BWRAP_LOG"
+  grep -q 'ENV_SECRET:GH_TOKEN' "$BWRAP_LOG"
+  grep -q 'ENV_SECRET:CLAUDE_CODE_OAUTH_TOKEN' "$BWRAP_LOG"
 }
 
 @test "runtime=bwrap passes MODEL and lifecycle labels via --setenv" {
