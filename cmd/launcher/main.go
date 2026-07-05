@@ -246,6 +246,17 @@ func swapLabel(fc forge.Client, num, add, remove string) {
 	}
 }
 
+// claimIssue marks an issue in-progress before dispatch. When discovery already
+// runs off the in-progress label — the workflow claimed the issue in YAML
+// before the launcher started — the swap would add and remove the same label,
+// so it is skipped.
+func claimIssue(c config, fc forge.Client, num string) {
+	if c.label == c.inProgressLabel {
+		return
+	}
+	swapLabel(fc, num, c.inProgressLabel, c.label)
+}
+
 // runOne dispatches one issue into a container and logs its output.
 func runOne(c config, pwd string, r runner.Runner, iss issue) error {
 	logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
@@ -648,7 +659,7 @@ func fanOut(c config, fc forge.Client, pwd string, r runner.Runner, batch []issu
 	sem := make(chan struct{}, c.maxParallel)
 	var wg sync.WaitGroup
 	for _, iss := range batch {
-		swapLabel(fc, iss.number, c.inProgressLabel, c.label)
+		claimIssue(c, fc, iss.number)
 		wg.Add(1)
 		iss := iss
 		go func() {
