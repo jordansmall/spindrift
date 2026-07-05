@@ -66,11 +66,22 @@ fi
 
 # Detect a Nix devShell in the cloned repo. When found the prompt guides the
 # agent to run checks inside `nix develop`; absence or probe failure degrades
-# gracefully to the baked toolchain.
+# gracefully to the baked toolchain. The probe is bounded by
+# DEV_SHELL_PROBE_TIMEOUT (baked by nix; override at runtime) so a heavy
+# consumer devShell eval cannot stall the box indefinitely.
 if [ -f "flake.nix" ]; then
   echo "==> flake.nix found in cloned repo; probing for devShell"
-  if command -v nix >/dev/null 2>&1 && nix develop --command true 2>/dev/null; then
+  _probe_rc=0
+  if command -v nix >/dev/null 2>&1; then
+    timeout "${DEV_SHELL_PROBE_TIMEOUT:-300}" nix develop --command true 2>/dev/null \
+      || _probe_rc=$?
+  else
+    _probe_rc=1
+  fi
+  if [ "$_probe_rc" -eq 0 ]; then
     echo "==> devShell found — agent will use nix develop for checks"
+  elif [ "$_probe_rc" -eq 124 ]; then
+    echo "==> devShell probe timed out (${DEV_SHELL_PROBE_TIMEOUT:-300}s) — using baked toolchain"
   else
     echo "==> no devShell in flake (or nix develop failed) — using baked toolchain"
   fi

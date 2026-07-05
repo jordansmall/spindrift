@@ -148,6 +148,12 @@
     doc = "total seconds to wait for dependency-wave completion before aborting";
     boxEnv = false;
   };
+  devShellProbeTimeout = {
+    env = "DEV_SHELL_PROBE_TIMEOUT";
+    default = 300;
+    doc = "seconds before the devShell probe is abandoned and the baked toolchain is used";
+    boxEnv = true;
+  };
   mergePollInterval = {
     env = "MERGE_POLL_INTERVAL";
     default = 30;
