@@ -45,7 +45,13 @@ git checkout -b "$BRANCH" "origin/${BASE_BRANCH:-}"
 # open PR exists, leave the branch alone — the #122 adoption path will take
 # over instead.
 if git rev-parse --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
-  if gh pr list --head "$BRANCH" --state open 2>/dev/null | grep -q .; then
+  # Fail hard on gh errors: a silent empty response (network/auth failure)
+  # is indistinguishable from "no PR" and must not trigger the force-reset.
+  open_prs="$(gh pr list --repo "$REPO_SLUG" --head "$BRANCH" --state open 2>/dev/null)" || {
+    echo "==> gh pr list failed on $BRANCH; aborting to protect any open PR"
+    exit 1
+  }
+  if printf '%s\n' "$open_prs" | grep -q .; then
     echo "==> open PR exists on $BRANCH; skipping force-reset (adoption path)"
   else
     echo "==> stale remote branch $BRANCH found (no open PR); force-resetting to ${BASE_BRANCH:-}"

@@ -351,8 +351,9 @@ EOF
   echo "$output" | grep -q "skipping force-reset"
 
   # The stale commit is still on the remote branch (not force-reset).
-  run git -C "$WORK_DIR" ls-remote origin "refs/heads/agent/issue-7"
   stale_sha="$(git -C "$BATS_TEST_TMPDIR/prior" rev-parse HEAD)"
+  run git -C "$WORK_DIR" ls-remote origin "refs/heads/agent/issue-7"
+  [ "$status" -eq 0 ]
   [[ "$output" == "$stale_sha"* ]]
 }
 
