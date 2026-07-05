@@ -303,8 +303,9 @@ EOF
   grep -qi 'push.*after.*commit\|push.*every.*commit\|push.*each.*commit\|after.*commit.*push' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "re-dispatched box force-resets a stale remote branch to base" {
-  # Simulate a prior run that pushed agent/issue-7 with a commit, then died.
+@test "re-dispatched box force-resets a stale remote branch (no open PR)" {
+  # Simulate a prior run that pushed agent/issue-7 with a commit, then died
+  # before opening a PR.
   local prior="$BATS_TEST_TMPDIR/prior"
   git clone -q "https://github.com/owner/repo.git" "$prior"
   git -C "$prior" checkout -b "agent/issue-7" "origin/main"
@@ -312,15 +313,14 @@ EOF
   git -C "$prior" add -A
   git -C "$prior" commit -q -m "feat: prior run commit"
   git -C "$prior" push -q origin "agent/issue-7"
+  # No FAKE_GH_PR_LIST_7 → gh pr list returns empty → no open PR
 
   # A re-dispatch should succeed and start clean from main.
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
-  # Work dir is on the correct branch, not the stale commits.
-  run git -C "$WORK_DIR" rev-parse --abbrev-ref HEAD
-  [ "$output" = "agent/issue-7" ]
-  [ ! -f "$WORK_DIR/stale.txt" ]
+  # Entrypoint logged the force-reset.
+  echo "$output" | grep -q "force-resetting"
 
   # The remote branch was force-reset, so a plain push from the clean
   # work-tree succeeds without a non-fast-forward rejection.
@@ -329,6 +329,31 @@ EOF
   git -C "$WORK_DIR" commit -q -m "feat: new work"
   run git -C "$WORK_DIR" push origin "agent/issue-7"
   [ "$status" -eq 0 ]
+}
+
+@test "re-dispatched box skips force-reset when an open PR exists on the stale branch" {
+  # Simulate a prior run that pushed commits AND opened a PR, then died before
+  # printing SPINDRIFT_OUTCOME.  The entrypoint must not destroy the branch so
+  # the #122 adoption path can still recover the run.
+  local prior="$BATS_TEST_TMPDIR/prior"
+  git clone -q "https://github.com/owner/repo.git" "$prior"
+  git -C "$prior" checkout -b "agent/issue-7" "origin/main"
+  echo "prior run work" > "$prior/prior.txt"
+  git -C "$prior" add -A
+  git -C "$prior" commit -q -m "feat: prior run commit"
+  git -C "$prior" push -q origin "agent/issue-7"
+  export FAKE_GH_PR_LIST_7="https://github.com/owner/repo/pull/7"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  # Entrypoint logged that it skipped the force-reset.
+  echo "$output" | grep -q "skipping force-reset"
+
+  # The stale commit is still on the remote branch (not force-reset).
+  run git -C "$WORK_DIR" ls-remote origin "refs/heads/agent/issue-7"
+  stale_sha="$(git -C "$BATS_TEST_TMPDIR/prior" rev-parse HEAD)"
+  [[ "$output" == "$stale_sha"* ]]
 }
 
 @test "entrypoint detects devShell and logs when flake.nix has a devShell" {

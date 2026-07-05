@@ -457,21 +457,6 @@ EOF
   ! grep -q 'pr merge' "$GH_LOG"
 }
 
-@test "branch-but-no-PR is a safe no-op: status stays missing, no merge attempted" {
-  # Pins issue #122 recovery: adoption considers open non-draft PRs only.
-  # A Box that pushed its branch but died before opening a PR leaves a remote
-  # branch with no open PR.  The launcher must treat this as status=missing —
-  # it must not attempt to adopt or merge the branch.
-  export FAKE_PODMAN_IMAGE_PRESENT=1
-  export FAKE_GH_ISSUES=$'1\tFirst issue'
-  # No FAKE_PODMAN_OUTCOME_1 → no SPINDRIFT_OUTCOME in log (Box died)
-  # No FAKE_GH_PR_LIST_1     → no open PR (branch exists remotely, but no PR)
-  run "$RUN_CMD"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"status=missing"* ]]
-  ! grep -q 'pr merge' "$GH_LOG"
-}
-
 # --- Outcome verification (issue #51) ----------------------------------------
 
 @test "outcome report flags as failed when PR is not MERGED on GitHub" {

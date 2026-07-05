@@ -39,11 +39,18 @@ echo "==> cloning $REPO_SLUG"
 git clone "https://github.com/${REPO_SLUG}.git" "$WORK_DIR"
 cd "$WORK_DIR"
 git checkout -b "$BRANCH" "origin/${BASE_BRANCH:-}"
-# If a stale remote branch exists from a prior interrupted run, force-reset it
-# to the base so incremental pushes from this Box are never rejected non-fast-forward.
-if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-  echo "==> stale remote branch $BRANCH found; force-resetting to ${BASE_BRANCH:-}"
-  git push --force origin "$BRANCH"
+# A prior run may have already pushed agent/issue-N before dying.  When no
+# open PR exists, force-reset the remote branch so this Box starts clean and
+# its first incremental push is never rejected non-fast-forward.  When an
+# open PR exists, leave the branch alone — the #122 adoption path will take
+# over instead.
+if git rev-parse --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
+  if gh pr list --head "$BRANCH" --state open 2>/dev/null | grep -q .; then
+    echo "==> open PR exists on $BRANCH; skipping force-reset (adoption path)"
+  else
+    echo "==> stale remote branch $BRANCH found (no open PR); force-resetting to ${BASE_BRANCH:-}"
+    git push --force origin "$BRANCH"
+  fi
 fi
 
 # Detect a Nix devShell in the cloned repo. When found the prompt guides the
