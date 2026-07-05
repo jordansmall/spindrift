@@ -711,7 +711,7 @@ EOF
   grep -q -- '--unshare-net' "$BWRAP_LOG"
 }
 
-@test "runtime=bwrap default: no --unshare-net and resolv.conf bound (host-loopback reachable)" {
+@test "runtime=bwrap default: no --unshare-net (shares host netns; host-loopback reachable)" {
   export FAKE_GH_ISSUES=$'1\tOnly issue'
   unset BWRAP_UNSHARE_NET
   run "$BWRAP_RUN_CMD"
