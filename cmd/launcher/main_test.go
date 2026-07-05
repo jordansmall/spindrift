@@ -1,9 +1,13 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // TestConfigHasNoModelFields enforces that model/scoutModel/reviewModel were
@@ -179,5 +183,59 @@ func TestDetectCycle_ExternalBlockerIgnored(t *testing.T) {
 	node, hasCycle := detectCycle(edges, []string{"1"})
 	if hasCycle {
 		t.Errorf("expected no cycle (external blockers ignored in batch), got cycle member %s", node)
+	}
+}
+
+// --- unreadyBlockers tests ---
+
+func TestUnreadyBlockers_Pending(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"}) // no complete label, still open
+	c := config{completeLabel: "agent-complete"}
+	edges := map[string][]string{"10": {"11"}}
+	got := unreadyBlockers(c, fc, "10", edges)
+	if !reflect.DeepEqual(got, []string{"11"}) {
+		t.Errorf("expected [11], got %v", got)
+	}
+}
+
+func TestUnreadyBlockers_CompleteAndClosedAreReady(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN", Labels: []string{"agent-complete"}})
+	fc.SetIssue(forge.Issue{Number: "12", State: "CLOSED"})
+	c := config{completeLabel: "agent-complete"}
+	edges := map[string][]string{"10": {"11", "12"}}
+	if got := unreadyBlockers(c, fc, "10", edges); len(got) != 0 {
+		t.Errorf("expected no unready blockers, got %v", got)
+	}
+}
+
+func TestUnreadyBlockers_Mixed(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN", Labels: []string{"agent-complete"}})
+	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN"}) // still blocking
+	c := config{completeLabel: "agent-complete"}
+	edges := map[string][]string{"10": {"11", "12"}}
+	if got := unreadyBlockers(c, fc, "10", edges); !reflect.DeepEqual(got, []string{"12"}) {
+		t.Errorf("expected [12], got %v", got)
+	}
+}
+
+// --- writeBlockedMarker tests ---
+
+func TestWriteBlockedMarker(t *testing.T) {
+	pwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeBlockedMarker(pwd, []string{"11", "13"}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(pwd, "logs", blockedMarker))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(b); got != "#11, #13" {
+		t.Errorf("expected %q, got %q", "#11, #13", got)
 	}
 }
