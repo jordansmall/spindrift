@@ -48,6 +48,15 @@ it) → `agent-failed` (the Box exited non-zero; human triage, re-label to
 retry). Success needs no terminal label — the merged PR closes the issue.
 _Avoid_: status, queue, state machine.
 
+`fanout-blocker` is a planning gate, orthogonal to the dispatch-state lifecycle
+above. It marks an issue that must land before concurrent fan-out is enabled for
+any newer issue. The dogfood wrapper exports `BARRIER_LABEL=fanout-blocker` so
+the Launcher fences everything numbered above the lowest open `fanout-blocker`
+issue; when that issue closes, the fence lifts to the next barrier (or the rest
+of the backlog). An issue may carry `fanout-blocker` alongside any dispatch
+state — it is not a state the issue transitions through.
+_Avoid_: barrier state, fan-out label, serial gate.
+
 **Outcome line**:
 The machine-readable final line a Box writes to stdout, parsed by the Launcher
 to learn whether a PR is ready for CI-watch-and-merge, blocked, or failed.
