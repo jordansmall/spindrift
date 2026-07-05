@@ -223,6 +223,86 @@ EOF
   [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 0 ]
 }
 
+# --- BARRIER_LABEL (issue #174) -------------------------------------------
+#
+# GH_STATE (GH_LOG.state) is pre-seeded with tab-separated "num\tlabel" lines
+# to give each issue a fixed lifecycle label. This prevents the fake's default
+# "never-edited → matches any query" behaviour from leaking barrier issues into
+# the ready query and vice versa.
+
+@test "BARRIER_LABEL unset: dispatches all ready issues unchanged (off-by-default)" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
+  printf '1\tready-for-agent\n2\tready-for-agent\n' > "$GH_LOG.state"
+  # Do NOT set BARRIER_LABEL — barrier is disabled.
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
+  grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
+}
+
+@test "BARRIER_LABEL: holds ready issues numbered above the lowest open barrier" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  # Issue 1: ready; issue 5: barrier; issue 7: ready but > B=5.
+  export FAKE_GH_ISSUES=$'1\tReady\n5\tBarrier\n7\tHeld'
+  printf '1\tready-for-agent\n' > "$GH_LOG.state"
+  printf '5\tmy-barrier\n' >> "$GH_LOG.state"
+  printf '7\tready-for-agent\n' >> "$GH_LOG.state"
+  export BARRIER_LABEL="my-barrier"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  # Issue 1 (≤ B=5) dispatches; issue 7 (> B=5) is fenced.
+  grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
+  ! grep -q 'ISSUE_NUMBER=5' "$PODMAN_LOG"
+  ! grep -q 'ISSUE_NUMBER=7' "$PODMAN_LOG"
+}
+
+@test "BARRIER_LABEL set but no open barrier issues: dispatches all ready issues" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tReady\n2\tReady2'
+  # Pre-seed labels so neither issue matches the barrier label query.
+  printf '1\tready-for-agent\n2\tready-for-agent\n' > "$GH_LOG.state"
+  export BARRIER_LABEL="my-barrier"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
+  grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
+}
+
+@test "BARRIER_LABEL: two open barriers fence at the lower number (lowest-first serialization)" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  # Barriers at 5 and 10; ready issues at 1, 7, 12.
+  export FAKE_GH_ISSUES=$'1\tReady\n5\tBarrier A\n7\tHeld\n10\tBarrier B\n12\tAlso held'
+  printf '1\tready-for-agent\n' > "$GH_LOG.state"
+  printf '5\tmy-barrier\n' >> "$GH_LOG.state"
+  printf '7\tready-for-agent\n' >> "$GH_LOG.state"
+  printf '10\tmy-barrier\n' >> "$GH_LOG.state"
+  printf '12\tready-for-agent\n' >> "$GH_LOG.state"
+  export BARRIER_LABEL="my-barrier"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  # Only issue 1 (≤ lowest barrier B=5) dispatches.
+  grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
+  ! grep -q 'ISSUE_NUMBER=7' "$PODMAN_LOG"
+  ! grep -q 'ISSUE_NUMBER=12' "$PODMAN_LOG"
+}
+
+@test "BARRIER_LABEL: barrier issue itself (= B) is included in the dispatch set" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  # Issue 5 is both a barrier AND in the ready queue (≤ B includes B itself).
+  export FAKE_GH_ISSUES=$'1\tReady\n5\tAlso ready barrier\n7\tHeld'
+  printf '1\tready-for-agent\n' > "$GH_LOG.state"
+  printf '7\tready-for-agent\n' >> "$GH_LOG.state"
+  # Issue 5 starts with both labels; use the barrier label in state so it matches
+  # the barrier query, and rely on fake default for the ready query.
+  printf '5\tmy-barrier\n' >> "$GH_LOG.state"
+  export BARRIER_LABEL="my-barrier"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
+  ! grep -q 'ISSUE_NUMBER=7' "$PODMAN_LOG"
+}
+
 @test "run fails fast when REPO_SLUG is missing" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   unset REPO_SLUG
