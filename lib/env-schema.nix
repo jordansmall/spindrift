@@ -165,4 +165,9 @@
     doc = "host directory mounted over /agent/prompts for zero-rebuild prompt iteration";
     boxEnv = false;
   };
+  issueNumber = {
+    env = "ISSUE_NUMBER";
+    doc = "dispatch only this issue number, bypassing the LABEL query; empty discovers by LABEL";
+    boxEnv = false;
+  };
 }
