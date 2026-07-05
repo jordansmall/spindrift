@@ -120,6 +120,11 @@ echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
 # Stream the transcript live (visible via `podman logs -f`) while capturing it.
 # stream-json is the only --print format that emits events in realtime; plain
 # text stays silent until the very end, so the box looks dead for the whole run.
+#
+# Pipeline: claude → tee (raw canonical copy) → formatter (human-readable view)
+# The raw copy in $stream_log is the sole input to the SPINDRIFT_OUTCOME
+# extraction below, so a formatter bug can never corrupt that path.
+FORMAT_TRANSCRIPT_SCRIPT="${FORMAT_TRANSCRIPT_SCRIPT:-/agent/format-transcript.sh}"
 stream_log="$(mktemp)"
 set +e
 claude -p "$prompt" \
@@ -128,7 +133,8 @@ claude -p "$prompt" \
   --verbose \
   --output-format stream-json \
   --dangerously-skip-permissions \
-  | tee "$stream_log"
+  | tee "$stream_log" \
+  | bash "$FORMAT_TRANSCRIPT_SCRIPT" 2>/dev/null || true
 claude_rc="${PIPESTATUS[0]}"
 set -e
 

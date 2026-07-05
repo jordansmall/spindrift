@@ -239,6 +239,7 @@
                   # writeShellApplication at build time, not standalone here.
                   shellcheck --shell=bash \
                     ${./agent/entrypoint.sh} \
+                    ${./agent/format-transcript.sh} \
                     ${./tests/fakes/podman} \
                     ${./tests/fakes/docker} \
                     ${./tests/fakes/bwrap} \
@@ -277,6 +278,7 @@
                   BWRAP_BUILD_CMD = "${bwrapHarness.build}/bin/build";
                   IMAGE_PATH = batsHarness.imagePath;
                   ENTRYPOINT = ./agent/entrypoint.sh;
+                  FORMAT_TRANSCRIPT_SCRIPT = ./agent/format-transcript.sh;
                   DOGFOOD_SH = ./dogfood.sh;
                   PROMPTS_DIR = ./templates/default/prompts;
                   # The baked default prompt dir the `run` command mounts, and a
