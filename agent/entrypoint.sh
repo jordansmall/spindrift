@@ -39,6 +39,12 @@ echo "==> cloning $REPO_SLUG"
 git clone "https://github.com/${REPO_SLUG}.git" "$WORK_DIR"
 cd "$WORK_DIR"
 git checkout -b "$BRANCH" "origin/${BASE_BRANCH:-}"
+# If a stale remote branch exists from a prior interrupted run, force-reset it
+# to the base so incremental pushes from this Box are never rejected non-fast-forward.
+if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+  echo "==> stale remote branch $BRANCH found; force-resetting to ${BASE_BRANCH:-}"
+  git push --force origin "$BRANCH"
+fi
 
 # Detect a Nix devShell in the cloned repo. When found the prompt guides the
 # agent to run checks inside `nix develop`; absence or probe failure degrades
