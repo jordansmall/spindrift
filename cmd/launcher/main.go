@@ -1,6 +1,6 @@
 // Package main: spindrift launcher — orchestrates open issues into disposable
-// containers. Config is baked into env vars by the nix wrapper (imagePreamble,
-// runDefaultsPreamble, etc.); harness.env overrides those at runtime. The
+// containers. Config is baked into env vars by the nix wrapper (goRunPreamble,
+// goRunDefaultsPreamble, etc.); harness.env overrides those at runtime. The
 // binary contains no baked store paths of its own beyond what nix injects.
 package main
 
@@ -17,6 +17,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 type config struct {
@@ -31,6 +32,8 @@ type config struct {
 	// bwrap agent closure paths (bwrap only)
 	agentFiles    string
 	agentEnv      string
+	agentFilesDrv string // .drv path; used by `launcher build` to realise the closure
+	agentEnvDrv   string // .drv path; used by `launcher build` to realise the closure
 	bakedPrefetch string
 
 	// Runtime: podman | docker | bwrap
@@ -124,6 +127,8 @@ func loadConfig() config {
 		flakeImageAttr:  os.Getenv("FLAKE_IMAGE_ATTR"),
 		agentFiles:      os.Getenv("AGENT_FILES"),
 		agentEnv:        os.Getenv("AGENT_ENV"),
+		agentFilesDrv:   os.Getenv("AGENT_FILES_DRV"),
+		agentEnvDrv:     os.Getenv("AGENT_ENV_DRV"),
 		bakedPrefetch:   os.Getenv("BAKED_PREFETCH"),
 		runtime:         os.Getenv("RUNTIME"),
 		image:           image,
@@ -185,96 +190,52 @@ func validate(c config) error {
 	return nil
 }
 
-func loadImage(runtime, archive, imageTag string) error {
-	fmt.Printf("==> loading spindrift image from %s\n", archive)
-	load := exec.Command(runtime, "load", "-i", archive)
-	load.Stdout = os.Stdout
-	load.Stderr = os.Stderr
-	if err := load.Run(); err != nil {
-		return fmt.Errorf("load failed: %w", err)
+// newRunner constructs the runner adapter for the `run` subcommand.
+func newRunner(c config, pwd string) runner.Runner {
+	if c.runtime == "bwrap" {
+		return runner.NewBwrap(c.agentFiles, c.agentEnv, c.bakedPrefetch, c.spindriftPromptDir)
 	}
-	tag := exec.Command(runtime, "tag", "spindrift:latest", imageTag)
-	tag.Stdout = os.Stdout
-	tag.Stderr = os.Stderr
-	if err := tag.Run(); err != nil {
-		return fmt.Errorf("tag failed: %w", err)
-	}
-	fmt.Printf("==> done: spindrift:latest + %s\n", imageTag)
-	return nil
+	return runner.NewOCI(c.runtime, c.image, c.imageArchive, c.imageDrv, c.imageTag,
+		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, c.spindriftPromptDir)
 }
 
-func buildInContainer(c config, pwd string) error {
-	tar := filepath.Join(pwd, ".spindrift-image.tar")
-	pathfile := ".spindrift-image-path"
-	fmt.Printf("==> no host Linux builder; building the image inside a %s container\n", c.nixBuilderImage)
-	fmt.Printf("    (reusing the '%s' volume for /nix so rebuilds are incremental)\n", c.nixVolume)
-
-	shCmd := fmt.Sprintf(
-		"nix --extra-experimental-features 'nix-command flakes' build '%s' --print-out-paths --no-link >%s && cp \"$(cat %s)\" .spindrift-image.tar",
-		c.flakeImageAttr, pathfile, pathfile,
-	)
-	build := exec.Command(c.runtime, "run", "--rm",
-		"-v", c.nixVolume+":/nix",
-		"-v", pwd+":/workspace",
-		"-w", "/workspace",
-		c.nixBuilderImage,
-		"sh", "-euc", shCmd,
-	)
-	build.Stdout = os.Stdout
-	build.Stderr = os.Stderr
-	if err := build.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "==> container build failed — see the %s output above.\n", c.runtime)
-		_ = os.Remove(tar)
-		_ = os.Remove(filepath.Join(pwd, pathfile))
-		return fmt.Errorf("container build failed")
+// newBuildRunner constructs the runner adapter for the `build` subcommand.
+func newBuildRunner(c config, pwd string) runner.Runner {
+	if c.runtime == "bwrap" {
+		return runner.NewBwrapBuild(c.agentFilesDrv, c.agentEnvDrv)
 	}
-	if err := loadImage(c.runtime, tar, c.imageTag); err != nil {
+	return runner.NewOCI(c.runtime, c.image, c.imageArchive, c.imageDrv, c.imageTag,
+		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, "")
+}
+
+// buildBoxEnv assembles the env map forwarded into a Box. It combines the
+// schema boxEnv=true vars (read from the ambient env by name) with per-issue
+// vars. The adapter is responsible for any runtime-specific additions (e.g.
+// PREFETCH for bwrap, HOME/PATH for the sandbox).
+func buildBoxEnv(c config, iss issue) map[string]string {
+	env := make(map[string]string)
+	for _, name := range strings.Fields(c.boxEnvVars) {
+		env[name] = os.Getenv(name)
+	}
+	env["ISSUE_NUMBER"] = iss.number
+	env["ISSUE_TITLE"] = iss.title
+	if iss.fixPass > 0 {
+		env["FIX_PASS"] = strconv.Itoa(iss.fixPass)
+	}
+	return env
+}
+
+// build realises the sandbox image or store closures without running any agent.
+func build() error {
+	c := loadConfig()
+	if c.runtime == "" {
+		return fmt.Errorf("RUNTIME is not set")
+	}
+	pwd, err := os.Getwd()
+	if err != nil {
 		return err
 	}
-	_ = os.Remove(tar)
-	_ = os.Remove(filepath.Join(pwd, pathfile))
-	return nil
-}
-
-// ensureImage checks that the OCI image is present and builds it if not.
-func ensureImage(c config, pwd string) error {
-	exists := exec.Command(c.runtime, "image", "exists", c.image)
-	if err := exists.Run(); err == nil {
-		return nil
-	}
-	fmt.Printf("==> image '%s' not found — building first\n", c.image)
-
-	// 1. Try host build (nix build <drv>^* --no-link).
-	nixBuild := exec.Command("nix", "build", c.imageDrv+"^*", "--no-link")
-	nixBuild.Stdout = os.Stdout
-	nixBuild.Stderr = os.Stderr
-	if err := nixBuild.Run(); err == nil {
-		fmt.Println("==> realised image derivation on the host")
-		return loadImage(c.runtime, c.imageArchive, c.imageTag)
-	}
-
-	// 2. Fall back to ephemeral nix container if the runtime is available.
-	if _, err := exec.LookPath(c.runtime); err == nil {
-		return buildInContainer(c, pwd)
-	}
-
-	// 3. Neither path is possible.
-	fmt.Fprintf(os.Stderr, `==> cannot build the spindrift image.
-
-The image is a Linux (OCI) derivation, and this host can neither realise it
-directly nor fall back to a container build:
-
-  * No Linux builder: 'nix build' could not realise the image. On macOS, enable
-    nix-darwin's 'nix.linux-builder.enable = true;', or point nix at a remote
-    Linux builder via 'nix.buildMachines' / '--builders'.
-
-  * No container runtime: '%s' was not found on PATH. Install it (or set
-    'runtime = "docker"' in your mkHarness call) so 'build' can build the image
-    inside an ephemeral Nix container.
-
-Run 'build' from your Consumer flake's directory.
-`, c.runtime)
-	return fmt.Errorf("cannot build image: no Linux builder and no container runtime")
+	return newBuildRunner(c, pwd).EnsureReady()
 }
 
 // swapLabel is a best-effort label transition that logs but does not propagate
@@ -285,113 +246,8 @@ func swapLabel(fc forge.Client, num, add, remove string) {
 	}
 }
 
-// runOneOCI fans out a single issue into a podman/docker container.
-func runOneOCI(c config, iss issue, logFile *os.File) error {
-	// Reap any stale container from a prior interrupted run.
-	reap := exec.Command(c.runtime, "rm", "-f", "agent-issue-"+iss.number)
-	_ = reap.Run()
-
-	args := []string{"run", "--rm",
-		"--name", "agent-issue-" + iss.number,
-	}
-	// Forward schema boxEnv=true vars from BOX_ENV_VARS (nix-rendered list).
-	for _, envName := range strings.Fields(c.boxEnvVars) {
-		args = append(args, "-e", envName+"="+os.Getenv(envName))
-	}
-	// Per-issue vars forwarded individually (not schema knobs).
-	args = append(args,
-		"-e", "ISSUE_NUMBER="+iss.number,
-		"-e", "ISSUE_TITLE="+iss.title,
-	)
-	if iss.fixPass > 0 {
-		args = append(args, "-e", fmt.Sprintf("FIX_PASS=%d", iss.fixPass))
-	}
-	if c.spindriftPromptDir != "" {
-		if info, err := os.Stat(c.spindriftPromptDir); err == nil && info.IsDir() {
-			fmt.Printf("==> SPINDRIFT_PROMPT_DIR set; mounting %s over the baked prompt\n", c.spindriftPromptDir)
-			args = append(args, "-v", c.spindriftPromptDir+":/agent/prompts:ro")
-		}
-	}
-	args = append(args, c.image, "/agent/entrypoint.sh")
-
-	cmd := exec.Command(c.runtime, args...)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	return cmd.Run()
-}
-
-// runOneBwrap fans out a single issue into a bubblewrap sandbox.
-func runOneBwrap(c config, iss issue, logFile *os.File) error {
-	etcDir, err := os.MkdirTemp("", "spindrift-etc-*")
-	if err != nil {
-		return fmt.Errorf("mktemp: %w", err)
-	}
-	defer os.RemoveAll(etcDir)
-
-	passwd := "root:x:0:0:root:/root:/bin/bash\nagent:x:1000:1000:agent:/home/agent:/bin/bash\n"
-	group := "root:x:0:\nagent:x:1000:\n"
-	if err := os.WriteFile(filepath.Join(etcDir, "passwd"), []byte(passwd), 0o644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(etcDir, "group"), []byte(group), 0o644); err != nil {
-		return err
-	}
-
-	args := []string{
-		"--ro-bind", "/nix/store", "/nix/store",
-		"--tmpfs", "/tmp",
-		"--tmpfs", "/work",
-		"--tmpfs", "/home/agent",
-		"--proc", "/proc",
-		"--dev", "/dev",
-		"--dir", "/etc",
-		"--ro-bind", filepath.Join(etcDir, "passwd"), "/etc/passwd",
-		"--ro-bind", filepath.Join(etcDir, "group"), "/etc/group",
-	}
-	if _, err := os.Stat("/etc/resolv.conf"); err == nil {
-		args = append(args, "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf")
-	}
-	args = append(args, "--ro-bind", c.agentFiles+"/agent", "/agent")
-	if c.spindriftPromptDir != "" {
-		if info, err := os.Stat(c.spindriftPromptDir); err == nil && info.IsDir() {
-			fmt.Printf("==> SPINDRIFT_PROMPT_DIR set; mounting %s over the baked prompt\n", c.spindriftPromptDir)
-			args = append(args, "--ro-bind", c.spindriftPromptDir, "/agent/prompts")
-		}
-	}
-	args = append(args,
-		"--clearenv",
-		"--setenv", "HOME", "/home/agent",
-		"--setenv", "PATH", c.agentEnv+"/bin",
-		"--setenv", "SSL_CERT_FILE", c.agentEnv+"/etc/ssl/certs/ca-bundle.crt",
-		"--setenv", "GIT_SSL_CAINFO", c.agentEnv+"/etc/ssl/certs/ca-bundle.crt",
-	)
-	// Forward schema boxEnv=true vars from BOX_ENV_VARS (nix-rendered list).
-	for _, envName := range strings.Fields(c.boxEnvVars) {
-		args = append(args, "--setenv", envName, os.Getenv(envName))
-	}
-	// Per-issue vars and bwrap-specific runtime vars forwarded individually.
-	args = append(args,
-		"--setenv", "ISSUE_NUMBER", iss.number,
-		"--setenv", "ISSUE_TITLE", iss.title,
-		"--setenv", "PREFETCH", c.bakedPrefetch,
-	)
-	if iss.fixPass > 0 {
-		args = append(args, "--setenv", "FIX_PASS", strconv.Itoa(iss.fixPass))
-	}
-	args = append(args,
-		"--unshare-user", "--uid", "1000", "--gid", "1000",
-		"--unshare-pid", "--unshare-ipc", "--unshare-uts",
-		"--", "/agent/entrypoint.sh",
-	)
-
-	cmd := exec.Command("bwrap", args...)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	return cmd.Run()
-}
-
 // runOne dispatches one issue into a container and logs its output.
-func runOne(c config, pwd string, iss issue) error {
+func runOne(c config, pwd string, r runner.Runner, iss issue) error {
 	logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
 	fmt.Printf("    -> #%s: %s\n", iss.number, iss.title)
 
@@ -401,17 +257,20 @@ func runOne(c config, pwd string, iss issue) error {
 	}
 	defer logFile.Close()
 
-	if c.runtime == "bwrap" {
-		return runOneBwrap(c, iss, logFile)
+	box := runner.Box{
+		Issue:  iss.number,
+		Name:   "agent-issue-" + iss.number,
+		Env:    buildBoxEnv(c, iss),
+		Output: logFile,
 	}
-	return runOneOCI(c, iss, logFile)
+	return r.Run(box)
 }
 
 // runFix dispatches a fix box for issue iss, writing output to a per-attempt
 // log file. The fix box receives FIX_PASS=fixPass so the entrypoint can
 // distinguish fix runs and check out the existing branch rather than creating a
 // new one.
-func runFix(c config, pwd string, iss issue, fixPass int) error {
+func runFix(c config, pwd string, r runner.Runner, iss issue, fixPass int) error {
 	logPath := filepath.Join(pwd, "logs", fmt.Sprintf("issue-%s-fix-%d.log", iss.number, fixPass))
 	fmt.Printf("    -> #%s (fix-pass-%d): %s\n", iss.number, fixPass, iss.title)
 
@@ -422,10 +281,13 @@ func runFix(c config, pwd string, iss issue, fixPass int) error {
 	defer logFile.Close()
 
 	fixIss := issue{number: iss.number, title: iss.title, fixPass: fixPass}
-	if c.runtime == "bwrap" {
-		return runOneBwrap(c, fixIss, logFile)
+	box := runner.Box{
+		Issue:  fixIss.number,
+		Name:   "agent-issue-" + fixIss.number,
+		Env:    buildBoxEnv(c, fixIss),
+		Output: logFile,
 	}
-	return runOneOCI(c, fixIss, logFile)
+	return r.Run(box)
 }
 
 // mergeWhenGreen polls CheckState on the PR's head commit until the state
@@ -526,7 +388,7 @@ func verifyMerged(c config, fc forge.Client, num, pr string) {
 	swapLabel(fc, num, c.failedLabel, c.inProgressLabel)
 }
 
-func printOutcomeReport(c config, fc forge.Client, pwd string, issues []issue) {
+func printOutcomeReport(c config, fc forge.Client, pwd string, r runner.Runner, issues []issue) {
 	fmt.Println("==> outcome report")
 	for _, iss := range issues {
 		logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
@@ -547,7 +409,7 @@ func printOutcomeReport(c config, fc forge.Client, pwd string, issues []issue) {
 				continue
 			}
 			fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", iss.number, pr, branch)
-			fixFn := func(fixPass int) error { return runFix(c, pwd, iss, fixPass) }
+			fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
 			if selfHeal(c, fc, fixFn, iss.number, pr) {
 				verifyMerged(c, fc, iss.number, pr)
 			} else {
@@ -561,7 +423,7 @@ func printOutcomeReport(c config, fc forge.Client, pwd string, issues []issue) {
 			fmt.Printf("    #%s  pr=%s  status=%s  !! %s\n", iss.number, o.PR, o.Status, o.Note)
 		case "ready":
 			// Agent pushed a PR but left CI to the launcher — poll, self-heal, and merge.
-			fixFn := func(fixPass int) error { return runFix(c, pwd, iss, fixPass) }
+			fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
 			if selfHeal(c, fc, fixFn, iss.number, o.PR) {
 				verifyMerged(c, fc, iss.number, o.PR)
 			} else {
@@ -782,7 +644,7 @@ func issueNums(issues []issue) []string {
 
 // fanOut dispatches a batch of issues in parallel (up to maxParallel at once),
 // claiming the in-progress label before each goroutine launches.
-func fanOut(c config, fc forge.Client, pwd string, batch []issue) {
+func fanOut(c config, fc forge.Client, pwd string, r runner.Runner, batch []issue) {
 	sem := make(chan struct{}, c.maxParallel)
 	var wg sync.WaitGroup
 	for _, iss := range batch {
@@ -793,7 +655,7 @@ func fanOut(c config, fc forge.Client, pwd string, batch []issue) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			if err := runOne(c, pwd, iss); err != nil {
+			if err := runOne(c, pwd, r, iss); err != nil {
 				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.number, iss.number)
 				swapLabel(fc, iss.number, c.failedLabel, c.inProgressLabel)
 			} else {
@@ -809,7 +671,7 @@ func fanOut(c config, fc forge.Client, pwd string, batch []issue) {
 // depsPollSecs. The deadlock timer resets on any progress; if no issue becomes
 // ready within depsWaitSecs the function returns an error rather than blocking
 // forever. Dispatched issues leave the remaining set even when they fail.
-func dispatchWaves(c config, fc forge.Client, pwd string, issues []issue, edges map[string][]string) error {
+func dispatchWaves(c config, fc forge.Client, pwd string, r runner.Runner, issues []issue, edges map[string][]string) error {
 	remaining := make([]issue, len(issues))
 	copy(remaining, issues)
 	elapsed := 0
@@ -843,7 +705,7 @@ func dispatchWaves(c config, fc forge.Client, pwd string, issues []issue, edges 
 
 		// Progress: reset the deadlock timer.
 		elapsed = 0
-		fanOut(c, fc, pwd, ready)
+		fanOut(c, fc, pwd, r, ready)
 		remaining = held
 	}
 	return nil
@@ -860,10 +722,9 @@ func run() error {
 		return err
 	}
 
-	if c.runtime != "bwrap" {
-		if err := ensureImage(c, pwd); err != nil {
-			return err
-		}
+	r := newRunner(c, pwd)
+	if err := r.EnsureReady(); err != nil {
+		return err
 	}
 
 	fc := forge.NewExecClient(c.repoSlug)
@@ -918,23 +779,23 @@ func run() error {
 			return nil
 		}
 		fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), c.maxJobs)
-		fanOut(c, fc, pwd, selected)
-		printOutcomeReport(c, fc, pwd, selected)
+		fanOut(c, fc, pwd, r, selected)
+		printOutcomeReport(c, fc, pwd, r, selected)
 	} else if hasEdges {
 		// MAX_JOBS = 0 with dependency edges: multi-wave dispatch.
 		if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
 			return fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
 		}
 		fmt.Println("==> dependency edges found; dispatching in waves")
-		if err := dispatchWaves(c, fc, pwd, issues, edges); err != nil {
+		if err := dispatchWaves(c, fc, pwd, r, issues, edges); err != nil {
 			return err
 		}
-		printOutcomeReport(c, fc, pwd, issues)
+		printOutcomeReport(c, fc, pwd, r, issues)
 	} else {
 		// MAX_JOBS = 0, no declared edges: original single-wave fan-out.
 		fmt.Printf("==> %d issue(s); launching up to %d container(s) at a time\n", len(issues), c.maxParallel)
-		fanOut(c, fc, pwd, issues)
-		printOutcomeReport(c, fc, pwd, issues)
+		fanOut(c, fc, pwd, r, issues)
+		printOutcomeReport(c, fc, pwd, r, issues)
 	}
 
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
@@ -942,6 +803,13 @@ func run() error {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "build" {
+		if err := build(); err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
