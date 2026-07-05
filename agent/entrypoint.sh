@@ -51,11 +51,14 @@ if git rev-parse --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
     echo "==> gh pr list failed on $BRANCH; aborting to protect any open PR"
     exit 1
   }
-  if printf '%s\n' "$open_prs" | grep -q .; then
+  if [ -n "$open_prs" ]; then
     echo "==> open PR exists on $BRANCH; skipping force-reset (adoption path)"
   else
     echo "==> stale remote branch $BRANCH found (no open PR); force-resetting to ${BASE_BRANCH:-}"
-    git push --force-with-lease origin "$BRANCH"
+    git push --force-with-lease origin "$BRANCH" || {
+      echo "==> force-with-lease push failed on $BRANCH; concurrent Box may be ahead"
+      exit 1
+    }
   fi
 fi
 
