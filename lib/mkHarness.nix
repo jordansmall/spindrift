@@ -34,7 +34,12 @@
   runtime ? "podman",
   # Fallback Linux builder for when the host can't realise the Linux image itself
   # (the stock-mac case). Fully qualified so podman needs no default registry.
-  nixBuilderImage ? "docker.io/nixos/nix:latest",
+  # Pinned by manifest-list digest for reproducibility and supply-chain safety —
+  # this container runs with the consumer tree bind-mounted read-write, so a
+  # silently-updated :latest would be a code-execution vector.
+  # To bump: pull the image, run `podman image inspect --format '{{.RepoDigests}}' nixos/nix`,
+  # and update the digest here and in README.md.
+  nixBuilderImage ? "docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8",
   # Bake a usable nix into the box (binary + a registered store DB + a
   # single-user, sandbox-off nix.conf) so `nix flake check` and `nix develop`
   # run inside the unprivileged throwaway container. On by default — this is the
