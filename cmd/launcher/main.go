@@ -714,14 +714,22 @@ var classifyFn func(string) (outcome.Classification, error) = outcome.Classify
 // terminal failure or once the retry cap is exhausted.
 //
 //   - 429 with a known resetsAt: hold until the reset time (+ holdJitterSecs),
-//     then re-dispatch. Consecutive holds that end in another 429 count toward
-//     the cap; a hold that ends in success or terminal does not.
+//     then re-dispatch. A hold that ends in success or terminal does NOT
+//     consume the retry cap. Consecutive holds that each end in another 429
+//     count toward the cap (the "no-progress" case — the token never recovered).
+//     NOTE: full progress detection (distinguishing an immediate re-429 from a
+//     legitimate long-running re-dispatch that also 429s) requires branch-push
+//     tracking (#140). Until then we count all consecutive 429-then-hold cycles,
+//     which is conservative but prevents infinite looping on permanently-bad tokens.
 //   - Other transients (529/overloaded, network, 429 without resetsAt): linear
 //     backoff retry up to transientRetryMax, then agent-failed.
 //   - Terminal: agent-failed immediately, no retry.
+//   - Re-dispatch clones fresh until #140 lands (incremental branch push); once
+//     #140 is implemented, a pre-existing remote branch is handled
+//     deterministically and hold-then-resume picks up from the last push.
 func runWithRetry(c config, pwd string, r runner.Runner, iss issue) bool {
-	holdCount := 0     // consecutive "hold → still 429" cycles counted toward cap
-	transientCount := 0 // non-hold transient retry count
+	holdCount := 0
+	transientCount := 0
 	prevWasHold := false
 
 	for {
@@ -743,8 +751,10 @@ func runWithRetry(c config, pwd string, r runner.Runner, iss issue) bool {
 		// Transient exit: branch on reason.
 		if cl.Reason == outcome.RateLimit && cl.ResetAt != nil {
 			// 429 with known reset: hold until reset + jitter.
+			// A hold following another hold (prevWasHold=true) means the token
+			// has not recovered — consume the cap. A hold after a non-hold
+			// iteration (success, terminal, or different transient) is "free".
 			if prevWasHold {
-				// Previous hold also ended in a 429 → no progress; consume cap.
 				holdCount++
 			}
 			if holdCount >= c.transientRetryMax {
