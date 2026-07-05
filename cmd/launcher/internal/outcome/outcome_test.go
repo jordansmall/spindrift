@@ -214,9 +214,12 @@ func TestLastInLog_NotFound(t *testing.T) {
 }
 
 func TestLastInLog_FileNotFound(t *testing.T) {
-	_, _, err := outcome.LastInLog("/nonexistent/path/test.log")
-	if err == nil {
-		t.Fatal("expected error for missing file, got nil")
+	_, found, err := outcome.LastInLog("/nonexistent/path/test.log")
+	if err != nil {
+		t.Fatalf("unexpected error for missing file: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false for missing file")
 	}
 }
 

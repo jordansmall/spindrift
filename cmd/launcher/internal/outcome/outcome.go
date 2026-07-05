@@ -56,11 +56,15 @@ func (o Outcome) Line() string {
 // line parsed as an Outcome. Lines larger than the 4 MiB scan buffer are
 // skipped rather than aborting the scan; the last outcome line wins.
 //
-// Returns (Outcome{}, false, nil) when no outcome line is present.
-// Returns (Outcome{}, false, err) on I/O errors other than oversized lines.
+// Returns (Outcome{}, false, nil) when no outcome line is present or the
+// file does not exist. Returns (Outcome{}, false, err) on I/O errors other
+// than file-not-found or oversized lines.
 func LastInLog(path string) (Outcome, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Outcome{}, false, nil
+		}
 		return Outcome{}, false, err
 	}
 	defer f.Close()

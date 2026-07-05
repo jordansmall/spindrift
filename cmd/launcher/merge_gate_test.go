@@ -190,7 +190,11 @@ func TestNoOutcomeParsingOutsidePackage(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(data), `"SPINDRIFT_OUTCOME "`) {
+		// Check both Go string-quoting styles; backtick literals bypass a
+		// double-quote-only check.
+		content := string(data)
+		if strings.Contains(content, `"SPINDRIFT_OUTCOME "`) ||
+			strings.Contains(content, "`SPINDRIFT_OUTCOME `") {
 			t.Errorf("%s: contains SPINDRIFT_OUTCOME parsing — all outcome parsing must go through internal/outcome", path)
 		}
 		return nil
