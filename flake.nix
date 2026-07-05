@@ -4,17 +4,12 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs =
     inputs@{
       flake-parts,
       nixpkgs,
-      rust-overlay,
       ...
     }:
     flake-parts.lib.mkFlake { inherit inputs; } {
@@ -77,18 +72,13 @@
             packages = p: [ p.hello ];
           };
 
-          # The rust dogfood as a direct call, mirroring the `spindrift = { ... }`
+          # The dogfood as a direct call, mirroring the `spindrift = { ... }`
           # module config below. Kept so the equivalence check can prove the
           # module and direct paths yield byte-identical outputs.
           harness = import ./lib/mkHarness.nix {
             inherit nixpkgs system;
-            overlays = [ (import rust-overlay) ];
-            config.allowUnfree = true;
-            prefetch = "cargo fetch --locked || true";
-            packages =
-              p:
-              [ (p.rust-bin.fromRustupToolchainFile ./templates/default/toolchain/rust-toolchain.toml) ]
-              ++ import ./templates/default/toolchain/packages.nix { pkgs = p; };
+            prefetch = "go mod download || true";
+            packages = p: [ p.go ];
           };
 
           # A minimal, non-Rust consumer, proving the engine bakes an arbitrary
@@ -202,7 +192,7 @@
           # builder; here we assert eval + the image store path resolving into
           # the launcher commands.
           templateOutputs = (import ./templates/default/flake.nix).outputs {
-            inherit nixpkgs flake-parts rust-overlay;
+            inherit nixpkgs flake-parts;
             self = {
               outPath = ./templates/default;
             };
@@ -216,15 +206,8 @@
         {
           # The dogfood's real packages/apps flow through the flake-parts shim.
           spindrift = {
-            overlays = [ (import rust-overlay) ];
-            config = {
-              allowUnfree = true;
-            };
-            prefetch = "cargo fetch --locked || true";
-            packages =
-              p:
-              [ (p.rust-bin.fromRustupToolchainFile ./templates/default/toolchain/rust-toolchain.toml) ]
-              ++ import ./templates/default/toolchain/packages.nix { pkgs = p; };
+            prefetch = "go mod download || true";
+            packages = p: [ p.go ];
           };
 
           checks = {
