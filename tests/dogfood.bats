@@ -88,3 +88,54 @@ setup() {
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "no progress"
 }
+
+# Replaces the fake nix with one that logs BARRIER_LABEL and MAX_JOBS to
+# NIX_ENV_LOG on every `nix run` call, so tests can assert the environment
+# dogfood.sh passes to the launcher.
+_install_env_logging_nix() {
+  local shebang
+  shebang="$(head -n1 "$FAKE_BIN/nix")"
+  {
+    printf '%s\n' "$shebang"
+    cat <<'EOF'
+: "${NIX_LOG:?NIX_LOG must point at a log file}"
+printf '%s\n' "$*" >>"$NIX_LOG"
+if printf '%s ' "$@" | grep -q 'run'; then
+  printf 'BARRIER_LABEL=%s\n' "${BARRIER_LABEL:-}" >>"${NIX_ENV_LOG:-/dev/null}"
+  printf 'MAX_JOBS=%s\n' "${MAX_JOBS:-}" >>"${NIX_ENV_LOG:-/dev/null}"
+fi
+exit 0
+EOF
+  } >"$FAKE_BIN/nix.tmp"
+  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
+  chmod +x "$FAKE_BIN/nix"
+}
+
+@test "dogfood passes BARRIER_LABEL=fanout-blocker to nix run" {
+  export NIX_ENV_LOG="$BATS_TEST_TMPDIR/nix-env.log"
+  : >"$NIX_ENV_LOG"
+  _install_env_logging_nix
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  grep -q 'BARRIER_LABEL=fanout-blocker' "$NIX_ENV_LOG"
+}
+
+@test "dogfood does not pin MAX_JOBS=1" {
+  export NIX_ENV_LOG="$BATS_TEST_TMPDIR/nix-env.log"
+  : >"$NIX_ENV_LOG"
+  _install_env_logging_nix
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  ! grep -q '^MAX_JOBS=1$' "$NIX_ENV_LOG"
+}
+
+@test "fully-fenced iteration triggers stall detection, not hot-spin" {
+  _install_stalling_gh
+  export NIX_ENV_LOG="$BATS_TEST_TMPDIR/nix-env.log"
+  : >"$NIX_ENV_LOG"
+  _install_env_logging_nix
+  run bash -c "BASE_BRANCH=main STALL_MAX_ITERATIONS=1 STALL_SLEEP_SECONDS=0 bash '$WORK/dogfood.sh' 2>&1"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -q "no progress"
+  grep -q 'BARRIER_LABEL=fanout-blocker' "$NIX_ENV_LOG"
+}

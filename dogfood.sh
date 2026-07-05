@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dogfood loop: spindrift building spindrift, one issue at a time.
+# Dogfood loop: spindrift building spindrift.
 #
 # The box's behaviour — entrypoint, toolchain, and prompt — is baked into the OCI
 # image at `nix run .#build` time (the merge gate itself lives in the launcher).
@@ -13,9 +13,12 @@
 #                                `nix run .#build` reads from ($PWD).
 #   2. `nix run .#build`     — re-bake the image from that updated tree.
 #
-# It runs MAX_JOBS=1 so each `nix run .#run` drains exactly one issue; the pull +
-# rebuild happen between issues. Strictly serial by design — that is the point:
-# it guarantees issue N+1 runs against the image issue N produced.
+# Each iteration fans out concurrently through the ready set, gated by
+# BARRIER_LABEL=fanout-blocker: the launcher will not dispatch issues newer than
+# the lowest open fanout-blocker issue. When that issue's PR merges and closes,
+# the next iteration's fence lifts to the following barrier (or the whole
+# backlog). The pull + rebuild happen between iterations so each wave sees any
+# fix the previous wave landed.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -30,6 +33,7 @@ if [ -f harness.env ]; then
 fi
 LABEL="${LABEL:-ready-for-agent}"
 BASE_BRANCH="${BASE_BRANCH:-main}"
+export BARRIER_LABEL="${BARRIER_LABEL:-fanout-blocker}"
 : "${REPO_SLUG:?set REPO_SLUG=owner/repo in harness.env}"
 
 if [ -n "$(git status --porcelain)" ]; then
@@ -77,6 +81,6 @@ while :; do
   echo "==> dogfood: nix run .#build"
   nix run .#build
 
-  echo "==> dogfood: nix run .#run (MAX_JOBS=1)"
-  MAX_JOBS=1 nix run .#run
+  echo "==> dogfood: nix run .#run"
+  nix run .#run
 done
