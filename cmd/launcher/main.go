@@ -52,9 +52,6 @@ type config struct {
 	inProgressLabel string
 	failedLabel     string
 	completeLabel   string
-	model           string
-	scoutModel      string
-	reviewModel     string
 	maxJobs         int
 
 	// Dependency-wave knobs
@@ -143,9 +140,6 @@ func loadConfig() config {
 		inProgressLabel: getenv("IN_PROGRESS_LABEL", "agent-in-progress"),
 		failedLabel:     getenv("FAILED_LABEL", "agent-failed"),
 		completeLabel:   getenv("COMPLETE_LABEL", "agent-complete"),
-		model:           getenv("MODEL", "claude-sonnet-4-6"),
-		scoutModel:      os.Getenv("SCOUT_MODEL"),
-		reviewModel:     os.Getenv("REVIEW_MODEL"),
 		maxJobs:         atoiNonneg(os.Getenv("MAX_JOBS"), 0),
 
 		depsPollSecs: atoiNonneg(getenv("DEPS_POLL_SECS", "30"), 30),
