@@ -274,7 +274,7 @@ host.
 | Pull requests     | Read and write | open PRs (including drafts) + merge via rebase |
 | Issues            | Read and write | read the issue; **write only** for the "if blocked" path that comments on it — drop that fallback and Read suffices |
 | Metadata          | Read           | mandatory baseline, auto-selected            |
-| Workflows         | Read and write | **only if** an issue edits `.github/workflows/*` — omit otherwise |
+| Workflows         | Read and write | **off by default** — grant only when an issue edits `.github/workflows/*`; agent branches run in-repo so `pull_request` events carry repository secrets; with this permission an injected agent can rewrite CI or exfiltrate those secrets |
 
 ## Threat model
 
@@ -285,21 +285,36 @@ deliberate, not oversights — write them down so you can honour them:
    Target repo dispatches an Agent holding a repo-write token. GitHub requires
    the triage role to label, so treat every label-applier (triage and up) as a
    trusted operator — the label *is* the authorization step.
-2. **Issue content is untrusted input.** Reading the issue is the Agent's whole
-   job, so prompt injection is inherent to the design, not a bug to patch. What
-   bounds it is the blast radius: exactly what the token allows and nothing
-   more, because the Box has no host access.
-3. **Branch protection is the required backstop.** The token needs Contents RW
-   to push its `agent/issue-N` branch, and that same scope permits pushing to
-   the base branch. Enable branch protection on the base branch with these
-   settings: block direct pushes (the PR is the only path in); require CI
-   status checks to pass before merge; and **do not require an external
-   approving review** — a bot cannot approve its own PR, so that rule deadlocks
-   autonomous self-merge. In repository settings, enable rebase merge (and
-   optionally disable merge commits and squash) to keep a linear history.
-4. **Scope the token.** Use a fine-grained PAT restricted to the single Target
-   repo (Issues RW, Contents RW, Pull requests RW, Metadata R). Repo scoping is
-   what turns "the Agent can do anything" into "anything, to one repo."
+2. **Issue body and comments are attacker-writable input.** Reading the issue is
+   the Agent's whole job, so prompt injection is inherent to the design, not a
+   bug to patch. The label gates *which* issues get dispatched — but once
+   labeled, the issue body and **every comment from any GitHub user** feed the
+   agent as prompt input. The trust boundary is the label, not the issue or
+   comment author. What bounds the blast radius is what the token allows and
+   nothing more, because the Box has no host access.
+3. **Branch protection is a hard prerequisite, not a nicety.** The token needs
+   Contents RW to push its `agent/issue-N` branch, and that same scope permits
+   pushing directly to the base branch — bypassing the PR flow entirely. Without
+   branch protection **the harness is not safe to deploy**. Enable it on the
+   base branch: block direct pushes (the PR is the only path in); require CI
+   status checks to pass before merge; **do not require an external approving
+   review** — a bot cannot approve its own PR, so that rule deadlocks autonomous
+   self-merge. In repository settings, enable rebase merge to keep a linear
+   history. Branch protection requires a public repo or a paid GitHub plan —
+   **do not point the harness at a private repo on GitHub Free** where branch
+   protection is unavailable.
+4. **A fine-grained single-repo PAT is required, not recommended.** A
+   broadly-scoped classic PAT or a multi-repo fine-grained PAT gives an
+   injected agent write access to every repo the token reaches. Use a
+   fine-grained PAT restricted to the single Target repo (Issues RW, Contents
+   RW, Pull requests RW, Metadata R). That restriction is what turns "the Agent
+   can do anything" into "anything, to one repo."
+5. **Workflows:RW is off by default and carries elevated risk.** Agent PR
+   branches live in-repo (not forks), so `pull_request` workflow events run
+   with repository secrets. With Workflows:RW, an injected agent can rewrite
+   CI to auto-pass status checks or exfiltrate Actions secrets. Grant it only
+   when an issue explicitly edits `.github/workflows/*`, and treat that grant
+   as escalated trust. See the token permission table above.
 
 ## Prerequisites
 
