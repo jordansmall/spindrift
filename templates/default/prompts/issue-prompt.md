@@ -146,6 +146,9 @@ it and nothing after. Do not close with a prose summary, and do not defer it to 
 background task. The launcher parses this one line to learn your PR; if it is
 missing, the PR is never merged and the entire run is wasted.
 
+The grammar is specified and validated by `cmd/launcher/internal/outcome` in the
+Harness repo — `Parse`, `Line`, and `LastInLog` are the authoritative source.
+
 `status=ready` means: branch pushed, PR open, CI started. The LAUNCHER owns
 the merge and the complete-label swap.
 Do NOT run `gh issue edit ... --add-label ${COMPLETE_LABEL}` or `gh pr merge`.
