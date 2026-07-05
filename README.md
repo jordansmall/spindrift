@@ -131,7 +131,7 @@ knobs. Unset options fall through to `mkHarness`'s own defaults.
 | `prompt`    | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`nix run .#build`) |
 | `defaults`  | `{ label; baseBranch; maxParallel; branchPrefix; inProgressLabel; failedLabel; model; }` | see below | non-secret run defaults baked into `run` |
 | `runtime`   | `"podman"` \| `"docker"`    | `"podman"`         | container runtime the `build`/`run` commands drive                   |
-| `nixBuilderImage` | string                | `"docker.io/nixos/nix:latest"` | Nix image `build` uses as a fallback Linux builder when the host can't realise the image |
+| `nixBuilderImage` | string                | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` | Nix image `build` uses as a fallback Linux builder when the host can't realise the image; pinned by digest for supply-chain safety (see below) |
 
 The `defaults` submodule bakes the run knobs into the `run` command; a matching
 env var still wins at runtime, so one built command can be re-pointed without a
@@ -327,8 +327,28 @@ image is `build`'s job, and it handles the Mac case for you:
     `nix.buildMachines` / `--builders`.
   - **Just build on Linux / CI** and load the result on the Mac.
 
-The Nix container image the fallback uses is `docker.io/nixos/nix:latest` by
-default; override it with the `nixBuilderImage` option.
+The Nix container image the fallback uses is pinned by digest (default:
+`docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8`).
+Digest pinning is a supply-chain safety measure: the container runs with the
+consumer's working tree bind-mounted read-write, so an unpinned `:latest` tag
+would be a silent code-execution vector. Override with the `nixBuilderImage`
+parameter in your `mkHarness` call.
+
+**Bumping the pin:** pull the image you want, inspect its digest, and update
+both `mkHarness.nix` and `README.md`:
+
+```bash
+podman pull docker.io/nixos/nix:latest
+podman image inspect --format '{{index .RepoDigests 0}}' nixos/nix
+# → docker.io/nixos/nix@sha256:<new-digest>
+```
+
+Alternatively, use `skopeo` without pulling:
+
+```bash
+skopeo inspect --raw docker://docker.io/nixos/nix:latest \
+  | sha256sum   # manifest list digest
+```
 
 ## Customizing the template
 

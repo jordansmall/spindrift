@@ -71,6 +71,16 @@ setup() {
   [[ "$output" == *"container runtime"* ]]
 }
 
+# --- digest-pinned builder image (issue #103) --------------------------------
+
+@test "the container fallback uses a digest-pinned image reference, not a mutable tag" {
+  export FAKE_NIX_BUILD_OK=0
+  run "$BUILD_CMD"
+  [ "$status" -eq 0 ]
+  grep -q '@sha256:' "$PODMAN_LOG"
+  ! grep -q 'nixos/nix:latest' "$PODMAN_LOG"
+}
+
 # --- error surfacing (issue #98) ---------------------------------------------
 
 @test "build surfaces the real nix error and does not attempt the container fallback" {
