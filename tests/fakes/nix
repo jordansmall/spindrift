@@ -24,6 +24,9 @@ case "${1:-}" in
     exit 1
     ;;
   develop)
+    if [ "${FAKE_NIX_DEV_SHELL_HANG:-0}" = "1" ]; then
+      sleep 9999
+    fi
     if [ "${FAKE_NIX_DEV_SHELL_OK:-0}" = "1" ]; then
       exit 0
     fi
