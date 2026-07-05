@@ -39,8 +39,8 @@ nix flake init -t github:jordansmall/spindrift
 ```
 
 That drops a ready-to-edit starter: a `flake.nix` importing the harness, a
-`prompts/` directory, a sample `toolchain/`, a `harness.env.example`, and a
-`.gitignore` for `harness.env`. Then:
+`prompts/` directory, a `harness.env.example`, and a `.gitignore` for
+`harness.env`. Then:
 
 ```sh
 $EDITOR flake.nix                        # tune the toolchain/packages for your stack
@@ -332,12 +332,13 @@ default; override it with the `nixBuilderImage` option.
 
 ## Customizing the template
 
-The starter is a working Rust example. To retarget it:
+The starter is a minimal Go example. To retarget it:
 
-- **`toolchain/`** — swap `rust-toolchain.toml`/`packages.nix` (and the
-  `rust-overlay` input + overlay in `flake.nix`) for your node/go/python stack,
-  or set `packages` inline. The engine carries nothing language-specific
-  (ADR 0003).
+- **`packages` in `flake.nix`** — the toolchain baked into the image is one line
+  (`p: [ p.go ]`), straight from nixpkgs. Swap it for your node/python/rust
+  stack; add an `overlays` entry and matching input only if your stack needs one
+  (e.g. `rust-overlay` for pinned Rust channels). The engine carries nothing
+  language-specific (ADR 0003).
 - **`prompts/issue-prompt.md`** — tune the agent's workflow (test commands,
   commit conventions, PR etiquette). If the Target repo ships a `commit` skill
   or `CLAUDE.md`, the agent picks it up from the clone automatically.
@@ -354,7 +355,7 @@ of a Dockerfile. The trade-offs:
   independent and opens its own PR; ordering is left to humans (or a future
   planner phase). Good when issues are largely independent.
 - **Reproducible toolchain by construction** via the pinned flake, rather than a
-  floating `rustup`/`binstall` image.
+  floating language-runtime base image.
 
 See `docs/adr/` for the architectural decisions.
 
