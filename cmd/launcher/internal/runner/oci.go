@@ -99,6 +99,12 @@ Run 'build' from your Consumer flake's directory.
 	return fmt.Errorf("cannot build image: no Linux builder and no container runtime")
 }
 
+// isDigestPinned reports whether image is pinned by digest (@sha256:…).
+// Mutable tags like :latest return false; a digest reference is immutable.
+func isDigestPinned(image string) bool {
+	return strings.Contains(image, "@sha256:")
+}
+
 // isNoBuilderError reports whether nix stderr indicates a missing Linux
 // builder rather than a genuine derivation error. Only builder-missing failures
 // should trigger the container fallback; real errors must surface immediately.
