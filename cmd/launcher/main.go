@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/heartbeat"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -281,7 +282,7 @@ func runOne(c config, pwd string, r runner.Runner, iss issue) error {
 		Issue:  iss.number,
 		Name:   "agent-issue-" + iss.number,
 		Env:    buildBoxEnv(c, iss),
-		Output: logFile,
+		Output: heartbeat.New(logFile, iss.number, os.Stdout, heartbeat.DefaultThrottle),
 	}
 	return r.Run(box)
 }
@@ -305,7 +306,7 @@ func runFix(c config, pwd string, r runner.Runner, iss issue, fixPass int) error
 		Issue:  fixIss.number,
 		Name:   "agent-issue-" + fixIss.number,
 		Env:    buildBoxEnv(c, fixIss),
-		Output: logFile,
+		Output: heartbeat.New(logFile, fixIss.number, os.Stdout, heartbeat.DefaultThrottle),
 	}
 	return r.Run(box)
 }
