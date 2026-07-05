@@ -121,10 +121,14 @@ echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
 # stream-json is the only --print format that emits events in realtime; plain
 # text stays silent until the very end, so the box looks dead for the whole run.
 #
-# Pipeline: claude → tee (raw canonical copy) → formatter (human-readable view)
-# The raw copy in $stream_log is the sole input to the SPINDRIFT_OUTCOME
-# extraction below, so a formatter bug can never corrupt that path.
-FORMAT_TRANSCRIPT_SCRIPT="${FORMAT_TRANSCRIPT_SCRIPT:-/agent/format-transcript.sh}"
+# The raw stream-json is the canonical record: it is BOTH streamed to stdout —
+# which the launcher captures verbatim into logs/issue-<n>.log — and tee'd to
+# $stream_log for the SPINDRIFT_OUTCOME extraction below. The launcher's
+# outcome.Classify scans that log for transient markers (rate_limit_error,
+# resetsAt, ...) to drive hold-until-reset retries, so the raw events must reach
+# stdout unmodified — never routed through a lossy formatter (see #123). For a
+# human-readable view, pipe the saved log through agent/format-transcript.sh on
+# the host: `format-transcript.sh < logs/issue-<n>.log`.
 stream_log="$(mktemp)"
 set +e
 claude -p "$prompt" \
@@ -133,8 +137,7 @@ claude -p "$prompt" \
   --verbose \
   --output-format stream-json \
   --dangerously-skip-permissions \
-  | tee "$stream_log" \
-  | bash "$FORMAT_TRANSCRIPT_SCRIPT" 2>/dev/null || true
+  | tee "$stream_log"
 claude_rc="${PIPESTATUS[0]}"
 set -e
 

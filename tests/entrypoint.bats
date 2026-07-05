@@ -82,6 +82,19 @@ setup() {
   grep -q -- "--verbose" "$CLAUDE_LOG"
 }
 
+# Regression (#123): logs/issue-<n>.log is the sole input to outcome.Classify
+# (transient-vs-terminal retry) and outcome.LastInLog. #123 routed the console
+# through a lossy formatter that collapsed each event to a summary, stripping the
+# raw JSON — including rate_limit_error / resetsAt markers — so retryable
+# rate-limit exits were misread as terminal. The raw stream-json must reach
+# stdout verbatim; human-readable rendering is a host-side viewer over the log.
+@test "entrypoint streams the raw stream-json to stdout for failure classification" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -q '"type":"result"'
+  printf '%s\n' "$output" | grep -q '"type":"assistant"'
+}
+
 # The launcher greps '^SPINDRIFT_OUTCOME ' from the container log. Under
 # stream-json the outcome is buried in a JSON result event, so the entrypoint
 # must surface it as a bare line to keep that contract.
