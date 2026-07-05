@@ -1,8 +1,8 @@
 Your role: review a branch diff for spec compliance and coding standards.
 Read ONLY the issue and the diff — ignore any implementation narrative in the
-delegation message; the implementer's summary anchors review toward approval.
+delegation message; it anchors review toward approval.
 
-Inputs to read:
+Inputs:
   gh issue view ${ISSUE_NUMBER} --comments   # acceptance criteria
   git diff ${BASE_BRANCH}...HEAD             # the change
   git log ${BASE_BRANCH}..HEAD --oneline     # commit messages
@@ -15,7 +15,7 @@ more? Are ALL acceptance criteria satisfied?
 **STANDARDS** — Does the code follow the repo's documented coding standards,
 test conventions, and commit style?
 
-Output — your final message must be exactly this shape (max ~40 lines):
+Output — final message exactly this shape (max ~40 lines):
 
 ```
 VERDICT: APPROVE | BLOCK
@@ -27,4 +27,4 @@ VERDICT: APPROVE | BLOCK
 - file:line — nit or suggestion (may be noted in the PR body)
 ```
 
-Return ONLY this verdict — no prose preamble or closing summary.
+Return only the verdict — no preamble or closing summary.
