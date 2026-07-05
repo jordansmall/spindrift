@@ -424,6 +424,20 @@ func verifyMerged(c config, fc forge.Client, num, pr string) {
 	swapLabel(fc, num, c.failedLabel, c.inProgressLabel)
 }
 
+// adoptAndGate runs the merge gate (selfHeal → verifyMerged) on an
+// already-discovered open non-draft PR for iss. Prints "status=adopted"
+// before running the gate. Called by both printOutcomeReport and
+// reconcileStranded.
+func adoptAndGate(c config, fc forge.Client, iss issue, prURL string, runFixFn func(int) error) {
+	branch := c.branchPrefix + iss.number
+	fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", iss.number, prURL, branch)
+	if selfHeal(c, fc, runFixFn, iss.number, prURL) {
+		verifyMerged(c, fc, iss.number, prURL)
+	} else {
+		fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, prURL)
+	}
+}
+
 func printOutcomeReport(c config, fc forge.Client, pwd string, r runner.Runner, issues []issue) {
 	fmt.Println("==> outcome report")
 	for _, iss := range issues {
@@ -454,13 +468,8 @@ func printOutcomeReport(c config, fc forge.Client, pwd string, r runner.Runner, 
 				fmt.Printf("    #%s  pr=%s  status=blocked  note=draft PR on %s; no outcome line\n", iss.number, pr, branch)
 				continue
 			}
-			fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", iss.number, pr, branch)
 			fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
-			if selfHeal(c, fc, fixFn, iss.number, pr) {
-				verifyMerged(c, fc, iss.number, pr)
-			} else {
-				fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, pr)
-			}
+			adoptAndGate(c, fc, iss, pr, fixFn)
 			continue
 		}
 
@@ -762,6 +771,32 @@ func discoverIssues(c config, fc forge.Client) ([]issue, error) {
 	return issues, nil
 }
 
+// reconcileStranded discovers open issues carrying inProgressLabel that also
+// have an open non-draft PR on their agent branch, and runs the merge gate on
+// each. Draft PRs and in-progress issues with no open PR are skipped silently.
+// Called at launcher start, before any new dispatch.
+func reconcileStranded(c config, fc forge.Client, pwd string, r runner.Runner) {
+	fiList, err := fc.ListIssues(c.inProgressLabel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reconcile: list in-progress issues: %v\n", err)
+		return
+	}
+	if len(fiList) == 0 {
+		return
+	}
+	fmt.Println("==> reconciling stranded in-progress issues")
+	for _, fi := range fiList {
+		iss := issue{number: fi.Number, title: fi.Title}
+		branch := c.branchPrefix + iss.number
+		prURL, isDraft, found, prErr := openPRForBranch(fc, branch)
+		if prErr != nil || !found || isDraft {
+			continue
+		}
+		fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
+		adoptAndGate(c, fc, iss, prURL, fixFn)
+	}
+}
+
 // issueNums returns the number strings from a slice of issues.
 func issueNums(issues []issue) []string {
 	nums := make([]string, len(issues))
@@ -945,6 +980,12 @@ func run() error {
 	}
 
 	fc := forge.NewExecClient(c.repoSlug)
+
+	// Reconcile stranded in-progress issues before dispatching new work.
+	// Skip when ISSUE_NUMBER is set — the caller already claimed a specific issue.
+	if c.issueNumber == "" {
+		reconcileStranded(c, fc, pwd, r)
+	}
 
 	issues, err := discoverIssues(c, fc)
 	if err != nil {
