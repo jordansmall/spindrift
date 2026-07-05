@@ -152,6 +152,7 @@
     env = "DEV_SHELL_PROBE_TIMEOUT";
     default = 300;
     doc = "seconds before the devShell probe is abandoned and the baked toolchain is used";
+    flakeOption = true;
     boxEnv = true;
   };
   mergePollInterval = {
