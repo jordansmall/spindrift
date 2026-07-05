@@ -87,6 +87,17 @@ setup() {
   [ "$rm_line" -lt "$run_line" ]
 }
 
+@test "run skips stale-reap for a running container (concurrent invocation is safe)" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tOnly issue'
+  # Declare agent-issue-1 as running (a concurrent invocation owns it).
+  export FAKE_PODMAN_CONTAINER_STATE_agent_issue_1="running"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  # rm -f must NOT be issued for a live container.
+  ! grep -q -- 'rm -f agent-issue-1' "$PODMAN_LOG"
+}
+
 @test "run reads config from \$PWD/harness.env" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   unset REPO_SLUG

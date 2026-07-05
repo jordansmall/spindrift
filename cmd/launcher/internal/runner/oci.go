@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // ociAdapter implements Runner for OCI container runtimes (podman or docker).
@@ -137,11 +138,26 @@ func (a *ociAdapter) buildInContainer() error {
 	return nil
 }
 
+// containerIsRunning reports whether name is currently in the "running" state.
+// Returns false when the container is absent, exited, or inspect fails — in all
+// of those cases the caller may safely proceed with rm -f.
+func (a *ociAdapter) containerIsRunning(name string) bool {
+	out, err := exec.Command(a.cli, "inspect", "--format={{.State.Status}}", name).Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "running"
+}
+
 // Run fans out a single issue into a podman/docker container.
 func (a *ociAdapter) Run(box Box) error {
-	// Reap any stale container from a prior interrupted run.
-	reap := exec.Command(a.cli, "rm", "-f", box.Name)
-	_ = reap.Run()
+	// Reap any stale (exited or created) container from a prior interrupted run.
+	// Never touch a running container — a concurrent launcher invocation may own it,
+	// and a force-remove would destroy that run's work silently.
+	if !a.containerIsRunning(box.Name) {
+		reap := exec.Command(a.cli, "rm", "-f", box.Name)
+		_ = reap.Run()
+	}
 
 	out := box.Output
 	if out == nil {
@@ -166,9 +182,11 @@ func (a *ociAdapter) Run(box Box) error {
 	return cmd.Run()
 }
 
-// Reap removes a named container (best-effort).
+// Reap removes a named container (best-effort). Never removes a running container.
 func (a *ociAdapter) Reap(name string) error {
-	reap := exec.Command(a.cli, "rm", "-f", name)
-	_ = reap.Run()
+	if !a.containerIsRunning(name) {
+		reap := exec.Command(a.cli, "rm", "-f", name)
+		_ = reap.Run()
+	}
 	return nil
 }

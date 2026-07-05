@@ -16,6 +16,21 @@ case "${1:-}" in
       exit $?
     fi
     ;;
+  inspect)
+    # `podman inspect --format=... <name>` — container liveness probe.
+    # Returns "running" when FAKE_PODMAN_CONTAINER_STATE_<norm> = "running"
+    # (hyphens in the name become underscores in the var name).
+    # Exits 1 otherwise (container absent or not running).
+    name=""
+    for arg in "$@"; do name="$arg"; done
+    norm="${name//-/_}"
+    state_var="FAKE_PODMAN_CONTAINER_STATE_${norm}"
+    if [ "${!state_var:-}" = "running" ]; then
+      echo "running"
+      exit 0
+    fi
+    exit 1
+    ;;
   run)
     # `podman run ...` — scripted exit code drives the Go launcher's failure path.
     issue_num=""
