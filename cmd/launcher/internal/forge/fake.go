@@ -2,6 +2,8 @@ package forge
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"sync"
 )
 
@@ -86,6 +88,11 @@ func (f *Fake) ListIssues(label string) ([]Issue, error) {
 			}
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		ni, _ := strconv.Atoi(out[i].Number)
+		nj, _ := strconv.Atoi(out[j].Number)
+		return ni < nj
+	})
 	return out, nil
 }
 

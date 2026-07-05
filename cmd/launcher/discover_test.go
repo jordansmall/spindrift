@@ -46,3 +46,28 @@ func TestDiscoverIssues_ByLabel(t *testing.T) {
 		t.Fatalf("expected only issue #1 by label, got %+v", issues)
 	}
 }
+
+// Issues must come back oldest-first (ascending number) regardless of the
+// order they are inserted into the fake store.
+func TestDiscoverIssues_OldestFirst(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	fc := forge.NewFake()
+	for _, n := range []string{"3", "1", "2"} {
+		fc.SetIssue(forge.Issue{Number: n, Title: "issue " + n, Labels: []string{c.label}})
+	}
+
+	issues, err := discoverIssues(c, fc)
+	if err != nil {
+		t.Fatalf("discoverIssues: %v", err)
+	}
+	if len(issues) != 3 {
+		t.Fatalf("expected 3 issues, got %d: %+v", len(issues), issues)
+	}
+	want := []string{"1", "2", "3"}
+	for i, iss := range issues {
+		if iss.number != want[i] {
+			t.Errorf("position %d: got #%s, want #%s", i, iss.number, want[i])
+		}
+	}
+}
