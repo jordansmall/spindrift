@@ -26,6 +26,9 @@ type Fake struct {
 	// the i-th Run call. The last element is reused when the sequence is
 	// exhausted. Takes precedence over RunErr.
 	RunErrs []error
+
+	// WriteToOutput, if non-nil, is written to box.Output before Run returns.
+	WriteToOutput []byte
 }
 
 // NewFake returns an empty Fake runner.
@@ -41,12 +44,16 @@ func (f *Fake) EnsureReady() error {
 
 // Run records the box and returns the error for this call index. If RunErrs
 // is non-nil, RunErrs[i] is used (last element reused when exhausted);
-// otherwise RunErr is returned.
+// otherwise RunErr is returned. If WriteToOutput is set and box.Output is
+// non-nil, the bytes are written to box.Output before returning.
 func (f *Fake) Run(box Box) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	i := len(f.RunCalls)
 	f.RunCalls = append(f.RunCalls, box)
+	if len(f.WriteToOutput) > 0 && box.Output != nil {
+		box.Output.Write(f.WriteToOutput) //nolint:errcheck
+	}
 	if len(f.RunErrs) > 0 {
 		if i < len(f.RunErrs) {
 			return f.RunErrs[i]
