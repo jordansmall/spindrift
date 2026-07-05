@@ -9,10 +9,12 @@ on:
   issues:
     types: [labeled]
 
-# Serialise repo-wide: agent boxes and any interactive session share one Claude
-# rate-limit window, so never let two labelings run concurrently. Queue, don't cancel.
+# Serialise per issue only: two labelings of the SAME issue queue behind each
+# other (no double-dispatch), but different issues run concurrently. Agent boxes
+# share one Claude rate-limit window — with repo-wide serialisation removed, the
+# operator is responsible for not triggering more issues than that window allows.
 concurrency:
-  group: agent-dispatch
+  group: agent-dispatch-${{ github.event.issue.number }}
   cancel-in-progress: false
 
 permissions:
