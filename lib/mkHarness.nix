@@ -20,8 +20,8 @@
   prefetch ? "",
   # The agent prompt template, a Consumer-owned artifact. Rendered to a store
   # path and mounted into the container at runtime — NOT baked into the image —
-  # so it can be re-pointed via SPINDRIFT_PROMPT_DIR with zero rebuilds (see
-  # scripts/run.sh).
+  # so it can be re-pointed via SPINDRIFT_PROMPT_DIR with zero rebuilds (the Go
+  # launcher mounts it in cmd/launcher/internal/runner).
   prompt ? builtins.readFile ../templates/default/prompts/issue-prompt.md,
   # Subagent system prompts. Defaults ship with the harness; Consumers can
   # override via the `prompt` directory mechanism (SPINDRIFT_PROMPT_DIR).
@@ -156,7 +156,7 @@ let
   # entrypoint (not a host-path mount) so the Box is self-contained: a macOS
   # podman machine cannot bind-mount the host /nix/store into its Linux VM.
   # SPINDRIFT_PROMPT_DIR still mounts an override dir for zero-rebuild iteration
-  # (see scripts/run.sh).
+  # (the Go launcher mounts it in cmd/launcher/internal/runner).
   agentFiles = pkgs.runCommand "spindrift-agent-files" { } ''
     mkdir -p $out/agent/prompts
     cp ${entrypoint}/bin/entrypoint $out/agent/entrypoint.sh

@@ -21,7 +21,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # REPO_SLUG (and GH_TOKEN, for the readiness query) come from harness.env, the
-# same gitignored file run.sh reads. LABEL falls back to the harness default.
+# gitignored env file sourced into the harness. LABEL falls back to the default.
 if [ -f harness.env ]; then
   set -a
   # shellcheck disable=SC1091

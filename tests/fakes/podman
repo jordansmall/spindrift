@@ -17,7 +17,7 @@ case "${1:-}" in
     fi
     ;;
   run)
-    # `podman run ...` — scripted exit code drives run.sh's failure path.
+    # `podman run ...` — scripted exit code drives the Go launcher's failure path.
     issue_num=""
     complete_label=""
     for arg in "$@"; do
