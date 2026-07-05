@@ -42,7 +42,7 @@ Before each commit, run the repo's own checks green. Use what the project
 defines (package scripts, Makefile, CI config). Route bulk output to a file,
 load only failures:
 
-  cargo test > /tmp/test.log 2>&1 || tail -50 /tmp/test.log
+  go test ./... > /tmp/test.log 2>&1 || tail -50 /tmp/test.log
 
 If the repo has a `flake.nix` devShell, prefer its pinned toolchain:
 
@@ -50,11 +50,11 @@ If the repo has a `flake.nix` devShell, prefer its pinned toolchain:
   nix flake check                  # validate the full flake
 
 If `nix develop` is unavailable or fails, fall back to the baked toolchain and
-log the fallback. Rust workspace without a devShell:
+log the fallback. Go module without a devShell:
 
-- `cargo fmt --all --check`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo test`
+- `test -z "$(gofmt -l .)"`
+- `go vet ./...`
+- `go test ./...`
 
 # COMMIT
 
