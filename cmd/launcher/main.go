@@ -45,6 +45,7 @@ type config struct {
 	// Run defaults (overrideable via env / harness.env)
 	repoSlug        string
 	label           string
+	issueNumber     string
 	baseBranch      string
 	maxParallel     int
 	branchPrefix    string
@@ -135,6 +136,7 @@ func loadConfig() config {
 
 		repoSlug:        os.Getenv("REPO_SLUG"),
 		label:           getenv("LABEL", "ready-for-agent"),
+		issueNumber:     os.Getenv("ISSUE_NUMBER"),
 		baseBranch:      getenv("BASE_BRANCH", "main"),
 		maxParallel:     atoi(getenv("MAX_PARALLEL", "3"), 3),
 		branchPrefix:    getenv("BRANCH_PREFIX", "agent/issue-"),
@@ -644,6 +646,32 @@ func issueIsReady(c config, fc forge.Client, num string, edges map[string][]stri
 	return true
 }
 
+// discoverIssues resolves the batch of issues to dispatch. When ISSUE_NUMBER is
+// set the workflow has already claimed exactly this issue (label swapped to
+// in-progress before the build), so we target it directly rather than querying
+// by label — a label query could otherwise pick up a different issue stranded
+// on the same in-progress label by an earlier crash.
+func discoverIssues(c config, fc forge.Client) ([]issue, error) {
+	if c.issueNumber != "" {
+		fmt.Printf("==> targeting claimed issue #%s in %s\n", c.issueNumber, c.repoSlug)
+		fi, err := fc.Issue(c.issueNumber)
+		if err != nil {
+			return nil, err
+		}
+		return []issue{{number: fi.Number, title: fi.Title}}, nil
+	}
+	fmt.Printf("==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
+	rawIssues, err := fc.ListIssues(c.label)
+	if err != nil {
+		return nil, err
+	}
+	var issues []issue
+	for _, fi := range rawIssues {
+		issues = append(issues, issue{number: fi.Number, title: fi.Title})
+	}
+	return issues, nil
+}
+
 // issueNums returns the number strings from a slice of issues.
 func issueNums(issues []issue) []string {
 	nums := make([]string, len(issues))
@@ -740,14 +768,9 @@ func run() error {
 
 	fc := forge.NewExecClient(c.repoSlug)
 
-	fmt.Printf("==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
-	rawIssues, err := fc.ListIssues(c.label)
+	issues, err := discoverIssues(c, fc)
 	if err != nil {
 		return err
-	}
-	var issues []issue
-	for _, fi := range rawIssues {
-		issues = append(issues, issue{number: fi.Number, title: fi.Title})
 	}
 	if len(issues) == 0 {
 		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
