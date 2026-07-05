@@ -32,8 +32,8 @@ const (
 
 // Client is the forge seam — all GitHub API calls go through here.
 type Client interface {
-	ListIssues(label string) ([]Issue, error)        // open issues, oldest-first
-	Issue(num string) (Issue, error)                 // body + labels + state, one gh call
+	ListIssues(label string) ([]Issue, error) // open issues, oldest-first
+	Issue(num string) (Issue, error)          // body + labels + state, one gh call
 	SwapLabel(num, add, remove string) error
 	OpenPRForBranch(branch string) (PR, bool, error) // false = no open PR
 	PRState(url string) (string, error)              // MERGED check
