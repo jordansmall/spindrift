@@ -911,9 +911,13 @@ func run() error {
 		return err
 	}
 
-	issues, err = filterByBarrier(c, fc, issues)
-	if err != nil {
-		return err
+	// Barrier filtering applies only to label-based discovery. When ISSUE_NUMBER
+	// is set the issue is already claimed; the fence must not drop it.
+	if c.issueNumber == "" {
+		issues, err = filterByBarrier(c, fc, issues)
+		if err != nil {
+			return err
+		}
 	}
 
 	if len(issues) == 0 {
