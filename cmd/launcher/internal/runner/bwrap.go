@@ -8,6 +8,15 @@ import (
 	"path/filepath"
 )
 
+// bwrapSecrets is the set of box.Env keys whose values must not appear on the
+// bwrap command line. They are delivered via the process environment instead
+// so that ps/proc cannot expose them to other local users.
+var bwrapSecrets = map[string]bool{
+	"GH_TOKEN":                true,
+	"CLAUDE_CODE_OAUTH_TOKEN": true,
+	"ANTHROPIC_API_KEY":       true,
+}
+
 // bwrapAdapter implements Runner for the daemonless bubblewrap sandbox.
 // EnsureReady is a no-op — store closures are realised by the build command.
 type bwrapAdapter struct {
@@ -36,23 +45,11 @@ func NewBwrap(agentFiles, agentEnv, bakedPrefetch, promptDir string, unshareNet 
 // `launcher build` (bwrapBuildAdapter.EnsureReady) before `run` is invoked.
 func (a *bwrapAdapter) EnsureReady() error { return nil }
 
-// Run fans out a single issue into a bubblewrap sandbox.
-func (a *bwrapAdapter) Run(box Box) error {
-	etcDir, err := os.MkdirTemp("", "spindrift-etc-*")
-	if err != nil {
-		return fmt.Errorf("mktemp: %w", err)
-	}
-	defer os.RemoveAll(etcDir)
-
-	passwd := "root:x:0:0:root:/root:/bin/bash\nagent:x:1000:1000:agent:/home/agent:/bin/bash\n"
-	group := "root:x:0:\nagent:x:1000:\n"
-	if err := os.WriteFile(filepath.Join(etcDir, "passwd"), []byte(passwd), 0o644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(etcDir, "group"), []byte(group), 0o644); err != nil {
-		return err
-	}
-
+// buildArgs constructs the bwrap command-line arguments for the given box.
+// etcDir is the temp directory holding the synthesised /etc/passwd and /etc/group.
+// Secret env vars (GH_TOKEN, auth tokens) are intentionally excluded from argv;
+// they reach the sandbox via inherited process environment (no --clearenv).
+func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	args := []string{
 		"--ro-bind", "/nix/store", "/nix/store",
 		"--tmpfs", "/tmp",
@@ -76,8 +73,10 @@ func (a *bwrapAdapter) Run(box Box) error {
 			args = append(args, "--ro-bind", a.promptDir, "/agent/prompts")
 		}
 	}
+	// --clearenv is intentionally absent: secrets (GH_TOKEN, auth tokens) reach
+	// the sandbox by inheriting the launcher's process environment. Values on
+	// argv are visible in ps/proc, so secrets must not appear there.
 	args = append(args,
-		"--clearenv",
 		"--setenv", "HOME", "/home/agent",
 		"--setenv", "PATH", a.agentEnv+"/bin",
 		"--setenv", "SSL_CERT_FILE", a.agentEnv+"/etc/ssl/certs/ca-bundle.crt",
@@ -85,7 +84,9 @@ func (a *bwrapAdapter) Run(box Box) error {
 		"--setenv", "PREFETCH", a.bakedPrefetch,
 	)
 	for k, v := range box.Env {
-		args = append(args, "--setenv", k, v)
+		if !bwrapSecrets[k] {
+			args = append(args, "--setenv", k, v)
+		}
 	}
 	unshareFlags := []string{"--unshare-user", "--uid", "1000", "--gid", "1000",
 		"--unshare-pid", "--unshare-ipc", "--unshare-uts"}
@@ -94,13 +95,35 @@ func (a *bwrapAdapter) Run(box Box) error {
 	}
 	args = append(args, unshareFlags...)
 	args = append(args, "--", "/agent/entrypoint.sh")
+	return args
+}
+
+// Run fans out a single issue into a bubblewrap sandbox.
+func (a *bwrapAdapter) Run(box Box) error {
+	etcDir, err := os.MkdirTemp("", "spindrift-etc-*")
+	if err != nil {
+		return fmt.Errorf("mktemp: %w", err)
+	}
+	defer os.RemoveAll(etcDir)
+
+	passwd := "root:x:0:0:root:/root:/bin/bash\nagent:x:1000:1000:agent:/home/agent:/bin/bash\n"
+	group := "root:x:0:\nagent:x:1000:\n"
+	if err := os.WriteFile(filepath.Join(etcDir, "passwd"), []byte(passwd), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(etcDir, "group"), []byte(group), 0o644); err != nil {
+		return err
+	}
 
 	out := box.Output
 	if out == nil {
 		out = io.Discard
 	}
 
-	cmd := exec.Command("bwrap", args...)
+	// cmd.Env = nil: the bwrap process inherits the launcher's full environment.
+	// Without --clearenv, the sandbox also inherits it. Secrets (GH_TOKEN, auth
+	// tokens) are therefore available inside the sandbox without appearing on argv.
+	cmd := exec.Command("bwrap", a.buildArgs(etcDir, box)...)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	return cmd.Run()
