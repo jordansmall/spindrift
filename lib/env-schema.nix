@@ -93,6 +93,12 @@
     flakeOption = true;
     boxEnv = true;
   };
+  barrierLabel = {
+    env = "BARRIER_LABEL";
+    doc = "open issues carrying this label fence all higher-numbered issues; empty disables fencing";
+    flakeOption = true;
+    boxEnv = false;
+  };
   # ── Required runtime inputs ────────────────────────────────────────────────
   repoSlug = {
     env = "REPO_SLUG";
