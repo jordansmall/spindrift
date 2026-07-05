@@ -81,6 +81,9 @@ func (f *Fake) ListIssues(label string) ([]Issue, error) {
 	defer f.mu.Unlock()
 	var out []Issue
 	for _, iss := range f.issues {
+		if iss.State == "CLOSED" {
+			continue
+		}
 		for _, l := range iss.Labels {
 			if l == label {
 				out = append(out, iss)
