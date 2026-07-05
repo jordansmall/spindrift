@@ -343,12 +343,6 @@ podman image inspect --format '{{index .RepoDigests 0}}' nixos/nix
 # → docker.io/nixos/nix@sha256:<new-digest>
 ```
 
-Alternatively, use `skopeo` without pulling:
-
-```bash
-skopeo inspect --raw docker://docker.io/nixos/nix:latest \
-  | sha256sum   # manifest list digest
-```
 
 ## Customizing the template
 

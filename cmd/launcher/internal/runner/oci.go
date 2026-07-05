@@ -136,6 +136,9 @@ func (a *ociAdapter) buildInContainer() error {
 	}
 	defer os.RemoveAll(tmpDir)
 
+	if !isDigestPinned(a.nixBuilderImage) {
+		fmt.Fprintf(os.Stderr, "==> WARNING: nixBuilderImage %q is not digest-pinned; use @sha256:… for supply-chain safety\n", a.nixBuilderImage)
+	}
 	fmt.Printf("==> no host Linux builder; building the image inside a %s container\n", a.nixBuilderImage)
 	fmt.Printf("    (reusing the '%s' volume for /nix so rebuilds are incremental)\n", a.nixVolume)
 
