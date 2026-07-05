@@ -651,12 +651,36 @@ func blockerReady(c config, fc forge.Client, dep string) bool {
 
 // issueIsReady returns true when all of num's declared blockers are ready.
 func issueIsReady(c config, fc forge.Client, num string, edges map[string][]string) bool {
+	return len(unreadyBlockers(c, fc, num, edges)) == 0
+}
+
+// unreadyBlockers returns num's declared blockers that are not yet satisfied,
+// in edge order. Empty means the issue is ready to dispatch.
+func unreadyBlockers(c config, fc forge.Client, num string, edges map[string][]string) []string {
+	var out []string
 	for _, dep := range edges[num] {
 		if !blockerReady(c, fc, dep) {
-			return false
+			out = append(out, dep)
 		}
 	}
-	return true
+	return out
+}
+
+// blockedMarker is the file the launcher drops under logs/ when a claimed
+// single issue cannot start because a blocker is unmet. The dispatching
+// pipeline reads it to release the claim and comment; detection stays here so
+// the two blocker formats are parsed once, in one place.
+const blockedMarker = "blocked.txt"
+
+// writeBlockedMarker records the unmet blockers as a "#a, #b" list for the
+// workflow to interpolate into its release comment.
+func writeBlockedMarker(pwd string, blockers []string) error {
+	refs := make([]string, len(blockers))
+	for i, b := range blockers {
+		refs[i] = "#" + b
+	}
+	path := filepath.Join(pwd, "logs", blockedMarker)
+	return os.WriteFile(path, []byte(strings.Join(refs, ", ")), 0o644)
 }
 
 // discoverIssues resolves the batch of issues to dispatch. When ISSUE_NUMBER is
@@ -910,6 +934,18 @@ func run() error {
 			}
 		}
 		if len(selected) == 0 {
+			// Claimed single-issue path: the caller already swapped this issue
+			// onto the in-progress label, so a bare skip would strand it there.
+			// Drop a marker naming the unmet blockers; the dispatching pipeline
+			// releases the claim and comments. Give up — no wait, no recovery.
+			if c.issueNumber != "" {
+				if blockers := unreadyBlockers(c, fc, c.issueNumber, edges); len(blockers) > 0 {
+					if err := writeBlockedMarker(pwd, blockers); err != nil {
+						return err
+					}
+					fmt.Printf("==> #%s blocked; wrote logs/%s for the pipeline to release the claim\n", c.issueNumber, blockedMarker)
+				}
+			}
 			fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", c.label)
 			return nil
 		}

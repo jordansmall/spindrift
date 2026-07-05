@@ -70,6 +70,24 @@ jobs:
       - name: Dispatch the labeled issue
         run: nix run .#run
 
+      # The launcher parses the two blocker formats and, when this claimed issue
+      # is blocked by an unmet dependency, drops logs/blocked.txt naming the
+      # blockers instead of working it. Undo the up-front claim (back to
+      # ready-for-agent) and say why. No recovery — the operator re-triggers once
+      # the blocker resolves. always() so a failed build (no marker) is a no-op.
+      - name: Release the claim if blocked
+        if: always()
+        run: |
+          [ -f logs/blocked.txt ] || exit 0
+          blockers=$(cat logs/blocked.txt)
+          gh issue comment "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --body "🚧 Agent made no changes: this issue is blocked by ${blockers} (not yet \`agent-complete\` or closed). Released back to \`ready-for-agent\`; re-trigger once the blocker is resolved."
+          gh issue edit "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --add-label ready-for-agent \
+            --remove-label agent-in-progress
+
       - name: Upload run logs
         if: always()
         uses: actions/upload-artifact@v4
