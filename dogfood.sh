@@ -37,7 +37,12 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
+STALL_MAX_ITERATIONS="${STALL_MAX_ITERATIONS:-3}"
+STALL_SLEEP_SECONDS="${STALL_SLEEP_SECONDS:-60}"
+
 iteration=0
+stall_count=0
+prev_remaining=""
 while :; do
   remaining="$(gh issue list --repo "$REPO_SLUG" --state open \
     --label "$LABEL" --json number --jq 'length')"
@@ -45,6 +50,20 @@ while :; do
     echo "==> dogfood: no '$LABEL' issues left — done after $iteration iteration(s)."
     break
   fi
+
+  if [ -n "$prev_remaining" ] && [ "$remaining" -eq "$prev_remaining" ]; then
+    stall_count=$((stall_count + 1))
+    if [ "$stall_count" -ge "$STALL_MAX_ITERATIONS" ]; then
+      echo "!! dogfood: no progress for $stall_count iteration(s) — $remaining '$LABEL' issue(s) still open. Exiting." >&2
+      exit 1
+    fi
+    echo "==> dogfood: no progress (stall $stall_count/$STALL_MAX_ITERATIONS) — sleeping ${STALL_SLEEP_SECONDS}s"
+    sleep "$STALL_SLEEP_SECONDS"
+    continue
+  fi
+  stall_count=0
+  prev_remaining="$remaining"
+
   iteration=$((iteration + 1))
   echo "==> dogfood iteration $iteration: $remaining '$LABEL' issue(s) remaining"
 

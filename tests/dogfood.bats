@@ -5,6 +5,24 @@
 
 load helper
 
+# A gh stub that always returns 2 for `issue list`, simulating a loop where
+# no issues are ever drained (all blocked or skipped).
+_install_stalling_gh() {
+  local shebang
+  shebang="$(head -n1 "$FAKE_BIN/gh")"
+  {
+    printf '%s\n' "$shebang"
+    cat <<'EOF'
+if printf '%s ' "$@" | grep -q 'issue list'; then
+  echo 2
+fi
+exit 0
+EOF
+  } >"$FAKE_BIN/gh.tmp"
+  mv "$FAKE_BIN/gh.tmp" "$FAKE_BIN/gh"
+  chmod +x "$FAKE_BIN/gh"
+}
+
 # A gh stub answering only dogfood's readiness probe (`issue list … --jq length`):
 # 1 on the first call (one issue to drain) then 0, so the loop runs exactly once.
 # Reuse the copied fake's shebang so this works both locally (`/usr/bin/env`) and
@@ -62,4 +80,11 @@ setup() {
   run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
   [ "$status" -eq 0 ]
   [ "$(git -C "$WORK" rev-parse --abbrev-ref HEAD)" = "main" ]
+}
+
+@test "dogfood aborts after N stalled iterations with no progress" {
+  _install_stalling_gh
+  run bash -c "BASE_BRANCH=main STALL_MAX_ITERATIONS=1 STALL_SLEEP_SECONDS=0 bash '$WORK/dogfood.sh' 2>&1"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "no progress"
 }
