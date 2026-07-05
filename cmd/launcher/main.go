@@ -5,7 +5,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/outcome"
 )
 
 type config struct {
@@ -428,45 +428,6 @@ func runFix(c config, pwd string, iss issue, fixPass int) error {
 	return runOneOCI(c, fixIss, logFile)
 }
 
-// outcomeLine returns the last SPINDRIFT_OUTCOME line from the issue log.
-// Uses a 4 MiB scanner buffer so that large tool-output lines (JSON, file
-// reads) before the outcome line do not silently truncate the scan.
-func outcomeLine(logPath string) string {
-	f, err := os.Open(logPath)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	var last string
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
-	for scanner.Scan() {
-		if line := scanner.Text(); strings.HasPrefix(line, "SPINDRIFT_OUTCOME ") {
-			last = line
-		}
-	}
-	return last
-}
-
-// field extracts the value of `key=<value>` from a space-delimited outcome line.
-func field(line, key string) string {
-	prefix := key + "="
-	for _, tok := range strings.Fields(line) {
-		if strings.HasPrefix(tok, prefix) {
-			return tok[len(prefix):]
-		}
-	}
-	return ""
-}
-
-// noteField extracts everything after `note=` (may contain spaces).
-func noteField(line string) string {
-	if idx := strings.Index(line, "note="); idx >= 0 {
-		return line[idx+5:]
-	}
-	return ""
-}
-
 // mergeWhenGreen polls CheckState on the PR's head commit until the state
 // reaches SUCCESS, a terminal failure, or mergePollTimeout seconds elapse.
 //
@@ -569,11 +530,15 @@ func printOutcomeReport(c config, fc forge.Client, pwd string, issues []issue) {
 	fmt.Println("==> outcome report")
 	for _, iss := range issues {
 		logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
-		line := outcomeLine(logPath)
-		if line == "" {
+		o, found, err := outcome.LastInLog(logPath)
+		if err != nil {
+			fmt.Printf("    #%s  status=missing  note=no SPINDRIFT_OUTCOME in log\n", iss.number)
+			continue
+		}
+		if !found {
 			branch := c.branchPrefix + iss.number
-			pr, isDraft, found, err := openPRForBranch(fc, branch)
-			if err != nil || !found {
+			pr, isDraft, prFound, prErr := openPRForBranch(fc, branch)
+			if prErr != nil || !prFound {
 				fmt.Printf("    #%s  status=missing  note=no SPINDRIFT_OUTCOME in log\n", iss.number)
 				continue
 			}
@@ -590,26 +555,23 @@ func printOutcomeReport(c config, fc forge.Client, pwd string, issues []issue) {
 			}
 			continue
 		}
-		pr := field(line, "pr")
-		status := field(line, "status")
-		note := noteField(line)
 
-		switch status {
+		switch o.Status {
 		case "blocked":
-			fmt.Printf("    #%s  pr=%s  status=%s  !! %s\n", iss.number, pr, status, note)
+			fmt.Printf("    #%s  pr=%s  status=%s  !! %s\n", iss.number, o.PR, o.Status, o.Note)
 		case "ready":
 			// Agent pushed a PR but left CI to the launcher — poll, self-heal, and merge.
 			fixFn := func(fixPass int) error { return runFix(c, pwd, iss, fixPass) }
-			if selfHeal(c, fc, fixFn, iss.number, pr) {
-				verifyMerged(c, fc, iss.number, pr)
+			if selfHeal(c, fc, fixFn, iss.number, o.PR) {
+				verifyMerged(c, fc, iss.number, o.PR)
 			} else {
-				fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, pr)
+				fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, o.PR)
 			}
 		case "merged":
 			// Agent already merged (legacy path) — verify the GitHub state.
-			verifyMerged(c, fc, iss.number, pr)
+			verifyMerged(c, fc, iss.number, o.PR)
 		default:
-			fmt.Printf("    #%s  pr=%s  status=%s\n", iss.number, pr, status)
+			fmt.Printf("    #%s  pr=%s  status=%s\n", iss.number, o.PR, o.Status)
 		}
 	}
 }
