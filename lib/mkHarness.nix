@@ -302,10 +302,17 @@ let
         export BAKED_PREFETCH
       ''
     else
+      # OCI run also bakes the build-time vars so EnsureReady can build the
+      # image on demand when it is absent — the workflow is `build` first, but
+      # `run` must handle a missing image gracefully on any machine.
       ''
         export IMAGE_ARCHIVE="${imagePath}"
         export IMAGE_TAG="spindrift:${imageHash}"
         export RUNTIME="${runtime}"
+        export IMAGE_DRV="${imageDrv}"
+        export NIX_BUILDER_IMAGE="${nixBuilderImage}"
+        export NIX_VOLUME="spindrift-nix"
+        export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.spindrift"
       '';
 
   goBuildPreamble =
