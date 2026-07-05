@@ -24,12 +24,16 @@ type ociAdapter struct {
 	pwd             string // $PWD; container-fallback mounts this as /workspace
 	promptDir       string // optional host path to mount over /agent/prompts
 	podmanNetwork   string // optional --network value; empty omits the flag
+	pidsLimit       string // --pids-limit value; empty disables the flag
+	memoryLimit     string // --memory value; empty disables the flag
 }
 
 // NewOCI constructs an OCI adapter. pwd is the working directory (used for the
 // container-fallback path); promptDir is the optional SPINDRIFT_PROMPT_DIR;
 // podmanNetwork is the optional --network value (empty omits the flag).
-func NewOCI(cli, image, imageArchive, imageDrv, imageTag, nixBuilderImage, nixVolume, flakeImageAttr, pwd, promptDir, podmanNetwork string) Runner {
+// pidsLimit and memoryLimit set the --pids-limit and --memory flags; empty
+// string omits the flag.
+func NewOCI(cli, image, imageArchive, imageDrv, imageTag, nixBuilderImage, nixVolume, flakeImageAttr, pwd, promptDir, podmanNetwork, pidsLimit, memoryLimit string) Runner {
 	return &ociAdapter{
 		cli:             cli,
 		image:           image,
@@ -42,6 +46,8 @@ func NewOCI(cli, image, imageArchive, imageDrv, imageTag, nixBuilderImage, nixVo
 		pwd:             pwd,
 		promptDir:       promptDir,
 		podmanNetwork:   podmanNetwork,
+		pidsLimit:       pidsLimit,
+		memoryLimit:     memoryLimit,
 	}
 }
 
@@ -177,6 +183,37 @@ func (a *ociAdapter) containerIsRunning(name string) bool {
 	return strings.TrimSpace(string(out)) == "running"
 }
 
+// buildRunArgs assembles the argument slice for `podman/docker run`. Separated
+// from Run so the arg construction can be tested without exec.
+func (a *ociAdapter) buildRunArgs(box Box) []string {
+	args := []string{"run", "--rm", "--name", box.Name}
+	if a.podmanNetwork != "" {
+		args = append(args, "--network", a.podmanNetwork)
+	}
+	for k, v := range box.Env {
+		args = append(args, "-e", k+"="+v)
+	}
+	if a.promptDir != "" {
+		if info, err := os.Stat(a.promptDir); err == nil && info.IsDir() {
+			fmt.Printf("==> SPINDRIFT_PROMPT_DIR set; mounting %s over the baked prompt\n", a.promptDir)
+			args = append(args, "-v", a.promptDir+":/agent/prompts:ro")
+		}
+	}
+	// Security hardening — always drop all capabilities and block privilege
+	// escalation; these are unconditional so no consumer knob can silently
+	// weaken the sandbox.
+	args = append(args, "--cap-drop=all", "--security-opt=no-new-privileges")
+	// Resource caps — configurable so consumers can tune without a rebuild.
+	if a.pidsLimit != "" {
+		args = append(args, "--pids-limit="+a.pidsLimit)
+	}
+	if a.memoryLimit != "" {
+		args = append(args, "--memory="+a.memoryLimit)
+	}
+	args = append(args, a.image, "/agent/entrypoint.sh")
+	return args
+}
+
 // Run fans out a single issue into a podman/docker container.
 func (a *ociAdapter) Run(box Box) error {
 	// Reap any stale (exited or created) container from a prior interrupted run.
@@ -192,22 +229,7 @@ func (a *ociAdapter) Run(box Box) error {
 		out = io.Discard
 	}
 
-	args := []string{"run", "--rm", "--name", box.Name}
-	if a.podmanNetwork != "" {
-		args = append(args, "--network", a.podmanNetwork)
-	}
-	for k, v := range box.Env {
-		args = append(args, "-e", k+"="+v)
-	}
-	if a.promptDir != "" {
-		if info, err := os.Stat(a.promptDir); err == nil && info.IsDir() {
-			fmt.Printf("==> SPINDRIFT_PROMPT_DIR set; mounting %s over the baked prompt\n", a.promptDir)
-			args = append(args, "-v", a.promptDir+":/agent/prompts:ro")
-		}
-	}
-	args = append(args, a.image, "/agent/entrypoint.sh")
-
-	cmd := exec.Command(a.cli, args...)
+	cmd := exec.Command(a.cli, a.buildRunArgs(box)...)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	return cmd.Run()
