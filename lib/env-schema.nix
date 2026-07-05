@@ -111,6 +111,20 @@
     flakeOption = true;
     boxEnv = false;
   };
+  memoryLimit = {
+    env = "MEMORY_LIMIT";
+    default = "4g";
+    doc = "max memory per agent container (--memory); empty string disables the limit";
+    flakeOption = true;
+    boxEnv = false;
+  };
+  pidsLimit = {
+    env = "PIDS_LIMIT";
+    default = "512";
+    doc = "max processes per agent container (--pids-limit); empty string disables the limit";
+    flakeOption = true;
+    boxEnv = false;
+  };
   # ── Required runtime inputs ────────────────────────────────────────────────
   repoSlug = {
     env = "REPO_SLUG";
