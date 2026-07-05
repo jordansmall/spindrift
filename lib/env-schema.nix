@@ -86,6 +86,13 @@
     flakeOption = true;
     boxEnv = true;
   };
+  devShellProbeTimeout = {
+    env = "DEV_SHELL_PROBE_TIMEOUT";
+    default = 300;
+    doc = "seconds before the devShell probe is abandoned and the baked toolchain is used";
+    flakeOption = true;
+    boxEnv = true;
+  };
   # ── Required runtime inputs ────────────────────────────────────────────────
   repoSlug = {
     env = "REPO_SLUG";
@@ -147,13 +154,6 @@
     default = 7200;
     doc = "total seconds to wait for dependency-wave completion before aborting";
     boxEnv = false;
-  };
-  devShellProbeTimeout = {
-    env = "DEV_SHELL_PROBE_TIMEOUT";
-    default = 300;
-    doc = "seconds before the devShell probe is abandoned and the baked toolchain is used";
-    flakeOption = true;
-    boxEnv = true;
   };
   mergePollInterval = {
     env = "MERGE_POLL_INTERVAL";
