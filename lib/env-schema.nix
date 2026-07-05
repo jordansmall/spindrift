@@ -170,4 +170,22 @@
     doc = "dispatch only this issue number, bypassing the LABEL query; empty discovers by LABEL";
     boxEnv = false;
   };
+  holdJitterSecs = {
+    env = "HOLD_JITTER_SECS";
+    default = 5;
+    doc = "jitter seconds added to 429 hold duration to spread re-dispatch";
+    boxEnv = false;
+  };
+  transientBackoffSecs = {
+    env = "TRANSIENT_BACKOFF_SECS";
+    default = 30;
+    doc = "base backoff seconds per retry for 529/overloaded and network transients";
+    boxEnv = false;
+  };
+  transientRetryMax = {
+    env = "TRANSIENT_RETRY_MAX";
+    default = 3;
+    doc = "max retries for transient exits (529/network backoff; consecutive 429 holds)";
+    boxEnv = false;
+  };
 }

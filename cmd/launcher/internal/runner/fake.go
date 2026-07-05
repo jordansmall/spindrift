@@ -19,8 +19,13 @@ type Fake struct {
 	// EnsureReadyErr, if non-nil, is returned by EnsureReady.
 	EnsureReadyErr error
 
-	// RunErr, if non-nil, is returned by every Run call.
+	// RunErr, if non-nil, is returned by every Run call (when RunErrs is nil).
 	RunErr error
+
+	// RunErrs, if non-nil, provides per-call errors: RunErrs[i] is returned for
+	// the i-th Run call. The last element is reused when the sequence is
+	// exhausted. Takes precedence over RunErr.
+	RunErrs []error
 }
 
 // NewFake returns an empty Fake runner.
@@ -34,11 +39,20 @@ func (f *Fake) EnsureReady() error {
 	return f.EnsureReadyErr
 }
 
-// Run records the box and returns RunErr.
+// Run records the box and returns the error for this call index. If RunErrs
+// is non-nil, RunErrs[i] is used (last element reused when exhausted);
+// otherwise RunErr is returned.
 func (f *Fake) Run(box Box) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	i := len(f.RunCalls)
 	f.RunCalls = append(f.RunCalls, box)
+	if len(f.RunErrs) > 0 {
+		if i < len(f.RunErrs) {
+			return f.RunErrs[i]
+		}
+		return f.RunErrs[len(f.RunErrs)-1]
+	}
 	return f.RunErr
 }
 
