@@ -40,3 +40,15 @@ setup() {
   ! grep -q -- ':/agent/prompts' "$PODMAN_LOG"
   [[ "$output" != *"SPINDRIFT_PROMPT_DIR"* ]]
 }
+
+@test "SPINDRIFT_PROMPT_DIR mount covers all three prompt files via directory bind" {
+  local override="$BATS_TEST_TMPDIR/myprompts"
+  mkdir -p "$override"
+  echo "hot-override" >"$override/issue-prompt.md"
+  echo "custom-scout" >"$override/scout-prompt.md"
+  echo "custom-review" >"$override/review-prompt.md"
+  export SPINDRIFT_PROMPT_DIR="$override"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q -- "-v $override:/agent/prompts" "$PODMAN_LOG"
+}

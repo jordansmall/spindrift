@@ -22,6 +22,7 @@ setup_fakes() {
   export CLAUDE_LOG="$BATS_TEST_TMPDIR/claude.log"
   export NIX_LOG="$BATS_TEST_TMPDIR/nix.log"
   export CLAUDE_PROMPT_FILE="$BATS_TEST_TMPDIR/claude-prompt.txt"
+  export CLAUDE_AGENTS_FILE="$BATS_TEST_TMPDIR/claude-agents.json"
   : >"$PODMAN_LOG"
   : >"$DOCKER_LOG"
   : >"$BWRAP_LOG"
