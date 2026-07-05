@@ -629,8 +629,16 @@
                   "BOX_ENV_VARS"
                 ];
                 schemaEnvNames = map (e: e.env) (attrValues schema);
-                # Forward: every schema name must appear as a string literal in main.go.
-                missingFromGo = filter (name: !pkgs.lib.hasInfix ''"${name}"'' mainGoSrc) schemaEnvNames;
+                # Schema knobs forwarded to containers via BOX_ENV_VARS only — the Go
+                # binary never reads them directly, so they need no os.Getenv call.
+                boxEnvOnly = [
+                  "MODEL"
+                  "SCOUT_MODEL"
+                  "REVIEW_MODEL"
+                ];
+                # Forward: every schema name (that Go reads directly) must appear as a
+                # string literal in main.go.
+                missingFromGo = filter (name: !pkgs.lib.hasInfix ''"${name}"'' mainGoSrc) (subtractLists boxEnvOnly schemaEnvNames);
                 # Reverse: extract names from os.Getenv/getenv calls in main.go.
                 parts = builtins.split ''(os\.Getenv|getenv)\("([A-Z_][A-Z0-9_]*)"\)'' mainGoSrc;
                 goEnvNames = map (m: builtins.elemAt m 1) (filter builtins.isList parts);

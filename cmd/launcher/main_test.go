@@ -1,9 +1,21 @@
 package main
 
 import (
+	"reflect"
 	"sort"
 	"testing"
 )
+
+// TestConfigHasNoModelFields enforces that model/scoutModel/reviewModel were
+// removed from the config struct; models forward via BOX_ENV_VARS instead.
+func TestConfigHasNoModelFields(t *testing.T) {
+	ct := reflect.TypeOf(config{})
+	for _, name := range []string{"model", "scoutModel", "reviewModel"} {
+		if _, ok := ct.FieldByName(name); ok {
+			t.Errorf("config has field %q; remove it — models forward via BOX_ENV_VARS", name)
+		}
+	}
+}
 
 // --- parseBlockerRefs tests ---
 
