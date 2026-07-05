@@ -96,6 +96,12 @@
           # public outputs — the checks introspect it at eval time only.
           nonRustHarness = import ./lib/mkHarness.nix {
             inherit nixpkgs system;
+            # Empty subagent tiers keep this a genuine no-model harness so the
+            # agents-json-baked check can assert an empty AGENTS_JSON_TEMPLATE.
+            defaults = {
+              scoutModel = "";
+              reviewModel = "";
+            };
             packages = p: [ p.hello ];
           };
 
