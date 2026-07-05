@@ -78,6 +78,8 @@ type config struct {
 	// Optional prompt override
 	spindriftPromptDir string
 
+	barrierLabel string
+
 	// Space-separated list of env var names to forward into each Box container.
 	// Set by the nix-rendered preamble from the schema's boxEnv=true entries so
 	// the Go source never needs to enumerate them by hand.
@@ -165,6 +167,8 @@ func loadConfig() config {
 		gitUserEmail:     os.Getenv("GIT_USER_EMAIL"),
 
 		spindriftPromptDir: os.Getenv("SPINDRIFT_PROMPT_DIR"),
+
+		barrierLabel: os.Getenv("BARRIER_LABEL"),
 
 		boxEnvVars: os.Getenv("BOX_ENV_VARS"),
 	}
@@ -659,6 +663,39 @@ func issueIsReady(c config, fc forge.Client, num string, edges map[string][]stri
 	return true
 }
 
+// filterByBarrier drops issues whose number exceeds the lowest open barrier.
+// When barrierLabel is empty the function is a no-op and returns issues unchanged.
+// The barrier query covers all dispatch states (ready/in-progress/failed): any
+// open issue carrying barrierLabel fences higher-numbered issues, regardless of
+// which other labels it carries. The fence lifts only when the issue is closed.
+func filterByBarrier(c config, fc forge.Client, issues []issue) ([]issue, error) {
+	if c.barrierLabel == "" {
+		return issues, nil
+	}
+	barriers, err := fc.ListIssues(c.barrierLabel)
+	if err != nil {
+		return nil, fmt.Errorf("barrier query: %w", err)
+	}
+	if len(barriers) == 0 {
+		return issues, nil
+	}
+	minB := -1
+	for _, b := range barriers {
+		n, _ := strconv.Atoi(b.Number)
+		if minB < 0 || n < minB {
+			minB = n
+		}
+	}
+	var out []issue
+	for _, iss := range issues {
+		n, _ := strconv.Atoi(iss.number)
+		if n <= minB {
+			out = append(out, iss)
+		}
+	}
+	return out, nil
+}
+
 // discoverIssues resolves the batch of issues to dispatch. When ISSUE_NUMBER is
 // set the workflow has already claimed exactly this issue (label swapped to
 // in-progress before the build), so we target it directly rather than querying
@@ -873,6 +910,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
+	issues, err = filterByBarrier(c, fc, issues)
+	if err != nil {
+		return err
+	}
+
 	if len(issues) == 0 {
 		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
 		return nil
