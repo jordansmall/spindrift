@@ -18,10 +18,10 @@
   # Optional shell snippet the entrypoint runs after cloning, to warm toolchain
   # caches (e.g. fetch pinned deps). Baked into the image; default is a no-op.
   prefetch ? "",
-  # The agent prompt template, a Consumer-owned artifact. Rendered to a store
-  # path and mounted into the container at runtime — NOT baked into the image —
-  # so it can be re-pointed via SPINDRIFT_PROMPT_DIR with zero rebuilds (the Go
-  # launcher mounts it in cmd/launcher/internal/runner).
+  # The agent prompt template, a Consumer-owned artifact. Baked into the image
+  # at /agent/prompts (see agentFiles); changing it requires an image rebuild.
+  # SPINDRIFT_PROMPT_DIR mounts an override directory at runtime for zero-rebuild
+  # iteration (the Go launcher mounts it in cmd/launcher/internal/runner).
   prompt ? builtins.readFile ../templates/default/prompts/issue-prompt.md,
   # Subagent system prompts. Defaults ship with the harness; Consumers can
   # override via the `prompt` directory mechanism (SPINDRIFT_PROMPT_DIR).
@@ -197,9 +197,9 @@ let
   '';
 
   # The rendered prompt directory as a host store path (native-buildable on
-  # darwin, so it needs no Linux builder). The `run` command bakes this path in
-  # and bind-mounts it at /agent/prompts, where the entrypoint reads all three
-  # prompt files and substitutes the per-issue variables.
+  # darwin, so it needs no Linux builder). The prompt is normally baked into
+  # the image via agentFiles; this output exists so tests can assert it is NOT
+  # bind-mounted by default, and so SPINDRIFT_PROMPT_DIR can point to it.
   promptDir = hostPkgs.runCommand "prompt-dir" { } ''
     mkdir -p $out
     cp ${hostPkgs.writeText "issue-prompt.md" prompt} $out/issue-prompt.md

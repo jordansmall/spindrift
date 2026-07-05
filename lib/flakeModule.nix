@@ -67,7 +67,7 @@ in
       prompt = mkOption {
         type = types.nullOr types.lines;
         default = null;
-        description = "Agent prompt template rendered to a store path and mounted at run time.";
+        description = "Agent prompt template baked into the image; changing it requires an image rebuild. Set SPINDRIFT_PROMPT_DIR at runtime to override without a rebuild.";
       };
 
       # One sub-option per schema flakeOption entry — generated so adding a knob

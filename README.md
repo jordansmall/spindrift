@@ -128,7 +128,7 @@ knobs. Unset options fall through to `mkHarness`'s own defaults.
 | `config`    | attrs                       | `{ allowUnfree = true; }` | nixpkgs config attrs                                          |
 | `packages`  | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
 | `prefetch`  | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
-| `prompt`    | string                      | bundled starter    | agent prompt template; rendered to a store path, mounted at run time |
+| `prompt`    | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`nix run .#build`) |
 | `defaults`  | `{ label; baseBranch; maxParallel; branchPrefix; inProgressLabel; failedLabel; model; }` | see below | non-secret run defaults baked into `run` |
 | `runtime`   | `"podman"` \| `"docker"`    | `"podman"`         | container runtime the `build`/`run` commands drive                   |
 | `nixBuilderImage` | string                | `"docker.io/nixos/nix:latest"` | Nix image `build` uses as a fallback Linux builder when the host can't realise the image |
@@ -143,9 +143,9 @@ rebuild. Baked defaults: `label = "ready-for-agent"`, `baseBranch = "main"`,
 agent runs, threaded into the container as `MODEL` so `MODEL=...` switches models
 at runtime with no image rebuild.
 
-The **prompt is a runtime mount**, not baked into the image: edit
-`prompts/issue-prompt.md` and re-run with no image rebuild, or point
-`SPINDRIFT_PROMPT_DIR` at any directory to hot-override it.
+The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
+requires an image rebuild (`nix run .#build`). Point `SPINDRIFT_PROMPT_DIR`
+at any directory to override it at runtime for zero-rebuild iteration.
 
 ## Runtime configuration
 
