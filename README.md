@@ -138,10 +138,13 @@ env var still wins at runtime, so one built command can be re-pointed without a
 rebuild. Baked defaults: `label = "ready-for-agent"`, `baseBranch = "main"`,
 `maxParallel = 3`, `branchPrefix = "agent/issue-"`,
 `inProgressLabel = "agent-in-progress"`, `failedLabel = "agent-failed"`,
-`model = "claude-opus-4-8"`. `inProgressLabel`/`failedLabel` drive the
+`model = "claude-sonnet-4-6"`, `scoutModel = "claude-haiku-4-5-20251001"`,
+`reviewModel = "claude-opus-4-8"`. `inProgressLabel`/`failedLabel` drive the
 [label lifecycle](#label-lifecycle); `model` is the Claude model the in-container
-agent runs, threaded into the container as `MODEL` so `MODEL=...` switches models
-at runtime with no image rebuild.
+implementor agent runs, threaded into the container as `MODEL` so `MODEL=...`
+switches models at runtime with no image rebuild. `scoutModel`/`reviewModel` tier
+the read-only scout and reviewer subagents the same way; setting either to `""`
+drops both subagents from the `claude` invocation.
 
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`nix run .#build`). Point `SPINDRIFT_PROMPT_DIR`
@@ -167,7 +170,9 @@ a rebuild (ADR 0001):
 | `BRANCH_PREFIX`           | `agent/issue-`         | branch name = prefix + issue number      |
 | `IN_PROGRESS_LABEL`       | `agent-in-progress`    | label a dispatched issue is swapped to   |
 | `FAILED_LABEL`            | `agent-failed`         | label an issue gets when its Box fails   |
-| `MODEL`                   | `claude-opus-4-8`      | Claude model the in-container agent runs |
+| `MODEL`                   | `claude-sonnet-4-6`    | Claude model the in-container implementor runs |
+| `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` | scout subagent model tier (empty drops subagents) |
+| `REVIEW_MODEL`            | `claude-opus-4-8`      | reviewer subagent model tier (empty drops subagents) |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
 | `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | hot-override the mounted prompt dir     |
 

@@ -67,22 +67,22 @@
   };
   model = {
     env = "MODEL";
-    default = "claude-opus-4-8";
-    doc = "primary Claude model for the agent (zero-rebuild runtime switch)";
+    default = "claude-sonnet-4-6";
+    doc = "primary (implementor) Claude model for the agent (zero-rebuild runtime switch)";
     flakeOption = true;
     boxEnv = true;
   };
   scoutModel = {
     env = "SCOUT_MODEL";
-    default = "";
-    doc = "scout subagent model tier; empty omits --agents from the claude invocation";
+    default = "claude-haiku-4-5-20251001";
+    doc = "scout subagent model tier; empty omits the scout/reviewer --agents from the claude invocation";
     flakeOption = true;
     boxEnv = true;
   };
   reviewModel = {
     env = "REVIEW_MODEL";
-    default = "";
-    doc = "reviewer subagent model tier; empty omits --agents from the claude invocation";
+    default = "claude-opus-4-8";
+    doc = "reviewer subagent model tier; empty omits the scout/reviewer --agents from the claude invocation";
     flakeOption = true;
     boxEnv = true;
   };
