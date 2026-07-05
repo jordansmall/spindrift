@@ -27,3 +27,10 @@ only `build` pays for realisation. The container fallback assumes `build` is
 invoked from the Consumer flake's directory (the same `$PWD` convention
 `harness.env` already uses) and keeps a named volume for `/nix` so rebuilds are
 incremental.
+
+The build logic now lives entirely in the Go binary (`internal/runner` OCI and
+bwrap adapters) rather than in bash scripts. The `build` shell wrapper is a
+thin env-var exporter that execs `launcher build`; the three bash scripts
+(`build.sh`, `build-image.sh`, `bwrap-build.sh`) have been deleted. The runner
+seam (`runner.Runner`) also pins the docker compatibility fix: `image inspect`
+replaces `image exists`, which docker does not support.
