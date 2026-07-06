@@ -141,6 +141,17 @@ let
       }
     else "";
 
+  # In-box heartbeat filter: reuses the #182 heartbeat parser as a CLI binary
+  # so the entrypoint can pipe claude's stream-json output through it without
+  # modifying the raw capture channel. Built for Linux (pkgs, not hostPkgs).
+  heartbeatFilterBin = pkgs.buildGoModule {
+    pname = "spindrift-heartbeat-filter";
+    version = "0.1.0";
+    src = ../cmd/launcher;
+    vendorHash = null;
+    subPackages = [ "spindrift-heartbeat-filter" ];
+  };
+
   # Plumbing every agent needs regardless of language: a shell, the VCS + GitHub
   # CLIs, Claude Code, CA certs, and the unix tools the entrypoint relies on.
   harnessPackages =
@@ -156,6 +167,7 @@ let
       gh
       claude-code
       cacert
+      heartbeatFilterBin # in-box heartbeat filter (#183)
     ])
     # The nix CLI is included by default so `nix flake check` / `nix develop`
     # work inside the box. Omitted only when the Consumer opts into the lean image.
@@ -186,6 +198,7 @@ let
       gettext # envsubst
       coreutils
       jq # extracts the outcome from the stream-json transcript
+      heartbeatFilterBin # in-box heartbeat view (#183)
     ];
     # Prepend the schema-derived defaults block so the entrypoint carries the
     # baked values without hardcoding them in the source script.
@@ -439,6 +452,7 @@ let
     version = "0.1.0";
     src = ../cmd/launcher;
     vendorHash = null;
+    subPackages = [ "." ]; # build only the launcher; heartbeat-filter is in-box only
   };
 
   # The build command: bakes nix-computed config as exported env vars and
