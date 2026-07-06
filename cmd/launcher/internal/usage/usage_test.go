@@ -130,13 +130,13 @@ func TestLastInLog_MalformedJSON(t *testing.T) {
 }
 
 func TestBreakdownByRole_ScoutAndReviewer(t *testing.T) {
-	// Main agent: invokes scout Task
-	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_scout","name":"Task","input":{}}],"usage":{"input_tokens":100,"output_tokens":50}}}`
+	// Main agent: invokes scout Task (subagent_type in input)
+	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_scout","name":"Task","input":{"subagent_type":"scout","prompt":"map files"}}],"usage":{"input_tokens":100,"output_tokens":50}}}`
 	// Scout messages (grouped under toolu_scout)
 	scoutMsg1 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":200,"output_tokens":80}},"parent_tool_use_id":"toolu_scout"}`
 	scoutMsg2 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":100,"output_tokens":40}},"parent_tool_use_id":"toolu_scout"}`
 	// Main agent: invokes reviewer Task
-	implMain2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_reviewer","name":"Task","input":{}}],"usage":{"input_tokens":150,"output_tokens":60}}}`
+	implMain2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_reviewer","name":"Task","input":{"subagent_type":"reviewer","prompt":"review diff"}}],"usage":{"input_tokens":150,"output_tokens":60}}}`
 	// Reviewer message
 	reviewerMsg1 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":300,"output_tokens":100}},"parent_tool_use_id":"toolu_reviewer"}`
 	// Final main agent message (no parent)
@@ -175,6 +175,35 @@ func TestBreakdownByRole_ScoutAndReviewer(t *testing.T) {
 	}
 	if reviewer.OutputTokens != 100 {
 		t.Errorf("reviewer output tokens: got %d, want 100", reviewer.OutputTokens)
+	}
+}
+
+func TestBreakdownByRole_ReviewerReinvoked(t *testing.T) {
+	// First reviewer invocation
+	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_rev1","name":"Task","input":{"subagent_type":"reviewer","prompt":"review diff"}}],"usage":{"input_tokens":100,"output_tokens":30}}}`
+	reviewerMsg1 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":200,"output_tokens":80}},"parent_tool_use_id":"toolu_rev1"}`
+	// Second reviewer invocation (after BLOCK)
+	implMain2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_rev2","name":"Task","input":{"subagent_type":"reviewer","prompt":"re-review"}}],"usage":{"input_tokens":50,"output_tokens":20}}}`
+	reviewerMsg2 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":150,"output_tokens":60}},"parent_tool_use_id":"toolu_rev2"}`
+
+	path := writeLog(t, implMain1, reviewerMsg1, implMain2, reviewerMsg2)
+
+	breakdown, err := usage.BreakdownByRole(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	roles := map[string]usage.RoleUsage{}
+	for _, r := range breakdown {
+		roles[r.Role] = r
+	}
+
+	// Both reviewer invocations must be summed under "reviewer", not mislabeled.
+	reviewer := roles["reviewer"]
+	if reviewer.InputTokens != 350 { // 200+150
+		t.Errorf("reviewer input tokens: got %d, want 350 (both invocations)", reviewer.InputTokens)
+	}
+	if _, ok := roles["subagent"]; ok {
+		t.Error("want no subagent bucket; second reviewer invocation should sum into reviewer")
 	}
 }
 

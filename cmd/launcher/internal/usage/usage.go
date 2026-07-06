@@ -122,15 +122,20 @@ type assistantMsg struct {
 }
 
 type msgContent struct {
-	Type string `json:"type"`
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
+	Type  string          `json:"type"`
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
+}
+
+type taskInput struct {
+	SubagentType string `json:"subagent_type"`
 }
 
 // BreakdownByRole scans the file at path and returns per-role token breakdowns
 // by parsing assistant message events. Messages with no parent_tool_use_id are
-// attributed to the implementor. Task tool-use IDs in the implementor's messages
-// are mapped to roles in encounter order: first Task → scout, second → reviewer.
+// attributed to the implementor. Task tool-use IDs are mapped to roles via the
+// subagent_type field in each Task's input (e.g. "scout", "reviewer").
 //
 // Returns (nil, nil) when the file does not exist.
 func BreakdownByRole(path string) ([]RoleUsage, error) {
@@ -169,8 +174,11 @@ func BreakdownByRole(path string) ([]RoleUsage, error) {
 		}
 	}
 
-	// Pass 1: collect Task tool-use IDs in encounter order from implementor messages.
-	var taskOrder []string
+	// Pass 1: collect Task tool-use IDs → role name from implementor messages.
+	// The subagent_type field in each Task's input (e.g. "scout", "reviewer")
+	// is the ground-truth role, so re-invocations of the same role accumulate
+	// correctly rather than being mis-attributed by position.
+	taskRole := make(map[string]string)
 	for _, line := range lines {
 		if !strings.Contains(line, `"type":"assistant"`) {
 			continue
@@ -183,20 +191,18 @@ func BreakdownByRole(path string) ([]RoleUsage, error) {
 			continue
 		}
 		for _, c := range ev.Message.Content {
-			if c.Type == "tool_use" && c.Name == "Task" && c.ID != "" {
-				taskOrder = append(taskOrder, c.ID)
+			if c.Type != "tool_use" || c.Name != "Task" || c.ID == "" {
+				continue
 			}
-		}
-	}
-
-	// Build task ID → role name map.
-	roleNames := []string{"scout", "reviewer"}
-	taskRole := make(map[string]string, len(taskOrder))
-	for i, id := range taskOrder {
-		if i < len(roleNames) {
-			taskRole[id] = roleNames[i]
-		} else {
-			taskRole[id] = "subagent"
+			var ti taskInput
+			if len(c.Input) > 0 {
+				_ = json.Unmarshal(c.Input, &ti)
+			}
+			role := ti.SubagentType
+			if role == "" {
+				role = "subagent"
+			}
+			taskRole[c.ID] = role
 		}
 	}
 
