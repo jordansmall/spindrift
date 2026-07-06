@@ -31,6 +31,15 @@ printf '%s' "$prompt" >"${CLAUDE_PROMPT_FILE:-/dev/null}"
 printf '%s' "$agents" >"${CLAUDE_AGENTS_FILE:-/dev/null}"
 printf 'claude invoked for issue #%s\n' "${ISSUE_NUMBER:-?}" >>"$CLAUDE_LOG"
 
+# Report any skill files discoverable at the path Claude Code scans.
+# Real claude -p reads $HOME/.claude/skills/; this fake does the same so
+# tests can assert discovery without a live LLM.
+if [ -d "${HOME:-}/.claude/skills" ]; then
+  for _skill in "${HOME}/.claude/skills/"*.md; do
+    [ -f "$_skill" ] && printf 'skill discovered: %s\n' "$(basename "$_skill")" >>"$CLAUDE_LOG"
+  done
+fi
+
 if [ "${FAKE_CLAUDE_COMMIT:-0}" = "1" ]; then
   branch="$(git rev-parse --abbrev-ref HEAD)"
   printf 'stub agent change for issue #%s\n' "${ISSUE_NUMBER:-0}" >agent-change.txt

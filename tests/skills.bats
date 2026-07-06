@@ -54,4 +54,5 @@ setup() {
   run "$BWRAP_RUN_CMD"
   [ "$status" -eq 0 ]
   ! grep -q -- '/.claude/skills' "$BWRAP_LOG"
+  [[ "$output" != *"SPINDRIFT_SKILLS_DIR"* ]]
 }
