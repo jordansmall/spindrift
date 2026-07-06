@@ -231,6 +231,16 @@ EOF
   ! grep -q 'status=merged' "$CLAUDE_PROMPT_FILE"
 }
 
+# --- re-dispatch idempotency (issue #217) ------------------------------------
+# The in-box push must use --force-with-lease so a retry from a different base
+# replaces the prior run's branch state rather than colliding non-fast-forward.
+
+@test "default prompt instructs agent to push with --force-with-lease" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- '--force-with-lease' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "re-dispatched box force-resets a stale remote branch (no open PR)" {
   # Simulate a prior run that pushed agent/issue-7 with a commit, then died
   # before opening a PR.
