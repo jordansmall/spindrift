@@ -948,6 +948,41 @@ EOF
   [[ "$output" == *"status=verified-merged"* ]]
 }
 
+# AC #1 (issue #130): a late-registered check appears PENDING on the
+# confirmation re-poll; gate keeps waiting and merges once the full set
+# is green.  The initial SUCCESS snapshot alone is not sufficient.
+@test "late-registered check: SUCCESS then PENDING confirmation → defers, eventually merges" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  # seq: initial=SUCCESS, confirmation=PENDING (late job registered), next poll=SUCCESS (sticks)
+  export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS,PENDING,SUCCESS"
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=3
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
+  [[ "$output" == *"status=verified-merged"* ]]
+}
+
+# AC #2 (issue #130): a late-registered job fails after an initial all-green
+# snapshot.  Confirmation re-poll sees FAILURE → no merge, agent-failed.
+@test "late-registered check fails after SUCCESS snapshot → no merge, agent-failed" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  # seq: initial=SUCCESS, confirmation=FAILURE (late job registered and already red)
+  export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS,FAILURE"
+  export MERGE_POLL_INTERVAL=0
+  export MAX_FIX_ATTEMPTS=0  # bare gate test — self-heal disabled
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  ! grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
+  [[ "$output" == *"status=failed"* ]]
+}
+
 # --- Self-heal fix-agent (issue #136) -----------------------------------------
 
 # Red-then-green: launcher dispatches one fix box, CI turns green, PR merges.
