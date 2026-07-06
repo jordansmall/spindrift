@@ -125,6 +125,31 @@ func TestPrintHelp_ContainsLabelEntry(t *testing.T) {
 	}
 }
 
+// TestParseFlags_AliasSetEnv: an alias flag resolves to the same env var as the long form.
+func TestParseFlags_AliasSetEnv(t *testing.T) {
+	t.Setenv("ISSUE_NUMBER", "")
+	remaining, err := parseFlags([]string{"--issue", "42"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Errorf("expected no remaining args, got %v", remaining)
+	}
+	if got := os.Getenv("ISSUE_NUMBER"); got != "42" {
+		t.Errorf("ISSUE_NUMBER = %q, want %q (alias must set same env var)", got, "42")
+	}
+}
+
+// TestPrintHelp_ShowsAlias: aliased knobs show the alias next to the long form.
+func TestPrintHelp_ShowsAlias(t *testing.T) {
+	var buf bytes.Buffer
+	printHelp(&buf)
+	out := buf.String()
+	if !strings.Contains(out, "--issue-number, --issue") {
+		t.Errorf("help output missing alias display; want --issue-number, --issue in:\n%s", out)
+	}
+}
+
 // TestPrintHelp_SecretKnobEnvOnly: secret knobs appear as env-only (no --flag prefix).
 func TestPrintHelp_SecretKnobEnvOnly(t *testing.T) {
 	var buf bytes.Buffer
