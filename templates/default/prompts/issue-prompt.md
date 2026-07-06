@@ -97,13 +97,23 @@ the PR body.
 
 # WATCH CI
 
-After opening the PR, block until CI registers. Right after `gh pr create`,
-`gh pr checks --watch` finds no checks, prints "no checks", exits 0 — treating
-that as green merges before CI starts. So wait for a check to appear first:
+After opening the PR, block until CI registers. Right after `gh pr create` the
+`statusCheckRollup` state is absent — treating that as green would merge before
+CI starts. Wait for the rollup to return any non-empty state:
 
 ```
-# "no checks" yet means not-started, NOT green
-until gh pr checks <pr-number> 2>/dev/null | grep -q .; do sleep 10; done
+# gh pr checks uses the check-runs REST endpoint which 403s under fine-grained
+# PATs. Use statusCheckRollup (GraphQL) instead — it works with fine-grained
+# tokens and aggregates both commit statuses and check-runs faithfully, so a
+# missing check reads as not-started rather than silently green.
+GQL='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}'
+owner=$(echo "<pr-url>" | cut -d/ -f4)
+repo=$(echo "<pr-url>"  | cut -d/ -f5)
+num=$(echo "<pr-url>"   | cut -d/ -f7)
+until gh api graphql -f query="$GQL" -f owner="$owner" -f repo="$repo" \
+  -F number="$num" \
+  --jq '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state // ""' \
+  2>/dev/null | grep -q .; do sleep 10; done
 ```
 
 Run this in the foreground and block on it yourself — never background it (`&`,
