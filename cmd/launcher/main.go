@@ -671,7 +671,9 @@ var (
 // parseBlockerRefs extracts all blocker issue numbers referenced in a body.
 // Recognises two formats:
 //   - Inline: "depends on #N" or "blocked by #N" anywhere in the body.
-//     All issue refs after the keyword (to end of line) are captured.
+//     Refs in the contiguous list after the keyword are captured;
+//     the list ends at the first prose token (e.g. a period or a
+//     non-"and" word) to prevent false blockers from "see also #N".
 //   - Section: a "## Blocked by" header followed by "- #N" list items.
 //     All issue refs in each list item are captured.
 //
