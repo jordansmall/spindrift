@@ -944,19 +944,20 @@ func runWithRetry(c config, pwd string, r runner.Runner, iss issue) bool {
 	}
 }
 
-// fanOut dispatches a batch of issues in parallel (up to maxParallel at once),
-// claiming the in-progress label before each goroutine launches.
+// fanOut dispatches a batch of issues in parallel (up to maxParallel at once).
+// Each goroutine claims its issue only after acquiring a semaphore slot so that
+// at most maxParallel issues are ever in the in-progress state simultaneously.
 func fanOut(c config, fc forge.Client, pwd string, r runner.Runner, batch []issue) {
 	sem := make(chan struct{}, c.maxParallel)
 	var wg sync.WaitGroup
 	for _, iss := range batch {
-		claimIssue(c, fc, iss.number)
 		wg.Add(1)
 		iss := iss
 		go func() {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			claimIssue(c, fc, iss.number)
 			if ok := runWithRetry(c, pwd, r, iss); !ok {
 				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.number, iss.number)
 				swapLabel(fc, iss.number, c.failedLabel, c.inProgressLabel)
