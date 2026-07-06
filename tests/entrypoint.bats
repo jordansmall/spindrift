@@ -421,6 +421,14 @@ SKILL
   # main: it should have both the prior branch work and the main advance.
   [ -f "$WORK_DIR/branch.txt" ]
   [ -f "$WORK_DIR/main_advance.txt" ]
+
+  # The rebased branch must have been force-pushed so the agent's first
+  # incremental push is a fast-forward, not a non-fast-forward rejection.
+  echo "agent work" > "$WORK_DIR/agent.txt"
+  git -C "$WORK_DIR" add agent.txt
+  git -C "$WORK_DIR" commit -q -m "feat: agent work on rebased branch"
+  run git -C "$WORK_DIR" push origin "agent/issue-7"
+  [ "$status" -eq 0 ]
 }
 
 @test "entrypoint fails fast when pre-work rebase conflicts with latest main" {

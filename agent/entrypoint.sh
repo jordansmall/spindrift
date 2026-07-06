@@ -49,6 +49,7 @@ git fetch origin
 # its first incremental push is never rejected non-fast-forward.  When an
 # open PR exists, check out the prior work so the pre-work rebase can replay
 # it onto current origin/BASE_BRANCH before the agent begins.
+_rebase_and_publish=""
 if git rev-parse --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
   # Fail hard on gh errors: a silent empty response (network/auth failure)
   # is indistinguishable from "no PR" and must not trigger the force-reset.
@@ -59,6 +60,9 @@ if git rev-parse --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
   if [ -n "$open_prs" ]; then
     echo "==> open PR exists on $BRANCH; skipping force-reset — checking out prior work for pre-work rebase"
     git checkout -b "$BRANCH" "origin/$BRANCH"
+    # Mark that the rebased branch must be published after the rebase so the
+    # agent's first incremental push is a fast-forward, not a rejection.
+    _rebase_and_publish=1
   else
     echo "==> stale remote branch $BRANCH found (no open PR); force-resetting to ${BASE_BRANCH:-}"
     git checkout -b "$BRANCH" "origin/${BASE_BRANCH:-}"
@@ -82,6 +86,16 @@ git rebase "origin/${BASE_BRANCH:-}" || {
   git rebase --abort 2>/dev/null || true
   exit 1
 }
+# Publish the rebased branch so the agent's first incremental push is a
+# fast-forward.  Only needed in the adoption path where the rebase rewrote
+# history that was already on the remote.
+if [ -n "${_rebase_and_publish:-}" ]; then
+  echo "==> publishing rebased $BRANCH"
+  git push --force-with-lease origin "$BRANCH" || {
+    echo "==> force-with-lease push after pre-work rebase failed on $BRANCH"
+    exit 1
+  }
+fi
 
 # Detect a Nix devShell in the cloned repo. When found the prompt guides the
 # agent to run checks inside `nix develop`; absence or probe failure degrades
