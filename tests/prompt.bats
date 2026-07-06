@@ -56,8 +56,10 @@ setup() {
 @test "WATCH CI section uses GraphQL statusCheckRollup not gh pr checks" {
   # gh pr checks uses the check-runs REST endpoint which 403s under
   # fine-grained PATs; the prompt must use statusCheckRollup (GraphQL).
-  : "${PROMPTS_DIR:?PROMPTS_DIR must be set}"
-  local prompt="$PROMPTS_DIR/issue-prompt.md"
+  # PROMPTS_DIR is exported by the nix check derivation; fall back to the
+  # source tree when running bats locally outside the nix harness.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
   ! grep -q 'until gh pr checks' "$prompt"
   grep -q 'statusCheckRollup' "$prompt"
   grep -qi 'fine-grained' "$prompt"
