@@ -26,6 +26,7 @@ in
         # nix-rendered preamble), so they are shellcheck'd by
         # writeShellApplication at build time, not standalone here.
         shellcheck --shell=bash \
+          ${../dogfood.sh} \
           ${../agent/entrypoint.sh} \
           ${../agent/format-transcript.sh} \
           ${../tests/fakes/runtime} \
