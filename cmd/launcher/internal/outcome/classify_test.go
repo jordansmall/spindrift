@@ -127,6 +127,16 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// Claude Code session-limit with a resetsAt field — ResetAt must propagate.
+		name: "RateLimit_SessionLimit_WithResetsAt",
+		lines: []string{
+			`{"type":"error","error":{"type":"usage_limit_reached","message":"Claude Code usage limit reached"},"resetsAt":1783192800}`,
+		},
+		wantClass:   outcome.Transient,
+		wantReason:  outcome.RateLimit,
+		wantResetAt: func() *time.Time { t := time.Unix(1783192800, 0).UTC(); return &t }(),
+	},
+	{
 		// Claude Code session-limit: plain-text fallback message.
 		name: "RateLimit_SessionLimit_PlainText",
 		lines: []string{
