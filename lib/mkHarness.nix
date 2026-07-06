@@ -423,7 +423,16 @@ let
   '';
 
   # The Go launcher binary, built hermetically by buildGoModule.
-  # No external dependencies → vendorHash = null.
+  #
+  # vendorHash policy:
+  #   null  — stdlib-only; no go.sum / vendor dir required. Keep null as long
+  #           as cmd/launcher/go.mod has no external dependencies.
+  #   "<hash>" — when the first external dep is added, run:
+  #               nix build --impure --expr \
+  #                 '(import <nixpkgs> {}).buildGoModule { pname="x"; version="0"; \
+  #                  src = ./cmd/launcher; vendorHash = pkgs.lib.fakeHash; }'
+  #             and replace pkgs.lib.fakeHash with the hash Nix reports in the
+  #             error output. Commit go.sum and the updated vendorHash together.
   launcherBin = hostPkgs.buildGoModule {
     pname = "spindrift-launcher";
     version = "0.1.0";
