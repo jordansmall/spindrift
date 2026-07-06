@@ -582,7 +582,9 @@ EOF
   # FAKE_GH_PR_DRAFT_1 not set → defaults to "false" (non-draft)
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   run "$RUN_CMD"
-  [ "$status" -eq 0 ]
+  # reconcileStranded adopts and merges the PR; discoverIssues then finds no
+  # ready-for-agent issues → launcher exits 2 (queue empty).
+  [ "$status" -eq 2 ]
   grep -q 'pr merge' "$GH_LOG"
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
   [[ "$output" == *"status=adopted"* ]]
