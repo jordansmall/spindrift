@@ -83,6 +83,25 @@ setup() {
   grep -q -- "--verbose" "$CLAUDE_LOG"
 }
 
+# In-box heartbeat view (#183): the entrypoint pipes claude's output through
+# spindrift-heartbeat-filter so a human can `tail -f /tmp/heartbeat.log` inside
+# the box and see coarse status lines instead of raw NDJSON. Raw stream-json
+# still reaches stdout unchanged for the launcher's byte-exact capture.
+
+@test "entrypoint writes coarse heartbeat log at /tmp/heartbeat.log" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -f /tmp/heartbeat.log ]
+}
+
+@test "heartbeat log contains status lines, not raw NDJSON" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # Heartbeat lines look like "#7 · …", not raw JSON objects.
+  grep -q '^#' /tmp/heartbeat.log
+  ! grep -q '"type":' /tmp/heartbeat.log
+}
+
 # Regression (#123): logs/issue-<n>.log is the sole input to outcome.Classify
 # (transient-vs-terminal retry) and outcome.LastInLog. #123 routed the console
 # through a lossy formatter that collapsed each event to a summary, stripping the

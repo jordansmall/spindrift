@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Fake spindrift-heartbeat-filter for bats tests.
+# Passes stdin through to stdout unchanged (preserving the raw capture channel)
+# and writes a synthetic heartbeat line to the file given by -f, proving the
+# entrypoint wires the filter into the claude pipeline.
+set -euo pipefail
+
+heartbeat_file="/tmp/heartbeat.log"
+issue="${ISSUE_NUMBER:-0}"
+
+while getopts "f:n:" opt; do
+  case "$opt" in
+    f) heartbeat_file="$OPTARG" ;;
+    n) issue="$OPTARG" ;;
+    *) ;;
+  esac
+done
+
+cat
+printf '#%s · fake heartbeat\n' "$issue" >> "$heartbeat_file"
