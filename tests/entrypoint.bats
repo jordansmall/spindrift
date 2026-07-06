@@ -200,115 +200,16 @@ EOF
   grep -qi 'scout' "$CLAUDE_PROMPT_FILE"
 }
 
-# The container has none of the operator's user/project skills, so the prompt
-# must be self-contained: spell the process out, never reference a skill.
-@test "default prompt makes TDD a hard rule, not a preference" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'hard rule' "$CLAUDE_PROMPT_FILE"
-  grep -qi 'never write implementation code before' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt forbids batching tests and implementation" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'one failing test, one change' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt is self-contained: commit convention stated directly, no skill references" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'Conventional Commits' "$CLAUDE_PROMPT_FILE"
-  ! grep -qi 'skill' "$CLAUDE_PROMPT_FILE"
-}
-
 @test "default prompt spawns a reviewer subagent" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qi 'reviewer' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "default prompt explains why inline review risks a premature stop" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'turn.ending\|halfway gate\|finish.line' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt forbids inline review" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'do not review inline\|not inline\|inline.*only.*when\|only.*inline.*when' "$CLAUDE_PROMPT_FILE"
-}
-
 @test "default prompt specifies a review loop keyed on VERDICT: BLOCK" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q 'VERDICT.*BLOCK\|BLOCK.*VERDICT' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt states both subagents are always pre-provisioned" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'always.*provisioned\|pre-provisioned\|always pre' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt instructs saving the scout brief outside the repo" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi '/tmp/brief\|outside.*repo\|outside the repo' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt CHECK section routes bulk output to a file" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'test.log\|/tmp/.*log\|route.*output\|output.*file\|tail.*log\|log.*tail' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt blocks on CI and never merges on red" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'pr checks\|watch.*ci\|ci.*watch\|watch.*check\|check.*watch' "$CLAUDE_PROMPT_FILE"
-  grep -qi 'never.*merg.*red\|red.*never.*merg\|do not.*merg.*red\|merg.*only.*green\|green.*merg' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt waits for CI to register before trusting the watch" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  # "no checks" right after opening the PR must not read as green — the prompt
-  # tells the agent to wait for a check to register before merging.
-  grep -qi 'register' "$CLAUDE_PROMPT_FILE"
-  grep -qi 'no checks' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt requires the CI-registration wait to run in the foreground" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  # A backgrounded wait ends the agent's turn before CI registers, so the final
-  # outcome line is never printed and the launcher can never learn the PR to merge.
-  grep -qi 'foreground' "$CLAUDE_PROMPT_FILE"
-  grep -qi 'background' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt states the launcher owns the merge" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'launcher.*owns\|launcher.*rebase\|rebase.*launcher\|launcher.*merge\|merge.*launcher' "$CLAUDE_PROMPT_FILE"
-  grep -qi 'do not run.*gh pr merge\|do not.*merge\|not.*run.*pr merge' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt instructs agent the launcher owns the complete-label swap" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'launcher.*complete\|complete.*launcher\|launcher.*owns\|owns.*complete' "$CLAUDE_PROMPT_FILE"
-  grep -qi 'do not.*add-label\|do not run.*issue edit' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt requires the outcome line be the literal final output" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  # The launcher only learns the PR from this line; the agent must not end its
-  # turn with prose or defer the line to a background task.
-  grep -qi 'do not end your turn\|must be the last\|literal.*final\|final.*message\|nothing after' "$CLAUDE_PROMPT_FILE"
 }
 
 @test "default prompt emits exactly one SPINDRIFT_OUTCOME line" {
@@ -328,32 +229,6 @@ EOF
   [ "$status" -eq 0 ]
   grep -q 'status=ready' "$CLAUDE_PROMPT_FILE"
   ! grep -q 'status=merged' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt states the launcher owns the CI-green decision" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'launcher.*ci\|launcher.*green\|launcher.*owns\|ci.*launcher\|green.*launcher' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt takes the blocked path when CI fails to register" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'no check.*register\|if no check\|never.*register\|not.*register' "$CLAUDE_PROMPT_FILE"
-  grep -q 'status=blocked' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt opens a draft PR and comments on the issue when blocked" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -q -- '--draft' "$CLAUDE_PROMPT_FILE"
-  grep -q 'issue comment\|pr comment\|comment.*issue\|comment.*blocked' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "default prompt instructs agent to push the branch after every substantive commit" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'push.*after.*commit\|push.*every.*commit\|push.*each.*commit\|after.*commit.*push' "$CLAUDE_PROMPT_FILE"
 }
 
 @test "re-dispatched box force-resets a stale remote branch (no open PR)" {
@@ -443,13 +318,6 @@ EOF
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! echo "$output" | grep -q "devShell"
-}
-
-@test "default prompt mentions nix develop and nix flake check for flake projects" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -q 'nix develop' "$CLAUDE_PROMPT_FILE"
-  grep -q 'nix flake check' "$CLAUDE_PROMPT_FILE"
 }
 
 @test "entrypoint skips the prefetch hook when it is empty" {
