@@ -1339,6 +1339,12 @@ func run() error {
 }
 
 func main() {
+	for _, a := range os.Args[1:] {
+		if a == "--help" || a == "-h" {
+			printHelp(os.Stdout)
+			os.Exit(0)
+		}
+	}
 	args, err := parseFlags(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
