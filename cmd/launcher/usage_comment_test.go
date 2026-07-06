@@ -48,7 +48,7 @@ func TestPrintOutcomeReport_PostsUsageComment_Blocked(t *testing.T) {
 	fr := runner.NewFake()
 	c := baseConfig()
 
-	printOutcomeReport(c, fc, dir, fr, []issue{{number: issNum, title: "test issue"}})
+	gateIssue(c, fc, dir, fr, issue{number: issNum, title: "test issue"})
 
 	if len(fc.CommentCalls) != 1 {
 		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
@@ -84,7 +84,7 @@ func TestPrintOutcomeReport_UsageMissing_NoCrash(t *testing.T) {
 	c := baseConfig()
 
 	// Must not panic or error.
-	printOutcomeReport(c, fc, dir, fr, []issue{{number: issNum, title: "test issue"}})
+	gateIssue(c, fc, dir, fr, issue{number: issNum, title: "test issue"})
 
 	if len(fc.CommentCalls) != 1 {
 		t.Fatalf("want 1 comment posted even without usage data, got %d", len(fc.CommentCalls))
@@ -122,7 +122,7 @@ func TestPrintOutcomeReport_PostsUsageComment_WithBreakdown(t *testing.T) {
 	fr := runner.NewFake()
 	c := baseConfig()
 
-	printOutcomeReport(c, fc, dir, fr, []issue{{number: issNum, title: "test issue"}})
+	gateIssue(c, fc, dir, fr, issue{number: issNum, title: "test issue"})
 
 	if len(fc.CommentCalls) != 1 {
 		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
