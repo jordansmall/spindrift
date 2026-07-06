@@ -19,6 +19,7 @@ import (
 	"spindrift.dev/launcher/internal/heartbeat"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 type config struct {
@@ -438,6 +439,49 @@ func adoptAndGate(c config, fc forge.Client, iss issue, prURL string, runFixFn f
 	}
 }
 
+// postUsageComment posts an aggregate usage-statistics comment to the issue.
+// If no result event is found in the log the comment notes that usage is
+// unavailable. Errors posting the comment are logged but do not abort the
+// caller.
+func postUsageComment(fc forge.Client, issNum, logPath string) {
+	model := os.Getenv("MODEL")
+	if model == "" {
+		model = "unknown"
+	}
+	u, found, err := usage.LastInLog(logPath)
+	var body string
+	if err != nil || !found {
+		body = fmt.Sprintf("## Run usage\n\nModel: `%s`\n\nUsage data unavailable (no result event in log).", model)
+	} else {
+		body = fmt.Sprintf(
+			"## Run usage\n\n"+
+				"| Field | Value |\n"+
+				"| --- | --- |\n"+
+				"| Model | `%s` |\n"+
+				"| Cost | $%.4f |\n"+
+				"| Input tokens | %d |\n"+
+				"| Output tokens | %d |\n"+
+				"| Cache read tokens | %d |\n"+
+				"| Cache creation tokens | %d |\n"+
+				"| Wall time | %dms |\n"+
+				"| API time | %dms |\n"+
+				"| Turns | %d |",
+			model,
+			u.TotalCostUSD,
+			u.InputTokens,
+			u.OutputTokens,
+			u.CacheReadInputTokens,
+			u.CacheCreationInputTokens,
+			u.DurationMs,
+			u.DurationApiMs,
+			u.NumTurns,
+		)
+	}
+	if commentErr := fc.Comment(issNum, body); commentErr != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: post usage comment: %v\n", issNum, commentErr)
+	}
+}
+
 func printOutcomeReport(c config, fc forge.Client, pwd string, r runner.Runner, issues []issue) {
 	fmt.Println("==> outcome report")
 	for _, iss := range issues {
@@ -476,6 +520,7 @@ func printOutcomeReport(c config, fc forge.Client, pwd string, r runner.Runner, 
 		switch o.Status {
 		case "blocked":
 			fmt.Printf("    #%s  pr=%s  status=%s  !! %s\n", iss.number, o.PR, o.Status, o.Note)
+			postUsageComment(fc, iss.number, logPath)
 		case "ready":
 			// Agent pushed a PR but left CI to the launcher — poll, self-heal, and merge.
 			fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
@@ -484,11 +529,14 @@ func printOutcomeReport(c config, fc forge.Client, pwd string, r runner.Runner, 
 			} else {
 				fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, o.PR)
 			}
+			postUsageComment(fc, iss.number, logPath)
 		case "merged":
 			// Agent already merged (legacy path) — verify the GitHub state.
 			verifyMerged(c, fc, iss.number, o.PR)
+			postUsageComment(fc, iss.number, logPath)
 		default:
 			fmt.Printf("    #%s  pr=%s  status=%s\n", iss.number, o.PR, o.Status)
+			postUsageComment(fc, iss.number, logPath)
 		}
 	}
 }
