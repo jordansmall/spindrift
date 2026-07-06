@@ -249,9 +249,20 @@ EOF
   repo)
     case "${2:-}" in
       clone)
-        # Minimal stub: record the call and succeed. The real Rebase creates
-        # a tmpdir before calling gh repo clone, so the dir exists already;
-        # subsequent git calls use the fake git binary.
+        # ${3:-} = owner/repo slug, ${4:-} = target directory.
+        # When FAKE_GH_REPO_CLONE_GIT=1, use real git so the insteadOf URL
+        # rewrite (set up by setup_bare_repo) redirects https://github.com/…
+        # to a local bare repo; subsequent git operations work against that
+        # local clone. Without the flag, the call is a no-op and the target
+        # dir stays empty so downstream git operations fail (simulates a
+        # network-unreachable or conflicted-and-unrebasable scenario).
+        repo_slug="${3:-}"
+        target_dir="${4:-}"
+        if [ -n "${FAKE_GH_REPO_CLONE_GIT:-}" ] && \
+           [ -n "$repo_slug" ] && [ -n "$target_dir" ]; then
+          git clone --no-single-branch \
+            "https://github.com/${repo_slug}.git" "$target_dir"
+        fi
         ;;
     esac
     ;;

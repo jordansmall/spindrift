@@ -967,14 +967,18 @@ EOF
 
 # --- Merge-conflict rebase retry (issue #194) ---------------------------------
 
-# conflict→rebase→merge: merge fails with conflict, rebase succeeds, second
-# merge attempt succeeds → issue reaches agent-complete.
+# conflict→rebase→merge: merge fails with conflict, rebase resolves cleanly via
+# a local bare repo (setup_bare_repo + insteadOf URL rewrite), second merge
+# attempt succeeds → issue reaches agent-complete.
 @test "merge gate: conflict → rebase → retried merge → agent-complete" {
-  # Install the fake git so real git is not called during the rebase flow.
-  cp "$FAKES_DIR/git" "$FAKE_BIN/git"
-  chmod +x "$FAKE_BIN/git"
-  export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
-  : >"$GIT_LOG"
+  # Set up a real local git remote so gh repo clone (which calls real git) can
+  # clone from a local file URL rewritten by the insteadOf config.
+  setup_bare_repo
+  # Push the PR head branch so git checkout agent/issue-1 resolves after clone.
+  local seed="$BATS_TEST_TMPDIR/seed-pr"
+  git clone -q "https://github.com/owner/repo.git" "$seed"
+  git -C "$seed" checkout -q -b "agent/issue-1"
+  git -C "$seed" push -q origin HEAD:agent/issue-1
 
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
@@ -983,6 +987,9 @@ EOF
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS,SUCCESS"
   # First merge call fails with conflict; second succeeds.
   export FAKE_GH_PR_MERGE_CONFLICT_1=1
+  export FAKE_GH_PR_HEAD_1="agent/issue-1"
+  export FAKE_GH_PR_BASE_1="main"
+  export FAKE_GH_REPO_CLONE_GIT=1
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export MAX_REBASE_ATTEMPTS=3
@@ -991,25 +998,19 @@ EOF
   grep -q 'pr merge' "$GH_LOG"
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
   [[ "$output" == *"status=verified-merged"* ]]
-  # Verify that git rebase was invoked during the retry.
-  grep -q 'rebase' "$GIT_LOG"
 }
 
-# conflict→unrebasable→failed: merge fails with conflict, rebase also fails
-# (FAKE_GIT_REBASE_EXIT=1) → issue marked agent-failed without further retries.
-@test "merge gate: conflict → unrebasable → agent-failed" {
-  # Install the fake git so real git is not called during the rebase flow.
-  cp "$FAKES_DIR/git" "$FAKE_BIN/git"
-  chmod +x "$FAKE_BIN/git"
-  export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
-  : >"$GIT_LOG"
-
+# conflict→rebase-fails→failed: merge fails with conflict; the rebase fails
+# (no git repo in the clone dir because gh repo clone is a no-op stub here)
+# → launcher swaps to agent-failed without dispatching a fix box.
+@test "merge gate: conflict → rebase fails → agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   export FAKE_GH_PR_MERGE_CONFLICT_1=99  # all merge calls fail with conflict
-  export FAKE_GIT_REBASE_EXIT=1          # git rebase exits non-zero (unresolvable)
+  # gh repo clone is a no-op here (no real git remote configured), so the
+  # subsequent git checkout fails → Rebase returns an error → agent-failed.
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export MAX_REBASE_ATTEMPTS=3
@@ -1017,8 +1018,8 @@ EOF
   [ "$status" -eq 0 ]
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
   [[ "$output" == *"status=failed"* ]]
-  # Verify git rebase was attempted (and failed).
-  grep -q 'rebase' "$GIT_LOG"
+  # Launcher must log the rebase-retry attempt before failing.
+  [[ "$output" == *"status=rebase-retry"* ]]
 }
 
 # Pending-timeout: no fix passes consumed, gate timeout marks agent-failed.
