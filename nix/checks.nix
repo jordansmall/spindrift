@@ -499,7 +499,7 @@ in
       );
       secretRows = concatStrings (
         mapAttrsToList (_: e:
-          "\t{env: \"${e.env}\", doc: \"${e.doc}\"},\n"
+          "\t{env: \"${e.env}\", doc: \"${e.doc}\", fileFlag: \"${toKebab e.env}-file\"},\n"
         ) secretSchema
       );
       generated = pkgs.writeText "flagtable_gen.go.generated" (
@@ -514,7 +514,7 @@ in
         + "}\n"
         + "\n"
         + "// secretKnobs lists secret knobs that have no value flag.\n"
-        + "// Callers must supply these via the environment; they are shown in --help as env-only.\n"
+        + "// Callers must supply these via the environment or via --<fileFlag> path flag.\n"
         + "var secretKnobs = []secretKnob{\n"
         + secretRows
         + "}\n"

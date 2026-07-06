@@ -40,9 +40,9 @@ var schemaFlags = []flagEntry{
 }
 
 // secretKnobs lists secret knobs that have no value flag.
-// Callers must supply these via the environment; they are shown in --help as env-only.
+// Callers must supply these via the environment or via --<fileFlag> path flag.
 var secretKnobs = []secretKnob{
-	{env: "ANTHROPIC_API_KEY", doc: "Anthropic API key; set this or CLAUDE_CODE_OAUTH_TOKEN"},
-	{env: "CLAUDE_CODE_OAUTH_TOKEN", doc: "Claude Code OAuth token (run 'claude setup-token'); set this or ANTHROPIC_API_KEY"},
-	{env: "GH_TOKEN", doc: "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW"},
+	{env: "ANTHROPIC_API_KEY", doc: "Anthropic API key; set this or CLAUDE_CODE_OAUTH_TOKEN", fileFlag: "anthropic-api-key-file"},
+	{env: "CLAUDE_CODE_OAUTH_TOKEN", doc: "Claude Code OAuth token (run 'claude setup-token'); set this or ANTHROPIC_API_KEY", fileFlag: "claude-code-oauth-token-file"},
+	{env: "GH_TOKEN", doc: "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW", fileFlag: "gh-token-file"},
 }
