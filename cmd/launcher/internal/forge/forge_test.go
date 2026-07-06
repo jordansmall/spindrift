@@ -60,6 +60,28 @@ func TestFake_SwapLabel(t *testing.T) {
 	}
 }
 
+// TestFake_Comment verifies that Comment records calls in order.
+func TestFake_Comment(t *testing.T) {
+	f := forge.NewFake()
+
+	if err := f.Comment("42", "first comment"); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+	if err := f.Comment("42", "second comment"); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+
+	if len(f.CommentCalls) != 2 {
+		t.Fatalf("want 2 CommentCalls, got %d", len(f.CommentCalls))
+	}
+	if f.CommentCalls[0].Num != "42" || f.CommentCalls[0].Body != "first comment" {
+		t.Errorf("CommentCalls[0]: got %+v", f.CommentCalls[0])
+	}
+	if f.CommentCalls[1].Body != "second comment" {
+		t.Errorf("CommentCalls[1]: got %+v", f.CommentCalls[1])
+	}
+}
+
 // TestFake_OpenPRForBranch verifies the branch→PR lookup.
 func TestFake_OpenPRForBranch(t *testing.T) {
 	f := forge.NewFake()

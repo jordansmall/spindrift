@@ -12,6 +12,11 @@ type SwapCall struct {
 	Num, Add, Remove string
 }
 
+// CommentCall records a single Comment invocation.
+type CommentCall struct {
+	Num, Body string
+}
+
 // Fake is an in-memory Client for unit tests. All methods are safe for
 // concurrent use. CheckState pops from a scripted RollupState queue so polling
 // tests need no real sleeps.
@@ -30,6 +35,8 @@ type Fake struct {
 	Merged string
 	// SwapCalls records all SwapLabel invocations in order.
 	SwapCalls []SwapCall
+	// CommentCalls records all Comment invocations in order.
+	CommentCalls []CommentCall
 }
 
 // NewFake returns an empty Fake client.
@@ -127,6 +134,13 @@ func (f *Fake) SwapLabel(num, add, remove string) error {
 	next = append(next, add)
 	iss.Labels = next
 	f.issues[num] = iss
+	return nil
+}
+
+func (f *Fake) Comment(num, body string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.CommentCalls = append(f.CommentCalls, CommentCall{num, body})
 	return nil
 }
 

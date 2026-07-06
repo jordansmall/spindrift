@@ -102,6 +102,17 @@ func (e *execClient) SwapLabel(num, add, remove string) error {
 	return nil
 }
 
+func (e *execClient) Comment(num, body string) error {
+	cmd := exec.Command("gh", "issue", "comment", num,
+		"--repo", e.repo,
+		"--body", body,
+	)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("gh issue comment %s: %w", num, err)
+	}
+	return nil
+}
+
 func (e *execClient) OpenPRForBranch(branch string) (PR, bool, error) {
 	cmd := exec.Command("gh", "pr", "list",
 		"--repo", e.repo,
