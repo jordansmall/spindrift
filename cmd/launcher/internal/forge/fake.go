@@ -24,10 +24,17 @@ type Fake struct {
 	prStates  map[string]string // URL → OPEN/MERGED/CLOSED
 	checkQ    map[string][]RollupState
 
-	// MergeErr, if non-nil, is returned by every Merge call.
+	// MergeErr, if non-nil, is returned by every Merge call (after MergeErrs is drained).
 	MergeErr error
+	// MergeErrs is a per-call queue drained before MergeErr is checked.
+	// A nil entry means success; a non-nil entry is returned as the error.
+	MergeErrs []error
 	// Merged is set to the URL of the last successful Merge call.
 	Merged string
+	// RebaseErr, if non-nil, is returned by every Rebase call.
+	RebaseErr error
+	// RebasedURLs records all URLs passed to Rebase in order.
+	RebasedURLs []string
 	// SwapCalls records all SwapLabel invocations in order.
 	SwapCalls []SwapCall
 }
@@ -171,10 +178,27 @@ func (f *Fake) CheckState(url string) (RollupState, error) {
 func (f *Fake) Merge(url string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if len(f.MergeErrs) > 0 {
+		err := f.MergeErrs[0]
+		f.MergeErrs = f.MergeErrs[1:]
+		if err != nil {
+			return err
+		}
+		f.Merged = url
+		f.prStates[url] = "MERGED"
+		return nil
+	}
 	if f.MergeErr != nil {
 		return f.MergeErr
 	}
 	f.Merged = url
 	f.prStates[url] = "MERGED"
 	return nil
+}
+
+func (f *Fake) Rebase(url string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.RebasedURLs = append(f.RebasedURLs, url)
+	return f.RebaseErr
 }
