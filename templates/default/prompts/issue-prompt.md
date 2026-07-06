@@ -67,8 +67,8 @@ Push after every substantive commit (a dying box then loses minutes, not the
 whole run):
 
 ```
-git push -u origin ${BRANCH}   # first push
-git push                        # subsequent
+git push --force-with-lease -u origin ${BRANCH}   # first push
+git push --force-with-lease                        # subsequent
 ```
 
 # REVIEW
@@ -90,7 +90,7 @@ the PR body.
 
 # OPEN A PULL REQUEST
 
-1. `git push -u origin ${BRANCH}`
+1. `git push --force-with-lease -u origin ${BRANCH}`
 2. `gh pr create --base ${BASE_BRANCH} --head ${BRANCH} --title "<conventional title>" --body "<summary>"`
 3. Body MUST contain `Closes #${ISSUE_NUMBER}`. Summarize what changed and flag
    anything a reviewer should know.
