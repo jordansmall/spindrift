@@ -519,63 +519,69 @@ func breakdownSection(logPath string) string {
 	return sb.String()
 }
 
-func printOutcomeReport(c config, fc forge.Client, pwd string, r runner.Runner, issues []issue) {
-	fmt.Println("==> outcome report")
-	for _, iss := range issues {
-		logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
-		o, found, err := outcome.LastInLog(logPath)
-		if err != nil {
-			fmt.Printf("    #%s  status=missing  note=no outcome in log\n", iss.number)
-			continue
-		}
-		if !found {
-			branch := c.branchPrefix + iss.number
-			pr, isDraft, prFound, prErr := openPRForBranch(fc, branch)
-			if prErr != nil || !prFound {
-				cls, clsErr := outcome.Classify(logPath)
-				clsNote := ""
-				if clsErr != nil {
-					fmt.Fprintf(os.Stderr, "    ?? #%s: classify: %v\n", iss.number, clsErr)
-				} else {
-					clsNote = fmt.Sprintf("  class=%s  reason=%s", cls.Class, cls.Reason)
-					if cls.ResetAt != nil {
-						clsNote += "  resetsAt=" + cls.ResetAt.UTC().Format(time.RFC3339)
-					}
-				}
-				fmt.Printf("    #%s  status=missing%s  note=no outcome in log\n", iss.number, clsNote)
-				continue
-			}
-			if isDraft {
-				fmt.Printf("    #%s  pr=%s  status=blocked  note=draft PR on %s; no outcome line\n", iss.number, pr, branch)
-				continue
-			}
-			fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
-			adoptAndGate(c, fc, iss, pr, fixFn)
-			continue
-		}
-
-		switch o.Status {
-		case "blocked":
-			fmt.Printf("    #%s  pr=%s  status=%s  !! %s\n", iss.number, o.PR, o.Status, o.Note)
-			postUsageComment(fc, iss.number, logPath)
-		case "ready":
-			// Agent pushed a PR but left CI to the launcher — poll, self-heal, and merge.
-			fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
-			if selfHeal(c, fc, fixFn, iss.number, o.PR) {
-				verifyMerged(c, fc, iss.number, o.PR)
-			} else {
-				fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, o.PR)
-			}
-			postUsageComment(fc, iss.number, logPath)
-		case "merged":
-			// Agent already merged (legacy path) — verify the GitHub state.
-			verifyMerged(c, fc, iss.number, o.PR)
-			postUsageComment(fc, iss.number, logPath)
-		default:
-			fmt.Printf("    #%s  pr=%s  status=%s\n", iss.number, o.PR, o.Status)
-			postUsageComment(fc, iss.number, logPath)
-		}
+// gateIssue runs the merge gate for a single issue immediately after its box
+// exits. It reads the outcome log, drives selfHeal or adoptAndGate as needed,
+// and posts the usage comment. Called from fanOut goroutines so each issue
+// reaches completeLabel or failedLabel independently of its wave siblings.
+func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue) {
+	logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
+	o, found, err := outcome.LastInLog(logPath)
+	if err != nil {
+		fmt.Printf("    #%s  status=missing  note=no outcome in log\n", iss.number)
+		return
 	}
+	if !found {
+		branch := c.branchPrefix + iss.number
+		pr, isDraft, prFound, prErr := openPRForBranch(fc, branch)
+		if prErr != nil || !prFound {
+			cls, clsErr := outcome.Classify(logPath)
+			clsNote := ""
+			if clsErr != nil {
+				fmt.Fprintf(os.Stderr, "    ?? #%s: classify: %v\n", iss.number, clsErr)
+			} else {
+				clsNote = fmt.Sprintf("  class=%s  reason=%s", cls.Class, cls.Reason)
+				if cls.ResetAt != nil {
+					clsNote += "  resetsAt=" + cls.ResetAt.UTC().Format(time.RFC3339)
+				}
+			}
+			fmt.Printf("    #%s  status=missing%s  note=no outcome in log\n", iss.number, clsNote)
+			return
+		}
+		if isDraft {
+			fmt.Printf("    #%s  pr=%s  status=blocked  note=draft PR on %s; no outcome line\n", iss.number, pr, branch)
+			return
+		}
+		fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
+		adoptAndGate(c, fc, iss, pr, fixFn)
+		return
+	}
+
+	switch o.Status {
+	case "blocked":
+		fmt.Printf("    #%s  pr=%s  status=%s  !! %s\n", iss.number, o.PR, o.Status, o.Note)
+		postUsageComment(fc, iss.number, logPath)
+	case "ready":
+		fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
+		if selfHeal(c, fc, fixFn, iss.number, o.PR) {
+			verifyMerged(c, fc, iss.number, o.PR)
+		} else {
+			fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, o.PR)
+		}
+		postUsageComment(fc, iss.number, logPath)
+	case "merged":
+		verifyMerged(c, fc, iss.number, o.PR)
+		postUsageComment(fc, iss.number, logPath)
+	default:
+		fmt.Printf("    #%s  pr=%s  status=%s\n", iss.number, o.PR, o.Status)
+		postUsageComment(fc, iss.number, logPath)
+	}
+}
+
+// printOutcomeReport prints the outcome-report header. Per-issue gating now
+// runs inside fanOut goroutines via gateIssue, so each issue reaches its
+// terminal label independently before this point.
+func printOutcomeReport(_ config, _ forge.Client, _ string, _ runner.Runner, _ []issue) {
+	fmt.Println("==> outcome report")
 }
 
 // openPRForBranch wraps fc.OpenPRForBranch to unpack the PR struct for callers
@@ -1048,6 +1054,7 @@ func fanOut(c config, fc forge.Client, pwd string, r runner.Runner, batch []issu
 				swapLabel(fc, iss.number, c.failedLabel, c.inProgressLabel)
 			} else {
 				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.number, iss.number)
+				gateIssue(c, fc, pwd, r, iss)
 			}
 		}()
 	}

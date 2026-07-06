@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -97,5 +98,41 @@ func TestFanOut_ClaimsGatedByMaxParallel(t *testing.T) {
 	// Both issues must have been claimed by the end.
 	if got = atomic.LoadInt32(&count); got != 2 {
 		t.Errorf("total claims after fanOut: got %d, want 2", got)
+	}
+}
+
+// TestFanOut_GatesEachIssueAfterBoxCompletes verifies that the merge gate runs
+// inside each goroutine immediately after its box exits. An issue with a "ready"
+// outcome and green CI must reach completeLabel before fanOut returns, without
+// waiting for sibling boxes to finish.
+func TestFanOut_GatesEachIssueAfterBoxCompletes(t *testing.T) {
+	const prURL = "https://github.com/owner/repo/pull/10"
+
+	c := baseConfig()
+	c.maxParallel = 2
+	c.branchPrefix = "agent/issue-"
+	c.mergePollInterval = 0
+	c.mergePollTimeout = 100
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess})
+
+	// The fake runner writes the outcome line into the log file (via box.Output)
+	// before returning, simulating a box that ran successfully and emitted its result.
+	fr := runner.NewFake()
+	fr.WriteToOutput = []byte(fmt.Sprintf(
+		"SPINDRIFT_OUTCOME issue=1 pr=%s status=ready note=ok\n", prURL,
+	))
+
+	dir := tempLogDir(t)
+	fanOut(c, fc, dir, fr, []issue{{number: "1", title: "first"}})
+
+	iss, err := fc.Issue("1")
+	if err != nil {
+		t.Fatalf("Issue(%q): %v", "1", err)
+	}
+	if !containsLabel(iss.Labels, c.completeLabel) {
+		t.Errorf("issue 1 must have %q after fanOut; got labels=%v", c.completeLabel, iss.Labels)
 	}
 }
