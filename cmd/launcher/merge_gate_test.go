@@ -28,6 +28,7 @@ func TestMergeWhenGreen(t *testing.T) {
 		timeout                   int
 		maxRebaseAttempts         int // 0 → use baseConfig default (3)
 		checkStates               []forge.RollupState
+		checkStateErrs            []error // per-call error queue; nil entry = use state queue
 		mergeErr                  error
 		mergeErrs                 []error // per-call queue; overrides mergeErr when non-nil
 		rebaseErr                 error
@@ -191,6 +192,30 @@ func TestMergeWhenGreen(t *testing.T) {
 			wantMerged:  true,
 			wantSwapAdd: "agent-complete",
 		},
+		{
+			// A 403 or other API error on the first poll must not be silently
+			// dropped as StateNone. Without the fix the error is ignored, the
+			// loop hits the subsequent SUCCESS entries, and merges — this test
+			// would incorrectly report wantMerged=false as a failure.
+			name:           "CheckState API error on first poll is non-retriable",
+			timeout:        100,
+			checkStateErrs: []error{errors.New("gh api graphql: 403 Forbidden")},
+			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
+			wantMerged:     false,
+			wantGenuineRed: false,
+		},
+		{
+			// A 403 on the confirmation poll (second call after an initial SUCCESS)
+			// must also surface as non-retriable rather than being silently treated
+			// as StateNone. Without the fix the loop breaks on NONE, re-polls,
+			// finds SUCCESS again, and merges.
+			name:           "CheckState API error on confirmation poll is non-retriable",
+			timeout:        100,
+			checkStateErrs: []error{nil, errors.New("gh api graphql: 403 Forbidden")},
+			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
+			wantMerged:     false,
+			wantGenuineRed: false,
+		},
 	}
 
 	for _, tc := range cases {
@@ -212,6 +237,9 @@ func TestMergeWhenGreen(t *testing.T) {
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
 			if len(tc.checkStates) > 0 {
 				fc.SetCheckStates(testPR, tc.checkStates)
+			}
+			if len(tc.checkStateErrs) > 0 {
+				fc.SetCheckStateErrors(testPR, tc.checkStateErrs)
 			}
 
 			conflictResolveCalls := 0
