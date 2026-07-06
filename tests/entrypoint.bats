@@ -385,3 +385,66 @@ SKILL
   [ "$status" -eq 0 ]
   ! grep -qi '\bskill\b' "$CLAUDE_PROMPT_FILE"
 }
+
+# --- pre-work rebase (issue #215) -------------------------------------------
+# Before the agent starts, the box must rebase the working branch onto the
+# latest origin/BASE_BRANCH so the agent works against current main rather
+# than the state of origin at clone time.
+
+@test "entrypoint rebases prior work onto latest origin/BASE_BRANCH before agent starts" {
+  # Simulate a prior run: agent/issue-7 was pushed with a commit, then main
+  # advanced with a non-conflicting change while the branch was in flight.
+  local prior="$BATS_TEST_TMPDIR/prior"
+  git clone -q "https://github.com/owner/repo.git" "$prior"
+  git -C "$prior" checkout -b "agent/issue-7" "origin/main"
+  echo "branch work" > "$prior/branch.txt"
+  git -C "$prior" add branch.txt
+  git -C "$prior" commit -q -m "feat: prior run work"
+  git -C "$prior" push -q origin "agent/issue-7"
+
+  # Advance main with a non-conflicting commit (simulates a refactor landing
+  # on main while the branch was in flight).
+  local advance="$BATS_TEST_TMPDIR/advance"
+  git clone -q "https://github.com/owner/repo.git" "$advance"
+  echo "main advance" > "$advance/main_advance.txt"
+  git -C "$advance" add main_advance.txt
+  git -C "$advance" commit -q -m "chore: advance main"
+  git -C "$advance" push -q origin HEAD:main
+
+  # Open PR so the adoption path is taken (no force-reset).
+  export FAKE_GH_PR_LIST_7="https://github.com/owner/repo/pull/7"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  # After the pre-work rebase the working branch must be on top of the latest
+  # main: it should have both the prior branch work and the main advance.
+  [ -f "$WORK_DIR/branch.txt" ]
+  [ -f "$WORK_DIR/main_advance.txt" ]
+}
+
+@test "entrypoint fails fast when pre-work rebase conflicts with latest main" {
+  # Simulate a prior run that modified README.md on the branch, then main
+  # landed a conflicting change to the same file.
+  local prior="$BATS_TEST_TMPDIR/prior"
+  git clone -q "https://github.com/owner/repo.git" "$prior"
+  git -C "$prior" checkout -b "agent/issue-7" "origin/main"
+  printf "branch version\n" > "$prior/README.md"
+  git -C "$prior" add README.md
+  git -C "$prior" commit -q -m "feat: branch modifies README"
+  git -C "$prior" push -q origin "agent/issue-7"
+
+  local advance="$BATS_TEST_TMPDIR/advance"
+  git clone -q "https://github.com/owner/repo.git" "$advance"
+  printf "main version\n" > "$advance/README.md"
+  git -C "$advance" add README.md
+  git -C "$advance" commit -q -m "chore: main modifies README (conflicts)"
+  git -C "$advance" push -q origin HEAD:main
+
+  # Open PR so the adoption path is taken (where the rebase is attempted).
+  export FAKE_GH_PR_LIST_7="https://github.com/owner/repo/pull/7"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"pre-work rebase"* ]]
+}
