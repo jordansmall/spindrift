@@ -115,8 +115,11 @@ let
   # A Consumer-configured skill (#119): proves the `skills` argument bakes
   # the skill files into the image's skills path. Eval-only for the
   # skillsDir assertion; the image-layer check is Linux-gated.
+  # Uses ghFakeOverlay so the run command drives the offline fake gh, not
+  # the real gh pinned into runtimeInputs (same pattern as batsHarness).
   skillsHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
+    overlays = [ ghFakeOverlay ];
     skills = [
       (pkgs.writeText "baked-skill.md" ''
         ---
