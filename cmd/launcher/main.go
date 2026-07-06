@@ -582,7 +582,7 @@ func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue
 	logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
 	o, found, err := outcome.LastInLog(logPath)
 	if err != nil {
-		fmt.Printf("    #%s  status=missing  note=no outcome in log\n", iss.number)
+		fmt.Printf("    #%s  status=malformed  note=unparseable outcome line\n", iss.number)
 		return
 	}
 	if !found {
