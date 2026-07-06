@@ -2,7 +2,7 @@
 package main
 
 // schemaFlags is the flag table derived from lib/env-schema.nix.
-// Secret knobs (GH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY) are excluded.
+// Secret knobs are excluded from schemaFlags; see secretKnobs below.
 // Run `nix flake check` after editing lib/env-schema.nix to regenerate.
 var schemaFlags = []flagEntry{
 	{env: "BARRIER_LABEL", flag: "barrier-label", kind: "string", doc: "open issues carrying this label fence all higher-numbered issues; empty disables fencing", dflt: ""},

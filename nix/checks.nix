@@ -506,7 +506,7 @@ in
         + "package main\n"
         + "\n"
         + "// schemaFlags is the flag table derived from lib/env-schema.nix.\n"
-        + "// Secret knobs (GH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY) are excluded.\n"
+        + "// Secret knobs are excluded from schemaFlags; see secretKnobs below.\n"
         + "// Run `nix flake check` after editing lib/env-schema.nix to regenerate.\n"
         + "var schemaFlags = []flagEntry{\n"
         + rows
