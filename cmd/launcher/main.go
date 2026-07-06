@@ -386,7 +386,11 @@ func mergeWhenGreen(c config, fc forge.Client, num, pr string, conflictResolveFn
 	rebaseAttempts := 0
 
 	for {
-		state, _ := fc.CheckState(pr)
+		state, stateErr := fc.CheckState(pr)
+		if stateErr != nil {
+			fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, stateErr)
+			return false, false
+		}
 
 		switch state {
 		case forge.StateSuccess:
@@ -395,7 +399,12 @@ func mergeWhenGreen(c config, fc forge.Client, num, pr string, conflictResolveFn
 			time.Sleep(time.Duration(pollIv) * time.Second)
 			// Re-poll to confirm the snapshot is stable. A partial check
 			// registration can briefly show SUCCESS before all jobs appear.
-			if confirm, _ := fc.CheckState(pr); confirm != forge.StateSuccess {
+			confirm, confirmErr := fc.CheckState(pr)
+			if confirmErr != nil {
+				fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, confirmErr)
+				return false, false
+			}
+			if confirm != forge.StateSuccess {
 				if confirm == forge.StateFailure || confirm == forge.StateError {
 					return false, true
 				}
