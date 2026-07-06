@@ -640,6 +640,49 @@ EOF
   ! grep -q 'agent-failed' "$GH_LOG"
 }
 
+# --- engage subcommand (issue #195) ------------------------------------------
+
+@test "engage: green PR is adopted and merged" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tStranded issue'
+  printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
+  export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
+  export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
+  run "$RUN_CMD" engage 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=adopted"* ]]
+  [[ "$output" == *"status=verified-merged"* ]]
+  grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
+}
+
+@test "engage: draft PR is skipped and exits non-zero" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tStranded issue'
+  printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
+  export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
+  export FAKE_GH_PR_DRAFT_1="true"
+  run "$RUN_CMD" engage 1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"status=skipped"* ]]
+  ! grep -q 'pr merge' "$GH_LOG"
+  ! grep -q 'agent-complete' "$GH_LOG"
+  ! grep -q 'agent-failed' "$GH_LOG"
+}
+
+@test "engage: no open PR exits non-zero without label churn" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tStranded issue'
+  printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
+  # No FAKE_GH_PR_LIST_1 → no PR found
+  run "$RUN_CMD" engage 1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"status=skipped"* ]]
+  ! grep -q 'pr merge' "$GH_LOG"
+  ! grep -q 'agent-complete' "$GH_LOG"
+  ! grep -q 'agent-failed' "$GH_LOG"
+}
+
 # --- Outcome verification (issue #51) ----------------------------------------
 
 @test "outcome report flags as failed when PR is not MERGED on GitHub" {

@@ -440,7 +440,7 @@ let
         GIT_USER_NAME="''${GIT_USER_NAME:-$(git config --get user.name 2>/dev/null || true)}"
         GIT_USER_EMAIL="''${GIT_USER_EMAIL:-$(git config --get user.email 2>/dev/null || true)}"
         export GIT_USER_NAME GIT_USER_EMAIL
-        exec ${launcherBin}/bin/launcher
+        exec ${launcherBin}/bin/launcher "$@"
       '';
   };
 
