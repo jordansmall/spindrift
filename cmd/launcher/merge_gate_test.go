@@ -24,17 +24,20 @@ const testPR = "https://github.com/owner/repo/pull/42"
 
 func TestMergeWhenGreen(t *testing.T) {
 	cases := []struct {
-		name              string
-		timeout           int
-		maxRebaseAttempts int // 0 → use baseConfig default (3)
-		checkStates       []forge.RollupState
-		mergeErr          error
-		mergeErrs         []error // per-call queue; overrides mergeErr when non-nil
-		rebaseErr         error
-		wantMerged        bool
-		wantGenuineRed    bool
-		wantSwapAdd       string // expected label added in last SwapLabel call; "" = no swap
-		wantRebaseCalled  int    // expected len(fc.RebasedURLs)
+		name                      string
+		timeout                   int
+		maxRebaseAttempts         int // 0 → use baseConfig default (3)
+		checkStates               []forge.RollupState
+		mergeErr                  error
+		mergeErrs                 []error // per-call queue; overrides mergeErr when non-nil
+		rebaseErr                 error
+		conflictResolveErr        error // nil → resolve succeeds; non-nil → resolve fails
+		noConflictResolveFn       bool  // when true pass nil conflictResolveFn
+		wantMerged                bool
+		wantGenuineRed            bool
+		wantSwapAdd               string // expected label added in last SwapLabel call; "" = no swap
+		wantRebaseCalled          int    // expected len(fc.RebasedURLs)
+		wantConflictResolveCalled int
 	}{
 		{
 			name:           "SUCCESS on first poll merges and completes",
@@ -123,6 +126,49 @@ func TestMergeWhenGreen(t *testing.T) {
 			wantSwapAdd:      "",
 			wantRebaseCalled: 1,
 		},
+		{
+			name:              "rebase conflict → conflict-resolve fn called → merge succeeds",
+			timeout:           100,
+			maxRebaseAttempts: 3,
+			// CI green twice: before and after conflict resolution.
+			checkStates: []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
+			// Merge conflicts; rebase itself also conflicts (fn resolves it); then merge succeeds.
+			mergeErrs:                 []error{forge.ErrMergeConflict, nil},
+			rebaseErr:                 forge.ErrMergeConflict,
+			wantMerged:                true,
+			wantGenuineRed:            false,
+			wantSwapAdd:               "agent-complete",
+			wantRebaseCalled:          1,
+			wantConflictResolveCalled: 1,
+		},
+		{
+			name:                      "rebase conflict → conflict-resolve fn fails → non-retriable",
+			timeout:                   100,
+			maxRebaseAttempts:         3,
+			checkStates:               []forge.RollupState{forge.StateSuccess},
+			mergeErrs:                 []error{forge.ErrMergeConflict},
+			rebaseErr:                 forge.ErrMergeConflict,
+			conflictResolveErr:        errors.New("agent could not resolve conflict"),
+			wantMerged:                false,
+			wantGenuineRed:            false,
+			wantSwapAdd:               "",
+			wantRebaseCalled:          1,
+			wantConflictResolveCalled: 1,
+		},
+		{
+			name:                      "rebase conflict → no conflict-resolve fn → non-retriable",
+			timeout:                   100,
+			maxRebaseAttempts:         3,
+			checkStates:               []forge.RollupState{forge.StateSuccess},
+			mergeErrs:                 []error{forge.ErrMergeConflict},
+			rebaseErr:                 forge.ErrMergeConflict,
+			noConflictResolveFn:       true,
+			wantMerged:                false,
+			wantGenuineRed:            false,
+			wantSwapAdd:               "",
+			wantRebaseCalled:          1,
+			wantConflictResolveCalled: 0,
+		},
 	}
 
 	for _, tc := range cases {
@@ -146,7 +192,16 @@ func TestMergeWhenGreen(t *testing.T) {
 				fc.SetCheckStates(testPR, tc.checkStates)
 			}
 
-			got, genuineRed := mergeWhenGreen(c, fc, "1", testPR)
+			conflictResolveCalls := 0
+			var conflictResolveFn func(string) error
+			if !tc.noConflictResolveFn {
+				conflictResolveFn = func(_ string) error {
+					conflictResolveCalls++
+					return tc.conflictResolveErr
+				}
+			}
+
+			got, genuineRed := mergeWhenGreen(c, fc, "1", testPR, conflictResolveFn)
 
 			if got != tc.wantMerged {
 				t.Errorf("mergeWhenGreen merged=%v, want %v", got, tc.wantMerged)
@@ -162,6 +217,9 @@ func TestMergeWhenGreen(t *testing.T) {
 			}
 			if got := len(fc.RebasedURLs); got != tc.wantRebaseCalled {
 				t.Errorf("Rebase called %d times, want %d", got, tc.wantRebaseCalled)
+			}
+			if conflictResolveCalls != tc.wantConflictResolveCalled {
+				t.Errorf("conflictResolveFn called %d times, want %d", conflictResolveCalls, tc.wantConflictResolveCalled)
 			}
 
 			if tc.wantSwapAdd != "" {

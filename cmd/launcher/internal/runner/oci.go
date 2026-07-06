@@ -223,8 +223,29 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 	return args
 }
 
+// reapOrphanedRebaseDirs removes leftover spindrift-rebase-* directories in root.
+// These are created by forge.Rebase and cleaned up with defer; they become orphaned
+// when the launcher is killed before the defer runs.
+func reapOrphanedRebaseDirs(root string) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "spindrift-rebase-") {
+			continue
+		}
+		path := filepath.Join(root, e.Name())
+		if err := os.RemoveAll(path); err == nil {
+			fmt.Printf("==> reaped orphaned rebase temp dir: %s\n", path)
+		}
+	}
+}
+
 // Run fans out a single issue into a podman/docker container.
 func (a *ociAdapter) Run(box Box) error {
+	// Reap any orphaned rebase temp dirs left by a prior killed launcher run.
+	reapOrphanedRebaseDirs(os.TempDir())
 	// Reap any stale (exited or created) container from a prior interrupted run.
 	// Never touch a running container — a concurrent launcher invocation may own it,
 	// and a force-remove would destroy that run's work silently.
