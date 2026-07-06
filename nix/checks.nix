@@ -78,6 +78,11 @@ in
         # Harnesses with baked skills for skills-precedence tests.
         SKILLS_RUN_CMD = "${skillsHarness.run}/bin/run";
         SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.run}/bin/run";
+        # Not read by bats directly, but forces Nix to realise
+        # skillsBwrapHarness.agentFiles so its store path exists on disk when
+        # the bwrap adapter calls os.Stat on the baked-skills subdirectory.
+        # The run command embeds the path via unsafeDiscardStringContext, which
+        # drops the Nix dependency — without this attr the path is absent.
         SKILLS_AGENT_FILES = skillsBwrapHarness.agentFiles;
       }
       ''
