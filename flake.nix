@@ -223,9 +223,7 @@
                   shellcheck --shell=bash \
                     ${./agent/entrypoint.sh} \
                     ${./agent/format-transcript.sh} \
-                    ${./tests/fakes/podman} \
-                    ${./tests/fakes/docker} \
-                    ${./tests/fakes/bwrap} \
+                    ${./tests/fakes/runtime} \
                     ${./tests/fakes/gh} \
                     ${./tests/fakes/claude} \
                     ${./tests/fakes/nix} \
