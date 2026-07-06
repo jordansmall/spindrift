@@ -11,13 +11,35 @@ rt="$(printf '%s' "$runtime" | tr '[:lower:]' '[:upper:]')"
 log_var="${rt}_LOG"
 : "${!log_var:?${log_var} must point at a log file}"
 log="${!log_var}"
+
+# bwrap: extract ISSUE_NUMBER early so each concurrent box writes its own log
+# file, eliminating concurrent-write races when multiple issues fan out.
+issue_num=""
+if [ "$runtime" = "bwrap" ]; then
+  _args=("$@")
+  _i=0
+  while [ "$_i" -lt "${#_args[@]}" ]; do
+    if [ "${_args[$_i]}" = "--setenv" ]; then
+      if [ "${_args[$((_i + 1))]}" = "ISSUE_NUMBER" ]; then
+        issue_num="${_args[$((_i + 2))]}"
+        break
+      fi
+      _i=$((_i + 3))
+    else
+      _i=$((_i + 1))
+    fi
+  done
+fi
+
 printf '%s\n' "$*" >>"$log"
+[ -n "$issue_num" ] && printf '%s\n' "$*" >>"${log}.issue-${issue_num}"
 
 # bwrap: log secret env vars received via process environment (name only, not value).
 if [ "$runtime" = "bwrap" ]; then
   for _secret in GH_TOKEN CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY; do
     if [ -n "${!_secret:-}" ]; then
       printf 'ENV_SECRET:%s\n' "$_secret" >>"$log"
+      [ -n "$issue_num" ] && printf 'ENV_SECRET:%s\n' "$_secret" >>"${log}.issue-${issue_num}"
     fi
   done
 fi
@@ -71,21 +93,6 @@ case "$runtime" in
     esac
     ;;
   bwrap)
-    issue_num=""
-    args=("$@")
-    i=0
-    while [ "$i" -lt "${#args[@]}" ]; do
-      if [ "${args[$i]}" = "--setenv" ]; then
-        key="${args[$((i + 1))]}"
-        val="${args[$((i + 2))]}"
-        case "$key" in
-          ISSUE_NUMBER) issue_num="$val" ;;
-        esac
-        i=$((i + 3))
-      else
-        i=$((i + 1))
-      fi
-    done
     if [ -n "$issue_num" ]; then
       outcome_var="FAKE_${rt}_OUTCOME_${issue_num}"
       outcome_val="${!outcome_var:-}"

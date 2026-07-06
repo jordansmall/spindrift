@@ -808,8 +808,13 @@ EOF
 @test "runtime=bwrap fans out one bwrap invocation per issue" {
   run "$BWRAP_RUN_CMD"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '^--ro-bind' "$BWRAP_LOG")" -ge 2 ]
-  grep -q 'ISSUE_NUMBER' "$BWRAP_LOG"
+  # Each issue must have its own per-issue log file so concurrent writes never
+  # race on a shared sink; assert each dispatched issue produced a sandboxed
+  # invocation independently.
+  grep -q '^--ro-bind' "${BWRAP_LOG}.issue-1"
+  grep -q 'ISSUE_NUMBER' "${BWRAP_LOG}.issue-1"
+  grep -q '^--ro-bind' "${BWRAP_LOG}.issue-2"
+  grep -q 'ISSUE_NUMBER' "${BWRAP_LOG}.issue-2"
   [ ! -s "$PODMAN_LOG" ]
 }
 
