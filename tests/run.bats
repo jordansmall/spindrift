@@ -227,11 +227,12 @@ EOF
   ! grep -q ':/agent/prompts' "$PODMAN_LOG"
 }
 
-@test "run exits cleanly when there are no matching issues" {
+@test "run exits 2 when there are no matching issues" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=""
   run "$RUN_CMD"
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"nothing to do"* ]]
   [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 0 ]
 }
 
@@ -362,9 +363,9 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
   # Second invocation: both issues now carry agent-in-progress, so the
-  # ready-for-agent query returns nothing and no new container starts.
+  # ready-for-agent query returns nothing → exits 2 (queue empty).
   run "$RUN_CMD"
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 2 ]
   [[ "$output" == *"nothing to do"* ]]
   [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
 }
@@ -622,7 +623,9 @@ EOF
   # FAKE_GH_PR_DRAFT_1 not set → defaults to "false" (non-draft)
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   run "$RUN_CMD"
-  [ "$status" -eq 0 ]
+  # After reconcile merges the stranded PR, discoverIssues finds no
+  # ready-for-agent issues → launcher exits 2 (queue empty).
+  [ "$status" -eq 2 ]
   [[ "$output" == *"status=adopted"* ]]
   [[ "$output" == *"status=verified-merged"* ]]
   grep -q 'pr merge' "$GH_LOG"
@@ -637,7 +640,9 @@ EOF
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   export FAKE_GH_PR_DRAFT_1="true"
   run "$RUN_CMD"
-  [ "$status" -eq 0 ]
+  # Draft PR → reconcile skips; discoverIssues finds no ready-for-agent
+  # issues (only in-progress) → launcher exits 2 (queue empty).
+  [ "$status" -eq 2 ]
   ! grep -q 'pr merge' "$GH_LOG"
   ! grep -q 'agent-complete' "$GH_LOG"
   ! grep -q 'agent-failed' "$GH_LOG"
@@ -649,7 +654,9 @@ EOF
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
   # No FAKE_GH_PR_LIST_1 → no PR found
   run "$RUN_CMD"
-  [ "$status" -eq 0 ]
+  # No PR → reconcile skips; discoverIssues finds no ready-for-agent
+  # issues (only in-progress) → launcher exits 2 (queue empty).
+  [ "$status" -eq 2 ]
   ! grep -q 'pr merge' "$GH_LOG"
   ! grep -q 'agent-complete' "$GH_LOG"
   ! grep -q 'agent-failed' "$GH_LOG"
@@ -1055,3 +1062,13 @@ EOF
   [[ "$output" == *"status=failed"* ]]
 }
 
+# --- Queue-empty exit code (issue #110) ----------------------------------------
+
+@test "run exits 2 when no open issues exist" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=""
+  run "$RUN_CMD"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"nothing to do"* ]]
+  [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 0 ]
+}

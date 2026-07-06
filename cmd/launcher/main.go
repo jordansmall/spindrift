@@ -594,6 +594,16 @@ func openPRForBranch(fc forge.Client, branch string) (url string, isDraft bool, 
 	return pr.URL, pr.IsDraft, true, nil
 }
 
+// Sentinel errors translated to specific exit codes so callers like dogfood.sh
+// can distinguish termination reasons without a separate gh probe.
+//
+//   exit 2 (errQueueEmpty):   discoverIssues found no open dispatchable issues.
+//   exit 3 (errQueueDrained): open issues exist but filterByBarrier fenced them all.
+var (
+	errQueueEmpty   = errors.New("queue empty")
+	errQueueDrained = errors.New("queue drained")
+)
+
 // Compiled once; shared by all parseBlockerRefs calls.
 var (
 	// Matches inline keyword patterns. The keyword must be followed by optional
@@ -1166,15 +1176,18 @@ func run() error {
 	// Barrier filtering applies only to label-based discovery. When ISSUE_NUMBER
 	// is set the issue is already claimed; the fence must not drop it.
 	if c.issueNumber == "" {
+		if len(issues) == 0 {
+			fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
+			return errQueueEmpty
+		}
 		issues, err = filterByBarrier(c, fc, issues)
 		if err != nil {
 			return err
 		}
-	}
-
-	if len(issues) == 0 {
-		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
-		return nil
+		if len(issues) == 0 {
+			fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
+			return errQueueDrained
+		}
 	}
 
 	// Build the dependency graph for the batch.
@@ -1268,6 +1281,12 @@ func main() {
 		return
 	}
 	if err := run(); err != nil {
+		if errors.Is(err, errQueueEmpty) {
+			os.Exit(2)
+		}
+		if errors.Is(err, errQueueDrained) {
+			os.Exit(3)
+		}
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
 	}
