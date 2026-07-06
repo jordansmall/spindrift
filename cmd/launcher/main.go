@@ -523,8 +523,8 @@ func postUsageComment(fc forge.Client, issNum, logPath string) {
 				"| Output tokens | %d |\n"+
 				"| Cache read tokens | %d |\n"+
 				"| Cache creation tokens | %d |\n"+
-				"| Wall time | %dms |\n"+
-				"| API time | %dms |\n"+
+				"| Wall time | %s |\n"+
+				"| API time | %s |\n"+
 				"| Turns | %d |",
 			model,
 			u.TotalCostUSD,
@@ -532,8 +532,8 @@ func postUsageComment(fc forge.Client, issNum, logPath string) {
 			u.OutputTokens,
 			u.CacheReadInputTokens,
 			u.CacheCreationInputTokens,
-			u.DurationMs,
-			u.DurationApiMs,
+			usage.FormatDuration(u.DurationMs),
+			usage.FormatDuration(u.DurationApiMs),
 			u.NumTurns,
 		)
 		body += breakdownSection(logPath)

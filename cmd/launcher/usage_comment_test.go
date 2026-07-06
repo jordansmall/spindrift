@@ -31,6 +31,41 @@ func writeUsageLogLines(t *testing.T, dir, issNum string, lines ...string) {
 	}
 }
 
+// TestPrintOutcomeReport_HumanReadableDurations verifies that wall time and API
+// time are formatted as h/m/s strings, not raw milliseconds.
+func TestPrintOutcomeReport_HumanReadableDurations(t *testing.T) {
+	dir := tempLogDir(t)
+	const issNum = "88"
+	const prURL = "https://github.com/owner/repo/pull/88"
+
+	outcomeLine := "SPINDRIFT_OUTCOME issue=" + issNum + " pr=" + prURL + " status=blocked note=dur-test"
+	// duration_ms=3665000 → "1h 1m 5s"; duration_api_ms=65000 → "1m 5s"
+	resultEvent := `{"type":"result","num_turns":3,"total_cost_usd":0.10,"duration_ms":3665000,"duration_api_ms":65000,"usage":{"input_tokens":100,"output_tokens":50}}`
+	writeUsageLog(t, dir, issNum, outcomeLine, resultEvent)
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	fr := runner.NewFake()
+	c := baseConfig()
+
+	gateIssue(c, fc, dir, fr, issue{number: issNum, title: "test issue"})
+
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
+	}
+	body := fc.CommentCalls[0].Body
+	if !strings.Contains(body, "1h 1m 5s") {
+		t.Errorf("comment should contain wall time %q; got: %q", "1h 1m 5s", body)
+	}
+	if !strings.Contains(body, "1m 5s") {
+		t.Errorf("comment should contain API time %q; got: %q", "1m 5s", body)
+	}
+	if strings.Contains(body, "3665000ms") || strings.Contains(body, "65000ms") {
+		t.Errorf("comment should NOT contain raw ms values; got: %q", body)
+	}
+}
+
 // TestPrintOutcomeReport_PostsUsageComment_Blocked verifies that a usage-summary
 // comment is posted to the forge when the outcome is "blocked".
 func TestPrintOutcomeReport_PostsUsageComment_Blocked(t *testing.T) {
