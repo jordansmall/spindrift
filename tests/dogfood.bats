@@ -1,54 +1,58 @@
-# Branch hygiene for the dogfood loop. Each iteration rebuilds the image from
-# $PWD, so the loop must reset to the base branch before `git pull --ff-only`:
-# a host left on a feature branch (e.g. after a prior merge) has no upstream to
-# fast-forward, and the bare pull would fail or rebuild the wrong tree.
+# Branch hygiene and exit-code contract for the dogfood loop.
+#
+# The loop must reset to the base branch before `git pull --ff-only` because a
+# host left on a feature branch (e.g. after a prior merge) has no upstream to
+# fast-forward. Termination is driven by the launcher's exit code rather than a
+# separate gh probe: exit 2 (queue empty) breaks the loop cleanly; exit 3 (all
+# issues behind a barrier) triggers the stall guard.
 
 load helper
 
-# A gh stub that always returns 2 for `issue list`, simulating a loop where
-# no issues are ever drained (all blocked or skipped).
-_install_stalling_gh() {
+# Replaces the fake nix with one that exits $1 on `nix run .#run` calls and
+# exits 0 on all other nix calls (build, etc.).
+_install_exit_code_nix() {
+  local code="$1"
   local shebang
-  shebang="$(head -n1 "$FAKE_BIN/gh")"
-  {
-    printf '%s\n' "$shebang"
-    cat <<'EOF'
-if printf '%s ' "$@" | grep -q 'issue list'; then
-  echo 2
-fi
-exit 0
-EOF
-  } >"$FAKE_BIN/gh.tmp"
-  mv "$FAKE_BIN/gh.tmp" "$FAKE_BIN/gh"
-  chmod +x "$FAKE_BIN/gh"
-}
-
-# A gh stub answering only dogfood's readiness probe (`issue list … --jq length`):
-# 1 on the first call (one issue to drain) then 0, so the loop runs exactly once.
-# Reuse the copied fake's shebang so this works both locally (`/usr/bin/env`) and
-# under the sandboxed nix check (store-bash, shebangs already substituted).
-_install_counting_gh() {
-  local shebang
-  shebang="$(head -n1 "$FAKE_BIN/gh")"
+  shebang="$(head -n1 "$FAKE_BIN/nix")"
   {
     printf '%s\n' "$shebang"
     cat <<EOF
-if printf '%s ' "\$@" | grep -q 'issue list'; then
-  n="\$(cat "$COUNTER" 2>/dev/null || echo 0)"
-  if [ "\$n" -eq 0 ]; then echo 1; else echo 0; fi
-  echo \$((n + 1)) >"$COUNTER"
+: "\${NIX_LOG:?NIX_LOG must point at a log file}"
+printf '%s\n' "\$*" >>"\$NIX_LOG"
+if printf '%s ' "\$@" | grep -q '\.#run'; then
+  exit $code
 fi
 exit 0
 EOF
-  } >"$FAKE_BIN/gh.tmp"
-  mv "$FAKE_BIN/gh.tmp" "$FAKE_BIN/gh"
-  chmod +x "$FAKE_BIN/gh"
+  } >"$FAKE_BIN/nix.tmp"
+  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
+  chmod +x "$FAKE_BIN/nix"
+}
+
+# Replaces the fake nix with one that logs BARRIER_LABEL and MAX_JOBS on every
+# `nix run .#run` call, then exits 2 so the dogfood loop terminates cleanly.
+_install_env_logging_nix() {
+  local shebang
+  shebang="$(head -n1 "$FAKE_BIN/nix")"
+  {
+    printf '%s\n' "$shebang"
+    cat <<'EOF'
+: "${NIX_LOG:?NIX_LOG must point at a log file}"
+printf '%s\n' "$*" >>"$NIX_LOG"
+if printf '%s ' "$@" | grep -q '\.#run'; then
+  printf 'BARRIER_LABEL=%s\n' "${BARRIER_LABEL:-}" >>"${NIX_ENV_LOG:-/dev/null}"
+  printf 'MAX_JOBS=%s\n' "${MAX_JOBS:-}" >>"${NIX_ENV_LOG:-/dev/null}"
+  exit 2
+fi
+exit 0
+EOF
+  } >"$FAKE_BIN/nix.tmp"
+  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
+  chmod +x "$FAKE_BIN/nix"
 }
 
 setup() {
   setup_fakes
-  export COUNTER="$BATS_TEST_TMPDIR/gh-count"
-  _install_counting_gh
 
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
@@ -74,6 +78,9 @@ setup() {
   # Land the host on a feature branch with no upstream — the state that broke a
   # bare `git pull --ff-only`.
   git -C "$WORK" checkout -q -b feat/leftover
+
+  # Default nix exits 2 on `nix run .#run` so tests terminate after one cycle.
+  _install_exit_code_nix 2
 }
 
 @test "dogfood resets to the base branch before pulling" {
@@ -82,33 +89,25 @@ setup() {
   [ "$(git -C "$WORK" rev-parse --abbrev-ref HEAD)" = "main" ]
 }
 
-@test "dogfood aborts after N stalled iterations with no progress" {
-  _install_stalling_gh
-  run bash -c "BASE_BRANCH=main STALL_MAX_ITERATIONS=1 STALL_SLEEP_SECONDS=0 bash '$WORK/dogfood.sh' 2>&1"
-  [ "$status" -ne 0 ]
-  echo "$output" | grep -q "no progress"
+@test "dogfood exits cleanly when launcher exits 2 (queue empty)" {
+  _install_exit_code_nix 2
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"done"* ]]
 }
 
-# Replaces the fake nix with one that logs BARRIER_LABEL and MAX_JOBS to
-# NIX_ENV_LOG on every `nix run` call, so tests can assert the environment
-# dogfood.sh passes to the launcher.
-_install_env_logging_nix() {
-  local shebang
-  shebang="$(head -n1 "$FAKE_BIN/nix")"
-  {
-    printf '%s\n' "$shebang"
-    cat <<'EOF'
-: "${NIX_LOG:?NIX_LOG must point at a log file}"
-printf '%s\n' "$*" >>"$NIX_LOG"
-if printf '%s ' "$@" | grep -q 'run'; then
-  printf 'BARRIER_LABEL=%s\n' "${BARRIER_LABEL:-}" >>"${NIX_ENV_LOG:-/dev/null}"
-  printf 'MAX_JOBS=%s\n' "${MAX_JOBS:-}" >>"${NIX_ENV_LOG:-/dev/null}"
-fi
-exit 0
-EOF
-  } >"$FAKE_BIN/nix.tmp"
-  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
-  chmod +x "$FAKE_BIN/nix"
+@test "dogfood triggers stall detection when launcher exits 3 (queue drained)" {
+  _install_exit_code_nix 3
+  run bash -c "BASE_BRANCH=main STALL_MAX_ITERATIONS=1 STALL_SLEEP_SECONDS=0 bash '$WORK/dogfood.sh' 2>&1"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -q "no progress"
+}
+
+@test "dogfood aborts when launcher exits non-zero (not 2 or 3)" {
+  _install_exit_code_nix 1
+  run bash -c "BASE_BRANCH=main bash '$WORK/dogfood.sh' 2>&1"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -q "launcher failed"
 }
 
 @test "dogfood passes BARRIER_LABEL=fanout-blocker to nix run" {
@@ -130,12 +129,9 @@ EOF
 }
 
 @test "fully-fenced iteration triggers stall detection, not hot-spin" {
-  _install_stalling_gh
-  export NIX_ENV_LOG="$BATS_TEST_TMPDIR/nix-env.log"
-  : >"$NIX_ENV_LOG"
-  _install_env_logging_nix
+  # exit 3: open issues exist but all sit behind a barrier — stall, not a crash.
+  _install_exit_code_nix 3
   run bash -c "BASE_BRANCH=main STALL_MAX_ITERATIONS=1 STALL_SLEEP_SECONDS=0 bash '$WORK/dogfood.sh' 2>&1"
   [ "$status" -ne 0 ]
   printf '%s\n' "$output" | grep -q "no progress"
-  grep -q 'BARRIER_LABEL=fanout-blocker' "$NIX_ENV_LOG"
 }
