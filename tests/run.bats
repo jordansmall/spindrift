@@ -927,6 +927,12 @@ EOF
 # conflict→rebase→merge: merge fails with conflict, rebase succeeds, second
 # merge attempt succeeds → issue reaches agent-complete.
 @test "merge gate: conflict → rebase → retried merge → agent-complete" {
+  # Install the fake git so real git is not called during the rebase flow.
+  cp "$FAKES_DIR/git" "$FAKE_BIN/git"
+  chmod +x "$FAKE_BIN/git"
+  export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
+  : >"$GIT_LOG"
+
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
@@ -949,6 +955,12 @@ EOF
 # conflict→unrebasable→failed: merge fails with conflict, rebase also fails
 # (FAKE_GIT_REBASE_EXIT=1) → issue marked agent-failed without further retries.
 @test "merge gate: conflict → unrebasable → agent-failed" {
+  # Install the fake git so real git is not called during the rebase flow.
+  cp "$FAKES_DIR/git" "$FAKE_BIN/git"
+  chmod +x "$FAKE_BIN/git"
+  export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
+  : >"$GIT_LOG"
+
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
