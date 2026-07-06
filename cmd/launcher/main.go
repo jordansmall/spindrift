@@ -5,6 +5,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -68,6 +69,7 @@ type config struct {
 	mergePollInterval int
 	mergePollTimeout  int
 	maxFixAttempts    int
+	maxRebaseAttempts int
 
 	// Secrets / identity
 	ghToken          string
@@ -168,6 +170,7 @@ func loadConfig() config {
 		mergePollInterval: atoiNonneg(getenv("MERGE_POLL_INTERVAL", "30"), 30),
 		mergePollTimeout:  atoiNonneg(getenv("MERGE_POLL_TIMEOUT", "1800"), 1800),
 		maxFixAttempts:    atoiNonneg(getenv("MAX_FIX_ATTEMPTS", "3"), 3),
+		maxRebaseAttempts: atoiNonneg(getenv("MAX_REBASE_ATTEMPTS", "3"), 3),
 
 		ghToken:          os.Getenv("GH_TOKEN"),
 		claudeOAuthToken: os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
@@ -346,18 +349,32 @@ func mergeWhenGreen(c config, fc forge.Client, num, pr string) (bool, bool) {
 		actualIv = 1
 	}
 	elapsed := 0
+	rebaseAttempts := 0
 
 	for {
 		state, _ := fc.CheckState(pr)
 
 		switch state {
 		case forge.StateSuccess:
-			if err := fc.Merge(pr); err == nil {
+			err := fc.Merge(pr)
+			if err == nil {
 				swapLabel(fc, num, c.completeLabel, c.inProgressLabel)
 				return true, false
 			}
-			// Merge command failed — not a genuine CI red; no retry.
-			return false, false
+			if errors.Is(err, forge.ErrMergeConflict) && rebaseAttempts < c.maxRebaseAttempts {
+				rebaseAttempts++
+				fmt.Printf("    #%s  pr=%s  status=rebase-retry  attempt=%d/%d\n",
+					num, pr, rebaseAttempts, c.maxRebaseAttempts)
+				if rbErr := fc.Rebase(pr); rbErr != nil {
+					fmt.Printf("    #%s  pr=%s  status=rebase-failed  !! %v\n", num, pr, rbErr)
+					return false, false
+				}
+				// Reset the poll timer so CI gets a full window after the force-push.
+				elapsed = 0
+			} else {
+				// Non-conflict failure or exhausted rebase attempts — non-retriable.
+				return false, false
+			}
 		case forge.StateFailure, forge.StateError:
 			// Genuine red — signal caller so it can dispatch a fix pass.
 			return false, true
