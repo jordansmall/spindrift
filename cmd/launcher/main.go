@@ -1339,19 +1339,24 @@ func run() error {
 }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "build" {
+	args, err := parseFlags(os.Args[1:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.Exit(1)
+	}
+	if len(args) > 0 && args[0] == "build" {
 		if err := build(); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
 		return
 	}
-	if len(os.Args) > 1 && os.Args[1] == "engage" {
-		if len(os.Args) < 3 {
+	if len(args) > 0 && args[0] == "engage" {
+		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: launcher engage <issue-number>")
 			os.Exit(1)
 		}
-		if err := engageIssue(os.Args[2]); err != nil {
+		if err := engageIssue(args[1]); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
