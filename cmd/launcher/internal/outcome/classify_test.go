@@ -117,6 +117,26 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// Claude Code session-limit: structured JSON error type.
+		name: "RateLimit_SessionLimit_ErrorType",
+		lines: []string{
+			`{"type":"error","error":{"type":"usage_limit_reached","message":"Claude Code usage limit reached"}}`,
+		},
+		wantClass:   outcome.Transient,
+		wantReason:  outcome.RateLimit,
+		wantResetAt: nil,
+	},
+	{
+		// Claude Code session-limit: plain-text fallback message.
+		name: "RateLimit_SessionLimit_PlainText",
+		lines: []string{
+			`Claude Code usage limit reached`,
+		},
+		wantClass:   outcome.Transient,
+		wantReason:  outcome.RateLimit,
+		wantResetAt: nil,
+	},
+	{
 		// Issue numbers, byte counts, or port numbers containing "429" or "529"
 		// must not be mistaken for API rate-limit / overload errors.
 		name: "Terminal_NoBareDigitFalsePositive",

@@ -54,10 +54,12 @@ var transientPatterns = []struct {
 	// Structured API error types — highest specificity, check first.
 	{"rate_limit_error", RateLimit},
 	{"overloaded_error", Overloaded},
+	{"usage_limit_reached", RateLimit},
 	// HTTP status phrase patterns — specific enough to avoid false positives.
 	{"429 Too Many Requests", RateLimit},
 	{"529 Overloaded", Overloaded},
-	// Claude plain-text error message.
+	// Claude plain-text error messages.
+	{"Claude Code usage limit reached", RateLimit},
 	{"Overloaded", Overloaded},
 	// Network-level failures logged by the Go HTTP client or stdlib.
 	{"connection refused", Network},
