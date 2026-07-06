@@ -797,6 +797,56 @@ func reconcileStranded(c config, fc forge.Client, pwd string, r runner.Runner) {
 	}
 }
 
+// engageByNumber resolves the open non-draft PR for the issue numbered issueNum
+// and drives the same adopt-and-gate path used by reconcileStranded. Returns an
+// error when the issue cannot be fetched, the PR is a draft, or no open PR
+// exists; the caller should treat those as non-success exits.
+func engageByNumber(c config, fc forge.Client, pwd string, r runner.Runner, issueNum string) error {
+	fi, err := fc.Issue(issueNum)
+	if err != nil {
+		return fmt.Errorf("issue %s: %w", issueNum, err)
+	}
+	iss := issue{number: fi.Number, title: fi.Title}
+	branch := c.branchPrefix + iss.number
+	prURL, isDraft, found, prErr := openPRForBranch(fc, branch)
+	if prErr != nil {
+		return fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr)
+	}
+	if !found {
+		fmt.Printf("    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
+		return fmt.Errorf("issue %s: no open PR", issueNum)
+	}
+	if isDraft {
+		fmt.Printf("    #%s  pr=%s  status=skipped  note=draft PR; engage operates on non-draft PRs only\n", issueNum, prURL)
+		return fmt.Errorf("issue %s: draft PR", issueNum)
+	}
+	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
+		return fmt.Errorf("mkdir logs: %w", err)
+	}
+	fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
+	adoptAndGate(c, fc, iss, prURL, fixFn)
+	return nil
+}
+
+// engageIssue is the entry point for the `engage` subcommand. It loads config,
+// wires the forge client and runner, then calls engageByNumber.
+func engageIssue(issueNum string) error {
+	pwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	c := loadConfig()
+	if err := validate(c); err != nil {
+		return err
+	}
+	r := newRunner(c, pwd)
+	if err := r.EnsureReady(); err != nil {
+		return err
+	}
+	fc := forge.NewExecClient(c.repoSlug)
+	return engageByNumber(c, fc, pwd, r, issueNum)
+}
+
 // issueNums returns the number strings from a slice of issues.
 func issueNums(issues []issue) []string {
 	nums := make([]string, len(issues))
@@ -1080,6 +1130,17 @@ func run() error {
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "build" {
 		if err := build(); err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "engage" {
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: launcher engage <issue-number>")
+			os.Exit(1)
+		}
+		if err := engageIssue(os.Args[2]); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
