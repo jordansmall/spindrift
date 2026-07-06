@@ -162,6 +162,93 @@ func TestWriterEmitsOnNewTool(t *testing.T) {
 	}
 }
 
+// TestWriterNarrationTrimming verifies that narration text is trimmed to a single
+// line bounded to 120 characters.
+func TestWriterNarrationTrimming(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	var status bytes.Buffer
+	w := heartbeat.New(&bytes.Buffer{}, "99", &status, time.Hour)
+
+	event := `{"type":"assistant","message":{"content":[{"type":"text","text":"` + long + `"}]}}` + "\n"
+	fmt.Fprint(w, event)
+
+	out := strings.TrimRight(status.String(), "\n")
+	lines := strings.Split(out, "\n")
+	if len(lines) != 1 {
+		t.Errorf("expected 1 heartbeat line, got %d: %q", len(lines), status.String())
+	}
+	// Line = "#99 · <text>\n"; text portion must be ≤120 chars.
+	prefix := "#99 \xc2\xb7 "
+	if !strings.HasPrefix(lines[0], prefix) {
+		t.Errorf("line missing prefix %q: %q", prefix, lines[0])
+	}
+	textPart := strings.TrimPrefix(lines[0], prefix)
+	if len(textPart) > 120 {
+		t.Errorf("narration text %d chars, want ≤120", len(textPart))
+	}
+}
+
+// TestWriterSubagentNarrationDropped verifies that assistant text blocks that
+// carry a parent_tool_use_id (subagent output) are silently dropped — they are
+// not emitted as heartbeat lines. The raw log still receives every byte.
+func TestWriterSubagentNarrationDropped(t *testing.T) {
+	var raw bytes.Buffer
+	var status bytes.Buffer
+	w := heartbeat.New(&raw, "55", &status, time.Hour)
+
+	event := `{"type":"assistant","parent_tool_use_id":"tu_abc","message":{"content":[{"type":"text","text":"subagent says hello"}]}}` + "\n"
+	fmt.Fprint(w, event)
+
+	// Subagent narration must not appear in the heartbeat stream.
+	if strings.Contains(status.String(), "subagent says hello") {
+		t.Errorf("subagent narration must not appear in heartbeat: %q", status.String())
+	}
+	// Raw log must still receive every byte.
+	if raw.String() != event {
+		t.Errorf("raw passthrough broken: got %q, want %q", raw.String(), event)
+	}
+}
+
+// TestWriterNarrationBeforeTool verifies that when an assistant message contains
+// both a text block and a tool_use block, the narration line appears before the
+// tool line in the output.
+func TestWriterNarrationBeforeTool(t *testing.T) {
+	var status bytes.Buffer
+	w := heartbeat.New(&bytes.Buffer{}, "42", &status, time.Hour)
+
+	// Message with text then tool_use.
+	event := `{"type":"assistant","message":{"content":[{"type":"text","text":"I will edit the file."},{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"}}]}}` + "\n"
+	fmt.Fprint(w, event)
+
+	out := status.String()
+	narrationIdx := strings.Index(out, "I will edit")
+	toolIdx := strings.Index(out, "Edit(main.go)")
+	if narrationIdx < 0 {
+		t.Fatalf("narration not found in output: %q", out)
+	}
+	if toolIdx < 0 {
+		t.Fatalf("tool not found in output: %q", out)
+	}
+	if narrationIdx > toolIdx {
+		t.Errorf("narration (%d) must appear before tool (%d): %q", narrationIdx, toolIdx, out)
+	}
+}
+
+// TestWriterNarrationEmptySkipped verifies that empty or whitespace-only text
+// blocks do not produce a heartbeat line.
+func TestWriterNarrationEmptySkipped(t *testing.T) {
+	for _, txt := range []string{"", "   ", "\t\n"} {
+		var status bytes.Buffer
+		w := heartbeat.New(&bytes.Buffer{}, "8", &status, time.Hour)
+		// JSON-encode the text value to handle whitespace safely.
+		import_txt := fmt.Sprintf(`{"type":"assistant","message":{"content":[{"type":"text","text":%q}]}}`, txt)
+		fmt.Fprintln(w, import_txt)
+		if status.Len() > 0 {
+			t.Errorf("text=%q: unexpected heartbeat: %q", txt, status.String())
+		}
+	}
+}
+
 // TestFormatHeartbeatShape verifies the output shape from FormatHeartbeat.
 func TestFormatHeartbeatShape(t *testing.T) {
 	cases := []struct {
@@ -186,18 +273,20 @@ func TestFormatHeartbeatShape(t *testing.T) {
 	}
 }
 
-// TestWriterNonToolContentBlocks verifies that text content blocks in assistant
-// events do not trigger a heartbeat emission (only tool_use does).
-func TestWriterNonToolContentBlocks(t *testing.T) {
+// TestWriterNarrationText verifies that a text content block in an assistant
+// event emits a heartbeat line containing the narration text.
+func TestWriterNarrationText(t *testing.T) {
 	var status bytes.Buffer
 	w := heartbeat.New(&bytes.Buffer{}, "8", &status, time.Hour)
 
-	// Assistant event with only text content, no tool_use.
 	event := `{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}` + "\n"
 	fmt.Fprint(w, event)
 
-	// No heartbeat expected (no tool change, throttle is 1h).
-	if status.Len() > 0 {
-		t.Errorf("unexpected heartbeat for text-only content: %q", status.String())
+	out := status.String()
+	if !strings.Contains(out, "#8") {
+		t.Errorf("heartbeat missing issue prefix: %q", out)
+	}
+	if !strings.Contains(out, "hello") {
+		t.Errorf("heartbeat missing narration text: %q", out)
 	}
 }
