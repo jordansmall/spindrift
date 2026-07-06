@@ -51,6 +51,41 @@ func TestBwrapArgs_NoClearEnv(t *testing.T) {
 	}
 }
 
+// TestBwrapArgs_SkillsDirMounted verifies that a valid SPINDRIFT_SKILLS_DIR
+// produces a --ro-bind entry for /home/agent/.claude/skills.
+func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
+	dir := t.TempDir()
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		skillsDir:     dir,
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	argStr := strings.Join(args, " ")
+	want := "--ro-bind " + dir + " /home/agent/.claude/skills"
+	if !strings.Contains(argStr, want) {
+		t.Errorf("skills bind %q not found in args: %v", want, args)
+	}
+}
+
+// TestBwrapArgs_SkillsDirUnset_NoMount verifies that omitting skillsDir
+// produces no skills bind in the bwrap args.
+func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		skillsDir:     "",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	argStr := strings.Join(args, " ")
+	if strings.Contains(argStr, ".claude/skills") {
+		t.Errorf("unexpected skills bind in args when skillsDir is empty: %v", args)
+	}
+}
+
 // TestBwrapArgs_NonSecretOnArgv verifies that non-secret env vars still reach
 // the sandbox via --setenv (so they appear in argv).
 func TestBwrapArgs_NonSecretOnArgv(t *testing.T) {
