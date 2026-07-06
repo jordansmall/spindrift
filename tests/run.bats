@@ -922,6 +922,50 @@ EOF
   [[ "$output" == *"status=failed"* ]]
 }
 
+# --- Merge-conflict rebase retry (issue #194) ---------------------------------
+
+# conflict→rebase→merge: merge fails with conflict, rebase succeeds, second
+# merge attempt succeeds → issue reaches agent-complete.
+@test "merge gate: conflict → rebase → retried merge → agent-complete" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  # CI returns SUCCESS twice: once before the merge attempt, once after rebase.
+  export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS,SUCCESS"
+  # First merge call fails with conflict; second succeeds.
+  export FAKE_GH_PR_MERGE_CONFLICT_1=1
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=100
+  export MAX_REBASE_ATTEMPTS=3
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'pr merge' "$GH_LOG"
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
+  [[ "$output" == *"status=verified-merged"* ]]
+  # Verify that git rebase was invoked during the retry.
+  grep -q 'rebase' "$GIT_LOG"
+}
+
+# conflict→unrebasable→failed: merge fails with conflict, rebase also fails
+# (FAKE_GIT_REBASE_EXIT=1) → issue marked agent-failed without further retries.
+@test "merge gate: conflict → unrebasable → agent-failed" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'1\tFirst issue'
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
+  export FAKE_GH_PR_MERGE_CONFLICT_1=99  # all merge calls fail with conflict
+  export FAKE_GIT_REBASE_EXIT=1          # git rebase exits non-zero (unresolvable)
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=100
+  export MAX_REBASE_ATTEMPTS=3
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
+  [[ "$output" == *"status=failed"* ]]
+  # Verify git rebase was attempted (and failed).
+  grep -q 'rebase' "$GIT_LOG"
+}
+
 # Pending-timeout: no fix passes consumed, gate timeout marks agent-failed.
 @test "self-heal: pending timeout does not consume fix passes" {
   export FAKE_PODMAN_IMAGE_PRESENT=1

@@ -164,6 +164,13 @@ EOF
             draftvar="FAKE_GH_PR_DRAFT_${pr_num}"
             printf '%s\n' "${!draftvar:-false}"
             ;;
+          headRefName,baseRefName)
+            headvar="FAKE_GH_PR_HEAD_${pr_num}"
+            basevar="FAKE_GH_PR_BASE_${pr_num}"
+            printf '%s\t%s\n' \
+              "${!headvar:-agent/issue-${pr_num}}" \
+              "${!basevar:-main}"
+            ;;
         esac
         ;;
       checks)
@@ -183,6 +190,22 @@ EOF
       merge)
         pr_ref="${3:-}"
         pr_num="${pr_ref##*/}"
+        # FAKE_GH_PR_MERGE_CONFLICT_N: number of merge calls that should fail
+        # with a merge-conflict error before succeeding.
+        conflict_var="FAKE_GH_PR_MERGE_CONFLICT_${pr_num}"
+        merge_count_key="merge-count-${pr_num}"
+        merge_count=0
+        if [ -f "$GH_STATE" ]; then
+          while IFS=$'\t' read -r k v; do
+            [ "$k" = "$merge_count_key" ] && merge_count="$v"
+          done <"$GH_STATE"
+        fi
+        merge_count=$((merge_count + 1))
+        printf '%s\t%s\n' "$merge_count_key" "$merge_count" >>"$GH_STATE"
+        if [ -n "${!conflict_var:-}" ] && [ "$merge_count" -le "${!conflict_var:-0}" ]; then
+          printf 'GraphQL: Pull Request is not mergeable\n' >&2
+          exit 1
+        fi
         printf 'pr-state-%s\tMERGED\n' "$pr_num" >>"$GH_STATE"
         ;;
     esac
@@ -220,6 +243,15 @@ EOF
           rollupvar="FAKE_GH_GRAPHQL_ROLLUP_${pr_num}"
           [ -n "${!rollupvar:-}" ] && printf '%s\n' "${!rollupvar}"
         fi
+        ;;
+    esac
+    ;;
+  repo)
+    case "${2:-}" in
+      clone)
+        # Minimal stub: record the call and succeed. The real Rebase creates
+        # a tmpdir before calling gh repo clone, so the dir exists already;
+        # subsequent git calls use the fake git binary.
         ;;
     esac
     ;;

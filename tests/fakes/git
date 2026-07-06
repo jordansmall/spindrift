@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Fake git for bash tests that exercise the rebase-retry flow.
+# Logs every call and honours FAKE_GIT_REBASE_EXIT to simulate rebase failure.
+set -euo pipefail
+
+GIT_LOG="${GIT_LOG:-/dev/null}"
+
+# Strip leading -C <dir> pairs so the log records the logical command.
+args=("$@")
+filtered=()
+i=0
+while [ "$i" -lt "${#args[@]}" ]; do
+  if [ "${args[i]}" = "-C" ]; then
+    i=$((i + 2))
+  else
+    filtered+=("${args[i]}")
+    i=$((i + 1))
+  fi
+done
+
+printf '%s\n' "${filtered[*]}" >>"$GIT_LOG"
+
+case "${filtered[0]:-}" in
+  rebase)
+    exit "${FAKE_GIT_REBASE_EXIT:-0}"
+    ;;
+  *)
+    exit 0
+    ;;
+esac
