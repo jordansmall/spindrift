@@ -150,3 +150,97 @@ func TestAdoptAndGate_GreenMergesAndCompletes(t *testing.T) {
 		t.Errorf("last swap add=%q, want %q", last.Add, c.completeLabel)
 	}
 }
+
+// --- engageByNumber tests -----------------------------------------------------
+
+func TestEngageByNumber_GreenMergesAndCompletes(t *testing.T) {
+	c := reconcileConfig()
+	fc := forge.NewFake()
+
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	branch := c.branchPrefix + "42"
+	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
+	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess})
+
+	err := engageByNumber(c, fc, t.TempDir(), nil, "42")
+
+	if err != nil {
+		t.Errorf("expected nil error on green path; got %v", err)
+	}
+	if fc.Merged != testReconcilePR {
+		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.SwapCalls) == 0 {
+		t.Fatal("expected SwapLabel call for completeLabel")
+	}
+	if last := fc.SwapCalls[len(fc.SwapCalls)-1]; last.Add != c.completeLabel {
+		t.Errorf("last swap add=%q, want %q", last.Add, c.completeLabel)
+	}
+}
+
+func TestEngageByNumber_DraftPRSkipped(t *testing.T) {
+	c := reconcileConfig()
+	fc := forge.NewFake()
+
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	branch := c.branchPrefix + "42"
+	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: true})
+
+	err := engageByNumber(c, fc, t.TempDir(), nil, "42")
+
+	if err == nil {
+		t.Error("expected error for draft PR; got nil")
+	}
+	if fc.Merged != "" {
+		t.Errorf("draft PR must not be merged; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.SwapCalls) != 0 {
+		t.Errorf("draft PR must not trigger label churn; got %v", fc.SwapCalls)
+	}
+}
+
+func TestEngageByNumber_NoPRSkipped(t *testing.T) {
+	c := reconcileConfig()
+	fc := forge.NewFake()
+
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	// No PR registered for the branch.
+
+	err := engageByNumber(c, fc, t.TempDir(), nil, "42")
+
+	if err == nil {
+		t.Error("expected error for no-PR case; got nil")
+	}
+	if fc.Merged != "" {
+		t.Errorf("no-PR case must not trigger merge; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.SwapCalls) != 0 {
+		t.Errorf("no-PR case must not trigger label churn; got %v", fc.SwapCalls)
+	}
+}
+
+func TestEngageByNumber_RedFollowsSelfHeal(t *testing.T) {
+	c := reconcileConfig()
+	c.maxFixAttempts = 0
+	fc := forge.NewFake()
+
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	branch := c.branchPrefix + "42"
+	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
+	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
+
+	err := engageByNumber(c, fc, t.TempDir(), nil, "42")
+
+	if err != nil {
+		t.Errorf("expected nil error (gate result expressed via labels); got %v", err)
+	}
+	if fc.Merged != "" {
+		t.Errorf("expected no merge on red CI; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.SwapCalls) == 0 {
+		t.Fatal("expected SwapLabel call for failedLabel")
+	}
+	if last := fc.SwapCalls[len(fc.SwapCalls)-1]; last.Add != c.failedLabel {
+		t.Errorf("last swap add=%q, want %q", last.Add, c.failedLabel)
+	}
+}
