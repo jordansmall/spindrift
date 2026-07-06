@@ -69,9 +69,10 @@ func (w *Writer) Write(p []byte) (int, error) {
 }
 
 type streamEvent struct {
-	Type     string        `json:"type"`
-	Message  *messageBlock `json:"message,omitempty"`
-	NumTurns int           `json:"num_turns,omitempty"`
+	Type            string        `json:"type"`
+	Message         *messageBlock `json:"message,omitempty"`
+	NumTurns        int           `json:"num_turns,omitempty"`
+	ParentToolUseID string        `json:"parent_tool_use_id,omitempty"`
 }
 
 type messageBlock struct {
@@ -82,6 +83,7 @@ type contentBlock struct {
 	Type  string          `json:"type"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
+	Text  string          `json:"text,omitempty"`
 }
 
 func (w *Writer) parseLine(line string) {
@@ -97,6 +99,20 @@ func (w *Writer) parseLine(line string) {
 	switch ev.Type {
 	case "assistant":
 		if ev.Message != nil {
+			// Subagent narration (parent_tool_use_id != "") is dropped: subagent
+			// text is implementation detail of the spawning tool, not operator intent.
+			if ev.ParentToolUseID == "" {
+				// Emit narration before tool line when both are present.
+				for _, block := range ev.Message.Content {
+					if block.Type == "text" {
+						if narration := trimNarration(block.Text); narration != "" {
+							fmt.Fprintln(w.out, "#"+w.issue+" \xc2\xb7 "+narration)
+							w.lastEmit = time.Now()
+						}
+						break
+					}
+				}
+			}
 			for _, block := range ev.Message.Content {
 				if block.Type == "tool_use" {
 					tool := formatTool(block.Name, block.Input)
@@ -147,6 +163,29 @@ func FormatHeartbeat(issue string, turns int, lastTool string) string {
 		fmt.Fprintf(&sb, " \xc2\xb7 %s", lastTool)
 	}
 	return sb.String()
+}
+
+// trimNarration returns the first sentence of text, capped at 120 characters, with
+// leading/trailing whitespace removed. Returns "" for empty or whitespace-only input.
+// Subagent text (parent_tool_use_id != "") is handled by the caller — this function
+// only trims; it does not decide whether to emit.
+func trimNarration(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	// Trim to first sentence boundary or newline.
+	if i := strings.IndexAny(text, ".!?\n"); i >= 0 {
+		text = strings.TrimSpace(text[:i+1])
+		// Strip trailing newline that was the boundary character.
+		if len(text) > 0 && text[len(text)-1] == '\n' {
+			text = strings.TrimSpace(text[:len(text)-1])
+		}
+	}
+	if len(text) > 120 {
+		text = text[:117] + "..."
+	}
+	return text
 }
 
 // formatTool returns a compact label for a tool_use block, e.g. "Edit(main.go)".
