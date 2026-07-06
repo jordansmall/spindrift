@@ -101,6 +101,54 @@ func TestFanOut_ClaimsGatedByMaxParallel(t *testing.T) {
 	}
 }
 
+// TestFanOut_FailingContainerReleasesSemaphoreForLaterClaim verifies that when the
+// first container fails, the semaphore slot is freed and the next issue can be
+// claimed. This is the acceptance-criteria scenario: MAX_PARALLEL=1, failing first
+// container, later issues only claimed after the slot frees.
+func TestFanOut_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.T) {
+	c := baseConfig()
+	c.maxParallel = 1
+	c.label = "agent-trigger"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
+
+	var count int32
+	cfc := &countingForge{Client: fc, claimCount: &count, inProg: c.inProgressLabel}
+
+	fr := runner.NewFake()
+	fr.RunErrs = []error{boxErr, nil} // first slot: fail; second: succeed
+
+	dir := tempLogDir(t)
+	fanOut(c, cfc, dir, fr, []issue{
+		{number: "1", title: "first"},
+		{number: "2", title: "second"},
+	})
+
+	// Both issues must have been claimed — the failing first container must not
+	// prevent the second issue from being dispatched.
+	if got := atomic.LoadInt32(&count); got != 2 {
+		t.Errorf("total claims after fanOut with failing first box: got %d, want 2", got)
+	}
+
+	// Exactly one issue must carry failedLabel (the one whose box exited non-zero).
+	// We don't assert which number failed — goroutine scheduling is non-deterministic.
+	failed := 0
+	for _, num := range []string{"1", "2"} {
+		iss, err := fc.Issue(num)
+		if err != nil {
+			t.Fatalf("Issue(%q): %v", num, err)
+		}
+		if containsLabel(iss.Labels, c.failedLabel) {
+			failed++
+		}
+	}
+	if failed != 1 {
+		t.Errorf("exactly 1 issue should carry failedLabel; got %d", failed)
+	}
+}
+
 // TestFanOut_GatesEachIssueAfterBoxCompletes verifies that the merge gate runs
 // inside each goroutine immediately after its box exits. An issue with a "ready"
 // outcome and green CI must reach completeLabel before fanOut returns, without
