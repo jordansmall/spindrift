@@ -1213,6 +1213,49 @@ func dispatchWaves(c config, fc forge.Client, pwd string, r runner.Runner, issue
 	return nil
 }
 
+// drainMaxJobs drains up to c.maxJobs currently-unblocked issues from the
+// batch and exits. Blocked issues are skipped so no slot is wasted on a
+// dependency that hasn't merged yet; they wait for the next invocation.
+// A cycle in the in-batch dependency graph is an error returned immediately.
+func drainMaxJobs(c config, fc forge.Client, pwd string, r runner.Runner, issues []issue, edges map[string][]string) error {
+	if len(edges) > 0 {
+		if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
+			return fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
+		}
+	}
+	var selected []issue
+	for _, iss := range issues {
+		if issueIsReady(c, fc, iss.number, edges) {
+			selected = append(selected, iss)
+			if len(selected) >= c.maxJobs {
+				break
+			}
+		} else {
+			fmt.Printf("    ~~ #%s blocked (a blocker is not '%s'); skipping\n", iss.number, c.completeLabel)
+		}
+	}
+	if len(selected) == 0 {
+		// Claimed single-issue path: the caller already swapped this issue
+		// onto the in-progress label, so a bare skip would strand it there.
+		// Drop a marker naming the unmet blockers; the dispatching pipeline
+		// releases the claim and comments. Give up — no wait, no recovery.
+		if c.issueNumber != "" {
+			if blockers := unreadyBlockers(c, fc, c.issueNumber, edges); len(blockers) > 0 {
+				if err := writeBlockedMarker(pwd, blockers); err != nil {
+					return err
+				}
+				fmt.Printf("==> #%s blocked; wrote logs/%s for the pipeline to release the claim\n", c.issueNumber, blockedMarker)
+			}
+		}
+		fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", c.label)
+		return nil
+	}
+	fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), c.maxJobs)
+	fanOut(c, fc, pwd, r, selected)
+	printOutcomeReport(c, fc, pwd, r, selected)
+	return nil
+}
+
 func run() error {
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -1271,44 +1314,9 @@ func run() error {
 	}
 
 	if c.maxJobs > 0 {
-		// MAX_JOBS > 0: drain up to N currently-unblocked issues, then exit.
-		// A blocked oldest issue is skipped so no slot is wasted on a
-		// dependency that hasn't merged yet; it waits for the next invocation.
-		if hasEdges {
-			if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
-				return fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
-			}
+		if err := drainMaxJobs(c, fc, pwd, r, issues, edges); err != nil {
+			return err
 		}
-		var selected []issue
-		for _, iss := range issues {
-			if issueIsReady(c, fc, iss.number, edges) {
-				selected = append(selected, iss)
-				if len(selected) >= c.maxJobs {
-					break
-				}
-			} else {
-				fmt.Printf("    ~~ #%s blocked (a blocker is not '%s'); skipping\n", iss.number, c.completeLabel)
-			}
-		}
-		if len(selected) == 0 {
-			// Claimed single-issue path: the caller already swapped this issue
-			// onto the in-progress label, so a bare skip would strand it there.
-			// Drop a marker naming the unmet blockers; the dispatching pipeline
-			// releases the claim and comments. Give up — no wait, no recovery.
-			if c.issueNumber != "" {
-				if blockers := unreadyBlockers(c, fc, c.issueNumber, edges); len(blockers) > 0 {
-					if err := writeBlockedMarker(pwd, blockers); err != nil {
-						return err
-					}
-					fmt.Printf("==> #%s blocked; wrote logs/%s for the pipeline to release the claim\n", c.issueNumber, blockedMarker)
-				}
-			}
-			fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", c.label)
-			return nil
-		}
-		fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), c.maxJobs)
-		fanOut(c, fc, pwd, r, selected)
-		printOutcomeReport(c, fc, pwd, r, selected)
 	} else if hasEdges {
 		// MAX_JOBS = 0 with dependency edges: multi-wave dispatch.
 		if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
