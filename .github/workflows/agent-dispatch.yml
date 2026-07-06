@@ -23,11 +23,17 @@ permissions:
 jobs:
   dispatch:
     if: github.event.label.name == 'agent-trigger'
-    runs-on: ubuntu-latest
+    # Self-hosted macbook-air runner (labels from #233). nix + gh + podman are
+    # pre-installed and persistent on the host.
+    runs-on: [macbook-air]
     timeout-minutes: 180
     env:
-      # nix run .#run reads these directly; env wins over the image's baked defaults.
-      RUNTIME: docker
+      # nix run .#run reads these directly; env wins over the image's baked
+      # defaults. On the Mac the runtime is podman: `nix run .#build` realises
+      # the agent image via the container/podman-machine fallback, which cannot
+      # bind-mount the host /nix/store and so uses the `spindrift-nix` nixVolume
+      # provisioned in #233.
+      RUNTIME: podman
       # The claim step below swaps the issue onto agent-in-progress before the
       # build, so the launcher targets it by number rather than a label query.
       # LABEL still names the in-progress label so fanOut skips the redundant
@@ -60,10 +66,11 @@ jobs:
             --remove-label agent-trigger \
             --remove-label ready-for-agent
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
+      # nix is pre-installed and persistent on the self-hosted runner (#233), so
+      # no per-run DeterminateSystems/nix-installer-action.
 
-      # ~2m40s cold on a GitHub runner (nixpkgs closure is substituted, not compiled).
+      # Realises the agent image via the podman-machine fallback + `spindrift-nix`
+      # nixVolume; incremental once the volume is warm.
       - name: Build the agent image
         run: nix run .#build
 
