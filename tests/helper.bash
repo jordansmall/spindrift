@@ -11,7 +11,7 @@ setup_fakes() {
   FAKE_BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$FAKE_BIN"
   cp "$FAKES_DIR"/podman "$FAKES_DIR"/docker "$FAKES_DIR"/bwrap "$FAKES_DIR"/gh \
-    "$FAKES_DIR"/claude "$FAKES_DIR"/nix "$FAKES_DIR"/git "$FAKE_BIN"/
+    "$FAKES_DIR"/claude "$FAKES_DIR"/nix "$FAKE_BIN"/
   chmod +x "$FAKE_BIN"/*
   export PATH="$FAKE_BIN:$PATH"
 
@@ -28,7 +28,6 @@ setup_fakes() {
   : >"$DOCKER_LOG"
   : >"$BWRAP_LOG"
   : >"$GH_LOG"
-  : >"$GIT_LOG"
   : >"$CLAUDE_LOG"
   : >"$NIX_LOG"
 }
