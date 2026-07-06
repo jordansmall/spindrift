@@ -24,6 +24,7 @@ type bwrapAdapter struct {
 	agentEnv      string // baked nix store path for the agent env (PATH, SSL, …)
 	bakedPrefetch string // baked prefetch snippet fed to the entrypoint
 	promptDir     string // optional host path to bind-mount over /agent/prompts
+	skillsDir     string // optional host path to bind-mount over /home/agent/.claude/skills
 	unshareNet    bool   // when true, adds --unshare-net (isolates from host netns)
 }
 
@@ -31,12 +32,13 @@ type bwrapAdapter struct {
 // EnsureReady is a no-op; call NewBwrapBuild for the build command.
 // unshareNet adds --unshare-net to isolate from the host network namespace;
 // when false, the sandbox shares the host netns (host-loopback reachable).
-func NewBwrap(agentFiles, agentEnv, bakedPrefetch, promptDir string, unshareNet bool) Runner {
+func NewBwrap(agentFiles, agentEnv, bakedPrefetch, promptDir, skillsDir string, unshareNet bool) Runner {
 	return &bwrapAdapter{
 		agentFiles:    agentFiles,
 		agentEnv:      agentEnv,
 		bakedPrefetch: bakedPrefetch,
 		promptDir:     promptDir,
+		skillsDir:     skillsDir,
 		unshareNet:    unshareNet,
 	}
 }
@@ -71,6 +73,12 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		if info, err := os.Stat(a.promptDir); err == nil && info.IsDir() {
 			fmt.Printf("==> SPINDRIFT_PROMPT_DIR set; mounting %s over the baked prompt\n", a.promptDir)
 			args = append(args, "--ro-bind", a.promptDir, "/agent/prompts")
+		}
+	}
+	if a.skillsDir != "" {
+		if info, err := os.Stat(a.skillsDir); err == nil && info.IsDir() {
+			fmt.Printf("==> SPINDRIFT_SKILLS_DIR set; mounting %s over /home/agent/.claude/skills\n", a.skillsDir)
+			args = append(args, "--ro-bind", a.skillsDir, "/home/agent/.claude/skills")
 		}
 	}
 	// --clearenv is intentionally absent: secrets (GH_TOKEN, auth tokens) reach

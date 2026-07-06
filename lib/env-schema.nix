@@ -210,6 +210,11 @@
     doc = "host directory mounted over /agent/prompts for zero-rebuild prompt iteration";
     boxEnv = false;
   };
+  spindriftSkillsDir = {
+    env = "SPINDRIFT_SKILLS_DIR";
+    doc = "host directory mounted read-only over /home/agent/.claude/skills so the headless agent can load operator-provided skills";
+    boxEnv = false;
+  };
   issueNumber = {
     env = "ISSUE_NUMBER";
     doc = "dispatch only this issue number, bypassing the LABEL query; empty discovers by LABEL";

@@ -1,6 +1,9 @@
 package runner
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestIsDigestPinned(t *testing.T) {
 	tests := []struct {
@@ -102,6 +105,38 @@ func TestBuildRunArgsImageIsLast(t *testing.T) {
 		}
 		if flagIdx >= imageIdx {
 			t.Errorf("flag %q (idx %d) must appear before image (idx %d)", flag, flagIdx, imageIdx)
+		}
+	}
+}
+
+func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
+	dir := t.TempDir()
+	a := &ociAdapter{
+		cli:       "podman",
+		image:     "spindrift:test",
+		skillsDir: dir,
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	args := a.buildRunArgs(box)
+
+	want := dir + ":/home/agent/.claude/skills:ro"
+	if !containsArg(args, want) {
+		t.Errorf("skills mount %q not found in args: %v", want, args)
+	}
+}
+
+func TestBuildRunArgs_SkillsDirUnset_NoMount(t *testing.T) {
+	a := &ociAdapter{
+		cli:       "podman",
+		image:     "spindrift:test",
+		skillsDir: "",
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	args := a.buildRunArgs(box)
+
+	for _, arg := range args {
+		if strings.Contains(arg, ".claude/skills") {
+			t.Errorf("unexpected skills mount in args when skillsDir is empty: %v", args)
 		}
 	}
 }

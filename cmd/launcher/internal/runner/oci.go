@@ -23,6 +23,7 @@ type ociAdapter struct {
 	flakeImageAttr  string // nix flake attr for the image (.#packages.x.spindrift)
 	pwd             string // $PWD; container-fallback mounts this as /workspace
 	promptDir       string // optional host path to mount over /agent/prompts
+	skillsDir       string // optional host path to mount over /home/agent/.claude/skills
 	podmanNetwork   string // optional --network value; empty omits the flag
 	pidsLimit       string // --pids-limit value; empty disables the flag
 	memoryLimit     string // --memory value; empty disables the flag
@@ -30,10 +31,11 @@ type ociAdapter struct {
 
 // NewOCI constructs an OCI adapter. pwd is the working directory (used for the
 // container-fallback path); promptDir is the optional SPINDRIFT_PROMPT_DIR;
+// skillsDir is the optional SPINDRIFT_SKILLS_DIR;
 // podmanNetwork is the optional --network value (empty omits the flag).
 // pidsLimit and memoryLimit set the --pids-limit and --memory flags; empty
 // string omits the flag.
-func NewOCI(cli, image, imageArchive, imageDrv, imageTag, nixBuilderImage, nixVolume, flakeImageAttr, pwd, promptDir, podmanNetwork, pidsLimit, memoryLimit string) Runner {
+func NewOCI(cli, image, imageArchive, imageDrv, imageTag, nixBuilderImage, nixVolume, flakeImageAttr, pwd, promptDir, skillsDir, podmanNetwork, pidsLimit, memoryLimit string) Runner {
 	return &ociAdapter{
 		cli:             cli,
 		image:           image,
@@ -45,6 +47,7 @@ func NewOCI(cli, image, imageArchive, imageDrv, imageTag, nixBuilderImage, nixVo
 		flakeImageAttr:  flakeImageAttr,
 		pwd:             pwd,
 		promptDir:       promptDir,
+		skillsDir:       skillsDir,
 		podmanNetwork:   podmanNetwork,
 		pidsLimit:       pidsLimit,
 		memoryLimit:     memoryLimit,
@@ -197,6 +200,12 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 		if info, err := os.Stat(a.promptDir); err == nil && info.IsDir() {
 			fmt.Printf("==> SPINDRIFT_PROMPT_DIR set; mounting %s over the baked prompt\n", a.promptDir)
 			args = append(args, "-v", a.promptDir+":/agent/prompts:ro")
+		}
+	}
+	if a.skillsDir != "" {
+		if info, err := os.Stat(a.skillsDir); err == nil && info.IsDir() {
+			fmt.Printf("==> SPINDRIFT_SKILLS_DIR set; mounting %s over /home/agent/.claude/skills\n", a.skillsDir)
+			args = append(args, "-v", a.skillsDir+":/home/agent/.claude/skills:ro")
 		}
 	}
 	// Security hardening — always drop all capabilities and block privilege

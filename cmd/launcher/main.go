@@ -81,6 +81,8 @@ type config struct {
 
 	// Optional prompt override
 	spindriftPromptDir string
+	// Optional skills override
+	spindriftSkillsDir string
 
 	barrierLabel string
 
@@ -180,6 +182,7 @@ func loadConfig() config {
 		gitUserEmail:     os.Getenv("GIT_USER_EMAIL"),
 
 		spindriftPromptDir: os.Getenv("SPINDRIFT_PROMPT_DIR"),
+		spindriftSkillsDir: os.Getenv("SPINDRIFT_SKILLS_DIR"),
 
 		barrierLabel: os.Getenv("BARRIER_LABEL"),
 
@@ -220,10 +223,10 @@ func validate(c config) error {
 // newRunner constructs the runner adapter for the `run` subcommand.
 func newRunner(c config, pwd string) runner.Runner {
 	if c.runtime == "bwrap" {
-		return runner.NewBwrap(c.agentFiles, c.agentEnv, c.bakedPrefetch, c.spindriftPromptDir, c.bwrapUnshareNet)
+		return runner.NewBwrap(c.agentFiles, c.agentEnv, c.bakedPrefetch, c.spindriftPromptDir, c.spindriftSkillsDir, c.bwrapUnshareNet)
 	}
 	return runner.NewOCI(c.runtime, c.image, c.imageArchive, c.imageDrv, c.imageTag,
-		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, c.spindriftPromptDir,
+		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, c.spindriftPromptDir, c.spindriftSkillsDir,
 		c.podmanNetwork, c.pidsLimit, c.memoryLimit)
 }
 
@@ -234,7 +237,7 @@ func newBuildRunner(c config, pwd string) runner.Runner {
 	}
 	return runner.NewOCI(c.runtime, c.image, c.imageArchive, c.imageDrv, c.imageTag,
 		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, "", "",
-		c.pidsLimit, c.memoryLimit)
+		"", c.pidsLimit, c.memoryLimit)
 }
 
 // buildBoxEnv assembles the env map forwarded into a Box. It combines the
@@ -597,8 +600,8 @@ func openPRForBranch(fc forge.Client, branch string) (url string, isDraft bool, 
 // Sentinel errors translated to specific exit codes so callers like dogfood.sh
 // can distinguish termination reasons without a separate gh probe.
 //
-//   exit 2 (errQueueEmpty):   discoverIssues found no open dispatchable issues.
-//   exit 3 (errQueueDrained): open issues exist but filterByBarrier fenced them all.
+//	exit 2 (errQueueEmpty):   discoverIssues found no open dispatchable issues.
+//	exit 3 (errQueueDrained): open issues exist but filterByBarrier fenced them all.
 var (
 	errQueueEmpty   = errors.New("queue empty")
 	errQueueDrained = errors.New("queue drained")
