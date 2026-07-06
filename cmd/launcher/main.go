@@ -333,8 +333,38 @@ func runFix(c config, pwd string, r runner.Runner, iss issue, fixPass int) error
 	return r.Run(box)
 }
 
+// runConflictResolve dispatches a conflict-resolution box for issue iss.
+// The box receives CONFLICT_RESOLVE_PR_URL so the entrypoint enters
+// conflict-resolve mode: it resolves the rebase conflict, pushes the branch,
+// and exits without running the main agent prompt.
+func runConflictResolve(c config, pwd string, r runner.Runner, iss issue, pr string) error {
+	logPath := filepath.Join(pwd, "logs", fmt.Sprintf("issue-%s-conflict-resolve.log", iss.number))
+	fmt.Printf("    -> #%s (conflict-resolve): %s\n", iss.number, iss.title)
+
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		return fmt.Errorf("create conflict-resolve log: %w", err)
+	}
+	defer logFile.Close()
+
+	env := buildBoxEnv(c, iss)
+	env["CONFLICT_RESOLVE_PR_URL"] = pr
+	box := runner.Box{
+		Issue:  iss.number,
+		Name:   "agent-issue-" + iss.number,
+		Env:    env,
+		Output: heartbeat.New(logFile, iss.number, os.Stdout, heartbeat.DefaultThrottle),
+	}
+	return r.Run(box)
+}
+
 // mergeWhenGreen polls CheckState on the PR's head commit until the state
 // reaches SUCCESS, a terminal failure, or mergePollTimeout seconds elapse.
+//
+// conflictResolveFn, when non-nil, is called when fc.Rebase returns
+// ErrMergeConflict. If it succeeds the poll loop continues; on failure the
+// outcome is non-retriable. When nil, a rebase conflict is immediately
+// non-retriable.
 //
 // Returns (merged, genuineRed):
 //   - (true, false)  — CI green, PR merged, issue swapped to completeLabel.
@@ -342,7 +372,7 @@ func runFix(c config, pwd string, r runner.Runner, iss issue, fixPass int) error
 //     dispatch a fix box. No label swap performed.
 //   - (false, false) — non-retriable outcome (timeout, merge command failure);
 //     no label swap performed. Caller must swap to failedLabel.
-func mergeWhenGreen(c config, fc forge.Client, num, pr string) (bool, bool) {
+func mergeWhenGreen(c config, fc forge.Client, num, pr string, conflictResolveFn func(string) error) (bool, bool) {
 	pollIv := c.mergePollInterval
 	deadline := c.mergePollTimeout
 	// actualIv is used for elapsed tracking; floor to 1 so we don't
@@ -370,8 +400,16 @@ func mergeWhenGreen(c config, fc forge.Client, num, pr string) (bool, bool) {
 				fmt.Printf("    #%s  pr=%s  status=rebase-retry  attempt=%d/%d\n",
 					num, pr, rebaseAttempts, c.maxRebaseAttempts)
 				if rbErr := fc.Rebase(pr); rbErr != nil {
-					fmt.Printf("    #%s  pr=%s  status=rebase-failed  !! %v\n", num, pr, rbErr)
-					return false, false
+					if errors.Is(rbErr, forge.ErrMergeConflict) && conflictResolveFn != nil {
+						fmt.Printf("    #%s  pr=%s  status=conflict-resolve\n", num, pr)
+						if crErr := conflictResolveFn(pr); crErr != nil {
+							fmt.Printf("    #%s  pr=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
+							return false, false
+						}
+					} else {
+						fmt.Printf("    #%s  pr=%s  status=rebase-failed  !! %v\n", num, pr, rbErr)
+						return false, false
+					}
 				}
 				// Reset the poll timer so CI gets a full window after the force-push.
 				elapsed = 0
@@ -403,9 +441,11 @@ func mergeWhenGreen(c config, fc forge.Client, num, pr string) (bool, bool) {
 //
 // runFix is called with the 1-based fix-pass number and must dispatch the fix
 // box synchronously (it blocks until the box exits).
-func selfHeal(c config, fc forge.Client, runFixFn func(int) error, num, pr string) bool {
+// runConflictResolveFn, when non-nil, is passed through to mergeWhenGreen to
+// drive agent-based resolution of merge-gate rebase conflicts.
+func selfHeal(c config, fc forge.Client, runFixFn func(int) error, runConflictResolveFn func(string) error, num, pr string) bool {
 	for attempt := 0; ; attempt++ {
-		merged, genuineRed := mergeWhenGreen(c, fc, num, pr)
+		merged, genuineRed := mergeWhenGreen(c, fc, num, pr, runConflictResolveFn)
 		if merged {
 			return true
 		}
@@ -449,10 +489,10 @@ func verifyMerged(c config, fc forge.Client, num, pr string) {
 // already-discovered open non-draft PR for iss. Prints "status=adopted"
 // before running the gate. Called by both printOutcomeReport and
 // reconcileStranded.
-func adoptAndGate(c config, fc forge.Client, iss issue, prURL string, runFixFn func(int) error) {
+func adoptAndGate(c config, fc forge.Client, iss issue, prURL string, runFixFn func(int) error, runConflictResolveFn func(string) error) {
 	branch := c.branchPrefix + iss.number
 	fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", iss.number, prURL, branch)
-	if selfHeal(c, fc, runFixFn, iss.number, prURL) {
+	if selfHeal(c, fc, runFixFn, runConflictResolveFn, iss.number, prURL) {
 		verifyMerged(c, fc, iss.number, prURL)
 	} else {
 		fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, prURL)
@@ -555,7 +595,8 @@ func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue
 			return
 		}
 		fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
-		adoptAndGate(c, fc, iss, pr, fixFn)
+		conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
+		adoptAndGate(c, fc, iss, pr, fixFn, conflictFn)
 		return
 	}
 
@@ -565,7 +606,8 @@ func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue
 		postUsageComment(fc, iss.number, logPath)
 	case "ready":
 		fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
-		if selfHeal(c, fc, fixFn, iss.number, o.PR) {
+		conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
+		if selfHeal(c, fc, fixFn, conflictFn, iss.number, o.PR) {
 			verifyMerged(c, fc, iss.number, o.PR)
 		} else {
 			fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, o.PR)
@@ -912,7 +954,8 @@ func reconcileStranded(c config, fc forge.Client, pwd string, r runner.Runner) {
 			continue
 		}
 		fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
-		adoptAndGate(c, fc, iss, prURL, fixFn)
+		conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
+		adoptAndGate(c, fc, iss, prURL, fixFn, conflictFn)
 	}
 }
 
@@ -943,7 +986,8 @@ func engageByNumber(c config, fc forge.Client, pwd string, r runner.Runner, issu
 		return fmt.Errorf("mkdir logs: %w", err)
 	}
 	fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
-	adoptAndGate(c, fc, iss, prURL, fixFn)
+	conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
+	adoptAndGate(c, fc, iss, prURL, fixFn, conflictFn)
 	return nil
 }
 

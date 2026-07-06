@@ -1,9 +1,44 @@
 package runner
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestReapOrphanedRebaseDirs_RemovesStaleAndKeepsOthers(t *testing.T) {
+	root := t.TempDir()
+	stale := []string{
+		filepath.Join(root, "spindrift-rebase-abc123"),
+		filepath.Join(root, "spindrift-rebase-def456"),
+	}
+	for _, d := range stale {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other := filepath.Join(root, "not-a-rebase-dir")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	reapOrphanedRebaseDirs(root)
+
+	for _, d := range stale {
+		if _, err := os.Stat(d); !os.IsNotExist(err) {
+			t.Errorf("expected stale dir %s to be removed", filepath.Base(d))
+		}
+	}
+	if _, err := os.Stat(other); os.IsNotExist(err) {
+		t.Errorf("expected non-rebase dir %s to be kept", filepath.Base(other))
+	}
+}
+
+func TestReapOrphanedRebaseDirs_NoopOnMissingRoot(t *testing.T) {
+	// Should not panic when root does not exist.
+	reapOrphanedRebaseDirs("/tmp/spindrift-test-nonexistent-root-xyz")
+}
 
 func TestIsDigestPinned(t *testing.T) {
 	tests := []struct {
