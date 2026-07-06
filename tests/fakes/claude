@@ -40,6 +40,16 @@ if [ -d "${HOME:-}/.claude/skills" ]; then
   done
 fi
 
+# Conflict-resolution mode: simulate an agent that resolves rebase conflicts
+# by accepting the being-rebased version (theirs) for all conflicted files,
+# then continues the rebase. The entrypoint checks for completion afterwards.
+if [ "${FAKE_CLAUDE_RESOLVE_CONFLICT:-0}" = "1" ]; then
+  git checkout --theirs .
+  git add .
+  GIT_EDITOR=true git rebase --continue
+  exit 0
+fi
+
 if [ "${FAKE_CLAUDE_COMMIT:-0}" = "1" ]; then
   branch="$(git rev-parse --abbrev-ref HEAD)"
   printf 'stub agent change for issue #%s\n' "${ISSUE_NUMBER:-0}" >agent-change.txt

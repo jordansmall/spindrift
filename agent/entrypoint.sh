@@ -81,15 +81,13 @@ fi
 # mechanically; fail fast with a distinct signal instead of proceeding on a
 # stale base.
 echo "==> rebasing $BRANCH onto latest origin/${BASE_BRANCH:-}"
-git rebase "origin/${BASE_BRANCH:-}" || {
-  echo "==> pre-work rebase onto origin/${BASE_BRANCH:-} failed — resolve the conflict and re-dispatch"
-  git rebase --abort 2>/dev/null || true
-  exit 1
-}
+_had_rebase_conflict=""
+git rebase "origin/${BASE_BRANCH:-}" || _had_rebase_conflict=1
 # Publish the rebased branch so the agent's first incremental push is a
 # fast-forward.  Only needed in the adoption path where the rebase rewrote
-# history that was already on the remote.
-if [ -n "${_rebase_and_publish:-}" ]; then
+# history that was already on the remote.  When a conflict is detected,
+# publication is deferred until after the conflict-resolve agent runs below.
+if [ -z "${_had_rebase_conflict:-}" ] && [ -n "${_rebase_and_publish:-}" ]; then
   echo "==> publishing rebased $BRANCH"
   git push --force-with-lease origin "$BRANCH" || {
     echo "==> force-with-lease push after pre-work rebase failed on $BRANCH"
@@ -158,6 +156,41 @@ _subst() {
     envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE' \
     <"$1"
 }
+# When the pre-work rebase produced conflicts, spawn a conflict-resolve agent to
+# re-map the branch onto current main.  Only escalate to exit 1 if the agent
+# genuinely cannot resolve.
+if [ -n "${_had_rebase_conflict:-}" ]; then
+  echo "==> pre-work rebase conflict detected — invoking conflict-resolve agent"
+  _cr_prompt="$(_subst "${PROMPTS_DIR}/conflict-resolve-prompt.md")"
+  set +e
+  claude -p "$_cr_prompt" \
+    --model "${MODEL:-}" \
+    --verbose \
+    --output-format stream-json \
+    --dangerously-skip-permissions
+  set -e
+  if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
+    git rebase --abort 2>/dev/null || true
+    echo "==> pre-work rebase onto origin/${BASE_BRANCH:-} failed — conflict agent could not resolve"
+    exit 1
+  fi
+  echo "==> pre-work rebase conflict resolved by agent"
+  if [ -n "${_rebase_and_publish:-}" ]; then
+    echo "==> publishing rebased $BRANCH (post-conflict-resolve)"
+    git push --force-with-lease origin "$BRANCH" || {
+      echo "==> force-with-lease push after conflict resolution failed on $BRANCH"
+      exit 1
+    }
+  fi
+fi
+
+# CONFLICT_RESOLVE_PR_URL mode: this box was dispatched only to re-map the PR
+# branch onto current main.  Exit after resolution without running the main agent.
+if [ -n "${CONFLICT_RESOLVE_PR_URL:-}" ]; then
+  echo "==> CONFLICT_RESOLVE_PR_URL: conflict resolved — exiting without main agent"
+  exit 0
+fi
+
 prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
 
 # Forward the nix-baked --agents JSON to the Agent. AGENTS_JSON_TEMPLATE is

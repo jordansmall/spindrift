@@ -456,3 +456,63 @@ SKILL
   [ "$status" -ne 0 ]
   [[ "$output" == *"pre-work rebase"* ]]
 }
+
+# --- pre-work rebase conflict resolution (issue #216) -------------------------
+# When a pre-work rebase conflict occurs, an agent is spawned to resolve it.
+# Only genuinely unresolvable conflicts fail the box.
+
+setup_rebase_conflict() {
+  # Helper: push a conflicting README.md change from a prior run, then advance
+  # main with a different conflicting change, and open a fake PR.
+  local prior advance
+  prior="$BATS_TEST_TMPDIR/prior"
+  advance="$BATS_TEST_TMPDIR/advance"
+
+  git clone -q "https://github.com/owner/repo.git" "$prior"
+  git -C "$prior" checkout -b "agent/issue-7" "origin/main"
+  printf "branch version\n" > "$prior/README.md"
+  git -C "$prior" add README.md
+  git -C "$prior" commit -q -m "feat: branch modifies README"
+  git -C "$prior" push -q origin "agent/issue-7"
+
+  git clone -q "https://github.com/owner/repo.git" "$advance"
+  printf "main version\n" > "$advance/README.md"
+  git -C "$advance" add README.md
+  git -C "$advance" commit -q -m "chore: main modifies README (conflicts)"
+  git -C "$advance" push -q origin HEAD:main
+
+  export FAKE_GH_PR_LIST_7="https://github.com/owner/repo/pull/7"
+}
+
+@test "pre-work rebase conflict: agent resolves and entrypoint continues" {
+  setup_rebase_conflict
+  # FAKE_CLAUDE_RESOLVE_CONFLICT=1 makes the stub agent run git rebase --continue.
+  export FAKE_CLAUDE_RESOLVE_CONFLICT=1
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # Working dir must exist (clone succeeded and rebase completed).
+  [ -d "$WORK_DIR/.git" ]
+  # The main agent prompt must have been passed to claude.
+  grep -q "Implement GitHub issue #7" "$CLAUDE_PROMPT_FILE"
+}
+
+@test "pre-work rebase conflict: unresolvable conflict exits non-zero" {
+  setup_rebase_conflict
+  # No FAKE_CLAUDE_RESOLVE_CONFLICT — stub does not complete the rebase.
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"pre-work rebase"* ]]
+}
+
+@test "CONFLICT_RESOLVE_PR_URL: exits after resolving without running main agent" {
+  setup_rebase_conflict
+  export FAKE_CLAUDE_RESOLVE_CONFLICT=1
+  export CONFLICT_RESOLVE_PR_URL="https://github.com/owner/repo/pull/7"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # Main agent must NOT have been invoked — the issue prompt should be absent.
+  ! grep -q "Implement GitHub issue #7" "$CLAUDE_PROMPT_FILE"
+}
