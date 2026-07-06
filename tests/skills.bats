@@ -56,3 +56,45 @@ setup() {
   ! grep -q -- '/.claude/skills' "$BWRAP_LOG"
   [[ "$output" != *"SPINDRIFT_SKILLS_DIR"* ]]
 }
+
+# --- baked skills (issue #119) ------------------------------------------------
+# Skills baked into the image at build time are exposed in the bwrap sandbox
+# via a --ro-bind even without SPINDRIFT_SKILLS_DIR. For OCI the skills are
+# in the image layer; no extra mount is added by the launcher.
+
+@test "baked skills: mounted in bwrap sandbox without SPINDRIFT_SKILLS_DIR" {
+  unset SPINDRIFT_SKILLS_DIR
+  run "$SKILLS_BWRAP_RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q -- "--ro-bind.*home/agent/.claude/skills /home/agent/.claude/skills" "$BWRAP_LOG"
+}
+
+@test "baked skills: SPINDRIFT_SKILLS_DIR takes precedence over baked skills (bwrap)" {
+  # Runtime mount is applied; that it shadows baked skills is proven by
+  # TestBwrapArgs_RuntimeSkillsTakePrecedence in the Go unit suite.
+  local skills="$BATS_TEST_TMPDIR/runtime-override-bwrap"
+  mkdir -p "$skills"
+  export SPINDRIFT_SKILLS_DIR="$skills"
+  run "$SKILLS_BWRAP_RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q -- "--ro-bind $skills /home/agent/.claude/skills" "$BWRAP_LOG"
+}
+
+@test "baked skills: no extra mount added for OCI (skills are in image)" {
+  # The OCI image carries baked skills in its filesystem; the launcher adds
+  # no extra volume mount when SPINDRIFT_SKILLS_DIR is unset.
+  unset SPINDRIFT_SKILLS_DIR
+  run "$SKILLS_RUN_CMD"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '/.claude/skills' "$PODMAN_LOG"
+}
+
+@test "baked skills: SPINDRIFT_SKILLS_DIR still mounts override for OCI" {
+  # Runtime override is respected even when skills are baked into the image.
+  local skills="$BATS_TEST_TMPDIR/runtime-override-oci"
+  mkdir -p "$skills"
+  export SPINDRIFT_SKILLS_DIR="$skills"
+  run "$SKILLS_RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q -- "-v $skills:/home/agent/.claude/skills:ro" "$PODMAN_LOG"
+}

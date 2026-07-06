@@ -1,6 +1,8 @@
 package runner
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -83,6 +85,57 @@ func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {
 	argStr := strings.Join(args, " ")
 	if strings.Contains(argStr, ".claude/skills") {
 		t.Errorf("unexpected skills bind in args when skillsDir is empty: %v", args)
+	}
+}
+
+// TestBwrapArgs_BakedSkillsMounted verifies that when agentFiles contains a
+// home/agent/.claude/skills directory, a --ro-bind is added even when skillsDir
+// is empty (baked skills are exposed without a runtime mount).
+func TestBwrapArgs_BakedSkillsMounted(t *testing.T) {
+	dir := t.TempDir()
+	skillsPath := filepath.Join(dir, "home", "agent", ".claude", "skills")
+	if err := os.MkdirAll(skillsPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := &bwrapAdapter{
+		agentFiles:    dir,
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		skillsDir:     "",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	argStr := strings.Join(args, " ")
+	want := "--ro-bind " + skillsPath + " /home/agent/.claude/skills"
+	if !strings.Contains(argStr, want) {
+		t.Errorf("baked skills bind %q not found in args: %v", want, args)
+	}
+}
+
+// TestBwrapArgs_RuntimeSkillsTakePrecedence verifies that when both baked skills
+// exist in agentFiles and skillsDir is set, only the runtime mount is added
+// (runtime wins; baked skills are not double-mounted).
+func TestBwrapArgs_RuntimeSkillsTakePrecedence(t *testing.T) {
+	agentDir := t.TempDir()
+	bakedSkillsPath := filepath.Join(agentDir, "home", "agent", ".claude", "skills")
+	if err := os.MkdirAll(bakedSkillsPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runtimeSkills := t.TempDir()
+	a := &bwrapAdapter{
+		agentFiles:    agentDir,
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		skillsDir:     runtimeSkills,
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	argStr := strings.Join(args, " ")
+
+	wantRuntime := "--ro-bind " + runtimeSkills + " /home/agent/.claude/skills"
+	if !strings.Contains(argStr, wantRuntime) {
+		t.Errorf("runtime skills bind %q not found in args: %v", wantRuntime, args)
+	}
+	if strings.Contains(argStr, bakedSkillsPath) {
+		t.Errorf("baked skills path %q unexpectedly found in args (runtime should take precedence): %v", bakedSkillsPath, args)
 	}
 }
 

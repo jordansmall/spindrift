@@ -112,6 +112,41 @@ let
     packages = p: [ p.hello ];
   };
 
+  # A Consumer-configured skill (#119): proves the `skills` argument bakes
+  # the skill files into the image's skills path. Eval-only for the
+  # skillsDir assertion; the image-layer check is Linux-gated.
+  skillsHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    skills = [
+      (pkgs.writeText "baked-skill.md" ''
+        ---
+        name: baked-skill
+        description: A skill baked into the image at build time.
+        ---
+        BAKED-SKILL-MARKER
+      '')
+    ];
+    packages = p: [ p.hello ];
+  };
+
+  # The bwrap variant of the skills harness: same baked skills but with the
+  # daemonless bwrap runner so bats can verify the bind-mount path.
+  skillsBwrapHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    overlays = [ ghFakeOverlay ];
+    runtime = "bwrap";
+    skills = [
+      (pkgs.writeText "baked-skill.md" ''
+        ---
+        name: baked-skill
+        description: A skill baked into the image at build time.
+        ---
+        BAKED-SKILL-MARKER
+      '')
+    ];
+    packages = p: [ p.hello ];
+  };
+
   # A minimal flake-parts consumer fixture (#5), standing in for a
   # downstream flake. Evaluated in-repo (no separate lock / no network)
   # via a nested `mkFlake`; the checks compare its outputs to the
@@ -167,6 +202,8 @@ in
     bwrapHarness
     noRuntimeHarness
     promptHarness
+    skillsHarness
+    skillsBwrapHarness
     minimalDirect
     consumerPkgs
     templatePkgs
