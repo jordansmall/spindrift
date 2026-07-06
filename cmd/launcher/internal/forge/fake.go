@@ -28,6 +28,7 @@ type Fake struct {
 	branchPRs map[string]string // branch → PR URL
 	prStates  map[string]string // URL → OPEN/MERGED/CLOSED
 	checkQ    map[string][]RollupState
+	checkErrQ map[string][]error // per-call error queue; nil entry = consult checkQ
 
 	// MergeErr, if non-nil, is returned by every Merge call (after MergeErrs is drained).
 	MergeErr error
@@ -54,6 +55,7 @@ func NewFake() *Fake {
 		branchPRs: map[string]string{},
 		prStates:  map[string]string{},
 		checkQ:    map[string][]RollupState{},
+		checkErrQ: map[string][]error{},
 	}
 }
 
@@ -88,6 +90,15 @@ func (f *Fake) SetCheckStates(url string, states []RollupState) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.checkQ[url] = append([]RollupState(nil), states...)
+}
+
+// SetCheckStateErrors scripts a per-call error queue for CheckState. Each
+// entry is consumed in order before the state queue is consulted. A nil entry
+// means "no error for this call — fall through to the state queue."
+func (f *Fake) SetCheckStateErrors(url string, errs []error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.checkErrQ[url] = append([]error(nil), errs...)
 }
 
 func (f *Fake) ListIssues(label string) ([]Issue, error) {
@@ -175,11 +186,21 @@ func (f *Fake) PRState(url string) (string, error) {
 	return s, nil
 }
 
-// CheckState pops the next scripted RollupState for url. When the queue is
-// exhausted it returns StateNone (simulating a PR with no checks registered).
+// CheckState pops the next scripted entry for url. The error queue is
+// consulted first: a non-nil entry returns StateNone plus that error; a nil
+// entry falls through to the state queue. When both queues are exhausted it
+// returns StateNone (simulating a PR with no checks registered).
 func (f *Fake) CheckState(url string) (RollupState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if eq := f.checkErrQ[url]; len(eq) > 0 {
+		entry := eq[0]
+		f.checkErrQ[url] = eq[1:]
+		if entry != nil {
+			return StateNone, entry
+		}
+		// nil entry: fall through to state queue
+	}
 	q := f.checkQ[url]
 	if len(q) == 0 {
 		return StateNone, nil
