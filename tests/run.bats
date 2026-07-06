@@ -483,6 +483,30 @@ EOF
   [[ "$output" == *"deadlock"* || "$output" == *"ERROR"* ]]
 }
 
+@test "closed unlabeled blocker unblocks its dependent (treated as satisfied)" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'2\tDependent'
+  export FAKE_GH_ISSUE_BODY_2="depends on #1"
+  # Blocker #1 is CLOSED but never received the complete label.
+  export FAKE_GH_ISSUE_STATE_1="CLOSED"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
+  [[ "$output" == *"closed without"* ]]
+}
+
+@test "open unlabeled blocker keeps dependent blocked and surfaces as deadlock" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export FAKE_GH_ISSUES=$'2\tDependent'
+  export FAKE_GH_ISSUE_BODY_2="depends on #1"
+  # Blocker #1 is OPEN (default) with no complete label — permanently unready.
+  export DEPS_WAIT_SECS=0
+  run "$RUN_CMD"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"deadlock"* || "$output" == *"ERROR"* ]]
+  ! grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
+}
+
 @test "run dispatches the blocker before the dependent (wave ordering)" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tBlocker\n2\tDependent'
@@ -516,6 +540,24 @@ EOF
 @test "MAX_JOBS=0 dispatches the whole batch (no limit)" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export MAX_JOBS=0
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
+}
+
+# --- MAX_PARALLEL bounds clamp (issue #91) ------------------------------------
+
+@test "MAX_PARALLEL=0 falls back to default and dispatches the whole batch" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export MAX_PARALLEL=0
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
+}
+
+@test "MAX_PARALLEL=garbage falls back to default and dispatches the whole batch" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  export MAX_PARALLEL=garbage
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
@@ -570,6 +612,21 @@ EOF
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   [[ "$output" == *"missing"* ]]
+}
+
+@test "malformed outcome line renders as malformed; subsequent issue is verified independently" {
+  export FAKE_PODMAN_IMAGE_PRESENT=1
+  # Issue 1: outcome line present but missing required pr= and status= tokens.
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 note=missing-required-tokens"
+  # Issue 2: well-formed outcome already merged.
+  export FAKE_PODMAN_OUTCOME_2="SPINDRIFT_OUTCOME issue=2 pr=https://github.com/owner/repo/pull/2 status=merged note=ok"
+  export FAKE_GH_PR_STATE_2="MERGED"
+  export FAKE_GH_ISSUE_LABELS_2="agent-complete"
+  run "$RUN_CMD"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"#1"* ]]
+  [[ "$output" == *"status=malformed"* ]]
+  [[ "$output" == *"status=verified-merged"* ]]
 }
 
 # --- PR adoption when outcome line is absent (issue #122) --------------------
