@@ -357,3 +357,31 @@ SKILL
   # The fake claude reports each discovered skill; assert this one was found.
   grep -q "skill discovered: test-skill.md" "$CLAUDE_LOG"
 }
+
+# --- prompt skill preference (issue #120) -------------------------------------
+# When a skill is present at HOME/.claude/skills/, the rendered prompt must
+# direct the agent to use it. When absent, the inline guidance stands alone
+# with no skill reference — the inline path is the floor, the skill the upgrade.
+
+@test "prompt references available skill when present at HOME/.claude/skills" {
+  mkdir -p "$HOME/.claude/skills"
+  cat >"$HOME/.claude/skills/tdd.md" <<'SKILL'
+---
+name: tdd
+description: Test-driven development skill.
+---
+Use TDD.
+SKILL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'tdd' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "prompt contains no skill reference when HOME/.claude/skills is empty" {
+  # No skills seeded — inline guidance must stand alone; the word "skill"
+  # must not appear so agents on skill-free boxes get only the inline path.
+  mkdir -p "$HOME/.claude/skills"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -qi '\bskill\b' "$CLAUDE_PROMPT_FILE"
+}
