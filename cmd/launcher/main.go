@@ -774,6 +774,21 @@ func issueIsReady(c config, fc forge.Client, num string, edges map[string][]stri
 	return len(unreadyBlockers(c, fc, num, edges)) == 0
 }
 
+// hasFailedInBatchBlocker returns true when any of num's in-batch declared
+// blockers carry failedLabel, meaning the dependent can never proceed.
+func hasFailedInBatchBlocker(c config, fc forge.Client, num string, edges map[string][]string) bool {
+	for _, dep := range edges[num] {
+		fi, err := fc.Issue(dep)
+		if err != nil {
+			continue
+		}
+		if containsLabel(fi.Labels, c.failedLabel) {
+			return true
+		}
+	}
+	return false
+}
+
 // unreadyBlockers returns num's declared blockers that are not yet satisfied,
 // in edge order. Empty means the issue is ready to dispatch.
 func unreadyBlockers(c config, fc forge.Client, num string, edges map[string][]string) []string {
@@ -1072,16 +1087,29 @@ func dispatchWaves(c config, fc forge.Client, pwd string, r runner.Runner, issue
 	elapsed := 0
 
 	for len(remaining) > 0 {
-		var ready, held []issue
+		var ready, blockerFailed, held []issue
 		for _, iss := range remaining {
-			if issueIsReady(c, fc, iss.number, edges) {
+			switch {
+			case issueIsReady(c, fc, iss.number, edges):
 				ready = append(ready, iss)
-			} else {
+			case hasFailedInBatchBlocker(c, fc, iss.number, edges):
+				blockerFailed = append(blockerFailed, iss)
+			default:
 				held = append(held, iss)
 			}
 		}
 
+		for _, iss := range blockerFailed {
+			fmt.Printf("    !! #%s  status=blocker-failed  note=a dependency failed; skipping\n", iss.number)
+			swapLabel(fc, iss.number, c.failedLabel, c.label)
+		}
+
 		if len(ready) == 0 {
+			if len(blockerFailed) > 0 {
+				elapsed = 0
+				remaining = held
+				continue
+			}
 			if elapsed >= c.depsWaitSecs {
 				fmt.Fprintf(os.Stderr,
 					"ERROR: dependency deadlock — blockers did not reach '%s' after %ds\n",

@@ -474,7 +474,10 @@ EOF
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tBlocker\n2\tDependent'
   export FAKE_GH_ISSUE_BODY_2="depends on #1"
-  export FAKE_PODMAN_AUTO_COMPLETE=1
+  # Issue 1 box writes a ready outcome; the launcher gates it (CI SUCCESS → merge →
+  # agent-complete) before wave 2 starts. No FAKE_PODMAN_AUTO_COMPLETE shortcut.
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ok"
+  export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   export GH_STATE="$GH_LOG.state"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]

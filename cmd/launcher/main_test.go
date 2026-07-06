@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // TestConfigHasNoModelFields enforces that model/scoutModel/reviewModel were
@@ -239,3 +241,44 @@ func TestWriteBlockedMarker(t *testing.T) {
 		t.Errorf("expected %q, got %q", "#11, #13", got)
 	}
 }
+
+// TestDispatchWaves_FailsDependentWhenBlockerFails verifies that a dependent
+// whose in-batch blocker reaches failedLabel is itself failed immediately,
+// rather than holding until depsWaitSecs.
+func TestDispatchWaves_FailsDependentWhenBlockerFails(t *testing.T) {
+	c := baseConfig()
+	c.label = "agent-trigger"
+	c.maxParallel = 2
+	c.branchPrefix = "agent/issue-"
+	c.mergePollInterval = 0
+	c.mergePollTimeout = 0
+	c.depsPollSecs = 1
+	c.depsWaitSecs = 2
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
+
+	fr := runner.NewFake()
+	fr.RunErr = errBoxFailed
+
+	edges := map[string][]string{"2": {"1"}}
+
+	dir := tempLogDir(t)
+	if err := dispatchWaves(c, fc, dir, fr, []issue{
+		{number: "1", title: "blocker"},
+		{number: "2", title: "dependent"},
+	}, edges); err != nil {
+		t.Fatalf("dispatchWaves: %v", err)
+	}
+
+	iss2, err := fc.Issue("2")
+	if err != nil {
+		t.Fatalf("Issue(2): %v", err)
+	}
+	if !containsLabel(iss2.Labels, c.failedLabel) {
+		t.Errorf("issue 2 must have %q when blocker failed; labels=%v", c.failedLabel, iss2.Labels)
+	}
+}
+
+var errBoxFailed = fmt.Errorf("exit 1")
