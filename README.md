@@ -129,17 +129,23 @@ knobs. Unset options fall through to `mkHarness`'s own defaults.
 | `packages`  | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
 | `prefetch`  | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
 | `prompt`    | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`nix run .#build`) |
-| `defaults`  | `{ label; baseBranch; maxParallel; branchPrefix; inProgressLabel; failedLabel; model; }` | see below | non-secret run defaults baked into `run` |
-| `runtime`   | `"podman"` \| `"docker"`    | `"podman"`         | container runtime the `build`/`run` commands drive                   |
+| `scoutPrompt` / `reviewPrompt` | string           | bundled starters   | system prompts for the read-only scout and reviewer subagents; baked in, overridable via `SPINDRIFT_PROMPT_DIR` |
+| `skills`    | list of paths               | `[]`               | skill files baked into the image at `/home/agent/.claude/skills` so the headless agent can `/invoke` them; `SPINDRIFT_SKILLS_DIR` mounts over them at runtime |
+| `defaults`  | submodule (all `flakeOption` env knobs) | see below | non-secret run defaults baked into `run` |
+| `runtime`   | `"podman"` \| `"docker"` \| `"bwrap"` | `"podman"` | runner the `build`/`run` commands drive: an OCI runtime, or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
+| `nixInBox`  | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
 | `nixBuilderImage` | string                | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` | Nix image `build` uses as a fallback Linux builder when the host can't realise the image; pinned by digest for supply-chain safety (see below) |
 
 The `defaults` submodule bakes the run knobs into the `run` command; a matching
 env var still wins at runtime, so one built command can be re-pointed without a
-rebuild. Baked defaults: `label = "ready-for-agent"`, `baseBranch = "main"`,
-`maxParallel = 3`, `branchPrefix = "agent/issue-"`,
-`inProgressLabel = "agent-in-progress"`, `failedLabel = "agent-failed"`,
+rebuild. It exposes every consumer-tunable knob from `lib/env-schema.nix` (the
+single source of truth for the runtime env surface). Key baked defaults:
+`label = "ready-for-agent"`, `baseBranch = "main"`, `maxParallel = 3`,
+`branchPrefix = "agent/issue-"`, `inProgressLabel = "agent-in-progress"`,
+`failedLabel = "agent-failed"`, `completeLabel = "agent-complete"`,
 `model = "claude-sonnet-4-6"`, `scoutModel = "claude-haiku-4-5-20251001"`,
-`reviewModel = "claude-opus-4-8"`. `inProgressLabel`/`failedLabel` drive the
+`reviewModel = "claude-opus-4-8"`.
+`inProgressLabel`/`failedLabel`/`completeLabel` drive the
 [label lifecycle](#label-lifecycle); `model` is the Claude model the in-container
 implementor agent runs, threaded into the container as `MODEL` so `MODEL=...`
 switches models at runtime with no image rebuild. `scoutModel`/`reviewModel` tier
@@ -165,27 +171,54 @@ a rebuild (ADR 0001):
 | `GIT_USER_NAME`           | host `git config` (required) | commit author name                 |
 | `GIT_USER_EMAIL`          | host `git config` (required) | commit author email                |
 | `LABEL`                   | `ready-for-agent`      | issues to pick up                        |
+| `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query |
 | `BASE_BRANCH`             | `main`                 | branch to cut from and PR into           |
 | `MAX_PARALLEL`            | `3`                    | concurrent containers                    |
 | `BRANCH_PREFIX`           | `agent/issue-`         | branch name = prefix + issue number      |
 | `IN_PROGRESS_LABEL`       | `agent-in-progress`    | label a dispatched issue is swapped to   |
-| `FAILED_LABEL`            | `agent-failed`         | label an issue gets when its Box fails   |
+| `FAILED_LABEL`            | `agent-failed`         | label an issue gets when its Box fails or its PR can't merge |
+| `COMPLETE_LABEL`          | `agent-complete`       | label the launcher swaps on after a successful rebase-merge |
+| `BARRIER_LABEL`           | — (empty = off)        | open issues carrying it fence all higher-numbered issues until they close |
 | `MODEL`                   | `claude-sonnet-4-6`    | Claude model the in-container implementor runs |
 | `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` | scout subagent model tier (empty drops subagents) |
 | `REVIEW_MODEL`            | `claude-opus-4-8`      | reviewer subagent model tier (empty drops subagents) |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
 | `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | hot-override the mounted prompt dir     |
+| `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override the mounted skills dir     |
 
-`LABEL`/`BASE_BRANCH`/`MAX_PARALLEL`/`BRANCH_PREFIX`/`IN_PROGRESS_LABEL`/`FAILED_LABEL`/`MODEL`
-override whatever was baked
-via `defaults`. Commit identity is **required**: an override wins, else the
-host's `git config user.name`/`user.email` is inherited; if neither is set,
-`run` exits rather than committing under an arbitrary identity.
+Every `defaults`-baked knob above can be re-pointed at runtime; the env var
+wins over whatever was baked. Commit identity is **required**: an override wins,
+else the host's `git config user.name`/`user.email` is inherited; if neither is
+set, `run` exits rather than committing under an arbitrary identity.
+
+### Advanced tuning
+
+These knobs are runtime-only (no `defaults` baking) unless noted, and rarely
+need changing. See `lib/env-schema.nix` for the authoritative list.
+
+| var                    | default | meaning                                                        |
+| ---------------------- | ------- | -------------------------------------------------------------- |
+| `MAX_JOBS`             | `0`     | drain at most N unblocked issues then exit (`0` = unlimited / full waves) |
+| `MAX_FIX_ATTEMPTS`     | `3`     | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
+| `MAX_REBASE_ATTEMPTS`  | `3`     | rebase-and-retry passes when a green PR conflicts after a sibling merge (`0` disables) |
+| `MERGE_POLL_INTERVAL`  | `30`    | seconds between CI-status polls in the merge gate              |
+| `MERGE_POLL_TIMEOUT`   | `1800`  | seconds to wait for CI green before abandoning the merge       |
+| `DEPS_POLL_SECS`       | `30`    | seconds between dependency-wave poll iterations                |
+| `DEPS_WAIT_SECS`       | `7200`  | seconds to wait for a dependency wave before declaring deadlock |
+| `TRANSIENT_RETRY_MAX`  | `3`     | retries for transient box exits (529/network backoff; consecutive 429 holds) |
+| `TRANSIENT_BACKOFF_SECS` | `30`  | base linear backoff per transient retry                        |
+| `HOLD_JITTER_SECS`     | `5`     | jitter added to a 429 hold-until-reset before re-dispatch      |
+| `DEV_SHELL_PROBE_TIMEOUT` (baked) | `300` | seconds before the in-box devShell probe is abandoned for the baked toolchain |
+| `MEMORY_LIMIT` (baked) | `4g`    | per-container `--memory` cap (OCI only; empty disables)        |
+| `PIDS_LIMIT` (baked)   | `512`   | per-container `--pids-limit` cap (OCI only; empty disables)    |
+| `PODMAN_NETWORK` (baked) | —     | `--network` value for podman run; set `pasta` to restrict egress |
+| `BWRAP_UNSHARE_NET` (baked) | —  | non-empty adds `--unshare-net` to the bwrap runner             |
 
 ## Runtime flow
 
 ```
-nix run .#run
+nix run .#run   (the nix-built Go launcher, host-side)
+  ├─ reconcile any stranded agent-in-progress issues with an open PR (adopt + gate)
   └─ gh issue list --label ready-for-agent        (find the work)
      └─ for each issue, up to MAX_PARALLEL at once:
         podman run  spindrift:latest               (disposable box)
@@ -193,14 +226,30 @@ nix run .#run
              ├─ git clone <REPO_SLUG>  +  git checkout -b agent/issue-N
              ├─ run PREFETCH (optional cache warm-up)
              └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
-                └─ implement → check → commit → push → open PR → review → merge (rebase)
+                └─ implement → check → commit → push → self-review (reviewer subagent)
+                   → open PR → wait for CI to register
+                   → print  SPINDRIFT_OUTCOME issue=N pr=<url> status=ready
+        │
+        └─ back on the host, the launcher runs the MERGE GATE for that issue:
+           ├─ poll CI on the PR head until green (or red, or timeout)
+           ├─ green → rebase-merge the PR → swap issue to agent-complete
+           ├─ red   → dispatch fix boxes (up to MAX_FIX_ATTEMPTS), then re-gate
+           ├─ merge conflict → rebase the PR (up to MAX_REBASE_ATTEMPTS)
+           └─ post an aggregate usage/cost comment to the issue
 ```
+
+The split is deliberate: the **Box** owns implementing the issue and opening the
+PR, but the **launcher** (host-side, the Go binary) owns the CI-green decision,
+the rebase-merge, and the terminal label swap — a Box cannot approve or merge its
+own PR, and keeping merge authority outside the throwaway container is what makes
+branch protection meaningful. The Box's last line is a machine-readable
+`SPINDRIFT_OUTCOME` line (grammar in `cmd/launcher/internal/outcome`) that tells
+the launcher which PR to gate.
 
 The harness never touches the Target repo's working tree on your host — it all
 happens through fresh clones inside containers — so it can drive **any** GitHub
-repo you point `REPO_SLUG` at. After its own review and green CI, the agent
-merges the PR via rebase; `Closes #N` in the PR description closes the issue on
-merge.
+repo you point `REPO_SLUG` at. `Closes #N` in the PR description closes the issue
+when the launcher merges it.
 
 ## Label lifecycle
 
@@ -210,51 +259,66 @@ is what makes re-running it safe. `run` queries only `LABEL`
 up twice:
 
 ```
-ready-for-agent ──dispatch──▶ agent-in-progress ──Box exits ≠0──▶ agent-failed
-   (launch button)              (a Box is running;                  (human triage;
-                                 re-runs skip it)                    re-label to retry)
+ready-for-agent ──dispatch──▶ agent-in-progress ──CI green + merge──▶ agent-complete
+   (launch button)              (a Box is running,                     (merged; issue
+                                 or the merge gate is                   closed via Closes #N)
+                                 polling CI; re-runs skip it)
                                        │
-                                  Box exits 0
-                                       ▼
-                              (no terminal label — the
-                               merged PR's `Closes #N`
-                               closes the issue)
+                                       ├─ Box exits ≠0 (after retries) ─┐
+                                       └─ CI red after MAX_FIX_ATTEMPTS ─┤
+                                          or merge otherwise fails       ▼
+                                                                    agent-failed
+                                                                    (human triage;
+                                                                     re-label to retry)
 ```
 
 - **Dispatch is idempotent.** As `run` hands each issue to a container it swaps
   `ready-for-agent` → `agent-in-progress`. Because the issue query matches only
-  `ready-for-agent`, re-running `run` while PRs are still in review re-dispatches
-  nothing — in-progress issues are no longer selected. (Without this, every
-  re-run would burn a full agent run per issue before dying on a non-fast-forward
-  push.)
-- **Failures surface for triage.** If the container exits non-zero, `run` swaps
-  `agent-in-progress` → `agent-failed` and stops. There are **no automatic
-  retries**: a human inspects `logs/issue-<n>.log`, and re-labelling the issue
-  `ready-for-agent` re-arms it for the next run.
-- **Success is silent.** A successful Box leaves the labels untouched; the merged
-  PR's `Closes #N` closes the issue.
+  `ready-for-agent`, re-running `run` while PRs are still in the merge gate
+  re-dispatches nothing — in-progress issues are no longer selected.
+- **Success is labelled.** When the merge gate merges the PR it swaps
+  `agent-in-progress` → `agent-complete`, then verifies the PR really is merged
+  and the label really landed. `Closes #N` in the PR body closes the issue on
+  merge. (Dependency ordering keys off this label — a blocker is "ready" once it
+  carries `agent-complete` or is closed.)
+- **Red CI self-heals before it fails.** If CI goes genuinely red, the launcher
+  dispatches up to `MAX_FIX_ATTEMPTS` fix boxes on the same branch and re-gates
+  after each. Only once those are exhausted (or the box itself exits non-zero
+  after transient retries) does it swap to `agent-failed` and stop. There are
+  **no automatic re-dispatches from `ready-for-agent`**: a human inspects
+  `logs/issue-<n>.log` and re-labels to retry.
+- **Stranded issues are reconciled.** At startup `run` scans open
+  `agent-in-progress` issues that already have an open non-draft PR and re-runs
+  the merge gate on each ("adopts" them) — so a launcher killed mid-gate picks up
+  where it left off on the next run, without a fresh agent pass.
 
-Rename either label with the `inProgressLabel` / `failedLabel` `defaults` (baked)
-or the `IN_PROGRESS_LABEL` / `FAILED_LABEL` env vars (runtime).
+Rename any of these with the `inProgressLabel` / `failedLabel` / `completeLabel`
+`defaults` (baked) or the `IN_PROGRESS_LABEL` / `FAILED_LABEL` / `COMPLETE_LABEL`
+env vars (runtime).
 
 ### Prerequisite: create the labels on the Target repo
 
-`gh issue edit` cannot invent a label, so all three must already exist on the
+`gh issue edit` cannot invent a label, so all four must already exist on the
 Target repo. Create them once:
 
 ```sh
 gh label create ready-for-agent   --repo owner/repo --color 0e8a16 --description "dispatch to a spindrift agent"
 gh label create agent-in-progress --repo owner/repo --color fbca04 --description "a spindrift Box is working this issue"
-gh label create agent-failed      --repo owner/repo --color b60205 --description "the Box exited non-zero; needs triage"
+gh label create agent-complete    --repo owner/repo --color 5319e7 --description "the PR was merged by the launcher's merge gate"
+gh label create agent-failed      --repo owner/repo --color b60205 --description "the Box failed or the PR could not merge; needs triage"
 ```
 
 ### Caveat: a killed launcher can strand an issue
 
-The swaps are best-effort and there is **no reconciliation loop**. If the
-launcher is killed mid-run (Ctrl-C, a crashed host, a laptop closing), an issue
-can be left in `agent-in-progress` with no container running — so `run` will keep
-skipping it. The unstick is a **manual label flip**: move it back to
-`ready-for-agent` to re-dispatch (or to `agent-failed` to park it).
+The label swaps are best-effort. If the launcher is killed mid-run (Ctrl-C, a
+crashed host, a laptop closing) an issue can be left in `agent-in-progress` with
+no container running. The next `run` **reconciles automatically** for the common
+case: it adopts any `agent-in-progress` issue that already has an open non-draft
+PR and re-runs the merge gate on it. What it cannot recover on its own is an
+issue stranded *before* a PR was opened (or with only a draft PR) — there is
+nothing to adopt, and the `LABEL` query skips it. The unstick there is a
+**manual label flip**: move it back to `ready-for-agent` to re-dispatch (or to
+`agent-failed` to park it).
 
 ```sh
 gh issue edit <n> --repo owner/repo --add-label ready-for-agent --remove-label agent-in-progress
@@ -272,7 +336,7 @@ host.
 | ----------------- | -------------- | -------------------------------------------- |
 | Contents          | Read and write | clone the repo + push the branch             |
 | Pull requests     | Read and write | open PRs (including drafts) + merge via rebase |
-| Issues            | Read and write | read the issue; **write only** for the "if blocked" path that comments on it — drop that fallback and Read suffices |
+| Issues            | Read and write | read the issue; write to swap the dispatch labels (`agent-in-progress`/`agent-complete`/`agent-failed`) and post the per-issue usage/cost comment |
 | Metadata          | Read           | mandatory baseline, auto-selected            |
 | Workflows         | Read and write | **off by default** — grant only when an issue edits `.github/workflows/*`; agent branches run in-repo so `pull_request` events carry repository secrets; with this permission an injected agent can rewrite CI or exfiltrate those secrets |
 
@@ -319,7 +383,8 @@ deliberate, not oversights — write them down so you can honour them:
 ## Prerequisites
 
 - **nix** with flakes enabled.
-- **podman** (or set `runtime = "docker"`).
+- **podman** (or set `runtime = "docker"`; or `runtime = "bwrap"` for the
+  daemonless bubblewrap sandbox on Linux, which needs no container runtime).
 - A **GitHub token** scoped to the Target repo (see above).
 - **Claude Code auth**: run `claude setup-token` on the host, or an API key.
 
@@ -378,15 +443,21 @@ The harness reproduces the part that matters for isolation — *containerize the
 runner, fan out one box per issue* — and leans on nix for the toolchain instead
 of a Dockerfile. The trade-offs:
 
-- **Simpler & fewer deps**: bash + nix + a container runtime + Claude Code. No
-  orchestration library, no Node runtime to import.
-- **No cross-issue dependency unblocking within a run.** Each container is
-  independent and opens its own PR; ordering is left to humans (or a future
-  planner phase). Good when issues are largely independent.
+- **Simpler & fewer deps**: nix + a container runtime + Claude Code. The
+  orchestration is a small, nix-built Go binary (`cmd/launcher`, ADR 0007); the
+  only bash left is the in-box entrypoint. No orchestration library, no Node
+  runtime to import.
+- **Cross-issue dependency ordering within a run.** The launcher parses
+  `depends on #N` / `blocked by #N` (inline or a `## Blocked by` list) from issue
+  bodies and dispatches in dependency waves, holding a dependent until its
+  blockers reach `agent-complete`; a cycle aborts the run. Independent issues
+  still fan out concurrently up to `MAX_PARALLEL`.
 - **Reproducible toolchain by construction** via the pinned flake, rather than a
   floating language-runtime base image.
 
-See `docs/adr/` for the architectural decisions.
+See `docs/adr/` for the architectural decisions (0001–0008), including the
+Go launcher (0007), the pluggable OCI/bwrap runner (0006), and nix-in-the-box
+(0008).
 
 ## Unattended runs
 
