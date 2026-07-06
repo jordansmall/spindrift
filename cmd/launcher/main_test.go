@@ -223,6 +223,59 @@ func TestUnreadyBlockers_Mixed(t *testing.T) {
 	}
 }
 
+// --- integer-knob parsing tests ---
+
+// TestMaxParallelEdgeCases covers the atoi() fallback for values where zero
+// would deadlock the semaphore: 0, negative, and non-numeric all fall back to
+// the compiled default (3).
+func TestMaxParallelEdgeCases(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("MAX_PARALLEL") })
+
+	cases := []struct {
+		env  string
+		want int
+	}{
+		{"0", 3},   // zero → deadlock guard, must fall back
+		{"-1", 3},  // negative → fall back
+		{"-99", 3}, // large negative → fall back
+		{"abc", 3}, // non-numeric → fall back
+		{"", 3},    // unset → fall back to default
+		{"1", 1},   // valid positive → use as-is
+		{"10", 10}, // larger valid value → use as-is
+	}
+	for _, tc := range cases {
+		os.Setenv("MAX_PARALLEL", tc.env)
+		c := loadConfig()
+		if c.maxParallel != tc.want {
+			t.Errorf("MAX_PARALLEL=%q: got %d, want %d", tc.env, c.maxParallel, tc.want)
+		}
+	}
+}
+
+// TestMaxJobsEdgeCases covers the atoiNonneg() fallback: zero is valid
+// (meaning unlimited), negatives fall back to default (0).
+func TestMaxJobsEdgeCases(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("MAX_JOBS") })
+
+	cases := []struct {
+		env  string
+		want int
+	}{
+		{"0", 0},   // zero is valid (unlimited)
+		{"-1", 0},  // negative → fall back to default
+		{"abc", 0}, // non-numeric → fall back to default
+		{"", 0},    // unset → fall back to default
+		{"5", 5},   // valid positive → use as-is
+	}
+	for _, tc := range cases {
+		os.Setenv("MAX_JOBS", tc.env)
+		c := loadConfig()
+		if c.maxJobs != tc.want {
+			t.Errorf("MAX_JOBS=%q: got %d, want %d", tc.env, c.maxJobs, tc.want)
+		}
+	}
+}
+
 // --- writeBlockedMarker tests ---
 
 func TestWriteBlockedMarker(t *testing.T) {
