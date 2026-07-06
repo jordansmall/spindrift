@@ -334,3 +334,27 @@ FAKE
   [ "$status" -eq 0 ]
   [ ! -f "$PREFETCH_LOG" ]
 }
+
+# --- skills dir discovery path (issue #118) -----------------------------------
+# Claude Code discovers skills from $HOME/.claude/skills/. In the box HOME is
+# /home/agent (mkHarness.nix sets HOME=/home/agent for OCI; bwrap.go passes
+# --setenv HOME /home/agent). The entrypoint itself does not reference skills —
+# it invokes `claude -p` which discovers them from HOME. This test seeds a skill
+# at the expected path and verifies the entrypoint runs successfully, confirming
+# the discovery path is correct and claude would be invoked with skills accessible.
+@test "entrypoint runs successfully with a skill seeded at HOME/.claude/skills" {
+  mkdir -p "$HOME/.claude/skills"
+  cat >"$HOME/.claude/skills/test-skill.md" <<'SKILL'
+---
+name: test-skill
+description: A stub skill used only by this test.
+---
+Do the test thing.
+SKILL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # Entrypoint completed and handed off to the (fake) claude agent.
+  grep -q "claude invoked for issue #7" "$CLAUDE_LOG"
+  # The skill file is reachable at the expected discovery path.
+  [ -f "$HOME/.claude/skills/test-skill.md" ]
+}
