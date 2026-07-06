@@ -18,7 +18,7 @@ var schemaFlags = []flagEntry{
 	{env: "GIT_USER_NAME", flag: "git-user-name", kind: "string", doc: "commit identity name; falls back to host git config user.name", dflt: ""},
 	{env: "HOLD_JITTER_SECS", flag: "hold-jitter-secs", kind: "int", doc: "jitter seconds added to 429 hold duration to spread re-dispatch", dflt: "5"},
 	{env: "IN_PROGRESS_LABEL", flag: "in-progress-label", kind: "string", doc: "label swapped on from LABEL when an issue enters the queue", dflt: "agent-in-progress"},
-	{env: "ISSUE_NUMBER", flag: "issue-number", kind: "string", doc: "dispatch only this issue number, bypassing the LABEL query; empty discovers by LABEL", dflt: ""},
+	{env: "ISSUE_NUMBER", flag: "issue-number", alias: "issue", kind: "string", doc: "dispatch only this issue number, bypassing the LABEL query; empty discovers by LABEL", dflt: ""},
 	{env: "LABEL", flag: "label", kind: "string", doc: "issues carrying this label are dispatchable (the launch button)", dflt: "ready-for-agent"},
 	{env: "MAX_FIX_ATTEMPTS", flag: "max-fix-attempts", kind: "int", doc: "fix-agent passes when CI is genuinely red before marking agent-failed; 0 disables self-healing", dflt: "3"},
 	{env: "MAX_JOBS", flag: "max-jobs", kind: "int", doc: "dependency-wave concurrency cap; 0 means unlimited", dflt: "0"},
