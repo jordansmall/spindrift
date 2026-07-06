@@ -533,6 +533,8 @@ in
   prompt-baked-into-image = pkgs.runCommand "prompt-baked-into-image" { } ''
     grep -q 'CONFIGURED-PROMPT-MARKER' \
       ${promptHarness.agentFiles}/agent/prompts/issue-prompt.md
+    grep -q 'git rebase' \
+      ${promptHarness.agentFiles}/agent/prompts/conflict-resolve-prompt.md
     touch $out
   '';
 
