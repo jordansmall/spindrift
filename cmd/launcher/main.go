@@ -390,6 +390,9 @@ func mergeWhenGreen(c config, fc forge.Client, num, pr string, conflictResolveFn
 
 		switch state {
 		case forge.StateSuccess:
+			// Pause before confirming — back-to-back GraphQL calls return the
+			// same snapshot, so a late-registered job would not yet appear.
+			time.Sleep(time.Duration(pollIv) * time.Second)
 			// Re-poll to confirm the snapshot is stable. A partial check
 			// registration can briefly show SUCCESS before all jobs appear.
 			if confirm, _ := fc.CheckState(pr); confirm != forge.StateSuccess {
