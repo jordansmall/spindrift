@@ -26,11 +26,12 @@ type Writer struct {
 	out      io.Writer
 	throttle time.Duration
 
-	mu       sync.Mutex
-	buf      []byte
-	turns    int
-	lastTool string
-	lastEmit time.Time
+	mu        sync.Mutex
+	buf       []byte
+	turns     int
+	lastTool  string
+	lastPhase string
+	lastEmit  time.Time
 }
 
 // New returns a Writer that passes all bytes to raw unchanged and emits
@@ -143,15 +144,18 @@ func (w *Writer) parseLine(line string) {
 }
 
 func (w *Writer) emit() {
-	fmt.Fprintln(w.out, FormatHeartbeat(w.issue, w.turns, w.lastTool))
+	fmt.Fprintln(w.out, FormatHeartbeat(w.issue, w.turns, w.lastTool, w.lastPhase))
 	w.lastEmit = time.Now()
 }
 
 // FormatHeartbeat returns a coarse status line for one running issue.
-// Example: "#42 · 15 turns · Edit(main.go)"
-func FormatHeartbeat(issue string, turns int, lastTool string) string {
+// Example: "#42 [edit] · 15 turns · Edit(main.go)"
+func FormatHeartbeat(issue string, turns int, lastTool, phase string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s", issue)
+	if phase != "" {
+		fmt.Fprintf(&sb, " [%s]", phase)
+	}
 	if turns > 0 {
 		plural := "s"
 		if turns == 1 {

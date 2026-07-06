@@ -255,19 +255,20 @@ func TestFormatHeartbeatShape(t *testing.T) {
 		issue    string
 		turns    int
 		lastTool string
+		phase    string
 		wantSubs []string
 	}{
-		{"42", 15, "Edit(main.go)", []string{"#42", "15 turn", "Edit(main.go)"}},
-		{"1", 1, "Bash(ls)", []string{"#1", "1 turn", "Bash(ls)"}},
-		{"7", 0, "", []string{"#7"}},
-		{"3", 3, "", []string{"#3", "3 turn"}},
+		{"42", 15, "Edit(main.go)", "edit", []string{"#42", "[edit]", "15 turn", "Edit(main.go)"}},
+		{"1", 1, "Bash(ls)", "explore", []string{"#1", "[explore]", "1 turn", "Bash(ls)"}},
+		{"7", 0, "", "explore", []string{"#7", "[explore]"}},
+		{"3", 3, "", "test", []string{"#3", "[test]", "3 turn"}},
 	}
 	for _, tc := range cases {
-		got := heartbeat.FormatHeartbeat(tc.issue, tc.turns, tc.lastTool)
+		got := heartbeat.FormatHeartbeat(tc.issue, tc.turns, tc.lastTool, tc.phase)
 		for _, sub := range tc.wantSubs {
 			if !strings.Contains(got, sub) {
-				t.Errorf("FormatHeartbeat(%q,%d,%q) = %q, missing %q",
-					tc.issue, tc.turns, tc.lastTool, got, sub)
+				t.Errorf("FormatHeartbeat(%q,%d,%q,%q) = %q, missing %q",
+					tc.issue, tc.turns, tc.lastTool, tc.phase, got, sub)
 			}
 		}
 	}
