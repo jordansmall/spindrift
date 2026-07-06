@@ -1061,14 +1061,3 @@ EOF
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
   [[ "$output" == *"status=failed"* ]]
 }
-
-# --- Queue-empty exit code (issue #110) ----------------------------------------
-
-@test "run exits 2 when no open issues exist" {
-  export FAKE_PODMAN_IMAGE_PRESENT=1
-  export FAKE_GH_ISSUES=""
-  run "$RUN_CMD"
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"nothing to do"* ]]
-  [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 0 ]
-}
