@@ -52,3 +52,13 @@ setup() {
   [ "$status" -eq 0 ]
   grep -q -- "-v $override:/agent/prompts" "$PODMAN_LOG"
 }
+
+@test "WATCH CI section uses GraphQL statusCheckRollup not gh pr checks" {
+  # gh pr checks uses the check-runs REST endpoint which 403s under
+  # fine-grained PATs; the prompt must use statusCheckRollup (GraphQL).
+  : "${PROMPTS_DIR:?PROMPTS_DIR must be set}"
+  local prompt="$PROMPTS_DIR/issue-prompt.md"
+  ! grep -q 'until gh pr checks' "$prompt"
+  grep -q 'statusCheckRollup' "$prompt"
+  grep -qi 'fine-grained' "$prompt"
+}
