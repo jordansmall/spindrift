@@ -11,7 +11,7 @@ setup_fakes() {
   FAKE_BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$FAKE_BIN"
   cp "$FAKES_DIR"/podman "$FAKES_DIR"/docker "$FAKES_DIR"/bwrap "$FAKES_DIR"/gh \
-    "$FAKES_DIR"/claude "$FAKES_DIR"/nix "$FAKE_BIN"/
+    "$FAKES_DIR"/claude "$FAKES_DIR"/nix "$FAKES_DIR"/git "$FAKE_BIN"/
   chmod +x "$FAKE_BIN"/*
   export PATH="$FAKE_BIN:$PATH"
 
@@ -19,6 +19,7 @@ setup_fakes() {
   export DOCKER_LOG="$BATS_TEST_TMPDIR/docker.log"
   export BWRAP_LOG="$BATS_TEST_TMPDIR/bwrap.log"
   export GH_LOG="$BATS_TEST_TMPDIR/gh.log"
+  export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
   export CLAUDE_LOG="$BATS_TEST_TMPDIR/claude.log"
   export NIX_LOG="$BATS_TEST_TMPDIR/nix.log"
   export CLAUDE_PROMPT_FILE="$BATS_TEST_TMPDIR/claude-prompt.txt"
@@ -27,6 +28,7 @@ setup_fakes() {
   : >"$DOCKER_LOG"
   : >"$BWRAP_LOG"
   : >"$GH_LOG"
+  : >"$GIT_LOG"
   : >"$CLAUDE_LOG"
   : >"$NIX_LOG"
 }
