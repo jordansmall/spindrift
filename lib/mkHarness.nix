@@ -430,8 +430,9 @@ let
   #   "<hash>" — when the first external dep is added, run:
   #               nix build --impure --expr \
   #                 '(import <nixpkgs> {}).buildGoModule { pname="x"; version="0"; \
-  #                  src = ./cmd/launcher; vendorHash = pkgs.lib.fakeHash; }'
-  #             and replace pkgs.lib.fakeHash with the hash Nix reports in the
+  #                  src = ./cmd/launcher; \
+  #                  vendorHash = (import <nixpkgs> {}).lib.fakeHash; }'
+  #             and replace lib.fakeHash with the hash Nix reports in the
   #             error output. Commit go.sum and the updated vendorHash together.
   launcherBin = hostPkgs.buildGoModule {
     pname = "spindrift-launcher";
