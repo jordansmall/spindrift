@@ -476,10 +476,30 @@ func postUsageComment(fc forge.Client, issNum, logPath string) {
 			u.DurationApiMs,
 			u.NumTurns,
 		)
+		body += breakdownSection(logPath)
 	}
 	if commentErr := fc.Comment(issNum, body); commentErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: post usage comment: %v\n", issNum, commentErr)
 	}
+}
+
+// breakdownSection returns a Markdown per-role breakdown section, or empty
+// string if no assistant events are found or the log cannot be read.
+func breakdownSection(logPath string) string {
+	roles, err := usage.BreakdownByRole(logPath)
+	if err != nil || len(roles) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\n### Per-role breakdown\n\n")
+	sb.WriteString("| Role | Input tokens | Output tokens | Cache read | Cache creation |\n")
+	sb.WriteString("| --- | --- | --- | --- | --- |\n")
+	for _, r := range roles {
+		fmt.Fprintf(&sb, "| %s | %d | %d | %d | %d |\n",
+			r.Role, r.InputTokens, r.OutputTokens,
+			r.CacheReadInputTokens, r.CacheCreationInputTokens)
+	}
+	return sb.String()
 }
 
 func printOutcomeReport(c config, fc forge.Client, pwd string, r runner.Runner, issues []issue) {
