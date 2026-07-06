@@ -6,10 +6,27 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
 )
+
+// FormatDuration converts a millisecond count to a human-readable string.
+// Outputs "Xh Ym Zs", "Xm Ys", or "Xs" depending on magnitude.
+func FormatDuration(ms int64) string {
+	s := ms / 1000
+	h := s / 3600
+	m := (s % 3600) / 60
+	sec := s % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm %ds", h, m, sec)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm %ds", m, sec)
+	}
+	return fmt.Sprintf("%ds", sec)
+}
 
 // RoleUsage holds the aggregated token usage attributed to one subagent role.
 type RoleUsage struct {
