@@ -27,6 +27,7 @@
   # override via the `prompt` directory mechanism (SPINDRIFT_PROMPT_DIR).
   scoutPrompt ? builtins.readFile ../templates/default/prompts/scout-prompt.md,
   reviewPrompt ? builtins.readFile ../templates/default/prompts/review-prompt.md,
+  conflictResolvePrompt ? builtins.readFile ../templates/default/prompts/conflict-resolve-prompt.md,
   # Skill files baked into the image at /home/agent/.claude/skills so the
   # headless agent can invoke them without a runtime mount. Each element must
   # be a path to a skill file; the file is copied under its basename.
@@ -209,6 +210,7 @@ let
     cp ${pkgs.writeText "issue-prompt.md" prompt} $out/agent/prompts/issue-prompt.md
     cp ${pkgs.writeText "scout-prompt.md" scoutPrompt} $out/agent/prompts/scout-prompt.md
     cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md
+    cp ${pkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
     ${lib.optionalString (skills != [ ]) ''
       mkdir -p $out/home/agent/.claude/skills
       ${lib.concatMapStrings (f: ''
@@ -226,6 +228,7 @@ let
     cp ${hostPkgs.writeText "issue-prompt.md" prompt} $out/issue-prompt.md
     cp ${hostPkgs.writeText "scout-prompt.md" scoutPrompt} $out/scout-prompt.md
     cp ${hostPkgs.writeText "review-prompt.md" reviewPrompt} $out/review-prompt.md
+    cp ${hostPkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/conflict-resolve-prompt.md
   '';
 
   # The baked-skills directory as a host store path (native-buildable on
