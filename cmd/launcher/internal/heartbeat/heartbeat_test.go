@@ -274,6 +274,42 @@ func TestFormatHeartbeatShape(t *testing.T) {
 	}
 }
 
+// TestWriterHeartbeatIncludesPhase verifies that the heartbeat line includes
+// the phase tag derived from the tool used.
+func TestWriterHeartbeatIncludesPhase(t *testing.T) {
+	var status bytes.Buffer
+	w := heartbeat.New(&bytes.Buffer{}, "42", &status, time.Hour)
+
+	event := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"}}]}}` + "\n"
+	fmt.Fprint(w, event)
+
+	out := status.String()
+	if !strings.Contains(out, "[edit]") {
+		t.Errorf("heartbeat missing [edit] phase tag: %q", out)
+	}
+}
+
+// TestWriterPhaseTransitionEmitsLine verifies that switching to a different
+// phase triggers a heartbeat emission even when the throttle is high.
+func TestWriterPhaseTransitionEmitsLine(t *testing.T) {
+	var status bytes.Buffer
+	w := heartbeat.New(&bytes.Buffer{}, "11", &status, time.Hour)
+
+	ev1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
+	ev2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"b.go"}}]}}` + "\n"
+
+	fmt.Fprint(w, ev1)
+	fmt.Fprint(w, ev2)
+
+	out := status.String()
+	if !strings.Contains(out, "[explore]") {
+		t.Errorf("missing [explore] phase tag: %q", out)
+	}
+	if !strings.Contains(out, "[edit]") {
+		t.Errorf("missing [edit] phase tag after transition: %q", out)
+	}
+}
+
 // TestWriterNarrationText verifies that a text content block in an assistant
 // event emits a heartbeat line containing the narration text.
 func TestWriterNarrationText(t *testing.T) {
