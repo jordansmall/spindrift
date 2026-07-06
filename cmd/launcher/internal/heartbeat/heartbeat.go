@@ -107,7 +107,13 @@ func (w *Writer) parseLine(line string) {
 				for _, block := range ev.Message.Content {
 					if block.Type == "text" {
 						if narration := trimNarration(block.Text); narration != "" {
-							fmt.Fprintln(w.out, "#"+w.issue+" \xc2\xb7 "+narration)
+							var line string
+							if w.lastPhase != "" {
+								line = "#" + w.issue + " [" + w.lastPhase + "] " + narration
+							} else {
+								line = "#" + w.issue + " \xc2\xb7 " + narration
+							}
+							fmt.Fprintln(w.out, line)
 							w.lastEmit = time.Now()
 						}
 						break

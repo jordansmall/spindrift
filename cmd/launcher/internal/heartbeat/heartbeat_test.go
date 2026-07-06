@@ -162,6 +162,30 @@ func TestWriterEmitsOnNewTool(t *testing.T) {
 	}
 }
 
+// TestWriterNarrationIncludesPhase verifies that narration lines carry the
+// current phase tag derived from the most recent tool.
+func TestWriterNarrationIncludesPhase(t *testing.T) {
+	var status bytes.Buffer
+	w := heartbeat.New(&bytes.Buffer{}, "42", &status, time.Hour)
+
+	// First establish a phase via a tool event.
+	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
+	fmt.Fprint(w, toolEv)
+	status.Reset()
+
+	// Now send a narration event; it should carry the explore phase.
+	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Checking the file."}]}}` + "\n"
+	fmt.Fprint(w, narEv)
+
+	out := status.String()
+	if !strings.Contains(out, "[explore]") {
+		t.Errorf("narration missing [explore] phase tag: %q", out)
+	}
+	if !strings.Contains(out, "Checking the file") {
+		t.Errorf("narration text missing: %q", out)
+	}
+}
+
 // TestWriterNarrationTrimming verifies that narration text is trimmed to a single
 // line bounded to 120 characters.
 func TestWriterNarrationTrimming(t *testing.T) {
