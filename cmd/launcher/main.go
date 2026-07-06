@@ -662,6 +662,10 @@ var (
 	anyHeading = regexp.MustCompile(`^#+`)
 	// Matches a bullet list item line.
 	bulletItem = regexp.MustCompile(`^[ \t]*[-*][ \t]*`)
+	// Matches a contiguous inline ref-list from the start of a string.
+	// Valid tokens: #NNN refs, commas, slashes, whitespace, and the word
+	// "and". Stops before prose words or sentence-boundary punctuation.
+	refListPrefix = regexp.MustCompile(`^(?:#[0-9]+|[,/]|\s+|\band\b)+`)
 )
 
 // parseBlockerRefs extracts all blocker issue numbers referenced in a body.
@@ -706,7 +710,10 @@ func parseBlockerRefs(body string) []string {
 			}
 		}
 
-		// Inline keyword anywhere in the line: extract all #N refs that follow.
+		// Inline keyword anywhere in the line: extract #N refs that form a
+		// contiguous ref list immediately after the keyword. Stops before
+		// prose tokens so that "depends on #12. See also #99" does not
+		// record #99 as a blocker.
 		remaining := line
 		for {
 			loc := blockKeyword.FindStringIndex(remaining)
@@ -714,7 +721,8 @@ func parseBlockerRefs(body string) []string {
 				break
 			}
 			after := remaining[loc[1]:]
-			for _, m := range issueRef.FindAllStringSubmatch(after, -1) {
+			listStr := refListPrefix.FindString(after)
+			for _, m := range issueRef.FindAllStringSubmatch(listStr, -1) {
 				addRef(m[1])
 			}
 			remaining = after
