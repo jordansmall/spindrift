@@ -106,11 +106,11 @@ func TestPrintOutcomeReport_PostsUsageComment_WithBreakdown(t *testing.T) {
 	outcomeLine := "SPINDRIFT_OUTCOME issue=" + issNum + " pr=" + prURL + " status=ready note=ok"
 	resultEvent := `{"type":"result","num_turns":5,"total_cost_usd":0.50,"duration_ms":4000,"duration_api_ms":3000,"usage":{"input_tokens":600,"output_tokens":200}}`
 	// Main agent invokes scout
-	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_scout","name":"Task","input":{}}],"usage":{"input_tokens":100,"output_tokens":30}}}`
+	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_scout","name":"Task","input":{"subagent_type":"scout"}}],"usage":{"input_tokens":100,"output_tokens":30}}}`
 	// Scout messages
 	scoutMsg := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":200,"output_tokens":60}},"parent_tool_use_id":"toolu_scout"}`
 	// Main agent invokes reviewer
-	implMain2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_reviewer","name":"Task","input":{}}],"usage":{"input_tokens":150,"output_tokens":50}}}`
+	implMain2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_reviewer","name":"Task","input":{"subagent_type":"reviewer"}}],"usage":{"input_tokens":150,"output_tokens":50}}}`
 	// Reviewer message
 	reviewerMsg := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":150,"output_tokens":60}},"parent_tool_use_id":"toolu_reviewer"}`
 
