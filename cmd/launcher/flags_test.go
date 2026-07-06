@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -150,6 +151,57 @@ func TestPrintHelp_ShowsAlias(t *testing.T) {
 	}
 }
 
+// TestParseFlags_FileFlag_ReadsToken: --<name>-file reads the file and sets the env var.
+func TestParseFlags_FileFlag_ReadsToken(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token.txt")
+	if err := os.WriteFile(tokenFile, []byte("secret-value"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GH_TOKEN", "")
+	_, err := parseFlags([]string{"--gh-token-file", tokenFile})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "secret-value" {
+		t.Errorf("GH_TOKEN = %q, want %q", got, "secret-value")
+	}
+}
+
+// TestParseFlags_FileFlag_WinsOverEnv: file flag takes precedence over env var.
+func TestParseFlags_FileFlag_WinsOverEnv(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token.txt")
+	if err := os.WriteFile(tokenFile, []byte("file-value"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GH_TOKEN", "env-value")
+	_, err := parseFlags([]string{"--gh-token-file", tokenFile})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "file-value" {
+		t.Errorf("GH_TOKEN = %q, want %q (file flag must win over env)", got, "file-value")
+	}
+}
+
+// TestParseFlags_FileFlag_MissingFile: --<name>-file with non-existent path returns an error.
+func TestParseFlags_FileFlag_MissingFile(t *testing.T) {
+	_, err := parseFlags([]string{"--gh-token-file", "/nonexistent/path/token.txt"})
+	if err == nil {
+		t.Fatal("expected error for missing file, got nil")
+	}
+	if !strings.Contains(err.Error(), "/nonexistent/path/token.txt") {
+		t.Errorf("error should mention the path, got: %v", err)
+	}
+}
+
+// TestParseFlags_FileFlag_MissingValue: --<name>-file with no following arg returns an error.
+func TestParseFlags_FileFlag_MissingValue(t *testing.T) {
+	_, err := parseFlags([]string{"--gh-token-file"})
+	if err == nil {
+		t.Fatal("expected error when file flag has no path argument, got nil")
+	}
+}
+
 // TestPrintHelp_SecretKnobEnvOnly: secret knobs appear as env-only (no --flag prefix).
 func TestPrintHelp_SecretKnobEnvOnly(t *testing.T) {
 	var buf bytes.Buffer
@@ -160,5 +212,33 @@ func TestPrintHelp_SecretKnobEnvOnly(t *testing.T) {
 	}
 	if !strings.Contains(out, "env-only") {
 		t.Error("help output missing 'env-only' marker for secret knobs")
+	}
+}
+
+// TestParseFlags_FileFlag_StripsNewline: trailing newline is stripped from file content.
+func TestParseFlags_FileFlag_StripsNewline(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token.txt")
+	if err := os.WriteFile(tokenFile, []byte("stripped-value\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GH_TOKEN", "")
+	_, err := parseFlags([]string{"--gh-token-file", tokenFile})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "stripped-value" {
+		t.Errorf("GH_TOKEN = %q, want %q (trailing newline must be stripped)", got, "stripped-value")
+	}
+}
+
+// TestPrintHelp_ShowsSecretFileFlags: help output lists --<name>-file flags for secret knobs.
+func TestPrintHelp_ShowsSecretFileFlags(t *testing.T) {
+	var buf bytes.Buffer
+	printHelp(&buf)
+	out := buf.String()
+	for _, want := range []string{"--gh-token-file", "--anthropic-api-key-file", "--claude-code-oauth-token-file"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help output missing %s", want)
+		}
 	}
 }
