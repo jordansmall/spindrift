@@ -26,7 +26,7 @@ elsewhere.
 
 # IMPLEMENT
 
-Work test-first, one slice at a time. Hard rule:
+${SKILL_PREAMBLE}Work test-first, one slice at a time. Hard rule:
 
 1. RED: write ONE failing test, run it, confirm it fails for the right reason.
    Never write implementation code before a failing test exists.

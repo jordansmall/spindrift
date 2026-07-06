@@ -94,6 +94,23 @@ if [ -n "${PREFETCH:-}" ]; then
   eval "$PREFETCH"
 fi
 
+# Discover available skills at $HOME/.claude/skills/ and build a directive
+# to prefer them over the inline guidance where they apply.
+SKILL_PREAMBLE=""
+_skills_found=""
+if [ -d "${HOME:-}/.claude/skills" ]; then
+  for _sf in "${HOME}/.claude/skills/"*.md; do
+    [ -f "$_sf" ] || continue
+    _sn="$(basename "$_sf" .md)"
+    _skills_found="${_skills_found:+${_skills_found}, }${_sn}"
+  done
+fi
+if [ -n "$_skills_found" ]; then
+  SKILL_PREAMBLE="Skills available: ${_skills_found}. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
+
+"
+fi
+
 # Substitute only known placeholders so literal `$` in the prompt body (shell
 # snippets, etc.) survives. The single-quoted variable list is envsubst's
 # literal, not a shell expansion — hence SC2016.
@@ -105,7 +122,8 @@ _subst() {
     BASE_BRANCH="${BASE_BRANCH:-}" \
     IN_PROGRESS_LABEL="${IN_PROGRESS_LABEL:-}" \
     COMPLETE_LABEL="${COMPLETE_LABEL:-}" \
-    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL' \
+    SKILL_PREAMBLE="${SKILL_PREAMBLE:-}" \
+    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE' \
     <"$1"
 }
 prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
