@@ -212,7 +212,7 @@ let
     ${lib.optionalString (skills != [ ]) ''
       mkdir -p $out/home/agent/.claude/skills
       ${lib.concatMapStrings (f: ''
-        cp ${f} $out/home/agent/.claude/skills/${builtins.baseNameOf (toString f)}
+        cp ${f} $out/home/agent/.claude/skills/${if lib.isDerivation f then f.name else builtins.baseNameOf f}
       '') skills}
     ''}
   '';
@@ -238,7 +238,7 @@ let
       ''
         mkdir -p $out
         ${lib.concatMapStrings (f: ''
-          cp ${f} $out/${builtins.baseNameOf (toString f)}
+          cp ${f} $out/${if lib.isDerivation f then f.name else builtins.baseNameOf f}
         '') skills}
       ''
   );
