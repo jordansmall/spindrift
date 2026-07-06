@@ -117,8 +117,13 @@ func (w *Writer) parseLine(line string) {
 			for _, block := range ev.Message.Content {
 				if block.Type == "tool_use" {
 					tool := formatTool(block.Name, block.Input)
+					phase := toolToPhase(block.Name, block.Input)
 					if tool != w.lastTool {
 						w.lastTool = tool
+						changed = true
+					}
+					if phase != w.lastPhase {
+						w.lastPhase = phase
 						changed = true
 					}
 					// Use first tool_use block per assistant event.
