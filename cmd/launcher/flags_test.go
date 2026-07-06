@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -107,5 +109,31 @@ func TestParseFlags_MultipleFlags(t *testing.T) {
 	}
 	if got := os.Getenv("MAX_JOBS"); got != "1" {
 		t.Errorf("MAX_JOBS = %q, want %q", got, "1")
+	}
+}
+
+// TestPrintHelp_ContainsLabelEntry: help output includes --label flag with its doc.
+func TestPrintHelp_ContainsLabelEntry(t *testing.T) {
+	var buf bytes.Buffer
+	printHelp(&buf)
+	out := buf.String()
+	if !strings.Contains(out, "--label") {
+		t.Error("help output missing --label flag")
+	}
+	if !strings.Contains(out, "issues carrying this label are dispatchable") {
+		t.Error("help output missing label doc string")
+	}
+}
+
+// TestPrintHelp_SecretKnobEnvOnly: secret knobs appear as env-only (no --flag prefix).
+func TestPrintHelp_SecretKnobEnvOnly(t *testing.T) {
+	var buf bytes.Buffer
+	printHelp(&buf)
+	out := buf.String()
+	if !strings.Contains(out, "GH_TOKEN") {
+		t.Error("help output missing GH_TOKEN env-only listing")
+	}
+	if !strings.Contains(out, "env-only") {
+		t.Error("help output missing 'env-only' marker for secret knobs")
 	}
 }
