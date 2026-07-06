@@ -958,6 +958,8 @@ EOF
   # seq: initial=SUCCESS, confirmation=PENDING (late job registered), next poll=SUCCESS (sticks)
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS,PENDING,SUCCESS"
   export MERGE_POLL_INTERVAL=0
+  # Timeout must exceed the deferral iteration count (2 loops here): elapsed
+  # increments by 1 per iteration when MERGE_POLL_INTERVAL=0, so ≥2 suffices.
   export MERGE_POLL_TIMEOUT=3
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
@@ -975,6 +977,7 @@ EOF
   # seq: initial=SUCCESS, confirmation=FAILURE (late job registered and already red)
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS,FAILURE"
   export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=100
   export MAX_FIX_ATTEMPTS=0  # bare gate test — self-heal disabled
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
