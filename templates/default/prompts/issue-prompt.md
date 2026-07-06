@@ -97,19 +97,21 @@ the PR body.
 
 # WATCH CI
 
-After opening the PR, block until CI registers. Right after `gh pr create` the
-`statusCheckRollup` state is absent — treating that as green would merge before
-CI starts. Wait for the rollup to return any non-empty state:
+After opening the PR, capture the URL that `gh pr create` prints and block
+until CI registers. Right after the PR is created the `statusCheckRollup`
+state is absent — treating that as green would merge before CI starts. Wait
+for the rollup to return any non-empty state:
 
 ```
 # gh pr checks uses the check-runs REST endpoint which 403s under fine-grained
 # PATs. Use statusCheckRollup (GraphQL) instead — it works with fine-grained
 # tokens and aggregates both commit statuses and check-runs faithfully, so a
 # missing check reads as not-started rather than silently green.
+PR_URL=<the URL gh pr create printed, e.g. https://github.com/owner/repo/pull/42>
 GQL='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}'
-owner=$(echo "<pr-url>" | cut -d/ -f4)
-repo=$(echo "<pr-url>"  | cut -d/ -f5)
-num=$(echo "<pr-url>"   | cut -d/ -f7)
+owner=$(echo "$PR_URL" | cut -d/ -f4)
+repo=$(echo "$PR_URL"  | cut -d/ -f5)
+num=$(echo "$PR_URL"   | cut -d/ -f7)
 until gh api graphql -f query="$GQL" -f owner="$owner" -f repo="$repo" \
   -F number="$num" \
   --jq '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state // ""' \
