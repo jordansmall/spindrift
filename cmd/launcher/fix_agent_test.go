@@ -26,7 +26,7 @@ func TestSelfHeal_SuccessFirstTry(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
-	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateSuccess})
+	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	var fixCalls []int
 	merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
@@ -72,8 +72,8 @@ func TestSelfHeal_GenuineRedFixSucceeds(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
-	// First poll: FAILURE; after fix box: SUCCESS
-	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess})
+	// First poll: FAILURE; after fix box: SUCCESS (plus confirmation poll)
+	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
 
 	var fixCalls []int
 	merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
@@ -131,7 +131,7 @@ func TestSelfHeal_ErrorStateTriggersFixPass(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
 	// ERROR is genuine red just like FAILURE; fix pass should be triggered.
-	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateError, forge.StateSuccess})
+	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateError, forge.StateSuccess, forge.StateSuccess})
 
 	var fixCalls []int
 	merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)

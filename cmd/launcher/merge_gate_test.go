@@ -42,7 +42,7 @@ func TestMergeWhenGreen(t *testing.T) {
 		{
 			name:           "SUCCESS on first poll merges and completes",
 			timeout:        100,
-			checkStates:    []forge.RollupState{forge.StateSuccess},
+			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
 			wantMerged:     true,
 			wantGenuineRed: false,
 			wantSwapAdd:    "agent-complete",
@@ -50,7 +50,7 @@ func TestMergeWhenGreen(t *testing.T) {
 		{
 			name:           "PENDING then SUCCESS merges after one wait iteration",
 			timeout:        100,
-			checkStates:    []forge.RollupState{forge.StatePending, forge.StateSuccess},
+			checkStates:    []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess},
 			wantMerged:     true,
 			wantGenuineRed: false,
 			wantSwapAdd:    "agent-complete",
@@ -92,8 +92,8 @@ func TestMergeWhenGreen(t *testing.T) {
 			name:              "conflict → rebase → re-poll → merge succeeds",
 			timeout:           100,
 			maxRebaseAttempts: 3,
-			// CI returns SUCCESS twice: before and after the rebase.
-			checkStates: []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
+			// Confirmation poll + merge poll each need their own SUCCESS.
+			checkStates: []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
 			// First Merge call returns ErrMergeConflict; second succeeds.
 			mergeErrs:        []error{forge.ErrMergeConflict, nil},
 			wantMerged:       true,
@@ -105,13 +105,14 @@ func TestMergeWhenGreen(t *testing.T) {
 			name:              "conflict → rebase fails → non-retriable",
 			timeout:           100,
 			maxRebaseAttempts: 3,
-			checkStates:       []forge.RollupState{forge.StateSuccess},
-			mergeErrs:         []error{forge.ErrMergeConflict},
-			rebaseErr:         errors.New("rebase failed: conflict"),
-			wantMerged:        false,
-			wantGenuineRed:    false,
-			wantSwapAdd:       "",
-			wantRebaseCalled:  1,
+			// Confirmation poll consumes a second SUCCESS before merge is attempted.
+			checkStates:      []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
+			mergeErrs:        []error{forge.ErrMergeConflict},
+			rebaseErr:        errors.New("rebase failed: conflict"),
+			wantMerged:       false,
+			wantGenuineRed:   false,
+			wantSwapAdd:      "",
+			wantRebaseCalled: 1,
 		},
 		{
 			name:              "conflict exhausts maxRebaseAttempts → non-retriable",
@@ -130,8 +131,8 @@ func TestMergeWhenGreen(t *testing.T) {
 			name:              "rebase conflict → conflict-resolve fn called → merge succeeds",
 			timeout:           100,
 			maxRebaseAttempts: 3,
-			// CI green twice: before and after conflict resolution.
-			checkStates: []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
+			// Confirmation poll needed before each Merge attempt.
+			checkStates: []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
 			// Merge conflicts; rebase itself also conflicts (fn resolves it); then merge succeeds.
 			mergeErrs:                 []error{forge.ErrMergeConflict, nil},
 			rebaseErr:                 forge.ErrMergeConflict,
@@ -142,10 +143,11 @@ func TestMergeWhenGreen(t *testing.T) {
 			wantConflictResolveCalled: 1,
 		},
 		{
-			name:                      "rebase conflict → conflict-resolve fn fails → non-retriable",
-			timeout:                   100,
-			maxRebaseAttempts:         3,
-			checkStates:               []forge.RollupState{forge.StateSuccess},
+			name:              "rebase conflict → conflict-resolve fn fails → non-retriable",
+			timeout:           100,
+			maxRebaseAttempts: 3,
+			// Confirmation poll consumes a second SUCCESS before merge is attempted.
+			checkStates:               []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
 			mergeErrs:                 []error{forge.ErrMergeConflict},
 			rebaseErr:                 forge.ErrMergeConflict,
 			conflictResolveErr:        errors.New("agent could not resolve conflict"),
@@ -156,10 +158,11 @@ func TestMergeWhenGreen(t *testing.T) {
 			wantConflictResolveCalled: 1,
 		},
 		{
-			name:                      "rebase conflict → no conflict-resolve fn → non-retriable",
-			timeout:                   100,
-			maxRebaseAttempts:         3,
-			checkStates:               []forge.RollupState{forge.StateSuccess},
+			name:              "rebase conflict → no conflict-resolve fn → non-retriable",
+			timeout:           100,
+			maxRebaseAttempts: 3,
+			// Confirmation poll consumes a second SUCCESS before merge is attempted.
+			checkStates:               []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
 			mergeErrs:                 []error{forge.ErrMergeConflict},
 			rebaseErr:                 forge.ErrMergeConflict,
 			noConflictResolveFn:       true,
@@ -168,6 +171,25 @@ func TestMergeWhenGreen(t *testing.T) {
 			wantSwapAdd:               "",
 			wantRebaseCalled:          1,
 			wantConflictResolveCalled: 0,
+		},
+		{
+			// A partial check snapshot can briefly show SUCCESS before all jobs
+			// are registered. A second poll that returns FAILURE is genuine red.
+			name:           "SUCCESS then FAILURE in confirmation poll is genuine red",
+			timeout:        100,
+			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateFailure},
+			wantMerged:     false,
+			wantGenuineRed: true,
+			wantSwapAdd:    "",
+		},
+		{
+			// Confirmation returns PENDING — another check registered but not
+			// yet settled. Gate keeps waiting; eventually stabilises to SUCCESS.
+			name:        "SUCCESS then PENDING in confirmation poll defers merge",
+			timeout:     100,
+			checkStates: []forge.RollupState{forge.StateSuccess, forge.StatePending, forge.StateSuccess, forge.StateSuccess},
+			wantMerged:  true,
+			wantSwapAdd: "agent-complete",
 		},
 	}
 

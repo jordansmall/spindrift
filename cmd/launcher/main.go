@@ -390,6 +390,15 @@ func mergeWhenGreen(c config, fc forge.Client, num, pr string, conflictResolveFn
 
 		switch state {
 		case forge.StateSuccess:
+			// Re-poll to confirm the snapshot is stable. A partial check
+			// registration can briefly show SUCCESS before all jobs appear.
+			if confirm, _ := fc.CheckState(pr); confirm != forge.StateSuccess {
+				if confirm == forge.StateFailure || confirm == forge.StateError {
+					return false, true
+				}
+				// PENDING/EXPECTED/NONE — keep waiting for checks to settle.
+				break
+			}
 			err := fc.Merge(pr)
 			if err == nil {
 				swapLabel(fc, num, c.completeLabel, c.inProgressLabel)
