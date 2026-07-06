@@ -6,6 +6,8 @@
 #
 # Fields (all optional except env and doc):
 #   env          string  env-var name (SCREAMING_SNAKE_CASE)
+#   alias        string  optional short-form CLI flag alias (kebab-case, no dashes);
+#                        when set, --<alias> is a second way to set the same knob
 #   default      any     baked-in default; absent means runtime-required or empty
 #   placeholder  string  friendly value shown in harness.env.example for required
 #                        non-secret vars (e.g. REPO_SLUG=owner/repo)
@@ -217,6 +219,7 @@
   };
   issueNumber = {
     env = "ISSUE_NUMBER";
+    alias = "issue";
     doc = "dispatch only this issue number, bypassing the LABEL query; empty discovers by LABEL";
     boxEnv = false;
   };

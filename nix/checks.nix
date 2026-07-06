@@ -491,9 +491,10 @@ in
       toKebab = env: toLower (replaceStrings [ "_" ] [ "-" ] env);
       flagKind = e: if builtins.isInt (e.default or null) then "int" else "string";
       flagDflt = e: if e ? default then (if builtins.isInt e.default then builtins.toString e.default else e.default) else "";
+      flagAlias = e: if e ? alias then ", alias: \"${e.alias}\"" else "";
       rows = concatStrings (
         mapAttrsToList (_: e:
-          "\t{env: \"${e.env}\", flag: \"${toKebab e.env}\", kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\"},\n"
+          "\t{env: \"${e.env}\", flag: \"${toKebab e.env}\"${flagAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\"},\n"
         ) nonSecretSchema
       );
       secretRows = concatStrings (
