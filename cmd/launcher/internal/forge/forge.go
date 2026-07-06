@@ -2,6 +2,13 @@
 // repo's host. GitHub is today's only adapter; the name goes into the glossary.
 package forge
 
+import "errors"
+
+// ErrMergeConflict is returned by Merge when the PR branch cannot be
+// auto-merged due to conflicts with the base branch. Callers may attempt to
+// rebase the head branch and retry.
+var ErrMergeConflict = errors.New("merge conflict")
+
 // Issue is a GitHub issue as seen by the launcher.
 type Issue struct {
 	Number string // launcher keeps issue numbers as strings
@@ -40,4 +47,5 @@ type Client interface {
 	PRState(url string) (string, error)              // MERGED check
 	CheckState(url string) (RollupState, error)      // aggregate statusCheckRollup
 	Merge(url string) error                          // rebase + delete branch
+	Rebase(prURL string) error                       // checkout head, rebase onto base, force-push
 }

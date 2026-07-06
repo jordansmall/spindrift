@@ -2,8 +2,10 @@ package forge
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -178,9 +180,67 @@ func (e *execClient) CheckState(url string) (RollupState, error) {
 }
 
 func (e *execClient) Merge(url string) error {
+	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "pr", "merge", url, "--rebase", "--delete-branch")
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if isMergeConflict(stderr.String()) {
+			return ErrMergeConflict
+		}
 		return fmt.Errorf("gh pr merge %s: %w", url, err)
+	}
+	return nil
+}
+
+// isMergeConflict returns true when gh's stderr indicates a merge-conflict
+// failure rather than a permissions error, network failure, or other cause.
+func isMergeConflict(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "merge conflict") ||
+		strings.Contains(s, "not mergeable")
+}
+
+// Rebase checks out the PR's head branch into a temporary clone of the target
+// repository, rebases it onto origin/<base>, and force-pushes the result.
+// Returns ErrMergeConflict if the rebase cannot be completed automatically.
+func (e *execClient) Rebase(prURL string) error {
+	out, err := exec.Command("gh", "pr", "view", prURL,
+		"--json", "headRefName,baseRefName",
+		"--jq", "[.headRefName,.baseRefName]|@tsv",
+	).Output()
+	if err != nil {
+		return fmt.Errorf("gh pr view %s: %w", prURL, err)
+	}
+	fields := strings.SplitN(strings.TrimSpace(string(out)), "\t", 2)
+	if len(fields) != 2 {
+		return fmt.Errorf("gh pr view: unexpected output %q", string(out))
+	}
+	head, base := fields[0], fields[1]
+
+	dir, err := os.MkdirTemp("", "spindrift-rebase-*")
+	if err != nil {
+		return fmt.Errorf("mkdtemp: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	if err := exec.Command("gh", "repo", "clone", e.repo, dir,
+		"--", "--no-single-branch").Run(); err != nil {
+		return fmt.Errorf("gh repo clone: %w", err)
+	}
+
+	gitIn := func(args ...string) *exec.Cmd {
+		return exec.Command("git", append([]string{"-C", dir}, args...)...)
+	}
+
+	if err := gitIn("checkout", head).Run(); err != nil {
+		return fmt.Errorf("git checkout %s: %w", head, err)
+	}
+	if err := gitIn("rebase", "origin/"+base).Run(); err != nil {
+		_ = gitIn("rebase", "--abort").Run()
+		return ErrMergeConflict
+	}
+	if err := gitIn("push", "--force-with-lease").Run(); err != nil {
+		return fmt.Errorf("git push --force-with-lease: %w", err)
 	}
 	return nil
 }
