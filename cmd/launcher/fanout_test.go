@@ -164,7 +164,7 @@ func TestFanOut_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
-	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess})
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	// The fake runner writes the outcome line into the log file (via box.Output)
 	// before returning, simulating a box that ran successfully and emitted its result.
