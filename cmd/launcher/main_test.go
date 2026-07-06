@@ -119,6 +119,35 @@ func TestParseBlockerRefs_ListItemMultipleRefs(t *testing.T) {
 	}
 }
 
+// TestParseBlockerRefs_CommaSeparated ensures comma-separated refs are
+// still collected when there is no "and".
+func TestParseBlockerRefs_CommaSeparated(t *testing.T) {
+	refs := parseBlockerRefs("depends on #12, #13")
+	sort.Strings(refs)
+	if len(refs) != 2 || refs[0] != "12" || refs[1] != "13" {
+		t.Errorf("expected [12, 13], got %v", refs)
+	}
+}
+
+// TestParseBlockerRefs_SlashSeparated ensures slash-separated refs work and
+// prose following them is not captured.
+func TestParseBlockerRefs_SlashSeparated(t *testing.T) {
+	refs := parseBlockerRefs("depends on #1 / #2 but not #3")
+	sort.Strings(refs)
+	if len(refs) != 2 || refs[0] != "1" || refs[1] != "2" {
+		t.Errorf("expected [1, 2], got %v", refs)
+	}
+}
+
+// TestParseBlockerRefs_InlineStopsAtProse checks that refs in prose after the
+// ref list are not captured as blockers.
+func TestParseBlockerRefs_InlineStopsAtProse(t *testing.T) {
+	refs := parseBlockerRefs("This depends on #12. See also the discussion in #99.")
+	if len(refs) != 1 || refs[0] != "12" {
+		t.Errorf("expected [12], got %v", refs)
+	}
+}
+
 // --- detectCycle tests ---
 
 func TestDetectCycle_Empty(t *testing.T) {
