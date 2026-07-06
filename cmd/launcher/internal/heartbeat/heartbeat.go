@@ -188,6 +188,32 @@ func trimNarration(text string) string {
 	return text
 }
 
+// toolToPhase maps a tool name and its input to the current work phase.
+// The mapping is the single authoritative place for phase heuristics.
+func toolToPhase(name string, input json.RawMessage) string {
+	switch name {
+	case "Edit", "Write", "NotebookEdit":
+		return "edit"
+	case "Bash":
+		var m map[string]interface{}
+		if len(input) > 0 {
+			if err := json.Unmarshal(input, &m); err == nil {
+				if cmd, ok := m["command"].(string); ok {
+					if strings.Contains(cmd, "go test") {
+						return "test"
+					}
+					if strings.Contains(cmd, "git commit") {
+						return "commit"
+					}
+				}
+			}
+		}
+		return "explore"
+	default:
+		return "explore"
+	}
+}
+
 // formatTool returns a compact label for a tool_use block, e.g. "Edit(main.go)".
 // It checks well-known input keys in priority order; falls back to the tool
 // name alone when no string argument can be extracted.
