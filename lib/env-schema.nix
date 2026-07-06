@@ -169,6 +169,12 @@
     doc = "fix-agent passes when CI is genuinely red before marking agent-failed; 0 disables self-healing";
     boxEnv = false;
   };
+  maxRebaseAttempts = {
+    env = "MAX_REBASE_ATTEMPTS";
+    default = 3;
+    doc = "rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries";
+    boxEnv = false;
+  };
   maxJobs = {
     env = "MAX_JOBS";
     default = 0;
