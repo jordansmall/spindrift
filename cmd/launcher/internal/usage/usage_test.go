@@ -129,6 +129,87 @@ func TestLastInLog_MalformedJSON(t *testing.T) {
 	}
 }
 
+func TestBreakdownByRole_ScoutAndReviewer(t *testing.T) {
+	// Main agent: invokes scout Task
+	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_scout","name":"Task","input":{}}],"usage":{"input_tokens":100,"output_tokens":50}}}`
+	// Scout messages (grouped under toolu_scout)
+	scoutMsg1 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":200,"output_tokens":80}},"parent_tool_use_id":"toolu_scout"}`
+	scoutMsg2 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":100,"output_tokens":40}},"parent_tool_use_id":"toolu_scout"}`
+	// Main agent: invokes reviewer Task
+	implMain2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_reviewer","name":"Task","input":{}}],"usage":{"input_tokens":150,"output_tokens":60}}}`
+	// Reviewer message
+	reviewerMsg1 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":300,"output_tokens":100}},"parent_tool_use_id":"toolu_reviewer"}`
+	// Final main agent message (no parent)
+	implMain3 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":50,"output_tokens":20}}}`
+
+	path := writeLog(t, implMain1, scoutMsg1, scoutMsg2, implMain2, reviewerMsg1, implMain3)
+
+	breakdown, err := usage.BreakdownByRole(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	roles := map[string]usage.RoleUsage{}
+	for _, r := range breakdown {
+		roles[r.Role] = r
+	}
+
+	impl := roles["implementor"]
+	if impl.InputTokens != 300 { // 100+150+50
+		t.Errorf("implementor input tokens: got %d, want 300", impl.InputTokens)
+	}
+	if impl.OutputTokens != 130 { // 50+60+20
+		t.Errorf("implementor output tokens: got %d, want 130", impl.OutputTokens)
+	}
+
+	scout := roles["scout"]
+	if scout.InputTokens != 300 { // 200+100
+		t.Errorf("scout input tokens: got %d, want 300", scout.InputTokens)
+	}
+	if scout.OutputTokens != 120 { // 80+40
+		t.Errorf("scout output tokens: got %d, want 120", scout.OutputTokens)
+	}
+
+	reviewer := roles["reviewer"]
+	if reviewer.InputTokens != 300 {
+		t.Errorf("reviewer input tokens: got %d, want 300", reviewer.InputTokens)
+	}
+	if reviewer.OutputTokens != 100 {
+		t.Errorf("reviewer output tokens: got %d, want 100", reviewer.OutputTokens)
+	}
+}
+
+func TestBreakdownByRole_NoSubagents(t *testing.T) {
+	// Only main agent messages, no parent_tool_use_id
+	implMsg1 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":100,"output_tokens":50}}}`
+	implMsg2 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":200,"output_tokens":80}}}`
+
+	path := writeLog(t, implMsg1, implMsg2)
+
+	breakdown, err := usage.BreakdownByRole(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(breakdown) != 1 {
+		t.Fatalf("want 1 role (implementor only), got %d", len(breakdown))
+	}
+	if breakdown[0].Role != "implementor" {
+		t.Errorf("role: got %q, want %q", breakdown[0].Role, "implementor")
+	}
+	if breakdown[0].InputTokens != 300 {
+		t.Errorf("implementor input tokens: got %d, want 300", breakdown[0].InputTokens)
+	}
+}
+
+func TestBreakdownByRole_FileNotFound(t *testing.T) {
+	breakdown, err := usage.BreakdownByRole("/nonexistent/path/test.log")
+	if err != nil {
+		t.Fatalf("unexpected error for missing file: %v", err)
+	}
+	if breakdown != nil {
+		t.Fatal("expected nil breakdown for missing file")
+	}
+}
+
 func TestLastInLog_OversizedLine(t *testing.T) {
 	const fiveMiB = 5 * 1024 * 1024
 	// Write an oversized line then a valid result event

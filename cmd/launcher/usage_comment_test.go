@@ -13,15 +13,19 @@ import (
 // writeUsageLog writes a log file containing an outcome line and a result event.
 func writeUsageLog(t *testing.T, dir, issNum, outcomeLine, resultEvent string) {
 	t.Helper()
+	writeUsageLogLines(t, dir, issNum, outcomeLine, resultEvent)
+}
+
+func writeUsageLogLines(t *testing.T, dir, issNum string, lines ...string) {
+	t.Helper()
 	path := filepath.Join(dir, "logs", "issue-"+issNum+".log")
-	var lines []string
-	if outcomeLine != "" {
-		lines = append(lines, outcomeLine)
+	var parts []string
+	for _, l := range lines {
+		if l != "" {
+			parts = append(parts, l)
+		}
 	}
-	if resultEvent != "" {
-		lines = append(lines, resultEvent)
-	}
-	content := strings.Join(lines, "\n") + "\n"
+	content := strings.Join(parts, "\n") + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -88,5 +92,52 @@ func TestPrintOutcomeReport_UsageMissing_NoCrash(t *testing.T) {
 	body := fc.CommentCalls[0].Body
 	if !strings.Contains(body, "unavailable") {
 		t.Errorf("comment should say unavailable when usage missing; got: %q", body)
+	}
+}
+
+// TestPrintOutcomeReport_PostsUsageComment_WithBreakdown verifies that when the
+// log contains scout and reviewer subagent messages, the usage comment includes
+// a per-role breakdown table.
+func TestPrintOutcomeReport_PostsUsageComment_WithBreakdown(t *testing.T) {
+	dir := tempLogDir(t)
+	const issNum = "55"
+	const prURL = "https://github.com/owner/repo/pull/55"
+
+	outcomeLine := "SPINDRIFT_OUTCOME issue=" + issNum + " pr=" + prURL + " status=ready note=ok"
+	resultEvent := `{"type":"result","num_turns":5,"total_cost_usd":0.50,"duration_ms":4000,"duration_api_ms":3000,"usage":{"input_tokens":600,"output_tokens":200}}`
+	// Main agent invokes scout
+	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_scout","name":"Task","input":{}}],"usage":{"input_tokens":100,"output_tokens":30}}}`
+	// Scout messages
+	scoutMsg := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":200,"output_tokens":60}},"parent_tool_use_id":"toolu_scout"}`
+	// Main agent invokes reviewer
+	implMain2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_reviewer","name":"Task","input":{}}],"usage":{"input_tokens":150,"output_tokens":50}}}`
+	// Reviewer message
+	reviewerMsg := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":150,"output_tokens":60}},"parent_tool_use_id":"toolu_reviewer"}`
+
+	writeUsageLogLines(t, dir, issNum, outcomeLine, resultEvent, implMain1, scoutMsg, implMain2, reviewerMsg)
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	fr := runner.NewFake()
+	c := baseConfig()
+
+	printOutcomeReport(c, fc, dir, fr, []issue{{number: issNum, title: "test issue"}})
+
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
+	}
+	body := fc.CommentCalls[0].Body
+	if !strings.Contains(body, "breakdown") && !strings.Contains(body, "Breakdown") {
+		t.Errorf("comment should contain breakdown section; got: %q", body)
+	}
+	if !strings.Contains(body, "scout") {
+		t.Errorf("comment should contain scout row; got: %q", body)
+	}
+	if !strings.Contains(body, "reviewer") {
+		t.Errorf("comment should contain reviewer row; got: %q", body)
+	}
+	if !strings.Contains(body, "implementor") {
+		t.Errorf("comment should contain implementor row; got: %q", body)
 	}
 }
