@@ -871,6 +871,7 @@ EOF
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
+  export MERGE_POLL_INTERVAL=0  # avoid 30s confirmation-settle sleep
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'pr merge' "$GH_LOG"

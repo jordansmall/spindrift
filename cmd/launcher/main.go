@@ -390,6 +390,24 @@ func mergeWhenGreen(c config, fc forge.Client, num, pr string, conflictResolveFn
 
 		switch state {
 		case forge.StateSuccess:
+			// Re-poll once after the settle interval before merging. GitHub registers
+			// check runs asynchronously: a partial green set (e.g. 1 of 3 jobs
+			// registered and already passing) looks like StateSuccess momentarily.
+			// A second consecutive StateSuccess confirms the set is stable.
+			time.Sleep(time.Duration(pollIv) * time.Second)
+			elapsed += actualIv
+			confirmed, _ := fc.CheckState(pr)
+			if confirmed == forge.StateFailure || confirmed == forge.StateError {
+				// A late-registered job came in red — treat as genuine red.
+				return false, true
+			}
+			if confirmed != forge.StateSuccess {
+				// New jobs appeared (PENDING/EXPECTED/NONE) — not stable yet.
+				if elapsed >= deadline {
+					return false, false
+				}
+				continue
+			}
 			err := fc.Merge(pr)
 			if err == nil {
 				swapLabel(fc, num, c.completeLabel, c.inProgressLabel)

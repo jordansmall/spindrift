@@ -26,7 +26,7 @@ func TestReconcileStranded_GreenPRMergesAndCompletes(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
 	branch := c.branchPrefix + "5"
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
-	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess})
+	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	reconcileStranded(c, fc, t.TempDir(), nil)
 
@@ -129,7 +129,7 @@ func TestAdoptAndGate_GreenMergesAndCompletes(t *testing.T) {
 	iss := issue{number: "77", title: "Test issue"}
 
 	fc.SetIssue(forge.Issue{Number: "77", Labels: []string{c.inProgressLabel}})
-	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess})
+	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	var fixCalls []int
 	adoptAndGate(c, fc, iss, testReconcilePR, func(pass int) error {
@@ -160,7 +160,7 @@ func TestEngageByNumber_GreenMergesAndCompletes(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	branch := c.branchPrefix + "42"
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
-	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess})
+	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	err := engageByNumber(c, fc, t.TempDir(), nil, "42")
 
