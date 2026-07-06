@@ -75,10 +75,17 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 			args = append(args, "--ro-bind", a.promptDir, "/agent/prompts")
 		}
 	}
+	// Runtime mount takes precedence over baked skills; fall back to baked
+	// skills when no runtime override is set.
 	if a.skillsDir != "" {
 		if info, err := os.Stat(a.skillsDir); err == nil && info.IsDir() {
 			fmt.Printf("==> SPINDRIFT_SKILLS_DIR set; mounting %s over /home/agent/.claude/skills\n", a.skillsDir)
 			args = append(args, "--ro-bind", a.skillsDir, "/home/agent/.claude/skills")
+		}
+	} else {
+		bakedSkillsPath := filepath.Join(a.agentFiles, "home", "agent", ".claude", "skills")
+		if info, err := os.Stat(bakedSkillsPath); err == nil && info.IsDir() {
+			args = append(args, "--ro-bind", bakedSkillsPath, "/home/agent/.claude/skills")
 		}
 	}
 	// --clearenv is intentionally absent: secrets (GH_TOKEN, auth tokens) reach

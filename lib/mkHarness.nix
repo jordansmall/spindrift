@@ -27,6 +27,12 @@
   # override via the `prompt` directory mechanism (SPINDRIFT_PROMPT_DIR).
   scoutPrompt ? builtins.readFile ../templates/default/prompts/scout-prompt.md,
   reviewPrompt ? builtins.readFile ../templates/default/prompts/review-prompt.md,
+  # Skill files baked into the image at /home/agent/.claude/skills so the
+  # headless agent can invoke them without a runtime mount. Each element must
+  # be a path to a skill file; the file is copied under its basename.
+  # SPINDRIFT_SKILLS_DIR at runtime mounts over the same path and takes
+  # precedence, shadowing all baked skills.
+  skills ? [ ],
   # Non-secret run config baked into the `run` command as its built-in defaults;
   # a matching env var still wins at runtime, so one build can be re-pointed.
   defaults ? { },
@@ -203,6 +209,12 @@ let
     cp ${pkgs.writeText "issue-prompt.md" prompt} $out/agent/prompts/issue-prompt.md
     cp ${pkgs.writeText "scout-prompt.md" scoutPrompt} $out/agent/prompts/scout-prompt.md
     cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md
+    ${lib.optionalString (skills != [ ]) ''
+      mkdir -p $out/home/agent/.claude/skills
+      ${lib.concatMapStrings (f: ''
+        cp ${f} $out/home/agent/.claude/skills/${builtins.baseNameOf (toString f)}
+      '') skills}
+    ''}
   '';
 
   # The rendered prompt directory as a host store path (native-buildable on
@@ -215,6 +227,21 @@ let
     cp ${hostPkgs.writeText "scout-prompt.md" scoutPrompt} $out/scout-prompt.md
     cp ${hostPkgs.writeText "review-prompt.md" reviewPrompt} $out/review-prompt.md
   '';
+
+  # The baked-skills directory as a host store path (native-buildable on
+  # darwin). Each skill file is copied under its basename. When skills is
+  # empty this derivation is an empty directory.
+  skillsDir = hostPkgs.runCommand "skills-dir" { } (
+    if skills == [ ] then
+      "mkdir -p $out"
+    else
+      ''
+        mkdir -p $out
+        ${lib.concatMapStrings (f: ''
+          cp ${f} $out/${builtins.baseNameOf (toString f)}
+        '') skills}
+      ''
+  );
 
   # A non-root `agent` user (uid/gid 1000). Claude Code refuses
   # --dangerously-skip-permissions under root/sudo, and the Box relies on that
@@ -463,6 +490,7 @@ else
     run
     imagePath
     promptDir
+    skillsDir
     ;
 
   packages = {

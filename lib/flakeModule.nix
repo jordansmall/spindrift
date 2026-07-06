@@ -70,6 +70,12 @@ in
         description = "Agent prompt template baked into the image; changing it requires an image rebuild. Set SPINDRIFT_PROMPT_DIR at runtime to override without a rebuild.";
       };
 
+      skills = mkOption {
+        type = types.nullOr (types.listOf types.path);
+        default = null;
+        description = "Skill files baked into the image at /home/agent/.claude/skills. Each element is a path to a skill file. SPINDRIFT_SKILLS_DIR at runtime mounts over the same path and takes precedence.";
+      };
+
       # One sub-option per schema flakeOption entry — generated so adding a knob
       # to env-schema.nix propagates here automatically.
       defaults = mkOption {
@@ -121,6 +127,7 @@ in
         // lib.optionalAttrs (cfg.packages != null) { inherit (cfg) packages; }
         // lib.optionalAttrs (cfg.prefetch != null) { inherit (cfg) prefetch; }
         // lib.optionalAttrs (cfg.prompt != null) { inherit (cfg) prompt; }
+        // lib.optionalAttrs (cfg.skills != null) { inherit (cfg) skills; }
         // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; }
         // lib.optionalAttrs (cfg.runtime != null) { inherit (cfg) runtime; }
         // lib.optionalAttrs (cfg.nixInBox != null) { inherit (cfg) nixInBox; };

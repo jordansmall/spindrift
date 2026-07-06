@@ -10,6 +10,8 @@ let
     bwrapHarness
     noRuntimeHarness
     promptHarness
+    skillsHarness
+    skillsBwrapHarness
     minimalDirect
     consumerPkgs
     templatePkgs
@@ -73,6 +75,10 @@ in
         # to the stubbed agent (#4).
         PROMPT_PATH = batsHarness.promptDir;
         PROMPT_HARNESS_DIR = promptHarness.promptDir;
+        # Harnesses with baked skills for skills-precedence tests.
+        SKILLS_RUN_CMD = "${skillsHarness.run}/bin/run";
+        SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.run}/bin/run";
+        SKILLS_AGENT_FILES = skillsBwrapHarness.agentFiles;
       }
       ''
         export HOME="$TMPDIR/home"
@@ -250,6 +256,15 @@ in
     # The Consumer's prompt text is what lands in the rendered file.
     grep -q 'CONFIGURED-PROMPT-MARKER' \
       ${promptHarness.promptDir}/issue-prompt.md
+    touch $out
+  '';
+
+  # The configured `skills` are rendered to a store-path skills directory.
+  # Eval/native only (the skills dir is a host store path built by hostPkgs;
+  # the image-layer check is below, Linux-gated).
+  mkharness-skills = pkgs.runCommand "mkharness-skills" { } ''
+    grep -q 'BAKED-SKILL-MARKER' \
+      ${skillsHarness.skillsDir}/baked-skill.md
     touch $out
   '';
 
@@ -513,6 +528,15 @@ in
   prompt-baked-into-image = pkgs.runCommand "prompt-baked-into-image" { } ''
     grep -q 'CONFIGURED-PROMPT-MARKER' \
       ${promptHarness.agentFiles}/agent/prompts/issue-prompt.md
+    touch $out
+  '';
+
+  # Skills configured at build time must land in the agent-files layer at
+  # /home/agent/.claude/skills so the Box is self-contained. Realises the
+  # agent-files layer; Linux-gated like the other image checks.
+  skills-baked-into-image = pkgs.runCommand "skills-baked-into-image" { } ''
+    grep -q 'BAKED-SKILL-MARKER' \
+      ${skillsHarness.agentFiles}/home/agent/.claude/skills/baked-skill.md
     touch $out
   '';
 
