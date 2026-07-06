@@ -1,17 +1,19 @@
 # Shared bats helpers. Sourced by every *.bats file.
 #
 # The nix `checks.<system>.bats` derivation exports the paths these helpers
-# depend on: FAKES_DIR (the fake podman/gh/claude), RUN_CMD / BUILD_CMD (the
+# depend on: FAKES_DIR (the fake runtime/gh/claude), RUN_CMD / BUILD_CMD (the
 # nix-generated commands with the image store path baked in), ENTRYPOINT (the
 # in-container script), PROMPTS_DIR (the baked prompt templates), and IMAGE_PATH
 # (the image archive store path substituted into the commands).
 
 setup_fakes() {
-  : "${FAKES_DIR:?FAKES_DIR must be set (dir holding fake podman/gh/claude)}"
+  : "${FAKES_DIR:?FAKES_DIR must be set (dir holding fake runtime/gh/claude)}"
   FAKE_BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$FAKE_BIN"
-  cp "$FAKES_DIR"/podman "$FAKES_DIR"/docker "$FAKES_DIR"/bwrap "$FAKES_DIR"/gh \
-    "$FAKES_DIR"/claude "$FAKES_DIR"/nix "$FAKE_BIN"/
+  cp "$FAKES_DIR/runtime" "$FAKE_BIN/podman"
+  cp "$FAKES_DIR/runtime" "$FAKE_BIN/docker"
+  cp "$FAKES_DIR/runtime" "$FAKE_BIN/bwrap"
+  cp "$FAKES_DIR/gh" "$FAKES_DIR/claude" "$FAKES_DIR/nix" "$FAKE_BIN/"
   chmod +x "$FAKE_BIN"/*
   export PATH="$FAKE_BIN:$PATH"
 

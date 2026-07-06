@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Unified runtime fake: dispatches on basename "$0" (podman/docker/bwrap).
+# Records every invocation to ${RT}_LOG and simulates just enough behaviour for
+# the harness scripts. Outcome emission, AUTO_COMPLETE, and GH_STATE writes are
+# available under all three names — none is a lagging copy of another.
+set -euo pipefail
+
+runtime="$(basename "$0")"
+rt="$(printf '%s' "$runtime" | tr '[:lower:]' '[:upper:]')"
+
+log_var="${rt}_LOG"
+: "${!log_var:?${log_var} must point at a log file}"
+log="${!log_var}"
+printf '%s\n' "$*" >>"$log"
+
+# bwrap: log secret env vars received via process environment (name only, not value).
+if [ "$runtime" = "bwrap" ]; then
+  for _secret in GH_TOKEN CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY; do
+    if [ -n "${!_secret:-}" ]; then
+      printf 'ENV_SECRET:%s\n' "$_secret" >>"$log"
+    fi
+  done
+fi
+
+case "$runtime" in
+  podman|docker)
+    case "${1:-}" in
+      image)
+        if [ "${2:-}" = "inspect" ] || [ "${2:-}" = "exists" ]; then
+          image_present_var="FAKE_${rt}_IMAGE_PRESENT"
+          [ "${!image_present_var:-0}" = "1" ]
+          exit $?
+        fi
+        ;;
+      inspect)
+        # Container liveness probe: returns "running" when the named container
+        # state var is set to "running".
+        name=""
+        for arg in "$@"; do name="$arg"; done
+        norm="${name//-/_}"
+        state_var="FAKE_${rt}_CONTAINER_STATE_${norm}"
+        if [ "${!state_var:-}" = "running" ]; then
+          echo "running"
+          exit 0
+        fi
+        exit 1
+        ;;
+      run)
+        issue_num=""
+        complete_label=""
+        for arg in "$@"; do
+          case "$arg" in
+            ISSUE_NUMBER=*) issue_num="${arg#ISSUE_NUMBER=}" ;;
+            COMPLETE_LABEL=*) complete_label="${arg#COMPLETE_LABEL=}" ;;
+          esac
+        done
+        auto_complete_var="FAKE_${rt}_AUTO_COMPLETE"
+        run_exit_var="FAKE_${rt}_RUN_EXIT"
+        if [ "${!auto_complete_var:-0}" = "1" ] &&
+           [ "${!run_exit_var:-0}" = "0" ] &&
+           [ -n "${GH_STATE:-}" ] &&
+           [ -n "$issue_num" ] && [ -n "$complete_label" ]; then
+          printf '%s\t%s\n' "$issue_num" "$complete_label" >>"$GH_STATE"
+        fi
+        if [ -n "$issue_num" ]; then
+          outcome_var="FAKE_${rt}_OUTCOME_${issue_num}"
+          [ -n "${!outcome_var:-}" ] && printf '%s\n' "${!outcome_var}"
+        fi
+        exit "${!run_exit_var:-0}"
+        ;;
+    esac
+    ;;
+  bwrap)
+    issue_num=""
+    args=("$@")
+    i=0
+    while [ "$i" -lt "${#args[@]}" ]; do
+      if [ "${args[$i]}" = "--setenv" ]; then
+        key="${args[$((i + 1))]}"
+        val="${args[$((i + 2))]}"
+        case "$key" in
+          ISSUE_NUMBER) issue_num="$val" ;;
+        esac
+        i=$((i + 3))
+      else
+        i=$((i + 1))
+      fi
+    done
+    if [ -n "$issue_num" ]; then
+      outcome_var="FAKE_${rt}_OUTCOME_${issue_num}"
+      outcome_val="${!outcome_var:-}"
+      [ -n "$outcome_val" ] && printf '%s\n' "$outcome_val"
+    fi
+    run_exit_var="FAKE_${rt}_RUN_EXIT"
+    exit "${!run_exit_var:-0}"
+    ;;
+esac
+
+exit 0
