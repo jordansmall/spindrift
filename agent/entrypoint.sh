@@ -41,12 +41,14 @@ gh auth setup-git
 echo "==> cloning $REPO_SLUG"
 git clone "https://github.com/${REPO_SLUG}.git" "$WORK_DIR"
 cd "$WORK_DIR"
-git checkout -b "$BRANCH" "origin/${BASE_BRANCH:-}"
+# Fetch the absolute latest refs so the pre-work rebase positions the branch
+# on current origin/BASE_BRANCH, not the state captured at clone time.
+git fetch origin
 # A prior run may have already pushed agent/issue-N before dying.  When no
 # open PR exists, force-reset the remote branch so this Box starts clean and
 # its first incremental push is never rejected non-fast-forward.  When an
-# open PR exists, leave the branch alone — the #122 adoption path will take
-# over instead.
+# open PR exists, check out the prior work so the pre-work rebase can replay
+# it onto current origin/BASE_BRANCH before the agent begins.
 if git rev-parse --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
   # Fail hard on gh errors: a silent empty response (network/auth failure)
   # is indistinguishable from "no PR" and must not trigger the force-reset.
@@ -55,15 +57,31 @@ if git rev-parse --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
     exit 1
   }
   if [ -n "$open_prs" ]; then
-    echo "==> open PR exists on $BRANCH; skipping force-reset (adoption path)"
+    echo "==> open PR exists on $BRANCH; skipping force-reset — checking out prior work for pre-work rebase"
+    git checkout -b "$BRANCH" "origin/$BRANCH"
   else
     echo "==> stale remote branch $BRANCH found (no open PR); force-resetting to ${BASE_BRANCH:-}"
+    git checkout -b "$BRANCH" "origin/${BASE_BRANCH:-}"
     git push --force-with-lease origin "$BRANCH" || {
       echo "==> force-with-lease push failed on $BRANCH; concurrent Box may be ahead"
       exit 1
     }
   fi
+else
+  git checkout -b "$BRANCH" "origin/${BASE_BRANCH:-}"
 fi
+# Rebase onto the latest origin/BASE_BRANCH before the agent starts.  This
+# ensures the agent works against current main rather than the state of
+# origin at clone time, closing the stale-base defect.  A conflict here
+# means the prior branch diverged in a way that cannot be resolved
+# mechanically; fail fast with a distinct signal instead of proceeding on a
+# stale base.
+echo "==> rebasing $BRANCH onto latest origin/${BASE_BRANCH:-}"
+git rebase "origin/${BASE_BRANCH:-}" || {
+  echo "==> pre-work rebase onto origin/${BASE_BRANCH:-} failed — resolve the conflict and re-dispatch"
+  git rebase --abort 2>/dev/null || true
+  exit 1
+}
 
 # Detect a Nix devShell in the cloned repo. When found the prompt guides the
 # agent to run checks inside `nix develop`; absence or probe failure degrades
