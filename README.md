@@ -147,6 +147,15 @@ cannot approve or merge its own PR — that is what makes branch protection
 meaningful. See [How a run works](docs/reference.md#how-a-run-works) for the full
 diagram and label lifecycle.
 
+## Documentation
+
+| document | what's in it |
+| -------- | ------------ |
+| [`docs/reference.md`](docs/reference.md) | Full CLI table, all configuration options, runtime env vars, how a run works, label lifecycle, security model, macOS build notes, design notes |
+| [`CONTEXT.md`](CONTEXT.md) | Vocabulary — Harness, Consumer flake, Target repo, Box, Forge, and the three roles |
+| [`MIGRATING.md`](MIGRATING.md) | Deprecated commands and breaking changes by version |
+| [`VERSIONING.md`](VERSIONING.md) | Semver policy and the stability guarantees for each surface |
+
 ## Credits
 
 Heavily inspired by Matt Pocock's
