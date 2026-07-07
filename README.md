@@ -1,5 +1,7 @@
 # spindrift
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 *A nix-based agent automation harness, consumed as a flake.*
 
 Run headless [Claude Code](https://claude.com/claude-code) agents in
