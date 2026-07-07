@@ -551,7 +551,9 @@ func adoptAndGate(c config, fc forge.Client, iss issue, prURL string, runFixFn f
 	branch := c.branchPrefix + iss.number
 	fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", iss.number, prURL, branch)
 	if selfHeal(c, fc, runFixFn, runConflictResolveFn, iss.number, prURL) {
-		verifyMerged(c, fc, iss.number, prURL)
+		if c.mergeMode == "immediate" {
+			verifyMerged(c, fc, iss.number, prURL)
+		}
 	} else {
 		fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, prURL)
 	}
@@ -666,7 +668,9 @@ func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue
 		fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
 		conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
 		if selfHeal(c, fc, fixFn, conflictFn, iss.number, o.PR) {
-			verifyMerged(c, fc, iss.number, o.PR)
+			if c.mergeMode == "immediate" {
+				verifyMerged(c, fc, iss.number, o.PR)
+			}
 		} else {
 			fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, o.PR)
 		}

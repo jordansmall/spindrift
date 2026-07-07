@@ -361,6 +361,31 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	}
 }
 
+// TestAdoptAndGate_ManualModeStaysComplete verifies that adoptAndGate in manual
+// (and auto) mode leaves the issue at agent-complete and never swaps it to
+// agent-failed after CI reaches green without a merge.
+func TestAdoptAndGate_ManualModeStaysComplete(t *testing.T) {
+	for _, mode := range []string{"manual", "auto"} {
+		t.Run(mode, func(t *testing.T) {
+			c := baseConfig()
+			c.mergeMode = mode
+			fc := forge.NewFake()
+			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+			fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+
+			adoptAndGate(c, fc, issue{number: "1"}, testPR, func(int) error { return nil }, nil)
+
+			iss, _ := fc.Issue("1")
+			if !containsLabel(iss.Labels, c.completeLabel) {
+				t.Errorf("mode=%s: issue must carry %q after green; labels=%v", mode, c.completeLabel, iss.Labels)
+			}
+			if containsLabel(iss.Labels, c.failedLabel) {
+				t.Errorf("mode=%s: issue must NOT carry %q after green in non-immediate mode; labels=%v", mode, c.failedLabel, iss.Labels)
+			}
+		})
+	}
+}
+
 // TestNoGhExecOutsideForge walks all non-test Go source files in cmd/launcher,
 // excluding internal/forge, and fails if any contain exec.Command("gh" —
 // keeping all gh API calls behind the forge seam.
