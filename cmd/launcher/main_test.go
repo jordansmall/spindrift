@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -408,3 +411,46 @@ func minimalValidConfig() config {
 }
 
 var errBoxFailed = fmt.Errorf("exit 1")
+
+// --- runDoctor tests ---
+
+func TestDoctor_Success(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, &buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "owner/repo") {
+		t.Errorf("want output to contain resolved repo, got %q", buf.String())
+	}
+}
+
+func TestDoctor_AuthFailure(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeErr = forge.ErrAuthFailure
+
+	var buf bytes.Buffer
+	err := runDoctor(f, &buf)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, forge.ErrAuthFailure) {
+		t.Errorf("want ErrAuthFailure, got %v", err)
+	}
+}
+
+func TestDoctor_RepoNotFound(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeErr = forge.ErrRepoNotFound
+
+	var buf bytes.Buffer
+	err := runDoctor(f, &buf)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, forge.ErrRepoNotFound) {
+		t.Errorf("want ErrRepoNotFound, got %v", err)
+	}
+}
