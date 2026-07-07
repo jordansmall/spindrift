@@ -22,11 +22,14 @@ type Writer struct {
 	issue string
 	out   io.Writer
 
-	mu         sync.Mutex
-	buf        []byte
-	turns      int
-	lastPhase  string
-	toolCounts map[string]int // accumulated counts per tool kind since last narration/phase reset
+	mu          sync.Mutex
+	buf         []byte
+	turns       int
+	taskRole    map[string]string         // Task tool-use id → subagent role
+	currentRole string                    // role of the message being parsed
+	lastHeader  string                    // role of last emitted switch header
+	roleCounts  map[string]map[string]int // tool counts per role
+	rolePhase   map[string]string         // current phase per role
 }
 
 // New returns a Writer that passes all bytes to raw unchanged and emits
@@ -36,7 +39,9 @@ func New(raw io.Writer, issue string, out io.Writer) *Writer {
 		raw:        raw,
 		issue:      issue,
 		out:        out,
-		toolCounts: make(map[string]int),
+		taskRole:   make(map[string]string),
+		roleCounts: make(map[string]map[string]int),
+		rolePhase:  make(map[string]string),
 	}
 }
 
@@ -75,9 +80,14 @@ type messageBlock struct {
 
 type contentBlock struct {
 	Type  string          `json:"type"`
+	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
 	Text  string          `json:"text,omitempty"`
+}
+
+type taskInput struct {
+	SubagentType string `json:"subagent_type"`
 }
 
 func (w *Writer) parseLine(line string) {
@@ -92,41 +102,82 @@ func (w *Writer) parseLine(line string) {
 	switch ev.Type {
 	case "assistant":
 		if ev.Message != nil {
-			// Subagent narration (parent_tool_use_id != "") is dropped: subagent
-			// text is implementation detail of the spawning tool, not operator intent.
+			// Collect Task tool-use IDs → subagent role from implementor messages
+			// (online, single-pass; mirrors usage.BreakdownByRole pass 1).
 			if ev.ParentToolUseID == "" {
-				// Narration: emit text line, then emit count line for accumulated tools.
+				for _, block := range ev.Message.Content {
+					if block.Type == "tool_use" && block.Name == "Task" && block.ID != "" {
+						var ti taskInput
+						if len(block.Input) > 0 {
+							_ = json.Unmarshal(block.Input, &ti)
+						}
+						role := ti.SubagentType
+						if role == "" {
+							role = "subagent"
+						}
+						w.taskRole[block.ID] = role
+					}
+				}
+			}
+
+			// Resolve acting role from parent_tool_use_id.
+			role := "implementor"
+			if ev.ParentToolUseID != "" {
+				if r, ok := w.taskRole[ev.ParentToolUseID]; ok {
+					role = r
+				} else {
+					role = "subagent"
+				}
+			}
+
+			// On role switch, flush the departing role's pending counts.
+			if role != w.currentRole {
+				w.flushCounts(w.currentRole)
+				w.currentRole = role
+			}
+
+			// Subagent narration (parent_tool_use_id != "") is dropped; only
+			// implementor text is emitted.
+			if ev.ParentToolUseID == "" {
 				for _, block := range ev.Message.Content {
 					if block.Type == "text" {
 						if narration := trimNarration(block.Text); narration != "" {
-							var line string
-							if w.lastPhase != "" {
-								line = "#" + w.issue + " [" + w.lastPhase + "] " + narration
+							phase := w.rolePhase[w.currentRole]
+							var narLine string
+							if phase != "" {
+								narLine = "#" + w.issue + " [" + phase + "] " + narration
 							} else {
-								line = "#" + w.issue + " \xc2\xb7 " + narration
+								narLine = "#" + w.issue + " \xc2\xb7 " + narration
 							}
-							fmt.Fprintln(w.out, line)
-							if hasCounts(w.toolCounts) {
-								fmt.Fprintln(w.out, FormatCountLine(w.issue, w.lastPhase, w.toolCounts))
-								clearCounts(w.toolCounts)
+							w.ensureHeader()
+							fmt.Fprintln(w.out, narLine)
+							if w.hasCurrCounts() {
+								fmt.Fprintln(w.out, FormatCountLine(w.issue, phase, w.currCounts()))
+								clearCounts(w.currCounts())
 							}
 						}
 						break
 					}
 				}
 			}
-			// Accumulate tool counts; emit count line on phase transition.
+
+			// Accumulate tool counts per role; emit count line on phase transition.
 			for _, block := range ev.Message.Content {
 				if block.Type == "tool_use" {
 					phase := toolToPhase(block.Name, block.Input)
-					if phase != w.lastPhase {
-						if hasCounts(w.toolCounts) {
-							fmt.Fprintln(w.out, FormatCountLine(w.issue, w.lastPhase, w.toolCounts))
-							clearCounts(w.toolCounts)
+					currPhase := w.rolePhase[w.currentRole]
+					if phase != currPhase {
+						if w.hasCurrCounts() {
+							w.ensureHeader()
+							fmt.Fprintln(w.out, FormatCountLine(w.issue, currPhase, w.currCounts()))
+							clearCounts(w.currCounts())
 						}
-						w.lastPhase = phase
+						w.rolePhase[w.currentRole] = phase
 					}
-					w.toolCounts[toolKind(block.Name)]++
+					if w.roleCounts[w.currentRole] == nil {
+						w.roleCounts[w.currentRole] = make(map[string]int)
+					}
+					w.roleCounts[w.currentRole][toolKind(block.Name)]++
 					break
 				}
 			}
@@ -141,13 +192,63 @@ func (w *Writer) parseLine(line string) {
 }
 
 func (w *Writer) emit() {
-	if hasCounts(w.toolCounts) {
-		fmt.Fprintln(w.out, FormatCountLine(w.issue, w.lastPhase, w.toolCounts))
-		clearCounts(w.toolCounts)
+	if w.hasCurrCounts() {
+		w.ensureHeader()
+		fmt.Fprintln(w.out, FormatCountLine(w.issue, w.rolePhase[w.currentRole], w.currCounts()))
+		clearCounts(w.currCounts())
 	}
 	if w.turns > 0 {
-		fmt.Fprintln(w.out, FormatHeartbeat(w.issue, w.turns, "", w.lastPhase))
+		fmt.Fprintln(w.out, FormatHeartbeat(w.issue, w.turns, "", w.rolePhase["implementor"]))
 	}
+}
+
+// ensureHeader emits a switch header for currentRole if the last emitted header
+// is for a different role. It is a no-op when the acting role header was already
+// emitted and no intervening header was needed.
+func (w *Writer) ensureHeader() {
+	if w.currentRole != "" && w.currentRole != w.lastHeader {
+		fmt.Fprintln(w.out, FormatRoleHeader(w.issue, w.currentRole))
+		w.lastHeader = w.currentRole
+	}
+}
+
+// flushCounts emits the pending count line for role, preceded by a switch
+// header if needed. It is a no-op when role is empty or has no accumulated counts.
+func (w *Writer) flushCounts(role string) {
+	if role == "" {
+		return
+	}
+	counts := w.roleCounts[role]
+	if !hasCounts(counts) {
+		return
+	}
+	if w.lastHeader != role {
+		fmt.Fprintln(w.out, FormatRoleHeader(w.issue, role))
+		w.lastHeader = role
+	}
+	fmt.Fprintln(w.out, FormatCountLine(w.issue, w.rolePhase[role], counts))
+	clearCounts(counts)
+}
+
+func (w *Writer) hasCurrCounts() bool {
+	return hasCounts(w.roleCounts[w.currentRole])
+}
+
+func (w *Writer) currCounts() map[string]int {
+	return w.roleCounts[w.currentRole]
+}
+
+// FormatRoleHeader returns a switch-header line for the acting role.
+// Example: "#284 ── implementor ────────────────"
+func FormatRoleHeader(issue, role string) string {
+	const targetWidth = 36
+	const minTrail = 4
+	prefix := "#" + issue + " \xe2\x94\x80\xe2\x94\x80 " + role + " "
+	trail := targetWidth - len([]rune(prefix))
+	if trail < minTrail {
+		trail = minTrail
+	}
+	return prefix + strings.Repeat("\xe2\x94\x80", trail)
 }
 
 // FormatHeartbeat returns a coarse status line for one running issue.
