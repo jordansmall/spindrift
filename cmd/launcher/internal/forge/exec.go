@@ -266,6 +266,27 @@ func (e *execClient) Probe() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// ListLabels returns the names of all labels defined in the repository.
+func (e *execClient) ListLabels() ([]string, error) {
+	out, err := exec.Command("gh", "label", "list",
+		"--repo", e.repo,
+		"--json", "name",
+		"--jq", ".[].name",
+		"--limit", "100",
+	).Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh label list: %w", err)
+	}
+	var labels []string
+	sc := bufio.NewScanner(strings.NewReader(string(out)))
+	for sc.Scan() {
+		if name := strings.TrimSpace(sc.Text()); name != "" {
+			labels = append(labels, name)
+		}
+	}
+	return labels, nil
+}
+
 // Rebase checks out the PR's head branch into a temporary clone of the target
 // repository, rebases it onto origin/<base>, and force-pushes the result.
 // Returns ErrMergeConflict if the rebase cannot be completed automatically.

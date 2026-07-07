@@ -63,4 +63,6 @@ type Client interface {
 	// repository is reachable. Returns the resolved repo slug on success, or
 	// ErrAuthFailure / ErrRepoNotFound to distinguish the two failure modes.
 	Probe() (string, error)
+	// ListLabels returns the names of all labels defined in the repository.
+	ListLabels() ([]string, error)
 }

@@ -60,6 +60,11 @@ type Fake struct {
 	ProbeErr error
 	// ProbeRepo is the resolved repo slug returned by Probe on success.
 	ProbeRepo string
+
+	// Labels is the list of label names returned by ListLabels on success.
+	Labels []string
+	// ListLabelsErr, if non-nil, is returned by ListLabels.
+	ListLabelsErr error
 }
 
 // NewFake returns an empty Fake client.
@@ -289,4 +294,15 @@ func (f *Fake) Probe() (string, error) {
 		return "", f.ProbeErr
 	}
 	return f.ProbeRepo, nil
+}
+
+func (f *Fake) ListLabels() ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ListLabelsErr != nil {
+		return nil, f.ListLabelsErr
+	}
+	out := make([]string, len(f.Labels))
+	copy(out, f.Labels)
+	return out, nil
 }
