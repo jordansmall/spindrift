@@ -23,9 +23,10 @@ func TestFilterPassesRawBytesUnchanged(t *testing.T) {
 }
 
 // TestFilterWritesHeartbeatToFile verifies that tool_use events in stream-json
-// produce coarse heartbeat lines in the output file.
+// produce count summary lines in the output file.
 func TestFilterWritesHeartbeatToFile(t *testing.T) {
-	input := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"}}]}}` + "\n"
+	input := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"}}]}}` + "\n" +
+		`{"type":"result","num_turns":1}` + "\n"
 	var stdout bytes.Buffer
 	heartbeatFile := filepath.Join(t.TempDir(), "heartbeat.log")
 	if err := run("7", heartbeatFile, bytes.NewBufferString(input), &stdout); err != nil {
@@ -39,8 +40,8 @@ func TestFilterWritesHeartbeatToFile(t *testing.T) {
 	if !strings.Contains(content, "#7") {
 		t.Errorf("heartbeat missing issue prefix: %q", content)
 	}
-	if !strings.Contains(content, "Edit") {
-		t.Errorf("heartbeat missing tool name: %q", content)
+	if !strings.Contains(content, "edit") {
+		t.Errorf("heartbeat missing tool kind 'edit': %q", content)
 	}
 }
 
