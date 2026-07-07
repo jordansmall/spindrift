@@ -1192,6 +1192,7 @@ EOF
 @test "dispatch --no-build accepts an issue number as a positional arg" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'42\tTarget issue'
+  export FAKE_GH_ISSUE_LABELS_42="ready-for-agent"
   run "$SPINDRIFT_CMD" dispatch --no-build 42
   [ "$status" -eq 0 ]
   grep -q 'ISSUE_NUMBER=42' "$PODMAN_LOG"
