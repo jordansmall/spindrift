@@ -99,7 +99,7 @@ your inputs and import the flake-parts module:
 }
 ```
 
-This yields `packages.<system>.{build,run}` (plus the Linux-only `spindrift`
+This yields `packages.<system>.{build,run}` (plus the Linux-only `agent-image`
 image) and matching `apps.<system>.{build,run}`.
 
 ### Or call `mkHarness` directly
@@ -461,7 +461,7 @@ deliberate, not oversights — write them down so you can honour them:
 
 ## Building on macOS
 
-OCI images are Linux-only, so the `spindrift` image is a *Linux* derivation even
+OCI images are Linux-only, so the `agent-image` package is a *Linux* derivation even
 on a Mac. The launcher commands (`build`/`run`) are native and only *reference*
 the image path, so `nix flake check` never forces a Linux build. Realising the
 image is `build`'s job, and it handles the Mac case for you:

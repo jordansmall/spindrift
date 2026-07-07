@@ -329,7 +329,7 @@ let
   # commands embed the exact Linux image path WITHOUT taking a build-time
   # dependency on it. That lets `build`/`run` — and `nix flake check` — build
   # natively on darwin, while realising the image stays an explicit, Linux-only
-  # `nix build .#spindrift`.
+  # `nix build .#agent-image`.
   imagePath = builtins.unsafeDiscardStringContext (toString image);
 
   # The 32-char nix store hash extracted from imagePath. Nix store paths are
@@ -410,7 +410,7 @@ let
         export IMAGE_DRV="${imageDrv}"
         export NIX_BUILDER_IMAGE="${nixBuilderImage}"
         export NIX_VOLUME="spindrift-nix"
-        export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.spindrift"
+        export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.agent-image"
       '';
 
   goBuildPreamble =
@@ -428,7 +428,7 @@ let
         export IMAGE_DRV="${imageDrv}"
         export NIX_BUILDER_IMAGE="${nixBuilderImage}"
         export NIX_VOLUME="spindrift-nix"
-        export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.spindrift"
+        export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.agent-image"
       '';
 
   # Exported run defaults for the Go launcher wrapper.
@@ -534,7 +534,7 @@ else
     inherit build run;
   }
   # The OCI image is not relevant for the bwrap runner (no image build/load).
-  // lib.optionalAttrs (isLinux && runtime != "bwrap") { spindrift = image; };
+  // lib.optionalAttrs (isLinux && runtime != "bwrap") { agent-image = image; };
 
   apps = {
     build = {
