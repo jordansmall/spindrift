@@ -119,6 +119,32 @@ func TestFake_Probe(t *testing.T) {
 	})
 }
 
+// TestFake_ListLabels verifies the ListLabels scripting fields.
+func TestFake_ListLabels(t *testing.T) {
+	t.Run("returns scripted labels", func(t *testing.T) {
+		f := forge.NewFake()
+		f.Labels = []string{"ready-for-agent", "agent-in-progress"}
+
+		labels, err := f.ListLabels()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(labels) != 2 || labels[0] != "ready-for-agent" || labels[1] != "agent-in-progress" {
+			t.Fatalf("want [ready-for-agent agent-in-progress], got %v", labels)
+		}
+	})
+
+	t.Run("returns error", func(t *testing.T) {
+		f := forge.NewFake()
+		f.ListLabelsErr = errors.New("api error")
+
+		_, err := f.ListLabels()
+		if err == nil || err.Error() != "api error" {
+			t.Fatalf("want api error, got %v", err)
+		}
+	})
+}
+
 // TestFake_OpenPRForBranch verifies the branch→PR lookup.
 func TestFake_OpenPRForBranch(t *testing.T) {
 	f := forge.NewFake()
