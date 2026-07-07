@@ -1120,10 +1120,10 @@ func recoverIssue(issueNum string) error {
 	return recoverByNumber(c, fc, pwd, r, issueNum)
 }
 
-// runDoctor probes forge connectivity and reports the result to w. It returns
-// ErrAuthFailure when the credential check fails, ErrRepoNotFound when the
-// configured repository is unreachable, and nil on success.
-func runDoctor(fc forge.Client, w io.Writer) error {
+// runDoctor probes forge connectivity, then checks that all configured triage
+// labels exist in the repository. It returns an error if any check fails; a
+// missing label causes a non-zero exit so CI can catch an unconfigured repo.
+func runDoctor(fc forge.Client, c config, w io.Writer) error {
 	repo, err := fc.Probe()
 	if err != nil {
 		if errors.Is(err, forge.ErrAuthFailure) {
@@ -1135,6 +1135,29 @@ func runDoctor(fc forge.Client, w io.Writer) error {
 		return fmt.Errorf("forge connectivity check failed: %w", err)
 	}
 	fmt.Fprintf(w, "ok: forge connectivity confirmed — %s is reachable\n", repo)
+
+	existing, err := fc.ListLabels()
+	if err != nil {
+		return fmt.Errorf("label check failed: %w", err)
+	}
+	present := make(map[string]bool, len(existing))
+	for _, l := range existing {
+		present[l] = true
+	}
+
+	expected := []string{c.label, c.inProgressLabel, c.failedLabel, c.completeLabel}
+	var anyMissing bool
+	for _, label := range expected {
+		if present[label] {
+			fmt.Fprintf(w, "ok: label %q present\n", label)
+		} else {
+			fmt.Fprintf(w, "MISSING: label %q missing\n", label)
+			anyMissing = true
+		}
+	}
+	if anyMissing {
+		return fmt.Errorf("one or more triage labels are missing — create them in the repository")
+	}
 	return nil
 }
 
@@ -1589,7 +1612,7 @@ func main() {
 	if len(args) > 0 && args[0] == "doctor" {
 		c := loadConfig()
 		fc := forge.NewExecClient(c.repoSlug)
-		if err := runDoctor(fc, os.Stdout); err != nil {
+		if err := runDoctor(fc, c, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
