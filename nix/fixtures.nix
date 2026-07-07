@@ -32,6 +32,7 @@ let
     inherit nixpkgs system revision;
     prefetch = "go mod download || true";
     packages = p: [ p.go ];
+    defaults = { mergeMode = "immediate"; };
   };
 
   # The dogfood as a direct call with revision = "unknown".  Used by
