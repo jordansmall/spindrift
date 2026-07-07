@@ -101,7 +101,7 @@ type config struct {
 	boxEnvVars string
 
 	// mergeMode controls post-green behavior: "immediate" merges the PR,
-	// "manual" leaves it open, "auto" is reserved for native GitHub auto-merge.
+	// "manual" leaves it open, "auto" enqueues GitHub's native auto-merge.
 	mergeMode string
 }
 
