@@ -1120,6 +1120,24 @@ func recoverIssue(issueNum string) error {
 	return recoverByNumber(c, fc, pwd, r, issueNum)
 }
 
+// runDoctor probes forge connectivity and reports the result to w. It returns
+// ErrAuthFailure when the credential check fails, ErrRepoNotFound when the
+// configured repository is unreachable, and nil on success.
+func runDoctor(fc forge.Client, w io.Writer) error {
+	repo, err := fc.Probe()
+	if err != nil {
+		if errors.Is(err, forge.ErrAuthFailure) {
+			return fmt.Errorf("forge auth check failed (check GH_TOKEN is set and valid): %w", err)
+		}
+		if errors.Is(err, forge.ErrRepoNotFound) {
+			return fmt.Errorf("forge repo not found (check --repo-slug / REPO_SLUG is correct): %w", err)
+		}
+		return fmt.Errorf("forge connectivity check failed: %w", err)
+	}
+	fmt.Fprintf(w, "ok: forge connectivity confirmed — %s is reachable\n", repo)
+	return nil
+}
+
 // previewIssues is the testable core of the preview verb. When issueNums is
 // non-empty it performs a selective dry-run: fetches exactly those issues,
 // prints label-bypass warnings, blocker annotations, and cascade-eviction
@@ -1563,6 +1581,15 @@ func main() {
 	}
 	if len(args) > 0 && args[0] == "build" {
 		if err := build(); err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(args) > 0 && args[0] == "doctor" {
+		c := loadConfig()
+		fc := forge.NewExecClient(c.repoSlug)
+		if err := runDoctor(fc, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
