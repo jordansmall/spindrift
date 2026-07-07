@@ -1042,11 +1042,16 @@ func engageIssue(issueNum string) error {
 	return engageByNumber(c, fc, pwd, r, issueNum)
 }
 
-// previewIssues is the testable core of the preview verb. It discovers issues
-// using the same logic as dispatch (honoring fanout-blocker fence) and prints
-// the candidate list plus the resolved Target repo to w. No Boxes are started
-// and no mutating Forge calls are made.
-func previewIssues(c config, fc forge.Client, w io.Writer) error {
+// previewIssues is the testable core of the preview verb. When issueNums is
+// non-empty it performs a selective dry-run: fetches exactly those issues,
+// prints label-bypass warnings, blocker annotations, and cascade-eviction
+// notices without launching any Box or prompting. When issueNums is empty it
+// falls back to queue-drain discovery (fanout-blocker fence honored).
+func previewIssues(c config, fc forge.Client, w io.Writer, issueNums []string) error {
+	if len(issueNums) > 0 {
+		return previewSelectiveList(c, fc, w, issueNums)
+	}
+
 	issues, err := discoverIssues(c, fc)
 	if err != nil {
 		return err
@@ -1073,14 +1078,57 @@ func previewIssues(c config, fc forge.Client, w io.Writer) error {
 	return nil
 }
 
+// previewSelectiveList performs a dry-run of the selective-list dispatch path.
+// It prints label-bypass warnings, per-issue blocker annotations, and cascade-
+// eviction notices. No Boxes are started and no Forge mutations occur.
+func previewSelectiveList(c config, fc forge.Client, w io.Writer, nums []string) error {
+	issues, unlabeled, err := fetchSelectiveIssues(c, fc, nums)
+	if err != nil {
+		return err
+	}
+
+	// Label-bypass warnings (no prompt in preview).
+	for _, num := range unlabeled {
+		fmt.Fprintf(w, "⚠ #%s not ready-for-agent; dispatching anyway (explicit)\n", num)
+	}
+
+	// Parse blocker graph.
+	edges, err := parseBlockers(fc, issues)
+	if err != nil {
+		return err
+	}
+
+	// Eviction pass (dry-run; no side effects).
+	kept, notices := evictUnmetBlockers(c, fc, issues, edges)
+	for _, n := range notices {
+		fmt.Fprintln(w, n)
+	}
+
+	fmt.Fprintf(w, "repo: %s\n", c.repoSlug)
+	if len(kept) == 0 {
+		fmt.Fprintf(w, "no issues would be dispatched after eviction\n")
+		return nil
+	}
+	fmt.Fprintf(w, "%d issue(s) would be dispatched:\n", len(kept))
+	for _, iss := range kept {
+		blockers := edges[iss.number]
+		if len(blockers) > 0 {
+			fmt.Fprintf(w, "  #%s  %s  (blocked by #%s)\n", iss.number, iss.title, strings.Join(blockers, ", #"))
+		} else {
+			fmt.Fprintf(w, "  #%s  %s\n", iss.number, iss.title)
+		}
+	}
+	return nil
+}
+
 // preview is the entry point for the `preview` subcommand.
-func preview() error {
+func preview(issueNums []string) error {
 	c := loadConfig()
 	if err := validate(c); err != nil {
 		return err
 	}
 	fc := forge.NewExecClient(c.repoSlug)
-	return previewIssues(c, fc, os.Stdout)
+	return previewIssues(c, fc, os.Stdout, issueNums)
 }
 
 // issueNums returns the number strings from a slice of issues.
@@ -1430,7 +1478,8 @@ func main() {
 		return
 	}
 	if len(args) > 0 && args[0] == "preview" {
-		if err := preview(); err != nil {
+		previewNums := dispatchIssueArgs(args[1:])
+		if err := preview(previewNums); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
@@ -1438,11 +1487,38 @@ func main() {
 	}
 	if len(args) > 0 && args[0] == "dispatch" {
 		noBuild, dispatchArgs := dispatchNoBuildArgs(args[1:])
-		if issueNum := dispatchIssueArg(dispatchArgs); issueNum != "" {
-			if err := os.Setenv("ISSUE_NUMBER", issueNum); err != nil {
+		forceYes, dispatchArgs := dispatchYesArgs(dispatchArgs)
+		nums := dispatchIssueArgs(dispatchArgs)
+		if len(nums) > 0 {
+			// Operator explicit list: selective path (bypasses label/barrier gates).
+			pwd, err := os.Getwd()
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
 				os.Exit(1)
 			}
+			c := loadConfig()
+			if err := validate(c); err != nil {
+				fmt.Fprintf(os.Stderr, "%s\n", err)
+				os.Exit(1)
+			}
+			r := newRunner(c, pwd)
+			if noBuild {
+				if err := r.IsReady(); err != nil {
+					fmt.Fprintf(os.Stderr, "%s\n", err)
+					os.Exit(1)
+				}
+			} else {
+				if err := r.EnsureReady(); err != nil {
+					fmt.Fprintf(os.Stderr, "%s\n", err)
+					os.Exit(1)
+				}
+			}
+			fc := forge.NewExecClient(c.repoSlug)
+			if err := selectiveListDispatch(c, fc, pwd, r, nums, forceYes, os.Stdin, os.Stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "%s\n", err)
+				os.Exit(1)
+			}
+			return
 		}
 		if err := run(noBuild); err != nil {
 			if errors.Is(err, errQueueEmpty) {
