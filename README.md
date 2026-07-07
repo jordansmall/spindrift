@@ -128,6 +128,25 @@ validity, and that all four triage labels exist on the Target repo. When run
 interactively (TTY attached) and labels are missing, it offers to create them;
 in CI (no TTY) it reports missing labels and exits non-zero.
 
+## Basic flow
+
+```
+spindrift dispatch  ─▶  find ready-for-agent issues
+                          └─ one container per issue (up to MAX_PARALLEL)
+                               clone repo → run claude → commit → push → open PR
+                               └─ SPINDRIFT_OUTCOME issue=N pr=<url> status=ready
+
+host launcher  ─▶  merge gate per issue
+                    poll CI → green → agent-complete → apply MERGE_MODE
+                           → red   → fix boxes (up to MAX_FIX_ATTEMPTS) → re-gate
+                           → exhausted → agent-failed (human triage, re-label to retry)
+```
+
+The Box implements; the launcher owns the CI-green decision and the merge. A Box
+cannot approve or merge its own PR — that is what makes branch protection
+meaningful. See [How a run works](docs/reference.md#how-a-run-works) for the full
+diagram and label lifecycle.
+
 ## Credits
 
 Heavily inspired by Matt Pocock's
