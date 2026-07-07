@@ -147,6 +147,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Subcommands:")
 	fmt.Fprintln(w, "  dispatch [--no-build] [issue]  fan out one agent per ready-for-agent issue; optional issue number dispatches a single issue")
+	fmt.Fprintln(w, "  preview                        list issues dispatch would pick up and the target repo, without starting any Box")
 	fmt.Fprintln(w, "  build                          realise the agent image or store closures without running any agent")
 	fmt.Fprintln(w, "  engage <issue>                 run the merge gate for a single issue")
 	fmt.Fprintln(w)
