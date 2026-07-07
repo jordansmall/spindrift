@@ -1265,7 +1265,7 @@ func drainMaxJobs(c config, fc forge.Client, pwd string, r runner.Runner, issues
 	return nil
 }
 
-func run() error {
+func run(noBuild bool) error {
 	pwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -1277,8 +1277,14 @@ func run() error {
 	}
 
 	r := newRunner(c, pwd)
-	if err := r.EnsureReady(); err != nil {
-		return err
+	if noBuild {
+		if err := r.IsReady(); err != nil {
+			return err
+		}
+	} else {
+		if err := r.EnsureReady(); err != nil {
+			return err
+		}
 	}
 
 	fc := forge.NewExecClient(c.repoSlug)
@@ -1382,13 +1388,14 @@ func main() {
 		return
 	}
 	if len(args) > 0 && args[0] == "dispatch" {
-		if issueNum := dispatchIssueArg(args[1:]); issueNum != "" {
+		noBuild, dispatchArgs := dispatchNoBuildArgs(args[1:])
+		if issueNum := dispatchIssueArg(dispatchArgs); issueNum != "" {
 			if err := os.Setenv("ISSUE_NUMBER", issueNum); err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
 				os.Exit(1)
 			}
 		}
-		if err := run(); err != nil {
+		if err := run(noBuild); err != nil {
 			if errors.Is(err, errQueueEmpty) {
 				os.Exit(2)
 			}
@@ -1400,7 +1407,7 @@ func main() {
 		}
 		return
 	}
-	if err := run(); err != nil {
+	if err := run(false); err != nil {
 		if errors.Is(err, errQueueEmpty) {
 			os.Exit(2)
 		}
