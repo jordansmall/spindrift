@@ -43,7 +43,6 @@ jobs:
       # Metadata R. The default GITHUB_TOKEN is not enough (the launcher merges PRs).
       GH_TOKEN: ${{ secrets.SPINDRIFT_GH_TOKEN }}
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      MERGE_MODE: immediate
     steps:
       - uses: actions/checkout@v4
 
