@@ -61,8 +61,14 @@ _Avoid_: GitHub adapter, API layer, client wrapper.
 The dispatch states of an issue, carried as labels on the Target repo:
 `ready-for-agent` (a human marks the issue dispatchable — the label is the
 launch button) → `agent-in-progress` (a Box has been dispatched; re-runs skip
-it) → `agent-failed` (the Box exited non-zero; human triage, re-label to
-retry). Success needs no terminal label — the merged PR closes the issue.
+it) → `agent-complete` (the agent produced a green PR and has nothing left to
+do; merge is a separate downstream function gated by MERGE_MODE) or
+`agent-failed` (the Box crashed or CI never reached green past
+MAX_FIX_ATTEMPTS; human triage, re-label to retry). A merge failure after
+green leaves the issue `agent-complete` with a merge-blocked note — never
+`agent-failed`. MERGE_MODE controls what happens after green: `immediate`
+merges the PR automatically; `manual` (default) leaves the open PR for a
+human to approve and merge; `auto` is reserved for native GitHub auto-merge.
 _Avoid_: status, queue, state machine.
 
 `fanout-blocker` is a planning gate, orthogonal to the dispatch-state lifecycle
