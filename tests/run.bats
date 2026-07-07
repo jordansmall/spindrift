@@ -518,6 +518,9 @@ EOF
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ok"
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   export GH_STATE="$GH_LOG.state"
+  # PRForBranch needs this to find the PR URL; gh pr merge then writes MERGED to
+  # GH_STATE, which PRState reads to satisfy blockerReady for wave 2.
+  export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
