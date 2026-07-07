@@ -8,28 +8,18 @@ on:
 jobs:
   check:
     name: flake check + image realise
-    # Self-hosted macbook-air runner (labels from #233). Gate untrusted fork
-    # code: run automatically only for pushes and same-repo PRs, so arbitrary
-    # fork code never executes on the host. Fork PRs are skipped here and need a
-    # maintainer to run CI (GitHub "require approval for outside collaborators",
-    # or re-pushing the branch inside this repo).
-    if: >-
-      github.event_name == 'push' ||
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [macbook-air]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # nix is pre-installed and persistent on the self-hosted runner (#233), so
-      # no per-run DeterminateSystems/nix-installer-action.
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
 
       # shellcheck, the bats suite, and the eval-only equivalence checks.
       - name: nix flake check
         run: nix flake check --print-build-logs
 
-      # Realise the Linux OCI image. On the macbook-air the Linux derivation
-      # can't be realised natively — `nix run .#build` builds it through the
-      # container/podman-machine fallback (ADR 0004), reusing the `spindrift-nix`
-      # nixVolume for /nix so rebuilds stay incremental.
+      # Realise the Linux OCI image natively — the one thing the checks only
+      # assert at eval time. On a Linux runner this needs no podman fallback.
       - name: Build the agent image
-        run: nix run .#build
+        run: nix build .#packages.x86_64-linux.spindrift --print-build-logs
