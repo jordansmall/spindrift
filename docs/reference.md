@@ -179,3 +179,64 @@ overridable at runtime via env var) ensures a broken or unusually heavy devShell
 eval cannot stall the box. See the `nixInBox` [option](#option-surface) and
 [ADR 0008](adr/0008-nix-is-a-first-class-default-in-the-box.md) for the full
 rationale and the lean-image escape hatch.
+
+---
+
+## Runtime configuration
+
+The target, secrets, and commit identity are **runtime env** (in `harness.env`
+or your shell) — never Nix options — so one image drives any Target repo without
+a rebuild (ADR 0001):
+
+| var                       | default                | meaning                                  |
+| ------------------------- | ---------------------- | ---------------------------------------- |
+| `REPO_SLUG`               | — (required)           | target repo, `owner/repo`                |
+| `GH_TOKEN`                | — (required)           | GitHub token for `gh` inside containers  |
+| `CLAUDE_CODE_OAUTH_TOKEN` | — (one auth required)  | from `claude setup-token`                |
+| `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token           |
+| `GIT_USER_NAME`           | host `git config` (required) | commit author name                 |
+| `GIT_USER_EMAIL`          | host `git config` (required) | commit author email                |
+| `LABEL`                   | `ready-for-agent`      | issues to pick up                        |
+| `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query |
+| `BASE_BRANCH`             | `main`                 | branch to cut from and PR into           |
+| `MAX_PARALLEL`            | `3`                    | concurrent containers                    |
+| `BRANCH_PREFIX`           | `agent/issue-`         | branch name = prefix + issue number      |
+| `IN_PROGRESS_LABEL`       | `agent-in-progress`    | label a dispatched issue is swapped to   |
+| `FAILED_LABEL`            | `agent-failed`         | label an issue gets when its Box fails or its PR can't merge |
+| `COMPLETE_LABEL`          | `agent-complete`       | label the launcher swaps on when CI reaches green (agent is done; the merge is a separate step) |
+| `MERGE_MODE`              | `manual`               | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue GitHub native auto-merge — repo must have *Allow auto-merge* on) |
+| `BARRIER_LABEL`           | — (empty = off)        | open issues carrying it fence all higher-numbered issues until they close |
+| `MODEL`                   | `claude-sonnet-4-6`    | Claude model the in-container implementor runs |
+| `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` | scout subagent model tier (empty drops subagents) |
+| `REVIEW_MODEL`            | `claude-opus-4-8`      | reviewer subagent model tier (empty drops subagents) |
+| `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
+| `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | hot-override the mounted prompt dir     |
+| `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override the mounted skills dir     |
+
+Every `defaults`-baked knob above can be re-pointed at runtime; the env var
+wins over whatever was baked. Commit identity is **required**: an override wins,
+else the host's `git config user.name`/`user.email` is inherited; if neither is
+set, `spindrift dispatch` exits rather than committing under an arbitrary identity.
+
+### Advanced tuning
+
+These knobs are runtime-only (no `defaults` baking) unless noted, and rarely
+need changing. See `lib/env-schema.nix` for the authoritative list.
+
+| var                    | default | meaning                                                        |
+| ---------------------- | ------- | -------------------------------------------------------------- |
+| `MAX_JOBS`             | `0`     | drain at most N unblocked issues then exit (`0` = unlimited / full waves) |
+| `MAX_FIX_ATTEMPTS`     | `3`     | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
+| `MAX_REBASE_ATTEMPTS`  | `3`     | rebase-and-retry passes when a green PR conflicts after a sibling merge (`0` disables) |
+| `MERGE_POLL_INTERVAL`  | `30`    | seconds between CI-status polls in the merge gate              |
+| `MERGE_POLL_TIMEOUT`   | `1800`  | seconds to wait for CI green before abandoning the merge       |
+| `DEPS_POLL_SECS`       | `30`    | seconds between dependency-wave poll iterations                |
+| `DEPS_WAIT_SECS`       | `7200`  | seconds to wait for a dependency wave before declaring deadlock |
+| `TRANSIENT_RETRY_MAX`  | `3`     | retries for transient box exits (529/network backoff; consecutive 429 holds) |
+| `TRANSIENT_BACKOFF_SECS` | `30`  | base linear backoff per transient retry                        |
+| `HOLD_JITTER_SECS`     | `5`     | jitter added to a 429 hold-until-reset before re-dispatch      |
+| `DEV_SHELL_PROBE_TIMEOUT` (baked) | `300` | seconds before the in-box devShell probe is abandoned for the baked toolchain |
+| `MEMORY_LIMIT` (baked) | `4g`    | per-container `--memory` cap (OCI only; empty disables)        |
+| `PIDS_LIMIT` (baked)   | `512`   | per-container `--pids-limit` cap (OCI only; empty disables)    |
+| `PODMAN_NETWORK` (baked) | —     | `--network` value for podman run; set `pasta` to restrict egress |
+| `BWRAP_UNSHARE_NET` (baked) | —  | non-empty adds `--unshare-net` to the bwrap runner             |
