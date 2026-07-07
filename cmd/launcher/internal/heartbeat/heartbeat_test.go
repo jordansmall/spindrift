@@ -351,3 +351,26 @@ func TestWriterNarrationText(t *testing.T) {
 		t.Errorf("heartbeat missing narration text: %q", out)
 	}
 }
+
+// TestWriterCountLineOnNarration verifies that accumulated tool events produce
+// a count summary line when narration arrives, not one line per tool event.
+func TestWriterCountLineOnNarration(t *testing.T) {
+	var status bytes.Buffer
+	w := heartbeat.New(&bytes.Buffer{}, "228", &status, time.Hour)
+
+	readEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
+	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Exploring."}]}}` + "\n"
+
+	for i := 0; i < 3; i++ {
+		fmt.Fprint(w, readEv)
+	}
+	fmt.Fprint(w, narEv)
+
+	out := status.String()
+	if !strings.Contains(out, "3 read") {
+		t.Errorf("count line missing '3 read': %q", out)
+	}
+	if !strings.Contains(out, "Exploring") {
+		t.Errorf("narration missing: %q", out)
+	}
+}
