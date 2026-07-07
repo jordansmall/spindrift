@@ -1,6 +1,7 @@
 package forge_test
 
 import (
+	"errors"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -80,6 +81,42 @@ func TestFake_Comment(t *testing.T) {
 	if f.CommentCalls[1].Body != "second comment" {
 		t.Errorf("CommentCalls[1]: got %+v", f.CommentCalls[1])
 	}
+}
+
+// TestFake_Probe verifies the Probe scripting fields.
+func TestFake_Probe(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		f := forge.NewFake()
+		f.ProbeRepo = "owner/repo"
+
+		repo, err := f.Probe()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if repo != "owner/repo" {
+			t.Fatalf("want %q, got %q", "owner/repo", repo)
+		}
+	})
+
+	t.Run("auth error", func(t *testing.T) {
+		f := forge.NewFake()
+		f.ProbeErr = forge.ErrAuthFailure
+
+		_, err := f.Probe()
+		if !errors.Is(err, forge.ErrAuthFailure) {
+			t.Fatalf("want ErrAuthFailure, got %v", err)
+		}
+	})
+
+	t.Run("repo not found", func(t *testing.T) {
+		f := forge.NewFake()
+		f.ProbeErr = forge.ErrRepoNotFound
+
+		_, err := f.Probe()
+		if !errors.Is(err, forge.ErrRepoNotFound) {
+			t.Fatalf("want ErrRepoNotFound, got %v", err)
+		}
+	})
 }
 
 // TestFake_OpenPRForBranch verifies the branch→PR lookup.

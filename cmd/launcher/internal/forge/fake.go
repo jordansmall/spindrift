@@ -54,6 +54,12 @@ type Fake struct {
 	EnqueueAutoMergeErr error
 	// EnqueueAutoMergeCalls records all PR URLs passed to EnqueueAutoMerge.
 	EnqueueAutoMergeCalls []string
+
+	// ProbeErr, if non-nil, is returned by Probe. Use ErrAuthFailure or
+	// ErrRepoNotFound to simulate specific failure modes.
+	ProbeErr error
+	// ProbeRepo is the resolved repo slug returned by Probe on success.
+	ProbeRepo string
 }
 
 // NewFake returns an empty Fake client.
@@ -274,4 +280,13 @@ func (f *Fake) EnqueueAutoMerge(prURL string) error {
 	defer f.mu.Unlock()
 	f.EnqueueAutoMergeCalls = append(f.EnqueueAutoMergeCalls, prURL)
 	return f.EnqueueAutoMergeErr
+}
+
+func (f *Fake) Probe() (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ProbeErr != nil {
+		return "", f.ProbeErr
+	}
+	return f.ProbeRepo, nil
 }
