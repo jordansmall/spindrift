@@ -991,11 +991,11 @@ func reconcileStranded(c config, fc forge.Client, pwd string, r runner.Runner) {
 	}
 }
 
-// engageByNumber resolves the open non-draft PR for the issue numbered issueNum
+// recoverByNumber resolves the open non-draft PR for the issue numbered issueNum
 // and drives the same adopt-and-gate path used by reconcileStranded. Returns an
 // error when the issue cannot be fetched, the PR is a draft, or no open PR
 // exists; the caller should treat those as non-success exits.
-func engageByNumber(c config, fc forge.Client, pwd string, r runner.Runner, issueNum string) error {
+func recoverByNumber(c config, fc forge.Client, pwd string, r runner.Runner, issueNum string) error {
 	fi, err := fc.Issue(issueNum)
 	if err != nil {
 		return fmt.Errorf("issue %s: %w", issueNum, err)
@@ -1011,7 +1011,7 @@ func engageByNumber(c config, fc forge.Client, pwd string, r runner.Runner, issu
 		return fmt.Errorf("issue %s: no open PR", issueNum)
 	}
 	if isDraft {
-		fmt.Printf("    #%s  pr=%s  status=skipped  note=draft PR; engage operates on non-draft PRs only\n", issueNum, prURL)
+		fmt.Printf("    #%s  pr=%s  status=skipped  note=draft PR; recover operates on non-draft PRs only\n", issueNum, prURL)
 		return fmt.Errorf("issue %s: draft PR", issueNum)
 	}
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
@@ -1023,9 +1023,9 @@ func engageByNumber(c config, fc forge.Client, pwd string, r runner.Runner, issu
 	return nil
 }
 
-// engageIssue is the entry point for the `engage` subcommand. It loads config,
-// wires the forge client and runner, then calls engageByNumber.
-func engageIssue(issueNum string) error {
+// recoverIssue is the entry point for the `recover` subcommand. It loads config,
+// wires the forge client and runner, then calls recoverByNumber.
+func recoverIssue(issueNum string) error {
 	pwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -1039,7 +1039,7 @@ func engageIssue(issueNum string) error {
 		return err
 	}
 	fc := forge.NewExecClient(c.repoSlug)
-	return engageByNumber(c, fc, pwd, r, issueNum)
+	return recoverByNumber(c, fc, pwd, r, issueNum)
 }
 
 // previewIssues is the testable core of the preview verb. When issueNums is
@@ -1475,12 +1475,24 @@ func main() {
 		}
 		return
 	}
+	if len(args) > 0 && args[0] == "recover" {
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: spindrift recover <issue-number>")
+			os.Exit(1)
+		}
+		if err := recoverIssue(args[1]); err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(args) > 0 && args[0] == "engage" {
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: spindrift engage <issue-number>")
 			os.Exit(1)
 		}
-		if err := engageIssue(args[1]); err != nil {
+		fmt.Fprintln(os.Stderr, "spindrift: 'engage' is deprecated; use 'recover' instead. Removal: v0.2.0.")
+		if err := recoverIssue(args[1]); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
