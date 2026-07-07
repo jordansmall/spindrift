@@ -110,7 +110,12 @@ in
   };
 
   config.perSystem =
-    { config, system, ... }:
+    {
+      config,
+      system,
+      self,
+      ...
+    }:
     let
       cfg = config.spindrift;
       # Drop unset run defaults so mkHarness supplies its own per key.
@@ -121,6 +126,7 @@ in
         {
           inherit system;
           nixpkgs = cfg.nixpkgs;
+          revision = self.shortRev or self.dirtyShortRev or "unknown";
         }
         // lib.optionalAttrs (cfg.overlays != null) { inherit (cfg) overlays; }
         // lib.optionalAttrs (cfg.config != null) { inherit (cfg) config; }
