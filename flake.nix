@@ -48,7 +48,8 @@
           ...
         }:
         let
-          fixtures = import ./nix/fixtures.nix { inherit pkgs nixpkgs system flake-parts; };
+          revision = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
+          fixtures = import ./nix/fixtures.nix { inherit pkgs nixpkgs system flake-parts revision; };
         in
         {
           # The dogfood's real packages/apps flow through the flake-parts shim.

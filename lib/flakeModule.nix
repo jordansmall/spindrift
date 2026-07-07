@@ -9,6 +9,7 @@
   lib,
   flake-parts-lib,
   inputs,
+  self,
   ...
 }:
 let
@@ -113,7 +114,6 @@ in
     {
       config,
       system,
-      self,
       ...
     }:
     let
