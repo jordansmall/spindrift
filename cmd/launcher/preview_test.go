@@ -100,3 +100,35 @@ func TestPreviewIssues_EmptyQueue(t *testing.T) {
 		t.Errorf("output should mention nothing to dispatch; got:\n%s", out)
 	}
 }
+
+// TestPreviewIssues_BareAnnotatesBlockers verifies that bare preview (no
+// positionals) annotates each issue with its inline blocker references.
+func TestPreviewIssues_BareAnnotatesBlockers(t *testing.T) {
+	c := baseConfig()
+	c.repoSlug = "owner/repo"
+	c.label = "ready-for-agent"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "99", Title: "blocker issue", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "15", Title: "dependent", Labels: []string{c.label},
+		Body: "## Blocked by\n- #99\n"})
+
+	var buf bytes.Buffer
+	if err := previewIssues(c, fc, &buf, nil); err != nil {
+		t.Fatalf("previewIssues: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "#15") {
+		t.Errorf("output missing #15; got:\n%s", out)
+	}
+	// #15 must show its blocker annotation.
+	if !strings.Contains(out, "blocked by #99") {
+		t.Errorf("output missing blocker annotation for #15; got:\n%s", out)
+	}
+	// #99 has no blockers — its own line must not carry a "blocked by" suffix.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "blocker issue") && strings.Contains(line, "blocked by") {
+			t.Errorf("#99 line should not have blocker annotation; got: %s", line)
+		}
+	}
+}
