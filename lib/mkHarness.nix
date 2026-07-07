@@ -141,12 +141,16 @@ let
       }
     else "";
 
+  # Version sourced from the release-please manifest so mkHarness always tracks
+  # the bot-maintained source of truth (ADR-0010).
+  spindriftVersion = (builtins.fromJSON (builtins.readFile ../.release-please-manifest.json)).".";
+
   # In-box heartbeat filter: reuses the #182 heartbeat parser as a CLI binary
   # so the entrypoint can pipe claude's stream-json output through it without
   # modifying the raw capture channel. Built for Linux (pkgs, not hostPkgs).
   heartbeatFilterBin = pkgs.buildGoModule {
     pname = "spindrift-heartbeat-filter";
-    version = "0.1.0";
+    version = spindriftVersion;
     src = ../cmd/launcher;
     vendorHash = null;
     subPackages = [ "spindrift-heartbeat-filter" ];
@@ -450,7 +454,7 @@ let
   #             error output. Commit go.sum and the updated vendorHash together.
   launcherBin = hostPkgs.buildGoModule {
     pname = "spindrift-launcher";
-    version = "0.1.0";
+    version = spindriftVersion;
     src = ../cmd/launcher;
     vendorHash = null;
     subPackages = [ "." ]; # build only the launcher; heartbeat-filter is in-box only
