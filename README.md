@@ -24,8 +24,8 @@ spindrift separates three roles (see `CONTEXT.md` for the full glossary):
   flake-parts shim (`flakeModules.default`), and the in-container entrypoint.
   The thing you import.
 - **Consumer flake** — *your* flake. It imports the Harness and configures the
-  toolchain, packages, prompt, and run defaults. It produces the `build`/`run`
-  commands and the image.
+  toolchain, packages, prompt, and run defaults. It produces the `spindrift`
+  CLI and the image.
 - **Target repo** — the GitHub repo whose issues the agents work, set by
   `REPO_SLUG` at runtime. Always cloned fresh inside the container, never read
   from a host checkout — so it is a distinct role even when it is the same repo
@@ -53,9 +53,34 @@ spindrift build                          # realise the image, then load it  (slo
 spindrift dispatch                       # fan out one container per ready-for-agent issue
 ```
 
-Run commands **from your Consumer flake's directory**: `build` reads the
-flake from `$PWD` for its container fallback, and `dispatch` reads `harness.env`
+Run commands **from your Consumer flake's directory**: `spindrift build` reads the
+flake from `$PWD` for its container fallback, and `spindrift dispatch` reads `harness.env`
 from `$PWD` (the same convention). Per-issue logs land in `logs/issue-<n>.log`.
+
+## The `spindrift` CLI
+
+`nix develop` (or `direnv allow`) puts a single `spindrift` binary on your PATH
+— it is the primary surface, and everything runs through it:
+
+| command                          | what it does                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------------- |
+| `spindrift dispatch`             | fan out one container per `ready-for-agent` issue, in dependency waves          |
+| `spindrift dispatch 42 57`       | dispatch exactly these issues, bypassing the label/barrier gates                |
+| `spindrift dispatch --no-build`  | fail fast if the image is absent instead of building it first (split build/run) |
+| `spindrift dispatch --yes`       | skip the confirmation prompt when dispatching unlabeled issues (alias `--force`)|
+| `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
+| `spindrift build`                | realise/load the agent image (or store closures) without running any agent      |
+| `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
+| `spindrift --help` / `--version` | full flag list / installed version                                              |
+
+Every runtime knob below is also a `--flag`, with **flag > env > default**
+precedence; `spindrift --help` prints the generated table. Bare `spindrift` with
+no subcommand is `spindrift dispatch`.
+
+> **Deprecated (removed in v0.2.0, see [`MIGRATING.md`](MIGRATING.md)):**
+> `nix run .#run` and `nix run .#build` still work but print a notice and forward
+> to `spindrift dispatch` / `spindrift build`. `spindrift engage <issue>` is a
+> deprecated alias for `spindrift recover <issue>`.
 
 If you use **direnv**, the template's `.envrc` (`use flake`) activates the dev
 shell automatically on `cd` — no manual `nix develop` needed.
@@ -64,14 +89,15 @@ If the Target repos define their own `flake.nix` devShell, see
 [*Targeting repos that define their own devShell toolchain*](#targeting-repos-that-define-their-own-devshell-toolchain)
 below — you can keep `packages` minimal and let each Target's devShell drive checks.
 
-`build` **realises** the image derivation and then loads it into your container
+`spindrift build` **realises** the image derivation and then loads it into your container
 runtime. On a host with a Linux builder (any Linux machine, or a Mac with a
 Linux builder configured) it realises the image directly. On a stock Mac — no
 Linux builder — it transparently falls back to building the image inside an
 **ephemeral Nix container** on the same runtime it already requires, keeping a
 named `/nix` volume so rebuilds stay incremental. Either way the result is
-`spindrift:latest`, loaded and ready for `run`. If the host has neither a Linux
-builder nor a container runtime, `build` exits with instructions.
+`spindrift:latest`, loaded and ready for `spindrift dispatch`. If the host has
+neither a Linux builder nor a container runtime, `spindrift build` exits with
+instructions.
 
 ## Adding spindrift to your flake
 
@@ -90,19 +116,28 @@ your inputs and import the flake-parts module:
     flake-parts.lib.mkFlake { inherit inputs; } {
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       imports = [ spindrift.flakeModules.default ];
-      perSystem = _: {
+      perSystem = { config, pkgs, ... }: {
         spindrift = {
           # bake your build/test toolchain into the image (a fn of the Linux pkgs)
           packages = p: [ p.go p.gnumake ];
           prompt = builtins.readFile ./prompts/issue-prompt.md;
+        };
+
+        # Put the spindrift CLI on PATH: `nix develop` → `spindrift dispatch`.
+        devShells.default = pkgs.mkShell {
+          packages = [ config.packages.spindrift ];
         };
       };
     };
 }
 ```
 
-This yields `packages.<system>.{build,run}` (plus the Linux-only `agent-image`
-image) and matching `apps.<system>.{build,run}`.
+This yields the **`spindrift` CLI** as `packages.<system>.spindrift` and as
+`apps.<system>.default` (so `nix run .` == `spindrift dispatch`), plus the
+Linux-only `agent-image`. The dev shell above is what puts `spindrift` on your
+PATH. The old per-command apps `nix run .#build` / `nix run .#run` remain as thin
+deprecated aliases that print a notice and forward to `spindrift build` /
+`spindrift dispatch`; both are removed in v0.2.0 (see [`MIGRATING.md`](MIGRATING.md)).
 
 ### Or call `mkHarness` directly
 
@@ -116,7 +151,8 @@ spindrift.lib.mkHarness {
   system = "aarch64-darwin";
   packages = p: [ p.go ];
 }
-# => { image, build, run, packages, apps, imagePath, promptDir, ... }
+# => { image, spindrift, build, run, packages, apps, imagePath, promptDir, skillsDir, ... }
+# packages.spindrift is the CLI; add it to a devShell so `spindrift` is on PATH.
 ```
 
 `mkHarness` takes the locked *nixpkgs input* (not a pre-built `pkgs`) so it can
@@ -201,32 +237,33 @@ knobs. Unset options fall through to `mkHarness`'s own defaults.
 | `config`    | attrs                       | `{ allowUnfree = true; }` | nixpkgs config attrs                                          |
 | `packages`  | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
 | `prefetch`  | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
-| `prompt`    | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`nix run .#build`) |
+| `prompt`    | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`) |
 | `scoutPrompt` / `reviewPrompt` | string           | bundled starters   | system prompts for the read-only scout and reviewer subagents; baked in, overridable via `SPINDRIFT_PROMPT_DIR` |
 | `skills`    | list of paths               | `[]`               | skill files baked into the image at `/home/agent/.claude/skills` so the headless agent can `/invoke` them; `SPINDRIFT_SKILLS_DIR` mounts over them at runtime |
-| `defaults`  | submodule (all `flakeOption` env knobs) | see below | non-secret run defaults baked into `run` |
-| `runtime`   | `"podman"` \| `"docker"` \| `"bwrap"` | `"podman"` | runner the `build`/`run` commands drive: an OCI runtime, or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
+| `defaults`  | submodule (all `flakeOption` env knobs) | see below | non-secret run defaults baked into the `spindrift` CLI |
+| `runtime`   | `"podman"` \| `"docker"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime, or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
 | `nixInBox`  | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
-| `nixBuilderImage` | string                | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` | Nix image `build` uses as a fallback Linux builder when the host can't realise the image; pinned by digest for supply-chain safety (see below) |
+| `nixBuilderImage` | string                | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realise the image; pinned by digest for supply-chain safety (see below) |
 
-The `defaults` submodule bakes the run knobs into the `run` command; a matching
+The `defaults` submodule bakes the run knobs into the `spindrift` CLI; a matching
 env var still wins at runtime, so one built command can be re-pointed without a
 rebuild. It exposes every consumer-tunable knob from `lib/env-schema.nix` (the
 single source of truth for the runtime env surface). Key baked defaults:
 `label = "ready-for-agent"`, `baseBranch = "main"`, `maxParallel = 3`,
 `branchPrefix = "agent/issue-"`, `inProgressLabel = "agent-in-progress"`,
 `failedLabel = "agent-failed"`, `completeLabel = "agent-complete"`,
-`model = "claude-sonnet-4-6"`, `scoutModel = "claude-haiku-4-5-20251001"`,
-`reviewModel = "claude-opus-4-8"`.
+`mergeMode = "manual"`, `model = "claude-sonnet-4-6"`,
+`scoutModel = "claude-haiku-4-5-20251001"`, `reviewModel = "claude-opus-4-8"`.
 `inProgressLabel`/`failedLabel`/`completeLabel` drive the
-[label lifecycle](#label-lifecycle); `model` is the Claude model the in-container
+[label lifecycle](#label-lifecycle); `mergeMode` is the post-green
+[merge policy](#label-lifecycle) (`manual`/`immediate`/`auto`); `model` is the Claude model the in-container
 implementor agent runs, threaded into the container as `MODEL` so `MODEL=...`
 switches models at runtime with no image rebuild. `scoutModel`/`reviewModel` tier
 the read-only scout and reviewer subagents the same way; setting either to `""`
 drops both subagents from the `claude` invocation.
 
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
-requires an image rebuild (`nix run .#build`). Point `SPINDRIFT_PROMPT_DIR`
+requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
 at any directory to override it at runtime for zero-rebuild iteration.
 
 ## Runtime configuration
@@ -250,7 +287,8 @@ a rebuild (ADR 0001):
 | `BRANCH_PREFIX`           | `agent/issue-`         | branch name = prefix + issue number      |
 | `IN_PROGRESS_LABEL`       | `agent-in-progress`    | label a dispatched issue is swapped to   |
 | `FAILED_LABEL`            | `agent-failed`         | label an issue gets when its Box fails or its PR can't merge |
-| `COMPLETE_LABEL`          | `agent-complete`       | label the launcher swaps on after a successful rebase-merge |
+| `COMPLETE_LABEL`          | `agent-complete`       | label the launcher swaps on when CI reaches green (agent is done; the merge is a separate step) |
+| `MERGE_MODE`              | `manual`               | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue GitHub native auto-merge — repo must have *Allow auto-merge* on) |
 | `BARRIER_LABEL`           | — (empty = off)        | open issues carrying it fence all higher-numbered issues until they close |
 | `MODEL`                   | `claude-sonnet-4-6`    | Claude model the in-container implementor runs |
 | `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` | scout subagent model tier (empty drops subagents) |
@@ -262,7 +300,7 @@ a rebuild (ADR 0001):
 Every `defaults`-baked knob above can be re-pointed at runtime; the env var
 wins over whatever was baked. Commit identity is **required**: an override wins,
 else the host's `git config user.name`/`user.email` is inherited; if neither is
-set, `run` exits rather than committing under an arbitrary identity.
+set, `spindrift dispatch` exits rather than committing under an arbitrary identity.
 
 ### Advanced tuning
 
@@ -290,7 +328,7 @@ need changing. See `lib/env-schema.nix` for the authoritative list.
 ## Runtime flow
 
 ```
-nix run .#run   (the nix-built Go launcher, host-side)
+spindrift dispatch   (the nix-built Go launcher, host-side)
   ├─ reconcile any stranded agent-in-progress issues with an open PR (adopt + gate)
   └─ gh issue list --label ready-for-agent        (find the work)
      └─ for each issue, up to MAX_PARALLEL at once:
@@ -305,37 +343,43 @@ nix run .#run   (the nix-built Go launcher, host-side)
         │
         └─ back on the host, the launcher runs the MERGE GATE for that issue:
            ├─ poll CI on the PR head until green (or red, or timeout)
-           ├─ green → rebase-merge the PR → swap issue to agent-complete
+           ├─ green → swap issue to agent-complete, then apply MERGE_MODE:
+           │           manual    → leave the green PR for a human (default)
+           │           immediate → rebase-merge the PR now
+           │           auto      → enqueue GitHub native auto-merge
            ├─ red   → dispatch fix boxes (up to MAX_FIX_ATTEMPTS), then re-gate
-           ├─ merge conflict → rebase the PR (up to MAX_REBASE_ATTEMPTS)
+           ├─ merge conflict (immediate) → rebase the PR (up to MAX_REBASE_ATTEMPTS)
            └─ post an aggregate usage/cost comment to the issue
 ```
 
 The split is deliberate: the **Box** owns implementing the issue and opening the
 PR, but the **launcher** (host-side, the Go binary) owns the CI-green decision,
-the rebase-merge, and the terminal label swap — a Box cannot approve or merge its
-own PR, and keeping merge authority outside the throwaway container is what makes
-branch protection meaningful. The Box's last line is a machine-readable
-`SPINDRIFT_OUTCOME` line (grammar in `cmd/launcher/internal/outcome`) that tells
-the launcher which PR to gate.
+the merge, and the terminal label swap — a Box cannot approve or merge its own
+PR, and keeping merge authority outside the throwaway container is what makes
+branch protection meaningful. `agent-complete` marks CI green (the agent's work
+is done); **whether the PR then merges is the `MERGE_MODE` policy**, decoupled so
+the same run can land PRs automatically or hand green PRs to a human reviewer. The
+Box's last line is a machine-readable `SPINDRIFT_OUTCOME` line (grammar in
+`cmd/launcher/internal/outcome`) that tells the launcher which PR to gate.
 
 The harness never touches the Target repo's working tree on your host — it all
 happens through fresh clones inside containers — so it can drive **any** GitHub
 repo you point `REPO_SLUG` at. `Closes #N` in the PR description closes the issue
-when the launcher merges it.
+when the PR merges — by the launcher (`immediate`), by GitHub (`auto`), or by a
+human (`manual`).
 
 ## Label lifecycle
 
-`run` uses labels on the Target repo as the dispatch state of each issue, which
-is what makes re-running it safe. `run` queries only `LABEL`
+`spindrift dispatch` uses labels on the Target repo as the dispatch state of each
+issue, which is what makes re-running it safe. It queries only `LABEL`
 (`ready-for-agent`), so the labels below are what keep an issue from being picked
 up twice:
 
 ```
-ready-for-agent ──dispatch──▶ agent-in-progress ──CI green + merge──▶ agent-complete
-   (launch button)              (a Box is running,                     (merged; issue
-                                 or the merge gate is                   closed via Closes #N)
-                                 polling CI; re-runs skip it)
+ready-for-agent ──dispatch──▶ agent-in-progress ─────CI green─────▶ agent-complete
+   (launch button)              (a Box is running,                   (agent done; PR is
+                                 or the merge gate is                  green — then merged
+                                 polling CI; re-runs skip it)         per MERGE_MODE)
                                        │
                                        ├─ Box exits ≠0 (after retries) ─┐
                                        └─ CI red after MAX_FIX_ATTEMPTS ─┤
@@ -345,22 +389,26 @@ ready-for-agent ──dispatch──▶ agent-in-progress ──CI green + merge
                                                                      re-label to retry)
 ```
 
-- **Dispatch is idempotent.** As `run` hands each issue to a container it swaps
-  `ready-for-agent` → `agent-in-progress`. Because the issue query matches only
-  `ready-for-agent`, re-running `run` while PRs are still in the merge gate
-  re-dispatches nothing — in-progress issues are no longer selected.
-- **Success is labelled.** When the merge gate merges the PR it swaps
-  `agent-in-progress` → `agent-complete`, then verifies the PR really is merged
-  and the label really landed. `Closes #N` in the PR body closes the issue on
-  merge. (Dependency ordering keys off this label — a blocker is "ready" once it
-  carries `agent-complete` or is closed.)
+- **Dispatch is idempotent.** As `dispatch` hands each issue to a container it
+  swaps `ready-for-agent` → `agent-in-progress`. Because the issue query matches
+  only `ready-for-agent`, re-running `dispatch` while PRs are still in the merge
+  gate re-dispatches nothing — in-progress issues are no longer selected.
+- **Green is labelled; merge is a separate policy.** When CI confirms green the
+  merge gate swaps `agent-in-progress` → `agent-complete` — the agent's work is
+  done and the PR is mergeable. What happens next is `MERGE_MODE`: `immediate`
+  rebase-merges the PR (then verifies it really is merged and the label landed);
+  `auto` enqueues GitHub's native auto-merge; `manual` (the default) leaves the
+  green PR open for a human. `Closes #N` in the PR body closes the issue whenever
+  the PR merges. (Dependency ordering keys off this label — a blocker is "ready"
+  once it carries `agent-complete` or is closed, so waves advance on green even in
+  `manual` mode.)
 - **Red CI self-heals before it fails.** If CI goes genuinely red, the launcher
   dispatches up to `MAX_FIX_ATTEMPTS` fix boxes on the same branch and re-gates
   after each. Only once those are exhausted (or the box itself exits non-zero
   after transient retries) does it swap to `agent-failed` and stop. There are
   **no automatic re-dispatches from `ready-for-agent`**: a human inspects
   `logs/issue-<n>.log` and re-labels to retry.
-- **Stranded issues are reconciled.** At startup `run` scans open
+- **Stranded issues are reconciled.** At startup `spindrift dispatch` scans open
   `agent-in-progress` issues that already have an open non-draft PR and re-runs
   the merge gate on each ("adopts" them) — so a launcher killed mid-gate picks up
   where it left off on the next run, without a fresh agent pass.
@@ -385,7 +433,7 @@ gh label create agent-failed      --repo owner/repo --color b60205 --description
 
 The label swaps are best-effort. If the launcher is killed mid-run (Ctrl-C, a
 crashed host, a laptop closing) an issue can be left in `agent-in-progress` with
-no container running. The next `run` **reconciles automatically** for the common
+no container running. The next `spindrift dispatch` **reconciles automatically** for the common
 case: it adopts any `agent-in-progress` issue that already has an open non-draft
 PR and re-runs the merge gate on it. What it cannot recover on its own is an
 issue stranded *before* a PR was opened (or with only a draft PR) — there is
@@ -402,8 +450,8 @@ gh issue edit <n> --repo owner/repo --add-label ready-for-agent --remove-label a
 Use a **fine-grained personal access token** with access to **only the Target
 repository**. That scoping is what bounds `--dangerously-skip-permissions`: even
 if an agent misbehaves, the token can touch nothing but that one repo. The same
-token is used by `gh` inside each container and by `run` to list issues on the
-host.
+token is used by `gh` inside each container and by `spindrift dispatch` to list
+issues on the host.
 
 | permission        | level          | why                                          |
 | ----------------- | -------------- | -------------------------------------------- |
@@ -464,18 +512,18 @@ deliberate, not oversights — write them down so you can honour them:
 ## Building on macOS
 
 OCI images are Linux-only, so the `agent-image` package is a *Linux* derivation even
-on a Mac. The launcher commands (`build`/`run`) are native and only *reference*
+on a Mac. The launcher commands (`spindrift build`/`dispatch`) are native and only *reference*
 the image path, so `nix flake check` never forces a Linux build. Realising the
-image is `build`'s job, and it handles the Mac case for you:
+image is `spindrift build`'s job, and it handles the Mac case for you:
 
-- **Out of the box**: with no Linux builder, `nix run .#build` builds the image
+- **Out of the box**: with no Linux builder, `spindrift build` builds the image
   inside an **ephemeral Nix container** on your `podman`/`docker` runtime (the
   machine that can *run* the Box can always *build* it), reusing a named `/nix`
   volume so rebuilds are incremental. Nothing to configure beyond the runtime
   you already need — just run it from your Consumer flake's directory.
 - **Faster with a real Linux builder** (skips the container round-trip):
   - **nix-darwin**: enable `nix.linux-builder.enable = true;` (a small Linux VM
-    nix uses automatically). `build` then realises the image directly.
+    nix uses automatically). `spindrift build` then realises the image directly.
   - **Remote builder**: point nix at any Linux box via
     `nix.buildMachines` / `--builders`.
   - **Just build on Linux / CI** and load the result on the Mac.
@@ -534,9 +582,11 @@ Go launcher (0007), the pluggable OCI/bwrap runner (0006), and nix-in-the-box
 
 ## Unattended runs
 
-`nix run .#run` is just a command, so wrap it however you schedule things —
+`spindrift dispatch` is just a command, so wrap it however you schedule things —
 `cron`, `launchd`, a systemd timer, or a CI job on a Linux runner (where the
-image builds with no Linux-builder dance).
+image builds with no Linux-builder dance). In non-interactive contexts invoke the
+CLI by its store path or via `nix run .#default -- dispatch` rather than relying
+on a dev-shell PATH.
 
 ## Credits
 
