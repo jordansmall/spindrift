@@ -25,7 +25,7 @@ var schemaFlags = []flagEntry{
 	{env: "MAX_PARALLEL", flag: "max-parallel", kind: "int", doc: "maximum concurrent agent containers", dflt: "3"},
 	{env: "MAX_REBASE_ATTEMPTS", flag: "max-rebase-attempts", kind: "int", doc: "rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries", dflt: "3"},
 	{env: "MEMORY_LIMIT", flag: "memory-limit", kind: "string", doc: "max memory per agent container (--memory); empty string disables the limit", dflt: "4g"},
-	{env: "MERGE_MODE", flag: "merge-mode", kind: "string", doc: "post-green merge policy: immediate (merge on green), auto (reserved; routes to manual), manual (leave PR open for human approval)", dflt: "manual"},
+	{env: "MERGE_MODE", flag: "merge-mode", kind: "string", doc: "post-green merge policy: immediate (merge on green), auto (enqueue GitHub native auto-merge; repo must have Allow auto-merge enabled), manual (leave PR open for human approval)", dflt: "manual"},
 	{env: "MERGE_POLL_INTERVAL", flag: "merge-poll-interval", kind: "int", doc: "seconds between merge-gate poll iterations", dflt: "30"},
 	{env: "MERGE_POLL_TIMEOUT", flag: "merge-poll-timeout", kind: "int", doc: "total seconds to wait for CI green before abandoning the merge attempt", dflt: "1800"},
 	{env: "MODEL", flag: "model", kind: "string", doc: "primary (implementor) Claude model for the agent (zero-rebuild runtime switch)", dflt: "claude-sonnet-4-6"},
