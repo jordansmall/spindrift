@@ -436,11 +436,12 @@ EOF
 
 # --- Dependency-wave ordering (issue #39) ----------------------------------
 
-@test "run dispatches an issue whose external blocker already carries COMPLETE_LABEL" {
+@test "run dispatches an issue whose external blocker has a merged PR" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'2\tDependent'
   export FAKE_GH_ISSUE_BODY_2="Depends on #1"
-  export FAKE_GH_ISSUE_LABELS_1="agent-complete"
+  export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
+  export FAKE_GH_PR_STATE_1="MERGED"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
@@ -450,7 +451,8 @@ EOF
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'2\tDependent'
   export FAKE_GH_ISSUE_BODY_2="blocked by #1"
-  export FAKE_GH_ISSUE_LABELS_1="agent-complete"
+  export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
+  export FAKE_GH_PR_STATE_1="MERGED"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
@@ -492,7 +494,7 @@ EOF
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
-  [[ "$output" == *"closed without"* ]]
+  [[ "$output" == *"no discoverable PR"* ]]
 }
 
 @test "open unlabeled blocker keeps dependent blocked and surfaces as deadlock" {
