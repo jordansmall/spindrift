@@ -188,10 +188,10 @@ func TestWriterThrottlesSameToolRepeat(t *testing.T) {
 	fmt.Fprint(w, narEv)
 
 	out := status.String()
-	// Narration + count line = 2 lines total, not 5 per-tool lines.
+	// Header + narration + count = 3 lines total, not 5 per-tool lines.
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(lines) != 2 {
-		t.Errorf("expected 2 lines (narration + count), got %d: %q", len(lines), out)
+	if len(lines) != 3 {
+		t.Errorf("expected 3 lines (header + narration + count), got %d: %q", len(lines), out)
 	}
 	if !strings.Contains(out, "5 read") {
 		t.Errorf("count line missing '5 reads': %q", out)
@@ -257,15 +257,15 @@ func TestWriterNarrationTrimming(t *testing.T) {
 
 	out := strings.TrimRight(status.String(), "\n")
 	lines := strings.Split(out, "\n")
-	if len(lines) != 1 {
-		t.Errorf("expected 1 heartbeat line, got %d: %q", len(lines), status.String())
+	if len(lines) != 2 {
+		t.Errorf("expected 2 lines (header + narration), got %d: %q", len(lines), status.String())
 	}
-	// Line = "#99 · <text>\n"; text portion must be ≤120 chars.
+	// lines[1] is the narration: "#99 · <text>"; text portion must be ≤120 chars.
 	prefix := "#99 \xc2\xb7 "
-	if !strings.HasPrefix(lines[0], prefix) {
-		t.Errorf("line missing prefix %q: %q", prefix, lines[0])
+	if !strings.HasPrefix(lines[1], prefix) {
+		t.Errorf("narration line missing prefix %q: %q", prefix, lines[1])
 	}
-	textPart := strings.TrimPrefix(lines[0], prefix)
+	textPart := strings.TrimPrefix(lines[1], prefix)
 	if len(textPart) > 120 {
 		t.Errorf("narration text %d chars, want ≤120", len(textPart))
 	}
@@ -507,6 +507,139 @@ func TestWriterCountsDistinctKinds(t *testing.T) {
 	if !strings.Contains(out, "1 grep") {
 		t.Errorf("count line missing '1 grep': %q", out)
 	}
+}
+
+// TestWriterSwitchHeader covers all switch-header acceptance criteria:
+// implementor-only, role switch sequence, re-invocation, unknown parent, and
+// header-spam suppression.
+func TestWriterSwitchHeader(t *testing.T) {
+	const (
+		rule = "\xe2\x94\x80\xe2\x94\x80" // ──
+	)
+	// Helpers to build JSON stream events.
+	implNar := func(text string) string {
+		return `{"type":"assistant","message":{"content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
+	}
+	implTool := func(name, id string) string {
+		return `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"` + name + `","id":"` + id + `","input":{}}]}}` + "\n"
+	}
+	implTask := func(id, subagentType string) string {
+		return `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","id":"` + id + `","input":{"subagent_type":"` + subagentType + `"}}]}}` + "\n"
+	}
+	subRead := func(parentID string) string {
+		return `{"type":"assistant","parent_tool_use_id":"` + parentID + `","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n"
+	}
+	subNar := func(parentID, text string) string {
+		return `{"type":"assistant","parent_tool_use_id":"` + parentID + `","message":{"content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
+	}
+	_ = subNar
+
+	t.Run("implementor_only_single_header", func(t *testing.T) {
+		var status bytes.Buffer
+		w := heartbeat.New(&bytes.Buffer{}, "284", &status)
+		fmt.Fprint(w, implNar("Now I have a clear understanding."))
+
+		out := status.String()
+		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("want 2 lines (header+narration), got %d: %q", len(lines), out)
+		}
+		if !strings.Contains(lines[0], "#284") || !strings.Contains(lines[0], rule) || !strings.Contains(lines[0], "implementor") {
+			t.Errorf("line 0 must be implementor header, got: %q", lines[0])
+		}
+		if !strings.Contains(lines[1], "Now I have a clear understanding") {
+			t.Errorf("line 1 must be narration, got: %q", lines[1])
+		}
+	})
+
+	t.Run("implementor_scout_implementor_sequence", func(t *testing.T) {
+		var status bytes.Buffer
+		w := heartbeat.New(&bytes.Buffer{}, "284", &status)
+
+		// Implementor does a read then launches scout.
+		fmt.Fprint(w, implTool("Read", "r0"))
+		fmt.Fprint(w, implTask("tu_s1", "scout"))
+		// Scout does a read (counts should be separate from implementor's).
+		fmt.Fprint(w, subRead("tu_s1"))
+		// Implementor resumes with narration.
+		fmt.Fprint(w, implNar("Back to work."))
+
+		out := status.String()
+		// Must contain scout header and implementor header(s).
+		if !strings.Contains(out, "scout") {
+			t.Errorf("missing scout role header: %q", out)
+		}
+		// Scout header must precede implementor's second header.
+		scoutIdx := strings.Index(out, "scout")
+		implIdx := strings.LastIndex(out, "implementor")
+		if scoutIdx < 0 || implIdx < 0 {
+			t.Fatalf("headers missing: %q", out)
+		}
+		if scoutIdx > implIdx {
+			t.Errorf("scout header must appear before final implementor header: %q", out)
+		}
+	})
+
+	t.Run("same_role_reinvoked_no_duplicate_header", func(t *testing.T) {
+		var status bytes.Buffer
+		w := heartbeat.New(&bytes.Buffer{}, "1", &status)
+
+		// Launch scout twice; between them implementor emits a narration so both
+		// scout stints produce counts (the second scout header must appear).
+		fmt.Fprint(w, implTask("tu_a", "scout"))
+		fmt.Fprint(w, subRead("tu_a"))
+		// Implementor narration causes scout counts to flush and implementor header.
+		fmt.Fprint(w, implNar("Checking."))
+		// Second scout invocation.
+		fmt.Fprint(w, implTask("tu_b", "scout"))
+		fmt.Fprint(w, subRead("tu_b"))
+		fmt.Fprint(w, implNar("Done."))
+
+		out := status.String()
+		// "scout" must appear twice (two scout stints that both produce counts).
+		if count := strings.Count(out, rule+" scout "); count < 2 {
+			t.Errorf("expected ≥2 scout headers, got %d: %q", count, out)
+		}
+	})
+
+	t.Run("unknown_parent_fallback_subagent", func(t *testing.T) {
+		var status bytes.Buffer
+		w := heartbeat.New(&bytes.Buffer{}, "5", &status)
+
+		// A message with a parent_tool_use_id that was never registered.
+		unknown := `{"type":"assistant","parent_tool_use_id":"unknown_id","message":{"content":[{"type":"tool_use","name":"Read","id":"rx","input":{}}]}}` + "\n"
+		fmt.Fprint(w, unknown)
+		// Implementor narration triggers flush.
+		fmt.Fprint(w, implNar("Continuing."))
+
+		out := status.String()
+		if !strings.Contains(out, "subagent") {
+			t.Errorf("unknown parent must produce 'subagent' role header: %q", out)
+		}
+	})
+
+	t.Run("suppressed_empty_headers", func(t *testing.T) {
+		var status bytes.Buffer
+		w := heartbeat.New(&bytes.Buffer{}, "9", &status)
+
+		// Scout produces zero body output; implementor follows immediately.
+		// Must NOT get a scout header followed by implementor header with nothing between.
+		fmt.Fprint(w, implTask("tu_s", "scout"))
+		// Scout sends only narration (dropped) — no tool calls, no counts.
+		fmt.Fprint(w, subNar("tu_s", "internal scout thought"))
+		// Implementor resumes.
+		fmt.Fprint(w, implNar("I reviewed the scout output."))
+
+		out := status.String()
+		// Scout produced no counts so scout header must not appear.
+		if strings.Contains(out, rule+" scout ") {
+			t.Errorf("empty scout stint must not emit scout header: %q", out)
+		}
+		// Implementor header must appear exactly once (before the narration).
+		if n := strings.Count(out, rule+" implementor "); n != 1 {
+			t.Errorf("implementor header must appear exactly once, got %d: %q", n, out)
+		}
+	})
 }
 
 // TestWriterCountLineOnNarration verifies that accumulated tool events produce
