@@ -523,6 +523,11 @@ EOF
   # PRForBranch needs this to find the PR URL; gh pr merge then writes MERGED to
   # GH_STATE, which PRState reads to satisfy blockerReady for wave 2.
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
+  # Pre-seed issue #1 as ready-for-agent so reconcileStranded does not adopt its
+  # PR before wave 1 dispatch. Without this, the fake matches any label query for
+  # issues with no recorded state, and FAKE_GH_PR_LIST_1 causes reconcile to
+  # adopt+merge #1, removing it from the ready queue before it is dispatched.
+  printf '1\tready-for-agent\n' > "$GH_LOG.state"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
