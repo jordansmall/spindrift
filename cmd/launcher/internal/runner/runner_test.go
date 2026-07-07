@@ -1,6 +1,7 @@
 package runner_test
 
 import (
+	"fmt"
 	"testing"
 
 	"spindrift.dev/launcher/internal/runner"
@@ -61,5 +62,25 @@ func TestFake_ReapRecordsName(t *testing.T) {
 	}
 	if len(f.ReapCalls) != 1 || f.ReapCalls[0] != "agent-issue-5" {
 		t.Errorf("ReapCalls: want [agent-issue-5], got %v", f.ReapCalls)
+	}
+}
+
+// TestFake_IsReadyRecordsCalls verifies that IsReady records invocations and
+// returns IsReadyErr.
+func TestFake_IsReadyRecordsCalls(t *testing.T) {
+	f := runner.NewFake()
+	if err := f.IsReady(); err != nil {
+		t.Fatalf("IsReady (nil err): %v", err)
+	}
+	if f.IsReadyCalls != 1 {
+		t.Errorf("IsReadyCalls: want 1, got %d", f.IsReadyCalls)
+	}
+
+	f.IsReadyErr = fmt.Errorf("image absent; run `spindrift build`")
+	if err := f.IsReady(); err == nil {
+		t.Fatal("IsReady with IsReadyErr set: want error, got nil")
+	}
+	if f.IsReadyCalls != 2 {
+		t.Errorf("IsReadyCalls: want 2, got %d", f.IsReadyCalls)
 	}
 }

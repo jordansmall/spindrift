@@ -10,6 +10,9 @@ type Fake struct {
 	// EnsureReadyCalls counts how many times EnsureReady was called.
 	EnsureReadyCalls int
 
+	// IsReadyCalls counts how many times IsReady was called.
+	IsReadyCalls int
+
 	// RunCalls records all Run invocations in order.
 	RunCalls []Box
 
@@ -18,6 +21,9 @@ type Fake struct {
 
 	// EnsureReadyErr, if non-nil, is returned by EnsureReady.
 	EnsureReadyErr error
+
+	// IsReadyErr, if non-nil, is returned by IsReady.
+	IsReadyErr error
 
 	// RunErr, if non-nil, is returned by every Run call (when RunErrs is nil).
 	RunErr error
@@ -40,6 +46,14 @@ func (f *Fake) EnsureReady() error {
 	defer f.mu.Unlock()
 	f.EnsureReadyCalls++
 	return f.EnsureReadyErr
+}
+
+// IsReady records the call and returns IsReadyErr.
+func (f *Fake) IsReady() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.IsReadyCalls++
+	return f.IsReadyErr
 }
 
 // Run records the box and returns the error for this call index. If RunErrs

@@ -47,6 +47,10 @@ func NewBwrap(agentFiles, agentEnv, bakedPrefetch, promptDir, skillsDir string, 
 // `launcher build` (bwrapBuildAdapter.EnsureReady) before `run` is invoked.
 func (a *bwrapAdapter) EnsureReady() error { return nil }
 
+// IsReady is a no-op for bwrap: store closures are realised out-of-band by
+// `spindrift build` and are either present or absent at bwrap invocation time.
+func (a *bwrapAdapter) IsReady() error { return nil }
+
 // buildArgs constructs the bwrap command-line arguments for the given box.
 // etcDir is the temp directory holding the synthesised /etc/passwd and /etc/group.
 // Secret env vars (GH_TOKEN, auth tokens) are intentionally excluded from argv;
@@ -185,6 +189,9 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 	fmt.Println("==> done: agent store closures realised")
 	return nil
 }
+
+// IsReady is a no-op for the build adapter.
+func (a *bwrapBuildAdapter) IsReady() error { return nil }
 
 // Run is not supported by the build adapter.
 func (a *bwrapBuildAdapter) Run(_ Box) error {
