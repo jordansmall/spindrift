@@ -19,7 +19,7 @@ func TestPreviewIssues_ListsIssuesAndRepo(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "20", Title: "second issue", Labels: []string{c.label}})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, &buf); err != nil {
+	if err := previewIssues(c, fc, &buf, nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -54,7 +54,7 @@ func TestPreviewIssues_RespectsBarrierFence(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "15", Title: "after barrier", Labels: []string{c.label}})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, &buf); err != nil {
+	if err := previewIssues(c, fc, &buf, nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func TestPreviewIssues_EmptyQueue(t *testing.T) {
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, &buf); err != nil {
+	if err := previewIssues(c, fc, &buf, nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
