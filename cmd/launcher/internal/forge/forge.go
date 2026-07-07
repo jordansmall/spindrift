@@ -65,4 +65,7 @@ type Client interface {
 	Probe() (string, error)
 	// ListLabels returns the names of all labels defined in the repository.
 	ListLabels() ([]string, error)
+	// CreateLabel creates a new label with the given name, description, and
+	// hex color (without the leading #). Returns an error if gh reports failure.
+	CreateLabel(name, description, color string) error
 }
