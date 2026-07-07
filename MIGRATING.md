@@ -20,6 +20,9 @@ spindrift dispatch 123
 # Build / realise the agent image without running any agent
 spindrift build
 
+# Dispatch without auto-building (fail fast if image absent)
+spindrift dispatch --no-build
+
 # Show all flags and subcommands
 spindrift --help
 
@@ -33,7 +36,7 @@ spindrift --version
 |--------------------------|--------------------------|-------------------------------------|
 | `nix run .#run`          | `spindrift dispatch`     | Deprecated alias prints a notice    |
 | `nix run .`              | `spindrift dispatch`     | `apps.default` now points to CLI    |
-| `nix run .#build`        | `spindrift build`        | No alias; use the CLI directly      |
+| `nix run .#build`        | `spindrift build`        | Deprecated alias prints a notice    |
 | `ISSUE_NUMBER=42 nix run .#run` | `spindrift dispatch 42` | Positional arg replaces env var |
 
 ### Template quick-start

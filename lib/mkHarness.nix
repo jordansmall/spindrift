@@ -468,13 +468,13 @@ let
     meta.license = lib.licenses.mit;
   };
 
-  # The build command: bakes nix-computed config as exported env vars and
-  # execs the Go launcher with the `build` subcommand. The Go binary contains
-  # all realise-and-load logic; no bash build scripts remain (ADR 0004).
+  # Deprecated build alias: prints a one-line stderr notice and execs the same
+  # build logic. Kept for one release (ADR-0010); removal target: next minor after 0.1.x.
   build = (hostPkgs.writeShellApplication {
     name = "build";
     runtimeInputs = [ hostPkgs.coreutils ];
     text = goBuildPreamble + ''
+      >&2 echo "spindrift: 'nix run .#build' is deprecated; use 'spindrift build' instead. Removal: v0.2.0. See MIGRATING.md."
       exec ${launcherBin}/bin/launcher build
     '';
   }).overrideAttrs (_: {
