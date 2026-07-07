@@ -1,4 +1,4 @@
-{ pkgs, nixpkgs, system, flake-parts }:
+{ pkgs, nixpkgs, system, flake-parts, revision ? "unknown" }:
 let
   # The launchers pin the real `gh` via runtimeInputs, which would shadow
   # a PATH-injected fake; so the bats-driven harnesses below overlay `gh`
@@ -26,8 +26,18 @@ let
 
   # The dogfood as a direct call, mirroring the `spindrift = { ... }`
   # module config below. Kept so the equivalence check can prove the
-  # module and direct paths yield byte-identical outputs.
+  # module and direct paths yield byte-identical outputs.  Uses the
+  # same revision as the dogfood module (passed in from flake.nix).
   harness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system revision;
+    prefetch = "go mod download || true";
+    packages = p: [ p.go ];
+  };
+
+  # The dogfood as a direct call with revision = "unknown".  Used by
+  # template-fixture: the template module consumer has a stub self with
+  # no shortRev, so its revision is "unknown"; this must match.
+  harnessNoRevision = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     prefetch = "go mod download || true";
     packages = p: [ p.go ];
@@ -210,5 +220,6 @@ in
     minimalDirect
     consumerPkgs
     templatePkgs
+    harnessNoRevision
     ;
 }

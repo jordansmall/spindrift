@@ -15,6 +15,7 @@ let
     minimalDirect
     consumerPkgs
     templatePkgs
+    harnessNoRevision
     ;
 in
 {
@@ -176,9 +177,9 @@ in
       {
         templateBuild = templatePkgs.build;
         templateRun = templatePkgs.run;
-        directBuild = harness.build;
-        directRun = harness.run;
-        imagePath = harness.imagePath;
+        directBuild = harnessNoRevision.build;
+        directRun = harnessNoRevision.run;
+        imagePath = harnessNoRevision.imagePath;
       }
       ''
         buildCmd="$templateBuild/bin/build"
