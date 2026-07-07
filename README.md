@@ -6,7 +6,8 @@
 
 Run headless [Claude Code](https://claude.com/claude-code) agents in
 **disposable, nix-built containers** — one per GitHub issue. spindrift is
-**imported by your flake**, not cloned. Two ideas carry it:
+**imported by your flake**, not cloned. Two ideas carry it (see
+[`CONTEXT.md`](CONTEXT.md) for the full vocabulary):
 
 1. **The container is the isolation boundary.** Each issue runs in its own
    throwaway container with a fresh clone, a scoped token, and no host access.
@@ -15,21 +16,6 @@ Run headless [Claude Code](https://claude.com/claude-code) agents in
 2. **The toolchain is a nix image.** The image is built with `dockerTools` from
    the *same* pinned nixpkgs your dev shell uses, so the agent's environment and
    yours can never drift. One source of truth, no hand-maintained Dockerfile.
-
-## The three roles
-
-spindrift separates three roles (see `CONTEXT.md` for the full glossary):
-
-- **Harness** — spindrift itself: the engine (`lib.mkHarness`), the
-  flake-parts shim (`flakeModules.default`), and the in-container entrypoint.
-  The thing you import.
-- **Consumer flake** — *your* flake. It imports the Harness and configures the
-  toolchain, packages, prompt, and run defaults. It produces the `spindrift`
-  CLI and the image.
-- **Target repo** — the GitHub repo whose issues the agents work, set by
-  `REPO_SLUG` at runtime. Always cloned fresh inside the container, never read
-  from a host checkout — so it is a distinct role even when it is the same repo
-  as the Consumer flake.
 
 ## Prerequisites
 
