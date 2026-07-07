@@ -8,6 +8,8 @@ setup() {
   set_run_env
   cd "$BATS_TEST_TMPDIR"
   export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
+  # Fail fast on future predicate mismatches rather than blocking CI for 2h.
+  export DEPS_WAIT_SECS=10
 }
 
 @test "run builds and loads the image (with a log line) when it is absent" {
