@@ -145,6 +145,35 @@ func TestFake_ListLabels(t *testing.T) {
 	})
 }
 
+// TestFake_CreateLabel verifies the CreateLabel scripting fields.
+func TestFake_CreateLabel(t *testing.T) {
+	t.Run("records call", func(t *testing.T) {
+		f := forge.NewFake()
+
+		if err := f.CreateLabel("my-label", "a desc", "0075ca"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(f.CreateLabelCalls) != 1 {
+			t.Fatalf("want 1 CreateLabelCall, got %d", len(f.CreateLabelCalls))
+		}
+		got := f.CreateLabelCalls[0]
+		if got.Name != "my-label" || got.Description != "a desc" || got.Color != "0075ca" {
+			t.Errorf("unexpected call args: %+v", got)
+		}
+	})
+
+	t.Run("returns scripted error", func(t *testing.T) {
+		f := forge.NewFake()
+		f.CreateLabelErr = errors.New("api error")
+
+		err := f.CreateLabel("x", "y", "z")
+		if err == nil || err.Error() != "api error" {
+			t.Fatalf("want api error, got %v", err)
+		}
+	})
+}
+
 // TestFake_OpenPRForBranch verifies the branch→PR lookup.
 func TestFake_OpenPRForBranch(t *testing.T) {
 	f := forge.NewFake()

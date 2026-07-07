@@ -12,6 +12,11 @@ type SwapCall struct {
 	Num, Add, Remove string
 }
 
+// CreateLabelCall records a single CreateLabel invocation.
+type CreateLabelCall struct {
+	Name, Description, Color string
+}
+
 // CommentCall records a single Comment invocation.
 type CommentCall struct {
 	Num, Body string
@@ -65,6 +70,11 @@ type Fake struct {
 	Labels []string
 	// ListLabelsErr, if non-nil, is returned by ListLabels.
 	ListLabelsErr error
+
+	// CreateLabelCalls records all CreateLabel invocations in order.
+	CreateLabelCalls []CreateLabelCall
+	// CreateLabelErr, if non-nil, is returned by every CreateLabel call.
+	CreateLabelErr error
 }
 
 // NewFake returns an empty Fake client.
@@ -305,4 +315,11 @@ func (f *Fake) ListLabels() ([]string, error) {
 	out := make([]string, len(f.Labels))
 	copy(out, f.Labels)
 	return out, nil
+}
+
+func (f *Fake) CreateLabel(name, description, color string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.CreateLabelCalls = append(f.CreateLabelCalls, CreateLabelCall{name, description, color})
+	return f.CreateLabelErr
 }

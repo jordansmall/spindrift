@@ -287,6 +287,20 @@ func (e *execClient) ListLabels() ([]string, error) {
 	return labels, nil
 }
 
+// CreateLabel creates a new label in the repository with the given name,
+// description, and hex color (without the leading #).
+func (e *execClient) CreateLabel(name, description, color string) error {
+	out, err := exec.Command("gh", "label", "create", name,
+		"--repo", e.repo,
+		"--description", description,
+		"--color", color,
+	).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh label create %q: %w: %s", name, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // Rebase checks out the PR's head branch into a temporary clone of the target
 // repository, rebases it onto origin/<base>, and force-pushes the result.
 // Returns ErrMergeConflict if the rebase cannot be completed automatically.
