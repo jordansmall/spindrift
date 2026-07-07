@@ -99,6 +99,10 @@ type config struct {
 	// Set by the nix-rendered preamble from the schema's boxEnv=true entries so
 	// the Go source never needs to enumerate them by hand.
 	boxEnvVars string
+
+	// mergeMode controls post-green behavior: "immediate" merges the PR,
+	// "manual" leaves it open, "auto" is reserved for native GitHub auto-merge.
+	mergeMode string
 }
 
 type issue struct {
@@ -193,6 +197,8 @@ func loadConfig() config {
 		memoryLimit:     getenv("MEMORY_LIMIT", "4g"),
 
 		boxEnvVars: os.Getenv("BOX_ENV_VARS"),
+
+		mergeMode: getenv("MERGE_MODE", "manual"),
 	}
 }
 
@@ -217,6 +223,12 @@ func validate(c config) error {
 	}
 	if _, err := exec.LookPath(c.runtime); err != nil {
 		return fmt.Errorf("%s not found on PATH.", c.runtime)
+	}
+	switch c.mergeMode {
+	case "immediate", "auto", "manual":
+		// valid
+	default:
+		return fmt.Errorf("MERGE_MODE=%q is not valid; must be immediate, auto, or manual", c.mergeMode)
 	}
 	return nil
 }
@@ -359,21 +371,17 @@ func runConflictResolve(c config, pwd string, r runner.Runner, iss issue, pr str
 	return r.Run(box)
 }
 
-// mergeWhenGreen polls CheckState on the PR's head commit until the state
-// reaches SUCCESS, a terminal failure, or mergePollTimeout seconds elapse.
+// gateToGreen polls CheckState on the PR's head commit until the state
+// reaches confirmed SUCCESS, a terminal failure, or mergePollTimeout seconds
+// elapse. On confirmed green, agent-complete is swapped unconditionally.
 //
-// conflictResolveFn, when non-nil, is called when fc.Rebase returns
-// ErrMergeConflict. If it succeeds the poll loop continues; on failure the
-// outcome is non-retriable. When nil, a rebase conflict is immediately
-// non-retriable.
-//
-// Returns (merged, genuineRed):
-//   - (true, false)  — CI green, PR merged, issue swapped to completeLabel.
+// Returns (green, genuineRed):
+//   - (true, false)  — CI confirmed green; issue swapped to completeLabel.
 //   - (false, true)  — CI red (FAILURE or ERROR); caller decides whether to
 //     dispatch a fix box. No label swap performed.
-//   - (false, false) — non-retriable outcome (timeout, merge command failure);
-//     no label swap performed. Caller must swap to failedLabel.
-func mergeWhenGreen(c config, fc forge.Client, num, pr string, conflictResolveFn func(string) error) (bool, bool) {
+//   - (false, false) — non-retriable outcome (timeout, API error); no label
+//     swap. Caller must swap to failedLabel.
+func gateToGreen(c config, fc forge.Client, num, pr string) (bool, bool) {
 	pollIv := c.mergePollInterval
 	deadline := c.mergePollTimeout
 	// actualIv is used for elapsed tracking; floor to 1 so we don't
@@ -384,7 +392,6 @@ func mergeWhenGreen(c config, fc forge.Client, num, pr string, conflictResolveFn
 		actualIv = 1
 	}
 	elapsed := 0
-	rebaseAttempts := 0
 
 	for {
 		state, stateErr := fc.CheckState(pr)
@@ -412,33 +419,9 @@ func mergeWhenGreen(c config, fc forge.Client, num, pr string, conflictResolveFn
 				// PENDING/EXPECTED/NONE — keep waiting for checks to settle.
 				break
 			}
-			err := fc.Merge(pr)
-			if err == nil {
-				swapLabel(fc, num, c.completeLabel, c.inProgressLabel)
-				return true, false
-			}
-			if errors.Is(err, forge.ErrMergeConflict) && rebaseAttempts < c.maxRebaseAttempts {
-				rebaseAttempts++
-				fmt.Printf("    #%s  pr=%s  status=rebase-retry  attempt=%d/%d\n",
-					num, pr, rebaseAttempts, c.maxRebaseAttempts)
-				if rbErr := fc.Rebase(pr); rbErr != nil {
-					if errors.Is(rbErr, forge.ErrMergeConflict) && conflictResolveFn != nil {
-						fmt.Printf("    #%s  pr=%s  status=conflict-resolve\n", num, pr)
-						if crErr := conflictResolveFn(pr); crErr != nil {
-							fmt.Printf("    #%s  pr=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
-							return false, false
-						}
-					} else {
-						fmt.Printf("    #%s  pr=%s  status=rebase-failed  !! %v\n", num, pr, rbErr)
-						return false, false
-					}
-				}
-				// Reset the poll timer so CI gets a full window after the force-push.
-				elapsed = 0
-			} else {
-				// Non-conflict failure or exhausted rebase attempts — non-retriable.
-				return false, false
-			}
+			// Confirmed green: swap agent-complete regardless of merge outcome.
+			swapLabel(fc, num, c.completeLabel, c.inProgressLabel)
+			return true, false
 		case forge.StateFailure, forge.StateError:
 			// Genuine red — signal caller so it can dispatch a fix pass.
 			return false, true
@@ -457,18 +440,71 @@ func mergeWhenGreen(c config, fc forge.Client, num, pr string, conflictResolveFn
 	return false, false
 }
 
-// selfHeal polls the merge gate, dispatching fix boxes on genuine red up to
-// maxFixAttempts times. It owns all label swaps on the failure path;
-// mergeWhenGreen owns the completeLabel swap on success.
+// applyMergeMode performs the mode-specific action after CI reaches green.
+// agent-complete is already set; a merge failure is returned as an error but
+// does not revert the label.
 //
-// runFix is called with the 1-based fix-pass number and must dispatch the fix
-// box synchronously (it blocks until the box exits).
-// runConflictResolveFn, when non-nil, is passed through to mergeWhenGreen to
-// drive agent-based resolution of merge-gate rebase conflicts.
+// conflictResolveFn, when non-nil, is called when fc.Rebase returns
+// ErrMergeConflict to attempt an agent-assisted resolution. When nil, a
+// rebase conflict is immediately non-retriable.
+func applyMergeMode(c config, fc forge.Client, num, pr string, conflictResolveFn func(string) error) error {
+	switch c.mergeMode {
+	case "immediate":
+		return mergeImmediate(c, fc, num, pr, conflictResolveFn)
+	case "manual", "auto":
+		fmt.Printf("    #%s  pr=%s  status=agent-complete  merge-mode=%s\n", num, pr, c.mergeMode)
+		return nil
+	default:
+		return fmt.Errorf("unrecognised MERGE_MODE: %q", c.mergeMode)
+	}
+}
+
+// mergeImmediate attempts to merge the green PR with rebase retry on conflict.
+// It embodies the existing rebase-retry and agent conflict-resolve behaviors.
+func mergeImmediate(c config, fc forge.Client, num, pr string, conflictResolveFn func(string) error) error {
+	rebaseAttempts := 0
+	for {
+		err := fc.Merge(pr)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, forge.ErrMergeConflict) || rebaseAttempts >= c.maxRebaseAttempts {
+			return err
+		}
+		rebaseAttempts++
+		fmt.Printf("    #%s  pr=%s  status=rebase-retry  attempt=%d/%d\n",
+			num, pr, rebaseAttempts, c.maxRebaseAttempts)
+		if rbErr := fc.Rebase(pr); rbErr != nil {
+			if errors.Is(rbErr, forge.ErrMergeConflict) && conflictResolveFn != nil {
+				fmt.Printf("    #%s  pr=%s  status=conflict-resolve\n", num, pr)
+				if crErr := conflictResolveFn(pr); crErr != nil {
+					fmt.Printf("    #%s  pr=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
+					return crErr
+				}
+			} else {
+				fmt.Printf("    #%s  pr=%s  status=rebase-failed  !! %v\n", num, pr, rbErr)
+				return rbErr
+			}
+		}
+	}
+}
+
+// selfHeal polls the merge gate, dispatching fix boxes on genuine red up to
+// maxFixAttempts times. On green it swaps agent-complete (via gateToGreen)
+// then applies the merge mode; a merge failure after green leaves the issue
+// agent-complete and is never demoted to agent-failed.
+//
+// runFixFn is called with the 1-based fix-pass number and must dispatch the
+// fix box synchronously. runConflictResolveFn, when non-nil, is forwarded to
+// applyMergeMode for agent-assisted rebase-conflict resolution.
 func selfHeal(c config, fc forge.Client, runFixFn func(int) error, runConflictResolveFn func(string) error, num, pr string) bool {
 	for attempt := 0; ; attempt++ {
-		merged, genuineRed := mergeWhenGreen(c, fc, num, pr, runConflictResolveFn)
-		if merged {
+		green, genuineRed := gateToGreen(c, fc, num, pr)
+		if green {
+			if err := applyMergeMode(c, fc, num, pr, runConflictResolveFn); err != nil {
+				fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, pr, err)
+				fc.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
+			}
 			return true
 		}
 		if !genuineRed || attempt >= c.maxFixAttempts {
@@ -1064,7 +1100,7 @@ func previewIssues(c config, fc forge.Client, w io.Writer, issueNums []string) e
 	}
 	if c.issueNumber == "" {
 		if len(issues) == 0 {
-			fmt.Fprintf(w, "repo: %s\nno open '%s' issues — nothing to dispatch.\n", c.repoSlug, c.label)
+			fmt.Fprintf(w, "repo: %s  merge-mode: %s\nno open '%s' issues — nothing to dispatch.\n", c.repoSlug, c.mergeMode, c.label)
 			return nil
 		}
 		issues, err = filterByBarrier(c, fc, issues)
@@ -1076,7 +1112,7 @@ func previewIssues(c config, fc forge.Client, w io.Writer, issueNums []string) e
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "repo: %s\n", c.repoSlug)
+	fmt.Fprintf(w, "repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
 	if len(issues) == 0 {
 		fmt.Fprintf(w, "no issues would be dispatched (fanout-blocker fence in effect)\n")
 		return nil
@@ -1119,7 +1155,7 @@ func previewSelectiveList(c config, fc forge.Client, w io.Writer, nums []string)
 		fmt.Fprintln(w, n)
 	}
 
-	fmt.Fprintf(w, "repo: %s\n", c.repoSlug)
+	fmt.Fprintf(w, "repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
 	if len(kept) == 0 {
 		fmt.Fprintf(w, "no issues would be dispatched after eviction\n")
 		return nil
