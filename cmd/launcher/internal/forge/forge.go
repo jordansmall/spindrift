@@ -9,6 +9,14 @@ import "errors"
 // rebase the head branch and retry.
 var ErrMergeConflict = errors.New("merge conflict")
 
+// ErrAuthFailure is returned by Probe when the forge credentials are missing
+// or invalid. Callers should advise the user to check GH_TOKEN.
+var ErrAuthFailure = errors.New("forge auth failure")
+
+// ErrRepoNotFound is returned by Probe when the configured repository cannot
+// be reached or does not exist under the authenticated account.
+var ErrRepoNotFound = errors.New("forge repo not found")
+
 // Issue is a GitHub issue as seen by the launcher.
 type Issue struct {
 	Number string // launcher keeps issue numbers as strings
@@ -51,4 +59,8 @@ type Client interface {
 	Rebase(prURL string) error                       // checkout head, rebase onto base, force-push
 	CanAutoMerge() (bool, error)                     // true if the repo allows auto-merge
 	EnqueueAutoMerge(prURL string) error             // gh pr merge --auto --rebase --delete-branch
+	// Probe checks that the forge credentials are valid and the configured
+	// repository is reachable. Returns the resolved repo slug on success, or
+	// ErrAuthFailure / ErrRepoNotFound to distinguish the two failure modes.
+	Probe() (string, error)
 }

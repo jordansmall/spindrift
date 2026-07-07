@@ -250,6 +250,22 @@ func (e *execClient) EnqueueAutoMerge(prURL string) error {
 	return nil
 }
 
+// Probe checks that gh is authenticated and the configured repository is
+// reachable. It returns the resolved repo slug on success, ErrAuthFailure if
+// the credential check fails, or ErrRepoNotFound if the repo cannot be found.
+func (e *execClient) Probe() (string, error) {
+	if err := exec.Command("gh", "auth", "status").Run(); err != nil {
+		return "", fmt.Errorf("%w: %s", ErrAuthFailure, err)
+	}
+	out, err := exec.Command("gh", "repo", "view", "--repo", e.repo,
+		"--json", "nameWithOwner", "--jq", ".nameWithOwner",
+	).Output()
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", ErrRepoNotFound, e.repo)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // Rebase checks out the PR's head branch into a temporary clone of the target
 // repository, rebases it onto origin/<base>, and force-pushes the result.
 // Returns ErrMergeConflict if the rebase cannot be completed automatically.
