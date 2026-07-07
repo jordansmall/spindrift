@@ -7,6 +7,8 @@ logs/
 
 # local config + secrets
 harness.env
+.env
+.envrc
 
 # direnv
 .direnv/
