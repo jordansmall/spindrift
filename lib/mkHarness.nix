@@ -52,6 +52,9 @@
   # run inside the unprivileged throwaway container. On by default — this is the
   # nix-centric baseline every box gets; set to false for a lean, nix-free image.
   nixInBox ? true,
+  # Short git revision injected into the binary via ldflags for `spindrift --version`.
+  # Callers pass self.shortRev or self.rev; defaults to "unknown" for impure builds.
+  revision ? "unknown",
 }:
 let
   # OCI images are Linux-only. Map the Consumer's (possibly darwin) system to
@@ -458,6 +461,10 @@ let
     src = ../cmd/launcher;
     vendorHash = null;
     subPackages = [ "." ]; # build only the launcher; heartbeat-filter is in-box only
+    ldflags = [
+      "-X main.version=${spindriftVersion}"
+      "-X main.revision=${revision}"
+    ];
     meta.license = lib.licenses.mit;
   };
 
@@ -474,10 +481,46 @@ let
     meta.license = lib.licenses.mit;
   });
 
-  # The run command: a thin shell wrapper that bakes nix-computed config into
-  # env vars, sources harness.env for runtime overrides, then execs the Go
-  # binary. The binary contains no baked store paths of its own beyond those
-  # injected here (ADR 0007).
+  # Shared shell body used by both the spindrift CLI and the deprecated run alias.
+  # Bakes nix-computed config into env vars, sources harness.env for runtime
+  # overrides, then execs the Go binary (ADR 0007).
+  runShellBody =
+    goRunPreamble
+    + goRunDefaultsPreamble
+    + boxEnvVarsPreamble
+    + ''
+      # Config + secrets (gitignored), read from $PWD since the harness is a
+      # store path with no working tree. `set -a` overrides the baked defaults.
+      if [ -f "$PWD/harness.env" ]; then
+        set -a
+        # shellcheck disable=SC1091
+        . "$PWD/harness.env"
+        set +a
+      fi
+      # Commit identity: explicit override wins, else inherit the host git config.
+      GIT_USER_NAME="''${GIT_USER_NAME:-$(git config --get user.name 2>/dev/null || true)}"
+      GIT_USER_EMAIL="''${GIT_USER_EMAIL:-$(git config --get user.email 2>/dev/null || true)}"
+      export GIT_USER_NAME GIT_USER_EMAIL
+    '';
+
+  # The spindrift CLI: bakes nix-computed config as env vars and execs the Go
+  # launcher. Exposed as packages.spindrift, apps.default, and in devShells.
+  spindrift = (hostPkgs.writeShellApplication {
+    name = "spindrift";
+    runtimeInputs = with hostPkgs; [
+      gh
+      git
+      coreutils
+    ];
+    text = runShellBody + ''
+      exec ${launcherBin}/bin/launcher "$@"
+    '';
+  }).overrideAttrs (_: {
+    meta.license = lib.licenses.mit;
+  });
+
+  # Deprecated run alias: prints a one-line stderr notice and execs spindrift dispatch.
+  # Kept for one release (ADR-0010); removal target: next minor after 0.1.x.
   run = (hostPkgs.writeShellApplication {
     name = "run";
     runtimeInputs = with hostPkgs; [
@@ -485,25 +528,10 @@ let
       git
       coreutils
     ];
-    text =
-      goRunPreamble
-      + goRunDefaultsPreamble
-      + boxEnvVarsPreamble
-      + ''
-        # Config + secrets (gitignored), read from $PWD since the harness is a
-        # store path with no working tree. `set -a` overrides the baked defaults.
-        if [ -f "$PWD/harness.env" ]; then
-          set -a
-          # shellcheck disable=SC1091
-          . "$PWD/harness.env"
-          set +a
-        fi
-        # Commit identity: explicit override wins, else inherit the host git config.
-        GIT_USER_NAME="''${GIT_USER_NAME:-$(git config --get user.name 2>/dev/null || true)}"
-        GIT_USER_EMAIL="''${GIT_USER_EMAIL:-$(git config --get user.email 2>/dev/null || true)}"
-        export GIT_USER_NAME GIT_USER_EMAIL
-        exec ${launcherBin}/bin/launcher "$@"
-      '';
+    text = runShellBody + ''
+      >&2 echo "spindrift: 'nix run .#run' is deprecated; use 'spindrift dispatch' instead. Removal: v0.2.0. See MIGRATING.md."
+      exec ${launcherBin}/bin/launcher dispatch "$@"
+    '';
   }).overrideAttrs (_: {
     meta.license = lib.licenses.mit;
   });
@@ -525,13 +553,14 @@ else
     agentFiles
     build
     run
+    spindrift
     imagePath
     promptDir
     skillsDir
     ;
 
   packages = {
-    inherit build run;
+    inherit build run spindrift;
   }
   # The OCI image is not relevant for the bwrap runner (no image build/load).
   // lib.optionalAttrs (isLinux && runtime != "bwrap") { agent-image = image; };
@@ -541,6 +570,12 @@ else
       type = "app";
       program = "${build}/bin/build";
     };
+    # apps.default is the primary entry point: spindrift CLI.
+    default = {
+      type = "app";
+      program = "${spindrift}/bin/spindrift";
+    };
+    # Deprecated: kept for one release. Prints a notice and execs spindrift dispatch.
     run = {
       type = "app";
       program = "${run}/bin/run";

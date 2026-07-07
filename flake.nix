@@ -62,11 +62,13 @@
           };
 
           # For hacking ON the harness itself (host-side).
+          # spindrift CLI is included so `nix develop` → `spindrift dispatch` works.
           devShells.default = pkgs.mkShell {
             packages = [
               pkgs.git
               pkgs.gh
               pkgs.jq
+              config.packages.spindrift
             ];
           };
         };
