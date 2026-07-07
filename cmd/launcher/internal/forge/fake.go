@@ -45,6 +45,15 @@ type Fake struct {
 	SwapCalls []SwapCall
 	// CommentCalls records all Comment invocations in order.
 	CommentCalls []CommentCall
+
+	// AutoMergeAllowed controls what CanAutoMerge returns (default false).
+	AutoMergeAllowed bool
+	// AutoMergeErr, if non-nil, is returned by CanAutoMerge.
+	AutoMergeErr error
+	// EnqueueAutoMergeErr, if non-nil, is returned by EnqueueAutoMerge.
+	EnqueueAutoMergeErr error
+	// EnqueueAutoMergeCalls records all PR URLs passed to EnqueueAutoMerge.
+	EnqueueAutoMergeCalls []string
 }
 
 // NewFake returns an empty Fake client.
@@ -249,4 +258,20 @@ func (f *Fake) Rebase(url string) error {
 	defer f.mu.Unlock()
 	f.RebasedURLs = append(f.RebasedURLs, url)
 	return f.RebaseErr
+}
+
+func (f *Fake) CanAutoMerge() (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.AutoMergeErr != nil {
+		return false, f.AutoMergeErr
+	}
+	return f.AutoMergeAllowed, nil
+}
+
+func (f *Fake) EnqueueAutoMerge(prURL string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.EnqueueAutoMergeCalls = append(f.EnqueueAutoMergeCalls, prURL)
+	return f.EnqueueAutoMergeErr
 }

@@ -49,4 +49,6 @@ type Client interface {
 	CheckState(url string) (RollupState, error)      // aggregate statusCheckRollup
 	Merge(url string) error                          // rebase + delete branch
 	Rebase(prURL string) error                       // checkout head, rebase onto base, force-push
+	CanAutoMerge() (bool, error)                     // true if the repo allows auto-merge
+	EnqueueAutoMerge(prURL string) error             // gh pr merge --auto --rebase --delete-branch
 }
