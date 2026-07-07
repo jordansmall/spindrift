@@ -70,7 +70,7 @@
   mergeMode = {
     env = "MERGE_MODE";
     default = "manual";
-    doc = "post-green merge policy: immediate (merge on green), auto (reserved; routes to manual), manual (leave PR open for human approval)";
+    doc = "post-green merge policy: immediate (merge on green), auto (enqueue GitHub native auto-merge; repo must have Allow auto-merge enabled), manual (leave PR open for human approval)";
     flakeOption = true;
     boxEnv = false;
   };
