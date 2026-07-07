@@ -61,6 +61,7 @@ in
         # is pinned into their runtimeInputs PATH and would otherwise
         # shadow a PATH-injected fake.
         RUN_CMD = "${batsHarness.run}/bin/run";
+        SPINDRIFT_CMD = "${batsHarness.spindrift}/bin/spindrift";
         BUILD_CMD = "${batsHarness.build}/bin/build";
         BUILD_NO_RUNTIME_CMD = "${noRuntimeHarness.build}/bin/build";
         CUSTOM_RUN_CMD = "${customHarness.run}/bin/run";

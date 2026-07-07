@@ -729,7 +729,7 @@ EOF
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
-  run "$RUN_CMD" engage 1
+  run "$SPINDRIFT_CMD" engage 1
   [ "$status" -eq 0 ]
   [[ "$output" == *"status=adopted"* ]]
   [[ "$output" == *"status=verified-merged"* ]]
@@ -743,7 +743,7 @@ EOF
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   export FAKE_GH_PR_DRAFT_1="true"
-  run "$RUN_CMD" engage 1
+  run "$SPINDRIFT_CMD" engage 1
   [ "$status" -ne 0 ]
   [[ "$output" == *"status=skipped"* ]]
   ! grep -q 'pr merge' "$GH_LOG"
@@ -756,7 +756,7 @@ EOF
   export FAKE_GH_ISSUES=$'1\tStranded issue'
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
   # No FAKE_GH_PR_LIST_1 → no PR found
-  run "$RUN_CMD" engage 1
+  run "$SPINDRIFT_CMD" engage 1
   [ "$status" -ne 0 ]
   [[ "$output" == *"status=skipped"* ]]
   ! grep -q 'pr merge' "$GH_LOG"
