@@ -1429,6 +1429,7 @@ func run(noBuild bool) error {
 	}
 
 	fc := forge.NewExecClient(c.repoSlug)
+	fmt.Printf("repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
 
 	// Reconcile stranded in-progress issues before dispatching new work.
 	// Skip when ISSUE_NUMBER is set — the caller already claimed a specific issue.
