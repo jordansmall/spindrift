@@ -148,8 +148,9 @@ func TestSelectiveListDispatch_NonInteractiveAbort(t *testing.T) {
 	}
 }
 
-// TestSelectiveListDispatch_BlockerOrderedAhead: when #99 (already complete)
-// blocks #15 and both are in the list, #15 is not evicted and both are dispatched.
+// TestSelectiveListDispatch_BlockerOrderedAhead: when #99 (already done — issue
+// closed) blocks #15 and both are in the list, #15 is not evicted and both are
+// dispatched.
 func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -158,9 +159,9 @@ func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 	c.depsWaitSecs = 100
 
 	fc := forge.NewFake()
-	// #99 is already complete (e.g. just ran in an earlier wave).
-	fc.SetIssue(forge.Issue{Number: "99", Title: "blocker", Labels: []string{c.label, c.completeLabel}})
-	// #15 is blocked by #99 (in the list and complete → edge satisfied).
+	// #99 is already done — issue closed (PR merged + auto-close).
+	fc.SetIssue(forge.Issue{Number: "99", Title: "blocker", State: "CLOSED", Labels: []string{c.label}})
+	// #15 is blocked by #99 (in the list and closed → edge satisfied).
 	fc.SetIssue(forge.Issue{Number: "15", Title: "dependent", Labels: []string{c.label},
 		Body: "## Blocked by\n- #99\n"})
 

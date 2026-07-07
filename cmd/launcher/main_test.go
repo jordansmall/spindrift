@@ -230,9 +230,13 @@ func TestUnreadyBlockers_Pending(t *testing.T) {
 	}
 }
 
-func TestUnreadyBlockers_CompleteAndClosedAreReady(t *testing.T) {
+func TestUnreadyBlockers_MergedAndClosedAreReady(t *testing.T) {
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN", Labels: []string{"agent-complete"}})
+	// #11: PR merged — satisfied by merged PR regardless of labels.
+	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
+	fc.SetPR("11", forge.PR{URL: "https://github.com/owner/repo/pull/11"})
+	fc.SetPRState("https://github.com/owner/repo/pull/11", "MERGED")
+	// #12: issue closed with no PR — fallback satisfied.
 	fc.SetIssue(forge.Issue{Number: "12", State: "CLOSED"})
 	c := config{completeLabel: "agent-complete"}
 	edges := map[string][]string{"10": {"11", "12"}}
@@ -243,8 +247,12 @@ func TestUnreadyBlockers_CompleteAndClosedAreReady(t *testing.T) {
 
 func TestUnreadyBlockers_Mixed(t *testing.T) {
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN", Labels: []string{"agent-complete"}})
-	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN"}) // still blocking
+	// #11: PR merged — satisfied.
+	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
+	fc.SetPR("11", forge.PR{URL: "https://github.com/owner/repo/pull/11"})
+	fc.SetPRState("https://github.com/owner/repo/pull/11", "MERGED")
+	// #12: still open with no merged PR — blocking.
+	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN"})
 	c := config{completeLabel: "agent-complete"}
 	edges := map[string][]string{"10": {"11", "12"}}
 	if got := unreadyBlockers(c, fc, "10", edges); !reflect.DeepEqual(got, []string{"12"}) {
