@@ -420,7 +420,7 @@ func TestDoctor_Success(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	var buf bytes.Buffer
-	if err := runDoctor(f, defaultLabelConfig(), &buf); err != nil {
+	if err := runDoctor(f, defaultLabelConfig(), &buf, strings.NewReader(""), false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(buf.String(), "owner/repo") {
@@ -433,7 +433,7 @@ func TestDoctor_AuthFailure(t *testing.T) {
 	f.ProbeErr = forge.ErrAuthFailure
 
 	var buf bytes.Buffer
-	err := runDoctor(f, config{}, &buf)
+	err := runDoctor(f, config{}, &buf, strings.NewReader(""), false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -447,7 +447,7 @@ func TestDoctor_RepoNotFound(t *testing.T) {
 	f.ProbeErr = forge.ErrRepoNotFound
 
 	var buf bytes.Buffer
-	err := runDoctor(f, config{}, &buf)
+	err := runDoctor(f, config{}, &buf, strings.NewReader(""), false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -471,7 +471,7 @@ func TestDoctor_LabelsAllPresent(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	var buf bytes.Buffer
-	if err := runDoctor(f, defaultLabelConfig(), &buf); err != nil {
+	if err := runDoctor(f, defaultLabelConfig(), &buf, strings.NewReader(""), false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
@@ -491,7 +491,7 @@ func TestDoctor_LabelsSomeMissing(t *testing.T) {
 	f.Labels = []string{"ready-for-agent", "agent-in-progress"}
 
 	var buf bytes.Buffer
-	err := runDoctor(f, defaultLabelConfig(), &buf)
+	err := runDoctor(f, defaultLabelConfig(), &buf, strings.NewReader(""), false)
 	if err == nil {
 		t.Fatal("expected non-zero exit for missing labels, got nil")
 	}
@@ -507,7 +507,7 @@ func TestDoctor_LabelsAllMissing(t *testing.T) {
 	f.Labels = []string{}
 
 	var buf bytes.Buffer
-	err := runDoctor(f, defaultLabelConfig(), &buf)
+	err := runDoctor(f, defaultLabelConfig(), &buf, strings.NewReader(""), false)
 	if err == nil {
 		t.Fatal("expected non-zero exit for all-missing labels, got nil")
 	}
@@ -515,4 +515,85 @@ func TestDoctor_LabelsAllMissing(t *testing.T) {
 	if !strings.Contains(out, "missing") {
 		t.Errorf("want output to mention 'missing', got:\n%s", out)
 	}
+}
+
+func TestDoctor_NoTTY_NoPrompt(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent"} // three missing
+
+	var buf bytes.Buffer
+	err := runDoctor(f, defaultLabelConfig(), &buf, strings.NewReader(""), false)
+	if err == nil {
+		t.Fatal("expected non-zero exit for missing labels, got nil")
+	}
+	if strings.Contains(buf.String(), "[y/N]") {
+		t.Errorf("no-TTY path must not show a prompt, got:\n%s", buf.String())
+	}
+	if len(f.CreateLabelCalls) != 0 {
+		t.Errorf("no-TTY path must not create labels, got %d calls", len(f.CreateLabelCalls))
+	}
+}
+
+func TestDoctor_TTY_Decline(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent"} // three missing
+
+	var buf bytes.Buffer
+	err := runDoctor(f, defaultLabelConfig(), &buf, strings.NewReader("n\n"), true)
+	if err == nil {
+		t.Fatal("expected non-zero exit on decline, got nil")
+	}
+	if !strings.Contains(buf.String(), "[y/N]") {
+		t.Errorf("TTY path must show the prompt, got:\n%s", buf.String())
+	}
+	if len(f.CreateLabelCalls) != 0 {
+		t.Errorf("decline must not create labels, got %d calls", len(f.CreateLabelCalls))
+	}
+}
+
+func TestDoctor_TTY_Confirm(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	// Two labels missing: agent-failed and agent-complete
+	f.Labels = []string{"ready-for-agent", "agent-in-progress"}
+	// After creation the fake doesn't auto-add to Labels, so script the
+	// second ListLabels call (re-verify) to return all four.
+	f.LabelsSeq = [][]string{
+		{"ready-for-agent", "agent-in-progress"},                                   // first check
+		{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, // re-verify
+	}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, defaultLabelConfig(), &buf, strings.NewReader("y\n"), true)
+	if err != nil {
+		t.Fatalf("unexpected error after confirm: %v", err)
+	}
+	if len(f.CreateLabelCalls) != 2 {
+		t.Fatalf("want 2 CreateLabel calls, got %d", len(f.CreateLabelCalls))
+	}
+	names := []string{f.CreateLabelCalls[0].Name, f.CreateLabelCalls[1].Name}
+	if !contains(names, "agent-failed") || !contains(names, "agent-complete") {
+		t.Errorf("want agent-failed and agent-complete created, got %v", names)
+	}
+	// Verify default colors are from triageLabelMeta
+	for _, call := range f.CreateLabelCalls {
+		if call.Color == "" || call.Color == "ededed" {
+			t.Errorf("label %q should use a named color, got %q", call.Name, call.Color)
+		}
+	}
+	out := buf.String()
+	if !strings.Contains(out, "ok: all triage labels present") {
+		t.Errorf("want success message after creation, got:\n%s", out)
+	}
+}
+
+func contains(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

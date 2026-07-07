@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -1120,10 +1121,25 @@ func recoverIssue(issueNum string) error {
 	return recoverByNumber(c, fc, pwd, r, issueNum)
 }
 
+// labelMeta holds the default color and description for a triage label.
+type labelMeta struct {
+	description string
+	color       string // hex without leading #
+}
+
+// triageLabelMeta is the single source of truth for default triage label
+// colors and descriptions, keyed by the canonical label name.
+var triageLabelMeta = map[string]labelMeta{
+	"ready-for-agent":   {description: "Fully specified; ready for an AFK agent", color: "0075ca"},
+	"agent-in-progress": {description: "An AFK agent is actively working this issue", color: "e4e669"},
+	"agent-failed":      {description: "Box exited non-zero; needs human triage", color: "d93f0b"},
+	"agent-complete":    {description: "Agent work merged and green", color: "0e8a16"},
+}
+
 // runDoctor probes forge connectivity, then checks that all configured triage
-// labels exist in the repository. It returns an error if any check fails; a
-// missing label causes a non-zero exit so CI can catch an unconfigured repo.
-func runDoctor(fc forge.Client, c config, w io.Writer) error {
+// labels exist in the repository. When interactive is true and labels are
+// missing, it prompts to create them; otherwise it reports and exits non-zero.
+func runDoctor(fc forge.Client, c config, w io.Writer, stdin io.Reader, interactive bool) error {
 	repo, err := fc.Probe()
 	if err != nil {
 		if errors.Is(err, forge.ErrAuthFailure) {
@@ -1136,29 +1152,68 @@ func runDoctor(fc forge.Client, c config, w io.Writer) error {
 	}
 	fmt.Fprintf(w, "ok: forge connectivity confirmed — %s is reachable\n", repo)
 
-	existing, err := fc.ListLabels()
-	if err != nil {
-		return fmt.Errorf("label check failed: %w", err)
-	}
-	present := make(map[string]bool, len(existing))
-	for _, l := range existing {
-		present[l] = true
+	checkLabels := func() ([]string, error) {
+		existing, lerr := fc.ListLabels()
+		if lerr != nil {
+			return nil, fmt.Errorf("label check failed: %w", lerr)
+		}
+		present := make(map[string]bool, len(existing))
+		for _, l := range existing {
+			present[l] = true
+		}
+		expected := []string{c.label, c.inProgressLabel, c.failedLabel, c.completeLabel}
+		var missing []string
+		for _, label := range expected {
+			if present[label] {
+				fmt.Fprintf(w, "ok: label %q present\n", label)
+			} else {
+				fmt.Fprintf(w, "MISSING: label %q missing\n", label)
+				missing = append(missing, label)
+			}
+		}
+		return missing, nil
 	}
 
-	expected := []string{c.label, c.inProgressLabel, c.failedLabel, c.completeLabel}
-	var anyMissing bool
-	for _, label := range expected {
-		if present[label] {
-			fmt.Fprintf(w, "ok: label %q present\n", label)
-		} else {
-			fmt.Fprintf(w, "MISSING: label %q missing\n", label)
-			anyMissing = true
-		}
+	missing, err := checkLabels()
+	if err != nil {
+		return err
 	}
-	if anyMissing {
+	if len(missing) == 0 {
+		return nil
+	}
+
+	if !interactive {
 		return fmt.Errorf("one or more triage labels are missing — create them in the repository")
 	}
-	return nil
+
+	fmt.Fprintf(w, "Create %d missing label(s)? [y/N] ", len(missing))
+	scanner := bufio.NewScanner(stdin)
+	if !scanner.Scan() || strings.ToLower(strings.TrimSpace(scanner.Text())) != "y" {
+		fmt.Fprintln(w)
+		return fmt.Errorf("one or more triage labels are missing — create them in the repository")
+	}
+
+	for _, name := range missing {
+		meta, ok := triageLabelMeta[name]
+		if !ok {
+			meta = labelMeta{color: "ededed"}
+		}
+		if cerr := fc.CreateLabel(name, meta.description, meta.color); cerr != nil {
+			return fmt.Errorf("create label %q: %w", name, cerr)
+		}
+		fmt.Fprintf(w, "created: label %q\n", name)
+	}
+
+	// Re-verify after creation.
+	missing, err = checkLabels()
+	if err != nil {
+		return err
+	}
+	if len(missing) == 0 {
+		fmt.Fprintln(w, "ok: all triage labels present")
+		return nil
+	}
+	return fmt.Errorf("one or more triage labels are still missing after creation")
 }
 
 // previewIssues is the testable core of the preview verb. When issueNums is
@@ -1612,7 +1667,9 @@ func main() {
 	if len(args) > 0 && args[0] == "doctor" {
 		c := loadConfig()
 		fc := forge.NewExecClient(c.repoSlug)
-		if err := runDoctor(fc, c, os.Stdout); err != nil {
+		stat, _ := os.Stdin.Stat()
+		interactive := (stat.Mode() & os.ModeCharDevice) != 0
+		if err := runDoctor(fc, c, os.Stdout, os.Stdin, interactive); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}

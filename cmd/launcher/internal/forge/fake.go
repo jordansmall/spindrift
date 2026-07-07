@@ -67,7 +67,12 @@ type Fake struct {
 	ProbeRepo string
 
 	// Labels is the list of label names returned by ListLabels on success.
+	// When LabelsSeq is non-empty, each call pops the next entry from it
+	// instead (falling back to Labels once the sequence is exhausted).
 	Labels []string
+	// LabelsSeq, when non-empty, is a per-call queue drained by ListLabels.
+	// Each call pops the first slice; when exhausted, Labels is used.
+	LabelsSeq [][]string
 	// ListLabelsErr, if non-nil, is returned by ListLabels.
 	ListLabelsErr error
 
@@ -312,8 +317,13 @@ func (f *Fake) ListLabels() ([]string, error) {
 	if f.ListLabelsErr != nil {
 		return nil, f.ListLabelsErr
 	}
-	out := make([]string, len(f.Labels))
-	copy(out, f.Labels)
+	src := f.Labels
+	if len(f.LabelsSeq) > 0 {
+		src = f.LabelsSeq[0]
+		f.LabelsSeq = f.LabelsSeq[1:]
+	}
+	out := make([]string, len(src))
+	copy(out, src)
 	return out, nil
 }
 
