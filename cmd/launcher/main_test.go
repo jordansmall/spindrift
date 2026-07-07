@@ -230,11 +230,15 @@ func TestUnreadyBlockers_Pending(t *testing.T) {
 	}
 }
 
-func TestUnreadyBlockers_CompleteAndClosedAreReady(t *testing.T) {
+func TestUnreadyBlockers_MergedAndClosedAreReady(t *testing.T) {
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN", Labels: []string{"agent-complete"}})
+	// issue #11: open, PR merged — satisfies via merged-PR path
+	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
+	fc.SetPR("agent/issue-11", forge.PR{URL: "https://github.com/example/repo/pull/11"})
+	fc.SetPRState("https://github.com/example/repo/pull/11", "MERGED")
+	// issue #12: closed, no PR — satisfies via closed-issue fallback
 	fc.SetIssue(forge.Issue{Number: "12", State: "CLOSED"})
-	c := config{completeLabel: "agent-complete"}
+	c := config{branchPrefix: "agent/issue-"}
 	edges := map[string][]string{"10": {"11", "12"}}
 	if got := unreadyBlockers(c, fc, "10", edges); len(got) != 0 {
 		t.Errorf("expected no unready blockers, got %v", got)
@@ -243,12 +247,54 @@ func TestUnreadyBlockers_CompleteAndClosedAreReady(t *testing.T) {
 
 func TestUnreadyBlockers_Mixed(t *testing.T) {
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN", Labels: []string{"agent-complete"}})
-	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN"}) // still blocking
-	c := config{completeLabel: "agent-complete"}
+	// issue #11: open, PR merged — satisfied
+	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
+	fc.SetPR("agent/issue-11", forge.PR{URL: "https://github.com/example/repo/pull/11"})
+	fc.SetPRState("https://github.com/example/repo/pull/11", "MERGED")
+	// issue #12: open, no merged PR — still blocking
+	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN"})
+	c := config{branchPrefix: "agent/issue-"}
 	edges := map[string][]string{"10": {"11", "12"}}
 	if got := unreadyBlockers(c, fc, "10", edges); !reflect.DeepEqual(got, []string{"12"}) {
 		t.Errorf("expected [12], got %v", got)
+	}
+}
+
+// TestBlockerReady_CompleteLabel_OpenPR_NotReady covers acceptance criterion 3:
+// carrying agent-complete with an open PR must not satisfy the blocker.
+func TestBlockerReady_CompleteLabel_OpenPR_NotReady(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN", Labels: []string{"agent-complete"}})
+	fc.SetPR("agent/issue-11", forge.PR{URL: "https://github.com/example/repo/pull/1"})
+	// PR state defaults to OPEN in the fake, but be explicit
+	fc.SetPRState("https://github.com/example/repo/pull/1", "OPEN")
+	c := config{branchPrefix: "agent/issue-"}
+	if blockerReady(c, fc, "11") {
+		t.Error("expected open PR with agent-complete label to not satisfy blocker")
+	}
+}
+
+// TestBlockerReady_ClosedNoPR_Ready covers the closed-issue fallback: a blocker
+// that is CLOSED with no discoverable PR is treated as satisfied.
+func TestBlockerReady_ClosedNoPR_Ready(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "11", State: "CLOSED"})
+	c := config{branchPrefix: "agent/issue-"}
+	if !blockerReady(c, fc, "11") {
+		t.Error("expected closed issue with no PR to satisfy blocker")
+	}
+}
+
+// TestBlockerReady_MergedPR covers the primary acceptance criterion: a blocker
+// whose PR state is MERGED is satisfied regardless of any label.
+func TestBlockerReady_MergedPR(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
+	fc.SetPR("agent/issue-11", forge.PR{URL: "https://github.com/example/repo/pull/1"})
+	fc.SetPRState("https://github.com/example/repo/pull/1", "MERGED")
+	c := config{branchPrefix: "agent/issue-"}
+	if !blockerReady(c, fc, "11") {
+		t.Error("expected merged PR to satisfy blocker")
 	}
 }
 
