@@ -337,7 +337,7 @@ func TestApplyMergeMode_Auto(t *testing.T) {
 
 // TestSelfHeal_MergeFailureAfterGreenKeepsComplete verifies that a merge
 // failure after CI reaches green leaves the issue at agent-complete (not
-// agent-failed).
+// agent-failed) and returns (ok=true, merged=false).
 func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	c := baseConfig()
 	c.mergeMode = "immediate"
@@ -348,10 +348,36 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErr = errors.New("required review missing")
 
-	ok := selfHeal(c, fc, func(int) error { return nil }, nil, "1", testPR)
+	ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", testPR)
 	if !ok {
-		t.Error("selfHeal must return true when CI reached green (even if merge fails)")
+		t.Error("selfHeal must return ok=true when CI reached green (even if merge fails)")
 	}
+	if merged {
+		t.Error("selfHeal must return merged=false when merge fails")
+	}
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, c.completeLabel) {
+		t.Errorf("issue must carry %q after green+merge-failure; labels=%v", c.completeLabel, iss.Labels)
+	}
+	if containsLabel(iss.Labels, c.failedLabel) {
+		t.Errorf("issue must NOT carry %q after merge failure on green PR; labels=%v", c.failedLabel, iss.Labels)
+	}
+}
+
+// TestAdoptAndGate_ImmediateMergeFailureStaysComplete verifies that adoptAndGate
+// in immediate mode does not demote the issue to agent-failed when the merge
+// itself fails after CI goes green (spec: merge-blocked stays at agent-complete).
+func TestAdoptAndGate_ImmediateMergeFailureStaysComplete(t *testing.T) {
+	c := baseConfig()
+	c.mergeMode = "immediate"
+	c.maxRebaseAttempts = 0
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.MergeErr = errors.New("required review missing")
+
+	adoptAndGate(c, fc, issue{number: "1"}, testPR, func(int) error { return nil }, nil)
+
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, c.completeLabel) {
 		t.Errorf("issue must carry %q after green+merge-failure; labels=%v", c.completeLabel, iss.Labels)

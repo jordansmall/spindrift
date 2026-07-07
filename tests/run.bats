@@ -1203,10 +1203,11 @@ EOF
   [[ "$output" == *"status=verified-merged"* ]]
 }
 
-# conflict→rebase-fails→failed: merge fails with conflict; the rebase fails
-# (no git repo in the clone dir because gh repo clone is a no-op stub here)
-# → launcher swaps to agent-failed without dispatching a fix box.
-@test "merge gate: conflict → rebase fails → agent-failed" {
+# conflict→rebase-fails→merge-blocked: merge fails with conflict; the rebase
+# fails (no git repo in the clone dir because gh repo clone is a no-op stub
+# here) → launcher leaves the issue at agent-complete with a merge-blocked note
+# rather than demoting it to agent-failed.
+@test "merge gate: conflict → rebase fails → merge-blocked (stays agent-complete)" {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
@@ -1214,15 +1215,16 @@ EOF
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   export FAKE_GH_PR_MERGE_CONFLICT_1=99  # all merge calls fail with conflict
   # gh repo clone is a no-op here (no real git remote configured), so the
-  # subsequent git checkout fails → Rebase returns an error → agent-failed.
+  # subsequent git checkout fails → Rebase returns an error → merge-blocked.
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=100
   export MAX_REBASE_ATTEMPTS=3
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed --remove-label agent-in-progress' "$GH_LOG"
-  [[ "$output" == *"status=failed"* ]]
-  # Launcher must log the rebase-retry attempt before failing.
+  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
+  ! grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-failed' "$GH_LOG"
+  [[ "$output" == *"status=merge-blocked"* ]]
+  # Launcher must log the rebase-retry attempt before blocking.
   [[ "$output" == *"status=rebase-retry"* ]]
 }
 
