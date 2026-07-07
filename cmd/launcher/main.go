@@ -1066,6 +1066,10 @@ func previewIssues(c config, fc forge.Client, w io.Writer, issueNums []string) e
 			return err
 		}
 	}
+	edges, err := parseBlockers(fc, issues)
+	if err != nil {
+		return err
+	}
 	fmt.Fprintf(w, "repo: %s\n", c.repoSlug)
 	if len(issues) == 0 {
 		fmt.Fprintf(w, "no issues would be dispatched (fanout-blocker fence in effect)\n")
@@ -1073,7 +1077,12 @@ func previewIssues(c config, fc forge.Client, w io.Writer, issueNums []string) e
 	}
 	fmt.Fprintf(w, "%d issue(s) would be dispatched:\n", len(issues))
 	for _, iss := range issues {
-		fmt.Fprintf(w, "  #%s  %s\n", iss.number, iss.title)
+		blockers := edges[iss.number]
+		if len(blockers) > 0 {
+			fmt.Fprintf(w, "  #%s  %s  (blocked by #%s)\n", iss.number, iss.title, strings.Join(blockers, ", #"))
+		} else {
+			fmt.Fprintf(w, "  #%s  %s\n", iss.number, iss.title)
+		}
 	}
 	return nil
 }
