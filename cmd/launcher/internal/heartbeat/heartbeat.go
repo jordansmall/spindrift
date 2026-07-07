@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,12 +27,12 @@ type Writer struct {
 	out      io.Writer
 	throttle time.Duration
 
-	mu        sync.Mutex
-	buf       []byte
-	turns     int
-	lastTool  string
-	lastPhase string
-	lastEmit  time.Time
+	mu         sync.Mutex
+	buf        []byte
+	turns      int
+	lastPhase  string
+	lastEmit   time.Time
+	toolCounts map[string]int // accumulated counts per tool kind since last narration/phase reset
 }
 
 // New returns a Writer that passes all bytes to raw unchanged and emits
@@ -40,10 +41,12 @@ type Writer struct {
 // DefaultThrottle if unsure.
 func New(raw io.Writer, issue string, out io.Writer, throttle time.Duration) *Writer {
 	return &Writer{
-		raw:      raw,
-		issue:    issue,
-		out:      out,
-		throttle: throttle,
+		raw:        raw,
+		issue:      issue,
+		out:        out,
+		throttle:   throttle,
+		toolCounts: make(map[string]int),
+		lastEmit:   time.Now(),
 	}
 }
 
@@ -96,14 +99,13 @@ func (w *Writer) parseLine(line string) {
 	if err := json.Unmarshal([]byte(line), &ev); err != nil {
 		return
 	}
-	changed := false
 	switch ev.Type {
 	case "assistant":
 		if ev.Message != nil {
 			// Subagent narration (parent_tool_use_id != "") is dropped: subagent
 			// text is implementation detail of the spawning tool, not operator intent.
 			if ev.ParentToolUseID == "" {
-				// Emit narration before tool line when both are present.
+				// Narration: emit text line, then emit count line for accumulated tools.
 				for _, block := range ev.Message.Content {
 					if block.Type == "text" {
 						if narration := trimNarration(block.Text); narration != "" {
@@ -114,32 +116,32 @@ func (w *Writer) parseLine(line string) {
 								line = "#" + w.issue + " \xc2\xb7 " + narration
 							}
 							fmt.Fprintln(w.out, line)
+							if hasCounts(w.toolCounts) {
+								fmt.Fprintln(w.out, FormatCountLine(w.issue, w.lastPhase, w.toolCounts))
+								clearCounts(w.toolCounts)
+							}
 							w.lastEmit = time.Now()
 						}
 						break
 					}
 				}
 			}
+			// Accumulate tool counts; emit count line on phase transition.
 			for _, block := range ev.Message.Content {
 				if block.Type == "tool_use" {
-					tool := formatTool(block.Name, block.Input)
 					phase := toolToPhase(block.Name, block.Input)
-					if tool != w.lastTool {
-						w.lastTool = tool
-						changed = true
-					}
 					if phase != w.lastPhase {
+						if hasCounts(w.toolCounts) {
+							fmt.Fprintln(w.out, FormatCountLine(w.issue, w.lastPhase, w.toolCounts))
+							clearCounts(w.toolCounts)
+							w.lastEmit = time.Now()
+						}
 						w.lastPhase = phase
-						changed = true
 					}
-					// Use first tool_use block per assistant event.
+					w.toolCounts[toolKind(block.Name)]++
 					break
 				}
 			}
-		}
-		if changed {
-			w.emit()
-			return
 		}
 	case "result":
 		if ev.NumTurns > 0 {
@@ -149,13 +151,17 @@ func (w *Writer) parseLine(line string) {
 		return
 	}
 	// Time-based fallback: emit if throttle duration has elapsed and we have state.
-	if (w.lastTool != "" || w.turns > 0) && time.Since(w.lastEmit) >= w.throttle {
+	if (hasCounts(w.toolCounts) || w.turns > 0) && time.Since(w.lastEmit) >= w.throttle {
 		w.emit()
 	}
 }
 
 func (w *Writer) emit() {
-	fmt.Fprintln(w.out, FormatHeartbeat(w.issue, w.turns, w.lastTool, w.lastPhase))
+	if hasCounts(w.toolCounts) {
+		fmt.Fprintln(w.out, FormatCountLine(w.issue, w.lastPhase, w.toolCounts))
+		clearCounts(w.toolCounts)
+	}
+	fmt.Fprintln(w.out, FormatHeartbeat(w.issue, w.turns, "", w.lastPhase))
 	w.lastEmit = time.Now()
 }
 
@@ -178,6 +184,93 @@ func FormatHeartbeat(issue string, turns int, lastTool, phase string) string {
 		fmt.Fprintf(&sb, " \xc2\xb7 %s", lastTool)
 	}
 	return sb.String()
+}
+
+// FormatCountLine returns a count summary line for accumulated tool calls.
+// Example: "#42 [explore] · 3 reads, 2 greps"
+func FormatCountLine(issue, phase string, counts map[string]int) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "#%s", issue)
+	if phase != "" {
+		fmt.Fprintf(&sb, " [%s]", phase)
+	}
+	fmt.Fprintf(&sb, " \xc2\xb7 %s", formatCounts(counts))
+	return sb.String()
+}
+
+// toolKind maps a tool name to its human-readable count kind.
+func toolKind(name string) string {
+	switch name {
+	case "Read":
+		return "read"
+	case "Edit", "Write", "NotebookEdit":
+		return "edit"
+	case "Grep", "Glob":
+		return "grep"
+	case "WebSearch", "WebFetch":
+		return "search"
+	case "Agent":
+		return "subagent"
+	default:
+		return strings.ToLower(name)
+	}
+}
+
+// formatCounts returns a comma-separated count string, e.g. "3 reads, 2 greps".
+// Kinds are emitted in a fixed display order so output is deterministic.
+func formatCounts(counts map[string]int) string {
+	order := []string{"read", "edit", "grep", "search", "bash", "subagent"}
+	seen := make(map[string]bool, len(order))
+	var parts []string
+	for _, kind := range order {
+		if n := counts[kind]; n > 0 {
+			seen[kind] = true
+			parts = append(parts, fmt.Sprintf("%d %s", n, pluralKind(kind, n)))
+		}
+	}
+	// Append any kinds not in the fixed order, sorted for determinism.
+	var extra []string
+	for kind := range counts {
+		if !seen[kind] && counts[kind] > 0 {
+			extra = append(extra, kind)
+		}
+	}
+	sort.Strings(extra)
+	for _, kind := range extra {
+		n := counts[kind]
+		parts = append(parts, fmt.Sprintf("%d %s", n, pluralKind(kind, n)))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// pluralKind returns the plural form of a tool kind label for count n.
+func pluralKind(kind string, n int) string {
+	if n == 1 {
+		return kind
+	}
+	switch kind {
+	case "search":
+		return "searches"
+	default:
+		return kind + "s"
+	}
+}
+
+// hasCounts reports whether any tool kind has a non-zero count.
+func hasCounts(counts map[string]int) bool {
+	for _, n := range counts {
+		if n > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// clearCounts resets all counts to zero by deleting every key.
+func clearCounts(counts map[string]int) {
+	for k := range counts {
+		delete(counts, k)
+	}
 }
 
 // trimNarration returns the first sentence of text, capped at 120 characters, with
@@ -227,28 +320,4 @@ func toolToPhase(name string, input json.RawMessage) string {
 	default:
 		return "explore"
 	}
-}
-
-// formatTool returns a compact label for a tool_use block, e.g. "Edit(main.go)".
-// It checks well-known input keys in priority order; falls back to the tool
-// name alone when no string argument can be extracted.
-func formatTool(name string, input json.RawMessage) string {
-	if len(input) == 0 {
-		return name
-	}
-	var m map[string]interface{}
-	if err := json.Unmarshal(input, &m); err != nil {
-		return name
-	}
-	for _, key := range []string{"file_path", "command", "path", "query"} {
-		if v, ok := m[key]; ok {
-			if s, ok := v.(string); ok && s != "" {
-				if len(s) > 40 {
-					s = s[:37] + "..."
-				}
-				return name + "(" + s + ")"
-			}
-		}
-	}
-	return name
 }
