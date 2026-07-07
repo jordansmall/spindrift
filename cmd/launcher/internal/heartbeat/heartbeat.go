@@ -1,6 +1,7 @@
 // Package heartbeat provides a streaming stream-json parser that emits
-// throttled per-issue status lines to the launcher terminal while forwarding
-// all bytes to the raw log writer unchanged.
+// per-issue status lines to the launcher terminal at natural event boundaries
+// (narration, phase change, result) while forwarding all bytes to the raw log
+// writer unchanged.
 package heartbeat
 
 import (
@@ -11,42 +12,31 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 )
 
-// DefaultThrottle is the minimum interval between heartbeat lines when no
-// tool change has been detected.
-const DefaultThrottle = 5 * time.Second
-
-// Writer wraps a raw io.Writer (the log file) and emits throttled heartbeat
-// lines to out (the launcher terminal). Every byte written to Writer is
-// forwarded to raw unchanged; heartbeat emission is a side-effect.
+// Writer wraps a raw io.Writer (the log file) and emits heartbeat lines to
+// out (the launcher terminal) at natural event boundaries. Every byte written
+// to Writer is forwarded to raw unchanged; heartbeat emission is a side-effect.
 type Writer struct {
-	raw      io.Writer
-	issue    string
-	out      io.Writer
-	throttle time.Duration
+	raw   io.Writer
+	issue string
+	out   io.Writer
 
 	mu         sync.Mutex
 	buf        []byte
 	turns      int
 	lastPhase  string
-	lastEmit   time.Time
 	toolCounts map[string]int // accumulated counts per tool kind since last narration/phase reset
 }
 
 // New returns a Writer that passes all bytes to raw unchanged and emits
-// throttled heartbeat lines to out. throttle controls the minimum time
-// between heartbeat emissions when no new tool is detected; use
-// DefaultThrottle if unsure.
-func New(raw io.Writer, issue string, out io.Writer, throttle time.Duration) *Writer {
+// heartbeat lines to out at natural boundaries (narration, phase change, result).
+func New(raw io.Writer, issue string, out io.Writer) *Writer {
 	return &Writer{
 		raw:        raw,
 		issue:      issue,
 		out:        out,
-		throttle:   throttle,
 		toolCounts: make(map[string]int),
-		lastEmit:   time.Now(),
 	}
 }
 
@@ -120,7 +110,6 @@ func (w *Writer) parseLine(line string) {
 								fmt.Fprintln(w.out, FormatCountLine(w.issue, w.lastPhase, w.toolCounts))
 								clearCounts(w.toolCounts)
 							}
-							w.lastEmit = time.Now()
 						}
 						break
 					}
@@ -134,7 +123,6 @@ func (w *Writer) parseLine(line string) {
 						if hasCounts(w.toolCounts) {
 							fmt.Fprintln(w.out, FormatCountLine(w.issue, w.lastPhase, w.toolCounts))
 							clearCounts(w.toolCounts)
-							w.lastEmit = time.Now()
 						}
 						w.lastPhase = phase
 					}
@@ -150,10 +138,6 @@ func (w *Writer) parseLine(line string) {
 		w.emit()
 		return
 	}
-	// Time-based fallback: emit if throttle duration has elapsed and we have state.
-	if (hasCounts(w.toolCounts) || w.turns > 0) && time.Since(w.lastEmit) >= w.throttle {
-		w.emit()
-	}
 }
 
 func (w *Writer) emit() {
@@ -161,8 +145,9 @@ func (w *Writer) emit() {
 		fmt.Fprintln(w.out, FormatCountLine(w.issue, w.lastPhase, w.toolCounts))
 		clearCounts(w.toolCounts)
 	}
-	fmt.Fprintln(w.out, FormatHeartbeat(w.issue, w.turns, "", w.lastPhase))
-	w.lastEmit = time.Now()
+	if w.turns > 0 {
+		fmt.Fprintln(w.out, FormatHeartbeat(w.issue, w.turns, "", w.lastPhase))
+	}
 }
 
 // FormatHeartbeat returns a coarse status line for one running issue.

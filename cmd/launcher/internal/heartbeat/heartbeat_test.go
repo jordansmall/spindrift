@@ -5,17 +5,16 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"spindrift.dev/launcher/internal/heartbeat"
 )
 
 func newWriter(issue string, status *bytes.Buffer) *heartbeat.Writer {
-	return heartbeat.New(&bytes.Buffer{}, issue, status, time.Hour)
+	return heartbeat.New(&bytes.Buffer{}, issue, status)
 }
 
 func newWriterRaw(raw *bytes.Buffer, issue string, status *bytes.Buffer) *heartbeat.Writer {
-	return heartbeat.New(raw, issue, status, time.Hour)
+	return heartbeat.New(raw, issue, status)
 }
 
 // TestWriterPassesRawBytesUnchanged verifies the raw log writer receives every
@@ -111,6 +110,52 @@ func TestWriterEmitsOnResultEvent(t *testing.T) {
 	}
 }
 
+// TestNewNoThrottleArg verifies that New() accepts exactly three arguments
+// (no throttle) after the time-based fallback was removed.
+func TestNewNoThrottleArg(t *testing.T) {
+	w := heartbeat.New(&bytes.Buffer{}, "1", &bytes.Buffer{})
+	if w == nil {
+		t.Fatal("New returned nil")
+	}
+}
+
+// TestWriterBareResultEmitsNothing verifies that a result event with no
+// num_turns and no accumulated tool counts emits nothing.
+func TestWriterBareResultEmitsNothing(t *testing.T) {
+	var status bytes.Buffer
+	w := newWriter("42", &status)
+
+	event := `{"type":"result"}` + "\n"
+	fmt.Fprint(w, event)
+
+	if status.Len() > 0 {
+		t.Errorf("bare result must emit nothing, got: %q", status.String())
+	}
+}
+
+// TestWriterResultWithoutTurnsFlushesCountsOnly verifies that a result event
+// without num_turns flushes accumulated counts but emits no bare heartbeat line.
+func TestWriterResultWithoutTurnsFlushesCountsOnly(t *testing.T) {
+	var status bytes.Buffer
+	w := newWriter("42", &status)
+
+	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
+	resultEv := `{"type":"result"}` + "\n"
+	fmt.Fprint(w, toolEv)
+	fmt.Fprint(w, resultEv)
+
+	out := status.String()
+	if !strings.Contains(out, "1 read") {
+		t.Errorf("count line missing '1 read': %q", out)
+	}
+	// No bare heartbeat line: no line that is just "#42" or "#42 [explore]" with nothing useful after.
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if strings.HasSuffix(line, "]") || line == "#42" {
+			t.Errorf("bare heartbeat line emitted: %q", line)
+		}
+	}
+}
+
 // TestWriterTolerateMalformedJSON verifies that non-JSON and malformed lines do
 // not cause a panic and do not disrupt the raw passthrough.
 func TestWriterTolerateMalformedJSON(t *testing.T) {
@@ -131,7 +176,7 @@ func TestWriterTolerateMalformedJSON(t *testing.T) {
 // accumulate into a count, not a flood of individual lines.
 func TestWriterThrottlesSameToolRepeat(t *testing.T) {
 	var status bytes.Buffer
-	w := heartbeat.New(&bytes.Buffer{}, "5", &status, time.Hour)
+	w := heartbeat.New(&bytes.Buffer{}, "5", &status)
 
 	readEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Done."}]}}` + "\n"
@@ -157,7 +202,7 @@ func TestWriterThrottlesSameToolRepeat(t *testing.T) {
 // for each phase and kind.
 func TestWriterEmitsOnNewTool(t *testing.T) {
 	var status bytes.Buffer
-	w := heartbeat.New(&bytes.Buffer{}, "11", &status, time.Hour)
+	w := heartbeat.New(&bytes.Buffer{}, "11", &status)
 
 	ev1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	ev2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"b.go"}}]}}` + "\n"
@@ -180,7 +225,7 @@ func TestWriterEmitsOnNewTool(t *testing.T) {
 // current phase tag derived from the most recent tool.
 func TestWriterNarrationIncludesPhase(t *testing.T) {
 	var status bytes.Buffer
-	w := heartbeat.New(&bytes.Buffer{}, "42", &status, time.Hour)
+	w := heartbeat.New(&bytes.Buffer{}, "42", &status)
 
 	// First establish a phase via a tool event.
 	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
@@ -205,7 +250,7 @@ func TestWriterNarrationIncludesPhase(t *testing.T) {
 func TestWriterNarrationTrimming(t *testing.T) {
 	long := strings.Repeat("x", 200)
 	var status bytes.Buffer
-	w := heartbeat.New(&bytes.Buffer{}, "99", &status, time.Hour)
+	w := heartbeat.New(&bytes.Buffer{}, "99", &status)
 
 	event := `{"type":"assistant","message":{"content":[{"type":"text","text":"` + long + `"}]}}` + "\n"
 	fmt.Fprint(w, event)
@@ -232,7 +277,7 @@ func TestWriterNarrationTrimming(t *testing.T) {
 func TestWriterSubagentNarrationDropped(t *testing.T) {
 	var raw bytes.Buffer
 	var status bytes.Buffer
-	w := heartbeat.New(&raw, "55", &status, time.Hour)
+	w := heartbeat.New(&raw, "55", &status)
 
 	event := `{"type":"assistant","parent_tool_use_id":"tu_abc","message":{"content":[{"type":"text","text":"subagent says hello"}]}}` + "\n"
 	fmt.Fprint(w, event)
@@ -251,7 +296,7 @@ func TestWriterSubagentNarrationDropped(t *testing.T) {
 // count line for accumulated tools in the output.
 func TestWriterNarrationBeforeTool(t *testing.T) {
 	var status bytes.Buffer
-	w := heartbeat.New(&bytes.Buffer{}, "42", &status, time.Hour)
+	w := heartbeat.New(&bytes.Buffer{}, "42", &status)
 
 	// First narration starts the group.
 	narEv1 := `{"type":"assistant","message":{"content":[{"type":"text","text":"I will edit the file."}]}}` + "\n"
@@ -283,7 +328,7 @@ func TestWriterNarrationBeforeTool(t *testing.T) {
 func TestWriterNarrationEmptySkipped(t *testing.T) {
 	for _, txt := range []string{"", "   ", "\t\n"} {
 		var status bytes.Buffer
-		w := heartbeat.New(&bytes.Buffer{}, "8", &status, time.Hour)
+		w := heartbeat.New(&bytes.Buffer{}, "8", &status)
 		// JSON-encode the text value to handle whitespace safely.
 		import_txt := fmt.Sprintf(`{"type":"assistant","message":{"content":[{"type":"text","text":%q}]}}`, txt)
 		fmt.Fprintln(w, import_txt)
@@ -322,7 +367,7 @@ func TestFormatHeartbeatShape(t *testing.T) {
 // phase tag derived from the tools used.
 func TestWriterHeartbeatIncludesPhase(t *testing.T) {
 	var status bytes.Buffer
-	w := heartbeat.New(&bytes.Buffer{}, "42", &status, time.Hour)
+	w := heartbeat.New(&bytes.Buffer{}, "42", &status)
 
 	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"}}]}}` + "\n"
 	resultEv := `{"type":"result","num_turns":1}` + "\n"
@@ -340,7 +385,7 @@ func TestWriterHeartbeatIncludesPhase(t *testing.T) {
 // separately.
 func TestWriterPhaseTransitionEmitsLine(t *testing.T) {
 	var status bytes.Buffer
-	w := heartbeat.New(&bytes.Buffer{}, "11", &status, time.Hour)
+	w := heartbeat.New(&bytes.Buffer{}, "11", &status)
 
 	ev1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	ev2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"b.go"}}]}}` + "\n"
@@ -363,7 +408,7 @@ func TestWriterPhaseTransitionEmitsLine(t *testing.T) {
 // event emits a heartbeat line containing the narration text.
 func TestWriterNarrationText(t *testing.T) {
 	var status bytes.Buffer
-	w := heartbeat.New(&bytes.Buffer{}, "8", &status, time.Hour)
+	w := heartbeat.New(&bytes.Buffer{}, "8", &status)
 
 	event := `{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}` + "\n"
 	fmt.Fprint(w, event)
@@ -405,7 +450,7 @@ func TestFormatCountLineShape(t *testing.T) {
 // narration so the next window starts fresh.
 func TestWriterCountsResetOnNarration(t *testing.T) {
 	var status bytes.Buffer
-	w := heartbeat.New(&bytes.Buffer{}, "99", &status, time.Hour)
+	w := heartbeat.New(&bytes.Buffer{}, "99", &status)
 
 	readEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"First window."}]}}` + "\n"
@@ -444,7 +489,7 @@ func TestWriterCountsResetOnNarration(t *testing.T) {
 // separately in the count line emitted on narration.
 func TestWriterCountsDistinctKinds(t *testing.T) {
 	var status bytes.Buffer
-	w := heartbeat.New(&bytes.Buffer{}, "42", &status, time.Hour)
+	w := heartbeat.New(&bytes.Buffer{}, "42", &status)
 
 	readEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	grepEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Grep","input":{"query":"foo"}}]}}` + "\n"
@@ -468,7 +513,7 @@ func TestWriterCountsDistinctKinds(t *testing.T) {
 // a count summary line when narration arrives, not one line per tool event.
 func TestWriterCountLineOnNarration(t *testing.T) {
 	var status bytes.Buffer
-	w := heartbeat.New(&bytes.Buffer{}, "228", &status, time.Hour)
+	w := heartbeat.New(&bytes.Buffer{}, "228", &status)
 
 	readEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Exploring."}]}}` + "\n"
