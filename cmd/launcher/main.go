@@ -839,18 +839,24 @@ func containsLabel(labels []string, target string) bool {
 	return false
 }
 
-// blockerReady returns true when dep carries completeLabel or is closed (a
-// closed blocker without the label is treated as satisfied, with a log note).
+// blockerReady returns true when the blocker's PR is merged, or when the
+// blocker issue is closed with no discoverable PR (human-handled work).
 func blockerReady(c config, fc forge.Client, dep string) bool {
+	branch := c.branchPrefix + dep
+	pr, ok, err := fc.OpenPRForBranch(branch)
+	if err == nil && ok {
+		state, stateErr := fc.PRState(pr.URL)
+		if stateErr == nil {
+			return state == "MERGED"
+		}
+		return false
+	}
 	fi, err := fc.Issue(dep)
 	if err != nil {
 		return false
 	}
-	if containsLabel(fi.Labels, c.completeLabel) {
-		return true
-	}
 	if fi.State == "CLOSED" {
-		fmt.Printf("    .. blocker #%s is closed without '%s'; treating as satisfied\n", dep, c.completeLabel)
+		fmt.Printf("    .. blocker #%s is closed (no discoverable PR); treating as satisfied\n", dep)
 		return true
 	}
 	return false
