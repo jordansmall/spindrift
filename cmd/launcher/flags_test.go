@@ -346,6 +346,88 @@ func TestDispatchNoBuildArgs_AbsentFlag(t *testing.T) {
 	}
 }
 
+// TestDispatchIssueArgs_Variadic: multiple numeric args all returned in order.
+func TestDispatchIssueArgs_Variadic(t *testing.T) {
+	got := dispatchIssueArgs([]string{"12", "15", "18"})
+	want := []string{"12", "15", "18"}
+	if len(got) != len(want) {
+		t.Fatalf("dispatchIssueArgs: got %v, want %v", got, want)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("pos %d: got %q, want %q", i, got[i], w)
+		}
+	}
+}
+
+// TestDispatchIssueArgs_Empty: empty args return nil.
+func TestDispatchIssueArgs_Empty(t *testing.T) {
+	got := dispatchIssueArgs([]string{})
+	if len(got) != 0 {
+		t.Errorf("dispatchIssueArgs([]): got %v, want empty", got)
+	}
+}
+
+// TestDispatchIssueArgs_SkipsNonNumeric: non-numeric args are ignored.
+func TestDispatchIssueArgs_SkipsNonNumeric(t *testing.T) {
+	got := dispatchIssueArgs([]string{"--no-build", "42", "foo"})
+	if len(got) != 1 || got[0] != "42" {
+		t.Errorf("dispatchIssueArgs: got %v, want [42]", got)
+	}
+}
+
+// TestDispatchYesArgs_YesFlag: --yes sets yes=true and is removed from remaining.
+func TestDispatchYesArgs_YesFlag(t *testing.T) {
+	yes, rest := dispatchYesArgs([]string{"--yes", "42"})
+	if !yes {
+		t.Error("want yes=true, got false")
+	}
+	if len(rest) != 1 || rest[0] != "42" {
+		t.Errorf("rest = %v, want [42]", rest)
+	}
+}
+
+// TestDispatchYesArgs_ForceAlias: --force is an alias for --yes.
+func TestDispatchYesArgs_ForceAlias(t *testing.T) {
+	yes, _ := dispatchYesArgs([]string{"--force"})
+	if !yes {
+		t.Error("--force must set yes=true")
+	}
+}
+
+// TestDispatchYesArgs_Absent: no --yes/--force flag leaves yes=false.
+func TestDispatchYesArgs_Absent(t *testing.T) {
+	yes, rest := dispatchYesArgs([]string{"42"})
+	if yes {
+		t.Error("want yes=false, got true")
+	}
+	if len(rest) != 1 || rest[0] != "42" {
+		t.Errorf("rest = %v, want [42]", rest)
+	}
+}
+
+// TestParseFlags_YesPassthrough: --yes passes through like --no-build.
+func TestParseFlags_YesPassthrough(t *testing.T) {
+	remaining, err := parseFlags([]string{"dispatch", "--yes", "42"})
+	if err != nil {
+		t.Fatalf("parseFlags with --yes: unexpected error: %v", err)
+	}
+	if len(remaining) != 3 || remaining[1] != "--yes" || remaining[2] != "42" {
+		t.Errorf("remaining = %v, want [dispatch --yes 42]", remaining)
+	}
+}
+
+// TestParseFlags_ForcePassthrough: --force passes through like --no-build.
+func TestParseFlags_ForcePassthrough(t *testing.T) {
+	remaining, err := parseFlags([]string{"dispatch", "--force"})
+	if err != nil {
+		t.Fatalf("parseFlags with --force: unexpected error: %v", err)
+	}
+	if len(remaining) != 2 || remaining[1] != "--force" {
+		t.Errorf("remaining = %v, want [dispatch --force]", remaining)
+	}
+}
+
 // TestPrintHelp_ShowsNoBuildFlag: help output documents --no-build on dispatch.
 func TestPrintHelp_ShowsNoBuildFlag(t *testing.T) {
 	var buf bytes.Buffer

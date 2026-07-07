@@ -29,6 +29,18 @@ func dispatchIssueArg(args []string) string {
 	return ""
 }
 
+// dispatchIssueArgs extracts all numeric positional args following the "dispatch"
+// verb. Returns them in order; returns nil when none are present.
+func dispatchIssueArgs(args []string) []string {
+	var nums []string
+	for _, a := range args {
+		if n, err := strconv.Atoi(a); err == nil && n > 0 {
+			nums = append(nums, a)
+		}
+	}
+	return nums
+}
+
 // dispatchNoBuildArgs extracts the --no-build flag from the args following the
 // "dispatch" verb. Returns (true, filtered) when the flag is present, where
 // filtered has the flag removed so dispatchIssueArg sees only the issue number.
@@ -36,6 +48,19 @@ func dispatchNoBuildArgs(args []string) (noBuild bool, remaining []string) {
 	for _, a := range args {
 		if a == "--no-build" {
 			noBuild = true
+		} else {
+			remaining = append(remaining, a)
+		}
+	}
+	return
+}
+
+// dispatchYesArgs extracts the --yes/--force flag from the args following the
+// "dispatch" verb. Returns (true, filtered) when either flag is present.
+func dispatchYesArgs(args []string) (yes bool, remaining []string) {
+	for _, a := range args {
+		if a == "--yes" || a == "--force" {
+			yes = true
 		} else {
 			remaining = append(remaining, a)
 		}
@@ -100,9 +125,8 @@ func parseFlags(args []string) ([]string, error) {
 			i++
 			continue
 		}
-		// --no-build is a dispatch-only boolean flag; pass it through to the
-		// verb handler rather than treating it as an unknown schema flag.
-		if arg == "--no-build" {
+		// Dispatch-only boolean flags: pass through to the verb handler.
+		if arg == "--no-build" || arg == "--yes" || arg == "--force" {
 			remaining = append(remaining, arg)
 			i++
 			continue
@@ -146,13 +170,14 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "Usage: spindrift [flags] <subcommand> [args]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Subcommands:")
-	fmt.Fprintln(w, "  dispatch [--no-build] [issue]  fan out one agent per ready-for-agent issue; optional issue number dispatches a single issue")
-	fmt.Fprintln(w, "  preview                        list issues dispatch would pick up and the target repo, without starting any Box")
-	fmt.Fprintln(w, "  build                          realise the agent image or store closures without running any agent")
-	fmt.Fprintln(w, "  engage <issue>                 run the merge gate for a single issue")
+	fmt.Fprintln(w, "  dispatch [--no-build] [--yes] [issue...]  fan out agents; optional issue list dispatches exactly those (bypasses label/barrier gates)")
+	fmt.Fprintln(w, "  preview [issue...]                        dry-run: show what dispatch would pick up; with issue list, show ordering and eviction")
+	fmt.Fprintln(w, "  build                                     realise the agent image or store closures without running any agent")
+	fmt.Fprintln(w, "  engage <issue>                            run the merge gate for a single issue")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Dispatch flags:")
 	fmt.Fprintln(w, "  --no-build  fail fast if the image is absent instead of building; pair with 'spindrift build' for split build/run flows")
+	fmt.Fprintln(w, "  --yes       skip confirmation prompt when dispatching unlabeled issues (alias: --force)")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Flags (flag > env > default precedence):")
 	for _, e := range schemaFlags {
