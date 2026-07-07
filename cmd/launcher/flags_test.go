@@ -113,6 +113,64 @@ func TestParseFlags_MultipleFlags(t *testing.T) {
 	}
 }
 
+// TestDispatchIssueArg_Numeric: a numeric arg is returned as the issue number.
+func TestDispatchIssueArg_Numeric(t *testing.T) {
+	got := dispatchIssueArg([]string{"123"})
+	if got != "123" {
+		t.Errorf("dispatchIssueArg([\"123\"]) = %q, want %q", got, "123")
+	}
+}
+
+// TestDispatchIssueArg_Empty: empty args return empty string.
+func TestDispatchIssueArg_Empty(t *testing.T) {
+	got := dispatchIssueArg([]string{})
+	if got != "" {
+		t.Errorf("dispatchIssueArg([]) = %q, want %q", got, "")
+	}
+}
+
+// TestDispatchIssueArg_NonNumeric: non-numeric first arg returns empty string.
+func TestDispatchIssueArg_NonNumeric(t *testing.T) {
+	got := dispatchIssueArg([]string{"not-an-issue"})
+	if got != "" {
+		t.Errorf("dispatchIssueArg([\"not-an-issue\"]) = %q, want empty (non-numeric ignored)", got)
+	}
+}
+
+// TestPrintVersion_Format: version output starts with "spindrift" and includes a rev.
+func TestPrintVersion_Format(t *testing.T) {
+	var buf bytes.Buffer
+	printVersion(&buf)
+	got := buf.String()
+	if !strings.HasPrefix(got, "spindrift ") {
+		t.Errorf("printVersion must start with 'spindrift ', got: %q", got)
+	}
+	if !strings.Contains(got, "(rev ") {
+		t.Errorf("printVersion must contain '(rev ...)', got: %q", got)
+	}
+}
+
+// TestPrintHelp_UsageLineNamesSpindrift: the first usage line must name the binary "spindrift".
+func TestPrintHelp_UsageLineNamesSpindrift(t *testing.T) {
+	var buf bytes.Buffer
+	printHelp(&buf)
+	firstLine := strings.SplitN(buf.String(), "\n", 2)[0]
+	if !strings.HasPrefix(firstLine, "Usage: spindrift") {
+		t.Errorf("first line must start with 'Usage: spindrift', got: %q", firstLine)
+	}
+}
+
+// TestPrintHelp_ShowsDispatchSubcommand: help output names dispatch as a subcommand (not just a flag doc).
+func TestPrintHelp_ShowsDispatchSubcommand(t *testing.T) {
+	var buf bytes.Buffer
+	printHelp(&buf)
+	out := buf.String()
+	// "dispatch" must appear as a standalone subcommand entry, not buried in a flag doc.
+	if !strings.Contains(out, "dispatch [issue]") {
+		t.Errorf("help output must show 'dispatch [issue]' subcommand, got:\n%s", out)
+	}
+}
+
 // TestPrintHelp_ContainsLabelEntry: help output includes --label flag with its doc.
 func TestPrintHelp_ContainsLabelEntry(t *testing.T) {
 	var buf bytes.Buffer

@@ -1353,6 +1353,10 @@ func main() {
 			printHelp(os.Stdout)
 			os.Exit(0)
 		}
+		if a == "--version" {
+			printVersion(os.Stdout)
+			os.Exit(0)
+		}
 	}
 	args, err := parseFlags(os.Args[1:])
 	if err != nil {
@@ -1368,10 +1372,29 @@ func main() {
 	}
 	if len(args) > 0 && args[0] == "engage" {
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: launcher engage <issue-number>")
+			fmt.Fprintln(os.Stderr, "usage: spindrift engage <issue-number>")
 			os.Exit(1)
 		}
 		if err := engageIssue(args[1]); err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(args) > 0 && args[0] == "dispatch" {
+		if issueNum := dispatchIssueArg(args[1:]); issueNum != "" {
+			if err := os.Setenv("ISSUE_NUMBER", issueNum); err != nil {
+				fmt.Fprintf(os.Stderr, "%s\n", err)
+				os.Exit(1)
+			}
+		}
+		if err := run(); err != nil {
+			if errors.Is(err, errQueueEmpty) {
+				os.Exit(2)
+			}
+			if errors.Is(err, errQueueDrained) {
+				os.Exit(3)
+			}
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
