@@ -44,6 +44,7 @@ type Client interface {
 	SwapLabel(num, add, remove string) error
 	Comment(num, body string) error
 	OpenPRForBranch(branch string) (PR, bool, error) // false = no open PR
+	PRForBranch(branch string) (string, bool, error) // any state; false = no PR
 	PRState(url string) (string, error)              // MERGED check
 	CheckState(url string) (RollupState, error)      // aggregate statusCheckRollup
 	Merge(url string) error                          // rebase + delete branch
