@@ -1667,8 +1667,8 @@ func main() {
 	if len(args) > 0 && args[0] == "doctor" {
 		c := loadConfig()
 		fc := forge.NewExecClient(c.repoSlug)
-		stat, _ := os.Stdin.Stat()
-		interactive := (stat.Mode() & os.ModeCharDevice) != 0
+		stat, serr := os.Stdin.Stat()
+		interactive := serr == nil && (stat.Mode()&os.ModeCharDevice) != 0
 		if err := runDoctor(fc, c, os.Stdout, os.Stdin, interactive); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
