@@ -43,6 +43,12 @@ set_run_env() {
   export CLAUDE_CODE_OAUTH_TOKEN="fake-oauth"
   export GIT_USER_NAME="Test Bot"
   export GIT_USER_EMAIL="bot@example.com"
+  # The fakes resolve every blocker on the first check — nothing becomes ready
+  # over time. Collapse the deadlock timer so a never-ready blocker surfaces at
+  # once instead of grinding through the 2h/30s production default. A test that
+  # wants a nonzero window can still override these after set_run_env.
+  export DEPS_WAIT_SECS="${DEPS_WAIT_SECS:-0}"
+  export DEPS_POLL_SECS="${DEPS_POLL_SECS:-0}"
 }
 
 # Stand up a local bare "GitHub" repo and rewrite https://github.com/ to it via

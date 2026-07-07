@@ -124,16 +124,50 @@ EOF
   pr)
     case "${2:-}" in
       list)
-        # Supports --head <branch> to look up a PR by head branch name.
+        # Supports --head <branch> to look up a PR by head branch name, and
+        # --state {open,merged,closed,all} to filter by the PR's current state.
+        #
+        # A PR is discoverable on its branch when the test pre-registered it via
+        # FAKE_GH_PR_LIST_<n>, OR when it was merged during the run (recorded in
+        # $GH_STATE by `gh pr merge`) — mirroring GitHub, which tracks a merged
+        # PR on its head branch without any test pre-registration. The PR's state
+        # is the dynamic value from $GH_STATE if present, else FAKE_GH_PR_STATE_<n>,
+        # else OPEN — matching `pr view --json state`. Issue N ↔ PR N by convention.
         head_branch=""
+        state_filter=""
         args=("$@")
         for ((i = 0; i < ${#args[@]}; i++)); do
           [ "${args[i]}" = "--head" ] && head_branch="${args[i + 1]:-}"
+          [ "${args[i]}" = "--state" ] && state_filter="${args[i + 1]:-}"
         done
         if [ -n "$head_branch" ]; then
           issue_num="${head_branch##*/issue-}"
           listvar="FAKE_GH_PR_LIST_${issue_num}"
-          printf '%s\n' "${!listvar:-}"
+          url="${!listvar:-}"
+          pr_num="${issue_num}"
+          [ -n "$url" ] && pr_num="${url##*/}"
+
+          cur_state=""
+          if [ -f "$GH_STATE" ]; then
+            while IFS=$'\t' read -r k v; do
+              [ "$k" = "pr-state-$pr_num" ] && cur_state="$v"
+            done <"$GH_STATE"
+          fi
+          # A merge during the run makes an otherwise-unregistered PR discoverable.
+          if [ -z "$url" ] && [ -n "$cur_state" ]; then
+            url="https://github.com/${REPO_SLUG:-owner/repo}/pull/${pr_num}"
+          fi
+
+          if [ -n "$url" ] && [ -n "$state_filter" ] && [ "$state_filter" != "all" ]; then
+            if [ -z "$cur_state" ]; then
+              statevar="FAKE_GH_PR_STATE_${pr_num}"
+              cur_state="${!statevar:-OPEN}"
+            fi
+            cur_lc=$(printf '%s' "$cur_state" | tr '[:upper:]' '[:lower:]')
+            want_lc=$(printf '%s' "$state_filter" | tr '[:upper:]' '[:lower:]')
+            [ "$cur_lc" != "$want_lc" ] && url=""
+          fi
+          printf '%s\n' "$url"
         fi
         ;;
       view)

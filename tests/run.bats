@@ -436,11 +436,14 @@ EOF
 
 # --- Dependency-wave ordering (issue #39) ----------------------------------
 
-@test "run dispatches an issue whose external blocker already carries COMPLETE_LABEL" {
+@test "run dispatches an issue whose external blocker already has a merged PR" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'2\tDependent'
   export FAKE_GH_ISSUE_BODY_2="Depends on #1"
-  export FAKE_GH_ISSUE_LABELS_1="agent-complete"
+  # Blocker #1: open issue, but its branch PR is merged — the authoritative
+  # signal that satisfies the blocker (ADR-0012; the label alone no longer does).
+  export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
+  export FAKE_GH_PR_STATE_1="MERGED"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
@@ -450,7 +453,8 @@ EOF
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'2\tDependent'
   export FAKE_GH_ISSUE_BODY_2="blocked by #1"
-  export FAKE_GH_ISSUE_LABELS_1="agent-complete"
+  export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
+  export FAKE_GH_PR_STATE_1="MERGED"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'ISSUE_NUMBER=2' "$PODMAN_LOG"
@@ -511,8 +515,11 @@ EOF
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tBlocker\n2\tDependent'
   export FAKE_GH_ISSUE_BODY_2="depends on #1"
-  # Issue 1 box writes a ready outcome; the launcher gates it (CI SUCCESS → merge →
-  # agent-complete) before wave 2 starts. No FAKE_PODMAN_AUTO_COMPLETE shortcut.
+  # Issue 1 box writes a ready outcome; the launcher gates it (CI SUCCESS → merge)
+  # before wave 2 starts. Merging PR #1 records it MERGED in $GH_STATE, which
+  # MergedPRForBranch then discovers to satisfy #2's blocker in wave 2 — the
+  # merged-PR contract (ADR-0012). No FAKE_GH_PR_LIST_1 here: an open PR would be
+  # adopted by reconcileStranded instead of dispatched as a box.
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ok"
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   export GH_STATE="$GH_LOG.state"
