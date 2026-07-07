@@ -417,9 +417,10 @@ var errBoxFailed = fmt.Errorf("exit 1")
 func TestDoctor_Success(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 
 	var buf bytes.Buffer
-	if err := runDoctor(f, &buf); err != nil {
+	if err := runDoctor(f, defaultLabelConfig(), &buf); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(buf.String(), "owner/repo") {
@@ -432,7 +433,7 @@ func TestDoctor_AuthFailure(t *testing.T) {
 	f.ProbeErr = forge.ErrAuthFailure
 
 	var buf bytes.Buffer
-	err := runDoctor(f, &buf)
+	err := runDoctor(f, config{}, &buf)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -446,11 +447,72 @@ func TestDoctor_RepoNotFound(t *testing.T) {
 	f.ProbeErr = forge.ErrRepoNotFound
 
 	var buf bytes.Buffer
-	err := runDoctor(f, &buf)
+	err := runDoctor(f, config{}, &buf)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if !errors.Is(err, forge.ErrRepoNotFound) {
 		t.Errorf("want ErrRepoNotFound, got %v", err)
+	}
+}
+
+func defaultLabelConfig() config {
+	return config{
+		label:           "ready-for-agent",
+		inProgressLabel: "agent-in-progress",
+		failedLabel:     "agent-failed",
+		completeLabel:   "agent-complete",
+	}
+}
+
+func TestDoctor_LabelsAllPresent(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, defaultLabelConfig(), &buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	for _, label := range []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"} {
+		if !strings.Contains(out, label) {
+			t.Errorf("want output to contain label %q, got:\n%s", label, out)
+		}
+	}
+	if !strings.Contains(out, "present") {
+		t.Errorf("want output to mention 'present', got:\n%s", out)
+	}
+}
+
+func TestDoctor_LabelsSomeMissing(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress"}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, defaultLabelConfig(), &buf)
+	if err == nil {
+		t.Fatal("expected non-zero exit for missing labels, got nil")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "missing") {
+		t.Errorf("want output to mention 'missing', got:\n%s", out)
+	}
+}
+
+func TestDoctor_LabelsAllMissing(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, defaultLabelConfig(), &buf)
+	if err == nil {
+		t.Fatal("expected non-zero exit for all-missing labels, got nil")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "missing") {
+		t.Errorf("want output to mention 'missing', got:\n%s", out)
 	}
 }
