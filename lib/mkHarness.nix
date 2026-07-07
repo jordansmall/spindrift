@@ -150,6 +150,7 @@ let
     src = ../cmd/launcher;
     vendorHash = null;
     subPackages = [ "spindrift-heartbeat-filter" ];
+    meta.license = lib.licenses.mit;
   };
 
   # Plumbing every agent needs regardless of language: a shell, the VCS + GitHub
@@ -453,24 +454,27 @@ let
     src = ../cmd/launcher;
     vendorHash = null;
     subPackages = [ "." ]; # build only the launcher; heartbeat-filter is in-box only
+    meta.license = lib.licenses.mit;
   };
 
   # The build command: bakes nix-computed config as exported env vars and
   # execs the Go launcher with the `build` subcommand. The Go binary contains
   # all realise-and-load logic; no bash build scripts remain (ADR 0004).
-  build = hostPkgs.writeShellApplication {
+  build = (hostPkgs.writeShellApplication {
     name = "build";
     runtimeInputs = [ hostPkgs.coreutils ];
     text = goBuildPreamble + ''
       exec ${launcherBin}/bin/launcher build
     '';
-  };
+  }).overrideAttrs (_: {
+    meta.license = lib.licenses.mit;
+  });
 
   # The run command: a thin shell wrapper that bakes nix-computed config into
   # env vars, sources harness.env for runtime overrides, then execs the Go
   # binary. The binary contains no baked store paths of its own beyond those
   # injected here (ADR 0007).
-  run = hostPkgs.writeShellApplication {
+  run = (hostPkgs.writeShellApplication {
     name = "run";
     runtimeInputs = with hostPkgs; [
       gh
@@ -496,7 +500,9 @@ let
         export GIT_USER_NAME GIT_USER_EMAIL
         exec ${launcherBin}/bin/launcher "$@"
       '';
-  };
+  }).overrideAttrs (_: {
+    meta.license = lib.licenses.mit;
+  });
 
   # Realising the Linux image on darwin needs a Linux builder, so only offer it
   # as a package where it can actually build; the launcher commands (which merely
