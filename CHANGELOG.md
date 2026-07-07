@@ -1,5 +1,89 @@
 # Changelog
 
+## [0.1.2](https://github.com/jordansmall/spindrift/compare/v0.1.1...v0.1.2) (2026-07-07)
+
+
+### Features
+
+* **cli:** add --version, dispatch verb, updated help ([4fbf0fe](https://github.com/jordansmall/spindrift/commit/4fbf0fece704f77d143f048cabea72e97fae7779))
+* **cli:** add recover verb; deprecate engage as warn-then-exec alias ([9fe9321](https://github.com/jordansmall/spindrift/commit/9fe9321440be3804a86af15128dd69ce984e0111))
+* **cli:** dispatch --no-build flag ([a735b14](https://github.com/jordansmall/spindrift/commit/a735b14360137c60d342a3ea309c95cdd293e1b9))
+* **cli:** register preview verb and add to help text ([6f4c74a](https://github.com/jordansmall/spindrift/commit/6f4c74acc86437bebe88c6fb90b38cf1e135aec5))
+* **flags:** variadic dispatch args and --yes/--force ([ab9a59f](https://github.com/jordansmall/spindrift/commit/ab9a59f2cbce0a274df502722aa6c7d0d4873ac9))
+* **forge:** add CanAutoMerge and EnqueueAutoMerge to Client ([8cf20d6](https://github.com/jordansmall/spindrift/commit/8cf20d6391ed17aed9dbddc14453c7439f9ca32d))
+* **forge:** add PRForBranch; fix fake OpenPRForBranch state filter ([70a0502](https://github.com/jordansmall/spindrift/commit/70a05026277cb799d740379a84b37523e3d886f5))
+* **heartbeat:** add review, plan, search, git phases ([9ebce36](https://github.com/jordansmall/spindrift/commit/9ebce369b190b583306aaa86fe3eecc3d3098626)), closes [#306](https://github.com/jordansmall/spindrift/issues/306)
+* **heartbeat:** attribute activity via role switch headers ([f12c9a1](https://github.com/jordansmall/spindrift/commit/f12c9a1d2b8655f19590eed956738973c936722b))
+* **heartbeat:** show agent model in switch header ([db6d5da](https://github.com/jordansmall/spindrift/commit/db6d5da6c98d95b5a9a4d7c69a1bf0bf24109698)), closes [#307](https://github.com/jordansmall/spindrift/issues/307)
+* **launcher:** add MERGE_MODE knob; decouple agent-complete from merge ([58c9e7a](https://github.com/jordansmall/spindrift/commit/58c9e7ad989d72c6a299e3a7ba3b82ef54360821))
+* **launcher:** add preview verb core logic ([58ee04c](https://github.com/jordansmall/spindrift/commit/58ee04ce96d267533a62e7a48c51e5b25fefdcba))
+* **launcher:** implement MERGE_MODE=auto with preflight check ([a65de17](https://github.com/jordansmall/spindrift/commit/a65de17e9a60a7072e92896bc761fb81e5b54fb5))
+* **launcher:** selective list dispatch and preview annotations ([42b342a](https://github.com/jordansmall/spindrift/commit/42b342a9b82da0c931cd3f2c5de4aa8f0a8e6cb5))
+* **nix:** deprecate apps.build with migration notice ([9f974e4](https://github.com/jordansmall/spindrift/commit/9f974e4583dba639560648f36b1e0f040659c3be))
+* **nix:** spindrift CLI package, apps.default, ldflags, run deprecation ([8a1c0c2](https://github.com/jordansmall/spindrift/commit/8a1c0c2ca3b402e37fa8ae7f8e9d477bdc8cdc47))
+* **preview:** annotate blockers in bare queue listing ([7b6b6b0](https://github.com/jordansmall/spindrift/commit/7b6b6b044d4c02ce503c053fb98c47955db9f0a2))
+* **runner:** add IsReady() to Runner interface ([efad797](https://github.com/jordansmall/spindrift/commit/efad7974216c8bc24f9e69a0b02eb3d4ab84db87))
+
+
+### Bug Fixes
+
+* **bats:** use SPINDRIFT_CMD for engage tests ([a2da8f0](https://github.com/jordansmall/spindrift/commit/a2da8f008c553ab73147e38f852071defd52dff7))
+* **heartbeat:** guard emit() to skip bare FormatHeartbeat lines ([fe51736](https://github.com/jordansmall/spindrift/commit/fe51736c4c38ade89bedce5abe4258cbb9df5c51))
+* **launcher:** add dispatch startup banner; update harness.env.example ([c632a3e](https://github.com/jordansmall/spindrift/commit/c632a3e87e784b5b274bba55e2db245a23244728))
+* **launcher:** bind blockerReady to PR-merged/closed reality ([35906e5](https://github.com/jordansmall/spindrift/commit/35906e549d0c601fe4c65cf1447d4638895964b7))
+* **launcher:** don't demote to agent-failed on post-green merge block ([6094a38](https://github.com/jordansmall/spindrift/commit/6094a3836bb373359122a46ca87b233a15fdf5b5))
+* **launcher:** gate verifyMerged to immediate mode only ([fb8f5d9](https://github.com/jordansmall/spindrift/commit/fb8f5d9b5b2a7ca91ef6d37161e46ed430b83606))
+* **launcher:** sync flagtable_gen.go for auto MERGE_MODE ([70f26ba](https://github.com/jordansmall/spindrift/commit/70f26bac46a8875cdf1679b1cedd7e0f0c060cb6))
+* **launcher:** use PRForBranch in blockerReady for merged-PR check ([a7dac52](https://github.com/jordansmall/spindrift/commit/a7dac523be3db80f74991674a7b345091807da1c))
+* **nix:** self in top-level module arg, thread revision to fixtures ([bb99066](https://github.com/jordansmall/spindrift/commit/bb9906607ce23f5ea9acc8403d0470591375600e))
+* **template:** sync harness.env.example for auto MERGE_MODE ([d93810a](https://github.com/jordansmall/spindrift/commit/d93810a97cdf08644d56d2842471497cfdc19418))
+
+
+### Reverts
+
+* remove agent-dispatch.yml change (workflow scope missing) ([7b4987c](https://github.com/jordansmall/spindrift/commit/7b4987c9fa583b956ca58456de6563a166d1d1d9))
+
+
+### Documentation
+
+* add MIGRATING.md, .envrc template, devShell-first quick-start ([24900a7](https://github.com/jordansmall/spindrift/commit/24900a7cfa371039d9b1b23c9c49a234b5ab8a3c))
+* **launcher:** update mergeMode comment for auto ([4337a18](https://github.com/jordansmall/spindrift/commit/4337a18d004359b9e14bd25fe419cdf5eab7a395))
+* **migrating:** document engage → recover rename ([20b21d1](https://github.com/jordansmall/spindrift/commit/20b21d1ab6d3c962b50b384a1ef444a0c48266c5))
+* **readme:** document spindrift CLI and MERGE_MODE contracts ([4efd88c](https://github.com/jordansmall/spindrift/commit/4efd88c300c2131ca514c1604d8a05709b9fe4ad))
+* **schema:** update MERGE_MODE=auto description ([ebea4e7](https://github.com/jordansmall/spindrift/commit/ebea4e74c7f0a79768f8730ec4de48f5a15f8e27))
+
+
+### Code Refactoring
+
+* **heartbeat:** remove throttle param from New() call sites ([d4446b2](https://github.com/jordansmall/spindrift/commit/d4446b2b97bd0f44253a20f3672dccc99cc86c6f))
+* **launcher:** rename engageByNumber/Issue to recoverByNumber/Issue ([2f7cf8d](https://github.com/jordansmall/spindrift/commit/2f7cf8d0db5e5a5ac4d1456fb26edacf3f2f8272))
+* **launcher:** stable eviction notice order ([1af7975](https://github.com/jordansmall/spindrift/commit/1af79759af082e40a4d4e9b377c44a55da1a2865))
+* rename image output spindrift -&gt; agent-image ([9781a82](https://github.com/jordansmall/spindrift/commit/9781a8287f136b1bcd42dc4d7a82f9c75a7719c4))
+
+
+### Tests
+
+* **bats:** add DEPS_WAIT_SECS guardrail to setup() ([9ad4cea](https://github.com/jordansmall/spindrift/commit/9ad4cea849521d74ec7da38f982b8778e1abacf9))
+* **bats:** label issue in --no-build positional test ([c1a0c48](https://github.com/jordansmall/spindrift/commit/c1a0c488a3e16b04377d0d9f88ef80d6c0275661))
+* **bats:** pin MERGE_MODE=immediate in merge-dependent tests ([928a2e3](https://github.com/jordansmall/spindrift/commit/928a2e30d25ff62c98f141dc44a59f5082b894e7))
+* **bats:** pre-seed [#1](https://github.com/jordansmall/spindrift/issues/1) as ready to fix wave-ordering CI hang ([cb19bc2](https://github.com/jordansmall/spindrift/commit/cb19bc2ef47b47bfbbe20ef402545a875ed182c3))
+* **bats:** update blocker tests to PR-state predicate ([14fe9d8](https://github.com/jordansmall/spindrift/commit/14fe9d8e5abaea13483debab139bd2a4af711e3d))
+* **bats:** wire FAKE_GH_PR_LIST_1 in wave-ordering test ([c87c98d](https://github.com/jordansmall/spindrift/commit/c87c98d92f5b985e0687eea64da539e188e38d51))
+* **launcher:** cover auto MERGE_MODE enqueue, fallback, preflight ([4304281](https://github.com/jordansmall/spindrift/commit/43042810e645d73f0fc22cc9d9016f462dc1c8a4))
+* **launcher:** cover blockerReady merged/closed/open-with-label cases ([d34d754](https://github.com/jordansmall/spindrift/commit/d34d75434c39adda281f4ee027ed3acb59692cef))
+* **launcher:** cover preview verb ([a587002](https://github.com/jordansmall/spindrift/commit/a587002b4889fc219eb80e1ada2c4d795974dbaf))
+
+
+### Continuous Integration
+
+* build agent-image attr instead of spindrift ([47601da](https://github.com/jordansmall/spindrift/commit/47601daa835e149d4c474c4f3c5a5a3936b882e6))
+
+
+### Miscellaneous Chores
+
+* **nix:** bake MERGE_MODE=immediate into dogfood harness ([618d006](https://github.com/jordansmall/spindrift/commit/618d0060037f5929cd6904f421ead3d3148735cf))
+* wire MERGE_MODE into schema, flag table, CI, and docs ([bbfd02c](https://github.com/jordansmall/spindrift/commit/bbfd02c4b14fa84144123b9c0b1506cce4fa20a7))
+
 ## [0.1.1](https://github.com/jordansmall/spindrift/compare/v0.1.0...v0.1.1) (2026-07-07)
 
 
