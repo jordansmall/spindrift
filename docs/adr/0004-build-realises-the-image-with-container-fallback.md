@@ -18,7 +18,7 @@ the exact store path the launcher has baked in.
   where one exists (including Linux hosts themselves); rejected.
 - **`build` = load only** (the previous behaviour) — contradicted the README's
   "nix build + load" promise and left no exposed way to build the image from
-  darwin at all (`packages.<system>.spindrift` is Linux-only); rejected.
+  darwin at all (`packages.<system>.agent-image` is Linux-only); rejected.
 
 ## Consequences
 

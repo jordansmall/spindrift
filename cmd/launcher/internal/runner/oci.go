@@ -20,7 +20,7 @@ type ociAdapter struct {
 	imageTag        string // content-hash tag applied after loading
 	nixBuilderImage string // fallback container image that carries nix
 	nixVolume       string // named volume for /nix (incremental rebuilds)
-	flakeImageAttr  string // nix flake attr for the image (.#packages.x.spindrift)
+	flakeImageAttr  string // nix flake attr for the image (.#packages.x.agent-image)
 	pwd             string // $PWD; container-fallback mounts this as /workspace
 	promptDir       string // optional host path to mount over /agent/prompts
 	skillsDir       string // optional host path to mount over /home/agent/.claude/skills
