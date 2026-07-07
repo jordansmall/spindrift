@@ -151,9 +151,9 @@ func TestAdoptAndGate_GreenMergesAndCompletes(t *testing.T) {
 	}
 }
 
-// --- engageByNumber tests -----------------------------------------------------
+// --- recoverByNumber tests ----------------------------------------------------
 
-func TestEngageByNumber_GreenMergesAndCompletes(t *testing.T) {
+func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
 
@@ -162,7 +162,7 @@ func TestEngageByNumber_GreenMergesAndCompletes(t *testing.T) {
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
-	err := engageByNumber(c, fc, t.TempDir(), nil, "42")
+	err := recoverByNumber(c, fc, t.TempDir(), nil, "42")
 
 	if err != nil {
 		t.Errorf("expected nil error on green path; got %v", err)
@@ -178,7 +178,7 @@ func TestEngageByNumber_GreenMergesAndCompletes(t *testing.T) {
 	}
 }
 
-func TestEngageByNumber_DraftPRSkipped(t *testing.T) {
+func TestRecoverByNumber_DraftPRSkipped(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
 
@@ -186,7 +186,7 @@ func TestEngageByNumber_DraftPRSkipped(t *testing.T) {
 	branch := c.branchPrefix + "42"
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: true})
 
-	err := engageByNumber(c, fc, t.TempDir(), nil, "42")
+	err := recoverByNumber(c, fc, t.TempDir(), nil, "42")
 
 	if err == nil {
 		t.Error("expected error for draft PR; got nil")
@@ -199,14 +199,14 @@ func TestEngageByNumber_DraftPRSkipped(t *testing.T) {
 	}
 }
 
-func TestEngageByNumber_NoPRSkipped(t *testing.T) {
+func TestRecoverByNumber_NoPRSkipped(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	// No PR registered for the branch.
 
-	err := engageByNumber(c, fc, t.TempDir(), nil, "42")
+	err := recoverByNumber(c, fc, t.TempDir(), nil, "42")
 
 	if err == nil {
 		t.Error("expected error for no-PR case; got nil")
@@ -219,7 +219,7 @@ func TestEngageByNumber_NoPRSkipped(t *testing.T) {
 	}
 }
 
-func TestEngageByNumber_RedFollowsSelfHeal(t *testing.T) {
+func TestRecoverByNumber_RedFollowsSelfHeal(t *testing.T) {
 	c := reconcileConfig()
 	c.maxFixAttempts = 0
 	fc := forge.NewFake()
@@ -229,7 +229,7 @@ func TestEngageByNumber_RedFollowsSelfHeal(t *testing.T) {
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
 
-	err := engageByNumber(c, fc, t.TempDir(), nil, "42")
+	err := recoverByNumber(c, fc, t.TempDir(), nil, "42")
 
 	if err != nil {
 		t.Errorf("expected nil error (gate result expressed via labels); got %v", err)
