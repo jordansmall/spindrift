@@ -22,14 +22,16 @@ type Writer struct {
 	issue string
 	out   io.Writer
 
-	mu          sync.Mutex
-	buf         []byte
-	turns       int
-	taskRole    map[string]string         // Task tool-use id → subagent role
-	currentRole string                    // role of the message being parsed
-	lastHeader  string                    // role of last emitted switch header
-	roleCounts  map[string]map[string]int // tool counts per role
-	rolePhase   map[string]string         // current phase per role
+	mu              sync.Mutex
+	buf             []byte
+	turns           int
+	taskRole        map[string]string         // Task tool-use id → subagent role
+	currentRole     string                    // role of the message being parsed
+	currentModel    string                    // shortened model family of the current message
+	lastHeader      string                    // role of last emitted switch header
+	lastHeaderModel string                    // model of last emitted switch header
+	roleCounts      map[string]map[string]int // tool counts per role
+	rolePhase       map[string]string         // current phase per role
 }
 
 // New returns a Writer that passes all bytes to raw unchanged and emits
@@ -76,6 +78,7 @@ type streamEvent struct {
 
 type messageBlock struct {
 	Content []contentBlock `json:"content"`
+	Model   string         `json:"model,omitempty"`
 }
 
 type contentBlock struct {
@@ -129,11 +132,13 @@ func (w *Writer) parseLine(line string) {
 					role = "subagent"
 				}
 			}
+			model := ModelFamily(ev.Message.Model)
 
-			// On role switch, flush the departing role's pending counts.
-			if role != w.currentRole {
+			// On (role, model) change, flush the departing role's pending counts.
+			if role != w.currentRole || model != w.currentModel {
 				w.flushCounts(w.currentRole)
 				w.currentRole = role
+				w.currentModel = model
 			}
 
 			// Subagent narration (parent_tool_use_id != "") is dropped; only
@@ -206,9 +211,10 @@ func (w *Writer) emit() {
 // is for a different role. It is a no-op when the acting role header was already
 // emitted and no intervening header was needed.
 func (w *Writer) ensureHeader() {
-	if w.currentRole != "" && w.currentRole != w.lastHeader {
-		fmt.Fprintln(w.out, FormatRoleHeader(w.issue, w.currentRole))
+	if w.currentRole != "" && (w.currentRole != w.lastHeader || w.currentModel != w.lastHeaderModel) {
+		fmt.Fprintln(w.out, FormatRoleHeader(w.issue, w.currentRole, w.currentModel))
 		w.lastHeader = w.currentRole
+		w.lastHeaderModel = w.currentModel
 	}
 }
 
@@ -222,9 +228,10 @@ func (w *Writer) flushCounts(role string) {
 	if !hasCounts(counts) {
 		return
 	}
-	if w.lastHeader != role {
-		fmt.Fprintln(w.out, FormatRoleHeader(w.issue, role))
+	if w.lastHeader != role || w.lastHeaderModel != w.currentModel {
+		fmt.Fprintln(w.out, FormatRoleHeader(w.issue, role, w.currentModel))
 		w.lastHeader = role
+		w.lastHeaderModel = w.currentModel
 	}
 	fmt.Fprintln(w.out, FormatCountLine(w.issue, w.rolePhase[role], counts))
 	clearCounts(counts)
@@ -239,11 +246,17 @@ func (w *Writer) currCounts() map[string]int {
 }
 
 // FormatRoleHeader returns a switch-header line for the acting role.
-// Example: "#284 ── implementor ────────────────"
-func FormatRoleHeader(issue, role string) string {
+// When model is non-empty, appends "· <model>" after the role.
+// Example: "#284 ── implementor · opus ──────────"
+// Example: "#284 ── scout ──────────────────────"
+func FormatRoleHeader(issue, role, model string) string {
 	const targetWidth = 36
 	const minTrail = 4
-	prefix := "#" + issue + " \xe2\x94\x80\xe2\x94\x80 " + role + " "
+	label := role
+	if model != "" {
+		label = role + " \xc2\xb7 " + model
+	}
+	prefix := "#" + issue + " \xe2\x94\x80\xe2\x94\x80 " + label + " "
 	trail := targetWidth - len([]rune(prefix))
 	if trail < minTrail {
 		trail = minTrail
@@ -282,6 +295,21 @@ func FormatCountLine(issue, phase string, counts map[string]int) string {
 	}
 	fmt.Fprintf(&sb, " \xc2\xb7 %s", formatCounts(counts))
 	return sb.String()
+}
+
+// ModelFamily shortens a full model ID to its family label.
+// "claude-haiku-…" → "haiku", "claude-sonnet-…" → "sonnet", "claude-opus-…" → "opus".
+// Returns the id unchanged if no known family matches; returns "" for empty input.
+func ModelFamily(id string) string {
+	if id == "" {
+		return ""
+	}
+	for _, family := range []string{"haiku", "sonnet", "opus"} {
+		if strings.Contains(id, family) {
+			return family
+		}
+	}
+	return id
 }
 
 // toolKind maps a tool name to its human-readable count kind.

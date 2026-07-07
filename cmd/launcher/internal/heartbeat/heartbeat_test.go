@@ -642,6 +642,130 @@ func TestWriterSwitchHeader(t *testing.T) {
 	})
 }
 
+// TestModelFamily verifies model ID shortening to family labels.
+func TestModelFamily(t *testing.T) {
+	tests := []struct {
+		id   string
+		want string
+	}{
+		{"claude-haiku-4-5-20251001", "haiku"},
+		{"claude-sonnet-4-6", "sonnet"},
+		{"claude-opus-4-8", "opus"},
+		{"claude-opus-4-8-20250514", "opus"},
+		{"claude-fable-5", "claude-fable-5"},
+		{"gpt-4o", "gpt-4o"},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.id, func(t *testing.T) {
+			got := heartbeat.ModelFamily(tc.id)
+			if got != tc.want {
+				t.Errorf("ModelFamily(%q) = %q, want %q", tc.id, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWriterModelHeader covers model extraction, header format, missing-model tolerance,
+// and same-role model switch producing a new header.
+func TestWriterModelHeader(t *testing.T) {
+	const rule = "\xe2\x94\x80\xe2\x94\x80"
+
+	// Helper: implementor assistant event with optional model field.
+	implNarWithModel := func(text, model string) string {
+		modelJSON := ""
+		if model != "" {
+			modelJSON = `,"model":"` + model + `"`
+		}
+		return `{"type":"assistant","message":{"content":[{"type":"text","text":"` + text + `"}]` + modelJSON + `}}` + "\n"
+	}
+	implToolWithModel := func(name, id, model string) string {
+		modelJSON := ""
+		if model != "" {
+			modelJSON = `,"model":"` + model + `"`
+		}
+		return `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"` + name + `","id":"` + id + `","input":{}}]` + modelJSON + `}}` + "\n"
+	}
+
+	t.Run("model_in_header", func(t *testing.T) {
+		var status bytes.Buffer
+		w := heartbeat.New(&bytes.Buffer{}, "1", &status)
+		fmt.Fprint(w, implNarWithModel("Planning.", "claude-opus-4-8"))
+		out := status.String()
+		if !strings.Contains(out, rule+" implementor \xc2\xb7 opus ") {
+			t.Errorf("header must contain 'implementor · opus': %q", out)
+		}
+	})
+
+	t.Run("missing_model_role_only", func(t *testing.T) {
+		var status bytes.Buffer
+		w := heartbeat.New(&bytes.Buffer{}, "2", &status)
+		fmt.Fprint(w, implNarWithModel("Planning.", ""))
+		out := status.String()
+		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+		if len(lines) == 0 {
+			t.Fatal("no output")
+		}
+		header := lines[0]
+		if strings.Contains(header, "\xc2\xb7") {
+			t.Errorf("header with no model must not contain '·': %q", header)
+		}
+		if !strings.Contains(header, rule+" implementor ") {
+			t.Errorf("header must contain 'implementor': %q", header)
+		}
+	})
+
+	t.Run("same_role_model_switch_new_header", func(t *testing.T) {
+		var status bytes.Buffer
+		w := heartbeat.New(&bytes.Buffer{}, "3", &status)
+		// Implementor uses sonnet, accumulates a read, then switches to opus.
+		fmt.Fprint(w, implToolWithModel("Read", "r1", "claude-sonnet-4-6"))
+		fmt.Fprint(w, implNarWithModel("Now switching.", "claude-opus-4-8"))
+		out := status.String()
+		// Both model headers must appear.
+		if !strings.Contains(out, "sonnet") {
+			t.Errorf("must contain 'sonnet' header: %q", out)
+		}
+		if !strings.Contains(out, "opus") {
+			t.Errorf("must contain 'opus' header: %q", out)
+		}
+		// sonnet header must precede opus header.
+		si := strings.Index(out, "sonnet")
+		oi := strings.Index(out, "opus")
+		if si < 0 || oi < 0 || si > oi {
+			t.Errorf("sonnet header must precede opus header: %q", out)
+		}
+	})
+
+	t.Run("no_header_spam_same_role_model", func(t *testing.T) {
+		var status bytes.Buffer
+		w := heartbeat.New(&bytes.Buffer{}, "4", &status)
+		// Two consecutive narrations with the same (role, model) — only one header.
+		fmt.Fprint(w, implNarWithModel("First.", "claude-sonnet-4-6"))
+		fmt.Fprint(w, implNarWithModel("Second.", "claude-sonnet-4-6"))
+		out := status.String()
+		if n := strings.Count(out, rule+" implementor \xc2\xb7 sonnet "); n != 1 {
+			t.Errorf("identical (role,model) must emit header once, got %d: %q", n, out)
+		}
+	})
+}
+
+// TestFormatRoleHeaderModel verifies that FormatRoleHeader includes model when provided.
+func TestFormatRoleHeaderModel(t *testing.T) {
+	const rule = "\xe2\x94\x80\xe2\x94\x80"
+	h := heartbeat.FormatRoleHeader("42", "scout", "haiku")
+	if !strings.Contains(h, rule+" scout \xc2\xb7 haiku ") {
+		t.Errorf("header missing 'scout · haiku': %q", h)
+	}
+	hNoModel := heartbeat.FormatRoleHeader("42", "scout", "")
+	if strings.Contains(hNoModel, "\xc2\xb7") {
+		t.Errorf("header with empty model must not contain '·': %q", hNoModel)
+	}
+	if !strings.Contains(hNoModel, rule+" scout ") {
+		t.Errorf("header missing 'scout': %q", hNoModel)
+	}
+}
+
 // TestWriterCountLineOnNarration verifies that accumulated tool events produce
 // a count summary line when narration arrives, not one line per tool event.
 func TestWriterCountLineOnNarration(t *testing.T) {
