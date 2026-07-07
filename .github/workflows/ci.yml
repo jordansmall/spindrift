@@ -22,4 +22,4 @@ jobs:
       # Realise the Linux OCI image natively — the one thing the checks only
       # assert at eval time. On a Linux runner this needs no podman fallback.
       - name: Build the agent image
-        run: nix build .#packages.x86_64-linux.spindrift --print-build-logs
+        run: nix build .#packages.x86_64-linux.agent-image --print-build-logs
