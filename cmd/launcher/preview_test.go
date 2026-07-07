@@ -70,6 +70,26 @@ func TestPreviewIssues_RespectsBarrierFence(t *testing.T) {
 	}
 }
 
+// TestPreviewIssues_PrintsMergeMode verifies that previewIssues prints the
+// effective merge mode so the operator sees which mode is armed.
+func TestPreviewIssues_PrintsMergeMode(t *testing.T) {
+	c := baseConfig()
+	c.repoSlug = "owner/repo"
+	c.label = "ready-for-agent"
+	c.mergeMode = "immediate"
+	fc := forge.NewFake()
+
+	var buf bytes.Buffer
+	if err := previewIssues(c, fc, &buf, nil); err != nil {
+		t.Fatalf("previewIssues: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "immediate") {
+		t.Errorf("previewIssues output must include merge mode; got:\n%s", out)
+	}
+}
+
 // TestPrintHelp_ShowsPreview verifies that --help lists the preview subcommand.
 func TestPrintHelp_ShowsPreview(t *testing.T) {
 	var buf bytes.Buffer

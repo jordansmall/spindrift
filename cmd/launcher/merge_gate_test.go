@@ -17,161 +17,63 @@ func baseConfig() config {
 		completeLabel:     "agent-complete",
 		mergePollInterval: 0,   // no sleep in tests
 		mergePollTimeout:  100, // large enough for multi-poll tests
+		mergeMode:         "immediate",
 	}
 }
 
 const testPR = "https://github.com/owner/repo/pull/42"
 
-func TestMergeWhenGreen(t *testing.T) {
+// TestGateToGreen verifies that gateToGreen swaps agent-complete on confirmed
+// green (independent of any merge attempt) and signals genuineRed on failure.
+func TestGateToGreen(t *testing.T) {
 	cases := []struct {
-		name                      string
-		timeout                   int
-		maxRebaseAttempts         int // 0 → use baseConfig default (3)
-		checkStates               []forge.RollupState
-		checkStateErrs            []error // per-call error queue; nil entry = use state queue
-		mergeErr                  error
-		mergeErrs                 []error // per-call queue; overrides mergeErr when non-nil
-		rebaseErr                 error
-		conflictResolveErr        error // nil → resolve succeeds; non-nil → resolve fails
-		noConflictResolveFn       bool  // when true pass nil conflictResolveFn
-		wantMerged                bool
-		wantGenuineRed            bool
-		wantSwapAdd               string // expected label added in last SwapLabel call; "" = no swap
-		wantRebaseCalled          int    // expected len(fc.RebasedURLs)
-		wantConflictResolveCalled int
+		name           string
+		timeout        int
+		checkStates    []forge.RollupState
+		checkStateErrs []error
+		wantGreen      bool
+		wantGenuineRed bool
+		wantSwapAdd    string
 	}{
 		{
-			name:           "SUCCESS on first poll merges and completes",
+			name:           "SUCCESS on first poll swaps agent-complete",
 			timeout:        100,
 			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
-			wantMerged:     true,
+			wantGreen:      true,
 			wantGenuineRed: false,
 			wantSwapAdd:    "agent-complete",
 		},
 		{
-			name:           "PENDING then SUCCESS merges after one wait iteration",
+			name:           "PENDING then SUCCESS swaps after one wait iteration",
 			timeout:        100,
 			checkStates:    []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess},
-			wantMerged:     true,
+			wantGreen:      true,
 			wantGenuineRed: false,
 			wantSwapAdd:    "agent-complete",
 		},
 		{
-			name:           "FAILURE returns genuine-red signal without label swap",
+			name:           "FAILURE signals genuine-red without swap",
 			timeout:        100,
 			checkStates:    []forge.RollupState{forge.StateFailure},
-			wantMerged:     false,
+			wantGreen:      false,
 			wantGenuineRed: true,
-			wantSwapAdd:    "", // selfHeal owns the label swap
+			wantSwapAdd:    "",
 		},
 		{
-			name:           "ERROR returns genuine-red signal without label swap",
+			name:           "ERROR signals genuine-red without swap",
 			timeout:        100,
 			checkStates:    []forge.RollupState{forge.StateError},
-			wantMerged:     false,
+			wantGreen:      false,
 			wantGenuineRed: true,
-			wantSwapAdd:    "", // selfHeal owns the label swap
+			wantSwapAdd:    "",
 		},
 		{
-			name:           "NONE (no checks registered) times out — non-genuine failure",
-			timeout:        0, // expires on first iteration
+			name:           "NONE times out — non-genuine failure without swap",
+			timeout:        0,
 			checkStates:    nil,
-			wantMerged:     false,
+			wantGreen:      false,
 			wantGenuineRed: false,
-			wantSwapAdd:    "", // selfHeal owns the label swap
-		},
-		{
-			name:           "merge command failure is non-genuine (not a CI red)",
-			timeout:        100,
-			checkStates:    []forge.RollupState{forge.StateSuccess},
-			mergeErr:       errors.New("merge failed"),
-			wantMerged:     false,
-			wantGenuineRed: false,
-			wantSwapAdd:    "", // selfHeal owns the label swap
-		},
-		{
-			name:              "conflict → rebase → re-poll → merge succeeds",
-			timeout:           100,
-			maxRebaseAttempts: 3,
-			// Confirmation poll + merge poll each need their own SUCCESS.
-			checkStates: []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
-			// First Merge call returns ErrMergeConflict; second succeeds.
-			mergeErrs:        []error{forge.ErrMergeConflict, nil},
-			wantMerged:       true,
-			wantGenuineRed:   false,
-			wantSwapAdd:      "agent-complete",
-			wantRebaseCalled: 1,
-		},
-		{
-			name:              "conflict → rebase fails → non-retriable",
-			timeout:           100,
-			maxRebaseAttempts: 3,
-			// Confirmation poll consumes a second SUCCESS before merge is attempted.
-			checkStates:      []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
-			mergeErrs:        []error{forge.ErrMergeConflict},
-			rebaseErr:        errors.New("rebase failed: conflict"),
-			wantMerged:       false,
-			wantGenuineRed:   false,
-			wantSwapAdd:      "",
-			wantRebaseCalled: 1,
-		},
-		{
-			name:              "conflict exhausts maxRebaseAttempts → non-retriable",
-			timeout:           100,
-			maxRebaseAttempts: 1,
-			// CI stays SUCCESS; merge keeps returning conflict; rebase keeps succeeding.
-			checkStates: []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
-			mergeErrs:   []error{forge.ErrMergeConflict, forge.ErrMergeConflict},
-			wantMerged:  false,
-			// Exactly 1 rebase attempt allowed; second conflict hits the cap.
-			wantGenuineRed:   false,
-			wantSwapAdd:      "",
-			wantRebaseCalled: 1,
-		},
-		{
-			name:              "rebase conflict → conflict-resolve fn called → merge succeeds",
-			timeout:           100,
-			maxRebaseAttempts: 3,
-			// Confirmation poll needed before each Merge attempt.
-			checkStates: []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
-			// Merge conflicts; rebase itself also conflicts (fn resolves it); then merge succeeds.
-			mergeErrs:                 []error{forge.ErrMergeConflict, nil},
-			rebaseErr:                 forge.ErrMergeConflict,
-			wantMerged:                true,
-			wantGenuineRed:            false,
-			wantSwapAdd:               "agent-complete",
-			wantRebaseCalled:          1,
-			wantConflictResolveCalled: 1,
-		},
-		{
-			name:              "rebase conflict → conflict-resolve fn fails → non-retriable",
-			timeout:           100,
-			maxRebaseAttempts: 3,
-			// Confirmation poll consumes a second SUCCESS before merge is attempted.
-			checkStates:               []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
-			mergeErrs:                 []error{forge.ErrMergeConflict},
-			rebaseErr:                 forge.ErrMergeConflict,
-			conflictResolveErr:        errors.New("agent could not resolve conflict"),
-			wantMerged:                false,
-			wantGenuineRed:            false,
-			wantSwapAdd:               "",
-			wantRebaseCalled:          1,
-			wantConflictResolveCalled: 1,
-		},
-		{
-			name:              "rebase conflict → no conflict-resolve fn → non-retriable",
-			timeout:           100,
-			maxRebaseAttempts: 3,
-			// Confirmation poll consumes a second SUCCESS before merge is attempted.
-			checkStates:               []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
-			mergeErrs:                 []error{forge.ErrMergeConflict},
-			rebaseErr:                 forge.ErrMergeConflict,
-			noConflictResolveFn:       true,
-			wantMerged:                false,
-			wantGenuineRed:            false,
-			wantSwapAdd:               "",
-			wantRebaseCalled:          1,
-			wantConflictResolveCalled: 0,
+			wantSwapAdd:    "",
 		},
 		{
 			// A partial check snapshot can briefly show SUCCESS before all jobs
@@ -179,61 +81,45 @@ func TestMergeWhenGreen(t *testing.T) {
 			name:           "SUCCESS then FAILURE in confirmation poll is genuine red",
 			timeout:        100,
 			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateFailure},
-			wantMerged:     false,
+			wantGreen:      false,
 			wantGenuineRed: true,
 			wantSwapAdd:    "",
 		},
 		{
 			// Confirmation returns PENDING — another check registered but not
 			// yet settled. Gate keeps waiting; eventually stabilises to SUCCESS.
-			name:        "SUCCESS then PENDING in confirmation poll defers merge",
+			name:        "SUCCESS then PENDING in confirmation poll defers completion",
 			timeout:     100,
 			checkStates: []forge.RollupState{forge.StateSuccess, forge.StatePending, forge.StateSuccess, forge.StateSuccess},
-			wantMerged:  true,
+			wantGreen:   true,
 			wantSwapAdd: "agent-complete",
 		},
 		{
 			// A 403 or other API error on the first poll must not be silently
-			// dropped as StateNone. Without the fix the error is ignored, the
-			// loop hits the subsequent SUCCESS entries, and merges — this test
-			// would incorrectly report wantMerged=false as a failure.
+			// dropped as StateNone.
 			name:           "CheckState API error on first poll is non-retriable",
 			timeout:        100,
 			checkStateErrs: []error{errors.New("gh api graphql: 403 Forbidden")},
 			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
-			wantMerged:     false,
+			wantGreen:      false,
 			wantGenuineRed: false,
 		},
 		{
-			// A 403 on the confirmation poll (second call after an initial SUCCESS)
-			// must also surface as non-retriable rather than being silently treated
-			// as StateNone. Without the fix the loop breaks on NONE, re-polls,
-			// finds SUCCESS again, and merges.
+			// A 403 on the confirmation poll must surface as non-retriable.
 			name:           "CheckState API error on confirmation poll is non-retriable",
 			timeout:        100,
 			checkStateErrs: []error{nil, errors.New("gh api graphql: 403 Forbidden")},
 			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
-			wantMerged:     false,
+			wantGreen:      false,
 			wantGenuineRed: false,
 		},
 	}
-
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			c := baseConfig()
 			c.mergePollTimeout = tc.timeout
-			if tc.maxRebaseAttempts != 0 {
-				c.maxRebaseAttempts = tc.maxRebaseAttempts
-			}
-
 			fc := forge.NewFake()
-			if len(tc.mergeErrs) > 0 {
-				fc.MergeErrs = tc.mergeErrs
-			} else {
-				fc.MergeErr = tc.mergeErr
-			}
-			fc.RebaseErr = tc.rebaseErr
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
 			if len(tc.checkStates) > 0 {
 				fc.SetCheckStates(testPR, tc.checkStates)
@@ -241,6 +127,133 @@ func TestMergeWhenGreen(t *testing.T) {
 			if len(tc.checkStateErrs) > 0 {
 				fc.SetCheckStateErrors(testPR, tc.checkStateErrs)
 			}
+
+			green, genuineRed := gateToGreen(c, fc, "1", testPR)
+
+			if green != tc.wantGreen {
+				t.Errorf("gateToGreen green=%v, want %v", green, tc.wantGreen)
+			}
+			if genuineRed != tc.wantGenuineRed {
+				t.Errorf("gateToGreen genuineRed=%v, want %v", genuineRed, tc.wantGenuineRed)
+			}
+			if tc.wantSwapAdd != "" {
+				if len(fc.SwapCalls) == 0 {
+					t.Fatalf("expected SwapLabel call, got none")
+				}
+				last := fc.SwapCalls[len(fc.SwapCalls)-1]
+				if last.Add != tc.wantSwapAdd {
+					t.Errorf("swap add=%q, want %q", last.Add, tc.wantSwapAdd)
+				}
+			} else {
+				if len(fc.SwapCalls) > 0 {
+					t.Errorf("expected no SwapLabel calls, got %d: %+v", len(fc.SwapCalls), fc.SwapCalls)
+				}
+			}
+		})
+	}
+}
+
+// TestMergeImmediate verifies the rebase-retry and conflict-resolve behaviors
+// that run inside applyMergeMode for the immediate merge mode.
+func TestMergeImmediate(t *testing.T) {
+	cases := []struct {
+		name                      string
+		maxRebaseAttempts         int
+		mergeErr                  error
+		mergeErrs                 []error
+		rebaseErr                 error
+		conflictResolveErr        error
+		noConflictResolveFn       bool
+		wantErr                   bool
+		wantMerged                bool
+		wantRebaseCalled          int
+		wantConflictResolveCalled int
+	}{
+		{
+			name:       "clean merge succeeds",
+			wantErr:    false,
+			wantMerged: true,
+		},
+		{
+			name:       "non-conflict merge failure is returned",
+			mergeErr:   errors.New("required review missing"),
+			wantErr:    true,
+			wantMerged: false,
+		},
+		{
+			name:              "conflict → rebase → retry succeeds",
+			maxRebaseAttempts: 3,
+			mergeErrs:         []error{forge.ErrMergeConflict, nil},
+			wantErr:           false,
+			wantMerged:        true,
+			wantRebaseCalled:  1,
+		},
+		{
+			name:              "conflict → rebase fails → error returned",
+			maxRebaseAttempts: 3,
+			mergeErrs:         []error{forge.ErrMergeConflict},
+			rebaseErr:         errors.New("rebase failed: conflict"),
+			wantErr:           true,
+			wantMerged:        false,
+			wantRebaseCalled:  1,
+		},
+		{
+			name:              "conflict exhausts maxRebaseAttempts → error returned",
+			maxRebaseAttempts: 1,
+			mergeErrs:         []error{forge.ErrMergeConflict, forge.ErrMergeConflict},
+			wantErr:           true,
+			wantMerged:        false,
+			wantRebaseCalled:  1,
+		},
+		{
+			name:                      "rebase conflict → conflict-resolve fn succeeds → merge succeeds",
+			maxRebaseAttempts:         3,
+			mergeErrs:                 []error{forge.ErrMergeConflict, nil},
+			rebaseErr:                 forge.ErrMergeConflict,
+			wantErr:                   false,
+			wantMerged:                true,
+			wantRebaseCalled:          1,
+			wantConflictResolveCalled: 1,
+		},
+		{
+			name:                      "rebase conflict → conflict-resolve fn fails → error returned",
+			maxRebaseAttempts:         3,
+			mergeErrs:                 []error{forge.ErrMergeConflict},
+			rebaseErr:                 forge.ErrMergeConflict,
+			conflictResolveErr:        errors.New("agent could not resolve conflict"),
+			wantErr:                   true,
+			wantMerged:                false,
+			wantRebaseCalled:          1,
+			wantConflictResolveCalled: 1,
+		},
+		{
+			name:                      "rebase conflict → no conflict-resolve fn → error returned",
+			maxRebaseAttempts:         3,
+			mergeErrs:                 []error{forge.ErrMergeConflict},
+			rebaseErr:                 forge.ErrMergeConflict,
+			noConflictResolveFn:       true,
+			wantErr:                   true,
+			wantMerged:                false,
+			wantRebaseCalled:          1,
+			wantConflictResolveCalled: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseConfig()
+			if tc.maxRebaseAttempts != 0 {
+				c.maxRebaseAttempts = tc.maxRebaseAttempts
+			}
+			fc := forge.NewFake()
+			if len(tc.mergeErrs) > 0 {
+				fc.MergeErrs = tc.mergeErrs
+			} else {
+				fc.MergeErr = tc.mergeErr
+			}
+			fc.RebaseErr = tc.rebaseErr
+			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.completeLabel}})
 
 			conflictResolveCalls := 0
 			var conflictResolveFn func(string) error
@@ -251,16 +264,13 @@ func TestMergeWhenGreen(t *testing.T) {
 				}
 			}
 
-			got, genuineRed := mergeWhenGreen(c, fc, "1", testPR, conflictResolveFn)
+			err := mergeImmediate(c, fc, "1", testPR, conflictResolveFn)
 
-			if got != tc.wantMerged {
-				t.Errorf("mergeWhenGreen merged=%v, want %v", got, tc.wantMerged)
-			}
-			if genuineRed != tc.wantGenuineRed {
-				t.Errorf("mergeWhenGreen genuineRed=%v, want %v", genuineRed, tc.wantGenuineRed)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("mergeImmediate err=%v, wantErr=%v", err, tc.wantErr)
 			}
 			if tc.wantMerged && fc.Merged != testPR {
-				t.Errorf("Merge not called with PR URL; fc.Merged=%q", fc.Merged)
+				t.Errorf("Merge not called; fc.Merged=%q", fc.Merged)
 			}
 			if !tc.wantMerged && fc.Merged != "" {
 				t.Errorf("Merge should not have been called; fc.Merged=%q", fc.Merged)
@@ -271,21 +281,83 @@ func TestMergeWhenGreen(t *testing.T) {
 			if conflictResolveCalls != tc.wantConflictResolveCalled {
 				t.Errorf("conflictResolveFn called %d times, want %d", conflictResolveCalls, tc.wantConflictResolveCalled)
 			}
-
-			if tc.wantSwapAdd != "" {
-				if len(fc.SwapCalls) == 0 {
-					t.Fatalf("expected SwapLabel call but got none")
-				}
-				last := fc.SwapCalls[len(fc.SwapCalls)-1]
-				if last.Add != tc.wantSwapAdd {
-					t.Errorf("last swap add=%q, want %q", last.Add, tc.wantSwapAdd)
-				}
-			} else {
-				if len(fc.SwapCalls) > 0 {
-					t.Errorf("expected no SwapLabel calls, got %d: %+v", len(fc.SwapCalls), fc.SwapCalls)
-				}
-			}
 		})
+	}
+}
+
+// TestApplyMergeMode_Immediate verifies that immediate mode calls fc.Merge.
+func TestApplyMergeMode_Immediate(t *testing.T) {
+	c := baseConfig()
+	c.mergeMode = "immediate"
+	c.maxRebaseAttempts = 3
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.completeLabel}})
+
+	err := applyMergeMode(c, fc, "1", testPR, nil)
+	if err != nil {
+		t.Errorf("applyMergeMode immediate: unexpected error: %v", err)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("immediate mode must call Merge; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// TestApplyMergeMode_Manual verifies that manual mode does not call fc.Merge.
+func TestApplyMergeMode_Manual(t *testing.T) {
+	c := baseConfig()
+	c.mergeMode = "manual"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.completeLabel}})
+
+	err := applyMergeMode(c, fc, "1", testPR, nil)
+	if err != nil {
+		t.Errorf("applyMergeMode manual: unexpected error: %v", err)
+	}
+	if fc.Merged != "" {
+		t.Errorf("manual mode must not call Merge; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// TestApplyMergeMode_Auto verifies that auto mode is accepted and does not
+// call fc.Merge (routed through manual path pending native auto-merge).
+func TestApplyMergeMode_Auto(t *testing.T) {
+	c := baseConfig()
+	c.mergeMode = "auto"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.completeLabel}})
+
+	err := applyMergeMode(c, fc, "1", testPR, nil)
+	if err != nil {
+		t.Errorf("applyMergeMode auto: unexpected error: %v", err)
+	}
+	if fc.Merged != "" {
+		t.Errorf("auto mode must not call Merge (pending slice); fc.Merged=%q", fc.Merged)
+	}
+}
+
+// TestSelfHeal_MergeFailureAfterGreenKeepsComplete verifies that a merge
+// failure after CI reaches green leaves the issue at agent-complete (not
+// agent-failed).
+func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
+	c := baseConfig()
+	c.mergeMode = "immediate"
+	c.maxRebaseAttempts = 0
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	// CI is green but merge fails.
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.MergeErr = errors.New("required review missing")
+
+	ok := selfHeal(c, fc, func(int) error { return nil }, nil, "1", testPR)
+	if !ok {
+		t.Error("selfHeal must return true when CI reached green (even if merge fails)")
+	}
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, c.completeLabel) {
+		t.Errorf("issue must carry %q after green+merge-failure; labels=%v", c.completeLabel, iss.Labels)
+	}
+	if containsLabel(iss.Labels, c.failedLabel) {
+		t.Errorf("issue must NOT carry %q after merge failure on green PR; labels=%v", c.failedLabel, iss.Labels)
 	}
 }
 

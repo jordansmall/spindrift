@@ -371,4 +371,40 @@ func TestDispatchWaves_FailsDependentWhenBlockerFails(t *testing.T) {
 	}
 }
 
+// TestValidateMergeMode_RejectsUnknown verifies that validate() fails fast when
+// MERGE_MODE is set to an unrecognised value.
+func TestValidateMergeMode_RejectsUnknown(t *testing.T) {
+	c := minimalValidConfig()
+	c.mergeMode = "turbo"
+	if err := validate(c); err == nil {
+		t.Fatal("validate() should reject unrecognised MERGE_MODE")
+	}
+}
+
+// TestValidateMergeMode_AcceptsKnown verifies that validate() accepts the three
+// documented MERGE_MODE values.
+func TestValidateMergeMode_AcceptsKnown(t *testing.T) {
+	for _, mode := range []string{"immediate", "auto", "manual"} {
+		c := minimalValidConfig()
+		c.mergeMode = mode
+		if err := validate(c); err != nil {
+			t.Errorf("validate() rejected valid MERGE_MODE %q: %v", mode, err)
+		}
+	}
+}
+
+// minimalValidConfig returns a config that passes validate() so tests can
+// mutate exactly one field at a time.
+func minimalValidConfig() config {
+	return config{
+		repoSlug:         "owner/repo",
+		gitUserName:      "bot",
+		gitUserEmail:     "bot@example.com",
+		ghToken:          "ghp_test",
+		claudeOAuthToken: "tok",
+		runtime:          "echo", // echo is always on PATH
+		mergeMode:        "manual",
+	}
+}
+
 var errBoxFailed = fmt.Errorf("exit 1")
