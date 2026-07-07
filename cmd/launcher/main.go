@@ -305,7 +305,7 @@ func runOne(c config, pwd string, r runner.Runner, iss issue) error {
 		Issue:  iss.number,
 		Name:   "agent-issue-" + iss.number,
 		Env:    buildBoxEnv(c, iss),
-		Output: heartbeat.New(logFile, iss.number, os.Stdout, heartbeat.DefaultThrottle),
+		Output: heartbeat.New(logFile, iss.number, os.Stdout),
 	}
 	return r.Run(box)
 }
@@ -329,7 +329,7 @@ func runFix(c config, pwd string, r runner.Runner, iss issue, fixPass int) error
 		Issue:  fixIss.number,
 		Name:   "agent-issue-" + fixIss.number,
 		Env:    buildBoxEnv(c, fixIss),
-		Output: heartbeat.New(logFile, fixIss.number, os.Stdout, heartbeat.DefaultThrottle),
+		Output: heartbeat.New(logFile, fixIss.number, os.Stdout),
 	}
 	return r.Run(box)
 }
@@ -354,7 +354,7 @@ func runConflictResolve(c config, pwd string, r runner.Runner, iss issue, pr str
 		Issue:  iss.number,
 		Name:   "agent-issue-" + iss.number,
 		Env:    env,
-		Output: heartbeat.New(logFile, iss.number, os.Stdout, heartbeat.DefaultThrottle),
+		Output: heartbeat.New(logFile, iss.number, os.Stdout),
 	}
 	return r.Run(box)
 }
