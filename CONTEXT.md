@@ -24,8 +24,25 @@ is a distinct role from the Consumer flake even when they are the same repo.
 _Avoid_: source repo, project repo.
 
 **Agent**:
-A single headless `claude -p … --dangerously-skip-permissions` process working
-one issue inside one container.
+A single headless Driver process — `claude -p …` or `opencode run …`, run with
+`--dangerously-skip-permissions`/`--auto` — working one issue inside one
+container. The Agent is the running process; the Driver is which CLI it is.
+
+**Driver**:
+The swappable agent CLI baked into the Box: `claude` or `opencode`. A build-time
+seam (one Driver per image, picked beside `runtime`), analogous to the Forge and
+runner seams. Each Driver normalizes its tool's quirks at its own boundary and
+has two coordinated halves keyed by one name — a nix-generated in-box half
+(invocation, agent-config, outcome extraction) and a Go host-side strategy in the
+launcher (transient classification, heartbeat). _Provisional name_ — may be
+renamed (e.g. "agent harness"). _Avoid_: engine, backend, tool.
+
+**Provider**:
+The model backend a Driver talks to: Anthropic, GitHub Copilot, OpenAI. Distinct
+from the Driver — the `opencode` Driver is provider-flexible, so "GitHub Copilot
+support" is the opencode Driver pointed at the `github-copilot` provider, with
+`MODEL` provider-namespaced (`github-copilot/…`). The `claude` Driver is
+effectively locked to Anthropic. _Avoid_: model host, vendor, backend.
 
 **Box**:
 The disposable per-issue podman container — the isolation boundary that makes
