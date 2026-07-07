@@ -440,6 +440,23 @@ func gateToGreen(c config, fc forge.Client, num, pr string) (bool, bool) {
 	return false, false
 }
 
+// checkAutoMergePreflight verifies that the repo allows GitHub's native
+// auto-merge when MERGE_MODE=auto. Returns a non-nil error if the repo
+// disallows it or the capability check fails; no-ops for other modes.
+func checkAutoMergePreflight(c config, fc forge.Client) error {
+	if c.mergeMode != "auto" {
+		return nil
+	}
+	ok, err := fc.CanAutoMerge()
+	if err != nil {
+		return fmt.Errorf("MERGE_MODE=auto: auto-merge capability check failed: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("MERGE_MODE=auto: the repo does not allow auto-merge — enable \"Allow auto-merge\" in repo Settings → General, or switch to MERGE_MODE=manual")
+	}
+	return nil
+}
+
 // applyMergeMode performs the mode-specific action after CI reaches green.
 // agent-complete is already set; a merge failure is returned as an error but
 // does not revert the label.
@@ -451,7 +468,15 @@ func applyMergeMode(c config, fc forge.Client, num, pr string, conflictResolveFn
 	switch c.mergeMode {
 	case "immediate":
 		return mergeImmediate(c, fc, num, pr, conflictResolveFn)
-	case "manual", "auto":
+	case "auto":
+		if err := fc.EnqueueAutoMerge(pr); err != nil {
+			fmt.Printf("    #%s  pr=%s  status=auto-merge-enqueue-failed  !! %v\n", num, pr, err)
+			fc.Comment(num, fmt.Sprintf("auto-merge enqueue failed: %v — PR is green; approve and merge manually", err))
+			return nil
+		}
+		fmt.Printf("    #%s  pr=%s  status=auto-merge-enqueued\n", num, pr)
+		return nil
+	case "manual":
 		fmt.Printf("    #%s  pr=%s  status=agent-complete  merge-mode=%s\n", num, pr, c.mergeMode)
 		return nil
 	default:
@@ -1441,6 +1466,10 @@ func run(noBuild bool) error {
 
 	fc := forge.NewExecClient(c.repoSlug)
 	fmt.Printf("repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
+
+	if err := checkAutoMergePreflight(c, fc); err != nil {
+		return err
+	}
 
 	// Reconcile stranded in-progress issues before dispatching new work.
 	// Skip when ISSUE_NUMBER is set — the caller already claimed a specific issue.
