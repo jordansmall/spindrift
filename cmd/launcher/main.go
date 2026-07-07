@@ -494,18 +494,23 @@ func mergeImmediate(c config, fc forge.Client, num, pr string, conflictResolveFn
 // then applies the merge mode; a merge failure after green leaves the issue
 // agent-complete and is never demoted to agent-failed.
 //
+// Returns (ok, merged): ok is true when CI reached green; merged is true only
+// when immediate mode completed an actual merge. A merge failure keeps the
+// issue at agent-complete (merge-blocked note) and returns (true, false).
+//
 // runFixFn is called with the 1-based fix-pass number and must dispatch the
 // fix box synchronously. runConflictResolveFn, when non-nil, is forwarded to
 // applyMergeMode for agent-assisted rebase-conflict resolution.
-func selfHeal(c config, fc forge.Client, runFixFn func(int) error, runConflictResolveFn func(string) error, num, pr string) bool {
+func selfHeal(c config, fc forge.Client, runFixFn func(int) error, runConflictResolveFn func(string) error, num, pr string) (ok bool, merged bool) {
 	for attempt := 0; ; attempt++ {
 		green, genuineRed := gateToGreen(c, fc, num, pr)
 		if green {
 			if err := applyMergeMode(c, fc, num, pr, runConflictResolveFn); err != nil {
 				fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, pr, err)
 				fc.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
+				return true, false
 			}
-			return true
+			return true, c.mergeMode == "immediate"
 		}
 		if !genuineRed || attempt >= c.maxFixAttempts {
 			if genuineRed && c.maxFixAttempts > 0 {
@@ -513,7 +518,7 @@ func selfHeal(c config, fc forge.Client, runFixFn func(int) error, runConflictRe
 					num, pr, c.maxFixAttempts)
 			}
 			swapLabel(fc, num, c.failedLabel, c.inProgressLabel)
-			return false
+			return false, false
 		}
 		fmt.Printf("    #%s  pr=%s  fix-pass=%d/%d\n", num, pr, attempt+1, c.maxFixAttempts)
 		if err := runFixFn(attempt + 1); err != nil {
@@ -550,8 +555,9 @@ func verifyMerged(c config, fc forge.Client, num, pr string) {
 func adoptAndGate(c config, fc forge.Client, iss issue, prURL string, runFixFn func(int) error, runConflictResolveFn func(string) error) {
 	branch := c.branchPrefix + iss.number
 	fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", iss.number, prURL, branch)
-	if selfHeal(c, fc, runFixFn, runConflictResolveFn, iss.number, prURL) {
-		if c.mergeMode == "immediate" {
+	ok, merged := selfHeal(c, fc, runFixFn, runConflictResolveFn, iss.number, prURL)
+	if ok {
+		if merged {
 			verifyMerged(c, fc, iss.number, prURL)
 		}
 	} else {
@@ -667,8 +673,9 @@ func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue
 	case "ready":
 		fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
 		conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
-		if selfHeal(c, fc, fixFn, conflictFn, iss.number, o.PR) {
-			if c.mergeMode == "immediate" {
+		ok, merged := selfHeal(c, fc, fixFn, conflictFn, iss.number, o.PR)
+		if ok {
+			if merged {
 				verifyMerged(c, fc, iss.number, o.PR)
 			}
 		} else {

@@ -29,7 +29,7 @@ func TestSelfHeal_SuccessFirstTry(t *testing.T) {
 	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	var fixCalls []int
-	merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
+	_, merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
 
 	if !merged {
 		t.Error("expected merged=true on first-try SUCCESS")
@@ -52,7 +52,7 @@ func TestSelfHeal_GenuineRedMaxZero(t *testing.T) {
 	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateFailure})
 
 	var fixCalls []int
-	merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
+	_, merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
 
 	if merged {
 		t.Error("expected merged=false (maxFixAttempts=0)")
@@ -76,7 +76,7 @@ func TestSelfHeal_GenuineRedFixSucceeds(t *testing.T) {
 	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
 
 	var fixCalls []int
-	merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
+	_, merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
 
 	if !merged {
 		t.Error("expected merged=true after one fix pass")
@@ -104,7 +104,7 @@ func TestSelfHeal_ExhaustsAllPasses(t *testing.T) {
 	})
 
 	var fixCalls []int
-	merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
+	_, merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
 
 	if merged {
 		t.Error("expected merged=false after exhausting all fix passes")
@@ -134,7 +134,7 @@ func TestSelfHeal_ErrorStateTriggersFixPass(t *testing.T) {
 	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateError, forge.StateSuccess, forge.StateSuccess})
 
 	var fixCalls []int
-	merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
+	_, merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
 
 	if !merged {
 		t.Error("expected merged=true after ERROR then SUCCESS with fix pass")
@@ -152,7 +152,7 @@ func TestSelfHeal_PendingTimeoutNoFix(t *testing.T) {
 	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StatePending})
 
 	var fixCalls []int
-	merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
+	_, merged := selfHeal(c, fc, trackFix(&fixCalls), nil, "1", testFixPR)
 
 	if merged {
 		t.Error("expected merged=false on PENDING timeout")
