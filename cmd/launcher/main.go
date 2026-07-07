@@ -843,9 +843,9 @@ func containsLabel(labels []string, target string) bool {
 // blocker issue is closed with no discoverable PR (human-handled work).
 func blockerReady(c config, fc forge.Client, dep string) bool {
 	branch := c.branchPrefix + dep
-	pr, ok, err := fc.OpenPRForBranch(branch)
+	prURL, ok, err := fc.PRForBranch(branch)
 	if err == nil && ok {
-		state, stateErr := fc.PRState(pr.URL)
+		state, stateErr := fc.PRState(prURL)
 		if stateErr == nil {
 			return state == "MERGED"
 		}
