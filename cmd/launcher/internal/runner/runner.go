@@ -24,6 +24,11 @@ type Runner interface {
 	// bwrap: realises agent store closures via nix build.
 	EnsureReady() error
 
+	// IsReady reports whether the sandbox is usable right now, without building.
+	// OCI: checks that the image is loaded. bwrap: always returns nil.
+	// Returns an error with a "run `spindrift build`" hint when absent.
+	IsReady() error
+
 	// Run dispatches box and blocks until it exits. A non-zero exit is an error.
 	Run(box Box) error
 

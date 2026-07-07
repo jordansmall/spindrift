@@ -54,6 +54,18 @@ func NewOCI(cli, image, imageArchive, imageDrv, imageTag, nixBuilderImage, nixVo
 	}
 }
 
+// IsReady checks that the OCI image is already loaded without building.
+// Returns a descriptive error if absent so the caller can fail fast.
+func (a *ociAdapter) IsReady() error {
+	inspect := exec.Command(a.cli, "image", "inspect", a.image)
+	inspect.Stdout = io.Discard
+	inspect.Stderr = io.Discard
+	if err := inspect.Run(); err != nil {
+		return fmt.Errorf("image absent; run `spindrift build`")
+	}
+	return nil
+}
+
 // EnsureReady checks that the OCI image is present; builds it if not.
 // Uses `image inspect` (portable: docker has no `image exists` verb).
 func (a *ociAdapter) EnsureReady() error {

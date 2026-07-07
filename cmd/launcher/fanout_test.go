@@ -33,6 +33,7 @@ type signalRunner struct {
 }
 
 func (r *signalRunner) EnsureReady() error { return nil }
+func (r *signalRunner) IsReady() error     { return nil }
 func (r *signalRunner) Reap(string) error  { return nil }
 func (r *signalRunner) Run(_ runner.Box) error {
 	isFirst := false
