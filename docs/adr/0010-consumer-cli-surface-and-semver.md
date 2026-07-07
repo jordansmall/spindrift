@@ -13,14 +13,16 @@ each layer.
 The everyday surface becomes `nix develop` (or a template `.envrc` via direnv) →
 `spindrift dispatch`. The Launcher is already one binary with subcommands; the
 flake was splitting it back apart. Collapsing to one CLI gives unified `--help`,
-promotes the hidden `engage` path into a documented form, and hides `.#`. The
+promotes the hidden `engage` path (renamed `recover`, ADR 0011) into a
+documented form, and hides `.#`. The
 verbs are deliberately **plain, not themed** — a snow register (`flurry`/`pack`/
 `forecast`) was explored and rejected, because thematic verbs re-impose exactly
 the "what does this even do" tax the redesign exists to remove:
 
 - **`dispatch [issue]`** — fan out one Box per `ready-for-agent` issue, or a
-  single issue as an optional positional (absorbs the old `run` + hidden
-  `engage`). It **auto-builds the image on first use** (the Launcher's
+  single issue as an optional positional (the existing `ISSUE_NUMBER`
+  single-issue path — *not* `engage`, which is a separate merge-gate verb; see
+  ADR 0011). It **auto-builds the image on first use** (the Launcher's
   `EnsureReady` already does this), so the happy path is one command, not two; a
   loud progress line covers the slow first build and `--no-build` fails fast for
   callers who want the steps separate.
@@ -85,10 +87,11 @@ guarantee.
   register: for a surface whose complaint is "obtuse," verbs that need `--help`
   to decode cut against the goal. Keep the product name evocative, the verbs
   boring.
-- **`dispatch` folds single-issue in as a positional vs. a separate `engage`
-  verb** — a distinct verb is more discoverable in `--help` but doubles the
-  vocabulary for "do work." Folded into `dispatch <issue>`; one verb, optional
-  target.
+- **Single-issue dispatch as a `dispatch` positional vs. a dedicated verb** — a
+  distinct verb is more discoverable in `--help` but doubles the vocabulary for
+  "do work." Folded into `dispatch <issue>`; one verb, optional target. (This is
+  the `ISSUE_NUMBER` path only; `engage` — the unrelated merge-gate/adopt verb,
+  renamed `recover` in ADR 0011 — is *not* folded in and stays distinct.)
 - **A hand-maintained `VERSION` file (or fully git-tag-derived version)** — the
   file is auditable but needs a CI guard to stay in sync with the tag; tag-only
   is zero-toil but a flake cannot read its own tag, so `--version` degrades to a
@@ -105,8 +108,8 @@ guarantee.
 
 - The Launcher grows a real subcommand parser and `--help`/`--version`; `dispatch`
   gains an optional issue positional and a `--no-build` flag; `preview` is a new
-  read-only path over the existing discovery logic. `engage` stops being a
-  distinct verb.
+  read-only path over the existing discovery logic. `engage` remains a distinct
+  verb (the merge-gate/adopt path), renamed `recover` per ADR 0011.
 - Flake outputs are restructured: `packages.spindrift` (CLI), `apps.default`
   (CLI), `packages.agent-image` (the former `packages.spindrift` image), with
   `apps.{build,run}` retained as deprecated aliases for one release. Consumer
