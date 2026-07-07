@@ -219,6 +219,37 @@ func isMergeConflict(stderr string) bool {
 		strings.Contains(s, "not mergeable")
 }
 
+// CanAutoMerge queries whether the repo allows GitHub's native auto-merge feature.
+func (e *execClient) CanAutoMerge() (bool, error) {
+	parts := strings.SplitN(e.repo, "/", 2)
+	if len(parts) != 2 {
+		return false, fmt.Errorf("invalid repo slug: %q", e.repo)
+	}
+	owner, repo := parts[0], parts[1]
+	const gql = `query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){autoMergeAllowed}}`
+	cmd := exec.Command("gh", "api", "graphql",
+		"-f", "query="+gql,
+		"-f", "owner="+owner,
+		"-f", "repo="+repo,
+		"--jq", ".data.repository.autoMergeAllowed",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("gh api graphql (autoMergeAllowed): %w", err)
+	}
+	return strings.TrimSpace(string(out)) == "true", nil
+}
+
+// EnqueueAutoMerge enqueues GitHub's native auto-merge for the PR. GitHub will
+// merge the PR automatically once all branch-protection requirements are met.
+func (e *execClient) EnqueueAutoMerge(prURL string) error {
+	cmd := exec.Command("gh", "pr", "merge", prURL, "--auto", "--rebase", "--delete-branch")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("gh pr merge --auto %s: %w", prURL, err)
+	}
+	return nil
+}
+
 // Rebase checks out the PR's head branch into a temporary clone of the target
 // repository, rebases it onto origin/<base>, and force-pushes the result.
 // Returns ErrMergeConflict if the rebase cannot be completed automatically.
