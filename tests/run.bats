@@ -512,6 +512,7 @@ EOF
 }
 
 @test "run dispatches the blocker before the dependent (wave ordering)" {
+  export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tBlocker\n2\tDependent'
   export FAKE_GH_ISSUE_BODY_2="depends on #1"
@@ -644,6 +645,7 @@ EOF
 # --- PR adoption when outcome line is absent (issue #122) --------------------
 
 @test "missing outcome line + open non-draft PR → adopted and merged when CI passes" {
+  export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   # No FAKE_PODMAN_OUTCOME_1 → no SPINDRIFT_OUTCOME in log
@@ -686,6 +688,7 @@ EOF
 # --- Reconcile stranded issues (issue #193) -----------------------------------
 
 @test "reconcile: stranded in-progress issue with green PR is adopted and merged without new dispatch" {
+  export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tStranded issue'
   # Pre-seed GH_STATE so issue 1 carries the in-progress label, not ready-for-agent.
@@ -736,6 +739,7 @@ EOF
 # --- engage subcommand (issue #195) ------------------------------------------
 
 @test "engage: green PR is adopted and merged" {
+  export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tStranded issue'
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
@@ -779,6 +783,7 @@ EOF
 # --- recover subcommand (issue #281) -----------------------------------------
 
 @test "recover: green PR is adopted and merged" {
+  export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tStranded issue'
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
@@ -820,6 +825,7 @@ EOF
 }
 
 @test "engage: deprecation notice printed to stderr then delegates to recover" {
+  export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tStranded issue'
   printf '1\tagent-in-progress\n' >> "$GH_LOG.state"
@@ -997,6 +1003,7 @@ EOF
 # --- Launcher merge gate (issue #135) ----------------------------------------
 
 @test "rollup SUCCESS → merges PR and reports verified-merged" {
+  export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
@@ -1065,6 +1072,7 @@ EOF
 
 # PENDING-then-SUCCESS: gate waits through one pending poll then merges.
 @test "rollup PENDING then SUCCESS → waits and eventually merges" {
+  export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
@@ -1082,6 +1090,7 @@ EOF
 # confirmation re-poll; gate keeps waiting and merges once the full set
 # is green.  The initial SUCCESS snapshot alone is not sufficient.
 @test "late-registered check: SUCCESS then PENDING confirmation → defers, eventually merges" {
+  export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
@@ -1120,6 +1129,7 @@ EOF
 
 # Red-then-green: launcher dispatches one fix box, CI turns green, PR merges.
 @test "self-heal: red-then-green → dispatches fix box and merges" {
+  export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
@@ -1163,6 +1173,7 @@ EOF
 # a local bare repo (setup_bare_repo + insteadOf URL rewrite), second merge
 # attempt succeeds → issue reaches agent-complete.
 @test "merge gate: conflict → rebase → retried merge → agent-complete" {
+  export MERGE_MODE=immediate
   # Set up a real local git remote so gh repo clone (which calls real git) can
   # clone from a local file URL rewritten by the insteadOf config.
   setup_bare_repo
@@ -1196,6 +1207,7 @@ EOF
 # (no git repo in the clone dir because gh repo clone is a no-op stub here)
 # → launcher swaps to agent-failed without dispatching a fix box.
 @test "merge gate: conflict → rebase fails → agent-failed" {
+  export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
