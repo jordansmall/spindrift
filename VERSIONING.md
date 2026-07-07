@@ -48,3 +48,36 @@ Consumers upgrade by moving their flake input to the new tag:
 ```
 github:jordansmall/spindrift/v0.2.0
 ```
+
+## What lands in the CHANGELOG
+
+`CHANGELOG.md` is generated from the [Conventional Commits](https://www.conventionalcommits.org/)
+on `main`. The `changelog-sections` map in `.release-please-config.json` is
+explicit rather than relying on release-please's defaults — the defaults hide
+`security` and every type below `perf`, which would drop most of spindrift's
+history from the notes. Every type spindrift uses gets its own heading:
+
+| Commit type | CHANGELOG section |
+|---|---|
+| `feat` | Features |
+| `fix` | Bug Fixes |
+| `perf` | Performance Improvements |
+| `security` | Security |
+| `revert` | Reverts |
+| `docs` | Documentation |
+| `refactor` | Code Refactoring |
+| `test` | Tests |
+| `build` | Build System |
+| `ci` | Continuous Integration |
+| `chore` | Miscellaneous Chores |
+| `style` | Styles |
+| `deps` | Dependencies |
+
+Sections render in this order. Nothing is hidden — the changelog is a full
+record, not a curated highlight reel. This is independent of version bumping:
+which type triggers a MINOR vs PATCH bump is governed by the [pre-1.0
+policy](#pre-10-policy) above, not by where the commit appears here.
+
+The map, and the requirement that each heading is documented in this table, are
+pinned by the `release-please-changelog` flake check (`nix/checks.nix`) — edit
+the map in one place and the check fails until the config and this table agree.
