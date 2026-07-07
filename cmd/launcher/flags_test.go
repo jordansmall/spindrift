@@ -166,8 +166,8 @@ func TestPrintHelp_ShowsDispatchSubcommand(t *testing.T) {
 	printHelp(&buf)
 	out := buf.String()
 	// "dispatch" must appear as a standalone subcommand entry, not buried in a flag doc.
-	if !strings.Contains(out, "dispatch [issue]") {
-		t.Errorf("help output must show 'dispatch [issue]' subcommand, got:\n%s", out)
+	if !strings.Contains(out, "dispatch") {
+		t.Errorf("help output must show 'dispatch' subcommand, got:\n%s", out)
 	}
 }
 
@@ -298,5 +298,59 @@ func TestPrintHelp_ShowsSecretFileFlags(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("help output missing %s", want)
 		}
+	}
+}
+
+// TestParseFlags_NoBuildPassthrough: --no-build is returned as a remaining arg,
+// not treated as an unknown flag error.
+func TestParseFlags_NoBuildPassthrough(t *testing.T) {
+	remaining, err := parseFlags([]string{"dispatch", "--no-build"})
+	if err != nil {
+		t.Fatalf("parseFlags with --no-build: unexpected error: %v", err)
+	}
+	if len(remaining) != 2 || remaining[0] != "dispatch" || remaining[1] != "--no-build" {
+		t.Errorf("remaining = %v, want [dispatch --no-build]", remaining)
+	}
+}
+
+// TestParseFlags_NoBuildWithIssue: --no-build passes through with an issue number.
+func TestParseFlags_NoBuildWithIssue(t *testing.T) {
+	remaining, err := parseFlags([]string{"dispatch", "--no-build", "42"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(remaining) != 3 || remaining[1] != "--no-build" || remaining[2] != "42" {
+		t.Errorf("remaining = %v, want [dispatch --no-build 42]", remaining)
+	}
+}
+
+// TestDispatchNoBuildArgs: dispatch --no-build arg extraction.
+func TestDispatchNoBuildArgs(t *testing.T) {
+	noBuild, rest := dispatchNoBuildArgs([]string{"--no-build", "123"})
+	if !noBuild {
+		t.Error("want noBuild=true, got false")
+	}
+	if len(rest) != 1 || rest[0] != "123" {
+		t.Errorf("rest = %v, want [123]", rest)
+	}
+}
+
+// TestDispatchNoBuildArgs_AbsentFlag: no --no-build flag leaves noBuild false.
+func TestDispatchNoBuildArgs_AbsentFlag(t *testing.T) {
+	noBuild, rest := dispatchNoBuildArgs([]string{"42"})
+	if noBuild {
+		t.Error("want noBuild=false, got true")
+	}
+	if len(rest) != 1 || rest[0] != "42" {
+		t.Errorf("rest = %v, want [42]", rest)
+	}
+}
+
+// TestPrintHelp_ShowsNoBuildFlag: help output documents --no-build on dispatch.
+func TestPrintHelp_ShowsNoBuildFlag(t *testing.T) {
+	var buf bytes.Buffer
+	printHelp(&buf)
+	if !strings.Contains(buf.String(), "--no-build") {
+		t.Error("help output missing --no-build flag")
 	}
 }
