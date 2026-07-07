@@ -89,7 +89,7 @@ func TestRunOneHeartbeatEmitsToStdout(t *testing.T) {
 	if !strings.Contains(out, "#99") {
 		t.Errorf("heartbeat missing issue prefix in stdout: %q", out)
 	}
-	if !strings.Contains(out, "Bash") {
-		t.Errorf("heartbeat missing tool name in stdout: %q", out)
+	if !strings.Contains(out, "bash") {
+		t.Errorf("heartbeat missing tool kind 'bash' in stdout: %q", out)
 	}
 }
