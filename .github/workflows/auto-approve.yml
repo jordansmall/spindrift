@@ -1,0 +1,65 @@
+name: Auto-approve owner PRs
+
+# Supplies the one required approval on PRs authored by the repo owner, so
+# owner-authored work (including agent PRs, which the box opens under the
+# owner's GH_TOKEN and therefore GitHub attributes to the owner) doesn't block
+# on a self-review it isn't allowed to give. PRs by any other author fall
+# through to the normal required-review rule in branch protection.
+#
+# The approval must come from a *different* identity than the author — GitHub
+# forbids approving your own PR — so it is submitted by the release GitHub App.
+# For that approval to count, branch protection must require >= 1 approval and
+# the App must have `pull-requests: write` on the repo.
+#
+# Gate: `pull_request.user.login == repository_owner`. For a user-owned repo the
+# owner is a real login and this matches. For an org-owned fork the owner is the
+# org name, which no user login equals, so this never fires — a safe default.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+# The App token carries the write scope; the default GITHUB_TOKEN stays read-only.
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  auto-approve:
+    if: github.event.pull_request.user.login == github.repository_owner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Approve if commits are signed and not already approved by the App
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Require EVERY commit to be verified (valid signature from a key GitHub
+          # trusts) — not merely present. Counts lines across paginated pages, so
+          # `--jq | wc -l` rather than `| length` (which prints once per page).
+          unsigned=$(gh api --paginate "repos/$REPO/pulls/$PR/commits" \
+            --jq '.[] | select(.commit.verification.verified != true) | .sha' \
+            | wc -l | tr -d ' ')
+          if [ "${unsigned:-0}" -gt 0 ]; then
+            echo "PR has $unsigned unsigned/unverified commit(s); not auto-approving."
+            exit 0
+          fi
+          me=$(gh api user --jq .login)
+          # A stale-dismissed prior approval has state DISMISSED, not APPROVED,
+          # so a new push (synchronize) re-approves; a live approval is left alone.
+          already=$(gh api "repos/$REPO/pulls/$PR/reviews" \
+            --jq "[.[] | select(.user.login == \"$me\" and .state == \"APPROVED\")] | length")
+          if [ "${already:-0}" -gt 0 ]; then
+            echo "Already approved by $me; nothing to do."
+            exit 0
+          fi
+          gh pr review "$PR" --repo "$REPO" --approve \
+            -b "Auto-approved: PR authored by the repository owner."
