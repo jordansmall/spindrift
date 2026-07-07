@@ -130,12 +130,16 @@ func evictUnmetBlockers(c config, fc forge.Client, issues []issue, edges map[str
 		return blockerReady(c, fc, blocker)
 	}
 
+	// Iterate the issues slice (not the map) to produce stable output order.
 	for {
 		var toEvict []string
-		for num := range willRun {
-			for _, dep := range edges[num] {
+		for _, iss := range issues {
+			if !willRun[iss.number] {
+				continue
+			}
+			for _, dep := range edges[iss.number] {
 				if !blockerSatisfied(dep) {
-					toEvict = append(toEvict, num)
+					toEvict = append(toEvict, iss.number)
 					break
 				}
 			}
