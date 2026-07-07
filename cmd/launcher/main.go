@@ -839,7 +839,7 @@ func containsLabel(labels []string, target string) bool {
 }
 
 // blockerReady returns true when dep's PR is merged (authoritative) or the
-// issue is closed with no discoverable open PR (fallback for human-handled
+// issue is closed with no discoverable merged PR (fallback for human-handled
 // work). The agent-complete label is no longer part of the predicate; see
 // ADR-0012.
 func blockerReady(c config, fc forge.Client, dep string) bool {
@@ -848,15 +848,11 @@ func blockerReady(c config, fc forge.Client, dep string) bool {
 		return false
 	}
 	branch := c.branchPrefix + dep
-	pr, ok, err := fc.OpenPRForBranch(branch)
-	if err == nil && ok {
-		state, serr := fc.PRState(pr.URL)
-		if serr == nil {
-			return state == "MERGED"
-		}
+	if _, ok, err := fc.MergedPRForBranch(branch); err == nil && ok {
+		return true
 	}
 	if fi.State == "CLOSED" {
-		fmt.Printf("    .. blocker #%s is closed without a discoverable PR; treating as satisfied\n", dep)
+		fmt.Printf("    .. blocker #%s is closed without a discoverable merged PR; treating as satisfied\n", dep)
 		return true
 	}
 	return false

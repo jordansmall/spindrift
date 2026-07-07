@@ -169,10 +169,27 @@ func (f *Fake) OpenPRForBranch(branch string) (PR, bool, error) {
 	if !ok {
 		return PR{}, false, nil
 	}
+	if f.prStates[url] != "OPEN" {
+		return PR{}, false, nil
+	}
 	pr, ok := f.prs[url]
 	if !ok {
 		return PR{}, false, nil
 	}
+	return pr, true, nil
+}
+
+func (f *Fake) MergedPRForBranch(branch string) (PR, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	url, ok := f.branchPRs[branch]
+	if !ok {
+		return PR{}, false, nil
+	}
+	if f.prStates[url] != "MERGED" {
+		return PR{}, false, nil
+	}
+	pr := f.prs[url]
 	return pr, true, nil
 }
 

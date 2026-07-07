@@ -141,6 +141,25 @@ func (e *execClient) OpenPRForBranch(branch string) (PR, bool, error) {
 	return PR{URL: url, IsDraft: isDraft}, true, nil
 }
 
+func (e *execClient) MergedPRForBranch(branch string) (PR, bool, error) {
+	cmd := exec.Command("gh", "pr", "list",
+		"--repo", e.repo,
+		"--head", branch,
+		"--state", "merged",
+		"--json", "url",
+		"--jq", `.[0].url // ""`,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return PR{}, false, fmt.Errorf("gh pr list: %w", err)
+	}
+	url := strings.TrimSpace(string(out))
+	if url == "" {
+		return PR{}, false, nil
+	}
+	return PR{URL: url}, true, nil
+}
+
 func (e *execClient) PRState(url string) (string, error) {
 	cmd := exec.Command("gh", "pr", "view", url, "--json", "state", "--jq", ".state")
 	out, err := cmd.Output()

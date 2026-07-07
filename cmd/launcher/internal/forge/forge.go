@@ -43,9 +43,10 @@ type Client interface {
 	Issue(num string) (Issue, error)          // body + labels + state, one gh call
 	SwapLabel(num, add, remove string) error
 	Comment(num, body string) error
-	OpenPRForBranch(branch string) (PR, bool, error) // false = no open PR
-	PRState(url string) (string, error)              // MERGED check
-	CheckState(url string) (RollupState, error)      // aggregate statusCheckRollup
-	Merge(url string) error                          // rebase + delete branch
-	Rebase(prURL string) error                       // checkout head, rebase onto base, force-push
+	OpenPRForBranch(branch string) (PR, bool, error)   // false = no open PR
+	MergedPRForBranch(branch string) (PR, bool, error) // false = no merged PR
+	PRState(url string) (string, error)                // MERGED check
+	CheckState(url string) (RollupState, error)        // aggregate statusCheckRollup
+	Merge(url string) error                            // rebase + delete branch
+	Rebase(prURL string) error                         // checkout head, rebase onto base, force-push
 }
