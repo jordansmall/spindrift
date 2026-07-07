@@ -48,15 +48,17 @@ That drops a ready-to-edit starter: a `flake.nix` importing the harness, a
 $EDITOR flake.nix                        # tune the toolchain/packages for your stack
 $EDITOR prompts/issue-prompt.md          # tune the agent's workflow
 cp harness.env.example harness.env       # fill in REPO_SLUG, GH_TOKEN, Claude auth
-nix run .#build                          # realise the image, then load it  (slow first time)
-nix run .#run                            # fan out one container per ready-for-agent issue
+nix develop                              # enter the dev shell — puts spindrift on PATH
+spindrift build                          # realise the image, then load it  (slow first time)
+spindrift dispatch                       # fan out one container per ready-for-agent issue
 ```
 
-Run both commands **from your Consumer flake's directory**: `build` reads the
-flake from `$PWD` for its container fallback, and `run` reads `harness.env` from
-`$PWD` (the same convention). Per-issue logs land in `logs/issue-<n>.log`.
-`.#build`/`.#run` are also exposed as `packages`, so you can drop them into
-`devShells.default.packages` instead of using `nix run`.
+Run commands **from your Consumer flake's directory**: `build` reads the
+flake from `$PWD` for its container fallback, and `dispatch` reads `harness.env`
+from `$PWD` (the same convention). Per-issue logs land in `logs/issue-<n>.log`.
+
+If you use **direnv**, the template's `.envrc` (`use flake`) activates the dev
+shell automatically on `cd` — no manual `nix develop` needed.
 
 If the Target repos define their own `flake.nix` devShell, see
 [*Targeting repos that define their own devShell toolchain*](#targeting-repos-that-define-their-own-devshell-toolchain)
