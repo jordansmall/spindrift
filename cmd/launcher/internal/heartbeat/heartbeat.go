@@ -388,6 +388,20 @@ func toolToPhase(name string, input json.RawMessage) string {
 	switch name {
 	case "Edit", "Write", "NotebookEdit":
 		return "edit"
+	case "Grep", "Glob", "WebSearch", "WebFetch":
+		return "search"
+	case "Task", "Agent":
+		var ti taskInput
+		if len(input) > 0 {
+			_ = json.Unmarshal(input, &ti)
+		}
+		switch strings.ToLower(ti.SubagentType) {
+		case "reviewer":
+			return "review"
+		case "scout", "plan":
+			return "plan"
+		}
+		return "explore"
 	case "Bash":
 		var m map[string]interface{}
 		if len(input) > 0 {
@@ -398,6 +412,9 @@ func toolToPhase(name string, input json.RawMessage) string {
 					}
 					if strings.Contains(cmd, "git commit") {
 						return "commit"
+					}
+					if strings.Contains(cmd, "git ") || strings.Contains(cmd, "gh pr") {
+						return "git"
 					}
 				}
 			}
