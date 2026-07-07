@@ -469,3 +469,7 @@ image builds with no Linux-builder dance).
 
 Heavily inspired by Matt Pocock's
 [Sandcastle](https://github.com/mattpocock/sandcastle) project.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
