@@ -40,14 +40,14 @@ func main() {
 }
 
 // run reads stream-json from in, copies all bytes to out unchanged, and writes
-// throttled heartbeat lines to the file at filePath.
+// heartbeat lines to the file at filePath.
 func run(issue, filePath string, in io.Reader, out io.Writer) error {
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open heartbeat file: %w", err)
 	}
 	defer f.Close()
-	w := heartbeat.New(out, issue, f, heartbeat.DefaultThrottle)
+	w := heartbeat.New(out, issue, f)
 	_, err = io.Copy(w, in)
 	return err
 }
