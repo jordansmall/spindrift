@@ -7,6 +7,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1041,6 +1042,47 @@ func engageIssue(issueNum string) error {
 	return engageByNumber(c, fc, pwd, r, issueNum)
 }
 
+// previewIssues is the testable core of the preview verb. It discovers issues
+// using the same logic as dispatch (honoring fanout-blocker fence) and prints
+// the candidate list plus the resolved Target repo to w. No Boxes are started
+// and no mutating Forge calls are made.
+func previewIssues(c config, fc forge.Client, w io.Writer) error {
+	issues, err := discoverIssues(c, fc)
+	if err != nil {
+		return err
+	}
+	if c.issueNumber == "" {
+		if len(issues) == 0 {
+			fmt.Fprintf(w, "repo: %s\nno open '%s' issues — nothing to dispatch.\n", c.repoSlug, c.label)
+			return nil
+		}
+		issues, err = filterByBarrier(c, fc, issues)
+		if err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(w, "repo: %s\n", c.repoSlug)
+	if len(issues) == 0 {
+		fmt.Fprintf(w, "no issues would be dispatched (fanout-blocker fence in effect)\n")
+		return nil
+	}
+	fmt.Fprintf(w, "%d issue(s) would be dispatched:\n", len(issues))
+	for _, iss := range issues {
+		fmt.Fprintf(w, "  #%s  %s\n", iss.number, iss.title)
+	}
+	return nil
+}
+
+// preview is the entry point for the `preview` subcommand.
+func preview() error {
+	c := loadConfig()
+	if err := validate(c); err != nil {
+		return err
+	}
+	fc := forge.NewExecClient(c.repoSlug)
+	return previewIssues(c, fc, os.Stdout)
+}
+
 // issueNums returns the number strings from a slice of issues.
 func issueNums(issues []issue) []string {
 	nums := make([]string, len(issues))
@@ -1382,6 +1424,13 @@ func main() {
 			os.Exit(1)
 		}
 		if err := engageIssue(args[1]); err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(args) > 0 && args[0] == "preview" {
+		if err := preview(); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
