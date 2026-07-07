@@ -71,6 +71,7 @@ from `$PWD` (the same convention). Per-issue logs land in `logs/issue-<n>.log`.
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realise/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
+| `spindrift doctor`               | check forge credentials and repository connectivity; exits non-zero on failure   |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (same content as `man spindrift`)  |
 | `man spindrift`                  | the manual page (installed alongside the binary on your PATH)                    |

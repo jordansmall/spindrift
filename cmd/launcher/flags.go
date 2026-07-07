@@ -187,6 +187,7 @@ func printSubcommands(w io.Writer) {
 	fmt.Fprintln(w, "  preview [issue...]                        dry-run: show what dispatch would pick up, in order")
 	fmt.Fprintln(w, "  build                                     realise the agent image without running any agent")
 	fmt.Fprintln(w, "  recover <issue>                           run the merge gate for a single issue")
+	fmt.Fprintln(w, "  doctor                                    check forge credentials and repository connectivity")
 }
 
 // printHelp writes the concise usage summary: the tagline, synopsis,
