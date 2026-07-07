@@ -1536,15 +1536,25 @@ func run(noBuild bool) error {
 }
 
 func main() {
+	help, helpAll := false, false
 	for _, a := range os.Args[1:] {
-		if a == "--help" || a == "-h" {
-			printHelp(os.Stdout)
-			os.Exit(0)
-		}
-		if a == "--version" {
+		switch a {
+		case "--help", "-h":
+			help = true
+		case "--all":
+			helpAll = true
+		case "--version":
 			printVersion(os.Stdout)
 			os.Exit(0)
 		}
+	}
+	if help {
+		if helpAll {
+			printHelpFull(os.Stdout)
+		} else {
+			printHelp(os.Stdout)
+		}
+		os.Exit(0)
 	}
 	args, err := parseFlags(os.Args[1:])
 	if err != nil {

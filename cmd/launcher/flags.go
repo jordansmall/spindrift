@@ -77,6 +77,7 @@ type flagEntry struct {
 	kind  string // "string" or "int"
 	doc   string // one-line description from env-schema.nix
 	dflt  string // baked-in default as a string; empty when there is none
+	group string // category heading for the full reference (from env-schema.nix)
 }
 
 // secretKnob is a knob excluded from the value-flag surface (secret = true in
@@ -163,35 +164,92 @@ func parseFlags(args []string) ([]string, error) {
 	return remaining, nil
 }
 
-// printHelp writes a usage listing to w: subcommands, then one row per knob.
-// Non-secret knobs show --flag-name, type, default, and doc.
-// Secret knobs are listed as env-only (no value flag).
+// groupOrder is the display order of flag-group headings in the full reference
+// (printHelpFull and the man page). Every group used in env-schema.nix must
+// appear here, or its flags would silently drop out of the full listing
+// (guarded by TestGroupOrder_CoversEverySchemaGroup and launcher-flag-table).
+var groupOrder = []string{
+	"Issue discovery",
+	"Lifecycle labels",
+	"Branches & merge",
+	"Concurrency & dependency waves",
+	"Models",
+	"Self-healing & retries",
+	"Sandbox & resources",
+	"Repository & identity",
+	"Prompt & skill iteration",
+}
+
+// printSubcommands writes the shared subcommand listing used by both help modes.
+func printSubcommands(w io.Writer) {
+	fmt.Fprintln(w, "Subcommands:")
+	fmt.Fprintln(w, "  dispatch [--no-build] [--yes] [issue...]  fan out agents; an issue list dispatches exactly those (bypasses label/barrier gates)")
+	fmt.Fprintln(w, "  preview [issue...]                        dry-run: show what dispatch would pick up, in order")
+	fmt.Fprintln(w, "  build                                     realise the agent image without running any agent")
+	fmt.Fprintln(w, "  recover <issue>                           run the merge gate for a single issue")
+}
+
+// printHelp writes the concise usage summary: the tagline, synopsis,
+// subcommands, a handful of common flags, and pointers to the full reference
+// (man spindrift / --help --all). The exhaustive knob list lives in
+// printHelpFull so the default --help stays scannable.
 func printHelp(w io.Writer) {
+	fmt.Fprintln(w, "spindrift — fan out headless Claude Code agents across GitHub issues")
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage: spindrift [flags] <subcommand> [args]")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Subcommands:")
-	fmt.Fprintln(w, "  dispatch [--no-build] [--yes] [issue...]  fan out agents; optional issue list dispatches exactly those (bypasses label/barrier gates)")
-	fmt.Fprintln(w, "  preview [issue...]                        dry-run: show what dispatch would pick up; with issue list, show ordering and eviction")
-	fmt.Fprintln(w, "  build                                     realise the agent image or store closures without running any agent")
-	fmt.Fprintln(w, "  recover <issue>                           run the merge gate for a single issue")
-	fmt.Fprintln(w, "  engage <issue>                            (deprecated; alias for recover; removal: v0.2.0)")
+	printSubcommands(w)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Common flags:")
+	fmt.Fprintln(w, "  --repo-slug owner/repo   target GitHub repository (required)")
+	fmt.Fprintln(w, "  --model NAME             primary implementor model")
+	fmt.Fprintln(w, "  --max-parallel N         maximum concurrent agent containers")
+	fmt.Fprintln(w, "  --merge-mode MODE        post-green merge policy: immediate | auto | manual")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Full reference (all flags, env vars, and secrets):")
+	fmt.Fprintln(w, "  man spindrift            complete manual page")
+	fmt.Fprintln(w, "  spindrift --help --all   the same reference in the terminal")
+	fmt.Fprintln(w, "  spindrift --version      print version and revision")
+}
+
+// printHelpFull writes the exhaustive reference: subcommands, dispatch flags,
+// every knob grouped by category (flag > env > default precedence), and the
+// secret env-only / file-flag surface. Reached via `spindrift --help --all`.
+func printHelpFull(w io.Writer) {
+	fmt.Fprintln(w, "spindrift — fan out headless Claude Code agents across GitHub issues")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Usage: spindrift [flags] <subcommand> [args]")
+	fmt.Fprintln(w)
+	printSubcommands(w)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Dispatch flags:")
 	fmt.Fprintln(w, "  --no-build  fail fast if the image is absent instead of building; pair with 'spindrift build' for split build/run flows")
 	fmt.Fprintln(w, "  --yes       skip confirmation prompt when dispatching unlabeled issues (alias: --force)")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Flags (flag > env > default precedence):")
+
+	byGroup := make(map[string][]flagEntry, len(groupOrder))
 	for _, e := range schemaFlags {
-		dflt := e.dflt
-		if dflt == "" {
-			dflt = "(none)"
+		byGroup[e.group] = append(byGroup[e.group], e)
+	}
+	for _, g := range groupOrder {
+		entries := byGroup[g]
+		if len(entries) == 0 {
+			continue
 		}
-		flagCol := e.flag
-		if e.alias != "" {
-			flagCol = e.flag + ", --" + e.alias
+		fmt.Fprintf(w, "\n  %s:\n", g)
+		for _, e := range entries {
+			dflt := e.dflt
+			if dflt == "" {
+				dflt = "(none)"
+			}
+			flagCol := e.flag
+			if e.alias != "" {
+				flagCol = e.flag + ", --" + e.alias
+			}
+			fmt.Fprintf(w, "    --%-30s  %-6s  default=%-20s  %s\n",
+				flagCol, e.kind, dflt, e.doc)
 		}
-		fmt.Fprintf(w, "  --%-30s  %-6s  default=%-20s  %s\n",
-			flagCol, e.kind, dflt, e.doc)
 	}
 	if len(secretKnobs) > 0 {
 		fmt.Fprintln(w)

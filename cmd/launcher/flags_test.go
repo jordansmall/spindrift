@@ -150,13 +150,39 @@ func TestPrintVersion_Format(t *testing.T) {
 	}
 }
 
-// TestPrintHelp_UsageLineNamesSpindrift: the first usage line must name the binary "spindrift".
+// TestPrintHelp_UsageLineNamesSpindrift: the concise help carries a usage line naming the binary.
 func TestPrintHelp_UsageLineNamesSpindrift(t *testing.T) {
 	var buf bytes.Buffer
 	printHelp(&buf)
-	firstLine := strings.SplitN(buf.String(), "\n", 2)[0]
-	if !strings.HasPrefix(firstLine, "Usage: spindrift") {
-		t.Errorf("first line must start with 'Usage: spindrift', got: %q", firstLine)
+	if !strings.Contains(buf.String(), "Usage: spindrift [flags] <subcommand>") {
+		t.Errorf("help must contain a usage line naming spindrift, got:\n%s", buf.String())
+	}
+}
+
+// TestPrintHelp_Concise_PointsToFullReference: the concise help must route users
+// to the full reference (man page and --help --all) rather than dumping every flag.
+func TestPrintHelp_Concise_PointsToFullReference(t *testing.T) {
+	var buf bytes.Buffer
+	printHelp(&buf)
+	out := buf.String()
+	if !strings.Contains(out, "man spindrift") {
+		t.Errorf("concise help must point to 'man spindrift', got:\n%s", out)
+	}
+	if !strings.Contains(out, "--help --all") {
+		t.Errorf("concise help must point to '--help --all', got:\n%s", out)
+	}
+}
+
+// TestPrintHelp_Concise_OmitsRareFlags: the concise help stays concise — it must
+// NOT enumerate the long tail of tuning knobs (those live in --help --all / man).
+func TestPrintHelp_Concise_OmitsRareFlags(t *testing.T) {
+	var buf bytes.Buffer
+	printHelp(&buf)
+	out := buf.String()
+	for _, rare := range []string{"--transient-backoff-secs", "--hold-jitter-secs", "--deps-poll-secs"} {
+		if strings.Contains(out, rare) {
+			t.Errorf("concise help should omit rare flag %s; it belongs in --help --all/man, got:\n%s", rare, out)
+		}
 	}
 }
 
@@ -171,16 +197,66 @@ func TestPrintHelp_ShowsDispatchSubcommand(t *testing.T) {
 	}
 }
 
-// TestPrintHelp_ContainsLabelEntry: help output includes --label flag with its doc.
-func TestPrintHelp_ContainsLabelEntry(t *testing.T) {
+// TestPrintHelpFull_ContainsLabelEntry: the full reference includes --label with its doc.
+func TestPrintHelpFull_ContainsLabelEntry(t *testing.T) {
 	var buf bytes.Buffer
-	printHelp(&buf)
+	printHelpFull(&buf)
 	out := buf.String()
 	if !strings.Contains(out, "--label") {
-		t.Error("help output missing --label flag")
+		t.Error("full help output missing --label flag")
 	}
 	if !strings.Contains(out, "issues carrying this label are dispatchable") {
-		t.Error("help output missing label doc string")
+		t.Error("full help output missing label doc string")
+	}
+}
+
+// TestPrintHelpFull_GroupsFlags: the full reference groups flags under their
+// schema-declared category headings rather than a flat dump.
+func TestPrintHelpFull_GroupsFlags(t *testing.T) {
+	var buf bytes.Buffer
+	printHelpFull(&buf)
+	out := buf.String()
+	for _, g := range []string{"Issue discovery", "Models", "Sandbox & resources"} {
+		if !strings.Contains(out, g) {
+			t.Errorf("full help output missing group heading %q, got:\n%s", g, out)
+		}
+	}
+}
+
+// TestPrintHelpFull_CoversEverySchemaFlag: no flag may silently drop out of the
+// full reference (e.g. a knob whose group is absent from groupOrder).
+func TestPrintHelpFull_CoversEverySchemaFlag(t *testing.T) {
+	var buf bytes.Buffer
+	printHelpFull(&buf)
+	out := buf.String()
+	for _, e := range schemaFlags {
+		if !strings.Contains(out, "--"+e.flag) {
+			t.Errorf("full help output missing flag --%s (group %q not rendered?)", e.flag, e.group)
+		}
+	}
+}
+
+// TestSchemaFlags_AllHaveGroup: every generated flag row must carry a group, so
+// grouping in the full help and man page is total.
+func TestSchemaFlags_AllHaveGroup(t *testing.T) {
+	for _, e := range schemaFlags {
+		if e.group == "" {
+			t.Errorf("flag --%s has no group; add `group = ...` to its lib/env-schema.nix entry", e.flag)
+		}
+	}
+}
+
+// TestGroupOrder_CoversEverySchemaGroup: every group used by a flag must appear
+// in groupOrder, else printHelpFull would drop that group's flags.
+func TestGroupOrder_CoversEverySchemaGroup(t *testing.T) {
+	known := map[string]bool{}
+	for _, g := range groupOrder {
+		known[g] = true
+	}
+	for _, e := range schemaFlags {
+		if e.group != "" && !known[e.group] {
+			t.Errorf("flag --%s has group %q missing from groupOrder", e.flag, e.group)
+		}
 	}
 }
 
@@ -199,13 +275,13 @@ func TestParseFlags_AliasSetEnv(t *testing.T) {
 	}
 }
 
-// TestPrintHelp_ShowsAlias: aliased knobs show the alias next to the long form.
-func TestPrintHelp_ShowsAlias(t *testing.T) {
+// TestPrintHelpFull_ShowsAlias: aliased knobs show the alias next to the long form.
+func TestPrintHelpFull_ShowsAlias(t *testing.T) {
 	var buf bytes.Buffer
-	printHelp(&buf)
+	printHelpFull(&buf)
 	out := buf.String()
 	if !strings.Contains(out, "--issue-number, --issue") {
-		t.Errorf("help output missing alias display; want --issue-number, --issue in:\n%s", out)
+		t.Errorf("full help output missing alias display; want --issue-number, --issue in:\n%s", out)
 	}
 }
 
@@ -260,16 +336,16 @@ func TestParseFlags_FileFlag_MissingValue(t *testing.T) {
 	}
 }
 
-// TestPrintHelp_SecretKnobEnvOnly: secret knobs appear as env-only (no --flag prefix).
-func TestPrintHelp_SecretKnobEnvOnly(t *testing.T) {
+// TestPrintHelpFull_SecretKnobEnvOnly: secret knobs appear as env-only (no --flag prefix).
+func TestPrintHelpFull_SecretKnobEnvOnly(t *testing.T) {
 	var buf bytes.Buffer
-	printHelp(&buf)
+	printHelpFull(&buf)
 	out := buf.String()
 	if !strings.Contains(out, "GH_TOKEN") {
-		t.Error("help output missing GH_TOKEN env-only listing")
+		t.Error("full help output missing GH_TOKEN env-only listing")
 	}
 	if !strings.Contains(out, "env-only") {
-		t.Error("help output missing 'env-only' marker for secret knobs")
+		t.Error("full help output missing 'env-only' marker for secret knobs")
 	}
 }
 
@@ -289,10 +365,10 @@ func TestParseFlags_FileFlag_StripsNewline(t *testing.T) {
 	}
 }
 
-// TestPrintHelp_ShowsSecretFileFlags: help output lists --<name>-file flags for secret knobs.
-func TestPrintHelp_ShowsSecretFileFlags(t *testing.T) {
+// TestPrintHelpFull_ShowsSecretFileFlags: full help lists --<name>-file flags for secret knobs.
+func TestPrintHelpFull_ShowsSecretFileFlags(t *testing.T) {
 	var buf bytes.Buffer
-	printHelp(&buf)
+	printHelpFull(&buf)
 	out := buf.String()
 	for _, want := range []string{"--gh-token-file", "--anthropic-api-key-file", "--claude-code-oauth-token-file"} {
 		if !strings.Contains(out, want) {

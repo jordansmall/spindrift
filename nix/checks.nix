@@ -494,11 +494,17 @@ in
       flagKind = e: if builtins.isInt (e.default or null) then "int" else "string";
       flagDflt = e: if e ? default then (if builtins.isInt e.default then builtins.toString e.default else e.default) else "";
       flagAlias = e: if e ? alias then ", alias: \"${e.alias}\"" else "";
-      rows = concatStrings (
-        mapAttrsToList (_: e:
-          "\t{env: \"${e.env}\", flag: \"${toKebab e.env}\"${flagAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\"},\n"
-        ) nonSecretSchema
-      );
+      # Every non-secret knob must declare a group so the full reference groups
+      # it under a heading; a missing group is a schema error, not a silent "".
+      ungrouped = mapAttrsToList (k: _: k) (filterAttrs (_: e: !(e ? group)) nonSecretSchema);
+      rows =
+        assert pkgs.lib.assertMsg (ungrouped == [ ])
+          "env-schema.nix: non-secret knob(s) missing `group`: ${pkgs.lib.concatStringsSep ", " ungrouped}";
+        concatStrings (
+          mapAttrsToList (_: e:
+            "\t{env: \"${e.env}\", flag: \"${toKebab e.env}\", group: \"${e.group}\"${flagAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\"},\n"
+          ) nonSecretSchema
+        );
       secretRows = concatStrings (
         mapAttrsToList (_: e:
           "\t{env: \"${e.env}\", doc: \"${e.doc}\", fileFlag: \"${toKebab e.env}-file\"},\n"
@@ -530,6 +536,48 @@ in
       ''
         diff "$generated" "$committed" \
           || { echo "cmd/launcher/flagtable_gen.go is out of sync with lib/env-schema.nix — regenerate it" >&2; exit 1; }
+        touch $out
+      '';
+
+  # The generated man page must render (mandoc parses it) and totally cover the
+  # schema: every SH section, every OPTIONS group, every non-secret flag, and
+  # every secret env var. A new knob with no man-page presence fails here.
+  launcher-manpage =
+    let
+      schema = import ../lib/env-schema.nix;
+      inherit (pkgs.lib)
+        filter
+        attrValues
+        concatMapStrings
+        replaceStrings
+        toLower
+        unique
+        ;
+      toKebab = env: toLower (replaceStrings [ "_" ] [ "-" ] env);
+      # Roff renders the flag as \-\- with every hyphen escaped; match that form.
+      roffFlag = e: "\\-\\-" + replaceStrings [ "-" ] [ "\\-" ] (toKebab e.env);
+      nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
+      secretEntries = filter (e: e.secret or false) (attrValues schema);
+      groups = unique (map (e: e.group) nonSecret);
+      groupChecks = concatMapStrings (g: "need -F '.SS ${g}'\n") groups;
+      flagChecks = concatMapStrings (e: "need -F '${roffFlag e}'\n") nonSecret;
+      secretChecks = concatMapStrings (e: "need -F '${e.env}'\n") secretEntries;
+    in
+    pkgs.runCommand "launcher-manpage"
+      {
+        nativeBuildInputs = [ pkgs.mandoc ];
+        man = "${harness.manpage}/share/man/man1/spindrift.1";
+      }
+      ''
+        need() { grep -q "$@" "$man" || { echo "man page missing: $*" >&2; exit 1; }; }
+        # Renders without a fatal parse error.
+        mandoc -man -Tascii "$man" >/dev/null
+        for s in NAME SYNOPSIS DESCRIPTION SUBCOMMANDS OPTIONS ENVIRONMENT FILES EXAMPLES; do
+          grep -Eq "^\.SH \"?$s" "$man" || { echo "man page missing .SH $s" >&2; exit 1; }
+        done
+        ${groupChecks}
+        ${flagChecks}
+        ${secretChecks}
         touch $out
       '';
 

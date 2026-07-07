@@ -503,9 +503,141 @@ let
       export GIT_USER_NAME GIT_USER_EMAIL
     '';
 
+  # Roff man page rendered from the schema so `man spindrift` carries the full
+  # flag reference while `spindrift --help` stays concise (the OPTIONS groups
+  # mirror groupOrder in cmd/launcher/flags.go; keep the two lists in step).
+  manpageRoff =
+    let
+      inherit (lib) filter sort concatMapStrings replaceStrings toLower elem;
+      esc = replaceStrings [ "\\" ] [ "\\\\" ]; # neutralise stray backslashes
+      escFlag = f: replaceStrings [ "-" ] [ "\\-" ] f; # roff renders \- as a minus
+      toKebab = env: toLower (replaceStrings [ "_" ] [ "-" ] env);
+      flagKind = e: if builtins.isInt (e.default or null) then "int" else "string";
+      flagDflt = e: if e ? default then (if builtins.isInt e.default then toString e.default else e.default) else "";
+      nonSecret = filter (e: !(e.secret or false)) (lib.attrValues schema);
+      secretEntries = filter (e: e.secret or false) (lib.attrValues schema);
+      # Display order of OPTIONS headings; mirrors groupOrder in flags.go.
+      groupOrder = [
+        "Issue discovery"
+        "Lifecycle labels"
+        "Branches & merge"
+        "Concurrency & dependency waves"
+        "Models"
+        "Self-healing & retries"
+        "Sandbox & resources"
+        "Repository & identity"
+        "Prompt & skill iteration"
+      ];
+      usedGroups = lib.unique (map (e: e.group or "") nonSecret);
+      unknownGroups = filter (g: !(elem g groupOrder)) usedGroups;
+      optionBlock =
+        e:
+        let
+          names = "\\-\\-" + escFlag (toKebab e.env) + (if e ? alias then ", \\-\\-" + escFlag e.alias else "");
+          dflt = flagDflt e;
+          dfltSentence = if dflt == "" then "No default." else "Default: " + esc dflt + ".";
+        in
+        ".TP\n.B ${names} \\fI${flagKind e}\\fR\n\\&${esc e.doc}. ${dfltSentence}\n";
+      groupSection =
+        g:
+        let
+          entries = sort (a: b: a.env < b.env) (filter (e: (e.group or "") == g) nonSecret);
+        in
+        if entries == [ ] then "" else ".SS ${g}\n" + concatMapStrings optionBlock entries;
+      secretBlock =
+        e:
+        ".TP\n.B ${e.env}\n\\&${esc e.doc}. Supply via the environment or \\-\\-${toKebab e.env}\\-file (reads the value from a file path; takes precedence over the environment).\n";
+    in
+    assert lib.assertMsg (unknownGroups == [ ])
+      "manpageRoff: knob group(s) absent from groupOrder: ${lib.concatStringsSep ", " unknownGroups}";
+    ''
+      .TH SPINDRIFT 1 "${spindriftVersion}" "spindrift ${spindriftVersion}" "Spindrift Manual"
+      .SH NAME
+      spindrift \- fan out headless Claude Code agents across GitHub issues
+      .SH SYNOPSIS
+      .B spindrift
+      [\fIflags\fR] \fIsubcommand\fR [\fIargs\fR]
+      .SH DESCRIPTION
+      .B spindrift
+      dispatches one disposable, nix-built container per GitHub issue, runs a
+      headless Claude Code agent inside it, and drives each resulting pull request
+      through a merge gate. Every runtime knob is set by flag, environment
+      variable, or baked default, in that precedence order. Non-secret knobs also
+      read from a gitignored
+      .I harness.env
+      in the working directory.
+      .SH SUBCOMMANDS
+      .TP
+      .B dispatch [\-\-no-build] [\-\-yes] [issue...]
+      Fan out agents. With no issue list, discover dispatchable issues by label;
+      an explicit issue list dispatches exactly those, bypassing the label and
+      barrier gates.
+      .TP
+      .B preview [issue...]
+      Dry run: show what dispatch would pick up, in order, without launching any
+      agent.
+      .TP
+      .B build
+      Realise the agent image (or store closures) without running any agent.
+      .TP
+      .B recover <issue>
+      Run the merge gate for a single issue whose agent already finished.
+      .TP
+      .B engage <issue>
+      Deprecated alias for
+      .BR recover ;
+      removal target v0.2.0.
+      .SH "DISPATCH FLAGS"
+      .TP
+      .B \-\-no-build
+      Fail fast if the image is absent instead of building it; pair with
+      .B spindrift build
+      for split build/run flows.
+      .TP
+      .B \-\-yes
+      Skip the confirmation prompt when dispatching unlabeled issues. Alias:
+      .BR \-\-force .
+      .SH OPTIONS
+      Flags take precedence over environment variables, which take precedence over
+      baked defaults.
+      ${concatMapStrings groupSection groupOrder}.SH ENVIRONMENT
+      Secret knobs are never exposed as value flags; they are read from the
+      environment or from a file via their
+      .B \-\-<name>-file
+      flag.
+      ${concatMapStrings secretBlock secretEntries}.SH FILES
+      .TP
+      .I harness.env
+      Gitignored per-checkout config and secrets, sourced from the working
+      directory at dispatch time.
+      .SH EXAMPLES
+      .TP
+      Dispatch every ready issue, three containers at a time:
+      .B spindrift dispatch \-\-max-parallel 3
+      .TP
+      Dispatch a single issue, skipping the image build:
+      .B spindrift dispatch \-\-no-build 42
+      .TP
+      Preview the queue without launching anything:
+      .B spindrift preview
+      .TP
+      Print the full flag reference in the terminal:
+      .B spindrift \-\-help \-\-all
+      .SH "SEE ALSO"
+      .BR git (1),
+      .BR gh (1)
+    '';
+
+  manpage = hostPkgs.runCommand "spindrift-manpage" { } ''
+    install -Dm644 ${hostPkgs.writeText "spindrift.1" manpageRoff} \
+      "$out/share/man/man1/spindrift.1"
+  '';
+
   # The spindrift CLI: bakes nix-computed config as env vars and execs the Go
   # launcher. Exposed as packages.spindrift, apps.default, and in devShells.
-  spindrift = (hostPkgs.writeShellApplication {
+  # The man page is joined into the same output so `man spindrift` resolves
+  # from the dev shell (nixpkgs adds share/man to MANPATH) and on install.
+  spindriftBin = (hostPkgs.writeShellApplication {
     name = "spindrift";
     runtimeInputs = with hostPkgs; [
       gh
@@ -518,6 +650,15 @@ let
   }).overrideAttrs (_: {
     meta.license = lib.licenses.mit;
   });
+
+  spindrift = hostPkgs.symlinkJoin {
+    name = "spindrift";
+    paths = [
+      spindriftBin
+      manpage
+    ];
+    meta.license = lib.licenses.mit;
+  };
 
   # Deprecated run alias: prints a one-line stderr notice and execs spindrift dispatch.
   # Kept for one release (ADR-0010); removal target: next minor after 0.1.x.
@@ -554,6 +695,7 @@ else
     build
     run
     spindrift
+    manpage
     imagePath
     promptDir
     skillsDir
@@ -561,6 +703,7 @@ else
 
   packages = {
     inherit build run spindrift;
+    spindrift-manpage = manpage;
   }
   # The OCI image is not relevant for the bwrap runner (no image build/load).
   // lib.optionalAttrs (isLinux && runtime != "bwrap") { agent-image = image; };
