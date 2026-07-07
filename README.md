@@ -58,6 +58,10 @@ flake from `$PWD` for its container fallback, and `run` reads `harness.env` from
 `.#build`/`.#run` are also exposed as `packages`, so you can drop them into
 `devShells.default.packages` instead of using `nix run`.
 
+If the Target repos define their own `flake.nix` devShell, see
+[*Targeting repos that define their own devShell toolchain*](#targeting-repos-that-define-their-own-devshell-toolchain)
+below — you can keep `packages` minimal and let each Target's devShell drive checks.
+
 `build` **realises** the image derivation and then loads it into your container
 runtime. On a host with a Linux builder (any Linux machine, or a Mac with a
 Linux builder configured) it realises the image directly. On a stock Mac — no
@@ -116,6 +120,71 @@ spindrift.lib.mkHarness {
 `mkHarness` takes the locked *nixpkgs input* (not a pre-built `pkgs`) so it can
 map a darwin `system` to its Linux twin and re-instantiate for the OCI image —
 keeping the agent's toolchain and your dev shell from one pin (ADR 0002).
+
+### Targeting repos that define their own devShell toolchain
+
+If the Target repos define their own build toolchain in a `flake.nix` devShell,
+the Consumer can keep `packages` minimal and let each Target's devShell drive
+checks at runtime — one Consumer image serves many differently-toolchained
+Target repos.
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    spindrift.url = "github:jordansmall/spindrift";
+  };
+
+  outputs = inputs@{ flake-parts, spindrift, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
+      imports = [ spindrift.flakeModules.default ];
+      perSystem = _: {
+        spindrift = {
+          # Minimal toolchain — shared utilities only.
+          # The Target repo's own devShell drives the real build/test commands.
+          packages = p: [ p.git p.gh p.gnused ];
+
+          prompt = builtins.readFile ./prompts/issue-prompt.md;
+
+          # nixInBox is true by default — nix is already in the box, no
+          # override needed for the devShell probe to work.
+        };
+      };
+    };
+}
+```
+
+**How this works.** The Consumer image is built once from the Consumer's locked
+nixpkgs and is Target-agnostic: the Target repo's `flake.nix` is never evaluated
+at image-build time (ADR 0001, ADR 0002). After the Target repo is cloned inside
+the box, the entrypoint probes for a devShell:
+
+1. If `flake.nix` is present in the cloned repo and `nix` is on PATH (it is,
+   because `nixInBox = true` is the default per ADR 0008), the entrypoint runs
+   `nix develop --command true` under a `DEV_SHELL_PROBE_TIMEOUT`-second timeout
+   (default 300 s, baked from `lib/env-schema.nix`).
+2. If the probe succeeds, the agent is guided to run checks via
+   `nix develop -c <cmd>`, using the Target's exact toolchain.
+3. If `flake.nix` is absent, `nix` is unavailable, the probe fails, or the
+   timeout fires, the box degrades gracefully to the baked toolchain.
+
+**`nixInBox` interplay.** The probe requires a working `nix` CLI inside the box,
+which `nixInBox = true` (the default, [ADR
+0008](docs/adr/0008-nix-is-a-first-class-default-in-the-box.md)) provides.
+Setting [`nixInBox = false`](#option-surface) produces a lean, nix-free image —
+there is no in-box `nix`, so the devShell probe is skipped and only the baked
+`packages` toolchain is available. **The devShell pattern requires
+`nixInBox = true`.**
+
+**Practical upshot.** Keeping `packages` to a minimal set (`git`, `gh`, and the
+like) means the Consumer image stays small and works across Target repos with
+different language stacks. The `DEV_SHELL_PROBE_TIMEOUT` guard (default 300 s,
+overridable at runtime via env var) ensures a broken or unusually heavy devShell
+eval cannot stall the box. See the [`nixInBox` option](#option-surface) and
+[ADR 0008](docs/adr/0008-nix-is-a-first-class-default-in-the-box.md) for the
+full rationale and the lean-image escape hatch.
 
 ## Option surface
 
