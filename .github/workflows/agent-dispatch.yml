@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      # nix run .#run reads these directly; env wins over the image's baked defaults.
+      # spindrift dispatch reads these directly; env wins over the image's baked defaults.
       RUNTIME: docker
       # The claim step below swaps the issue onto agent-in-progress before the
       # build, so the launcher targets it by number rather than a label query.
@@ -65,10 +65,10 @@ jobs:
 
       # ~2m40s cold on a GitHub runner (nixpkgs closure is substituted, not compiled).
       - name: Build the agent image
-        run: nix run .#build
+        run: nix run . -- build
 
       - name: Dispatch the labeled issue
-        run: nix run .#run
+        run: nix run . -- dispatch
 
       # The launcher parses the two blocker formats and, when this claimed issue
       # is blocked by an unmet dependency, drops logs/blocked.txt naming the
