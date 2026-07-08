@@ -117,13 +117,6 @@
     flakeOption = true;
     boxEnv = true;
   };
-  barrierLabel = {
-    env = "BARRIER_LABEL";
-    group = "Issue discovery";
-    doc = "open issues carrying this label fence all higher-numbered issues; empty disables fencing";
-    flakeOption = true;
-    boxEnv = false;
-  };
   podmanNetwork = {
     env = "PODMAN_NETWORK";
     group = "Sandbox & resources";

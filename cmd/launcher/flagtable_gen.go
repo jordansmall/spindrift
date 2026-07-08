@@ -5,7 +5,6 @@ package main
 // Secret knobs are excluded from schemaFlags; see secretKnobs below.
 // Run `nix flake check` after editing lib/env-schema.nix to regenerate.
 var schemaFlags = []flagEntry{
-	{env: "BARRIER_LABEL", flag: "barrier-label", group: "Issue discovery", kind: "string", doc: "open issues carrying this label fence all higher-numbered issues; empty disables fencing", dflt: ""},
 	{env: "BASE_BRANCH", flag: "base-branch", group: "Branches & merge", kind: "string", doc: "default branch agent PRs merge into", dflt: "main"},
 	{env: "BRANCH_PREFIX", flag: "branch-prefix", group: "Branches & merge", kind: "string", doc: "prefix for agent-cut branches", dflt: "agent/issue-"},
 	{env: "BWRAP_UNSHARE_NET", flag: "bwrap-unshare-net", group: "Sandbox & resources", kind: "string", doc: "when non-empty, adds --unshare-net to bwrap; requires slirp/pasta for DNS; by default bwrap shares the host network namespace (host-loopback reachable)", dflt: ""},
