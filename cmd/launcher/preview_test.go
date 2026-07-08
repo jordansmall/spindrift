@@ -41,35 +41,6 @@ func TestPreviewIssues_ListsIssuesAndRepo(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_RespectsBarrierFence verifies that issues above the lowest
-// fanout-blocker barrier are excluded, matching dispatch behavior.
-func TestPreviewIssues_RespectsBarrierFence(t *testing.T) {
-	c := baseConfig()
-	c.repoSlug = "owner/repo"
-	c.label = "ready-for-agent"
-	c.barrierLabel = "fanout-blocker"
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "5", Title: "before barrier", Labels: []string{c.label}})
-	fc.SetIssue(forge.Issue{Number: "10", Title: "the barrier", Labels: []string{c.barrierLabel, c.label}})
-	fc.SetIssue(forge.Issue{Number: "15", Title: "after barrier", Labels: []string{c.label}})
-
-	var buf bytes.Buffer
-	if err := previewIssues(c, fc, &buf, nil); err != nil {
-		t.Fatalf("previewIssues: %v", err)
-	}
-
-	out := buf.String()
-	if !strings.Contains(out, "#5") {
-		t.Errorf("output missing #5 (before barrier); got:\n%s", out)
-	}
-	if !strings.Contains(out, "#10") {
-		t.Errorf("output missing #10 (the barrier itself); got:\n%s", out)
-	}
-	if strings.Contains(out, "#15") {
-		t.Errorf("output incorrectly includes #15 (after barrier); got:\n%s", out)
-	}
-}
-
 // TestPreviewIssues_PrintsMergeMode verifies that previewIssues prints the
 // effective merge mode so the operator sees which mode is armed.
 func TestPreviewIssues_PrintsMergeMode(t *testing.T) {

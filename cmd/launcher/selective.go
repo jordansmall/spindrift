@@ -12,11 +12,11 @@ import (
 )
 
 // selectiveListDispatch dispatches a hand-picked list of issues. It bypasses the
-// ready-for-agent label filter and the fanout-blocker barrier (operator override),
-// but still honors real dependency edges: in-list blockers are ordered ahead;
-// unmet external blockers trigger cascading eviction with a notice. Unlabeled
-// issues print a warning and require a single batched confirmation before any
-// Box is launched (skipped when forceYes=true or no unlabeled issues exist).
+// ready-for-agent label filter (operator override), but still honors real
+// dependency edges: in-list blockers are ordered ahead; unmet external blockers
+// trigger cascading eviction with a notice. Unlabeled issues print a warning and
+// require a single batched confirmation before any Box is launched (skipped when
+// forceYes=true or no unlabeled issues exist).
 func selectiveListDispatch(c config, fc forge.Client, pwd string, r runner.Runner, nums []string, forceYes bool, stdin io.Reader, stdout io.Writer) error {
 	// Fetch each issue by number.
 	issues, unlabeled, err := fetchSelectiveIssues(c, fc, nums)
