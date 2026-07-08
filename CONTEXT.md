@@ -115,19 +115,6 @@ _Was_: "Label lifecycle" — labels were GitHub's storage mechanism, mistaken fo
 the states themselves.
 _Avoid_: status, queue, state machine.
 
-`fanout-blocker` is a planning gate, orthogonal to the dispatch-state lifecycle
-above. It marks an issue that must land before concurrent fan-out is enabled for
-any newer issue. The dogfood wrapper exports `BARRIER_LABEL=fanout-blocker` so
-the Launcher fences everything numbered above the lowest open `fanout-blocker`
-issue; when that issue closes, the fence lifts to the next barrier (or the rest
-of the backlog). An issue may carry `fanout-blocker` alongside any dispatch
-state — it is not a state the issue transitions through.
-_Deprecated_: this was initial dogfooding scaffolding and is slated for removal
-in its own cleanup task. It is GitHub-only and is **not** extended to the `jira`
-or `local` Issue Trackers, which rely on canonical dispatch order alone (see
-Dispatch order below).
-_Avoid_: barrier state, fan-out label, serial gate.
-
 **Dispatch order**:
 The order in which `ListIssues` hands work to the launcher — canonically
 oldest-first. Identity is opaque to the launcher (`Number` is a string), so the
@@ -135,6 +122,12 @@ launcher never parses or compares IDs numerically; each Issue Tracker adapter
 returns issues already in canonical order using its own order key: `github` =
 issue number, `jira` = created time, `local` = a `created` frontmatter timestamp.
 _Avoid_: issue number, sequence, priority.
+
+**Fan-out concurrency**:
+Fan-out over the ready-set is unbounded by default. `MAX_PARALLEL` caps the
+number of concurrent agent containers (default 3); `MAX_JOBS` caps the
+dependency-wave concurrency (default 0 = unlimited). No label-based gate
+serializes issues; ordering is purely by dispatch order and blocker edges.
 
 **Outcome line**:
 The machine-readable final line a Box writes to stdout, parsed by the Launcher

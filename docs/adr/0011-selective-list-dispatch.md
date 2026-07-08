@@ -119,3 +119,6 @@ override path.
   The rename ships with the app-style deprecation idiom ADR 0010 established:
   `engage` survives one release as a warn-then-exec alias for `recover`. ADR 0010
   is amended accordingly.
+- **Note (post-ADR):** The `fanout-blocker` barrier was subsequently retired as
+  legacy dogfooding scaffolding (#329). The "pierced by explicit list" decision
+  above is moot; selective dispatch now simply has no barrier to pierce.
