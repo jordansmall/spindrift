@@ -157,10 +157,15 @@ the box, the entrypoint probes for a devShell:
 
 1. If `flake.nix` is present in the cloned repo and `nix` is on PATH (it is,
    because `nixInBox = true` is the default per ADR 0008), the entrypoint runs
-   `nix develop --command true` under a `DEV_SHELL_PROBE_TIMEOUT`-second timeout
-   (default 300 s, baked from `lib/env-schema.nix`).
-2. If the probe succeeds, the agent is guided to run checks via
-   `nix develop -c <cmd>`, using the Target's exact toolchain.
+   `nix develop ".#<DEV_SHELL_NAME>" --command true` under a
+   `DEV_SHELL_PROBE_TIMEOUT`-second timeout (default 300 s, baked from
+   `lib/env-schema.nix`).
+2. If the probe succeeds, the prefetch hook and the Driver (claude invocation)
+   run inside `nix develop ".#<DEV_SHELL_NAME>" --command bash <wrapper>` so
+   the agent operates in the Target's exact pinned environment — tools, env
+   vars, and shellHook included. If `nix develop` fails to exec the Driver
+   (nix rc ≠ 0 and empty stream), the entrypoint relaunches once in the baked
+   env rather than dying.
 3. If `flake.nix` is absent, `nix` is unavailable, the probe fails, or the
    timeout fires, the box degrades gracefully to the baked toolchain.
 
@@ -234,6 +239,7 @@ need changing. See `lib/env-schema.nix` for the authoritative list.
 | `TRANSIENT_RETRY_MAX`  | `3`     | retries for transient box exits (529/network backoff; consecutive 429 holds) |
 | `TRANSIENT_BACKOFF_SECS` | `30`  | base linear backoff per transient retry                        |
 | `HOLD_JITTER_SECS`     | `5`     | jitter added to a 429 hold-until-reset before re-dispatch      |
+| `DEV_SHELL_NAME` (baked) | `default` | which devShell to enter; set `ci` to use a lean headless shell distinct from the interactive `default` |
 | `DEV_SHELL_PROBE_TIMEOUT` (baked) | `300` | seconds before the in-box devShell probe is abandoned for the baked toolchain |
 | `MEMORY_LIMIT` (baked) | `4g`    | per-container `--memory` cap (OCI only; empty disables)        |
 | `PIDS_LIMIT` (baked)   | `512`   | per-container `--pids-limit` cap (OCI only; empty disables)    |
