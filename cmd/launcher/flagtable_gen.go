@@ -11,6 +11,7 @@ var schemaFlags = []flagEntry{
 	{env: "COMPLETE_LABEL", flag: "complete-label", group: "Lifecycle labels", kind: "string", doc: "label the launcher swaps on when CI reaches green (agent is done; merge is separate)", dflt: "agent-complete"},
 	{env: "DEPS_POLL_SECS", flag: "deps-poll-secs", group: "Concurrency & dependency waves", kind: "int", doc: "seconds between dependency-wave poll iterations", dflt: "30"},
 	{env: "DEPS_WAIT_SECS", flag: "deps-wait-secs", group: "Concurrency & dependency waves", kind: "int", doc: "total seconds to wait for dependency-wave completion before aborting", dflt: "7200"},
+	{env: "DEV_SHELL_NAME", flag: "dev-shell-name", group: "Sandbox & resources", kind: "string", doc: "which devShell to enter; lets a Target expose a lean headless ci shell distinct from a heavy interactive default", dflt: "default"},
 	{env: "DEV_SHELL_PROBE_TIMEOUT", flag: "dev-shell-probe-timeout", group: "Sandbox & resources", kind: "int", doc: "seconds before the devShell probe is abandoned and the baked toolchain is used", dflt: "300"},
 	{env: "FAILED_LABEL", flag: "failed-label", group: "Lifecycle labels", kind: "string", doc: "label swapped on when the agent box exits non-zero", dflt: "agent-failed"},
 	{env: "GIT_USER_EMAIL", flag: "git-user-email", group: "Repository & identity", kind: "string", doc: "commit identity email; falls back to host git config user.email", dflt: ""},

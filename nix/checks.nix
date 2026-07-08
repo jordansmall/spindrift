@@ -461,6 +461,7 @@ in
         "MODEL"
         "SCOUT_MODEL"
         "REVIEW_MODEL"
+        "DEV_SHELL_NAME"
         "DEV_SHELL_PROBE_TIMEOUT"
       ];
       # Forward: every schema name (that Go reads directly) must appear as a
