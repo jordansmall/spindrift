@@ -63,13 +63,30 @@ Prefer several small focused commits over one big one — commit each logical
 unit (domain change, then wiring, then tests) so each stands alone. Add a body
 only when the change isn't self-evident.
 
-Push after every substantive commit (a dying box then loses minutes, not the
-whole run):
+**Before each push**, rebase onto the latest base so the branch is never pushed
+from a stale base (a stale base can produce phantom diffs that trip push
+guards):
+
+```
+git fetch origin
+git rebase origin/${BASE_BRANCH}
+```
+
+Re-run the repo's checks after rebasing, then push:
 
 ```
 git push --force-with-lease -u origin ${BRANCH}   # first push
 git push --force-with-lease                        # subsequent
 ```
+
+**If a push is rejected**, do NOT silently strand the commits. Retry exactly
+once:
+
+1. `git fetch origin`
+2. `git rebase origin/${BASE_BRANCH}` — resolve any conflicts, re-run checks.
+3. `git push --force-with-lease` — one retry only.
+
+If the push still fails after the retry, follow IF BLOCKED.
 
 # REVIEW
 
@@ -146,10 +163,30 @@ Do NOT run `gh issue edit ... --add-label ${COMPLETE_LABEL}` or `gh pr merge`.
 
 # IF BLOCKED
 
-If you can't finish (review never clears, CI stays red after repeated fixes, or
-any other blocker):
+If you can't finish (review never clears, CI stays red after repeated fixes,
+push still fails after the one retry, or any other blocker):
 
-1. Push what you have.
+**Push failure — check the actual cause before reporting it.** Do not guess.
+Run:
+
+```
+git diff origin/${BASE_BRANCH} -- '.github/workflows/'
+```
+
+- **No diff (phantom delta):** The pre-push rebase-and-retry above should have
+  cleared this. If the push still fails, capture and report the actual push
+  error output.
+- **Genuine `.github/workflows/` change:** The agent's token intentionally
+  lacks `workflow` scope — this is a deliberate security boundary. Do NOT
+  attempt to acquire broader scope or route around it. Comment on the issue
+  explaining what changes were made and why they require human review with
+  `workflow` scope, then emit `status=blocked`.
+- **Any other rejection:** Report the literal push error output. Never
+  attribute a failure to a cause you have not verified.
+
+Then:
+
+1. Push what you have (or note if even that is impossible).
 2. Open the PR as a draft (`--draft`).
 3. Leave the issue in-progress — do NOT close it.
 4. Comment on the issue with what's done and what remains:
