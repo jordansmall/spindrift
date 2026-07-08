@@ -265,11 +265,17 @@ _run_driver() {
 
 _nix_rc=0
 if [ "$_use_dev_shell" = "1" ]; then
-  # Write the prompt to a temp file so the wrapper script can read it without
-  # embedding the full text in the script (avoids quoting hazards).
+  # Write the prompt to a temp file so the wrapper can read it without
+  # embedding the full text (avoids quoting hazards).
   _prompt_file="$(mktemp)"
   printf '%s' "$prompt" > "$_prompt_file"
-  # Write a wrapper that sources the driver logic inside the devShell.
+  # Write agents JSON to a temp file so the wrapper can pass it to claude
+  # as a single quoted argument — avoiding word-splitting on spaces in JSON.
+  _agents_file="$(mktemp)"
+  if [ "${#agents_args[@]}" -gt 0 ]; then
+    printf '%s' "${agents_args[1]}" > "$_agents_file"
+  fi
+  # Write a wrapper that drives the claude pipeline inside the devShell.
   # _harness_path is prepended so baked tools (spindrift-heartbeat-filter,
   # tee, etc.) remain reachable after nix develop rewrites PATH.
   _driver_wrapper="$(mktemp --suffix=.sh)"
@@ -277,9 +283,13 @@ if [ "$_use_dev_shell" = "1" ]; then
 #!/bin/bash
 export PATH="$_HARNESS_PATH:$PATH"
 set +e
+_agents_arg=()
+if [ -s "$_AGENTS_FILE" ]; then
+  _agents_arg=("--agents" "$(cat "$_AGENTS_FILE")")
+fi
 claude -p "$(cat "$_PROMPT_FILE")" \
   --model "${MODEL:-}" \
-  ${_AGENTS_ARGS} \
+  "${_agents_arg[@]}" \
   --verbose \
   --output-format stream-json \
   --dangerously-skip-permissions \
@@ -290,15 +300,14 @@ DRIVER_WRAPPER_EOF
   chmod +x "$_driver_wrapper"
   export _HARNESS_PATH="$_harness_path"
   export _PROMPT_FILE="$_prompt_file"
+  export _AGENTS_FILE="$_agents_file"
   export _STREAM_LOG="$stream_log"
   export _CLAUDE_RC_FILE="$_claude_rc_file"
-  # Serialize agents_args array into a string the wrapper can use.
-  export _AGENTS_ARGS="${agents_args[*]}"
   set +e
   nix develop ".#${DEV_SHELL_NAME:-default}" --command bash "$_driver_wrapper"
   _nix_rc=$?
   set -e
-  rm -f "$_driver_wrapper" "$_prompt_file"
+  rm -f "$_driver_wrapper" "$_prompt_file" "$_agents_file"
   # Launch-failure: nix develop itself failed before claude ran (stream empty).
   # Relaunch once in the baked env so transient nix failures don't kill the run.
   if [ "$_nix_rc" -ne 0 ] && [ ! -s "$stream_log" ]; then

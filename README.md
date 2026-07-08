@@ -73,7 +73,10 @@ your inputs and import the flake-parts module:
       imports = [ spindrift.flakeModules.default ];
       perSystem = { config, pkgs, ... }: {
         spindrift = {
-          # bake your build/test toolchain into the image (a fn of the Linux pkgs)
+          # The Target repo's devShell is used by default — no packages
+          # needed for a pure devShell setup. Add packages here only as
+          # a speed optimization to pre-bake toolchain closures into the
+          # image (see docs/reference.md for the full rationale).
           packages = p: [ p.go p.gnumake ];
           prompt = builtins.readFile ./prompts/issue-prompt.md;
         };
