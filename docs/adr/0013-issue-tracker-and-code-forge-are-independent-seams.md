@@ -57,5 +57,5 @@ file frontmatter). The two axes are **freely combinable and permissive** — eve
   parent is a deferred, opt-in enhancement, not part of the seam.
 - Dispatch order is adapter-provided (GitHub issue number, Jira created-time,
   local `created` frontmatter); the launcher never compares IDs numerically. The
-  `fanout-blocker` barrier is retired as legacy dogfooding scaffolding in a
-  separate cleanup task and is not carried into the new backends.
+  `fanout-blocker` barrier was retired as legacy dogfooding scaffolding and is
+  not carried into the new backends.

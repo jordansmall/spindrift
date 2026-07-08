@@ -120,7 +120,7 @@ correctly recognized.
 - CONTEXT.md's Label lifecycle is updated: `agent-complete` reads as "the agent
   is done — a green PR exists," with merge described as a separate
   `MERGE_MODE`-gated function; `agent-failed` reads as "no green PR was
-  produced." The `fanout-blocker` note is unaffected.
+  produced." (The `fanout-blocker` entry was subsequently retired in #329.)
 - spindrift's own `harness.env` sets `MERGE_MODE=immediate` so live dogfooding
   keeps auto-merging; the shipped env-schema default stays `manual`.
 - Deferred: a per-issue merge-mode override (e.g. a `hold-merge` label to force
