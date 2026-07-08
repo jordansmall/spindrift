@@ -1,5 +1,80 @@
 # Changelog
 
+## [0.1.3](https://github.com/jordansmall/spindrift/compare/v0.1.2...v0.1.3) (2026-07-08)
+
+
+### Features
+
+* **cli:** add man page and split help into concise + full reference ([e832152](https://github.com/jordansmall/spindrift/commit/e8321525607e62abcfb665be3e164d9d832bf605))
+* **doctor:** offer to create missing triage labels ([9f7fa0e](https://github.com/jordansmall/spindrift/commit/9f7fa0ec25098057942d664eb83d9d7408861e62))
+* **doctor:** report triage label status ([3e180fc](https://github.com/jordansmall/spindrift/commit/3e180fcef49dde657a30f6b4c548d296dca13170)), closes [#316](https://github.com/jordansmall/spindrift/issues/316)
+* **entrypoint:** log cold-run toolchain nudge ([20bf5ee](https://github.com/jordansmall/spindrift/commit/20bf5eea53bb85a766d8fe4f0e176e513a6b00aa))
+* **entrypoint:** run post-clone lifecycle inside devShell ([2f84cdd](https://github.com/jordansmall/spindrift/commit/2f84cddad3ff0dabcdcab3bcae046f4fe8b52391))
+* **forge:** add CreateLabel() to Client interface ([0a6383e](https://github.com/jordansmall/spindrift/commit/0a6383e8b150d405cebc0548175b590b4d2d2214))
+* **forge:** add ListLabels() to Client interface ([45f9dc5](https://github.com/jordansmall/spindrift/commit/45f9dc5964b3dd8e3efd9830eaeec05442726ed4))
+* **forge:** add Probe() connectivity check to Client ([3e54167](https://github.com/jordansmall/spindrift/commit/3e54167ef0fba58c014373e2a2f27f717d13ea40))
+* **launcher:** add doctor subcommand ([725c274](https://github.com/jordansmall/spindrift/commit/725c274774fa91e94c1c0a859fa7546fc76edfb6))
+* **prompt:** rebase before push, handle push failures ([d6766ef](https://github.com/jordansmall/spindrift/commit/d6766eff59436ed3d51aaebf288efc24cd25e541))
+* **runner:** reap container on success, retain on failure ([f62a561](https://github.com/jordansmall/spindrift/commit/f62a5611b775d16e96d1b88d56bbe9fa0eb58b52))
+* **schema:** add DEV_SHELL_NAME knob ([e54f429](https://github.com/jordansmall/spindrift/commit/e54f4294b9822ab45012aae997175d921e7be6bc))
+
+
+### Bug Fixes
+
+* **doctor:** guard against nil Stat() result in TTY detection ([d9ca2c7](https://github.com/jordansmall/spindrift/commit/d9ca2c7788eb36d9098b9c8d2ad9bffc3afafe2b))
+* **entrypoint:** suppress SC2016 on prefetch wrapper printf ([1c953d0](https://github.com/jordansmall/spindrift/commit/1c953d093af60cfe5c215933d083312f2d353c3c))
+* export MODEL into devShell wrapper; test coverage ([6510cce](https://github.com/jordansmall/spindrift/commit/6510cce01c6bc9f10df67e14f657f626d770d051))
+* reviewer findings — agents word-split, README clarity ([d710fba](https://github.com/jordansmall/spindrift/commit/d710fba39eac26383d3e0b00ddd08e0f22d5ef6b))
+
+
+### Documentation
+
+* add Before you deploy section and tighten prerequisites ([40936f0](https://github.com/jordansmall/spindrift/commit/40936f0b4f3f9e19ef8357c3f9e9870af50f2f45))
+* add CI and release badges to README ([655053e](https://github.com/jordansmall/spindrift/commit/655053ed5fc69819a7213d64a79a06e8962a3033))
+* add CONTRIBUTING and SECURITY reporting guides ([4130ae3](https://github.com/jordansmall/spindrift/commit/4130ae3333ba56ceeeec8f2379977f0dac5360b0))
+* add documentation index ([39df1b0](https://github.com/jordansmall/spindrift/commit/39df1b0e774ee2e673b31c0dd01b27879a7c3568))
+* compress basic-flow diagram ([86962a1](https://github.com/jordansmall/spindrift/commit/86962a1f9e2ae684e45a46859b4de1ccec14e912))
+* create docs/reference.md and move CLI section ([7c4e7e7](https://github.com/jordansmall/spindrift/commit/7c4e7e7082db8ee825677f2ff73fe08ea2732626))
+* document cold-run toolchain nudge ([b53a51f](https://github.com/jordansmall/spindrift/commit/b53a51fa1a4803a33e8713feb83eb9b8d6e3f7b7))
+* document devShell-first toolchain sourcing (ADR 0014) ([f2ec41c](https://github.com/jordansmall/spindrift/commit/f2ec41cac71fd98c2360a534958a9f4b63e3f0ff))
+* document doctor subcommand in help and README ([3b36f2e](https://github.com/jordansmall/spindrift/commit/3b36f2e37d553c6f23b7ae67affb10cfe944901b))
+* drop three-roles section, link CONTEXT.md from pitch ([0289776](https://github.com/jordansmall/spindrift/commit/02897767fb0db003341c7418694907a29e5c7d9e))
+* move flake config variants to reference ([d64d69a](https://github.com/jordansmall/spindrift/commit/d64d69af045706793ee7b4157395a7ffe0945702))
+* move runtime config and advanced tuning to reference ([5274cf4](https://github.com/jordansmall/spindrift/commit/5274cf47506037aa237fa1fd2d8faa4b98c924b5))
+* move runtime flow and label lifecycle to reference ([d3ae173](https://github.com/jordansmall/spindrift/commit/d3ae1732969e01a26e1ea9e243bb1b3a2942d0de))
+* move security, macOS, and remaining sections to reference ([a0f3f7d](https://github.com/jordansmall/spindrift/commit/a0f3f7d9be4dc45e50c5c135365e5c2103937fae))
+* **readme:** document DEV_SHELL_NAME and lean CI shell ([ce70ed5](https://github.com/jordansmall/spindrift/commit/ce70ed5a01f3c9c719d00eb86e1b3b2831698edb))
+* require a dedicated worktree per task ([e2e3fa7](https://github.com/jordansmall/spindrift/commit/e2e3fa71432b9722063f615fd81456c4c328756c))
+* retire fanout-blocker from glossary and ADRs ([a7ec43e](https://github.com/jordansmall/spindrift/commit/a7ec43e23448f77de341ade684e2e61f581f6f30))
+* split Forge into Issue Tracker and Code Forge seams ([ab3ee3d](https://github.com/jordansmall/spindrift/commit/ab3ee3d4d115a72e4a00e4c9b27997b67f99558f))
+* update devShell lifecycle-wrapping description ([362e7be](https://github.com/jordansmall/spindrift/commit/362e7beb054441024371b134ffd84e94505037eb))
+* update doctor description for label-status reporting ([de1f152](https://github.com/jordansmall/spindrift/commit/de1f152c1ea4d26a847a34e03052217459c55701))
+* use American spelling of "realize" ([c2a8f2f](https://github.com/jordansmall/spindrift/commit/c2a8f2f826a039bc3dc122e6d533bfe32a308b7e))
+
+
+### Code Refactoring
+
+* **launcher:** remove fanout-blocker barrier ([dff3ab5](https://github.com/jordansmall/spindrift/commit/dff3ab540a071a27b443cd45bda12272030851ff))
+
+
+### Tests
+
+* assert DEV_SHELL_NAME=default targets .#default ([0098e45](https://github.com/jordansmall/spindrift/commit/0098e451313a463e32ca76b6eeafa4afeb2f59e8))
+* remove barrier and stall-guard bats tests ([60ebc64](https://github.com/jordansmall/spindrift/commit/60ebc64500eac6c15aebe01b6fa0e59e1b066a0f))
+* **runner:** cover reap decision and no-rm invariant ([62318eb](https://github.com/jordansmall/spindrift/commit/62318ebe6107e39e9eaa8be85a4dba3c64955c75))
+
+
+### Continuous Integration
+
+* use spindrift CLI in agent-dispatch, not deprecated nix aliases ([0eafbe4](https://github.com/jordansmall/spindrift/commit/0eafbe4878f88c17b429606b85e6e631344ffcfd)), closes [#334](https://github.com/jordansmall/spindrift/issues/334)
+
+
+### Miscellaneous Chores
+
+* **dogfood:** remove barrier export and stall guard ([5b79a68](https://github.com/jordansmall/spindrift/commit/5b79a68b5d05383883df9be122c64f31fefe5caa))
+* drop BARRIER_LABEL from schema and config ([95273f2](https://github.com/jordansmall/spindrift/commit/95273f2d80ac5b66153fad8e455d94069a78071f))
+* **gitignore:** ignore .envrc ([2b51072](https://github.com/jordansmall/spindrift/commit/2b51072a5fa6fd8bc29c07d7efa0bc643d39ee05))
+
 ## [0.1.2](https://github.com/jordansmall/spindrift/compare/v0.1.1...v0.1.2) (2026-07-07)
 
 
