@@ -86,8 +86,6 @@ type config struct {
 	// Optional skills override
 	spindriftSkillsDir string
 
-	barrierLabel string
-
 	// Network egress restriction knobs
 	podmanNetwork   string // optional --network value for podman run
 	bwrapUnshareNet bool   // when true, adds --unshare-net to bwrap
@@ -189,8 +187,6 @@ func loadConfig() config {
 
 		spindriftPromptDir: os.Getenv("SPINDRIFT_PROMPT_DIR"),
 		spindriftSkillsDir: os.Getenv("SPINDRIFT_SKILLS_DIR"),
-
-		barrierLabel: os.Getenv("BARRIER_LABEL"),
 
 		podmanNetwork:   os.Getenv("PODMAN_NETWORK"),
 		bwrapUnshareNet: os.Getenv("BWRAP_UNSHARE_NET") != "",
@@ -737,12 +733,8 @@ func openPRForBranch(fc forge.Client, branch string) (url string, isDraft bool, 
 // Sentinel errors translated to specific exit codes so callers like dogfood.sh
 // can distinguish termination reasons without a separate gh probe.
 //
-//	exit 2 (errQueueEmpty):   discoverIssues found no open dispatchable issues.
-//	exit 3 (errQueueDrained): open issues exist but filterByBarrier fenced them all.
-var (
-	errQueueEmpty   = errors.New("queue empty")
-	errQueueDrained = errors.New("queue drained")
-)
+//	exit 2 (errQueueEmpty): discoverIssues found no open dispatchable issues.
+var errQueueEmpty = errors.New("queue empty")
 
 // Compiled once; shared by all parseBlockerRefs calls.
 var (
@@ -984,39 +976,6 @@ func writeBlockedMarker(pwd string, blockers []string) error {
 	return os.WriteFile(path, []byte(strings.Join(refs, ", ")), 0o644)
 }
 
-// filterByBarrier drops issues whose number exceeds the lowest open barrier.
-// When barrierLabel is empty the function is a no-op and returns issues unchanged.
-// The barrier query covers all dispatch states (ready/in-progress/failed): any
-// open issue carrying barrierLabel fences higher-numbered issues, regardless of
-// which other labels it carries. The fence lifts only when the issue is closed.
-func filterByBarrier(c config, fc forge.Client, issues []issue) ([]issue, error) {
-	if c.barrierLabel == "" {
-		return issues, nil
-	}
-	barriers, err := fc.ListIssues(c.barrierLabel)
-	if err != nil {
-		return nil, fmt.Errorf("barrier query: %w", err)
-	}
-	if len(barriers) == 0 {
-		return issues, nil
-	}
-	minB := -1
-	for _, b := range barriers {
-		n, _ := strconv.Atoi(b.Number)
-		if minB < 0 || n < minB {
-			minB = n
-		}
-	}
-	var out []issue
-	for _, iss := range issues {
-		n, _ := strconv.Atoi(iss.number)
-		if n <= minB {
-			out = append(out, iss)
-		}
-	}
-	return out, nil
-}
-
 // discoverIssues resolves the batch of issues to dispatch. When ISSUE_NUMBER is
 // set the workflow has already claimed exactly this issue (label swapped to
 // in-progress before the build), so we target it directly rather than querying
@@ -1220,7 +1179,7 @@ func runDoctor(fc forge.Client, c config, w io.Writer, stdin io.Reader, interact
 // non-empty it performs a selective dry-run: fetches exactly those issues,
 // prints label-bypass warnings, blocker annotations, and cascade-eviction
 // notices without launching any Box or prompting. When issueNums is empty it
-// falls back to queue-drain discovery (fanout-blocker fence honored).
+// falls back to queue-drain discovery.
 func previewIssues(c config, fc forge.Client, w io.Writer, issueNums []string) error {
 	if len(issueNums) > 0 {
 		return previewSelectiveList(c, fc, w, issueNums)
@@ -1230,25 +1189,15 @@ func previewIssues(c config, fc forge.Client, w io.Writer, issueNums []string) e
 	if err != nil {
 		return err
 	}
-	if c.issueNumber == "" {
-		if len(issues) == 0 {
-			fmt.Fprintf(w, "repo: %s  merge-mode: %s\nno open '%s' issues — nothing to dispatch.\n", c.repoSlug, c.mergeMode, c.label)
-			return nil
-		}
-		issues, err = filterByBarrier(c, fc, issues)
-		if err != nil {
-			return err
-		}
+	if c.issueNumber == "" && len(issues) == 0 {
+		fmt.Fprintf(w, "repo: %s  merge-mode: %s\nno open '%s' issues — nothing to dispatch.\n", c.repoSlug, c.mergeMode, c.label)
+		return nil
 	}
 	edges, err := parseBlockers(fc, issues)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
-	if len(issues) == 0 {
-		fmt.Fprintf(w, "no issues would be dispatched (fanout-blocker fence in effect)\n")
-		return nil
-	}
 	fmt.Fprintf(w, "%d issue(s) would be dispatched:\n", len(issues))
 	for _, iss := range issues {
 		blockers := edges[iss.number]
@@ -1578,21 +1527,9 @@ func run(noBuild bool) error {
 		return err
 	}
 
-	// Barrier filtering applies only to label-based discovery. When ISSUE_NUMBER
-	// is set the issue is already claimed; the fence must not drop it.
-	if c.issueNumber == "" {
-		if len(issues) == 0 {
-			fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
-			return errQueueEmpty
-		}
-		issues, err = filterByBarrier(c, fc, issues)
-		if err != nil {
-			return err
-		}
-		if len(issues) == 0 {
-			fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
-			return errQueueDrained
-		}
+	if c.issueNumber == "" && len(issues) == 0 {
+		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
+		return errQueueEmpty
 	}
 
 	// Build the dependency graph for the batch.
@@ -1745,9 +1682,6 @@ func main() {
 			if errors.Is(err, errQueueEmpty) {
 				os.Exit(2)
 			}
-			if errors.Is(err, errQueueDrained) {
-				os.Exit(3)
-			}
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
@@ -1756,9 +1690,6 @@ func main() {
 	if err := run(false); err != nil {
 		if errors.Is(err, errQueueEmpty) {
 			os.Exit(2)
-		}
-		if errors.Is(err, errQueueDrained) {
-			os.Exit(3)
 		}
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
