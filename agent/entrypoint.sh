@@ -130,6 +130,8 @@ if [ -n "${PREFETCH:-}" ]; then
     _pf_wrapper="$(mktemp --suffix=.sh)"
     # eval "$PREFETCH" so shell constructs in the hook (|| true, etc.)
     # are interpreted; match the non-devShell path exactly.
+    # $PATH and $PREFETCH are literal in the generated script — SC2016.
+    # shellcheck disable=SC2016
     printf '#!/bin/bash\nexport PATH="%s:$PATH"\neval "$PREFETCH"\n' \
       "$_harness_path" > "$_pf_wrapper"
     chmod +x "$_pf_wrapper"
