@@ -13,17 +13,14 @@
 #                                `nix run .#build` reads from ($PWD).
 #   2. `nix run .#build`     — re-bake the image from that updated tree.
 #
-# Each iteration fans out concurrently through the ready set, gated by
-# BARRIER_LABEL=fanout-blocker: the launcher will not dispatch issues newer than
-# the lowest open fanout-blocker issue. When that issue's PR merges and closes,
-# the next iteration's fence lifts to the following barrier (or the whole
-# backlog). The pull + rebuild happen between iterations so each wave sees any
-# fix the previous wave landed.
+# Each iteration fans out concurrently through the ready set. Concurrency is
+# bounded by MAX_PARALLEL (default 3) and MAX_JOBS (default unlimited). The
+# pull + rebuild happen between iterations so each wave sees any fix the
+# previous wave landed.
 #
 # Termination is driven by the launcher's exit code — no separate gh probe:
 #   exit 0 — dispatched work; loop continues after rebuilding from updated tree.
 #   exit 2 — queue empty (no open issues with the dispatch label); loop exits.
-#   exit 3 — queue drained (issues exist but all behind a barrier); stall guard.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -37,7 +34,6 @@ if [ -f harness.env ]; then
   set +a
 fi
 BASE_BRANCH="${BASE_BRANCH:-main}"      # must match env-schema.nix baseBranch.default
-export BARRIER_LABEL="${BARRIER_LABEL:-fanout-blocker}"
 : "${REPO_SLUG:?set REPO_SLUG=owner/repo in harness.env}"
 
 if [ -n "$(git status --porcelain)" ]; then
@@ -45,11 +41,7 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
-STALL_MAX_ITERATIONS="${STALL_MAX_ITERATIONS:-3}"
-STALL_SLEEP_SECONDS="${STALL_SLEEP_SECONDS:-60}"
-
 iteration=0
-stall_count=0
 
 echo "==> dogfood: git checkout $BASE_BRANCH && git pull --ff-only"
 # An agent's PR merges on $BASE_BRANCH, and the build reads $PWD — so reset to
@@ -71,25 +63,11 @@ while :; do
     break
   fi
 
-  if [ "$nix_exit" -eq 3 ]; then
-    stall_count=$((stall_count + 1))
-    if [ "$stall_count" -ge "$STALL_MAX_ITERATIONS" ]; then
-      echo "!! dogfood: no progress for $stall_count iteration(s) — issues blocked or queue stuck. Exiting." >&2
-      exit 1
-    fi
-    echo "==> dogfood: no progress (stall $stall_count/$STALL_MAX_ITERATIONS) — sleeping ${STALL_SLEEP_SECONDS}s"
-    sleep "$STALL_SLEEP_SECONDS"
-    # No rebuild on stall: exit 3 means issues exist but all sit behind a
-    # barrier; we wait for an external PR to merge and lift the fence.
-    continue
-  fi
-
   if [ "$nix_exit" -ne 0 ]; then
     echo "!! dogfood: launcher failed (exit $nix_exit)" >&2
     exit 1
   fi
 
-  stall_count=0
   iteration=$((iteration + 1))
   echo "==> dogfood iteration $iteration complete"
 
