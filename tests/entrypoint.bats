@@ -594,6 +594,15 @@ setup_rebase_conflict() {
   grep -q 'develop.*--command bash' "$NIX_LOG"
 }
 
+@test "DEV_SHELL_NAME default: nix develop targets .#default when name is default" {
+  seed_flake_repo
+  export FAKE_NIX_DEV_SHELL_OK=1
+  # DEV_SHELL_NAME=default is set in setup(); probe and wrappers must target .#default
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'develop .#default' "$NIX_LOG"
+}
+
 @test "DEV_SHELL_NAME selector: nix develop uses the configured devShell name" {
   seed_flake_repo
   export FAKE_NIX_DEV_SHELL_OK=1
