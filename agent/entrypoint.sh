@@ -95,6 +95,24 @@ if [ -z "${_had_rebase_conflict:-}" ] && [ -n "${_rebase_and_publish:-}" ]; then
   }
 fi
 
+# Cold-run toolchain nudge: when no prefetch is configured and a recognized
+# lockfile is present, emit a one-time hint pointing at the two knobs that
+# actually help (prefetch for per-run cache warm, packages for a baked
+# cross-run toolchain). Unknown ecosystems emit nothing.
+if [ -z "${PREFETCH:-}" ]; then
+  _nudge_ecosystem=""
+  if [ -f "Cargo.lock" ]; then
+    _nudge_ecosystem="cargo"
+  elif [ -f "package-lock.json" ] || [ -f "pnpm-lock.yaml" ] || [ -f "yarn.lock" ]; then
+    _nudge_ecosystem="npm/pnpm/yarn"
+  elif [ -f "go.sum" ]; then
+    _nudge_ecosystem="go mod"
+  fi
+  if [ -n "$_nudge_ecosystem" ]; then
+    echo "==> hint: ${_nudge_ecosystem} project detected; set 'prefetch' to warm dependency caches per run, or 'packages' to bake a toolchain into the image"
+  fi
+fi
+
 # Detect a Nix devShell in the cloned repo. When found the prefetch hook and
 # Driver run inside `nix develop` so the agent operates in the Target's exact
 # pinned environment. DEV_SHELL_PROBE_TIMEOUT is nix-baked (env-schema.nix

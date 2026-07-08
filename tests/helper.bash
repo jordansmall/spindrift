@@ -87,3 +87,15 @@ seed_flake_repo() {
   git -C "$seed" commit -q -m "chore: add flake"
   git -C "$seed" push -q origin HEAD:main
 }
+
+# Push a named lockfile to the remote's main branch. Call after setup_bare_repo.
+# Usage: seed_lockfile "go.sum"
+seed_lockfile() {
+  local lockfile="$1"
+  local seed="$BATS_TEST_TMPDIR/seed-lockfile"
+  git clone -q "https://github.com/owner/repo.git" "$seed"
+  touch "$seed/$lockfile"
+  git -C "$seed" add "$lockfile"
+  git -C "$seed" commit -q -m "chore: add $lockfile"
+  git -C "$seed" push -q origin HEAD:main
+}
