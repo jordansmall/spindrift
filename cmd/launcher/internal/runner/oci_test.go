@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -173,6 +174,28 @@ func TestBuildRunArgs_SkillsDirUnset_NoMount(t *testing.T) {
 		if strings.Contains(arg, ".claude/skills") {
 			t.Errorf("unexpected skills mount in args when skillsDir is empty: %v", args)
 		}
+	}
+}
+
+func TestReapAfterSuccess(t *testing.T) {
+	if !reapAfterSuccess(nil) {
+		t.Error("exit 0 (nil error) must reap the container")
+	}
+	if reapAfterSuccess(errors.New("exit status 1")) {
+		t.Error("non-zero exit must retain the container (not reap)")
+	}
+}
+
+func TestBuildRunArgs_NoRmFlag(t *testing.T) {
+	a := &ociAdapter{
+		cli:   "podman",
+		image: "spindrift:test",
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	args := a.buildRunArgs(box)
+
+	if containsArg(args, "--rm") {
+		t.Errorf("--rm must not be in buildRunArgs (lifecycle is managed by Run); args: %v", args)
 	}
 }
 
