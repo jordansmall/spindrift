@@ -95,6 +95,34 @@ The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
 at any directory to override it at runtime for zero-rebuild iteration.
 
+### Cold-run toolchain nudge
+
+When a Box runs **without a configured `prefetch`** and the cloned Target
+contains a recognized dependency lockfile, the entrypoint logs a one-time
+informational hint after the clone:
+
+```
+==> hint: go mod project detected; set 'prefetch' to warm dependency caches per run, or 'packages' to bake a toolchain into the image
+```
+
+The hint names the detected ecosystem and the two knobs that help:
+
+| knob       | effect                                                                  |
+| ---------- | ----------------------------------------------------------------------- |
+| `prefetch` | shell snippet that runs in the work tree after each clone; use it to download and cache dependencies so the agent doesn't fetch them cold on every tool invocation |
+| `packages` | bakes a toolchain into the image itself; pre-warmed across runs (no per-run network fetch needed) |
+
+Detection covers the following lockfiles (first match wins):
+
+| lockfile                                              | reported ecosystem |
+| ----------------------------------------------------- | ------------------ |
+| `Cargo.lock`                                          | cargo              |
+| `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`   | npm/pnpm/yarn      |
+| `go.sum`                                              | go mod             |
+
+Unrecognized ecosystems emit no hint. The hint is suppressed entirely when
+`prefetch` is already configured, so it is ignorable once you have acted on it.
+
 ### Calling `mkHarness` directly
 
 The flake-parts module is a thin shim over the engine. Any flake — flake-parts
