@@ -109,6 +109,14 @@
     flakeOption = true;
     boxEnv = true;
   };
+  devShellName = {
+    env = "DEV_SHELL_NAME";
+    group = "Sandbox & resources";
+    default = "default";
+    doc = "which devShell to enter; lets a Target expose a lean headless ci shell distinct from a heavy interactive default";
+    flakeOption = true;
+    boxEnv = true;
+  };
   devShellProbeTimeout = {
     env = "DEV_SHELL_PROBE_TIMEOUT";
     group = "Sandbox & resources";
