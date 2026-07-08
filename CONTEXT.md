@@ -50,6 +50,22 @@ The disposable per-issue podman container — the isolation boundary that makes
 `--dangerously-skip-permissions` safe.
 _Avoid_: sandbox, runner, worker.
 
+**Harness plumbing**:
+The language-agnostic tools every Agent needs regardless of the Target — shell,
+git, gh, the Driver CLI, jq, CA certs, nix. Always baked into the image and
+always kept on PATH, even when the Agent operates inside the Project toolchain.
+Distinct from the Project toolchain: plumbing is spindrift's, the toolchain is
+the Target's.
+_Avoid_: base image, harness deps, system tools.
+
+**Project toolchain**:
+The Target's language/build tools (rustc, node, sqlx, …). Sourced devShell-first:
+when the cloned Target has a usable devShell the Agent operates inside it via
+`nix develop` (the default, zero-config path); otherwise it falls back to the
+baked `packages` list. Baking is an opt-in *speed* knob — a warm store so the
+runtime `nix develop` substitutes nothing — not the primary source (ADR 0014).
+_Avoid_: packages, baked toolchain, dependencies.
+
 **Issue Tracker**:
 The seam that supplies work and carries dispatch state: listing dispatchable
 issues, reading an issue's body/title/state, transitioning its Dispatch state,
