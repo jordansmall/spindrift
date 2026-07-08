@@ -24,6 +24,18 @@ it. But once labeled, the issue body and **every comment from any GitHub user**
 feed the agent as prompt input. The trust boundary is the label, not the issue or
 comment author.
 
+## Worktrees
+
+**Always do task work in a dedicated git worktree, one per task/branch.** Do not
+edit files directly on whatever branch happens to be checked out. Parallel work
+gets increasingly tangled without worktrees — uncommitted edits stranded on the
+wrong branch, stash/pop juggling, and cross-task churn in a single tree. A
+worktree per task keeps each change isolated on its own branch from the start.
+
+```sh
+git worktree add ../spindrift-<task> -b <branch> origin/main
+```
+
 ## Running `gh`
 
 `gh` commands need network + the macOS keychain, which the command sandbox blocks
