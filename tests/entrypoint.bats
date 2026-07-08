@@ -21,6 +21,7 @@ setup() {
   export IN_PROGRESS_LABEL="agent-in-progress"
   export COMPLETE_LABEL="agent-complete"
   export DEV_SHELL_PROBE_TIMEOUT=300
+  export DEV_SHELL_NAME=default
   export ISSUE_NUMBER="7"
   export ISSUE_TITLE="Do the thing"
   export WORK_DIR="$BATS_TEST_TMPDIR/work"
@@ -577,4 +578,59 @@ setup_rebase_conflict() {
   [ "$status" -eq 0 ]
   grep -q '\.github/workflows' "$CLAUDE_PROMPT_FILE"
   grep -q 'workflow' "$CLAUDE_PROMPT_FILE"
+}
+
+# --- devShell lifecycle wrapping (issue #341) ----------------------------------
+# When the Target repo has a usable devShell, the prefetch hook and Driver
+# (claude invocation) must run inside `nix develop` so the agent operates in
+# the Target's exact pinned environment — not just the baked toolchain.
+
+@test "devShell-present Driver: claude is launched inside nix develop when devShell is found" {
+  seed_flake_repo
+  export FAKE_NIX_DEV_SHELL_OK=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # nix develop --command bash <wrapper> must appear in NIX_LOG (beyond the probe)
+  grep -q 'develop.*--command bash' "$NIX_LOG"
+}
+
+@test "DEV_SHELL_NAME selector: nix develop uses the configured devShell name" {
+  seed_flake_repo
+  export FAKE_NIX_DEV_SHELL_OK=1
+  export DEV_SHELL_NAME=ci
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'develop .#ci' "$NIX_LOG"
+}
+
+@test "launch-failure relaunch: entrypoint relaunches in baked env when nix develop cannot exec Driver" {
+  seed_flake_repo
+  export FAKE_NIX_DEV_SHELL_OK=1
+  export FAKE_NIX_DEV_SHELL_LAUNCH_FAIL=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # nix develop was attempted for the Driver
+  grep -q 'develop.*--command bash' "$NIX_LOG"
+  # Claude was still invoked (in baked env as fallback)
+  grep -q "claude invoked for issue" "$CLAUDE_LOG"
+}
+
+@test "devShell-present prefetch: prefetch runs inside nix develop when devShell is found" {
+  seed_flake_repo
+  export FAKE_NIX_DEV_SHELL_OK=1
+  export PREFETCH_LOG="$BATS_TEST_TMPDIR/prefetch.log"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    cat <<'FAKE'
+echo "warmed $PWD for #${ISSUE_NUMBER:-?}" >>"$PREFETCH_LOG"
+FAKE
+  } >"$FAKE_BIN/warm-cache"
+  chmod +x "$FAKE_BIN/warm-cache"
+  # Override the inherited PREFETCH so the prefetch test uses our command.
+  export PREFETCH="warm-cache"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "warmed" "$PREFETCH_LOG"
+  # Both prefetch and Driver wrappers use --command bash (probe uses --command true).
+  [ "$(grep -c 'develop.*--command bash' "$NIX_LOG")" -ge 2 ]
 }
