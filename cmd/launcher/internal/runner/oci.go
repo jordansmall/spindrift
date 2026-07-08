@@ -201,7 +201,7 @@ func (a *ociAdapter) containerIsRunning(name string) bool {
 // buildRunArgs assembles the argument slice for `podman/docker run`. Separated
 // from Run so the arg construction can be tested without exec.
 func (a *ociAdapter) buildRunArgs(box Box) []string {
-	args := []string{"run", "--rm", "--name", box.Name}
+	args := []string{"run", "--name", box.Name}
 	if a.podmanNetwork != "" {
 		args = append(args, "--network", a.podmanNetwork)
 	}
@@ -274,7 +274,18 @@ func (a *ociAdapter) Run(box Box) error {
 	cmd := exec.Command(a.cli, a.buildRunArgs(box)...)
 	cmd.Stdout = out
 	cmd.Stderr = out
-	return cmd.Run()
+	err := cmd.Run()
+	if reapAfterSuccess(err) {
+		_ = a.Reap(box.Name)
+	}
+	return err
+}
+
+// reapAfterSuccess reports whether the container should be reaped based on the
+// error returned from cmd.Run. A nil error (clean exit) triggers a reap;
+// any non-nil error retains the container so a human can recover locally.
+func reapAfterSuccess(err error) bool {
+	return err == nil
 }
 
 // Reap removes a named container (best-effort). Never removes a running container.
