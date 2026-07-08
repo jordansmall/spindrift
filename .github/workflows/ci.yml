@@ -7,7 +7,7 @@ on:
 
 jobs:
   check:
-    name: flake check + image realise
+    name: flake check + image realize
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +19,7 @@ jobs:
       - name: nix flake check
         run: nix flake check --print-build-logs
 
-      # Realise the Linux OCI image natively — the one thing the checks only
+      # Realize the Linux OCI image natively — the one thing the checks only
       # assert at eval time. On a Linux runner this needs no podman fallback.
       - name: Build the agent image
         run: nix build .#packages.x86_64-linux.agent-image --print-build-logs

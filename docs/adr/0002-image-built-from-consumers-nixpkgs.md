@@ -18,5 +18,5 @@ from one pin by construction.
 We take the locked *input* rather than a built `pkgs` specifically so we can map
 the Consumer's (possibly darwin) `system` to its Linux twin and re-instantiate —
 OCI images are Linux-only. This dissolves the macOS-builder problem's
-*evaluation* half (the expression Just Works anywhere); realising the derivation
+*evaluation* half (the expression Just Works anywhere); realizing the derivation
 still needs a Linux builder, which is unavoidable.

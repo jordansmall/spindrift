@@ -26,7 +26,7 @@ the "what does this even do" tax the redesign exists to remove:
   `EnsureReady` already does this), so the happy path is one command, not two; a
   loud progress line covers the slow first build and `--no-build` fails fast for
   callers who want the steps separate.
-- **`build`** — realise and load the image explicitly: the "will this build?"
+- **`build`** — realize and load the image explicitly: the "will this build?"
   pre-warm / CI verb, no longer a prerequisite for `dispatch`.
 - **`preview`** — read-only dry run: what `dispatch` *would* pick up, on which
   Target repo, without launching. `status` was rejected for this because it

@@ -16,7 +16,7 @@ type ociAdapter struct {
 	cli             string // "podman" or "docker"
 	image           string // tag to run (may be overridden by IMAGE env)
 	imageArchive    string // baked nix store path to the OCI tarball
-	imageDrv        string // baked .drv path; used by nix build for host realise
+	imageDrv        string // baked .drv path; used by nix build for host realize
 	imageTag        string // content-hash tag applied after loading
 	nixBuilderImage string // fallback container image that carries nix
 	nixVolume       string // named volume for /nix (incremental rebuilds)
@@ -83,7 +83,7 @@ func (a *ociAdapter) EnsureReady() error {
 	nixBuild.Stdout = os.Stdout
 	nixBuild.Stderr = io.MultiWriter(os.Stderr, &hostStderr)
 	if err := nixBuild.Run(); err == nil {
-		fmt.Println("==> realised image derivation on the host")
+		fmt.Println("==> realized image derivation on the host")
 		return a.loadImage(a.imageArchive)
 	}
 
@@ -104,10 +104,10 @@ func (a *ociAdapter) EnsureReady() error {
 	//    from `run` validate() already guaranteed it, making branch 2 succeed.
 	fmt.Fprintf(os.Stderr, `==> cannot build the spindrift image.
 
-The image is a Linux (OCI) derivation, and this host can neither realise it
+The image is a Linux (OCI) derivation, and this host can neither realize it
 directly nor fall back to a container build:
 
-  * No Linux builder: 'nix build' could not realise the image. On macOS, enable
+  * No Linux builder: 'nix build' could not realize the image. On macOS, enable
     nix-darwin's 'nix.linux-builder.enable = true;', or point nix at a remote
     Linux builder via 'nix.buildMachines' / '--builders'.
 

@@ -189,7 +189,7 @@ let
   # The `templates.default` starter, evaluated as a fixture (#6): call
   # its real `outputs` directly — no `nix flake init`, no network —
   # wiring `spindrift` to THIS checkout instead of the github input. The
-  # full Linux image realise is verified out-of-band via the podman
+  # full Linux image realize is verified out-of-band via the podman
   # builder; here we assert eval + the image store path resolving into
   # the launcher commands.
   templateOutputs = (import ../templates/default/flake.nix).outputs {

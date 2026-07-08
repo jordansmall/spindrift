@@ -17,7 +17,7 @@ spindrift dispatch
 # Dispatch a single issue
 spindrift dispatch 123
 
-# Build / realise the agent image without running any agent
+# Build / realize the agent image without running any agent
 spindrift build
 
 # Dispatch without auto-building (fail fast if image absent)

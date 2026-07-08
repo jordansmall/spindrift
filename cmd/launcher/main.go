@@ -37,8 +37,8 @@ type config struct {
 	// bwrap agent closure paths (bwrap only)
 	agentFiles    string
 	agentEnv      string
-	agentFilesDrv string // .drv path; used by `launcher build` to realise the closure
-	agentEnvDrv   string // .drv path; used by `launcher build` to realise the closure
+	agentFilesDrv string // .drv path; used by `launcher build` to realize the closure
+	agentEnvDrv   string // .drv path; used by `launcher build` to realize the closure
 	bakedPrefetch string
 
 	// Runtime: podman | docker | bwrap
@@ -267,7 +267,7 @@ func buildBoxEnv(c config, iss issue) map[string]string {
 	return env
 }
 
-// build realises the sandbox image or store closures without running any agent.
+// build realizes the sandbox image or store closures without running any agent.
 func build() error {
 	c := loadConfig()
 	if c.runtime == "" {
