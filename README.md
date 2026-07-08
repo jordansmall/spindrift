@@ -141,6 +141,8 @@ diagram and label lifecycle.
 | [`CONTEXT.md`](CONTEXT.md) | Vocabulary — Harness, Consumer flake, Target repo, Box, Forge, and the three roles |
 | [`MIGRATING.md`](MIGRATING.md) | Deprecated commands and breaking changes by version |
 | [`VERSIONING.md`](VERSIONING.md) | Semver policy and the stability guarantees for each surface |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Dev workflow (`nix flake check`), where code goes, ADRs, commit/release conventions |
+| [`SECURITY.md`](SECURITY.md) | How to report a vulnerability privately, plus the deployment threat model |
 
 ## Credits
 
