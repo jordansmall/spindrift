@@ -205,7 +205,6 @@ a rebuild (ADR 0001):
 | `FAILED_LABEL`            | `agent-failed`         | label an issue gets when its Box fails or its PR can't merge |
 | `COMPLETE_LABEL`          | `agent-complete`       | label the launcher swaps on when CI reaches green (agent is done; the merge is a separate step) |
 | `MERGE_MODE`              | `manual`               | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue GitHub native auto-merge — repo must have *Allow auto-merge* on) |
-| `BARRIER_LABEL`           | — (empty = off)        | open issues carrying it fence all higher-numbered issues until they close |
 | `MODEL`                   | `claude-sonnet-4-6`    | Claude model the in-container implementor runs |
 | `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` | scout subagent model tier (empty drops subagents) |
 | `REVIEW_MODEL`            | `claude-opus-4-8`      | reviewer subagent model tier (empty drops subagents) |
