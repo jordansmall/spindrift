@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fake nix for the `build` tests. Records every invocation to $NIX_LOG and
-# simulates whether this host can realise a Linux derivation: `nix build`
+# simulates whether this host can realize a Linux derivation: `nix build`
 # succeeds only when FAKE_NIX_BUILD_OK=1 (a host with a Linux builder),
 # otherwise it fails the way a builder-less darwin host does — driving the
 # ephemeral-container fallback. Never touches the real nix store.

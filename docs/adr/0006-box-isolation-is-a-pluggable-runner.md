@@ -39,7 +39,7 @@ On Linux (including CI) a Box can run with zero container-image plumbing:
 `dockerTools` and `load` fall away, leaving pure nix plus a bwrap exec. macOS
 keeps the OCI+VM path, since Linux-namespace isolation there still needs a Linux
 kernel (`podman machine`, or the reused nix-darwin `linux-builder` VM). Because
-the runner is now a seam, `build` for the bwrap runner realises the store
+the runner is now a seam, `build` for the bwrap runner realizes the store
 closure but skips the image/`load` step, and the entrypoint must not assume an
 OCI filesystem layout — it already clones into a work dir and reads a mounted
 prompt, both of which bwrap supplies as bind mounts.

@@ -19,9 +19,9 @@ type Box struct {
 
 // Runner is the seam through which the launcher manages agent sandbox life-cycles.
 type Runner interface {
-	// EnsureReady builds or realises the sandbox image/closure if absent.
+	// EnsureReady builds or realizes the sandbox image/closure if absent.
 	// OCI: image exists → nix build → load (container fallback included).
-	// bwrap: realises agent store closures via nix build.
+	// bwrap: realizes agent store closures via nix build.
 	EnsureReady() error
 
 	// IsReady reports whether the sandbox is usable right now, without building.

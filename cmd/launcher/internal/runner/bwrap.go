@@ -18,7 +18,7 @@ var bwrapSecrets = map[string]bool{
 }
 
 // bwrapAdapter implements Runner for the daemonless bubblewrap sandbox.
-// EnsureReady is a no-op — store closures are realised by the build command.
+// EnsureReady is a no-op — store closures are realized by the build command.
 type bwrapAdapter struct {
 	agentFiles    string // baked nix store path for agent files (/agent/…)
 	agentEnv      string // baked nix store path for the agent env (PATH, SSL, …)
@@ -43,11 +43,11 @@ func NewBwrap(agentFiles, agentEnv, bakedPrefetch, promptDir, skillsDir string, 
 	}
 }
 
-// EnsureReady is a no-op for bwrap run: store closures are realised by
+// EnsureReady is a no-op for bwrap run: store closures are realized by
 // `launcher build` (bwrapBuildAdapter.EnsureReady) before `run` is invoked.
 func (a *bwrapAdapter) EnsureReady() error { return nil }
 
-// IsReady is a no-op for bwrap: store closures are realised out-of-band by
+// IsReady is a no-op for bwrap: store closures are realized out-of-band by
 // `spindrift build` and are either present or absent at bwrap invocation time.
 func (a *bwrapAdapter) IsReady() error { return nil }
 
@@ -152,14 +152,14 @@ func (a *bwrapAdapter) Run(box Box) error {
 func (a *bwrapAdapter) Reap(_ string) error { return nil }
 
 // bwrapBuildAdapter implements Runner for the `launcher build` bwrap path.
-// EnsureReady realises the agent store closures; Run is not supported.
+// EnsureReady realizes the agent store closures; Run is not supported.
 type bwrapBuildAdapter struct {
 	agentFilesDrv string // .drv path for agentFiles
 	agentEnvDrv   string // .drv path for agentEnv
 }
 
 // NewBwrapBuild constructs a bwrap adapter for the build command.
-// EnsureReady realises agent store closures via nix build.
+// EnsureReady realizes agent store closures via nix build.
 func NewBwrapBuild(agentFilesDrv, agentEnvDrv string) Runner {
 	return &bwrapBuildAdapter{
 		agentFilesDrv: agentFilesDrv,
@@ -167,10 +167,10 @@ func NewBwrapBuild(agentFilesDrv, agentEnvDrv string) Runner {
 	}
 }
 
-// EnsureReady realises the agent store closures via nix build. Nix is
-// idempotent — if already realised this is fast. Real nix errors surface.
+// EnsureReady realizes the agent store closures via nix build. Nix is
+// idempotent — if already realized this is fast. Real nix errors surface.
 func (a *bwrapBuildAdapter) EnsureReady() error {
-	fmt.Println("==> bwrap runner: realising agent store closures (no image build/load)")
+	fmt.Println("==> bwrap runner: realizing agent store closures (no image build/load)")
 
 	nixFiles := exec.Command("nix", "build", a.agentFilesDrv+"^*", "--no-link")
 	nixFiles.Stdout = os.Stdout
@@ -186,7 +186,7 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 		return fmt.Errorf("nix build agent-env: %w", err)
 	}
 
-	fmt.Println("==> done: agent store closures realised")
+	fmt.Println("==> done: agent store closures realized")
 	return nil
 }
 

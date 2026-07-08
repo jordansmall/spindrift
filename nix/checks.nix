@@ -81,7 +81,7 @@ in
         # Harnesses with baked skills for skills-precedence tests.
         SKILLS_RUN_CMD = "${skillsHarness.run}/bin/run";
         SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.run}/bin/run";
-        # Not read by bats directly, but forces Nix to realise
+        # Not read by bats directly, but forces Nix to realize
         # skillsBwrapHarness.agentFiles so its store path exists on disk when
         # the bwrap adapter calls os.Stat on the baked-skills subdirectory.
         # The run command embeds the path via unsafeDiscardStringContext, which
@@ -171,7 +171,7 @@ in
   # The `templates.default` starter (#6): its `build`/`run` commands
   # must have the Linux image store path substituted in, and — since
   # its config mirrors the dogfood's — be byte-identical to the direct
-  # call. Eval-only; the Linux realise is done on the podman builder
+  # call. Eval-only; the Linux realize is done on the podman builder
   # against an instantiated copy.
   template-fixture =
     pkgs.runCommand "template-fixture"
@@ -687,7 +687,7 @@ in
   # The baked entrypoint must carry a store-path shebang, not the
   # source's `#!/usr/bin/env bash` — the Box has no /usr/bin/env. Guards
   # against baking the raw source instead of the writeShellApplication
-  # output. Realises the agent-files layer, so it is gated to a Linux
+  # output. Realizes the agent-files layer, so it is gated to a Linux
   # builder and omitted from `nix flake check` on darwin.
   entrypoint-shebang = pkgs.runCommand "entrypoint-shebang" { } ''
     shebang=$(head -1 ${nonRustHarness.agentFiles}/agent/entrypoint.sh)
@@ -722,7 +722,7 @@ in
 
   # The Box must run unprivileged: Claude Code refuses
   # --dangerously-skip-permissions under root. Assert the image config
-  # runs as the non-root `agent` user. Realises the image, so it is
+  # runs as the non-root `agent` user. Realizes the image, so it is
   # Linux-gated like the shebang check.
   box-runs-as-non-root =
     pkgs.runCommand "box-runs-as-non-root" { nativeBuildInputs = [ pkgs.jq ]; } ''
@@ -739,7 +739,7 @@ in
 
   # The rendered prompt must be baked into the agent-files layer at
   # /agent/prompts, so the Box is self-contained and needs no host
-  # /nix/store mount (which a macOS podman VM cannot provide). Realises
+  # /nix/store mount (which a macOS podman VM cannot provide). Realizes
   # the agent-files layer, so it is Linux-gated like the shebang check.
   prompt-baked-into-image = pkgs.runCommand "prompt-baked-into-image" { } ''
     grep -q 'CONFIGURED-PROMPT-MARKER' \
@@ -750,7 +750,7 @@ in
   '';
 
   # Skills configured at build time must land in the agent-files layer at
-  # /home/agent/.claude/skills so the Box is self-contained. Realises the
+  # /home/agent/.claude/skills so the Box is self-contained. Realizes the
   # agent-files layer; Linux-gated like the other image checks.
   skills-baked-into-image = pkgs.runCommand "skills-baked-into-image" { } ''
     grep -q 'BAKED-SKILL-MARKER' \
@@ -760,7 +760,7 @@ in
 
   # The nix.conf and store DB must be present in the image so
   # `nix flake check` reuses the baked closure instead of re-substituting.
-  # Realises the default image; Linux-gated like the other image checks.
+  # Realizes the default image; Linux-gated like the other image checks.
   nix-conf-in-image =
     pkgs.runCommand "nix-conf-in-image" { nativeBuildInputs = [ pkgs.jq ]; } ''
       # Extract the image ONCE (like box-runs-as-non-root), then read

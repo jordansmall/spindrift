@@ -17,7 +17,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift dispatch --no-build`  | fail fast if the image is absent instead of building it first (split build/run) |
 | `spindrift dispatch --yes`       | skip the confirmation prompt when dispatching unlabeled issues (alias `--force`)|
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
-| `spindrift build`                | realise/load the agent image (or store closures) without running any agent      |
+| `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
 | `spindrift doctor`               | check forge credentials, repository connectivity, and triage label presence; when run interactively (TTY attached) and labels are missing it offers to create them with default colors and descriptions; in CI (no TTY) it reports the missing labels and exits non-zero without prompting |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
@@ -38,9 +38,9 @@ terminal). Bare `spindrift` with no subcommand is `spindrift dispatch`.
 If you use **direnv**, the template's `.envrc` (`use flake`) activates the dev
 shell automatically on `cd` — no manual `nix develop` needed.
 
-`spindrift build` **realises** the image derivation and then loads it into your
+`spindrift build` **realizes** the image derivation and then loads it into your
 container runtime. On a host with a Linux builder (any Linux machine, or a Mac
-with a Linux builder configured) it realises the image directly. On a stock Mac
+with a Linux builder configured) it realizes the image directly. On a stock Mac
 — no Linux builder — it transparently falls back to building the image inside an
 **ephemeral Nix container** on the same runtime it already requires, keeping a
 named `/nix` volume so rebuilds stay incremental. Either way the result is
@@ -71,7 +71,7 @@ knobs. Unset options fall through to `mkHarness`'s own defaults.
 | `defaults`  | submodule (all `flakeOption` env knobs) | see below | non-secret run defaults baked into the `spindrift` CLI |
 | `runtime`   | `"podman"` \| `"docker"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime, or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
 | `nixInBox`  | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
-| `nixBuilderImage` | string                | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realise the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
+| `nixBuilderImage` | string                | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
 
 The `defaults` submodule bakes the run knobs into the `spindrift` CLI; a matching
 env var still wins at runtime, so one built command can be re-pointed without a
@@ -433,7 +433,7 @@ deliberate, not oversights — write them down so you can honour them:
 OCI images are Linux-only, so the `agent-image` package is a *Linux* derivation
 even on a Mac. The launcher commands (`spindrift build`/`dispatch`) are native
 and only *reference* the image path, so `nix flake check` never forces a Linux
-build. Realising the image is `spindrift build`'s job, and it handles the Mac
+build. Realizing the image is `spindrift build`'s job, and it handles the Mac
 case for you:
 
 - **Out of the box**: with no Linux builder, `spindrift build` builds the image
@@ -443,7 +443,7 @@ case for you:
   you already need — just run it from your Consumer flake's directory.
 - **Faster with a real Linux builder** (skips the container round-trip):
   - **nix-darwin**: enable `nix.linux-builder.enable = true;` (a small Linux VM
-    nix uses automatically). `spindrift build` then realises the image directly.
+    nix uses automatically). `spindrift build` then realizes the image directly.
   - **Remote builder**: point nix at any Linux box via
     `nix.buildMachines` / `--builders`.
   - **Just build on Linux / CI** and load the result on the Mac.

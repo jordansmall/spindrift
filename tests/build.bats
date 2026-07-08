@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Behaviour of the nix-generated `build` command: it realises the image
+# Behaviour of the nix-generated `build` command: it realizes the image
 # derivation, then loads it — falling back to an ephemeral Nix container on the
 # runtime when the host has no Linux builder. Driven entirely through fakes
 # (nix + podman), so no real build, container, or store is touched.
@@ -13,7 +13,7 @@ setup() {
 
 # --- host-build path (a host WITH a Linux builder) ---------------------------
 
-@test "build realises the derivation on the host, then loads the baked path" {
+@test "build realizes the derivation on the host, then loads the baked path" {
   export FAKE_NIX_BUILD_OK=1
   run "$BUILD_CMD"
   [ "$status" -eq 0 ]
@@ -39,7 +39,7 @@ setup() {
 
 # --- container-fallback path (a host WITHOUT a Linux builder) -----------------
 
-@test "build falls back to an ephemeral Nix container when the host can't realise it" {
+@test "build falls back to an ephemeral Nix container when the host can't realize it" {
   export FAKE_NIX_BUILD_OK=0
   run "$BUILD_CMD"
   [ "$status" -eq 0 ]
@@ -103,7 +103,7 @@ setup() {
 
 # --- bwrap build path (issue #54) --------------------------------------------
 
-@test "bwrap build realises agent store closures without loading an OCI image" {
+@test "bwrap build realizes agent store closures without loading an OCI image" {
   export FAKE_NIX_BUILD_OK=1
   run "$BWRAP_BUILD_CMD"
   [ "$status" -eq 0 ]

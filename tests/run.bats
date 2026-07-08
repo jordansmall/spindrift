@@ -22,7 +22,7 @@ setup() {
   grep -q "load -i $IMAGE_PATH" "$PODMAN_LOG"
 }
 
-@test "run falls back to container build when host cannot realise the image" {
+@test "run falls back to container build when host cannot realize the image" {
   export FAKE_PODMAN_IMAGE_PRESENT=0
   export FAKE_NIX_BUILD_OK=0
   run "$RUN_CMD"

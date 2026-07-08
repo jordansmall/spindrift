@@ -39,7 +39,7 @@
   defaults ? { },
   # Container runtime the launcher commands drive: "podman" (default) or "docker".
   runtime ? "podman",
-  # Fallback Linux builder for when the host can't realise the Linux image itself
+  # Fallback Linux builder for when the host can't realize the Linux image itself
   # (the stock-mac case). Fully qualified so podman needs no default registry.
   # Pinned by manifest-list digest for reproducibility and supply-chain safety —
   # this container runs with the consumer tree bind-mounted read-write, so a
@@ -331,7 +331,7 @@ let
   # The image's store path as PLAIN TEXT (context discarded), so the launcher
   # commands embed the exact Linux image path WITHOUT taking a build-time
   # dependency on it. That lets `build`/`run` — and `nix flake check` — build
-  # natively on darwin, while realising the image stays an explicit, Linux-only
+  # natively on darwin, while realizing the image stays an explicit, Linux-only
   # `nix build .#agent-image`.
   imagePath = builtins.unsafeDiscardStringContext (toString image);
 
@@ -341,18 +341,18 @@ let
   # changed flake produces a new hash → the old tag is absent → run rebuilds.
   imageHash = builtins.substring 11 32 imagePath;
 
-  # The image's `.drv` path, also context-discarded. `build` realises this with
+  # The image's `.drv` path, also context-discarded. `build` realizes this with
   # `nix build "<drv>^*"` before loading, so a fresh machine builds the image
-  # instead of failing on an unrealised path — while discarding the context
+  # instead of failing on an unrealized path — while discarding the context
   # keeps `nix flake check` and the launcher builds off any Linux build. Reading
   # `.drvPath` instantiates the derivation at eval time, so the .drv exists in
-  # the store by the time `build` runs; only realising it needs a Linux builder.
+  # the store by the time `build` runs; only realizing it needs a Linux builder.
   imageDrv = builtins.unsafeDiscardStringContext image.drvPath;
 
   # bwrap runner: store paths for the agent files and env, context-discarded so
   # the launcher commands embed the exact paths without a build-time dependency.
   # Reading `.drvPath` instantiates each derivation at eval time (creating the
-  # .drv file) but does not realise the output — `bwrap build` does that.
+  # .drv file) but does not realize the output — `bwrap build` does that.
   agentFilesPath = builtins.unsafeDiscardStringContext (toString agentFiles);
   agentFilesDrv = builtins.unsafeDiscardStringContext agentFiles.drvPath;
   agentEnvPath = builtins.unsafeDiscardStringContext (toString agentEnv);
@@ -391,7 +391,7 @@ let
   # shell-only. Two vars cover both adapter families:
   #
   #   goRunPreamble  — everything `run` needs at sandbox dispatch time.
-  #   goBuildPreamble — everything `build` needs to realise the image/closure.
+  #   goBuildPreamble — everything `build` needs to realize the image/closure.
 
   goRunPreamble =
     if runnerKind == "bwrap" then
@@ -578,7 +578,7 @@ let
       agent.
       .TP
       .B build
-      Realise the agent image (or store closures) without running any agent.
+      Realize the agent image (or store closures) without running any agent.
       .TP
       .B recover <issue>
       Run the merge gate for a single issue whose agent already finished.
@@ -677,7 +677,7 @@ let
     meta.license = lib.licenses.mit;
   });
 
-  # Realising the Linux image on darwin needs a Linux builder, so only offer it
+  # Realizing the Linux image on darwin needs a Linux builder, so only offer it
   # as a package where it can actually build; the launcher commands (which merely
   # reference its path) are always available. `nix flake check` on darwin thus
   # never forces a Linux build.
