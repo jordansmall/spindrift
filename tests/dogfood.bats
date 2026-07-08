@@ -3,8 +3,8 @@
 # The loop must reset to the base branch before `git pull --ff-only` because a
 # host left on a feature branch (e.g. after a prior merge) has no upstream to
 # fast-forward. Termination is driven by the launcher's exit code rather than a
-# separate gh probe: exit 2 (queue empty) breaks the loop cleanly; exit 3 (all
-# issues behind a barrier) triggers the stall guard.
+# separate gh probe: exit 2 (queue empty) breaks the loop cleanly; any other
+# non-zero exit aborts with an error.
 
 load helper
 
@@ -29,8 +29,8 @@ EOF
   chmod +x "$FAKE_BIN/nix"
 }
 
-# Replaces the fake nix with one that logs BARRIER_LABEL and MAX_JOBS on every
-# `nix run .#run` call, then exits 2 so the dogfood loop terminates cleanly.
+# Replaces the fake nix with one that logs MAX_JOBS on every `nix run .#run`
+# call, then exits 2 so the dogfood loop terminates cleanly.
 _install_env_logging_nix() {
   local shebang
   shebang="$(head -n1 "$FAKE_BIN/nix")"
@@ -40,7 +40,6 @@ _install_env_logging_nix() {
 : "${NIX_LOG:?NIX_LOG must point at a log file}"
 printf '%s\n' "$*" >>"$NIX_LOG"
 if printf '%s ' "$@" | grep -q '\.#run'; then
-  printf 'BARRIER_LABEL=%s\n' "${BARRIER_LABEL:-}" >>"${NIX_ENV_LOG:-/dev/null}"
   printf 'MAX_JOBS=%s\n' "${MAX_JOBS:-}" >>"${NIX_ENV_LOG:-/dev/null}"
   exit 2
 fi
@@ -96,27 +95,11 @@ setup() {
   [[ "$output" == *"done"* ]]
 }
 
-@test "dogfood triggers stall detection when launcher exits 3 (queue drained)" {
-  _install_exit_code_nix 3
-  run bash -c "BASE_BRANCH=main STALL_MAX_ITERATIONS=1 STALL_SLEEP_SECONDS=0 bash '$WORK/dogfood.sh' 2>&1"
-  [ "$status" -ne 0 ]
-  printf '%s\n' "$output" | grep -q "no progress"
-}
-
-@test "dogfood aborts when launcher exits non-zero (not 2 or 3)" {
+@test "dogfood aborts when launcher exits non-zero (not 2)" {
   _install_exit_code_nix 1
   run bash -c "BASE_BRANCH=main bash '$WORK/dogfood.sh' 2>&1"
   [ "$status" -ne 0 ]
   printf '%s\n' "$output" | grep -q "launcher failed"
-}
-
-@test "dogfood passes BARRIER_LABEL=fanout-blocker to nix run" {
-  export NIX_ENV_LOG="$BATS_TEST_TMPDIR/nix-env.log"
-  : >"$NIX_ENV_LOG"
-  _install_env_logging_nix
-  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
-  [ "$status" -eq 0 ]
-  grep -q 'BARRIER_LABEL=fanout-blocker' "$NIX_ENV_LOG"
 }
 
 @test "dogfood does not pin MAX_JOBS=1" {
@@ -128,10 +111,3 @@ setup() {
   ! grep -q '^MAX_JOBS=1$' "$NIX_ENV_LOG"
 }
 
-@test "fully-fenced iteration triggers stall detection, not hot-spin" {
-  # exit 3: open issues exist but all sit behind a barrier — stall, not a crash.
-  _install_exit_code_nix 3
-  run bash -c "BASE_BRANCH=main STALL_MAX_ITERATIONS=1 STALL_SLEEP_SECONDS=0 bash '$WORK/dogfood.sh' 2>&1"
-  [ "$status" -ne 0 ]
-  printf '%s\n' "$output" | grep -q "no progress"
-}
