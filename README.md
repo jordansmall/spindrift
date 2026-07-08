@@ -96,6 +96,19 @@ Linux-only `agent-image`. See [`docs/reference.md`](docs/reference.md) for the
 `mkHarness`-direct variant and the devShell-targeting pattern (one image,
 many differently-toolchained Target repos).
 
+**Lean CI shell.** If the Target repo exposes a `devShells.ci` with only the
+tools the agent needs (no LSP, no GUI tooling), set `DEV_SHELL_NAME=ci` — or
+bake it as the Consumer default:
+
+```nix
+spindrift.devShellName = "ci";
+```
+
+The Box enters that shell instead of `devShells.default`, giving the agent a
+smaller closure and a faster probe. See
+[devShell targeting](docs/reference.md#how-a-run-works) for the probe flow
+and baked-toolchain fallback.
+
 ## Before you deploy
 
 Three non-negotiables before pointing the harness at a live repo:
