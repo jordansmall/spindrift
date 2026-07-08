@@ -28,6 +28,22 @@ case "${1:-}" in
       sleep 9999
     fi
     if [ "${FAKE_NIX_DEV_SHELL_OK:-0}" = "1" ]; then
+      # Extract args after --command and exec them so wrappers run for real.
+      _found_cmd=0
+      _cmd_args=()
+      for _arg in "$@"; do
+        if [ "$_found_cmd" = "1" ]; then
+          _cmd_args+=("$_arg")
+        elif [ "$_arg" = "--command" ]; then
+          _found_cmd=1
+        fi
+      done
+      if [ "${#_cmd_args[@]}" -gt 0 ]; then
+        if [ "${FAKE_NIX_DEV_SHELL_LAUNCH_FAIL:-0}" = "1" ] && [ "${_cmd_args[0]}" = "bash" ]; then
+          exit 1
+        fi
+        exec "${_cmd_args[@]}"
+      fi
       exit 0
     fi
     echo "error: flake 'path:.' does not provide attribute 'devShells.x86_64-linux.default'" >&2

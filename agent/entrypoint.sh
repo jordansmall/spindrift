@@ -19,9 +19,9 @@ set -euo pipefail
 : "${GIT_USER_EMAIL:?GIT_USER_EMAIL is required}"
 
 # BASE_BRANCH, BRANCH_PREFIX, MODEL, SCOUT_MODEL, REVIEW_MODEL,
-# IN_PROGRESS_LABEL, COMPLETE_LABEL, and DEV_SHELL_PROBE_TIMEOUT are injected
-# by the nix-rendered defaults preamble prepended at image-build time
-# (env-schema.nix).
+# IN_PROGRESS_LABEL, COMPLETE_LABEL, DEV_SHELL_NAME, and DEV_SHELL_PROBE_TIMEOUT
+# are injected by the nix-rendered defaults preamble prepended at image-build
+# time (env-schema.nix).
 # AGENTS_JSON_TEMPLATE is a nix-computed derived value also prepended at
 # image-build time; it is not a schema knob.  The :-  expansions below keep
 # set -u and the linter happy for standalone use.
@@ -95,22 +95,26 @@ if [ -z "${_had_rebase_conflict:-}" ] && [ -n "${_rebase_and_publish:-}" ]; then
   }
 fi
 
-# Detect a Nix devShell in the cloned repo. When found the prompt guides the
-# agent to run checks inside `nix develop`; absence or probe failure degrades
-# gracefully to the baked toolchain. DEV_SHELL_PROBE_TIMEOUT is nix-baked
-# (env-schema.nix default 300 s) so a heavy consumer devShell eval cannot
-# stall the box indefinitely.
+# Detect a Nix devShell in the cloned repo. When found the prefetch hook and
+# Driver run inside `nix develop` so the agent operates in the Target's exact
+# pinned environment. DEV_SHELL_PROBE_TIMEOUT is nix-baked (env-schema.nix
+# default 300 s) so a heavy consumer devShell eval cannot stall the box.
+# DEV_SHELL_NAME selects which devShell to enter (default "default").
+_use_dev_shell=0
+_harness_path="$PATH"
 if [ -f "flake.nix" ]; then
   echo "==> flake.nix found in cloned repo; probing for devShell"
   _probe_rc=0
   if command -v nix >/dev/null 2>&1; then
-    timeout "${DEV_SHELL_PROBE_TIMEOUT}" nix develop --command true 2>/dev/null \
+    timeout "${DEV_SHELL_PROBE_TIMEOUT}" \
+      nix develop ".#${DEV_SHELL_NAME:-default}" --command true 2>/dev/null \
       || _probe_rc=$?
   else
     _probe_rc=1
   fi
   if [ "$_probe_rc" -eq 0 ]; then
-    echo "==> devShell found — agent will use nix develop for checks"
+    echo "==> devShell found — lifecycle will run inside nix develop"
+    _use_dev_shell=1
   elif [ "$_probe_rc" -eq 124 ]; then
     echo "==> devShell probe timed out (${DEV_SHELL_PROBE_TIMEOUT}s) — using baked toolchain"
   else
@@ -119,9 +123,22 @@ if [ -f "flake.nix" ]; then
 fi
 
 # Optional cache warm-up (mkHarness `prefetch`, baked into the image env); no-op
-# when unset.
+# when unset. When a devShell is available, run inside it so the prefetch
+# command sees the Target's exact toolchain and env vars.
 if [ -n "${PREFETCH:-}" ]; then
-  eval "$PREFETCH"
+  if [ "$_use_dev_shell" = "1" ]; then
+    _pf_wrapper="$(mktemp --suffix=.sh)"
+    # eval "$PREFETCH" so shell constructs in the hook (|| true, etc.)
+    # are interpreted; match the non-devShell path exactly.
+    printf '#!/bin/bash\nexport PATH="%s:$PATH"\neval "$PREFETCH"\n' \
+      "$_harness_path" > "$_pf_wrapper"
+    chmod +x "$_pf_wrapper"
+    # Prefetch failures are non-fatal — ignore nix rc.
+    nix develop ".#${DEV_SHELL_NAME:-default}" --command bash "$_pf_wrapper" || true
+    rm -f "$_pf_wrapper"
+  else
+    eval "$PREFETCH"
+  fi
 fi
 
 # Discover available skills at $HOME/.claude/skills/ and build a directive
@@ -227,17 +244,72 @@ echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
 # spindrift-heartbeat-filter is a transparent stdin→stdout passthrough; it adds
 # no bytes to the stream and does not affect PIPESTATUS[0] (claude's exit code).
 stream_log="$(mktemp)"
+_claude_rc_file="$(mktemp)"
+printf '1' > "$_claude_rc_file"
+
+_run_driver() {
+  # Inner function: run the claude pipeline; write PIPESTATUS[0] to
+  # $_claude_rc_file. Runs either directly or inside the devShell wrapper.
+  set +e
+  claude -p "$prompt" \
+    --model "${MODEL:-}" \
+    "${agents_args[@]}" \
+    --verbose \
+    --output-format stream-json \
+    --dangerously-skip-permissions \
+    | spindrift-heartbeat-filter -n "$ISSUE_NUMBER" -f /tmp/heartbeat.log \
+    | tee "$stream_log"
+  printf '%s' "${PIPESTATUS[0]}" > "$_claude_rc_file"
+  set -e
+}
+
+_nix_rc=0
+if [ "$_use_dev_shell" = "1" ]; then
+  # Write the prompt to a temp file so the wrapper script can read it without
+  # embedding the full text in the script (avoids quoting hazards).
+  _prompt_file="$(mktemp)"
+  printf '%s' "$prompt" > "$_prompt_file"
+  # Write a wrapper that sources the driver logic inside the devShell.
+  # _harness_path is prepended so baked tools (spindrift-heartbeat-filter,
+  # tee, etc.) remain reachable after nix develop rewrites PATH.
+  _driver_wrapper="$(mktemp --suffix=.sh)"
+  cat > "$_driver_wrapper" << 'DRIVER_WRAPPER_EOF'
+#!/bin/bash
+export PATH="$_HARNESS_PATH:$PATH"
 set +e
-claude -p "$prompt" \
+claude -p "$(cat "$_PROMPT_FILE")" \
   --model "${MODEL:-}" \
-  "${agents_args[@]}" \
+  ${_AGENTS_ARGS} \
   --verbose \
   --output-format stream-json \
   --dangerously-skip-permissions \
   | spindrift-heartbeat-filter -n "$ISSUE_NUMBER" -f /tmp/heartbeat.log \
-  | tee "$stream_log"
-claude_rc="${PIPESTATUS[0]}"
-set -e
+  | tee "$_STREAM_LOG"
+printf '%s' "${PIPESTATUS[0]}" > "$_CLAUDE_RC_FILE"
+DRIVER_WRAPPER_EOF
+  chmod +x "$_driver_wrapper"
+  export _HARNESS_PATH="$_harness_path"
+  export _PROMPT_FILE="$_prompt_file"
+  export _STREAM_LOG="$stream_log"
+  export _CLAUDE_RC_FILE="$_claude_rc_file"
+  # Serialize agents_args array into a string the wrapper can use.
+  export _AGENTS_ARGS="${agents_args[*]}"
+  set +e
+  nix develop ".#${DEV_SHELL_NAME:-default}" --command bash "$_driver_wrapper"
+  _nix_rc=$?
+  set -e
+  rm -f "$_driver_wrapper" "$_prompt_file"
+  # Launch-failure: nix develop itself failed before claude ran (stream empty).
+  # Relaunch once in the baked env so transient nix failures don't kill the run.
+  if [ "$_nix_rc" -ne 0 ] && [ ! -s "$stream_log" ]; then
+    echo "==> nix develop failed to launch Driver (rc=$_nix_rc, empty stream) — relaunching in baked env"
+    _run_driver
+  fi
+else
+  _run_driver
+fi
+claude_rc="$(cat "$_claude_rc_file")"
+rm -f "$_claude_rc_file"
 
 # The launcher greps '^SPINDRIFT_OUTCOME ' from the container log, but under
 # stream-json the agent's final line is wrapped in a result event. Surface it as
