@@ -634,3 +634,13 @@ FAKE
   # Both prefetch and Driver wrappers use --command bash (probe uses --command true).
   [ "$(grep -c 'develop.*--command bash' "$NIX_LOG")" -ge 2 ]
 }
+
+@test "devShell-present Driver: MODEL is forwarded into nix develop wrapper" {
+  seed_flake_repo
+  export FAKE_NIX_DEV_SHELL_OK=1
+  export MODEL=claude-test-model
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # fake claude logs "model=<value>" — verify MODEL reached the wrapper
+  grep -q 'model=claude-test-model' "$CLAUDE_LOG"
+}

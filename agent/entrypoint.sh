@@ -303,6 +303,9 @@ DRIVER_WRAPPER_EOF
   export _AGENTS_FILE="$_agents_file"
   export _STREAM_LOG="$stream_log"
   export _CLAUDE_RC_FILE="$_claude_rc_file"
+  # MODEL comes from the preamble (not exported by default); export it so the
+  # devShell child process sees the correct resolved value, not an empty string.
+  export MODEL="${MODEL:-}"
   set +e
   nix develop ".#${DEV_SHELL_NAME:-default}" --command bash "$_driver_wrapper"
   _nix_rc=$?
