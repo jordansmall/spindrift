@@ -33,7 +33,7 @@
     env = "ISSUE_TRACKER";
     group = "Issue discovery";
     default = "github";
-    doc = "IssueTracker backend: github (gh-exec) or local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR)";
+    doc = "IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), or jira (see JIRA_BASE_URL/JIRA_PROJECT_KEY/JIRA_TOKEN); the Code Forge (PR/CI/merge) stays github regardless";
     flakeOption = true;
     boxEnv = false;
   };
@@ -179,6 +179,42 @@
     flakeOption = true;
     boxEnv = false;
   };
+  jiraBaseURL = {
+    env = "JIRA_BASE_URL";
+    group = "Repository & identity";
+    doc = "Jira site base URL (e.g. https://yourcompany.atlassian.net); required when ISSUE_TRACKER=jira";
+    flakeOption = true;
+    boxEnv = false;
+  };
+  jiraProjectKey = {
+    env = "JIRA_PROJECT_KEY";
+    group = "Repository & identity";
+    doc = "Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira";
+    flakeOption = true;
+    boxEnv = false;
+  };
+  jiraEmail = {
+    env = "JIRA_EMAIL";
+    group = "Repository & identity";
+    doc = "Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; leave empty for Bearer-token auth (Jira Server/Data Center PATs)";
+    flakeOption = true;
+    boxEnv = false;
+  };
+  jiraStatusMapping = {
+    env = "JIRA_STATUS_MAPPING";
+    group = "Lifecycle labels";
+    default = "";
+    doc = "JSON object mapping dispatch states (dispatchable, inProgress, complete, failed) to native Jira status names, e.g. {'inProgress':'In Progress'}; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow";
+    flakeOption = true;
+    boxEnv = false;
+  };
+  jiraIncludeComments = {
+    env = "JIRA_INCLUDE_COMMENTS";
+    group = "Issue discovery";
+    doc = "when non-empty, the Jira adapter appends the issue's comment thread to the description it returns; empty (default) keeps the prompt-injection surface tight";
+    flakeOption = true;
+    boxEnv = false;
+  };
   # ── Required runtime inputs ────────────────────────────────────────────────
   repoSlug = {
     env = "REPO_SLUG";
@@ -207,6 +243,12 @@
     secret = true;
     doc = "Anthropic API key; set this or CLAUDE_CODE_OAUTH_TOKEN";
     boxEnv = true;
+  };
+  jiraToken = {
+    env = "JIRA_TOKEN";
+    secret = true;
+    doc = "Jira API token (Cloud: paired with JIRA_EMAIL for Basic auth; Server/Data Center: used alone as a Bearer PAT); required when ISSUE_TRACKER=jira";
+    boxEnv = false;
   };
   gitUserName = {
     env = "GIT_USER_NAME";

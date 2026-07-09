@@ -14,7 +14,8 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 
 | attr path | env var | default | description |
 |---|---|---|---|
-| `settings.issueDiscovery.issueTracker` | `ISSUE_TRACKER` | `github` | IssueTracker backend: github (gh-exec) or local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR) |
+| `settings.issueDiscovery.issueTracker` | `ISSUE_TRACKER` | `github` | IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), or jira (see JIRA_BASE_URL/JIRA_PROJECT_KEY/JIRA_TOKEN); the Code Forge (PR/CI/merge) stays github regardless |
+| `settings.issueDiscovery.jiraIncludeComments` | `JIRA_INCLUDE_COMMENTS` | — | when non-empty, the Jira adapter appends the issue's comment thread to the description it returns; empty (default) keeps the prompt-injection surface tight |
 | `settings.issueDiscovery.label` | `LABEL` | `ready-for-agent` | issues carrying this label are dispatchable (the launch button) |
 | `settings.issueDiscovery.localIssuesDir` | `LOCAL_ISSUES_DIR` | `.spindrift/issues` | directory scanned for issue files when ISSUE_TRACKER=local; keep it git-ignored so breakout issues stay private |
 
@@ -25,6 +26,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `settings.lifecycleLabels.completeLabel` | `COMPLETE_LABEL` | `agent-complete` | label the launcher swaps on when CI reaches green (agent is done; merge is separate) |
 | `settings.lifecycleLabels.failedLabel` | `FAILED_LABEL` | `agent-failed` | label swapped on when the agent box exits non-zero |
 | `settings.lifecycleLabels.inProgressLabel` | `IN_PROGRESS_LABEL` | `agent-in-progress` | label swapped on from LABEL when an issue enters the queue |
+| `settings.lifecycleLabels.jiraStatusMapping` | `JIRA_STATUS_MAPPING` | `` | JSON object mapping dispatch states (dispatchable, inProgress, complete, failed) to native Jira status names, e.g. {'inProgress':'In Progress'}; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow |
 
 ## Branches & merge (`settings.branches`)
 
@@ -83,5 +85,8 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `settings.repository.codeForgeRemoteURL` | `CODE_FORGE_REMOTE_URL` | — | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise |
 | `settings.repository.gitUserEmail` | `GIT_USER_EMAIL` | — | commit identity email; falls back to host git config user.email |
 | `settings.repository.gitUserName` | `GIT_USER_NAME` | — | commit identity name; falls back to host git config user.name |
+| `settings.repository.jiraBaseURL` | `JIRA_BASE_URL` | — | Jira site base URL (e.g. https://yourcompany.atlassian.net); required when ISSUE_TRACKER=jira |
+| `settings.repository.jiraEmail` | `JIRA_EMAIL` | — | Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; leave empty for Bearer-token auth (Jira Server/Data Center PATs) |
+| `settings.repository.jiraProjectKey` | `JIRA_PROJECT_KEY` | — | Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira |
 | `settings.repository.repoSlug` | `REPO_SLUG` | — | target GitHub repository the agents work on |
 
