@@ -488,6 +488,27 @@ func TestJiraClient_ListIssues_JQLAndOrder(t *testing.T) {
 	}
 }
 
+// TestJiraClient_ListIssues_CapsMaxResults verifies ListIssues bounds the
+// search page size (mirroring the github adapter's issueQueryLimit) so a
+// large backlog degrades to a warning instead of an unbounded response.
+func TestJiraClient_ListIssues_CapsMaxResults(t *testing.T) {
+	var gotMaxResults string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMaxResults = r.URL.Query().Get("maxResults")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"issues": []}`))
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: forge.DefaultDispatchLabels()})
+	if _, err := jc.ListIssues(forge.Dispatchable); err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if gotMaxResults != "100" {
+		t.Errorf("maxResults = %q, want 100", gotMaxResults)
+	}
+}
+
 // TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly verifies that when a
 // state has no status mapping, ListIssues queries by label alone.
 func TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly(t *testing.T) {

@@ -1216,21 +1216,26 @@ var triageLabelMeta = map[string]labelMeta{
 // true and labels are missing, it prompts to create them; otherwise it reports
 // and exits non-zero.
 func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer, stdin io.Reader, interactive bool) error {
+	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / REPO_SLUG"
+	if c.issueTracker == "jira" {
+		tokenHint, slugHint = "JIRA_TOKEN", "JIRA_BASE_URL / JIRA_PROJECT_KEY"
+	}
 	repo, err := it.Probe()
 	if err != nil {
 		if errors.Is(err, forge.ErrAuthFailure) {
-			return fmt.Errorf("forge auth check failed (check GH_TOKEN is set and valid): %w", err)
+			return fmt.Errorf("forge auth check failed (check %s is set and valid): %w", tokenHint, err)
 		}
 		if errors.Is(err, forge.ErrRepoNotFound) {
-			return fmt.Errorf("forge repo not found (check --repo-slug / REPO_SLUG is correct): %w", err)
+			return fmt.Errorf("forge repo not found (check %s is correct): %w", slugHint, err)
 		}
 		return fmt.Errorf("forge connectivity check failed: %w", err)
 	}
 	fmt.Fprintf(w, "ok: issue tracker confirmed — %s is reachable\n", repo)
-	if _, err := cf.Probe(); err != nil {
+	cfRepo, err := cf.Probe()
+	if err != nil {
 		return fmt.Errorf("code forge connectivity check failed: %w", err)
 	}
-	fmt.Fprintf(w, "ok: code forge confirmed — %s is reachable\n", repo)
+	fmt.Fprintf(w, "ok: code forge confirmed — %s is reachable\n", cfRepo)
 
 	checkLabels := func() ([]string, error) {
 		existing, lerr := it.ListLabels()
