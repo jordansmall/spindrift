@@ -229,3 +229,38 @@ func TestFanOut_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 		t.Errorf("expected Merge(%q) for MERGE_MODE=immediate; fc.Merged=%q", branch, fc.Merged)
 	}
 }
+
+// TestFanOut_GitForge_MergedStatusDoesNotDemoteToFailed verifies that a
+// CODE_FORGE=git outcome carrying status=merged (a status the grammar
+// documents as valid, outcome.go:24) never reaches verifyMerged's PR-state
+// check: the git Code Forge's PRState always errors, so an unguarded call
+// would wrongly demote the issue to agent-failed even though nothing is
+// actually wrong.
+func TestFanOut_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
+	const branch = "agent/issue-1"
+
+	c := baseConfig()
+	c.maxParallel = 2
+	c.branchPrefix = "agent/issue-"
+	c.codeForge = "git"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.PRStateErr = errors.New("PRState: not supported by the git Code Forge (push-only, no PR concept)")
+
+	fr := runner.NewFake()
+	fr.WriteToOutput = []byte(fmt.Sprintf(
+		"SPINDRIFT_OUTCOME issue=1 pr=%s status=merged note=ok\n", branch,
+	))
+
+	dir := tempLogDir(t)
+	fanOut(c, fc, dir, fr, []issue{{number: "1", title: "first"}})
+
+	iss, err := fc.Issue("1")
+	if err != nil {
+		t.Fatalf("Issue(%q): %v", "1", err)
+	}
+	if containsLabel(iss.Labels, c.failedLabel) {
+		t.Errorf("issue 1 must NOT have %q; got labels=%v", c.failedLabel, iss.Labels)
+	}
+}
