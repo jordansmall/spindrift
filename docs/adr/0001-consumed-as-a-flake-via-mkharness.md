@@ -20,3 +20,7 @@ etc. stay runtime env, never Nix options, so one image can be pointed at any
 Target repo without a rebuild. This keeps the control-plane pattern free while
 optimizing docs/defaults for the self-hosting case. Commands ship as packages so
 a consumer can drop them into `devShells.default.packages`, not only `nix run`.
+
+Consumer-tunable knobs are exposed as `perSystem.spindrift.settings.<section>.<knob>`
+(grouped by the same headings as `spindrift --help --all`); see ADR 0015 for the
+grouped-settings rationale and the section-attr-name mapping.
