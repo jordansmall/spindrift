@@ -328,6 +328,14 @@
     flakeOption = true;
     boxEnv = false;
   };
+  overlapGate = {
+    env = "OVERLAP_GATE";
+    group = "Concurrency & dependency waves";
+    default = "defer";
+    doc = "declared ## Touches overlap policy: defer (hold a Dispatchable issue whose declared touch-set intersects an InProgress issue's, retrying once the collider completes), off (disable the check)";
+    flakeOption = true;
+    boxEnv = false;
+  };
   mergePollInterval = {
     env = "MERGE_POLL_INTERVAL";
     group = "Branches & merge";
