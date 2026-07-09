@@ -52,12 +52,12 @@ ADR-0010 established a single `spindrift` CLI as the primary surface for the
 harness. The old `nix run .#run` / `.#build` split was a build artefact, not a
 user-facing design. The unified CLI is easier to discover, script, and extend.
 
-## `spindrift engage` → `spindrift recover`
+## `spindrift engage` (removed in v0.2.0)
 
-`spindrift engage <issue>` is deprecated and will be removed in **v0.2.0**.
-Use `spindrift recover <issue>` instead — it performs the same merge-gate/adopt
-operation. Running `engage` still works but prints a one-line notice to stderr.
+`spindrift engage <issue>` was removed in **v0.2.0**. Use
+`spindrift recover <issue>` instead — it performs the same merge-gate/adopt
+operation.
 
-| Old command                  | New command                   |
+| Removed command              | Replacement command           |
 |------------------------------|-------------------------------|
 | `spindrift engage <issue>`   | `spindrift recover <issue>`   |

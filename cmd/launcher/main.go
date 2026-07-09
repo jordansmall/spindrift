@@ -1623,18 +1623,6 @@ func main() {
 		}
 		return
 	}
-	if len(args) > 0 && args[0] == "engage" {
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: spindrift engage <issue-number>")
-			os.Exit(1)
-		}
-		fmt.Fprintln(os.Stderr, "spindrift: 'engage' is deprecated; use 'recover' instead. Removal: v0.2.0.")
-		if err := recoverIssue(args[1]); err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-			os.Exit(1)
-		}
-		return
-	}
 	if len(args) > 0 && args[0] == "preview" {
 		previewNums := dispatchIssueArgs(args[1:])
 		if err := preview(previewNums); err != nil {
