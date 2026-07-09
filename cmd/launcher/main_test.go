@@ -374,6 +374,21 @@ func TestDispatchWaves_FailsDependentWhenBlockerFails(t *testing.T) {
 	}
 }
 
+// TestValidate_RepoSlugRequired verifies that validate() fails when REPO_SLUG
+// is empty, confirming the required-validation contract is not masked by any
+// settings-baked preamble default (which bakes an empty ${REPO_SLUG:-}).
+func TestValidate_RepoSlugRequired(t *testing.T) {
+	c := minimalValidConfig()
+	c.repoSlug = ""
+	err := validate(c)
+	if err == nil {
+		t.Fatal("validate() must require REPO_SLUG when empty")
+	}
+	if !strings.Contains(err.Error(), "REPO_SLUG") {
+		t.Errorf("error should mention REPO_SLUG, got: %v", err)
+	}
+}
+
 // TestValidateMergeMode_RejectsUnknown verifies that validate() fails fast when
 // MERGE_MODE is set to an unrecognised value.
 func TestValidateMergeMode_RejectsUnknown(t *testing.T) {

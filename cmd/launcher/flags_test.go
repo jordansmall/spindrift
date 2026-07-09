@@ -35,6 +35,20 @@ func TestParseFlags_FlagWinsOverEnv(t *testing.T) {
 	}
 }
 
+// TestParseFlags_RepoSlugFlagWinsOverEnv: CLI flag wins over env for
+// REPO_SLUG, confirming the promoted identity knob honours flag > env
+// precedence even when a settings-baked default is in play at runtime.
+func TestParseFlags_RepoSlugFlagWinsOverEnv(t *testing.T) {
+	t.Setenv("REPO_SLUG", "env-org/env-repo")
+	_, err := parseFlags([]string{"--repo-slug", "flag-org/flag-repo"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("REPO_SLUG"); got != "flag-org/flag-repo" {
+		t.Errorf("REPO_SLUG = %q, want %q (flag must win over env)", got, "flag-org/flag-repo")
+	}
+}
+
 // TestParseFlags_EnvFallback: env is used when no flag is supplied.
 func TestParseFlags_EnvFallback(t *testing.T) {
 	t.Setenv("MAX_JOBS", "7")
