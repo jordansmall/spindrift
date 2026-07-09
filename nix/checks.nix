@@ -623,6 +623,7 @@ in
         "MODEL"
         "SCOUT_MODEL"
         "REVIEW_MODEL"
+        "FILER_MODEL"
         "DEV_SHELL_NAME"
         "DEV_SHELL_PROBE_TIMEOUT"
       ];

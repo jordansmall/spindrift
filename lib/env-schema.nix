@@ -137,7 +137,7 @@
     env = "FILER_MODEL";
     group = "Models";
     default = "";
-    doc = "filer subagent model tier; empty (default) means the filer is not provisioned — the opt-in is setting a model (recommended: claude-haiku-4-5-20251001); empty omits the filer entry from --agents; the flag itself is omitted only when no subagent model is set";
+    doc = "filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-4-5-20251001)";
     flakeOption = true;
     boxEnv = true;
   };
