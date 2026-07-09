@@ -438,11 +438,15 @@ in
       behaviorRun = mkRun {
         selfHealing = {
           maxFixAttempts = 5;
+          maxRebaseAttempts = 2;
           holdJitterSecs = 10;
+          transientBackoffSecs = 60;
+          transientRetryMax = 5;
         };
         concurrency = {
           maxJobs = 2;
           depsPollSecs = 60;
+          depsWaitSecs = 3600;
         };
         branches = {
           mergePollInterval = 90;
@@ -458,9 +462,10 @@ in
         };
       };
 
-      # REPO_SLUG without a consumer setting must bake an empty default so
-      # runtime required-validation is not masked (${REPO_SLUG:-} leaves it
-      # unset when no env var or flag is provided).
+      # REPO_SLUG without a consumer setting must bake an *empty* default so
+      # runtime required-validation is not masked.  renderDefaultsPreamble
+      # emits `REPO_SLUG="${REPO_SLUG:-}"` (value = ""); the grep matches
+      # `REPO_SLUG:-}"` (i.e. `:-` immediately followed by `}"`).
       defaultRun = mkRun { };
 
       # ISSUE_NUMBER must not be settable via settings (per-run dispatch
@@ -479,12 +484,20 @@ in
       ''
         grep -q 'MAX_FIX_ATTEMPTS:-5' "$behaviorRun/bin/run" \
           || { echo "MAX_FIX_ATTEMPTS:-5 not baked in run cmd" >&2; exit 1; }
+        grep -q 'MAX_REBASE_ATTEMPTS:-2' "$behaviorRun/bin/run" \
+          || { echo "MAX_REBASE_ATTEMPTS:-2 not baked in run cmd" >&2; exit 1; }
         grep -q 'HOLD_JITTER_SECS:-10' "$behaviorRun/bin/run" \
           || { echo "HOLD_JITTER_SECS:-10 not baked in run cmd" >&2; exit 1; }
+        grep -q 'TRANSIENT_BACKOFF_SECS:-60' "$behaviorRun/bin/run" \
+          || { echo "TRANSIENT_BACKOFF_SECS:-60 not baked in run cmd" >&2; exit 1; }
+        grep -q 'TRANSIENT_RETRY_MAX:-5' "$behaviorRun/bin/run" \
+          || { echo "TRANSIENT_RETRY_MAX:-5 not baked in run cmd" >&2; exit 1; }
         grep -q 'MAX_JOBS:-2' "$behaviorRun/bin/run" \
           || { echo "MAX_JOBS:-2 not baked in run cmd" >&2; exit 1; }
         grep -q 'DEPS_POLL_SECS:-60' "$behaviorRun/bin/run" \
           || { echo "DEPS_POLL_SECS:-60 not baked in run cmd" >&2; exit 1; }
+        grep -q 'DEPS_WAIT_SECS:-3600' "$behaviorRun/bin/run" \
+          || { echo "DEPS_WAIT_SECS:-3600 not baked in run cmd" >&2; exit 1; }
         grep -q 'MERGE_POLL_INTERVAL:-90' "$behaviorRun/bin/run" \
           || { echo "MERGE_POLL_INTERVAL:-90 not baked in run cmd" >&2; exit 1; }
         grep -q 'MERGE_POLL_TIMEOUT:-3600' "$behaviorRun/bin/run" \
@@ -495,8 +508,8 @@ in
           || { echo "GIT_USER_NAME:-Test Bot not baked in run cmd" >&2; exit 1; }
         grep -q 'GIT_USER_EMAIL:-bot@test.example' "$identityRun/bin/run" \
           || { echo "GIT_USER_EMAIL:-bot@test.example not baked in run cmd" >&2; exit 1; }
-        grep -q 'REPO_SLUG:-"' "$defaultRun/bin/run" \
-          || { echo "REPO_SLUG must have empty baked default when not set; required validation must not be masked" >&2; exit 1; }
+        grep -q 'REPO_SLUG:-}"' "$defaultRun/bin/run" \
+          || { echo "REPO_SLUG must have empty baked default (REPO_SLUG:-}) when not set; required validation must not be masked" >&2; exit 1; }
         touch $out
       '';
 
