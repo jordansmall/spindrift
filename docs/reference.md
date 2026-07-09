@@ -82,20 +82,44 @@ or knob names are rejected at eval time by the NixOS module system.
 
 ```nix
 settings = {
-  issueDiscovery  = { label = "ready-for-agent"; };
+  issueDiscovery  = { label          = "ready-for-agent"; };
   lifecycleLabels = { inProgressLabel = "agent-in-progress";
                       failedLabel     = "agent-failed";
                       completeLabel   = "agent-complete"; };
-  branches        = { baseBranch = "main"; branchPrefix = "agent/issue-";
-                      mergeMode  = "manual"; };
+  branches        = { baseBranch      = "main";
+                      branchPrefix    = "agent/issue-";
+                      mergeMode       = "manual"; };
   concurrency     = { maxParallel = 3; };
-  models          = { model = "claude-sonnet-4-6";
+  models          = { model       = "claude-sonnet-4-6";
                       scoutModel  = "claude-haiku-4-5-20251001";
                       reviewModel = "claude-opus-4-8"; };
-  sandbox         = { devShellName = "default"; devShellProbeTimeout = 300;
-                      memoryLimit = "4g"; pidsLimit = "512"; };
+  sandbox         = { devShellName         = "default";
+                      devShellProbeTimeout = 300;
+                      memoryLimit          = "4g";
+                      pidsLimit            = "512";
+                      podmanNetwork        = "";
+                      bwrapUnshareNet      = ""; };
 };
 ```
+
+#### Discovering flake options
+
+Three paths to discover which options exist and what they do:
+
+1. **Generated reference** — [`docs/flake-options.md`](flake-options.md) lists
+   every `settings.<section>.<knob>` with its env var, default, and description.
+   It is generated from `lib/env-schema.nix` and drift-guarded by `nix flake
+   check`; it is always in sync with the schema.
+
+2. **LSP autocomplete** — `nixd` and `nil` read the module option declarations
+   that `lib/flakeModule.nix` generates from the same schema.  Opening your
+   Consumer flake in an editor with either LSP gives option completions and hover
+   documentation for every `settings.<section>.<knob>` inline.
+
+3. **CLI reference** — `spindrift --help --all` (or `man spindrift`) prints the
+   full flag table grouped by section.  Every `settings` knob maps 1:1 to a
+   `--<flag>` in the same section heading, so the CLI reference doubles as a
+   guide to what is settable in the flake.
 
 `inProgressLabel`/`failedLabel`/`completeLabel` drive the
 [label lifecycle](#how-a-run-works); `mergeMode` is the post-green
