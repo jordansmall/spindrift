@@ -612,3 +612,16 @@ func contains(ss []string, s string) bool {
 	}
 	return false
 }
+
+// TestEngageAliasRemoved asserts that the deprecated `engage` subcommand
+// handler has been deleted from main.go. The handler was removed in v0.2.0;
+// this test prevents accidental re-introduction.
+func TestEngageAliasRemoved(t *testing.T) {
+	data, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("reading main.go: %v", err)
+	}
+	if strings.Contains(string(data), `args[0] == "engage"`) {
+		t.Error(`main.go still dispatches the deprecated "engage" subcommand; remove the handler`)
+	}
+}

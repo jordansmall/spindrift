@@ -32,8 +32,7 @@ terminal). Bare `spindrift` with no subcommand is `spindrift dispatch`.
 
 > **Deprecated (removed in v0.2.0, see [`MIGRATING.md`](../MIGRATING.md)):**
 > `nix run .#run` and `nix run .#build` still work but print a notice and forward
-> to `spindrift dispatch` / `spindrift build`. `spindrift engage <issue>` is a
-> deprecated alias for `spindrift recover <issue>`.
+> to `spindrift dispatch` / `spindrift build`.
 
 If you use **direnv**, the template's `.envrc` (`use flake`) activates the dev
 shell automatically on `cd` — no manual `nix develop` needed.

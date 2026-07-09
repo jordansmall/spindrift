@@ -625,11 +625,6 @@ let
       .TP
       .B recover <issue>
       Run the merge gate for a single issue whose agent already finished.
-      .TP
-      .B engage <issue>
-      Deprecated alias for
-      .BR recover ;
-      removal target v0.2.0.
       .SH "DISPATCH FLAGS"
       .TP
       .B \-\-no-build
