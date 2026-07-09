@@ -57,6 +57,7 @@
             #                       completeLabel   = "agent-complete"; };
             #   branches        = { baseBranch        = "main";
             #                       branchPrefix      = "agent/issue-";
+            #                       mergeGuardPaths   = ".github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
             #                       mergeMode         = "manual";
             #                       mergePollInterval = 30;
             #                       mergePollTimeout  = 1800; };
