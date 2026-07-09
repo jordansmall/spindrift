@@ -8,6 +8,9 @@ logs/
 # local config + secrets — never commit this
 harness.env
 
+# private local issues (ISSUE_TRACKER=local; see LOCAL_ISSUES_DIR)
+.spindrift/
+
 # direnv
 .direnv/
 
