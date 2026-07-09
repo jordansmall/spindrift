@@ -81,6 +81,12 @@ type config struct {
 	depsPollSecs int
 	depsWaitSecs int
 
+	// overlapGate controls the declared-## Touches overlap check: "defer"
+	// holds a Dispatchable issue whose touch-set intersects an InProgress
+	// issue's, retrying once the collider completes; "off" disables the
+	// check entirely.
+	overlapGate string
+
 	// Merge gate polling knobs
 	mergePollInterval int
 	mergePollTimeout  int
@@ -209,6 +215,7 @@ func loadConfig() config {
 
 		depsPollSecs: atoiNonneg(getenv("DEPS_POLL_SECS", "30"), 30),
 		depsWaitSecs: atoiNonneg(getenv("DEPS_WAIT_SECS", "7200"), 7200),
+		overlapGate:  getenv("OVERLAP_GATE", "defer"),
 
 		mergePollInterval: atoiNonneg(getenv("MERGE_POLL_INTERVAL", "30"), 30),
 		mergePollTimeout:  atoiNonneg(getenv("MERGE_POLL_TIMEOUT", "1800"), 1800),
@@ -266,6 +273,12 @@ func validate(c config) error {
 		// valid
 	default:
 		return fmt.Errorf("MERGE_MODE=%q is not valid; must be immediate, auto, or manual", c.mergeMode)
+	}
+	switch c.overlapGate {
+	case "defer", "off":
+		// valid
+	default:
+		return fmt.Errorf("OVERLAP_GATE=%q is not valid; must be defer or off", c.overlapGate)
 	}
 	switch c.issueTracker {
 	case "github", "local", "jira":
