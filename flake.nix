@@ -81,6 +81,15 @@
               ;
           };
 
+          # Repo-internal dev tooling, not consumer surface (issue #402):
+          # `nix run .#regen` regenerates every schema-generated artifact that
+          # nix/checks.nix drift-guards, sharing lib/renderers.nix with those
+          # checks so the two can never diverge.
+          apps.regen = {
+            type = "app";
+            program = "${import ./nix/regen.nix { inherit pkgs; }}/bin/regen";
+          };
+
           # For hacking ON the harness itself (host-side).
           # spindrift CLI is included so `nix develop` → `spindrift dispatch` works.
           devShells.default = pkgs.mkShell {
