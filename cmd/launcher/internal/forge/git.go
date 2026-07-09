@@ -16,12 +16,17 @@ import (
 type gitClient struct {
 	remoteURL  string
 	baseBranch string
+	userName   string
+	userEmail  string
 }
 
 // NewGitClient returns a CodeForge backed by a plain git remote URL.
 // baseBranch is the target branch Merge pushes onto for MERGE_MODE=immediate.
-func NewGitClient(remoteURL, baseBranch string) CodeForge {
-	return &gitClient{remoteURL: remoteURL, baseBranch: baseBranch}
+// userName/userEmail configure the commit identity on Merge's throwaway
+// clone (a merge commit needs a committer) instead of depending on ambient
+// host git config, which may be unset on a bare CI runner.
+func NewGitClient(remoteURL, baseBranch, userName, userEmail string) CodeForge {
+	return &gitClient{remoteURL: remoteURL, baseBranch: baseBranch, userName: userName, userEmail: userEmail}
 }
 
 func (g *gitClient) OpenPRForBranch(branch string) (PR, bool, error) {
@@ -76,6 +81,19 @@ func cloneToTemp(remoteURL, prefix string) (dir string, gitIn func(args ...strin
 	return dir, gitIn, cleanup, nil
 }
 
+// setCommitIdentity configures the launcher-supplied commit identity on a
+// throwaway clone so Merge/Rebase don't depend on ambient host git config,
+// which may be unset on a bare CI runner.
+func (g *gitClient) setCommitIdentity(gitIn func(args ...string) *exec.Cmd) error {
+	if err := gitIn("config", "user.name", g.userName).Run(); err != nil {
+		return fmt.Errorf("git config user.name: %w", err)
+	}
+	if err := gitIn("config", "user.email", g.userEmail).Run(); err != nil {
+		return fmt.Errorf("git config user.email: %w", err)
+	}
+	return nil
+}
+
 // Merge lands branch onto baseBranch by cloning the remote, merging branch in,
 // and pushing the result — the MERGE_MODE=immediate mapping for a push-only
 // forge. Returns ErrMergeConflict when the merge cannot be completed
@@ -91,6 +109,9 @@ func (g *gitClient) Merge(branch string) error {
 	}
 	defer cleanup()
 
+	if err := g.setCommitIdentity(gitIn); err != nil {
+		return err
+	}
 	if err := gitIn("checkout", g.baseBranch).Run(); err != nil {
 		return fmt.Errorf("git checkout %s: %w", g.baseBranch, err)
 	}
@@ -127,6 +148,9 @@ func (g *gitClient) Rebase(branch string) error {
 	}
 	defer cleanup()
 
+	if err := g.setCommitIdentity(gitIn); err != nil {
+		return err
+	}
 	if err := gitIn("checkout", branch).Run(); err != nil {
 		return fmt.Errorf("git checkout %s: %w", branch, err)
 	}

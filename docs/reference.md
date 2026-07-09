@@ -386,6 +386,14 @@ applies `MERGE_MODE` as a plain push: `manual` leaves the branch as pushed,
 `immediate` merges it onto the target branch. `auto` has no meaning off
 `github` and is rejected at startup.
 
+`immediate`'s merge-and-push to `CODE_FORGE_REMOTE_URL` runs on the
+**launcher host** (a throwaway local clone, not inside a Box), reusing
+`GIT_USER_NAME`/`GIT_USER_EMAIL` as the merge commit's identity. The host
+needs its own push credentials for that remote (e.g. an SSH key or
+credential helper covering `CODE_FORGE_REMOTE_URL`) — separate from the
+Box's `GH_TOKEN`, which only covers the Issue Tracker. A push auth failure
+surfaces as a `merge-blocked` comment on the issue, not a crash.
+
 ### Label lifecycle
 
 `spindrift dispatch` uses labels on the Target repo as the dispatch state of each
