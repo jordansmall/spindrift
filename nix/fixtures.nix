@@ -100,6 +100,20 @@ let
     packages = p: [ p.hello ];
   };
 
+  # A filer-only Consumer: only the (opt-in, default-empty) filer model is
+  # configured, proving it is composed independently like scout/reviewer
+  # rather than needing either to be set. Eval-only, consumed by
+  # agents-json-baked.
+  filerOnlyHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      scoutModel = "";
+      reviewModel = "";
+      filerModel = "solo-filer";
+    };
+    packages = p: [ p.hello ];
+  };
+
   # Exercise the run knobs (#3): non-default baked `defaults` and a
   # docker `runtime`. Eval-only, consumed by the checks below.
   customHarness = import ../lib/mkHarness.nix {
@@ -248,6 +262,7 @@ in
     leanHarness
     scoutOnlyHarness
     reviewerOnlyHarness
+    filerOnlyHarness
     customHarness
     dockerHarness
     bwrapHarness

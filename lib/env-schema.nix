@@ -133,6 +133,14 @@
     flakeOption = true;
     boxEnv = true;
   };
+  filerModel = {
+    env = "FILER_MODEL";
+    group = "Models";
+    default = "";
+    doc = "filer subagent model tier; empty (default) means the filer is not provisioned — the opt-in is setting a model (recommended: claude-haiku-4-5-20251001); empty omits the filer entry from --agents; the flag itself is omitted only when no subagent model is set";
+    flakeOption = true;
+    boxEnv = true;
+  };
   devShellName = {
     env = "DEV_SHELL_NAME";
     group = "Sandbox & resources";

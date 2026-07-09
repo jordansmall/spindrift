@@ -27,6 +27,8 @@
   # override via the `prompt` directory mechanism (SPINDRIFT_PROMPT_DIR).
   scoutPrompt ? builtins.readFile ../templates/default/prompts/scout-prompt.md,
   reviewPrompt ? builtins.readFile ../templates/default/prompts/review-prompt.md,
+  # Opt-in: provisioned only when filerModel is non-empty (see agentsJsonTemplate).
+  filerPrompt ? builtins.readFile ../templates/default/prompts/filer-prompt.md,
   conflictResolvePrompt ? builtins.readFile ../templates/default/prompts/conflict-resolve-prompt.md,
   # Skill files baked into the image at /home/agent/.claude/skills so the
   # headless agent can invoke them without a runtime mount. Each element must
@@ -128,6 +130,7 @@ let
     let
       sm = mergedDefaults.scoutModel or "";
       rm = mergedDefaults.reviewModel or "";
+      fm = mergedDefaults.filerModel or "";
       agents =
         lib.optionalAttrs (sm != "") {
           scout = {
@@ -154,6 +157,18 @@ let
               "WebFetch"
             ];
             model = rm;
+          };
+        }
+        // lib.optionalAttrs (fm != "") {
+          filer = {
+            description = "File issues from a review's non-blocking findings, best-effort";
+            prompt = "";
+            tools = [
+              "Read"
+              "Bash"
+              "WebFetch"
+            ];
+            model = fm;
           };
         };
     in
@@ -248,6 +263,7 @@ let
     cp ${pkgs.writeText "issue-prompt.md" prompt} $out/agent/prompts/issue-prompt.md
     cp ${pkgs.writeText "scout-prompt.md" scoutPrompt} $out/agent/prompts/scout-prompt.md
     cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md
+    cp ${pkgs.writeText "filer-prompt.md" filerPrompt} $out/agent/prompts/filer-prompt.md
     cp ${pkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
     ${lib.optionalString (skills != [ ]) ''
       mkdir -p $out/home/agent/.claude/skills
@@ -268,6 +284,7 @@ let
     cp ${hostPkgs.writeText "issue-prompt.md" prompt} $out/issue-prompt.md
     cp ${hostPkgs.writeText "scout-prompt.md" scoutPrompt} $out/scout-prompt.md
     cp ${hostPkgs.writeText "review-prompt.md" reviewPrompt} $out/review-prompt.md
+    cp ${hostPkgs.writeText "filer-prompt.md" filerPrompt} $out/filer-prompt.md
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/conflict-resolve-prompt.md
   '';
 

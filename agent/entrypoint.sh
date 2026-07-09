@@ -254,13 +254,16 @@ prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
 if [ -n "${AGENTS_JSON_TEMPLATE:-}" ]; then
   scout_prompt="$(_subst "${PROMPTS_DIR}/scout-prompt.md")"
   review_prompt="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
+  filer_prompt="$(_subst "${PROMPTS_DIR}/filer-prompt.md")"
   agents_json="$(jq -n \
     --argjson template "$AGENTS_JSON_TEMPLATE" \
     --arg scout_prompt "$scout_prompt" \
     --arg review_prompt "$review_prompt" \
+    --arg filer_prompt "$filer_prompt" \
     '$template
      | if has("scout") then .scout.prompt = $scout_prompt else . end
-     | if has("reviewer") then .reviewer.prompt = $review_prompt else . end')"
+     | if has("reviewer") then .reviewer.prompt = $review_prompt else . end
+     | if has("filer") then .filer.prompt = $filer_prompt else . end')"
   agents_args=(--agents "$agents_json")
 else
   agents_args=()
