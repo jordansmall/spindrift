@@ -1,0 +1,496 @@
+package forge_test
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"spindrift.dev/launcher/internal/forge"
+)
+
+// TestParseStatusMapping_Empty verifies an empty string parses to an empty
+// mapping (every state falls back to its label) rather than an error.
+func TestParseStatusMapping_Empty(t *testing.T) {
+	m, err := forge.ParseStatusMapping("")
+	if err != nil {
+		t.Fatalf("ParseStatusMapping(\"\"): %v", err)
+	}
+	if len(m) != 0 {
+		t.Errorf("want empty mapping, got %v", m)
+	}
+}
+
+// TestParseStatusMapping_AllStates verifies the JSON knob format maps every
+// dispatch-state key to its DispatchState.
+func TestParseStatusMapping_AllStates(t *testing.T) {
+	m, err := forge.ParseStatusMapping(`{"dispatchable":"To Do","inProgress":"In Progress","complete":"Done","failed":"Blocked"}`)
+	if err != nil {
+		t.Fatalf("ParseStatusMapping: %v", err)
+	}
+	want := map[forge.DispatchState]string{
+		forge.Dispatchable: "To Do",
+		forge.InProgress:   "In Progress",
+		forge.Complete:     "Done",
+		forge.Failed:       "Blocked",
+	}
+	for state, status := range want {
+		if m[state] != status {
+			t.Errorf("m[%v] = %q, want %q", state, m[state], status)
+		}
+	}
+}
+
+// TestParseStatusMapping_UnknownKey rejects a typo'd key instead of silently
+// dropping it, so a misconfigured mapping fails fast at startup.
+func TestParseStatusMapping_UnknownKey(t *testing.T) {
+	if _, err := forge.ParseStatusMapping(`{"disptchable":"To Do"}`); err == nil {
+		t.Fatal("want error for unknown key, got nil")
+	}
+}
+
+// TestParseStatusMapping_InvalidJSON rejects malformed JSON.
+func TestParseStatusMapping_InvalidJSON(t *testing.T) {
+	if _, err := forge.ParseStatusMapping(`{not json`); err == nil {
+		t.Fatal("want error for invalid JSON, got nil")
+	}
+}
+
+// TestJiraClient_ImplementsIssueTracker asserts that NewJiraClient satisfies
+// IssueTracker (Jira implements only this seam, per ADR 0013 — code still
+// lands via the github CodeForge).
+func TestJiraClient_ImplementsIssueTracker(t *testing.T) {
+	var _ forge.IssueTracker = forge.NewJiraClient(forge.JiraConfig{})
+}
+
+// TestJiraClient_Probe_Success verifies Probe() confirms connectivity and
+// returns the configured project key on success.
+func TestJiraClient_Probe_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/myself" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"accountId":"abc123"}`))
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{
+		BaseURL:    srv.URL,
+		ProjectKey: "PROJ",
+		Token:      "tok",
+	})
+
+	slug, err := jc.Probe()
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if slug != "PROJ" {
+		t.Errorf("Probe() = %q, want %q", slug, "PROJ")
+	}
+}
+
+// TestJiraClient_Probe_AuthFailure verifies Probe() surfaces ErrAuthFailure
+// when Jira rejects the credentials.
+func TestJiraClient_Probe_AuthFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{
+		BaseURL:    srv.URL,
+		ProjectKey: "PROJ",
+		Token:      "bad-token",
+	})
+
+	if _, err := jc.Probe(); !errors.Is(err, forge.ErrAuthFailure) {
+		t.Fatalf("Probe() error = %v, want ErrAuthFailure", err)
+	}
+}
+
+// TestJiraClient_Comment_PostsBody verifies Comment() POSTs the body to the
+// issue's comment endpoint.
+func TestJiraClient_Comment_PostsBody(t *testing.T) {
+	var gotPath, gotMethod string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	if err := jc.Comment("PROJ-42", "hello from the agent"); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/rest/api/2/issue/PROJ-42/comment" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotBody["body"] != "hello from the agent" {
+		t.Errorf("body = %v", gotBody)
+	}
+}
+
+// TestJiraClient_Issue_FetchesFields verifies Issue() populates Number,
+// Title, Body (description), State, and Labels from the Jira fields payload.
+func TestJiraClient_Issue_FetchesFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/issue/PROJ-7" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"key": "PROJ-7",
+			"fields": {
+				"summary": "Fix the thing",
+				"description": "Detailed description here.",
+				"status": {"name": "To Do"},
+				"labels": ["ready-for-agent"]
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	iss, err := jc.Issue("PROJ-7")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.Number != "PROJ-7" {
+		t.Errorf("Number = %q", iss.Number)
+	}
+	if iss.Title != "Fix the thing" {
+		t.Errorf("Title = %q", iss.Title)
+	}
+	if iss.Body != "Detailed description here." {
+		t.Errorf("Body = %q", iss.Body)
+	}
+	if iss.State != "To Do" {
+		t.Errorf("State = %q", iss.State)
+	}
+	if len(iss.Labels) != 1 || iss.Labels[0] != "ready-for-agent" {
+		t.Errorf("Labels = %v", iss.Labels)
+	}
+}
+
+// TestJiraClient_Issue_IncludeComments verifies that when IncludeComments is
+// set, Issue() appends the comment thread to Body; by default comments are
+// left out to keep the prompt-injection surface tight.
+func TestJiraClient_Issue_IncludeComments(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/issue/PROJ-7":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{
+				"key": "PROJ-7",
+				"fields": {"summary": "s", "description": "desc", "status": {"name": "To Do"}, "labels": []}
+			}`))
+		case "/rest/api/2/issue/PROJ-7/comment":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"comments": [{"body": "a comment from a user"}]}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	// Default: no comments included.
+	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	iss, err := jc.Issue("PROJ-7")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if strings.Contains(iss.Body, "a comment from a user") {
+		t.Errorf("Body must not include comments by default, got %q", iss.Body)
+	}
+
+	// Opt-in: comments appended.
+	jcWithComments := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok", IncludeComments: true})
+	iss2, err := jcWithComments.Issue("PROJ-7")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !strings.Contains(iss2.Body, "a comment from a user") {
+		t.Errorf("Body must include comments when opted in, got %q", iss2.Body)
+	}
+}
+
+// TestJiraClient_DepsOf_NativeLinks verifies DepsOf resolves dependencies
+// from native Jira "is blocked by" issue links, not prose parsing, and
+// ignores unrelated link types/directions.
+func TestJiraClient_DepsOf_NativeLinks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/issue/PROJ-10" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"key": "PROJ-10",
+			"fields": {
+				"summary": "s", "description": "This issue depends on #3 in prose, ignored.",
+				"status": {"name": "To Do"}, "labels": [],
+				"issuelinks": [
+					{"type": {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+					 "inwardIssue": {"key": "PROJ-3"}},
+					{"type": {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+					 "outwardIssue": {"key": "PROJ-99"}},
+					{"type": {"name": "Relates", "inward": "relates to", "outward": "relates to"},
+					 "inwardIssue": {"key": "PROJ-55"}}
+				]
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	deps, err := jc.DepsOf("PROJ-10")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	if len(deps) != 1 || deps[0] != "PROJ-3" {
+		t.Errorf("DepsOf = %v, want [PROJ-3] (native is-blocked-by link only)", deps)
+	}
+}
+
+// TestJiraClient_TransitionState_MappedStatus verifies TransitionState finds
+// and performs the workflow transition matching the configured status
+// mapping — no label fallback needed on the happy path.
+func TestJiraClient_TransitionState_MappedStatus(t *testing.T) {
+	var postedTransitionID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-1/transitions":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"transitions": [
+				{"id": "11", "name": "Start Progress", "to": {"name": "In Progress"}},
+				{"id": "21", "name": "Done", "to": {"name": "Done"}}
+			]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/rest/api/2/issue/PROJ-1/transitions":
+			var body map[string]map[string]string
+			json.NewDecoder(r.Body).Decode(&body)
+			postedTransitionID = body["transition"]["id"]
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-1":
+			t.Errorf("must not fall back to a label swap on the happy path")
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{
+		BaseURL: srv.URL,
+		Token:   "tok",
+		StatusMapping: map[forge.DispatchState]string{
+			forge.InProgress: "In Progress",
+		},
+		Labels: forge.DefaultDispatchLabels(),
+	})
+
+	if err := jc.TransitionState("PROJ-1", forge.Dispatchable, forge.InProgress); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+	if postedTransitionID != "11" {
+		t.Errorf("posted transition id = %q, want 11", postedTransitionID)
+	}
+}
+
+// TestJiraClient_TransitionState_UnmappedFallsBackToLabel verifies that when
+// no status mapping exists for the target state, TransitionState swaps the
+// fallback label instead — the lifecycle still makes progress.
+func TestJiraClient_TransitionState_UnmappedFallsBackToLabel(t *testing.T) {
+	var gotLabelOps []map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-2":
+			var body struct {
+				Update struct {
+					Labels []map[string]string `json:"labels"`
+				} `json:"update"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			gotLabelOps = body.Update.Labels
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s (transitions should not be queried when unmapped)", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{
+		BaseURL:       srv.URL,
+		Token:         "tok",
+		StatusMapping: map[forge.DispatchState]string{}, // no mapping for InProgress
+		Labels:        forge.DefaultDispatchLabels(),
+	})
+
+	if err := jc.TransitionState("PROJ-2", forge.Dispatchable, forge.InProgress); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+	want := []map[string]string{{"remove": "ready-for-agent"}, {"add": "agent-in-progress"}}
+	if len(gotLabelOps) != len(want) || gotLabelOps[0]["remove"] != want[0]["remove"] || gotLabelOps[1]["add"] != want[1]["add"] {
+		t.Errorf("label ops = %v, want %v", gotLabelOps, want)
+	}
+}
+
+// TestJiraClient_TransitionState_BlockedFallsBackToLabel verifies that when a
+// mapped transition exists but is not available on the issue's current
+// workflow (blocked), TransitionState falls back to the label swap.
+func TestJiraClient_TransitionState_BlockedFallsBackToLabel(t *testing.T) {
+	var labelSwapped bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-9/transitions":
+			// Only an irrelevant transition is available — "In Progress" is blocked.
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"transitions": [{"id": "99", "name": "Reopen", "to": {"name": "Backlog"}}]}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-9":
+			labelSwapped = true
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{
+		BaseURL: srv.URL,
+		Token:   "tok",
+		StatusMapping: map[forge.DispatchState]string{
+			forge.InProgress: "In Progress",
+		},
+		Labels: forge.DefaultDispatchLabels(),
+	})
+
+	if err := jc.TransitionState("PROJ-9", forge.Dispatchable, forge.InProgress); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+	if !labelSwapped {
+		t.Error("want label fallback when the mapped transition is blocked")
+	}
+}
+
+// TestJiraClient_ListIssues_JQLAndOrder verifies ListIssues queries by the
+// mapped status (falling back to the label for issues stuck there) scoped to
+// the project, and trusts the server's created-ascending ordering.
+func TestJiraClient_ListIssues_JQLAndOrder(t *testing.T) {
+	var gotJQL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/search" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		gotJQL = r.URL.Query().Get("jql")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"issues": [
+			{"key": "PROJ-1", "fields": {"summary": "first", "status": {"name": "To Do"}, "labels": ["ready-for-agent"]}},
+			{"key": "PROJ-4", "fields": {"summary": "second", "status": {"name": "To Do"}, "labels": ["ready-for-agent"]}}
+		]}`))
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{
+		BaseURL:    srv.URL,
+		Token:      "tok",
+		ProjectKey: "PROJ",
+		StatusMapping: map[forge.DispatchState]string{
+			forge.Dispatchable: "To Do",
+		},
+		Labels: forge.DefaultDispatchLabels(),
+	})
+
+	issues, err := jc.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if len(issues) != 2 || issues[0].Number != "PROJ-1" || issues[1].Number != "PROJ-4" {
+		t.Fatalf("issues = %+v", issues)
+	}
+	if !strings.Contains(gotJQL, `project = "PROJ"`) {
+		t.Errorf("jql = %q, want project scope", gotJQL)
+	}
+	if !strings.Contains(gotJQL, `status = "To Do"`) {
+		t.Errorf("jql = %q, want status clause", gotJQL)
+	}
+	if !strings.Contains(gotJQL, `labels = "ready-for-agent"`) {
+		t.Errorf("jql = %q, want label fallback clause", gotJQL)
+	}
+	if !strings.Contains(gotJQL, "order by created asc") {
+		t.Errorf("jql = %q, want canonical created-ascending order", gotJQL)
+	}
+}
+
+// TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly verifies that when a
+// state has no status mapping, ListIssues queries by label alone.
+func TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly(t *testing.T) {
+	var gotJQL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotJQL = r.URL.Query().Get("jql")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"issues": []}`))
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{
+		BaseURL:       srv.URL,
+		Token:         "tok",
+		ProjectKey:    "PROJ",
+		StatusMapping: map[forge.DispatchState]string{},
+		Labels:        forge.DefaultDispatchLabels(),
+	})
+
+	if _, err := jc.ListIssues(forge.InProgress); err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if strings.Contains(gotJQL, "status =") {
+		t.Errorf("jql = %q, must not reference status when unmapped", gotJQL)
+	}
+	if !strings.Contains(gotJQL, `labels = "agent-in-progress"`) {
+		t.Errorf("jql = %q, want label clause", gotJQL)
+	}
+}
+
+// TestJiraClient_ListLabels_ReturnsSiteLabels verifies ListLabels reads
+// Jira's site-wide label list.
+func TestJiraClient_ListLabels_ReturnsSiteLabels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/label" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"values": ["ready-for-agent", "agent-in-progress"]}`))
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	labels, err := jc.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	if len(labels) != 2 || labels[0] != "ready-for-agent" || labels[1] != "agent-in-progress" {
+		t.Errorf("labels = %v", labels)
+	}
+}
+
+// TestJiraClient_CreateLabel_NoOp verifies CreateLabel is a no-op: Jira has
+// no label-registration endpoint (labels are free text, auto-created on
+// first use), so it must not issue any request nor error.
+func TestJiraClient_CreateLabel_NoOp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("CreateLabel must not make any request, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	if err := jc.CreateLabel("agent-failed", "desc", "d93f0b"); err != nil {
+		t.Fatalf("CreateLabel: %v", err)
+	}
+}

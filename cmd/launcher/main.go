@@ -58,10 +58,19 @@ type config struct {
 	completeLabel   string
 	maxJobs         int
 
-	// issueTracker selects the IssueTracker adapter: "github" (default) or
-	// "local". localIssuesDir is the local adapter's issue directory.
+	// issueTracker selects the IssueTracker adapter: "github" (default),
+	// "local", or "jira". localIssuesDir is the local adapter's issue
+	// directory; the jira* fields are only consulted when issueTracker ==
+	// "jira". The Code Forge (PR/CI/merge) stays github regardless.
 	issueTracker   string
 	localIssuesDir string
+
+	jiraBaseURL         string
+	jiraProjectKey      string
+	jiraEmail           string
+	jiraToken           string
+	jiraStatusMapping   string
+	jiraIncludeComments bool
 
 	// Transient-exit retry knobs
 	transientRetryMax    int
@@ -185,8 +194,14 @@ func loadConfig() config {
 		completeLabel:   getenv("COMPLETE_LABEL", "agent-complete"),
 		maxJobs:         atoiNonneg(os.Getenv("MAX_JOBS"), 0),
 
-		issueTracker:   getenv("ISSUE_TRACKER", "github"),
-		localIssuesDir: getenv("LOCAL_ISSUES_DIR", ".spindrift/issues"),
+		issueTracker:        getenv("ISSUE_TRACKER", "github"),
+		localIssuesDir:      getenv("LOCAL_ISSUES_DIR", ".spindrift/issues"),
+		jiraBaseURL:         os.Getenv("JIRA_BASE_URL"),
+		jiraProjectKey:      os.Getenv("JIRA_PROJECT_KEY"),
+		jiraEmail:           os.Getenv("JIRA_EMAIL"),
+		jiraToken:           os.Getenv("JIRA_TOKEN"),
+		jiraStatusMapping:   os.Getenv("JIRA_STATUS_MAPPING"),
+		jiraIncludeComments: os.Getenv("JIRA_INCLUDE_COMMENTS") != "",
 
 		transientRetryMax:    atoi(getenv("TRANSIENT_RETRY_MAX", "3"), 3),
 		transientBackoffSecs: atoi(getenv("TRANSIENT_BACKOFF_SECS", "30"), 30),
@@ -253,10 +268,24 @@ func validate(c config) error {
 		return fmt.Errorf("MERGE_MODE=%q is not valid; must be immediate, auto, or manual", c.mergeMode)
 	}
 	switch c.issueTracker {
-	case "github", "local":
+	case "github", "local", "jira":
 		// valid
 	default:
-		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github or local", c.issueTracker)
+		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github, local, or jira", c.issueTracker)
+	}
+	if c.issueTracker == "jira" {
+		if c.jiraBaseURL == "" {
+			return fmt.Errorf("set JIRA_BASE_URL (Jira site base URL) when ISSUE_TRACKER=jira")
+		}
+		if c.jiraProjectKey == "" {
+			return fmt.Errorf("set JIRA_PROJECT_KEY when ISSUE_TRACKER=jira")
+		}
+		if c.jiraToken == "" {
+			return fmt.Errorf("set JIRA_TOKEN when ISSUE_TRACKER=jira")
+		}
+		if _, err := forge.ParseStatusMapping(c.jiraStatusMapping); err != nil {
+			return err
+		}
 	}
 	switch c.codeForge {
 	case "github":
@@ -284,10 +313,29 @@ func dispatchLabels(c config) forge.DispatchLabels {
 // newIssueTracker returns the IssueTracker adapter selected by ISSUE_TRACKER
 // (default "github").
 func newIssueTracker(c config) forge.IssueTracker {
-	if c.issueTracker == "local" {
+	switch c.issueTracker {
+	case "local":
 		return forge.NewLocalTracker(c.localIssuesDir, dispatchLabels(c))
+	case "jira":
+		statusMapping, err := forge.ParseStatusMapping(c.jiraStatusMapping)
+		if err != nil {
+			// validate() already rejects a malformed mapping before this is
+			// reached; treat it as unmapped (label-only lifecycle) as a
+			// fallback.
+			statusMapping = map[forge.DispatchState]string{}
+		}
+		return forge.NewJiraClient(forge.JiraConfig{
+			BaseURL:         c.jiraBaseURL,
+			ProjectKey:      c.jiraProjectKey,
+			Email:           c.jiraEmail,
+			Token:           c.jiraToken,
+			StatusMapping:   statusMapping,
+			Labels:          dispatchLabels(c),
+			IncludeComments: c.jiraIncludeComments,
+		})
+	default:
+		return forge.NewExecClient(c.repoSlug, dispatchLabels(c))
 	}
-	return forge.NewExecClient(c.repoSlug, dispatchLabels(c))
 }
 
 // newCodeForge returns the CodeForge adapter selected by CODE_FORGE: "github"
