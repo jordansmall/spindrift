@@ -451,6 +451,8 @@ live) are independent axes. `ISSUE_TRACKER` selects the tracker; the Code
 Forge stays `github` regardless (Jira issues, GitHub PRs).
 
 - **`github`** (default) — the label lifecycle described above.
+- **`local`** — a private, file-based tracker; see [Local issue
+  tracker](#local-issue-tracker-issue_trackerlocal) below.
 - **`jira`** — dispatch state maps to the project's native workflow via a
   configurable status mapping. `JIRA_STATUS_MAPPING` is a JSON object from
   canonical dispatch state to Jira status name, e.g.:

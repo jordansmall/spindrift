@@ -83,9 +83,9 @@ _Avoid_: packages, baked toolchain, dependencies.
 The seam that supplies work and carries dispatch state: listing dispatchable
 issues, reading an issue's body/title/state, transitioning its Dispatch state,
 and posting comments. One of two independent axes (the other is the Code Forge).
-Implemented adapters: `github` (issues via `gh`) and `jira`; planned: `local`
-(issues as files in the Target repo, no server). The launcher reasons in
-canonical Dispatch states, never in a backend's native mechanism.
+Implemented adapters: `github` (issues via `gh`), `jira`, and `local` (issues
+as files in the Target repo, no server). The launcher reasons in canonical
+Dispatch states, never in a backend's native mechanism.
 _Avoid_: issue source, ticketing, backlog.
 
 **Code Forge**:
