@@ -9,6 +9,12 @@ import "errors"
 // rebase the head branch and retry.
 var ErrMergeConflict = errors.New("merge conflict")
 
+// ErrTransientPushFailure is returned by Rebase when its force-push fails
+// for a reason unrelated to the branch state — a forge outage, network
+// fault, or locked ref — as opposed to a genuine stale-lease or
+// non-fast-forward rejection. Callers may retry a bounded number of times.
+var ErrTransientPushFailure = errors.New("transient push failure")
+
 // ErrAuthFailure is returned by Probe when the forge credentials are missing
 // or invalid. Callers should advise the user to check GH_TOKEN.
 var ErrAuthFailure = errors.New("forge auth failure")
