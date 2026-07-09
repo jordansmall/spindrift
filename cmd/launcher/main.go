@@ -624,6 +624,23 @@ func mergeImmediate(c config, fc forge.Client, num, pr string, conflictResolveFn
 	}
 }
 
+// landPushOnly is the CODE_FORGE=git counterpart to the gateToGreen+
+// applyMergeMode pair: there is no PR or CI to watch (the Box already pushed
+// branch to the remote), so the issue is marked Complete immediately and
+// MERGE_MODE is applied straight against the git Code Forge's push-only
+// Merge/Rebase. A merge failure leaves the issue Complete with a
+// merge-blocked note, matching the github adapter's post-green contract
+// (ADR 0012) — it is never demoted to Failed.
+func landPushOnly(c config, fc forge.Client, num, branch string) (ok bool, merged bool) {
+	transitionState(fc, num, forge.InProgress, forge.Complete)
+	if err := applyMergeMode(c, fc, num, branch, nil); err != nil {
+		fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, branch, err)
+		fc.Comment(num, fmt.Sprintf("merge blocked after push: %v", err))
+		return true, false
+	}
+	return true, c.mergeMode == "immediate"
+}
+
 // selfHeal polls the merge gate, dispatching fix boxes on genuine red up to
 // maxFixAttempts times. On green it swaps agent-complete (via gateToGreen)
 // then applies the merge mode; a merge failure after green leaves the issue
@@ -637,6 +654,9 @@ func mergeImmediate(c config, fc forge.Client, num, pr string, conflictResolveFn
 // fix box synchronously. runConflictResolveFn, when non-nil, is forwarded to
 // applyMergeMode for agent-assisted rebase-conflict resolution.
 func selfHeal(c config, fc forge.Client, runFixFn func(int) error, runConflictResolveFn func(string) error, num, pr string) (ok bool, merged bool) {
+	if c.codeForge == "git" {
+		return landPushOnly(c, fc, num, pr)
+	}
 	for attempt := 0; ; attempt++ {
 		green, genuineRed := gateToGreen(c, fc, num, pr)
 		if green {
@@ -821,7 +841,10 @@ func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue
 		conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
 		ok, merged := selfHeal(c, fc, fixFn, conflictFn, iss.number, o.PR)
 		if ok {
-			if merged {
+			// verifyMerged reads PR state, which the push-only git Code Forge
+			// does not have — landPushOnly's own fc.Merge success already
+			// confirms the push landed, so there is nothing left to verify.
+			if merged && c.codeForge == "github" {
 				verifyMerged(c, fc, iss.number, o.PR)
 			}
 		} else {

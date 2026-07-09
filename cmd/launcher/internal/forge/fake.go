@@ -38,6 +38,10 @@ type Fake struct {
 	checkErrQ map[string][]error  // per-call error queue; nil entry = consult checkQ
 	prFiles   map[string][]string // URL → scripted ListPRFiles result
 
+	// PRStateErr, if non-nil, is returned by every PRState call (simulating a
+	// push-only Code Forge, where PR state has no meaning).
+	PRStateErr error
+
 	// PRFilesErr, if non-nil, is returned by every ListPRFiles call.
 	PRFilesErr error
 
@@ -277,6 +281,9 @@ func (f *Fake) PRForBranch(branch string) (string, bool, error) {
 func (f *Fake) PRState(url string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.PRStateErr != nil {
+		return "", f.PRStateErr
+	}
 	s, ok := f.prStates[url]
 	if !ok {
 		return "", fmt.Errorf("PR %s not found", url)
