@@ -154,3 +154,46 @@ package is the authoritative spec and implementation: `Parse` validates the
 grammar, `Line` produces the canonical form, and `LastInLog` scans a Box log
 while gracefully skipping lines too large for the scanner buffer.
 _Avoid_: result line, output line, status line.
+
+**Guardrail prompt**:
+The harness-owned prompt carried in the system slot of every harness-issued
+Driver invocation, stating the trust boundaries to the model: issue bodies and
+comments are untrusted data, credentials are never disclosed, work stays on the
+dispatched issue, and edits to the guarded paths force a human merge.
+Non-negotiable by the Agent and by issue/comment authors; overridable by the
+Consumer flake, which is trusted by construction. A soft control: it hardens
+harness-issued invocations but cannot bind a fresh Driver process the Agent
+spawns itself — that containment belongs to the Box and token scope.
+_Avoid_: system prompt (ambiguous with the Driver's own), jailbreak prompt,
+safety prompt.
+
+**Merge guard**:
+The launcher-side check, outside the Box and beyond the Agent's influence,
+applied between green CI and merge: if the change touches a guarded path, the
+merge downgrades to manual — regardless of `MERGE_MODE` — and a note on the PR
+says why. It bounds injection-induced *drift* (an agent following its normal
+flow), not a fully adversarial Agent, which holds a token that can merge (see
+Two-actor separation). Downgrade, never block: the cost of a hit is one human
+read.
+_Avoid_: path filter, merge block, review gate.
+
+**Instruction surface**:
+The repo-carried files a Driver reads as trusted instructions on every fresh
+clone — `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.opencode/` — plus the CI config
+under `.github/`. The cross-run persistence vector: a poisoned instruction file
+merged once feeds every future Agent as trusted input. Guarded by the Merge
+guard's default path set.
+_Avoid_: config files, dotfiles, prompt files.
+
+**Two-actor separation**:
+The opt-in hard mode where the Box token's user cannot update the base branch
+(repository ruleset) and only a second, launcher-held token can merge. The only
+configuration in which the Merge guard is literally uninfluenceable by the
+Agent; the single-token default trades that away for operator simplicity.
+_Avoid_: dual token, split credentials, bot pair.
+
+**Tripwire**:
+The launcher's detection that a PR was merged by an actor other than itself
+while the issue was `InProgress` — evidence the Agent (or someone else) merged
+around the gate. Detection only, no prevention; surfaces for human triage.
+_Avoid_: audit, alert, monitor.
