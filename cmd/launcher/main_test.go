@@ -381,6 +381,24 @@ func TestValidateCodeForge_AcceptsKnown(t *testing.T) {
 	}
 }
 
+// TestNewCodeForge_Git_ReturnsPushOnlyAdapter verifies that CODE_FORGE=git
+// wires newCodeForge to the push-only git adapter (no PR/CI/auto-merge
+// concept) instead of the github gh-exec adapter.
+func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "git"
+	c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
+
+	cf := newCodeForge(c)
+
+	if ok, err := cf.CanAutoMerge(); err != nil || ok {
+		t.Errorf("CanAutoMerge = (%v, %v), want (false, nil) for the git Code Forge", ok, err)
+	}
+	if _, found, err := cf.PRForBranch("agent/issue-1"); err != nil || found {
+		t.Errorf("PRForBranch = (_, %v, %v), want (_, false, nil) for the git Code Forge", found, err)
+	}
+}
+
 // minimalValidConfig returns a config that passes validate() so tests can
 // mutate exactly one field at a time.
 func minimalValidConfig() config {

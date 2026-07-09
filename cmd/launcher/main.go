@@ -1670,6 +1670,9 @@ func main() {
 	}
 	if len(args) > 0 && args[0] == "doctor" {
 		c := loadConfig()
+		// Probe each seam through its own adapter (not the combined Client)
+		// so a CODE_FORGE=git deployment checks the actual remote it will
+		// push to, not the IssueTracker's repo a second time.
 		it := newIssueTracker(c)
 		cf := newCodeForge(c)
 		stat, serr := os.Stdin.Stat()
