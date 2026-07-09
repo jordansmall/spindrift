@@ -1,4 +1,11 @@
-{ pkgs, config, fixtures, nixpkgs, system, flake-parts }:
+{
+  pkgs,
+  config,
+  fixtures,
+  nixpkgs,
+  system,
+  flake-parts,
+}:
 let
   inherit (fixtures)
     batsHarness
@@ -242,13 +249,16 @@ in
   mkharness-rejects-unknown-key =
     let
       inherit (pkgs.lib) assertMsg;
-      result = builtins.tryEval (import ../lib/mkHarness.nix {
-        inherit nixpkgs system;
-        defaults = { typoLabel = "oops"; };
-      });
+      result = builtins.tryEval (
+        import ../lib/mkHarness.nix {
+          inherit nixpkgs system;
+          defaults = {
+            typoLabel = "oops";
+          };
+        }
+      );
     in
-    assert assertMsg (!result.success)
-      "mkHarness must throw on unknown defaults key 'typoLabel'";
+    assert assertMsg (!result.success) "mkHarness must throw on unknown defaults key 'typoLabel'";
     pkgs.runCommand "mkharness-rejects-unknown-key" { } "touch $out";
 
   # The configured `prompt` is rendered to a store-path directory and,
@@ -298,11 +308,9 @@ in
       names = map (p: p.name or "") nonRustHarness.agentEnv.paths;
       baked = frag: any (n: hasInfix frag n) names;
     in
-    assert assertMsg (baked "hello-")
-      "expected the hello package baked into the env";
+    assert assertMsg (baked "hello-") "expected the hello package baked into the env";
     # engine plumbing is still layered on, language-agnostically
-    assert assertMsg (baked "git-")
-      "expected git plumbing layered into the env";
+    assert assertMsg (baked "git-") "expected git plumbing layered into the env";
     pkgs.runCommand "packages-baked" { } "touch $out";
 
   # Nix is the first-class default: every box ships the nix CLI unless
@@ -313,8 +321,7 @@ in
       names = map (p: p.name or "") nonRustHarness.agentEnv.paths;
       hasNix = any (n: hasInfix "nix-" n || n == "nix") names;
     in
-    assert assertMsg hasNix
-      "expected the nix CLI to be baked into the default box";
+    assert assertMsg hasNix "expected the nix CLI to be baked into the default box";
     pkgs.runCommand "nix-baked-by-default" { } "touch $out";
 
   # nil is baked into the dogfood toolchain for fast, store-free Nix
@@ -326,8 +333,7 @@ in
       names = map (p: p.name or "") harness.agentEnv.paths;
       hasNil = any (n: hasInfix "nil-" n || n == "nil") names;
     in
-    assert assertMsg hasNil
-      "expected nil to be baked into the dogfood toolchain";
+    assert assertMsg hasNil "expected nil to be baked into the dogfood toolchain";
     pkgs.runCommand "nil-baked-in-dogfood" { } "touch $out";
 
   # The lean/no-nix escape hatch must not include the nix CLI.
@@ -337,8 +343,7 @@ in
       names = map (p: p.name or "") leanHarness.agentEnv.paths;
       hasNix = any (n: hasInfix "nix-" n || n == "nix") names;
     in
-    assert assertMsg (!hasNix)
-      "lean harness (nixInBox = false) must not bake in the nix CLI";
+    assert assertMsg (!hasNix) "lean harness (nixInBox = false) must not bake in the nix CLI";
     pkgs.runCommand "lean-escape-hatch" { } "touch $out";
 
   # The flakeModule must expose grouped settings.<section>.<knob> options
@@ -347,31 +352,32 @@ in
   # with the equivalent flat defaults.
   flakemodule-schema-options =
     let
-      consumer105 = flake-parts.lib.mkFlake
-        {
-          inputs = {
-            inherit nixpkgs;
-            self = {
-              outPath = ../.;
-            };
-          };
-        }
-        {
-          systems = [ system ];
-          imports = [ ../lib/flakeModule.nix ];
-          perSystem.spindrift = {
-            packages = p: [ p.hello ];
-            settings = {
-              models = {
-                scoutModel = "scout-test";
-                reviewModel = "review-test";
-              };
-              lifecycleLabels = {
-                completeLabel = "done-test";
+      consumer105 =
+        flake-parts.lib.mkFlake
+          {
+            inputs = {
+              inherit nixpkgs;
+              self = {
+                outPath = ../.;
               };
             };
+          }
+          {
+            systems = [ system ];
+            imports = [ ../lib/flakeModule.nix ];
+            perSystem.spindrift = {
+              packages = p: [ p.hello ];
+              settings = {
+                models = {
+                  scoutModel = "scout-test";
+                  reviewModel = "review-test";
+                };
+                lifecycleLabels = {
+                  completeLabel = "done-test";
+                };
+              };
+            };
           };
-        };
       direct105 = import ../lib/mkHarness.nix {
         inherit nixpkgs system;
         packages = p: [ p.hello ];
@@ -412,22 +418,33 @@ in
           {
             inputs = {
               inherit nixpkgs;
-              self = { outPath = ../.; };
+              self = {
+                outPath = ../.;
+              };
             };
           }
           {
             systems = [ system ];
             imports = [ ../lib/flakeModule.nix ];
-            perSystem.spindrift = { packages = p: [ p.hello ]; } // cfg;
+            perSystem.spindrift = {
+              packages = p: [ p.hello ];
+            }
+            // cfg;
           }
         ).packages.${system}.run;
-      badSection = builtins.tryEval (mkBadFlake { settings.typoSection.label = "oops"; });
-      badKnob = builtins.tryEval (mkBadFlake { settings.branches.typoKnob = "oops"; });
+      badSection = builtins.tryEval (mkBadFlake {
+        settings.typoSection.label = "oops";
+      });
+      badKnob = builtins.tryEval (mkBadFlake {
+        settings.branches.typoKnob = "oops";
+      });
     in
-    assert assertMsg (!badSection.success)
-      "flakeModule must throw on unknown settings section 'typoSection'";
-    assert assertMsg (!badKnob.success)
-      "flakeModule must throw on unknown knob 'typoKnob' in settings.branches";
+    assert assertMsg (
+      !badSection.success
+    ) "flakeModule must throw on unknown settings section 'typoSection'";
+    assert assertMsg (
+      !badKnob.success
+    ) "flakeModule must throw on unknown knob 'typoKnob' in settings.branches";
     pkgs.runCommand "flakemodule-rejects-unknown-settings" { } "touch $out";
 
   # harness.env.example must match the content generated from env-schema.nix.
@@ -515,14 +532,20 @@ in
       ];
       # Forward: every schema name (that Go reads directly) must appear as a
       # string literal in main.go.
-      missingFromGo = filter (name: !pkgs.lib.hasInfix ''"${name}"'' mainGoSrc) (subtractLists boxEnvOnly schemaEnvNames);
+      missingFromGo = filter (name: !pkgs.lib.hasInfix ''"${name}"'' mainGoSrc) (
+        subtractLists boxEnvOnly schemaEnvNames
+      );
       # Reverse: extract names from os.Getenv/getenv calls in main.go.
       parts = builtins.split ''(os\.Getenv|getenv)\("([A-Z_][A-Z0-9_]*)"\)'' mainGoSrc;
       goEnvNames = map (m: builtins.elemAt m 1) (filter builtins.isList parts);
       extraInGo = subtractLists (schemaEnvNames ++ nixBaked) goEnvNames;
     in
-    assert pkgs.lib.assertMsg (missingFromGo == [ ]) "schema knobs absent from main.go: ${concatStringsSep ", " missingFromGo}";
-    assert pkgs.lib.assertMsg (extraInGo == [ ]) "main.go reads env vars absent from schema: ${concatStringsSep ", " extraInGo}";
+    assert pkgs.lib.assertMsg (
+      missingFromGo == [ ]
+    ) "schema knobs absent from main.go: ${concatStringsSep ", " missingFromGo}";
+    assert pkgs.lib.assertMsg (
+      extraInGo == [ ]
+    ) "main.go reads env vars absent from schema: ${concatStringsSep ", " extraInGo}";
     pkgs.runCommand "launcher-env-coverage" { } "touch $out";
 
   # cmd/launcher/flagtable_gen.go must match the content generated from
@@ -542,22 +565,29 @@ in
       secretSchema = filterAttrs (_: e: (e.secret or false)) schema;
       toKebab = env: toLower (replaceStrings [ "_" ] [ "-" ] env);
       flagKind = e: if builtins.isInt (e.default or null) then "int" else "string";
-      flagDflt = e: if e ? default then (if builtins.isInt e.default then builtins.toString e.default else e.default) else "";
+      flagDflt =
+        e:
+        if e ? default then
+          (if builtins.isInt e.default then builtins.toString e.default else e.default)
+        else
+          "";
       flagAlias = e: if e ? alias then ", alias: \"${e.alias}\"" else "";
       # Every non-secret knob must declare a group so the full reference groups
       # it under a heading; a missing group is a schema error, not a silent "".
       ungrouped = mapAttrsToList (k: _: k) (filterAttrs (_: e: !(e ? group)) nonSecretSchema);
       rows =
-        assert pkgs.lib.assertMsg (ungrouped == [ ])
-          "env-schema.nix: non-secret knob(s) missing `group`: ${pkgs.lib.concatStringsSep ", " ungrouped}";
+        assert pkgs.lib.assertMsg (
+          ungrouped == [ ]
+        ) "env-schema.nix: non-secret knob(s) missing `group`: ${pkgs.lib.concatStringsSep ", " ungrouped}";
         concatStrings (
-          mapAttrsToList (_: e:
+          mapAttrsToList (
+            _: e:
             "\t{env: \"${e.env}\", flag: \"${toKebab e.env}\", group: \"${e.group}\"${flagAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\"},\n"
           ) nonSecretSchema
         );
       secretRows = concatStrings (
-        mapAttrsToList (_: e:
-          "\t{env: \"${e.env}\", doc: \"${e.doc}\", fileFlag: \"${toKebab e.env}-file\"},\n"
+        mapAttrsToList (
+          _: e: "\t{env: \"${e.env}\", doc: \"${e.doc}\", fileFlag: \"${toKebab e.env}-file\"},\n"
         ) secretSchema
       );
       generated = pkgs.writeText "flagtable_gen.go.generated" (
@@ -642,96 +672,145 @@ in
       # Source of truth for the section map. Order here is the order the
       # headings render in CHANGELOG.md. Nothing is hidden (see VERSIONING.md).
       sections = [
-        { type = "feat"; section = "Features"; }
-        { type = "fix"; section = "Bug Fixes"; }
-        { type = "perf"; section = "Performance Improvements"; }
-        { type = "security"; section = "Security"; }
-        { type = "revert"; section = "Reverts"; }
-        { type = "docs"; section = "Documentation"; }
-        { type = "refactor"; section = "Code Refactoring"; }
-        { type = "test"; section = "Tests"; }
-        { type = "build"; section = "Build System"; }
-        { type = "ci"; section = "Continuous Integration"; }
-        { type = "chore"; section = "Miscellaneous Chores"; }
-        { type = "style"; section = "Styles"; }
-        { type = "deps"; section = "Dependencies"; }
+        {
+          type = "feat";
+          section = "Features";
+        }
+        {
+          type = "fix";
+          section = "Bug Fixes";
+        }
+        {
+          type = "perf";
+          section = "Performance Improvements";
+        }
+        {
+          type = "security";
+          section = "Security";
+        }
+        {
+          type = "revert";
+          section = "Reverts";
+        }
+        {
+          type = "docs";
+          section = "Documentation";
+        }
+        {
+          type = "refactor";
+          section = "Code Refactoring";
+        }
+        {
+          type = "test";
+          section = "Tests";
+        }
+        {
+          type = "build";
+          section = "Build System";
+        }
+        {
+          type = "ci";
+          section = "Continuous Integration";
+        }
+        {
+          type = "chore";
+          section = "Miscellaneous Chores";
+        }
+        {
+          type = "style";
+          section = "Styles";
+        }
+        {
+          type = "deps";
+          section = "Dependencies";
+        }
       ];
       cfg = builtins.fromJSON (builtins.readFile ../.release-please-config.json);
       versioningDoc = builtins.readFile ../VERSIONING.md;
       missingFromDoc = builtins.filter (s: !hasInfix s.section versioningDoc) sections;
     in
-    assert assertMsg (cfg ? "changelog-sections")
-      ".release-please-config.json must declare changelog-sections (canonical map in nix/checks.nix)";
+    assert assertMsg (
+      cfg ? "changelog-sections"
+    ) ".release-please-config.json must declare changelog-sections (canonical map in nix/checks.nix)";
     assert assertMsg (cfg."changelog-sections" == sections)
       "changelog-sections in .release-please-config.json drifted from the canonical map in nix/checks.nix";
     assert assertMsg (missingFromDoc == [ ])
-      "VERSIONING.md is missing changelog headings: ${concatMapStringsSep ", " (s: s.section) missingFromDoc}";
+      "VERSIONING.md is missing changelog headings: ${
+        concatMapStringsSep ", " (s: s.section) missingFromDoc
+      }";
     pkgs.runCommand "release-please-changelog" { } "touch $out";
 
   # gofmt -l must exit cleanly — any output means unformatted files.
-  launcher-go-fmt = pkgs.runCommand "launcher-go-fmt"
-    { nativeBuildInputs = [ pkgs.go ]; }
-    ''
-      unformatted=$(gofmt -l ${../cmd/launcher})
-      if [ -n "$unformatted" ]; then
-        echo "gofmt violations:" >&2
-        echo "$unformatted" >&2
-        exit 1
-      fi
-      touch $out
-    '';
+  launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
+    unformatted=$(gofmt -l ${../cmd/launcher})
+    if [ -n "$unformatted" ]; then
+      echo "gofmt violations:" >&2
+      echo "$unformatted" >&2
+      exit 1
+    fi
+    touch $out
+  '';
+
+  # nixfmt --check must exit cleanly — any output means unformatted files.
+  nix-fmt = pkgs.runCommand "nix-fmt" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
+    nixfmt --check \
+      ${../flake.nix} \
+      ${../lib/env-schema.nix} \
+      ${../lib/flakeModule.nix} \
+      ${../lib/mkHarness.nix} \
+      ${../nix/checks.nix} \
+      ${../nix/fixtures.nix} \
+      ${../templates/default/flake.nix}
+    touch $out
+  '';
 
   # go vet catches suspicious constructs at analysis time.
-  launcher-go-vet = pkgs.runCommand "launcher-go-vet"
-    { nativeBuildInputs = [ pkgs.go ]; }
-    ''
-      cp -r ${../cmd/launcher} src
-      chmod -R +w src
-      export GOPROXY=off
-      export GONOSUMCHECK='*'
-      export GOMODCACHE="$TMPDIR/gomodcache"
-      export GOCACHE="$TMPDIR/gocache"
-      cd src
-      go vet ./...
-      touch $out
-    '';
+  launcher-go-vet = pkgs.runCommand "launcher-go-vet" { nativeBuildInputs = [ pkgs.go ]; } ''
+    cp -r ${../cmd/launcher} src
+    chmod -R +w src
+    export GOPROXY=off
+    export GONOSUMCHECK='*'
+    export GOMODCACHE="$TMPDIR/gomodcache"
+    export GOCACHE="$TMPDIR/gocache"
+    cd src
+    go vet ./...
+    touch $out
+  '';
 
   # go test must stay green: unit tests catch config-parsing bugs
   # before they reach the binary (see issue #112, 9494fc1-class).
-  launcher-go-test = pkgs.runCommand "launcher-go-test"
-    { nativeBuildInputs = [ pkgs.go ]; }
-    ''
-      cp -r ${../cmd/launcher} src
-      chmod -R +w src
-      export GOPROXY=off
-      export GONOSUMCHECK='*'
-      export GOMODCACHE="$TMPDIR/gomodcache"
-      export GOCACHE="$TMPDIR/gocache"
-      cd src
-      go test ./...
-      touch $out
-    '';
+  launcher-go-test = pkgs.runCommand "launcher-go-test" { nativeBuildInputs = [ pkgs.go ]; } ''
+    cp -r ${../cmd/launcher} src
+    chmod -R +w src
+    export GOPROXY=off
+    export GONOSUMCHECK='*'
+    export GOMODCACHE="$TMPDIR/gomodcache"
+    export GOCACHE="$TMPDIR/gocache"
+    cd src
+    go test ./...
+    touch $out
+  '';
 
   # Cross-build: launcher must compile for linux and darwin. Native
   # (x86_64-linux on CI) plus explicit darwin cross-targets.
   # CGO_ENABLED=0 makes pure-Go cross-compilation work without
   # a C cross-toolchain.
-  launcher-cross-build = pkgs.runCommand "launcher-cross-build"
-    { nativeBuildInputs = [ pkgs.go ]; }
-    ''
-      cp -r ${../cmd/launcher} src
-      chmod -R +w src
-      export GOPROXY=off
-      export GONOSUMCHECK='*'
-      export GOMODCACHE="$TMPDIR/gomodcache"
-      export GOCACHE="$TMPDIR/gocache"
-      export CGO_ENABLED=0
-      cd src
-      go build -o "$TMPDIR/launcher-linux" .
-      GOOS=darwin GOARCH=amd64 go build -o "$TMPDIR/launcher-darwin-amd64" .
-      GOOS=darwin GOARCH=arm64 go build -o "$TMPDIR/launcher-darwin-arm64" .
-      touch $out
-    '';
+  launcher-cross-build =
+    pkgs.runCommand "launcher-cross-build" { nativeBuildInputs = [ pkgs.go ]; }
+      ''
+        cp -r ${../cmd/launcher} src
+        chmod -R +w src
+        export GOPROXY=off
+        export GONOSUMCHECK='*'
+        export GOMODCACHE="$TMPDIR/gomodcache"
+        export GOCACHE="$TMPDIR/gocache"
+        export CGO_ENABLED=0
+        cd src
+        go build -o "$TMPDIR/launcher-linux" .
+        GOOS=darwin GOARCH=amd64 go build -o "$TMPDIR/launcher-darwin-amd64" .
+        GOOS=darwin GOARCH=arm64 go build -o "$TMPDIR/launcher-darwin-arm64" .
+        touch $out
+      '';
 }
 // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
   # The baked entrypoint must carry a store-path shebang, not the
@@ -775,17 +854,18 @@ in
   # runs as the non-root `agent` user. Realizes the image, so it is
   # Linux-gated like the shebang check.
   box-runs-as-non-root =
-    pkgs.runCommand "box-runs-as-non-root" { nativeBuildInputs = [ pkgs.jq ]; } ''
-      mkdir img && tar -xf ${nonRustHarness.image} -C img
-      cfg=$(jq -r '.[0].Config' img/manifest.json)
-      user=$(jq -r '.config.User // ""' "img/$cfg")
-      echo "image config User = '$user'"
-      [ "$user" = "agent" ] || {
-        echo "expected the Box to run as non-root 'agent', got '$user'" >&2
-        exit 1
-      }
-      touch $out
-    '';
+    pkgs.runCommand "box-runs-as-non-root" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        mkdir img && tar -xf ${nonRustHarness.image} -C img
+        cfg=$(jq -r '.[0].Config' img/manifest.json)
+        user=$(jq -r '.config.User // ""' "img/$cfg")
+        echo "image config User = '$user'"
+        [ "$user" = "agent" ] || {
+          echo "expected the Box to run as non-root 'agent', got '$user'" >&2
+          exit 1
+        }
+        touch $out
+      '';
 
   # The rendered prompt must be baked into the agent-files layer at
   # /agent/prompts, so the Box is self-contained and needs no host
@@ -811,32 +891,31 @@ in
   # The nix.conf and store DB must be present in the image so
   # `nix flake check` reuses the baked closure instead of re-substituting.
   # Realizes the default image; Linux-gated like the other image checks.
-  nix-conf-in-image =
-    pkgs.runCommand "nix-conf-in-image" { nativeBuildInputs = [ pkgs.jq ]; } ''
-      # Extract the image ONCE (like box-runs-as-non-root), then read
-      # only the top "customisation" layer where extraCommands writes
-      # nix.conf. Reading the compressed image more than once exhausts
-      # the runner's disk burst credits and wedges CI for minutes;
-      # re-reading all ~98 extracted layers is just as slow.
-      mkdir img && tar -xf ${nonRustHarness.image} -C img
-      layer="$(jq -r '.[0].Layers[-1]' img/manifest.json)"
-      # The customisation layer is packed with `tar -cf layer.tar .`, so
-      # members carry a leading `./`; match and extract the real name.
-      member="$(tar -tf "img/$layer" \
-        | grep -E '^(\./)?etc/nix/nix\.conf$' | head -1 || true)"
-      [ -n "$member" ] || {
-        echo "etc/nix/nix.conf not in the image's top (customisation) layer" >&2
-        exit 1
-      }
-      tar -xOf "img/$layer" "$member" > nix.conf
-      grep -q 'experimental-features = nix-command flakes' nix.conf || {
-        echo "nix.conf is missing experimental-features" >&2
-        exit 1
-      }
-      grep -q 'sandbox = false' nix.conf || {
-        echo "nix.conf is missing sandbox = false" >&2
-        exit 1
-      }
-      touch $out
-    '';
+  nix-conf-in-image = pkgs.runCommand "nix-conf-in-image" { nativeBuildInputs = [ pkgs.jq ]; } ''
+    # Extract the image ONCE (like box-runs-as-non-root), then read
+    # only the top "customisation" layer where extraCommands writes
+    # nix.conf. Reading the compressed image more than once exhausts
+    # the runner's disk burst credits and wedges CI for minutes;
+    # re-reading all ~98 extracted layers is just as slow.
+    mkdir img && tar -xf ${nonRustHarness.image} -C img
+    layer="$(jq -r '.[0].Layers[-1]' img/manifest.json)"
+    # The customisation layer is packed with `tar -cf layer.tar .`, so
+    # members carry a leading `./`; match and extract the real name.
+    member="$(tar -tf "img/$layer" \
+      | grep -E '^(\./)?etc/nix/nix\.conf$' | head -1 || true)"
+    [ -n "$member" ] || {
+      echo "etc/nix/nix.conf not in the image's top (customisation) layer" >&2
+      exit 1
+    }
+    tar -xOf "img/$layer" "$member" > nix.conf
+    grep -q 'experimental-features = nix-command flakes' nix.conf || {
+      echo "nix.conf is missing experimental-features" >&2
+      exit 1
+    }
+    grep -q 'sandbox = false' nix.conf || {
+      echo "nix.conf is missing sandbox = false" >&2
+      exit 1
+    }
+    touch $out
+  '';
 }
