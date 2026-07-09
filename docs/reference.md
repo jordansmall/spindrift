@@ -87,6 +87,7 @@ settings = {
                       completeLabel   = "agent-complete"; };
   branches        = { baseBranch = "main"; branchPrefix = "agent/issue-";
                       mergeMode  = "manual";
+                      mergeGuardPaths = ".github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
                       mergePollInterval = 30; mergePollTimeout = 1800; };
   concurrency     = { maxParallel = 3; maxJobs = 0;
                       depsPollSecs = 30; depsWaitSecs = 7200; };
@@ -125,7 +126,9 @@ Three paths to discover which options exist and what they do:
 
 `inProgressLabel`/`failedLabel`/`completeLabel` drive the
 [label lifecycle](#how-a-run-works); `mergeMode` is the post-green
-[merge policy](#how-a-run-works) (`manual`/`immediate`/`auto`); `model` is the
+[merge policy](#how-a-run-works) (`manual`/`immediate`/`auto`); `mergeGuardPaths`
+is the [merge guard](#merge-guard)'s glob list, downgrading a green PR to
+manual regardless of `mergeMode` when it touches a guarded path; `model` is the
 Claude model the in-container implementor agent runs, threaded into the container
 as `MODEL` so `MODEL=...` switches models at runtime with no image rebuild.
 `scoutModel`/`reviewModel` tier the read-only scout and reviewer subagents the
@@ -279,6 +282,7 @@ a rebuild (ADR 0001):
 | `FAILED_LABEL`            | `agent-failed` (baked) | label an issue gets when its Box fails or its PR can't merge |
 | `COMPLETE_LABEL`          | `agent-complete` (baked) | label the launcher swaps on when CI reaches green (agent is done; the merge is a separate step) |
 | `MERGE_MODE`              | `manual` (baked)       | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue GitHub native auto-merge — repo must have *Allow auto-merge* on) |
+| `MERGE_GUARD_PATHS`       | `.github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` (baked) | comma-separated globs; a green PR touching a matched path downgrades to manual regardless of `MERGE_MODE` (`github` Code Forge only; empty disables — see [Merge guard](#merge-guard)) |
 | `MODEL`                   | `claude-sonnet-5` (baked) | Claude model the in-container implementor runs |
 | `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` (baked) | scout subagent model tier (empty drops subagents) |
 | `REVIEW_MODEL`            | `claude-opus-4-8` (baked) | reviewer subagent model tier (empty drops subagents) |
@@ -417,6 +421,47 @@ ready-for-agent ──dispatch──▶ agent-in-progress ─────CI gree
 Rename any of these with the `inProgressLabel` / `failedLabel` / `completeLabel`
 knobs under `settings.lifecycleLabels` (baked) or the
 `IN_PROGRESS_LABEL` / `FAILED_LABEL` / `COMPLETE_LABEL` env vars (runtime).
+
+#### Merge guard
+
+Between CI going green and the merge itself, the launcher checks the PR's
+changed file paths against `MERGE_GUARD_PATHS` — a comma-separated glob list,
+matched against every added, modified, and deleted path. A hit **downgrades
+that merge to manual, regardless of `MERGE_MODE`**: no merge happens, a PR
+comment names the matched path(s) and the knob, and the issue lands at
+`agent-complete` with a merge-blocked-style note — the same outcome as a
+merge failure after green, never a demotion to `agent-failed`. The guard
+downgrades, it never blocks: the cost of a hit is one human read.
+
+The default is:
+
+```
+.github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**
+```
+
+— CI config plus the instruction surface (`CLAUDE.md`, `AGENTS.md`,
+`.claude/`, `.opencode/`). Those files are a cross-run persistence vector: a
+poisoned instruction file merged once feeds every future Agent as trusted
+input on its next fresh clone, so the default set is deliberately broad.
+Setting `MERGE_GUARD_PATHS=""` disables the guard entirely — an explicit
+opt-out; the operator owns the consequences.
+
+The changed-path list is read **host-side**, the same way the merge gate
+reads CI state — never from anything the Box produced — so an injected
+Agent following its normal flow cannot make the guard see a clean diff. It
+does not, however, defend against a fully adversarial Agent: the GitHub
+token that opens the PR is the same token that can merge it, so an agent
+willing to `gh pr merge` its own PR can bypass the launcher-side check
+entirely. See [ADR 0016](adr/0016-merge-guard-bounds-drift-not-adversaries.md)
+for that boundary and the two-actor-separation hard mode.
+
+The guard exists **only on the `github` Code Forge merge path**. The
+push-only `git` forge has no launcher in the merge path and therefore no
+guard at all.
+
+Configure it via `settings.branches.mergeGuardPaths` (baked) or the
+`MERGE_GUARD_PATHS` env var (runtime) — see the [flake options
+reference](flake-options.md) for the full knob surface.
 
 #### Create the labels on the Target repo
 

@@ -141,7 +141,7 @@ spindrift dispatch  ─▶  find ready-for-agent issues
                                └─ SPINDRIFT_OUTCOME issue=N pr=<url> status=ready
 
 host launcher  ─▶  merge gate per issue
-                    poll CI → green → agent-complete → apply MERGE_MODE
+                    poll CI → green → agent-complete → merge guard → apply MERGE_MODE
                            → red   → fix boxes (up to MAX_FIX_ATTEMPTS) → re-gate
                            → exhausted → agent-failed (human triage, re-label to retry)
 ```
@@ -150,6 +150,10 @@ The Box implements; the launcher owns the CI-green decision and the merge. A Box
 cannot approve or merge its own PR — that is what makes branch protection
 meaningful. See [How a run works](docs/reference.md#how-a-run-works) for the full
 diagram and label lifecycle.
+
+A green PR whose diff touches a guarded path (`.github/**`, `CLAUDE.md`,
+`AGENTS.md`, `.claude/**`, `.opencode/**` by default) is downgraded to manual
+regardless of `MERGE_MODE` — see [Merge guard](docs/reference.md#merge-guard).
 
 ## Documentation
 
