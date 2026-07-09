@@ -49,18 +49,36 @@
         }:
         let
           revision = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
-          fixtures = import ./nix/fixtures.nix { inherit pkgs nixpkgs system flake-parts revision; };
+          fixtures = import ./nix/fixtures.nix {
+            inherit
+              pkgs
+              nixpkgs
+              system
+              flake-parts
+              revision
+              ;
+          };
         in
         {
           # The dogfood's real packages/apps flow through the flake-parts shim.
           spindrift = {
             prefetch = "go mod download || true";
-            packages = p: [ p.go p.nil ];
+            packages = p: [
+              p.go
+              p.nil
+            ];
             settings.branches.mergeMode = "immediate";
           };
 
           checks = import ./nix/checks.nix {
-            inherit pkgs config fixtures nixpkgs system flake-parts;
+            inherit
+              pkgs
+              config
+              fixtures
+              nixpkgs
+              system
+              flake-parts
+              ;
           };
 
           # For hacking ON the harness itself (host-side).

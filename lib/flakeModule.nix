@@ -37,26 +37,30 @@ let
 
   # Group flakeOptionEntries by their section attr name; the result is
   # { sectionAttr = { knobName = entry; ... }; ... }.
-  sectionKnobs =
-    lib.foldl'
-      (acc: knobName:
-        let
-          entry = flakeOptionEntries.${knobName};
-          sectionAttr = groupToAttr.${entry.group} or null;
-        in
-        if sectionAttr == null then acc
-        else
-          acc // { ${sectionAttr} = (acc.${sectionAttr} or { }) // { ${knobName} = entry; }; }
-      )
-      { }
-      (lib.attrNames flakeOptionEntries);
+  sectionKnobs = lib.foldl' (
+    acc: knobName:
+    let
+      entry = flakeOptionEntries.${knobName};
+      sectionAttr = groupToAttr.${entry.group} or null;
+    in
+    if sectionAttr == null then
+      acc
+    else
+      acc
+      // {
+        ${sectionAttr} = (acc.${sectionAttr} or { }) // {
+          ${knobName} = entry;
+        };
+      }
+  ) { } (lib.attrNames flakeOptionEntries);
 
   # Generate one mkOption per knob; type is nullOr str/int so unset knobs fall
   # through to mkHarness's schema defaults.
   mkKnobOption =
     _key: entry:
     mkOption {
-      type = if builtins.isInt (entry.default or "") then types.nullOr types.int else types.nullOr types.str;
+      type =
+        if builtins.isInt (entry.default or "") then types.nullOr types.int else types.nullOr types.str;
       default = null;
       description = entry.doc;
     };
@@ -133,11 +137,13 @@ in
       };
 
       runtime = mkOption {
-        type = types.nullOr (types.enum [
-          "podman"
-          "docker"
-          "bwrap"
-        ]);
+        type = types.nullOr (
+          types.enum [
+            "podman"
+            "docker"
+            "bwrap"
+          ]
+        );
         default = null;
         description = "Runner the launcher commands drive: OCI runtimes (podman/docker) or the daemonless bubblewrap runner (bwrap, Linux-only).";
       };
@@ -166,27 +172,25 @@ in
       # Flatten settings.<section>.<knob> to a flat attrset, then drop nulls so
       # mkHarness receives only the knobs the Consumer explicitly set and supplies
       # its own schema defaults for the rest.
-      runDefaults =
-        lib.filterAttrs (_: v: v != null)
-          (lib.foldl' lib.mergeAttrs { }
-            (lib.mapAttrsToList (_section: knobs: knobs) cfg.settings));
+      runDefaults = lib.filterAttrs (_: v: v != null) (
+        lib.foldl' lib.mergeAttrs { } (lib.mapAttrsToList (_section: knobs: knobs) cfg.settings)
+      );
       # Forward only the options the Consumer actually set; the rest fall
       # through to mkHarness's defaults.
-      args =
-        {
-          inherit system;
-          nixpkgs = cfg.nixpkgs;
-          revision = self.shortRev or self.dirtyShortRev or "unknown";
-        }
-        // lib.optionalAttrs (cfg.overlays != null) { inherit (cfg) overlays; }
-        // lib.optionalAttrs (cfg.config != null) { inherit (cfg) config; }
-        // lib.optionalAttrs (cfg.packages != null) { inherit (cfg) packages; }
-        // lib.optionalAttrs (cfg.prefetch != null) { inherit (cfg) prefetch; }
-        // lib.optionalAttrs (cfg.prompt != null) { inherit (cfg) prompt; }
-        // lib.optionalAttrs (cfg.skills != null) { inherit (cfg) skills; }
-        // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; }
-        // lib.optionalAttrs (cfg.runtime != null) { inherit (cfg) runtime; }
-        // lib.optionalAttrs (cfg.nixInBox != null) { inherit (cfg) nixInBox; };
+      args = {
+        inherit system;
+        nixpkgs = cfg.nixpkgs;
+        revision = self.shortRev or self.dirtyShortRev or "unknown";
+      }
+      // lib.optionalAttrs (cfg.overlays != null) { inherit (cfg) overlays; }
+      // lib.optionalAttrs (cfg.config != null) { inherit (cfg) config; }
+      // lib.optionalAttrs (cfg.packages != null) { inherit (cfg) packages; }
+      // lib.optionalAttrs (cfg.prefetch != null) { inherit (cfg) prefetch; }
+      // lib.optionalAttrs (cfg.prompt != null) { inherit (cfg) prompt; }
+      // lib.optionalAttrs (cfg.skills != null) { inherit (cfg) skills; }
+      // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; }
+      // lib.optionalAttrs (cfg.runtime != null) { inherit (cfg) runtime; }
+      // lib.optionalAttrs (cfg.nixInBox != null) { inherit (cfg) nixInBox; };
       harness = mkHarness args;
     in
     {

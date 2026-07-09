@@ -132,17 +132,29 @@ let
         scout = {
           description = "Map relevant files, seams, and tests; return a structured brief";
           prompt = "";
-          tools = [ "Read" "Bash" "WebFetch" "WebSearch" "Glob" "Grep" ];
+          tools = [
+            "Read"
+            "Bash"
+            "WebFetch"
+            "WebSearch"
+            "Glob"
+            "Grep"
+          ];
           model = sm;
         };
         reviewer = {
           description = "Review the branch diff for spec compliance and coding standards";
           prompt = "";
-          tools = [ "Read" "Bash" "WebFetch" ];
+          tools = [
+            "Read"
+            "Bash"
+            "WebFetch"
+          ];
           model = rm;
         };
       }
-    else "";
+    else
+      "";
 
   # Version sourced from the release-please manifest so mkHarness always tracks
   # the bot-maintained source of truth (ADR-0010).
@@ -213,7 +225,9 @@ let
     # AGENTS_JSON_TEMPLATE is baked as a fixed value (not a :-default) because it
     # is derived from the configured models, not a standalone knob.
     text =
-      "AGENTS_JSON_TEMPLATE=" + lib.escapeShellArg agentsJsonTemplate + "\n"
+      "AGENTS_JSON_TEMPLATE="
+      + lib.escapeShellArg agentsJsonTemplate
+      + "\n"
       + renderDefaultsPreamble { }
       + stripShebang (builtins.readFile ../agent/entrypoint.sh);
   };
@@ -235,7 +249,9 @@ let
     ${lib.optionalString (skills != [ ]) ''
       mkdir -p $out/home/agent/.claude/skills
       ${lib.concatMapStrings (f: ''
-        cp ${f} $out/home/agent/.claude/skills/${if lib.isDerivation f then f.name else builtins.baseNameOf f}
+        cp ${f} $out/home/agent/.claude/skills/${
+          if lib.isDerivation f then f.name else builtins.baseNameOf f
+        }
       '') skills}
     ''}
   '';
@@ -287,27 +303,33 @@ let
       agentEnv
       agentFiles
     ];
-    extraCommands =
-      ''
-        mkdir -p tmp home/agent work etc
-        chmod 1777 tmp
-        cp ${passwdFile} etc/passwd
-        cp ${groupFile} etc/group
-      ''
-      # Make nix operable in an unprivileged throwaway container: a single-user,
-      # sandbox-off nix.conf and a store DB registered from the baked closure, so
-      # `nix flake check` reuses the image's store instead of treating it as empty.
-      + lib.optionalString nixInBox ''
-        mkdir -p etc/nix nix/var/nix/db nix/var/nix/gcroots nix/var/nix/profiles nix/var/nix/temproots nix/var/log/nix
-        printf '%s\n' \
-          'experimental-features = nix-command flakes' \
-          'sandbox = false' \
-          'filter-syscalls = false' > etc/nix/nix.conf
-        export NIX_REMOTE="local?root=$PWD"
-        # buildPackages.nix runs at image-build time on the builder host;
-        # pkgs.nix (above) is what gets baked into the container's PATH.
-        ${pkgs.buildPackages.nix}/bin/nix-store --load-db < ${pkgs.closureInfo { rootPaths = [ agentEnv agentFiles ]; }}/registration
-      '';
+    extraCommands = ''
+      mkdir -p tmp home/agent work etc
+      chmod 1777 tmp
+      cp ${passwdFile} etc/passwd
+      cp ${groupFile} etc/group
+    ''
+    # Make nix operable in an unprivileged throwaway container: a single-user,
+    # sandbox-off nix.conf and a store DB registered from the baked closure, so
+    # `nix flake check` reuses the image's store instead of treating it as empty.
+    + lib.optionalString nixInBox ''
+      mkdir -p etc/nix nix/var/nix/db nix/var/nix/gcroots nix/var/nix/profiles nix/var/nix/temproots nix/var/log/nix
+      printf '%s\n' \
+        'experimental-features = nix-command flakes' \
+        'sandbox = false' \
+        'filter-syscalls = false' > etc/nix/nix.conf
+      export NIX_REMOTE="local?root=$PWD"
+      # buildPackages.nix runs at image-build time on the builder host;
+      # pkgs.nix (above) is what gets baked into the container's PATH.
+      ${pkgs.buildPackages.nix}/bin/nix-store --load-db < ${
+        pkgs.closureInfo {
+          rootPaths = [
+            agentEnv
+            agentFiles
+          ];
+        }
+      }/registration
+    '';
     # chown must be recorded in the image layer, so it runs under fakeroot after
     # the tree is staged. HOME and the clone dir must be writable by the agent.
     fakeRootCommands = ''
@@ -366,14 +388,18 @@ let
   # flakeOption schema entries and emits `[export ]VAR="${VAR:-<baked>}"` lines.
   # A matching env var (or harness.env, sourced by the wrapper) still wins at runtime.
   renderDefaultsPreamble =
-    { export ? false }:
+    {
+      export ? false,
+    }:
     lib.concatStrings (
-      lib.mapAttrsToList (key: entry:
+      lib.mapAttrsToList (
+        key: entry:
         let
           value = mergedDefaults.${key};
           prefix = if export then "export " else "";
         in
-        ''${prefix}${entry.env}="''${${entry.env}:-${toString value}}"
+        ''
+          ${prefix}${entry.env}="''${${entry.env}:-${toString value}}"
         ''
       ) flakeOptionEntries
     );
@@ -470,16 +496,18 @@ let
 
   # Deprecated build alias: prints a one-line stderr notice and execs the same
   # build logic. Kept for one release (ADR-0010); removal target: next minor after 0.1.x.
-  build = (hostPkgs.writeShellApplication {
-    name = "build";
-    runtimeInputs = [ hostPkgs.coreutils ];
-    text = goBuildPreamble + ''
-      >&2 echo "spindrift: 'nix run .#build' is deprecated; use 'spindrift build' instead. Removal: v0.2.0. See MIGRATING.md."
-      exec ${launcherBin}/bin/launcher build
-    '';
-  }).overrideAttrs (_: {
-    meta.license = lib.licenses.mit;
-  });
+  build =
+    (hostPkgs.writeShellApplication {
+      name = "build";
+      runtimeInputs = [ hostPkgs.coreutils ];
+      text = goBuildPreamble + ''
+        >&2 echo "spindrift: 'nix run .#build' is deprecated; use 'spindrift build' instead. Removal: v0.2.0. See MIGRATING.md."
+        exec ${launcherBin}/bin/launcher build
+      '';
+    }).overrideAttrs
+      (_: {
+        meta.license = lib.licenses.mit;
+      });
 
   # Shared shell body used by both the spindrift CLI and the deprecated run alias.
   # Bakes nix-computed config into env vars, sources harness.env for runtime
@@ -508,12 +536,20 @@ let
   # mirror groupOrder in cmd/launcher/flags.go; keep the two lists in step).
   manpageRoff =
     let
-      inherit (lib) filter sort concatMapStrings replaceStrings toLower elem;
+      inherit (lib)
+        filter
+        sort
+        concatMapStrings
+        replaceStrings
+        toLower
+        elem
+        ;
       esc = replaceStrings [ "\\" ] [ "\\\\" ]; # neutralise stray backslashes
       escFlag = f: replaceStrings [ "-" ] [ "\\-" ] f; # roff renders \- as a minus
       toKebab = env: toLower (replaceStrings [ "_" ] [ "-" ] env);
       flagKind = e: if builtins.isInt (e.default or null) then "int" else "string";
-      flagDflt = e: if e ? default then (if builtins.isInt e.default then toString e.default else e.default) else "";
+      flagDflt =
+        e: if e ? default then (if builtins.isInt e.default then toString e.default else e.default) else "";
       nonSecret = filter (e: !(e.secret or false)) (lib.attrValues schema);
       secretEntries = filter (e: e.secret or false) (lib.attrValues schema);
       # Display order of OPTIONS headings; mirrors groupOrder in flags.go.
@@ -533,7 +569,8 @@ let
       optionBlock =
         e:
         let
-          names = "\\-\\-" + escFlag (toKebab e.env) + (if e ? alias then ", \\-\\-" + escFlag e.alias else "");
+          names =
+            "\\-\\-" + escFlag (toKebab e.env) + (if e ? alias then ", \\-\\-" + escFlag e.alias else "");
           dflt = flagDflt e;
           dfltSentence = if dflt == "" then "No default." else "Default: " + esc dflt + ".";
         in
@@ -548,8 +585,9 @@ let
         e:
         ".TP\n.B ${e.env}\n\\&${esc e.doc}. Supply via the environment or \\-\\-${toKebab e.env}\\-file (reads the value from a file path; takes precedence over the environment).\n";
     in
-    assert lib.assertMsg (unknownGroups == [ ])
-      "manpageRoff: knob group(s) absent from groupOrder: ${lib.concatStringsSep ", " unknownGroups}";
+    assert lib.assertMsg (
+      unknownGroups == [ ]
+    ) "manpageRoff: knob group(s) absent from groupOrder: ${lib.concatStringsSep ", " unknownGroups}";
     ''
       .TH SPINDRIFT 1 "${spindriftVersion}" "spindrift ${spindriftVersion}" "Spindrift Manual"
       .SH NAME
@@ -637,19 +675,21 @@ let
   # launcher. Exposed as packages.spindrift, apps.default, and in devShells.
   # The man page is joined into the same output so `man spindrift` resolves
   # from the dev shell (nixpkgs adds share/man to MANPATH) and on install.
-  spindriftBin = (hostPkgs.writeShellApplication {
-    name = "spindrift";
-    runtimeInputs = with hostPkgs; [
-      gh
-      git
-      coreutils
-    ];
-    text = runShellBody + ''
-      exec ${launcherBin}/bin/launcher "$@"
-    '';
-  }).overrideAttrs (_: {
-    meta.license = lib.licenses.mit;
-  });
+  spindriftBin =
+    (hostPkgs.writeShellApplication {
+      name = "spindrift";
+      runtimeInputs = with hostPkgs; [
+        gh
+        git
+        coreutils
+      ];
+      text = runShellBody + ''
+        exec ${launcherBin}/bin/launcher "$@"
+      '';
+    }).overrideAttrs
+      (_: {
+        meta.license = lib.licenses.mit;
+      });
 
   spindrift = hostPkgs.symlinkJoin {
     name = "spindrift";
@@ -662,20 +702,22 @@ let
 
   # Deprecated run alias: prints a one-line stderr notice and execs spindrift dispatch.
   # Kept for one release (ADR-0010); removal target: next minor after 0.1.x.
-  run = (hostPkgs.writeShellApplication {
-    name = "run";
-    runtimeInputs = with hostPkgs; [
-      gh
-      git
-      coreutils
-    ];
-    text = runShellBody + ''
-      >&2 echo "spindrift: 'nix run .#run' is deprecated; use 'spindrift dispatch' instead. Removal: v0.2.0. See MIGRATING.md."
-      exec ${launcherBin}/bin/launcher dispatch "$@"
-    '';
-  }).overrideAttrs (_: {
-    meta.license = lib.licenses.mit;
-  });
+  run =
+    (hostPkgs.writeShellApplication {
+      name = "run";
+      runtimeInputs = with hostPkgs; [
+        gh
+        git
+        coreutils
+      ];
+      text = runShellBody + ''
+        >&2 echo "spindrift: 'nix run .#run' is deprecated; use 'spindrift dispatch' instead. Removal: v0.2.0. See MIGRATING.md."
+        exec ${launcherBin}/bin/launcher dispatch "$@"
+      '';
+    }).overrideAttrs
+      (_: {
+        meta.license = lib.licenses.mit;
+      });
 
   # Realizing the Linux image on darwin needs a Linux builder, so only offer it
   # as a package where it can actually build; the launcher commands (which merely
@@ -684,44 +726,43 @@ let
   isLinux = system == linuxSystem;
 in
 if unknownDefaultKeys != [ ] then
-  throw
-    "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
+  throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
 else
-{
-  inherit
-    image
-    agentEnv
-    agentFiles
-    build
-    run
-    spindrift
-    manpage
-    imagePath
-    promptDir
-    skillsDir
-    ;
+  {
+    inherit
+      image
+      agentEnv
+      agentFiles
+      build
+      run
+      spindrift
+      manpage
+      imagePath
+      promptDir
+      skillsDir
+      ;
 
-  packages = {
-    inherit build run spindrift;
-    spindrift-manpage = manpage;
+    packages = {
+      inherit build run spindrift;
+      spindrift-manpage = manpage;
+    }
+    # The OCI image is not relevant for the bwrap runner (no image build/load).
+    // lib.optionalAttrs (isLinux && runtime != "bwrap") { agent-image = image; };
+
+    apps = {
+      build = {
+        type = "app";
+        program = "${build}/bin/build";
+      };
+      # apps.default is the primary entry point: spindrift CLI.
+      default = {
+        type = "app";
+        program = "${spindrift}/bin/spindrift";
+      };
+      # Deprecated: kept for one release. Prints a notice and execs spindrift dispatch.
+      run = {
+        type = "app";
+        program = "${run}/bin/run";
+      };
+    };
   }
-  # The OCI image is not relevant for the bwrap runner (no image build/load).
-  // lib.optionalAttrs (isLinux && runtime != "bwrap") { agent-image = image; };
-
-  apps = {
-    build = {
-      type = "app";
-      program = "${build}/bin/build";
-    };
-    # apps.default is the primary entry point: spindrift CLI.
-    default = {
-      type = "app";
-      program = "${spindrift}/bin/spindrift";
-    };
-    # Deprecated: kept for one release. Prints a notice and execs spindrift dispatch.
-    run = {
-      type = "app";
-      program = "${run}/bin/run";
-    };
-  };
-}

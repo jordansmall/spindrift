@@ -1,4 +1,10 @@
-{ pkgs, nixpkgs, system, flake-parts, revision ? "unknown" }:
+{
+  pkgs,
+  nixpkgs,
+  system,
+  flake-parts,
+  revision ? "unknown",
+}:
 let
   # The launchers pin the real `gh` via runtimeInputs, which would shadow
   # a PATH-injected fake; so the bats-driven harnesses below overlay `gh`
@@ -31,8 +37,13 @@ let
   harness = import ../lib/mkHarness.nix {
     inherit nixpkgs system revision;
     prefetch = "go mod download || true";
-    packages = p: [ p.go p.nil ];
-    defaults = { mergeMode = "immediate"; };
+    packages = p: [
+      p.go
+      p.nil
+    ];
+    defaults = {
+      mergeMode = "immediate";
+    };
   };
 
   # The template's config as a direct call with revision = "unknown".
