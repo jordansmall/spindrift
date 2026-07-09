@@ -56,7 +56,7 @@
           spindrift = {
             prefetch = "go mod download || true";
             packages = p: [ p.go ];
-            defaults.mergeMode = "immediate";
+            settings.branches.mergeMode = "immediate";
           };
 
           checks = import ./nix/checks.nix {

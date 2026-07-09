@@ -47,13 +47,13 @@
             prompt = builtins.readFile ./prompts/issue-prompt.md;
 
             # ---- Non-secret run defaults (optional) --------------------------
-            # A matching env var still wins at runtime. Secrets and the target
-            # (REPO_SLUG, GH_TOKEN, auth) are runtime env — see harness.env.example.
-            # defaults = {
-            #   label = "ready-for-agent";
-            #   baseBranch = "main";
-            #   maxParallel = 3;
-            #   branchPrefix = "agent/issue-";
+            # Grouped by section; a matching env var still wins at runtime.
+            # Secrets and the target (REPO_SLUG, GH_TOKEN, auth) are runtime
+            # env — see harness.env.example.
+            # settings = {
+            #   branches = {
+            #     mergeMode = "immediate";  # immediate | auto | manual (default)
+            #   };
             # };
           };
 
