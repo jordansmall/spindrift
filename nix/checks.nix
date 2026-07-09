@@ -929,7 +929,8 @@ in
         mkdir img && tar -xf ${nonRustHarness.image} -C img
         layer="$(jq -r '.[0].Layers[-1]' img/manifest.json)"
         uid=$(tar --numeric-owner -tvf "img/$layer" \
-          | awk '/nix\/var\/nix\/db\/?$/ { split($2,a,"/"); print a[1]; exit }')
+          | awk '/nix\/var\/nix\/db\/?$/ { split($2,a,"/"); print a[1]; exit }' \
+          || true)
         [ "$uid" = "1000" ] || {
           echo "nix/var/nix/db is not owned by uid 1000 (got: '$uid')" >&2
           exit 1
