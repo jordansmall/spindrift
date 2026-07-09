@@ -53,6 +53,12 @@ setup() {
   grep -q -- "-v $override:/agent/prompts" "$PODMAN_LOG"
 }
 
+@test "scout prompt forbids mid-turn narration between tool calls" {
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/scout-prompt.md"
+  grep -qi 'between tool calls' "$prompt"
+}
+
 @test "WATCH CI section uses GraphQL statusCheckRollup not gh pr checks" {
   # gh pr checks uses the check-runs REST endpoint which 403s under
   # fine-grained PATs; the prompt must use statusCheckRollup (GraphQL).
