@@ -51,12 +51,14 @@
             # Secrets and the target (REPO_SLUG, GH_TOKEN, auth) are runtime
             # env — see harness.env.example. Full reference: docs/flake-options.md
             # settings = {
-            #   issueDiscovery  = { label          = "ready-for-agent";
-            #                       issueTracker   = "github";
-            #                       localIssuesDir = ".spindrift/issues"; };
-            #   lifecycleLabels = { inProgressLabel = "agent-in-progress";
-            #                       failedLabel     = "agent-failed";
-            #                       completeLabel   = "agent-complete"; };
+            #   issueDiscovery  = { label               = "ready-for-agent";
+            #                       issueTracker        = "github";
+            #                       localIssuesDir      = ".spindrift/issues";
+            #                       jiraIncludeComments = ""; };
+            #   lifecycleLabels = { inProgressLabel   = "agent-in-progress";
+            #                       failedLabel       = "agent-failed";
+            #                       completeLabel     = "agent-complete";
+            #                       jiraStatusMapping = ""; };
             #   branches        = { baseBranch        = "main";
             #                       branchPrefix      = "agent/issue-";
             #                       mergeGuardPaths   = ".github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
@@ -81,11 +83,14 @@
             #                       pidsLimit            = "512";
             #                       podmanNetwork        = "";
             #                       bwrapUnshareNet      = ""; };
-            #   repository      = { repoSlug      = "owner/repo";
-            #                       gitUserName   = "";
-            #                       gitUserEmail  = "";
+            #   repository      = { repoSlug           = "owner/repo";
+            #                       gitUserName        = "";
+            #                       gitUserEmail       = "";
             #                       codeForge          = "github";
-            #                       codeForgeRemoteURL = ""; };
+            #                       codeForgeRemoteURL = "";
+            #                       jiraBaseURL        = "";
+            #                       jiraProjectKey     = "";
+            #                       jiraEmail          = ""; };
             # };
           };
 
