@@ -78,6 +78,28 @@ let
     packages = p: [ p.hello ];
   };
 
+  # A scout-only Consumer: only the scout model is configured, proving each
+  # subagent is baked into --agents independently rather than as an
+  # all-or-nothing pair. Eval-only, consumed by agents-json-baked.
+  scoutOnlyHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      scoutModel = "solo-scout";
+      reviewModel = "";
+    };
+    packages = p: [ p.hello ];
+  };
+
+  # The reviewer-only mirror of scoutOnlyHarness.
+  reviewerOnlyHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      scoutModel = "";
+      reviewModel = "solo-reviewer";
+    };
+    packages = p: [ p.hello ];
+  };
+
   # Exercise the run knobs (#3): non-default baked `defaults` and a
   # docker `runtime`. Eval-only, consumed by the checks below.
   customHarness = import ../lib/mkHarness.nix {
@@ -224,6 +246,8 @@ in
     harness
     nonRustHarness
     leanHarness
+    scoutOnlyHarness
+    reviewerOnlyHarness
     customHarness
     dockerHarness
     bwrapHarness
