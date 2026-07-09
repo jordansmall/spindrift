@@ -247,6 +247,7 @@ func TestGitClient_Merge_SetsCommitIdentityOnTempClone(t *testing.T) {
 
 	verify := t.TempDir()
 	gitRun(t, "", "clone", bare, verify)
+	gitRun(t, verify, "checkout", "main")
 	out := exec.Command("git", "-C", verify, "log", "-1", "--format=%an <%ae>", "main")
 	got, err := out.Output()
 	if err != nil {
