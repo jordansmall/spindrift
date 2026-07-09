@@ -121,7 +121,7 @@
     env = "SCOUT_MODEL";
     group = "Models";
     default = "claude-haiku-4-5-20251001";
-    doc = "scout subagent model tier; empty omits the scout/reviewer --agents from the claude invocation";
+    doc = "scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set";
     flakeOption = true;
     boxEnv = true;
   };
@@ -129,7 +129,7 @@
     env = "REVIEW_MODEL";
     group = "Models";
     default = "claude-opus-4-8";
-    doc = "reviewer subagent model tier; empty omits the scout/reviewer --agents from the claude invocation";
+    doc = "reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set";
     flakeOption = true;
     boxEnv = true;
   };

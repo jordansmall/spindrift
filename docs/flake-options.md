@@ -51,8 +51,8 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | attr path | env var | default | description |
 |---|---|---|---|
 | `settings.models.model` | `MODEL` | `claude-sonnet-5` | primary (implementor) Claude model for the agent (zero-rebuild runtime switch) |
-| `settings.models.reviewModel` | `REVIEW_MODEL` | `claude-opus-4-8` | reviewer subagent model tier; empty omits the scout/reviewer --agents from the claude invocation |
-| `settings.models.scoutModel` | `SCOUT_MODEL` | `claude-haiku-4-5-20251001` | scout subagent model tier; empty omits the scout/reviewer --agents from the claude invocation |
+| `settings.models.reviewModel` | `REVIEW_MODEL` | `claude-opus-4-8` | reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set |
+| `settings.models.scoutModel` | `SCOUT_MODEL` | `claude-haiku-4-5-20251001` | scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set |
 
 ## Self-healing & retries (`settings.selfHealing`)
 
