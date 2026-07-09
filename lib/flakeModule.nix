@@ -21,8 +21,7 @@ let
 
   # Map from groupOrder heading (cmd/launcher/flags.go) to the attr name used
   # under perSystem.spindrift.settings.  Sections with no flakeOption knobs
-  # (Self-healing & retries, Repository & identity, Prompt & skill iteration)
-  # never appear as settings sections.
+  # (Prompt & skill iteration) are silently skipped when rendering.
   groupToAttr = {
     "Issue discovery" = "issueDiscovery";
     "Lifecycle labels" = "lifecycleLabels";
