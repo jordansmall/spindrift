@@ -639,7 +639,7 @@ EOF
   [ "$status" -eq 2 ]
   ! grep -q 'pr merge' "$GH_LOG"
   ! grep -q 'agent-complete' "$GH_LOG"
-  ! grep -q 'agent-failed' "$GH_LOG"
+  ! grep -q -- 'agent-failed' "$GH_LOG"
 }
 
 @test "reconcile: stranded in-progress issue with no open PR is left untouched" {
@@ -653,7 +653,7 @@ EOF
   [ "$status" -eq 2 ]
   ! grep -q 'pr merge' "$GH_LOG"
   ! grep -q 'agent-complete' "$GH_LOG"
-  ! grep -q 'agent-failed' "$GH_LOG"
+  ! grep -q -- 'agent-failed' "$GH_LOG"
 }
 
 # --- engage subcommand (issue #195) ------------------------------------------
@@ -684,7 +684,7 @@ EOF
   [[ "$output" == *"status=skipped"* ]]
   ! grep -q 'pr merge' "$GH_LOG"
   ! grep -q 'agent-complete' "$GH_LOG"
-  ! grep -q 'agent-failed' "$GH_LOG"
+  ! grep -q -- 'agent-failed' "$GH_LOG"
 }
 
 @test "recover: no open PR exits non-zero without label churn (via issue #195)" {
@@ -697,7 +697,7 @@ EOF
   [[ "$output" == *"status=skipped"* ]]
   ! grep -q 'pr merge' "$GH_LOG"
   ! grep -q 'agent-complete' "$GH_LOG"
-  ! grep -q 'agent-failed' "$GH_LOG"
+  ! grep -q -- 'agent-failed' "$GH_LOG"
 }
 
 # --- recover subcommand (issue #281) -----------------------------------------
@@ -728,7 +728,7 @@ EOF
   [[ "$output" == *"status=skipped"* ]]
   ! grep -q 'pr merge' "$GH_LOG"
   ! grep -q 'agent-complete' "$GH_LOG"
-  ! grep -q 'agent-failed' "$GH_LOG"
+  ! grep -q -- 'agent-failed' "$GH_LOG"
 }
 
 @test "recover: no open PR exits non-zero without label churn" {
@@ -741,7 +741,7 @@ EOF
   [[ "$output" == *"status=skipped"* ]]
   ! grep -q 'pr merge' "$GH_LOG"
   ! grep -q 'agent-complete' "$GH_LOG"
-  ! grep -q 'agent-failed' "$GH_LOG"
+  ! grep -q -- 'agent-failed' "$GH_LOG"
 }
 
 # --- Outcome verification (issue #51) ----------------------------------------
