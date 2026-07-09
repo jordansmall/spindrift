@@ -36,6 +36,21 @@ worktree per task keeps each change isolated on its own branch from the start.
 git worktree add ../spindrift-<task> -b <branch> origin/main
 ```
 
+## Nix edits
+
+Before finishing any task that touches `*.nix` files, run `nil diagnostics` on
+each changed file and resolve all errors:
+
+```sh
+nil diagnostics path/to/file.nix
+```
+
+`nil diagnostics` exits non-zero on errors (warnings still exit 0). It checks
+syntax, duplicate attribute keys, undefined variables, and unused bindings
+without accessing the nix store, so it works as the `agent` user (uid 1000)
+inside the box even when `nix flake check` is unavailable. It complements, but
+does not replace, `nix flake check` in CI (which catches evaluation errors).
+
 ## Running `gh`
 
 `gh` commands need network + the macOS keychain, which the command sandbox blocks
