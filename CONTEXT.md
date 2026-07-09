@@ -13,7 +13,7 @@ _Avoid_: tool, framework, runner (the runner is specifically the container).
 
 **Consumer flake**:
 The downstream flake that imports the Harness and configures it (toolchain,
-packages, prompt, defaults). A role, not necessarily a separate repo — it may be
+packages, prompt, settings). A role, not necessarily a separate repo — it may be
 the same repo as the Target repo.
 _Avoid_: client, user repo, parent flake.
 

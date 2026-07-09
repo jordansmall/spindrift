@@ -68,20 +68,35 @@ knobs. Unset options fall through to `mkHarness`'s own defaults.
 | `prompt`    | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`) |
 | `scoutPrompt` / `reviewPrompt` | string           | bundled starters   | system prompts for the read-only scout and reviewer subagents; baked in, overridable via `SPINDRIFT_PROMPT_DIR` |
 | `skills`    | list of paths               | `[]`               | skill files baked into the image at `/home/agent/.claude/skills` so the headless agent can `/invoke` them; `SPINDRIFT_SKILLS_DIR` mounts over them at runtime |
-| `defaults`  | submodule (all `flakeOption` env knobs) | see below | non-secret run defaults baked into the `spindrift` CLI |
+| `settings`  | submodule, grouped by section (see below) | `{}` | non-secret run defaults baked into the `spindrift` CLI |
 | `runtime`   | `"podman"` \| `"docker"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime, or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
 | `nixInBox`  | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
 | `nixBuilderImage` | string                | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
 
-The `defaults` submodule bakes the run knobs into the `spindrift` CLI; a matching
+The `settings` submodule bakes run knobs into the `spindrift` CLI; a matching
 env var still wins at runtime, so one built command can be re-pointed without a
-rebuild. It exposes every consumer-tunable knob from `lib/env-schema.nix` (the
-single source of truth for the runtime env surface). Key baked defaults:
-`label = "ready-for-agent"`, `baseBranch = "main"`, `maxParallel = 3`,
-`branchPrefix = "agent/issue-"`, `inProgressLabel = "agent-in-progress"`,
-`failedLabel = "agent-failed"`, `completeLabel = "agent-complete"`,
-`mergeMode = "manual"`, `model = "claude-sonnet-4-6"`,
-`scoutModel = "claude-haiku-4-5-20251001"`, `reviewModel = "claude-opus-4-8"`.
+rebuild. Knobs are grouped by section — the same headings as `spindrift --help
+--all` — so the flake surface is self-documenting and stays in lockstep with the
+CLI help. Sections and knobs derive from `lib/env-schema.nix`; unknown section
+or knob names are rejected at eval time by the NixOS module system.
+
+```nix
+settings = {
+  issueDiscovery  = { label = "ready-for-agent"; };
+  lifecycleLabels = { inProgressLabel = "agent-in-progress";
+                      failedLabel     = "agent-failed";
+                      completeLabel   = "agent-complete"; };
+  branches        = { baseBranch = "main"; branchPrefix = "agent/issue-";
+                      mergeMode  = "manual"; };
+  concurrency     = { maxParallel = 3; };
+  models          = { model = "claude-sonnet-4-6";
+                      scoutModel  = "claude-haiku-4-5-20251001";
+                      reviewModel = "claude-opus-4-8"; };
+  sandbox         = { devShellName = "default"; devShellProbeTimeout = 300;
+                      memoryLimit = "4g"; pidsLimit = "512"; };
+};
+```
+
 `inProgressLabel`/`failedLabel`/`completeLabel` drive the
 [label lifecycle](#how-a-run-works); `mergeMode` is the post-green
 [merge policy](#how-a-run-works) (`manual`/`immediate`/`auto`); `model` is the
@@ -245,14 +260,14 @@ a rebuild (ADR 0001):
 | `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | hot-override the mounted prompt dir     |
 | `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override the mounted skills dir     |
 
-Every `defaults`-baked knob above can be re-pointed at runtime; the env var
+Every `settings`-baked knob above can be re-pointed at runtime; the env var
 wins over whatever was baked. Commit identity is **required**: an override wins,
 else the host's `git config user.name`/`user.email` is inherited; if neither is
 set, `spindrift dispatch` exits rather than committing under an arbitrary identity.
 
 ### Advanced tuning
 
-These knobs are runtime-only (no `defaults` baking) unless noted, and rarely
+These knobs are runtime-only (no `settings` baking) unless noted, and rarely
 need changing. See `lib/env-schema.nix` for the authoritative list.
 
 | var                    | default | meaning                                                        |
@@ -367,8 +382,8 @@ ready-for-agent ──dispatch──▶ agent-in-progress ─────CI gree
   where it left off on the next run, without a fresh agent pass.
 
 Rename any of these with the `inProgressLabel` / `failedLabel` / `completeLabel`
-`defaults` (baked) or the `IN_PROGRESS_LABEL` / `FAILED_LABEL` / `COMPLETE_LABEL`
-env vars (runtime).
+knobs under `settings.lifecycleLabels` (baked) or the
+`IN_PROGRESS_LABEL` / `FAILED_LABEL` / `COMPLETE_LABEL` env vars (runtime).
 
 #### Create the labels on the Target repo
 
