@@ -31,6 +31,10 @@ pkgs.writeShellApplication {
   runtimeInputs = [ pkgs.git ];
   text = ''
     root="$(git rev-parse --show-toplevel)"
+    if [ ! -f "$root/lib/env-schema.nix" ]; then
+      echo "regen: $root doesn't look like the spindrift repo (no lib/env-schema.nix); refusing to write" >&2
+      exit 1
+    fi
 
     write() {
       printf '%s' "$2" > "$root/$1"
