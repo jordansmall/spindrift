@@ -55,6 +55,7 @@ type Client interface {
 	PRForBranch(branch string) (string, bool, error) // any state; false = no PR
 	PRState(url string) (string, error)              // MERGED check
 	CheckState(url string) (RollupState, error)      // aggregate statusCheckRollup
+	ListPRFiles(url string) ([]string, error)        // changed paths: added, modified, and deleted alike
 	Merge(url string) error                          // rebase + delete branch
 	Rebase(prURL string) error                       // checkout head, rebase onto base, force-push
 	CanAutoMerge() (bool, error)                     // true if the repo allows auto-merge

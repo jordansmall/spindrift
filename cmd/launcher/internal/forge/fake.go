@@ -33,7 +33,11 @@ type Fake struct {
 	branchPRs map[string]string // branch → PR URL
 	prStates  map[string]string // URL → OPEN/MERGED/CLOSED
 	checkQ    map[string][]RollupState
-	checkErrQ map[string][]error // per-call error queue; nil entry = consult checkQ
+	checkErrQ map[string][]error  // per-call error queue; nil entry = consult checkQ
+	prFiles   map[string][]string // URL → scripted ListPRFiles result
+
+	// PRFilesErr, if non-nil, is returned by every ListPRFiles call.
+	PRFilesErr error
 
 	// MergeErr, if non-nil, is returned by every Merge call (after MergeErrs is drained).
 	MergeErr error
@@ -91,6 +95,7 @@ func NewFake() *Fake {
 		prStates:  map[string]string{},
 		checkQ:    map[string][]RollupState{},
 		checkErrQ: map[string][]error{},
+		prFiles:   map[string][]string{},
 	}
 }
 
@@ -134,6 +139,24 @@ func (f *Fake) SetCheckStateErrors(url string, errs []error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.checkErrQ[url] = append([]error(nil), errs...)
+}
+
+// SetPRFiles scripts the ListPRFiles result for the given PR URL.
+func (f *Fake) SetPRFiles(url string, files []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prFiles[url] = append([]string(nil), files...)
+}
+
+func (f *Fake) ListPRFiles(url string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.PRFilesErr != nil {
+		return nil, f.PRFilesErr
+	}
+	out := make([]string, len(f.prFiles[url]))
+	copy(out, f.prFiles[url])
+	return out, nil
 }
 
 func (f *Fake) ListIssues(label string) ([]Issue, error) {
