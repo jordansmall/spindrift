@@ -299,6 +299,22 @@ FAKE
   grep -q '# FILE ISSUES' "$CLAUDE_PROMPT_FILE"
 }
 
+# A scout/reviewer-only template (no "filer" key) must not require
+# filer-prompt.md to exist -- the file read has to be gated on the template
+# actually carrying a filer entry, same as the FILE_ISSUES_STEP gate above.
+@test "entrypoint does not require filer-prompt.md when the template omits filer" {
+  local prompt_dir="$BATS_TEST_TMPDIR/prompts"
+  mkdir -p "$prompt_dir"
+  printf 'issue stub\n' >"$prompt_dir/issue-prompt.md"
+  printf 'scout stub\n' >"$prompt_dir/scout-prompt.md"
+  printf 'reviewer stub\n' >"$prompt_dir/review-prompt.md"
+  export PROMPTS_DIR="$prompt_dir"
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"r","model":"opus","prompt":"","tools":["Read"]},"scout":{"description":"s","model":"haiku","prompt":"","tools":["Read"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  jq -e 'has("filer") | not' "$CLAUDE_AGENTS_FILE" >/dev/null
+}
+
 @test "issue prompt has no FILE ISSUES step when the filer is not configured" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]

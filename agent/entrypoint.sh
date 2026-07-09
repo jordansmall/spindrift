@@ -279,7 +279,10 @@ prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
 if [ -n "${AGENTS_JSON_TEMPLATE:-}" ]; then
   scout_prompt="$(_subst "${PROMPTS_DIR}/scout-prompt.md")"
   review_prompt="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
-  filer_prompt="$(_subst "${PROMPTS_DIR}/filer-prompt.md")"
+  filer_prompt=""
+  if printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
+    filer_prompt="$(_subst "${PROMPTS_DIR}/filer-prompt.md")"
+  fi
   agents_json="$(jq -n \
     --argjson template "$AGENTS_JSON_TEMPLATE" \
     --arg scout_prompt "$scout_prompt" \
