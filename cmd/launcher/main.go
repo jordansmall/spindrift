@@ -483,14 +483,29 @@ func applyMergeMode(c config, fc forge.Client, num, pr string, conflictResolveFn
 
 // mergeImmediate attempts to merge the green PR with rebase retry on conflict.
 // It embodies the existing rebase-retry and agent conflict-resolve behaviors.
+//
+// A successful conflict-resolve already rebased and force-pushed the branch,
+// so the next Merge conflict is retried directly (after a brief settle wait
+// for the forge's mergeability snapshot to catch up) instead of invoking
+// Rebase a second time.
 func mergeImmediate(c config, fc forge.Client, num, pr string, conflictResolveFn func(string) error) error {
 	rebaseAttempts := 0
+	skipRebase := false
 	for {
 		err := fc.Merge(pr)
 		if err == nil {
 			return nil
 		}
-		if !errors.Is(err, forge.ErrMergeConflict) || rebaseAttempts >= c.maxRebaseAttempts {
+		if !errors.Is(err, forge.ErrMergeConflict) {
+			return err
+		}
+		if skipRebase {
+			skipRebase = false
+			fmt.Printf("    #%s  pr=%s  status=merge-retry-settle\n", num, pr)
+			time.Sleep(time.Duration(c.mergePollInterval) * time.Second)
+			continue
+		}
+		if rebaseAttempts >= c.maxRebaseAttempts {
 			return err
 		}
 		rebaseAttempts++
@@ -503,6 +518,7 @@ func mergeImmediate(c config, fc forge.Client, num, pr string, conflictResolveFn
 					fmt.Printf("    #%s  pr=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
 					return crErr
 				}
+				skipRebase = true
 			} else {
 				fmt.Printf("    #%s  pr=%s  status=rebase-failed  !! %v\n", num, pr, rbErr)
 				return rbErr

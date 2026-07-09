@@ -228,6 +228,21 @@ func TestMergeImmediate(t *testing.T) {
 			wantConflictResolveCalled: 1,
 		},
 		{
+			// After conflict-resolve succeeds, the forge's mergeability
+			// snapshot is briefly stale and the next Merge still reports a
+			// conflict. The loop must retry Merge directly instead of
+			// invoking Rebase a second time (the box already rebased and
+			// force-pushed).
+			name:                      "conflict-resolve succeeds → stale conflict on retry does not re-rebase",
+			maxRebaseAttempts:         3,
+			mergeErrs:                 []error{forge.ErrMergeConflict, forge.ErrMergeConflict, nil},
+			rebaseErr:                 forge.ErrMergeConflict,
+			wantErr:                   false,
+			wantMerged:                true,
+			wantRebaseCalled:          1,
+			wantConflictResolveCalled: 1,
+		},
+		{
 			name:                      "rebase conflict → no conflict-resolve fn → error returned",
 			maxRebaseAttempts:         3,
 			mergeErrs:                 []error{forge.ErrMergeConflict},
