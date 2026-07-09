@@ -14,6 +14,9 @@ branch `${BRANCH}`. Resolve them and complete the rebase.
 5. When the rebase finishes cleanly (`git status` shows no rebase in progress),
    you are done. Do NOT open a PR or push — the caller handles that.
 
+Do not narrate between tool calls; the only text you output is the short
+explanation described below if the conflict is unresolvable.
+
 # SIGNALS
 
 - The rebase is complete when `.git/rebase-merge` and `.git/rebase-apply`
