@@ -334,6 +334,12 @@ func (j *jiraClient) TransitionState(num string, from, to DispatchState) error {
 	if target, ok := j.cfg.StatusMapping[to]; ok && target != "" {
 		err := j.transitionByStatus(num, target)
 		if err == nil {
+			// ListIssues matches a state by status OR its fallback label, so
+			// an issue discovered via the from label (a prior fallback, or
+			// an operator-applied label) must not still carry it after a
+			// successful native-status transition — best-effort; a cleanup
+			// failure must not undo the transition that already succeeded.
+			_ = j.swapLabel(num, "", j.cfg.Labels.Label(from))
 			return nil
 		}
 		if !errors.Is(err, errTransitionUnavailable) {

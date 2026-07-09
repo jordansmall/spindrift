@@ -290,9 +290,13 @@ func TestJiraClient_DepsOf_NativeLinks(t *testing.T) {
 
 // TestJiraClient_TransitionState_MappedStatus verifies TransitionState finds
 // and performs the workflow transition matching the configured status
-// mapping — no label fallback needed on the happy path.
+// mapping, and cleans up any stale from-state fallback label (e.g. an issue
+// discovered via the label — ListIssues matches on status OR label — must
+// not still carry that label after a successful native-status transition, or
+// ListIssues would re-match and re-dispatch it indefinitely).
 func TestJiraClient_TransitionState_MappedStatus(t *testing.T) {
 	var postedTransitionID string
+	var labelCleanupOps []map[string]string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-1/transitions":
@@ -307,7 +311,13 @@ func TestJiraClient_TransitionState_MappedStatus(t *testing.T) {
 			postedTransitionID = body["transition"]["id"]
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-1":
-			t.Errorf("must not fall back to a label swap on the happy path")
+			var body struct {
+				Update struct {
+					Labels []map[string]string `json:"labels"`
+				} `json:"update"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			labelCleanupOps = body.Update.Labels
 			w.WriteHeader(http.StatusOK)
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -329,6 +339,9 @@ func TestJiraClient_TransitionState_MappedStatus(t *testing.T) {
 	}
 	if postedTransitionID != "11" {
 		t.Errorf("posted transition id = %q, want 11", postedTransitionID)
+	}
+	if len(labelCleanupOps) != 1 || labelCleanupOps[0]["remove"] != "ready-for-agent" || labelCleanupOps[0]["add"] != "" {
+		t.Errorf("label cleanup ops = %v, want a single remove of ready-for-agent (no add)", labelCleanupOps)
 	}
 }
 
