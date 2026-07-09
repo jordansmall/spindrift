@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.2.0](https://github.com/jordansmall/spindrift/compare/v0.1.3...v0.2.0) (2026-07-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** `spindrift engage <issue>` is removed. Use `spindrift recover <issue>` instead. This removal targets v0.2.0 as previously announced.
+
+### Features
+
+* bump implementor model default to claude-sonnet-5 ([67f7038](https://github.com/jordansmall/spindrift/commit/67f70388c3269f178f2ae7572bcf2dcedfd1c2f3))
+* **checks:** add nix-fmt nixfmt formatting gate ([7913576](https://github.com/jordansmall/spindrift/commit/7913576c64bbfa9bd2bbd310522183e24027972a)), closes [#361](https://github.com/jordansmall/spindrift/issues/361)
+* **cli:** retire deprecated engage alias ([495ec78](https://github.com/jordansmall/spindrift/commit/495ec78824ef8246f53c527708d34ef635961645))
+* **dispatch:** add agent-recover label workflow ([d6d769b](https://github.com/jordansmall/spindrift/commit/d6d769bed2dab9602bf56cbd15bf170dbe4aa486))
+* **dogfood:** bake nil into the agent toolchain ([682374c](https://github.com/jordansmall/spindrift/commit/682374cfa855180407e52fcd545bf471c61db504))
+* **flakeModule:** replace defaults with settings ([3715625](https://github.com/jordansmall/spindrift/commit/37156253cf658646c7fdfe789a53cbc88be695cd))
+* generate flake-options reference, drift-guard template ([ab4d932](https://github.com/jordansmall/spindrift/commit/ab4d932a835e3442b267f527a914cd5d76ba4f16))
+* **nix:** expose formatter output via flakeModule ([278e4d6](https://github.com/jordansmall/spindrift/commit/278e4d6f89abad1a474192947c8af9c49c5fc5e8))
+* **review:** make reviewer subagent aggressively adversarial ([c52ee05](https://github.com/jordansmall/spindrift/commit/c52ee053736a455dcd919a7896972378b0b30934))
+* **schema:** promote 13 knobs to consumer-tunable flakeOption ([fa6f2d4](https://github.com/jordansmall/spindrift/commit/fa6f2d4e35cbc9a8b1890c13ced13c561d8a2e98))
+
+
+### Bug Fixes
+
+* **nix:** chown nix/var to agent uid in unprivileged box ([6aeeea1](https://github.com/jordansmall/spindrift/commit/6aeeea18a2cb604e24bd3f10c358223b093c446f)), closes [#356](https://github.com/jordansmall/spindrift/issues/356)
+* **nix:** reformat mkHarness.nix with nixfmt ([d86c3af](https://github.com/jordansmall/spindrift/commit/d86c3af81ef1644e02724f50f49ac881d1b2198b))
+* **nix:** suppress SIGPIPE in nix-var-owned-by-agent check ([b105f21](https://github.com/jordansmall/spindrift/commit/b105f21f3f6764d23b23a711195cfd7b02b4d584))
+* **nix:** update stale comment in flakeModule.nix ([f634ce4](https://github.com/jordansmall/spindrift/commit/f634ce42cc68b52212b41f5de24a797bf4b5c032))
+* reformat .nix files with pinned nixfmt ([3ad5136](https://github.com/jordansmall/spindrift/commit/3ad5136860cc8ad037f5055e09705823f090490a))
+* **test:** correct REPO_SLUG empty-default grep in nix check ([a9f3b02](https://github.com/jordansmall/spindrift/commit/a9f3b020a2225d586ae578e12f4b0acc21a82a1f))
+
+
+### Documentation
+
+* add flake-options reference and discovery path guide ([09426f3](https://github.com/jordansmall/spindrift/commit/09426f3e762e75b522656c9d9252ed175f1ae9df))
+* add selfHealing and repository sections to ([a1a4f90](https://github.com/jordansmall/spindrift/commit/a1a4f90bba5d0919b7c19eb1a2419253aad8b22a))
+* **adr:** record grouped-settings surface ([22a6440](https://github.com/jordansmall/spindrift/commit/22a64403e2bf21c89866a9aa29dd99ee1fb2b6ac))
+* instruct agent to run nil diagnostics on nix changes ([3084393](https://github.com/jordansmall/spindrift/commit/30843936bcea519ddc99213da0a8d187cc3b28ca))
+* record prompt-integrity vocabulary and ADR 0016 ([9ec5f58](https://github.com/jordansmall/spindrift/commit/9ec5f5874486c32582ba09c8d4035595ce962a5c))
+* **template:** add selfHealing and repository sections ([d447bef](https://github.com/jordansmall/spindrift/commit/d447bef7ce3cb89d4defa82131aada5f0a918992))
+* update for settings.&lt;section&gt; surface ([eb615c9](https://github.com/jordansmall/spindrift/commit/eb615c9d1116f874e4485a1da036ea5cfe831a11))
+* update reference for widened flake settings surface ([ef1d41c](https://github.com/jordansmall/spindrift/commit/ef1d41c6b60e1631d6007c3023a0e51db8078a78))
+
+
+### Code Refactoring
+
+* dogfood and template use settings.* ([e395991](https://github.com/jordansmall/spindrift/commit/e3959917739ce3c4a17f3bd4988d692784652668))
+* **nix:** correct formatter comment accuracy ([14cbf8c](https://github.com/jordansmall/spindrift/commit/14cbf8c76e39bfb3c7d4d90be9b34cfd5a36a451))
+
+
+### Tests
+
+* assert MODEL schemaFlags default is claude-sonnet-5 ([b2e7c35](https://github.com/jordansmall/spindrift/commit/b2e7c35f36c61d533528fff94e367df75ca800a4))
+* **bats:** update MODEL default assertions to claude-sonnet-5 ([879b23a](https://github.com/jordansmall/spindrift/commit/879b23a064f8ef39ac9bd3a04c653a2c16721c61))
+* **go:** add REPO_SLUG precedence and required-validation tests ([a1c37c0](https://github.com/jordansmall/spindrift/commit/a1c37c011469a40b2a982dd9cbca49f252804d2f))
+* **nix:** add formatter-is-nixfmt checks ([4b92945](https://github.com/jordansmall/spindrift/commit/4b9294536415eee9ed4d22dd09ee83e4b9360df2))
+* **nix:** also assert unknown knob within valid section throws ([6d99941](https://github.com/jordansmall/spindrift/commit/6d9994110ce877e067acce711bbc7522bcf106d2))
+* **nix:** assert nil is present in the dogfood toolchain ([d72cd17](https://github.com/jordansmall/spindrift/commit/d72cd172f2adbdbabb39fe0185607723e72be93f))
+* **nix:** assert nix/var owned by agent uid ([41af773](https://github.com/jordansmall/spindrift/commit/41af773e6ac59cad37b95e7fd32e8b341db3ca44))
+* **nix:** assert promoted operator knobs bake via settings ([dbdb512](https://github.com/jordansmall/spindrift/commit/dbdb512348b3a034839d1a65ebc34ab9ca0b061a))
+
 ## [0.1.3](https://github.com/jordansmall/spindrift/compare/v0.1.2...v0.1.3) (2026-07-08)
 
 
