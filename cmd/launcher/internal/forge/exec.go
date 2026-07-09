@@ -198,6 +198,35 @@ func (e *execClient) CheckState(url string) (RollupState, error) {
 	return RollupState(s), nil
 }
 
+// ListPRFiles returns every path changed by the PR (added, modified, and
+// deleted alike) via the REST pulls/files endpoint, which — unlike
+// check-runs — works under a fine-grained PAT scoped to Pull requests RW.
+// A deleted file is still reported under its old path.
+func (e *execClient) ListPRFiles(url string) ([]string, error) {
+	parts := strings.Split(url, "/")
+	if len(parts) < 7 {
+		return nil, fmt.Errorf("invalid PR URL: %s", url)
+	}
+	owner, repo, number := parts[3], parts[4], parts[6]
+	cmd := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/%s/pulls/%s/files", owner, repo, number),
+		"--paginate",
+		"--jq", ".[].filename",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh api pulls files: %w", err)
+	}
+	var files []string
+	sc := bufio.NewScanner(strings.NewReader(string(out)))
+	for sc.Scan() {
+		if f := strings.TrimSpace(sc.Text()); f != "" {
+			files = append(files, f)
+		}
+	}
+	return files, nil
+}
+
 func (e *execClient) Merge(url string) error {
 	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "pr", "merge", url, "--rebase", "--delete-branch")

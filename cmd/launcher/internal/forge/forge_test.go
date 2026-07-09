@@ -192,3 +192,25 @@ func TestFake_OpenPRForBranch(t *testing.T) {
 		t.Fatalf("want (_, false, nil) for missing branch; got ok=%v err=%v", ok2, err2)
 	}
 }
+
+// TestFake_ListPRFiles verifies that ListPRFiles returns the scripted changed
+// files for a PR — the merge guard's only source of changed paths.
+func TestFake_ListPRFiles(t *testing.T) {
+	f := forge.NewFake()
+	const url = "https://github.com/owner/repo/pull/42"
+	f.SetPRFiles(url, []string{"src/main.go", ".github/workflows/ci.yml"})
+
+	files, err := f.ListPRFiles(url)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"src/main.go", ".github/workflows/ci.yml"}
+	if len(files) != len(want) {
+		t.Fatalf("ListPRFiles = %v, want %v", files, want)
+	}
+	for i := range files {
+		if files[i] != want[i] {
+			t.Fatalf("ListPRFiles = %v, want %v", files, want)
+		}
+	}
+}
