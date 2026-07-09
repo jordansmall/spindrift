@@ -71,6 +71,16 @@ setup() {
   grep -qi 'one line' "$prompt"
 }
 
+@test "review prompt fetches before diffing against the origin base" {
+  # The implementor rebases against origin/BASE_BRANCH; the reviewer must
+  # diff against the same fetched ref, not a possibly-stale local one.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/review-prompt.md"
+  grep -q 'git fetch origin' "$prompt"
+  grep -qF 'git diff origin/${BASE_BRANCH}...HEAD' "$prompt"
+  grep -qF 'git log origin/${BASE_BRANCH}..HEAD' "$prompt"
+}
+
 @test "conflict-resolve prompt forbids mid-turn narration between tool calls" {
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/conflict-resolve-prompt.md"
