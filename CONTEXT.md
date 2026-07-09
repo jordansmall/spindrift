@@ -45,6 +45,19 @@ support" is the opencode Driver pointed at the `github-copilot` provider, with
 `MODEL` provider-namespaced (`github-copilot/…`). The `claude` Driver is
 effectively locked to Anthropic. _Avoid_: model host, vendor, backend.
 
+**Filer**:
+The opt-in subagent role (beside the scout and reviewer) that turns the final
+approving review's non-blocking findings into issues on the Issue Tracker — one
+issue per finding, merging only findings that are the same change, after a
+dedup search over previously filed findings in any state (a closed finding is a
+human triage decision, never refiled). Its issues carry the
+`agent-review-finding` label and are never dispatchable by its own hand — a
+human promotes them, preserving the rule that a human is the launch button.
+Filing is best-effort: a Filer failure never blocks the PR or alters the
+outcome. Off by default.
+_Avoid_: triager (it does not triage), reporter (collides with outcome
+reporting).
+
 **Box**:
 The disposable per-issue podman container — the isolation boundary that makes
 `--dangerously-skip-permissions` safe.
