@@ -336,7 +336,8 @@ let
     # write gcroots/profiles when nix commands run inside the container.
     fakeRootCommands = ''
       chown -R 1000:1000 home/agent work
-    '' + lib.optionalString nixInBox ''
+    ''
+    + lib.optionalString nixInBox ''
       chown -R 1000:1000 nix/var
     '';
     config = {
