@@ -141,10 +141,11 @@ FAKE
   grep -q "$WORK_DIR" "$PREFETCH_LOG"
 }
 
-# --agents JSON: produced by nix (builtins.toJSON) when both subagent models are
-# configured; forwarded by the entrypoint as-is after prompt injection.
-# The fake claude records the --agents value to $CLAUDE_AGENTS_FILE for
-# structural assertions without grepping a log that also contains prompt prose.
+# --agents JSON: produced by nix (builtins.toJSON), composing each subagent
+# independently by its own model knob; forwarded by the entrypoint as-is after
+# prompt injection. The fake claude records the --agents value to
+# $CLAUDE_AGENTS_FILE for structural assertions without grepping a log that
+# also contains prompt prose.
 @test "entrypoint omits --agents when AGENTS_JSON_TEMPLATE is not set" {
   # Default setup: SCOUT_MODEL="" REVIEW_MODEL="" → AGENTS_JSON_TEMPLATE not set
   # The entrypoint must not build JSON itself; with no template, no flag is passed.
