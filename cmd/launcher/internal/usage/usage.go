@@ -260,8 +260,8 @@ func BreakdownByRole(path string) ([]RoleUsage, error) {
 		b.CacheCreationInputTokens += ev.Message.Usage.CacheCreationInputTokens
 	}
 
-	// Return in deterministic order: implementor, scout, reviewer, then others.
-	order := []string{"implementor", "scout", "reviewer", "subagent"}
+	// Return in deterministic order: implementor, scout, reviewer, filer, then others.
+	order := []string{"implementor", "scout", "reviewer", "filer", "subagent"}
 	var result []RoleUsage
 	for _, role := range order {
 		if b, ok := buckets[role]; ok {
