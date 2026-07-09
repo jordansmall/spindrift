@@ -41,7 +41,11 @@ func TestGitForcePush_CapturesStderr(t *testing.T) {
 	run(work, "push", "-u", "origin", "main")
 
 	run("", "clone", bare, other)
-	run(other, "checkout", "-B", "main")
+	// Base "other"'s main explicitly on origin/main: the bare repo's HEAD
+	// symref may still point at the git installation's default branch name
+	// (e.g. "master"), which wouldn't exist yet, leaving "checkout -B main"
+	// with no start point to build on.
+	run(other, "checkout", "-B", "main", "origin/main")
 	run(other, "config", "user.email", "test@example.com")
 	run(other, "config", "user.name", "Test")
 	writeFile(filepath.Join(other, "b.txt"), "two\n")
