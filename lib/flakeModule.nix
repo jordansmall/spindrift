@@ -191,9 +191,8 @@ in
       // lib.optionalAttrs (cfg.runtime != null) { inherit (cfg) runtime; }
       // lib.optionalAttrs (cfg.nixInBox != null) { inherit (cfg) nixInBox; };
       harness = mkHarness args;
-      # Same nixpkgs pin the harness uses (ADR 0002): formatter and the
-      # nix-fmt check resolve identical store paths, so `nix fmt` fixes
-      # exactly what the gate catches.
+      # nixfmt from the consumer's locked nixpkgs input — same pin the
+      # nix-fmt gate uses — so `nix fmt` fixes what the check catches.
       nixfmt = (import cfg.nixpkgs { inherit system; }).nixfmt;
     in
     {
