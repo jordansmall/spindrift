@@ -1687,7 +1687,6 @@ func run(noBuild bool) error {
 		return err
 	}
 	hasEdges := len(edges) > 0
-	hasTouchOverlap := batchHasTouchOverlap(c, fc, issues)
 
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
 		return err
@@ -1697,7 +1696,7 @@ func run(noBuild bool) error {
 		if err := drainMaxJobs(c, fc, pwd, r, issues, edges); err != nil {
 			return err
 		}
-	} else if hasEdges || hasTouchOverlap {
+	} else if hasEdges || batchHasTouchOverlap(c, fc, issues) {
 		// MAX_JOBS = 0 with dependency edges, or a declared touch-set
 		// overlapping an already in-progress issue: multi-wave dispatch.
 		if node, cycle := detectCycle(edges, issueNums(issues)); cycle {

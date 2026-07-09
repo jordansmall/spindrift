@@ -19,10 +19,10 @@ func touchesOf(fc forge.Client, num string) ([]string, error) {
 }
 
 // waveOverlapCheck returns a per-candidate overlap check bound to a single
-// snapshot of InProgress issues, fetched once (not once per candidate) so a
-// dispatch wave issues one ListIssues call regardless of batch size.
-// OVERLAP_GATE=off (or a failed fetch) yields a check that always reports no
-// overlap, leaving dispatch unaffected.
+// snapshot of InProgress issues, fetched once per wave/drain call rather
+// than once per candidate (each candidate still costs its own touchesOf
+// fetch). OVERLAP_GATE=off (or a failed fetch) yields a check that always
+// reports no overlap, leaving dispatch unaffected.
 func waveOverlapCheck(c config, fc forge.Client) func(num string) (string, bool) {
 	noOverlap := func(string) (string, bool) { return "", false }
 	if c.overlapGate != "defer" {
@@ -94,28 +94,34 @@ func globsOverlap(a, b string) bool {
 	return segmentsOverlap(strings.Split(a, "/"), strings.Split(b, "/"))
 }
 
+// segmentsOverlap reports whether patterns a and b (each already split into
+// path segments) could both match some common path. Computed bottom-up as an
+// O(len(a)*len(b)) table — dp[i][j] means a[i:] and b[j:] can overlap — so a
+// pattern with many "**" segments (untrusted prompt input: a hostile issue
+// body can declare anything) never triggers the exponential blowup a naive
+// "try every split" recursion would hit when no overlap exists.
 func segmentsOverlap(a, b []string) bool {
-	if len(a) > 0 && a[0] == "**" {
-		if len(a) == 1 {
-			return true
-		}
-		for i := 0; i <= len(b); i++ {
-			if segmentsOverlap(a[1:], b[i:]) {
-				return true
+	dp := make([][]bool, len(a)+1)
+	for i := range dp {
+		dp[i] = make([]bool, len(b)+1)
+	}
+	for i := len(a); i >= 0; i-- {
+		for j := len(b); j >= 0; j-- {
+			switch {
+			case i == len(a) && j == len(b):
+				dp[i][j] = true
+			case i < len(a) && a[i] == "**":
+				dp[i][j] = dp[i+1][j] || (j < len(b) && dp[i][j+1])
+			case j < len(b) && b[j] == "**":
+				dp[i][j] = dp[i][j+1] || (i < len(a) && dp[i+1][j])
+			case i < len(a) && j < len(b):
+				dp[i][j] = segmentOverlap(a[i], b[j]) && dp[i+1][j+1]
+			default:
+				dp[i][j] = false
 			}
 		}
-		return false
 	}
-	if len(b) > 0 && b[0] == "**" {
-		return segmentsOverlap(b, a)
-	}
-	if len(a) == 0 || len(b) == 0 {
-		return len(a) == len(b)
-	}
-	if !segmentOverlap(a[0], b[0]) {
-		return false
-	}
-	return segmentsOverlap(a[1:], b[1:])
+	return dp[0][0]
 }
 
 // segmentOverlap reports whether two single path segments (each possibly
