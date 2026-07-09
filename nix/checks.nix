@@ -1014,6 +1014,10 @@ in
   '';
 
   # go vet catches suspicious constructs at analysis time.
+  # CGO_ENABLED=0 avoids needing a C toolchain: the jira forge adapter
+  # imports net/http, which otherwise pulls runtime/cgo into the build
+  # and fails with "gcc not found" (matches launcher-cross-build, which
+  # already builds the real binary this way).
   launcher-go-vet = pkgs.runCommand "launcher-go-vet" { nativeBuildInputs = [ pkgs.go ]; } ''
     cp -r ${../cmd/launcher} src
     chmod -R +w src
@@ -1021,6 +1025,7 @@ in
     export GONOSUMCHECK='*'
     export GOMODCACHE="$TMPDIR/gomodcache"
     export GOCACHE="$TMPDIR/gocache"
+    export CGO_ENABLED=0
     cd src
     go vet ./...
     touch $out
@@ -1029,7 +1034,8 @@ in
   # go test must stay green: unit tests catch config-parsing bugs
   # before they reach the binary (see issue #112, 9494fc1-class).
   # forge's tests shell out to git (TestGitForcePush_CapturesStderr), so
-  # git must be on PATH in the sandbox alongside go.
+  # git must be on PATH in the sandbox alongside go. CGO_ENABLED=0 for
+  # the same reason as launcher-go-vet above.
   launcher-go-test =
     pkgs.runCommand "launcher-go-test"
       {
@@ -1045,6 +1051,7 @@ in
         export GONOSUMCHECK='*'
         export GOMODCACHE="$TMPDIR/gomodcache"
         export GOCACHE="$TMPDIR/gocache"
+        export CGO_ENABLED=0
         cd src
         go test ./...
         touch $out
