@@ -146,7 +146,7 @@ EOF
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  grep -q 'MODEL=claude-sonnet-4-6' "$PODMAN_LOG"
+  grep -q 'MODEL=claude-sonnet-5' "$PODMAN_LOG"
 }
 
 @test "run passes the baked default SCOUT_MODEL and REVIEW_MODEL into the container" {
@@ -163,7 +163,7 @@ EOF
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'MODEL=claude-opus-4-8' "$PODMAN_LOG"
-  ! grep -q 'MODEL=claude-sonnet-4-6' "$PODMAN_LOG"
+  ! grep -q 'MODEL=claude-sonnet-5' "$PODMAN_LOG"
 }
 
 @test "a non-default baked label changes which issues run queries" {
