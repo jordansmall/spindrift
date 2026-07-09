@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -258,9 +259,18 @@ type jiraTransitionsPayload struct {
 	} `json:"transitions"`
 }
 
+// errTransitionUnavailable marks the case TransitionState should fall back to
+// a label for: the mapped status has no matching transition on the issue's
+// current workflow. Any other error from transitionByStatus is an infra
+// failure (network, auth, 5xx) and must propagate, not be swallowed into a
+// silent fallback.
+var errTransitionUnavailable = fmt.Errorf("jira: no available transition")
+
 // transitionByStatus performs the workflow transition on issue num that leads
-// to targetStatus. It returns an error if no such transition is available on
-// the issue's current workflow (unmapped/blocked case, per ADR 0013).
+// to targetStatus. It returns errTransitionUnavailable if no such transition
+// is available on the issue's current workflow (the unmapped/blocked case
+// TransitionState falls back to a label for, per ADR 0013); any other
+// non-nil error is an infra failure that must propagate.
 func (j *jiraClient) transitionByStatus(num, targetStatus string) error {
 	var payload jiraTransitionsPayload
 	status, err := j.do(http.MethodGet, "/rest/api/2/issue/"+num+"/transitions", nil, &payload)
@@ -278,7 +288,7 @@ func (j *jiraClient) transitionByStatus(num, targetStatus string) error {
 		}
 	}
 	if transitionID == "" {
-		return fmt.Errorf("jira: no available transition to %q on issue %s", targetStatus, num)
+		return fmt.Errorf("%w to %q on issue %s", errTransitionUnavailable, targetStatus, num)
 	}
 	status, err = j.do(http.MethodPost, "/rest/api/2/issue/"+num+"/transitions",
 		map[string]any{"transition": map[string]string{"id": transitionID}}, nil)
@@ -322,8 +332,12 @@ func (j *jiraClient) swapLabel(num, add, remove string) error {
 // (per ADR 0013) so the lifecycle always makes progress.
 func (j *jiraClient) TransitionState(num string, from, to DispatchState) error {
 	if target, ok := j.cfg.StatusMapping[to]; ok && target != "" {
-		if err := j.transitionByStatus(num, target); err == nil {
+		err := j.transitionByStatus(num, target)
+		if err == nil {
 			return nil
+		}
+		if !errors.Is(err, errTransitionUnavailable) {
+			return err
 		}
 	}
 	toLabel := j.cfg.Labels.Label(to)
