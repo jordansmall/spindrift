@@ -688,6 +688,52 @@ func TestAdoptAndGate_ManualModeStaysComplete(t *testing.T) {
 	}
 }
 
+// TestSelfHeal_GitForge_PushOnlyLanding verifies that for CODE_FORGE=git,
+// selfHeal skips the CI-wait/merge-gate entirely (there is no CI or PR to
+// watch — the Box already pushed the branch) and instead marks the issue
+// Complete immediately, then applies MERGE_MODE against the git Code Forge's
+// push-only Merge.
+func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
+	cases := []struct {
+		name       string
+		mergeMode  string
+		wantMerged bool
+	}{
+		{name: "manual leaves the branch as pushed", mergeMode: "manual", wantMerged: false},
+		{name: "immediate pushes to the target branch", mergeMode: "immediate", wantMerged: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseConfig()
+			c.codeForge = "git"
+			c.mergeMode = tc.mergeMode
+			fc := forge.NewFake()
+			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+			branch := "agent/issue-1"
+
+			ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", branch)
+
+			if !ok {
+				t.Fatal("selfHeal must return ok=true for CODE_FORGE=git — there is no CI to fail")
+			}
+			if merged != tc.wantMerged {
+				t.Errorf("selfHeal merged=%v, want %v", merged, tc.wantMerged)
+			}
+			if tc.wantMerged && fc.Merged != branch {
+				t.Errorf("expected Merge(%q); fc.Merged=%q", branch, fc.Merged)
+			}
+			if !tc.wantMerged && fc.Merged != "" {
+				t.Errorf("Merge must not be called; fc.Merged=%q", fc.Merged)
+			}
+			iss, _ := fc.Issue("1")
+			if !containsLabel(iss.Labels, c.completeLabel) {
+				t.Errorf("issue must carry %q; labels=%v", c.completeLabel, iss.Labels)
+			}
+		})
+	}
+}
+
 // TestNoGhExecOutsideForge walks all non-test Go source files in cmd/launcher,
 // excluding internal/forge, and fails if any contain exec.Command("gh" —
 // keeping all gh API calls behind the forge seam.

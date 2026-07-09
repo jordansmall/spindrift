@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -182,5 +183,49 @@ func TestFanOut_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	}
 	if !containsLabel(iss.Labels, c.completeLabel) {
 		t.Errorf("issue 1 must have %q after fanOut; got labels=%v", c.completeLabel, iss.Labels)
+	}
+}
+
+// TestFanOut_GitForge_ImmediateLandsWithoutVerifyingAPR verifies that a
+// CODE_FORGE=git outcome carrying a branch ref (not a PR URL) lands cleanly
+// through the same fanOut→gateIssue path used for github: the issue reaches
+// agent-complete and is never demoted to agent-failed by a PR-shaped
+// post-merge check that does not apply to a push-only forge.
+func TestFanOut_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
+	const branch = "agent/issue-1"
+
+	c := baseConfig()
+	c.maxParallel = 2
+	c.branchPrefix = "agent/issue-"
+	c.codeForge = "git"
+	c.mergeMode = "immediate"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	// The real git Code Forge has no PR concept — PRState always errors. A
+	// gateIssue path that (incorrectly) called verifyMerged for CODE_FORGE=git
+	// would read this as "not merged" and wrongly demote the issue to failed.
+	fc.PRStateErr = errors.New("PRState: not supported by the git Code Forge (push-only, no PR concept)")
+
+	fr := runner.NewFake()
+	fr.WriteToOutput = []byte(fmt.Sprintf(
+		"SPINDRIFT_OUTCOME issue=1 pr=%s status=ready note=ok\n", branch,
+	))
+
+	dir := tempLogDir(t)
+	fanOut(c, fc, dir, fr, []issue{{number: "1", title: "first"}})
+
+	iss, err := fc.Issue("1")
+	if err != nil {
+		t.Fatalf("Issue(%q): %v", "1", err)
+	}
+	if !containsLabel(iss.Labels, c.completeLabel) {
+		t.Errorf("issue 1 must have %q after fanOut; got labels=%v", c.completeLabel, iss.Labels)
+	}
+	if containsLabel(iss.Labels, c.failedLabel) {
+		t.Errorf("issue 1 must NOT have %q; got labels=%v", c.failedLabel, iss.Labels)
+	}
+	if fc.Merged != branch {
+		t.Errorf("expected Merge(%q) for MERGE_MODE=immediate; fc.Merged=%q", branch, fc.Merged)
 	}
 }
