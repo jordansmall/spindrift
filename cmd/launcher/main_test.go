@@ -338,6 +338,49 @@ body
 	}
 }
 
+// TestValidateCodeForge_RejectsUnknown verifies that validate() fails fast when
+// CODE_FORGE is set to an unrecognised value.
+func TestValidateCodeForge_RejectsUnknown(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "gitlab"
+	if err := validate(c); err == nil {
+		t.Fatal("validate() should reject unrecognised CODE_FORGE")
+	}
+}
+
+// TestValidateCodeForge_Git_RequiresRemoteURL verifies that validate() fails
+// fast when CODE_FORGE=git but no remote URL is configured — the git Code
+// Forge has nothing to clone from or push to without one.
+func TestValidateCodeForge_Git_RequiresRemoteURL(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "git"
+	c.codeForgeRemoteURL = ""
+	err := validate(c)
+	if err == nil {
+		t.Fatal("validate() should require CODE_FORGE_REMOTE_URL when CODE_FORGE=git")
+	}
+	if !strings.Contains(err.Error(), "CODE_FORGE_REMOTE_URL") {
+		t.Errorf("error should mention CODE_FORGE_REMOTE_URL, got: %v", err)
+	}
+}
+
+// TestValidateCodeForge_AcceptsKnown verifies that validate() accepts both
+// documented CODE_FORGE values.
+func TestValidateCodeForge_AcceptsKnown(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "github"
+	if err := validate(c); err != nil {
+		t.Errorf("validate() rejected CODE_FORGE=github: %v", err)
+	}
+
+	c = minimalValidConfig()
+	c.codeForge = "git"
+	c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
+	if err := validate(c); err != nil {
+		t.Errorf("validate() rejected valid CODE_FORGE=git config: %v", err)
+	}
+}
+
 // minimalValidConfig returns a config that passes validate() so tests can
 // mutate exactly one field at a time.
 func minimalValidConfig() config {
@@ -350,6 +393,7 @@ func minimalValidConfig() config {
 		runtime:          "echo", // echo is always on PATH
 		mergeMode:        "manual",
 		issueTracker:     "github",
+		codeForge:        "github",
 	}
 }
 
