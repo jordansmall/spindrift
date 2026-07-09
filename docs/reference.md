@@ -90,7 +90,7 @@ settings = {
                       mergePollInterval = 30; mergePollTimeout = 1800; };
   concurrency     = { maxParallel = 3; maxJobs = 0;
                       depsPollSecs = 30; depsWaitSecs = 7200; };
-  models          = { model = "claude-sonnet-4-6";
+  models          = { model = "claude-sonnet-5";
                       scoutModel  = "claude-haiku-4-5-20251001";
                       reviewModel = "claude-opus-4-8"; };
   sandbox         = { devShellName = "default"; devShellProbeTimeout = 300;
@@ -279,7 +279,7 @@ a rebuild (ADR 0001):
 | `FAILED_LABEL`            | `agent-failed` (baked) | label an issue gets when its Box fails or its PR can't merge |
 | `COMPLETE_LABEL`          | `agent-complete` (baked) | label the launcher swaps on when CI reaches green (agent is done; the merge is a separate step) |
 | `MERGE_MODE`              | `manual` (baked)       | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue GitHub native auto-merge — repo must have *Allow auto-merge* on) |
-| `MODEL`                   | `claude-sonnet-4-6` (baked) | Claude model the in-container implementor runs |
+| `MODEL`                   | `claude-sonnet-5` (baked) | Claude model the in-container implementor runs |
 | `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` (baked) | scout subagent model tier (empty drops subagents) |
 | `REVIEW_MODEL`            | `claude-opus-4-8` (baked) | reviewer subagent model tier (empty drops subagents) |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
