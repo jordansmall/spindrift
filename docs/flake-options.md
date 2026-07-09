@@ -47,6 +47,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `settings.concurrency.depsWaitSecs` | `DEPS_WAIT_SECS` | `7200` | total seconds to wait for dependency-wave completion before aborting |
 | `settings.concurrency.maxJobs` | `MAX_JOBS` | `0` | dependency-wave concurrency cap; 0 means unlimited |
 | `settings.concurrency.maxParallel` | `MAX_PARALLEL` | `3` | maximum concurrent agent containers |
+| `settings.concurrency.overlapGate` | `OVERLAP_GATE` | `defer` | declared ## Touches overlap policy: defer (hold a Dispatchable issue whose declared touch-set intersects an InProgress issue's, retrying once the collider completes), off (disable the check) |
 
 ## Models (`settings.models`)
 
