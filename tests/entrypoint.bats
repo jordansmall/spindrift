@@ -289,6 +289,22 @@ FAKE
   jq -e '.filer.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
 }
 
+# The main issue-prompt's FILE ISSUES step is substituted in only when the
+# filer is provisioned (same ${...} envsubst mechanism as SKILL_PREAMBLE) —
+# off by default, zero prompt residue.
+@test "issue prompt gains a FILE ISSUES step when the filer is provisioned" {
+  export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q '# FILE ISSUES' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "issue prompt has no FILE ISSUES step when the filer is not configured" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'FILE ISSUES' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "entrypoint includes a read-only tools whitelist in agents JSON" {
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
