@@ -407,6 +407,38 @@ func TestJiraClient_TransitionState_BlockedFallsBackToLabel(t *testing.T) {
 	}
 }
 
+// TestJiraClient_TransitionState_InfraErrorPropagates verifies that a genuine
+// infra failure (e.g. a 500 listing transitions) is surfaced as an error
+// rather than silently swallowed into a label-swap fallback — the fallback
+// is for an unmapped/blocked workflow transition, not for infra errors.
+func TestJiraClient_TransitionState_InfraErrorPropagates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-5/transitions":
+			w.WriteHeader(http.StatusInternalServerError)
+		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-5":
+			t.Error("must not fall back to a label swap on an infra error")
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{
+		BaseURL: srv.URL,
+		Token:   "tok",
+		StatusMapping: map[forge.DispatchState]string{
+			forge.InProgress: "In Progress",
+		},
+		Labels: forge.DefaultDispatchLabels(),
+	})
+
+	if err := jc.TransitionState("PROJ-5", forge.Dispatchable, forge.InProgress); err == nil {
+		t.Fatal("want an error surfaced for an infra failure, got nil")
+	}
+}
+
 // TestJiraClient_ListIssues_JQLAndOrder verifies ListIssues queries by the
 // mapped status (falling back to the label for issues stuck there) scoped to
 // the project, and trusts the server's created-ascending ordering.
