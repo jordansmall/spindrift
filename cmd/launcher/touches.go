@@ -18,11 +18,40 @@ func touchesOf(fc forge.Client, num string) ([]string, error) {
 	return forge.ParseTouchPaths(fi.Body), nil
 }
 
+// prTouchesOf returns the changed-file paths of num's open PR, augmenting its
+// declared touch-set with files the issue itself never declared in
+// ## Touches. Restricted to CODE_FORGE=github, the only forge with a PR to
+// inspect; off github, or when num has no open PR yet, or the fetch fails, it
+// returns nil with no error — v1's declared-only behavior applies unchanged.
+func prTouchesOf(c config, fc forge.Client, num string) []string {
+	if c.codeForge != "github" {
+		return nil
+	}
+	pr, found, err := fc.OpenPRForBranch(c.branchPrefix + num)
+	if err != nil || !found {
+		return nil
+	}
+	files, err := fc.ListPRFiles(pr.URL)
+	if err != nil {
+		return nil
+	}
+	return files
+}
+
+// inProgressTouches is one InProgress issue's touch-set for the overlap gate:
+// its declared ## Touches paths, augmented (v2, CODE_FORGE=github only) with
+// its open PR's actual changed files.
+type inProgressTouches struct {
+	number  string
+	touches []string
+}
+
 // waveOverlapCheck returns a per-candidate overlap check bound to a single
-// snapshot of InProgress issues, fetched once per wave/drain call rather
-// than once per candidate (each candidate still costs its own touchesOf
-// fetch). OVERLAP_GATE=off (or a failed fetch) yields a check that always
-// reports no overlap, leaving dispatch unaffected.
+// snapshot of InProgress issues (and, on github, their open PRs' changed
+// files), fetched once per wave/drain call rather than once per candidate
+// (each candidate still costs its own touchesOf fetch). OVERLAP_GATE=off (or
+// a failed fetch) yields a check that always reports no overlap, leaving
+// dispatch unaffected.
 func waveOverlapCheck(c config, fc forge.Client) func(num string) (string, bool) {
 	noOverlap := func(string) (string, bool) { return "", false }
 	if c.overlapGate != "defer" {
@@ -32,8 +61,14 @@ func waveOverlapCheck(c config, fc forge.Client) func(num string) (string, bool)
 	if err != nil {
 		return noOverlap
 	}
+	entries := make([]inProgressTouches, len(inProgress))
+	for i, fi := range inProgress {
+		touches := forge.ParseTouchPaths(fi.Body)
+		touches = append(touches, prTouchesOf(c, fc, fi.Number)...)
+		entries[i] = inProgressTouches{number: fi.Number, touches: touches}
+	}
 	return func(num string) (string, bool) {
-		return overlapsInProgress(fc, num, inProgress)
+		return overlapsInProgress(fc, num, entries)
 	}
 }
 
@@ -52,25 +87,22 @@ func batchHasTouchOverlap(c config, fc forge.Client, batch []issue) bool {
 }
 
 // overlapsInProgress reports whether candidate num's declared touch-set
-// intersects the declared touch-set of any issue in inProgress, returning the
-// first colliding issue's number. A candidate with no declared touches never
-// collides — issues with no ## Touches section are dispatched exactly as
-// today, per the OVERLAP_GATE acceptance criteria.
-func overlapsInProgress(fc forge.Client, num string, inProgress []forge.Issue) (string, bool) {
+// intersects any entry in inProgress — each entry's declared touches, plus
+// (v2) its open PR's actual changed files — returning the first colliding
+// issue's number. A candidate with no declared touches never collides —
+// issues with no ## Touches section are dispatched exactly as today, per the
+// OVERLAP_GATE acceptance criteria.
+func overlapsInProgress(fc forge.Client, num string, inProgress []inProgressTouches) (string, bool) {
 	touches, err := touchesOf(fc, num)
 	if err != nil || len(touches) == 0 {
 		return "", false
 	}
-	for _, fi := range inProgress {
-		if fi.Number == num {
+	for _, e := range inProgress {
+		if e.number == num || len(e.touches) == 0 {
 			continue
 		}
-		otherTouches := forge.ParseTouchPaths(fi.Body)
-		if len(otherTouches) == 0 {
-			continue
-		}
-		if touchSetsOverlap(touches, otherTouches) {
-			return fi.Number, true
+		if touchSetsOverlap(touches, e.touches) {
+			return e.number, true
 		}
 	}
 	return "", false
