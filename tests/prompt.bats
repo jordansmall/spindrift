@@ -64,3 +64,19 @@ setup() {
   grep -q 'statusCheckRollup' "$prompt"
   grep -qi 'fine-grained' "$prompt"
 }
+
+@test "COMMS section establishes machine-log voice with human-prose carve-outs" {
+  # Output is a machine-parsed log, not a conversation: no pleasantries and
+  # no restating subagent output, except on the surfaces that stay human
+  # prose (commits, PR body, IF BLOCKED comment, outcome note=).
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  grep -q '^# COMMS' "$prompt"
+  grep -qi 'no pleasantries' "$prompt"
+  grep -qi 'never restate' "$prompt"
+  grep -qi 'one terse' "$prompt"
+  grep -qi 'Conventional Commits' "$prompt"
+  grep -qi 'PR title and body' "$prompt"
+  grep -qi 'IF BLOCKED' "$prompt"
+  grep -qi 'note=' "$prompt"
+}
