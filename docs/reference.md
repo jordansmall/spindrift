@@ -65,7 +65,7 @@ knobs. Unset options fall through to `mkHarness`'s own defaults.
 | `packages`  | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
 | `prefetch`  | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
 | `prompt`    | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`) |
-| `scoutPrompt` / `reviewPrompt` | string           | bundled starters   | system prompts for the read-only scout and reviewer subagents; baked in, overridable via `SPINDRIFT_PROMPT_DIR` |
+| `scoutPrompt` / `reviewPrompt` / `filerPrompt` | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); baked in, overridable via `SPINDRIFT_PROMPT_DIR` |
 | `skills`    | list of paths               | `[]`               | skill files baked into the image at `/home/agent/.claude/skills` so the headless agent can `/invoke` them; `SPINDRIFT_SKILLS_DIR` mounts over them at runtime |
 | `settings`  | submodule, grouped by section (see below) | `{}` | non-secret run defaults baked into the `spindrift` CLI |
 | `runtime`   | `"podman"` \| `"docker"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime, or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
@@ -93,7 +93,8 @@ settings = {
                       depsPollSecs = 30; depsWaitSecs = 7200; };
   models          = { model = "claude-sonnet-5";
                       scoutModel  = "claude-haiku-4-5-20251001";
-                      reviewModel = "claude-opus-4-8"; };
+                      reviewModel = "claude-opus-4-8";
+                      filerModel  = ""; };
   sandbox         = { devShellName = "default"; devShellProbeTimeout = 300;
                       memoryLimit = "4g"; pidsLimit = "512";
                       podmanNetwork = ""; bwrapUnshareNet = ""; };
@@ -132,8 +133,10 @@ manual regardless of `mergeMode` when it touches a guarded path; `model` is the
 Claude model the in-container implementor agent runs, threaded into the container
 as `MODEL` so `MODEL=...` switches models at runtime with no image rebuild.
 `scoutModel`/`reviewModel` tier the read-only scout and reviewer subagents the
-same way; setting either to `""` drops both subagents from the `claude`
-invocation.
+same way; each is composed into `--agents` independently by its own knob, so
+emptying one drops only that subagent, never both. `filerModel` is the same
+shape but opt-in — empty by default, so the filer is not provisioned at all
+until a model is set; see [Filer](#filer).
 
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
@@ -290,6 +293,7 @@ a rebuild (ADR 0001):
 | `MODEL`                   | `claude-sonnet-5` (baked) | Claude model the in-container implementor runs |
 | `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` (baked) | scout subagent model tier (empty drops the scout entry from `--agents`) |
 | `REVIEW_MODEL`            | `claude-opus-4-8` (baked) | reviewer subagent model tier (empty drops the reviewer entry from `--agents`) |
+| `FILER_MODEL`             | `` (baked)             | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: `claude-haiku-4-5-20251001`); see [Filer](#filer) |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
 | `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | hot-override the mounted prompt dir (not bakeable) |
 | `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override the mounted skills dir (not bakeable) |
@@ -540,6 +544,44 @@ guard at all.
 Configure it via `settings.branches.mergeGuardPaths` (baked) or the
 `MERGE_GUARD_PATHS` env var (runtime) — see the [flake options
 reference](flake-options.md) for the full knob surface.
+
+#### Filer
+
+An opt-in subagent, alongside the scout and reviewer, that turns the final
+approving review's Non-blocking findings into tracked issues instead of
+leaving them in the PR body. Off by default; setting `FILER_MODEL` (empty by
+default, recommended `claude-haiku-4-5-20251001`) is the opt-in — an unset
+`FILER_MODEL` means zero behavior change and zero prompt residue in the
+rendered issue prompt.
+
+When enabled, after the final `APPROVE` verdict and before opening the PR,
+the main agent delegates the verdict's Non-blocking section to the filer.
+The filer:
+
+- ensures the `agent-review-finding` label exists on the Target repo
+  (idempotent — it creates the label itself; this label is separate from the
+  four triage labels `spindrift doctor` manages and is not required for
+  dispatch to work);
+- searches existing issues carrying `agent-review-finding` in **any** state
+  (open and closed) and skips findings that already match — a closed finding
+  is a human triage decision (won't-fix, duplicate, already fixed) and is
+  never refiled;
+- files one issue per surviving finding (merging only findings that are the
+  same change), each with a conventional title, the finding's file:line refs
+  and reviewing rationale, a `Found by review during #<issue> (PR <url>)`
+  provenance line, and an acceptance-criteria checklist.
+
+Filed issues carry `agent-review-finding` and **never** the dispatch label
+(`LABEL` / `ready-for-agent`) — a human promotes them, the same launch-button
+rule that gates every other issue. The PR body then lists the filed issue
+URLs instead of the raw findings.
+
+Filing is strictly best-effort: a filer failure or timeout never blocks the
+PR or changes the outcome line — the main agent falls back to pasting the raw
+Non-blocking findings into the PR body, exactly as when the filer is off.
+
+Override the filer's system prompt the same way as `scoutPrompt`/
+`reviewPrompt`, via the `filerPrompt` flake option or `SPINDRIFT_PROMPT_DIR`.
 
 #### Create the labels on the Target repo
 
