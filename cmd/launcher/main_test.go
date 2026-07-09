@@ -353,6 +353,28 @@ func TestValidateMergeMode_AcceptsKnown(t *testing.T) {
 	}
 }
 
+// TestValidateOverlapGate_RejectsUnknown verifies that validate() fails fast
+// when OVERLAP_GATE is set to an unrecognised value.
+func TestValidateOverlapGate_RejectsUnknown(t *testing.T) {
+	c := minimalValidConfig()
+	c.overlapGate = "yolo"
+	if err := validate(c); err == nil {
+		t.Fatal("validate() should reject unrecognised OVERLAP_GATE")
+	}
+}
+
+// TestValidateOverlapGate_AcceptsKnown verifies that validate() accepts the
+// two documented OVERLAP_GATE values.
+func TestValidateOverlapGate_AcceptsKnown(t *testing.T) {
+	for _, mode := range []string{"defer", "off"} {
+		c := minimalValidConfig()
+		c.overlapGate = mode
+		if err := validate(c); err != nil {
+			t.Errorf("validate() rejected valid OVERLAP_GATE %q: %v", mode, err)
+		}
+	}
+}
+
 // TestValidateIssueTracker_RejectsUnknown verifies that validate() fails fast
 // when ISSUE_TRACKER is set to an unrecognised value.
 func TestValidateIssueTracker_RejectsUnknown(t *testing.T) {
@@ -480,6 +502,7 @@ func minimalValidConfig() config {
 		mergeMode:        "manual",
 		issueTracker:     "github",
 		codeForge:        "github",
+		overlapGate:      "defer",
 	}
 }
 
