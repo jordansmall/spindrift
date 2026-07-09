@@ -14,6 +14,7 @@ let
     leanHarness
     scoutOnlyHarness
     reviewerOnlyHarness
+    filerOnlyHarness
     customHarness
     dockerHarness
     bwrapHarness
@@ -999,6 +1000,16 @@ in
       || { echo "reviewer-only harness missing reviewer model in baked template" >&2; exit 1; }
     ! grep -q '"scout"' <<<"$reviewer_line" \
       || { echo "reviewer-only harness unexpectedly bakes a scout entry" >&2; exit 1; }
+
+    # The filer-only mirror (opt-in, default empty — issue #393): composed
+    # independently like scout/reviewer, no scout/reviewer keys alongside it.
+    filer_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${filerOnlyHarness.agentFiles}/agent/entrypoint.sh)
+    grep -q 'solo-filer' <<<"$filer_line" \
+      || { echo "filer-only harness missing filer model in baked template" >&2; exit 1; }
+    ! grep -q '"scout"' <<<"$filer_line" \
+      || { echo "filer-only harness unexpectedly bakes a scout entry" >&2; exit 1; }
+    ! grep -q '"reviewer"' <<<"$filer_line" \
+      || { echo "filer-only harness unexpectedly bakes a reviewer entry" >&2; exit 1; }
 
     touch $out
   '';

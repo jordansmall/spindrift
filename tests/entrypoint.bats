@@ -18,6 +18,7 @@ setup() {
   export MODEL="claude-opus-4-8"
   export SCOUT_MODEL=""
   export REVIEW_MODEL=""
+  export FILER_MODEL=""
   export IN_PROGRESS_LABEL="agent-in-progress"
   export COMPLETE_LABEL="agent-complete"
   export DEV_SHELL_PROBE_TIMEOUT=300
@@ -265,6 +266,27 @@ FAKE
   [ "$status" -eq 0 ]
   jq -e '.scout.model == "claude-haiku-3-5"' "$CLAUDE_AGENTS_FILE" >/dev/null
   jq -e '.reviewer.model == "claude-opus-4-5"' "$CLAUDE_AGENTS_FILE" >/dev/null
+}
+
+# The filer (issue #393) is opt-in and composed independently, exactly like
+# scout/reviewer (#392) — never bundled with either.
+@test "entrypoint passes --agents with only filer when the template carries filer alone" {
+  export AGENTS_JSON_TEMPLATE='{"filer":{"description":"File issues from a review'"'"'s non-blocking findings, best-effort","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -s "$CLAUDE_AGENTS_FILE" ]
+  jq -e 'has("filer") and (has("scout") | not) and (has("reviewer") | not)' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.filer.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+}
+
+@test "entrypoint passes --agents with scout, reviewer, and filer all present" {
+  export AGENTS_JSON_TEMPLATE='{"scout":{"description":"scout","model":"opus","prompt":"","tools":["Read"]},"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read"]},"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  jq -e 'has("scout") and has("reviewer") and has("filer")' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.scout.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.filer.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
 }
 
 @test "entrypoint includes a read-only tools whitelist in agents JSON" {
