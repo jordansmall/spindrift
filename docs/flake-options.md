@@ -31,11 +31,16 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `settings.branches.baseBranch` | `BASE_BRANCH` | `main` | default branch agent PRs merge into |
 | `settings.branches.branchPrefix` | `BRANCH_PREFIX` | `agent/issue-` | prefix for agent-cut branches |
 | `settings.branches.mergeMode` | `MERGE_MODE` | `manual` | post-green merge policy: immediate (merge on green), auto (enqueue GitHub native auto-merge; repo must have Allow auto-merge enabled), manual (leave PR open for human approval) |
+| `settings.branches.mergePollInterval` | `MERGE_POLL_INTERVAL` | `30` | seconds between merge-gate poll iterations |
+| `settings.branches.mergePollTimeout` | `MERGE_POLL_TIMEOUT` | `1800` | total seconds to wait for CI green before abandoning the merge attempt |
 
 ## Concurrency & dependency waves (`settings.concurrency`)
 
 | attr path | env var | default | description |
 |---|---|---|---|
+| `settings.concurrency.depsPollSecs` | `DEPS_POLL_SECS` | `30` | seconds between dependency-wave poll iterations |
+| `settings.concurrency.depsWaitSecs` | `DEPS_WAIT_SECS` | `7200` | total seconds to wait for dependency-wave completion before aborting |
+| `settings.concurrency.maxJobs` | `MAX_JOBS` | `0` | dependency-wave concurrency cap; 0 means unlimited |
 | `settings.concurrency.maxParallel` | `MAX_PARALLEL` | `3` | maximum concurrent agent containers |
 
 ## Models (`settings.models`)
@@ -45,6 +50,16 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `settings.models.model` | `MODEL` | `claude-sonnet-4-6` | primary (implementor) Claude model for the agent (zero-rebuild runtime switch) |
 | `settings.models.reviewModel` | `REVIEW_MODEL` | `claude-opus-4-8` | reviewer subagent model tier; empty omits the scout/reviewer --agents from the claude invocation |
 | `settings.models.scoutModel` | `SCOUT_MODEL` | `claude-haiku-4-5-20251001` | scout subagent model tier; empty omits the scout/reviewer --agents from the claude invocation |
+
+## Self-healing & retries (`settings.selfHealing`)
+
+| attr path | env var | default | description |
+|---|---|---|---|
+| `settings.selfHealing.holdJitterSecs` | `HOLD_JITTER_SECS` | `5` | jitter seconds added to 429 hold duration to spread re-dispatch |
+| `settings.selfHealing.maxFixAttempts` | `MAX_FIX_ATTEMPTS` | `3` | fix-agent passes when CI is genuinely red before marking agent-failed; 0 disables self-healing |
+| `settings.selfHealing.maxRebaseAttempts` | `MAX_REBASE_ATTEMPTS` | `3` | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries |
+| `settings.selfHealing.transientBackoffSecs` | `TRANSIENT_BACKOFF_SECS` | `30` | base backoff seconds per retry for 529/overloaded and network transients |
+| `settings.selfHealing.transientRetryMax` | `TRANSIENT_RETRY_MAX` | `3` | max retries for transient exits (529/network backoff; consecutive 429 holds) |
 
 ## Sandbox & resources (`settings.sandbox`)
 
@@ -56,4 +71,12 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `settings.sandbox.memoryLimit` | `MEMORY_LIMIT` | `4g` | max memory per agent container (--memory); empty string disables the limit |
 | `settings.sandbox.pidsLimit` | `PIDS_LIMIT` | `512` | max processes per agent container (--pids-limit); empty string disables the limit |
 | `settings.sandbox.podmanNetwork` | `PODMAN_NETWORK` | — | --network value for podman run; empty applies no flag (podman NAT default); set to 'pasta' to restrict egress |
+
+## Repository & identity (`settings.repository`)
+
+| attr path | env var | default | description |
+|---|---|---|---|
+| `settings.repository.gitUserEmail` | `GIT_USER_EMAIL` | — | commit identity email; falls back to host git config user.email |
+| `settings.repository.gitUserName` | `GIT_USER_NAME` | — | commit identity name; falls back to host git config user.name |
+| `settings.repository.repoSlug` | `REPO_SLUG` | — | target GitHub repository the agents work on |
 
