@@ -162,6 +162,7 @@
     required = true;
     placeholder = "owner/repo";
     doc = "target GitHub repository the agents work on";
+    flakeOption = true;
     boxEnv = true;
   };
   ghToken = {
@@ -187,20 +188,23 @@
     env = "GIT_USER_NAME";
     group = "Repository & identity";
     doc = "commit identity name; falls back to host git config user.name";
+    flakeOption = true;
     boxEnv = true;
   };
   gitUserEmail = {
     env = "GIT_USER_EMAIL";
     group = "Repository & identity";
     doc = "commit identity email; falls back to host git config user.email";
+    flakeOption = true;
     boxEnv = true;
   };
-  # ── Runtime-only knobs (no flakeOption; tune via harness.env) ─────────────
+  # ── Operator-tunable knobs (flakeOption = true; also tune via harness.env) ─
   maxFixAttempts = {
     env = "MAX_FIX_ATTEMPTS";
     group = "Self-healing & retries";
     default = 3;
     doc = "fix-agent passes when CI is genuinely red before marking agent-failed; 0 disables self-healing";
+    flakeOption = true;
     boxEnv = false;
   };
   maxRebaseAttempts = {
@@ -208,6 +212,7 @@
     group = "Self-healing & retries";
     default = 3;
     doc = "rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries";
+    flakeOption = true;
     boxEnv = false;
   };
   maxJobs = {
@@ -215,6 +220,7 @@
     group = "Concurrency & dependency waves";
     default = 0;
     doc = "dependency-wave concurrency cap; 0 means unlimited";
+    flakeOption = true;
     boxEnv = false;
   };
   depsPollSecs = {
@@ -222,6 +228,7 @@
     group = "Concurrency & dependency waves";
     default = 30;
     doc = "seconds between dependency-wave poll iterations";
+    flakeOption = true;
     boxEnv = false;
   };
   depsWaitSecs = {
@@ -229,6 +236,7 @@
     group = "Concurrency & dependency waves";
     default = 7200;
     doc = "total seconds to wait for dependency-wave completion before aborting";
+    flakeOption = true;
     boxEnv = false;
   };
   mergePollInterval = {
@@ -236,6 +244,7 @@
     group = "Branches & merge";
     default = 30;
     doc = "seconds between merge-gate poll iterations";
+    flakeOption = true;
     boxEnv = false;
   };
   mergePollTimeout = {
@@ -243,6 +252,7 @@
     group = "Branches & merge";
     default = 1800;
     doc = "total seconds to wait for CI green before abandoning the merge attempt";
+    flakeOption = true;
     boxEnv = false;
   };
   spindriftPromptDir = {
@@ -269,6 +279,7 @@
     group = "Self-healing & retries";
     default = 5;
     doc = "jitter seconds added to 429 hold duration to spread re-dispatch";
+    flakeOption = true;
     boxEnv = false;
   };
   transientBackoffSecs = {
@@ -276,6 +287,7 @@
     group = "Self-healing & retries";
     default = 30;
     doc = "base backoff seconds per retry for 529/overloaded and network transients";
+    flakeOption = true;
     boxEnv = false;
   };
   transientRetryMax = {
@@ -283,6 +295,7 @@
     group = "Self-healing & retries";
     default = 3;
     doc = "max retries for transient exits (529/network backoff; consecutive 429 holds)";
+    flakeOption = true;
     boxEnv = false;
   };
 }
