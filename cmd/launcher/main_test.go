@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -22,6 +24,33 @@ func TestConfigHasNoModelFields(t *testing.T) {
 		if _, ok := ct.FieldByName(name); ok {
 			t.Errorf("config has field %q; remove it — models forward via BOX_ENV_VARS", name)
 		}
+	}
+}
+
+// --- newIssueTracker tests ---
+
+// TestNewIssueTracker_Jira verifies that ISSUE_TRACKER=jira selects a tracker
+// backed by the Jira REST API instead of the GitHub gh-exec adapter.
+func TestNewIssueTracker_Jira(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"accountId":"abc"}`))
+	}))
+	defer srv.Close()
+
+	c := minimalValidConfig()
+	c.issueTracker = "jira"
+	c.jiraBaseURL = srv.URL
+	c.jiraProjectKey = "PROJ"
+	c.jiraToken = "tok"
+
+	it := newIssueTracker(c)
+	slug, err := it.Probe()
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if slug != "PROJ" {
+		t.Errorf("Probe() = %q, want the Jira adapter (PROJ)", slug)
 	}
 }
 
@@ -270,6 +299,45 @@ func TestValidateMergeMode_RejectsUnknown(t *testing.T) {
 	c.mergeMode = "turbo"
 	if err := validate(c); err == nil {
 		t.Fatal("validate() should reject unrecognised MERGE_MODE")
+	}
+}
+
+// TestValidate_JiraRequiresBaseURLProjectKeyToken verifies validate() fails
+// fast when ISSUE_TRACKER=jira but the Jira connection fields are missing,
+// rather than deferring to a runtime Jira API error.
+func TestValidate_JiraRequiresBaseURLProjectKeyToken(t *testing.T) {
+	base := minimalValidConfig()
+	base.issueTracker = "jira"
+	base.jiraBaseURL = "https://example.atlassian.net"
+	base.jiraProjectKey = "PROJ"
+	base.jiraToken = "tok"
+
+	if err := validate(base); err != nil {
+		t.Fatalf("fully configured jira config should validate: %v", err)
+	}
+
+	for _, field := range []string{"jiraBaseURL", "jiraProjectKey", "jiraToken"} {
+		c := base
+		switch field {
+		case "jiraBaseURL":
+			c.jiraBaseURL = ""
+		case "jiraProjectKey":
+			c.jiraProjectKey = ""
+		case "jiraToken":
+			c.jiraToken = ""
+		}
+		if err := validate(c); err == nil {
+			t.Errorf("validate() must require %s when ISSUE_TRACKER=jira", field)
+		}
+	}
+}
+
+// TestValidate_JiraFieldsOptionalForGitHub verifies validate() does not
+// require Jira fields when ISSUE_TRACKER is unset/github.
+func TestValidate_JiraFieldsOptionalForGitHub(t *testing.T) {
+	c := minimalValidConfig()
+	if err := validate(c); err != nil {
+		t.Fatalf("github default must not require jira fields: %v", err)
 	}
 }
 
