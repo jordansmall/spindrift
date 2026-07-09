@@ -119,6 +119,25 @@ Its final message starts `VERDICT: APPROVE` or `VERDICT: BLOCK`. On BLOCK:
 Never open the PR with a blocking finding open. Non-blocking findings may go in
 the PR body.
 
+# LAND THE CHANGE
+
+Check `$CODE_FORGE` (already in your environment — run `echo $CODE_FORGE` if
+unsure):
+
+**`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge
+gate): skip OPEN A PULL REQUEST and WATCH CI below entirely.
+
+1. `git push --force-with-lease -u origin ${BRANCH}` (if not already pushed).
+2. Print exactly one line as your final output and stop:
+   ```
+   SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} pr=refs/heads/${BRANCH} status=ready note=<short reason>
+   ```
+   The launcher applies `MERGE_MODE` after this line (push straight to the
+   target branch on `immediate`; leave the branch as pushed on `manual`).
+   Do NOT run `gh pr create` and do NOT attempt to merge.
+
+**`CODE_FORGE=github`** (default): continue with OPEN A PULL REQUEST below.
+
 # OPEN A PULL REQUEST
 
 1. `git push --force-with-lease -u origin ${BRANCH}`
@@ -160,6 +179,9 @@ Do NOT merge. The LAUNCHER (outside this container) owns the CI-green decision,
 the rebase-merge, and the complete-label swap. Stop once CI has registered.
 
 # OUTCOME
+
+(`CODE_FORGE=github` only — `CODE_FORGE=git` already printed its outcome line
+and stopped under LAND THE CHANGE above.)
 
 Once CI has registered, print exactly one line as your final output:
 

@@ -110,3 +110,14 @@ setup() {
   grep -qi 'IF BLOCKED' <<<"$comms"
   grep -qi 'note=' <<<"$comms"
 }
+
+@test "prompt branches CODE_FORGE=git to a push-only outcome, no PR/CI" {
+  # CODE_FORGE=git (#330) must skip PR creation and CI-watch entirely and
+  # emit a branch ref where a PR URL would go.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  grep -q 'CODE_FORGE=git' "$prompt"
+  grep -q 'skip OPEN A PULL REQUEST and WATCH CI' "$prompt"
+  grep -qF 'pr=refs/heads/${BRANCH} status=ready' "$prompt"
+  grep -q 'Do NOT run `gh pr create`' "$prompt"
+}

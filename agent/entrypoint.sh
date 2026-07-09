@@ -38,8 +38,13 @@ git config --global user.email "$GIT_USER_EMAIL"
 git config --global init.defaultBranch main
 gh auth setup-git
 
-echo "==> cloning $REPO_SLUG"
-git clone "https://github.com/${REPO_SLUG}.git" "$WORK_DIR"
+# CODE_FORGE=git clones from and pushes to a configured plain git remote
+# instead of the target GitHub repo (ADR 0013); REPO_SLUG still resolves the
+# Issue Tracker regardless. CODE_FORGE=github (default, unset
+# CODE_FORGE_REMOTE_URL) keeps today's behavior unchanged.
+CLONE_URL="${CODE_FORGE_REMOTE_URL:-https://github.com/${REPO_SLUG}.git}"
+echo "==> cloning $CLONE_URL"
+git clone "$CLONE_URL" "$WORK_DIR"
 cd "$WORK_DIR"
 # Fetch the absolute latest refs so the pre-work rebase positions the branch
 # on current origin/BASE_BRANCH, not the state captured at clone time.
