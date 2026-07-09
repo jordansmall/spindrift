@@ -40,9 +40,13 @@ gh auth setup-git
 
 # CODE_FORGE=git clones from and pushes to a configured plain git remote
 # instead of the target GitHub repo (ADR 0013); REPO_SLUG still resolves the
-# Issue Tracker regardless. CODE_FORGE=github (default, unset
-# CODE_FORGE_REMOTE_URL) keeps today's behavior unchanged.
-CLONE_URL="${CODE_FORGE_REMOTE_URL:-https://github.com/${REPO_SLUG}.git}"
+# Issue Tracker regardless. Gated on CODE_FORGE=git so a stray
+# CODE_FORGE_REMOTE_URL left set in the environment can't silently redirect a
+# CODE_FORGE=github (default) deployment to the wrong remote.
+CLONE_URL="https://github.com/${REPO_SLUG}.git"
+if [ "${CODE_FORGE:-github}" = "git" ]; then
+  CLONE_URL="${CODE_FORGE_REMOTE_URL:?CODE_FORGE_REMOTE_URL is required when CODE_FORGE=git}"
+fi
 echo "==> cloning $CLONE_URL"
 git clone "$CLONE_URL" "$WORK_DIR"
 cd "$WORK_DIR"

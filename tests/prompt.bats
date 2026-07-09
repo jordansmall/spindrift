@@ -118,6 +118,6 @@ setup() {
   local prompt="$prompts/issue-prompt.md"
   grep -q 'CODE_FORGE=git' "$prompt"
   grep -q 'skip OPEN A PULL REQUEST and WATCH CI' "$prompt"
-  grep -qF 'pr=refs/heads/${BRANCH} status=ready' "$prompt"
+  grep -qF 'pr=${BRANCH} status=ready' "$prompt"
   grep -q 'Do NOT run `gh pr create`' "$prompt"
 }

@@ -44,24 +44,53 @@ func (g *gitClient) ListPRFiles(url string) ([]string, error) {
 	return nil, fmt.Errorf("ListPRFiles: not supported by the git Code Forge (MERGE_GUARD_PATHS applies to the github Code Forge only)")
 }
 
+// validateGitRef rejects a ref that git would parse as an option rather than
+// a ref (anything starting with "-"). branch/pr values passed to Merge and
+// Rebase originate from the Box's SPINDRIFT_OUTCOME line, which is untrusted
+// input (comment-injection trust boundary, CLAUDE.md) — without this check a
+// crafted value like "--upload-pack=<cmd>" would run arbitrary commands on
+// the launcher host via `git fetch`/`git checkout`.
+func validateGitRef(ref string) error {
+	if ref == "" || strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("invalid git ref %q", ref)
+	}
+	return nil
+}
+
+// cloneToTemp clones remoteURL into a fresh temp directory named per prefix
+// and returns a helper that runs git -C <dir> <args...>, plus a cleanup func
+// the caller must defer. Shared scaffold for Merge and Rebase.
+func cloneToTemp(remoteURL, prefix string) (dir string, gitIn func(args ...string) *exec.Cmd, cleanup func(), err error) {
+	dir, err = os.MkdirTemp("", prefix)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("mkdtemp: %w", err)
+	}
+	cleanup = func() { os.RemoveAll(dir) }
+	if err := exec.Command("git", "clone", remoteURL, dir).Run(); err != nil {
+		cleanup()
+		return "", nil, nil, fmt.Errorf("git clone %s: %w", remoteURL, err)
+	}
+	gitIn = func(args ...string) *exec.Cmd {
+		return exec.Command("git", append([]string{"-C", dir}, args...)...)
+	}
+	return dir, gitIn, cleanup, nil
+}
+
 // Merge lands branch onto baseBranch by cloning the remote, merging branch in,
 // and pushing the result — the MERGE_MODE=immediate mapping for a push-only
 // forge. Returns ErrMergeConflict when the merge cannot be completed
 // automatically, so callers can retry via Rebase exactly as they do for the
 // github adapter.
 func (g *gitClient) Merge(branch string) error {
-	dir, err := os.MkdirTemp("", "spindrift-git-forge-merge-*")
+	if err := validateGitRef(branch); err != nil {
+		return err
+	}
+	_, gitIn, cleanup, err := cloneToTemp(g.remoteURL, "spindrift-git-forge-merge-*")
 	if err != nil {
-		return fmt.Errorf("mkdtemp: %w", err)
+		return err
 	}
-	defer os.RemoveAll(dir)
+	defer cleanup()
 
-	if err := exec.Command("git", "clone", g.remoteURL, dir).Run(); err != nil {
-		return fmt.Errorf("git clone %s: %w", g.remoteURL, err)
-	}
-	gitIn := func(args ...string) *exec.Cmd {
-		return exec.Command("git", append([]string{"-C", dir}, args...)...)
-	}
 	if err := gitIn("checkout", g.baseBranch).Run(); err != nil {
 		return fmt.Errorf("git checkout %s: %w", g.baseBranch, err)
 	}
@@ -89,18 +118,15 @@ func (g *gitClient) Merge(branch string) error {
 // remote. Returns ErrMergeConflict when the rebase cannot be completed
 // automatically.
 func (g *gitClient) Rebase(branch string) error {
-	dir, err := os.MkdirTemp("", "spindrift-git-forge-rebase-*")
+	if err := validateGitRef(branch); err != nil {
+		return err
+	}
+	dir, gitIn, cleanup, err := cloneToTemp(g.remoteURL, "spindrift-git-forge-rebase-*")
 	if err != nil {
-		return fmt.Errorf("mkdtemp: %w", err)
+		return err
 	}
-	defer os.RemoveAll(dir)
+	defer cleanup()
 
-	if err := exec.Command("git", "clone", g.remoteURL, dir).Run(); err != nil {
-		return fmt.Errorf("git clone %s: %w", g.remoteURL, err)
-	}
-	gitIn := func(args ...string) *exec.Cmd {
-		return exec.Command("git", append([]string{"-C", dir}, args...)...)
-	}
 	if err := gitIn("checkout", branch).Run(); err != nil {
 		return fmt.Errorf("git checkout %s: %w", branch, err)
 	}

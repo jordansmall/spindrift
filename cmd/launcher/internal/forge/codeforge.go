@@ -3,9 +3,11 @@ package forge
 // CodeForge is the seam through which the launcher manages PRs, CI, and
 // merges. Implementations support PR+CI+merge (GitHub) or push-only (git).
 type CodeForge interface {
-	// OpenPRForBranch returns the open non-draft PR for branch, if any.
+	// OpenPRForBranch returns the open non-draft PR for branch, if any. The
+	// push-only git adapter has no PR concept and always returns not-found.
 	OpenPRForBranch(branch string) (PR, bool, error)
 	// PRForBranch returns the URL of any PR (any state) for branch, if any.
+	// The push-only git adapter has no PR concept and always returns not-found.
 	PRForBranch(branch string) (string, bool, error)
 	// PRState returns the state (OPEN/MERGED/CLOSED) of the given PR URL.
 	PRState(url string) (string, error)
@@ -13,10 +15,12 @@ type CodeForge interface {
 	CheckState(url string) (RollupState, error)
 	// ListPRFiles returns every path changed by the PR (added, modified, deleted).
 	ListPRFiles(url string) ([]string, error)
-	// Merge performs a rebase merge of the PR and deletes the branch.
-	Merge(url string) error
-	// Rebase rebases the PR's head branch onto its base and force-pushes.
-	Rebase(prURL string) error
+	// Merge lands ref onto the target branch: a rebase merge of the PR (github)
+	// or a plain merge-and-push of the branch name (git, MERGE_MODE=immediate).
+	Merge(ref string) error
+	// Rebase rebases ref onto its base and force-pushes: the PR's head branch
+	// (github) or the branch name itself (git).
+	Rebase(ref string) error
 	// CanAutoMerge reports whether the repository allows GitHub's native auto-merge.
 	CanAutoMerge() (bool, error)
 	// EnqueueAutoMerge enqueues native auto-merge for the PR.
