@@ -408,6 +408,68 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	}
 }
 
+// TestSelfHeal_MergeGuardHit_DowngradesToManual verifies that a PR touching a
+// guarded path is never merged — regardless of MERGE_MODE — and instead posts
+// a comment naming the matched path(s) and the knob, leaving the issue at
+// agent-complete exactly like a manual-mode green PR.
+func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
+	c := baseConfig()
+	c.mergeMode = "immediate"
+	c.mergeGuardPaths = ".github/**,**/CLAUDE.md"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetPRFiles(testPR, []string{"src/main.go", ".github/workflows/ci.yml"})
+
+	ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", testPR)
+	if !ok {
+		t.Error("selfHeal must return ok=true — CI reached green")
+	}
+	if merged {
+		t.Error("selfHeal must return merged=false when the merge guard hits")
+	}
+	if fc.Merged != "" {
+		t.Errorf("merge guard must prevent Merge from being called; fc.Merged=%q", fc.Merged)
+	}
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, c.completeLabel) {
+		t.Errorf("issue must carry %q after a guard-downgraded green PR; labels=%v", c.completeLabel, iss.Labels)
+	}
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("expected exactly one guard comment, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
+	}
+	body := fc.CommentCalls[0].Body
+	if !strings.Contains(body, ".github/workflows/ci.yml") {
+		t.Errorf("comment must name the matched path; body=%q", body)
+	}
+	if !strings.Contains(body, "MERGE_GUARD_PATHS") {
+		t.Errorf("comment must name the knob that triggered it; body=%q", body)
+	}
+}
+
+// TestSelfHeal_MergeGuardMiss_MergesNormally verifies that a green PR
+// touching no guarded path proceeds exactly as it would with no guard set.
+func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
+	c := baseConfig()
+	c.mergeMode = "immediate"
+	c.mergeGuardPaths = ".github/**,**/CLAUDE.md"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetPRFiles(testPR, []string{"src/main.go"})
+
+	ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", testPR)
+	if !ok || !merged {
+		t.Errorf("selfHeal(ok=%v, merged=%v), want (true, true) for a non-guarded green PR", ok, merged)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("expected Merge to be called; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("no guard comment expected on a miss; got %+v", fc.CommentCalls)
+	}
+}
+
 // TestAdoptAndGate_ImmediateMergeFailureStaysComplete verifies that adoptAndGate
 // in immediate mode does not demote the issue to agent-failed when the merge
 // itself fails after CI goes green (spec: merge-blocked stays at agent-complete).

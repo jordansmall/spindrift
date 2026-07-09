@@ -1,9 +1,37 @@
 package main
 
 import (
+	"fmt"
 	"path"
 	"strings"
+
+	"spindrift.dev/launcher/internal/forge"
 )
+
+// mergeGuardHit checks a green PR's changed files against MERGE_GUARD_PATHS,
+// returning the subset that hit a guarded glob. A nil, nil result means the
+// guard is disabled (empty patterns) or found no match; a non-nil error means
+// the changed-file list could not be read at all.
+func mergeGuardHit(c config, fc forge.Client, pr string) ([]string, error) {
+	if strings.TrimSpace(c.mergeGuardPaths) == "" {
+		return nil, nil
+	}
+	files, err := fc.ListPRFiles(pr)
+	if err != nil {
+		return nil, err
+	}
+	return matchedGuardPaths(c.mergeGuardPaths, files), nil
+}
+
+// mergeGuardComment is the PR comment posted when the guard downgrades a
+// merge to manual — it names the matched path(s) and the knob that fired so
+// a human reviewer knows exactly what to look at.
+func mergeGuardComment(matched []string) string {
+	return fmt.Sprintf(
+		"merge guard: MERGE_GUARD_PATHS matched %s — downgrading this merge to manual regardless of MERGE_MODE; review and merge by hand",
+		strings.Join(matched, ", "),
+	)
+}
 
 // matchedGuardPaths returns the subset of files that match any glob in the
 // comma-separated guardPaths (MERGE_GUARD_PATHS). An empty guardPaths always

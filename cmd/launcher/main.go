@@ -102,6 +102,11 @@ type config struct {
 	// mergeMode controls post-green behavior: "immediate" merges the PR,
 	// "manual" leaves it open, "auto" enqueues GitHub's native auto-merge.
 	mergeMode string
+
+	// mergeGuardPaths is a comma-separated list of globs matched against every
+	// changed path in the PR; a hit downgrades the merge to manual regardless
+	// of mergeMode. Empty disables the guard.
+	mergeGuardPaths string
 }
 
 type issue struct {
@@ -195,7 +200,8 @@ func loadConfig() config {
 
 		boxEnvVars: os.Getenv("BOX_ENV_VARS"),
 
-		mergeMode: getenv("MERGE_MODE", "manual"),
+		mergeMode:       getenv("MERGE_MODE", "manual"),
+		mergeGuardPaths: getenv("MERGE_GUARD_PATHS", ".github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**"),
 	}
 }
 
@@ -543,6 +549,17 @@ func selfHeal(c config, fc forge.Client, runFixFn func(int) error, runConflictRe
 	for attempt := 0; ; attempt++ {
 		green, genuineRed := gateToGreen(c, fc, num, pr)
 		if green {
+			matched, guardErr := mergeGuardHit(c, fc, pr)
+			if guardErr != nil {
+				fmt.Printf("    #%s  pr=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
+				fc.Comment(num, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
+				return true, false
+			}
+			if len(matched) > 0 {
+				fmt.Printf("    #%s  pr=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
+				fc.Comment(num, mergeGuardComment(matched))
+				return true, false
+			}
 			if err := applyMergeMode(c, fc, num, pr, runConflictResolveFn); err != nil {
 				fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, pr, err)
 				fc.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
