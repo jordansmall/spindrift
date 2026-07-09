@@ -11,18 +11,17 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// countingForge wraps a forge.Client and counts in-progress claim swaps atomically.
+// countingForge wraps a forge.Client and counts InProgress transitions atomically.
 type countingForge struct {
 	forge.Client
 	claimCount *int32
-	inProg     string
 }
 
-func (f *countingForge) SwapLabel(num, add, remove string) error {
-	if add == f.inProg {
+func (f *countingForge) TransitionState(num string, to forge.DispatchState) error {
+	if to == forge.InProgress {
 		atomic.AddInt32(f.claimCount, 1)
 	}
-	return f.Client.SwapLabel(num, add, remove)
+	return f.Client.TransitionState(num, to)
 }
 
 // signalRunner blocks the first Run call until released; subsequent calls return immediately.
@@ -58,7 +57,7 @@ func TestFanOut_ClaimsGatedByMaxParallel(t *testing.T) {
 	inner.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
 
 	var count int32
-	fc := &countingForge{Client: inner, claimCount: &count, inProg: c.inProgressLabel}
+	fc := &countingForge{Client: inner, claimCount: &count}
 	fr := &signalRunner{
 		firstStarted: make(chan struct{}),
 		release:      make(chan struct{}),
@@ -116,7 +115,7 @@ func TestFanOut_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
 
 	var count int32
-	cfc := &countingForge{Client: fc, claimCount: &count, inProg: c.inProgressLabel}
+	cfc := &countingForge{Client: fc, claimCount: &count}
 
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil} // first slot: fail; second: succeed

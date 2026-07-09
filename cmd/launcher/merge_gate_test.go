@@ -34,7 +34,8 @@ func TestGateToGreen(t *testing.T) {
 		checkStateErrs []error
 		wantGreen      bool
 		wantGenuineRed bool
-		wantSwapAdd    string
+		wantTransition bool
+		wantTo         forge.DispatchState
 	}{
 		{
 			name:           "SUCCESS on first poll swaps agent-complete",
@@ -42,7 +43,8 @@ func TestGateToGreen(t *testing.T) {
 			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
 			wantGreen:      true,
 			wantGenuineRed: false,
-			wantSwapAdd:    "agent-complete",
+			wantTransition: true,
+			wantTo:         forge.Complete,
 		},
 		{
 			name:           "PENDING then SUCCESS swaps after one wait iteration",
@@ -50,7 +52,8 @@ func TestGateToGreen(t *testing.T) {
 			checkStates:    []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess},
 			wantGreen:      true,
 			wantGenuineRed: false,
-			wantSwapAdd:    "agent-complete",
+			wantTransition: true,
+			wantTo:         forge.Complete,
 		},
 		{
 			name:           "FAILURE signals genuine-red without swap",
@@ -58,7 +61,6 @@ func TestGateToGreen(t *testing.T) {
 			checkStates:    []forge.RollupState{forge.StateFailure},
 			wantGreen:      false,
 			wantGenuineRed: true,
-			wantSwapAdd:    "",
 		},
 		{
 			name:           "ERROR signals genuine-red without swap",
@@ -66,7 +68,6 @@ func TestGateToGreen(t *testing.T) {
 			checkStates:    []forge.RollupState{forge.StateError},
 			wantGreen:      false,
 			wantGenuineRed: true,
-			wantSwapAdd:    "",
 		},
 		{
 			name:           "NONE times out — non-genuine failure without swap",
@@ -74,7 +75,6 @@ func TestGateToGreen(t *testing.T) {
 			checkStates:    nil,
 			wantGreen:      false,
 			wantGenuineRed: false,
-			wantSwapAdd:    "",
 		},
 		{
 			// A partial check snapshot can briefly show SUCCESS before all jobs
@@ -84,16 +84,16 @@ func TestGateToGreen(t *testing.T) {
 			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateFailure},
 			wantGreen:      false,
 			wantGenuineRed: true,
-			wantSwapAdd:    "",
 		},
 		{
 			// Confirmation returns PENDING — another check registered but not
 			// yet settled. Gate keeps waiting; eventually stabilises to SUCCESS.
-			name:        "SUCCESS then PENDING in confirmation poll defers completion",
-			timeout:     100,
-			checkStates: []forge.RollupState{forge.StateSuccess, forge.StatePending, forge.StateSuccess, forge.StateSuccess},
-			wantGreen:   true,
-			wantSwapAdd: "agent-complete",
+			name:           "SUCCESS then PENDING in confirmation poll defers completion",
+			timeout:        100,
+			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StatePending, forge.StateSuccess, forge.StateSuccess},
+			wantGreen:      true,
+			wantTransition: true,
+			wantTo:         forge.Complete,
 		},
 		{
 			// A 403 or other API error on the first poll must not be silently
@@ -137,17 +137,17 @@ func TestGateToGreen(t *testing.T) {
 			if genuineRed != tc.wantGenuineRed {
 				t.Errorf("gateToGreen genuineRed=%v, want %v", genuineRed, tc.wantGenuineRed)
 			}
-			if tc.wantSwapAdd != "" {
-				if len(fc.SwapCalls) == 0 {
-					t.Fatalf("expected SwapLabel call, got none")
+			if tc.wantTransition {
+				if len(fc.TransitionStateCalls) == 0 {
+					t.Fatalf("expected TransitionState call, got none")
 				}
-				last := fc.SwapCalls[len(fc.SwapCalls)-1]
-				if last.Add != tc.wantSwapAdd {
-					t.Errorf("swap add=%q, want %q", last.Add, tc.wantSwapAdd)
+				last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]
+				if last.To != tc.wantTo {
+					t.Errorf("TransitionState To=%v, want %v", last.To, tc.wantTo)
 				}
 			} else {
-				if len(fc.SwapCalls) > 0 {
-					t.Errorf("expected no SwapLabel calls, got %d: %+v", len(fc.SwapCalls), fc.SwapCalls)
+				if len(fc.TransitionStateCalls) > 0 {
+					t.Errorf("expected no TransitionState calls, got %d: %+v", len(fc.TransitionStateCalls), fc.TransitionStateCalls)
 				}
 			}
 		})

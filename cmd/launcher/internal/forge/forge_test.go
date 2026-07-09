@@ -40,13 +40,14 @@ func TestFake_CheckStateScript(t *testing.T) {
 	}
 }
 
-// TestFake_SwapLabel verifies that SwapLabel records calls and mutates Labels.
-func TestFake_SwapLabel(t *testing.T) {
+// TestFake_TransitionState verifies that TransitionState records calls and
+// mutates Labels, removing all other dispatch labels.
+func TestFake_TransitionState(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	if err := f.SwapLabel("42", "agent-in-progress", "ready-for-agent"); err != nil {
-		t.Fatalf("SwapLabel: %v", err)
+	if err := f.TransitionState("42", forge.InProgress); err != nil {
+		t.Fatalf("TransitionState: %v", err)
 	}
 
 	iss, err := f.Issue("42")
@@ -56,8 +57,12 @@ func TestFake_SwapLabel(t *testing.T) {
 	if len(iss.Labels) != 1 || iss.Labels[0] != "agent-in-progress" {
 		t.Fatalf("want [agent-in-progress], got %v", iss.Labels)
 	}
-	if len(f.SwapCalls) != 1 {
-		t.Fatalf("want 1 SwapCall, got %d", len(f.SwapCalls))
+	if len(f.TransitionStateCalls) != 1 {
+		t.Fatalf("want 1 TransitionStateCall, got %d", len(f.TransitionStateCalls))
+	}
+	got := f.TransitionStateCalls[0]
+	if got.Num != "42" || got.To != forge.InProgress {
+		t.Errorf("unexpected call: %+v", got)
 	}
 }
 

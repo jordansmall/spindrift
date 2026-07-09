@@ -33,11 +33,11 @@ func TestReconcileStranded_GreenPRMergesAndCompletes(t *testing.T) {
 	if fc.Merged != testReconcilePR {
 		t.Errorf("expected green stranded PR to be merged; fc.Merged=%q", fc.Merged)
 	}
-	if len(fc.SwapCalls) == 0 {
-		t.Fatal("expected SwapLabel call for completeLabel")
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected TransitionState call for completeLabel")
 	}
-	if last := fc.SwapCalls[len(fc.SwapCalls)-1]; last.Add != c.completeLabel {
-		t.Errorf("last swap add=%q, want %q", last.Add, c.completeLabel)
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Complete {
+		t.Errorf("last transition To=%v, want Complete", last.To)
 	}
 }
 
@@ -56,11 +56,11 @@ func TestReconcileStranded_RedFollowsSelfHeal(t *testing.T) {
 	if fc.Merged != "" {
 		t.Errorf("expected no merge on red CI; fc.Merged=%q", fc.Merged)
 	}
-	if len(fc.SwapCalls) == 0 {
-		t.Fatal("expected SwapLabel call for failedLabel")
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected TransitionState call for failedLabel")
 	}
-	if last := fc.SwapCalls[len(fc.SwapCalls)-1]; last.Add != c.failedLabel {
-		t.Errorf("last swap add=%q, want %q", last.Add, c.failedLabel)
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
+		t.Errorf("last transition To=%v, want Failed", last.To)
 	}
 }
 
@@ -77,8 +77,8 @@ func TestReconcileStranded_DraftPRSkipped(t *testing.T) {
 	if fc.Merged != "" {
 		t.Errorf("draft PR must not be merged; fc.Merged=%q", fc.Merged)
 	}
-	if len(fc.SwapCalls) != 0 {
-		t.Errorf("draft PR must not trigger label churn; got %v", fc.SwapCalls)
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("draft PR must not trigger label churn; got %v", fc.TransitionStateCalls)
 	}
 }
 
@@ -94,8 +94,8 @@ func TestReconcileStranded_NoPRSkipped(t *testing.T) {
 	if fc.Merged != "" {
 		t.Errorf("no-PR issue must not be merged; fc.Merged=%q", fc.Merged)
 	}
-	if len(fc.SwapCalls) != 0 {
-		t.Errorf("no-PR issue must not trigger label churn; got %v", fc.SwapCalls)
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("no-PR issue must not trigger label churn; got %v", fc.TransitionStateCalls)
 	}
 }
 
@@ -115,11 +115,11 @@ func TestAdoptAndGate_RedFollowsSelfHeal(t *testing.T) {
 	if fc.Merged != "" {
 		t.Errorf("expected no merge on red CI; fc.Merged=%q", fc.Merged)
 	}
-	if len(fc.SwapCalls) == 0 {
-		t.Fatal("expected SwapLabel call for failedLabel")
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected TransitionState call for failedLabel")
 	}
-	if last := fc.SwapCalls[len(fc.SwapCalls)-1]; last.Add != c.failedLabel {
-		t.Errorf("last swap add=%q, want %q", last.Add, c.failedLabel)
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
+		t.Errorf("last transition To=%v, want Failed", last.To)
 	}
 }
 
@@ -143,11 +143,11 @@ func TestAdoptAndGate_GreenMergesAndCompletes(t *testing.T) {
 	if len(fixCalls) != 0 {
 		t.Errorf("expected no fix calls on green CI, got %v", fixCalls)
 	}
-	if len(fc.SwapCalls) == 0 {
-		t.Fatal("expected SwapLabel call for completeLabel")
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected TransitionState call for completeLabel")
 	}
-	if last := fc.SwapCalls[len(fc.SwapCalls)-1]; last.Add != c.completeLabel {
-		t.Errorf("last swap add=%q, want %q", last.Add, c.completeLabel)
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Complete {
+		t.Errorf("last transition To=%v, want Complete", last.To)
 	}
 }
 
@@ -170,11 +170,11 @@ func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	if fc.Merged != testReconcilePR {
 		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
 	}
-	if len(fc.SwapCalls) == 0 {
-		t.Fatal("expected SwapLabel call for completeLabel")
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected TransitionState call for completeLabel")
 	}
-	if last := fc.SwapCalls[len(fc.SwapCalls)-1]; last.Add != c.completeLabel {
-		t.Errorf("last swap add=%q, want %q", last.Add, c.completeLabel)
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Complete {
+		t.Errorf("last transition To=%v, want Complete", last.To)
 	}
 }
 
@@ -194,8 +194,8 @@ func TestRecoverByNumber_DraftPRSkipped(t *testing.T) {
 	if fc.Merged != "" {
 		t.Errorf("draft PR must not be merged; fc.Merged=%q", fc.Merged)
 	}
-	if len(fc.SwapCalls) != 0 {
-		t.Errorf("draft PR must not trigger label churn; got %v", fc.SwapCalls)
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("draft PR must not trigger label churn; got %v", fc.TransitionStateCalls)
 	}
 }
 
@@ -214,8 +214,8 @@ func TestRecoverByNumber_NoPRSkipped(t *testing.T) {
 	if fc.Merged != "" {
 		t.Errorf("no-PR case must not trigger merge; fc.Merged=%q", fc.Merged)
 	}
-	if len(fc.SwapCalls) != 0 {
-		t.Errorf("no-PR case must not trigger label churn; got %v", fc.SwapCalls)
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("no-PR case must not trigger label churn; got %v", fc.TransitionStateCalls)
 	}
 }
 
@@ -237,10 +237,10 @@ func TestRecoverByNumber_RedFollowsSelfHeal(t *testing.T) {
 	if fc.Merged != "" {
 		t.Errorf("expected no merge on red CI; fc.Merged=%q", fc.Merged)
 	}
-	if len(fc.SwapCalls) == 0 {
-		t.Fatal("expected SwapLabel call for failedLabel")
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected TransitionState call for failedLabel")
 	}
-	if last := fc.SwapCalls[len(fc.SwapCalls)-1]; last.Add != c.failedLabel {
-		t.Errorf("last swap add=%q, want %q", last.Add, c.failedLabel)
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
+		t.Errorf("last transition To=%v, want Failed", last.To)
 	}
 }

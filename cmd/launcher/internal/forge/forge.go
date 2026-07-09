@@ -45,28 +45,9 @@ const (
 	StateNone     RollupState = "NONE" // no checks registered on this commit
 )
 
-// Client is the forge seam — all GitHub API calls go through here.
+// Client is the combined forge seam — IssueTracker and CodeForge in one.
+// Use the narrower seam types where a function only needs one axis.
 type Client interface {
-	ListIssues(label string) ([]Issue, error) // open issues, oldest-first
-	Issue(num string) (Issue, error)          // body + labels + state, one gh call
-	SwapLabel(num, add, remove string) error
-	Comment(num, body string) error
-	OpenPRForBranch(branch string) (PR, bool, error) // false = no open PR
-	PRForBranch(branch string) (string, bool, error) // any state; false = no PR
-	PRState(url string) (string, error)              // MERGED check
-	CheckState(url string) (RollupState, error)      // aggregate statusCheckRollup
-	ListPRFiles(url string) ([]string, error)        // changed paths: added, modified, and deleted alike
-	Merge(url string) error                          // rebase + delete branch
-	Rebase(prURL string) error                       // checkout head, rebase onto base, force-push
-	CanAutoMerge() (bool, error)                     // true if the repo allows auto-merge
-	EnqueueAutoMerge(prURL string) error             // gh pr merge --auto --rebase --delete-branch
-	// Probe checks that the forge credentials are valid and the configured
-	// repository is reachable. Returns the resolved repo slug on success, or
-	// ErrAuthFailure / ErrRepoNotFound to distinguish the two failure modes.
-	Probe() (string, error)
-	// ListLabels returns the names of all labels defined in the repository.
-	ListLabels() ([]string, error)
-	// CreateLabel creates a new label with the given name, description, and
-	// hex color (without the leading #). Returns an error if gh reports failure.
-	CreateLabel(name, description, color string) error
+	IssueTracker
+	CodeForge
 }

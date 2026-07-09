@@ -35,7 +35,7 @@ func selectiveListDispatch(c config, fc forge.Client, pwd string, r runner.Runne
 	}
 
 	// Build blocker graph and evict dependents with unmet external blockers.
-	edges, err := parseBlockers(fc, issues)
+	edges, err := buildEdges(fc, issues)
 	if err != nil {
 		return err
 	}

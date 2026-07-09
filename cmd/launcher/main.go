@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -236,6 +235,21 @@ func validate(c config) error {
 	return nil
 }
 
+// dispatchLabels builds the DispatchLabels mapping from loaded config.
+func dispatchLabels(c config) forge.DispatchLabels {
+	return forge.DispatchLabels{
+		Dispatchable: c.label,
+		InProgress:   c.inProgressLabel,
+		Complete:     c.completeLabel,
+		Failed:       c.failedLabel,
+	}
+}
+
+// newForgeClient returns an exec-backed forge Client wired to the config.
+func newForgeClient(c config) forge.Client {
+	return forge.NewExecClient(c.repoSlug, dispatchLabels(c))
+}
+
 // newRunner constructs the runner adapter for the `run` subcommand.
 func newRunner(c config, pwd string) runner.Runner {
 	if c.runtime == "bwrap" {
@@ -286,23 +300,23 @@ func build() error {
 	return newBuildRunner(c, pwd).EnsureReady()
 }
 
-// swapLabel is a best-effort label transition that logs but does not propagate
-// errors, matching the original behaviour.
-func swapLabel(fc forge.Client, num, add, remove string) {
-	if err := fc.SwapLabel(num, add, remove); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not set label '%s' (remove '%s')\n", num, add, remove)
+// transitionState is a best-effort dispatch-state transition that logs but
+// does not propagate errors, matching the original behaviour.
+func transitionState(fc forge.Client, num string, to forge.DispatchState) {
+	if err := fc.TransitionState(num, to); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %d\n", num, to)
 	}
 }
 
 // claimIssue marks an issue in-progress before dispatch. When discovery already
 // runs off the in-progress label — the workflow claimed the issue in YAML
-// before the launcher started — the swap would add and remove the same label,
-// so it is skipped.
+// before the launcher started — the transition would be a no-op, so it is
+// skipped.
 func claimIssue(c config, fc forge.Client, num string) {
 	if c.label == c.inProgressLabel {
 		return
 	}
-	swapLabel(fc, num, c.inProgressLabel, c.label)
+	transitionState(fc, num, forge.InProgress)
 }
 
 // runOne dispatches one issue into a container and logs its output.
@@ -422,8 +436,8 @@ func gateToGreen(c config, fc forge.Client, num, pr string) (bool, bool) {
 				// PENDING/EXPECTED/NONE — keep waiting for checks to settle.
 				break
 			}
-			// Confirmed green: swap agent-complete regardless of merge outcome.
-			swapLabel(fc, num, c.completeLabel, c.inProgressLabel)
+			// Confirmed green: mark complete regardless of merge outcome.
+			transitionState(fc, num, forge.Complete)
 			return true, false
 		case forge.StateFailure, forge.StateError:
 			// Genuine red — signal caller so it can dispatch a fix pass.
@@ -572,7 +586,7 @@ func selfHeal(c config, fc forge.Client, runFixFn func(int) error, runConflictRe
 				fmt.Printf("    #%s  pr=%s  status=fix-exhausted  !! exhausted %d fix pass(es)\n",
 					num, pr, c.maxFixAttempts)
 			}
-			swapLabel(fc, num, c.failedLabel, c.inProgressLabel)
+			transitionState(fc, num, forge.Failed)
 			return false, false
 		}
 		fmt.Printf("    #%s  pr=%s  fix-pass=%d/%d\n", num, pr, attempt+1, c.maxFixAttempts)
@@ -600,7 +614,7 @@ func verifyMerged(c config, fc forge.Client, num, pr string) {
 		reason = fmt.Sprintf("issue does not carry '%s'", c.completeLabel)
 	}
 	fmt.Printf("    #%s  pr=%s  status=failed  !! %s\n", num, pr, reason)
-	swapLabel(fc, num, c.failedLabel, c.inProgressLabel)
+	transitionState(fc, num, forge.Failed)
 }
 
 // adoptAndGate runs the merge gate (selfHeal → verifyMerged) on an
@@ -769,104 +783,19 @@ func openPRForBranch(fc forge.Client, branch string) (url string, isDraft bool, 
 //	exit 2 (errQueueEmpty): discoverIssues found no open dispatchable issues.
 var errQueueEmpty = errors.New("queue empty")
 
-// Compiled once; shared by all parseBlockerRefs calls.
-var (
-	// Matches inline keyword patterns. The keyword must be followed by optional
-	// whitespace and colon before any issue refs are scanned.
-	blockKeyword = regexp.MustCompile(`(?i)(?:depends on|blocked by)\s*:?\s*`)
-	// Matches "#NNN" issue references.
-	issueRef = regexp.MustCompile(`#([0-9]+)`)
-	// Matches "## Blocked by" (or similar) section headers.
-	blockedByHeader = regexp.MustCompile(`(?i)^#+\s*blocked by\s*:?\s*$`)
-	// Matches any markdown heading line (to end the "Blocked by" section).
-	anyHeading = regexp.MustCompile(`^#+`)
-	// Matches a bullet list item line.
-	bulletItem = regexp.MustCompile(`^[ \t]*[-*][ \t]*`)
-	// Matches a contiguous inline ref-list from the start of a string.
-	// Valid tokens: #NNN refs, commas, slashes, whitespace, and the word
-	// "and". Stops before prose words or sentence-boundary punctuation.
-	refListPrefix = regexp.MustCompile(`^(?:#[0-9]+|[,/]|\s+|\band\b)+`)
-)
-
-// parseBlockerRefs extracts all blocker issue numbers referenced in a body.
-// Recognises two formats:
-//   - Inline: "depends on #N" or "blocked by #N" anywhere in the body.
-//     Refs in the contiguous list after the keyword are captured;
-//     the list ends at the first prose token (e.g. a period or a
-//     non-"and" word) to prevent false blockers from "see also #N".
-//   - Section: a "## Blocked by" header followed by "- #N" list items.
-//     All issue refs in each list item are captured.
-//
-// Fixes two bugs present in the bash parser: (1) header+list edges were
-// silently dropped because the old single-line regex required the keyword and
-// the ref on the same line; (2) only the first ref on a "blocked by #12 #13"
-// line was captured.
-func parseBlockerRefs(body string) []string {
-	seen := map[string]bool{}
-	var refs []string
-	addRef := func(n string) {
-		if !seen[n] {
-			seen[n] = true
-			refs = append(refs, n)
-		}
-	}
-
-	inSection := false
-	for _, rawLine := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
-		line := strings.TrimRight(rawLine, "\r")
-
-		// "## Blocked by" section header — enter the section.
-		if blockedByHeader.MatchString(strings.TrimSpace(line)) {
-			inSection = true
-			continue
-		}
-		// Any other heading ends the section.
-		if anyHeading.MatchString(line) {
-			inSection = false
-		}
-
-		// List item inside the "Blocked by" section: extract all #N refs.
-		if inSection && bulletItem.MatchString(line) {
-			for _, m := range issueRef.FindAllStringSubmatch(line, -1) {
-				addRef(m[1])
-			}
-		}
-
-		// Inline keyword anywhere in the line: extract #N refs that form a
-		// contiguous ref list immediately after the keyword. Stops before
-		// prose tokens so that "depends on #12. See also #99" does not
-		// record #99 as a blocker.
-		remaining := line
-		for {
-			loc := blockKeyword.FindStringIndex(remaining)
-			if loc == nil {
-				break
-			}
-			after := remaining[loc[1]:]
-			listStr := refListPrefix.FindString(after)
-			for _, m := range issueRef.FindAllStringSubmatch(listStr, -1) {
-				addRef(m[1])
-			}
-			remaining = after
-		}
-	}
-	return refs
-}
-
-// parseBlockers fetches each issue's body from GitHub via the forge seam and
-// returns a map from issue number to the slice of issue numbers that must
-// complete first.
-func parseBlockers(fc forge.Client, issues []issue) (map[string][]string, error) {
+// buildEdges returns the dependency graph for the given batch of issues by
+// calling the IssueTracker's DepsOf for each. Non-fatal per-issue errors are
+// skipped, matching the original best-effort behaviour.
+func buildEdges(fc forge.Client, issues []issue) (map[string][]string, error) {
 	edges := map[string][]string{}
 	for _, iss := range issues {
-		fi, err := fc.Issue(iss.number)
+		deps, err := fc.DepsOf(iss.number)
 		if err != nil {
 			// Non-fatal: skip issues whose data cannot be fetched.
 			continue
 		}
-		refs := parseBlockerRefs(fi.Body)
-		if len(refs) > 0 {
-			edges[iss.number] = refs
+		if len(deps) > 0 {
+			edges[iss.number] = deps
 		}
 	}
 	return edges, nil
@@ -1024,7 +953,7 @@ func discoverIssues(c config, fc forge.Client) ([]issue, error) {
 		return []issue{{number: fi.Number, title: fi.Title}}, nil
 	}
 	fmt.Printf("==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
-	rawIssues, err := fc.ListIssues(c.label)
+	rawIssues, err := fc.ListIssues(forge.Dispatchable)
 	if err != nil {
 		return nil, err
 	}
@@ -1040,7 +969,7 @@ func discoverIssues(c config, fc forge.Client) ([]issue, error) {
 // each. Draft PRs and in-progress issues with no open PR are skipped silently.
 // Called at launcher start, before any new dispatch.
 func reconcileStranded(c config, fc forge.Client, pwd string, r runner.Runner) {
-	fiList, err := fc.ListIssues(c.inProgressLabel)
+	fiList, err := fc.ListIssues(forge.InProgress)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reconcile: list in-progress issues: %v\n", err)
 		return
@@ -1109,7 +1038,7 @@ func recoverIssue(issueNum string) error {
 	if err := r.EnsureReady(); err != nil {
 		return err
 	}
-	fc := forge.NewExecClient(c.repoSlug)
+	fc := newForgeClient(c)
 	return recoverByNumber(c, fc, pwd, r, issueNum)
 }
 
@@ -1128,11 +1057,12 @@ var triageLabelMeta = map[string]labelMeta{
 	"agent-complete":    {description: "Agent work merged and green", color: "0e8a16"},
 }
 
-// runDoctor probes forge connectivity, then checks that all configured triage
-// labels exist in the repository. When interactive is true and labels are
-// missing, it prompts to create them; otherwise it reports and exits non-zero.
-func runDoctor(fc forge.Client, c config, w io.Writer, stdin io.Reader, interactive bool) error {
-	repo, err := fc.Probe()
+// runDoctor probes both seams (IssueTracker + CodeForge), then checks that
+// all configured triage labels exist in the repository. When interactive is
+// true and labels are missing, it prompts to create them; otherwise it reports
+// and exits non-zero.
+func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer, stdin io.Reader, interactive bool) error {
+	repo, err := it.Probe()
 	if err != nil {
 		if errors.Is(err, forge.ErrAuthFailure) {
 			return fmt.Errorf("forge auth check failed (check GH_TOKEN is set and valid): %w", err)
@@ -1142,10 +1072,14 @@ func runDoctor(fc forge.Client, c config, w io.Writer, stdin io.Reader, interact
 		}
 		return fmt.Errorf("forge connectivity check failed: %w", err)
 	}
-	fmt.Fprintf(w, "ok: forge connectivity confirmed — %s is reachable\n", repo)
+	fmt.Fprintf(w, "ok: issue tracker confirmed — %s is reachable\n", repo)
+	if _, err := cf.Probe(); err != nil {
+		return fmt.Errorf("code forge connectivity check failed: %w", err)
+	}
+	fmt.Fprintf(w, "ok: code forge confirmed — %s is reachable\n", repo)
 
 	checkLabels := func() ([]string, error) {
-		existing, lerr := fc.ListLabels()
+		existing, lerr := it.ListLabels()
 		if lerr != nil {
 			return nil, fmt.Errorf("label check failed: %w", lerr)
 		}
@@ -1190,7 +1124,7 @@ func runDoctor(fc forge.Client, c config, w io.Writer, stdin io.Reader, interact
 		if !ok {
 			meta = labelMeta{color: "ededed"}
 		}
-		if cerr := fc.CreateLabel(name, meta.description, meta.color); cerr != nil {
+		if cerr := it.CreateLabel(name, meta.description, meta.color); cerr != nil {
 			return fmt.Errorf("create label %q: %w", name, cerr)
 		}
 		fmt.Fprintf(w, "created: label %q\n", name)
@@ -1226,7 +1160,7 @@ func previewIssues(c config, fc forge.Client, w io.Writer, issueNums []string) e
 		fmt.Fprintf(w, "repo: %s  merge-mode: %s\nno open '%s' issues — nothing to dispatch.\n", c.repoSlug, c.mergeMode, c.label)
 		return nil
 	}
-	edges, err := parseBlockers(fc, issues)
+	edges, err := buildEdges(fc, issues)
 	if err != nil {
 		return err
 	}
@@ -1258,7 +1192,7 @@ func previewSelectiveList(c config, fc forge.Client, w io.Writer, nums []string)
 	}
 
 	// Parse blocker graph.
-	edges, err := parseBlockers(fc, issues)
+	edges, err := buildEdges(fc, issues)
 	if err != nil {
 		return err
 	}
@@ -1292,7 +1226,7 @@ func preview(issueNums []string) error {
 	if err := validate(c); err != nil {
 		return err
 	}
-	fc := forge.NewExecClient(c.repoSlug)
+	fc := newForgeClient(c)
 	return previewIssues(c, fc, os.Stdout, issueNums)
 }
 
@@ -1409,7 +1343,7 @@ func fanOut(c config, fc forge.Client, pwd string, r runner.Runner, batch []issu
 			claimIssue(c, fc, iss.number)
 			if ok := runWithRetry(c, pwd, r, iss); !ok {
 				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.number, iss.number)
-				swapLabel(fc, iss.number, c.failedLabel, c.inProgressLabel)
+				transitionState(fc, iss.number, forge.Failed)
 			} else {
 				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.number, iss.number)
 				gateIssue(c, fc, pwd, r, iss)
@@ -1444,7 +1378,7 @@ func dispatchWaves(c config, fc forge.Client, pwd string, r runner.Runner, issue
 
 		for _, iss := range blockerFailed {
 			fmt.Printf("    !! #%s  status=blocker-failed  note=a dependency failed; skipping\n", iss.number)
-			swapLabel(fc, iss.number, c.failedLabel, c.label)
+			transitionState(fc, iss.number, forge.Failed)
 		}
 
 		if len(ready) == 0 {
@@ -1542,7 +1476,7 @@ func run(noBuild bool) error {
 		}
 	}
 
-	fc := forge.NewExecClient(c.repoSlug)
+	fc := newForgeClient(c)
 	fmt.Printf("repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
 
 	if err := checkAutoMergePreflight(c, fc); err != nil {
@@ -1566,7 +1500,7 @@ func run(noBuild bool) error {
 	}
 
 	// Build the dependency graph for the batch.
-	edges, err := parseBlockers(fc, issues)
+	edges, err := buildEdges(fc, issues)
 	if err != nil {
 		return err
 	}
@@ -1636,10 +1570,10 @@ func main() {
 	}
 	if len(args) > 0 && args[0] == "doctor" {
 		c := loadConfig()
-		fc := forge.NewExecClient(c.repoSlug)
+		fc := newForgeClient(c)
 		stat, serr := os.Stdin.Stat()
 		interactive := serr == nil && (stat.Mode()&os.ModeCharDevice) != 0
-		if err := runDoctor(fc, c, os.Stdout, os.Stdin, interactive); err != nil {
+		if err := runDoctor(fc, fc, c, os.Stdout, os.Stdin, interactive); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
@@ -1692,7 +1626,7 @@ func main() {
 					os.Exit(1)
 				}
 			}
-			fc := forge.NewExecClient(c.repoSlug)
+			fc := newForgeClient(c)
 			if err := selectiveListDispatch(c, fc, pwd, r, nums, forceYes, os.Stdin, os.Stdout); err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
 				os.Exit(1)
