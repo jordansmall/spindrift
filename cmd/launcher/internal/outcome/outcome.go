@@ -13,10 +13,13 @@ import (
 )
 
 // Outcome is the machine-readable result written by a Box as its final line.
-// Grammar: SPINDRIFT_OUTCOME issue=<num> pr=<url> status=<status> note=<text>
+// Grammar: SPINDRIFT_OUTCOME issue=<num> pr=<landing-ref> status=<status> note=<text>
 // Note may contain spaces and '='; all other fields are space-delimited tokens.
 type Outcome struct {
-	Issue  string
+	Issue string
+	// PR is the landing reference: a PR URL under CODE_FORGE=github, or a
+	// branch ref (e.g. "agent/issue-42") under the push-only CODE_FORGE=git,
+	// which has no PR concept.
 	PR     string
 	Status string // ready | blocked | failed | merged | …
 	Note   string // free text; may contain spaces and '='
