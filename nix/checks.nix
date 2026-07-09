@@ -404,6 +404,102 @@ in
         touch $out
       '';
 
+  # Promoted operator-tunable knobs (issue #353): the 13 newly consumer-tunable
+  # knobs appear under their correct settings section and bake the expected
+  # ${VAR:-<baked>} default into the generated run command.  Covers at least one
+  # behavior knob (selfHealing.maxFixAttempts) and the identity knob
+  # (repository.repoSlug).  Also confirms that REPO_SLUG bakes an *empty*
+  # default when unset so runtime required-validation is not masked, and that
+  # ISSUE_NUMBER remains absent from the flake surface (keep-off list).
+  flakemodule-widen-operator-knobs =
+    let
+      inherit (pkgs.lib) assertMsg;
+      mkRun =
+        settingsCfg:
+        (flake-parts.lib.mkFlake
+          {
+            inputs = {
+              inherit nixpkgs;
+              self = {
+                outPath = ../.;
+              };
+            };
+          }
+          {
+            systems = [ system ];
+            imports = [ ../lib/flakeModule.nix ];
+            perSystem.spindrift = {
+              packages = p: [ p.hello ];
+              settings = settingsCfg;
+            };
+          }
+        ).packages.${system}.run;
+
+      behaviorRun = mkRun {
+        selfHealing = {
+          maxFixAttempts = 5;
+          holdJitterSecs = 10;
+        };
+        concurrency = {
+          maxJobs = 2;
+          depsPollSecs = 60;
+        };
+        branches = {
+          mergePollInterval = 90;
+          mergePollTimeout = 3600;
+        };
+      };
+
+      identityRun = mkRun {
+        repository = {
+          repoSlug = "test-org/test-repo";
+          gitUserName = "Test Bot";
+          gitUserEmail = "bot@test.example";
+        };
+      };
+
+      # REPO_SLUG without a consumer setting must bake an empty default so
+      # runtime required-validation is not masked (${REPO_SLUG:-} leaves it
+      # unset when no env var or flag is provided).
+      defaultRun = mkRun { };
+
+      # ISSUE_NUMBER must not be settable via settings (per-run dispatch
+      # override; keep-off list).
+      badIssueNumber = builtins.tryEval (mkRun {
+        issueDiscovery.issueNumber = "42";
+      });
+    in
+    assert assertMsg (
+      !badIssueNumber.success
+    ) "ISSUE_NUMBER must not be settable via settings.issueDiscovery (keep-off list)";
+    pkgs.runCommand "flakemodule-widen-operator-knobs"
+      {
+        inherit behaviorRun identityRun defaultRun;
+      }
+      ''
+        grep -q 'MAX_FIX_ATTEMPTS:-5' "$behaviorRun/bin/run" \
+          || { echo "MAX_FIX_ATTEMPTS:-5 not baked in run cmd" >&2; exit 1; }
+        grep -q 'HOLD_JITTER_SECS:-10' "$behaviorRun/bin/run" \
+          || { echo "HOLD_JITTER_SECS:-10 not baked in run cmd" >&2; exit 1; }
+        grep -q 'MAX_JOBS:-2' "$behaviorRun/bin/run" \
+          || { echo "MAX_JOBS:-2 not baked in run cmd" >&2; exit 1; }
+        grep -q 'DEPS_POLL_SECS:-60' "$behaviorRun/bin/run" \
+          || { echo "DEPS_POLL_SECS:-60 not baked in run cmd" >&2; exit 1; }
+        grep -q 'MERGE_POLL_INTERVAL:-90' "$behaviorRun/bin/run" \
+          || { echo "MERGE_POLL_INTERVAL:-90 not baked in run cmd" >&2; exit 1; }
+        grep -q 'MERGE_POLL_TIMEOUT:-3600' "$behaviorRun/bin/run" \
+          || { echo "MERGE_POLL_TIMEOUT:-3600 not baked in run cmd" >&2; exit 1; }
+        grep -q 'REPO_SLUG:-test-org/test-repo' "$identityRun/bin/run" \
+          || { echo "REPO_SLUG:-test-org/test-repo not baked in run cmd" >&2; exit 1; }
+        grep -q 'GIT_USER_NAME:-Test Bot' "$identityRun/bin/run" \
+          || { echo "GIT_USER_NAME:-Test Bot not baked in run cmd" >&2; exit 1; }
+        grep -q 'GIT_USER_EMAIL:-bot@test.example' "$identityRun/bin/run" \
+          || { echo "GIT_USER_EMAIL:-bot@test.example not baked in run cmd" >&2; exit 1; }
+        grep -q 'REPO_SLUG:-"' "$defaultRun/bin/run" \
+          || { echo "REPO_SLUG must have empty baked default when not set; required validation must not be masked" >&2; exit 1; }
+        touch $out
+      '';
+
   # Unknown section or knob keys in `settings` must throw at eval time; the
   # NixOS module system rejects undeclared option names.  We force evaluation
   # down to `.packages.${system}.run` so the module config is actually
