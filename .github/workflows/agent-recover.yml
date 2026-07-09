@@ -1,0 +1,104 @@
+name: Agent recover
+
+# Adding the `agent-recover` label to an issue re-runs the merge gate on it:
+# `spindrift recover <n>` finds the open non-draft PR for the issue's branch and
+# drives it to green (self-healing red CI up to MAX_FIX_ATTEMPTS), then applies
+# MERGE_MODE. It is the manual unstick for an issue stranded in
+# `agent-in-progress` after a killed launcher — the case `spindrift dispatch`
+# can't reconcile on its own — and the retry path for an `agent-failed` PR.
+#
+# recover owns its terminal label swaps: green -> agent-complete, exhausted red
+# -> agent-failed. Those swaps read *from* agent-in-progress, so the claim step
+# normalises the issue onto agent-in-progress before recover runs. The claim
+# also clears agent-recover, so the label self-clears and will not re-fire.
+on:
+  issues:
+    types: [labeled]
+
+# Serialise per issue only: two labelings of the SAME issue queue behind each
+# other (no double-recover), but different issues run concurrently. Agent boxes
+# share one Claude rate-limit window — the operator is responsible for not
+# triggering more issues than that window allows.
+concurrency:
+  group: agent-recover-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    if: github.event.label.name == 'agent-recover'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      # spindrift reads these directly; env wins over the image's baked defaults.
+      RUNTIME: docker
+      REPO_SLUG: ${{ github.repository }}
+      BASE_BRANCH: ${{ github.event.repository.default_branch }}
+      GIT_USER_NAME: ${{ vars.AGENT_GIT_USER_NAME || 'spindrift-agent' }}
+      GIT_USER_EMAIL: ${{ vars.AGENT_GIT_USER_EMAIL || 'spindrift-agent@users.noreply.github.com' }}
+      # Fine-grained PAT scoped to this repo: Issues RW, Contents RW, Pull requests RW,
+      # Metadata R. The default GITHUB_TOKEN is not enough (the launcher merges PRs).
+      GH_TOKEN: ${{ secrets.SPINDRIFT_GH_TOKEN }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Normalise onto agent-in-progress up front — before nix install and the
+      # ~2m40s build — so recover's terminal swaps (which read from
+      # agent-in-progress) have the state they expect, and so ownership is
+      # atomic the instant the runner has the repo. Removing agent-recover
+      # self-clears the trigger (no re-fire); removing the terminal labels makes
+      # a retry-from-agent-failed / re-run-on-agent-complete start clean;
+      # removing ready-for-agent keeps a concurrent dispatch from grabbing it.
+      # Targets only the triggering issue.
+      - name: Claim the issue
+        run: |
+          gh issue edit "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --add-label agent-in-progress \
+            --remove-label agent-recover \
+            --remove-label agent-failed \
+            --remove-label agent-complete \
+            --remove-label ready-for-agent
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      # ~2m40s cold on a GitHub runner (nixpkgs closure is substituted, not compiled).
+      - name: Build the agent image
+        run: nix run . -- build
+
+      # recover exits non-zero ONLY when there is nothing to adopt (no open PR,
+      # a draft-only PR, or the issue can't be fetched) — and in that case it
+      # leaves labels untouched. Every path where a PR exists (green->complete,
+      # red-exhausted->failed, merge-blocked->complete) exits 0 with the label
+      # already swapped, so the park step below stays dormant.
+      - name: Recover the issue
+        id: recover
+        run: nix run . -- recover "${{ github.event.issue.number }}"
+
+      # Only fires when recover itself couldn't adopt (guarded on the step
+      # outcome so a failed build/install does NOT mislabel the issue). Park to
+      # agent-failed for human triage and say why — the claim already moved it
+      # off agent-recover, so without this it would sit silently on
+      # agent-in-progress with nothing running.
+      - name: Park if nothing to recover
+        if: always() && steps.recover.outcome == 'failure'
+        run: |
+          gh issue comment "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --body "⚠️ \`spindrift recover\` found nothing to adopt — no open non-draft PR on \`agent/issue-${{ github.event.issue.number }}\`. Parked to \`agent-failed\`; re-label \`agent-recover\` once an open PR exists, or \`ready-for-agent\` to re-dispatch from scratch."
+          gh issue edit "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --add-label agent-failed \
+            --remove-label agent-in-progress
+
+      - name: Upload run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-recover-logs-${{ github.event.issue.number }}
+          path: logs/
+          if-no-files-found: ignore
