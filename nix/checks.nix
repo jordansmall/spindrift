@@ -12,6 +12,8 @@ let
     harness
     nonRustHarness
     leanHarness
+    scoutOnlyHarness
+    reviewerOnlyHarness
     customHarness
     dockerHarness
     bwrapHarness
@@ -1099,9 +1101,10 @@ in
     touch $out
   '';
 
-  # AGENTS_JSON_TEMPLATE baked into the entrypoint by nix (ADR 0007):
-  # when both models are configured it contains the JSON produced by
-  # builtins.toJSON; when either is unset it is the empty string.
+  # AGENTS_JSON_TEMPLATE baked into the entrypoint by nix (ADR 0007): each
+  # subagent is composed independently by its own model knob (issue #392), so
+  # the template carries whichever of scout/reviewer have a model configured,
+  # and is the empty string only when neither does.
   agents-json-baked = pkgs.runCommand "agents-json-baked" { } ''
     ep=${customHarness.agentFiles}/agent/entrypoint.sh
 
@@ -1116,6 +1119,20 @@ in
     # Default harness bakes no models → template must not contain JSON content.
     ! grep -q 'AGENTS_JSON_TEMPLATE=.*{' ${nonRustHarness.agentFiles}/agent/entrypoint.sh \
       || { echo "AGENTS_JSON_TEMPLATE is non-empty for no-model harness" >&2; exit 1; }
+
+    # A scout-only harness bakes the scout entry alone — no reviewer key at all.
+    scout_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${scoutOnlyHarness.agentFiles}/agent/entrypoint.sh)
+    grep -q 'solo-scout' <<<"$scout_line" \
+      || { echo "scout-only harness missing scout model in baked template" >&2; exit 1; }
+    ! grep -q '"reviewer"' <<<"$scout_line" \
+      || { echo "scout-only harness unexpectedly bakes a reviewer entry" >&2; exit 1; }
+
+    # The reviewer-only mirror.
+    reviewer_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${reviewerOnlyHarness.agentFiles}/agent/entrypoint.sh)
+    grep -q 'solo-reviewer' <<<"$reviewer_line" \
+      || { echo "reviewer-only harness missing reviewer model in baked template" >&2; exit 1; }
+    ! grep -q '"scout"' <<<"$reviewer_line" \
+      || { echo "reviewer-only harness unexpectedly bakes a scout entry" >&2; exit 1; }
 
     touch $out
   '';

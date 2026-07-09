@@ -153,6 +153,24 @@ FAKE
   [ ! -s "$CLAUDE_AGENTS_FILE" ]
 }
 
+@test "entrypoint passes --agents with only scout when the template carries scout alone" {
+  export AGENTS_JSON_TEMPLATE='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -s "$CLAUDE_AGENTS_FILE" ]
+  jq -e 'has("scout") and (has("reviewer") | not)' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.scout.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+}
+
+@test "entrypoint passes --agents with only reviewer when the template carries reviewer alone" {
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -s "$CLAUDE_AGENTS_FILE" ]
+  jq -e 'has("reviewer") and (has("scout") | not)' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+}
+
 @test "entrypoint passes --agents as a JSON object with scout and reviewer when template is set" {
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
