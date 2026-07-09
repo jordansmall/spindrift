@@ -1536,14 +1536,19 @@ func dispatchWaves(c config, fc forge.Client, pwd string, r runner.Runner, issue
 	elapsed := 0
 
 	for len(remaining) > 0 {
+		checkOverlap := waveOverlapCheck(c, fc)
 		var ready, blockerFailed, held []issue
 		for _, iss := range remaining {
+			collider, overlapped := checkOverlap(iss.number)
 			switch {
-			case issueIsReady(c, fc, iss.number, edges):
+			case issueIsReady(c, fc, iss.number, edges) && !overlapped:
 				ready = append(ready, iss)
 			case hasFailedInBatchBlocker(c, fc, iss.number, edges):
 				blockerFailed = append(blockerFailed, iss)
 			default:
+				if overlapped {
+					fmt.Printf("    ~~ #%s touches overlap in-progress #%s; deferring\n", iss.number, collider)
+				}
 				held = append(held, iss)
 			}
 		}
@@ -1593,15 +1598,20 @@ func drainMaxJobs(c config, fc forge.Client, pwd string, r runner.Runner, issues
 			return fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
 		}
 	}
+	checkOverlap := waveOverlapCheck(c, fc)
 	var selected []issue
 	for _, iss := range issues {
-		if issueIsReady(c, fc, iss.number, edges) {
-			selected = append(selected, iss)
-			if len(selected) >= c.maxJobs {
-				break
-			}
-		} else {
+		if !issueIsReady(c, fc, iss.number, edges) {
 			fmt.Printf("    ~~ #%s blocked (a blocker is not '%s'); skipping\n", iss.number, c.completeLabel)
+			continue
+		}
+		if collider, overlapped := checkOverlap(iss.number); overlapped {
+			fmt.Printf("    ~~ #%s touches overlap in-progress #%s; deferring\n", iss.number, collider)
+			continue
+		}
+		selected = append(selected, iss)
+		if len(selected) >= c.maxJobs {
+			break
 		}
 	}
 	if len(selected) == 0 {
