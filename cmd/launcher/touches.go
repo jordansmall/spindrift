@@ -18,6 +18,25 @@ func touchesOf(fc forge.Client, num string) ([]string, error) {
 	return forge.ParseTouchPaths(fi.Body), nil
 }
 
+// waveOverlapCheck returns a per-candidate overlap check bound to a single
+// snapshot of InProgress issues, fetched once (not once per candidate) so a
+// dispatch wave issues one ListIssues call regardless of batch size.
+// OVERLAP_GATE=off (or a failed fetch) yields a check that always reports no
+// overlap, leaving dispatch unaffected.
+func waveOverlapCheck(c config, fc forge.Client) func(num string) (string, bool) {
+	noOverlap := func(string) (string, bool) { return "", false }
+	if c.overlapGate != "defer" {
+		return noOverlap
+	}
+	inProgress, err := fc.ListIssues(forge.InProgress)
+	if err != nil {
+		return noOverlap
+	}
+	return func(num string) (string, bool) {
+		return overlapsInProgress(fc, num, inProgress)
+	}
+}
+
 // overlapsInProgress reports whether candidate num's declared touch-set
 // intersects the declared touch-set of any issue in inProgress, returning the
 // first colliding issue's number. A candidate with no declared touches never

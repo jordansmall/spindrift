@@ -43,6 +43,49 @@ func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 	}
 }
 
+// TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext verifies that MAX_JOBS
+// drain skips a Dispatchable issue whose declared ## Touches overlaps an
+// InProgress issue's, without waiting, and dispatches the next candidate —
+// matching how it already treats an unmet declared blocker.
+func TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext(t *testing.T) {
+	c := baseConfig()
+	c.label = "agent-trigger"
+	c.maxParallel = 2
+	c.maxJobs = 2
+	c.overlapGate = "defer"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{
+		Number: "1",
+		Body:   "## Touches\n- lib/env-schema.nix",
+		Labels: []string{c.label},
+	})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{
+		Number: "20",
+		Body:   "## Touches\n- lib/env-schema.nix",
+		State:  "OPEN",
+		Labels: []string{c.inProgressLabel},
+	})
+
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	if err := drainMaxJobs(c, fc, dir, fr, []issue{
+		{number: "1", title: "overlapping issue"},
+		{number: "2", title: "clean issue"},
+	}, map[string][]string{}); err != nil {
+		t.Fatalf("drainMaxJobs: %v", err)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if fr.RunCalls[0].Issue != "2" {
+		t.Errorf("dispatched issue: got %q, want \"2\"", fr.RunCalls[0].Issue)
+	}
+}
+
 // TestDrainMaxJobs_CycleErrors verifies that a dependency cycle in the batch
 // causes drainMaxJobs to return an error before dispatching any issue.
 func TestDrainMaxJobs_CycleErrors(t *testing.T) {
