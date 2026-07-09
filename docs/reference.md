@@ -369,7 +369,18 @@ diff it eventually produces.
 The gate only compares a candidate against issues already `agent-in-progress`
 — two Dispatchable issues in the same batch with overlapping declared
 touches, neither yet in progress when the check runs, still fan out
-together in v1.
+together.
+
+**Inferred touch-sets (v2, `CODE_FORGE=github` only).** A declared
+`## Touches` section only bounds what its author thought to write down. On
+the `github` Code Forge, the gate augments each in-progress issue's declared
+touch-set with the actual changed files of its open PR (fetched once per
+wave, alongside the declared touches), so a candidate still holds against
+files the in-progress issue never declared. An in-progress issue with no open
+PR yet contributes only its declared touch-set — no error, no over-blocking.
+Off `github` — where there is no PR to inspect — and for any in-progress
+issue whose PR-file fetch fails, the gate falls back to declared-only
+behavior exactly as above.
 
 ---
 
