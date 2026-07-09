@@ -317,6 +317,19 @@ in
       "expected the nix CLI to be baked into the default box";
     pkgs.runCommand "nix-baked-by-default" { } "touch $out";
 
+  # nil is baked into the dogfood toolchain for fast, store-free Nix
+  # structural checks (syntax, duplicate keys, unused bindings) as uid 1000
+  # where nix flake check is unavailable.
+  nil-baked-in-dogfood =
+    let
+      inherit (pkgs.lib) assertMsg any hasInfix;
+      names = map (p: p.name or "") harness.agentEnv.paths;
+      hasNil = any (n: hasInfix "nil-" n || n == "nil") names;
+    in
+    assert assertMsg hasNil
+      "expected nil to be baked into the dogfood toolchain";
+    pkgs.runCommand "nil-baked-in-dogfood" { } "touch $out";
+
   # The lean/no-nix escape hatch must not include the nix CLI.
   lean-escape-hatch =
     let
