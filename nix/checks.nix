@@ -918,4 +918,22 @@ in
     }
     touch $out
   '';
+
+  # nix/var must be owned by uid 1000 so the non-root agent can lock the
+  # SQLite store DB inside the unprivileged container (issue #356).
+  # fakeRootCommands records ownership in the tar headers; --numeric-owner
+  # surfaces the raw uid so the check does not depend on /etc/passwd names.
+  nix-var-owned-by-agent =
+    pkgs.runCommand "nix-var-owned-by-agent" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        mkdir img && tar -xf ${nonRustHarness.image} -C img
+        layer="$(jq -r '.[0].Layers[-1]' img/manifest.json)"
+        uid=$(tar --numeric-owner -tvf "img/$layer" \
+          | awk '/nix\/var\/nix\/db\/?$/ { split($2,a,"/"); print a[1]; exit }')
+        [ "$uid" = "1000" ] || {
+          echo "nix/var/nix/db is not owned by uid 1000 (got: '$uid')" >&2
+          exit 1
+        }
+        touch $out
+      '';
 }
