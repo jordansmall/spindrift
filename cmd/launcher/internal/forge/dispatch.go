@@ -50,3 +50,20 @@ func (d DispatchLabels) Label(s DispatchState) string {
 func (d DispatchLabels) AllLabels() []string {
 	return []string{d.Dispatchable, d.InProgress, d.Complete, d.Failed}
 }
+
+// PredecessorLabel returns the dispatch label to remove when transitioning to
+// state to, following the canonical workflow:
+//
+//	Dispatchable → InProgress → Complete/Failed
+//
+// Returns "" for Dispatchable (no predecessor in the normal dispatch flow).
+func (d DispatchLabels) PredecessorLabel(to DispatchState) string {
+	switch to {
+	case InProgress:
+		return d.Dispatchable
+	case Complete, Failed:
+		return d.InProgress
+	default:
+		return ""
+	}
+}

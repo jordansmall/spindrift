@@ -95,16 +95,14 @@ func (e *execClient) Issue(num string) (Issue, error) {
 	return iss, nil
 }
 
-// TransitionState moves issue num to state to, removing all other dispatch
-// state labels. This is best-effort for unknown issues, matching gh CLI
-// behavior on missing labels.
+// TransitionState moves issue num to state to, swapping the canonical
+// predecessor label for the new state label. It mirrors the previous
+// SwapLabel(add, remove) call so that the gh command format is unchanged.
 func (e *execClient) TransitionState(num string, to DispatchState) error {
 	add := e.labels.Label(to)
 	args := []string{"issue", "edit", num, "--repo", e.repo, "--add-label", add}
-	for _, l := range e.labels.AllLabels() {
-		if l != add {
-			args = append(args, "--remove-label", l)
-		}
+	if remove := e.labels.PredecessorLabel(to); remove != "" {
+		args = append(args, "--remove-label", remove)
 	}
 	cmd := exec.Command("gh", args...)
 	if err := cmd.Run(); err != nil {

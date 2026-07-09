@@ -213,14 +213,11 @@ func (f *Fake) TransitionState(num string, to DispatchState) error {
 		return nil // best-effort
 	}
 	add := f.labels.Label(to)
-	allDispatch := make(map[string]bool, 4)
-	for _, l := range f.labels.AllLabels() {
-		allDispatch[l] = true
-	}
+	remove := f.labels.PredecessorLabel(to)
 	var next []string
 	for _, l := range iss.Labels {
-		if !allDispatch[l] {
-			next = append(next, l) // preserve non-dispatch labels
+		if l != remove {
+			next = append(next, l)
 		}
 	}
 	next = append(next, add)
