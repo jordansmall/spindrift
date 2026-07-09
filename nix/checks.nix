@@ -697,25 +697,15 @@ in
         foldl'
         hasInfix
         ;
-      # Must match lib/flakeModule.nix groupToAttr.
-      groupToAttr = {
-        "Issue discovery" = "issueDiscovery";
-        "Lifecycle labels" = "lifecycleLabels";
-        "Branches & merge" = "branches";
-        "Concurrency & dependency waves" = "concurrency";
-        "Models" = "models";
-        "Self-healing & retries" = "selfHealing";
-        "Sandbox & resources" = "sandbox";
-        "Repository & identity" = "repository";
-        "Prompt & skill iteration" = "promptSkillIteration";
-      };
       flakeOptionEntries = filterAttrs (_: e: e.flakeOption or false) schema;
-      # Map sectionAttr -> [knobName] for all flakeOption knobs.
+      # Map sectionAttr -> [knobName] for all flakeOption knobs. groupToAttr
+      # (must match lib/flakeModule.nix) comes from lib/renderers.nix — the
+      # same mapping flake-options-doc renders from.
       sectionKnobs = foldl' (
         acc: knobName:
         let
           entry = flakeOptionEntries.${knobName};
-          sectionAttr = groupToAttr.${entry.group} or null;
+          sectionAttr = renderers.groupToAttr.${entry.group} or null;
         in
         if sectionAttr == null then
           acc
