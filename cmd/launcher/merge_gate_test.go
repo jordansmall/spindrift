@@ -447,6 +447,30 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	}
 }
 
+// TestSelfHeal_MergeGuardHit_AutoMode verifies the guard fires under
+// MERGE_MODE=auto too — the acceptance criterion covers both immediate and
+// auto, since the guard downgrades regardless of mode.
+func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
+	c := baseConfig()
+	c.mergeMode = "auto"
+	c.mergeGuardPaths = ".github/**"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
+
+	ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", testPR)
+	if !ok || merged {
+		t.Errorf("selfHeal(ok=%v, merged=%v), want (true, false) for a guard-hit auto-mode PR", ok, merged)
+	}
+	if len(fc.EnqueueAutoMergeCalls) != 0 {
+		t.Errorf("guard hit must prevent EnqueueAutoMerge; calls=%v", fc.EnqueueAutoMergeCalls)
+	}
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("expected exactly one guard comment, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
+	}
+}
+
 // TestSelfHeal_MergeGuardMiss_MergesNormally verifies that a green PR
 // touching no guarded path proceeds exactly as it would with no guard set.
 func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
@@ -467,6 +491,41 @@ func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	}
 	if len(fc.CommentCalls) != 0 {
 		t.Errorf("no guard comment expected on a miss; got %+v", fc.CommentCalls)
+	}
+}
+
+// TestSelfHeal_MergeGuardCheckError_FailsSafe verifies that when the changed-
+// file list cannot be read at all, selfHeal fails safe: no merge, a
+// precautionary comment, and the issue stays at agent-complete (not
+// agent-failed) rather than silently falling through to MERGE_MODE.
+func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
+	c := baseConfig()
+	c.mergeMode = "immediate"
+	c.mergeGuardPaths = ".github/**"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
+
+	ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", testPR)
+	if !ok {
+		t.Error("selfHeal must return ok=true — CI reached green")
+	}
+	if merged {
+		t.Error("selfHeal must return merged=false when the guard check errors")
+	}
+	if fc.Merged != "" {
+		t.Errorf("a guard-check error must prevent Merge from being called; fc.Merged=%q", fc.Merged)
+	}
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, c.completeLabel) {
+		t.Errorf("issue must carry %q after a guard-check error on a green PR; labels=%v", c.completeLabel, iss.Labels)
+	}
+	if containsLabel(iss.Labels, c.failedLabel) {
+		t.Errorf("issue must NOT carry %q after a guard-check error; labels=%v", c.failedLabel, iss.Labels)
+	}
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("expected exactly one precautionary comment, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
 	}
 }
 
