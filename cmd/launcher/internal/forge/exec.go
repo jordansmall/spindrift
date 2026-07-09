@@ -340,7 +340,20 @@ func (e *execClient) Rebase(prURL string) error {
 		_ = gitIn("rebase", "--abort").Run()
 		return ErrMergeConflict
 	}
-	if err := gitIn("push", "--force-with-lease").Run(); err != nil {
+	return gitForcePush(dir)
+}
+
+// gitForcePush force-with-lease-pushes the current branch of the repo
+// checked out at dir, capturing git's stderr into the returned error so
+// callers can tell a stale lease apart from an auth or network fault.
+func gitForcePush(dir string) error {
+	var stderr bytes.Buffer
+	cmd := exec.Command("git", "-C", dir, "push", "--force-with-lease")
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if s := strings.TrimSpace(stderr.String()); s != "" {
+			return fmt.Errorf("git push --force-with-lease: %w: %s", err, s)
+		}
 		return fmt.Errorf("git push --force-with-lease: %w", err)
 	}
 	return nil
