@@ -51,7 +51,9 @@
             # Secrets and the target (REPO_SLUG, GH_TOKEN, auth) are runtime
             # env — see harness.env.example. Full reference: docs/flake-options.md
             # settings = {
-            #   issueDiscovery  = { label          = "ready-for-agent"; };
+            #   issueDiscovery  = { label          = "ready-for-agent";
+            #                       issueTracker   = "github";
+            #                       localIssuesDir = ".spindrift/issues"; };
             #   lifecycleLabels = { inProgressLabel = "agent-in-progress";
             #                       failedLabel     = "agent-failed";
             #                       completeLabel   = "agent-complete"; };

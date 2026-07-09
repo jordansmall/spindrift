@@ -65,6 +65,35 @@ func TestFake_ImplementsClient(t *testing.T) {
 	var _ forge.Client = forge.NewFake()
 }
 
+// TestNewClient_ComposesIndependentSeams asserts that NewClient lets the
+// IssueTracker and CodeForge axes vary independently (ADR 0013): calls route
+// to the seam that declares them, and the ambiguous Probe method resolves to
+// the CodeForge.
+func TestNewClient_ComposesIndependentSeams(t *testing.T) {
+	it := forge.NewFake()
+	it.SetIssue(forge.Issue{Number: "1", Title: "from tracker", Labels: []string{"ready-for-agent"}})
+	cf := forge.NewFake()
+	cf.ProbeRepo = "from code forge"
+
+	client := forge.NewClient(it, cf)
+
+	issues, err := client.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if len(issues) != 1 || issues[0].Title != "from tracker" {
+		t.Errorf("ListIssues = %+v, want issue from the it Fake", issues)
+	}
+
+	repo, err := client.Probe()
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if repo != "from code forge" {
+		t.Errorf("Probe() = %q, want %q (the CodeForge's Probe)", repo, "from code forge")
+	}
+}
+
 // --- TransitionState tests ---
 
 func TestFake_TransitionState_DispatchableToInProgress(t *testing.T) {

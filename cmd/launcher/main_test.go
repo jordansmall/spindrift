@@ -285,6 +285,59 @@ func TestValidateMergeMode_AcceptsKnown(t *testing.T) {
 	}
 }
 
+// TestValidateIssueTracker_RejectsUnknown verifies that validate() fails fast
+// when ISSUE_TRACKER is set to an unrecognised value.
+func TestValidateIssueTracker_RejectsUnknown(t *testing.T) {
+	c := minimalValidConfig()
+	c.issueTracker = "jira"
+	if err := validate(c); err == nil {
+		t.Fatal("validate() should reject unrecognised ISSUE_TRACKER")
+	}
+}
+
+// TestValidateIssueTracker_AcceptsKnown verifies that validate() accepts the
+// two documented ISSUE_TRACKER values.
+func TestValidateIssueTracker_AcceptsKnown(t *testing.T) {
+	for _, tracker := range []string{"github", "local"} {
+		c := minimalValidConfig()
+		c.issueTracker = tracker
+		if err := validate(c); err != nil {
+			t.Errorf("validate() rejected valid ISSUE_TRACKER %q: %v", tracker, err)
+		}
+	}
+}
+
+// TestNewIssueTracker_Local verifies that ISSUE_TRACKER=local selects a
+// tracker reading from localIssuesDir instead of the GitHub gh-exec adapter.
+func TestNewIssueTracker_Local(t *testing.T) {
+	dir := t.TempDir()
+	issueFile := `---
+title: Fix the thing
+state: ready-for-agent
+labels: []
+created: 2026-07-09T12:00:00Z
+---
+body
+`
+	if err := os.WriteFile(filepath.Join(dir, "fix-thing.md"), []byte(issueFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := minimalValidConfig()
+	c.issueTracker = "local"
+	c.localIssuesDir = dir
+	c.label = "ready-for-agent"
+
+	it := newIssueTracker(c)
+	issues, err := it.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if len(issues) != 1 || issues[0].Number != "fix-thing" {
+		t.Errorf("ListIssues = %+v, want [fix-thing]", issues)
+	}
+}
+
 // minimalValidConfig returns a config that passes validate() so tests can
 // mutate exactly one field at a time.
 func minimalValidConfig() config {
@@ -296,6 +349,7 @@ func minimalValidConfig() config {
 		claudeOAuthToken: "tok",
 		runtime:          "echo", // echo is always on PATH
 		mergeMode:        "manual",
+		issueTracker:     "github",
 	}
 }
 

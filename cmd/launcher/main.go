@@ -58,6 +58,11 @@ type config struct {
 	completeLabel   string
 	maxJobs         int
 
+	// issueTracker selects the IssueTracker adapter: "github" (default) or
+	// "local". localIssuesDir is the local adapter's issue directory.
+	issueTracker   string
+	localIssuesDir string
+
 	// Transient-exit retry knobs
 	transientRetryMax    int
 	transientBackoffSecs int
@@ -171,6 +176,9 @@ func loadConfig() config {
 		completeLabel:   getenv("COMPLETE_LABEL", "agent-complete"),
 		maxJobs:         atoiNonneg(os.Getenv("MAX_JOBS"), 0),
 
+		issueTracker:   getenv("ISSUE_TRACKER", "github"),
+		localIssuesDir: getenv("LOCAL_ISSUES_DIR", ".spindrift/issues"),
+
 		transientRetryMax:    atoi(getenv("TRANSIENT_RETRY_MAX", "3"), 3),
 		transientBackoffSecs: atoi(getenv("TRANSIENT_BACKOFF_SECS", "30"), 30),
 		holdJitterSecs:       atoiNonneg(getenv("HOLD_JITTER_SECS", "5"), 5),
@@ -232,6 +240,12 @@ func validate(c config) error {
 	default:
 		return fmt.Errorf("MERGE_MODE=%q is not valid; must be immediate, auto, or manual", c.mergeMode)
 	}
+	switch c.issueTracker {
+	case "github", "local":
+		// valid
+	default:
+		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github or local", c.issueTracker)
+	}
 	return nil
 }
 
@@ -245,9 +259,26 @@ func dispatchLabels(c config) forge.DispatchLabels {
 	}
 }
 
-// newForgeClient returns an exec-backed forge Client wired to the config.
-func newForgeClient(c config) forge.Client {
+// newIssueTracker returns the IssueTracker adapter selected by ISSUE_TRACKER
+// (default "github").
+func newIssueTracker(c config) forge.IssueTracker {
+	if c.issueTracker == "local" {
+		return forge.NewLocalTracker(c.localIssuesDir, dispatchLabels(c))
+	}
 	return forge.NewExecClient(c.repoSlug, dispatchLabels(c))
+}
+
+// newCodeForge returns the CodeForge adapter. CODE_FORGE backend selection
+// isn't wired yet, so this always returns the gh-exec adapter.
+func newCodeForge(c config) forge.CodeForge {
+	return forge.NewExecClient(c.repoSlug, dispatchLabels(c))
+}
+
+// newForgeClient composes the configured IssueTracker and CodeForge (which
+// vary independently per ADR 0013) into a single Client for call sites that
+// need both axes together.
+func newForgeClient(c config) forge.Client {
+	return forge.NewClient(newIssueTracker(c), newCodeForge(c))
 }
 
 // newRunner constructs the runner adapter for the `run` subcommand.
@@ -1587,10 +1618,11 @@ func main() {
 	}
 	if len(args) > 0 && args[0] == "doctor" {
 		c := loadConfig()
-		fc := newForgeClient(c)
+		it := newIssueTracker(c)
+		cf := newCodeForge(c)
 		stat, serr := os.Stdin.Stat()
 		interactive := serr == nil && (stat.Mode()&os.ModeCharDevice) != 0
-		if err := runDoctor(fc, fc, c, os.Stdout, os.Stdin, interactive); err != nil {
+		if err := runDoctor(it, cf, c, os.Stdout, os.Stdin, interactive); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}

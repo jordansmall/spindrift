@@ -57,3 +57,24 @@ type Client interface {
 	IssueTracker
 	CodeForge
 }
+
+// combinedClient composes an independently-selected IssueTracker and
+// CodeForge into a Client, so the two axes can vary independently (ADR
+// 0013) without every call site threading both seams through by hand.
+type combinedClient struct {
+	IssueTracker
+	CodeForge
+}
+
+// NewClient combines it and cf into a Client.
+func NewClient(it IssueTracker, cf CodeForge) Client {
+	return combinedClient{IssueTracker: it, CodeForge: cf}
+}
+
+// Probe disambiguates the Probe method both embedded seams declare,
+// delegating to the CodeForge (matching Client.Probe's historical meaning of
+// "is the repository reachable"). Callers that need each seam probed
+// independently should call it.Probe() and cf.Probe() directly instead.
+func (c combinedClient) Probe() (string, error) {
+	return c.CodeForge.Probe()
+}

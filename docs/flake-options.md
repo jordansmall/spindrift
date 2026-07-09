@@ -14,7 +14,9 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 
 | attr path | env var | default | description |
 |---|---|---|---|
+| `settings.issueDiscovery.issueTracker` | `ISSUE_TRACKER` | `github` | IssueTracker backend: github (gh-exec) or local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR) |
 | `settings.issueDiscovery.label` | `LABEL` | `ready-for-agent` | issues carrying this label are dispatchable (the launch button) |
+| `settings.issueDiscovery.localIssuesDir` | `LOCAL_ISSUES_DIR` | `.spindrift/issues` | directory scanned for issue files when ISSUE_TRACKER=local; keep it git-ignored so breakout issues stay private |
 
 ## Lifecycle labels (`settings.lifecycleLabels`)
 
