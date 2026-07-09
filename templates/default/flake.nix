@@ -83,7 +83,9 @@
             #                       bwrapUnshareNet      = ""; };
             #   repository      = { repoSlug      = "owner/repo";
             #                       gitUserName   = "";
-            #                       gitUserEmail  = ""; };
+            #                       gitUserEmail  = "";
+            #                       codeForge          = "github";
+            #                       codeForgeRemoteURL = ""; };
             # };
           };
 

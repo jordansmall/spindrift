@@ -79,6 +79,8 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 
 | attr path | env var | default | description |
 |---|---|---|---|
+| `settings.repository.codeForge` | `CODE_FORGE` | `github` | code-landing backend: github (open PR, watch CI, merge) or git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate) |
+| `settings.repository.codeForgeRemoteURL` | `CODE_FORGE_REMOTE_URL` | — | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise |
 | `settings.repository.gitUserEmail` | `GIT_USER_EMAIL` | — | commit identity email; falls back to host git config user.email |
 | `settings.repository.gitUserName` | `GIT_USER_NAME` | — | commit identity name; falls back to host git config user.name |
 | `settings.repository.repoSlug` | `REPO_SLUG` | — | target GitHub repository the agents work on |

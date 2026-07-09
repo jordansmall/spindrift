@@ -222,6 +222,21 @@
     flakeOption = true;
     boxEnv = true;
   };
+  codeForge = {
+    env = "CODE_FORGE";
+    group = "Repository & identity";
+    default = "github";
+    doc = "code-landing backend: github (open PR, watch CI, merge) or git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate)";
+    flakeOption = true;
+    boxEnv = true;
+  };
+  codeForgeRemoteURL = {
+    env = "CODE_FORGE_REMOTE_URL";
+    group = "Repository & identity";
+    doc = "plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise";
+    flakeOption = true;
+    boxEnv = true;
+  };
   # ── Operator-tunable knobs (flakeOption = true; also tune via harness.env) ─
   maxFixAttempts = {
     env = "MAX_FIX_ATTEMPTS";
