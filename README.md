@@ -156,6 +156,12 @@ A green PR whose diff touches a guarded path (`.github/**`, `**/CLAUDE.md`,
 manual regardless of `MERGE_MODE` — see
 [Merge guard](docs/reference.md#merge-guard).
 
+Set `FILER_MODEL` to opt in an optional Filer subagent that turns a review's
+non-blocking findings into `agent-review-finding`-labelled issues instead of
+leaving them in the PR body — never the dispatch label, so a human still
+promotes each one before an agent can pick it up. Off (empty) by default. See
+[Filer](docs/reference.md#filer).
+
 ## Documentation
 
 | document | what's in it |
