@@ -385,14 +385,16 @@ in
         touch $out
       '';
 
-  # An unknown section key in `settings` must throw at eval time; the NixOS
-  # module system rejects undeclared option names.  We force evaluation down
-  # to `.packages.${system}.run` so the module config is actually evaluated
-  # (flake-parts evaluates perSystem configs lazily on attribute access).
+  # Unknown section or knob keys in `settings` must throw at eval time; the
+  # NixOS module system rejects undeclared option names.  We force evaluation
+  # down to `.packages.${system}.run` so the module config is actually
+  # evaluated (flake-parts evaluates perSystem configs lazily on attribute
+  # access).
   flakemodule-rejects-unknown-settings =
     let
       inherit (pkgs.lib) assertMsg;
-      result = builtins.tryEval (
+      mkBadFlake =
+        cfg:
         (flake-parts.lib.mkFlake
           {
             inputs = {
@@ -403,16 +405,16 @@ in
           {
             systems = [ system ];
             imports = [ ../lib/flakeModule.nix ];
-            perSystem.spindrift = {
-              packages = p: [ p.hello ];
-              settings.typoSection.label = "oops";
-            };
+            perSystem.spindrift = { packages = p: [ p.hello ]; } // cfg;
           }
-        ).packages.${system}.run
-      );
+        ).packages.${system}.run;
+      badSection = builtins.tryEval (mkBadFlake { settings.typoSection.label = "oops"; });
+      badKnob = builtins.tryEval (mkBadFlake { settings.branches.typoKnob = "oops"; });
     in
-    assert assertMsg (!result.success)
+    assert assertMsg (!badSection.success)
       "flakeModule must throw on unknown settings section 'typoSection'";
+    assert assertMsg (!badKnob.success)
+      "flakeModule must throw on unknown knob 'typoKnob' in settings.branches";
     pkgs.runCommand "flakemodule-rejects-unknown-settings" { } "touch $out";
 
   # harness.env.example must match the content generated from env-schema.nix.
