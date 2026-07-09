@@ -178,6 +178,36 @@ func TestBreakdownByRole_ScoutAndReviewer(t *testing.T) {
 	}
 }
 
+func TestBreakdownByRole_Filer(t *testing.T) {
+	// Main agent invokes the filer Task after the final approving review.
+	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_filer","name":"Task","input":{"subagent_type":"filer","prompt":"file non-blocking findings"}}],"usage":{"input_tokens":80,"output_tokens":30}}}`
+	filerMsg1 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":220,"output_tokens":90}},"parent_tool_use_id":"toolu_filer"}`
+
+	path := writeLog(t, implMain1, filerMsg1)
+
+	breakdown, err := usage.BreakdownByRole(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	roles := map[string]usage.RoleUsage{}
+	for _, r := range breakdown {
+		roles[r.Role] = r
+	}
+
+	// The filer bucket must survive into the returned breakdown, not be
+	// silently dropped by the role display-order filter.
+	filer, ok := roles["filer"]
+	if !ok {
+		t.Fatal("want a filer role bucket in the breakdown, got none")
+	}
+	if filer.InputTokens != 220 {
+		t.Errorf("filer input tokens: got %d, want 220", filer.InputTokens)
+	}
+	if filer.OutputTokens != 90 {
+		t.Errorf("filer output tokens: got %d, want 90", filer.OutputTokens)
+	}
+}
+
 func TestBreakdownByRole_ReviewerReinvoked(t *testing.T) {
 	// First reviewer invocation
 	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_rev1","name":"Task","input":{"subagent_type":"reviewer","prompt":"review diff"}}],"usage":{"input_tokens":100,"output_tokens":30}}}`
