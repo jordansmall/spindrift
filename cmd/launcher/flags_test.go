@@ -8,6 +8,21 @@ import (
 	"testing"
 )
 
+// TestModelDefault_IsSonnet5 asserts that the primary implementor model default
+// is claude-sonnet-5, not an older release.
+func TestModelDefault_IsSonnet5(t *testing.T) {
+	const want = "claude-sonnet-5"
+	for _, e := range schemaFlags {
+		if e.env == "MODEL" {
+			if e.dflt != want {
+				t.Errorf("MODEL default = %q, want %q", e.dflt, want)
+			}
+			return
+		}
+	}
+	t.Fatal("MODEL entry not found in schemaFlags")
+}
+
 // TestParseFlags_SetEnv: a recognized flag is injected into the environment.
 func TestParseFlags_SetEnv(t *testing.T) {
 	t.Setenv("ISSUE_NUMBER", "")
