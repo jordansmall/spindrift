@@ -273,6 +273,8 @@ a rebuild (ADR 0001):
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
 | `GIT_USER_NAME`           | host `git config`; baked via `settings.repository.gitUserName` | commit author name |
 | `GIT_USER_EMAIL`          | host `git config`; baked via `settings.repository.gitUserEmail` | commit author email |
+| `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge) or `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)) |
+| `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
 | `ISSUE_TRACKER`           | `github` (baked)       | IssueTracker backend: `github` or `local` (private Markdown + YAML frontmatter files — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)) |
@@ -283,7 +285,7 @@ a rebuild (ADR 0001):
 | `IN_PROGRESS_LABEL`       | `agent-in-progress` (baked) | label a dispatched issue is swapped to |
 | `FAILED_LABEL`            | `agent-failed` (baked) | label an issue gets when its Box fails or its PR can't merge |
 | `COMPLETE_LABEL`          | `agent-complete` (baked) | label the launcher swaps on when CI reaches green (agent is done; the merge is a separate step) |
-| `MERGE_MODE`              | `manual` (baked)       | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue GitHub native auto-merge — repo must have *Allow auto-merge* on) |
+| `MERGE_MODE`              | `manual` (baked)       | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue GitHub native auto-merge — repo must have *Allow auto-merge* on). Under `CODE_FORGE=git`, `manual`/`immediate` map to remote pushes instead (leave the pushed branch / push straight to the target branch); `auto` has no meaning off `github` and fails fast at startup. |
 | `MERGE_GUARD_PATHS`       | `.github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` (baked) | comma-separated globs; a green PR touching a matched path downgrades to manual regardless of `MERGE_MODE` (`github` Code Forge only; empty disables — see [Merge guard](#merge-guard)) |
 | `MODEL`                   | `claude-sonnet-5` (baked) | Claude model the in-container implementor runs |
 | `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` (baked) | scout subagent model tier (empty drops the scout entry from `--agents`) |
@@ -374,6 +376,15 @@ happens through fresh clones inside containers — so it can drive **any** GitHu
 repo you point `REPO_SLUG` at. `Closes #N` in the PR description closes the issue
 when the PR merges — by the launcher (`immediate`), by GitHub (`auto`), or by a
 human (`manual`).
+
+**`CODE_FORGE=git`** (push-only, [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md))
+replaces everything from *open PR* onward: the Box pushes its branch to
+`CODE_FORGE_REMOTE_URL` and prints `SPINDRIFT_OUTCOME ... pr=refs/heads/agent/issue-N status=ready`
+— no PR, no CI-watch. The launcher skips the CI-poll entirely (there is
+nothing to poll) and swaps the issue straight to `agent-complete`, then
+applies `MERGE_MODE` as a plain push: `manual` leaves the branch as pushed,
+`immediate` merges it onto the target branch. `auto` has no meaning off
+`github` and is rejected at startup.
 
 ### Label lifecycle
 

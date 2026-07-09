@@ -36,6 +36,32 @@ setup() {
   [ "$output" = "agent/issue-7" ]
 }
 
+# CODE_FORGE=git: the Box clones from and pushes to a plain git remote instead
+# of https://github.com/$REPO_SLUG.git (ADR 0013 / #330). REPO_SLUG still
+# resolves the ISSUE_TRACKER (this slice demoes CODE_FORGE=git with the
+# github tracker), so the two must be independently settable.
+@test "CODE_FORGE_REMOTE_URL overrides the clone/push remote" {
+  local other_remote="$BATS_TEST_TMPDIR/other-remote.git"
+  git init --bare -q "$other_remote"
+  local seed="$BATS_TEST_TMPDIR/seed-other"
+  git clone -q "$other_remote" "$seed"
+  (
+    cd "$seed" || exit 1
+    echo "# other repo" >README.md
+    git add -A
+    git commit -q -m "chore: seed other remote"
+    git push -q origin HEAD:main
+  )
+
+  export CODE_FORGE_REMOTE_URL="$other_remote"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -d "$WORK_DIR/.git" ]
+  run git -C "$WORK_DIR" remote get-url origin
+  [ "$status" -eq 0 ]
+  [ "$output" = "$other_remote" ]
+}
+
 @test "entrypoint renders the prompt with issue placeholders substituted" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
