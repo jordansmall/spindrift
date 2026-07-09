@@ -379,7 +379,7 @@ human (`manual`).
 
 **`CODE_FORGE=git`** (push-only, [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md))
 replaces everything from *open PR* onward: the Box pushes its branch to
-`CODE_FORGE_REMOTE_URL` and prints `SPINDRIFT_OUTCOME ... pr=refs/heads/agent/issue-N status=ready`
+`CODE_FORGE_REMOTE_URL` and prints `SPINDRIFT_OUTCOME ... pr=agent/issue-N status=ready`
 — no PR, no CI-watch. The launcher skips the CI-poll entirely (there is
 nothing to poll) and swaps the issue straight to `agent-complete`, then
 applies `MERGE_MODE` as a plain push: `manual` leaves the branch as pushed,

@@ -53,6 +53,7 @@ setup() {
     git push -q origin HEAD:main
   )
 
+  export CODE_FORGE="git"
   export CODE_FORGE_REMOTE_URL="$other_remote"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -60,6 +61,20 @@ setup() {
   run git -C "$WORK_DIR" remote get-url origin
   [ "$status" -eq 0 ]
   [ "$output" = "$other_remote" ]
+}
+
+@test "CODE_FORGE_REMOTE_URL is ignored when CODE_FORGE is unset (github default)" {
+  # A stray CODE_FORGE_REMOTE_URL must not silently redirect a github
+  # deployment's clone — only CODE_FORGE=git opts in.
+  local other_remote="$BATS_TEST_TMPDIR/other-remote.git"
+  git init --bare -q "$other_remote"
+
+  export CODE_FORGE_REMOTE_URL="$other_remote"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  run git -C "$WORK_DIR" remote get-url origin
+  [ "$status" -eq 0 ]
+  [ "$output" != "$other_remote" ]
 }
 
 @test "entrypoint renders the prompt with issue placeholders substituted" {

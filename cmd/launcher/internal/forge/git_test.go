@@ -202,6 +202,37 @@ func TestGitClient_Rebase_ForcePushesRebasedBranch(t *testing.T) {
 	}
 }
 
+// TestGitClient_Merge_RejectsFlagLikeRef verifies that Merge refuses a landing
+// ref starting with "-" instead of passing it to git, where it would be
+// parsed as an option (e.g. a maliciously crafted outcome line's pr= field —
+// the outcome line is untrusted input per CLAUDE.md's comment-injection trust
+// boundary). Regression test for argument-injection RCE via `git fetch origin
+// <branch>`.
+func TestGitClient_Merge_RejectsFlagLikeRef(t *testing.T) {
+	bare := newBareRemoteWithBranches(t)
+	g := NewGitClient(bare, "main")
+
+	canary := filepath.Join(t.TempDir(), "pwned")
+	err := g.Merge("--upload-pack=touch " + canary)
+	if err == nil {
+		t.Fatal("Merge: want error for a flag-like ref, got nil")
+	}
+	if _, statErr := os.Stat(canary); statErr == nil {
+		t.Fatal("Merge executed the injected command — argument injection succeeded")
+	}
+}
+
+// TestGitClient_Rebase_RejectsFlagLikeRef is Rebase's counterpart to
+// TestGitClient_Merge_RejectsFlagLikeRef.
+func TestGitClient_Rebase_RejectsFlagLikeRef(t *testing.T) {
+	bare := newBareRemoteWithBranches(t)
+	g := NewGitClient(bare, "main")
+
+	if err := g.Rebase("--upload-pack=touch /tmp/should-not-run"); err == nil {
+		t.Fatal("Rebase: want error for a flag-like ref, got nil")
+	}
+}
+
 // TestGitClient_Probe verifies Probe succeeds against a reachable remote and
 // fails against an unreachable one.
 func TestGitClient_Probe(t *testing.T) {
