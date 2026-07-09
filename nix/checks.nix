@@ -195,7 +195,7 @@ in
           *) echo "unexpected image path: $imagePath" >&2; exit 1 ;;
         esac
 
-        # Same config as the dogfood ⇒ identical launcher commands.
+        # Same config as the template ⇒ identical launcher commands.
         [ "$templateBuild" = "$directBuild" ] \
           || { echo "build mismatch: $templateBuild != $directBuild" >&2; exit 1; }
         [ "$templateRun" = "$directRun" ] \
