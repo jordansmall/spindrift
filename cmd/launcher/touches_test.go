@@ -1,7 +1,9 @@
 package main
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -42,6 +44,31 @@ func TestTouchSetsOverlap_DoubleStarAnyDepth(t *testing.T) {
 func TestTouchSetsOverlap_DifferentDepthNoWildcardNoOverlap(t *testing.T) {
 	if touchSetsOverlap([]string{"cmd/launcher/*.go"}, []string{"cmd/launcher/internal/forge/exec.go"}) {
 		t.Error("expected no overlap: extra path segment with no ** present")
+	}
+}
+
+// TestTouchSetsOverlap_ManyDoubleStarsDoesNotHang verifies that a declared
+// touch glob with many "**" segments — issue bodies are untrusted prompt
+// input, so a hostile filer could write one — does not blow up the naive
+// exponential backtracking a recursive "** matches any suffix" check would
+// hit; overlap checking must stay polynomial in the segment count.
+func TestTouchSetsOverlap_ManyDoubleStarsDoesNotHang(t *testing.T) {
+	// Every "**" can match the run of "y" segments, so the mismatch is only
+	// ever discovered at the final "x" vs "y" comparison — naive backtracking
+	// must re-explore every star/segment split before concluding no overlap.
+	pathological := strings.Repeat("**/", 20) + "x"
+	noTrailingX := strings.TrimSuffix(strings.Repeat("y/", 20), "/")
+
+	done := make(chan bool, 1)
+	go func() { done <- touchSetsOverlap([]string{pathological}, []string{noTrailingX}) }()
+
+	select {
+	case overlap := <-done:
+		if overlap {
+			t.Error("expected no overlap: no segment in the ** chain is literally x")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("touchSetsOverlap did not return within 2s — likely exponential backtracking on repeated **")
 	}
 }
 

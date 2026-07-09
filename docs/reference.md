@@ -366,6 +366,11 @@ guard](#merge-guard), making no adversary-proofing claims: a `## Touches`
 section is declared by whoever files the issue, not verified against the
 diff it eventually produces.
 
+The gate only compares a candidate against issues already `agent-in-progress`
+— two Dispatchable issues in the same batch with overlapping declared
+touches, neither yet in progress when the check runs, still fan out
+together in v1.
+
 ---
 
 ## How a run works
