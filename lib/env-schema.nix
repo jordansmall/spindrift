@@ -29,6 +29,22 @@
     flakeOption = true;
     boxEnv = false;
   };
+  issueTracker = {
+    env = "ISSUE_TRACKER";
+    group = "Issue discovery";
+    default = "github";
+    doc = "IssueTracker backend: github (gh-exec) or local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR)";
+    flakeOption = true;
+    boxEnv = false;
+  };
+  localIssuesDir = {
+    env = "LOCAL_ISSUES_DIR";
+    group = "Issue discovery";
+    default = ".spindrift/issues";
+    doc = "directory scanned for issue files when ISSUE_TRACKER=local; keep it git-ignored so breakout issues stay private";
+    flakeOption = true;
+    boxEnv = false;
+  };
   baseBranch = {
     env = "BASE_BRANCH";
     group = "Branches & merge";
