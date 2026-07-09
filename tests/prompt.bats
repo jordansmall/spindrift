@@ -59,6 +59,18 @@ setup() {
   grep -qi 'between tool calls' "$prompt"
 }
 
+@test "review prompt forbids mid-turn narration between tool calls" {
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/review-prompt.md"
+  grep -qi 'between tool calls' "$prompt"
+}
+
+@test "review prompt caps each finding at one line" {
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/review-prompt.md"
+  grep -qi 'one line' "$prompt"
+}
+
 @test "WATCH CI section uses GraphQL statusCheckRollup not gh pr checks" {
   # gh pr checks uses the check-runs REST endpoint which 403s under
   # fine-grained PATs; the prompt must use statusCheckRollup (GraphQL).
