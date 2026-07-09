@@ -332,8 +332,12 @@ let
     '';
     # chown must be recorded in the image layer, so it runs under fakeroot after
     # the tree is staged. HOME and the clone dir must be writable by the agent.
+    # nix/var is also chowned so uid 1000 can lock the SQLite store DB and
+    # write gcroots/profiles when nix commands run inside the container.
     fakeRootCommands = ''
       chown -R 1000:1000 home/agent work
+    '' + lib.optionalString nixInBox ''
+      chown -R 1000:1000 nix/var
     '';
     config = {
       Entrypoint = [ "/bin/bash" ];
