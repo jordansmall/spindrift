@@ -734,6 +734,39 @@ func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 	}
 }
 
+// TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed verifies that for
+// CODE_FORGE=git, a push failure under MERGE_MODE=immediate leaves the issue
+// at agent-complete with a comment — never demoted to agent-failed — matching
+// the github adapter's post-green merge-blocked contract (ADR 0012).
+func TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed(t *testing.T) {
+	c := baseConfig()
+	c.codeForge = "git"
+	c.mergeMode = "immediate"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.MergeErr = errors.New("remote rejected: non-fast-forward")
+	branch := "agent/issue-1"
+
+	ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", branch)
+
+	if !ok {
+		t.Error("selfHeal must return ok=true — there is no CI to fail for CODE_FORGE=git")
+	}
+	if merged {
+		t.Error("selfHeal must return merged=false when the push fails")
+	}
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, c.completeLabel) {
+		t.Errorf("issue must carry %q after a push failure; labels=%v", c.completeLabel, iss.Labels)
+	}
+	if containsLabel(iss.Labels, c.failedLabel) {
+		t.Errorf("issue must NOT carry %q after a push failure; labels=%v", c.failedLabel, iss.Labels)
+	}
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("expected exactly one merge-blocked comment, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
+	}
+}
+
 // TestNoGhExecOutsideForge walks all non-test Go source files in cmd/launcher,
 // excluding internal/forge, and fails if any contain exec.Command("gh" —
 // keeping all gh API calls behind the forge seam.
