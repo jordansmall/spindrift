@@ -21,6 +21,7 @@ let
     skillsBwrapHarness
     minimalDirect
     consumerPkgs
+    consumerFormatter
     templatePkgs
     harnessNoRevision
     ;
@@ -1057,6 +1058,20 @@ in
         GOOS=darwin GOARCH=arm64 go build -o "$TMPDIR/launcher-darwin-arm64" .
         touch $out
       '';
+
+  # formatter output must be the same store path as the pinned pkgs.nixfmt
+  # used by the nix-fmt check — no drift between "how it's checked" and
+  # "how it's fixed".
+  formatter-is-nixfmt = pkgs.runCommand "formatter-is-nixfmt" { } ''
+    test "${config.formatter}" = "${pkgs.nixfmt}"
+    touch $out
+  '';
+
+  # flakeModule consumers receive the same formatter via perSystem.
+  module-consumer-formatter-is-nixfmt = pkgs.runCommand "module-consumer-formatter-is-nixfmt" { } ''
+    test "${consumerFormatter}" = "${pkgs.nixfmt}"
+    touch $out
+  '';
 }
 // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
   # The baked entrypoint must carry a store-path shebang, not the

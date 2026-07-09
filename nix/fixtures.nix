@@ -197,6 +197,7 @@ let
         perSystem.spindrift.packages = p: [ p.hello ];
       };
   consumerPkgs = moduleConsumer.packages.${system};
+  consumerFormatter = moduleConsumer.formatter.${system};
 
   # The `templates.default` starter, evaluated as a fixture (#6): call
   # its real `outputs` directly — no `nix flake init`, no network —
@@ -232,6 +233,7 @@ in
     skillsBwrapHarness
     minimalDirect
     consumerPkgs
+    consumerFormatter
     templatePkgs
     harnessNoRevision
     ;
