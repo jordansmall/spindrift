@@ -521,6 +521,9 @@ func checkAutoMergePreflight(c config, fc forge.Client) error {
 	if c.mergeMode != "auto" {
 		return nil
 	}
+	if c.codeForge != "github" {
+		return fmt.Errorf("MERGE_MODE=auto requires CODE_FORGE=github (got %q) — auto-merge is a GitHub-native feature with no meaning off github; switch to MERGE_MODE=manual or immediate", c.codeForge)
+	}
 	ok, err := fc.CanAutoMerge()
 	if err != nil {
 		return fmt.Errorf("MERGE_MODE=auto: auto-merge capability check failed: %w", err)

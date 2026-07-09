@@ -19,6 +19,7 @@ func baseConfig() config {
 		mergePollInterval: 0,   // no sleep in tests
 		mergePollTimeout:  100, // large enough for multi-poll tests
 		mergeMode:         "immediate",
+		codeForge:         "github",
 	}
 }
 
@@ -592,6 +593,7 @@ func TestAutoMergePreflight(t *testing.T) {
 	cases := []struct {
 		name             string
 		mergeMode        string
+		codeForge        string
 		autoMergeAllowed bool
 		autoMergeErr     error
 		wantErr          bool
@@ -629,12 +631,22 @@ func TestAutoMergePreflight(t *testing.T) {
 			autoMergeAllowed: false,
 			wantErr:          false,
 		},
+		{
+			name:            "auto mode with CODE_FORGE=git — abort before any CanAutoMerge call",
+			mergeMode:       "auto",
+			codeForge:       "git",
+			wantErr:         true,
+			wantErrContains: "CODE_FORGE=github",
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			c := baseConfig()
 			c.mergeMode = tc.mergeMode
+			if tc.codeForge != "" {
+				c.codeForge = tc.codeForge
+			}
 			fc := forge.NewFake()
 			fc.AutoMergeAllowed = tc.autoMergeAllowed
 			fc.AutoMergeErr = tc.autoMergeErr
