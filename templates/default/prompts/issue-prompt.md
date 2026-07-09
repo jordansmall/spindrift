@@ -12,6 +12,20 @@ Read first (run these yourself):
   issue or PRD it references (pull those in too).
 - `git log -n 10 --oneline` — recent history.
 
+# COMMS
+
+Your text output is a machine-parsed log, not a conversation.
+
+- No pleasantries, acknowledgements, praise, or apologies.
+- Never restate what a subagent returned.
+- One terse, data-bearing status line per step — what ran, what resulted —
+  no narrative framing.
+
+Human-quality prose is reserved exclusively for: commit messages
+(Conventional Commits section), the PR title and body, the issue comment
+required by IF BLOCKED, and the `note=` field of the SPINDRIFT_OUTCOME line.
+Everywhere else, stay terse.
+
 # SCOUT
 
 Delegate exploration to the `scout` subagent before reading source yourself:
