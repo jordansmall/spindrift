@@ -852,7 +852,13 @@ func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue
 		}
 		postUsageComment(fc, iss.number, logPath)
 	case "merged":
-		verifyMerged(c, fc, iss.number, o.PR)
+		// verifyMerged reads PR state, which the push-only git Code Forge does
+		// not have (mirrors the "ready" case's same guard above).
+		if c.codeForge == "github" {
+			verifyMerged(c, fc, iss.number, o.PR)
+		} else {
+			fmt.Printf("    #%s  pr=%s  status=%s\n", iss.number, o.PR, o.Status)
+		}
 		postUsageComment(fc, iss.number, logPath)
 	default:
 		fmt.Printf("    #%s  pr=%s  status=%s\n", iss.number, o.PR, o.Status)
