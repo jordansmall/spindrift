@@ -48,8 +48,12 @@ type Fake struct {
 	MergeErrs []error
 	// Merged is set to the URL of the last successful Merge call.
 	Merged string
-	// RebaseErr, if non-nil, is returned by every Rebase call.
+	// RebaseErr, if non-nil, is returned by every Rebase call (after
+	// RebaseErrs is drained).
 	RebaseErr error
+	// RebaseErrs is a per-call queue drained before RebaseErr is checked.
+	// A nil entry means success; a non-nil entry is returned as the error.
+	RebaseErrs []error
 	// RebasedURLs records all URLs passed to Rebase in order.
 	RebasedURLs []string
 	// TransitionStateCalls records all TransitionState invocations in order.
@@ -329,6 +333,11 @@ func (f *Fake) Rebase(url string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.RebasedURLs = append(f.RebasedURLs, url)
+	if len(f.RebaseErrs) > 0 {
+		err := f.RebaseErrs[0]
+		f.RebaseErrs = f.RebaseErrs[1:]
+		return err
+	}
 	return f.RebaseErr
 }
 

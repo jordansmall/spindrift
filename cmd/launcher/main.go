@@ -508,8 +508,13 @@ func applyMergeMode(c config, fc forge.Client, num, pr string, conflictResolveFn
 // so the next Merge conflict is retried directly (after a brief settle wait
 // for the forge's mergeability snapshot to catch up) instead of invoking
 // Rebase a second time.
+//
+// A Rebase force-push failure that forge.ErrTransientPushFailure wraps (an
+// infra or network fault, not a genuine stale-lease rejection) is retried up
+// to maxRebaseAttempts times before it's treated as terminal.
 func mergeImmediate(c config, fc forge.Client, num, pr string, conflictResolveFn func(string) error) error {
 	rebaseAttempts := 0
+	pushRetries := 0
 	skipRebase := false
 	for {
 		err := fc.Merge(pr)
@@ -531,7 +536,19 @@ func mergeImmediate(c config, fc forge.Client, num, pr string, conflictResolveFn
 		rebaseAttempts++
 		fmt.Printf("    #%s  pr=%s  status=rebase-retry  attempt=%d/%d\n",
 			num, pr, rebaseAttempts, c.maxRebaseAttempts)
-		if rbErr := fc.Rebase(pr); rbErr != nil {
+		rbErr := fc.Rebase(pr)
+		for rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && pushRetries < c.maxRebaseAttempts {
+			pushRetries++
+			fmt.Printf("    #%s  pr=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
+				num, pr, pushRetries, c.maxRebaseAttempts, rbErr)
+			rbErr = fc.Rebase(pr)
+		}
+		if rbErr != nil {
+			if errors.Is(rbErr, forge.ErrTransientPushFailure) {
+				fmt.Printf("    #%s  pr=%s  status=rebase-push-retries-exhausted  attempts=%d  !! %v\n",
+					num, pr, pushRetries, rbErr)
+				return rbErr
+			}
 			if errors.Is(rbErr, forge.ErrMergeConflict) && conflictResolveFn != nil {
 				fmt.Printf("    #%s  pr=%s  status=conflict-resolve\n", num, pr)
 				if crErr := conflictResolveFn(pr); crErr != nil {
