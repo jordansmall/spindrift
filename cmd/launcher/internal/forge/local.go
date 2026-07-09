@@ -109,14 +109,18 @@ func (lt *LocalTracker) readIssueFile(num string) (localIssue, error) {
 
 // toIssue converts a parsed local issue file into the launcher's Issue type.
 // Local issues have no closed/open concept of their own; State is always
-// reported OPEN.
+// reported OPEN. The frontmatter's dispatch-state marker is appended to
+// Labels so cross-backend logic that checks for a specific dispatch label
+// (e.g. failedLabel) works the same as it does against the GitHub adapter,
+// whose Labels already include whatever label represents current state.
 func toIssue(num string, li localIssue) Issue {
+	labels := append(append([]string(nil), li.frontmatter.Labels...), li.frontmatter.State)
 	return Issue{
 		Number: num,
 		Title:  li.frontmatter.Title,
 		Body:   li.body,
 		State:  "OPEN",
-		Labels: li.frontmatter.Labels,
+		Labels: labels,
 	}
 }
 

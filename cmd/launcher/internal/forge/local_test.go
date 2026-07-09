@@ -178,6 +178,32 @@ func TestLocalTracker_DepsOf_NoBlockedBySection(t *testing.T) {
 	}
 }
 
+// TestLocalTracker_Issue_LabelsIncludeDispatchState verifies that the
+// dispatch-state marker is included in the returned Issue's Labels, matching
+// the GitHub adapter's behavior (a GitHub issue's Labels always include
+// whichever label represents its current dispatch state). main.go's
+// cross-backend blocker logic (hasFailedInBatchBlocker) checks
+// containsLabel(fi.Labels, c.failedLabel) generically across adapters, so the
+// state marker must appear in Labels even though the frontmatter keeps state
+// and labels as separate fields on disk.
+func TestLocalTracker_Issue_LabelsIncludeDispatchState(t *testing.T) {
+	dir := t.TempDir()
+	labels := DefaultDispatchLabels()
+	writeLocalIssue(t, dir, "broken", localIssue{frontmatter: localFrontmatter{
+		Title: "Broken", State: labels.Failed, Labels: []string{"bug"}, Created: "2026-07-09T12:00:00Z",
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	iss, err := lt.Issue("broken")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	want := []string{"bug", labels.Failed}
+	if !reflect.DeepEqual(iss.Labels, want) {
+		t.Errorf("Labels = %v, want %v", iss.Labels, want)
+	}
+}
+
 func TestLocalTracker_Comment_AppendsToBody(t *testing.T) {
 	dir := t.TempDir()
 	labels := DefaultDispatchLabels()
