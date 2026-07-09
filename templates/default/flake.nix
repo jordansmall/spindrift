@@ -49,11 +49,25 @@
             # ---- Non-secret run defaults (optional) --------------------------
             # Grouped by section; a matching env var still wins at runtime.
             # Secrets and the target (REPO_SLUG, GH_TOKEN, auth) are runtime
-            # env — see harness.env.example.
+            # env — see harness.env.example. Full reference: docs/flake-options.md
             # settings = {
-            #   branches = {
-            #     mergeMode = "immediate";  # immediate | auto | manual (default)
-            #   };
+            #   issueDiscovery  = { label          = "ready-for-agent"; };
+            #   lifecycleLabels = { inProgressLabel = "agent-in-progress";
+            #                       failedLabel     = "agent-failed";
+            #                       completeLabel   = "agent-complete"; };
+            #   branches        = { baseBranch      = "main";
+            #                       branchPrefix    = "agent/issue-";
+            #                       mergeMode       = "manual"; };
+            #   concurrency     = { maxParallel = 3; };
+            #   models          = { model       = "claude-sonnet-4-6";
+            #                       scoutModel  = "claude-haiku-4-5-20251001";
+            #                       reviewModel = "claude-opus-4-8"; };
+            #   sandbox         = { devShellName         = "default";
+            #                       devShellProbeTimeout = 300;
+            #                       memoryLimit          = "4g";
+            #                       pidsLimit            = "512";
+            #                       podmanNetwork        = "";
+            #                       bwrapUnshareNet      = ""; };
             # };
           };
 
