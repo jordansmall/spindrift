@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"spindrift.dev/launcher/internal/forge"
+)
 
 // TestTouchSetsOverlap_LiteralPathHit verifies that two touch-sets sharing an
 // identical literal path are reported as overlapping.
@@ -38,5 +42,50 @@ func TestTouchSetsOverlap_DoubleStarAnyDepth(t *testing.T) {
 func TestTouchSetsOverlap_DifferentDepthNoWildcardNoOverlap(t *testing.T) {
 	if touchSetsOverlap([]string{"cmd/launcher/*.go"}, []string{"cmd/launcher/internal/forge/exec.go"}) {
 		t.Error("expected no overlap: extra path segment with no ** present")
+	}
+}
+
+// TestOverlapsInProgress_CollidingTouches verifies a candidate's declared
+// touch-set overlapping an InProgress issue's declared touch-set is reported,
+// naming the colliding issue.
+func TestOverlapsInProgress_CollidingTouches(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
+	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- lib/env-schema.nix", State: "OPEN", Labels: []string{"agent-in-progress"}})
+
+	inProgress, err := fc.ListIssues(forge.InProgress)
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	collider, held := overlapsInProgress(fc, "10", inProgress)
+	if !held || collider != "20" {
+		t.Errorf("overlapsInProgress = (%q, %v), want (\"20\", true)", collider, held)
+	}
+}
+
+// TestOverlapsInProgress_DisjointTouches verifies disjoint touch-sets never
+// hold a candidate.
+func TestOverlapsInProgress_DisjointTouches(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
+	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- docs/reference.md", State: "OPEN", Labels: []string{"agent-in-progress"}})
+
+	inProgress, _ := fc.ListIssues(forge.InProgress)
+	if _, held := overlapsInProgress(fc, "10", inProgress); held {
+		t.Error("expected no hold: disjoint touch-sets")
+	}
+}
+
+// TestOverlapsInProgress_NoDeclaredTouches verifies a candidate with no
+// ## Touches section is never held, matching the "dispatched exactly as
+// today" acceptance criterion.
+func TestOverlapsInProgress_NoDeclaredTouches(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "10", Body: "no touches section here", Labels: []string{"ready-for-agent"}})
+	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- lib/env-schema.nix", State: "OPEN", Labels: []string{"agent-in-progress"}})
+
+	inProgress, _ := fc.ListIssues(forge.InProgress)
+	if _, held := overlapsInProgress(fc, "10", inProgress); held {
+		t.Error("expected no hold: candidate declared no touches")
 	}
 }

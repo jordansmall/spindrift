@@ -18,6 +18,31 @@ func touchesOf(fc forge.Client, num string) ([]string, error) {
 	return forge.ParseTouchPaths(fi.Body), nil
 }
 
+// overlapsInProgress reports whether candidate num's declared touch-set
+// intersects the declared touch-set of any issue in inProgress, returning the
+// first colliding issue's number. A candidate with no declared touches never
+// collides — issues with no ## Touches section are dispatched exactly as
+// today, per the OVERLAP_GATE acceptance criteria.
+func overlapsInProgress(fc forge.Client, num string, inProgress []forge.Issue) (string, bool) {
+	touches, err := touchesOf(fc, num)
+	if err != nil || len(touches) == 0 {
+		return "", false
+	}
+	for _, fi := range inProgress {
+		if fi.Number == num {
+			continue
+		}
+		otherTouches := forge.ParseTouchPaths(fi.Body)
+		if len(otherTouches) == 0 {
+			continue
+		}
+		if touchSetsOverlap(touches, otherTouches) {
+			return fi.Number, true
+		}
+	}
+	return "", false
+}
+
 // touchSetsOverlap reports whether any glob in a intersects any glob in b —
 // i.e. some path could match both. Two globs intersect when every path
 // segment pair is compatible: equal, or either side is a "*"/"**" wildcard.
