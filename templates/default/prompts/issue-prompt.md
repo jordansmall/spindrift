@@ -119,7 +119,7 @@ Its final message starts `VERDICT: APPROVE` or `VERDICT: BLOCK`. On BLOCK:
 Never open the PR with a blocking finding open. Non-blocking findings may go in
 the PR body.
 
-# LAND THE CHANGE
+${FILE_ISSUES_STEP}# LAND THE CHANGE
 
 Check `$CODE_FORGE` (already in your environment — run `echo $CODE_FORGE` if
 unsure):

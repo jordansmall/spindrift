@@ -191,6 +191,30 @@ if [ -n "$_skills_found" ]; then
 "
 fi
 
+# The FILE ISSUES step is substituted into the issue prompt only when the
+# filer opt-in is set (FILER_MODEL non-empty), the same conditional-residue
+# mechanism as SKILL_PREAMBLE above: empty when off, so a filer-free box's
+# rendered prompt carries no trace of the step.
+FILE_ISSUES_STEP=""
+if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
+  FILE_ISSUES_STEP="# FILE ISSUES
+
+Delegate the review verdict's Non-blocking section to the filer subagent
+before opening the PR. It is pre-provisioned via --agents; pass it the
+Non-blocking findings verbatim, the issue number, and the PR URL (or branch,
+if not yet opened) for provenance.
+
+Best-effort: filing must never block the PR or change the outcome line.
+
+- On success, use the filer's returned issue URLs in the PR body instead of
+  the raw findings.
+- On failure (the filer errors, times out, or returns nothing usable), fall
+  back to pasting the raw Non-blocking findings into the PR body and proceed
+  — exactly as when the filer is not configured.
+
+"
+fi
+
 # Substitute only known placeholders so literal `$` in the prompt body (shell
 # snippets, etc.) survives. The single-quoted variable list is envsubst's
 # literal, not a shell expansion — hence SC2016.
@@ -203,7 +227,8 @@ _subst() {
     IN_PROGRESS_LABEL="${IN_PROGRESS_LABEL:-}" \
     COMPLETE_LABEL="${COMPLETE_LABEL:-}" \
     SKILL_PREAMBLE="${SKILL_PREAMBLE:-}" \
-    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE' \
+    FILE_ISSUES_STEP="${FILE_ISSUES_STEP:-}" \
+    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE $FILE_ISSUES_STEP' \
     <"$1"
 }
 # When the pre-work rebase produced conflicts, spawn a conflict-resolve agent to
