@@ -136,7 +136,10 @@ type jiraIssuePayload struct {
 		Summary     string `json:"summary"`
 		Description string `json:"description"`
 		Status      struct {
-			Name string `json:"name"`
+			Name           string `json:"name"`
+			StatusCategory struct {
+				Key string `json:"key"`
+			} `json:"statusCategory"`
 		} `json:"status"`
 		Labels     []string `json:"labels"`
 		IssueLinks []struct {
@@ -172,6 +175,16 @@ func (j *jiraClient) DepsOf(num string) ([]string, error) {
 		}
 	}
 	return deps, nil
+}
+
+// issueState maps Jira's statusCategory to the forge.Issue OPEN|CLOSED
+// contract: "done" is Jira's terminal category (regardless of the workflow's
+// custom terminal status name, e.g. "Done", "Won't Fix", "Resolved").
+func issueState(p jiraIssuePayload) string {
+	if p.Fields.Status.StatusCategory.Key == "done" {
+		return "CLOSED"
+	}
+	return "OPEN"
 }
 
 type jiraCommentsPayload struct {
@@ -218,7 +231,7 @@ func (j *jiraClient) Issue(num string) (Issue, error) {
 		Number: payload.Key,
 		Title:  payload.Fields.Summary,
 		Body:   body,
-		State:  payload.Fields.Status.Name,
+		State:  issueState(payload),
 		Labels: payload.Fields.Labels,
 	}, nil
 }
@@ -357,6 +370,7 @@ func (j *jiraClient) ListIssues(state DispatchState) ([]Issue, error) {
 			Number: p.Key,
 			Title:  p.Fields.Summary,
 			Body:   p.Fields.Description,
+			State:  issueState(p),
 			Labels: p.Fields.Labels,
 		}
 	}

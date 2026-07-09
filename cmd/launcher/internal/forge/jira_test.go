@@ -173,11 +173,39 @@ func TestJiraClient_Issue_FetchesFields(t *testing.T) {
 	if iss.Body != "Detailed description here." {
 		t.Errorf("Body = %q", iss.Body)
 	}
-	if iss.State != "To Do" {
-		t.Errorf("State = %q", iss.State)
+	if iss.State != "OPEN" {
+		t.Errorf("State = %q, want OPEN (per forge.Issue's OPEN|CLOSED contract)", iss.State)
 	}
 	if len(iss.Labels) != 1 || iss.Labels[0] != "ready-for-agent" {
 		t.Errorf("Labels = %v", iss.Labels)
+	}
+}
+
+// TestJiraClient_Issue_DoneStatusCategoryIsClosed verifies Issue() maps
+// Jira's "done" status category to the forge.Issue OPEN|CLOSED contract,
+// which blockerReady and ListIssues(Fake) depend on — the raw Jira status
+// name (e.g. "Done") is never itself "CLOSED".
+func TestJiraClient_Issue_DoneStatusCategoryIsClosed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"key": "PROJ-8",
+			"fields": {
+				"summary": "s", "description": "d",
+				"status": {"name": "Done", "statusCategory": {"key": "done"}},
+				"labels": []
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	iss, err := jc.Issue("PROJ-8")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.State != "CLOSED" {
+		t.Errorf("State = %q, want CLOSED for a done-category status", iss.State)
 	}
 }
 
