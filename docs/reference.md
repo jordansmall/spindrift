@@ -86,19 +86,22 @@ settings = {
   lifecycleLabels = { inProgressLabel = "agent-in-progress";
                       failedLabel     = "agent-failed";
                       completeLabel   = "agent-complete"; };
-  branches        = { baseBranch      = "main";
-                      branchPrefix    = "agent/issue-";
-                      mergeMode       = "manual"; };
-  concurrency     = { maxParallel = 3; };
-  models          = { model       = "claude-sonnet-4-6";
+  branches        = { baseBranch = "main"; branchPrefix = "agent/issue-";
+                      mergeMode  = "manual";
+                      mergePollInterval = 30; mergePollTimeout = 1800; };
+  concurrency     = { maxParallel = 3; maxJobs = 0;
+                      depsPollSecs = 30; depsWaitSecs = 7200; };
+  models          = { model = "claude-sonnet-4-6";
                       scoutModel  = "claude-haiku-4-5-20251001";
                       reviewModel = "claude-opus-4-8"; };
-  sandbox         = { devShellName         = "default";
-                      devShellProbeTimeout = 300;
-                      memoryLimit          = "4g";
-                      pidsLimit            = "512";
-                      podmanNetwork        = "";
-                      bwrapUnshareNet      = ""; };
+  sandbox         = { devShellName = "default"; devShellProbeTimeout = 300;
+                      memoryLimit = "4g"; pidsLimit = "512";
+                      podmanNetwork = ""; bwrapUnshareNet = ""; };
+  selfHealing     = { maxFixAttempts = 3; maxRebaseAttempts = 3;
+                      holdJitterSecs = 5; transientBackoffSecs = 30;
+                      transientRetryMax = 3; };
+  repository      = { repoSlug = "owner/repo";
+                      gitUserName = "bot"; gitUserEmail = "bot@example.com"; };
 };
 ```
 
@@ -262,56 +265,63 @@ a rebuild (ADR 0001):
 
 | var                       | default                | meaning                                  |
 | ------------------------- | ---------------------- | ---------------------------------------- |
-| `REPO_SLUG`               | — (required)           | target repo, `owner/repo`                |
-| `GH_TOKEN`                | — (required)           | GitHub token for `gh` inside containers  |
-| `CLAUDE_CODE_OAUTH_TOKEN` | — (one auth required)  | from `claude setup-token`                |
-| `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token           |
-| `GIT_USER_NAME`           | host `git config` (required) | commit author name                 |
-| `GIT_USER_EMAIL`          | host `git config` (required) | commit author email                |
-| `LABEL`                   | `ready-for-agent`      | issues to pick up                        |
-| `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query |
-| `BASE_BRANCH`             | `main`                 | branch to cut from and PR into           |
-| `MAX_PARALLEL`            | `3`                    | concurrent containers                    |
-| `BRANCH_PREFIX`           | `agent/issue-`         | branch name = prefix + issue number      |
-| `IN_PROGRESS_LABEL`       | `agent-in-progress`    | label a dispatched issue is swapped to   |
-| `FAILED_LABEL`            | `agent-failed`         | label an issue gets when its Box fails or its PR can't merge |
-| `COMPLETE_LABEL`          | `agent-complete`       | label the launcher swaps on when CI reaches green (agent is done; the merge is a separate step) |
-| `MERGE_MODE`              | `manual`               | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue GitHub native auto-merge — repo must have *Allow auto-merge* on) |
-| `MODEL`                   | `claude-sonnet-4-6`    | Claude model the in-container implementor runs |
-| `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` | scout subagent model tier (empty drops subagents) |
-| `REVIEW_MODEL`            | `claude-opus-4-8`      | reviewer subagent model tier (empty drops subagents) |
+| `REPO_SLUG`               | — (required; baked via `settings.repository.repoSlug`) | target repo, `owner/repo` |
+| `GH_TOKEN`                | — (required)           | GitHub token for `gh` inside containers (secret; env only) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | — (one auth required)  | from `claude setup-token` (secret; env only) |
+| `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
+| `GIT_USER_NAME`           | host `git config`; baked via `settings.repository.gitUserName` | commit author name |
+| `GIT_USER_EMAIL`          | host `git config`; baked via `settings.repository.gitUserEmail` | commit author email |
+| `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
+| `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
+| `BASE_BRANCH`             | `main` (baked)         | branch to cut from and PR into           |
+| `MAX_PARALLEL`            | `3` (baked)            | concurrent containers                    |
+| `BRANCH_PREFIX`           | `agent/issue-` (baked) | branch name = prefix + issue number      |
+| `IN_PROGRESS_LABEL`       | `agent-in-progress` (baked) | label a dispatched issue is swapped to |
+| `FAILED_LABEL`            | `agent-failed` (baked) | label an issue gets when its Box fails or its PR can't merge |
+| `COMPLETE_LABEL`          | `agent-complete` (baked) | label the launcher swaps on when CI reaches green (agent is done; the merge is a separate step) |
+| `MERGE_MODE`              | `manual` (baked)       | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue GitHub native auto-merge — repo must have *Allow auto-merge* on) |
+| `MODEL`                   | `claude-sonnet-4-6` (baked) | Claude model the in-container implementor runs |
+| `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` (baked) | scout subagent model tier (empty drops subagents) |
+| `REVIEW_MODEL`            | `claude-opus-4-8` (baked) | reviewer subagent model tier (empty drops subagents) |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
-| `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | hot-override the mounted prompt dir     |
-| `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override the mounted skills dir     |
+| `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | hot-override the mounted prompt dir (not bakeable) |
+| `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override the mounted skills dir (not bakeable) |
 
 Every `settings`-baked knob above can be re-pointed at runtime; the env var
-wins over whatever was baked. Commit identity is **required**: an override wins,
-else the host's `git config user.name`/`user.email` is inherited; if neither is
-set, `spindrift dispatch` exits rather than committing under an arbitrary identity.
+wins over whatever was baked. `(baked)` marks knobs whose defaults are baked
+into the `spindrift` CLI via `settings`; `(not bakeable)` marks knobs
+deliberately kept off the flake surface (secrets, per-run overrides, and
+dev-iteration host-path mounts). Commit identity is **required**: an override
+wins, else the host's `git config user.name`/`user.email` is inherited; if
+neither is set, `spindrift dispatch` exits rather than committing under an
+arbitrary identity.
 
 ### Advanced tuning
 
-These knobs are runtime-only (no `settings` baking) unless noted, and rarely
-need changing. See `lib/env-schema.nix` for the authoritative list.
+These knobs are rarely changed. All except `SPINDRIFT_PROMPT_DIR`,
+`SPINDRIFT_SKILLS_DIR`, and `ISSUE_NUMBER` can be baked via `settings` (see
+[Option surface](#option-surface)) or overridden at runtime via env var or CLI
+flag — whichever wins at runtime takes precedence. See `lib/env-schema.nix` for
+the authoritative list.
 
-| var                    | default | meaning                                                        |
-| ---------------------- | ------- | -------------------------------------------------------------- |
-| `MAX_JOBS`             | `0`     | drain at most N unblocked issues then exit (`0` = unlimited / full waves) |
-| `MAX_FIX_ATTEMPTS`     | `3`     | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
-| `MAX_REBASE_ATTEMPTS`  | `3`     | rebase-and-retry passes when a green PR conflicts after a sibling merge (`0` disables) |
-| `MERGE_POLL_INTERVAL`  | `30`    | seconds between CI-status polls in the merge gate              |
-| `MERGE_POLL_TIMEOUT`   | `1800`  | seconds to wait for CI green before abandoning the merge       |
-| `DEPS_POLL_SECS`       | `30`    | seconds between dependency-wave poll iterations                |
-| `DEPS_WAIT_SECS`       | `7200`  | seconds to wait for a dependency wave before declaring deadlock |
-| `TRANSIENT_RETRY_MAX`  | `3`     | retries for transient box exits (529/network backoff; consecutive 429 holds) |
-| `TRANSIENT_BACKOFF_SECS` | `30`  | base linear backoff per transient retry                        |
-| `HOLD_JITTER_SECS`     | `5`     | jitter added to a 429 hold-until-reset before re-dispatch      |
-| `DEV_SHELL_NAME` (baked) | `default` | which devShell to enter; set `ci` to use a lean headless shell distinct from the interactive `default` |
-| `DEV_SHELL_PROBE_TIMEOUT` (baked) | `300` | seconds before the in-box devShell probe is abandoned for the baked toolchain |
-| `MEMORY_LIMIT` (baked) | `4g`    | per-container `--memory` cap (OCI only; empty disables)        |
-| `PIDS_LIMIT` (baked)   | `512`   | per-container `--pids-limit` cap (OCI only; empty disables)    |
-| `PODMAN_NETWORK` (baked) | —     | `--network` value for podman run; set `pasta` to restrict egress |
-| `BWRAP_UNSHARE_NET` (baked) | —  | non-empty adds `--unshare-net` to the bwrap runner             |
+| var                    | default | `settings` section | meaning                                                |
+| ---------------------- | ------- | ------------------ | ------------------------------------------------------ |
+| `MAX_JOBS`             | `0`     | `concurrency`      | drain at most N unblocked issues then exit (`0` = unlimited / full waves) |
+| `MAX_FIX_ATTEMPTS`     | `3`     | `selfHealing`      | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
+| `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts after a sibling merge (`0` disables) |
+| `MERGE_POLL_INTERVAL`  | `30`    | `branches`         | seconds between CI-status polls in the merge gate      |
+| `MERGE_POLL_TIMEOUT`   | `1800`  | `branches`         | seconds to wait for CI green before abandoning the merge |
+| `DEPS_POLL_SECS`       | `30`    | `concurrency`      | seconds between dependency-wave poll iterations        |
+| `DEPS_WAIT_SECS`       | `7200`  | `concurrency`      | seconds to wait for a dependency wave before declaring deadlock |
+| `TRANSIENT_RETRY_MAX`  | `3`     | `selfHealing`      | retries for transient box exits (529/network backoff; consecutive 429 holds) |
+| `TRANSIENT_BACKOFF_SECS` | `30`  | `selfHealing`      | base linear backoff per transient retry                |
+| `HOLD_JITTER_SECS`     | `5`     | `selfHealing`      | jitter added to a 429 hold-until-reset before re-dispatch |
+| `DEV_SHELL_NAME`       | `default` | `sandbox`        | which devShell to enter; set `ci` to use a lean headless shell distinct from the interactive `default` |
+| `DEV_SHELL_PROBE_TIMEOUT` | `300` | `sandbox`        | seconds before the in-box devShell probe is abandoned for the baked toolchain |
+| `MEMORY_LIMIT`         | `4g`    | `sandbox`          | per-container `--memory` cap (OCI only; empty disables) |
+| `PIDS_LIMIT`           | `512`   | `sandbox`          | per-container `--pids-limit` cap (OCI only; empty disables) |
+| `PODMAN_NETWORK`       | —       | `sandbox`          | `--network` value for podman run; set `pasta` to restrict egress |
+| `BWRAP_UNSHARE_NET`    | —       | `sandbox`          | non-empty adds `--unshare-net` to the bwrap runner      |
 
 ---
 

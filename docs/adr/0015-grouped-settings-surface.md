@@ -20,17 +20,22 @@ Knobs are grouped by section — the same headings as `spindrift --help --all`
 (`groupOrder` in `cmd/launcher/flags.go`) — under `settings.<sectionAttr>`.
 Section attr names are camelCase translations of the headings:
 
-| `--help --all` heading              | `settings` attr      |
-| ----------------------------------- | -------------------- |
-| Issue discovery                     | `issueDiscovery`     |
-| Lifecycle labels                    | `lifecycleLabels`    |
-| Branches & merge                    | `branches`           |
-| Concurrency & dependency waves      | `concurrency`        |
-| Models                              | `models`             |
-| Sandbox & resources                 | `sandbox`            |
+| `--help --all` heading              | `settings` attr         |
+| ----------------------------------- | ----------------------- |
+| Issue discovery                     | `issueDiscovery`        |
+| Lifecycle labels                    | `lifecycleLabels`       |
+| Branches & merge                    | `branches`              |
+| Concurrency & dependency waves      | `concurrency`           |
+| Models                              | `models`                |
+| Sandbox & resources                 | `sandbox`               |
+| Self-healing & retries              | `selfHealing`           |
+| Repository & identity               | `repository`            |
 
-Sections with no consumer-tunable knobs (`selfHealing`, `repository`,
-`promptSkillIteration`) are not exposed — they would be empty submodules.
+`promptSkillIteration` is not exposed — its knobs (`SPINDRIFT_PROMPT_DIR`,
+`SPINDRIFT_SKILLS_DIR`) are dev-iteration host-path overrides deliberately
+kept off the flake surface (already served by the baked `prompt`/`skills`
+options). A section only appears when at least one knob in it carries
+`flakeOption = true`.
 
 The mapping is kept as a static `groupToAttr` attrset in `lib/flakeModule.nix`
 rather than derived algorithmically so it stays legible and can be audited
