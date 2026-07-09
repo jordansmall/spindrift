@@ -10,9 +10,10 @@ type IssueTracker interface {
 	ListIssues(state DispatchState) ([]Issue, error)
 	// Issue returns full details (body, labels, state) for the given number.
 	Issue(num string) (Issue, error)
-	// TransitionState moves issue num to state to, clearing other dispatch
-	// state markers.
-	TransitionState(num string, to DispatchState) error
+	// TransitionState moves issue num from state from to state to. It adds
+	// the label for to and removes the label for from, matching the
+	// SwapLabel(add, remove) contract with typed state identifiers.
+	TransitionState(num string, from, to DispatchState) error
 	// DepsOf returns the canonical dependency IDs for the given issue.
 	// Implementations parse the issue's native dependency format (e.g. GitHub
 	// body "depends on #N" / "## Blocked by" section).
