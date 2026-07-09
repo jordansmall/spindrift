@@ -68,7 +68,8 @@
             #   concurrency     = { maxParallel  = 3;
             #                       maxJobs      = 0;
             #                       depsPollSecs = 30;
-            #                       depsWaitSecs = 7200; };
+            #                       depsWaitSecs = 7200;
+            #                       overlapGate  = "defer"; };
             #   models          = { model       = "claude-sonnet-5";
             #                       scoutModel  = "claude-haiku-4-5-20251001";
             #                       reviewModel = "claude-opus-4-8";
