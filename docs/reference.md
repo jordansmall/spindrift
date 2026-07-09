@@ -443,6 +443,51 @@ Rename any of these with the `inProgressLabel` / `failedLabel` / `completeLabel`
 knobs under `settings.lifecycleLabels` (baked) or the
 `IN_PROGRESS_LABEL` / `FAILED_LABEL` / `COMPLETE_LABEL` env vars (runtime).
 
+#### Issue Tracker backends
+
+Per [ADR 0013](adr/0013-issue-tracker-and-code-forge-are-independent-seams.md),
+the Issue Tracker (where issues live) and the Code Forge (where code and CI
+live) are independent axes. `ISSUE_TRACKER` selects the tracker; the Code
+Forge stays `github` regardless (Jira issues, GitHub PRs).
+
+- **`github`** (default) — the label lifecycle described above.
+- **`jira`** — dispatch state maps to the project's native workflow via a
+  configurable status mapping. `JIRA_STATUS_MAPPING` is a JSON object from
+  canonical dispatch state to Jira status name, e.g.:
+
+  ```json
+  { "dispatchable": "To Do", "inProgress": "In Progress", "complete": "Done", "failed": "Blocked" }
+  ```
+
+  `TransitionState` performs the matching workflow transition. When a state
+  has no entry in the mapping, or the mapped transition is not available on
+  the issue's current workflow (its next-status editor screen doesn't offer
+  it), the launcher **falls back to swapping the same lifecycle label**
+  (`ready-for-agent` / `agent-in-progress` / `agent-complete` / `agent-failed`,
+  same knobs as the `github` tracker) so the lifecycle always makes progress
+  even on an unmapped or restrictive workflow. `ListIssues` matches either the
+  mapped status or the fallback label, so issues stuck on the label are never
+  lost, and orders results by Jira's `created` timestamp (the canonical order
+  for this backend, in place of GitHub's issue-number order).
+
+  Dependencies resolve from **native Jira issue links** (the built-in
+  `Blocks` link type's "is blocked by" direction) rather than prose parsing —
+  unlike `github`'s `## Blocked by` / `depends on #N` body conventions.
+
+  By default the agent's prompt input is the issue's summary and description
+  only; set `JIRA_INCLUDE_COMMENTS` (non-empty) to also append the comment
+  thread — opt-in, to keep the prompt-injection surface tight.
+
+  Config: `JIRA_BASE_URL` (site base URL), `JIRA_PROJECT_KEY`, and
+  `JIRA_STATUS_MAPPING` / `JIRA_INCLUDE_COMMENTS` are non-secret, set via
+  `settings.repository` / `settings.lifecycleLabels` / `settings.issueDiscovery`
+  (baked) or their env vars (runtime) — see the [flake options
+  reference](flake-options.md). `JIRA_TOKEN` is a secret env var alongside
+  `GH_TOKEN`: a Jira API token used alone as a Bearer PAT (Server/Data
+  Center), or paired with the non-secret `JIRA_EMAIL` for Basic auth (Cloud).
+  `spindrift doctor`'s `Probe()` check validates Jira auth and reachability
+  independently of the GitHub Code Forge probe.
+
 #### Merge guard
 
 Between CI going green and the merge itself, the launcher checks the PR's
