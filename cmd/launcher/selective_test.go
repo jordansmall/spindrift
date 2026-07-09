@@ -287,13 +287,13 @@ func TestPreviewIssues_WithList_ShowsUnlabeledWarning(t *testing.T) {
 	if strings.Contains(out, "[y/N]") {
 		t.Errorf("preview must not prompt; got:\n%s", out)
 	}
-	if len(fc.SwapCalls) != 0 {
-		t.Errorf("previewIssues made swap calls; want 0")
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("previewIssues made TransitionState calls; want 0")
 	}
 }
 
 // TestPreviewIssues_WithList_NoMutatingCalls: preview with list makes no
-// mutating forge calls (no SwapLabel, no Comment).
+// mutating forge calls (no TransitionState, no Comment).
 func TestPreviewIssues_WithList_NoMutatingCalls(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -308,8 +308,8 @@ func TestPreviewIssues_WithList_NoMutatingCalls(t *testing.T) {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
-	if len(fc.SwapCalls) != 0 {
-		t.Errorf("previewIssues made %d SwapLabel calls; want 0", len(fc.SwapCalls))
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("previewIssues made %d TransitionState calls; want 0", len(fc.TransitionStateCalls))
 	}
 	if len(fc.CommentCalls) != 0 {
 		t.Errorf("previewIssues made %d Comment calls; want 0", len(fc.CommentCalls))

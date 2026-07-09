@@ -33,8 +33,8 @@ func TestPreviewIssues_ListsIssuesAndRepo(t *testing.T) {
 	if !strings.Contains(out, "#20") {
 		t.Errorf("output missing issue #20; got:\n%s", out)
 	}
-	if len(fc.SwapCalls) != 0 {
-		t.Errorf("previewIssues made %d SwapLabel calls; want 0", len(fc.SwapCalls))
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("previewIssues made %d TransitionState calls; want 0", len(fc.TransitionStateCalls))
 	}
 	if len(fc.CommentCalls) != 0 {
 		t.Errorf("previewIssues made %d Comment calls; want 0", len(fc.CommentCalls))

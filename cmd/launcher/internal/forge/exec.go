@@ -12,20 +12,23 @@ import (
 )
 
 // execClient is the gh-exec adapter. It satisfies Client using the gh CLI.
-// GH_TOKEN is read from the ambient environment; the repo slug is fixed at
-// construction time.
+// GH_TOKEN is read from the ambient environment; the repo slug and dispatch
+// label mapping are fixed at construction time.
 type execClient struct {
-	repo string // owner/repo slug
+	repo   string // owner/repo slug
+	labels DispatchLabels
 }
 
 // NewExecClient returns a Client backed by the gh CLI for the given repo slug.
-func NewExecClient(repo string) Client {
-	return &execClient{repo: repo}
+// labels maps canonical DispatchState values to GitHub label names.
+func NewExecClient(repo string, labels DispatchLabels) Client {
+	return &execClient{repo: repo, labels: labels}
 }
 
 const issueQueryLimit = 100
 
-func (e *execClient) ListIssues(label string) ([]Issue, error) {
+func (e *execClient) ListIssues(state DispatchState) ([]Issue, error) {
+	label := e.labels.Label(state)
 	cmd := exec.Command("gh", "issue", "list",
 		"--repo", e.repo,
 		"--state", "open",
@@ -92,16 +95,32 @@ func (e *execClient) Issue(num string) (Issue, error) {
 	return iss, nil
 }
 
-func (e *execClient) SwapLabel(num, add, remove string) error {
-	cmd := exec.Command("gh", "issue", "edit", num,
-		"--repo", e.repo,
-		"--add-label", add,
-		"--remove-label", remove,
-	)
+// TransitionState moves issue num to state to, removing all other dispatch
+// state labels. This is best-effort for unknown issues, matching gh CLI
+// behavior on missing labels.
+func (e *execClient) TransitionState(num string, to DispatchState) error {
+	add := e.labels.Label(to)
+	args := []string{"issue", "edit", num, "--repo", e.repo, "--add-label", add}
+	for _, l := range e.labels.AllLabels() {
+		if l != add {
+			args = append(args, "--remove-label", l)
+		}
+	}
+	cmd := exec.Command("gh", args...)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("gh issue edit %s: %w", num, err)
 	}
 	return nil
+}
+
+// DepsOf returns the canonical dependency IDs for issue num by fetching its
+// body and parsing GitHub-format blocker references.
+func (e *execClient) DepsOf(num string) ([]string, error) {
+	iss, err := e.Issue(num)
+	if err != nil {
+		return nil, err
+	}
+	return ParseBlockerRefs(iss.Body), nil
 }
 
 func (e *execClient) Comment(num, body string) error {

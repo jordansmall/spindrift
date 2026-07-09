@@ -7,9 +7,10 @@ import (
 	"sync"
 )
 
-// SwapCall records a single SwapLabel invocation.
-type SwapCall struct {
-	Num, Add, Remove string
+// TransitionStateCall records a single TransitionState invocation.
+type TransitionStateCall struct {
+	Num string
+	To  DispatchState
 }
 
 // CreateLabelCall records a single CreateLabel invocation.
@@ -28,6 +29,7 @@ type CommentCall struct {
 type Fake struct {
 	mu sync.Mutex
 
+	labels    DispatchLabels
 	issues    map[string]Issue
 	prs       map[string]PR     // URL → PR
 	branchPRs map[string]string // branch → PR URL
@@ -50,8 +52,10 @@ type Fake struct {
 	RebaseErr error
 	// RebasedURLs records all URLs passed to Rebase in order.
 	RebasedURLs []string
-	// SwapCalls records all SwapLabel invocations in order.
-	SwapCalls []SwapCall
+	// TransitionStateCalls records all TransitionState invocations in order.
+	TransitionStateCalls []TransitionStateCall
+	// TransitionStateErr, if non-nil, is returned by every TransitionState call.
+	TransitionStateErr error
 	// CommentCalls records all Comment invocations in order.
 	CommentCalls []CommentCall
 
@@ -86,9 +90,10 @@ type Fake struct {
 	CreateLabelErr error
 }
 
-// NewFake returns an empty Fake client.
+// NewFake returns an empty Fake client using DefaultDispatchLabels.
 func NewFake() *Fake {
 	return &Fake{
+		labels:    DefaultDispatchLabels(),
 		issues:    map[string]Issue{},
 		prs:       map[string]PR{},
 		branchPRs: map[string]string{},
@@ -159,9 +164,10 @@ func (f *Fake) ListPRFiles(url string) ([]string, error) {
 	return out, nil
 }
 
-func (f *Fake) ListIssues(label string) ([]Issue, error) {
+func (f *Fake) ListIssues(state DispatchState) ([]Issue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	label := f.labels.Label(state)
 	var out []Issue
 	for _, iss := range f.issues {
 		if iss.State == "CLOSED" {
@@ -192,25 +198,46 @@ func (f *Fake) Issue(num string) (Issue, error) {
 	return iss, nil
 }
 
-func (f *Fake) SwapLabel(num, add, remove string) error {
+// TransitionState moves issue num to state to, removing all other dispatch
+// state labels. Best-effort on missing issues (no error), matching gh CLI
+// behavior.
+func (f *Fake) TransitionState(num string, to DispatchState) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.SwapCalls = append(f.SwapCalls, SwapCall{num, add, remove})
+	f.TransitionStateCalls = append(f.TransitionStateCalls, TransitionStateCall{num, to})
+	if f.TransitionStateErr != nil {
+		return f.TransitionStateErr
+	}
 	iss, ok := f.issues[num]
 	if !ok {
-		// Best-effort, just like the real gh CLI on a missing issue.
-		return nil
+		return nil // best-effort
+	}
+	add := f.labels.Label(to)
+	allDispatch := make(map[string]bool, 4)
+	for _, l := range f.labels.AllLabels() {
+		allDispatch[l] = true
 	}
 	var next []string
 	for _, l := range iss.Labels {
-		if l != remove {
-			next = append(next, l)
+		if !allDispatch[l] {
+			next = append(next, l) // preserve non-dispatch labels
 		}
 	}
 	next = append(next, add)
 	iss.Labels = next
 	f.issues[num] = iss
 	return nil
+}
+
+// DepsOf returns the dependency IDs parsed from the issue body.
+func (f *Fake) DepsOf(num string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	iss, ok := f.issues[num]
+	if !ok {
+		return nil, fmt.Errorf("issue %s not found", num)
+	}
+	return ParseBlockerRefs(iss.Body), nil
 }
 
 func (f *Fake) Comment(num, body string) error {

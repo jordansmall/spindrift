@@ -37,11 +37,11 @@ func TestSelfHeal_SuccessFirstTry(t *testing.T) {
 	if len(fixCalls) != 0 {
 		t.Errorf("expected no fix calls, got %v", fixCalls)
 	}
-	if len(fc.SwapCalls) == 0 {
-		t.Fatal("expected at least one SwapLabel call (complete label)")
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected at least one TransitionState call (Complete)")
 	}
-	if last := fc.SwapCalls[len(fc.SwapCalls)-1]; last.Add != c.completeLabel {
-		t.Errorf("last swap add=%q, want %q", last.Add, c.completeLabel)
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Complete {
+		t.Errorf("last transition To=%v, want Complete", last.To)
 	}
 }
 
@@ -60,11 +60,11 @@ func TestSelfHeal_GenuineRedMaxZero(t *testing.T) {
 	if len(fixCalls) != 0 {
 		t.Errorf("expected no fix calls (maxFixAttempts=0), got %v", fixCalls)
 	}
-	if len(fc.SwapCalls) == 0 {
-		t.Fatal("expected SwapLabel call for failedLabel")
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected TransitionState call for Failed")
 	}
-	if last := fc.SwapCalls[len(fc.SwapCalls)-1]; last.Add != c.failedLabel {
-		t.Errorf("last swap add=%q, want %q", last.Add, c.failedLabel)
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
+		t.Errorf("last transition To=%v, want Failed", last.To)
 	}
 }
 
@@ -84,11 +84,11 @@ func TestSelfHeal_GenuineRedFixSucceeds(t *testing.T) {
 	if len(fixCalls) != 1 || fixCalls[0] != 1 {
 		t.Errorf("expected exactly fix-pass-1, got %v", fixCalls)
 	}
-	if len(fc.SwapCalls) == 0 {
-		t.Fatal("expected SwapLabel call (complete label)")
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected TransitionState call (Complete)")
 	}
-	if last := fc.SwapCalls[len(fc.SwapCalls)-1]; last.Add != c.completeLabel {
-		t.Errorf("last swap add=%q, want %q", last.Add, c.completeLabel)
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Complete {
+		t.Errorf("last transition To=%v, want Complete", last.To)
 	}
 }
 
@@ -118,11 +118,11 @@ func TestSelfHeal_ExhaustsAllPasses(t *testing.T) {
 			t.Errorf("fixCalls[%d]=%d, want %d", i, p, i+1)
 		}
 	}
-	if len(fc.SwapCalls) == 0 {
-		t.Fatal("expected SwapLabel call for failedLabel")
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected TransitionState call for Failed")
 	}
-	if last := fc.SwapCalls[len(fc.SwapCalls)-1]; last.Add != c.failedLabel {
-		t.Errorf("last swap add=%q, want %q", last.Add, c.failedLabel)
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
+		t.Errorf("last transition To=%v, want Failed", last.To)
 	}
 }
 
@@ -160,11 +160,11 @@ func TestSelfHeal_PendingTimeoutNoFix(t *testing.T) {
 	if len(fixCalls) != 0 {
 		t.Errorf("expected no fix calls on PENDING timeout, got %v", fixCalls)
 	}
-	if len(fc.SwapCalls) == 0 {
-		t.Fatal("expected SwapLabel call for failedLabel")
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected TransitionState call for Failed")
 	}
-	if last := fc.SwapCalls[len(fc.SwapCalls)-1]; last.Add != c.failedLabel {
-		t.Errorf("last swap add=%q, want %q", last.Add, c.failedLabel)
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
+		t.Errorf("last transition To=%v, want Failed", last.To)
 	}
 }
 

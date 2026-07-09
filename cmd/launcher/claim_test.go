@@ -7,8 +7,7 @@ import (
 )
 
 // When the workflow has already claimed the issue (label == inProgressLabel),
-// claimIssue must not issue a redundant swap that adds and removes the same
-// label.
+// claimIssue must not issue a redundant transition.
 func TestClaimIssue_SkipsWhenAlreadyClaimed(t *testing.T) {
 	c := baseConfig()
 	c.label = c.inProgressLabel
@@ -17,15 +16,14 @@ func TestClaimIssue_SkipsWhenAlreadyClaimed(t *testing.T) {
 
 	claimIssue(c, fc, "7")
 
-	if len(fc.SwapCalls) != 0 {
-		t.Errorf("expected no SwapLabel calls when already claimed, got %+v", fc.SwapCalls)
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("expected no TransitionState calls when already claimed, got %+v", fc.TransitionStateCalls)
 	}
 }
 
-// When discovery runs off the trigger label, claimIssue swaps the issue onto the
-// in-progress label so the failure path (agent-in-progress -> agent-failed)
-// stays reachable.
-func TestClaimIssue_SwapsWhenTriggered(t *testing.T) {
+// When discovery runs off the trigger label, claimIssue transitions the issue
+// to InProgress so the failure path (InProgress → Failed) stays reachable.
+func TestClaimIssue_TransitionsWhenTriggered(t *testing.T) {
 	c := baseConfig()
 	c.label = "agent-trigger"
 	fc := forge.NewFake()
@@ -33,12 +31,11 @@ func TestClaimIssue_SwapsWhenTriggered(t *testing.T) {
 
 	claimIssue(c, fc, "7")
 
-	if len(fc.SwapCalls) != 1 {
-		t.Fatalf("expected exactly one SwapLabel call, got %+v", fc.SwapCalls)
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Fatalf("expected exactly one TransitionState call, got %+v", fc.TransitionStateCalls)
 	}
-	got := fc.SwapCalls[0]
-	if got.Add != c.inProgressLabel || got.Remove != c.label {
-		t.Errorf("swap add=%q remove=%q, want add=%q remove=%q",
-			got.Add, got.Remove, c.inProgressLabel, c.label)
+	got := fc.TransitionStateCalls[0]
+	if got.Num != "7" || got.To != forge.InProgress {
+		t.Errorf("want Num=7 To=InProgress, got %+v", got)
 	}
 }
