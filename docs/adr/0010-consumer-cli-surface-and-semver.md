@@ -129,3 +129,6 @@ guarantee.
   earlier `spindrift-<driver>` illustration. The `spindrift` output name is
   reserved for the host CLI; no image output is `spindrift`-prefixed. All of
   these outputs are covered by the versioned flake-output contract.
+- The flake option surface `perSystem.spindrift.defaults.*` was replaced by
+  `perSystem.spindrift.settings.<section>.<knob>` (ADR 0015). This is a MINOR
+  bump under the pre-1.0 policy; no external consumers existed at migration time.
