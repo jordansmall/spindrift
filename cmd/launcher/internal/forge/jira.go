@@ -368,6 +368,10 @@ func (j *jiraClient) ListIssues(state DispatchState) ([]Issue, error) {
 	if len(stateClauses) > 0 {
 		clauses = append(clauses, "("+strings.Join(stateClauses, " OR ")+")")
 	}
+	// Mirrors the github adapter's --state open: a resolved/closed issue must
+	// never be returned as dispatchable, even if it still carries a stale
+	// dispatch label from an earlier fallback transition.
+	clauses = append(clauses, "statusCategory != Done")
 	jql := strings.Join(clauses, " AND ") + " order by created asc"
 
 	var payload jiraSearchPayload

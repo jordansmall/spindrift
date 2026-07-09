@@ -509,6 +509,29 @@ func TestJiraClient_ListIssues_CapsMaxResults(t *testing.T) {
 	}
 }
 
+// TestJiraClient_ListIssues_ExcludesDoneCategory verifies ListIssues always
+// excludes done-category issues (mirroring the github adapter's --state
+// open): an issue resolved/closed in Jira while still carrying a stale
+// dispatch label (e.g. a prior label-fallback transition) must not be
+// re-dispatched.
+func TestJiraClient_ListIssues_ExcludesDoneCategory(t *testing.T) {
+	var gotJQL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotJQL = r.URL.Query().Get("jql")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"issues": []}`))
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: forge.DefaultDispatchLabels()})
+	if _, err := jc.ListIssues(forge.Dispatchable); err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if !strings.Contains(gotJQL, "statusCategory != Done") {
+		t.Errorf("jql = %q, want a statusCategory != Done exclusion", gotJQL)
+	}
+}
+
 // TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly verifies that when a
 // state has no status mapping, ListIssues queries by label alone.
 func TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly(t *testing.T) {
