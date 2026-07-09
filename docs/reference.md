@@ -275,6 +275,8 @@ a rebuild (ADR 0001):
 | `GIT_USER_EMAIL`          | host `git config`; baked via `settings.repository.gitUserEmail` | commit author email |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
+| `ISSUE_TRACKER`           | `github` (baked)       | IssueTracker backend: `github` or `local` (private Markdown + YAML frontmatter files — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)) |
+| `LOCAL_ISSUES_DIR`        | `.spindrift/issues` (baked) | directory scanned for issue files when `ISSUE_TRACKER=local`; git-ignored by default |
 | `BASE_BRANCH`             | `main` (baked)         | branch to cut from and PR into           |
 | `MAX_PARALLEL`            | `3` (baked)            | concurrent containers                    |
 | `BRANCH_PREFIX`           | `agent/issue-` (baked) | branch name = prefix + issue number      |
@@ -491,6 +493,57 @@ there is nothing to adopt, and the `LABEL` query skips it. The unstick there is 
 ```sh
 gh issue edit <n> --repo owner/repo --add-label ready-for-agent --remove-label agent-in-progress
 ```
+
+### Local issue tracker (`ISSUE_TRACKER=local`)
+
+`ISSUE_TRACKER=local` swaps the GitHub-backed Issue Tracker for a private,
+file-based one (per [ADR 0013](adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)):
+issues are Markdown files with YAML frontmatter in `LOCAL_ISSUES_DIR` (default
+`.spindrift/issues/`, git-ignored by default — see the template's
+`.gitignore`), scanned host-side by the launcher. There is no webhook, no CI
+trigger, and nothing about a local issue is ever published; this is how a
+solo developer drives agents from private breakout issues without polluting a
+shared tracker. The Code Forge (PR/CI/merge, or push-only) is a separate axis
+and still needs a real git remote — pair `ISSUE_TRACKER=local` with a `git`
+Code Forge for the fully private loop, or with `github` to keep opening PRs
+against a real repo while keeping the issue backlog itself private.
+
+Each issue is one file, named `<slug>.md`, where `<slug>` is the issue's ID
+(used anywhere the GitHub backend would use an issue number — dependency
+refs, branch names, log file names):
+
+```markdown
+---
+title: Fix the thing
+state: ready-for-agent
+labels: [bug, priority-high]
+created: 2026-07-09T12:00:00Z
+parent: some-upstream-slug
+---
+## What to build
+
+...
+
+## Blocked by
+
+- some-other-issue-slug
+```
+
+- `title`, `labels`, `created` (RFC 3339) mirror the GitHub adapter's fields.
+- `state` is the dispatch-state marker the launcher swaps in place —
+  `ready-for-agent` / `agent-in-progress` / `agent-complete` / `agent-failed`
+  by default (same names as `LABEL`/`IN_PROGRESS_LABEL`/`COMPLETE_LABEL`/
+  `FAILED_LABEL`, which still apply — the local adapter uses them as the
+  frontmatter value instead of a GitHub label).
+- `parent` is optional and purely informational; the local tracker is
+  standalone — any linkage to an upstream tracker is out of scope (ADR 0013).
+- **Canonical order is ascending `created`** — the local analogue of GitHub's
+  ascending issue-number order.
+- **Dependencies** come from a `## Blocked by` section: one issue slug per
+  bullet, no `#N` refs (local issues aren't numbered).
+- `spindrift doctor`'s label-presence check always passes for the local
+  adapter — there is no separate label registry to check; the four dispatch
+  markers above always exist as values the `state` field can take.
 
 ---
 
