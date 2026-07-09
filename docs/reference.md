@@ -324,6 +324,7 @@ the authoritative list.
 | `MERGE_POLL_TIMEOUT`   | `1800`  | `branches`         | seconds to wait for CI green before abandoning the merge |
 | `DEPS_POLL_SECS`       | `30`    | `concurrency`      | seconds between dependency-wave poll iterations        |
 | `DEPS_WAIT_SECS`       | `7200`  | `concurrency`      | seconds to wait for a dependency wave before declaring deadlock |
+| `OVERLAP_GATE`         | `defer` | `concurrency`      | declared `## Touches` overlap policy: `defer` (hold a Dispatchable issue whose declared touch-set intersects an in-progress issue's, retrying on the same `DEPS_POLL_SECS`/`DEPS_WAIT_SECS` cadence until the collider completes) or `off` (disable the check — see [Declared touch-set overlap](#declared-touch-set-overlap)) |
 | `TRANSIENT_RETRY_MAX`  | `3`     | `selfHealing`      | retries for transient box exits (529/network backoff; consecutive 429 holds) |
 | `TRANSIENT_BACKOFF_SECS` | `30`  | `selfHealing`      | base linear backoff per transient retry                |
 | `HOLD_JITTER_SECS`     | `5`     | `selfHealing`      | jitter added to a 429 hold-until-reset before re-dispatch |
@@ -333,6 +334,37 @@ the authoritative list.
 | `PIDS_LIMIT`           | `512`   | `sandbox`          | per-container `--pids-limit` cap (OCI only; empty disables) |
 | `PODMAN_NETWORK`       | —       | `sandbox`          | `--network` value for podman run; set `pasta` to restrict egress |
 | `BWRAP_UNSHARE_NET`    | —       | `sandbox`          | non-empty adds `--unshare-net` to the bwrap runner      |
+
+### Declared touch-set overlap
+
+An issue body may declare the paths it expects to change in a `## Touches`
+section — a bullet list of path globs, parsed the same way regardless of
+`ISSUE_TRACKER` (unlike dependency edges, where the `jira` adapter resolves
+native issue links instead of `## Blocked by` prose — see [Issue Tracker
+backends](#issue-tracker-backends)):
+
+```markdown
+## Touches
+
+- lib/env-schema.nix
+- cmd/launcher/*.go
+```
+
+With `OVERLAP_GATE=defer` (the default), dispatch holds a Dispatchable issue
+whose declared touch-set intersects the declared touch-set of any currently
+`agent-in-progress` issue, retrying on the same `DEPS_POLL_SECS`/
+`DEPS_WAIT_SECS` cadence used for declared blockers until the colliding issue
+completes. An issue with no `## Touches` section, or one whose touches never
+intersect an in-progress issue's, dispatches immediately — the gate only ever
+delays dispatch, it never fails an issue. Set `OVERLAP_GATE=off` to disable
+the check entirely.
+
+This bounds wasted work from parallel issues that rewrite the same generated
+surface (schema-derived artifacts, a shared config file) and collide
+repeatedly at rebase time — the same drift-bounding spirit as the [Merge
+guard](#merge-guard), making no adversary-proofing claims: a `## Touches`
+section is declared by whoever files the issue, not verified against the
+diff it eventually produces.
 
 ---
 
@@ -793,7 +825,10 @@ of a Dockerfile. The trade-offs:
   `depends on #N` / `blocked by #N` (inline or a `## Blocked by` list) from issue
   bodies and dispatches in dependency waves, holding a dependent until its
   blockers reach `agent-complete`; a cycle aborts the run. Independent issues
-  still fan out concurrently up to `MAX_PARALLEL`.
+  still fan out concurrently up to `MAX_PARALLEL`. A declared `## Touches`
+  section gets the same wave-and-retry treatment when it overlaps an
+  in-progress issue's (`OVERLAP_GATE`, default `defer`) — see [Declared
+  touch-set overlap](#declared-touch-set-overlap).
 - **Reproducible toolchain by construction** via the pinned flake, rather than a
   floating language-runtime base image.
 

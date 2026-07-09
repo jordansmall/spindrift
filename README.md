@@ -162,6 +162,11 @@ leaving them in the PR body — never the dispatch label, so a human still
 promotes each one before an agent can pick it up. Off (empty) by default. See
 [Filer](docs/reference.md#filer).
 
+An issue may also declare a `## Touches` section listing the paths it expects
+to change; dispatch defers it while its touch-set overlaps an already
+in-progress issue's, retrying once the collider completes — see [Declared
+touch-set overlap](docs/reference.md#declared-touch-set-overlap).
+
 ## Documentation
 
 | document | what's in it |
