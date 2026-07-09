@@ -151,9 +151,10 @@ cannot approve or merge its own PR — that is what makes branch protection
 meaningful. See [How a run works](docs/reference.md#how-a-run-works) for the full
 diagram and label lifecycle.
 
-A green PR whose diff touches a guarded path (`.github/**`, `CLAUDE.md`,
-`AGENTS.md`, `.claude/**`, `.opencode/**` by default) is downgraded to manual
-regardless of `MERGE_MODE` — see [Merge guard](docs/reference.md#merge-guard).
+A green PR whose diff touches a guarded path (`.github/**`, `**/CLAUDE.md`,
+`**/AGENTS.md`, `.claude/**`, `.opencode/**` by default) is downgraded to
+manual regardless of `MERGE_MODE` — see
+[Merge guard](docs/reference.md#merge-guard).
 
 ## Documentation
 
