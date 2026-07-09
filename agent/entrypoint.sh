@@ -33,9 +33,6 @@ WORK_DIR="${WORK_DIR:-/work}"
 PROMPTS_DIR="${PROMPTS_DIR:-/agent/prompts}"
 
 export GH_TOKEN
-git config --global user.name "$GIT_USER_NAME"
-git config --global user.email "$GIT_USER_EMAIL"
-git config --global init.defaultBranch main
 gh auth setup-git
 
 # CODE_FORGE=git clones from and pushes to a configured plain git remote
@@ -50,6 +47,13 @@ fi
 echo "==> cloning $CLONE_URL"
 git clone "$CLONE_URL" "$WORK_DIR"
 cd "$WORK_DIR"
+# Identity is repo-local, not global (#404): CI's hermetic check environment
+# has no global git config, so a global identity here would let git-shelling
+# tests observe config the Box has but CI doesn't. Setting it locally on this
+# clone keeps the Box's global surface CI-equivalent while commits/pushes
+# still carry the correct Agent identity.
+git config user.name "$GIT_USER_NAME"
+git config user.email "$GIT_USER_EMAIL"
 # Fetch the absolute latest refs so the pre-work rebase positions the branch
 # on current origin/BASE_BRANCH, not the state captured at clone time.
 git fetch origin
