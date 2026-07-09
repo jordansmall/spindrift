@@ -16,16 +16,59 @@ let
   inherit (lib) mkOption types;
   mkHarness = import ./mkHarness.nix;
   schema = import ./env-schema.nix;
-  # flakeOption entries are the Consumer-tunable subset that becomes `defaults.*`.
+  # flakeOption entries are the Consumer-tunable subset.
   flakeOptionEntries = lib.filterAttrs (_: e: e.flakeOption or false) schema;
-  # Generate one mkOption per flakeOption schema entry; type is nullOr str/int so
-  # unset options fall through to mkHarness's schema defaults.
-  mkDefaultOption =
+
+  # Map from groupOrder heading (cmd/launcher/flags.go) to the attr name used
+  # under perSystem.spindrift.settings.  Sections with no flakeOption knobs
+  # (Self-healing & retries, Repository & identity, Prompt & skill iteration)
+  # never appear as settings sections.
+  groupToAttr = {
+    "Issue discovery" = "issueDiscovery";
+    "Lifecycle labels" = "lifecycleLabels";
+    "Branches & merge" = "branches";
+    "Concurrency & dependency waves" = "concurrency";
+    "Models" = "models";
+    "Self-healing & retries" = "selfHealing";
+    "Sandbox & resources" = "sandbox";
+    "Repository & identity" = "repository";
+    "Prompt & skill iteration" = "promptSkillIteration";
+  };
+
+  # Group flakeOptionEntries by their section attr name; the result is
+  # { sectionAttr = { knobName = entry; ... }; ... }.
+  sectionKnobs =
+    lib.foldl'
+      (acc: knobName:
+        let
+          entry = flakeOptionEntries.${knobName};
+          sectionAttr = groupToAttr.${entry.group} or null;
+        in
+        if sectionAttr == null then acc
+        else
+          acc // { ${sectionAttr} = (acc.${sectionAttr} or { }) // { ${knobName} = entry; }; }
+      )
+      { }
+      (lib.attrNames flakeOptionEntries);
+
+  # Generate one mkOption per knob; type is nullOr str/int so unset knobs fall
+  # through to mkHarness's schema defaults.
+  mkKnobOption =
     _key: entry:
     mkOption {
       type = if builtins.isInt (entry.default or "") then types.nullOr types.int else types.nullOr types.str;
       default = null;
       description = entry.doc;
+    };
+
+  # Generate one section option (a submodule containing all knobs in the section).
+  mkSectionOption =
+    _sectionAttr: knobs:
+    mkOption {
+      type = types.submodule {
+        options = lib.mapAttrs mkKnobOption knobs;
+      };
+      default = { };
     };
 in
 {
@@ -77,14 +120,16 @@ in
         description = "Skill files baked into the image at /home/agent/.claude/skills. Each element is a path to a skill file. SPINDRIFT_SKILLS_DIR at runtime mounts over the same path and takes precedence.";
       };
 
-      # One sub-option per schema flakeOption entry — generated so adding a knob
-      # to env-schema.nix propagates here automatically.
-      defaults = mkOption {
+      # Generated from env-schema.nix: one sub-option per section (matching
+      # groupOrder in cmd/launcher/flags.go), one per consumer-tunable knob
+      # within each section.  Undeclared section or knob names are rejected at
+      # eval time by the NixOS module system.
+      settings = mkOption {
         type = types.submodule {
-          options = lib.mapAttrs mkDefaultOption flakeOptionEntries;
+          options = lib.mapAttrs mkSectionOption sectionKnobs;
         };
         default = { };
-        description = "Non-secret run defaults baked into the generated `run` command.";
+        description = "Non-secret run defaults baked into the generated `run` command, grouped by section. A matching env var wins at runtime.";
       };
 
       runtime = mkOption {
@@ -118,8 +163,13 @@ in
     }:
     let
       cfg = config.spindrift;
-      # Drop unset run defaults so mkHarness supplies its own per key.
-      runDefaults = lib.filterAttrs (_: v: v != null) cfg.defaults;
+      # Flatten settings.<section>.<knob> to a flat attrset, then drop nulls so
+      # mkHarness receives only the knobs the Consumer explicitly set and supplies
+      # its own schema defaults for the rest.
+      runDefaults =
+        lib.filterAttrs (_: v: v != null)
+          (lib.foldl' lib.mergeAttrs { }
+            (lib.mapAttrsToList (_section: knobs: knobs) cfg.settings));
       # Forward only the options the Consumer actually set; the rest fall
       # through to mkHarness's defaults.
       args =

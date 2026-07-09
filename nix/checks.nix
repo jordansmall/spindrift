@@ -328,10 +328,10 @@ in
       "lean harness (nixInBox = false) must not bake in the nix CLI";
     pkgs.runCommand "lean-escape-hatch" { } "touch $out";
 
-  # The flakeModule must expose scoutModel, reviewModel, and completeLabel
-  # as declarative options (today's drift class, issue #105). A consumer
-  # that sets those three gets byte-identical outputs to a direct mkHarness
-  # call with the same defaults.
+  # The flakeModule must expose grouped settings.<section>.<knob> options
+  # derived from env-schema.nix (issue #352). A consumer that sets knobs
+  # under settings.* gets byte-identical outputs to a direct mkHarness call
+  # with the equivalent flat defaults.
   flakemodule-schema-options =
     let
       consumer105 = flake-parts.lib.mkFlake
@@ -348,10 +348,14 @@ in
           imports = [ ../lib/flakeModule.nix ];
           perSystem.spindrift = {
             packages = p: [ p.hello ];
-            defaults = {
-              scoutModel = "scout-test";
-              reviewModel = "review-test";
-              completeLabel = "done-test";
+            settings = {
+              models = {
+                scoutModel = "scout-test";
+                reviewModel = "review-test";
+              };
+              lifecycleLabels = {
+                completeLabel = "done-test";
+              };
             };
           };
         };
@@ -380,6 +384,36 @@ in
           || { echo "run mismatch: $moduleRun != $directRun" >&2; exit 1; }
         touch $out
       '';
+
+  # An unknown section key in `settings` must throw at eval time; the NixOS
+  # module system rejects undeclared option names.  We force evaluation down
+  # to `.packages.${system}.run` so the module config is actually evaluated
+  # (flake-parts evaluates perSystem configs lazily on attribute access).
+  flakemodule-rejects-unknown-settings =
+    let
+      inherit (pkgs.lib) assertMsg;
+      result = builtins.tryEval (
+        (flake-parts.lib.mkFlake
+          {
+            inputs = {
+              inherit nixpkgs;
+              self = { outPath = ../.; };
+            };
+          }
+          {
+            systems = [ system ];
+            imports = [ ../lib/flakeModule.nix ];
+            perSystem.spindrift = {
+              packages = p: [ p.hello ];
+              settings.typoSection.label = "oops";
+            };
+          }
+        ).packages.${system}.run
+      );
+    in
+    assert assertMsg (!result.success)
+      "flakeModule must throw on unknown settings section 'typoSection'";
+    pkgs.runCommand "flakemodule-rejects-unknown-settings" { } "touch $out";
 
   # harness.env.example must match the content generated from env-schema.nix.
   # Fails when a new schema knob is added but the committed file is not
