@@ -120,41 +120,44 @@ let
   unknownDefaultKeys = lib.filter (k: !(lib.hasAttr k flakeOptionEntries)) (lib.attrNames defaults);
 
   # --agents JSON baked at eval time via builtins.toJSON so model names are never
-  # string-interpolated in bash (ADR 0007 tier-1). Empty string when either model
-  # is unset — the conditional is resolved at build time, not in the entrypoint.
+  # string-interpolated in bash (ADR 0007 tier-1). Each subagent is composed
+  # independently by its own model knob; the --agents flag is omitted only when
+  # no subagent model is set — the conditional is resolved at build time, not
+  # in the entrypoint.
   agentsJsonTemplate =
     let
       sm = mergedDefaults.scoutModel or "";
       rm = mergedDefaults.reviewModel or "";
+      agents =
+        lib.optionalAttrs (sm != "") {
+          scout = {
+            description = "Map relevant files, seams, and tests; return a structured brief";
+            prompt = "";
+            tools = [
+              "Read"
+              "Bash"
+              "WebFetch"
+              "WebSearch"
+              "Glob"
+              "Grep"
+            ];
+            model = sm;
+          };
+        }
+        // lib.optionalAttrs (rm != "") {
+          reviewer = {
+            description = "Review the branch diff for spec compliance and coding standards";
+            prompt = "";
+            tools = [
+              "Read"
+              "Bash"
+              "WebFetch"
+            ];
+            model = rm;
+          };
+        };
     in
-    if sm != "" && rm != "" then
-      builtins.toJSON {
-        scout = {
-          description = "Map relevant files, seams, and tests; return a structured brief";
-          prompt = "";
-          tools = [
-            "Read"
-            "Bash"
-            "WebFetch"
-            "WebSearch"
-            "Glob"
-            "Grep"
-          ];
-          model = sm;
-        };
-        reviewer = {
-          description = "Review the branch diff for spec compliance and coding standards";
-          prompt = "";
-          tools = [
-            "Read"
-            "Bash"
-            "WebFetch"
-          ];
-          model = rm;
-        };
-      }
-    else
-      "";
+    if agents == { } then "" else builtins.toJSON agents;
 
   # Version sourced from the release-please manifest so mkHarness always tracks
   # the bot-maintained source of truth (ADR-0010).
