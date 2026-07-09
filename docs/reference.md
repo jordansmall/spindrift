@@ -271,8 +271,8 @@ a rebuild (ADR 0001):
 | `GH_TOKEN`                | — (required)           | GitHub token for `gh` inside containers (secret; env only) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — (one auth required)  | from `claude setup-token` (secret; env only) |
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
-| `GIT_USER_NAME`           | host `git config`; baked via `settings.repository.gitUserName` | commit author name |
-| `GIT_USER_EMAIL`          | host `git config`; baked via `settings.repository.gitUserEmail` | commit author email |
+| `GIT_USER_NAME`           | host `git config`; baked via `settings.repository.gitUserName` | commit author name (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config)) |
+| `GIT_USER_EMAIL`          | host `git config`; baked via `settings.repository.gitUserEmail` | commit author email (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config)) |
 | `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge) or `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)) |
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
@@ -393,6 +393,16 @@ needs its own push credentials for that remote (e.g. an SSH key or
 credential helper covering `CODE_FORGE_REMOTE_URL`) — separate from the
 Box's `GH_TOKEN`, which only covers the Issue Tracker. A push auth failure
 surfaces as a `merge-blocked` comment on the issue, not a crash.
+
+### Hermetic git config
+
+The entrypoint sets `GIT_USER_NAME`/`GIT_USER_EMAIL` as **repo-local** git
+config on the cloned workspace (`git config user.name`, no `--global`), not
+global config. CI's hermetic `nix flake check` sandbox has no global git
+config, so keeping the Box's global surface empty too means a test that
+shells out to git behaves the same in both places — no environment-sensitive
+test can pass in the Box and fail in CI (or vice versa) because of an ambient
+global git setting the Box has and CI lacks.
 
 ### Label lifecycle
 
