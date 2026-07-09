@@ -501,6 +501,30 @@ func TestDoctor_Success(t *testing.T) {
 	}
 }
 
+// TestDoctor_ReportsEachSeamsOwnSlug verifies runDoctor prints each seam's own
+// Probe() result — not the IssueTracker's slug reused for the CodeForge line
+// — since under ISSUE_TRACKER=jira the two seams resolve to different
+// identities (a Jira project key vs a GitHub repo slug).
+func TestDoctor_ReportsEachSeamsOwnSlug(t *testing.T) {
+	it := forge.NewFake()
+	it.ProbeRepo = "PROJ"
+	it.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	cf := forge.NewFake()
+	cf.ProbeRepo = "owner/repo"
+
+	var buf bytes.Buffer
+	if err := runDoctor(it, cf, defaultLabelConfig(), &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "issue tracker confirmed — PROJ") {
+		t.Errorf("want issue tracker line to report PROJ, got %q", out)
+	}
+	if !strings.Contains(out, "code forge confirmed — owner/repo") {
+		t.Errorf("want code forge line to report owner/repo, got %q", out)
+	}
+}
+
 func TestDoctor_AuthFailure(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeErr = forge.ErrAuthFailure
@@ -512,6 +536,23 @@ func TestDoctor_AuthFailure(t *testing.T) {
 	}
 	if !errors.Is(err, forge.ErrAuthFailure) {
 		t.Errorf("want ErrAuthFailure, got %v", err)
+	}
+}
+
+// TestDoctor_AuthFailure_Jira verifies the auth-failure remediation text
+// names JIRA_TOKEN, not GH_TOKEN, when the issue tracker is jira — the
+// generic message would misdirect an operator debugging a Jira probe.
+func TestDoctor_AuthFailure_Jira(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeErr = forge.ErrAuthFailure
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, config{issueTracker: "jira"}, &buf, strings.NewReader(""), false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "JIRA_TOKEN") {
+		t.Errorf("want error to mention JIRA_TOKEN, got: %v", err)
 	}
 }
 

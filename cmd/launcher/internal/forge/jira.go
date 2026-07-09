@@ -378,6 +378,10 @@ func (j *jiraClient) ListIssues(state DispatchState) ([]Issue, error) {
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("jira: search: unexpected status %d", status)
 	}
+	if len(payload.Issues) >= jiraSearchMaxResults {
+		fmt.Printf("WARNING: jira search returned %d issues (limit %d); backlog may be larger — rerun to drain\n",
+			len(payload.Issues), jiraSearchMaxResults)
+	}
 	issues := make([]Issue, len(payload.Issues))
 	for i, p := range payload.Issues {
 		issues[i] = Issue{
@@ -391,9 +395,14 @@ func (j *jiraClient) ListIssues(state DispatchState) ([]Issue, error) {
 	return issues, nil
 }
 
+// jiraSearchMaxResults bounds a single ListIssues search page (mirroring the
+// github adapter's issueQueryLimit); a backlog larger than this drains over
+// successive dispatch runs rather than in one unbounded response.
+const jiraSearchMaxResults = 100
+
 // doSearch issues a Jira JQL search request via GET /rest/api/2/search.
 func (j *jiraClient) doSearch(jql string, out any) (int, error) {
-	q := url.Values{"jql": {jql}}
+	q := url.Values{"jql": {jql}, "maxResults": {fmt.Sprintf("%d", jiraSearchMaxResults)}}
 	return j.do(http.MethodGet, "/rest/api/2/search?"+q.Encode(), nil, out)
 }
 
