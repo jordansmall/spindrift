@@ -83,9 +83,9 @@ _Avoid_: packages, baked toolchain, dependencies.
 The seam that supplies work and carries dispatch state: listing dispatchable
 issues, reading an issue's body/title/state, transitioning its Dispatch state,
 and posting comments. One of two independent axes (the other is the Code Forge).
-Planned adapters: `github` (issues via `gh`), `jira`, and `local` (issues as
-files in the Target repo, no server). The launcher reasons in canonical Dispatch
-states, never in a backend's native mechanism.
+Implemented adapters: `github` (issues via `gh`) and `jira`; planned: `local`
+(issues as files in the Target repo, no server). The launcher reasons in
+canonical Dispatch states, never in a backend's native mechanism.
 _Avoid_: issue source, ticketing, backlog.
 
 **Code Forge**:
@@ -131,8 +131,10 @@ Each Issue Tracker adapter maps these states to its native mechanism:
   `agent-complete`/`agent-failed`), swapped atomically. This is the original,
   unchanged mechanism.
 - `jira` — a configurable status mapping (state → that project's workflow status
-  name/id), since there is no universal Jira workflow to assume; supported out of
-  the gate, not label-mirrored.
+  name/id), since there is no universal Jira workflow to assume; when a state is
+  unmapped, or the mapped transition isn't available on the issue's current
+  workflow, falls back to swapping a Jira label for that state (mirroring
+  `github`'s labels) so the lifecycle always makes progress.
 - `local` — a field in the issue file (frontmatter/directory), rewritten in place.
 
 A merge failure after green leaves the issue `Complete` with a merge-blocked note
