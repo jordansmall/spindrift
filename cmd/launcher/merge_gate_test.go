@@ -163,6 +163,7 @@ func TestMergeImmediate(t *testing.T) {
 		mergeErr                  error
 		mergeErrs                 []error
 		rebaseErr                 error
+		rebaseErrs                []error
 		conflictResolveErr        error
 		noConflictResolveFn       bool
 		wantErr                   bool
@@ -253,6 +254,34 @@ func TestMergeImmediate(t *testing.T) {
 			wantRebaseCalled:          1,
 			wantConflictResolveCalled: 0,
 		},
+		{
+			// A transient push failure (forge outage, network fault) during
+			// the force-push must not block the merge outright — it's
+			// retried, and here the retry succeeds.
+			name:              "conflict → rebase transient push failure → retry succeeds",
+			maxRebaseAttempts: 3,
+			mergeErrs:         []error{forge.ErrMergeConflict, nil},
+			rebaseErrs:        []error{forge.ErrTransientPushFailure, nil},
+			wantErr:           false,
+			wantMerged:        true,
+			wantRebaseCalled:  2,
+		},
+		{
+			// The forge stays down: every retry hits the same transient
+			// error. The retry must be bounded — not spin indefinitely —
+			// and the eventual failure must still surface to the caller.
+			name:              "conflict → rebase transient push failure persists → retries exhausted, error returned",
+			maxRebaseAttempts: 2,
+			mergeErrs:         []error{forge.ErrMergeConflict},
+			rebaseErrs: []error{
+				forge.ErrTransientPushFailure,
+				forge.ErrTransientPushFailure,
+				forge.ErrTransientPushFailure,
+			},
+			wantErr:          true,
+			wantMerged:       false,
+			wantRebaseCalled: 3,
+		},
 	}
 
 	for _, tc := range cases {
@@ -268,7 +297,11 @@ func TestMergeImmediate(t *testing.T) {
 			} else {
 				fc.MergeErr = tc.mergeErr
 			}
-			fc.RebaseErr = tc.rebaseErr
+			if len(tc.rebaseErrs) > 0 {
+				fc.RebaseErrs = tc.rebaseErrs
+			} else {
+				fc.RebaseErr = tc.rebaseErr
+			}
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.completeLabel}})
 
 			conflictResolveCalls := 0
