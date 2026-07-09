@@ -1026,17 +1026,27 @@ in
 
   # go test must stay green: unit tests catch config-parsing bugs
   # before they reach the binary (see issue #112, 9494fc1-class).
-  launcher-go-test = pkgs.runCommand "launcher-go-test" { nativeBuildInputs = [ pkgs.go ]; } ''
-    cp -r ${../cmd/launcher} src
-    chmod -R +w src
-    export GOPROXY=off
-    export GONOSUMCHECK='*'
-    export GOMODCACHE="$TMPDIR/gomodcache"
-    export GOCACHE="$TMPDIR/gocache"
-    cd src
-    go test ./...
-    touch $out
-  '';
+  # forge's tests shell out to git (TestGitForcePush_CapturesStderr), so
+  # git must be on PATH in the sandbox alongside go.
+  launcher-go-test =
+    pkgs.runCommand "launcher-go-test"
+      {
+        nativeBuildInputs = [
+          pkgs.go
+          pkgs.git
+        ];
+      }
+      ''
+        cp -r ${../cmd/launcher} src
+        chmod -R +w src
+        export GOPROXY=off
+        export GONOSUMCHECK='*'
+        export GOMODCACHE="$TMPDIR/gomodcache"
+        export GOCACHE="$TMPDIR/gocache"
+        cd src
+        go test ./...
+        touch $out
+      '';
 
   # Cross-build: launcher must compile for linux and darwin. Native
   # (x86_64-linux on CI) plus explicit darwin cross-targets.
