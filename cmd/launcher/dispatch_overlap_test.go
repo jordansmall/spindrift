@@ -133,6 +133,48 @@ func TestDispatchWaves_NoTouchesDeclaredDispatchesImmediately(t *testing.T) {
 	}
 }
 
+// TestDispatchWaves_OverlapV2HoldsOnPRChangedFiles verifies a candidate is
+// held when it collides with an in-progress issue's *actual* PR-changed
+// files — not declared in that issue's ## Touches — proving the v2
+// augmentation actually gates dispatchWaves, not just the unit-level check.
+func TestDispatchWaves_OverlapV2HoldsOnPRChangedFiles(t *testing.T) {
+	c := baseConfig()
+	c.label = "agent-trigger"
+	c.maxParallel = 1
+	c.overlapGate = "defer"
+	c.branchPrefix = "agent/issue-"
+	c.depsPollSecs = 1
+	c.depsWaitSecs = 1
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{
+		Number: "10",
+		Body:   "## Touches\n- internal/pkgx/foo.go",
+		Labels: []string{c.label},
+	})
+	fc.SetIssue(forge.Issue{
+		Number: "20",
+		Body:   "## Touches\n- docs/reference.md",
+		State:  "OPEN",
+		Labels: []string{c.inProgressLabel},
+	})
+	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
+	fc.SetPRFiles("https://github.com/owner/repo/pull/20", []string{"internal/pkgx/foo.go"})
+
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	err := dispatchWaves(c, fc, dir, fr, []issue{
+		{number: "10", title: "candidate"},
+	}, map[string][]string{})
+	if err == nil {
+		t.Fatal("dispatchWaves must deadlock while #20's open PR touches internal/pkgx/foo.go")
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("issue 10 must not be dispatched while colliding with #20's PR changed files; got %d run calls", len(fr.RunCalls))
+	}
+}
+
 // TestDispatchWaves_OverlapGateOffDisablesCheck verifies OVERLAP_GATE=off
 // dispatches an overlapping issue immediately, bypassing the gate entirely.
 func TestDispatchWaves_OverlapGateOffDisablesCheck(t *testing.T) {
