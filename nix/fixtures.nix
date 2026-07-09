@@ -31,13 +31,14 @@ let
   harness = import ../lib/mkHarness.nix {
     inherit nixpkgs system revision;
     prefetch = "go mod download || true";
-    packages = p: [ p.go ];
+    packages = p: [ p.go p.nil ];
     defaults = { mergeMode = "immediate"; };
   };
 
-  # The dogfood as a direct call with revision = "unknown".  Used by
-  # template-fixture: the template module consumer has a stub self with
-  # no shortRev, so its revision is "unknown"; this must match.
+  # The template's config as a direct call with revision = "unknown".
+  # Used by template-fixture: the template module consumer has a stub self
+  # with no shortRev, so its revision is "unknown"; this must match.
+  # Does not include dogfood-only packages (e.g. nil).
   harnessNoRevision = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     prefetch = "go mod download || true";

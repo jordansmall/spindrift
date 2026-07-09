@@ -55,7 +55,7 @@
           # The dogfood's real packages/apps flow through the flake-parts shim.
           spindrift = {
             prefetch = "go mod download || true";
-            packages = p: [ p.go ];
+            packages = p: [ p.go p.nil ];
             settings.branches.mergeMode = "immediate";
           };
 
