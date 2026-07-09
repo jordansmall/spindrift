@@ -30,6 +30,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 |---|---|---|---|
 | `settings.branches.baseBranch` | `BASE_BRANCH` | `main` | default branch agent PRs merge into |
 | `settings.branches.branchPrefix` | `BRANCH_PREFIX` | `agent/issue-` | prefix for agent-cut branches |
+| `settings.branches.mergeGuardPaths` | `MERGE_GUARD_PATHS` | `.github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` | comma-separated globs matched against every changed path (added, modified, deleted); a hit downgrades the merge to manual regardless of MERGE_MODE and posts a PR comment naming the match; empty disables the guard (github Code Forge merge path only) |
 | `settings.branches.mergeMode` | `MERGE_MODE` | `manual` | post-green merge policy: immediate (merge on green), auto (enqueue GitHub native auto-merge; repo must have Allow auto-merge enabled), manual (leave PR open for human approval) |
 | `settings.branches.mergePollInterval` | `MERGE_POLL_INTERVAL` | `30` | seconds between merge-gate poll iterations |
 | `settings.branches.mergePollTimeout` | `MERGE_POLL_TIMEOUT` | `1800` | total seconds to wait for CI green before abandoning the merge attempt |
