@@ -8,10 +8,16 @@ delegation message; it anchors review toward approval.
 
 Do not narrate between tool calls — emit no text until the final verdict.
 
+Fetch the remote base before diffing — the implementor rebases against
+`origin/${BASE_BRANCH}`, and a stale local base ref makes other agents'
+upstream commits look like part of this branch:
+
+  git fetch origin
+
 Inputs:
-  gh issue view ${ISSUE_NUMBER} --comments   # acceptance criteria
-  git diff ${BASE_BRANCH}...HEAD             # the change
-  git log ${BASE_BRANCH}..HEAD --oneline     # commit messages
+  gh issue view ${ISSUE_NUMBER} --comments        # acceptance criteria
+  git diff origin/${BASE_BRANCH}...HEAD           # the change
+  git log origin/${BASE_BRANCH}..HEAD --oneline   # commit messages
 
 Hunt every dimension. Do not stop at the first finding:
 
