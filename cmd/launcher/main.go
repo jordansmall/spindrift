@@ -111,6 +111,15 @@ type config struct {
 	// changed path in the PR; a hit downgrades the merge to manual regardless
 	// of mergeMode. Empty disables the guard.
 	mergeGuardPaths string
+
+	// codeForge selects the Code Forge adapter: "github" (open PR, watch CI,
+	// merge) or "git" (push-only to codeForgeRemoteURL; no PR, CI-watch, or
+	// merge gate).
+	codeForge string
+
+	// codeForgeRemoteURL is the plain git remote URL the Box clones from and
+	// pushes to when codeForge is "git". Unused (and unrequired) otherwise.
+	codeForgeRemoteURL string
 }
 
 type issue struct {
@@ -209,6 +218,9 @@ func loadConfig() config {
 
 		mergeMode:       getenv("MERGE_MODE", "manual"),
 		mergeGuardPaths: getenv("MERGE_GUARD_PATHS", ".github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**"),
+
+		codeForge:          getenv("CODE_FORGE", "github"),
+		codeForgeRemoteURL: os.Getenv("CODE_FORGE_REMOTE_URL"),
 	}
 }
 
@@ -246,6 +258,16 @@ func validate(c config) error {
 	default:
 		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github or local", c.issueTracker)
 	}
+	switch c.codeForge {
+	case "github":
+		// valid
+	case "git":
+		if c.codeForgeRemoteURL == "" {
+			return fmt.Errorf("set CODE_FORGE_REMOTE_URL (the plain git remote to clone from and push to) when CODE_FORGE=git")
+		}
+	default:
+		return fmt.Errorf("CODE_FORGE=%q is not valid; must be github or git", c.codeForge)
+	}
 	return nil
 }
 
@@ -268,9 +290,13 @@ func newIssueTracker(c config) forge.IssueTracker {
 	return forge.NewExecClient(c.repoSlug, dispatchLabels(c))
 }
 
-// newCodeForge returns the CodeForge adapter. CODE_FORGE backend selection
-// isn't wired yet, so this always returns the gh-exec adapter.
+// newCodeForge returns the CodeForge adapter selected by CODE_FORGE: "github"
+// (open PR, watch CI, merge) or "git" (push-only to codeForgeRemoteURL; no
+// PR, CI-watch, or merge gate).
 func newCodeForge(c config) forge.CodeForge {
+	if c.codeForge == "git" {
+		return forge.NewGitClient(c.codeForgeRemoteURL, c.baseBranch, c.gitUserName, c.gitUserEmail)
+	}
 	return forge.NewExecClient(c.repoSlug, dispatchLabels(c))
 }
 
