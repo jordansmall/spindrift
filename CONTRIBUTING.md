@@ -31,6 +31,23 @@ then realises the Linux image on every push and PR. **Before opening a PR,
 for bash/entrypoint changes, a Go test for launcher changes, or a nix fixture
 check for the declarative surface.
 
+After editing `lib/env-schema.nix`, regenerate the artifacts it drives —
+`templates/default/harness.env.example`, `cmd/launcher/flagtable_gen.go`, and
+`docs/flake-options.md` — instead of hand-editing them until the drift-guard
+checks (`nix/checks.nix`) go quiet:
+
+```sh
+nix run .#regen
+```
+
+The regenerator and the drift-guard checks share one renderer per artifact
+(`lib/renderers.nix`), so they can't drift from each other. It's repo-internal
+dev tooling, not part of the flake-option/env-schema consumer surface. The man
+page rebuilds fresh from the schema on every `nix flake check` (nothing to
+regenerate); `templates/default/flake.nix`'s commented-out `settings` example
+is hand-curated — `nix flake check`'s `template-settings-example` check still
+flags any section or knob you need to add by hand.
+
 To exercise the whole loop end to end against a live repo, use `./dogfood.sh`
 (never hand-run `nix run .#run`) — see [`docs/reference.md`](docs/reference.md).
 
@@ -40,10 +57,12 @@ The engine is nix; the runtime logic is a nix-built Go binary; the only bash lef
 is the in-box entrypoint. Respect that split — it is the point of the project.
 
 - **`lib/`** — the nix engine. `mkHarness.nix` (the function Consumers import),
-  `flakeModule.nix` (the flake-parts option surface), and `env-schema.nix` (the
+  `flakeModule.nix` (the flake-parts option surface), `env-schema.nix` (the
   **source of truth** for every `SPINDRIFT_*` variable; the `launcher-env-coverage`
-  check fails if the launcher and the schema drift). No language-specific tooling
-  belongs here — the core is language-agnostic ([ADR 0003](docs/adr/0003-language-agnostic-core.md)).
+  check fails if the launcher and the schema drift), and `renderers.nix` (the
+  schema → artifact render functions shared by the `nix/checks.nix` drift
+  guards and `nix run .#regen`). No language-specific tooling belongs here —
+  the core is language-agnostic ([ADR 0003](docs/adr/0003-language-agnostic-core.md)).
 - **`cmd/launcher/`** — the Go host-side launcher (its own module). Public
   behavior lives at the top level; `internal/` holds the seams — `forge`,
   `outcome`, `runner`, `heartbeat`, `usage`. The flag table
@@ -53,8 +72,9 @@ is the in-box entrypoint. Respect that split — it is the point of the project.
   is deliberately thin: nix computes the glue, bash only executes it
   ([ADR 0005](docs/adr/0005-nix-computes-generated-bash-executes.md)). Keep the
   ratio that way — reach for nix-generated config over more shell.
-- **`nix/`** — `checks.nix` (the flake-check suite) and `fixtures.nix` (the
-  harness variants the checks build). Add a check when you add a guarantee.
+- **`nix/`** — `checks.nix` (the flake-check suite), `fixtures.nix` (the
+  harness variants the checks build), and `regen.nix` (`nix run .#regen`, the
+  schema-artifact regenerator). Add a check when you add a guarantee.
 - **`templates/default/`** — the consumer starter (`nix flake init -t`).
   spindrift dogfoods this very template, so changes here are load-bearing.
 
