@@ -8,6 +8,8 @@ var schemaFlags = []flagEntry{
 	{env: "BASE_BRANCH", flag: "base-branch", group: "Branches & merge", kind: "string", doc: "default branch agent PRs merge into", dflt: "main"},
 	{env: "BRANCH_PREFIX", flag: "branch-prefix", group: "Branches & merge", kind: "string", doc: "prefix for agent-cut branches", dflt: "agent/issue-"},
 	{env: "BWRAP_UNSHARE_NET", flag: "bwrap-unshare-net", group: "Sandbox & resources", kind: "string", doc: "when non-empty, adds --unshare-net to bwrap; requires slirp/pasta for DNS; by default bwrap shares the host network namespace (host-loopback reachable)", dflt: ""},
+	{env: "CODE_FORGE", flag: "code-forge", group: "Repository & identity", kind: "string", doc: "code-landing backend: github (open PR, watch CI, merge) or git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate)", dflt: "github"},
+	{env: "CODE_FORGE_REMOTE_URL", flag: "code-forge-remote-url", group: "Repository & identity", kind: "string", doc: "plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise", dflt: ""},
 	{env: "COMPLETE_LABEL", flag: "complete-label", group: "Lifecycle labels", kind: "string", doc: "label the launcher swaps on when CI reaches green (agent is done; merge is separate)", dflt: "agent-complete"},
 	{env: "DEPS_POLL_SECS", flag: "deps-poll-secs", group: "Concurrency & dependency waves", kind: "int", doc: "seconds between dependency-wave poll iterations", dflt: "30"},
 	{env: "DEPS_WAIT_SECS", flag: "deps-wait-secs", group: "Concurrency & dependency waves", kind: "int", doc: "total seconds to wait for dependency-wave completion before aborting", dflt: "7200"},
