@@ -28,7 +28,7 @@ var schemaFlags = []flagEntry{
 	{env: "MERGE_MODE", flag: "merge-mode", group: "Branches & merge", kind: "string", doc: "post-green merge policy: immediate (merge on green), auto (enqueue GitHub native auto-merge; repo must have Allow auto-merge enabled), manual (leave PR open for human approval)", dflt: "manual"},
 	{env: "MERGE_POLL_INTERVAL", flag: "merge-poll-interval", group: "Branches & merge", kind: "int", doc: "seconds between merge-gate poll iterations", dflt: "30"},
 	{env: "MERGE_POLL_TIMEOUT", flag: "merge-poll-timeout", group: "Branches & merge", kind: "int", doc: "total seconds to wait for CI green before abandoning the merge attempt", dflt: "1800"},
-	{env: "MODEL", flag: "model", group: "Models", kind: "string", doc: "primary (implementor) Claude model for the agent (zero-rebuild runtime switch)", dflt: "claude-sonnet-4-6"},
+	{env: "MODEL", flag: "model", group: "Models", kind: "string", doc: "primary (implementor) Claude model for the agent (zero-rebuild runtime switch)", dflt: "claude-sonnet-5"},
 	{env: "PIDS_LIMIT", flag: "pids-limit", group: "Sandbox & resources", kind: "string", doc: "max processes per agent container (--pids-limit); empty string disables the limit", dflt: "512"},
 	{env: "PODMAN_NETWORK", flag: "podman-network", group: "Sandbox & resources", kind: "string", doc: "--network value for podman run; empty applies no flag (podman NAT default); set to 'pasta' to restrict egress", dflt: ""},
 	{env: "REPO_SLUG", flag: "repo-slug", group: "Repository & identity", kind: "string", doc: "target GitHub repository the agents work on", dflt: ""},

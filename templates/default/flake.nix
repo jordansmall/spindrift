@@ -64,7 +64,7 @@
             #                       maxJobs      = 0;
             #                       depsPollSecs = 30;
             #                       depsWaitSecs = 7200; };
-            #   models          = { model       = "claude-sonnet-4-6";
+            #   models          = { model       = "claude-sonnet-5";
             #                       scoutModel  = "claude-haiku-4-5-20251001";
             #                       reviewModel = "claude-opus-4-8"; };
             #   selfHealing     = { maxFixAttempts       = 3;
