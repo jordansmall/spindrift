@@ -9,8 +9,8 @@ import (
 
 // TransitionStateCall records a single TransitionState invocation.
 type TransitionStateCall struct {
-	Num string
-	To  DispatchState
+	Num      string
+	From, To DispatchState
 }
 
 // CreateLabelCall records a single CreateLabel invocation.
@@ -198,13 +198,12 @@ func (f *Fake) Issue(num string) (Issue, error) {
 	return iss, nil
 }
 
-// TransitionState moves issue num to state to, removing all other dispatch
-// state labels. Best-effort on missing issues (no error), matching gh CLI
-// behavior.
-func (f *Fake) TransitionState(num string, to DispatchState) error {
+// TransitionState swaps the from-state label for the to-state label on issue
+// num. Best-effort on missing issues (no error), matching gh CLI behavior.
+func (f *Fake) TransitionState(num string, from, to DispatchState) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.TransitionStateCalls = append(f.TransitionStateCalls, TransitionStateCall{num, to})
+	f.TransitionStateCalls = append(f.TransitionStateCalls, TransitionStateCall{num, from, to})
 	if f.TransitionStateErr != nil {
 		return f.TransitionStateErr
 	}
@@ -213,7 +212,7 @@ func (f *Fake) TransitionState(num string, to DispatchState) error {
 		return nil // best-effort
 	}
 	add := f.labels.Label(to)
-	remove := f.labels.PredecessorLabel(to)
+	remove := f.labels.Label(from)
 	var next []string
 	for _, l := range iss.Labels {
 		if l != remove {

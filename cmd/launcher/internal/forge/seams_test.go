@@ -71,7 +71,7 @@ func TestFake_TransitionState_DispatchableToInProgress(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	if err := f.TransitionState("42", forge.InProgress); err != nil {
+	if err := f.TransitionState("42", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("TransitionState: %v", err)
 	}
 
@@ -88,8 +88,9 @@ func TestFake_TransitionState_DispatchableToInProgress(t *testing.T) {
 	if len(f.TransitionStateCalls) != 1 {
 		t.Fatalf("want 1 TransitionStateCall, got %d", len(f.TransitionStateCalls))
 	}
-	if f.TransitionStateCalls[0].Num != "42" || f.TransitionStateCalls[0].To != forge.InProgress {
-		t.Errorf("unexpected call: %+v", f.TransitionStateCalls[0])
+	call := f.TransitionStateCalls[0]
+	if call.Num != "42" || call.From != forge.Dispatchable || call.To != forge.InProgress {
+		t.Errorf("unexpected call: %+v", call)
 	}
 }
 
@@ -97,7 +98,7 @@ func TestFake_TransitionState_InProgressToComplete(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "7", Labels: []string{"agent-in-progress"}})
 
-	if err := f.TransitionState("7", forge.Complete); err != nil {
+	if err := f.TransitionState("7", forge.InProgress, forge.Complete); err != nil {
 		t.Fatalf("TransitionState: %v", err)
 	}
 
@@ -116,7 +117,7 @@ func TestFake_TransitionState_InProgressToComplete(t *testing.T) {
 func TestFake_TransitionState_MissingIssueIsNoOp(t *testing.T) {
 	f := forge.NewFake()
 	// Best-effort: unknown issue number must not error.
-	if err := f.TransitionState("999", forge.Failed); err != nil {
+	if err := f.TransitionState("999", forge.InProgress, forge.Failed); err != nil {
 		t.Fatalf("TransitionState on missing issue: %v", err)
 	}
 }
@@ -125,7 +126,7 @@ func TestFake_TransitionState_Err(t *testing.T) {
 	f := forge.NewFake()
 	f.TransitionStateErr = forge.ErrAuthFailure
 
-	err := f.TransitionState("1", forge.InProgress)
+	err := f.TransitionState("1", forge.Dispatchable, forge.InProgress)
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}

@@ -41,12 +41,12 @@ func TestFake_CheckStateScript(t *testing.T) {
 }
 
 // TestFake_TransitionState verifies that TransitionState records calls and
-// mutates Labels, removing all other dispatch labels.
+// swaps the from-state label for the to-state label.
 func TestFake_TransitionState(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	if err := f.TransitionState("42", forge.InProgress); err != nil {
+	if err := f.TransitionState("42", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("TransitionState: %v", err)
 	}
 
@@ -61,7 +61,7 @@ func TestFake_TransitionState(t *testing.T) {
 		t.Fatalf("want 1 TransitionStateCall, got %d", len(f.TransitionStateCalls))
 	}
 	got := f.TransitionStateCalls[0]
-	if got.Num != "42" || got.To != forge.InProgress {
+	if got.Num != "42" || got.From != forge.Dispatchable || got.To != forge.InProgress {
 		t.Errorf("unexpected call: %+v", got)
 	}
 }

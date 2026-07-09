@@ -302,8 +302,8 @@ func build() error {
 
 // transitionState is a best-effort dispatch-state transition that logs but
 // does not propagate errors, matching the original behaviour.
-func transitionState(fc forge.Client, num string, to forge.DispatchState) {
-	if err := fc.TransitionState(num, to); err != nil {
+func transitionState(fc forge.Client, num string, from, to forge.DispatchState) {
+	if err := fc.TransitionState(num, from, to); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %d\n", num, to)
 	}
 }
@@ -316,7 +316,7 @@ func claimIssue(c config, fc forge.Client, num string) {
 	if c.label == c.inProgressLabel {
 		return
 	}
-	transitionState(fc, num, forge.InProgress)
+	transitionState(fc, num, forge.Dispatchable, forge.InProgress)
 }
 
 // runOne dispatches one issue into a container and logs its output.
@@ -437,7 +437,7 @@ func gateToGreen(c config, fc forge.Client, num, pr string) (bool, bool) {
 				break
 			}
 			// Confirmed green: mark complete regardless of merge outcome.
-			transitionState(fc, num, forge.Complete)
+			transitionState(fc, num, forge.InProgress, forge.Complete)
 			return true, false
 		case forge.StateFailure, forge.StateError:
 			// Genuine red — signal caller so it can dispatch a fix pass.
@@ -586,7 +586,7 @@ func selfHeal(c config, fc forge.Client, runFixFn func(int) error, runConflictRe
 				fmt.Printf("    #%s  pr=%s  status=fix-exhausted  !! exhausted %d fix pass(es)\n",
 					num, pr, c.maxFixAttempts)
 			}
-			transitionState(fc, num, forge.Failed)
+			transitionState(fc, num, forge.InProgress, forge.Failed)
 			return false, false
 		}
 		fmt.Printf("    #%s  pr=%s  fix-pass=%d/%d\n", num, pr, attempt+1, c.maxFixAttempts)
@@ -614,7 +614,7 @@ func verifyMerged(c config, fc forge.Client, num, pr string) {
 		reason = fmt.Sprintf("issue does not carry '%s'", c.completeLabel)
 	}
 	fmt.Printf("    #%s  pr=%s  status=failed  !! %s\n", num, pr, reason)
-	transitionState(fc, num, forge.Failed)
+	transitionState(fc, num, forge.InProgress, forge.Failed)
 }
 
 // adoptAndGate runs the merge gate (selfHeal → verifyMerged) on an
@@ -1343,7 +1343,7 @@ func fanOut(c config, fc forge.Client, pwd string, r runner.Runner, batch []issu
 			claimIssue(c, fc, iss.number)
 			if ok := runWithRetry(c, pwd, r, iss); !ok {
 				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.number, iss.number)
-				transitionState(fc, iss.number, forge.Failed)
+				transitionState(fc, iss.number, forge.InProgress, forge.Failed)
 			} else {
 				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.number, iss.number)
 				gateIssue(c, fc, pwd, r, iss)
@@ -1378,7 +1378,7 @@ func dispatchWaves(c config, fc forge.Client, pwd string, r runner.Runner, issue
 
 		for _, iss := range blockerFailed {
 			fmt.Printf("    !! #%s  status=blocker-failed  note=a dependency failed; skipping\n", iss.number)
-			transitionState(fc, iss.number, forge.Failed)
+			transitionState(fc, iss.number, forge.Dispatchable, forge.Failed)
 		}
 
 		if len(ready) == 0 {

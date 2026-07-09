@@ -95,13 +95,13 @@ func (e *execClient) Issue(num string) (Issue, error) {
 	return iss, nil
 }
 
-// TransitionState moves issue num to state to, swapping the canonical
-// predecessor label for the new state label. It mirrors the previous
-// SwapLabel(add, remove) call so that the gh command format is unchanged.
-func (e *execClient) TransitionState(num string, to DispatchState) error {
+// TransitionState swaps the from-state label for the to-state label on issue
+// num. It emits exactly one --add-label and one --remove-label, matching the
+// prior SwapLabel(add, remove) call contract with typed state identifiers.
+func (e *execClient) TransitionState(num string, from, to DispatchState) error {
 	add := e.labels.Label(to)
 	args := []string{"issue", "edit", num, "--repo", e.repo, "--add-label", add}
-	if remove := e.labels.PredecessorLabel(to); remove != "" {
+	if remove := e.labels.Label(from); remove != "" {
 		args = append(args, "--remove-label", remove)
 	}
 	cmd := exec.Command("gh", args...)

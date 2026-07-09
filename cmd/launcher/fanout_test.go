@@ -17,11 +17,11 @@ type countingForge struct {
 	claimCount *int32
 }
 
-func (f *countingForge) TransitionState(num string, to forge.DispatchState) error {
+func (f *countingForge) TransitionState(num string, from, to forge.DispatchState) error {
 	if to == forge.InProgress {
 		atomic.AddInt32(f.claimCount, 1)
 	}
-	return f.Client.TransitionState(num, to)
+	return f.Client.TransitionState(num, from, to)
 }
 
 // signalRunner blocks the first Run call until released; subsequent calls return immediately.
