@@ -68,15 +68,21 @@ setup() {
 @test "COMMS section establishes machine-log voice with human-prose carve-outs" {
   # Output is a machine-parsed log, not a conversation: no pleasantries and
   # no restating subagent output, except on the surfaces that stay human
-  # prose (commits, PR body, IF BLOCKED comment, outcome note=).
+  # prose (commits, PR body, IF BLOCKED comment, outcome note=). All
+  # assertions are scoped to the COMMS section itself, not just the file,
+  # so the test still fails if the carve-out sentence is dropped even
+  # though those surfaces are named elsewhere in the prompt too.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
-  grep -q '^# COMMS' "$prompt"
-  grep -qi 'no pleasantries' "$prompt"
-  grep -qi 'never restate' "$prompt"
-  grep -qi 'one terse' "$prompt"
-  grep -qi 'Conventional Commits' "$prompt"
-  grep -qi 'PR title and body' "$prompt"
-  grep -qi 'IF BLOCKED' "$prompt"
-  grep -qi 'note=' "$prompt"
+  local comms
+  comms="$(sed -n '/^# COMMS$/,/^# [A-Z]/p' "$prompt")"
+  [ -n "$comms" ]
+  grep -qi 'no pleasantries' <<<"$comms"
+  grep -qi 'never restate' <<<"$comms"
+  grep -qi 'one terse' <<<"$comms"
+  grep -qi 'reserved exclusively' <<<"$comms"
+  grep -qi 'Conventional Commits' <<<"$comms"
+  grep -qi 'PR title and body' <<<"$comms"
+  grep -qi 'IF BLOCKED' <<<"$comms"
+  grep -qi 'note=' <<<"$comms"
 }
