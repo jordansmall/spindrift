@@ -231,10 +231,13 @@ fi
 prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
 
 # Forward the nix-baked --agents JSON to the Agent. AGENTS_JSON_TEMPLATE is
-# computed by nix (builtins.toJSON) and set to empty when either subagent model
-# is unset, so the conditional is resolved at build time, not here.
-# When the template is present, inject the runtime-substituted prompts and
-# forward the completed JSON; otherwise omit the flag entirely.
+# computed by nix (builtins.toJSON) and set to empty when no subagent model is
+# configured, so the conditional is resolved at build time, not here. Each
+# subagent is baked independently, so the template may carry scout only,
+# reviewer only, both, or (empty string) neither.
+# When the template is present, inject the runtime-substituted prompt for
+# whichever agents it actually carries and forward the completed JSON;
+# otherwise omit the flag entirely.
 if [ -n "${AGENTS_JSON_TEMPLATE:-}" ]; then
   scout_prompt="$(_subst "${PROMPTS_DIR}/scout-prompt.md")"
   review_prompt="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
@@ -242,7 +245,9 @@ if [ -n "${AGENTS_JSON_TEMPLATE:-}" ]; then
     --argjson template "$AGENTS_JSON_TEMPLATE" \
     --arg scout_prompt "$scout_prompt" \
     --arg review_prompt "$review_prompt" \
-    '$template | .scout.prompt = $scout_prompt | .reviewer.prompt = $review_prompt')"
+    '$template
+     | if has("scout") then .scout.prompt = $scout_prompt else . end
+     | if has("reviewer") then .reviewer.prompt = $review_prompt else . end')"
   agents_args=(--agents "$agents_json")
 else
   agents_args=()
