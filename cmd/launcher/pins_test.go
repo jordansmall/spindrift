@@ -184,6 +184,21 @@ func TestPrintOutcomeReportRemoved(t *testing.T) {
 	}
 }
 
+// TestOsExitOnlyInMain pins issue #443's thin-main acceptance criterion:
+// os.Exit skips deferred cleanup, so every subcommand must return a plain
+// exit code and let main be the only frame that calls it — that's the only
+// way driver-cache cleanup can run via defer on every exit path.
+func TestOsExitOnlyInMain(t *testing.T) {
+	data, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("reading main.go: %v", err)
+	}
+	got := strings.Count(string(data), "os.Exit(")
+	if got != 1 {
+		t.Errorf("os.Exit( appears %d times in main.go, want 1 (main only) — subcommand functions must return exit codes instead", got)
+	}
+}
+
 // TestBootstrapPrologueAppearsOnce pins issue #443's core acceptance
 // criterion: run, the selective `dispatch <nums>` path, and recover used to
 // each carry their own copy of the six-step prologue (config load+validate,

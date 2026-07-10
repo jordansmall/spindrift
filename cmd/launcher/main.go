@@ -1196,9 +1196,114 @@ func run(lc *launchContext) error {
 	return nil
 }
 
-func main() {
+// cmdBuild is the `build` subcommand: realize the sandbox image or store
+// closures without running any agent.
+func cmdBuild() int {
+	if err := build(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
+	}
+	return 0
+}
+
+// cmdDoctor is the `doctor` subcommand: probe each forge seam through its
+// own adapter (not the combined Client) so a CODE_FORGE=git deployment
+// checks the actual remote it will push to, not the IssueTracker's repo a
+// second time. No runner/dispatch/settle wiring needed, so it does not go
+// through bootstrap.
+func cmdDoctor() int {
+	c := loadConfig()
+	it := newIssueTracker(c)
+	cf := newCodeForge(c)
+	stat, serr := os.Stdin.Stat()
+	interactive := serr == nil && (stat.Mode()&os.ModeCharDevice) != 0
+	if err := runDoctor(it, cf, c, os.Stdout, os.Stdin, interactive); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
+	}
+	return 0
+}
+
+// cmdRecover is the `recover` subcommand: adopt an already-discovered open
+// non-draft PR with no outcome line and drive it through the merge gate.
+func cmdRecover(issueNum string) int {
+	lc, cleanup, err := bootstrap(true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
+	}
+	defer cleanup()
+	if err := recoverByNumber(lc.config, lc.forge, lc.pwd, lc.factory, lc.settle, issueNum); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
+	}
+	return 0
+}
+
+// cmdPreview is the `preview` subcommand: report what dispatch would do
+// without launching any Box.
+func cmdPreview(issueNums []string) int {
+	if err := preview(issueNums); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
+	}
+	return 0
+}
+
+// cmdDispatchSelective is the `dispatch <nums>` subcommand: an
+// operator-supplied issue list that bypasses the label/barrier gates.
+func cmdDispatchSelective(nums []string, noBuild, forceYes bool) int {
+	lc, cleanup, err := bootstrap(!noBuild)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
+	}
+	defer cleanup()
+	if err := selectiveListDispatch(lc.config, lc.forge, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
+	}
+	return 0
+}
+
+// runExitCode translates run's result into the launcher's process exit
+// code: 2 for an empty dispatch queue, 3 for open issues that exist but
+// none are dispatchable, 1 for any other error, 0 on success. Split out
+// from cmdDispatch so it's unit-testable against a fake-populated
+// launchContext without going through bootstrap.
+func runExitCode(lc *launchContext) int {
+	err := run(lc)
+	if err == nil {
+		return 0
+	}
+	if errors.Is(err, errQueueEmpty) {
+		return 2
+	}
+	if errors.Is(err, errOpenNoneDispatchable) {
+		return 3
+	}
+	fmt.Fprintf(os.Stderr, "%s\n", err)
+	return 1
+}
+
+// cmdDispatch is the default `dispatch` subcommand (and the no-args
+// default): drain the labeled queue.
+func cmdDispatch(noBuild bool) int {
+	lc, cleanup, err := bootstrap(!noBuild)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
+	}
+	defer cleanup()
+	return runExitCode(lc)
+}
+
+// mainRun parses argv and dispatches to the selected subcommand, returning
+// the process exit code. It contains no business logic of its own beyond
+// arg parsing and subcommand selection.
+func mainRun(argv []string) int {
 	help, helpAll := false, false
-	for _, a := range os.Args[1:] {
+	for _, a := range argv {
 		switch a {
 		case "--help", "-h":
 			help = true
@@ -1206,7 +1311,7 @@ func main() {
 			helpAll = true
 		case "--version":
 			printVersion(os.Stdout)
-			os.Exit(0)
+			return 0
 		}
 	}
 	if help {
@@ -1215,120 +1320,41 @@ func main() {
 		} else {
 			printHelp(os.Stdout)
 		}
-		os.Exit(0)
+		return 0
 	}
-	args, err := parseFlags(os.Args[1:])
+	args, err := parseFlags(argv)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
-		os.Exit(1)
+		return 1
 	}
 	if len(args) > 0 && args[0] == "build" {
-		if err := build(); err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-			os.Exit(1)
-		}
-		return
+		return cmdBuild()
 	}
 	if len(args) > 0 && args[0] == "doctor" {
-		c := loadConfig()
-		// Probe each seam through its own adapter (not the combined Client)
-		// so a CODE_FORGE=git deployment checks the actual remote it will
-		// push to, not the IssueTracker's repo a second time.
-		it := newIssueTracker(c)
-		cf := newCodeForge(c)
-		stat, serr := os.Stdin.Stat()
-		interactive := serr == nil && (stat.Mode()&os.ModeCharDevice) != 0
-		if err := runDoctor(it, cf, c, os.Stdout, os.Stdin, interactive); err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-			os.Exit(1)
-		}
-		return
+		return cmdDoctor()
 	}
 	if len(args) > 0 && args[0] == "recover" {
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: spindrift recover <issue-number>")
-			os.Exit(1)
+			return 1
 		}
-		// os.Exit skips defers, so cleanup is called explicitly on every
-		// exit path below rather than deferred.
-		lc, cleanup, err := bootstrap(true)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-			os.Exit(1)
-		}
-		if err := recoverByNumber(lc.config, lc.forge, lc.pwd, lc.factory, lc.settle, args[1]); err != nil {
-			cleanup()
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-			os.Exit(1)
-		}
-		cleanup()
-		return
+		return cmdRecover(args[1])
 	}
 	if len(args) > 0 && args[0] == "preview" {
-		previewNums := dispatchIssueArgs(args[1:])
-		if err := preview(previewNums); err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-			os.Exit(1)
-		}
-		return
+		return cmdPreview(dispatchIssueArgs(args[1:]))
 	}
 	if len(args) > 0 && args[0] == "dispatch" {
 		noBuild, dispatchArgs := dispatchNoBuildArgs(args[1:])
 		forceYes, dispatchArgs := dispatchYesArgs(dispatchArgs)
 		nums := dispatchIssueArgs(dispatchArgs)
 		if len(nums) > 0 {
-			// Operator explicit list: selective path (bypasses label/barrier gates).
-			// os.Exit skips defers, so cleanup is called explicitly on every
-			// exit path below rather than deferred.
-			lc, cleanup, err := bootstrap(!noBuild)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s\n", err)
-				os.Exit(1)
-			}
-			if err := selectiveListDispatch(lc.config, lc.forge, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, os.Stdout); err != nil {
-				fmt.Fprintf(os.Stderr, "%s\n", err)
-				cleanup()
-				os.Exit(1)
-			}
-			cleanup()
-			return
+			return cmdDispatchSelective(nums, noBuild, forceYes)
 		}
-		// os.Exit skips defers, so cleanup is called explicitly on every
-		// exit path below rather than deferred.
-		lc, cleanup, err := bootstrap(!noBuild)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-			os.Exit(1)
-		}
-		if err := run(lc); err != nil {
-			cleanup()
-			if errors.Is(err, errQueueEmpty) {
-				os.Exit(2)
-			}
-			if errors.Is(err, errOpenNoneDispatchable) {
-				os.Exit(3)
-			}
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-			os.Exit(1)
-		}
-		cleanup()
-		return
+		return cmdDispatch(noBuild)
 	}
-	lc, cleanup, err := bootstrap(true)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		os.Exit(1)
-	}
-	if err := run(lc); err != nil {
-		cleanup()
-		if errors.Is(err, errQueueEmpty) {
-			os.Exit(2)
-		}
-		if errors.Is(err, errOpenNoneDispatchable) {
-			os.Exit(3)
-		}
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		os.Exit(1)
-	}
-	cleanup()
+	return cmdDispatch(false)
+}
+
+func main() {
+	os.Exit(mainRun(os.Args[1:]))
 }
