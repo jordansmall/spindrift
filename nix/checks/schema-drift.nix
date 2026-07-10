@@ -174,8 +174,8 @@ in
         ;
       flakeOptionEntries = filterAttrs (_: e: e.flakeOption or false) schema;
       # Map sectionAttr -> [knobName] for all flakeOption knobs. groupToAttr
-      # (must match lib/flakeModule.nix) comes from lib/renderers.nix — the
-      # same mapping flake-options-doc renders from.
+      # comes from lib/renderers.nix — lib/flakeModule.nix imports the same
+      # mapping, and flake-options-doc renders from it too.
       sectionKnobs = foldl' (
         acc: knobName:
         let
@@ -238,12 +238,12 @@ in
         attrValues
         concatMapStrings
         replaceStrings
-        toLower
         unique
         ;
-      toKebab = env: toLower (replaceStrings [ "_" ] [ "-" ] env);
-      # Roff renders the flag as \-\- with every hyphen escaped; match that form.
-      roffFlag = e: "\\-\\-" + replaceStrings [ "-" ] [ "\\-" ] (toKebab e.env);
+      # Roff renders the flag as \-\- with every hyphen escaped; match that
+      # form. toKebab comes from lib/renderers.nix — the same helper the man
+      # page itself is rendered through.
+      roffFlag = e: "\\-\\-" + replaceStrings [ "-" ] [ "\\-" ] (renderers.toKebab e.env);
       nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
       secretEntries = filter (e: e.secret or false) (attrValues schema);
       groups = unique (map (e: e.group) nonSecret);
