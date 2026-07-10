@@ -233,9 +233,10 @@ let
   # INVARIANT: the agent image drvPath must not change when host-side launcher
   # code outside this binary's import closure is modified (e.g. test-only
   # launcher commits). The fileset is intentionally tight: go.mod,
-  # spindrift-heartbeat-filter, and internal/heartbeat only, with *_test.go
-  # excluded. If a new import is added outside this closure the build fails
-  # loudly (missing package) — that is the intended failure mode (#474).
+  # spindrift-heartbeat-filter, internal/heartbeat, and internal/claudetranscript
+  # (heartbeat's transcript-parse import) only, with *_test.go excluded. If a
+  # new import is added outside this closure the build fails loudly (missing
+  # package) — that is the intended failure mode (#474).
   heartbeatFilterBin = pkgs.buildGoModule {
     pname = "spindrift-heartbeat-filter";
     version = spindriftVersion;
@@ -249,6 +250,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/heartbeat)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/claudetranscript)
       ];
     };
     vendorHash = null;
