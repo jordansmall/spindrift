@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -15,10 +16,61 @@ func fixConfig(maxFixAttempts int) config {
 }
 
 // noFix is a run function that records calls but always succeeds.
-func trackFix(calls *[]int) func(int) error {
-	return func(pass int) error {
+func trackFix(calls *[]int) func(int, string) error {
+	return func(pass int, _ string) error {
 		*calls = append(*calls, pass)
 		return nil
+	}
+}
+
+// TestSelfHeal_ForwardsFailureDetailToFix verifies that on genuine-red,
+// selfHeal captures fc.FailureDetail(pr) and forwards it as the second
+// argument to runFixFn — the fix box's CI_FAILURE_SUMMARY (issue #426).
+func TestSelfHeal_ForwardsFailureDetailToFix(t *testing.T) {
+	c := fixConfig(3)
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
+	fc.SetFailureDetail(testFixPR, "lint: FAILURE\n2 errors")
+
+	var gotSummaries []string
+	fixFn := func(pass int, summary string) error {
+		gotSummaries = append(gotSummaries, summary)
+		return nil
+	}
+	_, merged := selfHeal(c, fc, fixFn, nil, "1", testFixPR)
+
+	if !merged {
+		t.Fatal("expected merged=true after one fix pass")
+	}
+	if len(gotSummaries) != 1 || gotSummaries[0] != "lint: FAILURE\n2 errors" {
+		t.Errorf("want fix pass forwarded the scripted failure detail; got %v", gotSummaries)
+	}
+}
+
+// TestSelfHeal_EmptyFailureDetailFallsBackWithNoError verifies that when
+// FailureDetail returns an error (fetch failed) or "" (nothing scripted),
+// selfHeal still dispatches the fix pass with an empty summary rather than
+// failing the fix pass outright — the fetch is best-effort.
+func TestSelfHeal_EmptyFailureDetailFallsBackWithNoError(t *testing.T) {
+	c := fixConfig(3)
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
+	fc.FailureDetailErr = errors.New("gh api graphql: 403 Forbidden")
+
+	var gotSummaries []string
+	fixFn := func(pass int, summary string) error {
+		gotSummaries = append(gotSummaries, summary)
+		return nil
+	}
+	_, merged := selfHeal(c, fc, fixFn, nil, "1", testFixPR)
+
+	if !merged {
+		t.Fatal("a FailureDetail fetch error must not block the fix pass")
+	}
+	if len(gotSummaries) != 1 || gotSummaries[0] != "" {
+		t.Errorf("want empty summary on fetch error, got %v", gotSummaries)
 	}
 }
 

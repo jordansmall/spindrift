@@ -146,6 +146,9 @@ type issue struct {
 	number  string
 	title   string
 	fixPass int // 0 = initial run; >0 = fix-pass number (sets FIX_PASS env)
+	// ciFailureSummary, when non-empty, is the CI failure detail captured by
+	// selfHeal on genuine-red; forwarded into the fix Box as CI_FAILURE_SUMMARY.
+	ciFailureSummary string
 }
 
 func getenv(key, def string) string {
@@ -423,6 +426,9 @@ func buildBoxEnv(c config, iss issue) map[string]string {
 	if iss.fixPass > 0 {
 		env["FIX_PASS"] = strconv.Itoa(iss.fixPass)
 	}
+	if iss.ciFailureSummary != "" {
+		env["CI_FAILURE_SUMMARY"] = iss.ciFailureSummary
+	}
 	return env
 }
 
@@ -480,9 +486,10 @@ func runOne(c config, pwd string, r runner.Runner, iss issue) error {
 
 // runFix dispatches a fix box for issue iss, writing output to a per-attempt
 // log file. The fix box receives FIX_PASS=fixPass so the entrypoint can
-// distinguish fix runs and check out the existing branch rather than creating a
-// new one.
-func runFix(c config, pwd string, r runner.Runner, iss issue, fixPass int) error {
+// distinguish fix runs and check out the existing branch rather than creating
+// a new one, plus CI_FAILURE_SUMMARY (when non-empty) so the fix prompt can
+// render the concrete CI failure selfHeal captured on genuine-red.
+func runFix(c config, pwd string, r runner.Runner, iss issue, fixPass int, ciFailureSummary string) error {
 	logPath := filepath.Join(pwd, "logs", fmt.Sprintf("issue-%s-fix-%d.log", iss.number, fixPass))
 	fmt.Printf("    -> #%s (fix-pass-%d): %s\n", iss.number, fixPass, iss.title)
 
@@ -492,7 +499,7 @@ func runFix(c config, pwd string, r runner.Runner, iss issue, fixPass int) error
 	}
 	defer logFile.Close()
 
-	fixIss := issue{number: iss.number, title: iss.title, fixPass: fixPass}
+	fixIss := issue{number: iss.number, title: iss.title, fixPass: fixPass, ciFailureSummary: ciFailureSummary}
 	box := runner.Box{
 		Issue:  fixIss.number,
 		Name:   "agent-issue-" + fixIss.number,
@@ -732,10 +739,12 @@ func landPushOnly(c config, fc forge.Client, num, branch string) (ok bool, merge
 // when immediate mode completed an actual merge. A merge failure keeps the
 // issue at agent-complete (merge-blocked note) and returns (true, false).
 //
-// runFixFn is called with the 1-based fix-pass number and must dispatch the
-// fix box synchronously. runConflictResolveFn, when non-nil, is forwarded to
-// applyMergeMode for agent-assisted rebase-conflict resolution.
-func selfHeal(c config, fc forge.Client, runFixFn func(int) error, runConflictResolveFn func(string) error, num, pr string) (ok bool, merged bool) {
+// runFixFn is called with the 1-based fix-pass number and the CI failure
+// summary captured on genuine-red (empty when none could be fetched), and
+// must dispatch the fix box synchronously. runConflictResolveFn, when
+// non-nil, is forwarded to applyMergeMode for agent-assisted rebase-conflict
+// resolution.
+func selfHeal(c config, fc forge.Client, runFixFn func(int, string) error, runConflictResolveFn func(string) error, num, pr string) (ok bool, merged bool) {
 	if c.codeForge == "git" {
 		return landPushOnly(c, fc, num, pr)
 	}
@@ -769,7 +778,14 @@ func selfHeal(c config, fc forge.Client, runFixFn func(int) error, runConflictRe
 			return false, false
 		}
 		fmt.Printf("    #%s  pr=%s  fix-pass=%d/%d\n", num, pr, attempt+1, c.maxFixAttempts)
-		if err := runFixFn(attempt + 1); err != nil {
+		// Best-effort: a failure to fetch the CI failure detail must never
+		// block the fix pass — fall back to an empty summary.
+		detail, detailErr := fc.FailureDetail(pr)
+		if detailErr != nil {
+			fmt.Printf("    #%s  pr=%s  status=failure-detail-unavailable  !! %v\n", num, pr, detailErr)
+			detail = ""
+		}
+		if err := runFixFn(attempt+1, detail); err != nil {
 			fmt.Printf("    !! #%s fix-pass-%d exited non-zero\n", num, attempt+1)
 		}
 	}
@@ -800,7 +816,7 @@ func verifyMerged(c config, fc forge.Client, num, pr string) {
 // already-discovered open non-draft PR for iss. Prints "status=adopted"
 // before running the gate. Called by both printOutcomeReport and
 // reconcileStranded.
-func adoptAndGate(c config, fc forge.Client, iss issue, prURL string, runFixFn func(int) error, runConflictResolveFn func(string) error) {
+func adoptAndGate(c config, fc forge.Client, iss issue, prURL string, runFixFn func(int, string) error, runConflictResolveFn func(string) error) {
 	branch := c.branchPrefix + iss.number
 	fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", iss.number, prURL, branch)
 	ok, merged := selfHeal(c, fc, runFixFn, runConflictResolveFn, iss.number, prURL)
@@ -908,7 +924,9 @@ func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue
 			fmt.Printf("    #%s  pr=%s  status=blocked  note=draft PR on %s; no outcome line\n", iss.number, pr, branch)
 			return
 		}
-		fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
+		fixFn := func(fixPass int, ciFailureSummary string) error {
+			return runFix(c, pwd, r, iss, fixPass, ciFailureSummary)
+		}
 		conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
 		adoptAndGate(c, fc, iss, pr, fixFn, conflictFn)
 		return
@@ -919,7 +937,9 @@ func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue
 		fmt.Printf("    #%s  pr=%s  status=%s  !! %s\n", iss.number, o.PR, o.Status, o.Note)
 		postUsageComment(fc, iss.number, logPath)
 	case "ready":
-		fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
+		fixFn := func(fixPass int, ciFailureSummary string) error {
+			return runFix(c, pwd, r, iss, fixPass, ciFailureSummary)
+		}
 		conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
 		ok, merged := selfHeal(c, fc, fixFn, conflictFn, iss.number, o.PR)
 		if ok {
@@ -1173,7 +1193,9 @@ func reconcileStranded(c config, fc forge.Client, pwd string, r runner.Runner) {
 		if prErr != nil || !found || isDraft {
 			continue
 		}
-		fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
+		fixFn := func(fixPass int, ciFailureSummary string) error {
+			return runFix(c, pwd, r, iss, fixPass, ciFailureSummary)
+		}
 		conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
 		adoptAndGate(c, fc, iss, prURL, fixFn, conflictFn)
 	}
@@ -1205,7 +1227,9 @@ func recoverByNumber(c config, fc forge.Client, pwd string, r runner.Runner, iss
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
 		return fmt.Errorf("mkdir logs: %w", err)
 	}
-	fixFn := func(fixPass int) error { return runFix(c, pwd, r, iss, fixPass) }
+	fixFn := func(fixPass int, ciFailureSummary string) error {
+		return runFix(c, pwd, r, iss, fixPass, ciFailureSummary)
+	}
 	conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
 	adoptAndGate(c, fc, iss, prURL, fixFn, conflictFn)
 	return nil
