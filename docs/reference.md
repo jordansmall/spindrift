@@ -151,6 +151,18 @@ targeted fix, committing, pushing, and waiting for CI — emitting the same
 `SPINDRIFT_OUTCOME` grammar. `FIX_PASS` unset (the initial run) is
 byte-identical to before this prompt existed.
 
+On genuine-red, `selfHeal` also fetches the failed check names plus a bounded
+log excerpt for the PR's head commit (`forge.Client.FailureDetail`, the same
+fine-grained-PAT-safe GraphQL `statusCheckRollup` query `CheckState` uses) and
+forwards it into the fix box as `CI_FAILURE_SUMMARY`. `fix-prompt.md` renders
+it as a `# CI FAILURE` section ahead of `# CONTEXT`, so the fix agent goes
+straight to the failing check instead of rediscovering it via a blind local
+re-run — which misses CI-only failures (flaky, environment-specific, or
+checks the repo's local CHECK step doesn't run). The fetch is best-effort:
+a failure to fetch it never blocks the fix pass, and `CI_FAILURE_SUMMARY`
+unset or empty leaves `fix-prompt.md` byte-identical to the no-detail case,
+falling back to the local re-run with no error.
+
 The SPINDRIFT_OUTCOME contract — the sections that instruct the agent to
 print the `SPINDRIFT_OUTCOME issue=… pr=… status=… note=…` line the launcher
 parses to learn the PR — is harness-owned, not Consumer-tunable. At
@@ -427,10 +439,13 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
            │           manual    → leave the green PR for a human (default)
            │           immediate → rebase-merge the PR now
            │           auto      → enqueue GitHub native auto-merge
-           ├─ red   → dispatch fix boxes (up to MAX_FIX_ATTEMPTS, each driving
-           │          prompts/fix-prompt.md instead of issue-prompt.md — the
-           │          branch is already checked out, so the box skips SCOUT
-           │          and re-implementation and goes straight to check/fix/
+           ├─ red   → capture the failed checks + a bounded log excerpt
+           │          (best-effort), then dispatch fix boxes (up to
+           │          MAX_FIX_ATTEMPTS, each driving prompts/fix-prompt.md
+           │          instead of issue-prompt.md — the branch is already
+           │          checked out and CI_FAILURE_SUMMARY carries the known
+           │          failure, so the box skips SCOUT, re-implementation,
+           │          and blind rediscovery and goes straight to check/fix/
            │          commit/push), then re-gate
            ├─ merge conflict (immediate) → rebase the PR (up to MAX_REBASE_ATTEMPTS)
            └─ post an aggregate usage/cost comment to the issue
@@ -519,6 +534,12 @@ ready-for-agent ──dispatch──▶ agent-in-progress ─────CI gree
   after transient retries) does it swap to `agent-failed` and stop. There are
   **no automatic re-dispatches from `ready-for-agent`**: a human inspects
   `logs/issue-<n>.log` and re-labels to retry.
+- **The fix box gets the concrete failure, not a guess.** At the moment
+  genuine-red is declared, `selfHeal` fetches the failed check names plus a
+  bounded log excerpt for the PR's head commit and forwards it into the fix
+  box as `CI_FAILURE_SUMMARY`. The fetch is best-effort — a fetch failure
+  never blocks the fix pass, it just falls back to the fix box rediscovering
+  the failure itself (`gh run view --log-failed`, the pre-#426 behavior).
 - **Stranded issues are reconciled.** At startup `spindrift dispatch` scans open
   `agent-in-progress` issues that already have an open non-draft PR and re-runs
   the merge gate on each ("adopts" them) — so a launcher killed mid-gate picks up
