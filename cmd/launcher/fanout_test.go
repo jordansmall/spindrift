@@ -66,9 +66,10 @@ func TestFanOut_ClaimsGatedByMaxParallel(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
+	s := newSettle(c, fc)
 	fanDone := make(chan struct{})
 	go func() {
-		fanOut(c, fc, f, []issue{
+		fanOut(c, fc, f, s, []issue{
 			{number: "1", title: "first"},
 			{number: "2", title: "second"},
 		})
@@ -124,7 +125,8 @@ func TestFanOut_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	fanOut(c, cfc, f, []issue{
+	s := newSettle(c, cfc)
+	fanOut(c, cfc, f, s, []issue{
 		{number: "1", title: "first"},
 		{number: "2", title: "second"},
 	})
@@ -178,7 +180,8 @@ func TestFanOut_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	fanOut(c, fc, f, []issue{{number: "1", title: "first"}})
+	s := newSettle(c, fc)
+	fanOut(c, fc, f, s, []issue{{number: "1", title: "first"}})
 
 	iss, err := fc.Issue("1")
 	if err != nil {
@@ -191,7 +194,7 @@ func TestFanOut_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 
 // TestFanOut_GitForge_ImmediateLandsWithoutVerifyingAPR verifies that a
 // CODE_FORGE=git outcome carrying a branch ref (not a PR URL) lands cleanly
-// through the same fanOut→gateIssue path used for github: the issue reaches
+// through the same fanOut→settle.Settle path used for github: the issue reaches
 // agent-complete and is never demoted to agent-failed by a PR-shaped
 // post-merge check that does not apply to a push-only forge.
 func TestFanOut_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
@@ -204,10 +207,12 @@ func TestFanOut_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	c.mergeMode = "immediate"
 
 	fc := forge.NewFake()
+	fc.IsPushOnly = true
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
 	// The real git Code Forge has no PR concept — PRState always errors. A
-	// gateIssue path that (incorrectly) called verifyMerged for CODE_FORGE=git
-	// would read this as "not merged" and wrongly demote the issue to failed.
+	// settle path that (incorrectly) called verifyMerged for a push-only
+	// forge would read this as "not merged" and wrongly demote the issue to
+	// failed.
 	fc.PRStateErr = errors.New("PRState: not supported by the git Code Forge (push-only, no PR concept)")
 
 	fr := runner.NewFake()
@@ -217,7 +222,8 @@ func TestFanOut_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	fanOut(c, fc, f, []issue{{number: "1", title: "first"}})
+	s := newSettle(c, fc)
+	fanOut(c, fc, f, s, []issue{{number: "1", title: "first"}})
 
 	iss, err := fc.Issue("1")
 	if err != nil {
@@ -249,6 +255,7 @@ func TestFanOut_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 	c.codeForge = "git"
 
 	fc := forge.NewFake()
+	fc.IsPushOnly = true
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
 	fc.PRStateErr = errors.New("PRState: not supported by the git Code Forge (push-only, no PR concept)")
 
@@ -259,7 +266,8 @@ func TestFanOut_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	fanOut(c, fc, f, []issue{{number: "1", title: "first"}})
+	s := newSettle(c, fc)
+	fanOut(c, fc, f, s, []issue{{number: "1", title: "first"}})
 
 	iss, err := fc.Issue("1")
 	if err != nil {

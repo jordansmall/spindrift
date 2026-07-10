@@ -262,7 +262,8 @@ func TestDispatchWaves_FailsDependentWhenBlockerFails(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	if err := dispatchWaves(c, fc, f, []issue{
+	s := newSettle(c, fc)
+	if err := dispatchWaves(c, fc, f, s, []issue{
 		{number: "1", title: "blocker"},
 		{number: "2", title: "dependent"},
 	}, edges); err != nil {
