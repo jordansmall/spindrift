@@ -66,6 +66,8 @@
             packages = p: [
               p.go
               p.nil
+              p.bats
+              p.shellcheck
             ];
             settings.branches.mergeMode = "immediate";
             settings.promptSkillIteration.autoFormat = true;
