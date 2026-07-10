@@ -632,8 +632,8 @@ FAKE
   [ "$status" -ne 0 ]
 }
 
-@test "the five conditional prompt steps ship as fragment files under prompts/fragments" {
-  for f in skill-preamble file-issues auto-format auto-lint ci-failure; do
+@test "the six conditional prompt steps ship as fragment files under prompts/fragments" {
+  for f in skill-preamble caveman-default file-issues auto-format auto-lint ci-failure; do
     [ -f "$PROMPTS_DIR/fragments/$f.md" ]
   done
 }
@@ -666,6 +666,20 @@ FAKE
   [ "$status" -eq 0 ]
   ! grep -q 'scratch:build failed' "$CLAUDE_PROMPT_FILE"
   ! grep -q 'failed# CONTEXT' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "CAVEMAN_STEP stays separated from SCOUT" {
+  mkdir -p "$HOME/.claude/skills"
+  cat >"$HOME/.claude/skills/caveman.md" <<'SKILL'
+---
+name: caveman
+description: Ultra-compressed communication mode.
+---
+Respond terse like smart caveman.
+SKILL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'verbatim\.# SCOUT' "$CLAUDE_PROMPT_FILE"
 }
 
 # issue #463: the claude|heartbeat-filter|tee pipeline used to be hand-copied
@@ -954,6 +968,64 @@ SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qi 'caveman' "$CLAUDE_PROMPT_FILE"
+}
+
+# --- caveman-default narration (issue #487) ---------------------------------
+# #486 baked the skill; #487 makes the issue-pass prompt actually direct the
+# agent to use it for narration by default -- distinct from the generic
+# "skills available" mention SKILL_PREAMBLE already renders, which the test
+# above already satisfies without this feature.
+
+@test "prompt directs the agent to caveman narration by default when caveman is baked" {
+  mkdir -p "$HOME/.claude/skills"
+  cat >"$HOME/.claude/skills/caveman.md" <<'SKILL'
+---
+name: caveman
+description: Ultra-compressed communication mode.
+---
+Respond terse like smart caveman.
+SKILL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'narration' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'exempt' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "prompt carries no caveman-default narration instruction when caveman is not baked" {
+  mkdir -p "$HOME/.claude/skills"
+  cat >"$HOME/.claude/skills/tdd.md" <<'SKILL'
+---
+name: tdd
+description: Test-driven development skill.
+---
+Use TDD.
+SKILL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -qi 'narration' "$CLAUDE_PROMPT_FILE"
+}
+
+# The default applies to both agent passes (issue #487): CAVEMAN_STEP is
+# substituted into the COMMS section, which fix-prompt.md receives via the
+# shared-block injection (issue #455) rather than its own copy -- so this
+# exercises _inject_shared_block's runtime _subst call directly, the same
+# way the COMMS/CHECK/outcome injection tests above do.
+@test "fix pass gets caveman-default narration via the injected COMMS block when caveman is baked" {
+  export FIX_PASS="2"
+  mkdir -p "$HOME/.claude/skills"
+  cat >"$HOME/.claude/skills/caveman.md" <<'SKILL'
+---
+name: caveman
+description: Ultra-compressed communication mode.
+---
+Respond terse like smart caveman.
+SKILL
+  export COMMS_CONTRACT_FILE="$BATS_TEST_TMPDIR/comms-contract.md"
+  printf '# COMMS\n\n%s# SCOUT placeholder\n' '${CAVEMAN_STEP}' >"$COMMS_CONTRACT_FILE"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'narration' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'exempt' "$CLAUDE_PROMPT_FILE"
 }
 
 # --- pre-work rebase (issue #215) -------------------------------------------
