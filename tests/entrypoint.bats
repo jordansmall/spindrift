@@ -939,6 +939,23 @@ SKILL
   ! grep -qi '\bskill\b' "$CLAUDE_PROMPT_FILE"
 }
 
+@test "prompt advertises /caveman when the caveman skill is baked (issue #486)" {
+  # The dogfood Box bakes the pinned upstream caveman skill under the
+  # basename caveman.md; discovery is name-driven (basename minus .md), so
+  # a skill file at that basename must surface "caveman" in SKILLS_FOUND.
+  mkdir -p "$HOME/.claude/skills"
+  cat >"$HOME/.claude/skills/caveman.md" <<'SKILL'
+---
+name: caveman
+description: Ultra-compressed communication mode.
+---
+Respond terse like smart caveman.
+SKILL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'caveman' "$CLAUDE_PROMPT_FILE"
+}
+
 # --- pre-work rebase (issue #215) -------------------------------------------
 # Before the agent starts, the box must rebase the working branch onto the
 # latest origin/BASE_BRANCH so the agent works against current main rather
