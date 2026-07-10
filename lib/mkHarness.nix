@@ -41,6 +41,11 @@
   defaults ? { },
   # Container runtime the launcher commands drive: "podman" (default) or "docker".
   runtime ? "podman",
+  # The agent CLI Driver (ADR 0009): a build-time choice selecting one entry
+  # from the lib/drivers/ registry, baked into the image (in-box half) and
+  # threaded to the Go launcher as DRIVER (host-side half). "claude" is the
+  # only Driver today.
+  driver ? "claude",
   # Fallback Linux builder for when the host can't realize the Linux image itself
   # (the stock-mac case). Fully qualified so podman needs no default registry.
   # Pinned by manifest-list digest for reproducibility and supply-chain safety —
@@ -109,6 +114,14 @@ let
   # lines appear anywhere else in this file.
   schema = import ./env-schema.nix;
 
+  # The Driver registry (ADR 0009); driverEntry is the selected Driver's
+  # in-box half — invocation binary/flags, agent-config rendering, skill
+  # wiring, and outcome extraction — baked into the image below.
+  driverRegistry = import ./drivers/default.nix { inherit lib; };
+  driverEntry =
+    driverRegistry.${driver}
+      or (throw "mkHarness: unknown driver '${driver}'; known drivers: ${lib.concatStringsSep ", " (lib.attrNames driverRegistry)}");
+
   # flakeOption entries are the Consumer-tunable subset.
   flakeOptionEntries = lib.filterAttrs (_: e: e.flakeOption or false) schema;
 
@@ -121,58 +134,33 @@ let
   # would otherwise be silently ignored, never baked, never surfaced.
   unknownDefaultKeys = lib.filter (k: !(lib.hasAttr k flakeOptionEntries)) (lib.attrNames defaults);
 
-  # --agents JSON baked at eval time via builtins.toJSON so model names are never
-  # string-interpolated in bash (ADR 0007 tier-1). Each subagent is composed
-  # independently by its own model knob; the --agents flag is omitted only when
-  # no subagent model is set — the conditional is resolved at build time, not
-  # in the entrypoint.
-  agentsJsonTemplate =
-    let
-      sm = mergedDefaults.scoutModel or "";
-      rm = mergedDefaults.reviewModel or "";
-      fm = mergedDefaults.filerModel or "";
-      agents =
-        lib.optionalAttrs (sm != "") {
-          scout = {
-            description = "Map relevant files, seams, and tests; return a structured brief";
-            prompt = "";
-            tools = [
-              "Read"
-              "Bash"
-              "WebFetch"
-              "WebSearch"
-              "Glob"
-              "Grep"
-            ];
-            model = sm;
-          };
-        }
-        // lib.optionalAttrs (rm != "") {
-          reviewer = {
-            description = "Review the branch diff for spec compliance and coding standards";
-            prompt = "";
-            tools = [
-              "Read"
-              "Bash"
-              "WebFetch"
-            ];
-            model = rm;
-          };
-        }
-        // lib.optionalAttrs (fm != "") {
-          filer = {
-            description = "File issues from a review's non-blocking findings, best-effort";
-            prompt = "";
-            tools = [
-              "Read"
-              "Bash"
-              "WebFetch"
-            ];
-            model = fm;
-          };
-        };
-    in
-    if agents == { } then "" else builtins.toJSON agents;
+  # --agents JSON, rendered by the selected Driver (ADR 0009) so a future
+  # Driver with a different agent-config shape (e.g. opencode's agents/*.md)
+  # can supply its own renderer without touching mkHarness.
+  agentsJsonTemplate = driverEntry.agentsJsonTemplate {
+    scoutModel = mergedDefaults.scoutModel or "";
+    reviewModel = mergedDefaults.reviewModel or "";
+    filerModel = mergedDefaults.filerModel or "";
+  };
+
+  # The Driver's in-box half, rendered into agent/entrypoint.sh's
+  # ${DRIVER_*:-<default>} vars and its `_driver_extract_outcome` guarded
+  # function definition (ADR 0009). /home/agent is the image's fixed HOME
+  # (see passwdFile below), so the skills dir is baked as an absolute path
+  # rather than depending on $HOME at run time.
+  driverPreamble =
+    "DRIVER_BIN="
+    + lib.escapeShellArg driverEntry.bin
+    + "\n"
+    + "DRIVER_FLAGS_COMMON="
+    + lib.escapeShellArg driverEntry.flagsCommon
+    + "\n"
+    + "DRIVER_SKILLS_DIR="
+    + lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
+    + "\n"
+    + "_driver_extract_outcome() {\n"
+    + driverEntry.outcomeExtractFnBody
+    + "}\n";
 
   # Version sourced from the release-please manifest so mkHarness always tracks
   # the bot-maintained source of truth (ADR-0010).
@@ -191,7 +179,8 @@ let
   };
 
   # Plumbing every agent needs regardless of language: a shell, the VCS + GitHub
-  # CLIs, Claude Code, CA certs, and the unix tools the entrypoint relies on.
+  # CLIs, the selected Driver's binary, CA certs, and the unix tools the
+  # entrypoint relies on.
   harnessPackages =
     (with pkgs; [
       bashInteractive
@@ -203,7 +192,7 @@ let
       jq # extracts the outcome line from the agent's stream-json transcript
       git
       gh
-      claude-code
+      (driverEntry.package pkgs)
       cacert
       heartbeatFilterBin # in-box heartbeat filter (#183)
     ])
@@ -232,7 +221,7 @@ let
     runtimeInputs = with pkgs; [
       git
       gh
-      claude-code
+      (driverEntry.package pkgs)
       gettext # envsubst
       coreutils
       jq # extracts the outcome from the stream-json transcript
@@ -246,6 +235,7 @@ let
       "AGENTS_JSON_TEMPLATE="
       + lib.escapeShellArg agentsJsonTemplate
       + "\n"
+      + driverPreamble
       + renderDefaultsPreamble { }
       + stripShebang (builtins.readFile ../agent/entrypoint.sh);
   };
@@ -448,6 +438,7 @@ let
     if runnerKind == "bwrap" then
       ''
         export RUNTIME="bwrap"
+        export DRIVER="${driverEntry.name}"
         export AGENT_FILES="${agentFilesPath}"
         export AGENT_ENV="${agentEnvPath}"
         BAKED_PREFETCH=${lib.escapeShellArg prefetch}
@@ -461,6 +452,7 @@ let
         export IMAGE_ARCHIVE="${imagePath}"
         export IMAGE_TAG="spindrift:${imageHash}"
         export RUNTIME="${runtime}"
+        export DRIVER="${driverEntry.name}"
         export IMAGE_DRV="${imageDrv}"
         export NIX_BUILDER_IMAGE="${nixBuilderImage}"
         export NIX_VOLUME="spindrift-nix"

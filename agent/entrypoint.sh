@@ -32,6 +32,26 @@ BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
 WORK_DIR="${WORK_DIR:-/work}"
 PROMPTS_DIR="${PROMPTS_DIR:-/agent/prompts}"
 
+# DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are baked by the
+# selected Driver's lib/drivers/<name>.nix (ADR 0009); the defaults here keep
+# this script standalone-runnable — the bats suite execs it raw — and
+# byte-identical to a driver=claude image, the only Driver today.
+DRIVER_BIN="${DRIVER_BIN:-claude}"
+DRIVER_FLAGS_COMMON="${DRIVER_FLAGS_COMMON:---verbose --output-format stream-json --dangerously-skip-permissions}"
+DRIVER_SKILLS_DIR="${DRIVER_SKILLS_DIR:-${HOME:-}/.claude/skills}"
+
+# _driver_extract_outcome pulls the SPINDRIFT_OUTCOME line out of the agent's
+# raw transcript. A nix-built image prepends the selected Driver's own
+# definition (lib/drivers/<name>.nix outcomeExtractFnBody) ahead of this
+# script's body; the guard keeps that definition, falling back to claude's
+# stream-json extraction only when none was prepended (standalone/bats runs).
+if ! declare -F _driver_extract_outcome >/dev/null 2>&1; then
+  _driver_extract_outcome() {
+    jq -r 'select(.type == "result") | .result // empty' "$1" 2>/dev/null \
+      | grep '^SPINDRIFT_OUTCOME ' | tail -1 || true
+  }
+fi
+
 export GH_TOKEN
 gh auth setup-git
 
@@ -174,12 +194,12 @@ if [ -n "${PREFETCH:-}" ]; then
   fi
 fi
 
-# Discover available skills at $HOME/.claude/skills/ and build a directive
-# to prefer them over the inline guidance where they apply.
+# Discover available skills at DRIVER_SKILLS_DIR and build a directive to
+# prefer them over the inline guidance where they apply.
 SKILL_PREAMBLE=""
 _skills_found=""
-if [ -d "${HOME:-}/.claude/skills" ]; then
-  for _sf in "${HOME}/.claude/skills/"*.md; do
+if [ -d "$DRIVER_SKILLS_DIR" ]; then
+  for _sf in "${DRIVER_SKILLS_DIR}/"*.md; do
     [ -f "$_sf" ] || continue
     _sn="$(basename "$_sf" .md)"
     _skills_found="${_skills_found:+${_skills_found}, }${_sn}"
@@ -238,11 +258,10 @@ if [ -n "${_had_rebase_conflict:-}" ]; then
   echo "==> pre-work rebase conflict detected — invoking conflict-resolve agent"
   _cr_prompt="$(_subst "${PROMPTS_DIR}/conflict-resolve-prompt.md")"
   set +e
-  claude -p "$_cr_prompt" \
+  # shellcheck disable=SC2086
+  "$DRIVER_BIN" -p "$_cr_prompt" \
     --model "${MODEL:-}" \
-    --verbose \
-    --output-format stream-json \
-    --dangerously-skip-permissions
+    $DRIVER_FLAGS_COMMON
   set -e
   if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
     git rebase --abort 2>/dev/null || true
@@ -320,12 +339,11 @@ _run_driver() {
   # Inner function: run the claude pipeline; write PIPESTATUS[0] to
   # $_claude_rc_file. Runs either directly or inside the devShell wrapper.
   set +e
-  claude -p "$prompt" \
+  # shellcheck disable=SC2086
+  "$DRIVER_BIN" -p "$prompt" \
     --model "${MODEL:-}" \
     "${agents_args[@]}" \
-    --verbose \
-    --output-format stream-json \
-    --dangerously-skip-permissions \
+    $DRIVER_FLAGS_COMMON \
     | spindrift-heartbeat-filter -n "$ISSUE_NUMBER" -f /tmp/heartbeat.log \
     | tee "$stream_log"
   printf '%s' "${PIPESTATUS[0]}" > "$_claude_rc_file"
@@ -356,12 +374,11 @@ _agents_arg=()
 if [ -s "$_AGENTS_FILE" ]; then
   _agents_arg=("--agents" "$(cat "$_AGENTS_FILE")")
 fi
-claude -p "$(cat "$_PROMPT_FILE")" \
+# shellcheck disable=SC2086
+"$DRIVER_BIN" -p "$(cat "$_PROMPT_FILE")" \
   --model "${MODEL:-}" \
   "${_agents_arg[@]}" \
-  --verbose \
-  --output-format stream-json \
-  --dangerously-skip-permissions \
+  $DRIVER_FLAGS_COMMON \
   | spindrift-heartbeat-filter -n "$ISSUE_NUMBER" -f /tmp/heartbeat.log \
   | tee "$_STREAM_LOG"
 printf '%s' "${PIPESTATUS[0]}" > "$_CLAUDE_RC_FILE"
@@ -375,6 +392,11 @@ DRIVER_WRAPPER_EOF
   # MODEL comes from the preamble (not exported by default); export it so the
   # devShell child process sees the correct resolved value, not an empty string.
   export MODEL="${MODEL:-}"
+  # DRIVER_BIN and DRIVER_FLAGS_COMMON are plain (unexported) assignments
+  # above; export them so the devShell child process — which reads them from
+  # its own environment, not this script's variables — sees the same values.
+  export DRIVER_BIN
+  export DRIVER_FLAGS_COMMON
   set +e
   nix develop ".#${DEV_SHELL_NAME:-default}" --command bash "$_driver_wrapper"
   _nix_rc=$?
@@ -392,11 +414,11 @@ fi
 claude_rc="$(cat "$_claude_rc_file")"
 rm -f "$_claude_rc_file"
 
-# The launcher greps '^SPINDRIFT_OUTCOME ' from the container log, but under
-# stream-json the agent's final line is wrapped in a result event. Surface it as
-# a bare line so that contract is unchanged.
-jq -r 'select(.type == "result") | .result // empty' "$stream_log" 2>/dev/null \
-  | grep '^SPINDRIFT_OUTCOME ' | tail -1 || true
+# The launcher greps '^SPINDRIFT_OUTCOME ' from the container log, but the
+# Driver's raw transcript format buries it (claude wraps it in a stream-json
+# result event); _driver_extract_outcome surfaces it as a bare line so that
+# contract is unchanged.
+_driver_extract_outcome "$stream_log"
 rm -f "$stream_log"
 
 [ "$claude_rc" -eq 0 ] || exit "$claude_rc"
