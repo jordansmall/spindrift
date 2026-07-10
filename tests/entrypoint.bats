@@ -19,6 +19,7 @@ setup() {
   export SCOUT_MODEL=""
   export REVIEW_MODEL=""
   export FILER_MODEL=""
+  export AUTO_FORMAT=""
   export IN_PROGRESS_LABEL="agent-in-progress"
   export COMPLETE_LABEL="agent-complete"
   export DEV_SHELL_PROBE_TIMEOUT=300
@@ -494,6 +495,21 @@ FAKE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! grep -q 'FILE ISSUES' "$CLAUDE_PROMPT_FILE"
+}
+
+# AUTO_FORMAT knob: the AUTO-FORMAT step is injected only when AUTO_FORMAT is
+# non-empty — same conditional-residue mechanism as FILE_ISSUES_STEP.
+@test "issue prompt gains an AUTO-FORMAT step when AUTO_FORMAT is enabled" {
+  export AUTO_FORMAT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q '# AUTO-FORMAT' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "issue prompt has no AUTO-FORMAT step when AUTO_FORMAT is disabled" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'AUTO-FORMAT' "$CLAUDE_PROMPT_FILE"
 }
 
 @test "entrypoint includes a read-only tools whitelist in agents JSON" {
