@@ -36,10 +36,10 @@
   # verb claude itself uses. Called as `_driver_session_flags initial` on the
   # cold run (pins the id) or `_driver_session_flags resume` on a fix pass
   # (resumes it only if that session's transcript is actually present under
-  # the mounted /home/agent/.claude — e.g. absent after the cache was
-  # evicted, or on the first fix pass following a crash — in which case this
-  # prints nothing and the caller falls back to the cold-context fix flow
-  # with no error).
+  # the mounted /home/agent/.claude/projects — e.g. absent after the cache
+  # was evicted, or on the first fix pass following a crash — in which case
+  # this prints nothing and the caller falls back to the cold-context fix
+  # flow with no error).
   sessionFlagsFnBody = ''
     local h id
     h="$(printf '%s' "spindrift-session:''${REPO_SLUG:-}:''${ISSUE_NUMBER:-}" | sha256sum | cut -c1-32)"

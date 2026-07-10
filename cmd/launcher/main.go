@@ -450,7 +450,9 @@ func build() error {
 // that can dispatch a Box (run, the selective-list `dispatch <nums>` path,
 // and `recover`) creates it and defers cleanup; nil (the zero value, as in
 // every other test in this package) degrades transitionState's eviction and
-// runOne/runFix/runConflictResolve's Box population to no-ops.
+// runOne/runFix's Box population to no-ops. runConflictResolve does not
+// consult it -- session resume is a fix-flow concern, and its short-lived
+// rebase-conflict box never runs the main agent prompt.
 var activeDriverCache *driverCache
 
 // transitionState is a best-effort dispatch-state transition that logs but
@@ -1884,34 +1886,42 @@ func main() {
 		nums := dispatchIssueArgs(dispatchArgs)
 		if len(nums) > 0 {
 			// Operator explicit list: selective path (bypasses label/barrier gates).
-			defer setupDriverCache()()
+			// os.Exit skips defers, so cleanup is called explicitly on every
+			// exit path below rather than deferred.
+			cleanupDriverCache := setupDriverCache()
 			pwd, err := os.Getwd()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
+				cleanupDriverCache()
 				os.Exit(1)
 			}
 			c := loadConfig()
 			if err := validate(c); err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
+				cleanupDriverCache()
 				os.Exit(1)
 			}
 			r := newRunner(c, pwd)
 			if noBuild {
 				if err := r.IsReady(); err != nil {
 					fmt.Fprintf(os.Stderr, "%s\n", err)
+					cleanupDriverCache()
 					os.Exit(1)
 				}
 			} else {
 				if err := r.EnsureReady(); err != nil {
 					fmt.Fprintf(os.Stderr, "%s\n", err)
+					cleanupDriverCache()
 					os.Exit(1)
 				}
 			}
 			fc := newForgeClient(c)
 			if err := selectiveListDispatch(c, fc, pwd, r, nums, forceYes, os.Stdin, os.Stdout); err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
+				cleanupDriverCache()
 				os.Exit(1)
 			}
+			cleanupDriverCache()
 			return
 		}
 		if err := run(noBuild); err != nil {

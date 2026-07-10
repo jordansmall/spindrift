@@ -61,9 +61,10 @@ fi
 # _driver_session_flags computes the Driver's own session pin/resume argv
 # (issue #427/ADR 0009): `initial` pins a deterministic per-issue session id
 # on the cold run; `resume` re-emits it on a fix pass only when that
-# session's data is actually present under the mounted /home/agent/.claude,
-# printing nothing (a clean fallback to the cold-context fix flow) when it
-# is not. A nix-built image prepends the selected Driver's own definition
+# session's data is actually present under the mounted
+# /home/agent/.claude/projects, printing nothing (a clean fallback to the
+# cold-context fix flow) when it is not. A nix-built image prepends the
+# selected Driver's own definition
 # (lib/drivers/<name>.nix sessionFlagsFnBody); the guard keeps that
 # definition, falling back to claude's own scheme only in standalone/bats
 # runs, matching the byte-identical convention above.
