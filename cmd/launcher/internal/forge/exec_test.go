@@ -2,12 +2,127 @@ package forge
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// fakeGH writes a fake gh script to dir and returns the augmented PATH that
+// picks it up first. The script exits with exitCode and prints stderr to
+// os.Stderr, then records its argv to dir/gh-args.txt.
+func fakeGH(t *testing.T, exitCode int, fakeStderr string) (ghDir string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$@" > "%s/gh-args.txt"
+printf '%%s' %q >&2
+exit %d
+`, dir, fakeStderr, exitCode)
+	ghPath := filepath.Join(dir, "gh")
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// withFakeGH prepends dir to PATH for the duration of the test.
+func withFakeGH(t *testing.T, dir string) {
+	t.Helper()
+	old := os.Getenv("PATH")
+	t.Cleanup(func() { os.Setenv("PATH", old) })
+	os.Setenv("PATH", dir+":"+old)
+}
+
+// TestProbe_PositionalSlug verifies that Probe passes the slug as a positional
+// argument to `gh repo view` (no --repo flag).
+func TestProbe_PositionalSlug(t *testing.T) {
+	// We need two fake gh scripts: one for `gh auth status` (success) and one
+	// for `gh repo view`. A single script handles both calls — we only inspect
+	// the args file from the repo-view call, which is the second invocation.
+	// Use a counting wrapper approach: write args to numbered files.
+	dir := t.TempDir()
+	script := fmt.Sprintf(`#!/bin/sh
+n=$(ls "%s"/call-*.txt 2>/dev/null | wc -l)
+printf '%%s\n' "$@" > "%s/call-$(printf '%%02d' $n).txt"
+`, dir, dir)
+	ghPath := filepath.Join(dir, "gh")
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	withFakeGH(t, dir)
+
+	c := NewExecClient("owner/repo", DispatchLabels{})
+	// Both gh calls succeed (exit 0). Probe may return an error because the
+	// output is empty — that's fine; we only care about the argv shape.
+	it, ok := c.(interface{ Probe() (string, error) })
+	if !ok {
+		t.Fatal("Client does not expose Probe")
+	}
+	it.Probe() //nolint:errcheck
+
+	// The second call (call-01.txt) is `gh repo view …`
+	argsFile := filepath.Join(dir, "call-01.txt")
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("call-01.txt not written: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+
+	// Must contain "owner/repo" as a positional arg.
+	found := false
+	for _, a := range args {
+		if a == "owner/repo" {
+			found = true
+		}
+		// Must NOT contain --repo flag.
+		if a == "--repo" {
+			t.Fatalf("Probe passed --repo flag to gh repo view; args: %q", args)
+		}
+	}
+	if !found {
+		t.Fatalf("slug not found as positional arg in gh repo view; args: %q", args)
+	}
+}
+
+// TestProbe_StderrSurfaced verifies that when gh repo view fails, the returned
+// error contains gh's actual stderr rather than just the configured slug.
+func TestProbe_StderrSurfaced(t *testing.T) {
+	// Call 0: gh auth status — succeed.
+	// Call 1: gh repo view — fail with a distinctive stderr.
+	dir := t.TempDir()
+	script := fmt.Sprintf(`#!/bin/sh
+n=$(ls "%s"/call-*.txt 2>/dev/null | wc -l)
+printf '%%s\n' "$@" > "%s/call-$(printf '%%02d' $n).txt"
+if [ "$1" = "repo" ]; then
+  printf 'unknown flag: --repo\n' >&2
+  exit 1
+fi
+`, dir, dir)
+	ghPath := filepath.Join(dir, "gh")
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	withFakeGH(t, dir)
+
+	c := NewExecClient("owner/repo", DispatchLabels{})
+	it, ok := c.(interface{ Probe() (string, error) })
+	if !ok {
+		t.Fatal("Client does not expose Probe")
+	}
+	_, err := it.Probe()
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !errors.Is(err, ErrRepoNotFound) {
+		t.Fatalf("want ErrRepoNotFound, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("error must contain gh's stderr; got: %v", err)
+	}
+}
 
 // TestGitForcePush_CapturesStderr verifies that a rejected force-with-lease
 // push returns an error containing git's stderr, not just the exit status.
