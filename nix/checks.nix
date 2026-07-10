@@ -94,6 +94,10 @@ in
         # (no /agent/outcome-contract.md on the bats build host) still exercise
         # the same canonical text an image would bake (issue #420).
         OUTCOME_CONTRACT_FILE = batsHarness.outcomeContractFile;
+        # The Driver's registry-rendered function definitions; helper.bash
+        # prepends this before exec-ing the entrypoint so the bats suite
+        # exercises the same bodies the image bakes in (issue #433).
+        DRIVER_PREAMBLE_FILE = batsHarness.driverFunctionsFile;
         # Harnesses with baked skills for skills-precedence tests.
         SKILLS_RUN_CMD = "${skillsHarness.run}/bin/run";
         SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.run}/bin/run";

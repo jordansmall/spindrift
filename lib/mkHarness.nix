@@ -314,6 +314,19 @@ let
   # — proof the two cannot drift apart (issue #419).
   outcomeContractFile = hostPkgs.writeText "outcome-contract.md" outcomeContract;
 
+  # The Driver's function definitions as a host store-path file.  The bats
+  # harness prepends this before exec-ing the entrypoint (issue #433) so tests
+  # exercise the same registry-rendered bodies that mkHarness bakes into the
+  # image — not any hand-copied duplicates in the entrypoint itself.
+  driverFunctionsFile = hostPkgs.writeText "driver-functions.sh" (
+    "_driver_extract_outcome() {\n"
+    + driverEntry.outcomeExtractFnBody
+    + "}\n"
+    + "_driver_session_flags() {\n"
+    + driverEntry.sessionFlagsFnBody
+    + "}\n"
+  );
+
   # The rendered prompt directory as a host store path (native-buildable on
   # darwin, so it needs no Linux builder). The prompt is normally baked into
   # the image via agentFiles; this output exists so tests can assert it is NOT
@@ -802,6 +815,7 @@ else
       promptDir
       skillsDir
       outcomeContractFile
+      driverFunctionsFile
       ;
 
     packages = {
