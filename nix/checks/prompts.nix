@@ -92,14 +92,16 @@ in
     touch $out
   '';
 
-  mkharness-prompt-fix-outcome-injected = pkgs.runCommand "mkharness-prompt-fix-outcome-injected" { } ''
-    count=$(grep -c '# LAND THE CHANGE' ${batsHarness.promptDir}/fix-prompt.md)
-    [ "$count" -eq 1 ] || {
-      echo "expected the fix prompt's outcome contract injected exactly once, got $count" >&2
-      exit 1
-    }
-    touch $out
-  '';
+  mkharness-prompt-fix-outcome-injected =
+    pkgs.runCommand "mkharness-prompt-fix-outcome-injected" { }
+      ''
+        count=$(grep -c '# LAND THE CHANGE' ${batsHarness.promptDir}/fix-prompt.md)
+        [ "$count" -eq 1 ] || {
+          echo "expected the fix prompt's outcome contract injected exactly once, got $count" >&2
+          exit 1
+        }
+        touch $out
+      '';
 
   # A Consumer fixPrompt that carries only a fix-specific preamble — no
   # shared-block markers at all — must still gain all three, in COMMS, CHECK,
@@ -139,11 +141,13 @@ in
     touch $out
   '';
 
-  mkharness-prompt-fix-outcome-no-drift = pkgs.runCommand "mkharness-prompt-fix-outcome-no-drift" { } ''
-    awk '/# LAND THE CHANGE/{f=1} f' ${fixPromptHarness.promptDir}/fix-prompt.md > injected-contract.txt
-    diff ${batsHarness.outcomeContractFile} injected-contract.txt
-    touch $out
-  '';
+  mkharness-prompt-fix-outcome-no-drift =
+    pkgs.runCommand "mkharness-prompt-fix-outcome-no-drift" { }
+      ''
+        awk '/# LAND THE CHANGE/{f=1} f' ${fixPromptHarness.promptDir}/fix-prompt.md > injected-contract.txt
+        diff ${batsHarness.outcomeContractFile} injected-contract.txt
+        touch $out
+      '';
 
   # Grep pin (issue #455 acceptance criteria): the WATCH CI GraphQL query
   # literal must appear in exactly one prompt *source* file on disk.
