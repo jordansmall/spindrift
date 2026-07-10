@@ -45,7 +45,13 @@ let
   # same revision as the dogfood module (passed in from flake.nix).
   harness = import ../lib/mkHarness.nix {
     inherit nixpkgs system revision;
-    inherit (dogfoodDefaults) prefetch packages defaults nixStoreWritable extraClosures;
+    inherit (dogfoodDefaults)
+      prefetch
+      packages
+      defaults
+      nixStoreWritable
+      extraClosures
+      ;
     skills = dogfoodSkills;
   };
 
