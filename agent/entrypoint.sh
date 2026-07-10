@@ -269,6 +269,28 @@ Best-effort: filing must never block the PR or change the outcome line.
 "
 fi
 
+# AUTO_FORMAT_STEP is substituted into the issue prompt only when AUTO_FORMAT
+# is non-empty (opt-in knob) — the same conditional-residue mechanism as
+# FILE_ISSUES_STEP above: empty when off, so a default box carries no trace of
+# the step and the formatter is never mentioned.
+AUTO_FORMAT_STEP=""
+if [ -n "${AUTO_FORMAT:-}" ]; then
+  AUTO_FORMAT_STEP='# AUTO-FORMAT
+
+Before committing, auto-format the files you changed:
+
+1. Detect the project'"'"'s formatter, in order of preference:
+   - `nix fmt` when the target flake defines a formatter.
+   - A `format` or `fmt` script/target in `package.json`, `Makefile`, or `justfile`.
+   - The standard formatter for the language (e.g. `gofmt -w`, `cargo fmt`, `black`).
+2. Run it only on the files you changed (from `git diff --name-only` vs the
+   base branch), where the formatter accepts explicit paths. Fall back to a
+   project-wide run when the formatter does not support per-file invocation.
+3. Skip silently when no formatter is found — this must never fail the run.
+
+'
+fi
+
 # CI_FAILURE_STEP is substituted into the fix prompt only when the launcher
 # forwarded a CI_FAILURE_SUMMARY (selfHeal captured it on genuine-red, issue
 # #426) — the same conditional-residue mechanism as SKILL_PREAMBLE above:
@@ -299,8 +321,9 @@ _subst() {
     COMPLETE_LABEL="${COMPLETE_LABEL:-}" \
     SKILL_PREAMBLE="${SKILL_PREAMBLE:-}" \
     FILE_ISSUES_STEP="${FILE_ISSUES_STEP:-}" \
+    AUTO_FORMAT_STEP="${AUTO_FORMAT_STEP:-}" \
     CI_FAILURE_STEP="${CI_FAILURE_STEP:-}" \
-    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE $FILE_ISSUES_STEP $CI_FAILURE_STEP' \
+    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE $FILE_ISSUES_STEP $AUTO_FORMAT_STEP $CI_FAILURE_STEP' \
     <"$1"
 }
 # When the pre-work rebase produced conflicts, spawn a conflict-resolve agent to
