@@ -26,6 +26,7 @@ in
 // (import ./equivalence.nix common)
 // (import ./prompts.nix common)
 // (import ./schema-drift.nix common)
+// (import ./dispatch-labels.nix common)
 // (import ./changelog.nix common)
 // (import ./go.nix common)
 // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (import ./image.nix common)
