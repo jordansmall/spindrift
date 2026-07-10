@@ -85,14 +85,15 @@
             #                       pidsLimit            = "512";
             #                       podmanNetwork        = "";
             #                       bwrapUnshareNet      = ""; };
-            #   repository      = { repoSlug           = "owner/repo";
-            #                       gitUserName        = "";
-            #                       gitUserEmail       = "";
-            #                       codeForge          = "github";
-            #                       codeForgeRemoteURL = "";
-            #                       jiraBaseURL        = "";
-            #                       jiraProjectKey     = "";
-            #                       jiraEmail          = ""; };
+            #   repository           = { repoSlug           = "owner/repo";
+            #                            gitUserName        = "";
+            #                            gitUserEmail       = "";
+            #                            codeForge          = "github";
+            #                            codeForgeRemoteURL = "";
+            #                            jiraBaseURL        = "";
+            #                            jiraProjectKey     = "";
+            #                            jiraEmail          = ""; };
+            #   promptSkillIteration = { autoFormat = false; };
             # };
           };
 
