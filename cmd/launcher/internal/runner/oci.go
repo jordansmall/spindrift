@@ -23,10 +23,16 @@ type ociAdapter struct {
 	flakeImageAttr  string // nix flake attr for the image (.#packages.x.agent-image)
 	pwd             string // $PWD; container-fallback mounts this as /workspace
 	promptDir       string // optional host path to mount over /agent/prompts
-	skillsDir       string // optional host path to mount over /home/agent/.claude/skills
-	podmanNetwork   string // optional --network value; empty omits the flag
-	pidsLimit       string // --pids-limit value; empty disables the flag
-	memoryLimit     string // --memory value; empty disables the flag
+	skillsDir       string // optional host path to mount over driverSkillsDir
+	driverSkillsDir string // in-box skills mount target (Driver declaration, ADR 0009)
+	// driverSessionCacheDir is the in-box mount target for the Driver's
+	// session-state dir (Driver declaration, ADR 0009); empty when the
+	// selected Driver declares no session-state dir, in which case
+	// box.DriverCacheDir is never mounted regardless of its value.
+	driverSessionCacheDir string
+	podmanNetwork         string // optional --network value; empty omits the flag
+	pidsLimit             string // --pids-limit value; empty disables the flag
+	memoryLimit           string // --memory value; empty disables the flag
 }
 
 // NewOCI constructs an OCI adapter from cfg. pwd is the working directory
@@ -212,19 +218,20 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 			args = append(args, "-v", a.promptDir+":/agent/prompts:ro")
 		}
 	}
-	if box.DriverCacheDir != "" {
+	if box.DriverCacheDir != "" && a.driverSessionCacheDir != "" {
 		if info, err := os.Stat(box.DriverCacheDir); err == nil && info.IsDir() {
-			// Scoped to .claude/projects (where claude's session transcripts
-			// live), not the whole .claude, which would shadow the baked
-			// .claude/skills the image ships — OCI has no host-side path to
-			// re-mount baked skills over, unlike bwrap's agentFiles fallback.
-			args = append(args, "-v", box.DriverCacheDir+":/home/agent/.claude/projects")
+			// Scoped to the Driver's declared session-cache dir (e.g.
+			// .claude/projects for claude), not the whole .claude, which
+			// would shadow the baked .claude/skills the image ships — OCI
+			// has no host-side path to re-mount baked skills over, unlike
+			// bwrap's agentFiles fallback.
+			args = append(args, "-v", box.DriverCacheDir+":"+a.driverSessionCacheDir)
 		}
 	}
-	if a.skillsDir != "" {
+	if a.skillsDir != "" && a.driverSkillsDir != "" {
 		if info, err := os.Stat(a.skillsDir); err == nil && info.IsDir() {
-			fmt.Printf("==> SPINDRIFT_SKILLS_DIR set; mounting %s over /home/agent/.claude/skills\n", a.skillsDir)
-			args = append(args, "-v", a.skillsDir+":/home/agent/.claude/skills:ro")
+			fmt.Printf("==> SPINDRIFT_SKILLS_DIR set; mounting %s over %s\n", a.skillsDir, a.driverSkillsDir)
+			args = append(args, "-v", a.skillsDir+":"+a.driverSkillsDir+":ro")
 		}
 	}
 	// Security hardening — always drop all capabilities and block privilege

@@ -58,15 +58,38 @@ func TestBwrapArgs_NoClearEnv(t *testing.T) {
 func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
-		agentFiles:    "/fake/agent",
-		agentEnv:      "/fake/env",
-		bakedPrefetch: "echo ok",
-		skillsDir:     dir,
+		agentFiles:      "/fake/agent",
+		agentEnv:        "/fake/env",
+		bakedPrefetch:   "echo ok",
+		skillsDir:       dir,
+		driverSkillsDir: "/home/agent/.claude/skills",
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
 	argStr := strings.Join(args, " ")
 	want := "--ro-bind " + dir + " /home/agent/.claude/skills"
+	if !strings.Contains(argStr, want) {
+		t.Errorf("skills bind %q not found in args: %v", want, args)
+	}
+}
+
+// TestBwrapArgs_SkillsMountTarget_FromDriverDeclaration verifies the box-side
+// skills bind target comes from the adapter's driverSkillsDir field
+// (populated by the Driver declaration, ADR 0009) rather than a hardcoded
+// ".claude/skills" literal.
+func TestBwrapArgs_SkillsMountTarget_FromDriverDeclaration(t *testing.T) {
+	dir := t.TempDir()
+	a := &bwrapAdapter{
+		agentFiles:      "/fake/agent",
+		agentEnv:        "/fake/env",
+		bakedPrefetch:   "echo ok",
+		skillsDir:       dir,
+		driverSkillsDir: "/home/agent/custom-driver/skills",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	argStr := strings.Join(args, " ")
+	want := "--ro-bind " + dir + " /home/agent/custom-driver/skills"
 	if !strings.Contains(argStr, want) {
 		t.Errorf("skills bind %q not found in args: %v", want, args)
 	}
@@ -78,9 +101,10 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
-		agentFiles:    "/fake/agent",
-		agentEnv:      "/fake/env",
-		bakedPrefetch: "echo ok",
+		agentFiles:            "/fake/agent",
+		agentEnv:              "/fake/env",
+		bakedPrefetch:         "echo ok",
+		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
 
@@ -100,9 +124,10 @@ func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
 func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
-		agentFiles:    "/fake/agent",
-		agentEnv:      "/fake/env",
-		bakedPrefetch: "echo ok",
+		agentFiles:            "/fake/agent",
+		agentEnv:              "/fake/env",
+		bakedPrefetch:         "echo ok",
+		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
 
@@ -120,9 +145,10 @@ func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 func TestBwrapArgs_DriverCacheDir_DotClaudeParentCreated(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
-		agentFiles:    "/fake/agent",
-		agentEnv:      "/fake/env",
-		bakedPrefetch: "echo ok",
+		agentFiles:            "/fake/agent",
+		agentEnv:              "/fake/env",
+		bakedPrefetch:         "echo ok",
+		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
 
@@ -147,13 +173,59 @@ func TestBwrapArgs_DriverCacheDir_DotClaudeParentCreated(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_DriverCacheDirUnset_NoMount verifies that omitting
-// Box.DriverCacheDir produces no /home/agent/.claude/projects bind.
-func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
+// TestBwrapArgs_DriverCacheMountTarget_FromDriverDeclaration verifies the
+// box-side session-cache bind target, and the --dir parent it creates first,
+// come from the adapter's driverSessionCacheDir field (populated by the
+// Driver declaration, ADR 0009) rather than a hardcoded ".claude/projects"
+// literal.
+func TestBwrapArgs_DriverCacheMountTarget_FromDriverDeclaration(t *testing.T) {
+	dir := t.TempDir()
+	a := &bwrapAdapter{
+		agentFiles:            "/fake/agent",
+		agentEnv:              "/fake/env",
+		bakedPrefetch:         "echo ok",
+		driverSessionCacheDir: "/home/agent/custom-driver/state",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+
+	argStr := strings.Join(args, " ")
+	wantBind := "--bind " + dir + " /home/agent/custom-driver/state"
+	if !strings.Contains(argStr, wantBind) {
+		t.Errorf("driver cache bind %q not found in args: %v", wantBind, args)
+	}
+	wantDir := "--dir /home/agent/custom-driver"
+	if !strings.Contains(argStr, wantDir) {
+		t.Errorf("parent %q not found in args: %v", wantDir, args)
+	}
+}
+
+// TestBwrapArgs_DriverSessionCacheDirUndeclared_NoMount verifies that a
+// Driver declaring no session-state dir yields no cache bind even when a
+// host DriverCacheDir is present -- there is no in-box target to bind it
+// over (issue #448).
+func TestBwrapArgs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
+	dir := t.TempDir()
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+	for _, arg := range args {
+		if arg == dir {
+			t.Errorf("unexpected driver cache bind in args when Driver declares no session-cache dir: %v", args)
+		}
+	}
+}
+
+// TestBwrapArgs_DriverCacheDirUnset_NoMount verifies that omitting
+// Box.DriverCacheDir produces no /home/agent/.claude/projects bind.
+func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:            "/fake/agent",
+		agentEnv:              "/fake/env",
+		bakedPrefetch:         "echo ok",
+		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 	argStr := strings.Join(args, " ")
@@ -188,10 +260,11 @@ func TestBwrapArgs_BakedSkillsMounted(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &bwrapAdapter{
-		agentFiles:    dir,
-		agentEnv:      "/fake/env",
-		bakedPrefetch: "echo ok",
-		skillsDir:     "",
+		agentFiles:      dir,
+		agentEnv:        "/fake/env",
+		bakedPrefetch:   "echo ok",
+		skillsDir:       "",
+		driverSkillsDir: "/home/agent/.claude/skills",
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 	argStr := strings.Join(args, " ")
@@ -212,10 +285,11 @@ func TestBwrapArgs_RuntimeSkillsTakePrecedence(t *testing.T) {
 	}
 	runtimeSkills := t.TempDir()
 	a := &bwrapAdapter{
-		agentFiles:    agentDir,
-		agentEnv:      "/fake/env",
-		bakedPrefetch: "echo ok",
-		skillsDir:     runtimeSkills,
+		agentFiles:      agentDir,
+		agentEnv:        "/fake/env",
+		bakedPrefetch:   "echo ok",
+		skillsDir:       runtimeSkills,
+		driverSkillsDir: "/home/agent/.claude/skills",
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 	argStr := strings.Join(args, " ")

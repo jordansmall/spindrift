@@ -193,9 +193,10 @@ func TestBuildRunArgsImageIsLast(t *testing.T) {
 func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:       "podman",
-		image:     "spindrift:test",
-		skillsDir: dir,
+		cli:             "podman",
+		image:           "spindrift:test",
+		skillsDir:       dir,
+		driverSkillsDir: "/home/agent/.claude/skills",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
@@ -206,11 +207,33 @@ func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 	}
 }
 
+// TestBuildRunArgs_SkillsMountTarget_FromDriverDeclaration verifies the
+// box-side skills mount target comes from the adapter's driverSkillsDir
+// field (populated by the Driver declaration, ADR 0009) rather than a
+// hardcoded ".claude/skills" literal.
+func TestBuildRunArgs_SkillsMountTarget_FromDriverDeclaration(t *testing.T) {
+	dir := t.TempDir()
+	a := &ociAdapter{
+		cli:             "podman",
+		image:           "spindrift:test",
+		skillsDir:       dir,
+		driverSkillsDir: "/home/agent/custom-driver/skills",
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	args := a.buildRunArgs(box)
+
+	want := dir + ":/home/agent/custom-driver/skills:ro"
+	if !containsArg(args, want) {
+		t.Errorf("skills mount %q not found in args: %v", want, args)
+	}
+}
+
 func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:   "podman",
-		image: "spindrift:test",
+		cli:                   "podman",
+		image:                 "spindrift:test",
+		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
 	args := a.buildRunArgs(box)
@@ -232,8 +255,9 @@ func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 func TestBuildRunArgs_DriverCacheDirMounted_BakedSkillsSurvive(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:   "podman",
-		image: "spindrift:test",
+		cli:                   "podman",
+		image:                 "spindrift:test",
+		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
 	args := a.buildRunArgs(box)
@@ -248,8 +272,9 @@ func TestBuildRunArgs_DriverCacheDirMounted_BakedSkillsSurvive(t *testing.T) {
 func TestBuildRunArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:   "podman",
-		image: "spindrift:test",
+		cli:                   "podman",
+		image:                 "spindrift:test",
+		driverSessionCacheDir: "/home/agent/.claude/projects",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
 	args := a.buildRunArgs(box)
@@ -272,6 +297,46 @@ func TestBuildRunArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 	for _, arg := range args {
 		if strings.Contains(arg, "/home/agent/.claude/projects") {
 			t.Errorf("unexpected driver cache mount in args when DriverCacheDir is empty: %v", args)
+		}
+	}
+}
+
+// TestBuildRunArgs_DriverCacheMountTarget_FromDriverDeclaration verifies the
+// box-side session-cache mount target comes from the adapter's
+// driverSessionCacheDir field (populated by the Driver declaration, ADR
+// 0009) rather than a hardcoded ".claude/projects" literal.
+func TestBuildRunArgs_DriverCacheMountTarget_FromDriverDeclaration(t *testing.T) {
+	dir := t.TempDir()
+	a := &ociAdapter{
+		cli:                   "podman",
+		image:                 "spindrift:test",
+		driverSessionCacheDir: "/home/agent/custom-driver/state",
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
+	args := a.buildRunArgs(box)
+
+	want := dir + ":/home/agent/custom-driver/state"
+	if !containsArg(args, want) {
+		t.Errorf("driver cache mount %q not found in args: %v", want, args)
+	}
+}
+
+// TestBuildRunArgs_DriverSessionCacheDirUndeclared_NoMount verifies that a
+// Driver declaring no session-state dir yields no cache mount even when a
+// host DriverCacheDir is present -- there is no in-box target to mount it
+// over (issue #448).
+func TestBuildRunArgs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
+	dir := t.TempDir()
+	a := &ociAdapter{
+		cli:   "podman",
+		image: "spindrift:test",
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
+	args := a.buildRunArgs(box)
+
+	for _, arg := range args {
+		if strings.HasPrefix(arg, dir+":") {
+			t.Errorf("unexpected driver cache mount in args when Driver declares no session-cache dir: %v", args)
 		}
 	}
 }
