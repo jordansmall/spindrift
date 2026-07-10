@@ -71,7 +71,7 @@ func selectiveListDispatch(c config, fc forge.Client, pwd string, f *dispatch.Fa
 		return dispatchWaves(c, fc, f, s, issues, edges)
 	}
 	fmt.Fprintf(stdout, "==> %d issue(s); launching up to %d container(s) at a time\n", len(issues), c.maxParallel)
-	fanOut(c, fc, f, s, issues)
+	dispatchWave(c, fc, f, s, issues)
 	return nil
 }
 

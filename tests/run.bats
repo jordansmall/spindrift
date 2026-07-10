@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Behaviour of the nix-generated `run` command (fans out one Box per issue).
+# Behaviour of the nix-generated `run` command (launches one Box per issue).
 
 load helper
 
@@ -68,7 +68,7 @@ setup() {
   grep -q "^tag spindrift:latest spindrift:$image_hash" "$PODMAN_LOG"
 }
 
-@test "run fans out one container per issue" {
+@test "run launches one container per issue" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
@@ -785,7 +785,7 @@ EOF
 
 # --- bwrap runner (issue #54) ------------------------------------------------
 
-@test "runtime=bwrap fans out one bwrap invocation per issue" {
+@test "runtime=bwrap launches one bwrap invocation per issue" {
   run "$BWRAP_RUN_CMD"
   [ "$status" -eq 0 ]
   # Each issue must have its own per-issue log file so concurrent writes never

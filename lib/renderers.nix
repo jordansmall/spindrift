@@ -220,7 +220,7 @@ rec {
       ''
         .TH SPINDRIFT 1 "${spindriftVersion}" "spindrift ${spindriftVersion}" "Spindrift Manual"
         .SH NAME
-        spindrift \- fan out headless Claude Code agents across GitHub issues
+        spindrift \- launch waves of headless Claude Code agents across GitHub issues
         .SH SYNOPSIS
         .B spindrift
         [\fIflags\fR] \fIsubcommand\fR [\fIargs\fR]

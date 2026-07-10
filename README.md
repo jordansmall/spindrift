@@ -47,7 +47,7 @@ $EDITOR prompts/issue-prompt.md          # tune the agent's workflow
 cp harness.env.example harness.env       # fill in REPO_SLUG, GH_TOKEN, Claude auth
 nix develop                              # enter the dev shell — puts spindrift on PATH
 spindrift build                          # realize the image, then load it  (slow first time)
-spindrift dispatch                       # fan out one container per ready-for-agent issue
+spindrift dispatch                       # launch one container per ready-for-agent issue
 ```
 
 Run commands **from your Consumer flake's directory**: `spindrift build` reads the

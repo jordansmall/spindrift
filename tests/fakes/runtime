@@ -13,7 +13,7 @@ log_var="${rt}_LOG"
 log="${!log_var}"
 
 # bwrap: extract ISSUE_NUMBER early so each concurrent box writes its own log
-# file, eliminating concurrent-write races when multiple issues fan out.
+# file, eliminating concurrent-write races when multiple issues run concurrently.
 issue_num=""
 if [ "$runtime" = "bwrap" ]; then
   _args=("$@")

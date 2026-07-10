@@ -183,7 +183,7 @@ var groupOrder = []string{
 // printSubcommands writes the shared subcommand listing used by both help modes.
 func printSubcommands(w io.Writer) {
 	fmt.Fprintln(w, "Subcommands:")
-	fmt.Fprintln(w, "  dispatch [--no-build] [--yes] [issue...]  fan out agents; an issue list dispatches exactly those (bypasses label/barrier gates)")
+	fmt.Fprintln(w, "  dispatch [--no-build] [--yes] [issue...]  dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)")
 	fmt.Fprintln(w, "  preview [issue...]                        dry-run: show what dispatch would pick up, in order")
 	fmt.Fprintln(w, "  build                                     realize the agent image without running any agent")
 	fmt.Fprintln(w, "  recover <issue>                           run the merge gate for a single issue")
@@ -195,7 +195,7 @@ func printSubcommands(w io.Writer) {
 // (man spindrift / --help --all). The exhaustive knob list lives in
 // printHelpFull so the default --help stays scannable.
 func printHelp(w io.Writer) {
-	fmt.Fprintln(w, "spindrift — fan out headless Claude Code agents across GitHub issues")
+	fmt.Fprintln(w, "spindrift — launch waves of headless Claude Code agents across GitHub issues")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage: spindrift [flags] <subcommand> [args]")
 	fmt.Fprintln(w)
@@ -217,7 +217,7 @@ func printHelp(w io.Writer) {
 // every knob grouped by category (flag > env > default precedence), and the
 // secret env-only / file-flag surface. Reached via `spindrift --help --all`.
 func printHelpFull(w io.Writer) {
-	fmt.Fprintln(w, "spindrift — fan out headless Claude Code agents across GitHub issues")
+	fmt.Fprintln(w, "spindrift — launch waves of headless Claude Code agents across GitHub issues")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage: spindrift [flags] <subcommand> [args]")
 	fmt.Fprintln(w)

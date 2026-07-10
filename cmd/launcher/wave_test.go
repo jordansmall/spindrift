@@ -45,10 +45,10 @@ func (r *signalRunner) Run(_ runner.Box) error {
 	return nil
 }
 
-// TestFanOut_ClaimsGatedByMaxParallel verifies that claimIssue is called only
+// TestDispatchWave_ClaimsGatedByMaxParallel verifies that claimIssue is called only
 // after acquiring the semaphore slot, so at most maxParallel issues are claimed
 // at any point in time.
-func TestFanOut_ClaimsGatedByMaxParallel(t *testing.T) {
+func TestDispatchWave_ClaimsGatedByMaxParallel(t *testing.T) {
 	c := baseConfig()
 	c.maxParallel = 1
 	c.label = "agent-trigger"
@@ -67,13 +67,13 @@ func TestFanOut_ClaimsGatedByMaxParallel(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(c, fc)
-	fanDone := make(chan struct{})
+	waveDone := make(chan struct{})
 	go func() {
-		fanOut(c, fc, f, s, []issue{
+		dispatchWave(c, fc, f, s, []issue{
 			{number: "1", title: "first"},
 			{number: "2", title: "second"},
 		})
-		close(fanDone)
+		close(waveDone)
 	}()
 
 	// Block until the first run starts (sem is held; second goroutine cannot claim yet).
@@ -93,22 +93,22 @@ func TestFanOut_ClaimsGatedByMaxParallel(t *testing.T) {
 	// Release the first run and wait for all work to finish.
 	close(fr.release)
 	select {
-	case <-fanDone:
+	case <-waveDone:
 	case <-time.After(5 * time.Second):
-		t.Fatal("fanOut did not complete")
+		t.Fatal("dispatchWave did not complete")
 	}
 
 	// Both issues must have been claimed by the end.
 	if got = atomic.LoadInt32(&count); got != 2 {
-		t.Errorf("total claims after fanOut: got %d, want 2", got)
+		t.Errorf("total claims after dispatchWave: got %d, want 2", got)
 	}
 }
 
-// TestFanOut_FailingContainerReleasesSemaphoreForLaterClaim verifies that when the
+// TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim verifies that when the
 // first container fails, the semaphore slot is freed and the next issue can be
 // claimed. This is the acceptance-criteria scenario: MAX_PARALLEL=1, failing first
 // container, later issues only claimed after the slot frees.
-func TestFanOut_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.T) {
+func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.T) {
 	c := baseConfig()
 	c.maxParallel = 1
 	c.label = "agent-trigger"
@@ -126,7 +126,7 @@ func TestFanOut_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(c, cfc)
-	fanOut(c, cfc, f, s, []issue{
+	dispatchWave(c, cfc, f, s, []issue{
 		{number: "1", title: "first"},
 		{number: "2", title: "second"},
 	})
@@ -134,7 +134,7 @@ func TestFanOut_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.T) {
 	// Both issues must have been claimed — the failing first container must not
 	// prevent the second issue from being dispatched.
 	if got := atomic.LoadInt32(&count); got != 2 {
-		t.Errorf("total claims after fanOut with failing first box: got %d, want 2", got)
+		t.Errorf("total claims after dispatchWave with failing first box: got %d, want 2", got)
 	}
 
 	// Exactly one issue must carry failedLabel (the one whose box exited non-zero).
@@ -154,11 +154,11 @@ func TestFanOut_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.T) {
 	}
 }
 
-// TestFanOut_GatesEachIssueAfterBoxCompletes verifies that the merge gate runs
+// TestDispatchWave_GatesEachIssueAfterBoxCompletes verifies that the merge gate runs
 // inside each goroutine immediately after its box exits. An issue with a "ready"
-// outcome and green CI must reach completeLabel before fanOut returns, without
+// outcome and green CI must reach completeLabel before dispatchWave returns, without
 // waiting for sibling boxes to finish.
-func TestFanOut_GatesEachIssueAfterBoxCompletes(t *testing.T) {
+func TestDispatchWave_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	const prURL = "https://github.com/owner/repo/pull/10"
 
 	c := baseConfig()
@@ -181,23 +181,23 @@ func TestFanOut_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(c, fc)
-	fanOut(c, fc, f, s, []issue{{number: "1", title: "first"}})
+	dispatchWave(c, fc, f, s, []issue{{number: "1", title: "first"}})
 
 	iss, err := fc.Issue("1")
 	if err != nil {
 		t.Fatalf("Issue(%q): %v", "1", err)
 	}
 	if !containsLabel(iss.Labels, c.completeLabel) {
-		t.Errorf("issue 1 must have %q after fanOut; got labels=%v", c.completeLabel, iss.Labels)
+		t.Errorf("issue 1 must have %q after dispatchWave; got labels=%v", c.completeLabel, iss.Labels)
 	}
 }
 
-// TestFanOut_GitForge_ImmediateLandsWithoutVerifyingAPR verifies that a
+// TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR verifies that a
 // CODE_FORGE=git outcome carrying a branch ref (not a PR URL) lands cleanly
-// through the same fanOut→settle.Settle path used for github: the issue reaches
+// through the same dispatchWave→settle.Settle path used for github: the issue reaches
 // agent-complete and is never demoted to agent-failed by a PR-shaped
 // post-merge check that does not apply to a push-only forge.
-func TestFanOut_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
+func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	const branch = "agent/issue-1"
 
 	c := baseConfig()
@@ -223,14 +223,14 @@ func TestFanOut_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(c, fc)
-	fanOut(c, fc, f, s, []issue{{number: "1", title: "first"}})
+	dispatchWave(c, fc, f, s, []issue{{number: "1", title: "first"}})
 
 	iss, err := fc.Issue("1")
 	if err != nil {
 		t.Fatalf("Issue(%q): %v", "1", err)
 	}
 	if !containsLabel(iss.Labels, c.completeLabel) {
-		t.Errorf("issue 1 must have %q after fanOut; got labels=%v", c.completeLabel, iss.Labels)
+		t.Errorf("issue 1 must have %q after dispatchWave; got labels=%v", c.completeLabel, iss.Labels)
 	}
 	if containsLabel(iss.Labels, c.failedLabel) {
 		t.Errorf("issue 1 must NOT have %q; got labels=%v", c.failedLabel, iss.Labels)
@@ -240,13 +240,13 @@ func TestFanOut_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	}
 }
 
-// TestFanOut_GitForge_MergedStatusDoesNotDemoteToFailed verifies that a
+// TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed verifies that a
 // CODE_FORGE=git outcome carrying status=merged (a status the grammar
 // documents as valid, outcome.go:24) never reaches verifyMerged's PR-state
 // check: the git Code Forge's PRState always errors, so an unguarded call
 // would wrongly demote the issue to agent-failed even though nothing is
 // actually wrong.
-func TestFanOut_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
+func TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 	const branch = "agent/issue-1"
 
 	c := baseConfig()
@@ -267,7 +267,7 @@ func TestFanOut_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(c, fc)
-	fanOut(c, fc, f, s, []issue{{number: "1", title: "first"}})
+	dispatchWave(c, fc, f, s, []issue{{number: "1", title: "first"}})
 
 	iss, err := fc.Issue("1")
 	if err != nil {

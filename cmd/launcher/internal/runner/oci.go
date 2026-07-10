@@ -276,7 +276,7 @@ func reapOrphanedRebaseDirs(root string) {
 	}
 }
 
-// Run fans out a single issue into a podman/docker container.
+// Run launches a single issue into a podman/docker container.
 func (a *ociAdapter) Run(box Box) error {
 	// Reap any orphaned rebase temp dirs left by a prior killed launcher run.
 	reapOrphanedRebaseDirs(os.TempDir())
