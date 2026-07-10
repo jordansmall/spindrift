@@ -5,6 +5,7 @@ package main
 // Secret knobs are excluded from schemaFlags; see secretKnobs below.
 // Run `nix flake check` after editing lib/env-schema.nix to regenerate.
 var schemaFlags = []flagEntry{
+	{env: "AUTO_FORMAT", flag: "auto-format", group: "Prompt & skill iteration", kind: "string", doc: "when non-empty, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found", dflt: ""},
 	{env: "BASE_BRANCH", flag: "base-branch", group: "Branches & merge", kind: "string", doc: "default branch agent PRs merge into", dflt: "main"},
 	{env: "BRANCH_PREFIX", flag: "branch-prefix", group: "Branches & merge", kind: "string", doc: "prefix for agent-cut branches", dflt: "agent/issue-"},
 	{env: "BWRAP_UNSHARE_NET", flag: "bwrap-unshare-net", group: "Sandbox & resources", kind: "string", doc: "when non-empty, adds --unshare-net to bwrap; requires slirp/pasta for DNS; by default bwrap shares the host network namespace (host-loopback reachable)", dflt: ""},
