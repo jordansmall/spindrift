@@ -1158,38 +1158,18 @@ outer:
 	return nil
 }
 
-func run(noBuild bool) error {
-	pwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
+// run is the orchestration logic for the `dispatch` subcommand: preflight,
+// stranded-issue reconciliation, discovery, dependency-graph construction,
+// and drain/wave/fan-out dispatch. lc is wired by bootstrap in production;
+// tests construct it directly with fakes.
+func run(lc *launchContext) error {
+	c, fc, f, s, pwd := lc.config, lc.forge, lc.factory, lc.settle, lc.pwd
 
-	c := loadConfig()
-	if err := validate(c); err != nil {
-		return err
-	}
-
-	r := newRunner(c, pwd)
-	if noBuild {
-		if err := r.IsReady(); err != nil {
-			return err
-		}
-	} else {
-		if err := r.EnsureReady(); err != nil {
-			return err
-		}
-	}
-
-	fc := newForgeClient(c)
 	fmt.Printf("repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
 
 	if err := checkAutoMergePreflight(c, fc); err != nil {
 		return err
 	}
-
-	f := newDispatchFactory(c, pwd, r)
-	defer f.Cleanup()
-	s := newSettle(c, fc)
 
 	// Reconcile stranded in-progress issues before dispatching new work.
 	// Skip when ISSUE_NUMBER is set — the caller already claimed a specific issue.
@@ -1236,12 +1216,10 @@ func run(noBuild bool) error {
 		if err := dispatchWaves(c, fc, f, s, issues, edges); err != nil {
 			return err
 		}
-		printOutcomeReport()
 	} else {
 		// MAX_JOBS = 0, no declared edges: original single-wave fan-out.
 		fmt.Printf("==> %d issue(s); launching up to %d container(s) at a time\n", len(issues), c.maxParallel)
 		fanOut(c, fc, f, s, issues)
-		printOutcomeReport()
 	}
 
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
@@ -1356,7 +1334,15 @@ func main() {
 			f.Cleanup()
 			return
 		}
-		if err := run(noBuild); err != nil {
+		// os.Exit skips defers, so cleanup is called explicitly on every
+		// exit path below rather than deferred.
+		lc, cleanup, err := bootstrap(!noBuild)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			os.Exit(1)
+		}
+		if err := run(lc); err != nil {
+			cleanup()
 			if errors.Is(err, errQueueEmpty) {
 				os.Exit(2)
 			}
@@ -1366,9 +1352,16 @@ func main() {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
+		cleanup()
 		return
 	}
-	if err := run(false); err != nil {
+	lc, cleanup, err := bootstrap(true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.Exit(1)
+	}
+	if err := run(lc); err != nil {
+		cleanup()
 		if errors.Is(err, errQueueEmpty) {
 			os.Exit(2)
 		}
@@ -1378,4 +1371,5 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
 	}
+	cleanup()
 }
