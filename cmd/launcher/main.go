@@ -272,11 +272,8 @@ func validate(c config) error {
 	if _, err := driver.New(c.driver); err != nil {
 		return err
 	}
-	switch c.mergeMode {
-	case "immediate", "auto", "manual":
-		// valid
-	default:
-		return fmt.Errorf("MERGE_MODE=%q is not valid; must be immediate, auto, or manual", c.mergeMode)
+	if err := settle.ValidateMergeMode(c.mergeMode); err != nil {
+		return err
 	}
 	switch c.overlapGate {
 	case "defer", "off":
@@ -291,16 +288,7 @@ func validate(c config) error {
 		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github, local, or jira", c.issueTracker)
 	}
 	if c.issueTracker == "jira" {
-		if c.jiraBaseURL == "" {
-			return fmt.Errorf("set JIRA_BASE_URL (Jira site base URL) when ISSUE_TRACKER=jira")
-		}
-		if c.jiraProjectKey == "" {
-			return fmt.Errorf("set JIRA_PROJECT_KEY when ISSUE_TRACKER=jira")
-		}
-		if c.jiraToken == "" {
-			return fmt.Errorf("set JIRA_TOKEN when ISSUE_TRACKER=jira")
-		}
-		if _, err := forge.ParseStatusMapping(c.jiraStatusMapping); err != nil {
+		if err := forge.ValidateJiraEnv(c.jiraBaseURL, c.jiraProjectKey, c.jiraToken, c.jiraStatusMapping); err != nil {
 			return err
 		}
 	}
