@@ -169,6 +169,14 @@ flake defines one, otherwise a `format`/`fmt` script in `package.json`,
 `Makefile`, or `justfile`, otherwise the language's standard formatter. Runs
 only on changed files; skips silently when none is found. Off by default.
 
+Set `AUTO_LINT=1` (or `settings.promptSkillIteration.autoLint = true` in your
+Consumer flake) to have the implementor lint changed files before each commit,
+applying the linter's auto-fix mode and then manually resolving any remaining
+findings. The linter is detected automatically: a `lint` target in
+`package.json`, `Makefile`, or `justfile`, or the language's standard linter
+(e.g. `eslint`, `ruff`, `golangci-lint`, `clippy`, `statix`). Runs only on
+changed files; skips silently when none is found. Off by default.
+
 An issue may also declare a `## Touches` section listing the paths it expects
 to change; dispatch defers it while its touch-set overlaps an already
 in-progress issue's, retrying once the collider completes — see [Declared

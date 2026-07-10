@@ -5,6 +5,7 @@
 ### Features
 
 * **entrypoint:** add AUTO_FORMAT knob — opt-in auto-formatting of changed files before each commit; detects `nix fmt`, project fmt scripts, or language defaults; skips silently when none is found (off by default, enabled for spindrift's own dogfood runs)
+* **entrypoint:** add AUTO_LINT knob — opt-in auto-linting of changed files before each commit; detects project lint scripts or language-standard linters; applies auto-fix then resolves remaining findings; skips silently when none is found (off by default, enabled for spindrift's own dogfood runs)
 
 ## [0.2.1](https://github.com/jordansmall/spindrift/compare/v0.2.0...v0.2.1) (2026-07-10)
 
