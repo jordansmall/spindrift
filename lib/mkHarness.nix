@@ -114,6 +114,35 @@ let
   # lines appear anywhere else in this file.
   schema = import ./env-schema.nix;
 
+  # The SPINDRIFT_OUTCOME contract (the LAND THE CHANGE / WATCH CI / OUTCOME /
+  # IF BLOCKED sections) is harness-owned (issue #419): a Consumer `prompt`
+  # that drops it would ship an agent that never emits the outcome line, so
+  # the launcher never learns the PR and the merge/takeover silently never
+  # happens. Sliced from the default prompt's own heading rather than
+  # duplicated into a second file, so the injected block and the default
+  # prompt's sections cannot drift apart — same source, same bytes.
+  outcomeContractMarker = "# LAND THE CHANGE";
+  outcomeContract =
+    let
+      parts = lib.splitString outcomeContractMarker (
+        builtins.readFile ../templates/default/prompts/issue-prompt.md
+      );
+    in
+    assert lib.assertMsg (
+      builtins.length parts == 2
+    ) "mkHarness: templates/default/prompts/issue-prompt.md must contain the outcome-contract marker '${outcomeContractMarker}' exactly once";
+    outcomeContractMarker + builtins.elemAt parts 1;
+
+  # Appends the canonical outcome contract to any baked prompt that lacks it;
+  # a no-op when the marker is already present (the default prompt's own
+  # copy, or a Consumer prompt that kept it), so injection is idempotent.
+  injectOutcomeContract =
+    promptText:
+    if lib.hasInfix outcomeContractMarker promptText then
+      promptText
+    else
+      lib.removeSuffix "\n" promptText + "\n\n" + outcomeContract;
+
   # The Driver registry (ADR 0009); driverEntry is the selected Driver's
   # in-box half — invocation binary/flags, agent-config rendering, skill
   # wiring, and outcome extraction — baked into the image below.
@@ -250,7 +279,7 @@ let
     mkdir -p $out/agent/prompts
     cp ${entrypoint}/bin/entrypoint $out/agent/entrypoint.sh
     chmod +x $out/agent/entrypoint.sh
-    cp ${pkgs.writeText "issue-prompt.md" prompt} $out/agent/prompts/issue-prompt.md
+    cp ${pkgs.writeText "issue-prompt.md" (injectOutcomeContract prompt)} $out/agent/prompts/issue-prompt.md
     cp ${pkgs.writeText "scout-prompt.md" scoutPrompt} $out/agent/prompts/scout-prompt.md
     cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md
     cp ${pkgs.writeText "filer-prompt.md" filerPrompt} $out/agent/prompts/filer-prompt.md
@@ -265,13 +294,18 @@ let
     ''}
   '';
 
+  # The canonical outcome contract as a host store path, so checks can diff
+  # it against what a Consumer prompt lacking the contract gets injected with
+  # — proof the two cannot drift apart (issue #419).
+  outcomeContractFile = hostPkgs.writeText "outcome-contract.md" outcomeContract;
+
   # The rendered prompt directory as a host store path (native-buildable on
   # darwin, so it needs no Linux builder). The prompt is normally baked into
   # the image via agentFiles; this output exists so tests can assert it is NOT
   # bind-mounted by default, and so SPINDRIFT_PROMPT_DIR can point to it.
   promptDir = hostPkgs.runCommand "prompt-dir" { } ''
     mkdir -p $out
-    cp ${hostPkgs.writeText "issue-prompt.md" prompt} $out/issue-prompt.md
+    cp ${hostPkgs.writeText "issue-prompt.md" (injectOutcomeContract prompt)} $out/issue-prompt.md
     cp ${hostPkgs.writeText "scout-prompt.md" scoutPrompt} $out/scout-prompt.md
     cp ${hostPkgs.writeText "review-prompt.md" reviewPrompt} $out/review-prompt.md
     cp ${hostPkgs.writeText "filer-prompt.md" filerPrompt} $out/filer-prompt.md
@@ -752,6 +786,7 @@ else
       imagePath
       promptDir
       skillsDir
+      outcomeContractFile
       ;
 
     packages = {
