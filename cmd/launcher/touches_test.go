@@ -88,7 +88,7 @@ func declaredOnly(issues []forge.Issue) []inProgressTouches {
 // touch-set overlapping an InProgress issue's declared touch-set is reported,
 // naming the colliding issue.
 func TestOverlapsInProgress_CollidingTouches(t *testing.T) {
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- lib/env-schema.nix", State: "OPEN", Labels: []string{"agent-in-progress"}})
 
@@ -119,7 +119,7 @@ func TestOverlapsInProgress_DisjointTouches(t *testing.T) {
 // issue whose declared touches overlap an in-progress issue's is reported.
 func TestBatchHasTouchOverlap_DetectsOverlap(t *testing.T) {
 	c := config{overlapGate: "defer", inProgressLabel: "agent-in-progress"}
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- lib/env-schema.nix", State: "OPEN", Labels: []string{c.inProgressLabel}})
 
@@ -163,7 +163,7 @@ func TestOverlapsInProgress_CollidesViaOpenPRChangedFiles(t *testing.T) {
 	c := baseConfig()
 	c.overlapGate = "defer"
 	c.branchPrefix = "agent/issue-"
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.BranchPrefix = c.branchPrefix
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- internal/pkgx/foo.go", Labels: []string{"ready-for-agent"}})
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- docs/reference.md", State: "OPEN", Labels: []string{"agent-in-progress"}})

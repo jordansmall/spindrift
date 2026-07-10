@@ -16,7 +16,7 @@ func TestSettleAdopted_ImmediateMergeFailureStaysComplete(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.MaxRebaseAttempts = 0
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErr = errors.New("required review missing")
@@ -41,7 +41,7 @@ func TestSettleAdopted_ManualModeStaysComplete(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			c := baseConfig()
 			c.MergeMode = mode
-			fc := forge.NewFake()
+			fc := forge.NewFake(testDispatchLabels)
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 			fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 			s := New(c, fc)
@@ -86,7 +86,7 @@ func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 // the adopted PR and reaches agent-complete without dispatching any fix pass.
 func TestSettleAdopted_GreenMergesAndCompletes(t *testing.T) {
 	c := baseConfig()
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "77", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := New(c, fc)

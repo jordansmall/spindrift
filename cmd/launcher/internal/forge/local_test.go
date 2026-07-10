@@ -8,8 +8,21 @@ import (
 	"testing"
 )
 
+// testLabels is the conventional lifecycle-label set, mirrored from
+// lib/env-schema.nix and pinned against the agent workflows by
+// nix/checks/dispatch-labels.nix (issue #460). NewFake and the production
+// adapters (Exec, Local, Jira) take labels as an explicit constructor
+// argument rather than baking in a copy, so package-forge tests share this
+// one value instead of each restating the four label strings.
+var testLabels = DispatchLabels{
+	Dispatchable: "ready-for-agent",
+	InProgress:   "agent-in-progress",
+	Complete:     "agent-complete",
+	Failed:       "agent-failed",
+}
+
 // writeLocalIssue writes an issue file named slug+".md" under dir, using
-// DefaultDispatchLabels' native marker for state.
+// testLabels' native marker for state.
 func writeLocalIssue(t *testing.T, dir, slug string, li localIssue) {
 	t.Helper()
 	path := filepath.Join(dir, slug+".md")
@@ -19,7 +32,7 @@ func writeLocalIssue(t *testing.T, dir, slug string, li localIssue) {
 }
 
 func TestLocalTracker_ImplementsIssueTracker(t *testing.T) {
-	var _ IssueTracker = NewLocalTracker(t.TempDir(), DefaultDispatchLabels())
+	var _ IssueTracker = NewLocalTracker(t.TempDir(), testLabels)
 }
 
 func TestParseLocalIssue_Frontmatter(t *testing.T) {
@@ -78,7 +91,7 @@ func TestLocalIssue_RenderParseRoundTrip(t *testing.T) {
 
 func TestLocalTracker_ListIssues_OrderedByCreated(t *testing.T) {
 	dir := t.TempDir()
-	labels := DefaultDispatchLabels()
+	labels := testLabels
 
 	writeLocalIssue(t, dir, "second", localIssue{frontmatter: localFrontmatter{
 		Title: "Second", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z",
@@ -105,7 +118,7 @@ func TestLocalTracker_ListIssues_OrderedByCreated(t *testing.T) {
 
 func TestLocalTracker_TransitionState_RewritesFrontmatterInPlace(t *testing.T) {
 	dir := t.TempDir()
-	labels := DefaultDispatchLabels()
+	labels := testLabels
 	writeLocalIssue(t, dir, "fix-thing", localIssue{frontmatter: localFrontmatter{
 		Title: "Fix thing", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z",
 	}})
@@ -142,7 +155,7 @@ func TestLocalTracker_TransitionState_RewritesFrontmatterInPlace(t *testing.T) {
 
 func TestLocalTracker_DepsOf_ParsesBlockedBySlugSection(t *testing.T) {
 	dir := t.TempDir()
-	labels := DefaultDispatchLabels()
+	labels := testLabels
 	writeLocalIssue(t, dir, "depends-on-others", localIssue{
 		frontmatter: localFrontmatter{Title: "Depends on others", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
 		body: "## What to build\n\nDo the thing.\n\n" +
@@ -162,7 +175,7 @@ func TestLocalTracker_DepsOf_ParsesBlockedBySlugSection(t *testing.T) {
 
 func TestLocalTracker_DepsOf_NoBlockedBySection(t *testing.T) {
 	dir := t.TempDir()
-	labels := DefaultDispatchLabels()
+	labels := testLabels
 	writeLocalIssue(t, dir, "standalone", localIssue{
 		frontmatter: localFrontmatter{Title: "Standalone", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
 		body:        "## What to build\n\nDo the thing.\n",
@@ -188,7 +201,7 @@ func TestLocalTracker_DepsOf_NoBlockedBySection(t *testing.T) {
 // and labels as separate fields on disk.
 func TestLocalTracker_Issue_LabelsIncludeDispatchState(t *testing.T) {
 	dir := t.TempDir()
-	labels := DefaultDispatchLabels()
+	labels := testLabels
 	writeLocalIssue(t, dir, "broken", localIssue{frontmatter: localFrontmatter{
 		Title: "Broken", State: labels.Failed, Labels: []string{"bug"}, Created: "2026-07-09T12:00:00Z",
 	}})
@@ -206,7 +219,7 @@ func TestLocalTracker_Issue_LabelsIncludeDispatchState(t *testing.T) {
 
 func TestLocalTracker_Comment_AppendsToBody(t *testing.T) {
 	dir := t.TempDir()
-	labels := DefaultDispatchLabels()
+	labels := testLabels
 	writeLocalIssue(t, dir, "fix-thing", localIssue{
 		frontmatter: localFrontmatter{Title: "Fix thing", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
 		body:        "## What to build\n\nDo the thing.\n",
@@ -227,7 +240,7 @@ func TestLocalTracker_Comment_AppendsToBody(t *testing.T) {
 
 func TestLocalTracker_Probe_CreatesDirAndReturnsPath(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "issues")
-	lt := NewLocalTracker(dir, DefaultDispatchLabels())
+	lt := NewLocalTracker(dir, testLabels)
 	resolved, err := lt.Probe()
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
@@ -241,7 +254,7 @@ func TestLocalTracker_Probe_CreatesDirAndReturnsPath(t *testing.T) {
 }
 
 func TestLocalTracker_ListLabels_ReturnsDispatchLabels(t *testing.T) {
-	labels := DefaultDispatchLabels()
+	labels := testLabels
 	lt := NewLocalTracker(t.TempDir(), labels)
 	got, err := lt.ListLabels()
 	if err != nil {
@@ -254,7 +267,7 @@ func TestLocalTracker_ListLabels_ReturnsDispatchLabels(t *testing.T) {
 }
 
 func TestLocalTracker_CreateLabel_NoOp(t *testing.T) {
-	lt := NewLocalTracker(t.TempDir(), DefaultDispatchLabels())
+	lt := NewLocalTracker(t.TempDir(), testLabels)
 	if err := lt.CreateLabel("foo", "desc", "ededed"); err != nil {
 		t.Errorf("CreateLabel: %v", err)
 	}

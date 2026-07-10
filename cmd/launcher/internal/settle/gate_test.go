@@ -18,6 +18,19 @@ func baseConfig() Config {
 
 const testPR = "https://github.com/owner/repo/pull/42"
 
+// testDispatchLabels is the conventional lifecycle-label set, mirrored from
+// lib/env-schema.nix and pinned against the agent workflows by
+// nix/checks/dispatch-labels.nix (issue #460). forge.NewFake takes labels as
+// an explicit constructor argument rather than baking in a copy, so settle's
+// tests share this one value instead of each restating the four label
+// strings.
+var testDispatchLabels = forge.DispatchLabels{
+	Dispatchable: "ready-for-agent",
+	InProgress:   "agent-in-progress",
+	Complete:     "agent-complete",
+	Failed:       "agent-failed",
+}
+
 // TestGateToGreen verifies that gateToGreen swaps agent-complete on confirmed
 // green (independent of any merge attempt) and signals genuineRed on failure.
 func TestGateToGreen(t *testing.T) {

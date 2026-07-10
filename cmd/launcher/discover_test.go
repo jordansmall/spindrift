@@ -34,7 +34,7 @@ func TestDiscoverIssues_ByNumber(t *testing.T) {
 func TestDiscoverIssues_ByLabel(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Title: "ready", Labels: []string{c.label}})
 	fc.SetIssue(forge.Issue{Number: "2", Title: "not ready", Labels: []string{"backlog"}})
 
@@ -52,7 +52,7 @@ func TestDiscoverIssues_ByLabel(t *testing.T) {
 func TestDiscoverIssues_OldestFirst(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	for _, n := range []string{"3", "1", "2"} {
 		fc.SetIssue(forge.Issue{Number: n, Title: "issue " + n, Labels: []string{c.label}})
 	}

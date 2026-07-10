@@ -13,7 +13,7 @@ import (
 // TestExecClient_PushOnly verifies the github Code Forge reports itself as
 // not push-only — it opens a PR and watches CI.
 func TestExecClient_PushOnly(t *testing.T) {
-	e := NewExecClient("owner/repo", DefaultDispatchLabels(), "agent/issue-")
+	e := NewExecClient("owner/repo", testLabels, "agent/issue-")
 	if e.PushOnly() {
 		t.Error("PushOnly() = true, want false for the github Code Forge")
 	}

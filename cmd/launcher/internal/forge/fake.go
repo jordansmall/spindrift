@@ -110,10 +110,17 @@ type Fake struct {
 	BranchPrefix string
 }
 
-// NewFake returns an empty Fake client using DefaultDispatchLabels.
-func NewFake() *Fake {
+// NewFake returns an empty Fake client. labels configures the
+// DispatchState-to-label mapping the same way production adapters (Exec,
+// Local, Jira) take it as a constructor argument; omit it for tests that
+// never exercise ListIssues(state) or TransitionState.
+func NewFake(labels ...DispatchLabels) *Fake {
+	var l DispatchLabels
+	if len(labels) > 0 {
+		l = labels[0]
+	}
 	return &Fake{
-		labels:    DefaultDispatchLabels(),
+		labels:    l,
 		issues:    map[string]Issue{},
 		prs:       map[string]PR{},
 		branchPRs: map[string]string{},

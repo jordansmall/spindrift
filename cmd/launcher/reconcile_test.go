@@ -20,7 +20,7 @@ func reconcileConfig() config {
 
 func TestReconcileStranded_GreenPRMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.BranchPrefix = c.branchPrefix
 
 	// Issue on the in-progress label with a green open non-draft PR.
@@ -45,7 +45,7 @@ func TestReconcileStranded_GreenPRMergesAndCompletes(t *testing.T) {
 func TestReconcileStranded_RedFollowsSelfHeal(t *testing.T) {
 	c := reconcileConfig()
 	c.maxFixAttempts = 0
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.BranchPrefix = c.branchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
@@ -107,7 +107,7 @@ func TestReconcileStranded_NoPRSkipped(t *testing.T) {
 
 func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.BranchPrefix = c.branchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})

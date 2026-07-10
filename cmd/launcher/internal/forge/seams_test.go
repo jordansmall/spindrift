@@ -8,24 +8,21 @@ import (
 
 // --- DispatchLabels tests ---
 
-func TestDefaultDispatchLabels(t *testing.T) {
-	d := forge.DefaultDispatchLabels()
-	if d.Dispatchable != "ready-for-agent" {
-		t.Errorf("Dispatchable = %q, want %q", d.Dispatchable, "ready-for-agent")
-	}
-	if d.InProgress != "agent-in-progress" {
-		t.Errorf("InProgress = %q, want %q", d.InProgress, "agent-in-progress")
-	}
-	if d.Complete != "agent-complete" {
-		t.Errorf("Complete = %q, want %q", d.Complete, "agent-complete")
-	}
-	if d.Failed != "agent-failed" {
-		t.Errorf("Failed = %q, want %q", d.Failed, "agent-failed")
-	}
+// testLabels is the conventional lifecycle-label set, mirrored from
+// lib/env-schema.nix and pinned against the agent workflows by
+// nix/checks/dispatch-labels.nix (issue #460). NewFake and the production
+// adapters (Exec, Local, Jira) take labels as an explicit constructor
+// argument rather than baking in a copy, so forge_test shares this one value
+// instead of each test restating the four label strings.
+var testLabels = forge.DispatchLabels{
+	Dispatchable: "ready-for-agent",
+	InProgress:   "agent-in-progress",
+	Complete:     "agent-complete",
+	Failed:       "agent-failed",
 }
 
 func TestDispatchLabels_Label(t *testing.T) {
-	d := forge.DefaultDispatchLabels()
+	d := testLabels
 	if got := d.Label(forge.Dispatchable); got != "ready-for-agent" {
 		t.Errorf("Label(Dispatchable) = %q", got)
 	}
@@ -41,7 +38,7 @@ func TestDispatchLabels_Label(t *testing.T) {
 }
 
 func TestDispatchLabels_AllLabels(t *testing.T) {
-	d := forge.DefaultDispatchLabels()
+	d := testLabels
 	all := d.AllLabels()
 	if len(all) != 4 {
 		t.Fatalf("AllLabels len = %d, want 4", len(all))
@@ -83,7 +80,7 @@ func TestFake_ImplementsClient(t *testing.T) {
 // to the seam that declares them, and the ambiguous Probe method resolves to
 // the CodeForge.
 func TestNewClient_ComposesIndependentSeams(t *testing.T) {
-	it := forge.NewFake()
+	it := forge.NewFake(testLabels)
 	it.SetIssue(forge.Issue{Number: "1", Title: "from tracker", Labels: []string{"ready-for-agent"}})
 	cf := forge.NewFake()
 	cf.ProbeRepo = "from code forge"
@@ -110,7 +107,7 @@ func TestNewClient_ComposesIndependentSeams(t *testing.T) {
 // --- TransitionState tests ---
 
 func TestFake_TransitionState_DispatchableToInProgress(t *testing.T) {
-	f := forge.NewFake()
+	f := forge.NewFake(testLabels)
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
 	if err := f.TransitionState("42", forge.Dispatchable, forge.InProgress); err != nil {
@@ -137,7 +134,7 @@ func TestFake_TransitionState_DispatchableToInProgress(t *testing.T) {
 }
 
 func TestFake_TransitionState_InProgressToComplete(t *testing.T) {
-	f := forge.NewFake()
+	f := forge.NewFake(testLabels)
 	f.SetIssue(forge.Issue{Number: "7", Labels: []string{"agent-in-progress"}})
 
 	if err := f.TransitionState("7", forge.InProgress, forge.Complete); err != nil {
@@ -177,7 +174,7 @@ func TestFake_TransitionState_Err(t *testing.T) {
 // --- ListIssues(DispatchState) tests ---
 
 func TestFake_ListIssues_ByDispatchState(t *testing.T) {
-	f := forge.NewFake()
+	f := forge.NewFake(testLabels)
 	f.SetIssue(forge.Issue{Number: "1", State: "OPEN", Labels: []string{"ready-for-agent"}})
 	f.SetIssue(forge.Issue{Number: "2", State: "OPEN", Labels: []string{"agent-in-progress"}})
 	f.SetIssue(forge.Issue{Number: "3", State: "OPEN", Labels: []string{"ready-for-agent"}})

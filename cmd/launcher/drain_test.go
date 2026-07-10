@@ -57,7 +57,7 @@ func TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext(t *testing.T) {
 	c.maxJobs = 2
 	c.overlapGate = "defer"
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{
 		Number: "1",
 		Body:   "## Touches\n- lib/env-schema.nix",
@@ -100,7 +100,7 @@ func TestDrainMaxJobs_FailsDependentWhenBlockerFails(t *testing.T) {
 	c.maxParallel = 2
 	c.maxJobs = 2
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	// Issue #1 is blocked by #3 which has already reached the failed label.
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})

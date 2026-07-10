@@ -14,7 +14,7 @@ func TestPreviewIssues_ListsIssuesAndRepo(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
 	c.label = "ready-for-agent"
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "10", Title: "first issue", Labels: []string{c.label}})
 	fc.SetIssue(forge.Issue{Number: "20", Title: "second issue", Labels: []string{c.label}})
 
@@ -98,7 +98,7 @@ func TestPreviewIssues_BareAnnotatesBlockers(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
 	c.label = "ready-for-agent"
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "99", Title: "blocker issue", Labels: []string{c.label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "dependent", Labels: []string{c.label},
 		Body: "## Blocked by\n- #99\n"})
