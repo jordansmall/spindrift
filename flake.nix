@@ -75,7 +75,7 @@
           # fed from the same leaf values as fixtures.nix's direct mirror
           # (nix/dogfood-defaults.nix, issue #459).
           spindrift = {
-            inherit (dogfoodDefaults) prefetch packages;
+            inherit (dogfoodDefaults) prefetch packages nixStoreWritable extraClosures;
             skills = dogfoodSkills;
             settings.branches.mergeMode = dogfoodDefaults.defaults.mergeMode;
             settings.promptSkillIteration.autoFormat = dogfoodDefaults.defaults.autoFormat;
