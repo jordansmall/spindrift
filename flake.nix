@@ -74,7 +74,7 @@
             settings.promptSkillIteration.autoLint = true;
           };
 
-          checks = import ./nix/checks.nix {
+          checks = import ./nix/checks {
             inherit
               pkgs
               config
@@ -87,8 +87,8 @@
 
           # Repo-internal dev tooling, not consumer surface (issue #402):
           # `nix run .#regen` regenerates every schema-generated artifact that
-          # nix/checks.nix drift-guards, sharing lib/renderers.nix with those
-          # checks so the two can never diverge.
+          # nix/checks/schema-drift.nix drift-guards, sharing lib/renderers.nix
+          # with those checks so the two can never diverge.
           apps.regen = {
             type = "app";
             program = "${import ./nix/regen.nix { inherit pkgs; }}/bin/regen";
