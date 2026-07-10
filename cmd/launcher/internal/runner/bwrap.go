@@ -20,12 +20,18 @@ var bwrapSecrets = map[string]bool{
 // bwrapAdapter implements Runner for the daemonless bubblewrap sandbox.
 // EnsureReady is a no-op — store closures are realized by the build command.
 type bwrapAdapter struct {
-	agentFiles    string // baked nix store path for agent files (/agent/…)
-	agentEnv      string // baked nix store path for the agent env (PATH, SSL, …)
-	bakedPrefetch string // baked prefetch snippet fed to the entrypoint
-	promptDir     string // optional host path to bind-mount over /agent/prompts
-	skillsDir     string // optional host path to bind-mount over /home/agent/.claude/skills
-	unshareNet    bool   // when true, adds --unshare-net (isolates from host netns)
+	agentFiles      string // baked nix store path for agent files (/agent/…)
+	agentEnv        string // baked nix store path for the agent env (PATH, SSL, …)
+	bakedPrefetch   string // baked prefetch snippet fed to the entrypoint
+	promptDir       string // optional host path to bind-mount over /agent/prompts
+	skillsDir       string // optional host path to bind-mount over driverSkillsDir
+	driverSkillsDir string // in-box skills bind target (Driver declaration, ADR 0009)
+	// driverSessionCacheDir is the in-box bind target for the Driver's
+	// session-state dir (Driver declaration, ADR 0009); empty when the
+	// selected Driver declares no session-state dir, in which case
+	// box.DriverCacheDir is never bound regardless of its value.
+	driverSessionCacheDir string
+	unshareNet            bool // when true, adds --unshare-net (isolates from host netns)
 }
 
 // NewBwrap constructs a bwrap adapter for the run command from cfg.
@@ -75,16 +81,16 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	}
 	args = append(args, "--ro-bind", a.agentFiles+"/agent", "/agent")
 	// Writable host mount (issue #427): the only non-ro-bind mount in this
-	// adapter. Scoped to .claude/projects (where claude's session
-	// transcripts live) rather than the whole .claude, so it can never
-	// shadow the sibling .claude/skills bind below regardless of order.
-	if box.DriverCacheDir != "" {
+	// adapter. Scoped to the Driver's declared session-cache dir (e.g.
+	// .claude/projects for claude) rather than its parent, so it can never
+	// shadow a sibling skills bind below regardless of order.
+	if box.DriverCacheDir != "" && a.driverSessionCacheDir != "" {
 		if info, err := os.Stat(box.DriverCacheDir); err == nil && info.IsDir() {
 			// --dir creates the parent in the tmpfs as the sandbox user (uid 1000),
 			// preventing bwrap from auto-fabricating it as root when it processes
 			// the bind target (issue #447).
-			args = append(args, "--dir", "/home/agent/.claude")
-			args = append(args, "--bind", box.DriverCacheDir, "/home/agent/.claude/projects")
+			args = append(args, "--dir", filepath.Dir(a.driverSessionCacheDir))
+			args = append(args, "--bind", box.DriverCacheDir, a.driverSessionCacheDir)
 		}
 	}
 	if a.promptDir != "" {
@@ -95,15 +101,17 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	}
 	// Runtime mount takes precedence over baked skills; fall back to baked
 	// skills when no runtime override is set.
-	if a.skillsDir != "" {
-		if info, err := os.Stat(a.skillsDir); err == nil && info.IsDir() {
-			fmt.Printf("==> SPINDRIFT_SKILLS_DIR set; mounting %s over /home/agent/.claude/skills\n", a.skillsDir)
-			args = append(args, "--ro-bind", a.skillsDir, "/home/agent/.claude/skills")
-		}
-	} else {
-		bakedSkillsPath := filepath.Join(a.agentFiles, "home", "agent", ".claude", "skills")
-		if info, err := os.Stat(bakedSkillsPath); err == nil && info.IsDir() {
-			args = append(args, "--ro-bind", bakedSkillsPath, "/home/agent/.claude/skills")
+	if a.driverSkillsDir != "" {
+		if a.skillsDir != "" {
+			if info, err := os.Stat(a.skillsDir); err == nil && info.IsDir() {
+				fmt.Printf("==> SPINDRIFT_SKILLS_DIR set; mounting %s over %s\n", a.skillsDir, a.driverSkillsDir)
+				args = append(args, "--ro-bind", a.skillsDir, a.driverSkillsDir)
+			}
+		} else {
+			bakedSkillsPath := filepath.Join(a.agentFiles, a.driverSkillsDir)
+			if info, err := os.Stat(bakedSkillsPath); err == nil && info.IsDir() {
+				args = append(args, "--ro-bind", bakedSkillsPath, a.driverSkillsDir)
+			}
 		}
 	}
 	// --clearenv is intentionally absent: secrets (GH_TOKEN, auth tokens) reach
