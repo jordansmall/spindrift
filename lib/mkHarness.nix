@@ -284,6 +284,9 @@ let
   # (the Go launcher mounts it in cmd/launcher/internal/runner).
   agentFiles = pkgs.runCommand "spindrift-agent-files" { } ''
     mkdir -p $out/agent/prompts
+    # Pre-create the driver-cache mountpoint so podman reuses the agent-owned
+    # directory instead of fabricating root-owned parents (issue #447).
+    mkdir -p $out/home/agent/.claude/projects
     cp ${entrypoint}/bin/entrypoint $out/agent/entrypoint.sh
     chmod +x $out/agent/entrypoint.sh
     # A sibling of prompts/, not inside it, so a SPINDRIFT_PROMPT_DIR mount
