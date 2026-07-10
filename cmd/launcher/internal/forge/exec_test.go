@@ -10,6 +10,15 @@ import (
 	"testing"
 )
 
+// TestExecClient_PushOnly verifies the github Code Forge reports itself as
+// not push-only — it opens a PR and watches CI.
+func TestExecClient_PushOnly(t *testing.T) {
+	e := NewExecClient("owner/repo", DefaultDispatchLabels())
+	if e.PushOnly() {
+		t.Error("PushOnly() = true, want false for the github Code Forge")
+	}
+}
+
 // prependFakeGH writes a counting-wrapper gh script to a temp dir, prepends
 // that dir to PATH, and returns the dir. Each invocation of the fake gh
 // records its argv to call-NN.txt (zero-indexed) inside the dir.

@@ -100,6 +100,9 @@ type Fake struct {
 	CreateLabelCalls []CreateLabelCall
 	// CreateLabelErr, if non-nil, is returned by every CreateLabel call.
 	CreateLabelErr error
+
+	// IsPushOnly controls what PushOnly returns (default false, matching github).
+	IsPushOnly bool
 }
 
 // NewFake returns an empty Fake client using DefaultDispatchLabels.
@@ -419,4 +422,11 @@ func (f *Fake) CreateLabel(name, description, color string) error {
 	defer f.mu.Unlock()
 	f.CreateLabelCalls = append(f.CreateLabelCalls, CreateLabelCall{name, description, color})
 	return f.CreateLabelErr
+}
+
+// PushOnly returns IsPushOnly (default false, matching the github adapter).
+func (f *Fake) PushOnly() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.IsPushOnly
 }
