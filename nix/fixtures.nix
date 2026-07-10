@@ -43,6 +43,7 @@ let
     ];
     defaults = {
       mergeMode = "immediate";
+      autoFormat = true;
     };
   };
 
