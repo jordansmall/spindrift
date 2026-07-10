@@ -613,6 +613,7 @@ in
         "AGENT_ENV_DRV"
         "BAKED_PREFETCH"
         "RUNTIME"
+        "DRIVER"
         "IMAGE"
         "BOX_ENV_VARS"
       ];
