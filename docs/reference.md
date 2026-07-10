@@ -163,6 +163,33 @@ a failure to fetch it never blocks the fix pass, and `CI_FAILURE_SUMMARY`
 unset or empty leaves `fix-prompt.md` byte-identical to the no-detail case,
 falling back to the local re-run with no error.
 
+A fix box also resumes the *same Driver session* the initial run used,
+instead of cold-starting a fresh one: the launcher creates an ephemeral,
+process-lifetime, per-issue host directory and mounts it writable over
+`/home/agent/.claude` (the only writable host mount the runner seam has — the
+prompt/skills mounts above are read-only). The launcher only creates, mounts,
+and evicts that directory — it never reads, copies, parses, or chmods its
+contents, and the persisted session never leaves the host (it is not pushed
+to the remote or attached to the PR). The cache is keyed strictly
+`<cache>/<issue>`, so a session can only ever be resumed within its own
+issue's trust domain; it is evicted as soon as that issue reaches a terminal
+state (`agent-complete` or `agent-failed`), and the whole cache is removed
+when the launcher process exits. A fresh `spindrift dispatch` — or a crash —
+therefore always starts with an empty cache; `reconcileStranded` (see
+[Runtime flow](#how-a-run-works)) still adopts stranded PRs, just without a
+session to resume, so they take the same cold-context fix flow described
+above.
+
+The actual pin/resume verb lives behind the Driver seam (ADR 0009): on the
+initial run the claude Driver pins a deterministic session id (derived from
+`REPO_SLUG` + `ISSUE_NUMBER`, so no state beyond those two env vars is needed
+to recompute it) via `--session-id`; the fix box recomputes the same id and
+passes `--resume` only when that session's transcript is actually present
+under the mounted directory. When it is not — the cache was evicted, this is
+the first fix pass after a crash, or the branch was rebased out from under
+the session — the fix box falls back cleanly to the cold-context fix flow
+above, with no error.
+
 The SPINDRIFT_OUTCOME contract — the sections that instruct the agent to
 print the `SPINDRIFT_OUTCOME issue=… pr=… status=… note=…` line the launcher
 parses to learn the PR — is harness-owned, not Consumer-tunable. At
