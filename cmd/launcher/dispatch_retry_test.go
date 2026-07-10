@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -26,7 +27,7 @@ func setupClassify(t *testing.T, results []outcome.Classification) {
 	t.Helper()
 	orig := classifyFn
 	i := 0
-	classifyFn = func(string) (outcome.Classification, error) {
+	classifyFn = func(driver.Driver, string) (outcome.Classification, error) {
 		r := results[len(results)-1]
 		if i < len(results) {
 			r = results[i]
@@ -76,7 +77,7 @@ func TestRunWithRetry_SuccessOnFirstRun(t *testing.T) {
 
 	orig := classifyFn
 	called := false
-	classifyFn = func(string) (outcome.Classification, error) {
+	classifyFn = func(driver.Driver, string) (outcome.Classification, error) {
 		called = true
 		return outcome.Classification{}, nil
 	}

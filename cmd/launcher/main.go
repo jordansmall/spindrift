@@ -1438,8 +1438,12 @@ var sleepFn func(time.Duration) = time.Sleep
 var nowFn func() time.Time = time.Now
 
 // classifyFn is injectable for tests so callers can supply predetermined
-// classifications without writing log files on disk.
-var classifyFn func(string) (outcome.Classification, error) = outcome.Classify
+// classifications without writing log files on disk. Production routes
+// through the config's Driver strategy (ADR 0009) rather than calling
+// outcome.Classify directly, matching gateIssue's classification path.
+var classifyFn = func(d driver.Driver, logPath string) (outcome.Classification, error) {
+	return d.ClassifyTransient(logPath)
+}
 
 // runWithRetry dispatches iss, retrying transient failures according to
 // config limits. It returns true when the box exits zero, false after a
@@ -1470,7 +1474,7 @@ func runWithRetry(c config, pwd string, r runner.Runner, iss issue) bool {
 		}
 
 		logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
-		cl, err := classifyFn(logPath)
+		cl, err := classifyFn(newDriver(c), logPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: classify error: %v\n", iss.number, err)
 			return false
