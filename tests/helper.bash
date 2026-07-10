@@ -83,6 +83,37 @@ set_run_env() {
   export GIT_USER_EMAIL="bot@example.com"
 }
 
+# Every lib/env-schema.nix knob with boxEnv = true, at its schema default, so
+# entrypoint.bats exercises the same defaults the nix preamble bakes into the
+# image at build time instead of hand-copied literals that can drift from the
+# schema. The nix/checks/schema-drift.nix box-env-fixture-coverage check
+# fails the build if a new boxEnv knob is added here without an export.
+# Individual tests override any of these before invoking $ENTRYPOINT; a
+# deliberate divergence from the schema default (e.g. a model pinned for
+# stable assertions) is stated at its override site, not buried here.
+set_box_env() {
+  export REPO_SLUG="owner/repo"
+  export GH_TOKEN="fake-token"
+  export CLAUDE_CODE_OAUTH_TOKEN="fake-oauth"
+  export ANTHROPIC_API_KEY=""
+  export GIT_USER_NAME="Test Bot"
+  export GIT_USER_EMAIL="bot@example.com"
+  export CODE_FORGE="github"
+  export CODE_FORGE_REMOTE_URL=""
+  export BASE_BRANCH="main"
+  export BRANCH_PREFIX="agent/issue-"
+  export IN_PROGRESS_LABEL="agent-in-progress"
+  export COMPLETE_LABEL="agent-complete"
+  export MODEL="claude-sonnet-5"
+  export SCOUT_MODEL="claude-haiku-4-5-20251001"
+  export REVIEW_MODEL="claude-opus-4-8"
+  export FILER_MODEL=""
+  export DEV_SHELL_NAME="default"
+  export DEV_SHELL_PROBE_TIMEOUT=300
+  export AUTO_FORMAT=""
+  export AUTO_LINT=""
+}
+
 # Stand up a local bare "GitHub" repo and rewrite https://github.com/ to it via
 # git's insteadOf, so the entrypoint's real `git clone`/`push` stay offline.
 # Seeds an initial commit on `main`. Exports REMOTE_ROOT.
