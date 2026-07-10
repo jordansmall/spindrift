@@ -232,6 +232,85 @@ func TestBootstrapPrologueAppearsOnce(t *testing.T) {
 	}
 }
 
+// TestNoPRIssueStateLiteralOutsideForge walks all non-test Go source files in
+// cmd/launcher, excluding internal/forge, and fails if any contain a raw
+// "OPEN"/"MERGED"/"CLOSED" state literal — every PR/issue state must flow
+// through the typed forge.PRState/forge.IssueState constants, translated at
+// each adapter's own edge (issue #444).
+func TestNoPRIssueStateLiteralOutsideForge(t *testing.T) {
+	forbidden := []string{`"OPEN"`, `"MERGED"`, `"CLOSED"`}
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(filepath.ToSlash(path), "internal/forge") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		if strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		content := string(data)
+		for _, needle := range forbidden {
+			if strings.Contains(content, needle) {
+				t.Errorf("%s: contains %s — PR/issue state must use forge.PRState/forge.IssueState constants, not a raw literal", path, needle)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+}
+
+// TestNoBranchPrefixConcatOutsideForge walks all non-test Go source files in
+// cmd/launcher, excluding internal/forge, and fails if any concatenate
+// branchPrefix directly — the agent branch name must be computed by
+// forge.Client's AgentBranch(num), its single owner (issue #444).
+func TestNoBranchPrefixConcatOutsideForge(t *testing.T) {
+	forbidden := []string{"branchPrefix + ", "BranchPrefix + "}
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(filepath.ToSlash(path), "internal/forge") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		if strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		content := string(data)
+		for _, needle := range forbidden {
+			if strings.Contains(content, needle) {
+				t.Errorf("%s: contains %q — the agent branch name must be computed by forge.Client.AgentBranch(num), not concatenated here", path, needle)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+}
+
 // TestNoMergeGateOutsideSettlePackage walks all non-test Go source files in
 // cmd/launcher, excluding internal/settle, and fails if any of the merge-gate
 // functions absorbed by issue #442 have crept back into package main —
