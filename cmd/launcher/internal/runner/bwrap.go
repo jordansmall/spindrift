@@ -41,12 +41,14 @@ type bwrapAdapter struct {
 // reachable).
 func NewBwrap(cfg Config) Runner {
 	return &bwrapAdapter{
-		agentFiles:    cfg.AgentFiles,
-		agentEnv:      cfg.AgentEnv,
-		bakedPrefetch: cfg.BakedPrefetch,
-		promptDir:     cfg.PromptDir,
-		skillsDir:     cfg.SkillsDir,
-		unshareNet:    cfg.BwrapUnshareNet,
+		agentFiles:            cfg.AgentFiles,
+		agentEnv:              cfg.AgentEnv,
+		bakedPrefetch:         cfg.BakedPrefetch,
+		promptDir:             cfg.PromptDir,
+		skillsDir:             cfg.SkillsDir,
+		driverSkillsDir:       cfg.DriverSkillsDir,
+		driverSessionCacheDir: cfg.DriverSessionCacheDir,
+		unshareNet:            cfg.BwrapUnshareNet,
 	}
 }
 
