@@ -143,6 +143,14 @@ The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
 at any directory to override it at runtime for zero-rebuild iteration.
 
+A fix box (dispatched when CI comes back red — see [Runtime flow](#how-a-run-works))
+receives `FIX_PASS` and runs `prompts/fix-prompt.md` instead: the branch is
+already checked out with the prior run's work, so it skips SCOUT and
+implement-from-scratch and goes straight to re-running checks, making a
+targeted fix, committing, pushing, and waiting for CI — emitting the same
+`SPINDRIFT_OUTCOME` grammar. `FIX_PASS` unset (the initial run) is
+byte-identical to before this prompt existed.
+
 The SPINDRIFT_OUTCOME contract — the sections that instruct the agent to
 print the `SPINDRIFT_OUTCOME issue=… pr=… status=… note=…` line the launcher
 parses to learn the PR — is harness-owned, not Consumer-tunable. At
@@ -419,7 +427,11 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
            │           manual    → leave the green PR for a human (default)
            │           immediate → rebase-merge the PR now
            │           auto      → enqueue GitHub native auto-merge
-           ├─ red   → dispatch fix boxes (up to MAX_FIX_ATTEMPTS), then re-gate
+           ├─ red   → dispatch fix boxes (up to MAX_FIX_ATTEMPTS, each driving
+           │          prompts/fix-prompt.md instead of issue-prompt.md — the
+           │          branch is already checked out, so the box skips SCOUT
+           │          and re-implementation and goes straight to check/fix/
+           │          commit/push), then re-gate
            ├─ merge conflict (immediate) → rebase the PR (up to MAX_REBASE_ATTEMPTS)
            └─ post an aggregate usage/cost comment to the issue
 ```
@@ -835,6 +847,9 @@ The starter is a minimal Go example. To retarget it:
 - **`prompts/issue-prompt.md`** — tune the agent's workflow (test commands,
   commit conventions, PR etiquette). If the Target repo ships a `commit` skill
   or `CLAUDE.md`, the agent picks it up from the clone automatically.
+- **`prompts/fix-prompt.md`** — the warm-fix counterpart run on a
+  CI-red fix box (`FIX_PASS` set); tune it in step with `issue-prompt.md`'s
+  test commands and commit conventions.
 
 ---
 
