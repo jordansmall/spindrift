@@ -90,6 +90,10 @@ in
         # to the stubbed agent (#4).
         PROMPT_PATH = batsHarness.promptDir;
         PROMPT_HARNESS_DIR = promptHarness.promptDir;
+        # The default-image outcome contract, so entrypoint.bats runs standalone
+        # (no /agent/outcome-contract.md on the bats build host) still exercise
+        # the same canonical text an image would bake (issue #420).
+        OUTCOME_CONTRACT_FILE = batsHarness.outcomeContractFile;
         # Harnesses with baked skills for skills-precedence tests.
         SKILLS_RUN_CMD = "${skillsHarness.run}/bin/run";
         SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.run}/bin/run";
@@ -1090,6 +1094,18 @@ in
       ${promptHarness.agentFiles}/agent/prompts/conflict-resolve-prompt.md
     touch $out
   '';
+
+  # The canonical SPINDRIFT_OUTCOME contract must be baked at /agent, a
+  # sibling of /agent/prompts, so a SPINDRIFT_PROMPT_DIR mount (which shadows
+  # only /agent/prompts) never hides it from the entrypoint at run time
+  # (issue #420) -- and it must be byte-identical to the single source #419
+  # already exports, so the build-time and run-time injections cannot drift.
+  outcome-contract-baked-into-image =
+    pkgs.runCommand "outcome-contract-baked-into-image" { } ''
+      diff ${batsHarness.outcomeContractFile} \
+        ${batsHarness.agentFiles}/agent/outcome-contract.md
+      touch $out
+    '';
 
   # Skills configured at build time must land in the agent-files layer at
   # /home/agent/.claude/skills so the Box is self-contained. Realizes the

@@ -278,6 +278,10 @@ let
     mkdir -p $out/agent/prompts
     cp ${entrypoint}/bin/entrypoint $out/agent/entrypoint.sh
     chmod +x $out/agent/entrypoint.sh
+    # A sibling of prompts/, not inside it, so a SPINDRIFT_PROMPT_DIR mount
+    # (which shadows only /agent/prompts) never hides it from the entrypoint
+    # (issue #420).
+    cp ${pkgs.writeText "outcome-contract.md" outcomeContract} $out/agent/outcome-contract.md
     cp ${pkgs.writeText "issue-prompt.md" (injectOutcomeContract prompt)} $out/agent/prompts/issue-prompt.md
     cp ${pkgs.writeText "scout-prompt.md" scoutPrompt} $out/agent/prompts/scout-prompt.md
     cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md
