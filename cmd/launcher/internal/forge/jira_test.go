@@ -251,6 +251,39 @@ func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 	}
 }
 
+// TestJiraClient_Issue_IncludeComments_MultilineCommentIsOneBullet verifies
+// that Issue() renders each comment as a single bullet line, collapsing
+// embedded newlines to spaces — the same formatting the local adapter's
+// shared comment-append helper applies, so both consumers produce
+// consistent "## Comments" sections.
+func TestJiraClient_Issue_IncludeComments_MultilineCommentIsOneBullet(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/issue/PROJ-8":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{
+				"key": "PROJ-8",
+				"fields": {"summary": "s", "description": "desc", "status": {"name": "To Do"}, "labels": []}
+			}`))
+		case "/rest/api/2/issue/PROJ-8/comment":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"comments": [{"body": "line one\nline two"}]}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok", IncludeComments: true})
+	iss, err := jc.Issue("PROJ-8")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !strings.Contains(iss.Body, "- line one line two") {
+		t.Errorf("Body = %q, want a single bullet with embedded newlines collapsed to spaces", iss.Body)
+	}
+}
+
 // TestJiraClient_DepsOf_NativeLinks verifies DepsOf resolves dependencies
 // from native Jira "is blocked by" issue links, not prose parsing, and
 // ignores unrelated link types/directions.

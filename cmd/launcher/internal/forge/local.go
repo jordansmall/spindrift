@@ -242,17 +242,6 @@ func (lt *LocalTracker) Comment(num, body string) error {
 	return nil
 }
 
-// appendComment adds comment as a bullet under a trailing "## Comments"
-// section of body, creating the section if it isn't already present.
-func appendComment(body, comment string) string {
-	trimmed := strings.TrimRight(body, "\n")
-	if !strings.Contains(trimmed, "## Comments") {
-		trimmed += "\n\n## Comments\n"
-	}
-	trimmed += "\n- " + strings.ReplaceAll(comment, "\n", " ")
-	return trimmed + "\n"
-}
-
 // Probe ensures the local issues directory exists and returns its absolute
 // path (the local analogue of a resolved repo slug).
 func (lt *LocalTracker) Probe() (string, error) {
