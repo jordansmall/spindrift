@@ -485,7 +485,12 @@ in
   # mirror, so it isn't a safe drift discriminant.
   dogfood-leaf-values-single-source =
     let
-      inherit (pkgs.lib) assertMsg concatStringsSep filter hasInfix;
+      inherit (pkgs.lib)
+        assertMsg
+        concatStringsSep
+        filter
+        hasInfix
+        ;
       flakeSrc = builtins.readFile ../../flake.nix;
       fixturesSrc = builtins.readFile ../../nix/fixtures.nix;
       literals = [
