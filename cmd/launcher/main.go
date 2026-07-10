@@ -17,11 +17,10 @@ import (
 	"sync"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/runner"
-	"spindrift.dev/launcher/internal/usage"
 )
 
 type config struct {
@@ -143,12 +142,8 @@ type config struct {
 }
 
 type issue struct {
-	number  string
-	title   string
-	fixPass int // 0 = initial run; >0 = fix-pass number (sets FIX_PASS env)
-	// ciFailureSummary, when non-empty, is the CI failure detail captured by
-	// selfHeal on genuine-red; forwarded into the fix Box as CI_FAILURE_SUMMARY.
-	ciFailureSummary string
+	number string
+	title  string
 }
 
 func getenv(key, def string) string {
@@ -412,24 +407,27 @@ func newBuildRunner(c config, pwd string) runner.Runner {
 		"", c.pidsLimit, c.memoryLimit)
 }
 
-// buildBoxEnv assembles the env map forwarded into a Box. It combines the
-// schema boxEnv=true vars (read from the ambient env by name) with per-issue
-// vars. The adapter is responsible for any runtime-specific additions (e.g.
-// PREFETCH for bwrap, HOME/PATH for the sandbox).
-func buildBoxEnv(c config, iss issue) map[string]string {
-	env := make(map[string]string)
-	for _, name := range strings.Fields(c.boxEnvVars) {
-		env[name] = os.Getenv(name)
+// dispatchConfig builds the subset of config a dispatch.Factory needs.
+func dispatchConfig(c config) dispatch.Config {
+	return dispatch.Config{
+		BoxEnvVars:           c.boxEnvVars,
+		TransientRetryMax:    c.transientRetryMax,
+		TransientBackoffSecs: c.transientBackoffSecs,
+		HoldJitterSecs:       c.holdJitterSecs,
 	}
-	env["ISSUE_NUMBER"] = iss.number
-	env["ISSUE_TITLE"] = iss.title
-	if iss.fixPass > 0 {
-		env["FIX_PASS"] = strconv.Itoa(iss.fixPass)
+}
+
+// newDispatchFactory constructs the dispatch.Factory for one top-level
+// dispatch entry point (run, the selective `dispatch <nums>` path, or
+// recover). A driver-cache creation failure is logged and degrades to no
+// cache (fix boxes cold-start) rather than failing the dispatch -- the cache
+// is a resume optimization, not a correctness requirement (issue #427).
+func newDispatchFactory(c config, pwd string, r runner.Runner) *dispatch.Factory {
+	f, err := dispatch.NewFactory(dispatchConfig(c), pwd, r, newDriver(c), dispatch.RealClock())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "==> driver cache unavailable (%v) -- fix boxes will cold-start\n", err)
 	}
-	if iss.ciFailureSummary != "" {
-		env["CI_FAILURE_SUMMARY"] = iss.ciFailureSummary
-	}
-	return env
+	return f
 }
 
 // build realizes the sandbox image or store closures without running any agent.
@@ -445,27 +443,11 @@ func build() error {
 	return newBuildRunner(c, pwd).EnsureReady()
 }
 
-// activeDriverCache is the ephemeral, launcher-lifetime per-issue host cache
-// (issue #427) for the dispatch currently in flight. Each root entry point
-// that can dispatch a Box (run, the selective-list `dispatch <nums>` path,
-// and `recover`) creates it and defers cleanup; nil (the zero value, as in
-// every other test in this package) degrades transitionState's eviction and
-// runOne/runFix's Box population to no-ops. runConflictResolve does not
-// consult it -- session resume is a fix-flow concern, and its short-lived
-// rebase-conflict box never runs the main agent prompt.
-var activeDriverCache *driverCache
-
 // transitionState is a best-effort dispatch-state transition that logs but
-// does not propagate errors, matching the original behaviour. A transition
-// into a terminal state (Complete/Failed) also evicts that issue's driver
-// cache entry, covering every terminal transition in the package from one
-// hook rather than each call site.
+// does not propagate errors, matching the original behaviour.
 func transitionState(fc forge.Client, num string, from, to forge.DispatchState) {
 	if err := fc.TransitionState(num, from, to); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %d\n", num, to)
-	}
-	if to == forge.Complete || to == forge.Failed {
-		activeDriverCache.evict(num)
 	}
 }
 
@@ -478,78 +460,6 @@ func claimIssue(c config, fc forge.Client, num string) {
 		return
 	}
 	transitionState(fc, num, forge.Dispatchable, forge.InProgress)
-}
-
-// runOne dispatches one issue into a container and logs its output.
-func runOne(c config, pwd string, r runner.Runner, iss issue) error {
-	logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
-	fmt.Printf("    -> #%s: %s\n", iss.number, iss.title)
-
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		return fmt.Errorf("create log: %w", err)
-	}
-	defer logFile.Close()
-
-	box := runner.Box{
-		Issue:          iss.number,
-		Name:           "agent-issue-" + iss.number,
-		Env:            buildBoxEnv(c, iss),
-		Output:         newDriver(c).NewHeartbeatWriter(logFile, iss.number, os.Stdout),
-		DriverCacheDir: activeDriverCache.dirFor(iss.number),
-	}
-	return r.Run(box)
-}
-
-// runFix dispatches a fix box for issue iss, writing output to a per-attempt
-// log file. The fix box receives FIX_PASS=fixPass so the entrypoint can
-// distinguish fix runs and check out the existing branch rather than creating
-// a new one, plus CI_FAILURE_SUMMARY (when non-empty) so the fix prompt can
-// render the concrete CI failure selfHeal captured on genuine-red.
-func runFix(c config, pwd string, r runner.Runner, iss issue, fixPass int, ciFailureSummary string) error {
-	logPath := filepath.Join(pwd, "logs", fmt.Sprintf("issue-%s-fix-%d.log", iss.number, fixPass))
-	fmt.Printf("    -> #%s (fix-pass-%d): %s\n", iss.number, fixPass, iss.title)
-
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		return fmt.Errorf("create fix log: %w", err)
-	}
-	defer logFile.Close()
-
-	fixIss := issue{number: iss.number, title: iss.title, fixPass: fixPass, ciFailureSummary: ciFailureSummary}
-	box := runner.Box{
-		Issue:          fixIss.number,
-		Name:           "agent-issue-" + fixIss.number,
-		Env:            buildBoxEnv(c, fixIss),
-		Output:         newDriver(c).NewHeartbeatWriter(logFile, fixIss.number, os.Stdout),
-		DriverCacheDir: activeDriverCache.dirFor(fixIss.number),
-	}
-	return r.Run(box)
-}
-
-// runConflictResolve dispatches a conflict-resolution box for issue iss.
-// The box receives CONFLICT_RESOLVE_PR_URL so the entrypoint enters
-// conflict-resolve mode: it resolves the rebase conflict, pushes the branch,
-// and exits without running the main agent prompt.
-func runConflictResolve(c config, pwd string, r runner.Runner, iss issue, pr string) error {
-	logPath := filepath.Join(pwd, "logs", fmt.Sprintf("issue-%s-conflict-resolve.log", iss.number))
-	fmt.Printf("    -> #%s (conflict-resolve): %s\n", iss.number, iss.title)
-
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		return fmt.Errorf("create conflict-resolve log: %w", err)
-	}
-	defer logFile.Close()
-
-	env := buildBoxEnv(c, iss)
-	env["CONFLICT_RESOLVE_PR_URL"] = pr
-	box := runner.Box{
-		Issue:  iss.number,
-		Name:   "agent-issue-" + iss.number,
-		Env:    env,
-		Output: newDriver(c).NewHeartbeatWriter(logFile, iss.number, os.Stdout),
-	}
-	return r.Run(box)
 }
 
 // gateToGreen polls CheckState on the PR's head commit until the state
@@ -757,12 +667,10 @@ func landPushOnly(c config, fc forge.Client, num, branch string) (ok bool, merge
 // when immediate mode completed an actual merge. A merge failure keeps the
 // issue at agent-complete (merge-blocked note) and returns (true, false).
 //
-// runFixFn is called with the 1-based fix-pass number and the CI failure
-// summary captured on genuine-red (empty when none could be fetched), and
-// must dispatch the fix box synchronously. runConflictResolveFn, when
-// non-nil, is forwarded to applyMergeMode for agent-assisted rebase-conflict
-// resolution.
-func selfHeal(c config, fc forge.Client, runFixFn func(int, string) error, runConflictResolveFn func(string) error, num, pr string) (ok bool, merged bool) {
+// d dispatches fix passes and, when a rebase conflict arises, an
+// agent-assisted conflict resolution -- both subject to dispatch's own
+// in-session transient retry (issue #441).
+func selfHeal(c config, fc forge.Client, d dispatch.Dispatcher, num, pr string) (ok bool, merged bool) {
 	if c.codeForge == "git" {
 		return landPushOnly(c, fc, num, pr)
 	}
@@ -780,7 +688,7 @@ func selfHeal(c config, fc forge.Client, runFixFn func(int, string) error, runCo
 				fc.Comment(num, mergeGuardComment(matched))
 				return true, false
 			}
-			if err := applyMergeMode(c, fc, num, pr, runConflictResolveFn); err != nil {
+			if err := applyMergeMode(c, fc, num, pr, d.ResolveConflict); err != nil {
 				fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, pr, err)
 				fc.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
 				return true, false
@@ -803,7 +711,7 @@ func selfHeal(c config, fc forge.Client, runFixFn func(int, string) error, runCo
 			fmt.Printf("    #%s  pr=%s  status=failure-detail-unavailable  !! %v\n", num, pr, detailErr)
 			detail = ""
 		}
-		if err := runFixFn(attempt+1, detail); err != nil {
+		if result := d.Fix(attempt+1, detail); !result.Success {
 			fmt.Printf("    !! #%s fix-pass-%d exited non-zero\n", num, attempt+1)
 		}
 	}
@@ -832,12 +740,11 @@ func verifyMerged(c config, fc forge.Client, num, pr string) {
 
 // adoptAndGate runs the merge gate (selfHeal → verifyMerged) on an
 // already-discovered open non-draft PR for iss. Prints "status=adopted"
-// before running the gate. Called by both printOutcomeReport and
-// reconcileStranded.
-func adoptAndGate(c config, fc forge.Client, iss issue, prURL string, runFixFn func(int, string) error, runConflictResolveFn func(string) error) {
+// before running the gate. Called by both gateIssue and reconcileStranded.
+func adoptAndGate(c config, fc forge.Client, d dispatch.Dispatcher, iss issue, prURL string) {
 	branch := c.branchPrefix + iss.number
 	fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", iss.number, prURL, branch)
-	ok, merged := selfHeal(c, fc, runFixFn, runConflictResolveFn, iss.number, prURL)
+	ok, merged := selfHeal(c, fc, d, iss.number, prURL)
 	if ok {
 		if merged {
 			verifyMerged(c, fc, iss.number, prURL)
@@ -847,92 +754,35 @@ func adoptAndGate(c config, fc forge.Client, iss issue, prURL string, runFixFn f
 	}
 }
 
-// postUsageComment posts an aggregate usage-statistics comment to the issue.
-// If no result event is found in the log the comment notes that usage is
-// unavailable. Errors posting the comment are logged but do not abort the
-// caller.
-func postUsageComment(fc forge.Client, issNum, logPath string) {
-	model := os.Getenv("MODEL")
-	if model == "" {
-		model = "unknown"
-	}
-	u, found, err := usage.LastInLog(logPath)
-	var body string
-	if err != nil || !found {
-		body = fmt.Sprintf("## Run usage\n\nModel: `%s`\n\nUsage data unavailable (no result event in log).", model)
-	} else {
-		body = fmt.Sprintf(
-			"## Run usage\n\n"+
-				"| Field | Value |\n"+
-				"| --- | --- |\n"+
-				"| Model | `%s` |\n"+
-				"| Cost | $%.4f |\n"+
-				"| Input tokens | %d |\n"+
-				"| Output tokens | %d |\n"+
-				"| Cache read tokens | %d |\n"+
-				"| Cache creation tokens | %d |\n"+
-				"| Wall time | %s |\n"+
-				"| API time | %s |\n"+
-				"| Turns | %d |",
-			model,
-			u.TotalCostUSD,
-			u.InputTokens,
-			u.OutputTokens,
-			u.CacheReadInputTokens,
-			u.CacheCreationInputTokens,
-			usage.FormatDuration(u.DurationMs),
-			usage.FormatDuration(u.DurationApiMs),
-			u.NumTurns,
-		)
-		body += breakdownSection(logPath)
-	}
-	if commentErr := fc.Comment(issNum, body); commentErr != nil {
+// postUsageComment posts d's aggregate usage-statistics comment to the
+// issue. Errors posting the comment are logged but do not abort the caller.
+func postUsageComment(fc forge.Client, issNum string, d dispatch.Dispatcher) {
+	if commentErr := fc.Comment(issNum, d.UsageReport()); commentErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: post usage comment: %v\n", issNum, commentErr)
 	}
 }
 
-// breakdownSection returns a Markdown per-role breakdown section, or empty
-// string if no assistant events are found or the log cannot be read.
-func breakdownSection(logPath string) string {
-	roles, err := usage.BreakdownByRole(logPath)
-	if err != nil || len(roles) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("\n\n### Per-role breakdown\n\n")
-	sb.WriteString("| Role | Input tokens | Output tokens | Cache read | Cache creation |\n")
-	sb.WriteString("| --- | --- | --- | --- | --- |\n")
-	for _, r := range roles {
-		fmt.Fprintf(&sb, "| %s | %d | %d | %d | %d |\n",
-			r.Role, r.InputTokens, r.OutputTokens,
-			r.CacheReadInputTokens, r.CacheCreationInputTokens)
-	}
-	return sb.String()
-}
-
 // gateIssue runs the merge gate for a single issue immediately after its box
-// exits. It reads the outcome log, drives selfHeal or adoptAndGate as needed,
-// and posts the usage comment. Called from fanOut goroutines so each issue
-// reaches completeLabel or failedLabel independently of its wave siblings.
-func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue) {
-	logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
-	o, found, err := outcome.LastInLog(logPath)
-	if err != nil {
+// exits. It drives selfHeal or adoptAndGate off result (d's Run outcome) as
+// needed, and posts the usage comment. Called from fanOut goroutines so each
+// issue reaches completeLabel or failedLabel independently of its wave
+// siblings.
+func gateIssue(c config, fc forge.Client, d dispatch.Dispatcher, iss issue, result dispatch.Result) {
+	if result.ParseErr != nil {
 		fmt.Printf("    #%s  status=malformed  note=unparseable outcome line\n", iss.number)
 		return
 	}
-	if !found {
+	if !result.OutcomeFound {
 		branch := c.branchPrefix + iss.number
 		pr, isDraft, prFound, prErr := openPRForBranch(fc, branch)
 		if prErr != nil || !prFound {
-			cls, clsErr := newDriver(c).ClassifyTransient(logPath)
 			clsNote := ""
-			if clsErr != nil {
-				fmt.Fprintf(os.Stderr, "    ?? #%s: classify: %v\n", iss.number, clsErr)
+			if result.ClassifyErr != nil {
+				fmt.Fprintf(os.Stderr, "    ?? #%s: classify: %v\n", iss.number, result.ClassifyErr)
 			} else {
-				clsNote = fmt.Sprintf("  class=%s  reason=%s", cls.Class, cls.Reason)
-				if cls.ResetAt != nil {
-					clsNote += "  resetsAt=" + cls.ResetAt.UTC().Format(time.RFC3339)
+				clsNote = fmt.Sprintf("  class=%s  reason=%s", result.Classification.Class, result.Classification.Reason)
+				if result.Classification.ResetAt != nil {
+					clsNote += "  resetsAt=" + result.Classification.ResetAt.UTC().Format(time.RFC3339)
 				}
 			}
 			fmt.Printf("    #%s  status=missing%s  note=no outcome in log\n", iss.number, clsNote)
@@ -942,24 +792,17 @@ func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue
 			fmt.Printf("    #%s  pr=%s  status=blocked  note=draft PR on %s; no outcome line\n", iss.number, pr, branch)
 			return
 		}
-		fixFn := func(fixPass int, ciFailureSummary string) error {
-			return runFix(c, pwd, r, iss, fixPass, ciFailureSummary)
-		}
-		conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
-		adoptAndGate(c, fc, iss, pr, fixFn, conflictFn)
+		adoptAndGate(c, fc, d, iss, pr)
 		return
 	}
 
+	o := result.Outcome
 	switch o.Status {
 	case "blocked":
 		fmt.Printf("    #%s  pr=%s  status=%s  !! %s\n", iss.number, o.PR, o.Status, o.Note)
-		postUsageComment(fc, iss.number, logPath)
+		postUsageComment(fc, iss.number, d)
 	case "ready":
-		fixFn := func(fixPass int, ciFailureSummary string) error {
-			return runFix(c, pwd, r, iss, fixPass, ciFailureSummary)
-		}
-		conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
-		ok, merged := selfHeal(c, fc, fixFn, conflictFn, iss.number, o.PR)
+		ok, merged := selfHeal(c, fc, d, iss.number, o.PR)
 		if ok {
 			// verifyMerged reads PR state, which the push-only git Code Forge
 			// does not have — landPushOnly's own fc.Merge success already
@@ -970,7 +813,7 @@ func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue
 		} else {
 			fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, o.PR)
 		}
-		postUsageComment(fc, iss.number, logPath)
+		postUsageComment(fc, iss.number, d)
 	case "merged":
 		// verifyMerged reads PR state, which the push-only git Code Forge does
 		// not have (mirrors the "ready" case's same guard above).
@@ -979,17 +822,17 @@ func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue
 		} else {
 			fmt.Printf("    #%s  pr=%s  status=%s\n", iss.number, o.PR, o.Status)
 		}
-		postUsageComment(fc, iss.number, logPath)
+		postUsageComment(fc, iss.number, d)
 	default:
 		fmt.Printf("    #%s  pr=%s  status=%s\n", iss.number, o.PR, o.Status)
-		postUsageComment(fc, iss.number, logPath)
+		postUsageComment(fc, iss.number, d)
 	}
 }
 
 // printOutcomeReport prints the outcome-report header. Per-issue gating now
 // runs inside fanOut goroutines via gateIssue, so each issue reaches its
 // terminal label independently before this point.
-func printOutcomeReport(_ config, _ forge.Client, _ string, _ runner.Runner, _ []issue) {
+func printOutcomeReport() {
 	fmt.Println("==> outcome report")
 }
 
@@ -1200,7 +1043,7 @@ func discoverIssues(c config, fc forge.Client) ([]issue, error) {
 // have an open non-draft PR on their agent branch, and runs the merge gate on
 // each. Draft PRs and in-progress issues with no open PR are skipped silently.
 // Called at launcher start, before any new dispatch.
-func reconcileStranded(c config, fc forge.Client, pwd string, r runner.Runner) {
+func reconcileStranded(c config, fc forge.Client, f *dispatch.Factory) {
 	fiList, err := fc.ListIssues(forge.InProgress)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reconcile: list in-progress issues: %v\n", err)
@@ -1217,11 +1060,9 @@ func reconcileStranded(c config, fc forge.Client, pwd string, r runner.Runner) {
 		if prErr != nil || !found || isDraft {
 			continue
 		}
-		fixFn := func(fixPass int, ciFailureSummary string) error {
-			return runFix(c, pwd, r, iss, fixPass, ciFailureSummary)
-		}
-		conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
-		adoptAndGate(c, fc, iss, prURL, fixFn, conflictFn)
+		d := f.New(iss.number, iss.title)
+		adoptAndGate(c, fc, d, iss, prURL)
+		d.Close()
 	}
 }
 
@@ -1229,7 +1070,7 @@ func reconcileStranded(c config, fc forge.Client, pwd string, r runner.Runner) {
 // and drives the same adopt-and-gate path used by reconcileStranded. Returns an
 // error when the issue cannot be fetched, the PR is a draft, or no open PR
 // exists; the caller should treat those as non-success exits.
-func recoverByNumber(c config, fc forge.Client, pwd string, r runner.Runner, issueNum string) error {
+func recoverByNumber(c config, fc forge.Client, pwd string, f *dispatch.Factory, issueNum string) error {
 	fi, err := fc.Issue(issueNum)
 	if err != nil {
 		return fmt.Errorf("issue %s: %w", issueNum, err)
@@ -1251,19 +1092,15 @@ func recoverByNumber(c config, fc forge.Client, pwd string, r runner.Runner, iss
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
 		return fmt.Errorf("mkdir logs: %w", err)
 	}
-	fixFn := func(fixPass int, ciFailureSummary string) error {
-		return runFix(c, pwd, r, iss, fixPass, ciFailureSummary)
-	}
-	conflictFn := func(pr string) error { return runConflictResolve(c, pwd, r, iss, pr) }
-	adoptAndGate(c, fc, iss, prURL, fixFn, conflictFn)
+	d := f.New(iss.number, iss.title)
+	defer d.Close()
+	adoptAndGate(c, fc, d, iss, prURL)
 	return nil
 }
 
 // recoverIssue is the entry point for the `recover` subcommand. It loads config,
 // wires the forge client and runner, then calls recoverByNumber.
 func recoverIssue(issueNum string) error {
-	defer setupDriverCache()()
-
 	pwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -1277,7 +1114,9 @@ func recoverIssue(issueNum string) error {
 		return err
 	}
 	fc := newForgeClient(c)
-	return recoverByNumber(c, fc, pwd, r, issueNum)
+	f := newDispatchFactory(c, pwd, r)
+	defer f.Cleanup()
+	return recoverByNumber(c, fc, pwd, f, issueNum)
 }
 
 // labelMeta holds the default color and description for a triage label.
@@ -1482,102 +1321,10 @@ func issueNums(issues []issue) []string {
 	return nums
 }
 
-// sleepFn and nowFn are injectable for tests; they default to the real
-// time.Sleep and time.Now so production behaviour is unchanged.
-var sleepFn func(time.Duration) = time.Sleep
-var nowFn func() time.Time = time.Now
-
-// classifyFn is injectable for tests so callers can supply predetermined
-// classifications without writing log files on disk. Production routes
-// through the config's Driver strategy (ADR 0009) rather than calling
-// outcome.Classify directly, matching gateIssue's classification path.
-var classifyFn = func(d driver.Driver, logPath string) (outcome.Classification, error) {
-	return d.ClassifyTransient(logPath)
-}
-
-// runWithRetry dispatches iss, retrying transient failures according to
-// config limits. It returns true when the box exits zero, false after a
-// terminal failure or once the retry cap is exhausted.
-//
-//   - 429 with a known resetsAt: hold until the reset time (+ holdJitterSecs),
-//     then re-dispatch. A hold that ends in success or terminal does NOT
-//     consume the retry cap. Consecutive holds that each end in another 429
-//     count toward the cap (the "no-progress" case — the token never recovered).
-//     NOTE: full progress detection (distinguishing an immediate re-429 from a
-//     legitimate long-running re-dispatch that also 429s) requires branch-push
-//     tracking (#140). Until then we count all consecutive 429-then-hold cycles,
-//     which is conservative but prevents infinite looping on permanently-bad tokens.
-//   - Other transients (529/overloaded, network, 429 without resetsAt): linear
-//     backoff retry up to transientRetryMax, then agent-failed.
-//   - Terminal: agent-failed immediately, no retry.
-//   - Re-dispatch clones fresh until #140 lands (incremental branch push); once
-//     #140 is implemented, a pre-existing remote branch is handled
-//     deterministically and hold-then-resume picks up from the last push.
-func runWithRetry(c config, pwd string, r runner.Runner, iss issue) bool {
-	holdCount := 0
-	transientCount := 0
-	prevWasHold := false
-
-	for {
-		if err := runOne(c, pwd, r, iss); err == nil {
-			return true
-		}
-
-		logPath := filepath.Join(pwd, "logs", "issue-"+iss.number+".log")
-		cl, err := classifyFn(newDriver(c), logPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "    ?? #%s: classify error: %v\n", iss.number, err)
-			return false
-		}
-
-		if cl.Class == outcome.Terminal {
-			return false
-		}
-
-		// Transient exit: branch on reason.
-		if cl.Reason == outcome.RateLimit && cl.ResetAt != nil {
-			// 429 with known reset: hold until reset + jitter.
-			// A hold following another hold (prevWasHold=true) means the token
-			// has not recovered — consume the cap. A hold after a non-hold
-			// iteration (success, terminal, or different transient) is "free".
-			if prevWasHold {
-				holdCount++
-			}
-			if holdCount >= c.transientRetryMax {
-				fmt.Printf("    !! #%s: hold cap exhausted (%d consecutive no-progress hold(s))\n",
-					iss.number, c.transientRetryMax)
-				return false
-			}
-			wait := cl.ResetAt.Sub(nowFn()) + time.Duration(c.holdJitterSecs)*time.Second
-			if wait < 0 {
-				wait = time.Duration(c.holdJitterSecs) * time.Second
-			}
-			fmt.Printf("    .. #%s: rate limit; holding until %s\n",
-				iss.number, cl.ResetAt.UTC().Format("15:04 UTC"))
-			sleepFn(wait)
-			prevWasHold = true
-			continue
-		}
-
-		// 529/overloaded, network, or 429 without a known reset time → backoff retry.
-		prevWasHold = false
-		transientCount++
-		if transientCount > c.transientRetryMax {
-			fmt.Printf("    !! #%s: transient retry cap exhausted (%d)\n",
-				iss.number, c.transientRetryMax)
-			return false
-		}
-		backoff := time.Duration(c.transientBackoffSecs) * time.Second * time.Duration(transientCount)
-		fmt.Printf("    .. #%s: transient (%s); retry %d/%d in %s\n",
-			iss.number, cl.Reason, transientCount, c.transientRetryMax, backoff)
-		sleepFn(backoff)
-	}
-}
-
 // fanOut dispatches a batch of issues in parallel (up to maxParallel at once).
 // Each goroutine claims its issue only after acquiring a semaphore slot so that
 // at most maxParallel issues are ever in the in-progress state simultaneously.
-func fanOut(c config, fc forge.Client, pwd string, r runner.Runner, batch []issue) {
+func fanOut(c config, fc forge.Client, f *dispatch.Factory, batch []issue) {
 	sem := make(chan struct{}, c.maxParallel)
 	var wg sync.WaitGroup
 	for _, iss := range batch {
@@ -1588,12 +1335,15 @@ func fanOut(c config, fc forge.Client, pwd string, r runner.Runner, batch []issu
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			claimIssue(c, fc, iss.number)
-			if ok := runWithRetry(c, pwd, r, iss); !ok {
+			d := f.New(iss.number, iss.title)
+			defer d.Close()
+			result := d.Run()
+			if !result.Success {
 				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.number, iss.number)
 				transitionState(fc, iss.number, forge.InProgress, forge.Failed)
 			} else {
 				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.number, iss.number)
-				gateIssue(c, fc, pwd, r, iss)
+				gateIssue(c, fc, d, iss, result)
 			}
 		}()
 	}
@@ -1605,7 +1355,7 @@ func fanOut(c config, fc forge.Client, pwd string, r runner.Runner, batch []issu
 // depsPollSecs. The deadlock timer resets on any progress; if no issue becomes
 // ready within depsWaitSecs the function returns an error rather than blocking
 // forever. Dispatched issues leave the remaining set even when they fail.
-func dispatchWaves(c config, fc forge.Client, pwd string, r runner.Runner, issues []issue, edges map[string][]string) error {
+func dispatchWaves(c config, fc forge.Client, f *dispatch.Factory, issues []issue, edges map[string][]string) error {
 	remaining := make([]issue, len(issues))
 	copy(remaining, issues)
 	elapsed := 0
@@ -1657,7 +1407,7 @@ func dispatchWaves(c config, fc forge.Client, pwd string, r runner.Runner, issue
 
 		// Progress: reset the deadlock timer.
 		elapsed = 0
-		fanOut(c, fc, pwd, r, ready)
+		fanOut(c, fc, f, ready)
 		remaining = held
 	}
 	return nil
@@ -1667,7 +1417,7 @@ func dispatchWaves(c config, fc forge.Client, pwd string, r runner.Runner, issue
 // batch and exits. Blocked issues are skipped so no slot is wasted on a
 // dependency that hasn't merged yet; they wait for the next invocation.
 // A cycle in the in-batch dependency graph is an error returned immediately.
-func drainMaxJobs(c config, fc forge.Client, pwd string, r runner.Runner, issues []issue, edges map[string][]string) error {
+func drainMaxJobs(c config, fc forge.Client, pwd string, f *dispatch.Factory, issues []issue, edges map[string][]string) error {
 	if len(edges) > 0 {
 		if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
 			return fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
@@ -1728,34 +1478,12 @@ outer:
 		return nil
 	}
 	fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), c.maxJobs)
-	fanOut(c, fc, pwd, r, selected)
-	printOutcomeReport(c, fc, pwd, r, selected)
+	fanOut(c, fc, f, selected)
+	printOutcomeReport()
 	return nil
 }
 
-// setupDriverCache creates a fresh driverCache and installs it as
-// activeDriverCache for the duration of one dispatch entry point (run, the
-// selective `dispatch <nums>` path, or recover). Returns a cleanup func to
-// defer, which removes the whole cache root and clears activeDriverCache. A
-// creation failure is logged and degrades to no cache (nil) rather than
-// failing the dispatch -- the cache is a resume optimization, not a
-// correctness requirement (issue #427).
-func setupDriverCache() func() {
-	cache, err := newDriverCache()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "==> driver cache unavailable (%v) -- fix boxes will cold-start\n", err)
-		return func() {}
-	}
-	activeDriverCache = cache
-	return func() {
-		cache.cleanup()
-		activeDriverCache = nil
-	}
-}
-
 func run(noBuild bool) error {
-	defer setupDriverCache()()
-
 	pwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -1784,10 +1512,13 @@ func run(noBuild bool) error {
 		return err
 	}
 
+	f := newDispatchFactory(c, pwd, r)
+	defer f.Cleanup()
+
 	// Reconcile stranded in-progress issues before dispatching new work.
 	// Skip when ISSUE_NUMBER is set — the caller already claimed a specific issue.
 	if c.issueNumber == "" {
-		reconcileStranded(c, fc, pwd, r)
+		reconcileStranded(c, fc, f)
 	}
 
 	issues, err := discoverIssues(c, fc)
@@ -1812,7 +1543,7 @@ func run(noBuild bool) error {
 	}
 
 	if c.maxJobs > 0 {
-		if err := drainMaxJobs(c, fc, pwd, r, issues, edges); err != nil {
+		if err := drainMaxJobs(c, fc, pwd, f, issues, edges); err != nil {
 			return err
 		}
 	} else if hasEdges || batchHasTouchOverlap(c, fc, issues) {
@@ -1826,15 +1557,15 @@ func run(noBuild bool) error {
 		} else {
 			fmt.Println("==> declared touches overlap an in-progress issue; dispatching in waves")
 		}
-		if err := dispatchWaves(c, fc, pwd, r, issues, edges); err != nil {
+		if err := dispatchWaves(c, fc, f, issues, edges); err != nil {
 			return err
 		}
-		printOutcomeReport(c, fc, pwd, r, issues)
+		printOutcomeReport()
 	} else {
 		// MAX_JOBS = 0, no declared edges: original single-wave fan-out.
 		fmt.Printf("==> %d issue(s); launching up to %d container(s) at a time\n", len(issues), c.maxParallel)
-		fanOut(c, fc, pwd, r, issues)
-		printOutcomeReport(c, fc, pwd, r, issues)
+		fanOut(c, fc, f, issues)
+		printOutcomeReport()
 	}
 
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
@@ -1914,42 +1645,38 @@ func main() {
 		nums := dispatchIssueArgs(dispatchArgs)
 		if len(nums) > 0 {
 			// Operator explicit list: selective path (bypasses label/barrier gates).
-			// os.Exit skips defers, so cleanup is called explicitly on every
-			// exit path below rather than deferred.
-			cleanupDriverCache := setupDriverCache()
 			pwd, err := os.Getwd()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
-				cleanupDriverCache()
 				os.Exit(1)
 			}
 			c := loadConfig()
 			if err := validate(c); err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
-				cleanupDriverCache()
 				os.Exit(1)
 			}
 			r := newRunner(c, pwd)
 			if noBuild {
 				if err := r.IsReady(); err != nil {
 					fmt.Fprintf(os.Stderr, "%s\n", err)
-					cleanupDriverCache()
 					os.Exit(1)
 				}
 			} else {
 				if err := r.EnsureReady(); err != nil {
 					fmt.Fprintf(os.Stderr, "%s\n", err)
-					cleanupDriverCache()
 					os.Exit(1)
 				}
 			}
 			fc := newForgeClient(c)
-			if err := selectiveListDispatch(c, fc, pwd, r, nums, forceYes, os.Stdin, os.Stdout); err != nil {
+			// os.Exit skips defers, so cleanup is called explicitly on every
+			// exit path below rather than deferred.
+			f := newDispatchFactory(c, pwd, r)
+			if err := selectiveListDispatch(c, fc, pwd, f, nums, forceYes, os.Stdin, os.Stdout); err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
-				cleanupDriverCache()
+				f.Cleanup()
 				os.Exit(1)
 			}
-			cleanupDriverCache()
+			f.Cleanup()
 			return
 		}
 		if err := run(noBuild); err != nil {
