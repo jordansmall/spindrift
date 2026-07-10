@@ -668,7 +668,7 @@ FAKE
   ! grep -q 'failed# CONTEXT' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "CAVEMAN_STEP stays separated from SCOUT" {
+@test "CAVEMAN_STEP stays separated from the COMMS body text" {
   mkdir -p "$HOME/.claude/skills"
   cat >"$HOME/.claude/skills/caveman.md" <<'SKILL'
 ---
@@ -679,7 +679,7 @@ Respond terse like smart caveman.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q 'verbatim\.# SCOUT' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'verbatim\.Your text output' "$CLAUDE_PROMPT_FILE"
 }
 
 # issue #463: the claude|heartbeat-filter|tee pipeline used to be hand-copied
@@ -1021,7 +1021,7 @@ description: Ultra-compressed communication mode.
 Respond terse like smart caveman.
 SKILL
   export COMMS_CONTRACT_FILE="$BATS_TEST_TMPDIR/comms-contract.md"
-  printf '# COMMS\n\n%s# SCOUT placeholder\n' '${CAVEMAN_STEP}' >"$COMMS_CONTRACT_FILE"
+  printf '# COMMS\n\n%sbody text\n' '${CAVEMAN_STEP}' >"$COMMS_CONTRACT_FILE"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qi 'narration' "$CLAUDE_PROMPT_FILE"
