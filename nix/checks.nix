@@ -1107,6 +1107,19 @@ in
       touch $out
     '';
 
+  # The idempotency check (issue #420) hinges on the entrypoint's marker
+  # literal matching the one lib/mkHarness.nix slices the contract on; each is
+  # a hardcoded literal in its own language, with nothing else forcing them to
+  # agree, so a one-sided edit would silently break injection or duplicate
+  # the contract on every run. Compared as plain text (no eval) so this stays
+  # cheap and catches the drift at the source-literal level.
+  outcome-contract-marker-parity =
+    pkgs.runCommand "outcome-contract-marker-parity" { } ''
+      grep -qF 'outcomeContractMarker = "# LAND THE CHANGE";' ${../lib/mkHarness.nix}
+      grep -qF 'OUTCOME_CONTRACT_MARKER="# LAND THE CHANGE"' ${../agent/entrypoint.sh}
+      touch $out
+    '';
+
   # Skills configured at build time must land in the agent-files layer at
   # /home/agent/.claude/skills so the Box is self-contained. Realizes the
   # agent-files layer; Linux-gated like the other image checks.

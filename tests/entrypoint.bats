@@ -170,6 +170,21 @@ setup() {
   ! grep -q 'should not appear' "$CLAUDE_PROMPT_FILE"
 }
 
+# A missing/unreadable OUTCOME_CONTRACT_FILE must fail the entrypoint loudly
+# rather than silently proceeding without the contract -- the exact failure
+# mode #420 exists to prevent.
+@test "entrypoint fails loudly when OUTCOME_CONTRACT_FILE is missing" {
+  local prompt_dir="$BATS_TEST_TMPDIR/prompts"
+  mkdir -p "$prompt_dir"
+  printf 'issue stub, no contract here\n' >"$prompt_dir/issue-prompt.md"
+  printf 'scout stub\n' >"$prompt_dir/scout-prompt.md"
+  printf 'reviewer stub\n' >"$prompt_dir/review-prompt.md"
+  export PROMPTS_DIR="$prompt_dir"
+  export OUTCOME_CONTRACT_FILE="$BATS_TEST_TMPDIR/does-not-exist.md"
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+}
+
 @test "entrypoint invokes claude headlessly with skip-permissions" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
