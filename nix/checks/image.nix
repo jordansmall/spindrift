@@ -164,12 +164,15 @@ in
     touch $out
   '';
 
-  # Skills configured at build time must land in the agent-files layer at
-  # /home/agent/.claude/skills so the Box is self-contained. Realizes the
-  # agent-files layer; Linux-gated like the other image checks.
+  # Skills configured at build time must land in the agent-files layer at the
+  # Driver's declared skills dir (ADR 0009) so the Box is self-contained.
+  # Derives the expected path from skillsHarness.driverEntry rather than a
+  # literal, so the check tracks whichever Driver the image is built with
+  # (issue #448). Realizes the agent-files layer; Linux-gated like the other
+  # image checks.
   skills-baked-into-image = pkgs.runCommand "skills-baked-into-image" { } ''
     grep -q 'BAKED-SKILL-MARKER' \
-      ${skillsHarness.agentFiles}/home/agent/.claude/skills/baked-skill.md
+      ${skillsHarness.agentFiles}/home/agent/${skillsHarness.driverEntry.skillsDirRelative}/baked-skill.md
     touch $out
   '';
 
@@ -204,26 +207,35 @@ in
     touch $out
   '';
 
-  # The driver-cache mountpoint /home/agent/.claude/projects must be baked
-  # into the image owned by uid 1000, so podman reuses the existing directory
+  # The driver-cache mountpoint (the Driver's declared session-state dir,
+  # ADR 0009 -- /home/agent/.claude/projects for claude) must be baked into
+  # the image owned by uid 1000, so podman reuses the existing directory
   # instead of fabricating root-owned parent dirs when the volume is mounted
-  # (issue #447).  fakeRootCommands' chown -R 1000:1000 home/agent records
-  # the ownership in the top customisation layer (Layers[-1]), the same layer
-  # that nix-var-owned-by-agent and nix-conf-in-image inspect.
+  # (issue #447). The expected path is derived from
+  # nonRustHarness.driverEntry rather than a literal, so this check tracks
+  # whichever Driver the image is built with (issue #448).
+  # fakeRootCommands' chown -R 1000:1000 home/agent records the ownership in
+  # the top customisation layer (Layers[-1]), the same layer that
+  # nix-var-owned-by-agent and nix-conf-in-image inspect.
   projects-mountpoint-baked =
+    let
+      relPath = nonRustHarness.driverEntry.sessionCacheDirRelative;
+      bakedPath = "home/agent/${relPath}";
+      awkPattern = pkgs.lib.replaceStrings [ "/" "." ] [ "\\/" "\\." ] bakedPath;
+    in
     pkgs.runCommand "projects-mountpoint-baked" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
         mkdir img && tar -xf ${nonRustHarness.image} -C img
         layer="$(jq -r '.[0].Layers[-1]' img/manifest.json)"
         uid=$(tar --numeric-owner -tvf "img/$layer" \
-          | awk '/home\/agent\/\.claude\/projects\/?$/ { split($2,a,"/"); print a[1]; exit }' \
+          | awk '/${awkPattern}\/?$/ { split($2,a,"/"); print a[1]; exit }' \
           || true)
         [ -n "$uid" ] || {
-          echo "home/agent/.claude/projects not found in the image's top (customisation) layer" >&2
+          echo "${bakedPath} not found in the image's top (customisation) layer" >&2
           exit 1
         }
         [ "$uid" = "1000" ] || {
-          echo "home/agent/.claude/projects is not owned by uid 1000 (got: '$uid')" >&2
+          echo "${bakedPath} is not owned by uid 1000 (got: '$uid')" >&2
           exit 1
         }
         touch $out
