@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -267,11 +266,8 @@ func validate(c config) error {
 	if c.claudeOAuthToken == "" && c.anthropicAPIKey == "" {
 		return fmt.Errorf("set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY")
 	}
-	if c.runtime == "" {
-		return fmt.Errorf("RUNTIME is not set")
-	}
-	if _, err := exec.LookPath(c.runtime); err != nil {
-		return fmt.Errorf("%s not found on PATH.", c.runtime)
+	if err := runner.ValidateRuntime(c.runtime); err != nil {
+		return err
 	}
 	if _, err := driver.New(c.driver); err != nil {
 		return err
