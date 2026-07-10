@@ -31,11 +31,17 @@ type Factory struct {
 	cache  *cache
 }
 
-// NewFactory constructs a Factory and its driver-cache root. A cache
-// creation failure degrades to a nil cache (fix boxes cold-start) rather
-// than failing construction; the returned error is diagnostic only and the
-// Factory is still usable.
+// NewFactory constructs a Factory and its driver-cache root. When cfg
+// declares no DriverSessionCacheDir, the Factory skips cache creation
+// entirely (a nil cache, same as a creation failure) since there is no
+// in-box target to mount it over. Otherwise a cache creation failure
+// degrades to a nil cache (fix boxes cold-start) rather than failing
+// construction; the returned error is diagnostic only and the Factory is
+// still usable.
 func NewFactory(cfg Config, pwd string, r runner.Runner, drv driver.Driver, clock Clock) (*Factory, error) {
+	if cfg.DriverSessionCacheDir == "" {
+		return &Factory{cfg: cfg, pwd: pwd, runner: r, driver: drv, clock: clock, cache: nil}, nil
+	}
 	c, err := newCache()
 	return &Factory{cfg: cfg, pwd: pwd, runner: r, driver: drv, clock: clock, cache: c}, err
 }

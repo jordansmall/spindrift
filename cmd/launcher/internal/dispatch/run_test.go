@@ -74,7 +74,8 @@ func TestRun_PopulatesBoxDriverCacheDir(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
-	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
+	cfg := Config{DriverSessionCacheDir: "/home/agent/.claude/projects"}
+	f, err := NewFactory(cfg, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
@@ -93,6 +94,34 @@ func TestRun_PopulatesBoxDriverCacheDir(t *testing.T) {
 	}
 }
 
+// TestNewFactory_NoDriverSessionCacheDir_NoCacheCreated verifies that a
+// Driver declaring no session-cache dir (Config.DriverSessionCacheDir
+// empty) makes the Factory skip creating a per-issue cache directory
+// entirely -- Box.DriverCacheDir stays empty on every dispatched box, since
+// there is no in-box target to mount it over (issue #448).
+func TestNewFactory_NoDriverSessionCacheDir_NoCacheCreated(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("55", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if got := fr.RunCalls[0].DriverCacheDir; got != "" {
+		t.Errorf("Box.DriverCacheDir: got %q, want empty when Driver declares no session-cache dir", got)
+	}
+}
+
 // TestFix_PopulatesBoxDriverCacheDirWithSameKeyAsRun verifies Fix forwards
 // the same per-issue cache directory Run used for the same issue -- the
 // whole point being that the fix Box mounts back the initial run's session
@@ -101,7 +130,8 @@ func TestFix_PopulatesBoxDriverCacheDirWithSameKeyAsRun(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
-	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
+	cfg := Config{DriverSessionCacheDir: "/home/agent/.claude/projects"}
+	f, err := NewFactory(cfg, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
