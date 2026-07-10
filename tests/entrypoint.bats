@@ -131,6 +131,32 @@ setup() {
   grep -q "Implement issue #7: Do the thing on agent/issue-7" "$CLAUDE_PROMPT_FILE"
 }
 
+# FIX_PASS (issue #425): the launcher sets FIX_PASS on a fix box (dispatched
+# when CI comes back red) so the entrypoint drives a dedicated warm fix-prompt
+# instead of the cold issue-prompt a fresh run uses.
+@test "FIX_PASS unset drives issue-prompt.md, not fix-prompt.md" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "Fresh clone, new branch" "$CLAUDE_PROMPT_FILE"
+  ! grep -q "already checked out" "$CLAUDE_PROMPT_FILE"
+}
+
+@test "FIX_PASS=0 still drives issue-prompt.md (byte-identical to unset)" {
+  export FIX_PASS="0"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "Fresh clone, new branch" "$CLAUDE_PROMPT_FILE"
+  ! grep -q "already checked out" "$CLAUDE_PROMPT_FILE"
+}
+
+@test "FIX_PASS>0 drives fix-prompt.md instead of issue-prompt.md" {
+  export FIX_PASS="2"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "already checked out" "$CLAUDE_PROMPT_FILE"
+  ! grep -q "Fresh clone, new branch" "$CLAUDE_PROMPT_FILE"
+}
+
 # A SPINDRIFT_PROMPT_DIR mount (simulated here by pointing PROMPTS_DIR straight
 # at a host dir, exactly what the mount leaves the entrypoint seeing) whose
 # issue-prompt.md drops the SPINDRIFT_OUTCOME contract must still reach the
