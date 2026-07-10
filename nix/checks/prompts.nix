@@ -145,17 +145,21 @@ in
     touch $out
   '';
 
-  # Grep pin (issue #455 acceptance criteria): a distinctive literal from the
-  # shared WATCH CI block must appear in exactly one prompt *source* file on
-  # disk. fix-prompt.md gets this block by injection now, never as hand-copied
-  # source text — a regression here means someone pasted the block back in.
-  prompt-source-statusCheckRollup-appears-once =
-    pkgs.runCommand "prompt-source-statusCheckRollup-appears-once" { }
+  # Grep pin (issue #455 acceptance criteria): the WATCH CI GraphQL query
+  # literal must appear in exactly one prompt *source* file on disk.
+  # fix-prompt.md's CONTEXT section legitimately references the unrelated
+  # `statusCheckRollup` JSON field name via `gh pr view --json`, so the query
+  # body itself -- distinctive to the shared WATCH CI block -- is the pin, not
+  # the field name alone. fix-prompt.md gets the WATCH CI block by injection
+  # now, never as hand-copied source text -- a regression here means someone
+  # pasted the block back in.
+  prompt-source-statusCheckRollup-query-appears-once =
+    pkgs.runCommand "prompt-source-statusCheckRollup-query-appears-once" { }
       ''
-        count=$(grep -rl 'statusCheckRollup' ${../../templates/default/prompts} | wc -l)
+        count=$(grep -rlF 'query($owner:String!' ${../../templates/default/prompts} | wc -l)
         [ "$count" -eq 1 ] || {
-          echo "expected 'statusCheckRollup' in exactly one prompt source file, got $count" >&2
-          grep -rl 'statusCheckRollup' ${../../templates/default/prompts} >&2
+          echo "expected the WATCH CI GraphQL query in exactly one prompt source file, got $count" >&2
+          grep -rlF 'query($owner:String!' ${../../templates/default/prompts} >&2
           exit 1
         }
         touch $out
