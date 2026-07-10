@@ -93,7 +93,7 @@
             #                            jiraBaseURL        = "";
             #                            jiraProjectKey     = "";
             #                            jiraEmail          = ""; };
-            #   promptSkillIteration = { autoFormat = false; };
+            #   promptSkillIteration = { autoFormat = false; autoLint = false; };
             # };
           };
 
