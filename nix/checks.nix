@@ -1053,6 +1053,21 @@ in
     test "${consumerFormatter}" = "${pkgs.nixfmt}"
     touch $out
   '';
+
+  # heartbeatFilterBin.src must not contain *_test.go — the image drvPath
+  # must be invariant under host-side launcher test churn (issue #474).
+  # A tight fileset is the invariant; adding a new import outside it fails
+  # the build loudly (missing package) rather than silently expanding the src.
+  heartbeat-filter-src-excludes-tests = pkgs.runCommand "heartbeat-filter-src-excludes-tests" { } ''
+    test_files=$(find ${nonRustHarness.heartbeatFilterBin.src} -name '*_test.go')
+    if [ -n "$test_files" ]; then
+      echo "heartbeatFilterBin.src contains *_test.go files:" >&2
+      echo "$test_files" >&2
+      echo "Tighten the fileset in lib/mkHarness.nix (issue #474)" >&2
+      exit 1
+    fi
+    touch $out
+  '';
 }
 // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
   # The baked entrypoint must carry a store-path shebang, not the

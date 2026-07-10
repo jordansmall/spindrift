@@ -847,6 +847,7 @@ else
       skillsDir
       outcomeContractFile
       driverFunctionsFile
+      heartbeatFilterBin
       ;
 
     packages = {
