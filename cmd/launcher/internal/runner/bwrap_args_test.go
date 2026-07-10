@@ -113,6 +113,40 @@ func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 	}
 }
 
+// TestBwrapArgs_DriverCacheDir_DotClaudeParentCreated verifies that a
+// --dir /home/agent/.claude appears before the driver-cache bind so the
+// parent directory is agent-owned in the tmpfs rather than fabricated as
+// root by bwrap's bind-target auto-creation (issue #447).
+func TestBwrapArgs_DriverCacheDir_DotClaudeParentCreated(t *testing.T) {
+	dir := t.TempDir()
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+
+	dirIdx := -1
+	bindIdx := -1
+	for i, arg := range args {
+		if arg == "/home/agent/.claude" && i > 0 && args[i-1] == "--dir" {
+			dirIdx = i
+		}
+		if arg == "/home/agent/.claude/projects" && i > 0 && args[i-1] == dir {
+			bindIdx = i
+		}
+	}
+	if dirIdx == -1 {
+		t.Errorf("--dir /home/agent/.claude not found in args: %v", args)
+	}
+	if bindIdx == -1 {
+		t.Errorf("bind target /home/agent/.claude/projects not found in args: %v", args)
+	}
+	if dirIdx != -1 && bindIdx != -1 && dirIdx >= bindIdx {
+		t.Errorf("--dir /home/agent/.claude (idx %d) must precede bind target (idx %d)", dirIdx, bindIdx)
+	}
+}
+
 // TestBwrapArgs_DriverCacheDirUnset_NoMount verifies that omitting
 // Box.DriverCacheDir produces no /home/agent/.claude/projects bind.
 func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {

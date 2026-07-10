@@ -79,6 +79,10 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	// shadow the sibling .claude/skills bind below regardless of order.
 	if box.DriverCacheDir != "" {
 		if info, err := os.Stat(box.DriverCacheDir); err == nil && info.IsDir() {
+			// --dir creates the parent in the tmpfs as the sandbox user (uid 1000),
+			// preventing bwrap from auto-fabricating it as root when it processes
+			// the bind target (issue #447).
+			args = append(args, "--dir", "/home/agent/.claude")
 			args = append(args, "--bind", box.DriverCacheDir, "/home/agent/.claude/projects")
 		}
 	}
