@@ -223,23 +223,22 @@ in
       bakedPath = "home/agent/${relPath}";
       awkPattern = pkgs.lib.replaceStrings [ "/" "." ] [ "\\/" "\\." ] bakedPath;
     in
-    pkgs.runCommand "projects-mountpoint-baked" { nativeBuildInputs = [ pkgs.jq ]; }
-      ''
-        mkdir img && tar -xf ${nonRustHarness.image} -C img
-        layer="$(jq -r '.[0].Layers[-1]' img/manifest.json)"
-        uid=$(tar --numeric-owner -tvf "img/$layer" \
-          | awk '/${awkPattern}\/?$/ { split($2,a,"/"); print a[1]; exit }' \
-          || true)
-        [ -n "$uid" ] || {
-          echo "${bakedPath} not found in the image's top (customisation) layer" >&2
-          exit 1
-        }
-        [ "$uid" = "1000" ] || {
-          echo "${bakedPath} is not owned by uid 1000 (got: '$uid')" >&2
-          exit 1
-        }
-        touch $out
-      '';
+    pkgs.runCommand "projects-mountpoint-baked" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      mkdir img && tar -xf ${nonRustHarness.image} -C img
+      layer="$(jq -r '.[0].Layers[-1]' img/manifest.json)"
+      uid=$(tar --numeric-owner -tvf "img/$layer" \
+        | awk '/${awkPattern}\/?$/ { split($2,a,"/"); print a[1]; exit }' \
+        || true)
+      [ -n "$uid" ] || {
+        echo "${bakedPath} not found in the image's top (customisation) layer" >&2
+        exit 1
+      }
+      [ "$uid" = "1000" ] || {
+        echo "${bakedPath} is not owned by uid 1000 (got: '$uid')" >&2
+        exit 1
+      }
+      touch $out
+    '';
 
   # nix/var must be owned by uid 1000 so the non-root agent can lock the
   # SQLite store DB inside the unprivileged container (issue #356).
