@@ -122,7 +122,7 @@ func TestSettle_MalformedOutcome_NoPanic(t *testing.T) {
 func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 	const branch = "agent/issue-1"
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	fc.IsPushOnly = true
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.PRStateErr = errFake
