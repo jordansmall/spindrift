@@ -259,11 +259,10 @@ in
   # the dogfood image at its .md basename so the in-box skill preamble
   # advertises /caveman, the skill-file analogue of the nil/shellcheck
   # baked-toolchain guards above (issue #486).
-  caveman-baked-in-dogfood =
-    pkgs.runCommand "caveman-baked-in-dogfood" { } ''
-      test -s ${harness.skillsDir}/caveman.md
-      touch $out
-    '';
+  caveman-baked-in-dogfood = pkgs.runCommand "caveman-baked-in-dogfood" { } ''
+    test -s ${harness.skillsDir}/caveman.md
+    touch $out
+  '';
 
   # The lean/no-nix escape hatch must not include the nix CLI.
   lean-escape-hatch =
