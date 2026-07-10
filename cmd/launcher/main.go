@@ -445,11 +445,25 @@ func build() error {
 	return newBuildRunner(c, pwd).EnsureReady()
 }
 
+// activeDriverCache is the ephemeral, launcher-lifetime per-issue host cache
+// (issue #427) for the dispatch currently in flight. Each root entry point
+// that can dispatch a Box (run, the selective-list `dispatch <nums>` path,
+// and `recover`) creates it and defers cleanup; nil (the zero value, as in
+// every other test in this package) degrades transitionState's eviction and
+// runOne/runFix/runConflictResolve's Box population to no-ops.
+var activeDriverCache *driverCache
+
 // transitionState is a best-effort dispatch-state transition that logs but
-// does not propagate errors, matching the original behaviour.
+// does not propagate errors, matching the original behaviour. A transition
+// into a terminal state (Complete/Failed) also evicts that issue's driver
+// cache entry, covering every terminal transition in the package from one
+// hook rather than each call site.
 func transitionState(fc forge.Client, num string, from, to forge.DispatchState) {
 	if err := fc.TransitionState(num, from, to); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %d\n", num, to)
+	}
+	if to == forge.Complete || to == forge.Failed {
+		activeDriverCache.evict(num)
 	}
 }
 
@@ -476,10 +490,11 @@ func runOne(c config, pwd string, r runner.Runner, iss issue) error {
 	defer logFile.Close()
 
 	box := runner.Box{
-		Issue:  iss.number,
-		Name:   "agent-issue-" + iss.number,
-		Env:    buildBoxEnv(c, iss),
-		Output: newDriver(c).NewHeartbeatWriter(logFile, iss.number, os.Stdout),
+		Issue:          iss.number,
+		Name:           "agent-issue-" + iss.number,
+		Env:            buildBoxEnv(c, iss),
+		Output:         newDriver(c).NewHeartbeatWriter(logFile, iss.number, os.Stdout),
+		DriverCacheDir: activeDriverCache.dirFor(iss.number),
 	}
 	return r.Run(box)
 }
@@ -501,10 +516,11 @@ func runFix(c config, pwd string, r runner.Runner, iss issue, fixPass int, ciFai
 
 	fixIss := issue{number: iss.number, title: iss.title, fixPass: fixPass, ciFailureSummary: ciFailureSummary}
 	box := runner.Box{
-		Issue:  fixIss.number,
-		Name:   "agent-issue-" + fixIss.number,
-		Env:    buildBoxEnv(c, fixIss),
-		Output: newDriver(c).NewHeartbeatWriter(logFile, fixIss.number, os.Stdout),
+		Issue:          fixIss.number,
+		Name:           "agent-issue-" + fixIss.number,
+		Env:            buildBoxEnv(c, fixIss),
+		Output:         newDriver(c).NewHeartbeatWriter(logFile, fixIss.number, os.Stdout),
+		DriverCacheDir: activeDriverCache.dirFor(fixIss.number),
 	}
 	return r.Run(box)
 }
@@ -1238,6 +1254,8 @@ func recoverByNumber(c config, fc forge.Client, pwd string, r runner.Runner, iss
 // recoverIssue is the entry point for the `recover` subcommand. It loads config,
 // wires the forge client and runner, then calls recoverByNumber.
 func recoverIssue(issueNum string) error {
+	defer setupDriverCache()()
+
 	pwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -1685,7 +1703,29 @@ func drainMaxJobs(c config, fc forge.Client, pwd string, r runner.Runner, issues
 	return nil
 }
 
+// setupDriverCache creates a fresh driverCache and installs it as
+// activeDriverCache for the duration of one dispatch entry point (run, the
+// selective `dispatch <nums>` path, or recover). Returns a cleanup func to
+// defer, which removes the whole cache root and clears activeDriverCache. A
+// creation failure is logged and degrades to no cache (nil) rather than
+// failing the dispatch -- the cache is a resume optimization, not a
+// correctness requirement (issue #427).
+func setupDriverCache() func() {
+	cache, err := newDriverCache()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "==> driver cache unavailable (%v) -- fix boxes will cold-start\n", err)
+		return func() {}
+	}
+	activeDriverCache = cache
+	return func() {
+		cache.cleanup()
+		activeDriverCache = nil
+	}
+}
+
 func run(noBuild bool) error {
+	defer setupDriverCache()()
+
 	pwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -1844,6 +1884,7 @@ func main() {
 		nums := dispatchIssueArgs(dispatchArgs)
 		if len(nums) > 0 {
 			// Operator explicit list: selective path (bypasses label/barrier gates).
+			defer setupDriverCache()()
 			pwd, err := os.Getwd()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
