@@ -151,8 +151,9 @@ let
     let
       afterStartParts = lib.splitString startMarker text;
     in
-    assert lib.assertMsg (builtins.length afterStartParts == 2)
-      "mkHarness: source must contain start marker '${startMarker}' exactly once";
+    assert lib.assertMsg (
+      builtins.length afterStartParts == 2
+    ) "mkHarness: source must contain start marker '${startMarker}' exactly once";
     let
       afterStart = startMarker + builtins.elemAt afterStartParts 1;
       spanParts = lib.splitString endMarker afterStart;
