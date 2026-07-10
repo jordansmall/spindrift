@@ -35,4 +35,12 @@ type Config struct {
 	// (unused by the build adapters).
 	PromptDir string
 	SkillsDir string
+
+	// In-box mount targets declared by the selected Driver (ADR 0009; baked
+	// by nix at wrap time), shared by the OCI and bwrap run adapters.
+	// DriverSessionCacheDir is empty when the Driver declares no
+	// session-state dir, in which case the driver-cache dir is never
+	// mounted regardless of Box.DriverCacheDir.
+	DriverSkillsDir       string
+	DriverSessionCacheDir string
 }

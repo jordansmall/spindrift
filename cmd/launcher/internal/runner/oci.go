@@ -40,20 +40,22 @@ type ociAdapter struct {
 // dependency passed separately from cfg.
 func NewOCI(cfg Config, pwd string) Runner {
 	return &ociAdapter{
-		cli:             cfg.Runtime,
-		image:           cfg.Image,
-		imageArchive:    cfg.ImageArchive,
-		imageDrv:        cfg.ImageDrv,
-		imageTag:        cfg.ImageTag,
-		nixBuilderImage: cfg.NixBuilderImage,
-		nixVolume:       cfg.NixVolume,
-		flakeImageAttr:  cfg.FlakeImageAttr,
-		pwd:             pwd,
-		promptDir:       cfg.PromptDir,
-		skillsDir:       cfg.SkillsDir,
-		podmanNetwork:   cfg.PodmanNetwork,
-		pidsLimit:       cfg.PidsLimit,
-		memoryLimit:     cfg.MemoryLimit,
+		cli:                   cfg.Runtime,
+		image:                 cfg.Image,
+		imageArchive:          cfg.ImageArchive,
+		imageDrv:              cfg.ImageDrv,
+		imageTag:              cfg.ImageTag,
+		nixBuilderImage:       cfg.NixBuilderImage,
+		nixVolume:             cfg.NixVolume,
+		flakeImageAttr:        cfg.FlakeImageAttr,
+		pwd:                   pwd,
+		promptDir:             cfg.PromptDir,
+		skillsDir:             cfg.SkillsDir,
+		driverSkillsDir:       cfg.DriverSkillsDir,
+		driverSessionCacheDir: cfg.DriverSessionCacheDir,
+		podmanNetwork:         cfg.PodmanNetwork,
+		pidsLimit:             cfg.PidsLimit,
+		memoryLimit:           cfg.MemoryLimit,
 	}
 }
 
