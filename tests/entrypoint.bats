@@ -396,6 +396,23 @@ FAKE
   grep -q "$WORK_DIR" "$PREFETCH_LOG"
 }
 
+# NIX_STORE_WRITABLE: baked into the image Env by mkHarness's nixStoreWritable
+# knob (ADR 0018, issue #469) — self-test mode trades hermeticity for in-box
+# `nix flake check` feedback, so the warning must be loud when enabled and
+# absent by default.
+@test "entrypoint prints a WARNING when NIX_STORE_WRITABLE=true" {
+  export NIX_STORE_WRITABLE=true
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"==> WARNING"*"/nix/store is writable"* ]]
+}
+
+@test "entrypoint prints no store-writable warning by default" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"/nix/store is writable"* ]]
+}
+
 # --agents JSON: produced by nix (builtins.toJSON), composing each subagent
 # independently by its own model knob; forwarded by the entrypoint as-is after
 # prompt injection. The fake claude records the --agents value to
