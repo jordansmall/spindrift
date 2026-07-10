@@ -148,10 +148,10 @@ print the `SPINDRIFT_OUTCOME issue=… pr=… status=… note=…` line the laun
 parses to learn the PR — is harness-owned, not Consumer-tunable. At
 `spindrift build` time, a `prompt` that omits the contract gets it appended
 automatically (idempotent: a prompt that already has it is left untouched).
-This build-time injection does **not** cover a runtime `SPINDRIFT_PROMPT_DIR`
-override — that mounts a whole prompt directory over the baked one, bypassing
-the bake step entirely, so a runtime-mounted custom prompt that drops the
-contract ships an agent that never emits the outcome line.
+A runtime `SPINDRIFT_PROMPT_DIR` override is covered too: the entrypoint
+appends the same canonical contract to a rendered issue prompt that omits it,
+idempotently, so a runtime-mounted custom prompt can't ship an agent that
+never emits the outcome line either.
 
 ### Cold-run toolchain nudge
 
