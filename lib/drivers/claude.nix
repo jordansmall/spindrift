@@ -22,6 +22,14 @@
   # Directory Claude Code scans for skill files, relative to $HOME.
   skillsDirRelative = ".claude/skills";
 
+  # Directory claude's session transcripts live under, relative to $HOME
+  # (issue #427/#447/#448, ADR 0009): the launcher mounts an ephemeral
+  # per-issue host directory writable over it so a fix pass can resume the
+  # initial run's session instead of cold-starting one. A Driver that omits
+  # this attribute has no resumable session state -- the launcher creates no
+  # per-issue cache and the runner adapters add no mount for it.
+  sessionCacheDirRelative = ".claude/projects";
+
   # Shell function body extracting the SPINDRIFT_OUTCOME line from claude's
   # stream-json result event; called as `_driver_extract_outcome "$stream_log"`.
   outcomeExtractFnBody = ''

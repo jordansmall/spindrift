@@ -392,9 +392,11 @@ let
   # (the Go launcher mounts it in cmd/launcher/internal/runner).
   agentFiles = pkgs.runCommand "spindrift-agent-files" { } ''
     mkdir -p $out/agent/prompts
-    # Pre-create the driver-cache mountpoint so podman reuses the agent-owned
-    # directory instead of fabricating root-owned parents (issue #447).
-    mkdir -p $out/home/agent/.claude/projects
+    ${lib.optionalString (driverEntry ? sessionCacheDirRelative) ''
+      # Pre-create the driver-cache mountpoint so podman reuses the agent-owned
+      # directory instead of fabricating root-owned parents (issue #447).
+      mkdir -p $out/home/agent/${driverEntry.sessionCacheDirRelative}
+    ''}
     cp ${entrypoint}/bin/entrypoint $out/agent/entrypoint.sh
     chmod +x $out/agent/entrypoint.sh
     # A sibling of prompts/, not inside it, so a SPINDRIFT_PROMPT_DIR mount
@@ -410,9 +412,9 @@ let
     cp ${pkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
     cp ${pkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/agent/prompts/fix-prompt.md
     ${lib.optionalString (skills != [ ]) ''
-      mkdir -p $out/home/agent/.claude/skills
+      mkdir -p $out/home/agent/${driverEntry.skillsDirRelative}
       ${lib.concatMapStrings (f: ''
-        cp ${f} $out/home/agent/.claude/skills/${
+        cp ${f} $out/home/agent/${driverEntry.skillsDirRelative}/${
           if lib.isDerivation f then f.name else builtins.baseNameOf f
         }
       '') skills}
@@ -611,6 +613,25 @@ let
     map (e: e.env) (lib.filter (e: e.boxEnv or false) (lib.attrValues schema))
   );
 
+  # The Driver's in-box mount targets (ADR 0009), exported for the Go
+  # launcher's runner adapters (cmd/launcher/internal/runner) so they mount
+  # over the Driver's declared paths instead of a hardcoded ".claude"
+  # literal. DRIVER_SESSION_CACHE_DIR is empty when the selected Driver
+  # declares no session-state dir, in which case the launcher mounts no
+  # driver cache on either backend.
+  driverMountPreamble =
+    "export DRIVER_SKILLS_DIR="
+    + lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
+    + "\n"
+    + "export DRIVER_SESSION_CACHE_DIR="
+    + lib.escapeShellArg (
+      if driverEntry ? sessionCacheDirRelative then
+        "/home/agent/${driverEntry.sessionCacheDirRelative}"
+      else
+        ""
+    )
+    + "\n";
+
   # Exported preambles for the Go launcher wrappers. `export` is required so
   # the exec'd binary inherits each value; plain assignments would be
   # shell-only. Two vars cover both adapter families:
@@ -628,6 +649,7 @@ let
         BAKED_PREFETCH=${lib.escapeShellArg prefetch}
         export BAKED_PREFETCH
       ''
+      + driverMountPreamble
     else
       # OCI run also bakes the build-time vars so EnsureReady can build the
       # image on demand when it is absent — the workflow is `build` first, but
@@ -641,7 +663,8 @@ let
         export NIX_BUILDER_IMAGE="${nixBuilderImage}"
         export NIX_VOLUME="spindrift-nix"
         export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.agent-image"
-      '';
+      ''
+      + driverMountPreamble;
 
   goBuildPreamble =
     if runnerKind == "bwrap" then
@@ -815,6 +838,7 @@ else
       checkContractFile
       driverFunctionsFile
       heartbeatFilterBin
+      driverEntry
       ;
 
     packages = {
