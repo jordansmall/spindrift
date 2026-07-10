@@ -17,12 +17,14 @@ type Box struct {
 	Output io.Writer         // where stdout+stderr go; nil → discarded
 
 	// DriverCacheDir is an optional host path mounted writable over
-	// /home/agent/.claude (issue #427) so the claude Driver can pin a
-	// session on the initial run and resume it on a fix pass. Empty omits
-	// the mount. Unlike promptDir/skillsDir this is the first *writable*
-	// host mount — the always-on hardening (--cap-drop=all /
-	// --security-opt=no-new-privileges) must stay unconditional regardless.
-	// The launcher treats its contents as opaque: create/mount/evict only.
+	// /home/agent/.claude/projects (issue #427) so the claude Driver can pin
+	// a session on the initial run and resume it on a fix pass. Scoped to
+	// .claude/projects, not the whole .claude, so it can never shadow the
+	// baked .claude/skills. Empty omits the mount. Unlike promptDir/
+	// skillsDir this is the first *writable* host mount — the always-on
+	// hardening (--cap-drop=all / --security-opt=no-new-privileges) must
+	// stay unconditional regardless. The launcher treats its contents as
+	// opaque: create/mount/evict only.
 	DriverCacheDir string
 }
 
