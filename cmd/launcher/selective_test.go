@@ -23,11 +23,12 @@ func TestSelectiveListDispatch_AllLabeledNoPrompt(t *testing.T) {
 
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
 
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, dir, fr, []string{"12", "15", "18"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, dir, f, []string{"12", "15", "18"}, false, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -55,11 +56,12 @@ func TestSelectiveListDispatch_UnlabeledWarnsAndPrompts(t *testing.T) {
 
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
 
 	stdin := strings.NewReader("y\n")
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, dir, fr, []string{"12", "15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, dir, f, []string{"12", "15"}, false, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -87,11 +89,12 @@ func TestSelectiveListDispatch_UnlabeledAbortOnN(t *testing.T) {
 
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
 
 	stdin := strings.NewReader("n\n")
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, dir, fr, []string{"15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, dir, f, []string{"15"}, false, stdin, stdout)
 	if err == nil {
 		t.Fatal("expected error on abort, got nil")
 	}
@@ -111,11 +114,12 @@ func TestSelectiveListDispatch_YesFlagSkipsPrompt(t *testing.T) {
 
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
 
 	stdin := &bytes.Buffer{} // no input; would hang if prompt fired
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, dir, fr, []string{"15"}, true, stdin, stdout)
+	err := selectiveListDispatch(c, fc, dir, f, []string{"15"}, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch with --yes: %v", err)
 	}
@@ -135,11 +139,12 @@ func TestSelectiveListDispatch_NonInteractiveAbort(t *testing.T) {
 
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
 
 	stdin := &bytes.Buffer{} // EOF immediately = non-interactive
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, dir, fr, []string{"15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, dir, f, []string{"15"}, false, stdin, stdout)
 	if err == nil {
 		t.Fatal("expected non-interactive abort error, got nil")
 	}
@@ -167,10 +172,11 @@ func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, dir, fr, []string{"15", "99"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, dir, f, []string{"15", "99"}, false, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -195,10 +201,11 @@ func TestSelectiveListDispatch_UnmetExternalEviction(t *testing.T) {
 
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, dir, fr, []string{"15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, dir, f, []string{"15"}, false, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}

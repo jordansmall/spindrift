@@ -65,9 +65,10 @@ func TestFanOut_ClaimsGatedByMaxParallel(t *testing.T) {
 	}
 
 	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
 	fanDone := make(chan struct{})
 	go func() {
-		fanOut(c, fc, dir, fr, []issue{
+		fanOut(c, fc, f, []issue{
 			{number: "1", title: "first"},
 			{number: "2", title: "second"},
 		})
@@ -122,7 +123,8 @@ func TestFanOut_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.T) {
 	fr.RunErrs = []error{boxErr, nil} // first slot: fail; second: succeed
 
 	dir := tempLogDir(t)
-	fanOut(c, cfc, dir, fr, []issue{
+	f := testFactory(t, dir, fr)
+	fanOut(c, cfc, f, []issue{
 		{number: "1", title: "first"},
 		{number: "2", title: "second"},
 	})
@@ -175,7 +177,8 @@ func TestFanOut_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	))
 
 	dir := tempLogDir(t)
-	fanOut(c, fc, dir, fr, []issue{{number: "1", title: "first"}})
+	f := testFactory(t, dir, fr)
+	fanOut(c, fc, f, []issue{{number: "1", title: "first"}})
 
 	iss, err := fc.Issue("1")
 	if err != nil {
@@ -213,7 +216,8 @@ func TestFanOut_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	))
 
 	dir := tempLogDir(t)
-	fanOut(c, fc, dir, fr, []issue{{number: "1", title: "first"}})
+	f := testFactory(t, dir, fr)
+	fanOut(c, fc, f, []issue{{number: "1", title: "first"}})
 
 	iss, err := fc.Issue("1")
 	if err != nil {
@@ -254,7 +258,8 @@ func TestFanOut_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 	))
 
 	dir := tempLogDir(t)
-	fanOut(c, fc, dir, fr, []issue{{number: "1", title: "first"}})
+	f := testFactory(t, dir, fr)
+	fanOut(c, fc, f, []issue{{number: "1", title: "first"}})
 
 	iss, err := fc.Issue("1")
 	if err != nil {

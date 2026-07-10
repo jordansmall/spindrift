@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -426,7 +427,7 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErr = errors.New("required review missing")
 
-	ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", testPR)
+	ok, merged := selfHeal(c, fc, dispatch.NewFake(), "1", testPR)
 	if !ok {
 		t.Error("selfHeal must return ok=true when CI reached green (even if merge fails)")
 	}
@@ -455,7 +456,7 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(testPR, []string{"src/main.go", ".github/workflows/ci.yml"})
 
-	ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", testPR)
+	ok, merged := selfHeal(c, fc, dispatch.NewFake(), "1", testPR)
 	if !ok {
 		t.Error("selfHeal must return ok=true — CI reached green")
 	}
@@ -493,7 +494,7 @@ func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
 
-	ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", testPR)
+	ok, merged := selfHeal(c, fc, dispatch.NewFake(), "1", testPR)
 	if !ok || merged {
 		t.Errorf("selfHeal(ok=%v, merged=%v), want (true, false) for a guard-hit auto-mode PR", ok, merged)
 	}
@@ -516,7 +517,7 @@ func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(testPR, []string{"src/main.go"})
 
-	ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", testPR)
+	ok, merged := selfHeal(c, fc, dispatch.NewFake(), "1", testPR)
 	if !ok || !merged {
 		t.Errorf("selfHeal(ok=%v, merged=%v), want (true, true) for a non-guarded green PR", ok, merged)
 	}
@@ -541,7 +542,7 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
 
-	ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", testPR)
+	ok, merged := selfHeal(c, fc, dispatch.NewFake(), "1", testPR)
 	if !ok {
 		t.Error("selfHeal must return ok=true — CI reached green")
 	}
@@ -575,7 +576,7 @@ func TestAdoptAndGate_ImmediateMergeFailureStaysComplete(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErr = errors.New("required review missing")
 
-	adoptAndGate(c, fc, issue{number: "1"}, testPR, func(int, string) error { return nil }, nil)
+	adoptAndGate(c, fc, dispatch.NewFake(), issue{number: "1"}, testPR)
 
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, c.completeLabel) {
@@ -675,7 +676,7 @@ func TestAdoptAndGate_ManualModeStaysComplete(t *testing.T) {
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
 			fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
-			adoptAndGate(c, fc, issue{number: "1"}, testPR, func(int, string) error { return nil }, nil)
+			adoptAndGate(c, fc, dispatch.NewFake(), issue{number: "1"}, testPR)
 
 			iss, _ := fc.Issue("1")
 			if !containsLabel(iss.Labels, c.completeLabel) {
@@ -712,7 +713,7 @@ func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
 			branch := "agent/issue-1"
 
-			ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", branch)
+			ok, merged := selfHeal(c, fc, dispatch.NewFake(), "1", branch)
 
 			if !ok {
 				t.Fatal("selfHeal must return ok=true for CODE_FORGE=git — there is no CI to fail")
@@ -747,7 +748,7 @@ func TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed(t *testing.T) {
 	fc.MergeErr = errors.New("remote rejected: non-fast-forward")
 	branch := "agent/issue-1"
 
-	ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", branch)
+	ok, merged := selfHeal(c, fc, dispatch.NewFake(), "1", branch)
 
 	if !ok {
 		t.Error("selfHeal must return ok=true — there is no CI to fail for CODE_FORGE=git")
@@ -879,6 +880,50 @@ func TestNoOutcomeParsingOutsidePackage(t *testing.T) {
 		if strings.Contains(content, `"SPINDRIFT_OUTCOME "`) ||
 			strings.Contains(content, "`SPINDRIFT_OUTCOME `") {
 			t.Errorf("%s: contains SPINDRIFT_OUTCOME parsing — all outcome parsing must go through internal/outcome", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+}
+
+// TestNoBoxConstructionOutsideDispatchPackage walks all non-test Go source
+// files in cmd/launcher, excluding internal/dispatch, and fails if any
+// construct a runner.Box, open an issue log file for writing, or classify a
+// Driver exit directly — the per-issue execution seam established by issue
+// #441.
+func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
+	forbidden := []string{
+		`runner.Box{`,
+		`os.Create(`,
+		`.ClassifyTransient(`,
+	}
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(filepath.ToSlash(path), "internal/dispatch") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		if strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		content := string(data)
+		for _, needle := range forbidden {
+			if strings.Contains(content, needle) {
+				t.Errorf("%s: contains %q — all Box construction, issue-log creation, and Driver classification must go through internal/dispatch", path, needle)
+			}
 		}
 		return nil
 	})
