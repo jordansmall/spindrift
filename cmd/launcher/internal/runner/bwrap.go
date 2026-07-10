@@ -73,6 +73,14 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		}
 	}
 	args = append(args, "--ro-bind", a.agentFiles+"/agent", "/agent")
+	// Writable host mount (issue #427): the only non-ro-bind mount in this
+	// adapter. Bound before the skills bind below so a narrower skills
+	// mount still shadows it as read-only.
+	if box.DriverCacheDir != "" {
+		if info, err := os.Stat(box.DriverCacheDir); err == nil && info.IsDir() {
+			args = append(args, "--bind", box.DriverCacheDir, "/home/agent/.claude")
+		}
+	}
 	if a.promptDir != "" {
 		if info, err := os.Stat(a.promptDir); err == nil && info.IsDir() {
 			fmt.Printf("==> SPINDRIFT_PROMPT_DIR set; mounting %s over the baked prompt\n", a.promptDir)
