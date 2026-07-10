@@ -414,10 +414,11 @@ func newDriver(c config) driver.Driver {
 // dispatchConfig builds the subset of config a dispatch.Factory needs.
 func dispatchConfig(c config) dispatch.Config {
 	return dispatch.Config{
-		BoxEnvVars:           c.boxEnvVars,
-		TransientRetryMax:    c.transientRetryMax,
-		TransientBackoffSecs: c.transientBackoffSecs,
-		HoldJitterSecs:       c.holdJitterSecs,
+		BoxEnvVars:            c.boxEnvVars,
+		TransientRetryMax:     c.transientRetryMax,
+		TransientBackoffSecs:  c.transientBackoffSecs,
+		HoldJitterSecs:        c.holdJitterSecs,
+		DriverSessionCacheDir: c.driverSessionCacheDir,
 	}
 }
 

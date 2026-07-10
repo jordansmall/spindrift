@@ -30,6 +30,12 @@ type Config struct {
 	// HoldJitterSecs is added to a rate-limit hold's wait, and is the whole
 	// wait when the known reset time has already passed.
 	HoldJitterSecs int
+
+	// DriverSessionCacheDir is the selected Driver's declared in-box
+	// session-cache mount target (ADR 0009). Empty when the Driver declares
+	// none, in which case the Factory creates no per-issue cache directory
+	// at all -- there is nowhere in-box to mount it (issue #448).
+	DriverSessionCacheDir string
 }
 
 // buildBoxEnv assembles the env map forwarded into a Box. It combines the
