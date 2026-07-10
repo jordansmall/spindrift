@@ -110,7 +110,7 @@ func TestAdoptAndGate_RedFollowsSelfHeal(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "77", Labels: []string{c.inProgressLabel}})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
 
-	adoptAndGate(c, fc, iss, testReconcilePR, func(pass int) error { return nil }, nil)
+	adoptAndGate(c, fc, iss, testReconcilePR, func(pass int, summary string) error { return nil }, nil)
 
 	if fc.Merged != "" {
 		t.Errorf("expected no merge on red CI; fc.Merged=%q", fc.Merged)
@@ -132,7 +132,7 @@ func TestAdoptAndGate_GreenMergesAndCompletes(t *testing.T) {
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	var fixCalls []int
-	adoptAndGate(c, fc, iss, testReconcilePR, func(pass int) error {
+	adoptAndGate(c, fc, iss, testReconcilePR, func(pass int, summary string) error {
 		fixCalls = append(fixCalls, pass)
 		return nil
 	}, nil)

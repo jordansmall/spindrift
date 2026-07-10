@@ -426,7 +426,7 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErr = errors.New("required review missing")
 
-	ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", testPR)
+	ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", testPR)
 	if !ok {
 		t.Error("selfHeal must return ok=true when CI reached green (even if merge fails)")
 	}
@@ -455,7 +455,7 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(testPR, []string{"src/main.go", ".github/workflows/ci.yml"})
 
-	ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", testPR)
+	ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", testPR)
 	if !ok {
 		t.Error("selfHeal must return ok=true — CI reached green")
 	}
@@ -493,7 +493,7 @@ func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
 
-	ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", testPR)
+	ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", testPR)
 	if !ok || merged {
 		t.Errorf("selfHeal(ok=%v, merged=%v), want (true, false) for a guard-hit auto-mode PR", ok, merged)
 	}
@@ -516,7 +516,7 @@ func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(testPR, []string{"src/main.go"})
 
-	ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", testPR)
+	ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", testPR)
 	if !ok || !merged {
 		t.Errorf("selfHeal(ok=%v, merged=%v), want (true, true) for a non-guarded green PR", ok, merged)
 	}
@@ -541,7 +541,7 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
 
-	ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", testPR)
+	ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", testPR)
 	if !ok {
 		t.Error("selfHeal must return ok=true — CI reached green")
 	}
@@ -575,7 +575,7 @@ func TestAdoptAndGate_ImmediateMergeFailureStaysComplete(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErr = errors.New("required review missing")
 
-	adoptAndGate(c, fc, issue{number: "1"}, testPR, func(int) error { return nil }, nil)
+	adoptAndGate(c, fc, issue{number: "1"}, testPR, func(int, string) error { return nil }, nil)
 
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, c.completeLabel) {
@@ -675,7 +675,7 @@ func TestAdoptAndGate_ManualModeStaysComplete(t *testing.T) {
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
 			fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
-			adoptAndGate(c, fc, issue{number: "1"}, testPR, func(int) error { return nil }, nil)
+			adoptAndGate(c, fc, issue{number: "1"}, testPR, func(int, string) error { return nil }, nil)
 
 			iss, _ := fc.Issue("1")
 			if !containsLabel(iss.Labels, c.completeLabel) {
@@ -712,7 +712,7 @@ func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
 			branch := "agent/issue-1"
 
-			ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", branch)
+			ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", branch)
 
 			if !ok {
 				t.Fatal("selfHeal must return ok=true for CODE_FORGE=git — there is no CI to fail")
@@ -747,7 +747,7 @@ func TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed(t *testing.T) {
 	fc.MergeErr = errors.New("remote rejected: non-fast-forward")
 	branch := "agent/issue-1"
 
-	ok, merged := selfHeal(c, fc, func(int) error { return nil }, nil, "1", branch)
+	ok, merged := selfHeal(c, fc, func(int, string) error { return nil }, nil, "1", branch)
 
 	if !ok {
 		t.Error("selfHeal must return ok=true — there is no CI to fail for CODE_FORGE=git")
