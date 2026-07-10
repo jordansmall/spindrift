@@ -84,6 +84,92 @@ fi
 	}
 }
 
+// TestFailureDetail_GraphQLArgShape verifies that FailureDetail queries via
+// `gh api graphql` (fine-grained-PAT-safe) rather than `gh pr checks` (REST
+// check-runs, 403s under a fine-grained PAT), passing the PR number as a
+// GraphQL variable, and renders the failing check's name and summary.
+func TestFailureDetail_GraphQLArgShape(t *testing.T) {
+	dir := prependFakeGH(t, `if [ "$1" = "api" ]; then
+  printf '[{"__typename":"CheckRun","name":"test","conclusion":"FAILURE","summary":"boom"}]\n'
+fi
+`)
+
+	c := NewExecClient("owner/repo", DispatchLabels{})
+	detail, err := c.(interface {
+		FailureDetail(string) (string, error)
+	}).FailureDetail("https://github.com/owner/repo/pull/42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(detail, "test: FAILURE") || !strings.Contains(detail, "boom") {
+		t.Fatalf("detail missing failing check content: %q", detail)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatalf("call-00.txt not written: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "graphql") {
+		t.Fatalf("FailureDetail must use gh api graphql, not REST; args: %q", args)
+	}
+	if strings.Contains(joined, "checks") {
+		t.Fatalf("FailureDetail must not use `gh pr checks`; args: %q", args)
+	}
+	found42 := false
+	for _, a := range args {
+		if a == "number=42" {
+			found42 = true
+		}
+	}
+	if !found42 {
+		t.Fatalf("PR number not passed as a GraphQL variable; args: %q", args)
+	}
+}
+
+// TestRenderFailureDetail verifies the failing-context filter and the
+// maxFailureDetailBytes truncation.
+func TestRenderFailureDetail(t *testing.T) {
+	t.Run("filters out passing and non-failing conclusions", func(t *testing.T) {
+		contexts := []failureDetailContext{
+			{TypeName: "CheckRun", Name: "unit-tests", Conclusion: "SUCCESS", Summary: "all good"},
+			{TypeName: "CheckRun", Name: "lint", Conclusion: "FAILURE", Summary: "2 errors"},
+			{TypeName: "StatusContext", Context: "legacy-ci", State: "SUCCESS"},
+			{TypeName: "StatusContext", Context: "legacy-status", State: "ERROR", Description: "build broke"},
+		}
+		got := renderFailureDetail(contexts)
+		if strings.Contains(got, "unit-tests") || strings.Contains(got, "legacy-ci") {
+			t.Fatalf("passing contexts must be filtered out: %q", got)
+		}
+		if !strings.Contains(got, "lint: FAILURE") || !strings.Contains(got, "2 errors") {
+			t.Fatalf("failing CheckRun missing: %q", got)
+		}
+		if !strings.Contains(got, "legacy-status: ERROR") || !strings.Contains(got, "build broke") {
+			t.Fatalf("failing StatusContext missing: %q", got)
+		}
+	})
+
+	t.Run("no failing contexts returns empty string", func(t *testing.T) {
+		contexts := []failureDetailContext{
+			{TypeName: "CheckRun", Name: "unit-tests", Conclusion: "SUCCESS"},
+		}
+		if got := renderFailureDetail(contexts); got != "" {
+			t.Fatalf("want empty string, got %q", got)
+		}
+	})
+
+	t.Run("truncates to maxFailureDetailBytes", func(t *testing.T) {
+		contexts := []failureDetailContext{
+			{TypeName: "CheckRun", Name: "huge", Conclusion: "FAILURE", Summary: strings.Repeat("x", maxFailureDetailBytes*2)},
+		}
+		got := renderFailureDetail(contexts)
+		if len(got) > maxFailureDetailBytes {
+			t.Fatalf("detail not bounded: got %d bytes, want <= %d", len(got), maxFailureDetailBytes)
+		}
+	})
+}
+
 // TestGitForcePush_CapturesStderr verifies that a rejected force-with-lease
 // push returns an error containing git's stderr, not just the exit status.
 func TestGitForcePush_CapturesStderr(t *testing.T) {
