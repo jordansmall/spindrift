@@ -235,15 +235,8 @@ func (j *jiraClient) Issue(num string) (Issue, error) {
 		if cStatus != http.StatusOK {
 			return Issue{}, fmt.Errorf("jira: issue %s comments: unexpected status %d", num, cStatus)
 		}
-		if len(comments.Comments) > 0 {
-			var b bytes.Buffer
-			b.WriteString(body)
-			b.WriteString("\n\n## Comments\n")
-			for _, c := range comments.Comments {
-				b.WriteString("\n- ")
-				b.WriteString(c.Body)
-			}
-			body = b.String()
+		for _, c := range comments.Comments {
+			body = appendComment(body, c.Body)
 		}
 	}
 
