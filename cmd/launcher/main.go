@@ -772,28 +772,6 @@ func recoverByNumber(c config, fc forge.Client, pwd string, f *dispatch.Factory,
 	return nil
 }
 
-// recoverIssue is the entry point for the `recover` subcommand. It loads config,
-// wires the forge client and runner, then calls recoverByNumber.
-func recoverIssue(issueNum string) error {
-	pwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	c := loadConfig()
-	if err := validate(c); err != nil {
-		return err
-	}
-	r := newRunner(c, pwd)
-	if err := r.EnsureReady(); err != nil {
-		return err
-	}
-	fc := newForgeClient(c)
-	f := newDispatchFactory(c, pwd, r)
-	defer f.Cleanup()
-	s := newSettle(c, fc)
-	return recoverByNumber(c, fc, pwd, f, s, issueNum)
-}
-
 // labelMeta holds the default color and description for a triage label.
 type labelMeta struct {
 	description string
@@ -1279,10 +1257,19 @@ func main() {
 			fmt.Fprintln(os.Stderr, "usage: spindrift recover <issue-number>")
 			os.Exit(1)
 		}
-		if err := recoverIssue(args[1]); err != nil {
+		// os.Exit skips defers, so cleanup is called explicitly on every
+		// exit path below rather than deferred.
+		lc, cleanup, err := bootstrap(true)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
+		if err := recoverByNumber(lc.config, lc.forge, lc.pwd, lc.factory, lc.settle, args[1]); err != nil {
+			cleanup()
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			os.Exit(1)
+		}
+		cleanup()
 		return
 	}
 	if len(args) > 0 && args[0] == "preview" {
@@ -1299,39 +1286,19 @@ func main() {
 		nums := dispatchIssueArgs(dispatchArgs)
 		if len(nums) > 0 {
 			// Operator explicit list: selective path (bypasses label/barrier gates).
-			pwd, err := os.Getwd()
+			// os.Exit skips defers, so cleanup is called explicitly on every
+			// exit path below rather than deferred.
+			lc, cleanup, err := bootstrap(!noBuild)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
 				os.Exit(1)
 			}
-			c := loadConfig()
-			if err := validate(c); err != nil {
+			if err := selectiveListDispatch(lc.config, lc.forge, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, os.Stdout); err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
+				cleanup()
 				os.Exit(1)
 			}
-			r := newRunner(c, pwd)
-			if noBuild {
-				if err := r.IsReady(); err != nil {
-					fmt.Fprintf(os.Stderr, "%s\n", err)
-					os.Exit(1)
-				}
-			} else {
-				if err := r.EnsureReady(); err != nil {
-					fmt.Fprintf(os.Stderr, "%s\n", err)
-					os.Exit(1)
-				}
-			}
-			fc := newForgeClient(c)
-			// os.Exit skips defers, so cleanup is called explicitly on every
-			// exit path below rather than deferred.
-			f := newDispatchFactory(c, pwd, r)
-			s := newSettle(c, fc)
-			if err := selectiveListDispatch(c, fc, pwd, f, s, nums, forceYes, os.Stdin, os.Stdout); err != nil {
-				fmt.Fprintf(os.Stderr, "%s\n", err)
-				f.Cleanup()
-				os.Exit(1)
-			}
-			f.Cleanup()
+			cleanup()
 			return
 		}
 		// os.Exit skips defers, so cleanup is called explicitly on every
