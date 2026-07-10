@@ -204,6 +204,17 @@ func (a *ociAdapter) containerIsRunning(name string) bool {
 	return strings.TrimSpace(string(out)) == "running"
 }
 
+// mountSpecs computes the host-to-box mounts that apply for box, shared with
+// the bwrap adapter (buildMountSpecs); only the rendering below differs.
+func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
+	return buildMountSpecs(MountParams{
+		PromptDir:             a.promptDir,
+		SkillsDir:             a.skillsDir,
+		DriverSkillsDir:       a.driverSkillsDir,
+		DriverSessionCacheDir: a.driverSessionCacheDir,
+	}, box)
+}
+
 // buildRunArgs assembles the argument slice for `podman/docker run`. Separated
 // from Run so the arg construction can be tested without exec.
 func (a *ociAdapter) buildRunArgs(box Box) []string {
@@ -214,27 +225,22 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 	for k, v := range box.Env {
 		args = append(args, "-e", k+"="+v)
 	}
-	if a.promptDir != "" {
-		if info, err := os.Stat(a.promptDir); err == nil && info.IsDir() {
-			fmt.Printf("==> SPINDRIFT_PROMPT_DIR set; mounting %s over the baked prompt\n", a.promptDir)
-			args = append(args, "-v", a.promptDir+":/agent/prompts:ro")
+	// Mount decisions (gates, existence guards, operator messages) are
+	// computed once in buildMountSpecs, shared with the bwrap adapter; OCI
+	// only renders each spec into its own -v flag syntax. The driver-cache
+	// spec has no host-side path to re-mount baked skills over, unlike
+	// bwrap's agentFiles fallback — so it is scoped to the Driver's declared
+	// session-cache dir, never the whole .claude, which would shadow the
+	// baked .claude/skills the image ships.
+	for _, m := range a.mountSpecs(box) {
+		if m.Message != "" {
+			fmt.Print(m.Message)
 		}
-	}
-	if box.DriverCacheDir != "" && a.driverSessionCacheDir != "" {
-		if info, err := os.Stat(box.DriverCacheDir); err == nil && info.IsDir() {
-			// Scoped to the Driver's declared session-cache dir (e.g.
-			// .claude/projects for claude), not the whole .claude, which
-			// would shadow the baked .claude/skills the image ships — OCI
-			// has no host-side path to re-mount baked skills over, unlike
-			// bwrap's agentFiles fallback.
-			args = append(args, "-v", box.DriverCacheDir+":"+a.driverSessionCacheDir)
+		dst := m.Target
+		if m.ReadOnly {
+			dst += ":ro"
 		}
-	}
-	if a.skillsDir != "" && a.driverSkillsDir != "" {
-		if info, err := os.Stat(a.skillsDir); err == nil && info.IsDir() {
-			fmt.Printf("==> SPINDRIFT_SKILLS_DIR set; mounting %s over %s\n", a.skillsDir, a.driverSkillsDir)
-			args = append(args, "-v", a.skillsDir+":"+a.driverSkillsDir+":ro")
-		}
+		args = append(args, "-v", m.Source+":"+dst)
 	}
 	// Security hardening — always drop all capabilities and block privilege
 	// escalation; these are unconditional so no consumer knob can silently
