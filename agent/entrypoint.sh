@@ -18,6 +18,15 @@ set -euo pipefail
 : "${GIT_USER_NAME:?GIT_USER_NAME is required}"
 : "${GIT_USER_EMAIL:?GIT_USER_EMAIL is required}"
 
+# NIX_STORE_WRITABLE is baked into the image Env by mkHarness's
+# nixStoreWritable knob (ADR 0018, issue #469): self-test mode trades
+# hermeticity for in-box `nix flake check` feedback, so it must be loud at
+# Box start. New store paths land only in this container's ephemeral
+# copy-on-write layer -- the image and any shared volumes are never mutated.
+if [ "${NIX_STORE_WRITABLE:-false}" = "true" ]; then
+  echo "==> WARNING: /nix/store is writable (self-test mode) — this Box is not hermetic; do not use for untrusted issues"
+fi
+
 # BASE_BRANCH, BRANCH_PREFIX, MODEL, SCOUT_MODEL, REVIEW_MODEL,
 # IN_PROGRESS_LABEL, COMPLETE_LABEL, DEV_SHELL_NAME, and DEV_SHELL_PROBE_TIMEOUT
 # are injected by the nix-rendered defaults preamble prepended at image-build
