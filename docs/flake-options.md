@@ -92,3 +92,9 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `settings.repository.jiraProjectKey` | `JIRA_PROJECT_KEY` | — | Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira |
 | `settings.repository.repoSlug` | `REPO_SLUG` | — | target GitHub repository the agents work on |
 
+## Prompt & skill iteration (`settings.promptSkillIteration`)
+
+| attr path | env var | default | description |
+|---|---|---|---|
+| `settings.promptSkillIteration.autoFormat` | `AUTO_FORMAT` | `` | when non-empty, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found |
+
