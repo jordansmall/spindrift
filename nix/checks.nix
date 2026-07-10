@@ -1092,6 +1092,8 @@ in
       ${promptHarness.agentFiles}/agent/prompts/issue-prompt.md
     grep -q 'git rebase' \
       ${promptHarness.agentFiles}/agent/prompts/conflict-resolve-prompt.md
+    grep -q 'Fix box for GitHub issue' \
+      ${promptHarness.agentFiles}/agent/prompts/fix-prompt.md
     touch $out
   '';
 
