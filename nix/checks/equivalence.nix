@@ -475,6 +475,30 @@ in
     ) "flakeModule must throw on unknown knob 'typoKnob' in settings.branches";
     pkgs.runCommand "flakemodule-rejects-unknown-settings" { } "touch $out";
 
+  # The dogfood's tuned leaf values (mergeMode, autoFormat, autoLint) must be
+  # defined exactly once, in nix/dogfood-defaults.nix, and consumed by both
+  # flake.nix's `spindrift` module config and fixtures.nix's direct
+  # mkHarness mirror — not hand-restated at each site (issue #459). Commit
+  # faf8d2d is that hand-restatement drifting once already. `prefetch` is
+  # not pinned here: fixtures.nix's harnessNoRevision legitimately reuses the
+  # same command string for the (out-of-scope, per issue #459) template
+  # mirror, so it isn't a safe drift discriminant.
+  dogfood-leaf-values-single-source =
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep filter hasInfix;
+      flakeSrc = builtins.readFile ../../flake.nix;
+      fixturesSrc = builtins.readFile ../../nix/fixtures.nix;
+      literals = [
+        ''mergeMode = "immediate"''
+        "autoFormat = true"
+        "autoLint = true"
+      ];
+      leaked = filter (l: hasInfix l flakeSrc || hasInfix l fixturesSrc) literals;
+    in
+    assert assertMsg (leaked == [ ])
+      "dogfood leaf value(s) hand-restated outside nix/dogfood-defaults.nix: ${concatStringsSep ", " leaked}";
+    pkgs.runCommand "dogfood-leaf-values-single-source" { } "touch $out";
+
   # heartbeatFilterBin.src must not contain *_test.go — the image drvPath
   # must be invariant under host-side launcher test churn (issue #474).
   # A tight fileset is the invariant; adding a new import outside it fails
