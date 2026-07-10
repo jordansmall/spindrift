@@ -615,8 +615,7 @@ let
       escFlag = f: replaceStrings [ "-" ] [ "\\-" ] f; # roff renders \- as a minus
       toKebab = env: toLower (replaceStrings [ "_" ] [ "-" ] env);
       flagKind = e: if builtins.isInt (e.default or null) then "int" else "string";
-      flagDflt =
-        e: if e ? default then toString e.default else "";
+      flagDflt = e: if e ? default then toString e.default else "";
       nonSecret = filter (e: !(e.secret or false)) (lib.attrValues schema);
       secretEntries = filter (e: e.secret or false) (lib.attrValues schema);
       # Display order of OPTIONS headings; mirrors groupOrder in flags.go.
