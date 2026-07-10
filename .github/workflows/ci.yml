@@ -18,6 +18,16 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v16
 
+      # Fork-friendly binary cache: /nix rides the GitHub Actions cache, so no
+      # external service or credentials. PRs (including from forks) restore
+      # from base/default-branch caches; a miss degrades to a cold build.
+      - name: Restore and save the nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'go.sum') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+
       # shellcheck, the bats suite, and the eval-only equivalence checks.
       - name: nix flake check
         run: nix flake check --print-build-logs
