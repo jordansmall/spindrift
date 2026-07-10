@@ -411,19 +411,32 @@ stream_log="$(mktemp)"
 _claude_rc_file="$(mktemp)"
 printf '1' > "$_claude_rc_file"
 
+# The claude invocation + heartbeat-filter + tee + PIPESTATUS[0] capture used
+# to be hand-copied between this direct path and the devShell wrapper below
+# (issue #463) — a flag change had to be applied twice and stay byte-aligned.
+# Rendered once here instead, under the exact variable names (prompt,
+# agents_args, _driver_session_args, stream_log, _claude_rc_file) both paths
+# populate, so the wrapper below can eval the identical text in its own
+# process after reconstructing those names from the temp files it crosses the
+# process boundary with.
+_DRIVER_PIPELINE="$(cat <<'PIPELINE_EOF'
+"$DRIVER_BIN" -p "$prompt" \
+  --model "${MODEL:-}" \
+  "${agents_args[@]}" \
+  "${_driver_session_args[@]}" \
+  $DRIVER_FLAGS_COMMON \
+  | spindrift-heartbeat-filter -n "$ISSUE_NUMBER" -f /tmp/heartbeat.log \
+  | tee "$stream_log"
+printf '%s' "${PIPESTATUS[0]}" > "$_claude_rc_file"
+PIPELINE_EOF
+)"
+
 _run_driver() {
   # Inner function: run the claude pipeline; write PIPESTATUS[0] to
   # $_claude_rc_file. Runs either directly or inside the devShell wrapper.
   set +e
   # shellcheck disable=SC2086
-  "$DRIVER_BIN" -p "$prompt" \
-    --model "${MODEL:-}" \
-    "${agents_args[@]}" \
-    "${_driver_session_args[@]}" \
-    $DRIVER_FLAGS_COMMON \
-    | spindrift-heartbeat-filter -n "$ISSUE_NUMBER" -f /tmp/heartbeat.log \
-    | tee "$stream_log"
-  printf '%s' "${PIPESTATUS[0]}" > "$_claude_rc_file"
+  eval "$_DRIVER_PIPELINE"
   set -e
 }
 
@@ -444,28 +457,32 @@ if [ "$_use_dev_shell" = "1" ]; then
   # bash array cannot cross a process boundary via the environment.
   _session_file="$(mktemp)"
   printf '%s' "${_driver_session_args[*]}" > "$_session_file"
+  # The pipeline source itself crosses the same way (issue #463), so the
+  # wrapper evals the exact text _run_driver above evals, not a hand-copied
+  # rendering of it.
+  _pipeline_file="$(mktemp)"
+  printf '%s\n' "$_DRIVER_PIPELINE" > "$_pipeline_file"
   # Write a wrapper that drives the claude pipeline inside the devShell.
   # _harness_path is prepended so baked tools (spindrift-heartbeat-filter,
-  # tee, etc.) remain reachable after nix develop rewrites PATH.
+  # tee, etc.) remain reachable after nix develop rewrites PATH. Variable
+  # names are reconstructed to match _run_driver's above (prompt, agents_args,
+  # _driver_session_args, stream_log, _claude_rc_file) so the evaluated
+  # pipeline text needs no per-context rewriting.
   _driver_wrapper="$(mktemp --suffix=.sh)"
   cat > "$_driver_wrapper" << 'DRIVER_WRAPPER_EOF'
 #!/bin/bash
 export PATH="$_HARNESS_PATH:$PATH"
 set +e
-_agents_arg=()
+prompt="$(cat "$_PROMPT_FILE")"
+agents_args=()
 if [ -s "$_AGENTS_FILE" ]; then
-  _agents_arg=("--agents" "$(cat "$_AGENTS_FILE")")
+  agents_args=("--agents" "$(cat "$_AGENTS_FILE")")
 fi
-read -ra _session_arg <<< "$(cat "$_SESSION_FILE")"
+read -ra _driver_session_args <<< "$(cat "$_SESSION_FILE")"
+stream_log="$_STREAM_LOG"
+_claude_rc_file="$_CLAUDE_RC_FILE"
 # shellcheck disable=SC2086
-"$DRIVER_BIN" -p "$(cat "$_PROMPT_FILE")" \
-  --model "${MODEL:-}" \
-  "${_agents_arg[@]}" \
-  "${_session_arg[@]}" \
-  $DRIVER_FLAGS_COMMON \
-  | spindrift-heartbeat-filter -n "$ISSUE_NUMBER" -f /tmp/heartbeat.log \
-  | tee "$_STREAM_LOG"
-printf '%s' "${PIPESTATUS[0]}" > "$_CLAUDE_RC_FILE"
+eval "$(cat "$_PIPELINE_FILE")"
 DRIVER_WRAPPER_EOF
   chmod +x "$_driver_wrapper"
   export _HARNESS_PATH="$_harness_path"
@@ -474,6 +491,7 @@ DRIVER_WRAPPER_EOF
   export _SESSION_FILE="$_session_file"
   export _STREAM_LOG="$stream_log"
   export _CLAUDE_RC_FILE="$_claude_rc_file"
+  export _PIPELINE_FILE="$_pipeline_file"
   # MODEL comes from the preamble (not exported by default); export it so the
   # devShell child process sees the correct resolved value, not an empty string.
   export MODEL="${MODEL:-}"
@@ -486,7 +504,7 @@ DRIVER_WRAPPER_EOF
   nix develop ".#${DEV_SHELL_NAME:-default}" --command bash "$_driver_wrapper"
   _nix_rc=$?
   set -e
-  rm -f "$_driver_wrapper" "$_prompt_file" "$_agents_file" "$_session_file"
+  rm -f "$_driver_wrapper" "$_prompt_file" "$_agents_file" "$_session_file" "$_pipeline_file"
   # Launch-failure: nix develop itself failed before claude ran (stream empty).
   # Relaunch once in the baked env so transient nix failures don't kill the run.
   if [ "$_nix_rc" -ne 0 ] && [ ! -s "$stream_log" ]; then
