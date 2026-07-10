@@ -118,6 +118,14 @@ reject "incoherent" pairings (e.g. github-issues + no-code-forge); an operator
 who selects one owns the consequences.
 _Avoid_: preset, profile, mode.
 
+**Dispatch**:
+The per-issue execution, from claim to verdict: every Box launched for one
+issue — initial run, fix passes, conflict-resolve — plus its results and its
+Driver-cache entry. The thing whose states the Dispatch lifecycle names;
+distinct from the Driver's resumable conversation session, which the
+Driver-cache entry preserves across a Dispatch's fix passes.
+_Avoid_: session (collides with the Driver's conversation session), run, job.
+
 **Dispatch lifecycle**:
 The canonical dispatch states the launcher reasons in, independent of how any
 one Issue Tracker stores them: `Dispatchable` (a human marked the issue ready —
@@ -181,6 +189,14 @@ harness-issued invocations but cannot bind a fresh Driver process the Agent
 spawns itself — that containment belongs to the Box and token scope.
 _Avoid_: system prompt (ambiguous with the Driver's own), jailbreak prompt,
 safety prompt.
+
+**Settle**:
+Driving a Dispatch from Box-exit to its terminal lifecycle state, whatever
+that takes: interpreting the Outcome line, watching CI, self-heal fix passes,
+the merge or push-only landing under `MERGE_MODE` and the Merge guard, and
+merged-verification. "Merge gate" informally names the green→merge segment
+within a settle.
+_Avoid_: gate (a checkpoint — narrower than the whole settle), finalize, report.
 
 **Merge guard**:
 The launcher-side check, outside the Box and beyond the Agent's influence,
