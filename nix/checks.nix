@@ -1100,12 +1100,11 @@ in
   # only /agent/prompts) never hides it from the entrypoint at run time
   # (issue #420) -- and it must be byte-identical to the single source #419
   # already exports, so the build-time and run-time injections cannot drift.
-  outcome-contract-baked-into-image =
-    pkgs.runCommand "outcome-contract-baked-into-image" { } ''
-      diff ${batsHarness.outcomeContractFile} \
-        ${batsHarness.agentFiles}/agent/outcome-contract.md
-      touch $out
-    '';
+  outcome-contract-baked-into-image = pkgs.runCommand "outcome-contract-baked-into-image" { } ''
+    diff ${batsHarness.outcomeContractFile} \
+      ${batsHarness.agentFiles}/agent/outcome-contract.md
+    touch $out
+  '';
 
   # The idempotency check (issue #420) hinges on the entrypoint's marker
   # literal matching the one lib/mkHarness.nix slices the contract on; each is
@@ -1113,12 +1112,11 @@ in
   # agree, so a one-sided edit would silently break injection or duplicate
   # the contract on every run. Compared as plain text (no eval) so this stays
   # cheap and catches the drift at the source-literal level.
-  outcome-contract-marker-parity =
-    pkgs.runCommand "outcome-contract-marker-parity" { } ''
-      grep -qF 'outcomeContractMarker = "# LAND THE CHANGE";' ${../lib/mkHarness.nix}
-      grep -qF 'OUTCOME_CONTRACT_MARKER="# LAND THE CHANGE"' ${../agent/entrypoint.sh}
-      touch $out
-    '';
+  outcome-contract-marker-parity = pkgs.runCommand "outcome-contract-marker-parity" { } ''
+    grep -qF 'outcomeContractMarker = "# LAND THE CHANGE";' ${../lib/mkHarness.nix}
+    grep -qF 'OUTCOME_CONTRACT_MARKER="# LAND THE CHANGE"' ${../agent/entrypoint.sh}
+    touch $out
+  '';
 
   # Skills configured at build time must land in the agent-files layer at
   # /home/agent/.claude/skills so the Box is self-contained. Realizes the
