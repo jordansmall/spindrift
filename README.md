@@ -182,6 +182,25 @@ to change; dispatch defers it while its touch-set overlaps an already
 in-progress issue's, retrying once the collider completes — see [Declared
 touch-set overlap](docs/reference.md#declared-touch-set-overlap).
 
+## Dogfood loop
+
+`dogfood.sh` drives spindrift building itself. Each iteration drains one
+bounded batch of currently-unblocked issues, then pulls and rebuilds the image
+before the next iteration — so each wave always sees any fix the previous wave
+landed (build is a no-op unless the merged diff changed the image hash).
+
+**Parallel by default.** `MAX_JOBS` defaults to `MAX_PARALLEL` (default 3),
+so each batch drains exactly one slot-sized wave. Set `MAX_JOBS` explicitly to
+run larger batches or remove the cap.
+
+**Termination.** The loop is driven entirely by the launcher's exit code:
+
+| exit | meaning | loop action |
+|------|---------|-------------|
+| 0    | dispatched work | pull + rebuild, then continue |
+| 2    | queue empty (no open issues with the dispatch label) | exit cleanly |
+| 3    | open issues exist but none are dispatchable | stop and print a triage message — typically a failed blocker needs re-labeling before the queue can drain |
+
 ## Documentation
 
 | document | what's in it |

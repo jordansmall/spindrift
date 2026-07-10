@@ -13,14 +13,18 @@
 #                                `nix run .# -- build` reads from ($PWD).
 #   2. `nix run .# -- build` — re-bake the image from that updated tree.
 #
-# Each iteration fans out concurrently through the ready set. Concurrency is
-# bounded by MAX_PARALLEL (default 3) and MAX_JOBS (default unlimited). The
-# pull + rebuild happen between iterations so each wave sees any fix the
-# previous wave landed.
+# Each iteration drains one bounded batch of currently-unblocked issues.
+# Concurrency is bounded by MAX_PARALLEL (default 3); MAX_JOBS defaults to
+# MAX_PARALLEL so each batch drains exactly one slot-sized wave. An operator
+# can override MAX_JOBS explicitly to run larger or unbounded batches.
+# The pull + rebuild between iterations keep each wave on a fresh tree and
+# image, so dependent issues always see any fix the previous wave landed.
 #
 # Termination is driven by the launcher's exit code — no separate gh probe:
 #   exit 0 — dispatched work; loop continues after rebuilding from updated tree.
 #   exit 2 — queue empty (no open issues with the dispatch label); loop exits.
+#   exit 3 — open issues exist but none are dispatchable; loop stops and asks
+#             for human triage (typically a failed blocker needing re-label).
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -34,6 +38,8 @@ if [ -f harness.env ]; then
   set +a
 fi
 BASE_BRANCH="${BASE_BRANCH:-main}"      # must match env-schema.nix baseBranch.default
+MAX_PARALLEL="${MAX_PARALLEL:-3}"      # must match env-schema.nix maxParallel.default
+export MAX_JOBS="${MAX_JOBS:-$MAX_PARALLEL}"
 : "${REPO_SLUG:?set REPO_SLUG=owner/repo in harness.env}"
 
 if [ -n "$(git status --porcelain)" ]; then
@@ -60,6 +66,11 @@ while :; do
 
   if [ "$nix_exit" -eq 2 ]; then
     echo "==> dogfood: queue empty — done after $iteration iteration(s)."
+    break
+  fi
+
+  if [ "$nix_exit" -eq 3 ]; then
+    echo "==> dogfood: open issues remain but none are dispatchable — triage needed (a blocked issue may need re-labeling)."
     break
   fi
 

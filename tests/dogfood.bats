@@ -111,3 +111,19 @@ setup() {
   ! grep -q '^MAX_JOBS=1$' "$NIX_ENV_LOG"
 }
 
+@test "dogfood terminates cleanly with triage message when launcher exits 3" {
+  _install_exit_code_nix 3
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"none are dispatchable"* ]]
+}
+
+@test "dogfood exports MAX_JOBS defaulting to MAX_PARALLEL" {
+  export NIX_ENV_LOG="$BATS_TEST_TMPDIR/nix-env.log"
+  : >"$NIX_ENV_LOG"
+  _install_env_logging_nix
+  run env BASE_BRANCH=main MAX_PARALLEL=5 bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  grep -q '^MAX_JOBS=5$' "$NIX_ENV_LOG"
+}
+
