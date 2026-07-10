@@ -137,6 +137,48 @@ let
   # lines appear anywhere else in this file.
   schema = import ./env-schema.nix;
 
+  # issue-prompt.md is the single source every shared block below is sliced
+  # from — read once so each slice sees the identical text.
+  issuePromptSource = builtins.readFile ../templates/default/prompts/issue-prompt.md;
+
+  # Slices `text` from `startMarker` (inclusive) up to `endMarker`
+  # (exclusive), asserting each marker appears exactly once — the same
+  # single-occurrence guarantee the outcome-contract slice below relies on,
+  # so a heading collision fails loudly at eval time instead of silently
+  # slicing the wrong span.
+  sliceBetween =
+    startMarker: endMarker: text:
+    let
+      afterStartParts = lib.splitString startMarker text;
+    in
+    assert lib.assertMsg (builtins.length afterStartParts == 2)
+      "mkHarness: source must contain start marker '${startMarker}' exactly once";
+    let
+      afterStart = startMarker + builtins.elemAt afterStartParts 1;
+      spanParts = lib.splitString endMarker afterStart;
+    in
+    assert lib.assertMsg (builtins.length spanParts == 2)
+      "mkHarness: source must contain end marker '${endMarker}' exactly once after start marker '${startMarker}'";
+    builtins.elemAt spanParts 0;
+
+  # A sliced shared block (below) already ends with the blank line that
+  # separated it from the next heading in issue-prompt.md, so chaining two of
+  # them back to back — as #455's fix-prompt.md composition does — must not
+  # double that blank line up. Strips one, if present; a no-op on text that
+  # ends with a single "\n" (e.g. a plain Consumer `prompt` string).
+  trimTrailingBlankLine = s: if lib.hasSuffix "\n\n" s then lib.removeSuffix "\n" s else s;
+
+  # Appends `block` to `promptText` unless it already contains `marker` (the
+  # default prompt's own copy, or a Consumer prompt that kept it) — so
+  # injection is idempotent. Generic so #455 can reuse the #419 idiom for the
+  # COMMS and CHECK/COMMIT blocks below, not just the outcome contract.
+  injectSection =
+    marker: block: promptText:
+    if lib.hasInfix marker promptText then
+      promptText
+    else
+      lib.removeSuffix "\n" (trimTrailingBlankLine promptText) + "\n\n" + block;
+
   # The SPINDRIFT_OUTCOME contract (the LAND THE CHANGE / WATCH CI / OUTCOME /
   # IF BLOCKED sections) is harness-owned (issue #419): a Consumer `prompt`
   # that drops it would ship an agent that never emits the outcome line, so
@@ -147,23 +189,36 @@ let
   outcomeContractMarker = "# LAND THE CHANGE";
   outcomeContract =
     let
-      parts = lib.splitString outcomeContractMarker (
-        builtins.readFile ../templates/default/prompts/issue-prompt.md
-      );
+      parts = lib.splitString outcomeContractMarker issuePromptSource;
     in
     assert lib.assertMsg (builtins.length parts == 2)
       "mkHarness: templates/default/prompts/issue-prompt.md must contain the outcome-contract marker '${outcomeContractMarker}' exactly once";
     outcomeContractMarker + builtins.elemAt parts 1;
 
-  # Appends the canonical outcome contract to any baked prompt that lacks it;
-  # a no-op when the marker is already present (the default prompt's own
-  # copy, or a Consumer prompt that kept it), so injection is idempotent.
-  injectOutcomeContract =
-    promptText:
-    if lib.hasInfix outcomeContractMarker promptText then
-      promptText
-    else
-      lib.removeSuffix "\n" promptText + "\n\n" + outcomeContract;
+  injectOutcomeContract = injectSection outcomeContractMarker outcomeContract;
+
+  # COMMS and CHECK/COMMIT are the other two blocks fix-prompt.md used to
+  # hand-copy from issue-prompt.md (issue #455): sliced the same way as the
+  # outcome contract above, so fix-prompt.md's default template can drop
+  # them entirely and receive the byte-identical section at bake/run time
+  # instead. COMMS runs from its own heading up to SCOUT (issue-prompt-only —
+  # the fix prompt runs FIX in its place); CHECK/COMMIT runs from CHECK up to
+  # REVIEW (also issue-prompt-only — a fix pass has no review step).
+  commsMarker = "# COMMS";
+  commsBlock = sliceBetween commsMarker "# SCOUT" issuePromptSource;
+  checkMarker = "# CHECK";
+  checkBlock = sliceBetween checkMarker "# REVIEW" issuePromptSource;
+
+  injectComms = injectSection commsMarker commsBlock;
+  injectCheckCommit = injectSection checkMarker checkBlock;
+
+  # fix-prompt.md's full shared-block treatment (issue #455): COMMS, then
+  # CHECK/COMMIT, then the outcome contract, applied in that order so a
+  # fix prompt missing all three ends up with them in the same order
+  # issue-prompt.md carries them — mirrors the injection order in
+  # agent/entrypoint.sh so the baked and mounted-override cases agree.
+  injectFixSharedBlocks =
+    promptText: injectOutcomeContract (injectCheckCommit (injectComms promptText));
 
   # The Driver registry (ADR 0009); driverEntry is the selected Driver's
   # in-box half — invocation binary/flags, agent-config rendering, skill
@@ -340,12 +395,14 @@ let
     # (which shadows only /agent/prompts) never hides it from the entrypoint
     # (issue #420).
     cp ${pkgs.writeText "outcome-contract.md" outcomeContract} $out/agent/outcome-contract.md
+    cp ${pkgs.writeText "comms-contract.md" commsBlock} $out/agent/comms-contract.md
+    cp ${pkgs.writeText "check-contract.md" checkBlock} $out/agent/check-contract.md
     cp ${pkgs.writeText "issue-prompt.md" (injectOutcomeContract prompt)} $out/agent/prompts/issue-prompt.md
     cp ${pkgs.writeText "scout-prompt.md" scoutPrompt} $out/agent/prompts/scout-prompt.md
     cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md
     cp ${pkgs.writeText "filer-prompt.md" filerPrompt} $out/agent/prompts/filer-prompt.md
     cp ${pkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
-    cp ${pkgs.writeText "fix-prompt.md" fixPrompt} $out/agent/prompts/fix-prompt.md
+    cp ${pkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/agent/prompts/fix-prompt.md
     ${lib.optionalString (skills != [ ]) ''
       mkdir -p $out/home/agent/.claude/skills
       ${lib.concatMapStrings (f: ''
@@ -360,6 +417,11 @@ let
   # it against what a Consumer prompt lacking the contract gets injected with
   # — proof the two cannot drift apart (issue #419).
   outcomeContractFile = hostPkgs.writeText "outcome-contract.md" outcomeContract;
+
+  # The COMMS and CHECK/COMMIT blocks as host store paths, for the same
+  # drift-proof reason (issue #455).
+  commsContractFile = hostPkgs.writeText "comms-contract.md" commsBlock;
+  checkContractFile = hostPkgs.writeText "check-contract.md" checkBlock;
 
   # The Driver's function definitions as a host store-path file.  The bats
   # harness prepends this before exec-ing the entrypoint (issue #433) so tests
@@ -378,7 +440,7 @@ let
     cp ${hostPkgs.writeText "review-prompt.md" reviewPrompt} $out/review-prompt.md
     cp ${hostPkgs.writeText "filer-prompt.md" filerPrompt} $out/filer-prompt.md
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/conflict-resolve-prompt.md
-    cp ${hostPkgs.writeText "fix-prompt.md" fixPrompt} $out/fix-prompt.md
+    cp ${hostPkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/fix-prompt.md
   '';
 
   # The baked-skills directory as a host store path (native-buildable on
@@ -868,6 +930,8 @@ else
       promptDir
       skillsDir
       outcomeContractFile
+      commsContractFile
+      checkContractFile
       driverFunctionsFile
       heartbeatFilterBin
       ;

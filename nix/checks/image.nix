@@ -108,6 +108,11 @@ in
       ${promptHarness.agentFiles}/agent/prompts/conflict-resolve-prompt.md
     grep -q 'Fix box for GitHub issue' \
       ${promptHarness.agentFiles}/agent/prompts/fix-prompt.md
+    # fix-prompt.md's fix-specific preamble is baked as-is, but the shared
+    # WATCH CI block only ever reaches it via injection (issue #455) — proof
+    # the baked image, not just the eval-only promptDir, carries it.
+    grep -q 'statusCheckRollup' \
+      ${promptHarness.agentFiles}/agent/prompts/fix-prompt.md
     touch $out
   '';
 
@@ -122,6 +127,22 @@ in
     touch $out
   '';
 
+  # The COMMS and CHECK/COMMIT blocks fix-prompt.md shares with
+  # issue-prompt.md (issue #455) are baked at /agent the same way, for the
+  # same reason: byte-identical to the single source, so build-time and
+  # run-time injection cannot drift.
+  comms-contract-baked-into-image = pkgs.runCommand "comms-contract-baked-into-image" { } ''
+    diff ${batsHarness.commsContractFile} \
+      ${batsHarness.agentFiles}/agent/comms-contract.md
+    touch $out
+  '';
+
+  check-contract-baked-into-image = pkgs.runCommand "check-contract-baked-into-image" { } ''
+    diff ${batsHarness.checkContractFile} \
+      ${batsHarness.agentFiles}/agent/check-contract.md
+    touch $out
+  '';
+
   # The idempotency check (issue #420) hinges on the entrypoint's marker
   # literal matching the one lib/mkHarness.nix slices the contract on; each is
   # a hardcoded literal in its own language, with nothing else forcing them to
@@ -131,6 +152,15 @@ in
   outcome-contract-marker-parity = pkgs.runCommand "outcome-contract-marker-parity" { } ''
     grep -qF 'outcomeContractMarker = "# LAND THE CHANGE";' ${../../lib/mkHarness.nix}
     grep -qF 'OUTCOME_CONTRACT_MARKER="# LAND THE CHANGE"' ${../../agent/entrypoint.sh}
+    touch $out
+  '';
+
+  # Same drift guard, for the COMMS and CHECK/COMMIT markers (issue #455).
+  comms-check-contract-marker-parity = pkgs.runCommand "comms-check-contract-marker-parity" { } ''
+    grep -qF 'commsMarker = "# COMMS";' ${../../lib/mkHarness.nix}
+    grep -qF 'COMMS_CONTRACT_MARKER="# COMMS"' ${../../agent/entrypoint.sh}
+    grep -qF 'checkMarker = "# CHECK";' ${../../lib/mkHarness.nix}
+    grep -qF 'CHECK_CONTRACT_MARKER="# CHECK"' ${../../agent/entrypoint.sh}
     touch $out
   '';
 

@@ -77,6 +77,10 @@ in
         # (no /agent/outcome-contract.md on the bats build host) still exercise
         # the same canonical text an image would bake (issue #420).
         OUTCOME_CONTRACT_FILE = batsHarness.outcomeContractFile;
+        # Same reason, for the COMMS and CHECK/COMMIT blocks fix-prompt.md
+        # shares with issue-prompt.md (issue #455).
+        COMMS_CONTRACT_FILE = batsHarness.commsContractFile;
+        CHECK_CONTRACT_FILE = batsHarness.checkContractFile;
         # The Driver's registry-rendered function definitions; helper.bash
         # prepends this before exec-ing the entrypoint so the bats suite
         # exercises the same bodies the image bakes in (issue #433).
