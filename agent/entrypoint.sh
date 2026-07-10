@@ -275,6 +275,8 @@ fi
 # the step and the formatter is never mentioned.
 AUTO_FORMAT_STEP=""
 if [ -n "${AUTO_FORMAT:-}" ]; then
+  # Backticks are markdown formatting, not command substitution — SC2016.
+  # shellcheck disable=SC2016
   AUTO_FORMAT_STEP='# AUTO-FORMAT
 
 Before committing, auto-format the files you changed:
