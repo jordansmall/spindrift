@@ -149,7 +149,7 @@ in
   # knob-gated step present must supply its own fragment, exactly like it
   # already must supply filer-prompt.md.
   fragments-baked-into-image = pkgs.runCommand "fragments-baked-into-image" { } ''
-    for f in skill-preamble file-issues auto-format auto-lint ci-failure; do
+    for f in skill-preamble caveman-default file-issues auto-format auto-lint ci-failure; do
       diff ${../../templates/default/prompts/fragments}/"$f".md \
         ${batsHarness.agentFiles}/agent/prompts/fragments/"$f".md
     done

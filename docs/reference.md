@@ -145,8 +145,8 @@ The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
 at any directory to override it at runtime for zero-rebuild iteration.
 
-Six prompt steps are conditional on a runtime knob (the skill preamble, the
-caveman-default narration directive, `FILE ISSUES`, `AUTO-FORMAT`,
+Six prompt steps are conditional on a runtime signal (the skill preamble,
+the caveman-default narration directive, `FILE ISSUES`, `AUTO-FORMAT`,
 `AUTO-LINT`, and `CI FAILURE`) and are rendered from fragment files under
 `prompts/fragments/` rather than authored inline, so all instruction prose —
 conditional or not — lives with the rest of the prompt surface.
