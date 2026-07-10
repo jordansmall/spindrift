@@ -146,6 +146,15 @@ let
   # from — read once so each slice sees the identical text.
   issuePromptSource = builtins.readFile ../templates/default/prompts/issue-prompt.md;
 
+  # The conditional prompt steps (skill preamble, FILE ISSUES, AUTO-FORMAT,
+  # AUTO-LINT, CI FAILURE) live as fragment files under the prompts directory
+  # rather than heredocs in agent/entrypoint.sh (issue #463): not
+  # Consumer-tunable like `prompt`/`scoutPrompt`/etc above, so baked from this
+  # fixed source into every image the same way, under /agent/prompts/fragments
+  # -- a SPINDRIFT_PROMPT_DIR override supplies its own fragment for whichever
+  # knob it enables, exactly as it already must supply filer-prompt.md.
+  fragmentsSourceDir = ../templates/default/prompts/fragments;
+
   # Slices `text` from `startMarker` (inclusive) up to `endMarker`
   # (exclusive), asserting each marker appears exactly once — the same
   # single-occurrence guarantee the outcome-contract slice below relies on,
@@ -411,6 +420,7 @@ let
     cp ${pkgs.writeText "filer-prompt.md" filerPrompt} $out/agent/prompts/filer-prompt.md
     cp ${pkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
     cp ${pkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/agent/prompts/fix-prompt.md
+    cp -r ${fragmentsSourceDir} $out/agent/prompts/fragments
     ${lib.optionalString (skills != [ ]) ''
       mkdir -p $out/home/agent/${driverEntry.skillsDirRelative}
       ${lib.concatMapStrings (f: ''
@@ -449,6 +459,7 @@ let
     cp ${hostPkgs.writeText "filer-prompt.md" filerPrompt} $out/filer-prompt.md
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/conflict-resolve-prompt.md
     cp ${hostPkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/fix-prompt.md
+    cp -r ${fragmentsSourceDir} $out/fragments
   '';
 
   # The baked-skills directory as a host store path (native-buildable on

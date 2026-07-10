@@ -143,6 +143,19 @@ in
     touch $out
   '';
 
+  # The conditional prompt fragments (issue #463) must be baked under
+  # /agent/prompts/fragments -- inside the overridable prompt surface, unlike
+  # the contracts above -- so a SPINDRIFT_PROMPT_DIR override that wants a
+  # knob-gated step present must supply its own fragment, exactly like it
+  # already must supply filer-prompt.md.
+  fragments-baked-into-image = pkgs.runCommand "fragments-baked-into-image" { } ''
+    for f in skill-preamble file-issues auto-format auto-lint ci-failure; do
+      diff ${../../templates/default/prompts/fragments}/"$f".md \
+        ${batsHarness.agentFiles}/agent/prompts/fragments/"$f".md
+    done
+    touch $out
+  '';
+
   # The idempotency check (issue #420) hinges on the entrypoint's marker
   # literal matching the one lib/mkHarness.nix slices the contract on; each is
   # a hardcoded literal in its own language, with nothing else forcing them to
