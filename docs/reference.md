@@ -145,16 +145,24 @@ The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
 at any directory to override it at runtime for zero-rebuild iteration.
 
-Five prompt steps are conditional on a runtime knob (the skill preamble,
-`FILE ISSUES`, `AUTO-FORMAT`, `AUTO-LINT`, and `CI FAILURE`) and are rendered
-from fragment files under `prompts/fragments/` rather than authored inline,
-so all instruction prose — conditional or not — lives with the rest of the
-prompt surface. `SPINDRIFT_PROMPT_DIR` therefore overrides fragments the same
-way it overrides `prompts/issue-prompt.md` itself: a directory that enables
-a knob (`AUTO_FORMAT`, `AUTO_LINT`, a filer model, etc.) must ship the
-matching `fragments/*.md` file, exactly as it already must ship
-`filer-prompt.md` when the filer is configured — the entrypoint reads the
-fragment unconditionally once its knob is on, with no baked-in fallback.
+Six prompt steps are conditional on a runtime knob (the skill preamble, the
+caveman-default narration directive, `FILE ISSUES`, `AUTO-FORMAT`,
+`AUTO-LINT`, and `CI FAILURE`) and are rendered from fragment files under
+`prompts/fragments/` rather than authored inline, so all instruction prose —
+conditional or not — lives with the rest of the prompt surface.
+`SPINDRIFT_PROMPT_DIR` therefore overrides fragments the same way it
+overrides `prompts/issue-prompt.md` itself: a directory that enables a knob
+(`AUTO_FORMAT`, `AUTO_LINT`, a filer model, etc.) must ship the matching
+`fragments/*.md` file, exactly as it already must ship `filer-prompt.md`
+when the filer is configured — the entrypoint reads the fragment
+unconditionally once its knob is on, with no baked-in fallback.
+
+The caveman-default step is keyed on the baked skill itself rather than a
+separate knob: whenever `DRIVER_SKILLS_DIR/caveman.md` is present at
+runtime, both the issue pass and the fix pass (via the shared COMMS block,
+see below) direct the agent to use `/caveman` for narration and prose,
+exempting code, commands, error messages, and commit messages. A Consumer
+that never bakes the skill gets a prompt with zero mention of it.
 
 A fix box (dispatched when CI comes back red — see [Runtime flow](#how-a-run-works))
 receives `FIX_PASS` and runs `prompts/fix-prompt.md` instead: the branch is

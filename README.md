@@ -202,12 +202,19 @@ run larger batches or remove the cap.
 | 2    | queue empty (no open issues with the dispatch label) | exit cleanly |
 | 3    | open issues exist but none are dispatchable | stop and print a triage message — typically a failed blocker needs re-labeling before the queue can drain |
 
-**Baked skill.** The dogfood Box bakes the pinned upstream [`caveman`
-skill](https://github.com/juliusbrussee/caveman), advertised in-box as
-`/caveman`, so agents draining this loop compress narration ~65% in output
-tokens without touching code, commands, or error messages. The pin is a
+**Baked skill, on by default.** The dogfood Box bakes the pinned upstream
+[`caveman` skill](https://github.com/juliusbrussee/caveman), advertised
+in-box as `/caveman`, and the rendered issue-pass and fix-pass prompts
+direct the agent to default to it for narration and prose — so agents
+draining this loop compress narration ~65% in output tokens without
+touching code, commands, error messages, or commit messages. The pin is a
 non-flake `caveman` input in `flake.nix` (`flake.lock` owns the rev); see
 [Contributing](CONTRIBUTING.md) for how it's wired.
+
+To opt out, don't bake the skill: drop `caveman` from the consumer's
+`skills` list (see `nix/dogfood-skills.nix`). The instruction is rendered
+only when `caveman.md` is actually present at the baked skills path, so a
+consumer that skips it gets prompts with zero caveman residue.
 
 ## Documentation
 
