@@ -1,0 +1,278 @@
+package settle
+
+import (
+	"errors"
+	"fmt"
+	"testing"
+
+	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/forge"
+)
+
+// TestMergeImmediate verifies the rebase-retry and conflict-resolve behaviors
+// that run inside applyMergeMode for the immediate merge mode. Conflict
+// resolution is routed through a dispatch.Dispatcher (issue #442) instead of
+// a raw callback.
+func TestMergeImmediate(t *testing.T) {
+	cases := []struct {
+		name                      string
+		maxRebaseAttempts         int
+		mergeErr                  error
+		mergeErrs                 []error
+		rebaseErr                 error
+		rebaseErrs                []error
+		conflictResolveErr        error
+		noDispatcher              bool
+		wantErr                   bool
+		wantMerged                bool
+		wantRebaseCalled          int
+		wantConflictResolveCalled int
+	}{
+		{
+			name:       "clean merge succeeds",
+			wantErr:    false,
+			wantMerged: true,
+		},
+		{
+			name:       "non-conflict merge failure is returned",
+			mergeErr:   errors.New("required review missing"),
+			wantErr:    true,
+			wantMerged: false,
+		},
+		{
+			name:              "conflict → rebase → retry succeeds",
+			maxRebaseAttempts: 3,
+			mergeErrs:         []error{forge.ErrMergeConflict, nil},
+			wantErr:           false,
+			wantMerged:        true,
+			wantRebaseCalled:  1,
+		},
+		{
+			name:              "conflict → rebase fails → error returned",
+			maxRebaseAttempts: 3,
+			mergeErrs:         []error{forge.ErrMergeConflict},
+			rebaseErr:         errors.New("rebase failed: conflict"),
+			wantErr:           true,
+			wantMerged:        false,
+			wantRebaseCalled:  1,
+		},
+		{
+			name:              "conflict exhausts maxRebaseAttempts → error returned",
+			maxRebaseAttempts: 1,
+			mergeErrs:         []error{forge.ErrMergeConflict, forge.ErrMergeConflict},
+			wantErr:           true,
+			wantMerged:        false,
+			wantRebaseCalled:  1,
+		},
+		{
+			name:                      "rebase conflict → conflict-resolve fn succeeds → merge succeeds",
+			maxRebaseAttempts:         3,
+			mergeErrs:                 []error{forge.ErrMergeConflict, nil},
+			rebaseErr:                 forge.ErrMergeConflict,
+			wantErr:                   false,
+			wantMerged:                true,
+			wantRebaseCalled:          1,
+			wantConflictResolveCalled: 1,
+		},
+		{
+			name:                      "rebase conflict → conflict-resolve fn fails → error returned",
+			maxRebaseAttempts:         3,
+			mergeErrs:                 []error{forge.ErrMergeConflict},
+			rebaseErr:                 forge.ErrMergeConflict,
+			conflictResolveErr:        errors.New("agent could not resolve conflict"),
+			wantErr:                   true,
+			wantMerged:                false,
+			wantRebaseCalled:          1,
+			wantConflictResolveCalled: 1,
+		},
+		{
+			// After conflict-resolve succeeds, the forge's mergeability
+			// snapshot is briefly stale and the next Merge still reports a
+			// conflict. The loop must retry Merge directly instead of
+			// invoking Rebase a second time (the box already rebased and
+			// force-pushed).
+			name:                      "conflict-resolve succeeds → stale conflict on retry does not re-rebase",
+			maxRebaseAttempts:         3,
+			mergeErrs:                 []error{forge.ErrMergeConflict, forge.ErrMergeConflict, nil},
+			rebaseErr:                 forge.ErrMergeConflict,
+			wantErr:                   false,
+			wantMerged:                true,
+			wantRebaseCalled:          1,
+			wantConflictResolveCalled: 1,
+		},
+		{
+			name:                      "rebase conflict → no dispatcher → error returned",
+			maxRebaseAttempts:         3,
+			mergeErrs:                 []error{forge.ErrMergeConflict},
+			rebaseErr:                 forge.ErrMergeConflict,
+			noDispatcher:              true,
+			wantErr:                   true,
+			wantMerged:                false,
+			wantRebaseCalled:          1,
+			wantConflictResolveCalled: 0,
+		},
+		{
+			// A transient push failure (forge outage, network fault) during
+			// the force-push must not block the merge outright — it's
+			// retried, and here the retry succeeds.
+			name:              "conflict → rebase transient push failure → retry succeeds",
+			maxRebaseAttempts: 3,
+			mergeErrs:         []error{forge.ErrMergeConflict, nil},
+			rebaseErrs:        []error{forge.ErrTransientPushFailure, nil},
+			wantErr:           false,
+			wantMerged:        true,
+			wantRebaseCalled:  2,
+		},
+		{
+			// The forge stays down: every retry hits the same transient
+			// error. The retry must be bounded — not spin indefinitely —
+			// and the eventual failure must still surface to the caller.
+			name:              "conflict → rebase transient push failure persists → retries exhausted, error returned",
+			maxRebaseAttempts: 2,
+			mergeErrs:         []error{forge.ErrMergeConflict},
+			rebaseErrs: []error{
+				forge.ErrTransientPushFailure,
+				forge.ErrTransientPushFailure,
+				forge.ErrTransientPushFailure,
+			},
+			wantErr:          true,
+			wantMerged:       false,
+			wantRebaseCalled: 3,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseConfig()
+			if tc.maxRebaseAttempts != 0 {
+				c.MaxRebaseAttempts = tc.maxRebaseAttempts
+			}
+			fc := forge.NewFake()
+			if len(tc.mergeErrs) > 0 {
+				fc.MergeErrs = tc.mergeErrs
+			} else {
+				fc.MergeErr = tc.mergeErr
+			}
+			if len(tc.rebaseErrs) > 0 {
+				fc.RebaseErrs = tc.rebaseErrs
+			} else {
+				fc.RebaseErr = tc.rebaseErr
+			}
+			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+
+			var d dispatch.Dispatcher
+			var df *dispatch.Fake
+			if !tc.noDispatcher {
+				df = dispatch.NewFake()
+				df.ResolveConflictErr = tc.conflictResolveErr
+				d = df
+			}
+
+			s := New(c, fc)
+			err := s.mergeImmediate("1", testPR, d)
+
+			if (err != nil) != tc.wantErr {
+				t.Errorf("mergeImmediate err=%v, wantErr=%v", err, tc.wantErr)
+			}
+			if tc.wantMerged && fc.Merged != testPR {
+				t.Errorf("Merge not called; fc.Merged=%q", fc.Merged)
+			}
+			if !tc.wantMerged && fc.Merged != "" {
+				t.Errorf("Merge should not have been called; fc.Merged=%q", fc.Merged)
+			}
+			if got := len(fc.RebasedURLs); got != tc.wantRebaseCalled {
+				t.Errorf("Rebase called %d times, want %d", got, tc.wantRebaseCalled)
+			}
+			gotConflictResolveCalled := 0
+			if df != nil {
+				gotConflictResolveCalled = len(df.ResolveConflictCalls)
+			}
+			if gotConflictResolveCalled != tc.wantConflictResolveCalled {
+				t.Errorf("ResolveConflict called %d times, want %d", gotConflictResolveCalled, tc.wantConflictResolveCalled)
+			}
+		})
+	}
+}
+
+// TestApplyMergeMode_Immediate verifies that immediate mode calls fc.Merge.
+func TestApplyMergeMode_Immediate(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc)
+
+	err := s.applyMergeMode("1", testPR, nil)
+	if err != nil {
+		t.Errorf("applyMergeMode immediate: unexpected error: %v", err)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("immediate mode must call Merge; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// TestApplyMergeMode_Manual verifies that manual mode does not call fc.Merge.
+func TestApplyMergeMode_Manual(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "manual"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc)
+
+	err := s.applyMergeMode("1", testPR, nil)
+	if err != nil {
+		t.Errorf("applyMergeMode manual: unexpected error: %v", err)
+	}
+	if fc.Merged != "" {
+		t.Errorf("manual mode must not call Merge; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// TestApplyMergeMode_Auto_EnqueuesAutoMerge verifies that auto mode calls
+// EnqueueAutoMerge and does not call fc.Merge.
+func TestApplyMergeMode_Auto_EnqueuesAutoMerge(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "auto"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc)
+
+	err := s.applyMergeMode("1", testPR, nil)
+	if err != nil {
+		t.Errorf("applyMergeMode auto: unexpected error: %v", err)
+	}
+	if fc.Merged != "" {
+		t.Errorf("auto mode must not call Merge; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.EnqueueAutoMergeCalls) != 1 || fc.EnqueueAutoMergeCalls[0] != testPR {
+		t.Errorf("auto mode must call EnqueueAutoMerge(%q); calls=%v", testPR, fc.EnqueueAutoMergeCalls)
+	}
+}
+
+// TestApplyMergeMode_Auto_EnqueueFailureFallsBack verifies that when
+// EnqueueAutoMerge fails, applyMergeMode returns nil (no agent-failed) and
+// posts a warning comment to the issue.
+func TestApplyMergeMode_Auto_EnqueueFailureFallsBack(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "auto"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	fc.EnqueueAutoMergeErr = fmt.Errorf("gh pr merge --auto: permission denied")
+	s := New(c, fc)
+
+	err := s.applyMergeMode("1", testPR, nil)
+	if err != nil {
+		t.Errorf("auto mode enqueue failure must not propagate error; got: %v", err)
+	}
+	if fc.Merged != "" {
+		t.Errorf("auto mode must not call Merge; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.EnqueueAutoMergeCalls) == 0 {
+		t.Error("EnqueueAutoMerge must have been called")
+	}
+	if len(fc.CommentCalls) == 0 {
+		t.Error("a warning comment must be posted when auto-merge enqueue fails")
+	}
+}

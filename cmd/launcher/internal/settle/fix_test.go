@@ -1,4 +1,4 @@
-package main
+package settle
 
 import (
 	"errors"
@@ -8,11 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-const testFixPR = "https://github.com/owner/repo/pull/99"
-
-func fixConfig(maxFixAttempts int) config {
+func fixConfig(maxFixAttempts int) Config {
 	c := baseConfig()
-	c.maxFixAttempts = maxFixAttempts
+	c.MaxFixAttempts = maxFixAttempts
 	return c
 }
 
@@ -31,12 +29,13 @@ func fixPasses(d *dispatch.Fake) []int {
 func TestSelfHeal_ForwardsFailureDetailToFix(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
-	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
-	fc.SetFailureDetail(testFixPR, "lint: FAILURE\n2 errors")
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
+	fc.SetFailureDetail(testPR, "lint: FAILURE\n2 errors")
+	s := New(c, fc)
 
 	d := dispatch.NewFake()
-	_, merged := selfHeal(c, fc, d, "1", testFixPR)
+	_, merged := s.selfHeal(d, "1", testPR)
 
 	if !merged {
 		t.Fatal("expected merged=true after one fix pass")
@@ -53,12 +52,13 @@ func TestSelfHeal_ForwardsFailureDetailToFix(t *testing.T) {
 func TestSelfHeal_EmptyFailureDetailFallsBackWithNoError(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
-	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
 	fc.FailureDetailErr = errors.New("gh api graphql: 403 Forbidden")
+	s := New(c, fc)
 
 	d := dispatch.NewFake()
-	_, merged := selfHeal(c, fc, d, "1", testFixPR)
+	_, merged := s.selfHeal(d, "1", testPR)
 
 	if !merged {
 		t.Fatal("a FailureDetail fetch error must not block the fix pass")
@@ -71,11 +71,12 @@ func TestSelfHeal_EmptyFailureDetailFallsBackWithNoError(t *testing.T) {
 func TestSelfHeal_SuccessFirstTry(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
-	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	s := New(c, fc)
 
 	d := dispatch.NewFake()
-	_, merged := selfHeal(c, fc, d, "1", testFixPR)
+	_, merged := s.selfHeal(d, "1", testPR)
 
 	if !merged {
 		t.Error("expected merged=true on first-try SUCCESS")
@@ -94,11 +95,12 @@ func TestSelfHeal_SuccessFirstTry(t *testing.T) {
 func TestSelfHeal_GenuineRedMaxZero(t *testing.T) {
 	c := fixConfig(0) // no fix passes allowed
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
-	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateFailure})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
+	s := New(c, fc)
 
 	d := dispatch.NewFake()
-	_, merged := selfHeal(c, fc, d, "1", testFixPR)
+	_, merged := s.selfHeal(d, "1", testPR)
 
 	if merged {
 		t.Error("expected merged=false (maxFixAttempts=0)")
@@ -117,12 +119,13 @@ func TestSelfHeal_GenuineRedMaxZero(t *testing.T) {
 func TestSelfHeal_GenuineRedFixSucceeds(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	// First poll: FAILURE; after fix box: SUCCESS (plus confirmation poll)
-	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
+	s := New(c, fc)
 
 	d := dispatch.NewFake()
-	_, merged := selfHeal(c, fc, d, "1", testFixPR)
+	_, merged := s.selfHeal(d, "1", testPR)
 
 	if !merged {
 		t.Error("expected merged=true after one fix pass")
@@ -141,23 +144,24 @@ func TestSelfHeal_GenuineRedFixSucceeds(t *testing.T) {
 func TestSelfHeal_ExhaustsAllPasses(t *testing.T) {
 	c := fixConfig(2)
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	// All polls return FAILURE — never fixed.
-	fc.SetCheckStates(testFixPR, []forge.RollupState{
+	fc.SetCheckStates(testPR, []forge.RollupState{
 		forge.StateFailure,
 		forge.StateFailure,
 		forge.StateFailure,
 	})
+	s := New(c, fc)
 
 	d := dispatch.NewFake()
-	_, merged := selfHeal(c, fc, d, "1", testFixPR)
+	_, merged := s.selfHeal(d, "1", testPR)
 
 	if merged {
 		t.Error("expected merged=false after exhausting all fix passes")
 	}
 	passes := fixPasses(d)
 	if len(passes) != 2 {
-		t.Errorf("expected %d fix calls (maxFixAttempts), got %d: %v", c.maxFixAttempts, len(passes), passes)
+		t.Errorf("expected %d fix calls (maxFixAttempts), got %d: %v", c.MaxFixAttempts, len(passes), passes)
 	}
 	// Fix passes should be numbered 1, 2
 	for i, p := range passes {
@@ -176,12 +180,13 @@ func TestSelfHeal_ExhaustsAllPasses(t *testing.T) {
 func TestSelfHeal_ErrorStateTriggersFixPass(t *testing.T) {
 	c := fixConfig(1)
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	// ERROR is genuine red just like FAILURE; fix pass should be triggered.
-	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StateError, forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateError, forge.StateSuccess, forge.StateSuccess})
+	s := New(c, fc)
 
 	d := dispatch.NewFake()
-	_, merged := selfHeal(c, fc, d, "1", testFixPR)
+	_, merged := s.selfHeal(d, "1", testPR)
 
 	if !merged {
 		t.Error("expected merged=true after ERROR then SUCCESS with fix pass")
@@ -193,13 +198,14 @@ func TestSelfHeal_ErrorStateTriggersFixPass(t *testing.T) {
 
 func TestSelfHeal_PendingTimeoutNoFix(t *testing.T) {
 	c := fixConfig(3)
-	c.mergePollTimeout = 0 // expire immediately
+	c.MergePollTimeout = 0 // expire immediately
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
-	fc.SetCheckStates(testFixPR, []forge.RollupState{forge.StatePending})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending})
+	s := New(c, fc)
 
 	d := dispatch.NewFake()
-	_, merged := selfHeal(c, fc, d, "1", testFixPR)
+	_, merged := s.selfHeal(d, "1", testPR)
 
 	if merged {
 		t.Error("expected merged=false on PENDING timeout")
@@ -212,15 +218,5 @@ func TestSelfHeal_PendingTimeoutNoFix(t *testing.T) {
 	}
 	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
 		t.Errorf("last transition To=%v, want Failed", last.To)
-	}
-}
-
-func TestSelfHeal_DefaultMaxFixAttempts(t *testing.T) {
-	// MAX_FIX_ATTEMPTS defaults to 3; zero is a valid override (disables retries).
-	if got := atoiNonneg("3", 3); got != 3 {
-		t.Errorf("default MAX_FIX_ATTEMPTS=3 parsed as %d", got)
-	}
-	if got := atoiNonneg("0", 3); got != 0 {
-		t.Errorf("MAX_FIX_ATTEMPTS=0 should be valid (disable retries), got %d", got)
 	}
 }
