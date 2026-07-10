@@ -32,6 +32,12 @@ BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
 WORK_DIR="${WORK_DIR:-/work}"
 PROMPTS_DIR="${PROMPTS_DIR:-/agent/prompts}"
 
+# The canonical SPINDRIFT_OUTCOME contract (issue #419), baked at a sibling
+# path to /agent/prompts so a SPINDRIFT_PROMPT_DIR mount -- which shadows only
+# /agent/prompts -- never hides it (issue #420).
+OUTCOME_CONTRACT_MARKER="# LAND THE CHANGE"
+OUTCOME_CONTRACT_FILE="${OUTCOME_CONTRACT_FILE:-/agent/outcome-contract.md}"
+
 # DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are baked by the
 # selected Driver's lib/drivers/<name>.nix (ADR 0009); the defaults here keep
 # this script standalone-runnable — the bats suite execs it raw — and
@@ -286,6 +292,17 @@ if [ -n "${CONFLICT_RESOLVE_PR_URL:-}" ]; then
 fi
 
 prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
+# A SPINDRIFT_PROMPT_DIR mount replaces the whole prompt dir, so a rendered
+# prompt that dropped the contract (issue #419) never gets the build-time
+# injection; append the same canonical contract here, at run time, unless
+# it is already present (idempotent, mirrors lib/mkHarness.nix).
+if [[ "$prompt" != *"$OUTCOME_CONTRACT_MARKER"* ]]; then
+  # A direct assignment from the substitution (rather than nesting it as a
+  # printf argument) so a missing/unreadable OUTCOME_CONTRACT_FILE fails loudly
+  # under `set -e` instead of silently rendering an empty contract block.
+  outcome_contract="$(_subst "$OUTCOME_CONTRACT_FILE")"
+  prompt="$(printf '%s\n\n%s' "${prompt%$'\n'}" "$outcome_contract")"
+fi
 
 # Forward the nix-baked --agents JSON to the Agent. AGENTS_JSON_TEMPLATE is
 # computed by nix (builtins.toJSON) and set to empty when no subagent model is

@@ -131,6 +131,45 @@ setup() {
   grep -q "Implement issue #7: Do the thing on agent/issue-7" "$CLAUDE_PROMPT_FILE"
 }
 
+# A SPINDRIFT_PROMPT_DIR mount (simulated here by pointing PROMPTS_DIR straight
+# at a host dir, exactly what the mount leaves the entrypoint seeing) whose
+# issue-prompt.md drops the SPINDRIFT_OUTCOME contract must still reach the
+# driver with it appended (issue #420) -- otherwise the agent never emits the
+# outcome line and the launcher never learns the PR.
+@test "runtime prompt-dir override lacking the outcome contract gets it appended" {
+  local prompt_dir="$BATS_TEST_TMPDIR/prompts"
+  mkdir -p "$prompt_dir"
+  printf 'issue stub, no contract here\n' >"$prompt_dir/issue-prompt.md"
+  printf 'scout stub\n' >"$prompt_dir/scout-prompt.md"
+  printf 'reviewer stub\n' >"$prompt_dir/review-prompt.md"
+  export PROMPTS_DIR="$prompt_dir"
+  export OUTCOME_CONTRACT_FILE="$BATS_TEST_TMPDIR/outcome-contract.md"
+  printf '# LAND THE CHANGE\n\ncanonical contract for %s\n' '${BRANCH}' >"$OUTCOME_CONTRACT_FILE"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '# LAND THE CHANGE' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
+  grep -q 'canonical contract for agent/issue-7' "$CLAUDE_PROMPT_FILE"
+}
+
+# A mounted prompt that already carries the contract (e.g. copied from a
+# #419-baked prompt) must be passed through unchanged -- no duplication.
+@test "runtime prompt-dir override already containing the outcome contract is unchanged" {
+  local prompt_dir="$BATS_TEST_TMPDIR/prompts"
+  mkdir -p "$prompt_dir"
+  printf 'issue stub\n\n# LAND THE CHANGE\n\nalready has its own contract\n' \
+    >"$prompt_dir/issue-prompt.md"
+  printf 'scout stub\n' >"$prompt_dir/scout-prompt.md"
+  printf 'reviewer stub\n' >"$prompt_dir/review-prompt.md"
+  export PROMPTS_DIR="$prompt_dir"
+  export OUTCOME_CONTRACT_FILE="$BATS_TEST_TMPDIR/outcome-contract.md"
+  printf '# LAND THE CHANGE\n\nshould not appear\n' >"$OUTCOME_CONTRACT_FILE"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '# LAND THE CHANGE' "$CLAUDE_PROMPT_FILE")" -eq 1 ]
+  grep -q 'already has its own contract' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'should not appear' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "entrypoint invokes claude headlessly with skip-permissions" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
