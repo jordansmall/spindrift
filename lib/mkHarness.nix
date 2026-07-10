@@ -128,9 +128,8 @@ let
         builtins.readFile ../templates/default/prompts/issue-prompt.md
       );
     in
-    assert lib.assertMsg (
-      builtins.length parts == 2
-    ) "mkHarness: templates/default/prompts/issue-prompt.md must contain the outcome-contract marker '${outcomeContractMarker}' exactly once";
+    assert lib.assertMsg (builtins.length parts == 2)
+      "mkHarness: templates/default/prompts/issue-prompt.md must contain the outcome-contract marker '${outcomeContractMarker}' exactly once";
     outcomeContractMarker + builtins.elemAt parts 1;
 
   # Appends the canonical outcome contract to any baked prompt that lacks it;

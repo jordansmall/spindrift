@@ -296,23 +296,26 @@ in
 
   # The default prompt already contains the contract, so injection must be a
   # no-op: no duplication (issue #419).
-  mkharness-prompt-outcome-not-duplicated = pkgs.runCommand "mkharness-prompt-outcome-not-duplicated" { } ''
-    count=$(grep -c '# LAND THE CHANGE' ${batsHarness.promptDir}/issue-prompt.md)
-    [ "$count" -eq 1 ] || {
-      echo "expected the default prompt's outcome contract to stay single, got $count" >&2
-      exit 1
-    }
-    touch $out
-  '';
+  mkharness-prompt-outcome-not-duplicated =
+    pkgs.runCommand "mkharness-prompt-outcome-not-duplicated" { }
+      ''
+        count=$(grep -c '# LAND THE CHANGE' ${batsHarness.promptDir}/issue-prompt.md)
+        [ "$count" -eq 1 ] || {
+          echo "expected the default prompt's outcome contract to stay single, got $count" >&2
+          exit 1
+        }
+        touch $out
+      '';
 
   # The default box's rendered prompt must be byte-identical to the template
   # on disk — injection must not touch a prompt that already has the
   # contract (issue #419).
   mkharness-prompt-outcome-default-unchanged =
-    pkgs.runCommand "mkharness-prompt-outcome-default-unchanged" { } ''
-      diff ${../templates/default/prompts/issue-prompt.md} ${batsHarness.promptDir}/issue-prompt.md
-      touch $out
-    '';
+    pkgs.runCommand "mkharness-prompt-outcome-default-unchanged" { }
+      ''
+        diff ${../templates/default/prompts/issue-prompt.md} ${batsHarness.promptDir}/issue-prompt.md
+        touch $out
+      '';
 
   # The block injected into a prompt lacking the contract must be
   # byte-identical to the default prompt's own contract section — both are
