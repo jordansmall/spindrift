@@ -677,6 +677,7 @@ in
         "DEV_SHELL_NAME"
         "DEV_SHELL_PROBE_TIMEOUT"
         "AUTO_FORMAT"
+        "AUTO_LINT"
       ];
       # Forward: every schema name (that Go reads directly) must appear as a
       # string literal in main.go.
