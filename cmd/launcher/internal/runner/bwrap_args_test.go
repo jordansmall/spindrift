@@ -73,7 +73,8 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 }
 
 // TestBwrapArgs_DriverCacheDirMountedWritable verifies that a Box.DriverCacheDir
-// produces a writable --bind (not --ro-bind) entry for /home/agent/.claude.
+// produces a writable --bind (not --ro-bind) entry for
+// /home/agent/.claude/projects.
 func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
