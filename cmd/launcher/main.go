@@ -109,6 +109,12 @@ type config struct {
 	// Optional skills override
 	spindriftSkillsDir string
 
+	// In-box mount targets declared by the selected Driver (ADR 0009),
+	// nix-baked at wrap time. driverSessionCacheDir is empty when the
+	// Driver declares no session-state dir.
+	driverSkillsDir       string
+	driverSessionCacheDir string
+
 	// Network egress restriction knobs
 	podmanNetwork   string // optional --network value for podman run
 	bwrapUnshareNet bool   // when true, adds --unshare-net to bwrap
@@ -234,6 +240,9 @@ func loadConfig() config {
 
 		spindriftPromptDir: os.Getenv("SPINDRIFT_PROMPT_DIR"),
 		spindriftSkillsDir: os.Getenv("SPINDRIFT_SKILLS_DIR"),
+
+		driverSkillsDir:       os.Getenv("DRIVER_SKILLS_DIR"),
+		driverSessionCacheDir: os.Getenv("DRIVER_SESSION_CACHE_DIR"),
 
 		podmanNetwork:   os.Getenv("PODMAN_NETWORK"),
 		bwrapUnshareNet: os.Getenv("BWRAP_UNSHARE_NET") != "",
@@ -366,25 +375,27 @@ func newForgeClient(c config) forge.Client {
 // PodmanNetwork populated is harmless there.
 func runnerConfig(c config) runner.Config {
 	return runner.Config{
-		Runtime:         c.runtime,
-		Image:           c.image,
-		ImageArchive:    c.imageArchive,
-		ImageDrv:        c.imageDrv,
-		ImageTag:        c.imageTag,
-		NixBuilderImage: c.nixBuilderImage,
-		NixVolume:       c.nixVolume,
-		FlakeImageAttr:  c.flakeImageAttr,
-		PodmanNetwork:   c.podmanNetwork,
-		PidsLimit:       c.pidsLimit,
-		MemoryLimit:     c.memoryLimit,
-		AgentFiles:      c.agentFiles,
-		AgentEnv:        c.agentEnv,
-		AgentFilesDrv:   c.agentFilesDrv,
-		AgentEnvDrv:     c.agentEnvDrv,
-		BakedPrefetch:   c.bakedPrefetch,
-		BwrapUnshareNet: c.bwrapUnshareNet,
-		PromptDir:       c.spindriftPromptDir,
-		SkillsDir:       c.spindriftSkillsDir,
+		Runtime:               c.runtime,
+		Image:                 c.image,
+		ImageArchive:          c.imageArchive,
+		ImageDrv:              c.imageDrv,
+		ImageTag:              c.imageTag,
+		NixBuilderImage:       c.nixBuilderImage,
+		NixVolume:             c.nixVolume,
+		FlakeImageAttr:        c.flakeImageAttr,
+		PodmanNetwork:         c.podmanNetwork,
+		PidsLimit:             c.pidsLimit,
+		MemoryLimit:           c.memoryLimit,
+		AgentFiles:            c.agentFiles,
+		AgentEnv:              c.agentEnv,
+		AgentFilesDrv:         c.agentFilesDrv,
+		AgentEnvDrv:           c.agentEnvDrv,
+		BakedPrefetch:         c.bakedPrefetch,
+		BwrapUnshareNet:       c.bwrapUnshareNet,
+		PromptDir:             c.spindriftPromptDir,
+		SkillsDir:             c.spindriftSkillsDir,
+		DriverSkillsDir:       c.driverSkillsDir,
+		DriverSessionCacheDir: c.driverSessionCacheDir,
 	}
 }
 
