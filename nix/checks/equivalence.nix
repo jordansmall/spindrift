@@ -255,6 +255,16 @@ in
     assert assertMsg hasShellcheck "expected shellcheck to be baked into the dogfood toolchain";
     pkgs.runCommand "shellcheck-baked-in-dogfood" { } "touch $out";
 
+  # The pinned upstream caveman skill (juliusbrussee/caveman) is baked into
+  # the dogfood image at its .md basename so the in-box skill preamble
+  # advertises /caveman, the skill-file analogue of the nil/shellcheck
+  # baked-toolchain guards above (issue #486).
+  caveman-baked-in-dogfood =
+    pkgs.runCommand "caveman-baked-in-dogfood" { } ''
+      test -f ${harness.skillsDir}/caveman.md
+      touch $out
+    '';
+
   # The lean/no-nix escape hatch must not include the nix CLI.
   lean-escape-hatch =
     let
