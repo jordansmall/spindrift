@@ -64,7 +64,7 @@ knobs. Unset options fall through to `mkHarness`'s own defaults.
 | `config`    | attrs                       | `{ allowUnfree = true; }` | nixpkgs config attrs                                          |
 | `packages`  | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
 | `prefetch`  | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
-| `prompt`    | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`) |
+| `prompt`    | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent — a prompt that already has it is untouched) |
 | `scoutPrompt` / `reviewPrompt` / `filerPrompt` | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); baked in, overridable via `SPINDRIFT_PROMPT_DIR` |
 | `skills`    | list of paths               | `[]`               | skill files baked into the image at `/home/agent/.claude/skills` so the headless agent can `/invoke` them; `SPINDRIFT_SKILLS_DIR` mounts over them at runtime |
 | `settings`  | submodule, grouped by section (see below) | `{}` | non-secret run defaults baked into the `spindrift` CLI |
@@ -142,6 +142,16 @@ until a model is set; see [Filer](#filer).
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
 at any directory to override it at runtime for zero-rebuild iteration.
+
+The SPINDRIFT_OUTCOME contract — the sections that instruct the agent to
+print the `SPINDRIFT_OUTCOME issue=… pr=… status=… note=…` line the launcher
+parses to learn the PR — is harness-owned, not Consumer-tunable. At
+`spindrift build` time, a `prompt` that omits the contract gets it appended
+automatically (idempotent: a prompt that already has it is left untouched).
+This build-time injection does **not** cover a runtime `SPINDRIFT_PROMPT_DIR`
+override — that mounts a whole prompt directory over the baked one, bypassing
+the bake step entirely, so a runtime-mounted custom prompt that drops the
+contract ships an agent that never emits the outcome line.
 
 ### Cold-run toolchain nudge
 
