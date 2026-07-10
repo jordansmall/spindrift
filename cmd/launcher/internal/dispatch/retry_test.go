@@ -1,0 +1,427 @@
+package dispatch
+
+import (
+	"testing"
+	"time"
+
+	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/runner"
+)
+
+// retryConfig returns a Config with retry knobs set explicitly.
+func retryConfig(max, backoffSecs, holdJitter int) Config {
+	return Config{
+		TransientRetryMax:    max,
+		TransientBackoffSecs: backoffSecs,
+		HoldJitterSecs:       holdJitter,
+	}
+}
+
+// fakeClock returns a Clock with a fixed Now and a Sleep that records
+// durations into calls.
+func fakeClock(now time.Time, calls *[]time.Duration) Clock {
+	return Clock{
+		Now:   func() time.Time { return now },
+		Sleep: func(d time.Duration) { *calls = append(*calls, d) },
+	}
+}
+
+// newTestDispatch builds a Dispatch wired to fr and drv with the given retry
+// config and clock, without going through a Factory (so tests can inject a
+// fake Clock, which Factory's constructor doesn't expose a seam for
+// bypassing the real cache).
+func newTestDispatch(t *testing.T, cfg Config, fr runner.Runner, drv fakeDriver, clock Clock) *Dispatch {
+	t.Helper()
+	dir := tempLogDir(t)
+	f, err := NewFactory(cfg, dir, fr, drv, clock)
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	t.Cleanup(f.Cleanup)
+	return f.New("1", "t")
+}
+
+// TestDispatchWithRetry_SuccessOnFirstRun verifies that a successful run
+// whose box reports an outcome line returns it without any classify or
+// sleep calls.
+func TestDispatchWithRetry_SuccessOnFirstRun(t *testing.T) {
+	fr := runner.NewFake() // RunErr = nil → success
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
+	called := false
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		called = true
+		return outcome.Classification{}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+
+	result := d.Run()
+
+	if !result.Success {
+		t.Error("want Success=true, got false")
+	}
+	if !result.OutcomeFound {
+		t.Fatal("want OutcomeFound=true")
+	}
+	if result.Outcome.Status != "ready" {
+		t.Errorf("Outcome.Status: got %q, want %q", result.Outcome.Status, "ready")
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Errorf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if called {
+		t.Error("classify should not be called when an outcome line was found")
+	}
+	if len(sleeps) != 0 {
+		t.Errorf("sleep calls: got %d, want 0", len(sleeps))
+	}
+}
+
+// TestDispatchWithRetry_SuccessWithoutOutcomeClassifies verifies that a
+// zero-exit box that wrote no outcome line still gets a best-effort
+// classification, so gateIssue-style callers can explain what happened
+// without touching the log themselves.
+func TestDispatchWithRetry_SuccessWithoutOutcomeClassifies(t *testing.T) {
+	fr := runner.NewFake() // RunErr = nil → success, no outcome line written
+	wantCls := outcome.Classification{Class: outcome.Terminal, Reason: outcome.TaskFailed}
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return wantCls, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+
+	result := d.Run()
+
+	if !result.Success {
+		t.Error("want Success=true, got false")
+	}
+	if result.OutcomeFound {
+		t.Fatal("want OutcomeFound=false")
+	}
+	if result.Classification != wantCls {
+		t.Errorf("Classification: got %+v, want %+v", result.Classification, wantCls)
+	}
+}
+
+// TestDispatchWithRetry_SuccessWithMalformedOutcomeSetsParseErr verifies
+// that a zero-exit box whose log has an unparseable SPINDRIFT_OUTCOME line
+// (missing required fields) surfaces ParseErr without attempting
+// classification.
+func TestDispatchWithRetry_SuccessWithMalformedOutcomeSetsParseErr(t *testing.T) {
+	fr := runner.NewFake()
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1\n") // missing pr= and status=
+	called := false
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		called = true
+		return outcome.Classification{}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+
+	result := d.Run()
+
+	if !result.Success {
+		t.Error("want Success=true, got false")
+	}
+	if result.ParseErr == nil {
+		t.Fatal("want ParseErr set for an unparseable outcome line")
+	}
+	if result.OutcomeFound {
+		t.Error("want OutcomeFound=false for an unparseable outcome line")
+	}
+	if called {
+		t.Error("classify should not be called when the outcome line failed to parse")
+	}
+}
+
+// TestDispatchWithRetry_TerminalNeverRetried verifies that a terminal
+// failure exits after one attempt without retrying.
+func TestDispatchWithRetry_TerminalNeverRetried(t *testing.T) {
+	fr := runner.NewFake()
+	fr.RunErr = boxErr
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return outcome.Classification{Class: outcome.Terminal, Reason: outcome.TaskFailed}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+
+	result := d.Run()
+
+	if result.Success {
+		t.Error("want Success=false (terminal failure), got true")
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Errorf("RunCalls: got %d, want 1 (no retry on terminal)", len(fr.RunCalls))
+	}
+	if len(sleeps) != 0 {
+		t.Errorf("sleep calls: got %d, want 0 (no sleep on terminal)", len(sleeps))
+	}
+}
+
+// TestDispatchWithRetry_HoldThenSuccess verifies that a 429 with resetsAt
+// causes a hold sleep and re-dispatch, and that the hold does not consume
+// the retry cap when the re-dispatch succeeds.
+func TestDispatchWithRetry_HoldThenSuccess(t *testing.T) {
+	fixedNow := time.Unix(1_000_000, 0).UTC()
+	resetAt := fixedNow.Add(2 * time.Hour)
+
+	fr := runner.NewFake()
+	fr.RunErrs = []error{boxErr, nil} // first fails, second succeeds
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // holdJitter=0 for determinism
+
+	result := d.Run()
+
+	if !result.Success {
+		t.Error("want Success=true (success after hold), got false")
+	}
+	if len(fr.RunCalls) != 2 {
+		t.Errorf("RunCalls: got %d, want 2 (initial + hold re-dispatch)", len(fr.RunCalls))
+	}
+	if len(sleeps) != 1 {
+		t.Fatalf("sleep calls: got %d, want 1", len(sleeps))
+	}
+	wantSleep := 2 * time.Hour // resetAt - fixedNow, jitter=0
+	if sleeps[0] != wantSleep {
+		t.Errorf("sleep duration: got %v, want %v", sleeps[0], wantSleep)
+	}
+}
+
+// TestDispatchWithRetry_HoldJitterAdded verifies that HoldJitterSecs is
+// added to the hold sleep duration.
+func TestDispatchWithRetry_HoldJitterAdded(t *testing.T) {
+	fixedNow := time.Unix(1_000_000, 0).UTC()
+	resetAt := fixedNow.Add(1 * time.Hour)
+
+	fr := runner.NewFake()
+	fr.RunErrs = []error{boxErr, nil}
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 10), fr, drv, fakeClock(fixedNow, &sleeps)) // holdJitter=10s
+
+	d.Run()
+
+	if len(sleeps) != 1 {
+		t.Fatalf("sleep calls: got %d, want 1", len(sleeps))
+	}
+	wantSleep := 1*time.Hour + 10*time.Second
+	if sleeps[0] != wantSleep {
+		t.Errorf("sleep duration: got %v, want %v", sleeps[0], wantSleep)
+	}
+}
+
+// TestDispatchWithRetry_ConsecutiveHoldsConsumeCapAndFail verifies that a
+// series of consecutive 429s without progress eventually exhausts the hold
+// cap and returns Success=false.
+func TestDispatchWithRetry_ConsecutiveHoldsConsumeCapAndFail(t *testing.T) {
+	fixedNow := time.Unix(1_000_000, 0).UTC()
+	resetAt := fixedNow.Add(30 * time.Minute)
+
+	fr := runner.NewFake()
+	fr.RunErr = boxErr // all runs fail
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // max=3
+
+	result := d.Run()
+
+	if result.Success {
+		t.Error("want Success=false (cap exhausted), got true")
+	}
+	// With max=3: run1→429(free), run2→429(count=1), run3→429(count=2),
+	// run4→429(count=3 >= 3) → fail before 4th sleep.
+	// Total runs: 4, total sleeps: 3.
+	if len(fr.RunCalls) != 4 {
+		t.Errorf("RunCalls: got %d, want 4", len(fr.RunCalls))
+	}
+	if len(sleeps) != 3 {
+		t.Errorf("sleep calls: got %d, want 3 (one per hold before cap)", len(sleeps))
+	}
+}
+
+// TestDispatchWithRetry_HoldNotCountedAfterProgress verifies that holdCount
+// resets after a non-429 outcome: a hold-then-different-transient-then-
+// success sequence does not accumulate cap from the first hold.
+func TestDispatchWithRetry_HoldNotCountedAfterProgress(t *testing.T) {
+	fixedNow := time.Unix(1_000_000, 0).UTC()
+	resetAt := fixedNow.Add(30 * time.Minute)
+
+	fr := runner.NewFake()
+	// run1 fails (429), run2 fails (529 — different class), run3 succeeds
+	fr.RunErrs = []error{boxErr, boxErr, nil}
+
+	rateLimitCls := outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}
+	overloadedCls := outcome.Classification{Class: outcome.Transient, Reason: outcome.Overloaded}
+	calls := 0
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		calls++
+		if calls == 1 {
+			return rateLimitCls, nil
+		}
+		return overloadedCls, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(1, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // tight cap
+
+	result := d.Run()
+
+	// Even with max=1, the sequence succeeds because:
+	// - run1 → 429 hold (free, prevWasHold=true)
+	// - run2 → 529 (prevWasHold reset to false, transientCount=1 ≤ 1)
+	// - run3 → success
+	if !result.Success {
+		t.Error("want Success=true (succeeded after mixed transients), got false")
+	}
+	if len(fr.RunCalls) != 3 {
+		t.Errorf("RunCalls: got %d, want 3", len(fr.RunCalls))
+	}
+}
+
+// TestDispatchWithRetry_TransientBackoffRetryAndSucceed verifies that a
+// 529/network transient is retried with backoff and succeeds on
+// re-dispatch.
+func TestDispatchWithRetry_TransientBackoffRetryAndSucceed(t *testing.T) {
+	fr := runner.NewFake()
+	fr.RunErrs = []error{boxErr, nil} // first fails (529), second succeeds
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return outcome.Classification{Class: outcome.Transient, Reason: outcome.Overloaded}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 10, 0), fr, drv, fakeClock(time.Time{}, &sleeps)) // backoffSecs=10
+
+	result := d.Run()
+
+	if !result.Success {
+		t.Error("want Success=true (success after backoff retry), got false")
+	}
+	if len(fr.RunCalls) != 2 {
+		t.Errorf("RunCalls: got %d, want 2", len(fr.RunCalls))
+	}
+	if len(sleeps) != 1 {
+		t.Fatalf("sleep calls: got %d, want 1", len(sleeps))
+	}
+	if sleeps[0] != 10*time.Second {
+		t.Errorf("sleep duration: got %v, want %v", sleeps[0], 10*time.Second)
+	}
+}
+
+// TestDispatchWithRetry_TransientCapExhausted verifies that a 529/network
+// transient that never recovers exhausts the cap and returns Success=false.
+func TestDispatchWithRetry_TransientCapExhausted(t *testing.T) {
+	fr := runner.NewFake()
+	fr.RunErr = boxErr // all runs fail
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return outcome.Classification{Class: outcome.Transient, Reason: outcome.Network}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(2, 5, 0), fr, drv, fakeClock(time.Time{}, &sleeps)) // max=2, backoffSecs=5
+
+	result := d.Run()
+
+	if result.Success {
+		t.Error("want Success=false (cap exhausted), got true")
+	}
+	// max=2: initial run + 2 retries = 3 total runs, 2 sleeps.
+	if len(fr.RunCalls) != 3 {
+		t.Errorf("RunCalls: got %d, want 3", len(fr.RunCalls))
+	}
+	if len(sleeps) != 2 {
+		t.Fatalf("sleep calls: got %d, want 2", len(sleeps))
+	}
+	// Linear backoff: retry1 = 5s*1, retry2 = 5s*2
+	if sleeps[0] != 5*time.Second {
+		t.Errorf("sleep[0]: got %v, want %v", sleeps[0], 5*time.Second)
+	}
+	if sleeps[1] != 10*time.Second {
+		t.Errorf("sleep[1]: got %v, want %v", sleeps[1], 10*time.Second)
+	}
+}
+
+// TestDispatchWithRetry_RateLimitWithoutResetAtUsesBackoff verifies that a
+// 429 with no resetsAt is treated as a plain transient (backoff retry, not
+// hold).
+func TestDispatchWithRetry_RateLimitWithoutResetAtUsesBackoff(t *testing.T) {
+	fr := runner.NewFake()
+	fr.RunErrs = []error{boxErr, nil}
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: nil}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 15, 0), fr, drv, fakeClock(time.Time{}, &sleeps)) // backoffSecs=15
+
+	result := d.Run()
+
+	if !result.Success {
+		t.Error("want Success=true (success after backoff for 429 without resetsAt), got false")
+	}
+	if len(sleeps) != 1 {
+		t.Fatalf("sleep calls: got %d, want 1", len(sleeps))
+	}
+	// Should use backoff, not hold: 15s * 1
+	if sleeps[0] != 15*time.Second {
+		t.Errorf("sleep duration: got %v, want 15s (backoff, not hold)", sleeps[0])
+	}
+}
+
+// TestDispatchWithRetry_HoldWithPastResetUsesJitterOnly verifies that when
+// resetsAt is in the past the sleep is clamped to HoldJitterSecs.
+func TestDispatchWithRetry_HoldWithPastResetUsesJitterOnly(t *testing.T) {
+	fixedNow := time.Unix(2_000_000, 0).UTC()
+	resetAt := fixedNow.Add(-1 * time.Hour) // in the past
+
+	fr := runner.NewFake()
+	fr.RunErrs = []error{boxErr, nil}
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 7), fr, drv, fakeClock(fixedNow, &sleeps)) // holdJitter=7s
+
+	d.Run()
+
+	if len(sleeps) != 1 {
+		t.Fatalf("sleep calls: got %d, want 1", len(sleeps))
+	}
+	if sleeps[0] != 7*time.Second {
+		t.Errorf("sleep duration: got %v, want 7s (clamped to jitter)", sleeps[0])
+	}
+}
+
+// TestDispatchWithRetry_AppliesToFixToo verifies the behavior change called
+// out in issue #441: a 429 during a fix pass now holds until reset instead
+// of burning a fix attempt, because the retry policy applies uniformly to
+// Fix as it does to Run.
+func TestDispatchWithRetry_AppliesToFixToo(t *testing.T) {
+	fixedNow := time.Unix(1_000_000, 0).UTC()
+	resetAt := fixedNow.Add(1 * time.Hour)
+
+	fr := runner.NewFake()
+	fr.RunErrs = []error{boxErr, nil} // fix pass fails once (429), then succeeds
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
+
+	result := d.Fix(1, "ci failure detail")
+
+	if !result.Success {
+		t.Error("want Success=true (fix succeeded after hold), got false")
+	}
+	if len(fr.RunCalls) != 2 {
+		t.Errorf("RunCalls: got %d, want 2 (initial fix attempt + hold re-dispatch)", len(fr.RunCalls))
+	}
+	if len(sleeps) != 1 {
+		t.Fatalf("sleep calls: got %d, want 1 (held instead of burning the fix attempt)", len(sleeps))
+	}
+	if sleeps[0] != 1*time.Hour {
+		t.Errorf("sleep duration: got %v, want 1h (hold until reset)", sleeps[0])
+	}
+}
