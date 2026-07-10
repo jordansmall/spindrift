@@ -93,6 +93,63 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		name: "Network_ConnectionReset",
+		lines: []string{
+			`read tcp 127.0.0.1:42000->127.0.0.1:443: connection reset by peer`,
+		},
+		wantClass:   outcome.Transient,
+		wantReason:  outcome.Network,
+		wantResetAt: nil,
+	},
+	{
+		name: "Network_DialTcp",
+		lines: []string{
+			`dial tcp 1.2.3.4:443: i/o timeout`,
+		},
+		wantClass:   outcome.Transient,
+		wantReason:  outcome.Network,
+		wantResetAt: nil,
+	},
+	{
+		name: "Network_RequestCanceled",
+		lines: []string{
+			`Get "https://api.anthropic.com/v1/messages": net/http: request canceled`,
+		},
+		wantClass:   outcome.Transient,
+		wantReason:  outcome.Network,
+		wantResetAt: nil,
+	},
+	{
+		name: "Network_ContextDeadlineExceeded",
+		lines: []string{
+			`Post "https://api.anthropic.com/v1/messages": context deadline exceeded`,
+		},
+		wantClass:   outcome.Transient,
+		wantReason:  outcome.Network,
+		wantResetAt: nil,
+	},
+	{
+		name: "Network_NoSuchHost",
+		lines: []string{
+			`dial tcp: lookup api.anthropic.com: no such host`,
+		},
+		wantClass:   outcome.Transient,
+		wantReason:  outcome.Network,
+		wantResetAt: nil,
+	},
+	{
+		// First matching line in the log wins even when a higher-priority pattern
+		// (rate_limit_error) appears on a later line.
+		name: "Network_FirstMatchWins_EarlierLineBeatsLaterHigherPriority",
+		lines: []string{
+			`connection refused`,
+			`rate_limit_error occurred`,
+		},
+		wantClass:   outcome.Transient,
+		wantReason:  outcome.Network,
+		wantResetAt: nil,
+	},
+	{
 		name: "Terminal_GenuineTaskFailure",
 		lines: []string{
 			`Agent completed with no valid outcome.`,
