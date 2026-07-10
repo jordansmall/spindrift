@@ -120,6 +120,29 @@ in
     ) "main.go reads env vars absent from schema: ${concatStringsSep ", " extraInGo}";
     pkgs.runCommand "launcher-env-coverage" { } "touch $out";
 
+  # tests/helper.bash's set_box_env fixture must export every boxEnv = true
+  # schema knob, so entrypoint.bats exercises the same defaults the nix
+  # preamble bakes into the image at build time (issue #462). Presence-only,
+  # like launcher-env-coverage above — catches a new boxEnv knob added to the
+  # schema with no matching export added to set_box_env.
+  box-env-fixture-coverage =
+    let
+      schema = import ../../lib/env-schema.nix;
+      inherit (pkgs.lib)
+        attrValues
+        concatStringsSep
+        filter
+        hasInfix
+        ;
+      boxEnvNames = map (e: e.env) (filter (e: e.boxEnv or false) (attrValues schema));
+      helperSrc = builtins.readFile ../../tests/helper.bash;
+      missing = filter (name: !hasInfix "export ${name}=" helperSrc) boxEnvNames;
+    in
+    assert pkgs.lib.assertMsg (
+      missing == [ ]
+    ) "tests/helper.bash's set_box_env is missing boxEnv knobs: ${concatStringsSep ", " missing}";
+    pkgs.runCommand "box-env-fixture-coverage" { } "touch $out";
+
   # cmd/launcher/flagtable_gen.go must match the content generated from
   # env-schema.nix by mkHarness.nix renderFlagTableGo.  Fails when a new
   # schema knob is added but the committed generated file is not regenerated.
