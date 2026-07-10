@@ -44,6 +44,7 @@ let
     defaults = {
       mergeMode = "immediate";
       autoFormat = true;
+      autoLint = true;
     };
   };
 
