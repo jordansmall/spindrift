@@ -8,7 +8,7 @@
 
 load helper
 
-# Replaces the fake nix with one that exits $1 on `nix run .#run` calls and
+# Replaces the fake nix with one that exits $1 on `nix run .# -- dispatch` calls and
 # exits 0 on all other nix calls (build, etc.).
 _install_exit_code_nix() {
   local code="$1"
@@ -19,7 +19,7 @@ _install_exit_code_nix() {
     cat <<EOF
 : "\${NIX_LOG:?NIX_LOG must point at a log file}"
 printf '%s\n' "\$*" >>"\$NIX_LOG"
-if printf '%s ' "\$@" | grep -q '\.#run'; then
+if printf '%s ' "\$@" | grep -q -- '-- dispatch'; then
   exit $code
 fi
 exit 0
@@ -29,7 +29,7 @@ EOF
   chmod +x "$FAKE_BIN/nix"
 }
 
-# Replaces the fake nix with one that logs MAX_JOBS on every `nix run .#run`
+# Replaces the fake nix with one that logs MAX_JOBS on every `nix run .# -- dispatch`
 # call, then exits 2 so the dogfood loop terminates cleanly.
 _install_env_logging_nix() {
   local shebang
@@ -39,7 +39,7 @@ _install_env_logging_nix() {
     cat <<'EOF'
 : "${NIX_LOG:?NIX_LOG must point at a log file}"
 printf '%s\n' "$*" >>"$NIX_LOG"
-if printf '%s ' "$@" | grep -q '\.#run'; then
+if printf '%s ' "$@" | grep -q -- '-- dispatch'; then
   printf 'MAX_JOBS=%s\n' "${MAX_JOBS:-}" >>"${NIX_ENV_LOG:-/dev/null}"
   exit 2
 fi
@@ -78,7 +78,7 @@ setup() {
   # bare `git pull --ff-only`.
   git -C "$WORK" checkout -q -b feat/leftover
 
-  # Default nix exits 2 on `nix run .#run` so tests terminate after one cycle.
+  # Default nix exits 2 on `nix run .# -- dispatch` so tests terminate after one cycle.
   _install_exit_code_nix 2
 }
 
