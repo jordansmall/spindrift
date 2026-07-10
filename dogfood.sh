@@ -2,7 +2,7 @@
 # Dogfood loop: spindrift building spindrift.
 #
 # The box's behaviour — entrypoint, toolchain, and prompt — is baked into the OCI
-# image at `nix run .#build` time (the merge gate itself lives in the launcher).
+# image at `nix run .# -- build` time (the merge gate itself lives in the launcher).
 # When an agent merges a fix to the base branch, later issues stay blind to it
 # until the image is rebuilt from an updated tree. This loop closes both
 # staleness sources:
@@ -10,8 +10,8 @@
 #   1. `git checkout $BASE_BRANCH && git pull --ff-only`
 #                              — reset to the base branch and pull the just-merged
 #                                change into the local tree, which is what
-#                                `nix run .#build` reads from ($PWD).
-#   2. `nix run .#build`     — re-bake the image from that updated tree.
+#                                `nix run .# -- build` reads from ($PWD).
+#   2. `nix run .# -- build` — re-bake the image from that updated tree.
 #
 # Each iteration fans out concurrently through the ready set. Concurrency is
 # bounded by MAX_PARALLEL (default 3) and MAX_JOBS (default unlimited). The
@@ -50,13 +50,13 @@ echo "==> dogfood: git checkout $BASE_BRANCH && git pull --ff-only"
 git checkout "$BASE_BRANCH"
 git pull --ff-only
 
-echo "==> dogfood: nix run .#build"
-nix run .#build
+echo "==> dogfood: nix run .# -- build"
+nix run .# -- build
 
 while :; do
-  echo "==> dogfood: nix run .#run"
+  echo "==> dogfood: nix run .# -- dispatch"
   nix_exit=0
-  nix run .#run || nix_exit=$?
+  nix run .# -- dispatch || nix_exit=$?
 
   if [ "$nix_exit" -eq 2 ]; then
     echo "==> dogfood: queue empty — done after $iteration iteration(s)."
@@ -75,6 +75,6 @@ while :; do
   git checkout "$BASE_BRANCH"
   git pull --ff-only
 
-  echo "==> dogfood: nix run .#build"
-  nix run .#build
+  echo "==> dogfood: nix run .# -- build"
+  nix run .# -- build
 done
