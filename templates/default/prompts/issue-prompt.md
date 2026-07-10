@@ -14,7 +14,7 @@ Read first (run these yourself):
 
 # COMMS
 
-Your text output is a machine-parsed log, not a conversation.
+${CAVEMAN_STEP}Your text output is a machine-parsed log, not a conversation.
 
 - No pleasantries, acknowledgements, praise, or apologies.
 - Never restate what a subagent returned.
@@ -26,7 +26,7 @@ Human-quality prose is reserved exclusively for: commit messages
 required by IF BLOCKED, and the `note=` field of the SPINDRIFT_OUTCOME line.
 Everywhere else, stay terse.
 
-${CAVEMAN_STEP}# SCOUT
+# SCOUT
 
 Delegate exploration to the `scout` subagent before reading source yourself:
 
