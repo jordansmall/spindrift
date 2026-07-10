@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/heartbeat"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/usage"
@@ -42,6 +42,11 @@ type config struct {
 
 	// Runtime: podman | docker | bwrap
 	runtime string
+
+	// driver selects the Go Driver strategy (ADR 0009): transient
+	// classification and heartbeat parsing. Empty defaults to "claude",
+	// matching the nix side's default.
+	driver string
 
 	// image is the runtime image reference; defaults to imageTag
 	image string
@@ -187,6 +192,7 @@ func loadConfig() config {
 		agentEnvDrv:     os.Getenv("AGENT_ENV_DRV"),
 		bakedPrefetch:   os.Getenv("BAKED_PREFETCH"),
 		runtime:         os.Getenv("RUNTIME"),
+		driver:          os.Getenv("DRIVER"),
 		image:           image,
 
 		repoSlug:        os.Getenv("REPO_SLUG"),
@@ -267,6 +273,9 @@ func validate(c config) error {
 	}
 	if _, err := exec.LookPath(c.runtime); err != nil {
 		return fmt.Errorf("%s not found on PATH.", c.runtime)
+	}
+	if _, err := driver.New(c.driver); err != nil {
+		return err
 	}
 	switch c.mergeMode {
 	case "immediate", "auto", "manual":
@@ -378,6 +387,18 @@ func newRunner(c config, pwd string) runner.Runner {
 		c.podmanNetwork, c.pidsLimit, c.memoryLimit)
 }
 
+// newDriver returns the Go Driver strategy selected by c.driver (ADR 0009).
+// validate() already rejects an unrecognised DRIVER before this is reached,
+// so the error here is treated as impossible in production and falls back to
+// the registry default.
+func newDriver(c config) driver.Driver {
+	d, err := driver.New(c.driver)
+	if err != nil {
+		d, _ = driver.New("")
+	}
+	return d
+}
+
 // newBuildRunner constructs the runner adapter for the `build` subcommand.
 func newBuildRunner(c config, pwd string) runner.Runner {
 	if c.runtime == "bwrap" {
@@ -452,7 +473,7 @@ func runOne(c config, pwd string, r runner.Runner, iss issue) error {
 		Issue:  iss.number,
 		Name:   "agent-issue-" + iss.number,
 		Env:    buildBoxEnv(c, iss),
-		Output: heartbeat.New(logFile, iss.number, os.Stdout),
+		Output: newDriver(c).NewHeartbeatWriter(logFile, iss.number, os.Stdout),
 	}
 	return r.Run(box)
 }
@@ -476,7 +497,7 @@ func runFix(c config, pwd string, r runner.Runner, iss issue, fixPass int) error
 		Issue:  fixIss.number,
 		Name:   "agent-issue-" + fixIss.number,
 		Env:    buildBoxEnv(c, fixIss),
-		Output: heartbeat.New(logFile, fixIss.number, os.Stdout),
+		Output: newDriver(c).NewHeartbeatWriter(logFile, fixIss.number, os.Stdout),
 	}
 	return r.Run(box)
 }
@@ -501,7 +522,7 @@ func runConflictResolve(c config, pwd string, r runner.Runner, iss issue, pr str
 		Issue:  iss.number,
 		Name:   "agent-issue-" + iss.number,
 		Env:    env,
-		Output: heartbeat.New(logFile, iss.number, os.Stdout),
+		Output: newDriver(c).NewHeartbeatWriter(logFile, iss.number, os.Stdout),
 	}
 	return r.Run(box)
 }
@@ -870,7 +891,7 @@ func gateIssue(c config, fc forge.Client, pwd string, r runner.Runner, iss issue
 		branch := c.branchPrefix + iss.number
 		pr, isDraft, prFound, prErr := openPRForBranch(fc, branch)
 		if prErr != nil || !prFound {
-			cls, clsErr := outcome.Classify(logPath)
+			cls, clsErr := newDriver(c).ClassifyTransient(logPath)
 			clsNote := ""
 			if clsErr != nil {
 				fmt.Fprintf(os.Stderr, "    ?? #%s: classify: %v\n", iss.number, clsErr)
