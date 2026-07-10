@@ -32,4 +32,9 @@ type CodeForge interface {
 	EnqueueAutoMerge(prURL string) error
 	// Probe checks code forge connectivity and returns the resolved repo slug.
 	Probe() (string, error)
+	// PushOnly reports whether this adapter has no PR/CI/merge concept and
+	// lands code by pushing directly to a branch (the git adapter) as
+	// opposed to opening a PR and watching CI (github). Callers key
+	// behavior off this capability instead of comparing adapter names.
+	PushOnly() bool
 }

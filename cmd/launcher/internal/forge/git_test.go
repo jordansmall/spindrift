@@ -13,6 +13,16 @@ func TestGitClient_ImplementsCodeForge(t *testing.T) {
 	var _ CodeForge = NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com")
 }
 
+// TestGitClient_PushOnly verifies the git Code Forge reports itself as
+// push-only, the capability settle uses instead of a codeForge=="git" string
+// comparison.
+func TestGitClient_PushOnly(t *testing.T) {
+	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com")
+	if !g.PushOnly() {
+		t.Error("PushOnly() = false, want true for the git Code Forge")
+	}
+}
+
 // TestGitClient_NoPRConcept verifies that OpenPRForBranch and PRForBranch
 // always report "not found" — the git Code Forge is push-only and has no PR
 // concept at all.

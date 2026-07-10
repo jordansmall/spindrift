@@ -180,3 +180,8 @@ func (g *gitClient) Probe() (string, error) {
 	}
 	return g.remoteURL, nil
 }
+
+// PushOnly is always true: the git Code Forge has no PR/CI/merge concept.
+func (g *gitClient) PushOnly() bool {
+	return true
+}

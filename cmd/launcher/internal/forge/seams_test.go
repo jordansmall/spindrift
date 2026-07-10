@@ -60,6 +60,19 @@ func TestFake_ImplementsCodeForge(t *testing.T) {
 	var _ forge.CodeForge = forge.NewFake()
 }
 
+// TestFake_PushOnly_Configurable verifies the fake defaults to false (github)
+// and can be scripted true (git) for settle path tests.
+func TestFake_PushOnly_Configurable(t *testing.T) {
+	f := forge.NewFake()
+	if f.PushOnly() {
+		t.Error("PushOnly() default = true, want false")
+	}
+	f.IsPushOnly = true
+	if !f.PushOnly() {
+		t.Error("PushOnly() after IsPushOnly=true = false, want true")
+	}
+}
+
 // TestFake_ImplementsClient asserts that *Fake still satisfies the combined Client.
 func TestFake_ImplementsClient(t *testing.T) {
 	var _ forge.Client = forge.NewFake()
