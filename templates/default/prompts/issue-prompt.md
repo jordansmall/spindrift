@@ -70,7 +70,7 @@ log the fallback. Go module without a devShell:
 - `go vet ./...`
 - `go test ./...`
 
-${AUTO_FORMAT_STEP}# COMMIT
+${AUTO_FORMAT_STEP}${AUTO_LINT_STEP}# COMMIT
 
 Strict Conventional Commits v1.0.0, hard-wrapped (subject ≤50, body ≤72).
 Prefer several small focused commits over one big one — commit each logical
