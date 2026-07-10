@@ -293,6 +293,32 @@ Before committing, auto-format the files you changed:
 '
 fi
 
+# AUTO_LINT_STEP is substituted into the issue prompt only when AUTO_LINT is
+# non-empty (opt-in knob) — the same conditional-residue mechanism as
+# AUTO_FORMAT_STEP above: empty when off, so a default box carries no trace of
+# the step and the linter is never mentioned.
+AUTO_LINT_STEP=""
+if [ -n "${AUTO_LINT:-}" ]; then
+  # Backticks are markdown formatting, not command substitution — SC2016.
+  # shellcheck disable=SC2016
+  AUTO_LINT_STEP='# AUTO-LINT
+
+Before committing, lint the files you changed and resolve what you find:
+
+1. Detect the project'"'"'s linter, in order of preference:
+   - A `lint` target in the project'"'"'s build config (`package.json` script,
+     `Makefile`, `justfile`), or a checker the flake/devShell exposes.
+   - The standard linter for the language (e.g. `eslint`, `ruff`/`flake8`,
+     `golangci-lint`/`go vet`, `clippy`, `statix`).
+2. Run it only on the files you changed (from `git diff --name-only` vs the
+   base branch), where the linter accepts explicit paths.
+3. Apply the linter'"'"'s safe auto-fix mode where available, then manually
+   resolve the remaining findings in the changed files before committing.
+4. Skip silently when no linter is found — this must never fail the run.
+
+'
+fi
+
 # CI_FAILURE_STEP is substituted into the fix prompt only when the launcher
 # forwarded a CI_FAILURE_SUMMARY (selfHeal captured it on genuine-red, issue
 # #426) — the same conditional-residue mechanism as SKILL_PREAMBLE above:
@@ -324,8 +350,9 @@ _subst() {
     SKILL_PREAMBLE="${SKILL_PREAMBLE:-}" \
     FILE_ISSUES_STEP="${FILE_ISSUES_STEP:-}" \
     AUTO_FORMAT_STEP="${AUTO_FORMAT_STEP:-}" \
+    AUTO_LINT_STEP="${AUTO_LINT_STEP:-}" \
     CI_FAILURE_STEP="${CI_FAILURE_STEP:-}" \
-    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE $FILE_ISSUES_STEP $AUTO_FORMAT_STEP $CI_FAILURE_STEP' \
+    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE $FILE_ISSUES_STEP $AUTO_FORMAT_STEP $AUTO_LINT_STEP $CI_FAILURE_STEP' \
     <"$1"
 }
 # When the pre-work rebase produced conflicts, spawn a conflict-resolve agent to
