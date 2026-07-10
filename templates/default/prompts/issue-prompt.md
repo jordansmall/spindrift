@@ -26,7 +26,7 @@ Human-quality prose is reserved exclusively for: commit messages
 required by IF BLOCKED, and the `note=` field of the SPINDRIFT_OUTCOME line.
 Everywhere else, stay terse.
 
-# SCOUT
+${CAVEMAN_STEP}# SCOUT
 
 Delegate exploration to the `scout` subagent before reading source yourself:
 
