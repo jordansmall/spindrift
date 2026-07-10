@@ -26,46 +26,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      # spindrift dispatch reads these directly; env wins over the image's baked defaults.
-      RUNTIME: docker
-      # The claim step below swaps the issue onto agent-in-progress before the
-      # build, so the launcher targets it by number rather than a label query.
-      # LABEL still names the in-progress label so fanOut skips the redundant
-      # re-claim of an already-claimed issue.
+      # The claim step (inside agent-setup) swaps the issue onto
+      # agent-in-progress before the build, so the launcher targets it by
+      # number rather than a label query. LABEL still names the in-progress
+      # label so fanOut skips the redundant re-claim of an already-claimed
+      # issue.
       ISSUE_NUMBER: ${{ github.event.issue.number }}
       LABEL: agent-in-progress
       MAX_JOBS: "1"
-      REPO_SLUG: ${{ github.repository }}
-      BASE_BRANCH: ${{ github.event.repository.default_branch }}
-      GIT_USER_NAME: ${{ vars.AGENT_GIT_USER_NAME || 'spindrift-agent' }}
-      GIT_USER_EMAIL: ${{ vars.AGENT_GIT_USER_EMAIL || 'spindrift-agent@users.noreply.github.com' }}
-      # Fine-grained PAT scoped to this repo: Issues RW, Contents RW, Pull requests RW,
-      # Metadata R. The default GITHUB_TOKEN is not enough (the launcher merges PRs).
-      GH_TOKEN: ${{ secrets.SPINDRIFT_GH_TOKEN }}
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     steps:
+      # Checkout must precede the local composite step below: GitHub resolves
+      # ./.github/actions/agent-setup from the checked-out tree.
       - uses: actions/checkout@v4
 
-      # Claim the issue up front — before nix install and the ~2m40s build — so
-      # ownership is atomic and visible the instant the runner has the repo:
-      # nothing else can grab it during the install or build window. Targets
-      # only the triggering issue: never scans or strips ready-for-agent across
-      # other issues (a local dogfood run drains that pool and must be left
-      # untouched).
-      - name: Claim the issue
-        run: |
-          gh issue edit "${{ github.event.issue.number }}" \
-            --repo "${{ github.repository }}" \
-            --add-label agent-in-progress \
-            --remove-label agent-trigger \
-            --remove-label ready-for-agent
-
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
-
-      # ~2m40s cold on a GitHub runner (nixpkgs closure is substituted, not compiled).
-      - name: Build the agent image
-        run: nix run . -- build
+      # Claim (agent-trigger -> agent-in-progress, up front so ownership is
+      # atomic before the ~2m40s build), Install Nix, and build — plus the
+      # shared env block (RUNTIME, REPO_SLUG, BASE_BRANCH, tokens, bot
+      # identity) written to $GITHUB_ENV for every step below. The
+      # SPINDRIFT_GH_TOKEN secret is a fine-grained PAT scoped to this repo:
+      # Issues RW, Contents RW, Pull requests RW, Metadata R — the default
+      # GITHUB_TOKEN is not enough (the launcher merges PRs).
+      - name: Agent setup
+        uses: ./.github/actions/agent-setup
+        with:
+          gh-token: ${{ secrets.SPINDRIFT_GH_TOKEN }}
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          repo: ${{ github.repository }}
+          base-branch: ${{ github.event.repository.default_branch }}
+          claim-add-label: agent-in-progress
+          claim-remove-labels: agent-trigger ready-for-agent
+          git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
+          git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
 
       - name: Dispatch the labeled issue
         run: nix run . -- dispatch
