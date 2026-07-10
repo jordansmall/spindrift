@@ -372,6 +372,14 @@
     flakeOption = true;
     boxEnv = true;
   };
+  autoLint = {
+    env = "AUTO_LINT";
+    group = "Prompt & skill iteration";
+    default = false;
+    doc = "when non-empty, the implementor auto-detects and runs the project's linter on changed files before each commit, applying auto-fix then resolving remaining findings; skips silently when no linter is found";
+    flakeOption = true;
+    boxEnv = true;
+  };
   issueNumber = {
     env = "ISSUE_NUMBER";
     group = "Issue discovery";
