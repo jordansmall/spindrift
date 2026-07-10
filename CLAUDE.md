@@ -38,18 +38,30 @@ git worktree add ../spindrift-<task> -b <branch> origin/main
 
 ## Nix edits
 
-Before finishing any task that touches `*.nix` files, run `nil diagnostics` on
-each changed file and resolve all errors:
+spindrift dogfoods `nixStoreWritable` + `extraClosures` (ADR 0018, issue #470)
+on its own Consumer config, so the in-box Box working a spindrift issue has a
+writable `/nix/store` and the check/dev closure pre-baked. That makes real
+`nix flake check` the primary in-box gate — prefer it over guessing:
+
+```sh
+nix flake check
+```
+
+Run `nil diagnostics` on each changed `*.nix` file as a fast, per-file
+pre-check while iterating — it catches syntax errors, duplicate attribute
+keys, undefined variables, and unused bindings without a store round-trip:
 
 ```sh
 nil diagnostics path/to/file.nix
 ```
 
-`nil diagnostics` exits non-zero on errors (warnings still exit 0). It checks
-syntax, duplicate attribute keys, undefined variables, and unused bindings
-without accessing the nix store, so it works as the `agent` user (uid 1000)
-inside the box even when `nix flake check` is unavailable. It complements, but
-does not replace, `nix flake check` in CI (which catches evaluation errors).
+`nil diagnostics` exits non-zero on errors (warnings still exit 0). It
+complements, but does not replace, a full `nix flake check` before finishing
+the task — `nil` catches structural mistakes early; only `nix flake check`
+catches evaluation and build errors. If `nix flake check` is genuinely
+unavailable (e.g. a Box built without the self-test knobs, or the bwrap
+runner, which keeps its store read-only), fall back to `nil diagnostics` and
+say so.
 
 ## Shell edits
 

@@ -31,12 +31,17 @@ then realises the Linux image on every push and PR. **Before opening a PR,
 for bash/entrypoint changes, a Go test for launcher changes, or a nix fixture
 check for the declarative surface.
 
-An agent working in the dogfood Box (where `nix flake check` may be
-unavailable, e.g. no writable nix store) has faster, store-free stand-ins for
-two of those gates: `nil diagnostics path/to/file.nix` for changed `*.nix`
-files, and `shellcheck path/to/file.sh` for changed shell files. Both tools
-are baked into the Box and complement, but do not replace, the full
-`nix flake check` run in CI.
+spindrift's own dogfood Consumer config opts into `nixStoreWritable` and bakes
+the check/dev closure via `extraClosures` (ADR 0018, issue #470), so a Box
+working a spindrift issue has a writable `/nix/store` and can run real
+`nix flake check` in-box — that's the primary gate, the same one CI runs.
+This is OCI-runner only; the bwrap runner keeps its store read-only.
+
+For faster, store-free per-file iteration (or as a fallback on a Box built
+without the self-test knobs), use `nil diagnostics path/to/file.nix` for
+changed `*.nix` files and `shellcheck path/to/file.sh` for changed shell
+files. Both tools are baked into the Box and complement, but do not replace,
+a full `nix flake check` run before opening a PR.
 
 The dogfood Box also bakes the upstream [`caveman`
 skill](https://github.com/juliusbrussee/caveman) (issue #486), advertised
