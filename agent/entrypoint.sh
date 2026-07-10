@@ -210,120 +210,11 @@ if [ -n "${PREFETCH:-}" ]; then
   fi
 fi
 
-# Discover available skills at DRIVER_SKILLS_DIR and build a directive to
-# prefer them over the inline guidance where they apply.
-SKILL_PREAMBLE=""
-_skills_found=""
-if [ -d "$DRIVER_SKILLS_DIR" ]; then
-  for _sf in "${DRIVER_SKILLS_DIR}/"*.md; do
-    [ -f "$_sf" ] || continue
-    _sn="$(basename "$_sf" .md)"
-    _skills_found="${_skills_found:+${_skills_found}, }${_sn}"
-  done
-fi
-if [ -n "$_skills_found" ]; then
-  SKILL_PREAMBLE="Skills available: ${_skills_found}. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
-
-"
-fi
-
-# The FILE ISSUES step is substituted into the issue prompt only when the
-# filer opt-in is set (FILER_MODEL non-empty), the same conditional-residue
-# mechanism as SKILL_PREAMBLE above: empty when off, so a filer-free box's
-# rendered prompt carries no trace of the step.
-FILE_ISSUES_STEP=""
-if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
-  FILE_ISSUES_STEP="# FILE ISSUES
-
-Delegate the review verdict's Non-blocking section to the filer subagent
-before opening the PR. It is pre-provisioned via --agents; pass it the
-Non-blocking findings verbatim, the issue number, and the PR URL (or branch,
-if not yet opened) for provenance.
-
-Best-effort: filing must never block the PR or change the outcome line.
-
-- On success, use the filer's returned issue URLs in the PR body instead of
-  the raw findings.
-- On failure (the filer errors, times out, or returns nothing usable), fall
-  back to pasting the raw Non-blocking findings into the PR body and proceed
-  — exactly as when the filer is not configured.
-
-"
-fi
-
-# AUTO_FORMAT_STEP is substituted into the issue prompt only when AUTO_FORMAT
-# is non-empty (opt-in knob) — the same conditional-residue mechanism as
-# FILE_ISSUES_STEP above: empty when off, so a default box carries no trace of
-# the step and the formatter is never mentioned.
-AUTO_FORMAT_STEP=""
-if [ -n "${AUTO_FORMAT:-}" ]; then
-  # Backticks are markdown formatting, not command substitution — SC2016.
-  # shellcheck disable=SC2016
-  AUTO_FORMAT_STEP='# AUTO-FORMAT
-
-Before committing, auto-format the files you changed:
-
-1. Detect the project'"'"'s formatter, in order of preference:
-   - A `format` or `fmt` script/target in `package.json`, `Makefile`, or `justfile`.
-   - The standard formatter for the language (e.g. `gofmt -w`, `cargo fmt`, `black`).
-   - Never `nix fmt`, even if the flake defines a formatter: evaluating the
-     flake copies the dirty work tree into `/nix/store`, which the in-box
-     agent user cannot write to, so the command always dies with a store-lock
-     permission error.
-2. Run it only on the files you changed (from `git diff --name-only` vs the
-   base branch), where the formatter accepts explicit paths. Fall back to a
-   project-wide run when the formatter does not support per-file invocation.
-3. Skip silently when no formatter is found — this must never fail the run.
-
-'
-fi
-
-# AUTO_LINT_STEP is substituted into the issue prompt only when AUTO_LINT is
-# non-empty (opt-in knob) — the same conditional-residue mechanism as
-# AUTO_FORMAT_STEP above: empty when off, so a default box carries no trace of
-# the step and the linter is never mentioned.
-AUTO_LINT_STEP=""
-if [ -n "${AUTO_LINT:-}" ]; then
-  # Backticks are markdown formatting, not command substitution — SC2016.
-  # shellcheck disable=SC2016
-  AUTO_LINT_STEP='# AUTO-LINT
-
-Before committing, lint the files you changed and resolve what you find:
-
-1. Detect the project'"'"'s linter, in order of preference:
-   - A `lint` target in the project'"'"'s build config (`package.json` script,
-     `Makefile`, `justfile`), or a checker the flake/devShell exposes.
-   - The standard linter for the language (e.g. `eslint`, `ruff`/`flake8`,
-     `golangci-lint`/`go vet`, `clippy`, `statix`).
-2. Run it only on the files you changed (from `git diff --name-only` vs the
-   base branch), where the linter accepts explicit paths.
-3. Apply the linter'"'"'s safe auto-fix mode where available, then manually
-   resolve the remaining findings in the changed files before committing.
-4. Skip silently when no linter is found — this must never fail the run.
-
-'
-fi
-
-# CI_FAILURE_STEP is substituted into the fix prompt only when the launcher
-# forwarded a CI_FAILURE_SUMMARY (selfHeal captured it on genuine-red, issue
-# #426) — the same conditional-residue mechanism as SKILL_PREAMBLE above:
-# empty when absent, so a fix box with no fetched detail carries no trace of
-# the step and the prompt falls back to its own local-check flow with no error.
-CI_FAILURE_STEP=""
-if [ -n "${CI_FAILURE_SUMMARY:-}" ]; then
-  CI_FAILURE_STEP="# CI FAILURE
-
-The launcher captured this from the failing PR checks — treat it as the known
-failure instead of re-discovering it from scratch:
-
-${CI_FAILURE_SUMMARY}
-
-"
-fi
-
 # Substitute only known placeholders so literal `$` in the prompt body (shell
 # snippets, etc.) survives. The single-quoted variable list is envsubst's
-# literal, not a shell expansion — hence SC2016.
+# literal, not a shell expansion — hence SC2016. Defined ahead of the
+# fragment-gated blocks below (issue #463) since each one is itself rendered
+# through this function.
 _subst() {
   # shellcheck disable=SC2016
   ISSUE_NUMBER="$ISSUE_NUMBER" \
@@ -337,9 +228,70 @@ _subst() {
     AUTO_FORMAT_STEP="${AUTO_FORMAT_STEP:-}" \
     AUTO_LINT_STEP="${AUTO_LINT_STEP:-}" \
     CI_FAILURE_STEP="${CI_FAILURE_STEP:-}" \
-    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE $FILE_ISSUES_STEP $AUTO_FORMAT_STEP $AUTO_LINT_STEP $CI_FAILURE_STEP' \
+    SKILLS_FOUND="${SKILLS_FOUND:-}" \
+    CI_FAILURE_SUMMARY="${CI_FAILURE_SUMMARY:-}" \
+    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE $FILE_ISSUES_STEP $AUTO_FORMAT_STEP $AUTO_LINT_STEP $CI_FAILURE_STEP $SKILLS_FOUND $CI_FAILURE_SUMMARY' \
     <"$1"
 }
+
+# The conditional prompt steps below are rendered from fragment files under
+# PROMPTS_DIR/fragments (issue #463) instead of heredocs authored in this
+# script, so all instruction prose lives with the rest of the prompt surface
+# and a SPINDRIFT_PROMPT_DIR override supplies its own fragment for any knob
+# it enables, exactly as it already must supply filer-prompt.md when the
+# filer is configured (documented in docs/reference.md).
+
+# Discover available skills at DRIVER_SKILLS_DIR and build a directive to
+# prefer them over the inline guidance where they apply.
+SKILLS_FOUND=""
+if [ -d "$DRIVER_SKILLS_DIR" ]; then
+  for _sf in "${DRIVER_SKILLS_DIR}/"*.md; do
+    [ -f "$_sf" ] || continue
+    _sn="$(basename "$_sf" .md)"
+    SKILLS_FOUND="${SKILLS_FOUND:+${SKILLS_FOUND}, }${_sn}"
+  done
+fi
+SKILL_PREAMBLE=""
+if [ -n "$SKILLS_FOUND" ]; then
+  SKILL_PREAMBLE="$(_subst "${PROMPTS_DIR}/fragments/skill-preamble.md")"
+fi
+
+# The FILE ISSUES step is substituted into the issue prompt only when the
+# filer opt-in is set (FILER_MODEL non-empty), the same conditional-residue
+# mechanism as SKILL_PREAMBLE above: empty when off, so a filer-free box's
+# rendered prompt carries no trace of the step.
+FILE_ISSUES_STEP=""
+if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
+  FILE_ISSUES_STEP="$(_subst "${PROMPTS_DIR}/fragments/file-issues.md")"
+fi
+
+# AUTO_FORMAT_STEP is substituted into the issue prompt only when AUTO_FORMAT
+# is non-empty (opt-in knob) — the same conditional-residue mechanism as
+# FILE_ISSUES_STEP above: empty when off, so a default box carries no trace of
+# the step and the formatter is never mentioned.
+AUTO_FORMAT_STEP=""
+if [ -n "${AUTO_FORMAT:-}" ]; then
+  AUTO_FORMAT_STEP="$(_subst "${PROMPTS_DIR}/fragments/auto-format.md")"
+fi
+
+# AUTO_LINT_STEP is substituted into the issue prompt only when AUTO_LINT is
+# non-empty (opt-in knob) — the same conditional-residue mechanism as
+# AUTO_FORMAT_STEP above: empty when off, so a default box carries no trace of
+# the step and the linter is never mentioned.
+AUTO_LINT_STEP=""
+if [ -n "${AUTO_LINT:-}" ]; then
+  AUTO_LINT_STEP="$(_subst "${PROMPTS_DIR}/fragments/auto-lint.md")"
+fi
+
+# CI_FAILURE_STEP is substituted into the fix prompt only when the launcher
+# forwarded a CI_FAILURE_SUMMARY (selfHeal captured it on genuine-red, issue
+# #426) — the same conditional-residue mechanism as SKILL_PREAMBLE above:
+# empty when absent, so a fix box with no fetched detail carries no trace of
+# the step and the prompt falls back to its own local-check flow with no error.
+CI_FAILURE_STEP=""
+if [ -n "${CI_FAILURE_SUMMARY:-}" ]; then
+  CI_FAILURE_STEP="$(_subst "${PROMPTS_DIR}/fragments/ci-failure.md")"
+fi
 # When the pre-work rebase produced conflicts, spawn a conflict-resolve agent to
 # re-map the branch onto current main.  Only escalate to exit 1 if the agent
 # genuinely cannot resolve.

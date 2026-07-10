@@ -622,6 +622,48 @@ FAKE
   ! grep -q 'AUTO-LINT' "$CLAUDE_PROMPT_FILE"
 }
 
+# issue #463: the conditional prompt steps above (SKILL_PREAMBLE,
+# FILE_ISSUES_STEP, AUTO_FORMAT_STEP, AUTO_LINT_STEP, CI_FAILURE_STEP) must be
+# read from fragment files under PROMPTS_DIR, not authored as heredocs in the
+# script -- a markdown heading string-literal in entrypoint.sh means prose
+# leaked back into bash.
+@test "entrypoint source contains no prompt-prose markdown headings" {
+  run grep -E '# (FILE ISSUES|AUTO-FORMAT|AUTO-LINT|CI FAILURE)' "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+}
+
+@test "the five conditional prompt steps ship as fragment files under prompts/fragments" {
+  for f in skill-preamble file-issues auto-format auto-lint ci-failure; do
+    [ -f "$PROMPTS_DIR/fragments/$f.md" ]
+  done
+}
+
+# issue #463: the claude|heartbeat-filter|tee pipeline used to be hand-copied
+# between the direct path and the devShell wrapper heredoc; a single
+# occurrence of this fragment proves it is now rendered from one source that
+# both paths execute (the direct-path and devShell behavioural tests above
+# already prove both paths still work).
+@test "driver pipeline is defined exactly once in entrypoint.sh source" {
+  count=$(grep -c 'spindrift-heartbeat-filter -n "\$ISSUE_NUMBER" -f /tmp/heartbeat.log' "$ENTRYPOINT")
+  [ "$count" -eq 1 ]
+}
+
+# issue #463: a SPINDRIFT_PROMPT_DIR-style override supplies its own fragment
+# for a knob it enables, exactly like it already must supply filer-prompt.md
+# when AGENTS_JSON_TEMPLATE carries a filer entry (see "entrypoint does not
+# require filer-prompt.md..." above) -- documented in docs/reference.md.
+@test "runtime prompt-dir override supplies its own auto-format fragment" {
+  local prompt_dir="$BATS_TEST_TMPDIR/custom-prompts"
+  cp -r "$PROMPTS_DIR" "$prompt_dir"
+  chmod -R u+w "$prompt_dir"
+  printf '# AUTO-FORMAT\n\nCUSTOM-FRAGMENT-MARKER\n\n' >"$prompt_dir/fragments/auto-format.md"
+  export PROMPTS_DIR="$prompt_dir"
+  export AUTO_FORMAT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'CUSTOM-FRAGMENT-MARKER' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "entrypoint includes a read-only tools whitelist in agents JSON" {
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
