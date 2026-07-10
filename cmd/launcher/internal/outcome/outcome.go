@@ -4,12 +4,12 @@
 package outcome
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
+
+	"spindrift.dev/launcher/internal/logscan"
 )
 
 // Outcome is the machine-readable result written by a Box as its final line.
@@ -63,39 +63,17 @@ func (o Outcome) Line() string {
 // file does not exist. Returns (Outcome{}, false, err) on I/O errors other
 // than file-not-found or oversized lines.
 func LastInLog(path string) (Outcome, bool, error) {
-	f, err := os.Open(path)
+	var last string
+	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
+		if strings.HasPrefix(line, "SPINDRIFT_OUTCOME ") {
+			last = line
+		}
+	})
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Outcome{}, false, nil
 		}
 		return Outcome{}, false, err
-	}
-	defer f.Close()
-
-	const bufSize = 4 * 1024 * 1024
-	r := bufio.NewReaderSize(f, bufSize)
-	var last string
-	for {
-		line, isPrefix, err := r.ReadLine()
-		if isPrefix {
-			// Oversized line — drain remaining chunks and skip.
-			for isPrefix {
-				_, isPrefix, err = r.ReadLine()
-				if err != nil {
-					break
-				}
-			}
-		} else if err == nil {
-			if s := string(line); strings.HasPrefix(s, "SPINDRIFT_OUTCOME ") {
-				last = s
-			}
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return Outcome{}, false, err
-		}
 	}
 
 	if last == "" {

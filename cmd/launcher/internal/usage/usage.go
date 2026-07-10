@@ -3,15 +3,14 @@
 package usage
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
 	"spindrift.dev/launcher/internal/claudetranscript"
+	"spindrift.dev/launcher/internal/logscan"
 )
 
 // FormatDuration converts a millisecond count to a human-readable string.
@@ -75,52 +74,31 @@ type usageData struct {
 // does not exist. Returns (Usage{}, false, err) on I/O errors other than
 // file-not-found or oversized lines.
 func LastInLog(path string) (Usage, bool, error) {
-	f, err := os.Open(path)
+	var last *Usage
+	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
+		s := strings.TrimSpace(line)
+		if strings.Contains(s, `"type":"result"`) {
+			var ev resultEvent
+			if jsonErr := json.Unmarshal([]byte(s), &ev); jsonErr == nil && ev.Type == "result" {
+				u := Usage{
+					InputTokens:              ev.UsageData.InputTokens,
+					OutputTokens:             ev.UsageData.OutputTokens,
+					CacheReadInputTokens:     ev.UsageData.CacheReadInputTokens,
+					CacheCreationInputTokens: ev.UsageData.CacheCreationInputTokens,
+					TotalCostUSD:             ev.TotalCostUSD,
+					DurationMs:               ev.DurationMs,
+					DurationApiMs:            ev.DurationApiMs,
+					NumTurns:                 ev.NumTurns,
+				}
+				last = &u
+			}
+		}
+	})
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Usage{}, false, nil
 		}
 		return Usage{}, false, err
-	}
-	defer f.Close()
-
-	const bufSize = 4 * 1024 * 1024
-	r := bufio.NewReaderSize(f, bufSize)
-	var last *Usage
-	for {
-		line, isPrefix, err := r.ReadLine()
-		if isPrefix {
-			for isPrefix {
-				_, isPrefix, err = r.ReadLine()
-				if err != nil {
-					break
-				}
-			}
-		} else if err == nil {
-			s := strings.TrimSpace(string(line))
-			if strings.Contains(s, `"type":"result"`) {
-				var ev resultEvent
-				if jsonErr := json.Unmarshal([]byte(s), &ev); jsonErr == nil && ev.Type == "result" {
-					u := Usage{
-						InputTokens:              ev.UsageData.InputTokens,
-						OutputTokens:             ev.UsageData.OutputTokens,
-						CacheReadInputTokens:     ev.UsageData.CacheReadInputTokens,
-						CacheCreationInputTokens: ev.UsageData.CacheCreationInputTokens,
-						TotalCostUSD:             ev.TotalCostUSD,
-						DurationMs:               ev.DurationMs,
-						DurationApiMs:            ev.DurationApiMs,
-						NumTurns:                 ev.NumTurns,
-					}
-					last = &u
-				}
-			}
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return Usage{}, false, err
-		}
 	}
 
 	if last == nil {
@@ -136,39 +114,17 @@ func LastInLog(path string) (Usage, bool, error) {
 //
 // Returns (nil, nil) when the file does not exist.
 func BreakdownByRole(path string) ([]RoleUsage, error) {
-	f, err := os.Open(path)
+	var lines []string
+	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
+		if s := strings.TrimSpace(line); s != "" {
+			lines = append(lines, s)
+		}
+	})
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, err
-	}
-	defer f.Close()
-
-	const bufSize = 4 * 1024 * 1024
-	r := bufio.NewReaderSize(f, bufSize)
-	var lines []string
-	for {
-		line, isPrefix, err := r.ReadLine()
-		if isPrefix {
-			for isPrefix {
-				_, isPrefix, err = r.ReadLine()
-				if err != nil {
-					break
-				}
-			}
-		} else if err == nil {
-			s := strings.TrimSpace(string(line))
-			if s != "" {
-				lines = append(lines, s)
-			}
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, err
-		}
 	}
 
 	// Pass 1: collect Task tool-use IDs → role name from implementor messages.
