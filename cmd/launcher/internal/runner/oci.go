@@ -214,6 +214,11 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 			args = append(args, "-v", a.promptDir+":/agent/prompts:ro")
 		}
 	}
+	if box.DriverCacheDir != "" {
+		if info, err := os.Stat(box.DriverCacheDir); err == nil && info.IsDir() {
+			args = append(args, "-v", box.DriverCacheDir+":/home/agent/.claude")
+		}
+	}
 	if a.skillsDir != "" {
 		if info, err := os.Stat(a.skillsDir); err == nil && info.IsDir() {
 			fmt.Printf("==> SPINDRIFT_SKILLS_DIR set; mounting %s over /home/agent/.claude/skills\n", a.skillsDir)

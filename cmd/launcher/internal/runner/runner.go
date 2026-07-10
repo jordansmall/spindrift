@@ -15,6 +15,15 @@ type Box struct {
 	Name   string            // container/sandbox name, e.g. "agent-issue-42"
 	Env    map[string]string // env vars to forward into the box
 	Output io.Writer         // where stdout+stderr go; nil → discarded
+
+	// DriverCacheDir is an optional host path mounted writable over
+	// /home/agent/.claude (issue #427) so the claude Driver can pin a
+	// session on the initial run and resume it on a fix pass. Empty omits
+	// the mount. Unlike promptDir/skillsDir this is the first *writable*
+	// host mount — the always-on hardening (--cap-drop=all /
+	// --security-opt=no-new-privileges) must stay unconditional regardless.
+	// The launcher treats its contents as opaque: create/mount/evict only.
+	DriverCacheDir string
 }
 
 // Runner is the seam through which the launcher manages agent sandbox life-cycles.

@@ -72,6 +72,61 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 	}
 }
 
+// TestBwrapArgs_DriverCacheDirMountedWritable verifies that a Box.DriverCacheDir
+// produces a writable --bind (not --ro-bind) entry for /home/agent/.claude.
+func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
+	dir := t.TempDir()
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+
+	argStr := strings.Join(args, " ")
+	want := "--bind " + dir + " /home/agent/.claude"
+	if !strings.Contains(argStr, want) {
+		t.Errorf("driver cache bind %q not found in args: %v", want, args)
+	}
+	if strings.Contains(argStr, "--ro-bind "+dir+" /home/agent/.claude") {
+		t.Errorf("driver cache mount must be writable (--bind), not --ro-bind; args: %v", args)
+	}
+}
+
+// TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved verifies that the
+// writable driver-cache bind does not disturb the unshare/uid hardening
+// flags bwrap always applies.
+func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
+	dir := t.TempDir()
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
+
+	for _, flag := range []string{"--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts"} {
+		if !containsArg(args, flag) {
+			t.Errorf("writable driver cache bind must not weaken hardening; missing %q in args: %v", flag, args)
+		}
+	}
+}
+
+// TestBwrapArgs_DriverCacheDirUnset_NoMount verifies that omitting
+// Box.DriverCacheDir produces no /home/agent/.claude bind.
+func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	argStr := strings.Join(args, " ")
+	if strings.Contains(argStr, " /home/agent/.claude ") || strings.HasSuffix(argStr, " /home/agent/.claude") {
+		t.Errorf("unexpected driver cache bind in args when DriverCacheDir is empty: %v", args)
+	}
+}
+
 // TestBwrapArgs_SkillsDirUnset_NoMount verifies that omitting skillsDir
 // produces no skills bind in the bwrap args.
 func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {

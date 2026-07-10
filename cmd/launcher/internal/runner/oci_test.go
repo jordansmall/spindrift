@@ -161,6 +161,55 @@ func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 	}
 }
 
+func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
+	dir := t.TempDir()
+	a := &ociAdapter{
+		cli:   "podman",
+		image: "spindrift:test",
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
+	args := a.buildRunArgs(box)
+
+	want := dir + ":/home/agent/.claude"
+	if !containsArg(args, want) {
+		t.Errorf("driver cache mount %q not found in args: %v", want, args)
+	}
+	if containsArg(args, want+":ro") {
+		t.Errorf("driver cache mount must be writable, not :ro; args: %v", args)
+	}
+}
+
+func TestBuildRunArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
+	dir := t.TempDir()
+	a := &ociAdapter{
+		cli:   "podman",
+		image: "spindrift:test",
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
+	args := a.buildRunArgs(box)
+
+	for _, flag := range []string{"--cap-drop=all", "--security-opt=no-new-privileges"} {
+		if !containsArg(args, flag) {
+			t.Errorf("writable driver cache mount must not weaken hardening; missing %q in args: %v", flag, args)
+		}
+	}
+}
+
+func TestBuildRunArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
+	a := &ociAdapter{
+		cli:   "podman",
+		image: "spindrift:test",
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	args := a.buildRunArgs(box)
+
+	for _, arg := range args {
+		if strings.Contains(arg, "/home/agent/.claude") && !strings.Contains(arg, "/skills") {
+			t.Errorf("unexpected driver cache mount in args when DriverCacheDir is empty: %v", args)
+		}
+	}
+}
+
 func TestBuildRunArgs_SkillsDirUnset_NoMount(t *testing.T) {
 	a := &ociAdapter{
 		cli:       "podman",
