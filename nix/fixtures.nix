@@ -82,6 +82,24 @@ let
     packages = p: [ p.hello ];
   };
 
+  # Self-test mode opted in (ADR 0018, issue #469): the /nix/store directory
+  # is made agent-writable and the entrypoint's warning marker is baked.
+  # Realized on Linux by the checks that inspect the built image.
+  nixStoreWritableHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    nixStoreWritable = true;
+    packages = p: [ p.hello ];
+  };
+
+  # A Consumer-supplied extra closure (issue #469): proves an arbitrary
+  # derivation, unrelated to `packages`, lands in the image and store DB.
+  # cowsay is not baked by any other fixture, so its presence is unambiguous.
+  extraClosuresHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    extraClosures = p: [ p.cowsay ];
+    packages = p: [ p.hello ];
+  };
+
   # A scout-only Consumer: only the scout model is configured, proving each
   # subagent is baked into --agents independently rather than as an
   # all-or-nothing pair. Eval-only, consumed by agents-json-baked.
@@ -264,6 +282,8 @@ in
     harness
     nonRustHarness
     leanHarness
+    nixStoreWritableHarness
+    extraClosuresHarness
     scoutOnlyHarness
     reviewerOnlyHarness
     filerOnlyHarness

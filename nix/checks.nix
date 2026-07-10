@@ -12,6 +12,8 @@ let
     harness
     nonRustHarness
     leanHarness
+    nixStoreWritableHarness
+    extraClosuresHarness
     scoutOnlyHarness
     reviewerOnlyHarness
     filerOnlyHarness
@@ -1248,6 +1250,105 @@ in
           || true)
         [ "$uid" = "1000" ] || {
           echo "nix/var/nix/db is not owned by uid 1000 (got: '$uid')" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
+  # NIX_STORE_WRITABLE is baked into the image Env by mkHarness's
+  # nixStoreWritable knob (ADR 0018, issue #469) so the entrypoint's warning
+  # is driven by the image, not a runtime-only setting. Both sides of the
+  # knob are asserted here; each harness's image is still extracted only
+  # once (see box-runs-as-non-root on why repeat compressed-image reads are
+  # expensive).
+  nix-store-writable-env-marker =
+    pkgs.runCommand "nix-store-writable-env-marker" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        mkdir off && tar -xf ${nonRustHarness.image} -C off
+        cfg=$(jq -r '.[0].Config' off/manifest.json)
+        jq -e '.config.Env | any(. == "NIX_STORE_WRITABLE=false")' "off/$cfg" >/dev/null || {
+          echo "default harness (nixStoreWritable=false) must bake NIX_STORE_WRITABLE=false" >&2
+          exit 1
+        }
+
+        mkdir on && tar -xf ${nixStoreWritableHarness.image} -C on
+        cfg=$(jq -r '.[0].Config' on/manifest.json)
+        jq -e '.config.Env | any(. == "NIX_STORE_WRITABLE=true")' "on/$cfg" >/dev/null || {
+          echo "nixStoreWritable=true harness must bake NIX_STORE_WRITABLE=true" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
+  # /nix/store itself (not its existing contents) must become agent-writable
+  # -- non-recursively, so baked paths stay root-owned -- only when
+  # nixStoreWritable is opted in; the default image must never show uid 1000
+  # ownership on it (absent from the top layer entirely, or present at its
+  # pre-existing owner -- either reads as "not chowned to the agent").
+  nix-store-writable-chown =
+    pkgs.runCommand "nix-store-writable-chown" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        mkdir on && tar -xf ${nixStoreWritableHarness.image} -C on
+        layer="$(jq -r '.[0].Layers[-1]' on/manifest.json)"
+        uid=$(tar --numeric-owner -tvf "on/$layer" \
+          | awk '/(^|\/)nix\/store\/?$/ { split($2,a,"/"); print a[1]; exit }' \
+          || true)
+        [ "$uid" = "1000" ] || {
+          echo "nix/store is not owned by uid 1000 with nixStoreWritable=true (got: '$uid')" >&2
+          exit 1
+        }
+
+        mkdir off && tar -xf ${nonRustHarness.image} -C off
+        layer="$(jq -r '.[0].Layers[-1]' off/manifest.json)"
+        uid=$(tar --numeric-owner -tvf "off/$layer" \
+          | awk '/(^|\/)nix\/store\/?$/ { split($2,a,"/"); print a[1]; exit }' \
+          || true)
+        [ "$uid" != "1000" ] || {
+          echo "default harness (nixStoreWritable=false) must not chown nix/store to uid 1000" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
+  # extraClosures derivations must be physically present in the image
+  # contents -- contents=[...]++extraClosures pulls the closure into the
+  # image's store layers the same way agentEnv/agentFiles do. Listing (not
+  # extracting) each already-extracted layer once is cheap; only the initial
+  # compressed-image read is expensive (see box-runs-as-non-root).
+  extra-closure-in-image-contents =
+    pkgs.runCommand "extra-closure-in-image-contents" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        mkdir img && tar -xf ${extraClosuresHarness.image} -C img
+        found=""
+        for layer in $(jq -r '.[0].Layers[]' img/manifest.json); do
+          if tar -tf "img/$layer" | grep -q 'nix/store/[^/]*-cowsay-'; then
+            found=1
+            break
+          fi
+        done
+        [ -n "$found" ] || {
+          echo "extraClosures (cowsay) not physically present in any image layer" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
+  # The extraClosures closure must also be registered in the baked store DB
+  # (the same top customisation layer nix-conf-in-image inspects), so in-box
+  # nix sees it as already present instead of cold-substituting it.
+  extra-closure-registered-in-db =
+    pkgs.runCommand "extra-closure-registered-in-db" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        mkdir img && tar -xf ${extraClosuresHarness.image} -C img
+        layer="$(jq -r '.[0].Layers[-1]' img/manifest.json)"
+        member="$(tar -tf "img/$layer" \
+          | grep -E '^(\./)?nix/var/nix/db/db\.sqlite$' | head -1 || true)"
+        [ -n "$member" ] || {
+          echo "nix/var/nix/db/db.sqlite not in the image's top (customisation) layer" >&2
+          exit 1
+        }
+        tar -xOf "img/$layer" "$member" | grep -qa 'cowsay-' || {
+          echo "extraClosures (cowsay) not found in the registered store DB" >&2
           exit 1
         }
         touch $out
