@@ -202,6 +202,13 @@ run larger batches or remove the cap.
 | 2    | queue empty (no open issues with the dispatch label) | exit cleanly |
 | 3    | open issues exist but none are dispatchable | stop and print a triage message — typically a failed blocker needs re-labeling before the queue can drain |
 
+**Baked skill.** The dogfood Box bakes the pinned upstream [`caveman`
+skill](https://github.com/juliusbrussee/caveman), advertised in-box as
+`/caveman`, so agents draining this loop compress narration ~65% in output
+tokens without touching code, commands, or error messages. The pin is a
+non-flake `caveman` input in `flake.nix` (`flake.lock` owns the rev); see
+[Contributing](CONTRIBUTING.md) for how it's wired.
+
 ## Documentation
 
 | document | what's in it |
