@@ -565,10 +565,13 @@ ready-for-agent ──dispatch──▶ agent-in-progress ─────CI gree
   `manual` mode.)
 - **Red CI self-heals before it fails.** If CI goes genuinely red, the launcher
   dispatches up to `MAX_FIX_ATTEMPTS` fix boxes on the same branch and re-gates
-  after each. Only once those are exhausted (or the box itself exits non-zero
+  after each. Only once those are exhausted (or a fix box exits non-zero
   after transient retries) does it swap to `agent-failed` and stop. There are
   **no automatic re-dispatches from `ready-for-agent`**: a human inspects
-  `logs/issue-<n>.log` and re-labels to retry.
+  `logs/issue-<n>.log` and re-labels to retry. A fix box's transient exits get
+  the same in-session retry as the initial run — a 429 mid-fix-pass holds
+  until the reset time and re-dispatches rather than burning one of the
+  `MAX_FIX_ATTEMPTS` slots.
 - **The fix box gets the concrete failure, not a guess.** At the moment
   genuine-red is declared, `selfHeal` fetches the failed check names plus a
   bounded log excerpt for the PR's head commit and forwards it into the fix
