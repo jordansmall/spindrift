@@ -9,15 +9,13 @@ import (
 	"strings"
 )
 
-const issueQueryLimit = 100
-
 func (e *execClient) ListIssues(state DispatchState) ([]Issue, error) {
 	label := e.labels.Label(state)
 	cmd := exec.Command("gh", "issue", "list",
 		"--repo", e.repo,
 		"--state", "open",
 		"--label", label,
-		"--limit", strconv.Itoa(issueQueryLimit),
+		"--limit", strconv.Itoa(resultPageLimit),
 		"--search", "sort:created-asc",
 		"--json", "number,title",
 		"--jq", "sort_by(.number) | .[] | [.number, .title] | @tsv",
@@ -39,10 +37,7 @@ func (e *execClient) ListIssues(state DispatchState) ([]Issue, error) {
 		}
 		issues = append(issues, Issue{Number: parts[0], Title: parts[1]})
 	}
-	if len(issues) >= issueQueryLimit {
-		fmt.Printf("WARNING: issue list returned %d issues (limit %d); backlog may be larger — rerun to drain\n",
-			len(issues), issueQueryLimit)
-	}
+	warnPageMayTruncateBacklog("gh issue list", len(issues))
 	return issues, nil
 }
 
