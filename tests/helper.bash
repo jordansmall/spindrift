@@ -33,6 +33,17 @@ setup_fakes() {
   : >"$GH_LOG"
   : >"$CLAUDE_LOG"
   : >"$NIX_LOG"
+
+  # The nix check derivation exports OUTCOME_CONTRACT_FILE (the real
+  # mkHarness-built canonical contract); a bare `bats` run outside nix has no
+  # such file, so fall back to a minimal fixture -- entrypoint.sh reads this
+  # whenever a rendered issue prompt lacks the contract (issue #420). A test
+  # exercising the injection itself overrides this with its own fixture.
+  : "${OUTCOME_CONTRACT_FILE:=$BATS_TEST_TMPDIR/outcome-contract.md}"
+  export OUTCOME_CONTRACT_FILE
+  if [ ! -s "$OUTCOME_CONTRACT_FILE" ]; then
+    printf '# LAND THE CHANGE\n\ncanonical outcome contract fixture\n' >"$OUTCOME_CONTRACT_FILE"
+  fi
 }
 
 # Minimal env so the `run` command's required-var guards pass. Individual tests
