@@ -12,7 +12,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 
 | command                          | what it does                                                                    |
 | -------------------------------- | ------------------------------------------------------------------------------- |
-| `spindrift dispatch`             | fan out one container per `ready-for-agent` issue, in dependency waves          |
+| `spindrift dispatch`             | launch one container per `ready-for-agent` issue, in dependency waves          |
 | `spindrift dispatch 42 57`       | dispatch exactly these issues, bypassing the label/barrier gates                |
 | `spindrift dispatch --no-build`  | fail fast if the image is absent instead of building it first (split build/run) |
 | `spindrift dispatch --yes`       | skip the confirmation prompt when dispatching unlabeled issues (alias `--force`)|
@@ -478,7 +478,7 @@ diff it eventually produces.
 
 The gate only compares a candidate against issues already `agent-in-progress`
 — two Dispatchable issues in the same batch with overlapping declared
-touches, neither yet in progress when the check runs, still fan out
+touches, neither yet in progress when the check runs, still dispatch
 together.
 
 **Inferred touch-sets (v2, `CODE_FORGE=github` only).** A declared
@@ -959,7 +959,7 @@ The starter is a minimal Go example. To retarget it:
 ## Design notes & ADRs
 
 The harness reproduces the part that matters for isolation — *containerize the
-runner, fan out one box per issue* — and leans on nix for the toolchain instead
+runner, launch one box per issue* — and leans on nix for the toolchain instead
 of a Dockerfile. The trade-offs:
 
 - **Simpler & fewer deps**: nix + a container runtime + Claude Code. The
@@ -970,7 +970,7 @@ of a Dockerfile. The trade-offs:
   `depends on #N` / `blocked by #N` (inline or a `## Blocked by` list) from issue
   bodies and dispatches in dependency waves, holding a dependent until its
   blockers reach `agent-complete`; a cycle aborts the run. Independent issues
-  still fan out concurrently up to `MAX_PARALLEL`. A declared `## Touches`
+  still run concurrently up to `MAX_PARALLEL`. A declared `## Touches`
   section gets the same wave-and-retry treatment when it overlaps an
   in-progress issue's (`OVERLAP_GATE`, default `defer`) — see [Declared
   touch-set overlap](#declared-touch-set-overlap).

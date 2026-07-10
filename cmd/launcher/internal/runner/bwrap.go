@@ -151,7 +151,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	return args
 }
 
-// Run fans out a single issue into a bubblewrap sandbox.
+// Run launches a single issue into a bubblewrap sandbox.
 func (a *bwrapAdapter) Run(box Box) error {
 	etcDir, err := os.MkdirTemp("", "spindrift-etc-*")
 	if err != nil {

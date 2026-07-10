@@ -977,10 +977,10 @@ func issueNums(issues []issue) []string {
 	return nums
 }
 
-// fanOut dispatches a batch of issues in parallel (up to maxParallel at once).
+// dispatchWave dispatches a batch of issues in parallel (up to maxParallel at once).
 // Each goroutine claims its issue only after acquiring a semaphore slot so that
 // at most maxParallel issues are ever in the in-progress state simultaneously.
-func fanOut(c config, fc forge.Client, f *dispatch.Factory, s settle.Settler, batch []issue) {
+func dispatchWave(c config, fc forge.Client, f *dispatch.Factory, s settle.Settler, batch []issue) {
 	sem := make(chan struct{}, c.maxParallel)
 	var wg sync.WaitGroup
 	for _, iss := range batch {
@@ -1063,7 +1063,7 @@ func dispatchWaves(c config, fc forge.Client, f *dispatch.Factory, s settle.Sett
 
 		// Progress: reset the deadlock timer.
 		elapsed = 0
-		fanOut(c, fc, f, s, ready)
+		dispatchWave(c, fc, f, s, ready)
 		remaining = held
 	}
 	return nil
@@ -1134,7 +1134,7 @@ outer:
 		return nil
 	}
 	fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), c.maxJobs)
-	fanOut(c, fc, f, s, selected)
+	dispatchWave(c, fc, f, s, selected)
 	return nil
 }
 
@@ -1197,9 +1197,9 @@ func run(lc *launchContext) error {
 			return err
 		}
 	} else {
-		// MAX_JOBS = 0, no declared edges: original single-wave fan-out.
+		// MAX_JOBS = 0, no declared edges: original single-wave dispatch.
 		fmt.Printf("==> %d issue(s); launching up to %d container(s) at a time\n", len(issues), c.maxParallel)
-		fanOut(c, fc, f, s, issues)
+		dispatchWave(c, fc, f, s, issues)
 	}
 
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)

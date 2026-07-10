@@ -29,7 +29,7 @@ jobs:
       # The claim step (inside agent-setup) swaps the issue onto
       # agent-in-progress before the build, so the launcher targets it by
       # number rather than a label query. LABEL still names the in-progress
-      # label so fanOut skips the redundant re-claim of an already-claimed
+      # label so dispatchWave skips the redundant re-claim of an already-claimed
       # issue.
       ISSUE_NUMBER: ${{ github.event.issue.number }}
       LABEL: agent-in-progress

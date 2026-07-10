@@ -1,14 +1,14 @@
 # spindrift
 
-A nix-based harness that fans out headless Claude Code agents into disposable,
-nix-built containers — one per GitHub issue. This glossary pins the vocabulary
-of the harness and the parties around it.
+A nix-based harness that launches waves of headless Claude Code agents into
+disposable, nix-built containers — one per GitHub issue. This glossary pins the
+vocabulary of the harness and the parties around it.
 
 ## Language
 
 **Harness**:
 spindrift itself — the flake, the launcher, and the in-container entrypoint that
-together build the image and fan out agents. The thing being imported.
+together build the image and launch agent waves. The thing being imported.
 _Avoid_: tool, framework, runner (the runner is specifically the container).
 
 **Consumer flake**:
@@ -162,11 +162,16 @@ returns issues already in canonical order using its own order key: `github` =
 issue number, `jira` = created time, `local` = a `created` frontmatter timestamp.
 _Avoid_: issue number, sequence, priority.
 
-**Fan-out concurrency**:
-Fan-out over the ready-set is unbounded by default. `MAX_PARALLEL` caps the
-number of concurrent agent containers (default 3); `MAX_JOBS` caps the
-dependency-wave concurrency (default 0 = unlimited). No label-based gate
-serializes issues; ordering is purely by dispatch order and blocker edges.
+**Wave**:
+One batch of Dispatches launched concurrently. With no blocker edges the whole
+ready-set is a single wave; declared edges split a run into dependency waves.
+Waves are unbounded by default: `MAX_PARALLEL` caps the number of concurrent
+Boxes within a wave (default 3); `MAX_JOBS` caps the dependency-wave
+concurrency (default 0 = unlimited). No label-based gate serializes issues;
+ordering is purely by dispatch order and blocker edges.
+_Was_: "fan-out" — the launch act and the batch carried two names; unified on
+the batch noun.
+_Avoid_: fan-out, batch, round.
 
 **Outcome line**:
 The machine-readable final line a Box writes to stdout, parsed by the Launcher
