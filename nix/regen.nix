@@ -1,9 +1,10 @@
 # One-shot regenerator for every schema-generated artifact (issue #402):
 # `nix run .#regen` renders templates/default/harness.env.example,
-# cmd/launcher/flagtable_gen.go, and docs/flake-options.md from
-# lib/env-schema.nix and writes them into the working tree. Calls the exact
-# same renderers as the nix/checks.nix drift guards (lib/renderers.nix), so
-# resolving a schema-edit conflict is: fix env-schema.nix, run this, commit.
+# cmd/launcher/flagtable_gen.go, docs/flake-options.md, and
+# cmd/launcher/internal/driver/drivernames_gen.go from their respective Nix
+# sources and writes them into the working tree. Calls the exact same renderers
+# as the nix/checks.nix drift guards (lib/renderers.nix), so resolving a
+# source-edit conflict is: fix the Nix source, run this, commit.
 #
 # This is spindrift's own dev workflow, not consumer surface — it is not
 # wired into env-schema.nix or the generated flake-options reference.
@@ -24,6 +25,8 @@ let
   envExample = renderers.renderHarnessEnvExample schema;
   flagTable = renderers.renderFlagTableGo schema;
   flakeOptionsDoc = renderers.renderFlakeOptionsDoc schema;
+  driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
+  driverNamesFile = renderers.renderDriverNamesGo driverRegistry;
   inherit (pkgs.lib) escapeShellArg;
 in
 pkgs.writeShellApplication {
@@ -44,6 +47,7 @@ pkgs.writeShellApplication {
     write templates/default/harness.env.example ${escapeShellArg envExample}
     write cmd/launcher/flagtable_gen.go ${escapeShellArg flagTable}
     write docs/flake-options.md ${escapeShellArg flakeOptionsDoc}
+    write cmd/launcher/internal/driver/drivernames_gen.go ${escapeShellArg driverNamesFile}
 
     echo "note: templates/default/flake.nix's settings example is hand-curated; run 'nix flake check' (template-settings-example) to see if it needs a manual update." >&2
   '';
