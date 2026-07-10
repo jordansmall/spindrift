@@ -303,11 +303,14 @@ func (e *execClient) Probe() (string, error) {
 	if err := exec.Command("gh", "auth", "status").Run(); err != nil {
 		return "", fmt.Errorf("%w: %s", ErrAuthFailure, err)
 	}
-	out, err := exec.Command("gh", "repo", "view", "--repo", e.repo,
+	var stderr bytes.Buffer
+	cmd := exec.Command("gh", "repo", "view", e.repo,
 		"--json", "nameWithOwner", "--jq", ".nameWithOwner",
-	).Output()
+	)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("%w: %s", ErrRepoNotFound, e.repo)
+		return "", fmt.Errorf("%w: %s", ErrRepoNotFound, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(string(out)), nil
 }
