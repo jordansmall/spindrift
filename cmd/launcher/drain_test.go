@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -198,5 +199,36 @@ func TestDrainMaxJobs_CycleErrors(t *testing.T) {
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls: got %d, want 0 (no dispatch before cycle check)", len(fr.RunCalls))
+	}
+}
+
+// TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable verifies that drainMaxJobs
+// returns errOpenNoneDispatchable when open dispatchable issues exist but none
+// can be selected (all blocked), so a driving loop stops instead of hot-looping.
+func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
+	c := baseConfig()
+	c.label = "agent-trigger"
+	c.maxParallel = 2
+	c.maxJobs = 1
+
+	fc := forge.NewFake()
+	// Issue #1 is blocked by #3 (open, not yet complete).
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // blocker
+
+	fr := runner.NewFake()
+
+	edges := map[string][]string{"1": {"3"}}
+
+	dir := tempLogDir(t)
+	err := drainMaxJobs(c, fc, dir, fr, []issue{
+		{number: "1", title: "blocked issue"},
+	}, edges)
+
+	if !errors.Is(err, errOpenNoneDispatchable) {
+		t.Errorf("drainMaxJobs: got %v, want errOpenNoneDispatchable", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
 	}
 }

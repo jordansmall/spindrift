@@ -1007,7 +1007,13 @@ func openPRForBranch(fc forge.Client, branch string) (url string, isDraft bool, 
 // can distinguish termination reasons without a separate gh probe.
 //
 //	exit 2 (errQueueEmpty): discoverIssues found no open dispatchable issues.
-var errQueueEmpty = errors.New("queue empty")
+//	exit 3 (errOpenNoneDispatchable): open dispatchable issues exist but drain
+//	  selected zero (all blocked/deferred); the driving loop should stop with a
+//	  triage message rather than hot-looping.
+var (
+	errQueueEmpty           = errors.New("queue empty")
+	errOpenNoneDispatchable = errors.New("open issues exist but none are dispatchable")
+)
 
 // buildEdges returns the dependency graph for the given batch of issues by
 // calling the IssueTracker's DepsOf for each. Non-fatal per-issue errors are
@@ -1703,6 +1709,15 @@ outer:
 				}
 				fmt.Printf("==> #%s blocked; wrote logs/%s for the pipeline to release the claim\n", c.issueNumber, blockedMarker)
 			}
+			fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", c.label)
+			return nil
+		}
+		// Unattended drain path: if issues remain after cascade-failing blockers,
+		// signal callers with exit 3 so they stop instead of hot-looping.
+		remaining := len(issues) - len(blockerFailed)
+		if remaining > 0 {
+			fmt.Printf("no unblocked '%s' issues to drain — %d remain blocked or deferred.\n", c.label, remaining)
+			return errOpenNoneDispatchable
 		}
 		fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", c.label)
 		return nil
@@ -1936,6 +1951,9 @@ func main() {
 			if errors.Is(err, errQueueEmpty) {
 				os.Exit(2)
 			}
+			if errors.Is(err, errOpenNoneDispatchable) {
+				os.Exit(3)
+			}
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
 		}
@@ -1944,6 +1962,9 @@ func main() {
 	if err := run(false); err != nil {
 		if errors.Is(err, errQueueEmpty) {
 			os.Exit(2)
+		}
+		if errors.Is(err, errOpenNoneDispatchable) {
+			os.Exit(3)
 		}
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
