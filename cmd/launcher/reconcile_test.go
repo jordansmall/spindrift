@@ -21,10 +21,11 @@ func reconcileConfig() config {
 func TestReconcileStranded_GreenPRMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
+	fc.BranchPrefix = c.branchPrefix
 
 	// Issue on the in-progress label with a green open non-draft PR.
 	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
-	branch := c.branchPrefix + "5"
+	branch := fc.AgentBranch("5")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
@@ -45,9 +46,10 @@ func TestReconcileStranded_RedFollowsSelfHeal(t *testing.T) {
 	c := reconcileConfig()
 	c.maxFixAttempts = 0
 	fc := forge.NewFake()
+	fc.BranchPrefix = c.branchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
-	branch := c.branchPrefix + "5"
+	branch := fc.AgentBranch("5")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
 
@@ -67,9 +69,10 @@ func TestReconcileStranded_RedFollowsSelfHeal(t *testing.T) {
 func TestReconcileStranded_DraftPRSkipped(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
+	fc.BranchPrefix = c.branchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
-	branch := c.branchPrefix + "5"
+	branch := fc.AgentBranch("5")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: true})
 
 	reconcileStranded(c, fc, testFactory(t, t.TempDir(), nil), newSettle(c, fc))
@@ -85,6 +88,7 @@ func TestReconcileStranded_DraftPRSkipped(t *testing.T) {
 func TestReconcileStranded_NoPRSkipped(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
+	fc.BranchPrefix = c.branchPrefix
 
 	// In-progress issue with no PR registered.
 	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
@@ -104,9 +108,10 @@ func TestReconcileStranded_NoPRSkipped(t *testing.T) {
 func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
+	fc.BranchPrefix = c.branchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
-	branch := c.branchPrefix + "42"
+	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
@@ -130,9 +135,10 @@ func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 func TestRecoverByNumber_DraftPRSkipped(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
+	fc.BranchPrefix = c.branchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
-	branch := c.branchPrefix + "42"
+	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: true})
 
 	dir := tempLogDir(t)
@@ -152,6 +158,7 @@ func TestRecoverByNumber_DraftPRSkipped(t *testing.T) {
 func TestRecoverByNumber_NoPRSkipped(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
+	fc.BranchPrefix = c.branchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	// No PR registered for the branch.
@@ -174,9 +181,10 @@ func TestRecoverByNumber_RedFollowsSelfHeal(t *testing.T) {
 	c := reconcileConfig()
 	c.maxFixAttempts = 0
 	fc := forge.NewFake()
+	fc.BranchPrefix = c.branchPrefix
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
-	branch := c.branchPrefix + "42"
+	branch := fc.AgentBranch("42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
 

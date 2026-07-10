@@ -232,6 +232,28 @@ func TestFake_FailureDetailErr(t *testing.T) {
 	}
 }
 
+// TestFake_AgentBranch verifies the Fake concatenates its configured
+// BranchPrefix with num, matching the real adapters' AgentBranch(num)
+// contract (issue #444): the forge client owns the branch-prefix rule so
+// call sites never concatenate it themselves.
+func TestFake_AgentBranch(t *testing.T) {
+	f := forge.NewFake()
+	f.BranchPrefix = "agent/issue-"
+	if got := f.AgentBranch("42"); got != "agent/issue-42" {
+		t.Errorf("AgentBranch(42) = %q, want %q", got, "agent/issue-42")
+	}
+}
+
+// TestFake_AgentBranch_ZeroValue verifies an unconfigured BranchPrefix
+// ("") yields the bare issue number, matching an unconfigured
+// config.branchPrefix's zero value.
+func TestFake_AgentBranch_ZeroValue(t *testing.T) {
+	f := forge.NewFake()
+	if got := f.AgentBranch("7"); got != "7" {
+		t.Errorf("AgentBranch(7) = %q, want %q", got, "7")
+	}
+}
+
 // TestFake_ListPRFiles verifies that ListPRFiles returns the scripted changed
 // files for a PR — the merge guard's only source of changed paths.
 func TestFake_ListPRFiles(t *testing.T) {

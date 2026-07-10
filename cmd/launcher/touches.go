@@ -24,11 +24,11 @@ func touchesOf(fc forge.Client, num string) ([]string, error) {
 // PR to inspect; off github, or when num has no open PR yet, or the fetch
 // fails, it returns nil with no error — v1's declared-only behavior applies
 // unchanged.
-func prTouchesOf(c config, fc forge.Client, num string) []string {
+func prTouchesOf(fc forge.Client, num string) []string {
 	if fc.PushOnly() {
 		return nil
 	}
-	pr, found, err := fc.OpenPRForBranch(c.branchPrefix + num)
+	pr, found, err := fc.OpenPRForBranch(fc.AgentBranch(num))
 	if err != nil || !found {
 		return nil
 	}
@@ -65,7 +65,7 @@ func waveOverlapCheck(c config, fc forge.Client) func(num string) (string, bool)
 	entries := make([]inProgressTouches, len(inProgress))
 	for i, fi := range inProgress {
 		touches := forge.ParseTouchPaths(fi.Body)
-		touches = append(touches, prTouchesOf(c, fc, fi.Number)...)
+		touches = append(touches, prTouchesOf(fc, fi.Number)...)
 		entries[i] = inProgressTouches{number: fi.Number, touches: touches}
 	}
 	return func(num string) (string, bool) {

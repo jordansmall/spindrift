@@ -28,15 +28,38 @@ type Issue struct {
 	Number string // launcher keeps issue numbers as strings
 	Title  string
 	Body   string
-	State  string // OPEN | CLOSED
+	State  IssueState
 	Labels []string
 }
+
+// IssueState is the canonical open/closed state of an issue. Each
+// IssueTracker adapter (github, jira, local, and the fake) translates its own
+// native representation to these values at its own edge; no adapter's native
+// literal should leak past that boundary.
+type IssueState string
+
+const (
+	IssueOpen   IssueState = "OPEN"
+	IssueClosed IssueState = "CLOSED"
+)
 
 // PR is a GitHub pull request as seen by the launcher.
 type PR struct {
 	URL     string
 	IsDraft bool
 }
+
+// PRState is the canonical state of a pull request. Each CodeForge adapter
+// (github, the fake) translates its own native representation to these
+// values at its own edge; the push-only git adapter has no PR concept and
+// never returns one.
+type PRState string
+
+const (
+	PROpen   PRState = "OPEN"
+	PRMerged PRState = "MERGED"
+	PRClosed PRState = "CLOSED"
+)
 
 // RollupState is the aggregate CI status of a PR's head commit.
 type RollupState string

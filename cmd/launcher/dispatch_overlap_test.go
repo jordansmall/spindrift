@@ -153,6 +153,7 @@ func TestDispatchWaves_OverlapV2HoldsOnPRChangedFiles(t *testing.T) {
 	c.depsWaitSecs = 1
 
 	fc := forge.NewFake()
+	fc.BranchPrefix = c.branchPrefix
 	fc.SetIssue(forge.Issue{
 		Number: "10",
 		Body:   "## Touches\n- internal/pkgx/foo.go",

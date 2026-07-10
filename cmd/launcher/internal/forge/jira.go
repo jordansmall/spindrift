@@ -178,14 +178,14 @@ func (j *jiraClient) DepsOf(num string) ([]string, error) {
 	return deps, nil
 }
 
-// issueState maps Jira's statusCategory to the forge.Issue OPEN|CLOSED
-// contract: "done" is Jira's terminal category (regardless of the workflow's
-// custom terminal status name, e.g. "Done", "Won't Fix", "Resolved").
-func issueState(p jiraIssuePayload) string {
+// issueState maps Jira's statusCategory to the canonical IssueState: "done"
+// is Jira's terminal category (regardless of the workflow's custom terminal
+// status name, e.g. "Done", "Won't Fix", "Resolved").
+func issueState(p jiraIssuePayload) IssueState {
 	if p.Fields.Status.StatusCategory.Key == "done" {
-		return "CLOSED"
+		return IssueClosed
 	}
-	return "OPEN"
+	return IssueOpen
 }
 
 type jiraCommentsPayload struct {

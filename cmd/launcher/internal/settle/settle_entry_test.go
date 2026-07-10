@@ -148,13 +148,13 @@ func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 // branch and running the merge gate on it (SettleAdopted).
 func TestSettle_NoOutcome_AdoptsDiscoveredPR(t *testing.T) {
 	fc := forge.NewFake()
+	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{"agent-in-progress"}})
-	branch := "agent/issue-3"
+	branch := fc.AgentBranch("3")
 	fc.SetPR(branch, forge.PR{URL: testPR, IsDraft: false})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	c := baseConfig()
-	c.BranchPrefix = "agent/issue-"
 	s := New(c, fc)
 	s.Settle(dispatch.NewFake(), "3", dispatch.Result{Success: true})
 
@@ -170,7 +170,6 @@ func TestSettle_NoOutcome_NoPRFound(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "4", Labels: []string{"agent-in-progress"}})
 
 	c := baseConfig()
-	c.BranchPrefix = "agent/issue-"
 	s := New(c, fc)
 	s.Settle(dispatch.NewFake(), "4", dispatch.Result{Success: true})
 
@@ -186,12 +185,12 @@ func TestSettle_NoOutcome_NoPRFound(t *testing.T) {
 // action when the only discoverable PR is a draft.
 func TestSettle_NoOutcome_DraftPRBlocked(t *testing.T) {
 	fc := forge.NewFake()
+	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{"agent-in-progress"}})
-	branch := "agent/issue-5"
+	branch := fc.AgentBranch("5")
 	fc.SetPR(branch, forge.PR{URL: testPR, IsDraft: true})
 
 	c := baseConfig()
-	c.BranchPrefix = "agent/issue-"
 	s := New(c, fc)
 	s.Settle(dispatch.NewFake(), "5", dispatch.Result{Success: true})
 

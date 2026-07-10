@@ -13,10 +13,6 @@ import (
 
 // Config carries the subset of launcher config a Settle needs.
 type Config struct {
-	// BranchPrefix builds an issue's agent branch name (BranchPrefix + num)
-	// for PR discovery when a box exits with no outcome line.
-	BranchPrefix string
-
 	// MergeMode controls post-green behavior: "immediate" merges the PR,
 	// "manual" leaves it open, "auto" enqueues GitHub's native auto-merge.
 	MergeMode string

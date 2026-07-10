@@ -10,14 +10,14 @@ import (
 
 // TestGitClient_ImplementsCodeForge asserts that GitClient satisfies CodeForge.
 func TestGitClient_ImplementsCodeForge(t *testing.T) {
-	var _ CodeForge = NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com")
+	var _ CodeForge = NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
 }
 
 // TestGitClient_PushOnly verifies the git Code Forge reports itself as
 // push-only, the capability settle uses instead of a codeForge=="git" string
 // comparison.
 func TestGitClient_PushOnly(t *testing.T) {
-	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com")
+	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
 	if !g.PushOnly() {
 		t.Error("PushOnly() = false, want true for the git Code Forge")
 	}
@@ -27,7 +27,7 @@ func TestGitClient_PushOnly(t *testing.T) {
 // always report "not found" — the git Code Forge is push-only and has no PR
 // concept at all.
 func TestGitClient_NoPRConcept(t *testing.T) {
-	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com")
+	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
 
 	if pr, ok, err := g.OpenPRForBranch("agent/issue-1"); err != nil || ok {
 		t.Errorf("OpenPRForBranch = (%+v, %v, %v), want (_, false, nil)", pr, ok, err)
@@ -42,7 +42,7 @@ func TestGitClient_NoPRConcept(t *testing.T) {
 // "not supported", CheckState reports no checks, CanAutoMerge always reports
 // false, and EnqueueAutoMerge fails with an actionable message.
 func TestGitClient_NoCIOrAutoMergeConcept(t *testing.T) {
-	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com")
+	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
 
 	if _, err := g.PRState("agent/issue-1"); err == nil {
 		t.Error("PRState: want error, got nil")
@@ -115,7 +115,7 @@ func newBareRemoteWithBranches(t *testing.T) string {
 // mapping for a push-only forge.
 func TestGitClient_Merge_PushOnlyLanding(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 
 	if err := g.Merge("agent/issue-1"); err != nil {
 		t.Fatalf("Merge: %v", err)
@@ -159,7 +159,7 @@ func TestGitClient_Merge_ConflictReturnsErrMergeConflict(t *testing.T) {
 	gitRun(t, work, "commit", "-m", "conflicting")
 	gitRun(t, work, "push", "origin", "main")
 
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 	err := g.Merge("agent/issue-1")
 	if err != ErrMergeConflict {
 		t.Fatalf("Merge: want ErrMergeConflict, got: %v", err)
@@ -196,7 +196,7 @@ func TestGitClient_Rebase_ForcePushesRebasedBranch(t *testing.T) {
 	gitRun(t, work, "commit", "-m", "later main commit")
 	gitRun(t, work, "push", "origin", "main")
 
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 	if err := g.Rebase("agent/issue-1"); err != nil {
 		t.Fatalf("Rebase: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestGitClient_Rebase_ForcePushesRebasedBranch(t *testing.T) {
 // <branch>`.
 func TestGitClient_Merge_RejectsFlagLikeRef(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 
 	canary := filepath.Join(t.TempDir(), "pwned")
 	err := g.Merge("--upload-pack=touch " + canary)
@@ -236,7 +236,7 @@ func TestGitClient_Merge_RejectsFlagLikeRef(t *testing.T) {
 // TestGitClient_Merge_RejectsFlagLikeRef.
 func TestGitClient_Rebase_RejectsFlagLikeRef(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 
 	if err := g.Rebase("--upload-pack=touch /tmp/should-not-run"); err == nil {
 		t.Fatal("Rebase: want error for a flag-like ref, got nil")
@@ -249,7 +249,7 @@ func TestGitClient_Rebase_RejectsFlagLikeRef(t *testing.T) {
 // bare CI runner (a real merge commit needs a committer identity).
 func TestGitClient_Merge_SetsCommitIdentityOnTempClone(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
-	g := NewGitClient(bare, "main", "Spindrift Bot", "bot@example.com")
+	g := NewGitClient(bare, "main", "Spindrift Bot", "bot@example.com", "agent/issue-")
 
 	if err := g.Merge("agent/issue-1"); err != nil {
 		t.Fatalf("Merge: %v", err)
@@ -273,12 +273,12 @@ func TestGitClient_Merge_SetsCommitIdentityOnTempClone(t *testing.T) {
 func TestGitClient_Probe(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 
-	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 	if _, err := g.Probe(); err != nil {
 		t.Errorf("Probe on reachable remote: %v", err)
 	}
 
-	bad := NewGitClient(filepath.Join(t.TempDir(), "does-not-exist.git"), "main", "Test Bot", "bot@example.com")
+	bad := NewGitClient(filepath.Join(t.TempDir(), "does-not-exist.git"), "main", "Test Bot", "bot@example.com", "agent/issue-")
 	if _, err := bad.Probe(); err == nil {
 		t.Error("Probe on unreachable remote: want error, got nil")
 	}

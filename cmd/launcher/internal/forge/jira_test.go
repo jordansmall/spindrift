@@ -173,8 +173,8 @@ func TestJiraClient_Issue_FetchesFields(t *testing.T) {
 	if iss.Body != "Detailed description here." {
 		t.Errorf("Body = %q", iss.Body)
 	}
-	if iss.State != "OPEN" {
-		t.Errorf("State = %q, want OPEN (per forge.Issue's OPEN|CLOSED contract)", iss.State)
+	if iss.State != forge.IssueOpen {
+		t.Errorf("State = %q, want %q (per forge.Issue's OPEN|CLOSED contract)", iss.State, forge.IssueOpen)
 	}
 	if len(iss.Labels) != 1 || iss.Labels[0] != "ready-for-agent" {
 		t.Errorf("Labels = %v", iss.Labels)
@@ -204,8 +204,8 @@ func TestJiraClient_Issue_DoneStatusCategoryIsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if iss.State != "CLOSED" {
-		t.Errorf("State = %q, want CLOSED for a done-category status", iss.State)
+	if iss.State != forge.IssueClosed {
+		t.Errorf("State = %q, want %q for a done-category status", iss.State, forge.IssueClosed)
 	}
 }
 

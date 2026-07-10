@@ -14,19 +14,32 @@ import (
 // and Merge/Rebase land code by pushing directly to the remote instead of
 // merging a pull request.
 type gitClient struct {
-	remoteURL  string
-	baseBranch string
-	userName   string
-	userEmail  string
+	remoteURL    string
+	baseBranch   string
+	userName     string
+	userEmail    string
+	branchPrefix string
 }
 
 // NewGitClient returns a CodeForge backed by a plain git remote URL.
 // baseBranch is the target branch Merge pushes onto for MERGE_MODE=immediate.
 // userName/userEmail configure the commit identity on Merge's throwaway
 // clone (a merge commit needs a committer) instead of depending on ambient
-// host git config, which may be unset on a bare CI runner.
-func NewGitClient(remoteURL, baseBranch, userName, userEmail string) CodeForge {
-	return &gitClient{remoteURL: remoteURL, baseBranch: baseBranch, userName: userName, userEmail: userEmail}
+// host git config, which may be unset on a bare CI runner. branchPrefix is
+// baked into AgentBranch's output.
+func NewGitClient(remoteURL, baseBranch, userName, userEmail, branchPrefix string) CodeForge {
+	return &gitClient{
+		remoteURL:    remoteURL,
+		baseBranch:   baseBranch,
+		userName:     userName,
+		userEmail:    userEmail,
+		branchPrefix: branchPrefix,
+	}
+}
+
+// AgentBranch returns branchPrefix + num.
+func (g *gitClient) AgentBranch(num string) string {
+	return g.branchPrefix + num
 }
 
 func (g *gitClient) OpenPRForBranch(branch string) (PR, bool, error) {
@@ -37,7 +50,7 @@ func (g *gitClient) PRForBranch(branch string) (string, bool, error) {
 	return "", false, nil
 }
 
-func (g *gitClient) PRState(url string) (string, error) {
+func (g *gitClient) PRState(url string) (PRState, error) {
 	return "", fmt.Errorf("PRState: not supported by the git Code Forge (push-only, no PR concept)")
 }
 

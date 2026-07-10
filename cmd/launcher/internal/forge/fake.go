@@ -31,9 +31,9 @@ type Fake struct {
 
 	labels    DispatchLabels
 	issues    map[string]Issue
-	prs       map[string]PR     // URL → PR
-	branchPRs map[string]string // branch → PR URL
-	prStates  map[string]string // URL → OPEN/MERGED/CLOSED
+	prs       map[string]PR      // URL → PR
+	branchPRs map[string]string  // branch → PR URL
+	prStates  map[string]PRState // URL → canonical PR state
 	checkQ    map[string][]RollupState
 	checkErrQ map[string][]error  // per-call error queue; nil entry = consult checkQ
 	prFiles   map[string][]string // URL → scripted ListPRFiles result
@@ -103,6 +103,11 @@ type Fake struct {
 
 	// IsPushOnly controls what PushOnly returns (default false, matching github).
 	IsPushOnly bool
+
+	// BranchPrefix is baked into AgentBranch's output. Zero value "" matches
+	// an unconfigured config.branchPrefix; set explicitly to exercise a real
+	// prefix (e.g. "agent/issue-").
+	BranchPrefix string
 }
 
 // NewFake returns an empty Fake client using DefaultDispatchLabels.
@@ -112,13 +117,20 @@ func NewFake() *Fake {
 		issues:    map[string]Issue{},
 		prs:       map[string]PR{},
 		branchPRs: map[string]string{},
-		prStates:  map[string]string{},
+		prStates:  map[string]PRState{},
 		checkQ:    map[string][]RollupState{},
 		checkErrQ: map[string][]error{},
 		prFiles:   map[string][]string{},
 
 		failureDetail: map[string]string{},
 	}
+}
+
+// AgentBranch returns BranchPrefix + num.
+func (f *Fake) AgentBranch(num string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.BranchPrefix + num
 }
 
 // SetIssue upserts an issue into the fake store.
@@ -135,12 +147,12 @@ func (f *Fake) SetPR(branch string, pr PR) {
 	f.prs[pr.URL] = pr
 	f.branchPRs[branch] = pr.URL
 	if _, ok := f.prStates[pr.URL]; !ok {
-		f.prStates[pr.URL] = "OPEN"
+		f.prStates[pr.URL] = PROpen
 	}
 }
 
-// SetPRState overrides the state (OPEN/MERGED/CLOSED) of a known PR.
-func (f *Fake) SetPRState(url, state string) {
+// SetPRState overrides the canonical state of a known PR.
+func (f *Fake) SetPRState(url string, state PRState) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.prStates[url] = state
@@ -187,7 +199,7 @@ func (f *Fake) ListIssues(state DispatchState) ([]Issue, error) {
 	label := f.labels.Label(state)
 	var out []Issue
 	for _, iss := range f.issues {
-		if iss.State == "CLOSED" {
+		if iss.State == IssueClosed {
 			continue
 		}
 		for _, l := range iss.Labels {
@@ -267,7 +279,7 @@ func (f *Fake) OpenPRForBranch(branch string) (PR, bool, error) {
 	if !ok {
 		return PR{}, false, nil
 	}
-	if f.prStates[url] != "OPEN" {
+	if f.prStates[url] != PROpen {
 		return PR{}, false, nil
 	}
 	pr, ok := f.prs[url]
@@ -287,7 +299,7 @@ func (f *Fake) PRForBranch(branch string) (string, bool, error) {
 	return url, true, nil
 }
 
-func (f *Fake) PRState(url string) (string, error) {
+func (f *Fake) PRState(url string) (PRState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.PRStateErr != nil {
@@ -353,14 +365,14 @@ func (f *Fake) Merge(url string) error {
 			return err
 		}
 		f.Merged = url
-		f.prStates[url] = "MERGED"
+		f.prStates[url] = PRMerged
 		return nil
 	}
 	if f.MergeErr != nil {
 		return f.MergeErr
 	}
 	f.Merged = url
-	f.prStates[url] = "MERGED"
+	f.prStates[url] = PRMerged
 	return nil
 }
 

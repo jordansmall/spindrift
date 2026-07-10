@@ -355,7 +355,7 @@ func newIssueTracker(c config) forge.IssueTracker {
 			IncludeComments: c.jiraIncludeComments,
 		})
 	default:
-		return forge.NewExecClient(c.repoSlug, dispatchLabels(c))
+		return forge.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
 	}
 }
 
@@ -364,9 +364,9 @@ func newIssueTracker(c config) forge.IssueTracker {
 // PR, CI-watch, or merge gate).
 func newCodeForge(c config) forge.CodeForge {
 	if c.codeForge == "git" {
-		return forge.NewGitClient(c.codeForgeRemoteURL, c.baseBranch, c.gitUserName, c.gitUserEmail)
+		return forge.NewGitClient(c.codeForgeRemoteURL, c.baseBranch, c.gitUserName, c.gitUserEmail, c.branchPrefix)
 	}
-	return forge.NewExecClient(c.repoSlug, dispatchLabels(c))
+	return forge.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
 }
 
 // newForgeClient composes the configured IssueTracker and CodeForge (which
@@ -434,7 +434,6 @@ func newDispatchFactory(c config, pwd string, r runner.Runner) *dispatch.Factory
 // settleConfig builds the subset of config a settle.Settle needs.
 func settleConfig(c config) settle.Config {
 	return settle.Config{
-		BranchPrefix:      c.branchPrefix,
 		MergeMode:         c.mergeMode,
 		MergeGuardPaths:   c.mergeGuardPaths,
 		CompleteLabel:     c.completeLabel,
@@ -611,12 +610,12 @@ func containsLabel(labels []string, target string) bool {
 // blockerReady returns true when the blocker's PR is merged, or when the
 // blocker issue is closed with no discoverable PR (human-handled work).
 func blockerReady(c config, fc forge.Client, dep string) bool {
-	branch := c.branchPrefix + dep
+	branch := fc.AgentBranch(dep)
 	prURL, ok, err := fc.PRForBranch(branch)
 	if err == nil && ok {
 		state, stateErr := fc.PRState(prURL)
 		if stateErr == nil {
-			return state == "MERGED"
+			return state == forge.PRMerged
 		}
 		return false
 	}
@@ -624,7 +623,7 @@ func blockerReady(c config, fc forge.Client, dep string) bool {
 	if err != nil {
 		return false
 	}
-	if fi.State == "CLOSED" {
+	if fi.State == forge.IssueClosed {
 		fmt.Printf("    .. blocker #%s is closed (no discoverable PR); treating as satisfied\n", dep)
 		return true
 	}
@@ -722,7 +721,7 @@ func reconcileStranded(c config, fc forge.Client, f *dispatch.Factory, s settle.
 	fmt.Println("==> reconciling stranded in-progress issues")
 	for _, fi := range fiList {
 		iss := issue{number: fi.Number, title: fi.Title}
-		branch := c.branchPrefix + iss.number
+		branch := fc.AgentBranch(iss.number)
 		prURL, isDraft, found, prErr := openPRForBranch(fc, branch)
 		if prErr != nil || !found || isDraft {
 			continue
@@ -743,7 +742,7 @@ func recoverByNumber(c config, fc forge.Client, pwd string, f *dispatch.Factory,
 		return fmt.Errorf("issue %s: %w", issueNum, err)
 	}
 	iss := issue{number: fi.Number, title: fi.Title}
-	branch := c.branchPrefix + iss.number
+	branch := fc.AgentBranch(iss.number)
 	prURL, isDraft, found, prErr := openPRForBranch(fc, branch)
 	if prErr != nil {
 		return fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr)

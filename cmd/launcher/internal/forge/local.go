@@ -119,7 +119,7 @@ func toIssue(num string, li localIssue) Issue {
 		Number: num,
 		Title:  li.frontmatter.Title,
 		Body:   li.body,
-		State:  "OPEN",
+		State:  IssueOpen,
 		Labels: labels,
 	}
 }
