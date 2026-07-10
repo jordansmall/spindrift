@@ -90,7 +90,9 @@ setup() {
 
 @test "CODE_FORGE_REMOTE_URL is ignored when CODE_FORGE is unset (github default)" {
   # A stray CODE_FORGE_REMOTE_URL must not silently redirect a github
-  # deployment's clone — only CODE_FORGE=git opts in.
+  # deployment's clone — only CODE_FORGE=git opts in. set_box_env exports
+  # CODE_FORGE at its schema default ("github"), the same value this var
+  # would carry if truly unset.
   local other_remote="$BATS_TEST_TMPDIR/other-remote.git"
   git init --bare -q "$other_remote"
 
@@ -473,7 +475,9 @@ FAKE
 # $CLAUDE_AGENTS_FILE for structural assertions without grepping a log that
 # also contains prompt prose.
 @test "entrypoint omits --agents when AGENTS_JSON_TEMPLATE is not set" {
-  # Default setup: SCOUT_MODEL="" REVIEW_MODEL="" → AGENTS_JSON_TEMPLATE not set
+  # AGENTS_JSON_TEMPLATE is nix-baked from SCOUT_MODEL/REVIEW_MODEL at
+  # image-build time, not derived by the entrypoint at runtime, so it stays
+  # unset here regardless of set_box_env's SCOUT_MODEL/REVIEW_MODEL values.
   # The entrypoint must not build JSON itself; with no template, no flag is passed.
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
