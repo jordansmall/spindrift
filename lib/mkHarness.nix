@@ -176,11 +176,22 @@ let
     filerModel = mergedDefaults.filerModel or "";
   };
 
+  # The Driver's registry-rendered function definitions, shared between the
+  # image preamble and the bats harness file (issue #433) so neither can drift
+  # from the other.
+  driverFunctionDefs =
+    "_driver_extract_outcome() {\n"
+    + driverEntry.outcomeExtractFnBody
+    + "}\n"
+    + "_driver_session_flags() {\n"
+    + driverEntry.sessionFlagsFnBody
+    + "}\n";
+
   # The Driver's in-box half, rendered into agent/entrypoint.sh's
-  # ${DRIVER_*:-<default>} vars and its `_driver_extract_outcome` guarded
-  # function definition (ADR 0009). /home/agent is the image's fixed HOME
-  # (see passwdFile below), so the skills dir is baked as an absolute path
-  # rather than depending on $HOME at run time.
+  # ${DRIVER_*:-<default>} vars and the Driver function definitions
+  # (ADR 0009). /home/agent is the image's fixed HOME (see passwdFile
+  # below), so the skills dir is baked as an absolute path rather than
+  # depending on $HOME at run time.
   driverPreamble =
     "DRIVER_BIN="
     + lib.escapeShellArg driverEntry.bin
@@ -191,12 +202,7 @@ let
     + "DRIVER_SKILLS_DIR="
     + lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
     + "\n"
-    + "_driver_extract_outcome() {\n"
-    + driverEntry.outcomeExtractFnBody
-    + "}\n"
-    + "_driver_session_flags() {\n"
-    + driverEntry.sessionFlagsFnBody
-    + "}\n";
+    + driverFunctionDefs;
 
   # Version sourced from the release-please manifest so mkHarness always tracks
   # the bot-maintained source of truth (ADR-0010).
@@ -250,8 +256,9 @@ let
 
   # The in-container entrypoint, via writeShellApplication so shellcheck runs at
   # build time and its tools are pinned. Built for Linux. The source stays a
-  # complete, standalone script — the bats suite exercises it raw — so its
-  # shebang is stripped before it becomes this derivation's body.
+  # complete, standalone script (the bats harness prepends driverFunctionsFile
+  # before exec-ing it) so its shebang is stripped before it becomes this
+  # derivation's body.
   entrypoint = pkgs.writeShellApplication {
     name = "entrypoint";
     runtimeInputs = with pkgs; [
@@ -318,14 +325,7 @@ let
   # harness prepends this before exec-ing the entrypoint (issue #433) so tests
   # exercise the same registry-rendered bodies that mkHarness bakes into the
   # image — not any hand-copied duplicates in the entrypoint itself.
-  driverFunctionsFile = hostPkgs.writeText "driver-functions.sh" (
-    "_driver_extract_outcome() {\n"
-    + driverEntry.outcomeExtractFnBody
-    + "}\n"
-    + "_driver_session_flags() {\n"
-    + driverEntry.sessionFlagsFnBody
-    + "}\n"
-  );
+  driverFunctionsFile = hostPkgs.writeText "driver-functions.sh" driverFunctionDefs;
 
   # The rendered prompt directory as a host store path (native-buildable on
   # darwin, so it needs no Linux builder). The prompt is normally baked into
