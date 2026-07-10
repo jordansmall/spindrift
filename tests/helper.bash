@@ -45,6 +45,20 @@ setup_fakes() {
     printf '# LAND THE CHANGE\n\ncanonical outcome contract fixture\n' >"$OUTCOME_CONTRACT_FILE"
   fi
 
+  # Same fallback, for the COMMS and CHECK blocks fix-prompt.md shares with
+  # issue-prompt.md (issue #455). A test exercising the injection itself
+  # overrides these with its own fixture.
+  : "${COMMS_CONTRACT_FILE:=$BATS_TEST_TMPDIR/comms-contract.md}"
+  export COMMS_CONTRACT_FILE
+  if [ ! -s "$COMMS_CONTRACT_FILE" ]; then
+    printf '# COMMS\n\ncanonical comms contract fixture\n' >"$COMMS_CONTRACT_FILE"
+  fi
+  : "${CHECK_CONTRACT_FILE:=$BATS_TEST_TMPDIR/check-contract.md}"
+  export CHECK_CONTRACT_FILE
+  if [ ! -s "$CHECK_CONTRACT_FILE" ]; then
+    printf '# CHECK\n\ncanonical check contract fixture\n' >"$CHECK_CONTRACT_FILE"
+  fi
+
   # DRIVER_PREAMBLE_FILE is the registry-rendered Driver function definitions
   # (issue #433): prepend them to the entrypoint so the suite exercises the
   # same bodies the image bakes in, not any hand-copied duplicates.  The nix
