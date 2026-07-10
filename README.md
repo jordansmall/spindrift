@@ -164,10 +164,11 @@ promotes each one before an agent can pick it up. Off (empty) by default. See
 
 Set `AUTO_FORMAT=1` (or `settings.promptSkillIteration.autoFormat = true` in
 your Consumer flake) to have the implementor auto-format changed files before
-each commit. The formatter is detected automatically: `nix fmt` when the target
-flake defines one, otherwise a `format`/`fmt` script in `package.json`,
-`Makefile`, or `justfile`, otherwise the language's standard formatter. Runs
-only on changed files; skips silently when none is found. Off by default.
+each commit. The formatter is detected automatically: a `format`/`fmt` script
+in `package.json`, `Makefile`, or `justfile`, otherwise the language's standard
+formatter. Never `nix fmt` — evaluating the flake in-box would copy the dirty
+work tree into `/nix/store`, which the agent user cannot write to. Runs only
+on changed files; skips silently when none is found. Off by default.
 
 Set `AUTO_LINT=1` (or `settings.promptSkillIteration.autoLint = true` in your
 Consumer flake) to have the implementor lint changed files before each commit,
