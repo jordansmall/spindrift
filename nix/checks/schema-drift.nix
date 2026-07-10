@@ -1,4 +1,3 @@
-
 # Schema drift guards: every committed generated artifact (Driver name table,
 # harness.env.example, launcher flag table, flake-options doc, template
 # settings example, man page) must stay in sync with its schema source.

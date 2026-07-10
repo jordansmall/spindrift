@@ -1,4 +1,3 @@
-
 # mkHarness output-substitution and flake-module equivalence: the launcher
 # commands mkHarness renders, the flakeModule shim's byte-identical parity
 # with a direct mkHarness call, and the schema-derived settings surface.

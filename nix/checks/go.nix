@@ -1,7 +1,11 @@
-
 # Go toolchain gates (gofmt, vet, test, cross-build) plus the nixfmt
 # formatting gate and formatter-identity checks that ride alongside them.
-{ pkgs, config, fixtures, ... }:
+{
+  pkgs,
+  config,
+  fixtures,
+  ...
+}:
 let
   inherit (fixtures) consumerFormatter;
 in

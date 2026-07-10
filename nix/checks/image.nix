@@ -1,4 +1,3 @@
-
 # Linux-gated image-layer inspection: assertions that realize the OCI image
 # and inspect its layers/config, so they are omitted from `nix flake check`
 # on darwin (see the optionalAttrs pkgs.stdenv.isLinux wrapping this module's
