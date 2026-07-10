@@ -229,10 +229,28 @@ let
   # In-box heartbeat filter: reuses the #182 heartbeat parser as a CLI binary
   # so the entrypoint can pipe claude's stream-json output through it without
   # modifying the raw capture channel. Built for Linux (pkgs, not hostPkgs).
+  #
+  # INVARIANT: the agent image drvPath must not change when host-side launcher
+  # code outside this binary's import closure is modified (e.g. test-only
+  # launcher commits). The fileset is intentionally tight: go.mod,
+  # spindrift-heartbeat-filter, and internal/heartbeat only, with *_test.go
+  # excluded. If a new import is added outside this closure the build fails
+  # loudly (missing package) — that is the intended failure mode (#474).
   heartbeatFilterBin = pkgs.buildGoModule {
     pname = "spindrift-heartbeat-filter";
     version = spindriftVersion;
-    src = ../cmd/launcher;
+    src = lib.fileset.toSource {
+      root = ../cmd/launcher;
+      fileset = lib.fileset.unions [
+        ../cmd/launcher/go.mod
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/spindrift-heartbeat-filter)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/heartbeat)
+      ];
+    };
     vendorHash = null;
     subPackages = [ "spindrift-heartbeat-filter" ];
     meta.license = lib.licenses.mit;
