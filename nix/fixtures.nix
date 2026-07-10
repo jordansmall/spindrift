@@ -193,6 +193,20 @@ let
     packages = p: [ p.hello ];
   };
 
+  # A Consumer-configured fixPrompt (issue #455): proves a fix-prompt that
+  # carries only a fix-specific preamble — no COMMS/CHECK/outcome-contract
+  # markers at all — still gets all three shared blocks injected, the same
+  # way promptHarness above proves it for the outcome contract on the issue
+  # prompt.
+  fixPromptHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    fixPrompt = ''
+      CONFIGURED-FIX-PROMPT-MARKER
+      Fix issue #''${ISSUE_NUMBER}: ''${ISSUE_TITLE} on ''${BRANCH}
+    '';
+    packages = p: [ p.hello ];
+  };
+
   # A Consumer-configured skill (#119): proves the `skills` argument bakes
   # the skill files into the image's skills path. Eval-only for the
   # skillsDir assertion; the image-layer check is Linux-gated.
@@ -292,6 +306,7 @@ in
     bwrapHarness
     noRuntimeHarness
     promptHarness
+    fixPromptHarness
     skillsHarness
     skillsBwrapHarness
     minimalDirect
