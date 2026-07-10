@@ -21,6 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/settle"
 )
 
 type config struct {
@@ -430,6 +431,26 @@ func newDispatchFactory(c config, pwd string, r runner.Runner) *dispatch.Factory
 	return f
 }
 
+// settleConfig builds the subset of config a settle.Settle needs.
+func settleConfig(c config) settle.Config {
+	return settle.Config{
+		BranchPrefix:      c.branchPrefix,
+		MergeMode:         c.mergeMode,
+		MergeGuardPaths:   c.mergeGuardPaths,
+		CompleteLabel:     c.completeLabel,
+		MergePollInterval: c.mergePollInterval,
+		MergePollTimeout:  c.mergePollTimeout,
+		MaxFixAttempts:    c.maxFixAttempts,
+		MaxRebaseAttempts: c.maxRebaseAttempts,
+	}
+}
+
+// newSettle constructs the settle.Settle for one top-level dispatch entry
+// point, reused across every issue in that invocation.
+func newSettle(c config, fc forge.Client) *settle.Settle {
+	return settle.New(settleConfig(c), fc)
+}
+
 // build realizes the sandbox image or store closures without running any agent.
 func build() error {
 	c := loadConfig()
@@ -462,75 +483,6 @@ func claimIssue(c config, fc forge.Client, num string) {
 	transitionState(fc, num, forge.Dispatchable, forge.InProgress)
 }
 
-// gateToGreen polls CheckState on the PR's head commit until the state
-// reaches confirmed SUCCESS, a terminal failure, or mergePollTimeout seconds
-// elapse. On confirmed green, agent-complete is swapped unconditionally.
-//
-// Returns (green, genuineRed):
-//   - (true, false)  — CI confirmed green; issue swapped to completeLabel.
-//   - (false, true)  — CI red (FAILURE or ERROR); caller decides whether to
-//     dispatch a fix box. No label swap performed.
-//   - (false, false) — non-retriable outcome (timeout, API error); no label
-//     swap. Caller must swap to failedLabel.
-func gateToGreen(c config, fc forge.Client, num, pr string) (bool, bool) {
-	pollIv := c.mergePollInterval
-	deadline := c.mergePollTimeout
-	// actualIv is used for elapsed tracking; floor to 1 so we don't
-	// hot-spin. When pollIv is 0 (test mode) the sleep duration is also 0,
-	// so elapsed still advances and the loop terminates.
-	actualIv := pollIv
-	if actualIv <= 0 {
-		actualIv = 1
-	}
-	elapsed := 0
-
-	for {
-		state, stateErr := fc.CheckState(pr)
-		if stateErr != nil {
-			fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, stateErr)
-			return false, false
-		}
-
-		switch state {
-		case forge.StateSuccess:
-			// Pause before confirming — back-to-back GraphQL calls return the
-			// same snapshot, so a late-registered job would not yet appear.
-			time.Sleep(time.Duration(pollIv) * time.Second)
-			// Re-poll to confirm the snapshot is stable. A partial check
-			// registration can briefly show SUCCESS before all jobs appear.
-			confirm, confirmErr := fc.CheckState(pr)
-			if confirmErr != nil {
-				fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, confirmErr)
-				return false, false
-			}
-			if confirm != forge.StateSuccess {
-				if confirm == forge.StateFailure || confirm == forge.StateError {
-					return false, true
-				}
-				// PENDING/EXPECTED/NONE — keep waiting for checks to settle.
-				break
-			}
-			// Confirmed green: mark complete regardless of merge outcome.
-			transitionState(fc, num, forge.InProgress, forge.Complete)
-			return true, false
-		case forge.StateFailure, forge.StateError:
-			// Genuine red — signal caller so it can dispatch a fix pass.
-			return false, true
-		}
-
-		// PENDING, EXPECTED, NONE (no checks yet), or unrecognised — keep
-		// waiting until timeout.
-		if elapsed >= deadline {
-			break
-		}
-		// Sleep 0 when pollIv is 0 (test mode) so tests run without real
-		// delays; actualIv still advances elapsed to prevent a tight loop.
-		time.Sleep(time.Duration(pollIv) * time.Second)
-		elapsed += actualIv
-	}
-	return false, false
-}
-
 // checkAutoMergePreflight verifies that the repo allows GitHub's native
 // auto-merge when MERGE_MODE=auto. Returns a non-nil error if the repo
 // disallows it or the capability check fails; no-ops for other modes.
@@ -538,7 +490,7 @@ func checkAutoMergePreflight(c config, fc forge.Client) error {
 	if c.mergeMode != "auto" {
 		return nil
 	}
-	if c.codeForge != "github" {
+	if fc.PushOnly() {
 		return fmt.Errorf("MERGE_MODE=auto requires CODE_FORGE=github (got %q) — auto-merge is a GitHub-native feature with no meaning off github; switch to MERGE_MODE=manual or immediate", c.codeForge)
 	}
 	ok, err := fc.CanAutoMerge()
@@ -551,286 +503,8 @@ func checkAutoMergePreflight(c config, fc forge.Client) error {
 	return nil
 }
 
-// applyMergeMode performs the mode-specific action after CI reaches green.
-// agent-complete is already set; a merge failure is returned as an error but
-// does not revert the label.
-//
-// conflictResolveFn, when non-nil, is called when fc.Rebase returns
-// ErrMergeConflict to attempt an agent-assisted resolution. When nil, a
-// rebase conflict is immediately non-retriable.
-func applyMergeMode(c config, fc forge.Client, num, pr string, conflictResolveFn func(string) error) error {
-	switch c.mergeMode {
-	case "immediate":
-		return mergeImmediate(c, fc, num, pr, conflictResolveFn)
-	case "auto":
-		if err := fc.EnqueueAutoMerge(pr); err != nil {
-			fmt.Printf("    #%s  pr=%s  status=auto-merge-enqueue-failed  !! %v\n", num, pr, err)
-			fc.Comment(num, fmt.Sprintf("auto-merge enqueue failed: %v — PR is green; approve and merge manually", err))
-			return nil
-		}
-		fmt.Printf("    #%s  pr=%s  status=auto-merge-enqueued\n", num, pr)
-		return nil
-	case "manual":
-		fmt.Printf("    #%s  pr=%s  status=agent-complete  merge-mode=%s\n", num, pr, c.mergeMode)
-		return nil
-	default:
-		return fmt.Errorf("unrecognised MERGE_MODE: %q", c.mergeMode)
-	}
-}
-
-// mergeImmediate attempts to merge the green PR with rebase retry on conflict.
-// It embodies the existing rebase-retry and agent conflict-resolve behaviors.
-//
-// A successful conflict-resolve already rebased and force-pushed the branch,
-// so the next Merge conflict is retried directly (after a brief settle wait
-// for the forge's mergeability snapshot to catch up) instead of invoking
-// Rebase a second time.
-//
-// A Rebase force-push failure that forge.ErrTransientPushFailure wraps (an
-// infra or network fault, not a genuine stale-lease rejection) is retried up
-// to maxRebaseAttempts times before it's treated as terminal.
-func mergeImmediate(c config, fc forge.Client, num, pr string, conflictResolveFn func(string) error) error {
-	rebaseAttempts := 0
-	pushRetries := 0
-	skipRebase := false
-	for {
-		err := fc.Merge(pr)
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, forge.ErrMergeConflict) {
-			return err
-		}
-		if skipRebase {
-			skipRebase = false
-			fmt.Printf("    #%s  pr=%s  status=merge-retry-settle\n", num, pr)
-			time.Sleep(time.Duration(c.mergePollInterval) * time.Second)
-			continue
-		}
-		if rebaseAttempts >= c.maxRebaseAttempts {
-			return err
-		}
-		rebaseAttempts++
-		fmt.Printf("    #%s  pr=%s  status=rebase-retry  attempt=%d/%d\n",
-			num, pr, rebaseAttempts, c.maxRebaseAttempts)
-		rbErr := fc.Rebase(pr)
-		for rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && pushRetries < c.maxRebaseAttempts {
-			pushRetries++
-			fmt.Printf("    #%s  pr=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
-				num, pr, pushRetries, c.maxRebaseAttempts, rbErr)
-			rbErr = fc.Rebase(pr)
-		}
-		if rbErr != nil {
-			if errors.Is(rbErr, forge.ErrTransientPushFailure) {
-				fmt.Printf("    #%s  pr=%s  status=rebase-push-retries-exhausted  attempts=%d  !! %v\n",
-					num, pr, pushRetries, rbErr)
-				return rbErr
-			}
-			if errors.Is(rbErr, forge.ErrMergeConflict) && conflictResolveFn != nil {
-				fmt.Printf("    #%s  pr=%s  status=conflict-resolve\n", num, pr)
-				if crErr := conflictResolveFn(pr); crErr != nil {
-					fmt.Printf("    #%s  pr=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
-					return crErr
-				}
-				skipRebase = true
-			} else {
-				fmt.Printf("    #%s  pr=%s  status=rebase-failed  !! %v\n", num, pr, rbErr)
-				return rbErr
-			}
-		}
-	}
-}
-
-// landPushOnly is the CODE_FORGE=git counterpart to the gateToGreen+
-// applyMergeMode pair: there is no PR or CI to watch (the Box already pushed
-// branch to the remote), so the issue is marked Complete immediately and
-// MERGE_MODE is applied straight against the git Code Forge's push-only
-// Merge/Rebase. A merge failure leaves the issue Complete with a
-// merge-blocked note, matching the github adapter's post-green contract
-// (ADR 0012) — it is never demoted to Failed.
-func landPushOnly(c config, fc forge.Client, num, branch string) (ok bool, merged bool) {
-	transitionState(fc, num, forge.InProgress, forge.Complete)
-	if err := applyMergeMode(c, fc, num, branch, nil); err != nil {
-		fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, branch, err)
-		fc.Comment(num, fmt.Sprintf("merge blocked after push: %v", err))
-		return true, false
-	}
-	return true, c.mergeMode == "immediate"
-}
-
-// selfHeal polls the merge gate, dispatching fix boxes on genuine red up to
-// maxFixAttempts times. On green it swaps agent-complete (via gateToGreen)
-// then applies the merge mode; a merge failure after green leaves the issue
-// agent-complete and is never demoted to agent-failed.
-//
-// Returns (ok, merged): ok is true when CI reached green; merged is true only
-// when immediate mode completed an actual merge. A merge failure keeps the
-// issue at agent-complete (merge-blocked note) and returns (true, false).
-//
-// d dispatches fix passes and, when a rebase conflict arises, an
-// agent-assisted conflict resolution -- both subject to dispatch's own
-// in-session transient retry (issue #441).
-func selfHeal(c config, fc forge.Client, d dispatch.Dispatcher, num, pr string) (ok bool, merged bool) {
-	if c.codeForge == "git" {
-		return landPushOnly(c, fc, num, pr)
-	}
-	for attempt := 0; ; attempt++ {
-		green, genuineRed := gateToGreen(c, fc, num, pr)
-		if green {
-			matched, guardErr := mergeGuardHit(c, fc, pr)
-			if guardErr != nil {
-				fmt.Printf("    #%s  pr=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
-				fc.Comment(num, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
-				return true, false
-			}
-			if len(matched) > 0 {
-				fmt.Printf("    #%s  pr=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
-				fc.Comment(num, mergeGuardComment(matched))
-				return true, false
-			}
-			if err := applyMergeMode(c, fc, num, pr, d.ResolveConflict); err != nil {
-				fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, pr, err)
-				fc.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
-				return true, false
-			}
-			return true, c.mergeMode == "immediate"
-		}
-		if !genuineRed || attempt >= c.maxFixAttempts {
-			if genuineRed && c.maxFixAttempts > 0 {
-				fmt.Printf("    #%s  pr=%s  status=fix-exhausted  !! exhausted %d fix pass(es)\n",
-					num, pr, c.maxFixAttempts)
-			}
-			transitionState(fc, num, forge.InProgress, forge.Failed)
-			return false, false
-		}
-		fmt.Printf("    #%s  pr=%s  fix-pass=%d/%d\n", num, pr, attempt+1, c.maxFixAttempts)
-		// Best-effort: a failure to fetch the CI failure detail must never
-		// block the fix pass — fall back to an empty summary.
-		detail, detailErr := fc.FailureDetail(pr)
-		if detailErr != nil {
-			fmt.Printf("    #%s  pr=%s  status=failure-detail-unavailable  !! %v\n", num, pr, detailErr)
-			detail = ""
-		}
-		if result := d.Fix(attempt+1, detail); !result.Success {
-			fmt.Printf("    !! #%s fix-pass-%d exited non-zero\n", num, attempt+1)
-		}
-	}
-}
-
-func verifyMerged(c config, fc forge.Client, num, pr string) {
-	prState, _ := fc.PRState(pr)
-	iss, _ := fc.Issue(num)
-	if prState == "MERGED" && containsLabel(iss.Labels, c.completeLabel) {
-		fmt.Printf("    #%s  pr=%s  status=verified-merged\n", num, pr)
-		return
-	}
-	var reason string
-	if prState != "MERGED" {
-		if prState == "" {
-			reason = "PR state is 'unknown', expected MERGED"
-		} else {
-			reason = fmt.Sprintf("PR state is '%s', expected MERGED", prState)
-		}
-	} else {
-		reason = fmt.Sprintf("issue does not carry '%s'", c.completeLabel)
-	}
-	fmt.Printf("    #%s  pr=%s  status=failed  !! %s\n", num, pr, reason)
-	transitionState(fc, num, forge.InProgress, forge.Failed)
-}
-
-// adoptAndGate runs the merge gate (selfHeal → verifyMerged) on an
-// already-discovered open non-draft PR for iss. Prints "status=adopted"
-// before running the gate. Called by both gateIssue and reconcileStranded.
-func adoptAndGate(c config, fc forge.Client, d dispatch.Dispatcher, iss issue, prURL string) {
-	branch := c.branchPrefix + iss.number
-	fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", iss.number, prURL, branch)
-	ok, merged := selfHeal(c, fc, d, iss.number, prURL)
-	if ok {
-		if merged {
-			verifyMerged(c, fc, iss.number, prURL)
-		}
-	} else {
-		fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, prURL)
-	}
-}
-
-// postUsageComment posts d's aggregate usage-statistics comment to the
-// issue. Errors posting the comment are logged but do not abort the caller.
-func postUsageComment(fc forge.Client, issNum string, d dispatch.Dispatcher) {
-	if commentErr := fc.Comment(issNum, d.UsageReport()); commentErr != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: post usage comment: %v\n", issNum, commentErr)
-	}
-}
-
-// gateIssue runs the merge gate for a single issue immediately after its box
-// exits. It drives selfHeal or adoptAndGate off result (d's Run outcome) as
-// needed, and posts the usage comment. Called from fanOut goroutines so each
-// issue reaches completeLabel or failedLabel independently of its wave
-// siblings.
-func gateIssue(c config, fc forge.Client, d dispatch.Dispatcher, iss issue, result dispatch.Result) {
-	if result.ParseErr != nil {
-		fmt.Printf("    #%s  status=malformed  note=unparseable outcome line\n", iss.number)
-		return
-	}
-	if !result.OutcomeFound {
-		branch := c.branchPrefix + iss.number
-		pr, isDraft, prFound, prErr := openPRForBranch(fc, branch)
-		if prErr != nil || !prFound {
-			clsNote := ""
-			if result.ClassifyErr != nil {
-				fmt.Fprintf(os.Stderr, "    ?? #%s: classify: %v\n", iss.number, result.ClassifyErr)
-			} else {
-				clsNote = fmt.Sprintf("  class=%s  reason=%s", result.Classification.Class, result.Classification.Reason)
-				if result.Classification.ResetAt != nil {
-					clsNote += "  resetsAt=" + result.Classification.ResetAt.UTC().Format(time.RFC3339)
-				}
-			}
-			fmt.Printf("    #%s  status=missing%s  note=no outcome in log\n", iss.number, clsNote)
-			return
-		}
-		if isDraft {
-			fmt.Printf("    #%s  pr=%s  status=blocked  note=draft PR on %s; no outcome line\n", iss.number, pr, branch)
-			return
-		}
-		adoptAndGate(c, fc, d, iss, pr)
-		return
-	}
-
-	o := result.Outcome
-	switch o.Status {
-	case "blocked":
-		fmt.Printf("    #%s  pr=%s  status=%s  !! %s\n", iss.number, o.PR, o.Status, o.Note)
-		postUsageComment(fc, iss.number, d)
-	case "ready":
-		ok, merged := selfHeal(c, fc, d, iss.number, o.PR)
-		if ok {
-			// verifyMerged reads PR state, which the push-only git Code Forge
-			// does not have — landPushOnly's own fc.Merge success already
-			// confirms the push landed, so there is nothing left to verify.
-			if merged && c.codeForge == "github" {
-				verifyMerged(c, fc, iss.number, o.PR)
-			}
-		} else {
-			fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", iss.number, o.PR)
-		}
-		postUsageComment(fc, iss.number, d)
-	case "merged":
-		// verifyMerged reads PR state, which the push-only git Code Forge does
-		// not have (mirrors the "ready" case's same guard above).
-		if c.codeForge == "github" {
-			verifyMerged(c, fc, iss.number, o.PR)
-		} else {
-			fmt.Printf("    #%s  pr=%s  status=%s\n", iss.number, o.PR, o.Status)
-		}
-		postUsageComment(fc, iss.number, d)
-	default:
-		fmt.Printf("    #%s  pr=%s  status=%s\n", iss.number, o.PR, o.Status)
-		postUsageComment(fc, iss.number, d)
-	}
-}
-
-// printOutcomeReport prints the outcome-report header. Per-issue gating now
-// runs inside fanOut goroutines via gateIssue, so each issue reaches its
+// printOutcomeReport prints the outcome-report header. Per-issue settling now
+// runs inside fanOut goroutines via settle.Settle, so each issue reaches its
 // terminal label independently before this point.
 func printOutcomeReport() {
 	fmt.Println("==> outcome report")
@@ -1043,7 +717,7 @@ func discoverIssues(c config, fc forge.Client) ([]issue, error) {
 // have an open non-draft PR on their agent branch, and runs the merge gate on
 // each. Draft PRs and in-progress issues with no open PR are skipped silently.
 // Called at launcher start, before any new dispatch.
-func reconcileStranded(c config, fc forge.Client, f *dispatch.Factory) {
+func reconcileStranded(c config, fc forge.Client, f *dispatch.Factory, s settle.Settler) {
 	fiList, err := fc.ListIssues(forge.InProgress)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reconcile: list in-progress issues: %v\n", err)
@@ -1061,7 +735,7 @@ func reconcileStranded(c config, fc forge.Client, f *dispatch.Factory) {
 			continue
 		}
 		d := f.New(iss.number, iss.title)
-		adoptAndGate(c, fc, d, iss, prURL)
+		s.SettleAdopted(d, iss.number, prURL)
 		d.Close()
 	}
 }
@@ -1070,7 +744,7 @@ func reconcileStranded(c config, fc forge.Client, f *dispatch.Factory) {
 // and drives the same adopt-and-gate path used by reconcileStranded. Returns an
 // error when the issue cannot be fetched, the PR is a draft, or no open PR
 // exists; the caller should treat those as non-success exits.
-func recoverByNumber(c config, fc forge.Client, pwd string, f *dispatch.Factory, issueNum string) error {
+func recoverByNumber(c config, fc forge.Client, pwd string, f *dispatch.Factory, s settle.Settler, issueNum string) error {
 	fi, err := fc.Issue(issueNum)
 	if err != nil {
 		return fmt.Errorf("issue %s: %w", issueNum, err)
@@ -1094,7 +768,7 @@ func recoverByNumber(c config, fc forge.Client, pwd string, f *dispatch.Factory,
 	}
 	d := f.New(iss.number, iss.title)
 	defer d.Close()
-	adoptAndGate(c, fc, d, iss, prURL)
+	s.SettleAdopted(d, iss.number, prURL)
 	return nil
 }
 
@@ -1116,7 +790,8 @@ func recoverIssue(issueNum string) error {
 	fc := newForgeClient(c)
 	f := newDispatchFactory(c, pwd, r)
 	defer f.Cleanup()
-	return recoverByNumber(c, fc, pwd, f, issueNum)
+	s := newSettle(c, fc)
+	return recoverByNumber(c, fc, pwd, f, s, issueNum)
 }
 
 // labelMeta holds the default color and description for a triage label.
@@ -1324,7 +999,7 @@ func issueNums(issues []issue) []string {
 // fanOut dispatches a batch of issues in parallel (up to maxParallel at once).
 // Each goroutine claims its issue only after acquiring a semaphore slot so that
 // at most maxParallel issues are ever in the in-progress state simultaneously.
-func fanOut(c config, fc forge.Client, f *dispatch.Factory, batch []issue) {
+func fanOut(c config, fc forge.Client, f *dispatch.Factory, s settle.Settler, batch []issue) {
 	sem := make(chan struct{}, c.maxParallel)
 	var wg sync.WaitGroup
 	for _, iss := range batch {
@@ -1343,7 +1018,7 @@ func fanOut(c config, fc forge.Client, f *dispatch.Factory, batch []issue) {
 				transitionState(fc, iss.number, forge.InProgress, forge.Failed)
 			} else {
 				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.number, iss.number)
-				gateIssue(c, fc, d, iss, result)
+				s.Settle(d, iss.number, result)
 			}
 		}()
 	}
@@ -1355,7 +1030,7 @@ func fanOut(c config, fc forge.Client, f *dispatch.Factory, batch []issue) {
 // depsPollSecs. The deadlock timer resets on any progress; if no issue becomes
 // ready within depsWaitSecs the function returns an error rather than blocking
 // forever. Dispatched issues leave the remaining set even when they fail.
-func dispatchWaves(c config, fc forge.Client, f *dispatch.Factory, issues []issue, edges map[string][]string) error {
+func dispatchWaves(c config, fc forge.Client, f *dispatch.Factory, s settle.Settler, issues []issue, edges map[string][]string) error {
 	remaining := make([]issue, len(issues))
 	copy(remaining, issues)
 	elapsed := 0
@@ -1407,7 +1082,7 @@ func dispatchWaves(c config, fc forge.Client, f *dispatch.Factory, issues []issu
 
 		// Progress: reset the deadlock timer.
 		elapsed = 0
-		fanOut(c, fc, f, ready)
+		fanOut(c, fc, f, s, ready)
 		remaining = held
 	}
 	return nil
@@ -1417,7 +1092,7 @@ func dispatchWaves(c config, fc forge.Client, f *dispatch.Factory, issues []issu
 // batch and exits. Blocked issues are skipped so no slot is wasted on a
 // dependency that hasn't merged yet; they wait for the next invocation.
 // A cycle in the in-batch dependency graph is an error returned immediately.
-func drainMaxJobs(c config, fc forge.Client, pwd string, f *dispatch.Factory, issues []issue, edges map[string][]string) error {
+func drainMaxJobs(c config, fc forge.Client, pwd string, f *dispatch.Factory, s settle.Settler, issues []issue, edges map[string][]string) error {
 	if len(edges) > 0 {
 		if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
 			return fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
@@ -1478,7 +1153,7 @@ outer:
 		return nil
 	}
 	fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), c.maxJobs)
-	fanOut(c, fc, f, selected)
+	fanOut(c, fc, f, s, selected)
 	printOutcomeReport()
 	return nil
 }
@@ -1514,11 +1189,12 @@ func run(noBuild bool) error {
 
 	f := newDispatchFactory(c, pwd, r)
 	defer f.Cleanup()
+	s := newSettle(c, fc)
 
 	// Reconcile stranded in-progress issues before dispatching new work.
 	// Skip when ISSUE_NUMBER is set — the caller already claimed a specific issue.
 	if c.issueNumber == "" {
-		reconcileStranded(c, fc, f)
+		reconcileStranded(c, fc, f, s)
 	}
 
 	issues, err := discoverIssues(c, fc)
@@ -1543,7 +1219,7 @@ func run(noBuild bool) error {
 	}
 
 	if c.maxJobs > 0 {
-		if err := drainMaxJobs(c, fc, pwd, f, issues, edges); err != nil {
+		if err := drainMaxJobs(c, fc, pwd, f, s, issues, edges); err != nil {
 			return err
 		}
 	} else if hasEdges || batchHasTouchOverlap(c, fc, issues) {
@@ -1557,14 +1233,14 @@ func run(noBuild bool) error {
 		} else {
 			fmt.Println("==> declared touches overlap an in-progress issue; dispatching in waves")
 		}
-		if err := dispatchWaves(c, fc, f, issues, edges); err != nil {
+		if err := dispatchWaves(c, fc, f, s, issues, edges); err != nil {
 			return err
 		}
 		printOutcomeReport()
 	} else {
 		// MAX_JOBS = 0, no declared edges: original single-wave fan-out.
 		fmt.Printf("==> %d issue(s); launching up to %d container(s) at a time\n", len(issues), c.maxParallel)
-		fanOut(c, fc, f, issues)
+		fanOut(c, fc, f, s, issues)
 		printOutcomeReport()
 	}
 
@@ -1671,7 +1347,8 @@ func main() {
 			// os.Exit skips defers, so cleanup is called explicitly on every
 			// exit path below rather than deferred.
 			f := newDispatchFactory(c, pwd, r)
-			if err := selectiveListDispatch(c, fc, pwd, f, nums, forceYes, os.Stdin, os.Stdout); err != nil {
+			s := newSettle(c, fc)
+			if err := selectiveListDispatch(c, fc, pwd, f, s, nums, forceYes, os.Stdin, os.Stdout); err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
 				f.Cleanup()
 				os.Exit(1)

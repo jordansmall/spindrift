@@ -11,6 +11,20 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
+// baseConfig returns a config suitable for merge-gate-adjacent tests
+// (preflight, wiring through settle).
+func baseConfig() config {
+	return config{
+		inProgressLabel:   "agent-in-progress",
+		failedLabel:       "agent-failed",
+		completeLabel:     "agent-complete",
+		mergePollInterval: 0,   // no sleep in tests
+		mergePollTimeout:  100, // large enough for multi-poll tests
+		mergeMode:         "immediate",
+		codeForge:         "github",
+	}
+}
+
 // tempLogDir creates a temp dir with a logs/ subdirectory.
 func tempLogDir(t *testing.T) string {
 	t.Helper()

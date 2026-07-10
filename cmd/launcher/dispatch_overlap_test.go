@@ -38,7 +38,8 @@ func TestDispatchWaves_TouchOverlapDeadlocksWithoutRelease(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	err := dispatchWaves(c, fc, f, []issue{
+	s := newSettle(c, fc)
+	err := dispatchWaves(c, fc, f, s, []issue{
 		{number: "10", title: "candidate"},
 	}, map[string][]string{})
 	if err == nil {
@@ -83,7 +84,8 @@ func TestDispatchWaves_TouchOverlapDispatchesAfterColliderCompletes(t *testing.T
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	if err := dispatchWaves(c, fc, f, []issue{
+	s := newSettle(c, fc)
+	if err := dispatchWaves(c, fc, f, s, []issue{
 		{number: "10", title: "candidate"},
 	}, map[string][]string{}); err != nil {
 		t.Fatalf("dispatchWaves: %v", err)
@@ -126,7 +128,8 @@ func TestDispatchWaves_NoTouchesDeclaredDispatchesImmediately(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	if err := dispatchWaves(c, fc, f, []issue{
+	s := newSettle(c, fc)
+	if err := dispatchWaves(c, fc, f, s, []issue{
 		{number: "10", title: "candidate"},
 	}, map[string][]string{}); err != nil {
 		t.Fatalf("dispatchWaves: %v", err)
@@ -168,7 +171,8 @@ func TestDispatchWaves_OverlapV2HoldsOnPRChangedFiles(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	err := dispatchWaves(c, fc, f, []issue{
+	s := newSettle(c, fc)
+	err := dispatchWaves(c, fc, f, s, []issue{
 		{number: "10", title: "candidate"},
 	}, map[string][]string{})
 	if err == nil {
@@ -206,7 +210,8 @@ func TestDispatchWaves_OverlapGateOffDisablesCheck(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	if err := dispatchWaves(c, fc, f, []issue{
+	s := newSettle(c, fc)
+	if err := dispatchWaves(c, fc, f, s, []issue{
 		{number: "10", title: "candidate"},
 	}, map[string][]string{}); err != nil {
 		t.Fatalf("dispatchWaves: %v", err)

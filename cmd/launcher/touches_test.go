@@ -198,6 +198,7 @@ func TestPRTouchesOf_NonGithubForgeReturnsNil(t *testing.T) {
 	c := baseConfig()
 	c.codeForge = "git"
 	fc := forge.NewFake()
+	fc.IsPushOnly = true
 	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
 	fc.SetPRFiles("https://github.com/owner/repo/pull/20", []string{"lib/env-schema.nix"})
 

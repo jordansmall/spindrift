@@ -20,11 +20,12 @@ func touchesOf(fc forge.Client, num string) ([]string, error) {
 
 // prTouchesOf returns the changed-file paths of num's open PR, augmenting its
 // declared touch-set with files the issue itself never declared in
-// ## Touches. Restricted to CODE_FORGE=github, the only forge with a PR to
-// inspect; off github, or when num has no open PR yet, or the fetch fails, it
-// returns nil with no error — v1's declared-only behavior applies unchanged.
+// ## Touches. Restricted to a non-push-only Code Forge, the only kind with a
+// PR to inspect; off github, or when num has no open PR yet, or the fetch
+// fails, it returns nil with no error — v1's declared-only behavior applies
+// unchanged.
 func prTouchesOf(c config, fc forge.Client, num string) []string {
-	if c.codeForge != "github" {
+	if fc.PushOnly() {
 		return nil
 	}
 	pr, found, err := fc.OpenPRForBranch(c.branchPrefix + num)
