@@ -162,6 +162,13 @@ leaving them in the PR body — never the dispatch label, so a human still
 promotes each one before an agent can pick it up. Off (empty) by default. See
 [Filer](docs/reference.md#filer).
 
+Set `AUTO_FORMAT=1` (or `settings.promptSkillIteration.autoFormat = true` in
+your Consumer flake) to have the implementor auto-format changed files before
+each commit. The formatter is detected automatically: `nix fmt` when the target
+flake defines one, otherwise a `format`/`fmt` script in `package.json`,
+`Makefile`, or `justfile`, otherwise the language's standard formatter. Runs
+only on changed files; skips silently when none is found. Off by default.
+
 An issue may also declare a `## Touches` section listing the paths it expects
 to change; dispatch defers it while its touch-set overlaps an already
 in-progress issue's, retrying once the collider completes — see [Declared
