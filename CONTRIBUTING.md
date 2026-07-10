@@ -82,7 +82,11 @@ Two invariants worth calling out:
 
 - **The outcome line is a contract.** A Box's final `SPINDRIFT_OUTCOME issue=…`
   line on stdout is parsed by the launcher (`cmd/launcher/internal/outcome`).
-  Keep it well-formed; that package is the authoritative grammar.
+  Keep it well-formed; that package is the authoritative grammar. The
+  contract is harness-owned: `lib/mkHarness.nix` appends it to any baked
+  `prompt` that omits it, so a Consumer can't accidentally ship an agent that
+  never emits the line (a runtime `SPINDRIFT_PROMPT_DIR` override is the one
+  path this doesn't cover — see `docs/reference.md`).
 - **Do task work in a dedicated git worktree**, one per task/branch — don't edit
   files on whatever branch happens to be checked out (see [`CLAUDE.md`](CLAUDE.md)).
 
