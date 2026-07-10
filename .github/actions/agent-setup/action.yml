@@ -1,0 +1,89 @@
+name: Agent setup
+description: >-
+  Shared dispatch/recover prologue: checkout, claim the issue, install Nix,
+  build the agent image, and export the env values every spindrift subcommand
+  reads (bot identity included). Both agent-dispatch.yml and
+  agent-recover.yml call this so the claim/install/build steps and the git
+  bot identity literal exist exactly once.
+
+inputs:
+  gh-token:
+    description: Token for gh CLI calls (claim step and exported GH_TOKEN)
+    required: true
+  claude-oauth-token:
+    description: Exported as CLAUDE_CODE_OAUTH_TOKEN for the spindrift box
+    required: true
+  issue-number:
+    description: Issue number to claim
+    required: true
+  repo:
+    description: owner/repo slug, exported as REPO_SLUG
+    required: true
+  base-branch:
+    description: Default branch, exported as BASE_BRANCH
+    required: true
+  claim-add-label:
+    description: Label to add when claiming the issue
+    required: true
+  claim-remove-labels:
+    description: Space-separated labels to remove when claiming the issue
+    required: true
+  git-user-name:
+    description: >-
+      Bot git user.name. Empty falls back to the default baked into this
+      action's "Export shared env" step, the sole definition of that literal.
+    required: false
+    default: ""
+  git-user-email:
+    description: >-
+      Bot git user.email. Empty falls back to the default baked into this
+      action's "Export shared env" step, the sole definition of that literal.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # No checkout step here: the calling workflow must check out the repo
+    # before this `uses: ./.github/actions/agent-setup` step runs, since
+    # GitHub resolves and loads this action.yml from the checked-out tree.
+
+    # $GITHUB_ENV persists across the rest of the job, including steps back
+    # in the calling workflow, so this is the single place these values (and
+    # the bot identity literal) are defined. Exported before the build step
+    # below: spindrift's build() reads RUNTIME directly and fails if it's
+    # unset.
+    - name: Export shared env
+      shell: bash
+      run: |
+        echo "RUNTIME=docker" >> "$GITHUB_ENV"
+        echo "REPO_SLUG=${{ inputs.repo }}" >> "$GITHUB_ENV"
+        echo "BASE_BRANCH=${{ inputs.base-branch }}" >> "$GITHUB_ENV"
+        echo "GH_TOKEN=${{ inputs.gh-token }}" >> "$GITHUB_ENV"
+        echo "CLAUDE_CODE_OAUTH_TOKEN=${{ inputs.claude-oauth-token }}" >> "$GITHUB_ENV"
+        echo "GIT_USER_NAME=${{ inputs.git-user-name || 'spindrift-agent' }}" >> "$GITHUB_ENV"
+        echo "GIT_USER_EMAIL=${{ inputs.git-user-email || 'spindrift-agent@users.noreply.github.com' }}" >> "$GITHUB_ENV"
+
+    # Claim up front, before nix install and the ~2m40s build, so ownership
+    # is atomic and visible the instant the runner has the repo. Targets
+    # only the triggering issue: never scans or strips labels across other
+    # issues.
+    - name: Claim the issue
+      shell: bash
+      run: |
+        remove_args=()
+        for label in ${{ inputs.claim-remove-labels }}; do
+          remove_args+=(--remove-label "$label")
+        done
+        gh issue edit "${{ inputs.issue-number }}" \
+          --repo "${{ inputs.repo }}" \
+          --add-label "${{ inputs.claim-add-label }}" \
+          "${remove_args[@]}"
+
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@v16
+
+    # ~2m40s cold on a GitHub runner (nixpkgs closure is substituted, not compiled).
+    - name: Build the agent image
+      shell: bash
+      run: nix run . -- build
