@@ -83,6 +83,18 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// Bare "Overloaded" plain-text marker — exercises the lowest-priority
+		// Overloaded pattern, which is not reached by overloaded_error or
+		// "529 Overloaded" test strings.
+		name: "Overloaded_PlainText",
+		lines: []string{
+			`Overloaded`,
+		},
+		wantClass:   outcome.Transient,
+		wantReason:  outcome.Overloaded,
+		wantResetAt: nil,
+	},
+	{
 		name: "Network_ConnectionRefused",
 		lines: []string{
 			`dial tcp: connection refused`,
@@ -131,7 +143,7 @@ var classifyTests = []struct {
 	{
 		name: "Network_NoSuchHost",
 		lines: []string{
-			`dial tcp: lookup api.anthropic.com: no such host`,
+			`lookup api.anthropic.com on 8.8.8.8:53: no such host`,
 		},
 		wantClass:   outcome.Transient,
 		wantReason:  outcome.Network,
