@@ -59,7 +59,12 @@ let
     _key: entry:
     mkOption {
       type =
-        if builtins.isInt (entry.default or "") then types.nullOr types.int else types.nullOr types.str;
+        if builtins.isInt (entry.default or "") then
+          types.nullOr types.int
+        else if builtins.isBool (entry.default or "") then
+          types.nullOr types.bool
+        else
+          types.nullOr types.str;
       default = null;
       description = entry.doc;
     };

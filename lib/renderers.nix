@@ -80,10 +80,7 @@ rec {
       flagKind = e: if builtins.isInt (e.default or null) then "int" else "string";
       flagDflt =
         e:
-        if e ? default then
-          (if builtins.isInt e.default then builtins.toString e.default else e.default)
-        else
-          "";
+        if e ? default then builtins.toString e.default else "";
       flagAlias = e: if e ? alias then ", alias: \"${e.alias}\"" else "";
       # Every non-secret knob must declare a group so the full reference groups
       # it under a heading; a missing group is a schema error, not a silent "".
