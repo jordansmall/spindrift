@@ -84,6 +84,8 @@ in
         "BAKED_PREFETCH"
         "RUNTIME"
         "DRIVER"
+        "DRIVER_SKILLS_DIR"
+        "DRIVER_SESSION_CACHE_DIR"
         "IMAGE"
         "BOX_ENV_VARS"
       ];

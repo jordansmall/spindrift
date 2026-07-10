@@ -27,6 +27,39 @@ func TestConfigHasNoModelFields(t *testing.T) {
 	}
 }
 
+// TestRunnerConfig_DriverMountTargets verifies DRIVER_SKILLS_DIR and
+// DRIVER_SESSION_CACHE_DIR (nix-baked from the Driver declaration, ADR 0009)
+// reach runner.Config, so the OCI/bwrap adapters mount over the Driver's
+// declared paths instead of a hardcoded ".claude" literal (issue #448).
+func TestRunnerConfig_DriverMountTargets(t *testing.T) {
+	t.Setenv("DRIVER_SKILLS_DIR", "/home/agent/.claude/skills")
+	t.Setenv("DRIVER_SESSION_CACHE_DIR", "/home/agent/.claude/projects")
+
+	c := loadConfig()
+	rc := runnerConfig(c)
+
+	if rc.DriverSkillsDir != "/home/agent/.claude/skills" {
+		t.Errorf("DriverSkillsDir = %q, want /home/agent/.claude/skills", rc.DriverSkillsDir)
+	}
+	if rc.DriverSessionCacheDir != "/home/agent/.claude/projects" {
+		t.Errorf("DriverSessionCacheDir = %q, want /home/agent/.claude/projects", rc.DriverSessionCacheDir)
+	}
+}
+
+// TestRunnerConfig_DriverSessionCacheDirUnset verifies that an unset
+// DRIVER_SESSION_CACHE_DIR (a Driver declaring no session-state dir) reaches
+// runner.Config as empty, not a fallback literal.
+func TestRunnerConfig_DriverSessionCacheDirUnset(t *testing.T) {
+	t.Setenv("DRIVER_SESSION_CACHE_DIR", "")
+
+	c := loadConfig()
+	rc := runnerConfig(c)
+
+	if rc.DriverSessionCacheDir != "" {
+		t.Errorf("DriverSessionCacheDir = %q, want empty when DRIVER_SESSION_CACHE_DIR is unset", rc.DriverSessionCacheDir)
+	}
+}
+
 // --- newIssueTracker tests ---
 
 // TestNewIssueTracker_Jira verifies that ISSUE_TRACKER=jira selects a tracker
