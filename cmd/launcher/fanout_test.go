@@ -113,7 +113,7 @@ func TestFanOut_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.T) {
 	c.maxParallel = 1
 	c.label = "agent-trigger"
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
 
@@ -167,7 +167,7 @@ func TestFanOut_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	c.mergePollInterval = 0
 	c.mergePollTimeout = 100
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
@@ -206,7 +206,7 @@ func TestFanOut_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	c.codeForge = "git"
 	c.mergeMode = "immediate"
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.IsPushOnly = true
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
 	// The real git Code Forge has no PR concept — PRState always errors. A

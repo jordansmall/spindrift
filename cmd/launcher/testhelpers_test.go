@@ -8,8 +8,22 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 )
+
+// testDispatchLabels is the conventional lifecycle-label set, mirrored from
+// lib/env-schema.nix and pinned against the agent workflows by
+// nix/checks/dispatch-labels.nix (issue #460). forge.NewFake takes labels as
+// an explicit constructor argument rather than baking in a copy, so tests in
+// this package that exercise ListIssues(state) or TransitionState share this
+// one value instead of each restating the four label strings.
+var testDispatchLabels = forge.DispatchLabels{
+	Dispatchable: "ready-for-agent",
+	InProgress:   "agent-in-progress",
+	Complete:     "agent-complete",
+	Failed:       "agent-failed",
+}
 
 // baseConfig returns a config suitable for merge-gate-adjacent tests
 // (preflight, wiring through settle).

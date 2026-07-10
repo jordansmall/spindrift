@@ -331,7 +331,7 @@ func TestJiraClient_TransitionState_MappedStatus(t *testing.T) {
 		StatusMapping: map[forge.DispatchState]string{
 			forge.InProgress: "In Progress",
 		},
-		Labels: forge.DefaultDispatchLabels(),
+		Labels: testLabels,
 	})
 
 	if err := jc.TransitionState("PROJ-1", forge.Dispatchable, forge.InProgress); err != nil {
@@ -371,7 +371,7 @@ func TestJiraClient_TransitionState_UnmappedFallsBackToLabel(t *testing.T) {
 		BaseURL:       srv.URL,
 		Token:         "tok",
 		StatusMapping: map[forge.DispatchState]string{}, // no mapping for InProgress
-		Labels:        forge.DefaultDispatchLabels(),
+		Labels:        testLabels,
 	})
 
 	if err := jc.TransitionState("PROJ-2", forge.Dispatchable, forge.InProgress); err != nil {
@@ -409,7 +409,7 @@ func TestJiraClient_TransitionState_BlockedFallsBackToLabel(t *testing.T) {
 		StatusMapping: map[forge.DispatchState]string{
 			forge.InProgress: "In Progress",
 		},
-		Labels: forge.DefaultDispatchLabels(),
+		Labels: testLabels,
 	})
 
 	if err := jc.TransitionState("PROJ-9", forge.Dispatchable, forge.InProgress); err != nil {
@@ -444,7 +444,7 @@ func TestJiraClient_TransitionState_InfraErrorPropagates(t *testing.T) {
 		StatusMapping: map[forge.DispatchState]string{
 			forge.InProgress: "In Progress",
 		},
-		Labels: forge.DefaultDispatchLabels(),
+		Labels: testLabels,
 	})
 
 	if err := jc.TransitionState("PROJ-5", forge.Dispatchable, forge.InProgress); err == nil {
@@ -477,7 +477,7 @@ func TestJiraClient_ListIssues_JQLAndOrder(t *testing.T) {
 		StatusMapping: map[forge.DispatchState]string{
 			forge.Dispatchable: "To Do",
 		},
-		Labels: forge.DefaultDispatchLabels(),
+		Labels: testLabels,
 	})
 
 	issues, err := jc.ListIssues(forge.Dispatchable)
@@ -513,7 +513,7 @@ func TestJiraClient_ListIssues_CapsMaxResults(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: forge.DefaultDispatchLabels()})
+	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: testLabels})
 	if _, err := jc.ListIssues(forge.Dispatchable); err != nil {
 		t.Fatalf("ListIssues: %v", err)
 	}
@@ -536,7 +536,7 @@ func TestJiraClient_ListIssues_ExcludesDoneCategory(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: forge.DefaultDispatchLabels()})
+	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: testLabels})
 	if _, err := jc.ListIssues(forge.Dispatchable); err != nil {
 		t.Fatalf("ListIssues: %v", err)
 	}
@@ -561,7 +561,7 @@ func TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly(t *testing.T) {
 		Token:         "tok",
 		ProjectKey:    "PROJ",
 		StatusMapping: map[forge.DispatchState]string{},
-		Labels:        forge.DefaultDispatchLabels(),
+		Labels:        testLabels,
 	})
 
 	if _, err := jc.ListIssues(forge.InProgress); err != nil {

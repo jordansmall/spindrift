@@ -251,7 +251,7 @@ func TestDispatchWaves_FailsDependentWhenBlockerFails(t *testing.T) {
 	c.depsPollSecs = 1
 	c.depsWaitSecs = 2
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
 

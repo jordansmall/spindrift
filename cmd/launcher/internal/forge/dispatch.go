@@ -20,16 +20,6 @@ type DispatchLabels struct {
 	Failed       string // default "agent-failed"
 }
 
-// DefaultDispatchLabels returns the conventional GitHub label names.
-func DefaultDispatchLabels() DispatchLabels {
-	return DispatchLabels{
-		Dispatchable: "ready-for-agent",
-		InProgress:   "agent-in-progress",
-		Complete:     "agent-complete",
-		Failed:       "agent-failed",
-	}
-}
-
 // Label returns the native label string for state s.
 func (d DispatchLabels) Label(s DispatchState) string {
 	switch s {

@@ -21,7 +21,7 @@ func TestDispatchWaves_TouchOverlapDeadlocksWithoutRelease(t *testing.T) {
 	c.depsPollSecs = 1
 	c.depsWaitSecs = 1
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{
 		Number: "10",
 		Body:   "## Touches\n- lib/env-schema.nix",
@@ -62,7 +62,7 @@ func TestDispatchWaves_TouchOverlapDispatchesAfterColliderCompletes(t *testing.T
 	c.depsPollSecs = 1
 	c.depsWaitSecs = 5
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{
 		Number: "10",
 		Body:   "## Touches\n- lib/env-schema.nix",
@@ -152,7 +152,7 @@ func TestDispatchWaves_OverlapV2HoldsOnPRChangedFiles(t *testing.T) {
 	c.depsPollSecs = 1
 	c.depsWaitSecs = 1
 
-	fc := forge.NewFake()
+	fc := forge.NewFake(dispatchLabels(c))
 	fc.BranchPrefix = c.branchPrefix
 	fc.SetIssue(forge.Issue{
 		Number: "10",

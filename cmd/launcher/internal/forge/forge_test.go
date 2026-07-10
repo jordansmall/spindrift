@@ -43,7 +43,7 @@ func TestFake_CheckStateScript(t *testing.T) {
 // TestFake_TransitionState verifies that TransitionState records calls and
 // swaps the from-state label for the to-state label.
 func TestFake_TransitionState(t *testing.T) {
-	f := forge.NewFake()
+	f := forge.NewFake(testLabels)
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
 	if err := f.TransitionState("42", forge.Dispatchable, forge.InProgress); err != nil {

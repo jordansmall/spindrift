@@ -16,7 +16,7 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.MaxRebaseAttempts = 0
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	// CI is green but merge fails.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -47,7 +47,7 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.MergeGuardPaths = ".github/**,**/CLAUDE.md"
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(testPR, []string{"src/main.go", ".github/workflows/ci.yml"})
@@ -136,7 +136,7 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.MergeGuardPaths = ".github/**"
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
@@ -182,7 +182,7 @@ func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := baseConfig()
 			c.MergeMode = tc.mergeMode
-			fc := forge.NewFake()
+			fc := forge.NewFake(testDispatchLabels)
 			fc.IsPushOnly = true
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 			branch := "agent/issue-1"
@@ -217,7 +217,7 @@ func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 func TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	fc.IsPushOnly = true
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErr = errors.New("remote rejected: non-fast-forward")
