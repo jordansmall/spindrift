@@ -1320,8 +1320,12 @@ in
       ''
         mkdir img && tar -xf ${extraClosuresHarness.image} -C img
         found=""
+        # grep must drain tar's stream (no -q): stdenv runs with pipefail, and
+        # grep -q exits on first match, SIGPIPE-ing tar -- whether the pipeline
+        # then reports 141 or 0 is a pipe-buffer race, so a match may read as
+        # a miss (broke main at 6ec6273).
         for layer in $(jq -r '.[0].Layers[]' img/manifest.json); do
-          if tar -tf "img/$layer" | grep -q 'nix/store/[^/]*-cowsay-'; then
+          if tar -tf "img/$layer" | grep 'nix/store/[^/]*-cowsay-' >/dev/null; then
             found=1
             break
           fi
@@ -1347,7 +1351,8 @@ in
           echo "nix/var/nix/db/db.sqlite not in the image's top (customisation) layer" >&2
           exit 1
         }
-        tar -xOf "img/$layer" "$member" | grep -qa 'cowsay-' || {
+        # no -q: same pipefail/SIGPIPE race as extra-closure-in-image-contents
+        tar -xOf "img/$layer" "$member" | grep -a 'cowsay-' >/dev/null || {
           echo "extraClosures (cowsay) not found in the registered store DB" >&2
           exit 1
         }
