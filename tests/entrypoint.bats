@@ -7,24 +7,10 @@ load helper
 setup() {
   setup_fakes
   setup_bare_repo
-  export REPO_SLUG="owner/repo"
-  export GH_TOKEN="fake-token"
-  export GIT_USER_NAME="Bot"
-  export GIT_USER_EMAIL="bot@example.com"
-  export BASE_BRANCH="main"
-  export BRANCH_PREFIX="agent/issue-"
-  # These are baked by the nix preamble at image-build time (env-schema.nix defaults);
-  # set explicitly here so the raw script runs correctly in the bats suite.
+  set_box_env
+  # Pinned away from the schema default (claude-sonnet-5) so the MODEL-flag
+  # assertions below stay stable regardless of what the schema defaults to.
   export MODEL="claude-opus-4-8"
-  export SCOUT_MODEL=""
-  export REVIEW_MODEL=""
-  export FILER_MODEL=""
-  export AUTO_FORMAT=""
-  export AUTO_LINT=""
-  export IN_PROGRESS_LABEL="agent-in-progress"
-  export COMPLETE_LABEL="agent-complete"
-  export DEV_SHELL_PROBE_TIMEOUT=300
-  export DEV_SHELL_NAME=default
   export ISSUE_NUMBER="7"
   export ISSUE_TITLE="Do the thing"
   export WORK_DIR="$BATS_TEST_TMPDIR/work"
