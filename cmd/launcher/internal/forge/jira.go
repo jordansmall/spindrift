@@ -71,6 +71,25 @@ func ParseStatusMapping(s string) (map[DispatchState]string, error) {
 	return out, nil
 }
 
+// ValidateJiraEnv checks the JIRA_* config knobs required when
+// ISSUE_TRACKER=jira, guarding the same fields JiraConfig carries. Returns a
+// descriptive error for the first unmet requirement.
+func ValidateJiraEnv(baseURL, projectKey, token, statusMapping string) error {
+	if baseURL == "" {
+		return fmt.Errorf("set JIRA_BASE_URL (Jira site base URL) when ISSUE_TRACKER=jira")
+	}
+	if projectKey == "" {
+		return fmt.Errorf("set JIRA_PROJECT_KEY when ISSUE_TRACKER=jira")
+	}
+	if token == "" {
+		return fmt.Errorf("set JIRA_TOKEN when ISSUE_TRACKER=jira")
+	}
+	if _, err := ParseStatusMapping(statusMapping); err != nil {
+		return err
+	}
+	return nil
+}
+
 // jiraClient is the Jira REST adapter. It satisfies IssueTracker only.
 type jiraClient struct {
 	cfg JiraConfig
