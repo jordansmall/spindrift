@@ -261,7 +261,7 @@ in
   # baked-toolchain guards above (issue #486).
   caveman-baked-in-dogfood =
     pkgs.runCommand "caveman-baked-in-dogfood" { } ''
-      test -f ${harness.skillsDir}/caveman.md
+      test -s ${harness.skillsDir}/caveman.md
       touch $out
     '';
 
