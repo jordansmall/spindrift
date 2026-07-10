@@ -64,6 +64,24 @@
   # run inside the unprivileged throwaway container. On by default — this is the
   # nix-centric baseline every box gets; set to false for a lean, nix-free image.
   nixInBox ? true,
+  # Self-test mode (ADR 0018, issue #469): makes the /nix/store DIRECTORY
+  # (not its existing contents, which stay root-owned and immutable) writable
+  # by the agent uid in the built OCI image, so a `nix flake check` run inside
+  # the Box can substitute/build new store paths instead of hitting EACCES.
+  # New paths land in the container's ephemeral copy-on-write layer and die
+  # with the Box — the image and any shared volumes are never mutated. Off by
+  # default: this trades hermeticity for in-box feedback, so the entrypoint
+  # prints a loud warning when it is enabled. OCI-runner only; the bwrap
+  # runner keeps its read-only store bind.
+  nixStoreWritable ? false,
+  # Extra derivations whose closures are baked into the image contents and,
+  # when nixInBox is on, registered in the store DB alongside the runtime
+  # closure — so in-box nix sees them as already present instead of
+  # cold-substituting the world on every Box. A function of the (Linux) pkgs,
+  # like `packages`, so Consumer-supplied derivations stay correct on a
+  # darwin host. A generic Consumer knob, not a spindrift special case
+  # (issue #469).
+  extraClosures ? (_pkgs: [ ]),
   # Short git revision injected into the binary via ldflags for `spindrift --version`.
   # Callers pass self.shortRev or self.rev; defaults to "unknown" for impure builds.
   revision ? "unknown",
@@ -369,13 +387,18 @@ let
     agent:x:1000:
   '';
 
+  # Evaluated once so the image's contents, closure registration, and Env
+  # marker below all see the identical set of extra derivations.
+  extraClosurePaths = extraClosures pkgs;
+
   image = pkgs.dockerTools.buildLayeredImage {
     name = "spindrift";
     tag = "latest";
     contents = [
       agentEnv
       agentFiles
-    ];
+    ]
+    ++ extraClosurePaths;
     extraCommands = ''
       mkdir -p tmp home/agent work etc
       chmod 1777 tmp
@@ -399,7 +422,8 @@ let
           rootPaths = [
             agentEnv
             agentFiles
-          ];
+          ]
+          ++ extraClosurePaths;
         }
       }/registration
     '';
@@ -412,6 +436,12 @@ let
     ''
     + lib.optionalString nixInBox ''
       chown -R 1000:1000 nix/var
+    ''
+    # Non-recursive: only the store directory itself becomes agent-writable,
+    # so existing baked paths stay root-owned and immutable (self-test mode,
+    # ADR 0018).
+    + lib.optionalString nixStoreWritable ''
+      chown 1000:1000 nix/store
     '';
     config = {
       Entrypoint = [ "/bin/bash" ];
@@ -424,6 +454,7 @@ let
         "GIT_SSL_CAINFO=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         "PKG_CONFIG_PATH=/lib/pkgconfig"
         "PREFETCH=${prefetch}"
+        "NIX_STORE_WRITABLE=${lib.boolToString nixStoreWritable}"
       ];
     };
   };

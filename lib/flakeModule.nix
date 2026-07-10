@@ -172,6 +172,31 @@ in
           nix-free image.
         '';
       };
+
+      nixStoreWritable = mkOption {
+        type = types.nullOr types.bool;
+        default = null;
+        description = ''
+          Self-test mode (ADR 0018): make the /nix/store directory writable by
+          the agent uid in the built OCI image, so `nix flake check` can
+          substitute/build new store paths inside the Box instead of hitting
+          EACCES. New paths land only in the container's ephemeral
+          copy-on-write layer. Defaults to false; the entrypoint prints a loud
+          warning when enabled. OCI-runner only — the bwrap runner keeps its
+          read-only store bind.
+        '';
+      };
+
+      extraClosures = mkOption {
+        type = types.nullOr (types.functionTo (types.listOf types.package));
+        default = null;
+        description = ''
+          Extra derivations, as a function of the (Linux) pkgs, whose closures
+          are baked into the image contents and registered in the store DB
+          alongside the runtime closure — so in-box nix sees them as already
+          present instead of cold-substituting the world on every Box.
+        '';
+      };
     };
   };
 
@@ -205,7 +230,9 @@ in
       // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; }
       // lib.optionalAttrs (cfg.runtime != null) { inherit (cfg) runtime; }
       // lib.optionalAttrs (cfg.driver != null) { inherit (cfg) driver; }
-      // lib.optionalAttrs (cfg.nixInBox != null) { inherit (cfg) nixInBox; };
+      // lib.optionalAttrs (cfg.nixInBox != null) { inherit (cfg) nixInBox; }
+      // lib.optionalAttrs (cfg.nixStoreWritable != null) { inherit (cfg) nixStoreWritable; }
+      // lib.optionalAttrs (cfg.extraClosures != null) { inherit (cfg) extraClosures; };
       harness = mkHarness args;
       # nixfmt from the consumer's locked nixpkgs input — same pin the
       # nix-fmt gate uses — so `nix fmt` fixes what the check catches.
