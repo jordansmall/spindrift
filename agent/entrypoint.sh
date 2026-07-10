@@ -224,13 +224,14 @@ _subst() {
     IN_PROGRESS_LABEL="${IN_PROGRESS_LABEL:-}" \
     COMPLETE_LABEL="${COMPLETE_LABEL:-}" \
     SKILL_PREAMBLE="${SKILL_PREAMBLE:-}" \
+    CAVEMAN_STEP="${CAVEMAN_STEP:-}" \
     FILE_ISSUES_STEP="${FILE_ISSUES_STEP:-}" \
     AUTO_FORMAT_STEP="${AUTO_FORMAT_STEP:-}" \
     AUTO_LINT_STEP="${AUTO_LINT_STEP:-}" \
     CI_FAILURE_STEP="${CI_FAILURE_STEP:-}" \
     SKILLS_FOUND="${SKILLS_FOUND:-}" \
     CI_FAILURE_SUMMARY="${CI_FAILURE_SUMMARY:-}" \
-    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE $FILE_ISSUES_STEP $AUTO_FORMAT_STEP $AUTO_LINT_STEP $CI_FAILURE_STEP $SKILLS_FOUND $CI_FAILURE_SUMMARY' \
+    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE $CAVEMAN_STEP $FILE_ISSUES_STEP $AUTO_FORMAT_STEP $AUTO_LINT_STEP $CI_FAILURE_STEP $SKILLS_FOUND $CI_FAILURE_SUMMARY' \
     <"$1"
 }
 
@@ -263,6 +264,17 @@ fi
 SKILL_PREAMBLE=""
 if [ -n "$SKILLS_FOUND" ]; then
   SKILL_PREAMBLE="$(_subst "${PROMPTS_DIR}/fragments/skill-preamble.md")"$'\n\n'
+fi
+
+# CAVEMAN_STEP is substituted into the COMMS section (shared by both agent
+# passes, issue #455) only when the caveman skill is actually baked at
+# DRIVER_SKILLS_DIR/caveman.md -- the same conditional-residue mechanism as
+# SKILL_PREAMBLE above: a consumer that never bakes the skill carries no
+# trace of it, so the rendered prompt never mentions a skill the agent can't
+# invoke (issue #487).
+CAVEMAN_STEP=""
+if [ -f "${DRIVER_SKILLS_DIR}/caveman.md" ]; then
+  CAVEMAN_STEP="$(_subst "${PROMPTS_DIR}/fragments/caveman-default.md")"$'\n\n'
 fi
 
 # The FILE ISSUES step is substituted into the issue prompt only when the
