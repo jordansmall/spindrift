@@ -1,6 +1,10 @@
 package runner
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 // TestBuildMountSpecs_PromptDirMounted verifies that a valid PromptDir
 // produces a MountSpec targeting /agent/prompts, read-only, with the
@@ -110,6 +114,75 @@ func TestBuildMountSpecs_SkillsDirUnset_NoMount(t *testing.T) {
 	for _, s := range specs {
 		if s.Target == "/home/agent/.claude/skills" {
 			t.Errorf("unexpected skills-dir spec when SkillsDir is empty: %+v", specs)
+		}
+	}
+}
+
+// TestAdaptersRenderOnly_NoDuplicatedMountDecisions is the issue's grep pin:
+// the prompt-dir/skills-dir mount gates and their operator messages must
+// live only in buildMountSpecs, not be duplicated in either adapter file.
+// The driver-cache gate has no unique string to pin (its rationale comment
+// legitimately differs per adapter — OCI has no baked-skills fallback to
+// explain, bwrap does), so this pins the two mounts with operator messages.
+func TestAdaptersRenderOnly_NoDuplicatedMountDecisions(t *testing.T) {
+	markers := []string{
+		"SPINDRIFT_PROMPT_DIR set",
+		"SPINDRIFT_SKILLS_DIR set",
+	}
+	for _, path := range []string{"oci.go", "bwrap.go"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		for _, marker := range markers {
+			if strings.Contains(string(data), marker) {
+				t.Errorf("%s contains mount-decision marker %q; operator messages must come from the shared buildMountSpecs, not be duplicated in the adapter", path, marker)
+			}
+		}
+	}
+}
+
+// TestMountSpecs_RenderedIdenticallyAcrossBackends is the issue's demoable
+// criterion: the same mount config reaches both backends by construction.
+// Add a spec, both adapters emit it correctly rendered; remove it, both
+// drop it — because both render the same buildMountSpecs list.
+func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
+	promptDir := t.TempDir()
+	skillsDir := t.TempDir()
+	cacheDir := t.TempDir()
+
+	oci := &ociAdapter{
+		cli:                   "podman",
+		image:                 "spindrift:test",
+		promptDir:             promptDir,
+		skillsDir:             skillsDir,
+		driverSkillsDir:       "/home/agent/.claude/skills",
+		driverSessionCacheDir: "/home/agent/.claude/projects",
+	}
+	bwrap := &bwrapAdapter{
+		agentFiles:            t.TempDir(),
+		agentEnv:              "/fake/env",
+		bakedPrefetch:         "echo ok",
+		promptDir:             promptDir,
+		skillsDir:             skillsDir,
+		driverSkillsDir:       "/home/agent/.claude/skills",
+		driverSessionCacheDir: "/home/agent/.claude/projects",
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: cacheDir}
+
+	ociArgs := strings.Join(oci.buildRunArgs(box), " ")
+	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+
+	for _, mount := range []struct{ source, target string }{
+		{promptDir, "/agent/prompts"},
+		{skillsDir, "/home/agent/.claude/skills"},
+		{cacheDir, "/home/agent/.claude/projects"},
+	} {
+		if !strings.Contains(ociArgs, mount.source+":"+mount.target) {
+			t.Errorf("OCI missing mount %s -> %s in args: %s", mount.source, mount.target, ociArgs)
+		}
+		if !strings.Contains(bwrapArgs, mount.source+" "+mount.target) {
+			t.Errorf("bwrap missing mount %s -> %s in args: %s", mount.source, mount.target, bwrapArgs)
 		}
 	}
 }
