@@ -6,6 +6,10 @@
   revision ? "unknown",
 }:
 let
+  # The dogfood's tuned leaf values, shared with flake.nix's `spindrift`
+  # module config so the two wiring paths below can never drift (issue #459).
+  dogfoodDefaults = import ./dogfood-defaults.nix;
+
   # The launchers pin the real `gh` via runtimeInputs, which would shadow
   # a PATH-injected fake; so the bats-driven harnesses below overlay `gh`
   # with the recording fake, keeping the suite offline. podman/docker stay
@@ -36,18 +40,7 @@ let
   # same revision as the dogfood module (passed in from flake.nix).
   harness = import ../lib/mkHarness.nix {
     inherit nixpkgs system revision;
-    prefetch = "go mod download || true";
-    packages = p: [
-      p.go
-      p.nil
-      p.bats
-      p.shellcheck
-    ];
-    defaults = {
-      mergeMode = "immediate";
-      autoFormat = true;
-      autoLint = true;
-    };
+    inherit (dogfoodDefaults) prefetch packages defaults;
   };
 
   # The template's config as a direct call with revision = "unknown".

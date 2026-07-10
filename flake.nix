@@ -49,6 +49,7 @@
         }:
         let
           revision = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
+          dogfoodDefaults = import ./nix/dogfood-defaults.nix;
           fixtures = import ./nix/fixtures.nix {
             inherit
               pkgs
@@ -60,18 +61,14 @@
           };
         in
         {
-          # The dogfood's real packages/apps flow through the flake-parts shim.
+          # The dogfood's real packages/apps flow through the flake-parts shim,
+          # fed from the same leaf values as fixtures.nix's direct mirror
+          # (nix/dogfood-defaults.nix, issue #459).
           spindrift = {
-            prefetch = "go mod download || true";
-            packages = p: [
-              p.go
-              p.nil
-              p.bats
-              p.shellcheck
-            ];
-            settings.branches.mergeMode = "immediate";
-            settings.promptSkillIteration.autoFormat = true;
-            settings.promptSkillIteration.autoLint = true;
+            inherit (dogfoodDefaults) prefetch packages;
+            settings.branches.mergeMode = dogfoodDefaults.defaults.mergeMode;
+            settings.promptSkillIteration.autoFormat = dogfoodDefaults.defaults.autoFormat;
+            settings.promptSkillIteration.autoLint = dogfoodDefaults.defaults.autoLint;
           };
 
           checks = import ./nix/checks {
