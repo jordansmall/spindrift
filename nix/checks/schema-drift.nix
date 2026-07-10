@@ -202,6 +202,31 @@ in
       "templates/default/flake.nix settings example is missing knobs: ${concatStringsSep ", " missingKnobs}";
     pkgs.runCommand "template-settings-example" { } "touch $out";
 
+  # cmd/launcher/flags.go's groupOrder must list the same groups, in the same
+  # order, as lib/renderers.nix groupOrder. Go stays hand-written (issue #105:
+  # generation was rejected) — this pins the copy instead of replacing it.
+  launcher-grouporder =
+    let
+      inherit (pkgs.lib) concatStringsSep assertMsg;
+      flagsSrc = builtins.readFile ../../cmd/launcher/flags.go;
+      markerParts = builtins.split "var groupOrder = " flagsSrc;
+      afterMarker =
+        if builtins.length markerParts >= 3 then
+          builtins.elemAt markerParts 2
+        else
+          throw "cmd/launcher/flags.go: `var groupOrder = ` declaration not found";
+      body = builtins.elemAt (builtins.split "\n}\n" afterMarker) 0 + "\n";
+      entryMatches = builtins.split ''"([^"]*)",?\n'' body;
+      goGroupOrder = builtins.filter builtins.isString (
+        builtins.concatMap (x: if builtins.isList x then x else [ ]) entryMatches
+      );
+    in
+    assert assertMsg (goGroupOrder == renderers.groupOrder) ''
+      cmd/launcher/flags.go groupOrder is out of sync with lib/renderers.nix groupOrder.
+        got:  [${concatStringsSep ", " goGroupOrder}]
+        want: [${concatStringsSep ", " renderers.groupOrder}]'';
+    pkgs.runCommand "launcher-grouporder" { } "touch $out";
+
   # The generated man page must render (mandoc parses it) and totally cover the
   # schema: every SH section, every OPTIONS group, every non-secret flag, and
   # every secret env var. A new knob with no man-page presence fails here.
