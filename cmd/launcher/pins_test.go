@@ -171,6 +171,39 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 	}
 }
 
+// TestBootstrapPrologueAppearsOnce pins issue #443's core acceptance
+// criterion: run, the selective `dispatch <nums>` path, and recover used to
+// each carry their own copy of the six-step prologue (config load+validate,
+// runner construction, ready-check, forge client, dispatch factory, settle).
+// newDispatchFactory(c, pwd, r) is a distinctive literal that appears only
+// inside that prologue -- build, preview, and doctor never construct a
+// dispatch.Factory -- so pinning its count to 1 across the whole package
+// (excluding tests) proves the prologue now lives in bootstrap only.
+func TestBootstrapPrologueAppearsOnce(t *testing.T) {
+	const needle = "newDispatchFactory(c, pwd, r)"
+	total := 0
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		total += strings.Count(string(data), needle)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("%q appears %d times, want 1 (bootstrap only) — the six-step prologue must not be duplicated across run/dispatch<nums>/recover", needle, total)
+	}
+}
+
 // TestNoMergeGateOutsideSettlePackage walks all non-test Go source files in
 // cmd/launcher, excluding internal/settle, and fails if any of the merge-gate
 // functions absorbed by issue #442 have crept back into package main —
