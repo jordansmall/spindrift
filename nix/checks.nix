@@ -1160,6 +1160,43 @@ in
     touch $out
   '';
 
+  # The driver-cache mountpoint /home/agent/.claude/projects must be baked
+  # into the image owned by uid 1000, so podman reuses the existing directory
+  # instead of fabricating root-owned parent dirs when the volume is mounted
+  # (issue #447).  fakeRootCommands' chown -R 1000:1000 home/agent covers it;
+  # this check verifies it is actually present and correctly owned in the layer.
+  projects-mountpoint-baked =
+    pkgs.runCommand "projects-mountpoint-baked" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        mkdir img && tar -xf ${nonRustHarness.image} -C img
+        # Walk every layer (not just the top) because agentFiles lands in its
+        # own content-addressed layer, not in the top customisation layer.
+        manifest="$(jq -r '.[0].Layers[]' img/manifest.json)"
+        found_dir=0
+        found_uid=0
+        for layer in $manifest; do
+          if tar --numeric-owner -tvf "img/$layer" 2>/dev/null \
+              | grep -qE '^d.*(home/agent/\.claude/projects/?|home/agent/\.claude/projects)$'; then
+            found_dir=1
+            uid=$(tar --numeric-owner -tvf "img/$layer" \
+              | awk '/home\/agent\/\.claude\/projects\/?$/ { split($2,a,"/"); print a[1]; exit }')
+            if [ "$uid" = "1000" ]; then
+              found_uid=1
+            fi
+            break
+          fi
+        done
+        [ "$found_dir" -eq 1 ] || {
+          echo "home/agent/.claude/projects not found in any image layer" >&2
+          exit 1
+        }
+        [ "$found_uid" -eq 1 ] || {
+          echo "home/agent/.claude/projects is not owned by uid 1000 (got: '$uid')" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # nix/var must be owned by uid 1000 so the non-root agent can lock the
   # SQLite store DB inside the unprivileged container (issue #356).
   # fakeRootCommands records ownership in the tar headers; --numeric-owner
