@@ -38,10 +38,11 @@ git worktree add ../spindrift-<task> -b <branch> origin/main
 
 ## Nix edits
 
-spindrift dogfoods `nixStoreWritable` + `extraClosures` (ADR 0018, issue #470)
-on its own Consumer config, so the in-box Box working a spindrift issue has a
-writable `/nix/store` and the check/dev closure pre-baked. That makes real
-`nix flake check` the primary in-box gate — prefer it over guessing:
+spindrift dogfoods the `nixStoreWritable` + `extraClosures` knobs (ADR 0018,
+issue #469) on its own Consumer config (issue #470), so the Box working a
+spindrift issue has a writable `/nix/store` and the check/dev closure
+pre-baked. That makes real `nix flake check` the primary in-box gate — prefer
+it over guessing:
 
 ```sh
 nix flake check
