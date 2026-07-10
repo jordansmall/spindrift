@@ -16,23 +16,14 @@ let
   inherit (lib) mkOption types;
   mkHarness = import ./mkHarness.nix;
   schema = import ./env-schema.nix;
+  renderers = import ./renderers.nix;
   # flakeOption entries are the Consumer-tunable subset.
   flakeOptionEntries = lib.filterAttrs (_: e: e.flakeOption or false) schema;
 
-  # Map from groupOrder heading (cmd/launcher/flags.go) to the attr name used
-  # under perSystem.spindrift.settings.  Sections with no flakeOption knobs
-  # (Prompt & skill iteration) are silently skipped when rendering.
-  groupToAttr = {
-    "Issue discovery" = "issueDiscovery";
-    "Lifecycle labels" = "lifecycleLabels";
-    "Branches & merge" = "branches";
-    "Concurrency & dependency waves" = "concurrency";
-    "Models" = "models";
-    "Self-healing & retries" = "selfHealing";
-    "Sandbox & resources" = "sandbox";
-    "Repository & identity" = "repository";
-    "Prompt & skill iteration" = "promptSkillIteration";
-  };
+  # Map from groupOrder heading to the attr name used under
+  # perSystem.spindrift.settings. Sections with no flakeOption knobs (Prompt &
+  # skill iteration) are silently skipped when rendering.
+  inherit (renderers) groupToAttr;
 
   # Group flakeOptionEntries by their section attr name; the result is
   # { sectionAttr = { knobName = entry; ... }; ... }.
