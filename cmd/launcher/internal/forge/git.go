@@ -45,6 +45,10 @@ func (g *gitClient) CheckState(url string) (RollupState, error) {
 	return StateNone, nil
 }
 
+func (g *gitClient) FailureDetail(url string) (string, error) {
+	return "", nil
+}
+
 func (g *gitClient) ListPRFiles(url string) ([]string, error) {
 	return nil, fmt.Errorf("ListPRFiles: not supported by the git Code Forge (MERGE_GUARD_PATHS applies to the github Code Forge only)")
 }

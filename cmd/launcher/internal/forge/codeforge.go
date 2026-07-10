@@ -13,6 +13,11 @@ type CodeForge interface {
 	PRState(url string) (string, error)
 	// CheckState returns the aggregate CI rollup state for the PR's head commit.
 	CheckState(url string) (RollupState, error)
+	// FailureDetail returns the failed check names plus a bounded log excerpt
+	// for the PR's head commit, or "" when nothing is currently failing.
+	// Best-effort: callers must treat a non-nil error as "detail unavailable"
+	// and proceed without it rather than failing the caller's own operation.
+	FailureDetail(url string) (string, error)
 	// ListPRFiles returns every path changed by the PR (added, modified, deleted).
 	ListPRFiles(url string) ([]string, error)
 	// Merge lands ref onto the target branch: a rebase merge of the PR (github)

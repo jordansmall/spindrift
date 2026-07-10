@@ -198,6 +198,40 @@ func TestFake_OpenPRForBranch(t *testing.T) {
 	}
 }
 
+// TestFake_FailureDetail verifies that FailureDetail returns the scripted
+// detail for a PR URL, and "" (no error) for a URL with nothing scripted —
+// the fetch is best-effort, so an unscripted PR must not look like a hard
+// failure.
+func TestFake_FailureDetail(t *testing.T) {
+	f := forge.NewFake()
+	const url = "https://github.com/owner/repo/pull/7"
+	f.SetFailureDetail(url, "go test ./...: FAIL TestFoo\nwant 1, got 2")
+
+	detail, err := f.FailureDetail(url)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if detail != "go test ./...: FAIL TestFoo\nwant 1, got 2" {
+		t.Fatalf("unexpected detail: %q", detail)
+	}
+
+	detail2, err2 := f.FailureDetail("https://github.com/owner/repo/pull/8")
+	if err2 != nil || detail2 != "" {
+		t.Fatalf("want (\"\", nil) for unscripted URL; got (%q, %v)", detail2, err2)
+	}
+}
+
+// TestFake_FailureDetailErr verifies the scripted error field.
+func TestFake_FailureDetailErr(t *testing.T) {
+	f := forge.NewFake()
+	f.FailureDetailErr = errors.New("gh api graphql: 403 Forbidden")
+
+	_, err := f.FailureDetail("https://github.com/owner/repo/pull/7")
+	if err == nil || err.Error() != "gh api graphql: 403 Forbidden" {
+		t.Fatalf("want scripted error, got %v", err)
+	}
+}
+
 // TestFake_ListPRFiles verifies that ListPRFiles returns the scripted changed
 // files for a PR — the merge guard's only source of changed paths.
 func TestFake_ListPRFiles(t *testing.T) {

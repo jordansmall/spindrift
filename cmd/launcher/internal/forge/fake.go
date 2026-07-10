@@ -38,6 +38,10 @@ type Fake struct {
 	checkErrQ map[string][]error  // per-call error queue; nil entry = consult checkQ
 	prFiles   map[string][]string // URL → scripted ListPRFiles result
 
+	failureDetail map[string]string // URL → scripted FailureDetail result
+	// FailureDetailErr, if non-nil, is returned by every FailureDetail call.
+	FailureDetailErr error
+
 	// PRStateErr, if non-nil, is returned by every PRState call (simulating a
 	// push-only Code Forge, where PR state has no meaning).
 	PRStateErr error
@@ -109,6 +113,8 @@ func NewFake() *Fake {
 		checkQ:    map[string][]RollupState{},
 		checkErrQ: map[string][]error{},
 		prFiles:   map[string][]string{},
+
+		failureDetail: map[string]string{},
 	}
 }
 
@@ -313,6 +319,25 @@ func (f *Fake) CheckState(url string) (RollupState, error) {
 	s := q[0]
 	f.checkQ[url] = q[1:]
 	return s, nil
+}
+
+// SetFailureDetail scripts the FailureDetail result for the given PR URL.
+func (f *Fake) SetFailureDetail(url, detail string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failureDetail[url] = detail
+}
+
+// FailureDetail returns the scripted detail for url, or "" when nothing was
+// scripted — mirroring the best-effort contract of the real adapter, where a
+// PR with no failing checks yields no detail rather than an error.
+func (f *Fake) FailureDetail(url string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.FailureDetailErr != nil {
+		return "", f.FailureDetailErr
+	}
+	return f.failureDetail[url], nil
 }
 
 func (f *Fake) Merge(url string) error {
