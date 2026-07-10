@@ -30,6 +30,11 @@
   # Opt-in: provisioned only when filerModel is non-empty (see agentsJsonTemplate).
   filerPrompt ? builtins.readFile ../templates/default/prompts/filer-prompt.md,
   conflictResolvePrompt ? builtins.readFile ../templates/default/prompts/conflict-resolve-prompt.md,
+  # Driven instead of `prompt` on a fix box (FIX_PASS>0, ADR: selfHeal/runFix
+  # in cmd/launcher): the branch is already checked out, so this warm-fix
+  # prompt skips scout/implement-from-scratch and goes straight to
+  # check/fix/commit/push/watch-CI.
+  fixPrompt ? builtins.readFile ../templates/default/prompts/fix-prompt.md,
   # Skill files baked into the image at /home/agent/.claude/skills so the
   # headless agent can invoke them without a runtime mount. Each element must
   # be a path to a skill file; the file is copied under its basename.
@@ -287,6 +292,7 @@ let
     cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md
     cp ${pkgs.writeText "filer-prompt.md" filerPrompt} $out/agent/prompts/filer-prompt.md
     cp ${pkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
+    cp ${pkgs.writeText "fix-prompt.md" fixPrompt} $out/agent/prompts/fix-prompt.md
     ${lib.optionalString (skills != [ ]) ''
       mkdir -p $out/home/agent/.claude/skills
       ${lib.concatMapStrings (f: ''
@@ -313,6 +319,7 @@ let
     cp ${hostPkgs.writeText "review-prompt.md" reviewPrompt} $out/review-prompt.md
     cp ${hostPkgs.writeText "filer-prompt.md" filerPrompt} $out/filer-prompt.md
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/conflict-resolve-prompt.md
+    cp ${hostPkgs.writeText "fix-prompt.md" fixPrompt} $out/fix-prompt.md
   '';
 
   # The baked-skills directory as a host store path (native-buildable on
