@@ -30,6 +30,32 @@
       | grep '^SPINDRIFT_OUTCOME ' | tail -1 || true
   '';
 
+  # Shell function body computing the claude-specific session pin/resume
+  # flags (issue #427/ADR 0009): a deterministic per-issue session id (so no
+  # state beyond ISSUE_NUMBER/REPO_SLUG is needed to recompute it) plus the
+  # verb claude itself uses. Called as `_driver_session_flags initial` on the
+  # cold run (pins the id) or `_driver_session_flags resume` on a fix pass
+  # (resumes it only if that session's transcript is actually present under
+  # the mounted /home/agent/.claude — e.g. absent after the cache was
+  # evicted, or on the first fix pass following a crash — in which case this
+  # prints nothing and the caller falls back to the cold-context fix flow
+  # with no error).
+  sessionFlagsFnBody = ''
+    local h id
+    h="$(printf '%s' "spindrift-session:''${REPO_SLUG:-}:''${ISSUE_NUMBER:-}" | sha256sum | cut -c1-32)"
+    id="''${h:0:8}-''${h:8:4}-''${h:12:4}-''${h:16:4}-''${h:20:12}"
+    case "$1" in
+      initial)
+        printf -- '--session-id %s' "$id"
+        ;;
+      resume)
+        if compgen -G "''${HOME:-}/.claude/projects/*/''${id}.jsonl" >/dev/null 2>&1; then
+          printf -- '--resume %s' "$id"
+        fi
+        ;;
+    esac
+  '';
+
   # --agents JSON rendered at eval time via builtins.toJSON (ADR 0007 tier-1):
   # model names are never string-interpolated in bash. Each subagent is
   # composed independently by its own model knob; the flag is omitted when no

@@ -58,6 +58,33 @@ if ! declare -F _driver_extract_outcome >/dev/null 2>&1; then
   }
 fi
 
+# _driver_session_flags computes the Driver's own session pin/resume argv
+# (issue #427/ADR 0009): `initial` pins a deterministic per-issue session id
+# on the cold run; `resume` re-emits it on a fix pass only when that
+# session's data is actually present under the mounted /home/agent/.claude,
+# printing nothing (a clean fallback to the cold-context fix flow) when it
+# is not. A nix-built image prepends the selected Driver's own definition
+# (lib/drivers/<name>.nix sessionFlagsFnBody); the guard keeps that
+# definition, falling back to claude's own scheme only in standalone/bats
+# runs, matching the byte-identical convention above.
+if ! declare -F _driver_session_flags >/dev/null 2>&1; then
+  _driver_session_flags() {
+    local h id
+    h="$(printf '%s' "spindrift-session:${REPO_SLUG:-}:${ISSUE_NUMBER:-}" | sha256sum | cut -c1-32)"
+    id="${h:0:8}-${h:8:4}-${h:12:4}-${h:16:4}-${h:20:12}"
+    case "$1" in
+      initial)
+        printf -- '--session-id %s' "$id"
+        ;;
+      resume)
+        if compgen -G "${HOME:-}/.claude/projects/*/${id}.jsonl" >/dev/null 2>&1; then
+          printf -- '--resume %s' "$id"
+        fi
+        ;;
+    esac
+  }
+fi
+
 export GH_TOKEN
 gh auth setup-git
 
@@ -315,9 +342,15 @@ fi
 # a dedicated fix-prompt instead of the cold issue-prompt a fresh run uses.
 if [ -n "${FIX_PASS:-}" ] && [ "${FIX_PASS}" -gt 0 ]; then
   prompt="$(_subst "${PROMPTS_DIR}/fix-prompt.md")"
+  _driver_session_mode="resume"
 else
   prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
+  _driver_session_mode="initial"
 fi
+# Computed once so both the direct and devShell-wrapped invocations below
+# pin/resume the identical session id (issue #427); an empty result on
+# "resume" means no prior session was found and contributes no extra argv.
+read -ra _driver_session_args <<< "$(_driver_session_flags "$_driver_session_mode")"
 # A SPINDRIFT_PROMPT_DIR mount replaces the whole prompt dir, so a rendered
 # prompt that dropped the contract (issue #419) never gets the build-time
 # injection; append the same canonical contract here, at run time, unless
@@ -386,6 +419,7 @@ _run_driver() {
   "$DRIVER_BIN" -p "$prompt" \
     --model "${MODEL:-}" \
     "${agents_args[@]}" \
+    "${_driver_session_args[@]}" \
     $DRIVER_FLAGS_COMMON \
     | spindrift-heartbeat-filter -n "$ISSUE_NUMBER" -f /tmp/heartbeat.log \
     | tee "$stream_log"
@@ -405,6 +439,11 @@ if [ "$_use_dev_shell" = "1" ]; then
   if [ "${#agents_args[@]}" -gt 0 ]; then
     printf '%s' "${agents_args[1]}" > "$_agents_file"
   fi
+  # Session pin/resume args (issue #427) cross into the devShell wrapper's own
+  # process the same way: written to a file, rebuilt into an array there — a
+  # bash array cannot cross a process boundary via the environment.
+  _session_file="$(mktemp)"
+  printf '%s' "${_driver_session_args[*]}" > "$_session_file"
   # Write a wrapper that drives the claude pipeline inside the devShell.
   # _harness_path is prepended so baked tools (spindrift-heartbeat-filter,
   # tee, etc.) remain reachable after nix develop rewrites PATH.
@@ -417,10 +456,12 @@ _agents_arg=()
 if [ -s "$_AGENTS_FILE" ]; then
   _agents_arg=("--agents" "$(cat "$_AGENTS_FILE")")
 fi
+read -ra _session_arg <<< "$(cat "$_SESSION_FILE")"
 # shellcheck disable=SC2086
 "$DRIVER_BIN" -p "$(cat "$_PROMPT_FILE")" \
   --model "${MODEL:-}" \
   "${_agents_arg[@]}" \
+  "${_session_arg[@]}" \
   $DRIVER_FLAGS_COMMON \
   | spindrift-heartbeat-filter -n "$ISSUE_NUMBER" -f /tmp/heartbeat.log \
   | tee "$_STREAM_LOG"
@@ -430,6 +471,7 @@ DRIVER_WRAPPER_EOF
   export _HARNESS_PATH="$_harness_path"
   export _PROMPT_FILE="$_prompt_file"
   export _AGENTS_FILE="$_agents_file"
+  export _SESSION_FILE="$_session_file"
   export _STREAM_LOG="$stream_log"
   export _CLAUDE_RC_FILE="$_claude_rc_file"
   # MODEL comes from the preamble (not exported by default); export it so the
@@ -444,7 +486,7 @@ DRIVER_WRAPPER_EOF
   nix develop ".#${DEV_SHELL_NAME:-default}" --command bash "$_driver_wrapper"
   _nix_rc=$?
   set -e
-  rm -f "$_driver_wrapper" "$_prompt_file" "$_agents_file"
+  rm -f "$_driver_wrapper" "$_prompt_file" "$_agents_file" "$_session_file"
   # Launch-failure: nix develop itself failed before claude ran (stream empty).
   # Relaunch once in the baked env so transient nix failures don't kill the run.
   if [ "$_nix_rc" -ne 0 ] && [ ! -s "$stream_log" ]; then

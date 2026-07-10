@@ -193,6 +193,9 @@ let
     + "\n"
     + "_driver_extract_outcome() {\n"
     + driverEntry.outcomeExtractFnBody
+    + "}\n"
+    + "_driver_session_flags() {\n"
+    + driverEntry.sessionFlagsFnBody
     + "}\n";
 
   # Version sourced from the release-please manifest so mkHarness always tracks

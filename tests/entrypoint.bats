@@ -186,6 +186,64 @@ setup() {
   ! grep -q "lint: FAILURE" "$CLAUDE_PROMPT_FILE"
 }
 
+# Driver session pin/resume (issue #427): the fix Box resumes the same
+# Driver session the initial run pinned, so a warm fix pass continues the
+# agent's own conversation instead of relearning the changes it already made.
+# The id is deterministic (REPO_SLUG + ISSUE_NUMBER only) so no state beyond
+# those two env vars is needed to recompute it on either side.
+
+@test "cold run pins a deterministic session id via --session-id" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qE -- '--session-id [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' "$CLAUDE_LOG"
+  ! grep -q -- '--resume' "$CLAUDE_LOG"
+}
+
+@test "fix pass with no prior session data falls back with no --resume flag" {
+  export FIX_PASS="2"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--resume' "$CLAUDE_LOG"
+}
+
+@test "fix pass resumes the exact session id the initial run pinned" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local pinned_id
+  pinned_id="$(grep -oE -- '--session-id [0-9a-f-]+' "$CLAUDE_LOG")"
+  pinned_id="${pinned_id#--session-id }"
+  [ -n "$pinned_id" ]
+
+  # Simulate the persisted session transcript a writable /home/agent/.claude
+  # mount would carry over from the initial run into the fix box.
+  mkdir -p "$HOME/.claude/projects/fake-project"
+  touch "$HOME/.claude/projects/fake-project/${pinned_id}.jsonl"
+
+  : >"$CLAUDE_LOG"
+  export FIX_PASS="2"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- "--resume ${pinned_id}" "$CLAUDE_LOG"
+}
+
+@test "session id is stable across independent cold runs of the same issue" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local first_id
+  first_id="$(grep -oE -- '--session-id [0-9a-f-]+' "$CLAUDE_LOG")"
+  first_id="${first_id#--session-id }"
+
+  : >"$CLAUDE_LOG"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local second_id
+  second_id="$(grep -oE -- '--session-id [0-9a-f-]+' "$CLAUDE_LOG")"
+  second_id="${second_id#--session-id }"
+
+  [ -n "$first_id" ]
+  [ "$first_id" = "$second_id" ]
+}
+
 # A SPINDRIFT_PROMPT_DIR mount (simulated here by pointing PROMPTS_DIR straight
 # at a host dir, exactly what the mount leaves the entrypoint seeing) whose
 # issue-prompt.md drops the SPINDRIFT_OUTCOME contract must still reach the
