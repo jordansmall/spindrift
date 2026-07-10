@@ -38,6 +38,17 @@ files, and `shellcheck path/to/file.sh` for changed shell files. Both tools
 are baked into the Box and complement, but do not replace, the full
 `nix flake check` run in CI.
 
+The dogfood Box also bakes the upstream [`caveman`
+skill](https://github.com/juliusbrussee/caveman) (issue #486), advertised
+in-box as `/caveman`. It compresses agent narration ~65% in output tokens
+while leaving code, commands, and error messages untouched — worth having
+given how much of an agent's output in this Box is narration. The pin lives
+in `flake.nix`'s `caveman` input (`flake = false`; the rev is owned by
+`flake.lock`, never a floating fetch); `nix/dogfood-skills.nix` renames
+upstream's `skills/caveman/SKILL.md` to the `caveman.md` basename the
+skill-discovery loop in `agent/entrypoint.sh` keys off of. This is
+dogfood-only — the generic harness keeps its empty `skills` default.
+
 After editing `lib/env-schema.nix`, regenerate the artifacts it drives —
 `templates/default/harness.env.example`, `cmd/launcher/flagtable_gen.go`, and
 `docs/flake-options.md` — instead of hand-editing them until the drift-guard
