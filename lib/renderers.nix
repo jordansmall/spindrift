@@ -1,7 +1,10 @@
-# Shared render functions for the artifacts generated from lib/env-schema.nix.
-# nix/checks.nix (drift guards) and nix/regen.nix (the one-shot regenerator,
-# `nix run .#regen`) both call these — one renderer per artifact — so the
-# guard and the regenerator can never drift from each other (issue #402).
+# Shared render functions for the artifacts generated from lib/env-schema.nix,
+# and the owner of the flag-group section taxonomy (groupOrder/groupToAttr).
+# nix/checks/schema-drift.nix (drift guards) and nix/regen.nix (the one-shot
+# regenerator, `nix run .#regen`) call these — one renderer per artifact — so
+# the guard and the regenerator can never drift from each other (issue #402).
+# lib/mkHarness.nix and lib/flakeModule.nix import this file for the taxonomy
+# and the man-page renderer, for the same reason (issue #461).
 #
 # Pure builtins only (no `pkgs.lib`): keeps this file evaluable and unit-
 # testable with a bare `nix eval`, without needing a locked nixpkgs.
@@ -19,12 +22,22 @@ let
   # ASCII-only; every caller here feeds it a SCREAMING_SNAKE_CASE env var name.
   chars = s: builtins.genList (i: builtins.substring i 1 s) (builtins.stringLength s);
   toLower = builtins.replaceStrings (chars "ABCDEFGHIJKLMNOPQRSTUVWXYZ") (chars "abcdefghijklmnopqrstuvwxyz");
-  toKebab = env: toLower (builtins.replaceStrings [ "_" ] [ "-" ] env);
 in
 rec {
+  # Env var name -> flag name (e.g. MAX_PARALLEL -> max-parallel). Shared by
+  # every renderer and check that prints or greps for a flag name.
+  toKebab = env: toLower (builtins.replaceStrings [ "_" ] [ "-" ] env);
+
+  # Schema entry -> the type token the flag table and man page print.
+  flagKind = e: if builtins.isInt (e.default or null) then "int" else "string";
+
+  # Schema entry -> its default rendered as a string, or "" if it has none.
+  flagDflt = e: if e ? default then builtins.toString e.default else "";
+
   # Display order for the full flag reference (man page OPTIONS groups,
-  # flake-options.md sections); must match groupOrder in cmd/launcher/flags.go
-  # and lib/mkHarness.nix's manpageRoff.
+  # flake-options.md sections). cmd/launcher/flags.go carries its own copy
+  # (Go stays hand-written per issue #105); nix/checks/schema-drift.nix's
+  # launcher-grouporder check pins it against this list.
   groupOrder = [
     "Issue discovery"
     "Lifecycle labels"
@@ -37,7 +50,6 @@ rec {
     "Prompt & skill iteration"
   ];
 
-  # Must match lib/flakeModule.nix groupToAttr.
   groupToAttr = {
     "Issue discovery" = "issueDiscovery";
     "Lifecycle labels" = "lifecycleLabels";
@@ -94,10 +106,6 @@ rec {
     let
       nonSecretSchema = filterAttrs (_: e: !(e.secret or false)) schema;
       secretSchema = filterAttrs (_: e: (e.secret or false)) schema;
-      flagKind = e: if builtins.isInt (e.default or null) then "int" else "string";
-      flagDflt =
-        e:
-        if e ? default then builtins.toString e.default else "";
       flagAlias = e: if e ? alias then ", alias: \"${e.alias}\"" else "";
       # Every non-secret knob must declare a group so the full reference groups
       # it under a heading; a missing group is a schema error, not a silent "".
@@ -172,4 +180,113 @@ rec {
     + "See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.\n"
     + "\n"
     + concatStrings (map renderSection groupOrder);
+
+  # `man spindrift` roff content: the full flag reference that keeps
+  # `spindrift --help` (cmd/launcher/flags.go printHelp) concise.
+  renderManpageRoff =
+    schema: spindriftVersion:
+    let
+      nonSecret = builtins.filter (e: !(e.secret or false)) (builtins.attrValues schema);
+      secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
+      esc = builtins.replaceStrings [ "\\" ] [ "\\\\" ]; # neutralise stray backslashes
+      escFlag = f: builtins.replaceStrings [ "-" ] [ "\\-" ] f; # roff renders \- as a minus
+      unknownGroups = builtins.filter (g: !(builtins.elem g groupOrder)) (
+        map (e: e.group or "") nonSecret
+      );
+      optionBlock =
+        e:
+        let
+          names =
+            "\\-\\-" + escFlag (toKebab e.env) + (if e ? alias then ", \\-\\-" + escFlag e.alias else "");
+          dflt = flagDflt e;
+          dfltSentence = if dflt == "" then "No default." else "Default: " + esc dflt + ".";
+        in
+        ".TP\n.B ${names} \\fI${flagKind e}\\fR\n\\&${esc e.doc}. ${dfltSentence}\n";
+      groupSection =
+        g:
+        let
+          entries = builtins.sort (a: b: a.env < b.env) (
+            builtins.filter (e: (e.group or "") == g) nonSecret
+          );
+        in
+        if entries == [ ] then "" else ".SS ${g}\n" + concatStrings (map optionBlock entries);
+      secretBlock =
+        e:
+        ".TP\n.B ${e.env}\n\\&${esc e.doc}. Supply via the environment or \\-\\-${toKebab e.env}\\-file (reads the value from a file path; takes precedence over the environment).\n";
+    in
+    if unknownGroups != [ ] then
+      throw "renderManpageRoff: knob group(s) absent from groupOrder: ${builtins.concatStringsSep ", " unknownGroups}"
+    else
+      ''
+        .TH SPINDRIFT 1 "${spindriftVersion}" "spindrift ${spindriftVersion}" "Spindrift Manual"
+        .SH NAME
+        spindrift \- fan out headless Claude Code agents across GitHub issues
+        .SH SYNOPSIS
+        .B spindrift
+        [\fIflags\fR] \fIsubcommand\fR [\fIargs\fR]
+        .SH DESCRIPTION
+        .B spindrift
+        dispatches one disposable, nix-built container per GitHub issue, runs a
+        headless Claude Code agent inside it, and drives each resulting pull request
+        through a merge gate. Every runtime knob is set by flag, environment
+        variable, or baked default, in that precedence order. Non-secret knobs also
+        read from a gitignored
+        .I harness.env
+        in the working directory.
+        .SH SUBCOMMANDS
+        .TP
+        .B dispatch [\-\-no-build] [\-\-yes] [issue...]
+        Fan out agents. With no issue list, discover dispatchable issues by label;
+        an explicit issue list dispatches exactly those, bypassing the label and
+        barrier gates.
+        .TP
+        .B preview [issue...]
+        Dry run: show what dispatch would pick up, in order, without launching any
+        agent.
+        .TP
+        .B build
+        Realize the agent image (or store closures) without running any agent.
+        .TP
+        .B recover <issue>
+        Run the merge gate for a single issue whose agent already finished.
+        .SH "DISPATCH FLAGS"
+        .TP
+        .B \-\-no-build
+        Fail fast if the image is absent instead of building it; pair with
+        .B spindrift build
+        for split build/run flows.
+        .TP
+        .B \-\-yes
+        Skip the confirmation prompt when dispatching unlabeled issues. Alias:
+        .BR \-\-force .
+        .SH OPTIONS
+        Flags take precedence over environment variables, which take precedence over
+        baked defaults.
+        ${concatStrings (map groupSection groupOrder)}.SH ENVIRONMENT
+        Secret knobs are never exposed as value flags; they are read from the
+        environment or from a file via their
+        .B \-\-<name>-file
+        flag.
+        ${concatStrings (map secretBlock secretEntries)}.SH FILES
+        .TP
+        .I harness.env
+        Gitignored per-checkout config and secrets, sourced from the working
+        directory at dispatch time.
+        .SH EXAMPLES
+        .TP
+        Dispatch every ready issue, three containers at a time:
+        .B spindrift dispatch \-\-max-parallel 3
+        .TP
+        Dispatch a single issue, skipping the image build:
+        .B spindrift dispatch \-\-no-build 42
+        .TP
+        Preview the queue without launching anything:
+        .B spindrift preview
+        .TP
+        Print the full flag reference in the terminal:
+        .B spindrift \-\-help \-\-all
+        .SH "SEE ALSO"
+        .BR git (1),
+        .BR gh (1)
+      '';
 }
