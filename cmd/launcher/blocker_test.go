@@ -11,9 +11,10 @@ func TestBlockerReady_MergedPR(t *testing.T) {
 	c.branchPrefix = "agent/issue-"
 
 	fc := forge.NewFake()
+	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN"})
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
-	fc.SetPRState("https://github.com/owner/repo/pull/99", "MERGED")
+	fc.SetPRState("https://github.com/owner/repo/pull/99", forge.PRMerged)
 
 	if !blockerReady(c, fc, "99") {
 		t.Error("blockerReady: want true for merged PR, got false")
@@ -25,6 +26,7 @@ func TestBlockerReady_OpenPRWithCompleteLabel(t *testing.T) {
 	c.branchPrefix = "agent/issue-"
 
 	fc := forge.NewFake()
+	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Labels: []string{c.completeLabel}})
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
 	// state defaults to OPEN when SetPR is called without SetPRState override

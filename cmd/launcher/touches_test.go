@@ -164,6 +164,7 @@ func TestOverlapsInProgress_CollidesViaOpenPRChangedFiles(t *testing.T) {
 	c.overlapGate = "defer"
 	c.branchPrefix = "agent/issue-"
 	fc := forge.NewFake()
+	fc.BranchPrefix = c.branchPrefix
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- internal/pkgx/foo.go", Labels: []string{"ready-for-agent"}})
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- docs/reference.md", State: "OPEN", Labels: []string{"agent-in-progress"}})
 	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
@@ -180,13 +181,12 @@ func TestOverlapsInProgress_CollidesViaOpenPRChangedFiles(t *testing.T) {
 // an in-progress issue's open PR changed files are surfaced, so a candidate
 // can collide against files the issue itself never declared in ## Touches.
 func TestPRTouchesOf_ReturnsOpenPRChangedFiles(t *testing.T) {
-	c := baseConfig()
-	c.branchPrefix = "agent/issue-"
 	fc := forge.NewFake()
+	fc.BranchPrefix = "agent/issue-"
 	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
 	fc.SetPRFiles("https://github.com/owner/repo/pull/20", []string{"lib/env-schema.nix"})
 
-	got := prTouchesOf(c, fc, "20")
+	got := prTouchesOf(fc, "20")
 	if len(got) != 1 || got[0] != "lib/env-schema.nix" {
 		t.Errorf("prTouchesOf = %v, want [lib/env-schema.nix]", got)
 	}
@@ -202,7 +202,7 @@ func TestPRTouchesOf_NonGithubForgeReturnsNil(t *testing.T) {
 	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
 	fc.SetPRFiles("https://github.com/owner/repo/pull/20", []string{"lib/env-schema.nix"})
 
-	if got := prTouchesOf(c, fc, "20"); got != nil {
+	if got := prTouchesOf(fc, "20"); got != nil {
 		t.Errorf("prTouchesOf on a non-github forge = %v, want nil", got)
 	}
 }
@@ -210,10 +210,9 @@ func TestPRTouchesOf_NonGithubForgeReturnsNil(t *testing.T) {
 // TestPRTouchesOf_NoOpenPRReturnsNil verifies an in-progress issue with no
 // open PR yet contributes nothing extra — no error, no over-blocking.
 func TestPRTouchesOf_NoOpenPRReturnsNil(t *testing.T) {
-	c := baseConfig()
 	fc := forge.NewFake()
 
-	if got := prTouchesOf(c, fc, "20"); got != nil {
+	if got := prTouchesOf(fc, "20"); got != nil {
 		t.Errorf("prTouchesOf with no open PR = %v, want nil", got)
 	}
 }
@@ -222,13 +221,12 @@ func TestPRTouchesOf_NoOpenPRReturnsNil(t *testing.T) {
 // fetch is swallowed rather than propagated — the gate falls back to the
 // issue's declared touches instead of erroring the whole check.
 func TestPRTouchesOf_ListPRFilesErrorReturnsNil(t *testing.T) {
-	c := baseConfig()
-	c.branchPrefix = "agent/issue-"
 	fc := forge.NewFake()
+	fc.BranchPrefix = "agent/issue-"
 	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
 	fc.PRFilesErr = fmt.Errorf("boom")
 
-	if got := prTouchesOf(c, fc, "20"); got != nil {
+	if got := prTouchesOf(fc, "20"); got != nil {
 		t.Errorf("prTouchesOf on ListPRFiles error = %v, want nil", got)
 	}
 }

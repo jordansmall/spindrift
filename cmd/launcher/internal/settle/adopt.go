@@ -13,7 +13,7 @@ import (
 // before running the gate. Called by the reconcile/recover entry points and
 // by Settle itself when a Box exits with no outcome line.
 func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num, prURL string) {
-	branch := s.cfg.BranchPrefix + num
+	branch := s.fc.AgentBranch(num)
 	fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", num, prURL, branch)
 	ok, merged := s.selfHeal(d, num, prURL)
 	if ok {
@@ -31,12 +31,12 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num, prURL string) {
 func (s *Settle) verifyMerged(num, pr string) {
 	prState, _ := s.fc.PRState(pr)
 	iss, _ := s.fc.Issue(num)
-	if prState == "MERGED" && containsLabel(iss.Labels, s.cfg.CompleteLabel) {
+	if prState == forge.PRMerged && containsLabel(iss.Labels, s.cfg.CompleteLabel) {
 		fmt.Printf("    #%s  pr=%s  status=verified-merged\n", num, pr)
 		return
 	}
 	var reason string
-	if prState != "MERGED" {
+	if prState != forge.PRMerged {
 		if prState == "" {
 			reason = "PR state is 'unknown', expected MERGED"
 		} else {

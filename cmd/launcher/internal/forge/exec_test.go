@@ -13,7 +13,7 @@ import (
 // TestExecClient_PushOnly verifies the github Code Forge reports itself as
 // not push-only — it opens a PR and watches CI.
 func TestExecClient_PushOnly(t *testing.T) {
-	e := NewExecClient("owner/repo", DefaultDispatchLabels())
+	e := NewExecClient("owner/repo", DefaultDispatchLabels(), "agent/issue-")
 	if e.PushOnly() {
 		t.Error("PushOnly() = true, want false for the github Code Forge")
 	}
@@ -45,7 +45,7 @@ func TestProbe_PositionalSlug(t *testing.T) {
 	// Both gh calls exit 0. Probe may error on empty output — that's fine.
 	dir := prependFakeGH(t, "")
 
-	c := NewExecClient("owner/repo", DispatchLabels{})
+	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
 	c.(interface{ Probe() (string, error) }).Probe() //nolint:errcheck
 
 	// call-01.txt is the `gh repo view …` invocation.
@@ -80,7 +80,7 @@ func TestProbe_StderrSurfaced(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", DispatchLabels{})
+	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
 	_, err := c.(interface{ Probe() (string, error) }).Probe()
 	if err == nil {
 		t.Fatal("want error, got nil")
@@ -103,7 +103,7 @@ func TestFailureDetail_GraphQLArgShape(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", DispatchLabels{})
+	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
 	detail, err := c.(interface {
 		FailureDetail(string) (string, error)
 	}).FailureDetail("https://github.com/owner/repo/pull/42")

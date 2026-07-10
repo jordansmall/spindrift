@@ -20,7 +20,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 		return
 	}
 	if !result.OutcomeFound {
-		branch := s.cfg.BranchPrefix + num
+		branch := s.fc.AgentBranch(num)
 		pr, prFound, prErr := s.fc.OpenPRForBranch(branch)
 		if prErr != nil || !prFound {
 			clsNote := ""

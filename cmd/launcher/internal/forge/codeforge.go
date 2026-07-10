@@ -9,8 +9,8 @@ type CodeForge interface {
 	// PRForBranch returns the URL of any PR (any state) for branch, if any.
 	// The push-only git adapter has no PR concept and always returns not-found.
 	PRForBranch(branch string) (string, bool, error)
-	// PRState returns the state (OPEN/MERGED/CLOSED) of the given PR URL.
-	PRState(url string) (string, error)
+	// PRState returns the canonical state of the given PR URL.
+	PRState(url string) (PRState, error)
 	// CheckState returns the aggregate CI rollup state for the PR's head commit.
 	CheckState(url string) (RollupState, error)
 	// FailureDetail returns the failed check names plus a bounded log excerpt
@@ -37,4 +37,9 @@ type CodeForge interface {
 	// opposed to opening a PR and watching CI (github). Callers key
 	// behavior off this capability instead of comparing adapter names.
 	PushOnly() bool
+	// AgentBranch returns the agent branch name for issue num, with the
+	// branch prefix baked in at construction. The Code Forge seam's single
+	// owner of the branch-prefix rule — callers never concatenate it
+	// themselves.
+	AgentBranch(num string) string
 }
