@@ -170,12 +170,33 @@ func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
 	args := a.buildRunArgs(box)
 
-	want := dir + ":/home/agent/.claude"
+	want := dir + ":/home/agent/.claude/projects"
 	if !containsArg(args, want) {
 		t.Errorf("driver cache mount %q not found in args: %v", want, args)
 	}
 	if containsArg(args, want+":ro") {
 		t.Errorf("driver cache mount must be writable, not :ro; args: %v", args)
+	}
+}
+
+// TestBuildRunArgs_DriverCacheDirMounted_BakedSkillsSurvive verifies that the
+// writable cache mount, scoped to /home/agent/.claude/projects, does not
+// shadow /home/agent/.claude/skills baked into the image — the regression a
+// mount at the parent /home/agent/.claude would cause (OCI has no host-side
+// path to re-mount baked skills over, unlike bwrap's agentFiles fallback).
+func TestBuildRunArgs_DriverCacheDirMounted_BakedSkillsSurvive(t *testing.T) {
+	dir := t.TempDir()
+	a := &ociAdapter{
+		cli:   "podman",
+		image: "spindrift:test",
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
+	args := a.buildRunArgs(box)
+
+	for _, arg := range args {
+		if arg == "/home/agent/.claude" || strings.HasSuffix(arg, ":/home/agent/.claude") || strings.HasSuffix(arg, ":/home/agent/.claude:ro") {
+			t.Errorf("cache mount must not target the whole /home/agent/.claude (shadows baked skills); args: %v", args)
+		}
 	}
 }
 
@@ -204,7 +225,7 @@ func TestBuildRunArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 	args := a.buildRunArgs(box)
 
 	for _, arg := range args {
-		if strings.Contains(arg, "/home/agent/.claude") && !strings.Contains(arg, "/skills") {
+		if strings.Contains(arg, "/home/agent/.claude/projects") {
 			t.Errorf("unexpected driver cache mount in args when DriverCacheDir is empty: %v", args)
 		}
 	}

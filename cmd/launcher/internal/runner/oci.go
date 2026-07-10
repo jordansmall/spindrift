@@ -216,7 +216,11 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 	}
 	if box.DriverCacheDir != "" {
 		if info, err := os.Stat(box.DriverCacheDir); err == nil && info.IsDir() {
-			args = append(args, "-v", box.DriverCacheDir+":/home/agent/.claude")
+			// Scoped to .claude/projects (where claude's session transcripts
+			// live), not the whole .claude, which would shadow the baked
+			// .claude/skills the image ships — OCI has no host-side path to
+			// re-mount baked skills over, unlike bwrap's agentFiles fallback.
+			args = append(args, "-v", box.DriverCacheDir+":/home/agent/.claude/projects")
 		}
 	}
 	if a.skillsDir != "" {

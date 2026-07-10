@@ -84,11 +84,11 @@ func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
 
 	argStr := strings.Join(args, " ")
-	want := "--bind " + dir + " /home/agent/.claude"
+	want := "--bind " + dir + " /home/agent/.claude/projects"
 	if !strings.Contains(argStr, want) {
 		t.Errorf("driver cache bind %q not found in args: %v", want, args)
 	}
-	if strings.Contains(argStr, "--ro-bind "+dir+" /home/agent/.claude") {
+	if strings.Contains(argStr, "--ro-bind "+dir+" /home/agent/.claude/projects") {
 		t.Errorf("driver cache mount must be writable (--bind), not --ro-bind; args: %v", args)
 	}
 }
@@ -113,7 +113,7 @@ func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 }
 
 // TestBwrapArgs_DriverCacheDirUnset_NoMount verifies that omitting
-// Box.DriverCacheDir produces no /home/agent/.claude bind.
+// Box.DriverCacheDir produces no /home/agent/.claude/projects bind.
 func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -122,7 +122,7 @@ func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 	argStr := strings.Join(args, " ")
-	if strings.Contains(argStr, " /home/agent/.claude ") || strings.HasSuffix(argStr, " /home/agent/.claude") {
+	if strings.Contains(argStr, "/home/agent/.claude/projects") {
 		t.Errorf("unexpected driver cache bind in args when DriverCacheDir is empty: %v", args)
 	}
 }

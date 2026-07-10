@@ -166,8 +166,10 @@ falling back to the local re-run with no error.
 A fix box also resumes the *same Driver session* the initial run used,
 instead of cold-starting a fresh one: the launcher creates an ephemeral,
 process-lifetime, per-issue host directory and mounts it writable over
-`/home/agent/.claude` (the only writable host mount the runner seam has — the
-prompt/skills mounts above are read-only). The launcher only creates, mounts,
+`/home/agent/.claude/projects` — where claude's session transcripts live, and
+narrow enough that it can never shadow the baked `/home/agent/.claude/skills`
+above (the only writable host mount the runner seam has — the prompt/skills
+mounts above are read-only). The launcher only creates, mounts,
 and evicts that directory — it never reads, copies, parses, or chmods its
 contents, and the persisted session never leaves the host (it is not pushed
 to the remote or attached to the PR). The cache is keyed strictly
