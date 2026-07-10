@@ -171,6 +171,24 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 	}
 }
 
+// TestRunnerUnpackingWrappersRemoved asserts newRunner and newBuildRunner —
+// the positional-unpacking wrappers around runner.NewOCI/NewBwrap/
+// NewBwrapBuild — have been deleted from main.go; call sites build a
+// runner.Config via runnerConfig(c) and select the adapter directly
+// (issue #445).
+func TestRunnerUnpackingWrappersRemoved(t *testing.T) {
+	data, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("reading main.go: %v", err)
+	}
+	content := string(data)
+	for _, needle := range []string{"func newRunner(", "func newBuildRunner("} {
+		if strings.Contains(content, needle) {
+			t.Errorf("main.go still defines %s; delete it — adapters take runner.Config directly", needle)
+		}
+	}
+}
+
 // TestPrintOutcomeReportRemoved asserts the deprecated printOutcomeReport
 // helper (five ignored parameters collapsed to a single Println, issue #443)
 // has been deleted from main.go.

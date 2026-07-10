@@ -45,7 +45,13 @@ func bootstrap(ensureReady bool) (*launchContext, error) {
 		return nil, err
 	}
 
-	r := newRunner(c, pwd)
+	rc := runnerConfig(c)
+	var r runner.Runner
+	if c.runtime == "bwrap" {
+		r = runner.NewBwrap(rc)
+	} else {
+		r = runner.NewOCI(rc, pwd)
+	}
 	if ensureReady {
 		if err := r.EnsureReady(); err != nil {
 			return nil, err

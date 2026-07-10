@@ -376,14 +376,32 @@ func newForgeClient(c config) forge.Client {
 	return forge.NewClient(newIssueTracker(c), newCodeForge(c))
 }
 
-// newRunner constructs the runner adapter for the `run` subcommand.
-func newRunner(c config, pwd string) runner.Runner {
-	if c.runtime == "bwrap" {
-		return runner.NewBwrap(c.agentFiles, c.agentEnv, c.bakedPrefetch, c.spindriftPromptDir, c.spindriftSkillsDir, c.bwrapUnshareNet)
+// runnerConfig builds the runner.Config a runner adapter needs from loaded
+// config. Shared by both the `run` and `build` subcommand entry points; the
+// build entry point never calls Run(), so leaving PromptDir/SkillsDir/
+// PodmanNetwork populated is harmless there.
+func runnerConfig(c config) runner.Config {
+	return runner.Config{
+		Runtime:         c.runtime,
+		Image:           c.image,
+		ImageArchive:    c.imageArchive,
+		ImageDrv:        c.imageDrv,
+		ImageTag:        c.imageTag,
+		NixBuilderImage: c.nixBuilderImage,
+		NixVolume:       c.nixVolume,
+		FlakeImageAttr:  c.flakeImageAttr,
+		PodmanNetwork:   c.podmanNetwork,
+		PidsLimit:       c.pidsLimit,
+		MemoryLimit:     c.memoryLimit,
+		AgentFiles:      c.agentFiles,
+		AgentEnv:        c.agentEnv,
+		AgentFilesDrv:   c.agentFilesDrv,
+		AgentEnvDrv:     c.agentEnvDrv,
+		BakedPrefetch:   c.bakedPrefetch,
+		BwrapUnshareNet: c.bwrapUnshareNet,
+		PromptDir:       c.spindriftPromptDir,
+		SkillsDir:       c.spindriftSkillsDir,
 	}
-	return runner.NewOCI(c.runtime, c.image, c.imageArchive, c.imageDrv, c.imageTag,
-		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, c.spindriftPromptDir, c.spindriftSkillsDir,
-		c.podmanNetwork, c.pidsLimit, c.memoryLimit)
 }
 
 // newDriver returns the Go Driver strategy selected by c.driver (ADR 0009).
@@ -396,16 +414,6 @@ func newDriver(c config) driver.Driver {
 		d, _ = driver.New("")
 	}
 	return d
-}
-
-// newBuildRunner constructs the runner adapter for the `build` subcommand.
-func newBuildRunner(c config, pwd string) runner.Runner {
-	if c.runtime == "bwrap" {
-		return runner.NewBwrapBuild(c.agentFilesDrv, c.agentEnvDrv)
-	}
-	return runner.NewOCI(c.runtime, c.image, c.imageArchive, c.imageDrv, c.imageTag,
-		c.nixBuilderImage, c.nixVolume, c.flakeImageAttr, pwd, "", "",
-		"", c.pidsLimit, c.memoryLimit)
 }
 
 // dispatchConfig builds the subset of config a dispatch.Factory needs.
@@ -460,7 +468,14 @@ func build() error {
 	if err != nil {
 		return err
 	}
-	return newBuildRunner(c, pwd).EnsureReady()
+	rc := runnerConfig(c)
+	var r runner.Runner
+	if c.runtime == "bwrap" {
+		r = runner.NewBwrapBuild(rc)
+	} else {
+		r = runner.NewOCI(rc, pwd)
+	}
+	return r.EnsureReady()
 }
 
 // transitionState is a best-effort dispatch-state transition that logs but
