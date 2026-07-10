@@ -530,6 +530,25 @@ FAKE
   ! grep -q 'AUTO-FORMAT' "$CLAUDE_PROMPT_FILE"
 }
 
+# issue #452: `nix fmt` can never succeed in-box (uid 1000 has no
+# /nix/store write access, so evaluating the flake dies with a store-lock
+# permission error) — the step must not list it as a usable preference, and
+# must say why it's unavailable if it names it at all.
+@test "AUTO-FORMAT step never instructs nix fmt as a usable preference" {
+  export AUTO_FORMAT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q '`nix fmt` when the target flake defines a formatter' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "AUTO-FORMAT step explains why nix fmt is unavailable in-box" {
+  export AUTO_FORMAT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'nix fmt' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'permission' "$CLAUDE_PROMPT_FILE"
+}
+
 # AUTO_LINT knob: the AUTO-LINT step is injected only when AUTO_LINT is
 # non-empty — same conditional-residue mechanism as AUTO_FORMAT_STEP.
 @test "issue prompt gains an AUTO-LINT step when AUTO_LINT is enabled" {
