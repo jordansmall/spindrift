@@ -20,6 +20,7 @@ setup() {
   export REVIEW_MODEL=""
   export FILER_MODEL=""
   export AUTO_FORMAT=""
+  export AUTO_LINT=""
   export IN_PROGRESS_LABEL="agent-in-progress"
   export COMPLETE_LABEL="agent-complete"
   export DEV_SHELL_PROBE_TIMEOUT=300
@@ -510,6 +511,21 @@ FAKE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! grep -q 'AUTO-FORMAT' "$CLAUDE_PROMPT_FILE"
+}
+
+# AUTO_LINT knob: the AUTO-LINT step is injected only when AUTO_LINT is
+# non-empty — same conditional-residue mechanism as AUTO_FORMAT_STEP.
+@test "issue prompt gains an AUTO-LINT step when AUTO_LINT is enabled" {
+  export AUTO_LINT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q '# AUTO-LINT' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "issue prompt has no AUTO-LINT step when AUTO_LINT is disabled" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'AUTO-LINT' "$CLAUDE_PROMPT_FILE"
 }
 
 @test "entrypoint includes a read-only tools whitelist in agents JSON" {
