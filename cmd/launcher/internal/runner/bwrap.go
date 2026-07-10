@@ -60,6 +60,17 @@ func (a *bwrapAdapter) EnsureReady() error { return nil }
 // `spindrift build` and are either present or absent at bwrap invocation time.
 func (a *bwrapAdapter) IsReady() error { return nil }
 
+// mountSpecs computes the host-to-box mounts that apply for box, shared with
+// the OCI adapter (buildMountSpecs); only the rendering below differs.
+func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
+	return buildMountSpecs(MountParams{
+		PromptDir:             a.promptDir,
+		SkillsDir:             a.skillsDir,
+		DriverSkillsDir:       a.driverSkillsDir,
+		DriverSessionCacheDir: a.driverSessionCacheDir,
+	}, box)
+}
+
 // buildArgs constructs the bwrap command-line arguments for the given box.
 // etcDir is the temp directory holding the synthesised /etc/passwd and /etc/group.
 // Secret env vars (GH_TOKEN, auth tokens) are intentionally excluded from argv;
@@ -82,38 +93,38 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		}
 	}
 	args = append(args, "--ro-bind", a.agentFiles+"/agent", "/agent")
-	// Writable host mount (issue #427): the only non-ro-bind mount in this
-	// adapter. Scoped to the Driver's declared session-cache dir (e.g.
-	// .claude/projects for claude) rather than its parent, so it can never
-	// shadow a sibling skills bind below regardless of order.
-	if box.DriverCacheDir != "" && a.driverSessionCacheDir != "" {
-		if info, err := os.Stat(box.DriverCacheDir); err == nil && info.IsDir() {
-			// --dir creates the parent in the tmpfs as the sandbox user (uid 1000),
-			// preventing bwrap from auto-fabricating it as root when it processes
-			// the bind target (issue #447).
-			args = append(args, "--dir", filepath.Dir(a.driverSessionCacheDir))
-			args = append(args, "--bind", box.DriverCacheDir, a.driverSessionCacheDir)
+	// Mount decisions (gates, existence guards, operator messages) are
+	// computed once in buildMountSpecs, shared with the OCI adapter; bwrap
+	// only renders each spec into its own bind syntax. The driver-cache spec
+	// (issue #427) is the only writable mount buildMountSpecs ever produces,
+	// scoped to the Driver's declared session-cache dir rather than its
+	// parent so it can never shadow a sibling skills bind regardless of
+	// order.
+	skillsMounted := false
+	for _, m := range a.mountSpecs(box) {
+		if m.Message != "" {
+			fmt.Print(m.Message)
 		}
-	}
-	if a.promptDir != "" {
-		if info, err := os.Stat(a.promptDir); err == nil && info.IsDir() {
-			fmt.Printf("==> SPINDRIFT_PROMPT_DIR set; mounting %s over the baked prompt\n", a.promptDir)
-			args = append(args, "--ro-bind", a.promptDir, "/agent/prompts")
+		if m.Target == a.driverSkillsDir {
+			skillsMounted = true
 		}
+		if !m.ReadOnly {
+			// --dir creates the parent in the tmpfs as the sandbox user (uid
+			// 1000), preventing bwrap from auto-fabricating it as root when
+			// it processes the bind target (issue #447).
+			args = append(args, "--dir", filepath.Dir(m.Target))
+			args = append(args, "--bind", m.Source, m.Target)
+			continue
+		}
+		args = append(args, "--ro-bind", m.Source, m.Target)
 	}
-	// Runtime mount takes precedence over baked skills; fall back to baked
-	// skills when no runtime override is set.
-	if a.driverSkillsDir != "" {
-		if a.skillsDir != "" {
-			if info, err := os.Stat(a.skillsDir); err == nil && info.IsDir() {
-				fmt.Printf("==> SPINDRIFT_SKILLS_DIR set; mounting %s over %s\n", a.skillsDir, a.driverSkillsDir)
-				args = append(args, "--ro-bind", a.skillsDir, a.driverSkillsDir)
-			}
-		} else {
-			bakedSkillsPath := filepath.Join(a.agentFiles, a.driverSkillsDir)
-			if info, err := os.Stat(bakedSkillsPath); err == nil && info.IsDir() {
-				args = append(args, "--ro-bind", bakedSkillsPath, a.driverSkillsDir)
-			}
+	// buildMountSpecs only covers the runtime skills override; the
+	// image's own baked skills (no host-side equivalent for OCI, so this
+	// fallback stays bwrap-only) fill in when no runtime override applies.
+	if !skillsMounted && a.driverSkillsDir != "" {
+		bakedSkillsPath := filepath.Join(a.agentFiles, a.driverSkillsDir)
+		if spec, ok := candidateMount(bakedSkillsPath, a.driverSkillsDir, true); ok {
+			args = append(args, "--ro-bind", spec.Source, spec.Target)
 		}
 	}
 	// --clearenv is intentionally absent: secrets (GH_TOKEN, auth tokens) reach
