@@ -29,28 +29,25 @@ type ociAdapter struct {
 	memoryLimit     string // --memory value; empty disables the flag
 }
 
-// NewOCI constructs an OCI adapter. pwd is the working directory (used for the
-// container-fallback path); promptDir is the optional SPINDRIFT_PROMPT_DIR;
-// skillsDir is the optional SPINDRIFT_SKILLS_DIR;
-// podmanNetwork is the optional --network value (empty omits the flag).
-// pidsLimit and memoryLimit set the --pids-limit and --memory flags; empty
-// string omits the flag.
-func NewOCI(cli, image, imageArchive, imageDrv, imageTag, nixBuilderImage, nixVolume, flakeImageAttr, pwd, promptDir, skillsDir, podmanNetwork, pidsLimit, memoryLimit string) Runner {
+// NewOCI constructs an OCI adapter from cfg. pwd is the working directory
+// (used for the container-fallback path) — a genuine per-invocation runtime
+// dependency passed separately from cfg.
+func NewOCI(cfg Config, pwd string) Runner {
 	return &ociAdapter{
-		cli:             cli,
-		image:           image,
-		imageArchive:    imageArchive,
-		imageDrv:        imageDrv,
-		imageTag:        imageTag,
-		nixBuilderImage: nixBuilderImage,
-		nixVolume:       nixVolume,
-		flakeImageAttr:  flakeImageAttr,
+		cli:             cfg.Runtime,
+		image:           cfg.Image,
+		imageArchive:    cfg.ImageArchive,
+		imageDrv:        cfg.ImageDrv,
+		imageTag:        cfg.ImageTag,
+		nixBuilderImage: cfg.NixBuilderImage,
+		nixVolume:       cfg.NixVolume,
+		flakeImageAttr:  cfg.FlakeImageAttr,
 		pwd:             pwd,
-		promptDir:       promptDir,
-		skillsDir:       skillsDir,
-		podmanNetwork:   podmanNetwork,
-		pidsLimit:       pidsLimit,
-		memoryLimit:     memoryLimit,
+		promptDir:       cfg.PromptDir,
+		skillsDir:       cfg.SkillsDir,
+		podmanNetwork:   cfg.PodmanNetwork,
+		pidsLimit:       cfg.PidsLimit,
+		memoryLimit:     cfg.MemoryLimit,
 	}
 }
 

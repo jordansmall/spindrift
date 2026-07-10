@@ -28,18 +28,19 @@ type bwrapAdapter struct {
 	unshareNet    bool   // when true, adds --unshare-net (isolates from host netns)
 }
 
-// NewBwrap constructs a bwrap adapter for the run command.
+// NewBwrap constructs a bwrap adapter for the run command from cfg.
 // EnsureReady is a no-op; call NewBwrapBuild for the build command.
-// unshareNet adds --unshare-net to isolate from the host network namespace;
-// when false, the sandbox shares the host netns (host-loopback reachable).
-func NewBwrap(agentFiles, agentEnv, bakedPrefetch, promptDir, skillsDir string, unshareNet bool) Runner {
+// cfg.BwrapUnshareNet adds --unshare-net to isolate from the host network
+// namespace; when false, the sandbox shares the host netns (host-loopback
+// reachable).
+func NewBwrap(cfg Config) Runner {
 	return &bwrapAdapter{
-		agentFiles:    agentFiles,
-		agentEnv:      agentEnv,
-		bakedPrefetch: bakedPrefetch,
-		promptDir:     promptDir,
-		skillsDir:     skillsDir,
-		unshareNet:    unshareNet,
+		agentFiles:    cfg.AgentFiles,
+		agentEnv:      cfg.AgentEnv,
+		bakedPrefetch: cfg.BakedPrefetch,
+		promptDir:     cfg.PromptDir,
+		skillsDir:     cfg.SkillsDir,
+		unshareNet:    cfg.BwrapUnshareNet,
 	}
 }
 
@@ -171,12 +172,12 @@ type bwrapBuildAdapter struct {
 	agentEnvDrv   string // .drv path for agentEnv
 }
 
-// NewBwrapBuild constructs a bwrap adapter for the build command.
+// NewBwrapBuild constructs a bwrap adapter for the build command from cfg.
 // EnsureReady realizes agent store closures via nix build.
-func NewBwrapBuild(agentFilesDrv, agentEnvDrv string) Runner {
+func NewBwrapBuild(cfg Config) Runner {
 	return &bwrapBuildAdapter{
-		agentFilesDrv: agentFilesDrv,
-		agentEnvDrv:   agentEnvDrv,
+		agentFilesDrv: cfg.AgentFilesDrv,
+		agentEnvDrv:   cfg.AgentEnvDrv,
 	}
 }
 
