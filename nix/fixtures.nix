@@ -40,6 +40,8 @@ let
     packages = p: [
       p.go
       p.nil
+      p.bats
+      p.shellcheck
     ];
     defaults = {
       mergeMode = "immediate";
