@@ -2,11 +2,8 @@ package driver
 
 import "testing"
 
-// nixDriverNames mirrors the keys of lib/drivers/default.nix. Keep this list
-// in sync by hand — mkHarness.nix throws on an unknown `driver` option value,
-// and this test throws on a nix Driver name with no matching Go strategy (or
-// vice versa), so the two registries cannot silently drift (ADR 0009).
-var nixDriverNames = []string{"claude"}
+// nixDriverNames is generated from lib/drivers/default.nix by nix/checks.nix;
+// see drivernames_gen.go. Edit lib/drivers/default.nix and run `nix run .#regen`.
 
 func TestParityWithNixDriverRegistry(t *testing.T) {
 	goNames := Names()
