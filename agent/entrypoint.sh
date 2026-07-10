@@ -291,7 +291,15 @@ if [ -n "${CONFLICT_RESOLVE_PR_URL:-}" ]; then
   exit 0
 fi
 
-prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
+# FIX_PASS is set by the launcher on a fix box (dispatched when CI comes back
+# red on an already-open PR, ADR: selfHeal/runFix in cmd/launcher). A warm fix
+# pass already has the branch checked out and prior work in place, so it runs
+# a dedicated fix-prompt instead of the cold issue-prompt a fresh run uses.
+if [ -n "${FIX_PASS:-}" ] && [ "${FIX_PASS}" -gt 0 ]; then
+  prompt="$(_subst "${PROMPTS_DIR}/fix-prompt.md")"
+else
+  prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
+fi
 # A SPINDRIFT_PROMPT_DIR mount replaces the whole prompt dir, so a rendered
 # prompt that dropped the contract (issue #419) never gets the build-time
 # injection; append the same canonical contract here, at run time, unless
