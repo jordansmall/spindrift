@@ -31,6 +31,13 @@ then realises the Linux image on every push and PR. **Before opening a PR,
 for bash/entrypoint changes, a Go test for launcher changes, or a nix fixture
 check for the declarative surface.
 
+An agent working in the dogfood Box (where `nix flake check` may be
+unavailable, e.g. no writable nix store) has faster, store-free stand-ins for
+two of those gates: `nil diagnostics path/to/file.nix` for changed `*.nix`
+files, and `shellcheck path/to/file.sh` for changed shell files. Both tools
+are baked into the Box and complement, but do not replace, the full
+`nix flake check` run in CI.
+
 After editing `lib/env-schema.nix`, regenerate the artifacts it drives —
 `templates/default/harness.env.example`, `cmd/launcher/flagtable_gen.go`, and
 `docs/flake-options.md` — instead of hand-editing them until the drift-guard

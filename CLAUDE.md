@@ -51,6 +51,19 @@ without accessing the nix store, so it works as the `agent` user (uid 1000)
 inside the box even when `nix flake check` is unavailable. It complements, but
 does not replace, `nix flake check` in CI (which catches evaluation errors).
 
+## Shell edits
+
+Before finishing any task that touches `*.sh` or `*.bash` files, run
+`shellcheck` on each changed file and resolve all findings:
+
+```sh
+shellcheck path/to/file.sh
+```
+
+`shellcheck` is baked into the dogfood Box alongside `nil`, so it's on PATH as
+the `agent` user (uid 1000) without a store build. It complements, but does not
+replace, the `shellcheck` check `nix flake check` runs in CI.
+
 ## Running `gh`
 
 `gh` commands need network + the macOS keychain, which the command sandbox blocks
