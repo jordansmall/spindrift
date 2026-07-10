@@ -638,6 +638,36 @@ FAKE
   done
 }
 
+# issue #463: `$(_subst ...)` command substitution strips ALL trailing
+# newlines, so a fragment's blank-line separator (which the heredoc-string
+# assignments it replaces carried literally) must be reconstructed after
+# substitution -- otherwise the step glues onto the next heading with no
+# even a newline between them.
+@test "AUTO-FORMAT and AUTO-LINT steps stay separated from each other and from COMMIT" {
+  export AUTO_FORMAT=1
+  export AUTO_LINT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'run\.# AUTO-LINT' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'run\.# COMMIT' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "FILE ISSUES step stays separated from LAND THE CHANGE" {
+  export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'configured\.# LAND THE CHANGE' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "CI FAILURE step stays separated from CONTEXT on a fix pass" {
+  export FIX_PASS=1
+  export CI_FAILURE_SUMMARY="build failed"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'scratch:build failed' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'failed# CONTEXT' "$CLAUDE_PROMPT_FILE"
+}
+
 # issue #463: the claude|heartbeat-filter|tee pipeline used to be hand-copied
 # between the direct path and the devShell wrapper heredoc; a single
 # occurrence of this fragment proves it is now rendered from one source that

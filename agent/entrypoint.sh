@@ -240,6 +240,15 @@ _subst() {
 # and a SPINDRIFT_PROMPT_DIR override supplies its own fragment for any knob
 # it enables, exactly as it already must supply filer-prompt.md when the
 # filer is configured (documented in docs/reference.md).
+#
+# Each fragment file ends with the blank line that separates it from the
+# heading it precedes in the rendered prompt (e.g. issue-prompt.md's
+# `${AUTO_FORMAT_STEP}${AUTO_LINT_STEP}# COMMIT`), but `$(...)` command
+# substitution strips every trailing newline, blank line included -- and
+# stripping happens again at the OUTER `$(...)` around any function that
+# tries to reappend it internally, so the concatenation has to happen at the
+# assignment site itself, outside every command substitution: `"$(_subst
+# "$f")"$'\n\n'`, never `"$(some_wrapper "$f")"`.
 
 # Discover available skills at DRIVER_SKILLS_DIR and build a directive to
 # prefer them over the inline guidance where they apply.
@@ -253,7 +262,7 @@ if [ -d "$DRIVER_SKILLS_DIR" ]; then
 fi
 SKILL_PREAMBLE=""
 if [ -n "$SKILLS_FOUND" ]; then
-  SKILL_PREAMBLE="$(_subst "${PROMPTS_DIR}/fragments/skill-preamble.md")"
+  SKILL_PREAMBLE="$(_subst "${PROMPTS_DIR}/fragments/skill-preamble.md")"$'\n\n'
 fi
 
 # The FILE ISSUES step is substituted into the issue prompt only when the
@@ -262,7 +271,7 @@ fi
 # rendered prompt carries no trace of the step.
 FILE_ISSUES_STEP=""
 if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
-  FILE_ISSUES_STEP="$(_subst "${PROMPTS_DIR}/fragments/file-issues.md")"
+  FILE_ISSUES_STEP="$(_subst "${PROMPTS_DIR}/fragments/file-issues.md")"$'\n\n'
 fi
 
 # AUTO_FORMAT_STEP is substituted into the issue prompt only when AUTO_FORMAT
@@ -271,7 +280,7 @@ fi
 # the step and the formatter is never mentioned.
 AUTO_FORMAT_STEP=""
 if [ -n "${AUTO_FORMAT:-}" ]; then
-  AUTO_FORMAT_STEP="$(_subst "${PROMPTS_DIR}/fragments/auto-format.md")"
+  AUTO_FORMAT_STEP="$(_subst "${PROMPTS_DIR}/fragments/auto-format.md")"$'\n\n'
 fi
 
 # AUTO_LINT_STEP is substituted into the issue prompt only when AUTO_LINT is
@@ -280,7 +289,7 @@ fi
 # the step and the linter is never mentioned.
 AUTO_LINT_STEP=""
 if [ -n "${AUTO_LINT:-}" ]; then
-  AUTO_LINT_STEP="$(_subst "${PROMPTS_DIR}/fragments/auto-lint.md")"
+  AUTO_LINT_STEP="$(_subst "${PROMPTS_DIR}/fragments/auto-lint.md")"$'\n\n'
 fi
 
 # CI_FAILURE_STEP is substituted into the fix prompt only when the launcher
@@ -290,7 +299,7 @@ fi
 # the step and the prompt falls back to its own local-check flow with no error.
 CI_FAILURE_STEP=""
 if [ -n "${CI_FAILURE_SUMMARY:-}" ]; then
-  CI_FAILURE_STEP="$(_subst "${PROMPTS_DIR}/fragments/ci-failure.md")"
+  CI_FAILURE_STEP="$(_subst "${PROMPTS_DIR}/fragments/ci-failure.md")"$'\n\n'
 fi
 
 # When the pre-work rebase produced conflicts, spawn a conflict-resolve agent to
