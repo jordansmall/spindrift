@@ -53,7 +53,8 @@ type Settler interface {
 
 // Settle is the prod adapter: constructed once per top-level dispatch entry
 // point with its config and forge client, then reused across every issue in
-// that invocation.
+// that invocation. Safe for concurrent use across fanOut goroutines because
+// it holds no mutable state of its own beyond the (concurrency-safe) fc.
 type Settle struct {
 	cfg Config
 	fc  forge.Client
