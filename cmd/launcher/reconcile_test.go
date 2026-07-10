@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -28,7 +29,7 @@ func TestReconcileStranded_GreenPRMergesAndCompletes(t *testing.T) {
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
-	reconcileStranded(c, fc, t.TempDir(), nil)
+	reconcileStranded(c, fc, testFactory(t, t.TempDir(), nil))
 
 	if fc.Merged != testReconcilePR {
 		t.Errorf("expected green stranded PR to be merged; fc.Merged=%q", fc.Merged)
@@ -51,7 +52,7 @@ func TestReconcileStranded_RedFollowsSelfHeal(t *testing.T) {
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
 
-	reconcileStranded(c, fc, t.TempDir(), nil)
+	reconcileStranded(c, fc, testFactory(t, t.TempDir(), nil))
 
 	if fc.Merged != "" {
 		t.Errorf("expected no merge on red CI; fc.Merged=%q", fc.Merged)
@@ -72,7 +73,7 @@ func TestReconcileStranded_DraftPRSkipped(t *testing.T) {
 	branch := c.branchPrefix + "5"
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: true})
 
-	reconcileStranded(c, fc, t.TempDir(), nil)
+	reconcileStranded(c, fc, testFactory(t, t.TempDir(), nil))
 
 	if fc.Merged != "" {
 		t.Errorf("draft PR must not be merged; fc.Merged=%q", fc.Merged)
@@ -89,7 +90,7 @@ func TestReconcileStranded_NoPRSkipped(t *testing.T) {
 	// In-progress issue with no PR registered.
 	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
 
-	reconcileStranded(c, fc, t.TempDir(), nil)
+	reconcileStranded(c, fc, testFactory(t, t.TempDir(), nil))
 
 	if fc.Merged != "" {
 		t.Errorf("no-PR issue must not be merged; fc.Merged=%q", fc.Merged)
@@ -110,7 +111,7 @@ func TestAdoptAndGate_RedFollowsSelfHeal(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "77", Labels: []string{c.inProgressLabel}})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
 
-	adoptAndGate(c, fc, iss, testReconcilePR, func(pass int, summary string) error { return nil }, nil)
+	adoptAndGate(c, fc, dispatch.NewFake(), iss, testReconcilePR)
 
 	if fc.Merged != "" {
 		t.Errorf("expected no merge on red CI; fc.Merged=%q", fc.Merged)
@@ -131,17 +132,14 @@ func TestAdoptAndGate_GreenMergesAndCompletes(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "77", Labels: []string{c.inProgressLabel}})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
-	var fixCalls []int
-	adoptAndGate(c, fc, iss, testReconcilePR, func(pass int, summary string) error {
-		fixCalls = append(fixCalls, pass)
-		return nil
-	}, nil)
+	d := dispatch.NewFake()
+	adoptAndGate(c, fc, d, iss, testReconcilePR)
 
 	if fc.Merged != testReconcilePR {
 		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
 	}
-	if len(fixCalls) != 0 {
-		t.Errorf("expected no fix calls on green CI, got %v", fixCalls)
+	if len(d.FixCalls) != 0 {
+		t.Errorf("expected no fix calls on green CI, got %+v", d.FixCalls)
 	}
 	if len(fc.TransitionStateCalls) == 0 {
 		t.Fatal("expected TransitionState call for completeLabel")
@@ -162,7 +160,8 @@ func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
-	err := recoverByNumber(c, fc, t.TempDir(), nil, "42")
+	dir := tempLogDir(t)
+	err := recoverByNumber(c, fc, dir, testFactory(t, dir, nil), "42")
 
 	if err != nil {
 		t.Errorf("expected nil error on green path; got %v", err)
@@ -186,7 +185,8 @@ func TestRecoverByNumber_DraftPRSkipped(t *testing.T) {
 	branch := c.branchPrefix + "42"
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: true})
 
-	err := recoverByNumber(c, fc, t.TempDir(), nil, "42")
+	dir := tempLogDir(t)
+	err := recoverByNumber(c, fc, dir, testFactory(t, dir, nil), "42")
 
 	if err == nil {
 		t.Error("expected error for draft PR; got nil")
@@ -206,7 +206,8 @@ func TestRecoverByNumber_NoPRSkipped(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	// No PR registered for the branch.
 
-	err := recoverByNumber(c, fc, t.TempDir(), nil, "42")
+	dir := tempLogDir(t)
+	err := recoverByNumber(c, fc, dir, testFactory(t, dir, nil), "42")
 
 	if err == nil {
 		t.Error("expected error for no-PR case; got nil")
@@ -229,7 +230,8 @@ func TestRecoverByNumber_RedFollowsSelfHeal(t *testing.T) {
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
 
-	err := recoverByNumber(c, fc, t.TempDir(), nil, "42")
+	dir := tempLogDir(t)
+	err := recoverByNumber(c, fc, dir, testFactory(t, dir, nil), "42")
 
 	if err != nil {
 		t.Errorf("expected nil error (gate result expressed via labels); got %v", err)
