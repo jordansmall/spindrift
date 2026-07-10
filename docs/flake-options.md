@@ -97,4 +97,5 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | attr path | env var | default | description |
 |---|---|---|---|
 | `settings.promptSkillIteration.autoFormat` | `AUTO_FORMAT` | `` | when non-empty, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found |
+| `settings.promptSkillIteration.autoLint` | `AUTO_LINT` | `` | when non-empty, the implementor auto-detects and runs the project's linter on changed files before each commit, applying auto-fix then resolving remaining findings; skips silently when no linter is found |
 
