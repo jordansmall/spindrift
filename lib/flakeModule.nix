@@ -147,6 +147,16 @@ in
         description = "Runner the launcher commands drive: OCI runtimes (podman/docker) or the daemonless bubblewrap runner (bwrap, Linux-only).";
       };
 
+      driver = mkOption {
+        # A plain string, not `types.enum`, so the lib/drivers/ registry (not
+        # this option) stays the single source of truth for valid names —
+        # mkHarness.nix throws at eval time on a name absent from the
+        # registry (ADR 0009).
+        type = types.nullOr types.str;
+        default = null;
+        description = "The agent CLI Driver (ADR 0009): a build-time choice selecting one entry from the lib/drivers/ registry, baked into the image and threaded to the launcher as DRIVER. \"claude\" is the only Driver today.";
+      };
+
       nixInBox = mkOption {
         type = types.nullOr types.bool;
         default = null;
@@ -189,6 +199,7 @@ in
       // lib.optionalAttrs (cfg.skills != null) { inherit (cfg) skills; }
       // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; }
       // lib.optionalAttrs (cfg.runtime != null) { inherit (cfg) runtime; }
+      // lib.optionalAttrs (cfg.driver != null) { inherit (cfg) driver; }
       // lib.optionalAttrs (cfg.nixInBox != null) { inherit (cfg) nixInBox; };
       harness = mkHarness args;
       # nixfmt from the consumer's locked nixpkgs input — same pin the
