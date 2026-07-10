@@ -292,6 +292,7 @@ CI_FAILURE_STEP=""
 if [ -n "${CI_FAILURE_SUMMARY:-}" ]; then
   CI_FAILURE_STEP="$(_subst "${PROMPTS_DIR}/fragments/ci-failure.md")"
 fi
+
 # When the pre-work rebase produced conflicts, spawn a conflict-resolve agent to
 # re-map the branch onto current main.  Only escalate to exit 1 if the agent
 # genuinely cannot resolve.
