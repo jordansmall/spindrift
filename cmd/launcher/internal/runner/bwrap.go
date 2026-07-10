@@ -100,13 +100,9 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	// scoped to the Driver's declared session-cache dir rather than its
 	// parent so it can never shadow a sibling skills bind regardless of
 	// order.
-	skillsMounted := false
 	for _, m := range a.mountSpecs(box) {
 		if m.Message != "" {
 			fmt.Print(m.Message)
-		}
-		if m.Target == a.driverSkillsDir {
-			skillsMounted = true
 		}
 		if !m.ReadOnly {
 			// --dir creates the parent in the tmpfs as the sandbox user (uid
@@ -118,10 +114,13 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		}
 		args = append(args, "--ro-bind", m.Source, m.Target)
 	}
-	// buildMountSpecs only covers the runtime skills override; the
-	// image's own baked skills (no host-side equivalent for OCI, so this
-	// fallback stays bwrap-only) fill in when no runtime override applies.
-	if !skillsMounted && a.driverSkillsDir != "" {
+	// buildMountSpecs only covers the runtime skills override; the image's
+	// own baked skills (no host-side equivalent for OCI, so this fallback
+	// stays bwrap-only) fill in only when no runtime override was requested
+	// at all. An override that was requested but doesn't resolve to a
+	// directory yields no skills mount — it must not silently fall through
+	// to the baked skills.
+	if a.skillsDir == "" && a.driverSkillsDir != "" {
 		bakedSkillsPath := filepath.Join(a.agentFiles, a.driverSkillsDir)
 		if spec, ok := candidateMount(bakedSkillsPath, a.driverSkillsDir, true); ok {
 			args = append(args, "--ro-bind", spec.Source, spec.Target)
