@@ -16,7 +16,10 @@ type Event struct {
 	ParentToolUseID string   `json:"parent_tool_use_id,omitempty"`
 }
 
-// Message is the "message" object of an assistant stream event.
+// Message is the "message" object of an assistant stream event. It is a
+// union of every field a consumer needs: Model is heartbeat-only (narration
+// headers), Usage is usage-only (token accounting) — neither consumer
+// requires both to be populated.
 type Message struct {
 	Content []ContentBlock `json:"content"`
 	Model   string         `json:"model,omitempty"`

@@ -82,8 +82,10 @@ func (w *Writer) parseLine(line string) {
 	switch ev.Type {
 	case "assistant":
 		if ev.Message != nil {
-			// Collect Task tool-use IDs → subagent role from implementor messages
-			// (online, single-pass; mirrors usage.BreakdownByRole pass 1).
+			// Collect Task tool-use IDs → subagent role from implementor messages,
+			// online as events stream in (usage.BreakdownByRole does the same
+			// resolution buffered, over a full log, via the same claudetranscript
+			// helpers).
 			claudetranscript.CollectTaskRoles(ev, w.taskRole)
 
 			// Resolve acting role from parent_tool_use_id.
