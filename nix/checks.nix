@@ -614,6 +614,28 @@ in
     ) "flakeModule must throw on unknown knob 'typoKnob' in settings.branches";
     pkgs.runCommand "flakemodule-rejects-unknown-settings" { } "touch $out";
 
+  # cmd/launcher/internal/driver/drivernames_gen.go must match the key list
+  # derived from lib/drivers/default.nix. Fails when a Driver is added to the
+  # Nix registry but the committed generated file is not regenerated. Shares
+  # its renderer with `nix run .#regen` via lib/renderers.nix (issue #436).
+  driver-names-gen =
+    let
+      driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
+      generated = pkgs.writeText "drivernames_gen.go.generated" (
+        renderers.renderDriverNamesGo driverRegistry
+      );
+    in
+    pkgs.runCommand "driver-names-gen"
+      {
+        inherit generated;
+        committed = ../cmd/launcher/internal/driver/drivernames_gen.go;
+      }
+      ''
+        diff "$generated" "$committed" \
+          || { echo "cmd/launcher/internal/driver/drivernames_gen.go is out of sync with lib/drivers/default.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # harness.env.example must match the content generated from env-schema.nix.
   # Fails when a new schema knob is added but the committed file is not
   # regenerated (golden-file drift; resolves issue #109). Shares its renderer
