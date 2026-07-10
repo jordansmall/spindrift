@@ -1678,7 +1678,12 @@ func drainMaxJobs(c config, fc forge.Client, pwd string, r runner.Runner, issues
 outer:
 	for _, iss := range issues {
 		switch {
-		case hasFailedInBatchBlocker(c, fc, iss.number, edges):
+		// Cascade-fail only in the multi-issue drain path (c.issueNumber == "").
+		// The claimed single-issue path swaps the issue onto in-progress before
+		// calling here; cascading it would add Failed on top of in-progress,
+		// leaving the issue double-labeled. That path has its own blocked-marker
+		// signaling via the writeBlockedMarker call below.
+		case c.issueNumber == "" && hasFailedInBatchBlocker(c, fc, iss.number, edges):
 			blockerFailed = append(blockerFailed, iss)
 		case !issueIsReady(c, fc, iss.number, edges):
 			fmt.Printf("    ~~ #%s blocked (a blocker is not '%s'); skipping\n", iss.number, c.completeLabel)

@@ -232,3 +232,45 @@ func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
 	}
 }
+
+// TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade verifies that
+// when ISSUE_NUMBER is set (claimed single-issue path), an in-batch blocker
+// reaching failed state does NOT cascade-fail the claimed issue. The issue is
+// already on in-progress, so cascading would produce a double-labeled state.
+func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
+	c := baseConfig()
+	c.label = "agent-trigger"
+	c.issueNumber = "1" // claimed path
+	c.maxParallel = 1
+	c.maxJobs = 1
+
+	fc := forge.NewFake()
+	// Issue #1 is on in-progress (claimed); its blocker #3 has failed.
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.inProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.failedLabel}})
+
+	fr := runner.NewFake()
+
+	edges := map[string][]string{"1": {"3"}}
+
+	dir := tempLogDir(t)
+	// The claimed path returns nil (writes blocked marker path internally),
+	// not errOpenNoneDispatchable and not a cascade-fail.
+	if err := drainMaxJobs(c, fc, dir, fr, []issue{
+		{number: "1", title: "claimed issue"},
+	}, edges); err != nil {
+		t.Fatalf("drainMaxJobs: %v", err)
+	}
+
+	// Issue #1 must NOT have been failed — it's on in-progress, not dispatchable.
+	iss1, err := fc.Issue("1")
+	if err != nil {
+		t.Fatalf("Issue(1): %v", err)
+	}
+	if containsLabel(iss1.Labels, c.failedLabel) {
+		t.Errorf("claimed issue 1 must NOT be cascade-failed; labels=%v", iss1.Labels)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
+	}
+}
