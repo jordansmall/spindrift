@@ -40,51 +40,15 @@ OUTCOME_CONTRACT_FILE="${OUTCOME_CONTRACT_FILE:-/agent/outcome-contract.md}"
 
 # DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are baked by the
 # selected Driver's lib/drivers/<name>.nix (ADR 0009); the defaults here keep
-# this script standalone-runnable — the bats suite execs it raw — and
-# byte-identical to a driver=claude image, the only Driver today.
+# the :-expansions below quiet under set -u when the nix preamble is absent.
 DRIVER_BIN="${DRIVER_BIN:-claude}"
 DRIVER_FLAGS_COMMON="${DRIVER_FLAGS_COMMON:---verbose --output-format stream-json --dangerously-skip-permissions}"
 DRIVER_SKILLS_DIR="${DRIVER_SKILLS_DIR:-${HOME:-}/.claude/skills}"
 
-# _driver_extract_outcome pulls the SPINDRIFT_OUTCOME line out of the agent's
-# raw transcript. A nix-built image prepends the selected Driver's own
-# definition (lib/drivers/<name>.nix outcomeExtractFnBody) ahead of this
-# script's body; the guard keeps that definition, falling back to claude's
-# stream-json extraction only when none was prepended (standalone/bats runs).
-if ! declare -F _driver_extract_outcome >/dev/null 2>&1; then
-  _driver_extract_outcome() {
-    jq -r 'select(.type == "result") | .result // empty' "$1" 2>/dev/null \
-      | grep '^SPINDRIFT_OUTCOME ' | tail -1 || true
-  }
-fi
-
-# _driver_session_flags computes the Driver's own session pin/resume argv
-# (issue #427/ADR 0009): `initial` pins a deterministic per-issue session id
-# on the cold run; `resume` re-emits it on a fix pass only when that
-# session's data is actually present under the mounted
-# /home/agent/.claude/projects, printing nothing (a clean fallback to the
-# cold-context fix flow) when it is not. A nix-built image prepends the
-# selected Driver's own definition
-# (lib/drivers/<name>.nix sessionFlagsFnBody); the guard keeps that
-# definition, falling back to claude's own scheme only in standalone/bats
-# runs, matching the byte-identical convention above.
-if ! declare -F _driver_session_flags >/dev/null 2>&1; then
-  _driver_session_flags() {
-    local h id
-    h="$(printf '%s' "spindrift-session:${REPO_SLUG:-}:${ISSUE_NUMBER:-}" | sha256sum | cut -c1-32)"
-    id="${h:0:8}-${h:8:4}-${h:12:4}-${h:16:4}-${h:20:12}"
-    case "$1" in
-      initial)
-        printf -- '--session-id %s' "$id"
-        ;;
-      resume)
-        if compgen -G "${HOME:-}/.claude/projects/*/${id}.jsonl" >/dev/null 2>&1; then
-          printf -- '--resume %s' "$id"
-        fi
-        ;;
-    esac
-  }
-fi
+# _driver_extract_outcome and _driver_session_flags are defined by the Driver
+# registry (lib/drivers/<name>.nix); a nix-built image prepends them via
+# driverPreamble (lib/mkHarness.nix), and the bats harness sources the same
+# registry-rendered bodies via DRIVER_PREAMBLE_FILE (issue #433).
 
 export GH_TOKEN
 gh auth setup-git
