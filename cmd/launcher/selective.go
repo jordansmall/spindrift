@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // selectiveListDispatch dispatches a hand-picked list of issues. It bypasses the
@@ -17,7 +17,7 @@ import (
 // trigger cascading eviction with a notice. Unlabeled issues print a warning and
 // require a single batched confirmation before any Box is launched (skipped when
 // forceYes=true or no unlabeled issues exist).
-func selectiveListDispatch(c config, fc forge.Client, pwd string, r runner.Runner, nums []string, forceYes bool, stdin io.Reader, stdout io.Writer) error {
+func selectiveListDispatch(c config, fc forge.Client, pwd string, f *dispatch.Factory, nums []string, forceYes bool, stdin io.Reader, stdout io.Writer) error {
 	// Fetch each issue by number.
 	issues, unlabeled, err := fetchSelectiveIssues(c, fc, nums)
 	if err != nil {
@@ -67,10 +67,10 @@ func selectiveListDispatch(c config, fc forge.Client, pwd string, r runner.Runne
 			return fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
 		}
 		fmt.Fprintf(stdout, "==> %d issue(s); dispatching in dependency order\n", len(issues))
-		return dispatchWaves(c, fc, pwd, r, issues, edges)
+		return dispatchWaves(c, fc, f, issues, edges)
 	}
 	fmt.Fprintf(stdout, "==> %d issue(s); launching up to %d container(s) at a time\n", len(issues), c.maxParallel)
-	fanOut(c, fc, pwd, r, issues)
+	fanOut(c, fc, f, issues)
 	return nil
 }
 
