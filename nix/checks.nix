@@ -394,6 +394,27 @@ in
     assert assertMsg hasNil "expected nil to be baked into the dogfood toolchain";
     pkgs.runCommand "nil-baked-in-dogfood" { } "touch $out";
 
+  # bats and shellcheck are baked into the dogfood toolchain so an agent
+  # editing shell files can lint/test them in-box, the shell-file analogue
+  # of the nil diagnostics guidance above (issue #471).
+  bats-baked-in-dogfood =
+    let
+      inherit (pkgs.lib) assertMsg any hasInfix;
+      names = map (p: p.name or "") harness.agentEnv.paths;
+      hasBats = any (n: hasInfix "bats-" n) names;
+    in
+    assert assertMsg hasBats "expected bats to be baked into the dogfood toolchain";
+    pkgs.runCommand "bats-baked-in-dogfood" { } "touch $out";
+
+  shellcheck-baked-in-dogfood =
+    let
+      inherit (pkgs.lib) assertMsg any hasInfix;
+      names = map (p: p.name or "") harness.agentEnv.paths;
+      hasShellcheck = any (n: hasInfix "shellcheck-" n) names;
+    in
+    assert assertMsg hasShellcheck "expected shellcheck to be baked into the dogfood toolchain";
+    pkgs.runCommand "shellcheck-baked-in-dogfood" { } "touch $out";
+
   # The lean/no-nix escape hatch must not include the nix CLI.
   lean-escape-hatch =
     let
