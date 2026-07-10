@@ -1,12 +1,57 @@
 package runner
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestEnsureReady_ImagePresentPrintsMessage verifies that EnsureReady emits
+// the "image present — no rebuild needed" line when the image is already loaded,
+// so every loop iteration records whether a rebuild was required.
+func TestEnsureReady_ImagePresentPrintsMessage(t *testing.T) {
+	// Fake CLI: exits 0 for any invocation (simulates "image inspect" success).
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-podman")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &ociAdapter{cli: script, image: "spindrift:abc123"}
+
+	// Capture os.Stdout — EnsureReady uses fmt.Printf which writes there.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	ensureErr := a.EnsureReady()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+
+	if ensureErr != nil {
+		t.Fatalf("EnsureReady: %v", ensureErr)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "present") {
+		t.Errorf("expected 'present' in EnsureReady output when image loaded; got: %q", out)
+	}
+	if !strings.Contains(out, "no rebuild needed") {
+		t.Errorf("expected 'no rebuild needed' in EnsureReady output; got: %q", out)
+	}
+}
 
 func TestReapOrphanedRebaseDirs_RemovesStaleAndKeepsOthers(t *testing.T) {
 	root := t.TempDir()

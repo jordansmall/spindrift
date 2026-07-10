@@ -73,7 +73,8 @@ func (a *ociAdapter) EnsureReady() error {
 	inspect.Stdout = io.Discard
 	inspect.Stderr = io.Discard
 	if err := inspect.Run(); err == nil {
-		return nil // image already present
+		fmt.Printf("==> image '%s' present — no rebuild needed\n", a.image)
+		return nil
 	}
 	fmt.Printf("==> image '%s' not found — building first\n", a.image)
 
