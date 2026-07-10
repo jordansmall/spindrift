@@ -241,6 +241,23 @@ Best-effort: filing must never block the PR or change the outcome line.
 "
 fi
 
+# CI_FAILURE_STEP is substituted into the fix prompt only when the launcher
+# forwarded a CI_FAILURE_SUMMARY (selfHeal captured it on genuine-red, issue
+# #426) — the same conditional-residue mechanism as SKILL_PREAMBLE above:
+# empty when absent, so a fix box with no fetched detail carries no trace of
+# the step and the prompt falls back to its own local-check flow with no error.
+CI_FAILURE_STEP=""
+if [ -n "${CI_FAILURE_SUMMARY:-}" ]; then
+  CI_FAILURE_STEP="# CI FAILURE
+
+The launcher captured this from the failing PR checks — treat it as the known
+failure instead of re-discovering it from scratch:
+
+${CI_FAILURE_SUMMARY}
+
+"
+fi
+
 # Substitute only known placeholders so literal `$` in the prompt body (shell
 # snippets, etc.) survives. The single-quoted variable list is envsubst's
 # literal, not a shell expansion — hence SC2016.
@@ -254,7 +271,8 @@ _subst() {
     COMPLETE_LABEL="${COMPLETE_LABEL:-}" \
     SKILL_PREAMBLE="${SKILL_PREAMBLE:-}" \
     FILE_ISSUES_STEP="${FILE_ISSUES_STEP:-}" \
-    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE $FILE_ISSUES_STEP' \
+    CI_FAILURE_STEP="${CI_FAILURE_STEP:-}" \
+    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE $FILE_ISSUES_STEP $CI_FAILURE_STEP' \
     <"$1"
 }
 # When the pre-work rebase produced conflicts, spawn a conflict-resolve agent to

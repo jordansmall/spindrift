@@ -157,6 +157,35 @@ setup() {
   ! grep -q "Fresh clone, new branch" "$CLAUDE_PROMPT_FILE"
 }
 
+# CI_FAILURE_SUMMARY (issue #426): the launcher captures the concrete CI
+# failure on genuine-red and forwards it to the fix box so the fix agent goes
+# straight to the failing check instead of re-discovering it from scratch.
+@test "CI_FAILURE_SUMMARY set on a fix pass is rendered into the prompt" {
+  export FIX_PASS="2"
+  export CI_FAILURE_SUMMARY="lint: FAILURE
+2 errors in main.go"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "lint: FAILURE" "$CLAUDE_PROMPT_FILE"
+  grep -q "2 errors in main.go" "$CLAUDE_PROMPT_FILE"
+}
+
+@test "CI_FAILURE_SUMMARY unset on a fix pass falls back with no error" {
+  export FIX_PASS="2"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "already checked out" "$CLAUDE_PROMPT_FILE"
+  ! grep -q '\${CI_FAILURE_SUMMARY}' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "CI_FAILURE_SUMMARY is ignored on a fresh (non-fix) run" {
+  export CI_FAILURE_SUMMARY="lint: FAILURE"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "Fresh clone, new branch" "$CLAUDE_PROMPT_FILE"
+  ! grep -q "lint: FAILURE" "$CLAUDE_PROMPT_FILE"
+}
+
 # A SPINDRIFT_PROMPT_DIR mount (simulated here by pointing PROMPTS_DIR straight
 # at a host dir, exactly what the mount leaves the entrypoint seeing) whose
 # issue-prompt.md drops the SPINDRIFT_OUTCOME contract must still reach the

@@ -7,9 +7,9 @@ that opened a pull request against `${BASE_BRANCH}` — CI came back red on it.
 This is a warm fix pass, not a fresh implementation: do not re-scout, do not
 re-derive the issue from scratch.
 
-# CONTEXT
+${CI_FAILURE_STEP}# CONTEXT
 
-Read first (run these yourself):
+Read first (run these yourself) — skip anything CI FAILURE above already answered:
 
 - `git log -n 10 --oneline` — the prior run's commits already on this branch.
 - `gh pr view --json url,statusCheckRollup` — the open PR and its current CI
