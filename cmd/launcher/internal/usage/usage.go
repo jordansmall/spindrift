@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"spindrift.dev/launcher/internal/claudetranscript"
 )
 
 // FormatDuration converts a millisecond count to a human-readable string.
@@ -127,28 +129,6 @@ func LastInLog(path string) (Usage, bool, error) {
 	return *last, true, nil
 }
 
-type assistantEvent struct {
-	Type            string        `json:"type"`
-	Message         *assistantMsg `json:"message,omitempty"`
-	ParentToolUseID string        `json:"parent_tool_use_id,omitempty"`
-}
-
-type assistantMsg struct {
-	Content []msgContent `json:"content"`
-	Usage   usageData    `json:"usage"`
-}
-
-type msgContent struct {
-	Type  string          `json:"type"`
-	ID    string          `json:"id,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
-}
-
-type taskInput struct {
-	SubagentType string `json:"subagent_type"`
-}
-
 // BreakdownByRole scans the file at path and returns per-role token breakdowns
 // by parsing assistant message events. Messages with no parent_tool_use_id are
 // attributed to the implementor. Task tool-use IDs are mapped to roles via the
@@ -200,27 +180,11 @@ func BreakdownByRole(path string) ([]RoleUsage, error) {
 		if !strings.Contains(line, `"type":"assistant"`) {
 			continue
 		}
-		var ev assistantEvent
+		var ev claudetranscript.Event
 		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Type != "assistant" {
 			continue
 		}
-		if ev.ParentToolUseID != "" || ev.Message == nil {
-			continue
-		}
-		for _, c := range ev.Message.Content {
-			if c.Type != "tool_use" || c.Name != "Task" || c.ID == "" {
-				continue
-			}
-			var ti taskInput
-			if len(c.Input) > 0 {
-				_ = json.Unmarshal(c.Input, &ti)
-			}
-			role := ti.SubagentType
-			if role == "" {
-				role = "subagent"
-			}
-			taskRole[c.ID] = role
-		}
+		claudetranscript.CollectTaskRoles(ev, taskRole)
 	}
 
 	// Pass 2: accumulate usage per role.
@@ -238,21 +202,14 @@ func BreakdownByRole(path string) ([]RoleUsage, error) {
 		if !strings.Contains(line, `"type":"assistant"`) {
 			continue
 		}
-		var ev assistantEvent
+		var ev claudetranscript.Event
 		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Type != "assistant" {
 			continue
 		}
 		if ev.Message == nil {
 			continue
 		}
-		role := "implementor"
-		if ev.ParentToolUseID != "" {
-			if r, ok := taskRole[ev.ParentToolUseID]; ok {
-				role = r
-			} else {
-				role = "subagent"
-			}
-		}
+		role := claudetranscript.ResolveRole(ev, taskRole)
 		b := ensure(role)
 		b.InputTokens += ev.Message.Usage.InputTokens
 		b.OutputTokens += ev.Message.Usage.OutputTokens
