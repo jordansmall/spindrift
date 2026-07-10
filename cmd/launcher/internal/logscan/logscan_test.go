@@ -26,7 +26,7 @@ func writeLog(t *testing.T, lines ...string) string {
 	return path
 }
 
-func writeBigLog(t *testing.T, preLines []string, bigLineSize int, postLines []string) string {
+func writeBigLog(t *testing.T, bigLineSize int) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "big.log")
 	f, err := os.Create(path)
@@ -34,11 +34,6 @@ func writeBigLog(t *testing.T, preLines []string, bigLineSize int, postLines []s
 		t.Fatal(err)
 	}
 	defer f.Close()
-	for _, l := range preLines {
-		if _, err := f.WriteString(l + "\n"); err != nil {
-			t.Fatal(err)
-		}
-	}
 	big := make([]byte, bigLineSize)
 	for i := range big {
 		big[i] = 'x'
@@ -49,17 +44,12 @@ func writeBigLog(t *testing.T, preLines []string, bigLineSize int, postLines []s
 	if _, err := f.WriteString("\n"); err != nil {
 		t.Fatal(err)
 	}
-	for _, l := range postLines {
-		if _, err := f.WriteString(l + "\n"); err != nil {
-			t.Fatal(err)
-		}
-	}
 	return path
 }
 
 func TestForEachLine_ChunkOversized_FindsMarkerInsideOversizedLine(t *testing.T) {
 	const fiveMiB = 5 * 1024 * 1024
-	path := writeBigLog(t, nil, fiveMiB, nil)
+	path := writeBigLog(t, fiveMiB)
 
 	// Plant a marker at the tail of the oversized line, past the internal
 	// 4 MiB buffer boundary, so it only surfaces via chunked re-reads.
@@ -88,7 +78,7 @@ func TestForEachLine_ChunkOversized_FindsMarkerInsideOversizedLine(t *testing.T)
 
 func TestForEachLine_SkipOversized_SkipsMarkerInsideOversizedLine(t *testing.T) {
 	const fiveMiB = 5 * 1024 * 1024
-	path := writeBigLog(t, nil, fiveMiB, nil)
+	path := writeBigLog(t, fiveMiB)
 
 	f, err := os.OpenFile(path, os.O_WRONLY, 0)
 	if err != nil {

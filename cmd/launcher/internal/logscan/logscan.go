@@ -29,9 +29,10 @@ const (
 const bufSize = 4 * 1024 * 1024
 
 // ForEachLine opens path and invokes fn once per line, per policy for any
-// line exceeding bufSize. Returns the os.Open error unchanged (check with
-// errors.Is(err, os.ErrNotExist) for a missing file) or any other read error
-// from the underlying file.
+// line exceeding bufSize (see Policy — under ChunkOversized a match can be
+// missed if it straddles a chunk boundary). Returns the os.Open error
+// unchanged (check with errors.Is(err, os.ErrNotExist) for a missing file)
+// or any other read error from the underlying file.
 func ForEachLine(path string, policy Policy, fn func(line string)) error {
 	f, err := os.Open(path)
 	if err != nil {
