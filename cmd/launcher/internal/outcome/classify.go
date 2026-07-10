@@ -1,14 +1,14 @@
 package outcome
 
 import (
-	"bufio"
 	"errors"
-	"io"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"spindrift.dev/launcher/internal/logscan"
 )
 
 // Class describes whether a non-zero agent exit is retryable or not.
@@ -89,17 +89,11 @@ type scanResult struct {
 // 4 MiB scan buffer are processed in chunks, matching the same resilience
 // contract as LastInLog.
 func Classify(logPath string) (Classification, error) {
-	f, err := os.Open(logPath)
+	sr, err := scanLog(logPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Classification{Class: Terminal, Reason: TaskFailed}, nil
 		}
-		return Classification{}, err
-	}
-	defer f.Close()
-
-	sr, err := scanLog(f)
-	if err != nil {
 		return Classification{}, err
 	}
 
@@ -114,17 +108,13 @@ func Classify(logPath string) (Classification, error) {
 	return cl, nil
 }
 
-// scanLog reads r line by line and returns a scanResult with the first
+// scanLog reads logPath line by line and returns a scanResult with the first
 // transient reason found and any resetsAt timestamp extracted from anywhere in
 // the log. Oversized lines (> 4 MiB) are processed in chunks rather than
 // skipped, so markers in large JSON blobs are still detected.
-func scanLog(r io.Reader) (scanResult, error) {
-	const bufSize = 4 * 1024 * 1024
-	br := bufio.NewReaderSize(r, bufSize)
-
+func scanLog(logPath string) (scanResult, error) {
 	var sr scanResult
-
-	processChunk := func(chunk string) {
+	err := logscan.ForEachLine(logPath, logscan.ChunkOversized, func(chunk string) {
 		if !sr.found {
 			if reason, ok := matchTransient(chunk); ok {
 				sr.found = true
@@ -136,35 +126,10 @@ func scanLog(r io.Reader) (scanResult, error) {
 				sr.resetsAt = t
 			}
 		}
+	})
+	if err != nil {
+		return scanResult{}, err
 	}
-
-	for {
-		line, isPrefix, err := br.ReadLine()
-		// Process data only when the read succeeded or ended cleanly at EOF;
-		// skip partial data from real I/O errors.
-		if err == nil || errors.Is(err, io.EOF) {
-			processChunk(string(line))
-		}
-		if isPrefix {
-			for isPrefix {
-				var chunk []byte
-				chunk, isPrefix, err = br.ReadLine()
-				if err == nil || errors.Is(err, io.EOF) {
-					processChunk(string(chunk))
-				}
-				if err != nil {
-					break
-				}
-			}
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return scanResult{}, err
-		}
-	}
-
 	return sr, nil
 }
 
