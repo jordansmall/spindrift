@@ -12,9 +12,10 @@ import (
 // launchContext bundles the wiring shared by every top-level dispatch entry
 // point (run, the selective `dispatch <nums>` path, recover): the loaded and
 // validated config, the resolved working directory, the ready runner, the
-// forge client, the dispatch factory (with its driver cache), and settle.
-// bootstrap is the only place that constructs one; tests build it directly
-// with fakes to exercise entry-point logic without going through bootstrap.
+// forge client, the dispatch factory (with its driver cache), settle, and
+// the driver-cache cleanup hook. bootstrap is the only place that constructs
+// one; tests build it directly with fakes (and a spy cleanup) to exercise
+// subcommand logic without going through bootstrap.
 type launchContext struct {
 	config  config
 	pwd     string
@@ -22,6 +23,7 @@ type launchContext struct {
 	forge   forge.Client
 	factory *dispatch.Factory
 	settle  settle.Settler
+	cleanup func()
 }
 
 // bootstrap wires the prologue shared by run, the selective `dispatch <nums>`
@@ -30,42 +32,39 @@ type launchContext struct {
 // (including driver-cache setup), and settle. ensureReady selects
 // EnsureReady() (build if absent, the default) over IsReady() (fail fast
 // without building, --no-build) -- the one axis that varies per entry point.
-// The returned cleanup runs the dispatch factory's driver-cache cleanup;
-// callers must run it on every exit path. Because os.Exit is only ever
-// called in main, deferring it at the call site is always sufficient.
-func bootstrap(ensureReady bool) (*launchContext, func(), error) {
-	noopCleanup := func() {}
-
+// No step here can fail after the dispatch factory is constructed, so an
+// error return never carries a launch context that still needs cleanup.
+func bootstrap(ensureReady bool) (*launchContext, error) {
 	pwd, err := os.Getwd()
 	if err != nil {
-		return nil, noopCleanup, err
+		return nil, err
 	}
 
 	c := loadConfig()
 	if err := validate(c); err != nil {
-		return nil, noopCleanup, err
+		return nil, err
 	}
 
 	r := newRunner(c, pwd)
 	if ensureReady {
 		if err := r.EnsureReady(); err != nil {
-			return nil, noopCleanup, err
+			return nil, err
 		}
 	} else if err := r.IsReady(); err != nil {
-		return nil, noopCleanup, err
+		return nil, err
 	}
 
 	fc := newForgeClient(c)
 	f := newDispatchFactory(c, pwd, r)
 	s := newSettle(c, fc)
 
-	lc := &launchContext{
+	return &launchContext{
 		config:  c,
 		pwd:     pwd,
 		runner:  r,
 		forge:   fc,
 		factory: f,
 		settle:  s,
-	}
-	return lc, f.Cleanup, nil
+		cleanup: f.Cleanup,
+	}, nil
 }

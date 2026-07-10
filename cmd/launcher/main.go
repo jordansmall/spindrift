@@ -1225,14 +1225,11 @@ func cmdDoctor() int {
 }
 
 // cmdRecover is the `recover` subcommand: adopt an already-discovered open
-// non-draft PR with no outcome line and drive it through the merge gate.
-func cmdRecover(issueNum string) int {
-	lc, cleanup, err := bootstrap(true)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return 1
-	}
-	defer cleanup()
+// non-draft PR with no outcome line and drive it through the merge gate. lc
+// is wired by bootstrap in production; tests construct it directly with
+// fakes (and a spy cleanup) to exercise the cleanup-on-every-exit contract.
+func cmdRecover(lc *launchContext, issueNum string) int {
+	defer lc.cleanup()
 	if err := recoverByNumber(lc.config, lc.forge, lc.pwd, lc.factory, lc.settle, issueNum); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
@@ -1251,14 +1248,10 @@ func cmdPreview(issueNums []string) int {
 }
 
 // cmdDispatchSelective is the `dispatch <nums>` subcommand: an
-// operator-supplied issue list that bypasses the label/barrier gates.
-func cmdDispatchSelective(nums []string, noBuild, forceYes bool) int {
-	lc, cleanup, err := bootstrap(!noBuild)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return 1
-	}
-	defer cleanup()
+// operator-supplied issue list that bypasses the label/barrier gates. lc is
+// wired by bootstrap in production; tests construct it directly with fakes.
+func cmdDispatchSelective(lc *launchContext, nums []string, forceYes bool) int {
+	defer lc.cleanup()
 	if err := selectiveListDispatch(lc.config, lc.forge, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
@@ -1287,14 +1280,10 @@ func runExitCode(lc *launchContext) int {
 }
 
 // cmdDispatch is the default `dispatch` subcommand (and the no-args
-// default): drain the labeled queue.
-func cmdDispatch(noBuild bool) int {
-	lc, cleanup, err := bootstrap(!noBuild)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return 1
-	}
-	defer cleanup()
+// default): drain the labeled queue. lc is wired by bootstrap in
+// production; tests construct it directly with fakes.
+func cmdDispatch(lc *launchContext) int {
+	defer lc.cleanup()
 	return runExitCode(lc)
 }
 
@@ -1338,7 +1327,12 @@ func mainRun(argv []string) int {
 			fmt.Fprintln(os.Stderr, "usage: spindrift recover <issue-number>")
 			return 1
 		}
-		return cmdRecover(args[1])
+		lc, err := bootstrap(true)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			return 1
+		}
+		return cmdRecover(lc, args[1])
 	}
 	if len(args) > 0 && args[0] == "preview" {
 		return cmdPreview(dispatchIssueArgs(args[1:]))
@@ -1347,12 +1341,22 @@ func mainRun(argv []string) int {
 		noBuild, dispatchArgs := dispatchNoBuildArgs(args[1:])
 		forceYes, dispatchArgs := dispatchYesArgs(dispatchArgs)
 		nums := dispatchIssueArgs(dispatchArgs)
-		if len(nums) > 0 {
-			return cmdDispatchSelective(nums, noBuild, forceYes)
+		lc, err := bootstrap(!noBuild)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			return 1
 		}
-		return cmdDispatch(noBuild)
+		if len(nums) > 0 {
+			return cmdDispatchSelective(lc, nums, forceYes)
+		}
+		return cmdDispatch(lc)
 	}
-	return cmdDispatch(false)
+	lc, err := bootstrap(true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
+	}
+	return cmdDispatch(lc)
 }
 
 func main() {
