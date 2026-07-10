@@ -3,12 +3,17 @@
   nixpkgs,
   system,
   flake-parts,
+  caveman,
   revision ? "unknown",
 }:
 let
   # The dogfood's tuned leaf values, shared with flake.nix's `spindrift`
   # module config so the two wiring paths below can never drift (issue #459).
   dogfoodDefaults = import ./dogfood-defaults.nix;
+
+  # The dogfood's baked skills, shared with flake.nix's `spindrift` module
+  # config the same way (issue #486).
+  dogfoodSkills = import ./dogfood-skills.nix { inherit pkgs caveman; };
 
   # The launchers pin the real `gh` via runtimeInputs, which would shadow
   # a PATH-injected fake; so the bats-driven harnesses below overlay `gh`
@@ -41,6 +46,7 @@ let
   harness = import ../lib/mkHarness.nix {
     inherit nixpkgs system revision;
     inherit (dogfoodDefaults) prefetch packages defaults;
+    skills = dogfoodSkills;
   };
 
   # The template's config as a direct call with revision = "unknown".

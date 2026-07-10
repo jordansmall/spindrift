@@ -4,12 +4,20 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
+    # Upstream caveman skill (issue #486), pinned via flake.lock rather than
+    # a floating fetch. Not a flake itself, so `flake = false` — spindrift
+    # reads its skill content directly from the fetched source tree.
+    caveman = {
+      url = "github:juliusbrussee/caveman";
+      flake = false;
+    };
   };
 
   outputs =
     inputs@{
       flake-parts,
       nixpkgs,
+      caveman,
       ...
     }:
     flake-parts.lib.mkFlake { inherit inputs; } {
@@ -50,6 +58,7 @@
         let
           revision = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
           dogfoodDefaults = import ./nix/dogfood-defaults.nix;
+          dogfoodSkills = import ./nix/dogfood-skills.nix { inherit pkgs caveman; };
           fixtures = import ./nix/fixtures.nix {
             inherit
               pkgs
@@ -57,6 +66,7 @@
               system
               flake-parts
               revision
+              caveman
               ;
           };
         in
@@ -66,6 +76,7 @@
           # (nix/dogfood-defaults.nix, issue #459).
           spindrift = {
             inherit (dogfoodDefaults) prefetch packages;
+            skills = dogfoodSkills;
             settings.branches.mergeMode = dogfoodDefaults.defaults.mergeMode;
             settings.promptSkillIteration.autoFormat = dogfoodDefaults.defaults.autoFormat;
             settings.promptSkillIteration.autoLint = dogfoodDefaults.defaults.autoLint;
