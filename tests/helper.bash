@@ -44,6 +44,19 @@ setup_fakes() {
   if [ ! -s "$OUTCOME_CONTRACT_FILE" ]; then
     printf '# LAND THE CHANGE\n\ncanonical outcome contract fixture\n' >"$OUTCOME_CONTRACT_FILE"
   fi
+
+  # DRIVER_PREAMBLE_FILE is the registry-rendered Driver function definitions
+  # (issue #433): prepend them to the entrypoint so the suite exercises the
+  # same bodies the image bakes in, not any hand-copied duplicates.  The nix
+  # check derivation sets this; a bare bats run outside nix leaves ENTRYPOINT
+  # as-is (functions undefined → tests fail, by design: use nix flake check).
+  if [ -n "${DRIVER_PREAMBLE_FILE:-}" ]; then
+    local _wrapped="$BATS_TEST_TMPDIR/entrypoint.sh"
+    { cat "$DRIVER_PREAMBLE_FILE"; tail -n +2 "$ENTRYPOINT"; } >"$_wrapped"
+    chmod +x "$_wrapped"
+    ENTRYPOINT="$_wrapped"
+    export ENTRYPOINT
+  fi
 }
 
 # Minimal env so the `run` command's required-var guards pass. Individual tests

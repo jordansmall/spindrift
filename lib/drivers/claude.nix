@@ -1,10 +1,9 @@
 # The claude Driver: the in-box half (ADR 0009). Provides the data
 # lib/mkHarness.nix bakes into the image — the claude-code package, the
-# entrypoint's DRIVER_* preamble, and the --agents JSON — so the rendered
-# entrypoint is byte-identical to the hand-written version this registry
-# replaces. agent/entrypoint.sh's own `${DRIVER_*:-<default>}` fallbacks carry
-# the same values, so the bats suite (which execs the script raw, without any
-# nix preamble) exercises the identical claude behavior.
+# entrypoint's DRIVER_* preamble, and the --agents JSON.  The bats harness
+# sources mkHarness.driverFunctionsFile (derived from this registry) before
+# exec-ing the entrypoint, so the suite exercises the same function bodies the
+# image bakes in (issue #433).
 { lib }:
 {
   name = "claude";
