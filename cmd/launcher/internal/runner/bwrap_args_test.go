@@ -303,6 +303,31 @@ func TestBwrapArgs_RuntimeSkillsTakePrecedence(t *testing.T) {
 	}
 }
 
+// TestBwrapArgs_SkillsDirInvalid_NoFallback verifies that a SPINDRIFT_SKILLS_DIR
+// override pointing at a non-existent path is not silently replaced by the
+// baked-skills fallback: an explicit but broken override must produce no
+// skills bind at all, not a fallback to the image's own skills.
+func TestBwrapArgs_SkillsDirInvalid_NoFallback(t *testing.T) {
+	agentDir := t.TempDir()
+	bakedSkillsPath := filepath.Join(agentDir, "home", "agent", ".claude", "skills")
+	if err := os.MkdirAll(bakedSkillsPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := &bwrapAdapter{
+		agentFiles:      agentDir,
+		agentEnv:        "/fake/env",
+		bakedPrefetch:   "echo ok",
+		skillsDir:       filepath.Join(agentDir, "does-not-exist"),
+		driverSkillsDir: "/home/agent/.claude/skills",
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	argStr := strings.Join(args, " ")
+
+	if strings.Contains(argStr, "/home/agent/.claude/skills") {
+		t.Errorf("expected no skills bind for an invalid override (no silent fallback): %v", args)
+	}
+}
+
 // TestBwrapArgs_NonSecretOnArgv verifies that non-secret env vars still reach
 // the sandbox via --setenv (so they appear in argv).
 func TestBwrapArgs_NonSecretOnArgv(t *testing.T) {
