@@ -169,7 +169,11 @@ process-lifetime, per-issue host directory and mounts it writable over
 `/home/agent/.claude/projects` — where claude's session transcripts live, and
 narrow enough that it can never shadow the baked `/home/agent/.claude/skills`
 above (the only writable host mount the runner seam has — the prompt/skills
-mounts above are read-only). The launcher only creates, mounts,
+mounts above are read-only). The harness image pre-creates
+`/home/agent/.claude/projects` owned `1000:1000` so the OCI runtime reuses the
+existing directory instead of fabricating root-owned parent dirs when the volume
+is mounted; the bwrap adapter additionally emits `--dir /home/agent/.claude`
+before the bind so the parent is agent-owned in the tmpfs. The launcher only creates, mounts,
 and evicts that directory — it never reads, copies, parses, or chmods its
 contents, and the persisted session never leaves the host (it is not pushed
 to the remote or attached to the PR). The cache is keyed strictly
