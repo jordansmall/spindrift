@@ -68,6 +68,7 @@
               p.nil
             ];
             settings.branches.mergeMode = "immediate";
+            settings.promptSkillIteration.autoFormat = true;
           };
 
           checks = import ./nix/checks.nix {

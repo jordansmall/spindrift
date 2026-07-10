@@ -364,6 +364,14 @@
     doc = "host directory mounted read-only over /home/agent/.claude/skills so the headless agent can load operator-provided skills";
     boxEnv = false;
   };
+  autoFormat = {
+    env = "AUTO_FORMAT";
+    group = "Prompt & skill iteration";
+    default = false;
+    doc = "when non-empty, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found";
+    flakeOption = true;
+    boxEnv = true;
+  };
   issueNumber = {
     env = "ISSUE_NUMBER";
     group = "Issue discovery";
