@@ -1,5 +1,160 @@
 # Changelog
 
+## [0.2.1](https://github.com/jordansmall/spindrift/compare/v0.2.0...v0.2.1) (2026-07-10)
+
+
+### Features
+
+* **agent:** push-only Box flow for CODE_FORGE=git ([986393a](https://github.com/jordansmall/spindrift/commit/986393a2016620d19175a4efa758ce5e54f01df6))
+* **claude-driver:** pin and resume the session across a fix pass ([e456a3c](https://github.com/jordansmall/spindrift/commit/e456a3c9142c926fbead905e729161a880c4c444))
+* **drivers:** add lib/drivers/ Driver registry ([181fd93](https://github.com/jordansmall/spindrift/commit/181fd933d65ae177b72797df3af98237c8965308))
+* **drivers:** bake the Driver seam into the entrypoint ([bf8e570](https://github.com/jordansmall/spindrift/commit/bf8e57070291bbf69cb926f941813bc79c20a43d))
+* **entrypoint:** drive fix-prompt.md when FIX_PASS is set ([4a33a6c](https://github.com/jordansmall/spindrift/commit/4a33a6ca8228eb8168731fb94421fa1622fe59ac))
+* **entrypoint:** inject outcome contract into prompt-dir overrides ([29e7268](https://github.com/jordansmall/spindrift/commit/29e7268f88ef4b609672fdb1e461c4332769a830))
+* **entrypoint:** render CI_FAILURE_SUMMARY in fix-prompt.md ([ea74a34](https://github.com/jordansmall/spindrift/commit/ea74a34cd61f14e021ada47bd287f8295dcaff86))
+* **fix-box:** forward CI failure detail into the fix box ([f1080c3](https://github.com/jordansmall/spindrift/commit/f1080c3243f0a3162bf6e1824860d22b831fa2a6))
+* **flakeModule:** expose the driver option ([6688e53](https://github.com/jordansmall/spindrift/commit/6688e53024e783854dcd71ce30cda7d048aafa31))
+* **forge:** add Composite to pair an IssueTracker with a CodeForge ([466542b](https://github.com/jordansmall/spindrift/commit/466542bb9b94e53719e5248a2552faa2f75d3443))
+* **forge:** add FailureDetail CI capability ([b0db8d6](https://github.com/jordansmall/spindrift/commit/b0db8d60879e7955c4d68bf5a2701abc5916d0f7))
+* **forge:** add ListPRFiles to the Client seam ([d3a4738](https://github.com/jordansmall/spindrift/commit/d3a47380385f852dd86f4ca68fb2e1bf8f7a3fc1))
+* **forge:** add local IssueTracker adapter ([f601353](https://github.com/jordansmall/spindrift/commit/f601353644e877f498554301879d9dfb3100411a))
+* **forge:** add push-only git Code Forge adapter ([d8cac7c](https://github.com/jordansmall/spindrift/commit/d8cac7c3fd1eafed05a9ffa17b4ccfc6ab729034))
+* **forge:** classify transient vs genuine push failures ([3e1e4c8](https://github.com/jordansmall/spindrift/commit/3e1e4c8856992bb9de9840184e5c05d3cc4d90d8))
+* **forge:** parse a declared ## Touches section ([5a2bfce](https://github.com/jordansmall/spindrift/commit/5a2bfceb57dcaadfedceb5fac74b769e9b75c22c))
+* **launcher:** add CODE_FORGE / CODE_FORGE_REMOTE_URL config knobs ([f3542e8](https://github.com/jordansmall/spindrift/commit/f3542e80da3527522e40652e0ab0d5ab75c6125b))
+* **launcher:** add doublestar-style glob matcher for merge guard ([2beabfd](https://github.com/jordansmall/spindrift/commit/2beabfd718c92d57ff4f22db2bab3f824ac6c9fc))
+* **launcher:** add OVERLAP_GATE config knob ([74cccb0](https://github.com/jordansmall/spindrift/commit/74cccb01d81993f6c9302893cfd60d4e36cc912c))
+* **launcher:** detect touch overlap against InProgress issues ([effab6f](https://github.com/jordansmall/spindrift/commit/effab6f388f4efc47f26562ad96fb90d4a8b2783))
+* **launcher:** gate dispatchWaves and drainMaxJobs on touch overlap ([803413c](https://github.com/jordansmall/spindrift/commit/803413c263beab0c891b568230c690d7ab1e9498))
+* **launcher:** glob-vs-glob touch-set overlap check ([360522b](https://github.com/jordansmall/spindrift/commit/360522b9acbf323b24a37cb913929f9e1b72400a))
+* **launcher:** infer touch-sets from open PR files ([485b063](https://github.com/jordansmall/spindrift/commit/485b0633f9a4cb1563db0bdebc8b9d0ab244de24))
+* **launcher:** introduce Go Driver strategy seam ([a45666d](https://github.com/jordansmall/spindrift/commit/a45666df22bb3d67dd5ce5ead21dfb64a5e9448a))
+* **launcher:** land push-only outcomes without a CI/PR wait ([fa2ad12](https://github.com/jordansmall/spindrift/commit/fa2ad1243d078f4a7791e3d565345b188267e1e7))
+* **launcher:** own the ephemeral driver-cache lifecycle ([ddb4a85](https://github.com/jordansmall/spindrift/commit/ddb4a8595302f3980d51d1d6a7678ae9a85c1890))
+* **launcher:** retry transient Rebase push failures ([2766dbb](https://github.com/jordansmall/spindrift/commit/2766dbb31196cc9ef8af99081084b4d872ce4d20))
+* **launcher:** route run() through wave dispatch on touch overlap ([9d215e2](https://github.com/jordansmall/spindrift/commit/9d215e233f149671e5c9c65494574f4436df876e))
+* **launcher:** wire CODE_FORGE to select the CodeForge adapter ([8f9d134](https://github.com/jordansmall/spindrift/commit/8f9d134c12321fa49777619255edadc897bad577))
+* **launcher:** wire ISSUE_TRACKER=jira into newIssueTracker ([99a3d15](https://github.com/jordansmall/spindrift/commit/99a3d1536f20ebd8dea93ef930729374aee2b406))
+* **launcher:** wire ISSUE_TRACKER=local into the launcher ([cd1761a](https://github.com/jordansmall/spindrift/commit/cd1761a3af84b0bd45b2a091f7a885e3faae3e11))
+* **launcher:** wire the merge guard into the post-green gate ([ab91c7f](https://github.com/jordansmall/spindrift/commit/ab91c7f81082020606ce2a80e7d26c243477f7e4))
+* **mkHarness:** bake fix-prompt.md into the agent image ([c61f4a0](https://github.com/jordansmall/spindrift/commit/c61f4a07788255e48536c105b3578d6efa2fcd4a))
+* **mkHarness:** bake outcome contract at /agent, not /agent/prompts ([b0a3711](https://github.com/jordansmall/spindrift/commit/b0a3711f5ea11d6a4a59864728c05d6b2e401d69))
+* **mkHarness:** inject SPINDRIFT_OUTCOME contract into prompts ([3e01433](https://github.com/jordansmall/spindrift/commit/3e01433f6ce6cf182a728ca51b2b78d58aeb772d)), closes [#419](https://github.com/jordansmall/spindrift/issues/419)
+* **nix:** add nix run .#regen, the schema-artifact regenerator ([e6ceadb](https://github.com/jordansmall/spindrift/commit/e6ceadb86ff5397154f0209a74ad4c07c307bb1a))
+* **nix:** compose an opt-in filer entry into --agents JSON ([70cff73](https://github.com/jordansmall/spindrift/commit/70cff734f7c3e9bc06714f4d9e1bc8aac22abf5b))
+* **nix:** extract schema-artifact renderers into lib/renderers.nix ([fedb83b](https://github.com/jordansmall/spindrift/commit/fedb83bed317ed91c0efada8fb8763870f9051e6))
+* **prompt:** add comms-discipline section to implementor prompt ([e994156](https://github.com/jordansmall/spindrift/commit/e9941564dbfe6703e5902dff7a47b0815b7b0807))
+* **prompt:** gate a FILE ISSUES step on the filer opt-in ([e03ab15](https://github.com/jordansmall/spindrift/commit/e03ab15bc149afd4893a71766f93b912f77f66a8))
+* **prompts:** add dedicated fix-prompt template ([14f4f5c](https://github.com/jordansmall/spindrift/commit/14f4f5c0e66ad570d1193271053e8be0c8290885))
+* **prompts:** forbid mid-turn narration in conflict-resolve ([20457ea](https://github.com/jordansmall/spindrift/commit/20457ea156e28cb07ae78303e230a04d2af12380))
+* **prompts:** forbid mid-turn narration in scout prompt ([7e5e8ab](https://github.com/jordansmall/spindrift/commit/7e5e8ab1bdc03b8185a93eb0837f5da13050f95f))
+* **prompts:** forbid narration and cap findings in reviewer ([dd24e76](https://github.com/jordansmall/spindrift/commit/dd24e768282912d1e332fa54a64e5cba04c52f22))
+* **prompts:** resolve generated-file conflicts via regeneration ([d3267da](https://github.com/jordansmall/spindrift/commit/d3267daed470c07f0c1ff58e5d0923405485f345))
+* **runner:** add writable per-issue driver cache mount ([3be97e6](https://github.com/jordansmall/spindrift/commit/3be97e6e6a7f0aa6f9717b4769f0032458f13bdd))
+* **schema:** add ISSUE_TRACKER and Jira config knobs ([b5b58c1](https://github.com/jordansmall/spindrift/commit/b5b58c11a3cd4ee3f3e638b69332c2d52d367f5c))
+* **schema:** add MERGE_GUARD_PATHS to the env schema ([e8ca4a4](https://github.com/jordansmall/spindrift/commit/e8ca4a445d920f47fce3f73f17095edc3574cbc2))
+* **schema:** register CODE_FORGE and CODE_FORGE_REMOTE_URL knobs ([de44d87](https://github.com/jordansmall/spindrift/commit/de44d87c3829a2b12ff3586b79d0b1e260147cc3))
+* **schema:** register OVERLAP_GATE in the env schema ([a638ae4](https://github.com/jordansmall/spindrift/commit/a638ae47bcab3cbb9eb2007da91fed7451f89f4c))
+
+
+### Bug Fixes
+
+* **agent:** gate filer-prompt.md read on filer opt-in ([729e3ee](https://github.com/jordansmall/spindrift/commit/729e3eed613d36b40ff6f6bf669e7cfb19e813d0))
+* **box:** provision git identity repo-locally, not globally ([c6f7471](https://github.com/jordansmall/spindrift/commit/c6f747156d703400f4981a8f010c76e87341da14)), closes [#404](https://github.com/jordansmall/spindrift/issues/404)
+* **checks:** exempt DRIVER from env-schema coverage ([e263c32](https://github.com/jordansmall/spindrift/commit/e263c32a6f2c8e9a9a27e80850002967baa034d5))
+* **entrypoint:** inject prompts only for agents present ([e32fdf6](https://github.com/jordansmall/spindrift/commit/e32fdf6d79052b246b64befc6f994e68439fc73c))
+* **forge:** add PredecessorLabel; restore SwapLabel behavior ([8c4d139](https://github.com/jordansmall/spindrift/commit/8c4d1393dd5836c2d0d8670333b47de715b36d46))
+* **forge:** capture git stderr on rebase push failure ([147386c](https://github.com/jordansmall/spindrift/commit/147386c95249d1e904d439755d045abd6cfd2c96)), closes [#367](https://github.com/jordansmall/spindrift/issues/367)
+* **forge:** checkout main before reading its identity in test ([0d8313c](https://github.com/jordansmall/spindrift/commit/0d8313c9ef3275d15cd90f082cf108dc70cf6c97))
+* **forge:** clean up the from-label after a mapped Jira transition ([351e945](https://github.com/jordansmall/spindrift/commit/351e945907f42af8404ea2b75e7b43a9a4e76d2d))
+* **forge:** exclude done-category issues from Jira ListIssues ([14d9dc5](https://github.com/jordansmall/spindrift/commit/14d9dc5cc1f60717759c7c809046db3ea5a8401f))
+* **forge:** fix Probe to use positional slug and surface stderr ([a795bfc](https://github.com/jordansmall/spindrift/commit/a795bfcd7fdaa026da9b7d8b0b65c33ef5a462a1))
+* **forge:** local Issue.Labels includes the dispatch-state marker ([c11eb09](https://github.com/jordansmall/spindrift/commit/c11eb09e0c986af112a710643c51c0c0ad7af880))
+* **forge:** make TransitionState explicit with from+to states ([ae1827f](https://github.com/jordansmall/spindrift/commit/ae1827fe55487cd1fb69b7c1ec1baab59c41e0cc))
+* **forge:** map Jira statusCategory to the OPEN|CLOSED contract ([3d71e57](https://github.com/jordansmall/spindrift/commit/3d71e57224986e959069576226a625f59e488bfb))
+* **forge:** pin test's other clone to origin/main ([d32cdde](https://github.com/jordansmall/spindrift/commit/d32cdde3991b10457af7ab6d7cef1e3e291924b5))
+* **forge:** reject flag-like refs in the git Code Forge (RCE) ([52ef285](https://github.com/jordansmall/spindrift/commit/52ef2855d018b4737485003a102e842dcf143eb7))
+* **forge:** set commit identity on the git Code Forge's temp clone ([0d554c5](https://github.com/jordansmall/spindrift/commit/0d554c5f33f2ec229524c259143ebb6813ec1005))
+* **launcher:** bound touch-glob overlap check to polynomial time ([e5a8e64](https://github.com/jordansmall/spindrift/commit/e5a8e646536cb0be6be1c63b3fc21cf50e49dee9))
+* **launcher:** don't PR-state-check a git-forge merged outcome ([6f167d4](https://github.com/jordansmall/spindrift/commit/6f167d4e3c4040c454a7961ecbe7cb5854511def))
+* **launcher:** reject MERGE_MODE=auto fast for CODE_FORGE=git ([4836ccb](https://github.com/jordansmall/spindrift/commit/4836ccb49ec599e15c7cf134db3a01a5c74c37d9))
+* **launcher:** report each doctor seam's own probed slug ([ac7a326](https://github.com/jordansmall/spindrift/commit/ac7a326fae650e0605f839e04d454a2fb01a56d0))
+* **launcher:** route retry classification through Driver ([9ff1e7e](https://github.com/jordansmall/spindrift/commit/9ff1e7eea4fea8160aeb550e112aa75096624aef))
+* **launcher:** skip re-rebase after conflict-resolve ([8b177ce](https://github.com/jordansmall/spindrift/commit/8b177ce99c795ba8ea7071c082dcf176db2b81f4))
+* **nix:** add git to launcher-go-test sandbox PATH ([dc163b7](https://github.com/jordansmall/spindrift/commit/dc163b7ee256347ecc727e9c2b740bf234b06ef4))
+* **nix:** allowlist FILER_MODEL as box-env-only ([3619159](https://github.com/jordansmall/spindrift/commit/36191593c6f4e97739f7383205ec912ea9d32b09))
+* **nix:** disable cgo in launcher-go-vet/-test checks ([9b1d74b](https://github.com/jordansmall/spindrift/commit/9b1d74b996c5edd21272c30c03c430292582131b))
+* **nix:** guard regen against running outside the spindrift repo ([503c257](https://github.com/jordansmall/spindrift/commit/503c2571d74e343715f22f774c18e5b3db48f0e8))
+* **prompts:** reviewer diffs against fetched origin base ([9d3843c](https://github.com/jordansmall/spindrift/commit/9d3843c1f7751ff40045de424962eb16603c5949)), closes [#405](https://github.com/jordansmall/spindrift/issues/405)
+* **runner:** scope the cache mount to .claude/projects ([c914e74](https://github.com/jordansmall/spindrift/commit/c914e740863d6811b33055e634ff54860a303298))
+* **schema:** regenerate harness.env.example after quote fix ([be83315](https://github.com/jordansmall/spindrift/commit/be83315e3aed735f7ed0e3809f7d0eb02211ace6))
+* **schema:** remove stray issueTracker from repository example ([bb68e62](https://github.com/jordansmall/spindrift/commit/bb68e62567c88dc380082dc355ad9f8045f6265d))
+* **template:** add overlapGate to settings example ([679bc86](https://github.com/jordansmall/spindrift/commit/679bc86c3ded5da85cf487d8eb8d2b054d77cf87))
+* **tests:** give session-resume tests a fresh WORK_DIR per run ([5633a9d](https://github.com/jordansmall/spindrift/commit/5633a9d54c6db7d126ed0012e314e1be1f4e32d6))
+* **tests:** quote conflict-resolve loop, drop order dependence ([7089bce](https://github.com/jordansmall/spindrift/commit/7089bce8be0e98d88e2b07715a4e3b60f8625fab))
+* **usage:** keep filer role in the token-usage breakdown ([21583e1](https://github.com/jordansmall/spindrift/commit/21583e120d874e236b6bccd43a3d156875f57a40))
+
+
+### Documentation
+
+* add Filer term to the glossary ([e6b1696](https://github.com/jordansmall/spindrift/commit/e6b1696e8e74b5ac401405023a9307d100fec369))
+* cover runtime prompt-dir overrides in outcome-contract notes ([b2f06d7](https://github.com/jordansmall/spindrift/commit/b2f06d74a83e42c499ff8af96ec8c3f5e590191b))
+* describe the declared ## Touches overlap gate ([ee4a1a4](https://github.com/jordansmall/spindrift/commit/ee4a1a4be34884fe8d554cdff7ab5e7a6d199ab1))
+* describe the inferred touch-set overlap augmentation ([dab282a](https://github.com/jordansmall/spindrift/commit/dab282a390ffc83587af88dc445a4dc36f14e2f4))
+* document FILER_MODEL, filerPrompt, and the Filer ([350a896](https://github.com/jordansmall/spindrift/commit/350a89619415e2bd45e0cfcd1d46f6b947296b9d))
+* document nix run .#regen in CONTRIBUTING.md ([88d8815](https://github.com/jordansmall/spindrift/commit/88d8815ceeba08a7e809e55e2a5df5a24610f2dd))
+* document the driver option ([0b78c65](https://github.com/jordansmall/spindrift/commit/0b78c65181a892cf0f2e47a101c05effa6fc0d8b))
+* document the harness-owned outcome contract ([4c1f4d0](https://github.com/jordansmall/spindrift/commit/4c1f4d06ae7f480c8c253ff9653c061a4ca17935))
+* document the jira Issue Tracker config surface ([195a807](https://github.com/jordansmall/spindrift/commit/195a8078dadf1eebc192fc7b48455694f80e9d5e))
+* document the merge guard (MERGE_GUARD_PATHS) ([d7ad4fb](https://github.com/jordansmall/spindrift/commit/d7ad4fb6a990d8afff097e12965a67b08137a8e6))
+* **forge:** document the local issue tracker ([40d6054](https://github.com/jordansmall/spindrift/commit/40d605422288689b7d8fb54d77150f94e6d8f48d))
+* **harness:** describe SCOUT_MODEL/REVIEW_MODEL per-agent omission ([9ab1403](https://github.com/jordansmall/spindrift/commit/9ab14038ece95d5faf2d61fef8687a3f268068ab))
+* **harness:** fix stale pair-omission wording in reference.md ([b5f35da](https://github.com/jordansmall/spindrift/commit/b5f35da4bf3a00c9c38a971fc554dff87c323ee2))
+* **outcome:** document pr= as a landing reference, not always a URL ([8bcfedf](https://github.com/jordansmall/spindrift/commit/8bcfedf91433425b68b955da8b83435943e542ec))
+* point README's CONTRIBUTING.md row at nix run .#regen ([5603183](https://github.com/jordansmall/spindrift/commit/56031834274b315f1f0ea6e76d6dafd9c940ec55))
+* reconcile jira docs with the concurrently-landed local tracker ([e10b047](https://github.com/jordansmall/spindrift/commit/e10b047e7fc4fa59c22cb5c43e0d3243de7fd30b))
+* **reference:** document CI_FAILURE_SUMMARY ([14eb901](https://github.com/jordansmall/spindrift/commit/14eb90152c2617bd56e232250d268caee92b8aa5))
+* **reference:** document the ephemeral session cache ([fe62c29](https://github.com/jordansmall/spindrift/commit/fe62c293100397fbe0e7a60fbfb47171e4809e2e))
+* **reference:** document the hermetic git config guarantee ([ccdb33c](https://github.com/jordansmall/spindrift/commit/ccdb33c02a6b6de112fdc28f0d3b8159064ba556))
+* **reference:** note the fix box's fix-prompt.md ([bb94ec2](https://github.com/jordansmall/spindrift/commit/bb94ec208d9013eefa733c188afe5ce37c06d463))
+* **runner:** fix stale .claude mount path in comments ([a2b7e00](https://github.com/jordansmall/spindrift/commit/a2b7e009bf7168ebf83646b85f5ddf2c65faa195))
+
+
+### Code Refactoring
+
+* **forge:** consolidate fake-gh helper in Probe tests ([85f9711](https://github.com/jordansmall/spindrift/commit/85f9711975853f15bbf83359453e1ceb2e9c2ba4))
+* **forge:** split Client into IssueTracker + CodeForge seams ([a1027a8](https://github.com/jordansmall/spindrift/commit/a1027a835a2160db78358c7ae5f3650a7d5f1d9e)), closes [#328](https://github.com/jordansmall/spindrift/issues/328)
+* **harness:** bake --agents JSON per-agent ([a386c0b](https://github.com/jordansmall/spindrift/commit/a386c0b554373bedb668eaeaf58830cf420cce85))
+* **nix:** dedupe template-settings-example's groupToAttr ([284a027](https://github.com/jordansmall/spindrift/commit/284a0275d5fc172e3c6736ebb276d9d46a5113f2))
+* **nix:** wire drift-guard checks to lib/renderers.nix ([0bb150d](https://github.com/jordansmall/spindrift/commit/0bb150d58b05d6a42f219ec16f44203f8a39433e))
+
+
+### Tests
+
+* **box:** assert entrypoint identity is repo-local, not global ([64a1baa](https://github.com/jordansmall/spindrift/commit/64a1baa4d28797421aca8abddadb1e802bcd69b4))
+* **checks:** guard outcome-contract injection and drift ([7096c2b](https://github.com/jordansmall/spindrift/commit/7096c2b14cd5f016852b3a285d354e0fffaac1be))
+* **entrypoint:** cover FIX_PASS prompt-selection branch ([12031d9](https://github.com/jordansmall/spindrift/commit/12031d962160d8783e3b387461b6eddec6f405ad))
+* **entrypoint:** cover missing contract file and marker parity ([1724563](https://github.com/jordansmall/spindrift/commit/172456374ebb079cda63c00a78a835b128becba5))
+* **entrypoint:** demo generated-file conflict resolution ([07acf35](https://github.com/jordansmall/spindrift/commit/07acf35c94650212e64615eb14cf6aebd29f2f49))
+* **harness:** cover scout-only and reviewer-only --agents shapes ([ed3adac](https://github.com/jordansmall/spindrift/commit/ed3adacc9a55973d0982a80f19691c4fb00cf8eb))
+* **launcher:** cover dispatch-level PR-file overlap gate ([287e0ed](https://github.com/jordansmall/spindrift/commit/287e0ed19507047425fdd4ab7186a39e47247e41))
+* **launcher:** cover merge-guard error path and auto mode ([5b52f23](https://github.com/jordansmall/spindrift/commit/5b52f23e48ed2d7ecda524ce36837927151cbf61))
+* **launcher:** cover the git-forge merge-blocked path ([2582371](https://github.com/jordansmall/spindrift/commit/25823711a7c769b77e8582d3d7d0b35a482dc4e5))
+* **prompt:** assert COMMS section enforces machine-log voice ([4ce2341](https://github.com/jordansmall/spindrift/commit/4ce23411b718ac2ebf3eae5b9961925be7c70482))
+* **prompt:** scope COMMS assertions to the COMMS section ([402229a](https://github.com/jordansmall/spindrift/commit/402229a94c9850d0a6d273935c4abcb4c188d39e))
+
+
+### Continuous Integration
+
+* add least-privilege permissions block to workflow ([f787b80](https://github.com/jordansmall/spindrift/commit/f787b80f90c07e69a86f9492eee01a72a1310c4d))
+* cache the nix store across runs ([9faa93f](https://github.com/jordansmall/spindrift/commit/9faa93f0070bccd77034e63fc5dceafd62f876a4)), closes [#432](https://github.com/jordansmall/spindrift/issues/432)
+
+
+### Styles
+
+* **checks:** nixfmt the outcome-contract checks ([79199f2](https://github.com/jordansmall/spindrift/commit/79199f2d71785b17e2838550db7b23c9219291f3))
+* **mkHarness:** nixfmt lib/mkHarness.nix and nix/checks.nix ([8a55709](https://github.com/jordansmall/spindrift/commit/8a5570980d02358be64e7b588c3fc2af17c07419))
+
 ## [0.2.0](https://github.com/jordansmall/spindrift/compare/v0.1.3...v0.2.0) (2026-07-09)
 
 
