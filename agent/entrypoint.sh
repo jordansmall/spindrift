@@ -47,6 +47,15 @@ PROMPTS_DIR="${PROMPTS_DIR:-/agent/prompts}"
 OUTCOME_CONTRACT_MARKER="# LAND THE CHANGE"
 OUTCOME_CONTRACT_FILE="${OUTCOME_CONTRACT_FILE:-/agent/outcome-contract.md}"
 
+# The COMMS and CHECK/COMMIT blocks fix-prompt.md shares with issue-prompt.md
+# (issue #455 extends #419/#420's slice mechanism beyond the outcome contract):
+# baked and injected the same way, so a SPINDRIFT_PROMPT_DIR override of the
+# fix prompt gets the identical treatment.
+COMMS_CONTRACT_MARKER="# COMMS"
+COMMS_CONTRACT_FILE="${COMMS_CONTRACT_FILE:-/agent/comms-contract.md}"
+CHECK_CONTRACT_MARKER="# CHECK"
+CHECK_CONTRACT_FILE="${CHECK_CONTRACT_FILE:-/agent/check-contract.md}"
+
 # DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are baked by the
 # selected Driver's lib/drivers/<name>.nix (ADR 0009); the defaults here keep
 # the :-expansions below quiet under set -u when the nix preamble is absent.
@@ -381,16 +390,26 @@ fi
 # "resume" means no prior session was found and contributes no extra argv.
 read -ra _driver_session_args <<< "$(_driver_session_flags "$_driver_session_mode")"
 # A SPINDRIFT_PROMPT_DIR mount replaces the whole prompt dir, so a rendered
-# prompt that dropped the contract (issue #419) never gets the build-time
-# injection; append the same canonical contract here, at run time, unless
-# it is already present (idempotent, mirrors lib/mkHarness.nix).
-if [[ "$prompt" != *"$OUTCOME_CONTRACT_MARKER"* ]]; then
-  # A direct assignment from the substitution (rather than nesting it as a
-  # printf argument) so a missing/unreadable OUTCOME_CONTRACT_FILE fails loudly
-  # under `set -e` instead of silently rendering an empty contract block.
-  outcome_contract="$(_subst "$OUTCOME_CONTRACT_FILE")"
-  prompt="$(printf '%s\n\n%s' "${prompt%$'\n'}" "$outcome_contract")"
-fi
+# prompt that dropped a shared block (issue #419, extended to COMMS/CHECK by
+# #455) never gets the build-time injection; append the canonical block here,
+# at run time, unless it is already present (idempotent, mirrors
+# lib/mkHarness.nix). Applied in COMMS, CHECK, OUTCOME order so a prompt
+# missing all three (e.g. fix-prompt.md's fix-specific-preamble-only default)
+# ends up with them in the same order the issue prompt carries them.
+_inject_shared_block() {
+  local marker="$1" file="$2"
+  if [[ "$prompt" != *"$marker"* ]]; then
+    # A direct assignment from the substitution (rather than nesting it as a
+    # printf argument) so a missing/unreadable contract file fails loudly
+    # under `set -e` instead of silently rendering an empty block.
+    local block
+    block="$(_subst "$file")"
+    prompt="$(printf '%s\n\n%s' "${prompt%$'\n'}" "$block")"
+  fi
+}
+_inject_shared_block "$COMMS_CONTRACT_MARKER" "$COMMS_CONTRACT_FILE"
+_inject_shared_block "$CHECK_CONTRACT_MARKER" "$CHECK_CONTRACT_FILE"
+_inject_shared_block "$OUTCOME_CONTRACT_MARKER" "$OUTCOME_CONTRACT_FILE"
 
 # Forward the nix-baked --agents JSON to the Agent. AGENTS_JSON_TEMPLATE is
 # computed by nix (builtins.toJSON) and set to empty when no subagent model is
