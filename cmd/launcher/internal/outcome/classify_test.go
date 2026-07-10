@@ -231,6 +231,43 @@ var classifyTests = []struct {
 	},
 }
 
+// TestClassify_OversizedLine_ChunkMatchesMarker locks in the chunk-matching
+// oversized-line policy: a marker planted past the internal 4 MiB scan
+// buffer, inside one giant line, must still be found.
+func TestClassify_OversizedLine_ChunkMatchesMarker(t *testing.T) {
+	const fiveMiB = 5 * 1024 * 1024
+	path := filepath.Join(t.TempDir(), "big.log")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := make([]byte, fiveMiB)
+	for i := range big {
+		big[i] = 'x'
+	}
+	if _, err := f.Write(big); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte(`"rate_limit_error"`), fiveMiB-100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	c, err := outcome.Classify(path)
+	if err != nil {
+		t.Fatalf("Classify() error: %v", err)
+	}
+	if c.Class != outcome.Transient {
+		t.Errorf("Class: got %q, want %q", c.Class, outcome.Transient)
+	}
+	if c.Reason != outcome.RateLimit {
+		t.Errorf("Reason: got %q, want %q", c.Reason, outcome.RateLimit)
+	}
+}
+
 func TestClassify(t *testing.T) {
 	for _, tc := range classifyTests {
 		t.Run(tc.name, func(t *testing.T) {
