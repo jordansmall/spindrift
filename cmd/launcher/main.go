@@ -503,13 +503,6 @@ func checkAutoMergePreflight(c config, fc forge.Client) error {
 	return nil
 }
 
-// printOutcomeReport prints the outcome-report header. Per-issue settling now
-// runs inside fanOut goroutines via settle.Settle, so each issue reaches its
-// terminal label independently before this point.
-func printOutcomeReport() {
-	fmt.Println("==> outcome report")
-}
-
 // openPRForBranch wraps fc.OpenPRForBranch to unpack the PR struct for callers
 // that need the URL and draft flag separately.
 func openPRForBranch(fc forge.Client, branch string) (url string, isDraft bool, found bool, err error) {
@@ -1132,7 +1125,6 @@ outer:
 	}
 	fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), c.maxJobs)
 	fanOut(c, fc, f, s, selected)
-	printOutcomeReport()
 	return nil
 }
 

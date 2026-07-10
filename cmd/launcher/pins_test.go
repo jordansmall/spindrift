@@ -171,6 +171,19 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 	}
 }
 
+// TestPrintOutcomeReportRemoved asserts the deprecated printOutcomeReport
+// helper (five ignored parameters collapsed to a single Println, issue #443)
+// has been deleted from main.go.
+func TestPrintOutcomeReportRemoved(t *testing.T) {
+	data, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("reading main.go: %v", err)
+	}
+	if strings.Contains(string(data), "func printOutcomeReport(") {
+		t.Error("main.go still defines printOutcomeReport; delete it")
+	}
+}
+
 // TestBootstrapPrologueAppearsOnce pins issue #443's core acceptance
 // criterion: run, the selective `dispatch <nums>` path, and recover used to
 // each carry their own copy of the six-step prologue (config load+validate,
