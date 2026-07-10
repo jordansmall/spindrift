@@ -1,4 +1,3 @@
-
 # The release-please changelog contract: .release-please-config.json must
 # declare an explicit changelog-sections map, and every rendered heading must
 # be documented in VERSIONING.md.
@@ -72,9 +71,8 @@
       versioningDoc = builtins.readFile ../../VERSIONING.md;
       missingFromDoc = builtins.filter (s: !hasInfix s.section versioningDoc) sections;
     in
-    assert assertMsg (
-      cfg ? "changelog-sections"
-    ) ".release-please-config.json must declare changelog-sections (canonical map in nix/checks/changelog.nix)";
+    assert assertMsg (cfg ? "changelog-sections")
+      ".release-please-config.json must declare changelog-sections (canonical map in nix/checks/changelog.nix)";
     assert assertMsg (cfg."changelog-sections" == sections)
       "changelog-sections in .release-please-config.json drifted from the canonical map in nix/checks/changelog.nix";
     assert assertMsg (missingFromDoc == [ ])

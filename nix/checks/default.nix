@@ -1,4 +1,3 @@
-
 # Aggregator: merges the per-concern check modules into the single attrset
 # flake.nix wires into `perSystem.checks` (issue #454). The shared arg bundle
 # is hoisted once here so every module sees the exact same fixtures/pkgs

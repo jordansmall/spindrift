@@ -1,4 +1,3 @@
-
 # Bats/shell orchestration: shellcheck over the launcher scripts and fakes,
 # and the bash layer driven end-to-end through bats against those fakes.
 { pkgs, fixtures, ... }:

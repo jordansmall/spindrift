@@ -1,4 +1,3 @@
-
 # Prompt/outcome-contract behavior: rendering the configured prompt, and the
 # SPINDRIFT_OUTCOME contract injection/idempotency rules (issue #419).
 { pkgs, fixtures, ... }:
