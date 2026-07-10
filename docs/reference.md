@@ -167,15 +167,20 @@ falling back to the local re-run with no error.
 
 A fix box also resumes the *same Driver session* the initial run used,
 instead of cold-starting a fresh one: the launcher creates an ephemeral,
-process-lifetime, per-issue host directory and mounts it writable over
-`/home/agent/.claude/projects` — where claude's session transcripts live, and
-narrow enough that it can never shadow the baked `/home/agent/.claude/skills`
-above (the only writable host mount the runner seam has — the prompt/skills
-mounts above are read-only). The harness image pre-creates
-`/home/agent/.claude/projects` owned `1000:1000` so the OCI runtime reuses the
-existing directory instead of fabricating root-owned parent dirs when the volume
-is mounted; the bwrap adapter additionally emits `--dir /home/agent/.claude`
-before the bind so the parent is agent-owned in the tmpfs. The launcher only creates, mounts,
+process-lifetime, per-issue host directory and mounts it writable over the
+Driver's declared session-cache dir — `sessionCacheDirRelative` in its
+`lib/drivers/` entry (`/home/agent/.claude/projects` for claude, where its
+session transcripts live), narrow enough that it can never shadow the baked
+skills dir above (the only writable host mount the runner seam has — the
+prompt/skills mounts above are read-only). A Driver that omits
+`sessionCacheDirRelative` has no resumable session state: the launcher
+creates no per-issue cache directory and the runner adapters add no mount on
+either backend, the same "no cache, cold-start, never an error" degradation
+described below. The harness image pre-creates the declared dir owned
+`1000:1000` so the OCI runtime reuses the existing directory instead of
+fabricating root-owned parent dirs when the volume is mounted; the bwrap
+adapter additionally emits `--dir` on the declared dir's parent before the
+bind so it is agent-owned in the tmpfs. The launcher only creates, mounts,
 and evicts that directory — it never reads, copies, parses, or chmods its
 contents, and the persisted session never leaves the host (it is not pushed
 to the remote or attached to the PR). The cache is keyed strictly
@@ -197,6 +202,26 @@ under the mounted directory. When it is not — the cache was evicted, this is
 the first fix pass after a crash, or the branch was rebased out from under
 the session — the fix box falls back cleanly to the cold-context fix flow
 above, with no error.
+
+#### Authoring a new Driver
+
+A `lib/drivers/` entry (see `claude.nix`) declares, alongside the fields ADR
+0009 already documents (`name`, `package`, `bin`, `flagsCommon`,
+`outcomeExtractFnBody`, `sessionFlagsFnBody`, `agentsJsonTemplate`):
+
+- `skillsDirRelative` — where the agent CLI scans for skill files, relative
+  to `$HOME`. Required; the harness bakes skill files there and the runner
+  adapters mount `SPINDRIFT_SKILLS_DIR` overrides over the same path.
+- `sessionCacheDirRelative` — where the agent CLI's session transcripts
+  live, relative to `$HOME`. Optional; a Driver that omits it has no
+  resumable session state (see above).
+
+`mkHarness` derives from these two declarations: the image bake pre-creates
+each declared directory agent-owned (so podman/bwrap never fabricate a
+root-owned parent when the launcher mounts over it), and both are exported
+as absolute paths (`DRIVER_SKILLS_DIR`, `DRIVER_SESSION_CACHE_DIR`) that the
+Go launcher's OCI and bwrap adapters mount over — no Driver-specific path
+literal lives in the runner adapters or the image staging step.
 
 The SPINDRIFT_OUTCOME contract — the sections that instruct the agent to
 print the `SPINDRIFT_OUTCOME issue=… pr=… status=… note=…` line the launcher
