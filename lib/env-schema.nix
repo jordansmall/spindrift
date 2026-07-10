@@ -8,7 +8,7 @@
 #   env          string  env-var name (SCREAMING_SNAKE_CASE)
 #   group        string  category heading for the full flag reference (--help --all
 #                        and the man page); required on every non-secret knob and
-#                        must match a heading in groupOrder (cmd/launcher/flags.go)
+#                        must match a heading in lib/renderers.nix's groupOrder
 #   alias        string  optional short-form CLI flag alias (kebab-case, no dashes);
 #                        when set, --<alias> is a second way to set the same knob
 #   default      any     baked-in default; absent means runtime-required or empty

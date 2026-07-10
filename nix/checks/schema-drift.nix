@@ -216,7 +216,7 @@ in
         else
           throw "cmd/launcher/flags.go: `var groupOrder = ` declaration not found";
       body = builtins.elemAt (builtins.split "\n}\n" afterMarker) 0 + "\n";
-      entryMatches = builtins.split ''"([^"]*)",?\n'' body;
+      entryMatches = builtins.split "\"([^\"]*)\",?\n" body;
       goGroupOrder = builtins.filter builtins.isString (
         builtins.concatMap (x: if builtins.isList x then x else [ ]) entryMatches
       );
