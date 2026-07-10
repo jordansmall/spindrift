@@ -535,8 +535,9 @@ func TestJiraClient_ListIssues_JQLAndOrder(t *testing.T) {
 }
 
 // TestJiraClient_ListIssues_CapsMaxResults verifies ListIssues bounds the
-// search page size (mirroring the github adapter's issueQueryLimit) so a
-// large backlog degrades to a warning instead of an unbounded response.
+// search page size (the shared resultPageLimit, also used by the github
+// adapter) so a large backlog degrades to a warning instead of an
+// unbounded response.
 func TestJiraClient_ListIssues_CapsMaxResults(t *testing.T) {
 	var gotMaxResults string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
