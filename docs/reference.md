@@ -426,7 +426,7 @@ the authoritative list.
 
 | var                    | default | `settings` section | meaning                                                |
 | ---------------------- | ------- | ------------------ | ------------------------------------------------------ |
-| `MAX_JOBS`             | `0`     | `concurrency`      | drain at most N unblocked issues then exit (`0` = unlimited / full waves) |
+| `MAX_JOBS`             | `0`     | `concurrency`      | caps the wave size (`0` = uncapped) |
 | `MAX_FIX_ATTEMPTS`     | `3`     | `selfHealing`      | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
 | `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts after a sibling merge (`0` disables) |
 | `MERGE_POLL_INTERVAL`  | `30`    | `branches`         | seconds between CI-status polls in the merge gate      |

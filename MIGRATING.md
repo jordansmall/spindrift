@@ -65,10 +65,10 @@ error naming the valid keys.
 `dispatch` (directly, via a driving loop, or via `dogfood.sh`) is how a
 dependency graph drains wave by wave.
 
-| Removed knob      | Replacement                                      |
-|--------------------|--------------------------------------------------|
-| `DEPS_POLL_SECS`   | none — remove it from your settings/env           |
-| `DEPS_WAIT_SECS`   | none — remove it from your settings/env           |
+| Removed knob     | Replacement                             |
+|------------------|------------------------------------------|
+| `DEPS_POLL_SECS` | none — remove it from your settings/env |
+| `DEPS_WAIT_SECS` | none — remove it from your settings/env |
 
 ## `spindrift engage` (removed in v0.2.0)
 
