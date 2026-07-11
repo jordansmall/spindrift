@@ -81,10 +81,6 @@ type config struct {
 	transientBackoffSecs int
 	holdJitterSecs       int
 
-	// Dependency-wave knobs
-	depsPollSecs int
-	depsWaitSecs int
-
 	// overlapGate controls the declared-## Touches overlap check: "defer"
 	// holds a Dispatchable issue whose touch-set intersects an InProgress
 	// issue's, retrying once the collider completes; "off" disables the
@@ -223,9 +219,7 @@ func loadConfig() config {
 		transientBackoffSecs: atoi(getenv("TRANSIENT_BACKOFF_SECS", "30"), 30),
 		holdJitterSecs:       atoiNonneg(getenv("HOLD_JITTER_SECS", "5"), 5),
 
-		depsPollSecs: atoiNonneg(getenv("DEPS_POLL_SECS", "30"), 30),
-		depsWaitSecs: atoiNonneg(getenv("DEPS_WAIT_SECS", "7200"), 7200),
-		overlapGate:  getenv("OVERLAP_GATE", "defer"),
+		overlapGate: getenv("OVERLAP_GATE", "defer"),
 
 		mergePollInterval: atoiNonneg(getenv("MERGE_POLL_INTERVAL", "30"), 30),
 		mergePollTimeout:  atoiNonneg(getenv("MERGE_POLL_TIMEOUT", "1800"), 1800),
@@ -453,8 +447,6 @@ func wavesConfig(c config) waves.Config {
 	return waves.Config{
 		MaxParallel:     c.maxParallel,
 		MaxJobs:         c.maxJobs,
-		DepsPollSecs:    c.depsPollSecs,
-		DepsWaitSecs:    c.depsWaitSecs,
 		OverlapGate:     c.overlapGate,
 		Label:           c.label,
 		InProgressLabel: c.inProgressLabel,

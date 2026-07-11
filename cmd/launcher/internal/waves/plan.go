@@ -77,8 +77,6 @@ type Plan struct {
 type Config struct {
 	MaxParallel     int
 	MaxJobs         int
-	DepsPollSecs    int
-	DepsWaitSecs    int
 	OverlapGate     string
 	Label           string
 	InProgressLabel string
