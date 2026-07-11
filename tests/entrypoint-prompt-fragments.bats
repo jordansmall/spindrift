@@ -1,0 +1,256 @@
+#!/usr/bin/env bats
+# Conditional prompt steps rendered from fragment files, and substitution (issue #463).
+
+load helper
+
+setup() {
+  setup_entrypoint_env
+}
+
+# The main issue-prompt's FILE ISSUES step is substituted in only when the
+# filer is provisioned (same ${...} envsubst mechanism as SKILL_PREAMBLE) —
+# off by default, zero prompt residue.
+@test "issue prompt gains a FILE ISSUES step when the filer is provisioned" {
+  export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q '# FILE ISSUES' "$CLAUDE_PROMPT_FILE"
+}
+
+# A scout/reviewer-only template (no "filer" key) must not require
+# filer-prompt.md to exist -- the file read has to be gated on the template
+# actually carrying a filer entry, same as the FILE_ISSUES_STEP gate above.
+@test "entrypoint does not require filer-prompt.md when the template omits filer" {
+  local prompt_dir="$BATS_TEST_TMPDIR/prompts"
+  mkdir -p "$prompt_dir"
+  printf 'issue stub\n' >"$prompt_dir/issue-prompt.md"
+  printf 'scout stub\n' >"$prompt_dir/scout-prompt.md"
+  printf 'reviewer stub\n' >"$prompt_dir/review-prompt.md"
+  export PROMPTS_DIR="$prompt_dir"
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"r","model":"opus","prompt":"","tools":["Read"]},"scout":{"description":"s","model":"haiku","prompt":"","tools":["Read"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  jq -e 'has("filer") | not' "$CLAUDE_AGENTS_FILE" >/dev/null
+}
+
+@test "issue prompt has no FILE ISSUES step when the filer is not configured" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'FILE ISSUES' "$CLAUDE_PROMPT_FILE"
+}
+
+# AUTO_FORMAT knob: the AUTO-FORMAT step is injected only when AUTO_FORMAT is
+# non-empty — same conditional-residue mechanism as FILE_ISSUES_STEP.
+@test "issue prompt gains an AUTO-FORMAT step when AUTO_FORMAT is enabled" {
+  export AUTO_FORMAT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q '# AUTO-FORMAT' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "issue prompt has no AUTO-FORMAT step when AUTO_FORMAT is disabled" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'AUTO-FORMAT' "$CLAUDE_PROMPT_FILE"
+}
+
+# issue #452: `nix fmt` can never succeed in-box (uid 1000 has no
+# /nix/store write access, so evaluating the flake dies with a store-lock
+# permission error) — the step must not list it as a usable preference, and
+# must say why it's unavailable if it names it at all.
+@test "AUTO-FORMAT step never instructs nix fmt as a usable preference" {
+  export AUTO_FORMAT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q '`nix fmt` when the target flake defines a formatter' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "AUTO-FORMAT step explains why nix fmt is unavailable in-box" {
+  export AUTO_FORMAT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'nix fmt' "$CLAUDE_PROMPT_FILE"
+  grep -qi 'permission' "$CLAUDE_PROMPT_FILE"
+}
+
+# AUTO_LINT knob: the AUTO-LINT step is injected only when AUTO_LINT is
+# non-empty — same conditional-residue mechanism as AUTO_FORMAT_STEP.
+@test "issue prompt gains an AUTO-LINT step when AUTO_LINT is enabled" {
+  export AUTO_LINT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q '# AUTO-LINT' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "issue prompt has no AUTO-LINT step when AUTO_LINT is disabled" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'AUTO-LINT' "$CLAUDE_PROMPT_FILE"
+}
+
+# issue #463: the conditional prompt steps above (SKILL_PREAMBLE,
+# FILE_ISSUES_STEP, AUTO_FORMAT_STEP, AUTO_LINT_STEP, CI_FAILURE_STEP) must be
+# read from fragment files under PROMPTS_DIR, not authored as heredocs in the
+# script -- a markdown heading string-literal in entrypoint.sh means prose
+# leaked back into bash.
+@test "entrypoint source contains no prompt-prose markdown headings" {
+  run grep -E '# (FILE ISSUES|AUTO-FORMAT|AUTO-LINT|CI FAILURE)' "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+}
+
+@test "the six conditional prompt steps ship as fragment files under prompts/fragments" {
+  for f in skill-preamble caveman-default file-issues auto-format auto-lint ci-failure; do
+    [ -f "$PROMPTS_DIR/fragments/$f.md" ]
+  done
+}
+
+# issue #463: `$(_subst ...)` command substitution strips ALL trailing
+# newlines, so a fragment's blank-line separator (which the heredoc-string
+# assignments it replaces carried literally) must be reconstructed after
+# substitution -- otherwise the step glues onto the next heading with no
+# even a newline between them.
+@test "AUTO-FORMAT and AUTO-LINT steps stay separated from each other and from COMMIT" {
+  export AUTO_FORMAT=1
+  export AUTO_LINT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'run\.# AUTO-LINT' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'run\.# COMMIT' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "FILE ISSUES step stays separated from LAND THE CHANGE" {
+  export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'configured\.# LAND THE CHANGE' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "CI FAILURE step stays separated from CONTEXT on a fix pass" {
+  export FIX_PASS=1
+  export CI_FAILURE_SUMMARY="build failed"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'scratch:build failed' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'failed# CONTEXT' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "CAVEMAN_STEP stays separated from the COMMS body text" {
+  mkdir -p "$HOME/.claude/skills"
+  cat >"$HOME/.claude/skills/caveman.md" <<'SKILL'
+---
+name: caveman
+description: Ultra-compressed communication mode.
+---
+Respond terse like smart caveman.
+SKILL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'verbatim\.Your text output' "$CLAUDE_PROMPT_FILE"
+}
+
+# issue #463: the claude|heartbeat-filter|tee pipeline used to be hand-copied
+# between the direct path and the devShell wrapper heredoc; a single
+# occurrence of this fragment proves it is now rendered from one source that
+# both paths execute (the direct-path and devShell behavioural tests above
+# already prove both paths still work).
+@test "driver pipeline is defined exactly once in entrypoint.sh source" {
+  count=$(grep -c 'spindrift-heartbeat-filter -n "\$ISSUE_NUMBER" -f /tmp/heartbeat.log' "$ENTRYPOINT")
+  [ "$count" -eq 1 ]
+}
+
+# issue #463: a SPINDRIFT_PROMPT_DIR-style override supplies its own fragment
+# for a knob it enables, exactly like it already must supply filer-prompt.md
+# when AGENTS_JSON_TEMPLATE carries a filer entry (see "entrypoint does not
+# require filer-prompt.md..." above) -- documented in docs/reference.md.
+@test "runtime prompt-dir override supplies its own auto-format fragment" {
+  local prompt_dir="$BATS_TEST_TMPDIR/custom-prompts"
+  cp -r "$PROMPTS_DIR" "$prompt_dir"
+  chmod -R u+w "$prompt_dir"
+  printf '# AUTO-FORMAT\n\nCUSTOM-FRAGMENT-MARKER\n\n' >"$prompt_dir/fragments/auto-format.md"
+  export PROMPTS_DIR="$prompt_dir"
+  export AUTO_FORMAT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'CUSTOM-FRAGMENT-MARKER' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "entrypoint includes a read-only tools whitelist in agents JSON" {
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  jq -e '.scout.tools | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.tools | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.scout.tools | contains(["Edit"]) | not' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.scout.tools | contains(["Write"]) | not' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.tools | contains(["Edit"]) | not' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.tools | contains(["Write"]) | not' "$CLAUDE_AGENTS_FILE" >/dev/null
+}
+
+@test "IN_PROGRESS_LABEL and COMPLETE_LABEL are substituted in the prompt" {
+  local prompt_dir="$BATS_TEST_TMPDIR/prompts"
+  mkdir -p "$prompt_dir"
+  cat >"$prompt_dir/issue-prompt.md" <<'EOF'
+label: ${IN_PROGRESS_LABEL} complete: ${COMPLETE_LABEL}
+EOF
+  printf 'scout stub\n' >"$prompt_dir/scout-prompt.md"
+  printf 'reviewer stub\n' >"$prompt_dir/review-prompt.md"
+  export PROMPTS_DIR="$prompt_dir"
+  export IN_PROGRESS_LABEL="wip"
+  export COMPLETE_LABEL="done"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'label: wip' "$CLAUDE_PROMPT_FILE"
+  grep -q 'complete: done' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "envsubst substitutes placeholders in scout and review prompt files" {
+  local prompt_dir="$BATS_TEST_TMPDIR/prompts"
+  mkdir -p "$prompt_dir"
+  printf 'issue stub\n' >"$prompt_dir/issue-prompt.md"
+  printf 'scout for issue ${ISSUE_NUMBER}\n' >"$prompt_dir/scout-prompt.md"
+  printf 'review base ${BASE_BRANCH}\n' >"$prompt_dir/review-prompt.md"
+  export PROMPTS_DIR="$prompt_dir"
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"r","model":"opus","prompt":"","tools":["Read"]},"scout":{"description":"s","model":"haiku","prompt":"","tools":["Read"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  jq -e '.scout.prompt | contains("scout for issue 7")' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.reviewer.prompt | contains("review base main")' "$CLAUDE_AGENTS_FILE" >/dev/null
+}
+
+@test "default prompt delegates exploration to the scout subagent" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'scout' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt spawns a reviewer subagent" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'reviewer' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt specifies a review loop keyed on VERDICT: BLOCK" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'VERDICT.*BLOCK\|BLOCK.*VERDICT' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt emits exactly one SPINDRIFT_OUTCOME line" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -c 'SPINDRIFT_OUTCOME' "$CLAUDE_PROMPT_FILE" | grep -q '^[1-9]'
+}
+
+@test "default prompt emits SPINDRIFT_OUTCOME with status=blocked in the blocked path" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'status=blocked' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "default prompt emits status=ready as the success outcome" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q 'status=ready' "$CLAUDE_PROMPT_FILE"
+  ! grep -q 'status=merged' "$CLAUDE_PROMPT_FILE"
+}
+
