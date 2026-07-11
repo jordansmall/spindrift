@@ -115,6 +115,8 @@ func TestMatchOverlapConsistency(t *testing.T) {
 		{".github/**", ".github/workflows/ci.yml"},
 		{"cmd/launcher/*.go", "cmd/launcher/main.go"},
 		{"**/CLAUDE.md", "services/api/CLAUDE.md"},
+		{"cmd/launcher/*.go", "docs/reference.md"},
+		{"docs/*.md", "cmd/launcher/internal/forge/exec.go"},
 	}
 	for _, tc := range cases {
 		if Match(tc.pattern, tc.path) != Overlap(tc.pattern, tc.path) {
