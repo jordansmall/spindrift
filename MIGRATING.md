@@ -52,6 +52,24 @@ ADR-0010 established a single `spindrift` CLI as the primary surface for the
 harness. The old `nix run .#run` / `.#build` split was a build artefact, not a
 user-facing design. The unified CLI is easier to discover, script, and extend.
 
+## `DEPS_POLL_SECS` / `DEPS_WAIT_SECS` (removed)
+
+`DEPS_POLL_SECS`/`DEPS_WAIT_SECS` (`settings.concurrency.depsPollSecs`/
+`depsWaitSecs`) configured the in-process dependency-wave poll loop. That
+loop was deleted (ADR 0019): every dispatch invocation now runs at most one
+wave and exits, so the poll/wait knobs configure nothing. Setting either in
+`settings.concurrency` now fails at flake-eval time with an unknown-key
+error naming the valid keys.
+
+`MAX_JOBS` still caps the wave size (`0` means uncapped); re-invoking
+`dispatch` (directly, via a driving loop, or via `dogfood.sh`) is how a
+dependency graph drains wave by wave.
+
+| Removed knob      | Replacement                                      |
+|--------------------|--------------------------------------------------|
+| `DEPS_POLL_SECS`   | none — remove it from your settings/env           |
+| `DEPS_WAIT_SECS`   | none — remove it from your settings/env           |
+
 ## `spindrift engage` (removed in v0.2.0)
 
 `spindrift engage <issue>` was removed in **v0.2.0**. Use

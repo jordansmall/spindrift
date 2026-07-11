@@ -182,9 +182,12 @@ _Avoid_: issue number, sequence, priority.
 **Wave**:
 One batch of Dispatches launched concurrently. With no blocker edges the whole
 ready-set is a single wave; declared edges split a run into dependency waves.
-Waves are unbounded by default: `MAX_PARALLEL` caps the number of concurrent
-Boxes within a wave (default 3); `MAX_JOBS` caps the dependency-wave
-concurrency (default 0 = unlimited). No label-based gate serializes issues;
+Every dispatch invocation runs at most one wave (ADR 0019): `MAX_PARALLEL`
+caps the number of concurrent Boxes within a wave (default 3); `MAX_JOBS`
+caps the wave size (default 0 = uncapped). Held issues stay on the dispatch
+label and are picked up by the next invocation — a driving loop (dogfood.sh,
+CI, or a human re-running) drains a dependency graph wave by fresh wave; no
+in-process poll waits for later waves. No label-based gate serializes issues;
 ordering is purely by dispatch order and blocker edges.
 _Was_: "fan-out" — the launch act and the batch carried two names; unified on
 the batch noun.
