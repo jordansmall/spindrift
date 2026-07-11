@@ -193,6 +193,48 @@ func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 	}
 }
 
+// TestSelectiveListDispatch_InListUnmergedBlocker_DispatchesOnlyBlocker is
+// the regression test for #524's acceptance criterion: `dispatch 12 15`
+// where #15 is blocked by in-list, unmerged #12 dispatches #12 only in one
+// invocation; #15 is not claimed. The exact remaining-list/re-run-command
+// output is covered at the waves-package level (drainMaxJobs writes it to
+// stdout directly, not through the io.Writer this test's caller injects).
+func TestSelectiveListDispatch_InListUnmergedBlocker_DispatchesOnlyBlocker(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.maxParallel = 4
+
+	fc := forge.NewFake()
+	// #12 is open (not merged/closed) and blocks #15; both are in the list.
+	fc.SetIssue(forge.Issue{Number: "12", Title: "blocker", State: "OPEN", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "15", Title: "dependent", Labels: []string{c.label},
+		Body: "## Blocked by\n- #12\n"})
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(c, fc, fc)
+	stdin := &bytes.Buffer{}
+	stdout := &bytes.Buffer{}
+
+	err := selectiveListDispatch(c, fc, fc, dir, f, s, []string{"12", "15"}, false, stdin, stdout)
+	if err != nil {
+		t.Fatalf("selectiveListDispatch: %v", err)
+	}
+
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "12" {
+		t.Fatalf("RunCalls: got %v, want exactly issue 12 (dependent must wait for a fresh invocation)", fr.RunCalls)
+	}
+
+	iss15, err := fc.Issue("15")
+	if err != nil {
+		t.Fatalf("Issue(15): %v", err)
+	}
+	if containsLabel(iss15.Labels, c.inProgressLabel) {
+		t.Errorf("issue 15 must not be claimed while its blocker is unmet; labels=%v", iss15.Labels)
+	}
+}
+
 // TestSelectiveListDispatch_UnmetExternalEviction: #15 is blocked by #99 (not
 // in list, not merged) — #15 is evicted and nothing is dispatched.
 func TestSelectiveListDispatch_UnmetExternalEviction(t *testing.T) {

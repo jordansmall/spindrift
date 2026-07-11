@@ -78,6 +78,41 @@ func dispatchWave(cfg Config, it forge.IssueTracker, f *dispatch.Factory, s sett
 	wg.Wait()
 }
 
+// heldIssues returns the issues from the batch that were neither selected
+// for this wave nor cascade-failed — the ones a later invocation (or, for
+// OriginSelective, an operator re-run) could still dispatch. Order matches
+// issues.
+func heldIssues(issues, selected, blockerFailed []Issue) []Issue {
+	dispatched := make(map[string]bool, len(selected)+len(blockerFailed))
+	for _, iss := range selected {
+		dispatched[iss.Number] = true
+	}
+	for _, iss := range blockerFailed {
+		dispatched[iss.Number] = true
+	}
+	var held []Issue
+	for _, iss := range issues {
+		if !dispatched[iss.Number] {
+			held = append(held, iss)
+		}
+	}
+	return held
+}
+
+// printSelectiveRerunHint names the issues a selective-list wave left behind
+// and the exact command that carries them into the next invocation.
+// Selective dispatch bypasses the label gate (ADR 0011), so re-discovery
+// cannot pick the remainder back up the way the queue path does — the
+// operator carries it instead (ADR 0019).
+func printSelectiveRerunHint(held []Issue) {
+	nums := make([]string, len(held))
+	for i, iss := range held {
+		nums[i] = iss.Number
+	}
+	fmt.Printf("==> %d issue(s) remain: #%s\n", len(held), strings.Join(nums, ", #"))
+	fmt.Printf("==> re-run to continue: spindrift dispatch --yes %s\n", strings.Join(nums, " "))
+}
+
 // drainMaxJobs drains up to cfg.MaxJobs currently-unblocked issues from the
 // batch and exits; cfg.MaxJobs == 0 is uncapped and drains every unblocked
 // issue in the batch. Blocked issues are skipped so no slot is wasted on a
@@ -133,9 +168,12 @@ outer:
 		// Unattended drain path: if issues remain after cascade-failing blockers,
 		// signal callers with ErrOpenNoneDispatchable so they stop instead of
 		// hot-looping.
-		remaining := len(issues) - len(blockerFailed)
-		if remaining > 0 {
-			fmt.Printf("no unblocked '%s' issues to drain — %d remain blocked or deferred.\n", cfg.Label, remaining)
+		held := heldIssues(issues, selected, blockerFailed)
+		if len(held) > 0 {
+			fmt.Printf("no unblocked '%s' issues to drain — %d remain blocked or deferred.\n", cfg.Label, len(held))
+			if origin == OriginSelective {
+				printSelectiveRerunHint(held)
+			}
 			return ErrOpenNoneDispatchable
 		}
 		fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", cfg.Label)
@@ -143,8 +181,12 @@ outer:
 	}
 	fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), cfg.MaxJobs)
 	dispatchWave(cfg, it, f, s, selected)
-	if remaining := len(issues) - len(selected) - len(blockerFailed); remaining > 0 {
-		fmt.Printf("==> %d issue(s) remain for a later invocation (blocked, deferred, or past MAX_JOBS); re-run `spindrift dispatch` to continue the drain\n", remaining)
+	if held := heldIssues(issues, selected, blockerFailed); len(held) > 0 {
+		if origin == OriginSelective {
+			printSelectiveRerunHint(held)
+		} else {
+			fmt.Printf("==> %d issue(s) remain for a later invocation (blocked, deferred, or past MAX_JOBS); re-run `spindrift dispatch` to continue the drain\n", len(held))
+		}
 	}
 	return nil
 }
