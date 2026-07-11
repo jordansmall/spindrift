@@ -1,0 +1,273 @@
+package waves
+
+import (
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/runner"
+)
+
+// TestRunContinuous_RefillsFreedSlotWhileOthersRunning verifies the core
+// slot-refill behavior (#527 AC1): with MaxParallel=2 and three ready
+// issues, the third issue launches into the slot #1 frees while #2 is still
+// running — a batch-shaped implementation would deadlock here, since #2
+// only unblocks after #3 has already started.
+func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 2
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	started3 := make(chan struct{})
+	release2 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		switch box.Issue {
+		case "2":
+			<-release2
+		case "3":
+			close(started3)
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discover := func() ([]Issue, map[string][]string, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return nil, nil, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return out, map[string][]string{}, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	resultCh := make(chan error, 1)
+	go func() { resultCh <- RunContinuous(c, fc, fc, dir, f, s, discover, fresh) }()
+
+	select {
+	case <-started3:
+	case <-time.After(2 * time.Second):
+		t.Fatal("issue #3 was never dispatched — slot did not refill while #2 was still running")
+	}
+
+	close(release2)
+
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatalf("RunContinuous: got %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return after #2 was released")
+	}
+
+	if len(fr.RunCalls) != 3 {
+		t.Fatalf("RunCalls: got %d, want 3", len(fr.RunCalls))
+	}
+}
+
+// TestRunContinuous_RefillPicksUpIssueUnblockedMidRun verifies #527 AC2: a
+// blocked issue's blocker resolving mid-run (merged/closed after dispatch
+// started) makes it dispatchable on the very next refill, without a fresh
+// invocation.
+func TestRunContinuous_RefillPicksUpIssueUnblockedMidRun(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // #2's blocker, unmet at start
+
+	fr := runner.NewFake()
+	releaseC := make(chan struct{})
+	started2 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		switch box.Issue {
+		case "1":
+			<-releaseC
+		case "2":
+			close(started2)
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	edges := map[string][]string{"2": {"3"}}
+	discover := func() ([]Issue, map[string][]string, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return nil, nil, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return out, edges, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	resultCh := make(chan error, 1)
+	go func() { resultCh <- RunContinuous(c, fc, fc, dir, f, s, discover, fresh) }()
+
+	// #2 is blocked at dispatch start (its blocker is open); MaxParallel=1
+	// also means it can't launch until #1's slot frees. The blocker
+	// resolves here, while #1 is still in flight, before that slot frees —
+	// proving the refill re-checks readiness against fresh state rather
+	// than a snapshot taken at startup.
+	fc.SetIssue(forge.Issue{Number: "3", State: forge.IssueClosed})
+	close(releaseC)
+
+	select {
+	case <-started2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("issue #2 was never dispatched after its blocker resolved mid-run")
+	}
+
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatalf("RunContinuous: got %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return")
+	}
+
+	if len(fr.RunCalls) != 2 {
+		t.Fatalf("RunCalls: got %d, want 2", len(fr.RunCalls))
+	}
+}
+
+// TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish verifies #527
+// AC3: once the freshness checker reports rebuild-needed, no further Box
+// launches, the Box already in flight still runs to completion, and
+// RunContinuous returns ErrImageStale (the new documented exit code) once
+// it does.
+func TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 2
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	release1 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Issue == "1" {
+			<-release1
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discover := func() ([]Issue, map[string][]string, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return nil, nil, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return out, map[string][]string{}, nil
+	}
+
+	// Fresh for the first refill (fills #1's slot), stale for every
+	// refill after — including the second initial slot and #1's eventual
+	// completion refill.
+	var freshCalls int
+	var mu sync.Mutex
+	fresh := func() (bool, bool, string) {
+		mu.Lock()
+		defer mu.Unlock()
+		freshCalls++
+		if freshCalls == 1 {
+			return true, true, "fresh"
+		}
+		return true, false, "rebuild needed (base tip changed image inputs)"
+	}
+
+	resultCh := make(chan error, 1)
+	go func() { resultCh <- RunContinuous(c, fc, fc, dir, f, s, discover, fresh) }()
+
+	close(release1)
+
+	select {
+	case err := <-resultCh:
+		if !errors.Is(err, ErrImageStale) {
+			t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return")
+	}
+
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
+		t.Fatalf("RunCalls: got %v, want exactly issue 1 (no new Box after the probe went stale)", fr.RunCalls)
+	}
+}
+
+// TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable verifies that
+// exit-3 semantics are unchanged in continuous mode (#527 AC): when nothing
+// in the initial batch is ever dispatchable, RunContinuous returns
+// ErrOpenNoneDispatchable exactly as drainMaxJobs does for a batch wave,
+// rather than hanging waiting for a refill event that can never come (no
+// slot was ever filled).
+func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", State: "OPEN"}) // blocker, not complete
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	edges := map[string][]string{"1": {"2"}}
+	discover := func() ([]Issue, map[string][]string, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return nil, nil, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return out, edges, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	err := RunContinuous(c, fc, fc, dir, f, s, discover, fresh)
+	if !errors.Is(err, ErrOpenNoneDispatchable) {
+		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
+	}
+}
