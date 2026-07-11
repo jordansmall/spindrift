@@ -69,7 +69,7 @@ your inputs and import the flake-parts module:
 
   outputs = inputs@{ flake-parts, spindrift, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
-      systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
+      systems = [ "aarch64-darwin" "aarch64-linux" "x86_64-linux" ];
       imports = [ spindrift.flakeModules.default ];
       perSystem = { config, pkgs, ... }: {
         spindrift = {
