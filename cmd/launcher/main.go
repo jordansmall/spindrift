@@ -7,16 +7,13 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/waves"
@@ -646,111 +643,6 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	defer d.Close()
 	s.SettleAdopted(d, iss.number, prURL)
 	return nil
-}
-
-// previewIssues is the testable core of the preview verb. It always prints
-// an image-freshness line first (freshness.Probe against pwd/eval), then:
-// when issueNums is non-empty it performs a selective dry-run — fetches
-// exactly those issues, prints label-bypass warnings, blocker annotations,
-// and cascade-eviction notices without launching any Box or prompting; when
-// issueNums is empty it falls back to queue-drain discovery.
-func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Writer, issueNums []string, pwd string, eval freshness.Evaluator) error {
-	res := freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageDrv, eval)
-	fmt.Fprintf(w, "image-freshness: %s\n", res.Message)
-
-	if len(issueNums) > 0 {
-		return previewSelectiveList(c, it, cf, w, issueNums)
-	}
-
-	issues, origin, err := discoverIssues(c, it)
-	if err != nil {
-		return err
-	}
-	if origin == waves.OriginDiscovered && len(issues) == 0 {
-		fmt.Fprintf(w, "repo: %s  merge-mode: %s\nno open '%s' issues — nothing to dispatch.\n", c.repoSlug, c.mergeMode, c.label)
-		return nil
-	}
-	edges, err := waves.BuildEdges(it, toWaveIssues(issues))
-	if err != nil {
-		return err
-	}
-	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: edges})
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
-	fmt.Fprintf(w, "%d issue(s) would be dispatched:\n", len(plan.Issues))
-	for _, iss := range plan.Issues {
-		blockers := plan.Edges[iss.Number]
-		if len(blockers) > 0 {
-			fmt.Fprintf(w, "  #%s  %s  (blocked by #%s)\n", iss.Number, iss.Title, strings.Join(blockers, ", #"))
-		} else {
-			fmt.Fprintf(w, "  #%s  %s\n", iss.Number, iss.Title)
-		}
-	}
-	return nil
-}
-
-// previewSelectiveList performs a dry-run of the selective-list dispatch path.
-// It prints label-bypass warnings, per-issue blocker annotations, and cascade-
-// eviction notices. No Boxes are started and no Forge mutations occur.
-func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Writer, nums []string) error {
-	issues, unlabeled, err := fetchSelectiveIssues(c, it, nums)
-	if err != nil {
-		return err
-	}
-
-	// Label-bypass warnings (no prompt in preview).
-	for _, num := range unlabeled {
-		fmt.Fprintf(w, "⚠ #%s not ready-for-agent; dispatching anyway (explicit)\n", num)
-	}
-
-	// Parse blocker graph.
-	edges, err := waves.BuildEdges(it, toWaveIssues(issues))
-	if err != nil {
-		return err
-	}
-
-	// Eviction pass (dry-run; no side effects).
-	kept, notices := evictUnmetBlockers(c, it, cf, issues, edges)
-	for _, n := range notices {
-		fmt.Fprintln(w, n)
-	}
-
-	fmt.Fprintf(w, "repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
-	if len(kept) == 0 {
-		fmt.Fprintf(w, "no issues would be dispatched after eviction\n")
-		return nil
-	}
-	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(kept), Edges: edges})
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "%d issue(s) would be dispatched:\n", len(plan.Issues))
-	for _, iss := range plan.Issues {
-		blockers := plan.Edges[iss.Number]
-		if len(blockers) > 0 {
-			fmt.Fprintf(w, "  #%s  %s  (blocked by #%s)\n", iss.Number, iss.Title, strings.Join(blockers, ", #"))
-		} else {
-			fmt.Fprintf(w, "  #%s  %s\n", iss.Number, iss.Title)
-		}
-	}
-	return nil
-}
-
-// preview is the entry point for the `preview` subcommand.
-func preview(issueNums []string) error {
-	c := loadConfig()
-	if err := validate(c); err != nil {
-		return err
-	}
-	it := newIssueTracker(c)
-	cf := newCodeForge(c)
-	pwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	return previewIssues(c, it, cf, os.Stdout, issueNums, pwd, runner.NixEvaluator{})
 }
 
 // run is the orchestration logic for the `dispatch` subcommand: preflight,
