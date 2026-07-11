@@ -201,6 +201,45 @@ func TestDrainMaxJobs_MaxJobsCapHonored(t *testing.T) {
 	}
 }
 
+// TestDrainMaxJobs_PrintsRemainingCountAfterCapNotFalselyBlocked verifies
+// that when MAX_JOBS caps a wave short of the full ready set, the remaining
+// count message does not claim the leftover issues are "blocked or
+// deferred" — they are simply past the cap, ready for the next invocation.
+func TestDrainMaxJobs_PrintsRemainingCountAfterCapNotFalselyBlocked(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 3
+	c.MaxJobs = 1
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	out := captureStdout(t, func() {
+		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+			{Number: "1", Title: "first"},
+			{Number: "2", Title: "second"},
+			{Number: "3", Title: "third"},
+		}, map[string][]string{}, OriginDiscovered); err != nil {
+			t.Fatalf("drainMaxJobs: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "2 issue(s) remain") {
+		t.Errorf("output must report how many issues remain; got:\n%s", out)
+	}
+	if strings.Contains(out, "blocked or deferred") {
+		t.Errorf("issues held back only by the MAX_JOBS cap are not blocked or deferred; got:\n%s", out)
+	}
+}
+
 // TestDrainMaxJobs_ZeroMeansUncapped verifies that cfg.MaxJobs == 0 drains
 // every unblocked issue in the batch in one wave — the cap does not apply at
 // zero (ADR 0019: MAX_JOBS=0 is an uncapped drain batch, not "dispatch

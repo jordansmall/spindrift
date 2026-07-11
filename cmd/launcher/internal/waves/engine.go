@@ -208,7 +208,7 @@ outer:
 	fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), cfg.MaxJobs)
 	dispatchWave(cfg, it, f, s, selected)
 	if remaining := len(issues) - len(selected) - len(blockerFailed); remaining > 0 {
-		fmt.Printf("==> %d issue(s) remain blocked or deferred; re-run `spindrift dispatch` to continue the drain\n", remaining)
+		fmt.Printf("==> %d issue(s) remain for a later invocation (blocked, deferred, or past MAX_JOBS); re-run `spindrift dispatch` to continue the drain\n", remaining)
 	}
 	return nil
 }
