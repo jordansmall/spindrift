@@ -42,20 +42,22 @@ MAX_PARALLEL="${MAX_PARALLEL:-3}"      # must match env-schema.nix maxParallel.d
 export MAX_JOBS="${MAX_JOBS:-$MAX_PARALLEL}"
 : "${REPO_SLUG:?set REPO_SLUG=owner/repo in harness.env}"
 
+if [ -n "$(git status --porcelain)" ]; then
+  echo "!! working tree is dirty — commit/stash before dogfooding (build reads \$PWD)." >&2
+  exit 1
+fi
+
 # Graceful stop: signal this PID with USR1 or TERM (the devShell `dogfood-stop`
 # alias does this) to exit after the current wave instead of aborting it. Bash
 # defers a trapped signal until the in-flight `nix run` returns, so the wave
 # always finishes cleanly; the loop then breaks at the next boundary. Ctrl-C
 # (SIGINT to the whole process group) stays the hard-abort escape hatch.
+# Written after the dirty-tree check above: the pid file is untracked, and
+# writing it first would trip that very check.
 stop_requested=0
 trap 'stop_requested=1; echo "==> dogfood: stop requested — will exit after the current wave"' USR1 TERM
 echo $$ > .dogfood.pid
 trap 'rm -f .dogfood.pid' EXIT
-
-if [ -n "$(git status --porcelain)" ]; then
-  echo "!! working tree is dirty — commit/stash before dogfooding (build reads \$PWD)." >&2
-  exit 1
-fi
 
 iteration=0
 
