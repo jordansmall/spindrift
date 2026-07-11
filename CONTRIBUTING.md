@@ -55,9 +55,10 @@ skill-discovery loop in `agent/entrypoint.sh` keys off of. This is
 dogfood-only — the generic harness keeps its empty `skills` default.
 
 After editing `lib/env-schema.nix`, regenerate the artifacts it drives —
-`templates/default/harness.env.example`, `cmd/launcher/flagtable_gen.go`, and
-`docs/flake-options.md` — instead of hand-editing them until the drift-guard
-checks (`nix/checks.nix`) go quiet:
+`templates/default/harness.env.example`, `cmd/launcher/flagtable_gen.go`,
+`docs/flake-options.md`, `tests/box_env_gen.bash`, and the generated section of
+`templates/default/flake.nix`'s commented-out `settings` example — instead of
+hand-editing them until the drift-guard checks (`nix/checks.nix`) go quiet:
 
 ```sh
 nix run .#regen
@@ -67,9 +68,9 @@ The regenerator and the drift-guard checks share one renderer per artifact
 (`lib/renderers.nix`), so they can't drift from each other. It's repo-internal
 dev tooling, not part of the flake-option/env-schema consumer surface. The man
 page rebuilds fresh from the schema on every `nix flake check` (nothing to
-regenerate); `templates/default/flake.nix`'s commented-out `settings` example
-is hand-curated — `nix flake check`'s `template-settings-example` check still
-flags any section or knob you need to add by hand.
+regenerate). `lib/env-schema.nix` is the only hand-edit a new knob requires;
+the launcher's Go wiring (when the binary reads the knob directly) is the only
+other hand-edit.
 
 To exercise the whole loop end to end against a live repo, use `./dogfood.sh`
 (never hand-run `nix run .#run`) — see [`docs/reference.md`](docs/reference.md).

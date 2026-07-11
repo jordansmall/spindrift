@@ -98,26 +98,26 @@ in
 
   # tests/helper.bash's set_box_env fixture must export every boxEnv = true
   # schema knob, so the entrypoint-*.bats suites exercise the same defaults the nix
-  # preamble bakes into the image at build time (issue #462). Presence-only,
-  # like launcher-env-coverage above — catches a new boxEnv knob added to the
-  # schema with no matching export added to set_box_env.
+  # preamble bakes into the image at build time (issue #462). Fails when a new
+  # boxEnv knob is added to the schema but the committed generated fixture is
+  # not regenerated (golden-file drift, same treatment as harness-env-example
+  # above). Shares its renderer with `nix run .#regen` via lib/renderers.nix
+  # (issue #520).
   box-env-fixture-coverage =
     let
       schema = import ../../lib/env-schema.nix;
-      inherit (pkgs.lib)
-        attrValues
-        concatStringsSep
-        filter
-        hasInfix
-        ;
-      boxEnvNames = map (e: e.env) (filter (e: e.boxEnv or false) (attrValues schema));
-      helperSrc = builtins.readFile ../../tests/helper.bash;
-      missing = filter (name: !hasInfix "export ${name}=" helperSrc) boxEnvNames;
+      generated = pkgs.writeText "box_env_gen.bash.generated" (renderers.renderSetBoxEnvFixture schema);
     in
-    assert pkgs.lib.assertMsg (
-      missing == [ ]
-    ) "tests/helper.bash's set_box_env is missing boxEnv knobs: ${concatStringsSep ", " missing}";
-    pkgs.runCommand "box-env-fixture-coverage" { } "touch $out";
+    pkgs.runCommand "box-env-fixture-coverage"
+      {
+        inherit generated;
+        committed = ../../tests/box_env_gen.bash;
+      }
+      ''
+        diff "$generated" "$committed" \
+          || { echo "tests/box_env_gen.bash is out of sync with lib/env-schema.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
 
   # cmd/launcher/flagtable_gen.go must match the content generated from
   # env-schema.nix by mkHarness.nix renderFlagTableGo.  Fails when a new
@@ -159,49 +159,42 @@ in
         touch $out
       '';
 
-  # templates/default/flake.nix settings example block must cover every section
-  # and every knob in the schema-derived flakeOption surface.  Fails when a new
-  # section or knob is added to env-schema.nix but the template is not updated.
-  template-settings-example =
+  # The generated settings block between templates/default/flake.nix's
+  # BEGIN/END GENERATED SETTINGS EXAMPLE markers must match the content
+  # rendered from env-schema.nix — every flakeOption knob, exhaustively,
+  # with its doc string (issue #520). Shares its renderer with
+  # `nix run .#regen` via lib/renderers.nix, so guard and regenerator cannot
+  # drift from each other (issue #402).
+  template-settings-block =
     let
       schema = import ../../lib/env-schema.nix;
-      inherit (pkgs.lib)
-        attrNames
-        concatStringsSep
-        filter
-        filterAttrs
-        foldl'
-        hasInfix
-        ;
-      flakeOptionEntries = filterAttrs (_: e: e.flakeOption or false) schema;
-      # Map sectionAttr -> [knobName] for all flakeOption knobs. groupToAttr
-      # comes from lib/renderers.nix — lib/flakeModule.nix imports the same
-      # mapping, and flake-options-doc renders from it too.
-      sectionKnobs = foldl' (
-        acc: knobName:
-        let
-          entry = flakeOptionEntries.${knobName};
-          sectionAttr = renderers.groupToAttr.${entry.group} or null;
-        in
-        if sectionAttr == null then
-          acc
-        else
-          acc
-          // {
-            ${sectionAttr} = (acc.${sectionAttr} or [ ]) ++ [ knobName ];
-          }
-      ) { } (attrNames flakeOptionEntries);
+      inherit (pkgs.lib) assertMsg;
+      generated = renderers.renderTemplateSettingsBlock schema;
       templateSrc = builtins.readFile ../../templates/default/flake.nix;
-      missingSections = filter (s: !(hasInfix s templateSrc)) (attrNames sectionKnobs);
-      missingKnobs = pkgs.lib.concatLists (
-        pkgs.lib.mapAttrsToList (_section: knobs: filter (k: !(hasInfix k templateSrc)) knobs) sectionKnobs
-      );
+      beginMarker = "BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT\n";
+      endMarker = "            # END GENERATED SETTINGS EXAMPLE";
+      afterBegin =
+        let
+          parts = builtins.split beginMarker templateSrc;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 2
+        else
+          throw "templates/default/flake.nix: BEGIN GENERATED SETTINGS EXAMPLE marker not found";
+      committed =
+        let
+          parts = builtins.split endMarker afterBegin;
+        in
+        if builtins.length parts >= 3 then
+          builtins.elemAt parts 0
+        else
+          throw "templates/default/flake.nix: END GENERATED SETTINGS EXAMPLE marker not found";
     in
-    assert pkgs.lib.assertMsg (missingSections == [ ])
-      "templates/default/flake.nix settings example is missing sections: ${concatStringsSep ", " missingSections}";
-    assert pkgs.lib.assertMsg (missingKnobs == [ ])
-      "templates/default/flake.nix settings example is missing knobs: ${concatStringsSep ", " missingKnobs}";
-    pkgs.runCommand "template-settings-example" { } "touch $out";
+    assert assertMsg (committed == generated) ''
+      templates/default/flake.nix generated settings block is out of sync with lib/env-schema.nix — regenerate it with `nix run .#regen`
+        got:  ${committed}
+        want: ${generated}'';
+    pkgs.runCommand "template-settings-block" { } "touch $out";
 
   # cmd/launcher/flags.go's groupOrder must list the same groups, in the same
   # order, as lib/renderers.nix groupOrder. Go stays hand-written (issue #105:
