@@ -13,7 +13,9 @@
 #                        when set, --<alias> is a second way to set the same knob
 #   default      any     baked-in default; absent means runtime-required or empty
 #   placeholder  string  friendly value shown in harness.env.example for required
-#                        non-secret vars (e.g. REPO_SLUG=owner/repo)
+#                        non-secret vars (e.g. REPO_SLUG=owner/repo); also the
+#                        fake value the bats set_box_env fixture exports for a
+#                        boxEnv knob with no default (tests/box_env_gen.bash)
 #   required     bool    runtime-required (no sensible default; validate() aborts)
 #   secret       bool    never a flakeOption; shown as an empty placeholder in example
 #   doc          string  one-line description rendered into harness.env.example
@@ -246,12 +248,14 @@
     env = "GH_TOKEN";
     required = true;
     secret = true;
+    placeholder = "fake-token";
     doc = "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW";
     boxEnv = true;
   };
   claudeOAuthToken = {
     env = "CLAUDE_CODE_OAUTH_TOKEN";
     secret = true;
+    placeholder = "fake-oauth";
     doc = "Claude Code OAuth token (run 'claude setup-token'); set this or ANTHROPIC_API_KEY";
     boxEnv = true;
   };
@@ -270,6 +274,7 @@
   gitUserName = {
     env = "GIT_USER_NAME";
     group = "Repository & identity";
+    placeholder = "Test Bot";
     doc = "commit identity name; falls back to host git config user.name";
     flakeOption = true;
     boxEnv = true;
@@ -277,6 +282,7 @@
   gitUserEmail = {
     env = "GIT_USER_EMAIL";
     group = "Repository & identity";
+    placeholder = "bot@example.com";
     doc = "commit identity email; falls back to host git config user.email";
     flakeOption = true;
     boxEnv = true;
