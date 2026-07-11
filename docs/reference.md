@@ -92,8 +92,7 @@ settings = {
                       mergeMode  = "manual";
                       mergeGuardPaths = ".github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
                       mergePollInterval = 30; mergePollTimeout = 1800; };
-  concurrency     = { maxParallel = 3; maxJobs = 0;
-                      depsPollSecs = 30; depsWaitSecs = 7200; };
+  concurrency     = { maxParallel = 3; maxJobs = 0; };
   models          = { model = "claude-sonnet-5";
                       scoutModel  = "claude-haiku-4-5-20251001";
                       reviewModel = "claude-opus-4-8";
@@ -432,9 +431,7 @@ the authoritative list.
 | `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts after a sibling merge (`0` disables) |
 | `MERGE_POLL_INTERVAL`  | `30`    | `branches`         | seconds between CI-status polls in the merge gate      |
 | `MERGE_POLL_TIMEOUT`   | `1800`  | `branches`         | seconds to wait for CI green before abandoning the merge |
-| `DEPS_POLL_SECS`       | `30`    | `concurrency`      | seconds between dependency-wave poll iterations        |
-| `DEPS_WAIT_SECS`       | `7200`  | `concurrency`      | seconds to wait for a dependency wave before declaring deadlock |
-| `OVERLAP_GATE`         | `defer` | `concurrency`      | declared `## Touches` overlap policy: `defer` (hold a Dispatchable issue whose declared touch-set intersects an in-progress issue's, retrying on the same `DEPS_POLL_SECS`/`DEPS_WAIT_SECS` cadence until the collider completes) or `off` (disable the check — see [Declared touch-set overlap](#declared-touch-set-overlap)) |
+| `OVERLAP_GATE`         | `defer` | `concurrency`      | declared `## Touches` overlap policy: `defer` (hold a Dispatchable issue whose declared touch-set intersects an in-progress issue's, retrying once the collider completes) or `off` (disable the check — see [Declared touch-set overlap](#declared-touch-set-overlap)) |
 | `TRANSIENT_RETRY_MAX`  | `3`     | `selfHealing`      | retries for transient box exits (529/network backoff; consecutive 429 holds) |
 | `TRANSIENT_BACKOFF_SECS` | `30`  | `selfHealing`      | base linear backoff per transient retry                |
 | `HOLD_JITTER_SECS`     | `5`     | `selfHealing`      | jitter added to a 429 hold-until-reset before re-dispatch |
@@ -462,8 +459,7 @@ backends](#issue-tracker-backends)):
 
 With `OVERLAP_GATE=defer` (the default), dispatch holds a Dispatchable issue
 whose declared touch-set intersects the declared touch-set of any currently
-`agent-in-progress` issue, retrying on the same `DEPS_POLL_SECS`/
-`DEPS_WAIT_SECS` cadence used for declared blockers until the colliding issue
+`agent-in-progress` issue, retrying once the colliding issue
 completes. An issue with no `## Touches` section, or one whose touches never
 intersect an in-progress issue's, dispatches immediately — the gate only ever
 delays dispatch, it never fails an issue. Set `OVERLAP_GATE=off` to disable
