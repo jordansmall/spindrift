@@ -302,7 +302,12 @@ phase_conflict_resolve() {
     _cr_prompt="$(_subst "${PROMPTS_DIR}/conflict-resolve-prompt.md")"
     # No agents config or session to pin/resume for this pass; its exit
     # status isn't checked here either — success is read off the rebase
-    # state below instead.
+    # state below instead. Shadows _use_dev_shell to 0 for this call only
+    # (bash dynamic scoping resolves to the nearest enclosing local, same
+    # mechanism issue #515 documents for the other cross-phase sentinels):
+    # this pass ran outside the devShell before the two invocations were
+    # unified, and stays there — only the main run enters it.
+    local _use_dev_shell=0
     run_driver_in_env "$_cr_prompt" "" "" || true
     if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
       git rebase --abort 2>/dev/null || true
