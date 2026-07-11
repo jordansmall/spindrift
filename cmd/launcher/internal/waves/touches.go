@@ -73,6 +73,20 @@ func waveOverlapCheck(cfg Config, fc forge.Client) func(num string) (string, boo
 	}
 }
 
+// batchHasTouchOverlap reports whether any issue in batch declares a
+// touch-set overlapping an already InProgress issue's — used by Run to
+// decide whether a no-edges batch still needs the wave/retry dispatch path
+// rather than a single immediate wave.
+func batchHasTouchOverlap(cfg Config, fc forge.Client, batch []Issue) bool {
+	checkOverlap := waveOverlapCheck(cfg, fc)
+	for _, iss := range batch {
+		if _, overlapped := checkOverlap(iss.Number); overlapped {
+			return true
+		}
+	}
+	return false
+}
+
 // overlapsInProgress reports whether candidate num's declared touch-set
 // intersects any entry in inProgress — each entry's declared touches, plus
 // (v2) its open PR's actual changed files — returning the first colliding
