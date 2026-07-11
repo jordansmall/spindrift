@@ -8,19 +8,17 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// TestRun_Selective_NoEdges_IgnoresTouchOverlap verifies that OriginSelective
-// with no blocker edges dispatches immediately even when the batch's
-// declared touches overlap an in-progress issue's — matching the original
-// selectiveListDispatch behavior, which never consulted the overlap gate for
-// its mode decision. Run must not fall into the wave-retry engine (and its
-// deadlock timer) for an operator-specified list with no dependency edges.
-func TestRun_Selective_NoEdges_IgnoresTouchOverlap(t *testing.T) {
+// TestRun_Selective_NoEdges_TouchOverlapDefersThenExits verifies that,
+// post-#524, OriginSelective shares drainMaxJobs with the queue path: a
+// declared-touches overlap defers the candidate and Run exits with
+// ErrOpenNoneDispatchable instead of dispatching immediately — the old
+// selective-only overlap bypass existed solely to gate entry into the
+// deleted multi-wave loop and has no reason to survive it.
+func TestRun_Selective_NoEdges_TouchOverlapDefersThenExits(t *testing.T) {
 	c := baseConfig()
 	c.Label = "agent-trigger"
 	c.MaxParallel = 1
 	c.OverlapGate = "defer"
-	c.DepsPollSecs = 1
-	c.DepsWaitSecs = 1
 
 	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{
@@ -44,11 +42,11 @@ func TestRun_Selective_NoEdges_IgnoresTouchOverlap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	if err := Run(c, fc, fc, dir, f, s, plan); err != nil {
-		t.Fatalf("Run: %v", err)
+	if err := Run(c, fc, fc, dir, f, s, plan); !errors.Is(err, ErrOpenNoneDispatchable) {
+		t.Fatalf("Run: got %v, want ErrOpenNoneDispatchable", err)
 	}
-	if len(fr.RunCalls) != 1 {
-		t.Fatalf("selective dispatch with no edges must ignore touch overlap and dispatch immediately; got %d run calls", len(fr.RunCalls))
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("issue 10 must not be dispatched while its touches overlap in-progress #20; got %d run calls", len(fr.RunCalls))
 	}
 }
 

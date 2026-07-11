@@ -4,8 +4,7 @@ import "testing"
 
 // TestNewPlan_Discovered_NoEdges_SelectsDrainMode verifies a label-discovered
 // batch always selects ModeDrain, even with MaxJobs unset (0) — MAX_JOBS=0 is
-// the uncapped drain case (ADR 0019); ModeWaves is no longer reachable for
-// OriginDiscovered/OriginClaimed.
+// the uncapped drain case (ADR 0019).
 func TestNewPlan_Discovered_NoEdges_SelectsDrainMode(t *testing.T) {
 	cfg := Config{}
 	in := Input{
@@ -44,10 +43,11 @@ func TestNewPlan_Discovered_Edges_SelectsDrainMode(t *testing.T) {
 	}
 }
 
-// TestNewPlan_Selective_NoEdges_DefaultsToWavesMode verifies OriginSelective
-// still selects ModeWaves when MaxJobs is unset — selective-list dispatch
-// keeps the old multi-wave loop until #524 reroutes it (ADR 0019 scope note).
-func TestNewPlan_Selective_NoEdges_DefaultsToWavesMode(t *testing.T) {
+// TestNewPlan_Selective_NoEdges_SelectsDrainMode verifies OriginSelective
+// selects ModeDrain regardless of MaxJobs — #524 reroutes selective-list
+// dispatch off the old multi-wave loop onto the same at-most-one-wave drain
+// shape as the queue path (ADR 0019).
+func TestNewPlan_Selective_NoEdges_SelectsDrainMode(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginSelective,
@@ -57,8 +57,8 @@ func TestNewPlan_Selective_NoEdges_DefaultsToWavesMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	if plan.Mode != ModeWaves {
-		t.Errorf("Mode = %v, want ModeWaves", plan.Mode)
+	if plan.Mode != ModeDrain {
+		t.Errorf("Mode = %v, want ModeDrain", plan.Mode)
 	}
 }
 
