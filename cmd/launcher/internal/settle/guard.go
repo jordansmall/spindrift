@@ -25,7 +25,7 @@ func (s *Settle) mergeGuardHit(pr string) ([]string, error) {
 	if strings.TrimSpace(s.cfg.MergeGuardPaths) == "" {
 		return nil, nil
 	}
-	files, err := s.fc.ListPRFiles(pr)
+	files, err := s.pr.ListPRFiles(pr)
 	if err != nil {
 		return nil, err
 	}

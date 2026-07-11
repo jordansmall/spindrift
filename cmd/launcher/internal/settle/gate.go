@@ -20,8 +20,13 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 		return
 	}
 	if !result.OutcomeFound {
-		branch := s.fc.AgentBranch(num)
-		pr, prFound, prErr := s.fc.OpenPRForBranch(branch)
+		var pr forge.PR
+		var prFound bool
+		var prErr error
+		branch := s.cf.AgentBranch(num)
+		if s.pr != nil {
+			pr, prFound, prErr = s.pr.OpenPRForBranch(branch)
+		}
 		if prErr != nil || !prFound {
 			clsNote := ""
 			if result.ClassifyErr != nil {
@@ -52,9 +57,9 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 		ok, merged := s.selfHeal(d, num, o.PR)
 		if ok {
 			// verifyMerged reads PR state, which a push-only Code Forge does
-			// not have — landPushOnly's own fc.Merge success already
+			// not have — landPushOnly's own cf.Merge success already
 			// confirms the push landed, so there is nothing left to verify.
-			if merged && !s.fc.PushOnly() {
+			if merged && s.pr != nil {
 				s.verifyMerged(num, o.PR)
 			}
 		} else {
@@ -64,7 +69,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 	case "merged":
 		// verifyMerged reads PR state, which a push-only Code Forge does not
 		// have (mirrors the "ready" case's same guard above).
-		if !s.fc.PushOnly() {
+		if s.pr != nil {
 			s.verifyMerged(num, o.PR)
 		} else {
 			fmt.Printf("    #%s  pr=%s  status=%s\n", num, o.PR, o.Status)
@@ -79,7 +84,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 // transitionState is a best-effort dispatch-state transition that logs but
 // does not propagate errors, matching the launcher's original behaviour.
 func (s *Settle) transitionState(num string, from, to forge.DispatchState) {
-	if err := s.fc.TransitionState(num, from, to); err != nil {
+	if err := s.it.TransitionState(num, from, to); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %d\n", num, to)
 	}
 }
@@ -107,7 +112,7 @@ func (s *Settle) gateToGreen(num, pr string) (bool, bool) {
 	elapsed := 0
 
 	for {
-		state, stateErr := s.fc.CheckState(pr)
+		state, stateErr := s.pr.CheckState(pr)
 		if stateErr != nil {
 			fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, stateErr)
 			return false, false
@@ -120,7 +125,7 @@ func (s *Settle) gateToGreen(num, pr string) (bool, bool) {
 			time.Sleep(time.Duration(pollIv) * time.Second)
 			// Re-poll to confirm the snapshot is stable. A partial check
 			// registration can briefly show SUCCESS before all jobs appear.
-			confirm, confirmErr := s.fc.CheckState(pr)
+			confirm, confirmErr := s.pr.CheckState(pr)
 			if confirmErr != nil {
 				fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, confirmErr)
 				return false, false

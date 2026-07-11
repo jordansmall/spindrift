@@ -9,5 +9,6 @@ import (
 // TestNew_ImplementsSettler asserts that the concrete type New returns
 // satisfies Settler, the seam callers depend on so tests can inject a Fake.
 func TestNew_ImplementsSettler(t *testing.T) {
-	var _ Settler = New(Config{}, forge.NewFake())
+	fc := forge.NewFake()
+	var _ Settler = New(Config{}, fc, fc)
 }

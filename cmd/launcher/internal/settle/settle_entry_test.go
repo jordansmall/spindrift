@@ -26,7 +26,7 @@ func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 		Outcome:      outcome.Outcome{Issue: issNum, PR: prURL, Status: "blocked", Note: "tests failing"},
 	}
 
-	s := New(baseConfig(), fc)
+	s := New(baseConfig(), fc, fc)
 	s.Settle(d, issNum, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -55,7 +55,7 @@ func TestSettle_UsageMissing_NoCrash(t *testing.T) {
 		Outcome:      outcome.Outcome{Issue: issNum, PR: prURL, Status: "blocked", Note: "no result"},
 	}
 
-	s := New(baseConfig(), fc)
+	s := New(baseConfig(), fc, fc)
 	s.Settle(d, issNum, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -85,7 +85,7 @@ func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 	}
 
 	c := baseConfig()
-	s := New(c, fc)
+	s := New(c, fc, fc)
 	s.Settle(d, issNum, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -103,7 +103,7 @@ func TestSettle_MalformedOutcome_NoPanic(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	result := dispatch.Result{ParseErr: errFake}
 
-	s := New(baseConfig(), fc)
+	s := New(baseConfig(), fc, fc)
 	s.Settle(dispatch.NewFake(), "9", result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -123,7 +123,6 @@ func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 	const branch = "agent/issue-1"
 
 	fc := forge.NewFake(testDispatchLabels)
-	fc.IsPushOnly = true
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.PRStateErr = errFake
 
@@ -134,7 +133,7 @@ func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 		Outcome:      outcome.Outcome{Issue: "1", PR: branch, Status: "merged", Note: "ok"},
 	}
 
-	s := New(baseConfig(), fc)
+	s := New(baseConfig(), fc, fc.AsPushOnly())
 	s.Settle(d, "1", result)
 
 	iss, _ := fc.Issue("1")
@@ -155,7 +154,7 @@ func TestSettle_NoOutcome_AdoptsDiscoveredPR(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	c := baseConfig()
-	s := New(c, fc)
+	s := New(c, fc, fc)
 	s.Settle(dispatch.NewFake(), "3", dispatch.Result{Success: true})
 
 	if fc.Merged != testPR {
@@ -170,7 +169,7 @@ func TestSettle_NoOutcome_NoPRFound(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "4", Labels: []string{"agent-in-progress"}})
 
 	c := baseConfig()
-	s := New(c, fc)
+	s := New(c, fc, fc)
 	s.Settle(dispatch.NewFake(), "4", dispatch.Result{Success: true})
 
 	if len(fc.TransitionStateCalls) != 0 {
@@ -191,7 +190,7 @@ func TestSettle_NoOutcome_DraftPRBlocked(t *testing.T) {
 	fc.SetPR(branch, forge.PR{URL: testPR, IsDraft: true})
 
 	c := baseConfig()
-	s := New(c, fc)
+	s := New(c, fc, fc)
 	s.Settle(dispatch.NewFake(), "5", dispatch.Result{Success: true})
 
 	if fc.Merged != "" {

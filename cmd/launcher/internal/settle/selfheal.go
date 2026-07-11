@@ -18,7 +18,7 @@ func (s *Settle) landPushOnly(num, branch string) (ok bool, merged bool) {
 	s.transitionState(num, forge.InProgress, forge.Complete)
 	if err := s.applyMergeMode(num, branch, nil); err != nil {
 		fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, branch, err)
-		s.fc.Comment(num, fmt.Sprintf("merge blocked after push: %v", err))
+		s.it.Comment(num, fmt.Sprintf("merge blocked after push: %v", err))
 		return true, false
 	}
 	return true, s.cfg.MergeMode == "immediate"
@@ -37,7 +37,7 @@ func (s *Settle) landPushOnly(num, branch string) (ok bool, merged bool) {
 // agent-assisted conflict resolution -- both subject to dispatch's own
 // in-session transient retry (issue #441).
 func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) (ok bool, merged bool) {
-	if s.fc.PushOnly() {
+	if s.pr == nil {
 		return s.landPushOnly(num, pr)
 	}
 	for attempt := 0; ; attempt++ {
@@ -46,17 +46,17 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) (ok bool, merge
 			matched, guardErr := s.mergeGuardHit(pr)
 			if guardErr != nil {
 				fmt.Printf("    #%s  pr=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
-				s.fc.Comment(num, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
+				s.it.Comment(num, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
 				return true, false
 			}
 			if len(matched) > 0 {
 				fmt.Printf("    #%s  pr=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
-				s.fc.Comment(num, mergeGuardComment(matched))
+				s.it.Comment(num, mergeGuardComment(matched))
 				return true, false
 			}
 			if err := s.applyMergeMode(num, pr, d); err != nil {
 				fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, pr, err)
-				s.fc.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
+				s.it.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
 				return true, false
 			}
 			return true, s.cfg.MergeMode == "immediate"
@@ -72,7 +72,7 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) (ok bool, merge
 		fmt.Printf("    #%s  pr=%s  fix-pass=%d/%d\n", num, pr, attempt+1, s.cfg.MaxFixAttempts)
 		// Best-effort: a failure to fetch the CI failure detail must never
 		// block the fix pass — fall back to an empty summary.
-		detail, detailErr := s.fc.FailureDetail(pr)
+		detail, detailErr := s.pr.FailureDetail(pr)
 		if detailErr != nil {
 			fmt.Printf("    #%s  pr=%s  status=failure-detail-unavailable  !! %v\n", num, pr, detailErr)
 			detail = ""

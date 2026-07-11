@@ -21,7 +21,7 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	// CI is green but merge fails.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErr = errors.New("required review missing")
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	ok, merged := s.selfHeal(dispatch.NewFake(), "1", testPR)
 	if !ok {
@@ -51,7 +51,7 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(testPR, []string{"src/main.go", ".github/workflows/ci.yml"})
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	ok, merged := s.selfHeal(dispatch.NewFake(), "1", testPR)
 	if !ok {
@@ -90,7 +90,7 @@ func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	ok, merged := s.selfHeal(dispatch.NewFake(), "1", testPR)
 	if !ok || merged {
@@ -114,7 +114,7 @@ func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(testPR, []string{"src/main.go"})
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	ok, merged := s.selfHeal(dispatch.NewFake(), "1", testPR)
 	if !ok || !merged {
@@ -140,7 +140,7 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	ok, merged := s.selfHeal(dispatch.NewFake(), "1", testPR)
 	if !ok {
@@ -183,10 +183,9 @@ func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 			c := baseConfig()
 			c.MergeMode = tc.mergeMode
 			fc := forge.NewFake(testDispatchLabels)
-			fc.IsPushOnly = true
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 			branch := "agent/issue-1"
-			s := New(c, fc)
+			s := New(c, fc, fc.AsPushOnly())
 
 			ok, merged := s.selfHeal(dispatch.NewFake(), "1", branch)
 
@@ -218,11 +217,10 @@ func TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	fc := forge.NewFake(testDispatchLabels)
-	fc.IsPushOnly = true
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErr = errors.New("remote rejected: non-fast-forward")
 	branch := "agent/issue-1"
-	s := New(c, fc)
+	s := New(c, fc, fc.AsPushOnly())
 
 	ok, merged := s.selfHeal(dispatch.NewFake(), "1", branch)
 

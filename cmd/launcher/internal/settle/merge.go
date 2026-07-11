@@ -21,9 +21,9 @@ func (s *Settle) applyMergeMode(num, pr string, d dispatch.Dispatcher) error {
 	case "immediate":
 		return s.mergeImmediate(num, pr, d)
 	case "auto":
-		if err := s.fc.EnqueueAutoMerge(pr); err != nil {
+		if err := s.pr.EnqueueAutoMerge(pr); err != nil {
 			fmt.Printf("    #%s  pr=%s  status=auto-merge-enqueue-failed  !! %v\n", num, pr, err)
-			s.fc.Comment(num, fmt.Sprintf("auto-merge enqueue failed: %v — PR is green; approve and merge manually", err))
+			s.it.Comment(num, fmt.Sprintf("auto-merge enqueue failed: %v — PR is green; approve and merge manually", err))
 			return nil
 		}
 		fmt.Printf("    #%s  pr=%s  status=auto-merge-enqueued\n", num, pr)
@@ -52,7 +52,7 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 	pushRetries := 0
 	skipRebase := false
 	for {
-		err := s.fc.Merge(pr)
+		err := s.cf.Merge(pr)
 		if err == nil {
 			return nil
 		}
@@ -71,12 +71,12 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 		rebaseAttempts++
 		fmt.Printf("    #%s  pr=%s  status=rebase-retry  attempt=%d/%d\n",
 			num, pr, rebaseAttempts, s.cfg.MaxRebaseAttempts)
-		rbErr := s.fc.Rebase(pr)
+		rbErr := s.cf.Rebase(pr)
 		for rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && pushRetries < s.cfg.MaxRebaseAttempts {
 			pushRetries++
 			fmt.Printf("    #%s  pr=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
 				num, pr, pushRetries, s.cfg.MaxRebaseAttempts, rbErr)
-			rbErr = s.fc.Rebase(pr)
+			rbErr = s.cf.Rebase(pr)
 		}
 		if rbErr != nil {
 			if errors.Is(rbErr, forge.ErrTransientPushFailure) {

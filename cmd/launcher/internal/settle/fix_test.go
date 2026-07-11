@@ -32,7 +32,7 @@ func TestSelfHeal_ForwardsFailureDetailToFix(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
 	fc.SetFailureDetail(testPR, "lint: FAILURE\n2 errors")
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	d := dispatch.NewFake()
 	_, merged := s.selfHeal(d, "1", testPR)
@@ -55,7 +55,7 @@ func TestSelfHeal_EmptyFailureDetailFallsBackWithNoError(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
 	fc.FailureDetailErr = errors.New("gh api graphql: 403 Forbidden")
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	d := dispatch.NewFake()
 	_, merged := s.selfHeal(d, "1", testPR)
@@ -73,7 +73,7 @@ func TestSelfHeal_SuccessFirstTry(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	d := dispatch.NewFake()
 	_, merged := s.selfHeal(d, "1", testPR)
@@ -97,7 +97,7 @@ func TestSelfHeal_GenuineRedMaxZero(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	d := dispatch.NewFake()
 	_, merged := s.selfHeal(d, "1", testPR)
@@ -122,7 +122,7 @@ func TestSelfHeal_GenuineRedFixSucceeds(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	// First poll: FAILURE; after fix box: SUCCESS (plus confirmation poll)
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	d := dispatch.NewFake()
 	_, merged := s.selfHeal(d, "1", testPR)
@@ -151,7 +151,7 @@ func TestSelfHeal_ExhaustsAllPasses(t *testing.T) {
 		forge.StateFailure,
 		forge.StateFailure,
 	})
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	d := dispatch.NewFake()
 	_, merged := s.selfHeal(d, "1", testPR)
@@ -183,7 +183,7 @@ func TestSelfHeal_ErrorStateTriggersFixPass(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	// ERROR is genuine red just like FAILURE; fix pass should be triggered.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateError, forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	d := dispatch.NewFake()
 	_, merged := s.selfHeal(d, "1", testPR)
@@ -202,7 +202,7 @@ func TestSelfHeal_PendingTimeoutNoFix(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending})
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	d := dispatch.NewFake()
 	_, merged := s.selfHeal(d, "1", testPR)
