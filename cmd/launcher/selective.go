@@ -18,9 +18,9 @@ import (
 // trigger cascading eviction with a notice. Unlabeled issues print a warning and
 // require a single batched confirmation before any Box is launched (skipped when
 // forceYes=true or no unlabeled issues exist).
-func selectiveListDispatch(c config, fc forge.Client, pwd string, f *dispatch.Factory, s settle.Settler, nums []string, forceYes bool, stdin io.Reader, stdout io.Writer) error {
+func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, nums []string, forceYes bool, stdin io.Reader, stdout io.Writer) error {
 	// Fetch each issue by number.
-	issues, unlabeled, err := fetchSelectiveIssues(c, fc, nums)
+	issues, unlabeled, err := fetchSelectiveIssues(c, it, nums)
 	if err != nil {
 		return err
 	}
@@ -36,12 +36,12 @@ func selectiveListDispatch(c config, fc forge.Client, pwd string, f *dispatch.Fa
 	}
 
 	// Build blocker graph and evict dependents with unmet external blockers.
-	edges, err := waves.BuildEdges(fc, toWaveIssues(issues))
+	edges, err := waves.BuildEdges(it, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
 
-	issues, notices := evictUnmetBlockers(c, fc, issues, edges)
+	issues, notices := evictUnmetBlockers(c, it, cf, issues, edges)
 	for _, n := range notices {
 		fmt.Fprintln(stdout, n)
 	}
@@ -55,16 +55,16 @@ func selectiveListDispatch(c config, fc forge.Client, pwd string, f *dispatch.Fa
 	if err != nil {
 		return err
 	}
-	return waves.Run(selectiveWavesConfig(c), fc, pwd, f, s, plan)
+	return waves.Run(selectiveWavesConfig(c), it, cf, pwd, f, s, plan)
 }
 
 // fetchSelectiveIssues fetches each issue by number and returns the full list
 // plus the numbers of issues missing the ready-for-agent label.
-func fetchSelectiveIssues(c config, fc forge.Client, nums []string) ([]issue, []string, error) {
+func fetchSelectiveIssues(c config, it forge.IssueTracker, nums []string) ([]issue, []string, error) {
 	var issues []issue
 	var unlabeled []string
 	for _, num := range nums {
-		fi, err := fc.Issue(num)
+		fi, err := it.Issue(num)
 		if err != nil {
 			return nil, nil, fmt.Errorf("issue %s: %w", num, err)
 		}
@@ -97,7 +97,7 @@ func confirmUnlabeled(n int, forceYes bool, stdin io.Reader, stdout io.Writer) b
 // evictUnmetBlockers removes issues whose unmerged blockers are absent from the
 // list. Eviction cascades: if A is evicted, anything blocked by A is also
 // evicted. Returns the retained issues and a notice string per evicted issue.
-func evictUnmetBlockers(c config, fc forge.Client, issues []issue, edges map[string][]string) ([]issue, []string) {
+func evictUnmetBlockers(c config, it forge.IssueTracker, cf forge.CodeForge, issues []issue, edges map[string][]string) ([]issue, []string) {
 	// willRun tracks which issue numbers are still candidates.
 	willRun := make(map[string]bool, len(issues))
 	for _, iss := range issues {
@@ -111,7 +111,7 @@ func evictUnmetBlockers(c config, fc forge.Client, issues []issue, edges map[str
 		if willRun[blocker] {
 			return true
 		}
-		return waves.BlockerReady(fc, blocker)
+		return waves.BlockerReady(it, cf, blocker)
 	}
 
 	// Iterate the issues slice (not the map) to produce stable output order.
@@ -133,7 +133,7 @@ func evictUnmetBlockers(c config, fc forge.Client, issues []issue, edges map[str
 		}
 		for _, num := range toEvict {
 			notices = append(notices, fmt.Sprintf("⚠ #%s blocked by #%s (not in list, unmerged); skipping",
-				num, firstUnmet(c, fc, willRun, edges[num])))
+				num, firstUnmet(c, it, cf, willRun, edges[num])))
 			delete(willRun, num)
 		}
 	}
@@ -149,9 +149,9 @@ func evictUnmetBlockers(c config, fc forge.Client, issues []issue, edges map[str
 
 // firstUnmet returns the first entry in deps that is neither in willRun nor
 // already satisfied (closed/complete). Used only for notice formatting.
-func firstUnmet(c config, fc forge.Client, willRun map[string]bool, deps []string) string {
+func firstUnmet(c config, it forge.IssueTracker, cf forge.CodeForge, willRun map[string]bool, deps []string) string {
 	for _, dep := range deps {
-		if !willRun[dep] && !waves.BlockerReady(fc, dep) {
+		if !willRun[dep] && !waves.BlockerReady(it, cf, dep) {
 			return dep
 		}
 	}

@@ -12,18 +12,20 @@ import (
 // launchContext bundles the wiring shared by every top-level dispatch entry
 // point (run, the selective `dispatch <nums>` path, recover): the loaded and
 // validated config, the resolved working directory, the ready runner, the
-// forge client, the dispatch factory (with its driver cache), settle, and
-// the driver-cache cleanup hook. bootstrap is the only place that constructs
-// one; tests build it directly with fakes (and a spy cleanup) to exercise
-// subcommand logic without going through bootstrap.
+// independently-wired IssueTracker and CodeForge (ADR 0013), the dispatch
+// factory (with its driver cache), settle, and the driver-cache cleanup hook.
+// bootstrap is the only place that constructs one; tests build it directly
+// with fakes (and a spy cleanup) to exercise subcommand logic without going
+// through bootstrap.
 type launchContext struct {
-	config  config
-	pwd     string
-	runner  runner.Runner
-	forge   forge.Client
-	factory *dispatch.Factory
-	settle  settle.Settler
-	cleanup func()
+	config       config
+	pwd          string
+	runner       runner.Runner
+	issueTracker forge.IssueTracker
+	codeForge    forge.CodeForge
+	factory      *dispatch.Factory
+	settle       settle.Settler
+	cleanup      func()
 }
 
 // bootstrap wires the prologue shared by run, the selective `dispatch <nums>`
@@ -60,17 +62,19 @@ func bootstrap(ensureReady bool) (*launchContext, error) {
 		return nil, err
 	}
 
-	fc := newForgeClient(c)
+	it := newIssueTracker(c)
+	cf := newCodeForge(c)
 	f := newDispatchFactory(c, pwd, r)
-	s := newSettle(c, fc)
+	s := newSettle(c, it, cf)
 
 	return &launchContext{
-		config:  c,
-		pwd:     pwd,
-		runner:  r,
-		forge:   fc,
-		factory: f,
-		settle:  s,
-		cleanup: f.Cleanup,
+		config:       c,
+		pwd:          pwd,
+		runner:       r,
+		issueTracker: it,
+		codeForge:    cf,
+		factory:      f,
+		settle:       s,
+		cleanup:      f.Cleanup,
 	}, nil
 }

@@ -356,8 +356,8 @@ func TestValidateCodeForge_AcceptsKnown(t *testing.T) {
 }
 
 // TestNewCodeForge_Git_ReturnsPushOnlyAdapter verifies that CODE_FORGE=git
-// wires newCodeForge to the push-only git adapter (no PR/CI/auto-merge
-// concept) instead of the github gh-exec adapter.
+// wires newCodeForge to the push-only git adapter — one with no PRForge
+// surface at all — instead of the github gh-exec adapter.
 func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
@@ -365,11 +365,21 @@ func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
 
 	cf := newCodeForge(c)
 
-	if ok, err := cf.CanAutoMerge(); err != nil || ok {
-		t.Errorf("CanAutoMerge = (%v, %v), want (false, nil) for the git Code Forge", ok, err)
+	if _, ok := cf.(forge.PRForge); ok {
+		t.Error("newCodeForge(CODE_FORGE=git) satisfies PRForge, want the push-only git adapter to implement CodeForge only")
 	}
-	if _, found, err := cf.PRForBranch("agent/issue-1"); err != nil || found {
-		t.Errorf("PRForBranch = (_, %v, %v), want (_, false, nil) for the git Code Forge", found, err)
+}
+
+// TestNewCodeForge_Github_ImplementsPRForge verifies that CODE_FORGE=github
+// (the default) wires newCodeForge to an adapter satisfying PRForge.
+func TestNewCodeForge_Github_ImplementsPRForge(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "github"
+
+	cf := newCodeForge(c)
+
+	if _, ok := cf.(forge.PRForge); !ok {
+		t.Error("newCodeForge(CODE_FORGE=github) does not satisfy PRForge")
 	}
 }
 

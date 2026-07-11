@@ -16,12 +16,14 @@ func TestRun_EmptyQueue_ReturnsErrQueueEmpty(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
 	dir := tempLogDir(t)
+	fc := forge.NewFake()
 	lc := &launchContext{
-		config:  c,
-		pwd:     dir,
-		forge:   forge.NewFake(),
-		factory: testFactory(t, dir, nil),
-		settle:  settle.NewFake(),
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       settle.NewFake(),
 	}
 
 	err := run(lc)
@@ -38,12 +40,14 @@ func TestRunExitCode_EmptyQueue_ReturnsExitCode2(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
 	dir := tempLogDir(t)
+	fc := forge.NewFake()
 	lc := &launchContext{
-		config:  c,
-		pwd:     dir,
-		forge:   forge.NewFake(),
-		factory: testFactory(t, dir, nil),
-		settle:  settle.NewFake(),
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       settle.NewFake(),
 	}
 
 	if got := runExitCode(lc); got != 2 {

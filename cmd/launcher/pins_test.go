@@ -34,7 +34,7 @@ func TestNoGhExecOutsideForge(t *testing.T) {
 			return err
 		}
 		if strings.Contains(string(data), `exec.Command("gh"`) {
-			t.Errorf("%s: contains exec.Command(\"gh\") — all gh calls must go through forge.Client", path)
+			t.Errorf("%s: contains exec.Command(\"gh\") — all gh calls must go through the forge seam (IssueTracker/CodeForge)", path)
 		}
 		return nil
 	})
@@ -293,7 +293,7 @@ func TestNoPRIssueStateLiteralOutsideForge(t *testing.T) {
 // TestNoBranchPrefixConcatOutsideForge walks all non-test Go source files in
 // cmd/launcher, excluding internal/forge, and fails if any concatenate
 // branchPrefix directly — the agent branch name must be computed by
-// forge.Client's AgentBranch(num), its single owner (issue #444).
+// CodeForge's AgentBranch(num), its single owner (issue #444).
 func TestNoBranchPrefixConcatOutsideForge(t *testing.T) {
 	forbidden := []string{"branchPrefix + ", "BranchPrefix + "}
 	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
@@ -319,7 +319,7 @@ func TestNoBranchPrefixConcatOutsideForge(t *testing.T) {
 		content := string(data)
 		for _, needle := range forbidden {
 			if strings.Contains(content, needle) {
-				t.Errorf("%s: contains %q — the agent branch name must be computed by forge.Client.AgentBranch(num), not concatenated here", path, needle)
+				t.Errorf("%s: contains %q — the agent branch name must be computed by CodeForge.AgentBranch(num), not concatenated here", path, needle)
 			}
 		}
 		return nil
