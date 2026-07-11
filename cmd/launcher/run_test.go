@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 )
 
@@ -120,5 +121,98 @@ func TestSelectiveDispatchExitCode_ZeroSelected_ReturnsExitCode3(t *testing.T) {
 
 	if got := selectiveDispatchExitCode(lc, []string{"10"}, true); got != 3 {
 		t.Errorf("selectiveDispatchExitCode(lc, [10], true) = %d, want 3 (ErrOpenNoneDispatchable)", got)
+	}
+}
+
+// TestRunExitCode_ContinuousDispatch_EmptyQueue_ReturnsExitCode2 verifies
+// that CONTINUOUS_DISPATCH mode preserves exit-2 semantics unchanged
+// (#527 AC): an empty queue exits the same way whether or not continuous
+// mode is enabled.
+func TestRunExitCode_ContinuousDispatch_EmptyQueue_ReturnsExitCode2(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	dir := tempLogDir(t)
+	fc := forge.NewFake()
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       settle.NewFake(),
+	}
+
+	if got := runExitCode(lc); got != 2 {
+		t.Errorf("runExitCode(lc) = %d, want 2 (errQueueEmpty)", got)
+	}
+}
+
+// TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0 verifies
+// that with CONTINUOUS_DISPATCH enabled and the freshness probe reporting
+// not-applicable (RUNTIME=bwrap, which never blocks a refill), a
+// dispatchable issue launches and the run exits 0 — continuous mode wired
+// end-to-end through run/runExitCode.
+func TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	c.runtime = "bwrap"
+	dir := tempLogDir(t)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+
+	fr := runner.NewFake()
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, fr),
+		settle:       settle.NewFake(),
+	}
+
+	if got := runExitCode(lc); got != 0 {
+		t.Errorf("runExitCode(lc) = %d, want 0", got)
+	}
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
+		t.Errorf("RunCalls: got %v, want exactly issue 1", fr.RunCalls)
+	}
+}
+
+// TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4 verifies
+// the new exit code (#527 AC): with the freshness probe reporting
+// rebuild-needed (here, forced by a base-branch fetch that fails — pwd has
+// no git remote configured), no Box launches and the run exits 4.
+func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	c.runtime = "podman"
+	c.baseBranch = "main"
+	dir := tempLogDir(t)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+
+	fr := runner.NewFake()
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, fr),
+		settle:       settle.NewFake(),
+	}
+
+	if got := runExitCode(lc); got != 4 {
+		t.Errorf("runExitCode(lc) = %d, want 4 (waves.ErrImageStale)", got)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0 (no Box launches once the probe is stale)", len(fr.RunCalls))
 	}
 }
