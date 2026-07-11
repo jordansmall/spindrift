@@ -21,6 +21,18 @@ setup_entrypoint_env() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work"
 }
 
+# Shared setup for the split run-*.bats suites (issue #519): every concern
+# file needs its own setup() hook per bats semantics, so the body run.bats
+# used to run once now lives here instead.
+setup_run_env() {
+  setup_fakes
+  set_run_env
+  cd "$BATS_TEST_TMPDIR" || exit
+  export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
+  # Fail fast on future predicate mismatches rather than blocking CI for 2h.
+  export DEPS_WAIT_SECS=10
+}
+
 setup_fakes() {
   : "${FAKES_DIR:?FAKES_DIR must be set (dir holding fake runtime/gh/claude)}"
   FAKE_BIN="$BATS_TEST_TMPDIR/bin"
