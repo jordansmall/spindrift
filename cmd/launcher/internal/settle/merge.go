@@ -21,6 +21,9 @@ func (s *Settle) applyMergeMode(num, pr string, d dispatch.Dispatcher) error {
 	case "immediate":
 		return s.mergeImmediate(num, pr, d)
 	case "auto":
+		if s.pr == nil {
+			return fmt.Errorf("MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)")
+		}
 		if err := s.pr.EnqueueAutoMerge(pr); err != nil {
 			fmt.Printf("    #%s  pr=%s  status=auto-merge-enqueue-failed  !! %v\n", num, pr, err)
 			s.it.Comment(num, fmt.Sprintf("auto-merge enqueue failed: %v — PR is green; approve and merge manually", err))
