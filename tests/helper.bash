@@ -6,6 +6,21 @@
 # in-container script), PROMPTS_DIR (the baked prompt templates), and IMAGE_PATH
 # (the image archive store path substituted into the commands).
 
+# Shared setup for the split entrypoint-*.bats suites (issue #518): every
+# concern file needs its own setup() hook per bats semantics, so the body
+# entrypoint.bats used to run once now lives here instead.
+setup_entrypoint_env() {
+  setup_fakes
+  setup_bare_repo
+  set_box_env
+  # Pinned away from the schema default (claude-sonnet-5) so the MODEL-flag
+  # assertions below stay stable regardless of what the schema defaults to.
+  export MODEL="claude-opus-4-8"
+  export ISSUE_NUMBER="7"
+  export ISSUE_TITLE="Do the thing"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work"
+}
+
 setup_fakes() {
   : "${FAKES_DIR:?FAKES_DIR must be set (dir holding fake runtime/gh/claude)}"
   FAKE_BIN="$BATS_TEST_TMPDIR/bin"
@@ -84,7 +99,7 @@ set_run_env() {
 }
 
 # Every lib/env-schema.nix knob with boxEnv = true, at its schema default, so
-# entrypoint.bats exercises the same defaults the nix preamble bakes into the
+# the entrypoint-*.bats suites exercise the same defaults the nix preamble bakes into the
 # image at build time instead of hand-copied literals that can drift from the
 # schema. The nix/checks/schema-drift.nix box-env-fixture-coverage check
 # fails the build if a new boxEnv knob is added here without an export.
