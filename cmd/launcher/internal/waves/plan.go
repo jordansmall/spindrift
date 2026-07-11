@@ -1,11 +1,11 @@
 // Package waves owns the launcher's dependency-wave engine: the blocker
-// graph (edge building, cycle detection, readiness), the wave/drain
-// dispatch engine (concurrent wave fan-out, MAX_JOBS drain loop, deadlock
-// timer), and the declared-## Touches overlap gate. Plan is pure — given a
-// batch of issues and their blocker edges, it decides drain vs. wave mode
-// (or reports a cycle) with no side effects. Run executes a Plan: the
-// claim/dispatch/settle loop, MAX_PARALLEL/MAX_JOBS concurrency, the
-// deadlock timer, and the Touches overlap check.
+// graph (edge building, cycle detection, readiness), the drain dispatch
+// engine (concurrent wave fan-out, MAX_JOBS cap), and the declared-##
+// Touches overlap gate. Plan is pure — given a batch of issues and their
+// blocker edges, it validates them (or reports a cycle) with no side
+// effects. Run executes a Plan: the claim/dispatch/settle loop,
+// MAX_PARALLEL/MAX_JOBS concurrency, and the Touches overlap check, all in
+// a single selection-pass-then-exit wave (ADR 0019).
 package waves
 
 import (
@@ -36,17 +36,16 @@ const (
 	OriginSelective
 )
 
-// Mode is the dispatch strategy a Plan selects.
+// Mode is the dispatch strategy a Plan selects. ModeDrain is the only value
+// — every Origin selects it (ADR 0019 / #524) — kept as a named type rather
+// than inlined so Plan continues to document the decision NewPlan makes and
+// regression tests can pin it down.
 type Mode int
 
 const (
-	// ModeWaves dispatches issues in dependency order: each wave fires the
-	// currently-unblocked set, rechecking blocked issues (and the Touches
-	// overlap gate) until the batch drains or the deadlock timer fires.
-	ModeWaves Mode = iota
 	// ModeDrain selects up to Config.MaxJobs currently-unblocked issues and
 	// dispatches exactly that set once.
-	ModeDrain
+	ModeDrain Mode = iota
 )
 
 // Issue is the minimal issue identity the wave engine dispatches.
@@ -64,8 +63,9 @@ type Input struct {
 	Edges  map[string][]string
 }
 
-// Plan is the pure result of deciding how a batch of issues should be
-// dispatched: which Mode, in what order, and against which blocker edges.
+// Plan is the pure result of validating a batch of issues for dispatch:
+// which Mode (always ModeDrain), in what order, and against which blocker
+// edges.
 type Plan struct {
 	Mode   Mode
 	Origin Origin
@@ -86,28 +86,21 @@ type Config struct {
 	FailedLabel     string
 }
 
-// NewPlan decides how in.Issues should be dispatched. OriginDiscovered and
-// OriginClaimed (the queue path) always select ModeDrain per ADR 0019:
+// NewPlan decides how in.Issues should be dispatched. Every origin —
+// OriginDiscovered, OriginClaimed, and (per ADR 0019 / #524) OriginSelective
+// — always selects ModeDrain: one selection pass gates each issue, the
+// selected set dispatches as a single wave, and the invocation exits.
 // MAX_JOBS=0 means an uncapped drain batch, not the old in-process wave
-// loop. OriginSelective keeps the legacy cfg.MaxJobs-gated choice — the
-// hand-picked list still uses ModeWaves until #524 reroutes it. A dependency
-// cycle in in.Edges is reported as an error rather than a Plan — this is the
-// single place that decision is made; run, selective dispatch, and preview
-// all consume its result instead of repeating it.
+// loop. A dependency cycle in in.Edges is reported as an error rather than a
+// Plan — this is the single place that decision is made; run, selective
+// dispatch, and preview all consume its result instead of repeating it.
 func NewPlan(cfg Config, in Input) (Plan, error) {
 	if len(in.Edges) > 0 {
 		if node, cycle := detectCycle(in.Edges, issueNums(in.Issues)); cycle {
 			return Plan{}, fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
 		}
 	}
-	mode := ModeDrain
-	if in.Origin == OriginSelective {
-		mode = ModeWaves
-		if cfg.MaxJobs > 0 {
-			mode = ModeDrain
-		}
-	}
-	return Plan{Mode: mode, Origin: in.Origin, Issues: in.Issues, Edges: in.Edges}, nil
+	return Plan{Mode: ModeDrain, Origin: in.Origin, Issues: in.Issues, Edges: in.Edges}, nil
 }
 
 // issueNums returns the number strings from a slice of issues.
