@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
@@ -77,69 +76,6 @@ func dispatchWave(cfg Config, it forge.IssueTracker, f *dispatch.Factory, s sett
 		}()
 	}
 	wg.Wait()
-}
-
-// dispatchWaves fans issues out in dependency order. Each wave dispatches the
-// currently unblocked set; blocked issues are held and rechecked after
-// DepsPollSecs. The deadlock timer resets on any progress; if no issue becomes
-// ready within DepsWaitSecs the function returns an error rather than blocking
-// forever. Dispatched issues leave the remaining set even when they fail.
-func dispatchWaves(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string) error {
-	remaining := make([]Issue, len(issues))
-	copy(remaining, issues)
-	elapsed := 0
-
-	for len(remaining) > 0 {
-		checkOverlap := waveOverlapCheck(cfg, it, cf)
-		var ready, blockerFailed, held []Issue
-		for _, iss := range remaining {
-			collider, overlapped := checkOverlap(iss.Number)
-			switch {
-			case issueIsReady(it, cf, iss.Number, edges) && !overlapped:
-				ready = append(ready, iss)
-			case hasFailedInBatchBlocker(cfg, it, iss.Number, edges):
-				blockerFailed = append(blockerFailed, iss)
-			default:
-				if overlapped {
-					fmt.Printf("    ~~ #%s touches overlap in-progress #%s; deferring\n", iss.Number, collider)
-				}
-				held = append(held, iss)
-			}
-		}
-
-		for _, iss := range blockerFailed {
-			fmt.Printf("    !! #%s  status=blocker-failed  note=a dependency failed; skipping\n", iss.Number)
-			transitionState(it, iss.Number, forge.Dispatchable, forge.Failed)
-		}
-
-		if len(ready) == 0 {
-			if len(blockerFailed) > 0 {
-				elapsed = 0
-				remaining = held
-				continue
-			}
-			if elapsed >= cfg.DepsWaitSecs {
-				fmt.Fprintf(os.Stderr,
-					"ERROR: dependency deadlock — blockers did not reach '%s' after %ds\n",
-					cfg.CompleteLabel, cfg.DepsWaitSecs)
-				for _, iss := range remaining {
-					fmt.Fprintf(os.Stderr, "    #%s %s\n", iss.Number, iss.Title)
-				}
-				return fmt.Errorf("dependency deadlock")
-			}
-			fmt.Printf("    .. all remaining issues blocked; retrying in %ds (%ds elapsed)\n",
-				cfg.DepsPollSecs, elapsed)
-			time.Sleep(time.Duration(cfg.DepsPollSecs) * time.Second)
-			elapsed += cfg.DepsPollSecs
-			continue
-		}
-
-		// Progress: reset the deadlock timer.
-		elapsed = 0
-		dispatchWave(cfg, it, f, s, ready)
-		remaining = held
-	}
-	return nil
 }
 
 // drainMaxJobs drains up to cfg.MaxJobs currently-unblocked issues from the
@@ -219,34 +155,15 @@ outer:
 // directory; Run creates its logs/ subdirectory before dispatching any
 // issue.
 //
-// ModeDrain (ADR 0019) is the only mode NewPlan selects for
-// OriginDiscovered/OriginClaimed — the queue path — so drainMaxJobs alone
-// handles their edges, deadlock-free single-wave-then-exit dispatch,
-// including the Touches overlap check per candidate. ModeWaves, and the
-// no-edges overlaps check below that decides whether to enter it, are
-// therefore only ever reached for OriginSelective, which forces overlaps to
-// false: the wave-retry engine (with its deadlock timer) is only entered for
-// a selective batch with in-batch dependency edges. Rerouting selective
-// dispatch off ModeWaves, and removing this now-narrower branch along with
-// dispatchWaves, is follow-up work (#524).
+// ModeDrain (ADR 0019) is the only mode NewPlan ever selects, for every
+// Origin — drainMaxJobs alone handles blocker edges and the Touches overlap
+// check with a single selection pass, one wave, exit. Selective-list
+// dispatch (#524) shares this path with the queue: an in-list blocker that
+// hasn't reached CompleteLabel holds its dependent for a later invocation
+// rather than looping waves in-process.
 func Run(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, plan Plan) error {
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
 		return err
 	}
-	if plan.Mode == ModeDrain {
-		return drainMaxJobs(cfg, it, cf, pwd, f, s, plan.Issues, plan.Edges, plan.Origin)
-	}
-	hasEdges := len(plan.Edges) > 0
-	overlaps := !hasEdges && plan.Origin != OriginSelective && batchHasTouchOverlap(cfg, it, cf, plan.Issues)
-	if hasEdges || overlaps {
-		if hasEdges {
-			fmt.Println("==> dependency edges found; dispatching in waves")
-		} else {
-			fmt.Println("==> declared touches overlap an in-progress issue; dispatching in waves")
-		}
-		return dispatchWaves(cfg, it, cf, f, s, plan.Issues, plan.Edges)
-	}
-	fmt.Printf("==> %d issue(s); launching up to %d container(s) at a time\n", len(plan.Issues), cfg.MaxParallel)
-	dispatchWave(cfg, it, f, s, plan.Issues)
-	return nil
+	return drainMaxJobs(cfg, it, cf, pwd, f, s, plan.Issues, plan.Edges, plan.Origin)
 }
