@@ -421,6 +421,7 @@ phase_prompt_assembly() {
   # red on an already-open PR, ADR: selfHeal/runFix in cmd/launcher). A warm fix
   # pass already has the branch checked out and prior work in place, so it runs
   # a dedicated fix-prompt instead of the cold issue-prompt a fresh run uses.
+  local _driver_session_mode
   if [ -n "${FIX_PASS:-}" ] && [ "${FIX_PASS}" -gt 0 ]; then
     prompt="$(_subst "${PROMPTS_DIR}/fix-prompt.md")"
     _driver_session_mode="resume"
@@ -471,6 +472,13 @@ phase_prompt_assembly() {
 }
 
 main() {
+  # Cross-phase sentinels: declared local here so bash's dynamic scoping lets
+  # each phase function assign them by plain (non-local) assignment while
+  # keeping them out of true global scope (issue #515).
+  local _rebase_and_publish _had_rebase_conflict
+  local _use_dev_shell _harness_path
+  local prompt agents_args _driver_session_args
+
   configure_env
   clone_repo
   phase_branch_recovery
