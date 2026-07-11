@@ -169,7 +169,7 @@ func TestMergeImmediate(t *testing.T) {
 				d = df
 			}
 
-			s := New(c, fc)
+			s := New(c, fc, fc)
 			err := s.mergeImmediate("1", testPR, d)
 
 			if (err != nil) != tc.wantErr {
@@ -202,7 +202,7 @@ func TestApplyMergeMode_Immediate(t *testing.T) {
 	c.MaxRebaseAttempts = 3
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	err := s.applyMergeMode("1", testPR, nil)
 	if err != nil {
@@ -219,7 +219,7 @@ func TestApplyMergeMode_Manual(t *testing.T) {
 	c.MergeMode = "manual"
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	err := s.applyMergeMode("1", testPR, nil)
 	if err != nil {
@@ -237,7 +237,7 @@ func TestApplyMergeMode_Auto_EnqueuesAutoMerge(t *testing.T) {
 	c.MergeMode = "auto"
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	err := s.applyMergeMode("1", testPR, nil)
 	if err != nil {
@@ -260,7 +260,7 @@ func TestApplyMergeMode_Auto_EnqueueFailureFallsBack(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	fc.EnqueueAutoMergeErr = fmt.Errorf("gh pr merge --auto: permission denied")
-	s := New(c, fc)
+	s := New(c, fc, fc)
 
 	err := s.applyMergeMode("1", testPR, nil)
 	if err != nil {

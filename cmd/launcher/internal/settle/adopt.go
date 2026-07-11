@@ -13,7 +13,7 @@ import (
 // before running the gate. Called by the reconcile/recover entry points and
 // by Settle itself when a Box exits with no outcome line.
 func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num, prURL string) {
-	branch := s.fc.AgentBranch(num)
+	branch := s.cf.AgentBranch(num)
 	fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", num, prURL, branch)
 	ok, merged := s.selfHeal(d, num, prURL)
 	if ok {
@@ -29,8 +29,8 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num, prURL string) {
 // carries a MERGED state and CompleteLabel, demoting the issue to Failed
 // otherwise (evidence of a merge outside the gate).
 func (s *Settle) verifyMerged(num, pr string) {
-	prState, _ := s.fc.PRState(pr)
-	iss, _ := s.fc.Issue(num)
+	prState, _ := s.pr.PRState(pr)
+	iss, _ := s.it.Issue(num)
 	if prState == forge.PRMerged && containsLabel(iss.Labels, s.cfg.CompleteLabel) {
 		fmt.Printf("    #%s  pr=%s  status=verified-merged\n", num, pr)
 		return
@@ -52,7 +52,7 @@ func (s *Settle) verifyMerged(num, pr string) {
 // postUsageComment posts d's aggregate usage-statistics comment to the
 // issue. Errors posting the comment are logged but do not abort the caller.
 func (s *Settle) postUsageComment(num string, d dispatch.Dispatcher) {
-	if commentErr := s.fc.Comment(num, d.UsageReport()); commentErr != nil {
+	if commentErr := s.it.Comment(num, d.UsageReport()); commentErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: post usage comment: %v\n", num, commentErr)
 	}
 }

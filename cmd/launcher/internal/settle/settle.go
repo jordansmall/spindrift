@@ -48,17 +48,25 @@ type Settler interface {
 }
 
 // Settle is the prod adapter: constructed once per top-level dispatch entry
-// point with its config and forge client, then reused across every issue in
-// that invocation. Safe for concurrent use across dispatchWave goroutines because
-// it holds no mutable state of its own beyond the (concurrency-safe) fc.
+// point with its config, IssueTracker, and CodeForge, then reused across
+// every issue in that invocation. Safe for concurrent use across dispatchWave
+// goroutines because it holds no mutable state of its own beyond the
+// (concurrency-safe) it/cf.
 type Settle struct {
 	cfg Config
-	fc  forge.Client
+	it  forge.IssueTracker
+	cf  forge.CodeForge
+	// pr is cf's PRForge surface, resolved once at construction via a type
+	// assertion — nil for the push-only git adapter. Callers branch on pr ==
+	// nil instead of a removed PushOnly() flag.
+	pr forge.PRForge
 }
 
 var _ Settler = (*Settle)(nil)
 
-// New constructs a Settle.
-func New(cfg Config, fc forge.Client) *Settle {
-	return &Settle{cfg: cfg, fc: fc}
+// New constructs a Settle. pr is resolved from cf once via a type assertion
+// (nil when cf is push-only, e.g. the git adapter).
+func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
+	pr, _ := cf.(forge.PRForge)
+	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr}
 }
