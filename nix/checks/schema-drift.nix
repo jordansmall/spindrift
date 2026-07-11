@@ -121,7 +121,7 @@ in
     pkgs.runCommand "launcher-env-coverage" { } "touch $out";
 
   # tests/helper.bash's set_box_env fixture must export every boxEnv = true
-  # schema knob, so entrypoint.bats exercises the same defaults the nix
+  # schema knob, so the entrypoint-*.bats suites exercise the same defaults the nix
   # preamble bakes into the image at build time (issue #462). Presence-only,
   # like launcher-env-coverage above — catches a new boxEnv knob added to the
   # schema with no matching export added to set_box_env.

@@ -73,7 +73,7 @@ in
         # to the stubbed agent (#4).
         PROMPT_PATH = batsHarness.promptDir;
         PROMPT_HARNESS_DIR = promptHarness.promptDir;
-        # The default-image outcome contract, so entrypoint.bats runs standalone
+        # The default-image outcome contract, so the entrypoint-*.bats suites run standalone
         # (no /agent/outcome-contract.md on the bats build host) still exercise
         # the same canonical text an image would bake (issue #420).
         OUTCOME_CONTRACT_FILE = batsHarness.outcomeContractFile;
