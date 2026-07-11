@@ -135,6 +135,11 @@ let
   # renderer's output shape.
   preambles = import ./preambles.nix;
 
+  # Marker-delimited slicing/injection primitives (issue #512);
+  # nix/checks/prompt-inject.nix pins each primitive's behavior.
+  promptInject = import ./prompt-inject.nix;
+  inherit (promptInject) sliceBetween sliceFromMarker injectSection;
+
   # issue-prompt.md is the single source every shared block below is sliced
   # from — read once so each slice sees the identical text.
   issuePromptSource = builtins.readFile ../templates/default/prompts/issue-prompt.md;
@@ -148,45 +153,6 @@ let
   # knob it enables, exactly as it already must supply filer-prompt.md.
   fragmentsSourceDir = ../templates/default/prompts/fragments;
 
-  # Slices `text` from `startMarker` (inclusive) up to `endMarker`
-  # (exclusive), asserting each marker appears exactly once — the same
-  # single-occurrence guarantee the outcome-contract slice below relies on,
-  # so a heading collision fails loudly at eval time instead of silently
-  # slicing the wrong span.
-  sliceBetween =
-    startMarker: endMarker: text:
-    let
-      afterStartParts = lib.splitString startMarker text;
-    in
-    assert lib.assertMsg (
-      builtins.length afterStartParts == 2
-    ) "mkHarness: source must contain start marker '${startMarker}' exactly once";
-    let
-      afterStart = startMarker + builtins.elemAt afterStartParts 1;
-      spanParts = lib.splitString endMarker afterStart;
-    in
-    assert lib.assertMsg (builtins.length spanParts == 2)
-      "mkHarness: source must contain end marker '${endMarker}' exactly once after start marker '${startMarker}'";
-    builtins.elemAt spanParts 0;
-
-  # A sliced shared block (below) already ends with the blank line that
-  # separated it from the next heading in issue-prompt.md, so chaining two of
-  # them back to back — as #455's fix-prompt.md composition does — must not
-  # double that blank line up. Strips one, if present; a no-op on text that
-  # ends with a single "\n" (e.g. a plain Consumer `prompt` string).
-  trimTrailingBlankLine = s: if lib.hasSuffix "\n\n" s then lib.removeSuffix "\n" s else s;
-
-  # Appends `block` to `promptText` unless it already contains `marker` (the
-  # default prompt's own copy, or a Consumer prompt that kept it) — so
-  # injection is idempotent. Generic so #455 can reuse the #419 idiom for the
-  # COMMS and CHECK/COMMIT blocks below, not just the outcome contract.
-  injectSection =
-    marker: block: promptText:
-    if lib.hasInfix marker promptText then
-      promptText
-    else
-      lib.removeSuffix "\n" (trimTrailingBlankLine promptText) + "\n\n" + block;
-
   # The SPINDRIFT_OUTCOME contract (the LAND THE CHANGE / WATCH CI / OUTCOME /
   # IF BLOCKED sections) is harness-owned (issue #419): a Consumer `prompt`
   # that drops it would ship an agent that never emits the outcome line, so
@@ -195,13 +161,7 @@ let
   # duplicated into a second file, so the injected block and the default
   # prompt's sections cannot drift apart — same source, same bytes.
   outcomeContractMarker = "# LAND THE CHANGE";
-  outcomeContract =
-    let
-      parts = lib.splitString outcomeContractMarker issuePromptSource;
-    in
-    assert lib.assertMsg (builtins.length parts == 2)
-      "mkHarness: templates/default/prompts/issue-prompt.md must contain the outcome-contract marker '${outcomeContractMarker}' exactly once";
-    outcomeContractMarker + builtins.elemAt parts 1;
+  outcomeContract = sliceFromMarker outcomeContractMarker issuePromptSource;
 
   injectOutcomeContract = injectSection outcomeContractMarker outcomeContract;
 
