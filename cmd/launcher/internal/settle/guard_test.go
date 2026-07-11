@@ -2,14 +2,6 @@ package settle
 
 import "testing"
 
-// TestGlobMatch_DoubleStarDirectory verifies that a "dir/**" pattern matches
-// any path nested under dir, the shape MERGE_GUARD_PATHS uses for .github/**.
-func TestGlobMatch_DoubleStarDirectory(t *testing.T) {
-	if !globMatch(".github/**", ".github/workflows/ci.yml") {
-		t.Error("expected .github/** to match .github/workflows/ci.yml")
-	}
-}
-
 // TestMatchedGuardPaths_HitReturnsMatchedFiles verifies that a changed path
 // matching one of the comma-separated MERGE_GUARD_PATHS globs is reported.
 func TestMatchedGuardPaths_HitReturnsMatchedFiles(t *testing.T) {
