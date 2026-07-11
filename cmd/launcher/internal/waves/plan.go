@@ -86,21 +86,26 @@ type Config struct {
 	FailedLabel     string
 }
 
-// NewPlan decides how in.Issues should be dispatched: ModeDrain when
-// cfg.MaxJobs caps the batch, ModeWaves otherwise (which degenerates to a
-// single wave when in.Edges is empty and nothing overlaps at Run time). A
-// dependency cycle in in.Edges is reported as an error rather than a Plan —
-// this is the single place that decision is made; run, selective dispatch,
-// and preview all consume its result instead of repeating it.
+// NewPlan decides how in.Issues should be dispatched. OriginDiscovered and
+// OriginClaimed (the queue path) always select ModeDrain per ADR 0019:
+// MAX_JOBS=0 means an uncapped drain batch, not the old in-process wave
+// loop. OriginSelective keeps the legacy cfg.MaxJobs-gated choice — the
+// hand-picked list still uses ModeWaves until #524 reroutes it. A dependency
+// cycle in in.Edges is reported as an error rather than a Plan — this is the
+// single place that decision is made; run, selective dispatch, and preview
+// all consume its result instead of repeating it.
 func NewPlan(cfg Config, in Input) (Plan, error) {
 	if len(in.Edges) > 0 {
 		if node, cycle := detectCycle(in.Edges, issueNums(in.Issues)); cycle {
 			return Plan{}, fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
 		}
 	}
-	mode := ModeWaves
-	if cfg.MaxJobs > 0 {
-		mode = ModeDrain
+	mode := ModeDrain
+	if in.Origin == OriginSelective {
+		mode = ModeWaves
+		if cfg.MaxJobs > 0 {
+			mode = ModeDrain
+		}
 	}
 	return Plan{Mode: mode, Origin: in.Origin, Issues: in.Issues, Edges: in.Edges}, nil
 }

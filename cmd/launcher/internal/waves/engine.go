@@ -143,7 +143,8 @@ func dispatchWaves(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *dis
 }
 
 // drainMaxJobs drains up to cfg.MaxJobs currently-unblocked issues from the
-// batch and exits. Blocked issues are skipped so no slot is wasted on a
+// batch and exits; cfg.MaxJobs == 0 is uncapped and drains every unblocked
+// issue in the batch. Blocked issues are skipped so no slot is wasted on a
 // dependency that hasn't merged yet; they wait for the next invocation. The
 // in-batch dependency graph is assumed already cycle-checked by NewPlan.
 func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, origin Origin) error {
@@ -168,7 +169,7 @@ outer:
 				continue
 			}
 			selected = append(selected, iss)
-			if len(selected) >= cfg.MaxJobs {
+			if cfg.MaxJobs > 0 && len(selected) >= cfg.MaxJobs {
 				break outer
 			}
 		}
