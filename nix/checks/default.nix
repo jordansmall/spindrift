@@ -24,6 +24,7 @@ let
 in
 (import ./bats.nix common)
 // (import ./equivalence.nix common)
+// (import ./preambles.nix common)
 // (import ./prompts.nix common)
 // (import ./schema-drift.nix common)
 // (import ./dispatch-labels.nix common)
