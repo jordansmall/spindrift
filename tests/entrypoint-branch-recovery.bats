@@ -127,6 +127,20 @@ setup_rebase_conflict() {
   [[ "$output" == *"pre-work rebase"* ]]
 }
 
+# The conflict-resolve agent spawn and the main agent spawn go through the
+# same run_driver_in_env function (issue #516) — one interface, so a devShell
+# found by the probe wraps both passes, not just the main one.
+@test "conflict-resolve agent runs inside the same devShell as the main agent" {
+  seed_flake_repo
+  export FAKE_NIX_DEV_SHELL_OK=1
+  setup_rebase_conflict
+  export FAKE_CLAUDE_RESOLVE_CONFLICT=1
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'develop.*--command bash' "$NIX_LOG")" -eq 2 ]
+}
+
 @test "CONFLICT_RESOLVE_PR_URL: exits after resolving without running main agent" {
   setup_rebase_conflict
   export FAKE_CLAUDE_RESOLVE_CONFLICT=1

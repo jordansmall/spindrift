@@ -300,12 +300,10 @@ phase_conflict_resolve() {
     echo "==> pre-work rebase conflict detected — invoking conflict-resolve agent"
     local _cr_prompt
     _cr_prompt="$(_subst "${PROMPTS_DIR}/conflict-resolve-prompt.md")"
-    set +e
-    # shellcheck disable=SC2086
-    "$DRIVER_BIN" -p "$_cr_prompt" \
-      --model "${MODEL:-}" \
-      $DRIVER_FLAGS_COMMON
-    set -e
+    # No agents config or session to pin/resume for this pass; its exit
+    # status isn't checked here either — success is read off the rebase
+    # state below instead.
+    run_driver_in_env "$_cr_prompt" "" "" || true
     if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
       git rebase --abort 2>/dev/null || true
       echo "==> pre-work rebase onto origin/${BASE_BRANCH:-} failed — conflict agent could not resolve"
@@ -332,8 +330,8 @@ phase_conflict_resolve() {
 # phase_prompt_assembly renders the conditional opt-in prompt fragments,
 # runs phase_conflict_resolve, selects the issue/fix prompt, injects the
 # shared COMMS/CHECK/OUTCOME blocks, and builds the --agents JSON. Sets
-# prompt, _driver_session_mode, _driver_session_args, and agents_args, all
-# read by the Driver invocation in main.
+# prompt, _driver_session_mode, and agents_json, all read by
+# run_driver_in_env in main.
 phase_prompt_assembly() {
   # The conditional prompt steps below are rendered from fragment files under
   # PROMPTS_DIR/fragments (issue #463) instead of heredocs authored in this
@@ -421,7 +419,6 @@ phase_prompt_assembly() {
   # red on an already-open PR, ADR: selfHeal/runFix in cmd/launcher). A warm fix
   # pass already has the branch checked out and prior work in place, so it runs
   # a dedicated fix-prompt instead of the cold issue-prompt a fresh run uses.
-  local _driver_session_mode
   if [ -n "${FIX_PASS:-}" ] && [ "${FIX_PASS}" -gt 0 ]; then
     prompt="$(_subst "${PROMPTS_DIR}/fix-prompt.md")"
     _driver_session_mode="resume"
@@ -429,10 +426,6 @@ phase_prompt_assembly() {
     prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
     _driver_session_mode="initial"
   fi
-  # Computed once so both the direct and devShell-wrapped invocations below
-  # pin/resume the identical session id (issue #427); an empty result on
-  # "resume" means no prior session was found and contributes no extra argv.
-  read -ra _driver_session_args <<< "$(_driver_session_flags "$_driver_session_mode")"
   # Applied in COMMS, CHECK, OUTCOME order so a prompt missing all three (e.g.
   # fix-prompt.md's fix-specific-preamble-only default) ends up with them in
   # the same order the issue prompt carries them.
@@ -449,7 +442,7 @@ phase_prompt_assembly() {
   # whichever agents it actually carries and forward the completed JSON;
   # otherwise omit the flag entirely.
   if [ -n "${AGENTS_JSON_TEMPLATE:-}" ]; then
-    local scout_prompt review_prompt filer_prompt agents_json
+    local scout_prompt review_prompt filer_prompt
     scout_prompt="$(_subst "${PROMPTS_DIR}/scout-prompt.md")"
     review_prompt="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
     filer_prompt=""
@@ -465,30 +458,36 @@ phase_prompt_assembly() {
        | if has("scout") then .scout.prompt = $scout_prompt else . end
        | if has("reviewer") then .reviewer.prompt = $review_prompt else . end
        | if has("filer") then .filer.prompt = $filer_prompt else . end')"
-    agents_args=(--agents "$agents_json")
   else
-    agents_args=()
+    agents_json=""
   fi
 }
 
-main() {
-  # Cross-phase sentinels: declared local here so bash's dynamic scoping lets
-  # each phase function assign them by plain (non-local) assignment while
-  # keeping them out of true global scope (issue #515).
-  local _rebase_and_publish _had_rebase_conflict
-  local _use_dev_shell _harness_path
-  local prompt agents_args _driver_session_args
+# run_driver_in_env runs the Driver against $1 (the assembled prompt), with
+# $2 (--agents JSON, or "" to omit the flag) and $3 (session mode, forwarded
+# verbatim to the nix-supplied _driver_session_flags — "initial"/"resume" pin
+# or resume the issue's session id; any other value, e.g. "" for the
+# conflict-resolve pass, yields no session flags). Runs inside the Project
+# devShell when phase_devshell_probe found one (_use_dev_shell/_harness_path,
+# read via bash's dynamic scoping like every other phase function), with the
+# same relaunch-once-in-the-baked-env fallback on a devShell launch failure.
+# Surfaces the Driver's SPINDRIFT_OUTCOME line via the nix-supplied
+# _driver_extract_outcome and returns the Driver's exit status. Every temp
+# file and _UPPERCASE shadow export either invocation path marshals state
+# through is local to this function and gone once it returns.
+run_driver_in_env() {
+  local prompt="$1" agents_json="$2" session_mode="$3"
 
-  configure_env
-  clone_repo
-  phase_branch_recovery
-  phase_prework_rebase
-  phase_toolchain_nudge
-  phase_devshell_probe
-  phase_prefetch
-  phase_prompt_assembly
+  local agents_args=()
+  if [ -n "$agents_json" ]; then
+    agents_args=(--agents "$agents_json")
+  fi
+  # An unrecognized session_mode (e.g. "" for the conflict-resolve pass, which
+  # pins/resumes no session) falls through _driver_session_flags' case with no
+  # output, so _driver_session_args ends up empty — same as before.
+  local _driver_session_args
+  read -ra _driver_session_args <<< "$(_driver_session_flags "$session_mode")"
 
-  echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
   # Decoupled output channels (#183, superseding the #123 "raw on stdout" note):
   #
   #   stdout → launcher captures verbatim into logs/issue-<n>.log (byte-exact,
@@ -503,6 +502,7 @@ main() {
   #
   # spindrift-heartbeat-filter is a transparent stdin→stdout passthrough; it adds
   # no bytes to the stream and does not affect PIPESTATUS[0] (claude's exit code).
+  local stream_log _claude_rc_file
   stream_log="$(mktemp)"
   _claude_rc_file="$(mktemp)"
   printf '1' > "$_claude_rc_file"
@@ -515,6 +515,7 @@ main() {
   # populate, so the wrapper below can eval the identical text in its own
   # process after reconstructing those names from the temp files it crosses the
   # process boundary with.
+  local _DRIVER_PIPELINE
   _DRIVER_PIPELINE="$(cat <<'PIPELINE_EOF'
 "$DRIVER_BIN" -p "$prompt" \
   --model "${MODEL:-}" \
@@ -536,10 +537,11 @@ PIPELINE_EOF
     set -e
   }
 
-  _nix_rc=0
+  local _nix_rc=0
   if [ "$_use_dev_shell" = "1" ]; then
     # Write the prompt to a temp file so the wrapper can read it without
     # embedding the full text (avoids quoting hazards).
+    local _prompt_file _agents_file _session_file _pipeline_file _driver_wrapper
     _prompt_file="$(mktemp)"
     printf '%s' "$prompt" > "$_prompt_file"
     # Write agents JSON to a temp file so the wrapper can pass it to claude
@@ -581,13 +583,16 @@ _claude_rc_file="$_CLAUDE_RC_FILE"
 eval "$(cat "$_PIPELINE_FILE")"
 DRIVER_WRAPPER_EOF
     chmod +x "$_driver_wrapper"
-    export _HARNESS_PATH="$_harness_path"
-    export _PROMPT_FILE="$_prompt_file"
-    export _AGENTS_FILE="$_agents_file"
-    export _SESSION_FILE="$_session_file"
-    export _STREAM_LOG="$stream_log"
-    export _CLAUDE_RC_FILE="$_claude_rc_file"
-    export _PIPELINE_FILE="$_pipeline_file"
+    # Exported locals: visible to the devShell child process this function
+    # spawns below, but — unlike the plain global exports the two invocation
+    # paths used to share — gone the moment this function returns, so no
+    # shadow state leaks into the rest of the script.
+    local _HARNESS_PATH="$_harness_path" _PROMPT_FILE="$_prompt_file"
+    local _AGENTS_FILE="$_agents_file" _SESSION_FILE="$_session_file"
+    local _STREAM_LOG="$stream_log" _CLAUDE_RC_FILE="$_claude_rc_file"
+    local _PIPELINE_FILE="$_pipeline_file"
+    export _HARNESS_PATH _PROMPT_FILE _AGENTS_FILE _SESSION_FILE
+    export _STREAM_LOG _CLAUDE_RC_FILE _PIPELINE_FILE
     # MODEL comes from the preamble (not exported by default); export it so the
     # devShell child process sees the correct resolved value, not an empty string.
     export MODEL="${MODEL:-}"
@@ -610,6 +615,7 @@ DRIVER_WRAPPER_EOF
   else
     _run_driver
   fi
+  local claude_rc
   claude_rc="$(cat "$_claude_rc_file")"
   rm -f "$_claude_rc_file"
 
@@ -619,6 +625,30 @@ DRIVER_WRAPPER_EOF
   # contract is unchanged.
   _driver_extract_outcome "$stream_log"
   rm -f "$stream_log"
+
+  return "$claude_rc"
+}
+
+main() {
+  # Cross-phase sentinels: declared local here so bash's dynamic scoping lets
+  # each phase function assign them by plain (non-local) assignment while
+  # keeping them out of true global scope (issue #515).
+  local _rebase_and_publish _had_rebase_conflict
+  local _use_dev_shell _harness_path
+  local prompt agents_json _driver_session_mode
+
+  configure_env
+  clone_repo
+  phase_branch_recovery
+  phase_prework_rebase
+  phase_toolchain_nudge
+  phase_devshell_probe
+  phase_prefetch
+  phase_prompt_assembly
+
+  echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
+  local claude_rc=0
+  run_driver_in_env "$prompt" "$agents_json" "$_driver_session_mode" || claude_rc=$?
 
   [ "$claude_rc" -eq 0 ] || exit "$claude_rc"
   echo "==> entrypoint complete for issue #$ISSUE_NUMBER"
