@@ -170,9 +170,10 @@ outer:
 		// hot-looping.
 		held := heldIssues(issues, selected, blockerFailed)
 		if len(held) > 0 {
-			fmt.Printf("no unblocked '%s' issues to drain — %d remain blocked or deferred.\n", cfg.Label, len(held))
 			if origin == OriginSelective {
 				printSelectiveRerunHint(held)
+			} else {
+				fmt.Printf("no unblocked '%s' issues to drain — %d remain blocked or deferred.\n", cfg.Label, len(held))
 			}
 			return ErrOpenNoneDispatchable
 		}
