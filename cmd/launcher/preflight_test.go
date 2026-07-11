@@ -70,11 +70,14 @@ func TestAutoMergePreflight(t *testing.T) {
 				c.codeForge = tc.codeForge
 			}
 			fc := forge.NewFake()
-			fc.IsPushOnly = tc.codeForge == "git"
 			fc.AutoMergeAllowed = tc.autoMergeAllowed
 			fc.AutoMergeErr = tc.autoMergeErr
+			var cf forge.CodeForge = fc
+			if tc.codeForge == "git" {
+				cf = fc.AsPushOnly()
+			}
 
-			err := checkAutoMergePreflight(c, fc)
+			err := checkAutoMergePreflight(c, cf)
 
 			if (err != nil) != tc.wantErr {
 				t.Errorf("checkAutoMergePreflight err=%v, wantErr=%v", err, tc.wantErr)

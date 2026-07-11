@@ -19,12 +19,13 @@ func TestCmdRecover_RunsCleanupOnEveryExit(t *testing.T) {
 	dir := tempLogDir(t)
 	called := false
 	lc := &launchContext{
-		config:  c,
-		pwd:     dir,
-		forge:   fc,
-		factory: testFactory(t, dir, nil),
-		settle:  newSettle(c, fc),
-		cleanup: func() { called = true },
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       newSettle(c, fc, fc),
+		cleanup:      func() { called = true },
 	}
 
 	got := cmdRecover(lc, "42")
@@ -46,12 +47,13 @@ func TestCmdDispatchSelective_RunsCleanupOnEveryExit(t *testing.T) {
 	dir := tempLogDir(t)
 	called := false
 	lc := &launchContext{
-		config:  c,
-		pwd:     dir,
-		forge:   fc,
-		factory: testFactory(t, dir, nil),
-		settle:  settle.NewFake(),
-		cleanup: func() { called = true },
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       settle.NewFake(),
+		cleanup:      func() { called = true },
 	}
 
 	got := cmdDispatchSelective(lc, []string{"99"}, false)
@@ -71,13 +73,15 @@ func TestCmdDispatch_RunsCleanupOnEveryExit(t *testing.T) {
 	c.label = "ready-for-agent"
 	dir := tempLogDir(t)
 	called := false
+	fc := forge.NewFake()
 	lc := &launchContext{
-		config:  c,
-		pwd:     dir,
-		forge:   forge.NewFake(),
-		factory: testFactory(t, dir, nil),
-		settle:  settle.NewFake(),
-		cleanup: func() { called = true },
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       settle.NewFake(),
+		cleanup:      func() { called = true },
 	}
 
 	got := cmdDispatch(lc)

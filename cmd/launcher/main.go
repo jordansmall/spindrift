@@ -361,13 +361,6 @@ func newCodeForge(c config) forge.CodeForge {
 	return forge.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
 }
 
-// newForgeClient composes the configured IssueTracker and CodeForge (which
-// vary independently per ADR 0013) into a single Client for call sites that
-// need both axes together.
-func newForgeClient(c config) forge.Client {
-	return forge.NewClient(newIssueTracker(c), newCodeForge(c))
-}
-
 // runnerConfig builds the runner.Config a runner adapter needs from loaded
 // config. Shared by both the `run` and `build` subcommand entry points; the
 // build entry point never calls Run(), so leaving PromptDir/SkillsDir/
@@ -449,8 +442,8 @@ func settleConfig(c config) settle.Config {
 
 // newSettle constructs the settle.Settle for one top-level dispatch entry
 // point, reused across every issue in that invocation.
-func newSettle(c config, fc forge.Client) *settle.Settle {
-	return settle.New(settleConfig(c), fc)
+func newSettle(c config, it forge.IssueTracker, cf forge.CodeForge) *settle.Settle {
+	return settle.New(settleConfig(c), it, cf)
 }
 
 // wavesConfig builds the subset of config the wave engine (internal/waves)
@@ -513,27 +506,33 @@ func build() error {
 // checkAutoMergePreflight verifies that the repo allows GitHub's native
 // auto-merge when MERGE_MODE=auto. Returns a non-nil error if the repo
 // disallows it or the capability check fails; no-ops for other modes.
-func checkAutoMergePreflight(c config, fc forge.Client) error {
+func checkAutoMergePreflight(c config, cf forge.CodeForge) error {
 	if c.mergeMode != "auto" {
 		return nil
 	}
-	if fc.PushOnly() {
+	pr, ok := cf.(forge.PRForge)
+	if !ok {
 		return fmt.Errorf("MERGE_MODE=auto requires CODE_FORGE=github (got %q) — auto-merge is a GitHub-native feature with no meaning off github; switch to MERGE_MODE=manual or immediate", c.codeForge)
 	}
-	ok, err := fc.CanAutoMerge()
+	canAuto, err := pr.CanAutoMerge()
 	if err != nil {
 		return fmt.Errorf("MERGE_MODE=auto: auto-merge capability check failed: %w", err)
 	}
-	if !ok {
+	if !canAuto {
 		return fmt.Errorf("MERGE_MODE=auto: the repo does not allow auto-merge — enable \"Allow auto-merge\" in repo Settings → General, or switch to MERGE_MODE=manual")
 	}
 	return nil
 }
 
-// openPRForBranch wraps fc.OpenPRForBranch to unpack the PR struct for callers
-// that need the URL and draft flag separately.
-func openPRForBranch(fc forge.Client, branch string) (url string, isDraft bool, found bool, err error) {
-	pr, ok, err := fc.OpenPRForBranch(branch)
+// openPRForBranch wraps cf.(forge.PRForge).OpenPRForBranch to unpack the PR
+// struct for callers that need the URL and draft flag separately. A
+// push-only Code Forge (no PRForge) never has a PR to discover.
+func openPRForBranch(cf forge.CodeForge, branch string) (url string, isDraft bool, found bool, err error) {
+	prForge, ok := cf.(forge.PRForge)
+	if !ok {
+		return "", false, false, nil
+	}
+	pr, ok, err := prForge.OpenPRForBranch(branch)
 	if err != nil || !ok {
 		return "", false, false, err
 	}
@@ -576,18 +575,18 @@ func resolveOrigin(c config) waves.Origin {
 // target it directly rather than querying by label — a label query could
 // otherwise pick up a different issue stranded on the same in-progress label
 // by an earlier crash.
-func discoverIssues(c config, fc forge.Client) ([]issue, waves.Origin, error) {
+func discoverIssues(c config, it forge.IssueTracker) ([]issue, waves.Origin, error) {
 	origin := resolveOrigin(c)
 	if origin == waves.OriginClaimed {
 		fmt.Printf("==> targeting claimed issue #%s in %s\n", c.issueNumber, c.repoSlug)
-		fi, err := fc.Issue(c.issueNumber)
+		fi, err := it.Issue(c.issueNumber)
 		if err != nil {
 			return nil, origin, err
 		}
 		return []issue{{number: fi.Number, title: fi.Title}}, origin, nil
 	}
 	fmt.Printf("==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
-	rawIssues, err := fc.ListIssues(forge.Dispatchable)
+	rawIssues, err := it.ListIssues(forge.Dispatchable)
 	if err != nil {
 		return nil, origin, err
 	}
@@ -602,8 +601,8 @@ func discoverIssues(c config, fc forge.Client) ([]issue, waves.Origin, error) {
 // have an open non-draft PR on their agent branch, and runs the merge gate on
 // each. Draft PRs and in-progress issues with no open PR are skipped silently.
 // Called at launcher start, before any new dispatch.
-func reconcileStranded(c config, fc forge.Client, f *dispatch.Factory, s settle.Settler) {
-	fiList, err := fc.ListIssues(forge.InProgress)
+func reconcileStranded(c config, it forge.IssueTracker, cf forge.CodeForge, f *dispatch.Factory, s settle.Settler) {
+	fiList, err := it.ListIssues(forge.InProgress)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reconcile: list in-progress issues: %v\n", err)
 		return
@@ -614,8 +613,8 @@ func reconcileStranded(c config, fc forge.Client, f *dispatch.Factory, s settle.
 	fmt.Println("==> reconciling stranded in-progress issues")
 	for _, fi := range fiList {
 		iss := issue{number: fi.Number, title: fi.Title}
-		branch := fc.AgentBranch(iss.number)
-		prURL, isDraft, found, prErr := openPRForBranch(fc, branch)
+		branch := cf.AgentBranch(iss.number)
+		prURL, isDraft, found, prErr := openPRForBranch(cf, branch)
 		if prErr != nil || !found || isDraft {
 			continue
 		}
@@ -629,14 +628,14 @@ func reconcileStranded(c config, fc forge.Client, f *dispatch.Factory, s settle.
 // and drives the same adopt-and-gate path used by reconcileStranded. Returns an
 // error when the issue cannot be fetched, the PR is a draft, or no open PR
 // exists; the caller should treat those as non-success exits.
-func recoverByNumber(c config, fc forge.Client, pwd string, f *dispatch.Factory, s settle.Settler, issueNum string) error {
-	fi, err := fc.Issue(issueNum)
+func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issueNum string) error {
+	fi, err := it.Issue(issueNum)
 	if err != nil {
 		return fmt.Errorf("issue %s: %w", issueNum, err)
 	}
 	iss := issue{number: fi.Number, title: fi.Title}
-	branch := fc.AgentBranch(iss.number)
-	prURL, isDraft, found, prErr := openPRForBranch(fc, branch)
+	branch := cf.AgentBranch(iss.number)
+	prURL, isDraft, found, prErr := openPRForBranch(cf, branch)
 	if prErr != nil {
 		return fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr)
 	}
@@ -767,12 +766,12 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 // prints label-bypass warnings, blocker annotations, and cascade-eviction
 // notices without launching any Box or prompting. When issueNums is empty it
 // falls back to queue-drain discovery.
-func previewIssues(c config, fc forge.Client, w io.Writer, issueNums []string) error {
+func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Writer, issueNums []string) error {
 	if len(issueNums) > 0 {
-		return previewSelectiveList(c, fc, w, issueNums)
+		return previewSelectiveList(c, it, cf, w, issueNums)
 	}
 
-	issues, origin, err := discoverIssues(c, fc)
+	issues, origin, err := discoverIssues(c, it)
 	if err != nil {
 		return err
 	}
@@ -780,7 +779,7 @@ func previewIssues(c config, fc forge.Client, w io.Writer, issueNums []string) e
 		fmt.Fprintf(w, "repo: %s  merge-mode: %s\nno open '%s' issues — nothing to dispatch.\n", c.repoSlug, c.mergeMode, c.label)
 		return nil
 	}
-	edges, err := waves.BuildEdges(fc, toWaveIssues(issues))
+	edges, err := waves.BuildEdges(it, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
@@ -804,8 +803,8 @@ func previewIssues(c config, fc forge.Client, w io.Writer, issueNums []string) e
 // previewSelectiveList performs a dry-run of the selective-list dispatch path.
 // It prints label-bypass warnings, per-issue blocker annotations, and cascade-
 // eviction notices. No Boxes are started and no Forge mutations occur.
-func previewSelectiveList(c config, fc forge.Client, w io.Writer, nums []string) error {
-	issues, unlabeled, err := fetchSelectiveIssues(c, fc, nums)
+func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Writer, nums []string) error {
+	issues, unlabeled, err := fetchSelectiveIssues(c, it, nums)
 	if err != nil {
 		return err
 	}
@@ -816,13 +815,13 @@ func previewSelectiveList(c config, fc forge.Client, w io.Writer, nums []string)
 	}
 
 	// Parse blocker graph.
-	edges, err := waves.BuildEdges(fc, toWaveIssues(issues))
+	edges, err := waves.BuildEdges(it, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
 
 	// Eviction pass (dry-run; no side effects).
-	kept, notices := evictUnmetBlockers(c, fc, issues, edges)
+	kept, notices := evictUnmetBlockers(c, it, cf, issues, edges)
 	for _, n := range notices {
 		fmt.Fprintln(w, n)
 	}
@@ -854,8 +853,9 @@ func preview(issueNums []string) error {
 	if err := validate(c); err != nil {
 		return err
 	}
-	fc := newForgeClient(c)
-	return previewIssues(c, fc, os.Stdout, issueNums)
+	it := newIssueTracker(c)
+	cf := newCodeForge(c)
+	return previewIssues(c, it, cf, os.Stdout, issueNums)
 }
 
 // run is the orchestration logic for the `dispatch` subcommand: preflight,
@@ -863,21 +863,21 @@ func preview(issueNums []string) error {
 // and drain/wave/fan-out dispatch. lc is wired by bootstrap in production;
 // tests construct it directly with fakes.
 func run(lc *launchContext) error {
-	c, fc, f, s, pwd := lc.config, lc.forge, lc.factory, lc.settle, lc.pwd
+	c, it, cf, f, s, pwd := lc.config, lc.issueTracker, lc.codeForge, lc.factory, lc.settle, lc.pwd
 
 	fmt.Printf("repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
 
-	if err := checkAutoMergePreflight(c, fc); err != nil {
+	if err := checkAutoMergePreflight(c, cf); err != nil {
 		return err
 	}
 
 	// Reconcile stranded in-progress issues before dispatching new work.
 	// Skip when ISSUE_NUMBER is set — the caller already claimed a specific issue.
 	if resolveOrigin(c) == waves.OriginDiscovered {
-		reconcileStranded(c, fc, f, s)
+		reconcileStranded(c, it, cf, f, s)
 	}
 
-	issues, origin, err := discoverIssues(c, fc)
+	issues, origin, err := discoverIssues(c, it)
 	if err != nil {
 		return err
 	}
@@ -888,7 +888,7 @@ func run(lc *launchContext) error {
 	}
 
 	// Build the dependency graph for the batch.
-	edges, err := waves.BuildEdges(fc, toWaveIssues(issues))
+	edges, err := waves.BuildEdges(it, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
@@ -897,7 +897,7 @@ func run(lc *launchContext) error {
 	if err != nil {
 		return err
 	}
-	if err := waves.Run(wavesConfig(c), fc, pwd, f, s, plan); err != nil {
+	if err := waves.Run(wavesConfig(c), it, cf, pwd, f, s, plan); err != nil {
 		return err
 	}
 
@@ -939,7 +939,7 @@ func cmdDoctor() int {
 // fakes (and a spy cleanup) to exercise the cleanup-on-every-exit contract.
 func cmdRecover(lc *launchContext, issueNum string) int {
 	defer lc.cleanup()
-	if err := recoverByNumber(lc.config, lc.forge, lc.pwd, lc.factory, lc.settle, issueNum); err != nil {
+	if err := recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle, issueNum); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
 	}
@@ -961,7 +961,7 @@ func cmdPreview(issueNums []string) int {
 // wired by bootstrap in production; tests construct it directly with fakes.
 func cmdDispatchSelective(lc *launchContext, nums []string, forceYes bool) int {
 	defer lc.cleanup()
-	if err := selectiveListDispatch(lc.config, lc.forge, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, os.Stdout); err != nil {
+	if err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
 	}
