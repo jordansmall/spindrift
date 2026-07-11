@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/waves"
 )
 
 // TestPreviewIssues_ListsIssuesAndRepo verifies that previewIssues prints the
@@ -58,6 +59,36 @@ func TestPreviewIssues_PrintsMergeMode(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "immediate") {
 		t.Errorf("previewIssues output must include merge mode; got:\n%s", out)
+	}
+}
+
+// TestPrintPlan_AnnotatesBlockers verifies that printPlan — the single shared
+// blocker-annotation printer used by both the discovered-batch and selective
+// preview paths — prints the dispatch count and annotates only the issues
+// that carry blockers.
+func TestPrintPlan_AnnotatesBlockers(t *testing.T) {
+	plan := waves.Plan{
+		Issues: []waves.Issue{
+			{Number: "99", Title: "blocker issue"},
+			{Number: "15", Title: "dependent"},
+		},
+		Edges: map[string][]string{"15": {"99"}},
+	}
+
+	var buf bytes.Buffer
+	printPlan(&buf, plan)
+
+	out := buf.String()
+	if !strings.Contains(out, "2 issue(s) would be dispatched") {
+		t.Errorf("output missing dispatch count; got:\n%s", out)
+	}
+	if !strings.Contains(out, "#15  dependent  (blocked by #99)") {
+		t.Errorf("output missing blocker annotation for #15; got:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "blocker issue") && strings.Contains(line, "blocked by") {
+			t.Errorf("#99 line should not have blocker annotation; got: %s", line)
+		}
 	}
 }
 
