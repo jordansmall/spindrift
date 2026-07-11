@@ -142,6 +142,11 @@ let
   # other (issue #461).
   renderers = import ./renderers.nix;
 
+  # Nix→bash preamble marshalling shared by the entrypoint and the Go
+  # launcher wrappers below (issue #513); nix/checks/preambles.nix pins each
+  # renderer's output shape.
+  preambles = import ./preambles.nix;
+
   # issue-prompt.md is the single source every shared block below is sliced
   # from — read once so each slice sees the identical text.
   issuePromptSource = builtins.readFile ../templates/default/prompts/issue-prompt.md;
@@ -600,48 +605,7 @@ let
   # flakeOption schema entries and emits `[export ]VAR="${VAR:-<baked>}"` lines.
   # A matching env var (or harness.env, sourced by the wrapper) still wins at runtime.
   renderDefaultsPreamble =
-    {
-      export ? false,
-    }:
-    lib.concatStrings (
-      lib.mapAttrsToList (
-        key: entry:
-        let
-          value = mergedDefaults.${key};
-          prefix = if export then "export " else "";
-        in
-        ''
-          ${prefix}${entry.env}="''${${entry.env}:-${toString value}}"
-        ''
-      ) flakeOptionEntries
-    );
-
-  # Space-separated list of env var names forwarded from the host into the Box,
-  # derived from schema boxEnv=true entries.  The Go launcher reads BOX_ENV_VARS
-  # and builds its container-arg list from it, eliminating the hand-enumerated
-  # forwarding lists in runOneOCI / runOneBwrap.
-  boxEnvVarsList = lib.concatStringsSep " " (
-    map (e: e.env) (lib.filter (e: e.boxEnv or false) (lib.attrValues schema))
-  );
-
-  # The Driver's in-box mount targets (ADR 0009), exported for the Go
-  # launcher's runner adapters (cmd/launcher/internal/runner) so they mount
-  # over the Driver's declared paths instead of a hardcoded ".claude"
-  # literal. DRIVER_SESSION_CACHE_DIR is empty when the selected Driver
-  # declares no session-state dir, in which case the launcher mounts no
-  # driver cache on either backend.
-  driverMountPreamble =
-    "export DRIVER_SKILLS_DIR="
-    + lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
-    + "\n"
-    + "export DRIVER_SESSION_CACHE_DIR="
-    + lib.escapeShellArg (
-      if driverEntry ? sessionCacheDirRelative then
-        "/home/agent/${driverEntry.sessionCacheDirRelative}"
-      else
-        ""
-    )
-    + "\n";
+    args: preambles.renderDefaultsPreamble (args // { inherit flakeOptionEntries mergedDefaults; });
 
   # Exported preambles for the Go launcher wrappers. `export` is required so
   # the exec'd binary inherits each value; plain assignments would be
@@ -650,59 +614,42 @@ let
   #   goRunPreamble  — everything `run` needs at sandbox dispatch time.
   #   goBuildPreamble — everything `build` needs to realize the image/closure.
 
-  goRunPreamble =
-    if runnerKind == "bwrap" then
-      ''
-        export RUNTIME="bwrap"
-        export DRIVER="${driverEntry.name}"
-        export AGENT_FILES="${agentFilesPath}"
-        export AGENT_ENV="${agentEnvPath}"
-        BAKED_PREFETCH=${lib.escapeShellArg prefetch}
-        export BAKED_PREFETCH
-      ''
-      + driverMountPreamble
-    else
-      # OCI run also bakes the build-time vars so EnsureReady can build the
-      # image on demand when it is absent — the workflow is `build` first, but
-      # `run` must handle a missing image gracefully on any machine.
-      ''
-        export IMAGE_ARCHIVE="${imagePath}"
-        export IMAGE_TAG="spindrift:${imageHash}"
-        export RUNTIME="${runtime}"
-        export DRIVER="${driverEntry.name}"
-        export IMAGE_DRV="${imageDrv}"
-        export NIX_BUILDER_IMAGE="${nixBuilderImage}"
-        export NIX_VOLUME="spindrift-nix"
-        export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.agent-image"
-      ''
-      + driverMountPreamble;
+  goRunPreamble = preambles.renderGoRunPreamble {
+    inherit
+      runnerKind
+      driverEntry
+      agentFilesPath
+      agentEnvPath
+      prefetch
+      imagePath
+      imageHash
+      runtime
+      imageDrv
+      nixBuilderImage
+      linuxSystem
+      ;
+  };
 
-  goBuildPreamble =
-    if runnerKind == "bwrap" then
-      ''
-        export RUNTIME="bwrap"
-        export AGENT_FILES_DRV="${agentFilesDrv}"
-        export AGENT_ENV_DRV="${agentEnvDrv}"
-      ''
-    else
-      ''
-        export RUNTIME="${runtime}"
-        export IMAGE_ARCHIVE="${imagePath}"
-        export IMAGE_TAG="spindrift:${imageHash}"
-        export IMAGE_DRV="${imageDrv}"
-        export NIX_BUILDER_IMAGE="${nixBuilderImage}"
-        export NIX_VOLUME="spindrift-nix"
-        export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.agent-image"
-      '';
+  goBuildPreamble = preambles.renderGoBuildPreamble {
+    inherit
+      runnerKind
+      agentFilesDrv
+      agentEnvDrv
+      runtime
+      imagePath
+      imageHash
+      imageDrv
+      nixBuilderImage
+      linuxSystem
+      ;
+  };
 
   # Exported run defaults for the Go launcher wrapper.
   goRunDefaultsPreamble = renderDefaultsPreamble { export = true; };
 
   # BOX_ENV_VARS exported for the Go binary: the list of env vars it must forward
   # into each container, derived from schema boxEnv=true entries.
-  boxEnvVarsPreamble = ''
-    export BOX_ENV_VARS="${boxEnvVarsList}"
-  '';
+  boxEnvVarsPreamble = preambles.renderBoxEnvVarsPreamble schema;
 
   # The Go launcher binary, built hermetically by buildGoModule.
   #
