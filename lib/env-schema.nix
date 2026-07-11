@@ -19,6 +19,9 @@
 #   doc          string  one-line description rendered into harness.env.example
 #   flakeOption  bool    consumer-tunable via the flakeModule declarative surface
 #   boxEnv       bool    forwarded from the launcher host into the Box container
+#   boxEnvOnly   bool    boxEnv knob the Go launcher never reads directly (forwarded
+#                        to the Box only); excluded from launcher-env-coverage's
+#                        main.go presence requirement
 {
   # ── Consumer-tunable (flakeOption = true) ──────────────────────────────────
   label = {
@@ -116,6 +119,7 @@
     doc = "primary (implementor) Claude model for the agent (zero-rebuild runtime switch)";
     flakeOption = true;
     boxEnv = true;
+    boxEnvOnly = true;
   };
   scoutModel = {
     env = "SCOUT_MODEL";
@@ -124,6 +128,7 @@
     doc = "scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set";
     flakeOption = true;
     boxEnv = true;
+    boxEnvOnly = true;
   };
   reviewModel = {
     env = "REVIEW_MODEL";
@@ -132,6 +137,7 @@
     doc = "reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set";
     flakeOption = true;
     boxEnv = true;
+    boxEnvOnly = true;
   };
   filerModel = {
     env = "FILER_MODEL";
@@ -140,6 +146,7 @@
     doc = "filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-4-5-20251001)";
     flakeOption = true;
     boxEnv = true;
+    boxEnvOnly = true;
   };
   devShellName = {
     env = "DEV_SHELL_NAME";
@@ -148,6 +155,7 @@
     doc = "which devShell to enter; lets a Target expose a lean headless ci shell distinct from a heavy interactive default";
     flakeOption = true;
     boxEnv = true;
+    boxEnvOnly = true;
   };
   devShellProbeTimeout = {
     env = "DEV_SHELL_PROBE_TIMEOUT";
@@ -156,6 +164,7 @@
     doc = "seconds before the devShell probe is abandoned and the baked toolchain is used";
     flakeOption = true;
     boxEnv = true;
+    boxEnvOnly = true;
   };
   podmanNetwork = {
     env = "PODMAN_NETWORK";
@@ -371,6 +380,7 @@
     doc = "when non-empty, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found";
     flakeOption = true;
     boxEnv = true;
+    boxEnvOnly = true;
   };
   autoLint = {
     env = "AUTO_LINT";
@@ -379,6 +389,7 @@
     doc = "when non-empty, the implementor auto-detects and runs the project's linter on changed files before each commit, applying auto-fix then resolving remaining findings; skips silently when no linter is found";
     flakeOption = true;
     boxEnv = true;
+    boxEnvOnly = true;
   };
   issueNumber = {
     env = "ISSUE_NUMBER";

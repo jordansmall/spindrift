@@ -62,6 +62,32 @@ rec {
     "Prompt & skill iteration" = "promptSkillIteration";
   };
 
+  # Env vars main.go reads that are Nix-computed build/eval artifacts, not
+  # user-tunable knobs — they have no lib/env-schema.nix entry (that registry
+  # is scoped to runtime knobs, per its own header comment) and never gain
+  # one when a knob is added, so they live here rather than as a per-entry
+  # schema field. nix/checks/schema-drift.nix's launcher-env-coverage check
+  # excludes these from the schema<->main.go coverage comparison.
+  nixBakedEnvVars = [
+    "IMAGE_ARCHIVE"
+    "IMAGE_TAG"
+    "IMAGE_DRV"
+    "NIX_BUILDER_IMAGE"
+    "NIX_VOLUME"
+    "FLAKE_IMAGE_ATTR"
+    "AGENT_FILES"
+    "AGENT_ENV"
+    "AGENT_FILES_DRV"
+    "AGENT_ENV_DRV"
+    "BAKED_PREFETCH"
+    "RUNTIME"
+    "DRIVER"
+    "DRIVER_SKILLS_DIR"
+    "DRIVER_SESSION_CACHE_DIR"
+    "IMAGE"
+    "BOX_ENV_VARS"
+  ];
+
   # templates/default/harness.env.example content.
   renderHarnessEnvExample =
     schema:

@@ -70,38 +70,14 @@ in
       mainGoSrc = builtins.readFile ../../cmd/launcher/main.go;
       # Env var names that main.go reads but that are nix-generated
       # (not user-facing knobs): excluded from the schema-coverage check.
-      nixBaked = [
-        "IMAGE_ARCHIVE"
-        "IMAGE_TAG"
-        "IMAGE_DRV"
-        "NIX_BUILDER_IMAGE"
-        "NIX_VOLUME"
-        "FLAKE_IMAGE_ATTR"
-        "AGENT_FILES"
-        "AGENT_ENV"
-        "AGENT_FILES_DRV"
-        "AGENT_ENV_DRV"
-        "BAKED_PREFETCH"
-        "RUNTIME"
-        "DRIVER"
-        "DRIVER_SKILLS_DIR"
-        "DRIVER_SESSION_CACHE_DIR"
-        "IMAGE"
-        "BOX_ENV_VARS"
-      ];
+      # Canonical source: lib/renderers.nix nixBakedEnvVars.
+      nixBaked = renderers.nixBakedEnvVars;
       schemaEnvNames = map (e: e.env) (attrValues schema);
       # Schema knobs forwarded to containers via BOX_ENV_VARS only — the Go
       # binary never reads them directly, so they need no os.Getenv call.
-      boxEnvOnly = [
-        "MODEL"
-        "SCOUT_MODEL"
-        "REVIEW_MODEL"
-        "FILER_MODEL"
-        "DEV_SHELL_NAME"
-        "DEV_SHELL_PROBE_TIMEOUT"
-        "AUTO_FORMAT"
-        "AUTO_LINT"
-      ];
+      # Derived from each entry's boxEnvOnly field (lib/env-schema.nix) so a
+      # new such knob needs no matching edit here.
+      boxEnvOnly = map (e: e.env) (filter (e: e.boxEnvOnly or false) (attrValues schema));
       # Forward: every schema name (that Go reads directly) must appear as a
       # string literal in main.go.
       missingFromGo = filter (name: !pkgs.lib.hasInfix ''"${name}"'' mainGoSrc) (
