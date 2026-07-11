@@ -24,3 +24,37 @@ Each Driver **normalizes its tool's misbehavior at its own boundary**, so the en
 - A one-time human step is required to mint Copilot credentials (`opencode auth login` on a host), analogous to `claude setup-token`; the device flow cannot run in the Box.
 - opencode already reads `.claude/skills/` and falls back to `CLAUDE.md` when no `AGENTS.md` exists, so baked skills and a target repo's `CLAUDE.md` are honored without extra wiring; generating `AGENTS.md` is only needed when we want it to win over an existing `CLAUDE.md`.
 - The Driver seam also owns **session pin/resume** (issue #427): a fix box resumes the Driver session the initial run used rather than cold-starting one, via an ephemeral per-issue host directory the launcher mounts writable over the Box's home. The launcher's half is Driver-agnostic — create/mount/evict an opaque directory, keyed strictly per issue — but the pin/resume *verb* is each Driver's own: claude pins a deterministic session id via `--session-id` and resumes it via `--resume`, falling back cleanly to a cold context when no session is found; opencode would implement its own equivalent without any launcher change.
+
+## Amendment (issue #260): Copilot auth is env-native `OPENCODE_AUTH_CONTENT`, not `{env:}` config
+
+The spike this ADR called for resolved the undocumented unknown, and the
+answer inverts the two credential legs. The `github-copilot` provider is
+OAuth-only: opencode's bundled Copilot plugin activates its loader and fetch
+hook only for a stored `type: "oauth"` credential, and a config-file `apiKey`
+never reaches that path — a `{env:VAR}` placeholder in a generated
+`opencode.json` registers the provider but routes through the generic
+openai-compatible stack without the headers the sanctioned integration uses.
+A PAT/`GITHUB_TOKEN` flow was upstream-rejected as not planned. The
+generated-config `{env:}` leg therefore remains valid for genuine apiKey
+providers (Anthropic, OpenAI) under the opencode Driver, but is a non-path
+for Copilot specifically.
+
+The rejected "opaque `auth.json` blob env var" option turns out to be
+opencode's own supported mechanism, not a spindrift workaround: when
+`OPENCODE_AUTH_CONTENT` is set, opencode parses it as the entire auth store
+and never touches `auth.json` — verified empirically on 1.17.15 (provider
+registers, OAuth fetch path fires, nothing written to disk). The
+materialized/mounted-file fallback is unnecessary; the "secrets are env,
+never host files" model holds via a different env var than anticipated.
+
+The credential itself is a single long-lived GitHub OAuth token (`gho_…`),
+minted once on a host by the device flow (`opencode auth login -p
+github-copilot`, opencode's partnership GitHub App) and stored verbatim in
+both `refresh` and `access` with `expires: 0` — no session-token exchange, no
+refresh loop, not machine-bound. The auth slice's remaining design choice is
+knob shape: pass the JSON blob through verbatim, or (more in-idiom with
+`claudeOAuthToken`) a bare-token knob from which the nix-generated in-box
+half synthesizes the static `OPENCODE_AUTH_CONTENT` wrapper. Either way the
+variable joins the `bwrapSecrets` allowlist and the Driver-conditional
+`validate()` gate. Full findings, sources, and empirical transcript live on
+issue #260.
