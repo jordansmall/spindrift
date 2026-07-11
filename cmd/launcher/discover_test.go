@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/waves"
 )
 
 // With ISSUE_NUMBER set, discovery must target exactly that issue — never a
@@ -17,9 +18,12 @@ func TestDiscoverIssues_ByNumber(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "152", Title: "the claimed one", Labels: []string{c.inProgressLabel}})
 	fc.SetIssue(forge.Issue{Number: "99", Title: "a stranded run", Labels: []string{c.inProgressLabel}})
 
-	issues, err := discoverIssues(c, fc)
+	issues, origin, err := discoverIssues(c, fc)
 	if err != nil {
 		t.Fatalf("discoverIssues: %v", err)
+	}
+	if origin != waves.OriginClaimed {
+		t.Errorf("origin = %v, want OriginClaimed", origin)
 	}
 	if len(issues) != 1 {
 		t.Fatalf("expected exactly one issue, got %+v", issues)
@@ -38,9 +42,12 @@ func TestDiscoverIssues_ByLabel(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Title: "ready", Labels: []string{c.label}})
 	fc.SetIssue(forge.Issue{Number: "2", Title: "not ready", Labels: []string{"backlog"}})
 
-	issues, err := discoverIssues(c, fc)
+	issues, origin, err := discoverIssues(c, fc)
 	if err != nil {
 		t.Fatalf("discoverIssues: %v", err)
+	}
+	if origin != waves.OriginDiscovered {
+		t.Errorf("origin = %v, want OriginDiscovered", origin)
 	}
 	if len(issues) != 1 || issues[0].number != "1" {
 		t.Fatalf("expected only issue #1 by label, got %+v", issues)
@@ -57,7 +64,7 @@ func TestDiscoverIssues_OldestFirst(t *testing.T) {
 		fc.SetIssue(forge.Issue{Number: n, Title: "issue " + n, Labels: []string{c.label}})
 	}
 
-	issues, err := discoverIssues(c, fc)
+	issues, _, err := discoverIssues(c, fc)
 	if err != nil {
 		t.Fatalf("discoverIssues: %v", err)
 	}

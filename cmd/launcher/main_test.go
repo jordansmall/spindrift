@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,7 +12,6 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // TestConfigHasNoModelFields enforces that model/scoutModel/reviewModel were
@@ -87,118 +85,6 @@ func TestNewIssueTracker_Jira(t *testing.T) {
 	}
 }
 
-// --- detectCycle tests ---
-
-func TestDetectCycle_Empty(t *testing.T) {
-	_, hasCycle := detectCycle(map[string][]string{}, []string{})
-	if hasCycle {
-		t.Error("expected no cycle in empty graph")
-	}
-}
-
-func TestDetectCycle_NoCycle_Linear(t *testing.T) {
-	// 1 depends on 2, 2 depends on 3 (1→2→3)
-	edges := map[string][]string{
-		"1": {"2"},
-		"2": {"3"},
-	}
-	node, hasCycle := detectCycle(edges, []string{"1", "2", "3"})
-	if hasCycle {
-		t.Errorf("expected no cycle, got cycle member %s", node)
-	}
-}
-
-func TestDetectCycle_NoCycle_Parallel(t *testing.T) {
-	// 1 and 2 both depend on 3 (independent blockers)
-	edges := map[string][]string{
-		"1": {"3"},
-		"2": {"3"},
-	}
-	node, hasCycle := detectCycle(edges, []string{"1", "2", "3"})
-	if hasCycle {
-		t.Errorf("expected no cycle, got cycle member %s", node)
-	}
-}
-
-func TestDetectCycle_DirectCycle(t *testing.T) {
-	// 1 depends on 2 and 2 depends on 1
-	edges := map[string][]string{
-		"1": {"2"},
-		"2": {"1"},
-	}
-	_, hasCycle := detectCycle(edges, []string{"1", "2"})
-	if !hasCycle {
-		t.Error("expected cycle, got none")
-	}
-}
-
-func TestDetectCycle_TransitiveCycle(t *testing.T) {
-	// 1→2→3→1
-	edges := map[string][]string{
-		"1": {"2"},
-		"2": {"3"},
-		"3": {"1"},
-	}
-	_, hasCycle := detectCycle(edges, []string{"1", "2", "3"})
-	if !hasCycle {
-		t.Error("expected cycle, got none")
-	}
-}
-
-func TestDetectCycle_ExternalBlockerIgnored(t *testing.T) {
-	// 1 depends on 99 (external, not in batch)
-	edges := map[string][]string{
-		"1": {"99"},
-	}
-	node, hasCycle := detectCycle(edges, []string{"1"})
-	if hasCycle {
-		t.Errorf("expected no cycle (external blockers ignored in batch), got cycle member %s", node)
-	}
-}
-
-// --- unreadyBlockers tests ---
-
-func TestUnreadyBlockers_Pending(t *testing.T) {
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"}) // no complete label, still open
-	c := config{completeLabel: "agent-complete"}
-	edges := map[string][]string{"10": {"11"}}
-	got := unreadyBlockers(c, fc, "10", edges)
-	if !reflect.DeepEqual(got, []string{"11"}) {
-		t.Errorf("expected [11], got %v", got)
-	}
-}
-
-func TestUnreadyBlockers_MergedAndClosedAreReady(t *testing.T) {
-	fc := forge.NewFake()
-	// #11: PR merged — satisfied by merged PR regardless of labels.
-	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
-	fc.SetPR("11", forge.PR{URL: "https://github.com/owner/repo/pull/11"})
-	fc.SetPRState("https://github.com/owner/repo/pull/11", "MERGED")
-	// #12: issue closed with no PR — fallback satisfied.
-	fc.SetIssue(forge.Issue{Number: "12", State: "CLOSED"})
-	c := config{completeLabel: "agent-complete"}
-	edges := map[string][]string{"10": {"11", "12"}}
-	if got := unreadyBlockers(c, fc, "10", edges); len(got) != 0 {
-		t.Errorf("expected no unready blockers, got %v", got)
-	}
-}
-
-func TestUnreadyBlockers_Mixed(t *testing.T) {
-	fc := forge.NewFake()
-	// #11: PR merged — satisfied.
-	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
-	fc.SetPR("11", forge.PR{URL: "https://github.com/owner/repo/pull/11"})
-	fc.SetPRState("https://github.com/owner/repo/pull/11", "MERGED")
-	// #12: still open with no merged PR — blocking.
-	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN"})
-	c := config{completeLabel: "agent-complete"}
-	edges := map[string][]string{"10": {"11", "12"}}
-	if got := unreadyBlockers(c, fc, "10", edges); !reflect.DeepEqual(got, []string{"12"}) {
-		t.Errorf("expected [12], got %v", got)
-	}
-}
-
 // --- integer-knob parsing tests ---
 
 // TestMaxParallelEdgeCases covers the atoi() fallback for values where zero
@@ -249,66 +135,6 @@ func TestMaxJobsEdgeCases(t *testing.T) {
 		if c.maxJobs != tc.want {
 			t.Errorf("MAX_JOBS=%q: got %d, want %d", tc.env, c.maxJobs, tc.want)
 		}
-	}
-}
-
-// --- writeBlockedMarker tests ---
-
-func TestWriteBlockedMarker(t *testing.T) {
-	pwd := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := writeBlockedMarker(pwd, []string{"11", "13"}); err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(filepath.Join(pwd, "logs", blockedMarker))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := string(b); got != "#11, #13" {
-		t.Errorf("expected %q, got %q", "#11, #13", got)
-	}
-}
-
-// TestDispatchWaves_FailsDependentWhenBlockerFails verifies that a dependent
-// whose in-batch blocker reaches failedLabel is itself failed immediately,
-// rather than holding until depsWaitSecs.
-func TestDispatchWaves_FailsDependentWhenBlockerFails(t *testing.T) {
-	c := baseConfig()
-	c.label = "agent-trigger"
-	c.maxParallel = 2
-	c.branchPrefix = "agent/issue-"
-	c.mergePollInterval = 0
-	c.mergePollTimeout = 0
-	c.depsPollSecs = 1
-	c.depsWaitSecs = 2
-
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
-
-	fr := runner.NewFake()
-	fr.RunErr = errBoxFailed
-
-	edges := map[string][]string{"2": {"1"}}
-
-	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(c, fc)
-	if err := dispatchWaves(c, fc, f, s, []issue{
-		{number: "1", title: "blocker"},
-		{number: "2", title: "dependent"},
-	}, edges); err != nil {
-		t.Fatalf("dispatchWaves: %v", err)
-	}
-
-	iss2, err := fc.Issue("2")
-	if err != nil {
-		t.Fatalf("Issue(2): %v", err)
-	}
-	if !containsLabel(iss2.Labels, c.failedLabel) {
-		t.Errorf("issue 2 must have %q when blocker failed; labels=%v", c.failedLabel, iss2.Labels)
 	}
 }
 
@@ -563,8 +389,6 @@ func minimalValidConfig() config {
 		overlapGate:      "defer",
 	}
 }
-
-var errBoxFailed = fmt.Errorf("exit 1")
 
 // --- runDoctor tests ---
 
