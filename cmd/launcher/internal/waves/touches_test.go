@@ -7,11 +7,11 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestTouchSetsOverlap_LiteralPathHit verifies that touchSetsOverlap checks
-// every pattern pair across the two sets, not just the first (glob-semantics
-// per-pair matching is pinned in internal/glob).
+// TestTouchSetsOverlap_LiteralPathHit verifies touchSetsOverlap reports an
+// overlap when any pattern in a matches any pattern in b, delegating the
+// per-pair glob semantics (pinned in internal/glob) to glob.Overlap.
 func TestTouchSetsOverlap_LiteralPathHit(t *testing.T) {
-	if !touchSetsOverlap([]string{"lib/env-schema.nix"}, []string{"lib/env-schema.nix", "README.md"}) {
+	if !touchSetsOverlap([]string{"lib/env-schema.nix"}, []string{"README.md", "lib/env-schema.nix"}) {
 		t.Error("expected overlap on lib/env-schema.nix")
 	}
 }
