@@ -29,8 +29,6 @@ setup_run_env() {
   set_run_env
   cd "$BATS_TEST_TMPDIR" || exit
   export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
-  # Fail fast on future predicate mismatches rather than blocking CI for 2h.
-  export DEPS_WAIT_SECS=10
 }
 
 setup_fakes() {

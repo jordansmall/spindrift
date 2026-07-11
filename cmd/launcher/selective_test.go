@@ -165,8 +165,6 @@ func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
 	c.maxParallel = 4
-	c.depsPollSecs = 0
-	c.depsWaitSecs = 100
 
 	fc := forge.NewFake()
 	// #99 is already done — issue closed (PR merged + auto-close).
