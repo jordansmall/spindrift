@@ -2,74 +2,17 @@ package waves
 
 import (
 	"fmt"
-	"strings"
 	"testing"
-	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestTouchSetsOverlap_LiteralPathHit verifies that two touch-sets sharing an
-// identical literal path are reported as overlapping.
+// TestTouchSetsOverlap_LiteralPathHit verifies that touchSetsOverlap checks
+// every pattern pair across the two sets, not just the first (glob-semantics
+// per-pair matching is pinned in internal/glob).
 func TestTouchSetsOverlap_LiteralPathHit(t *testing.T) {
 	if !touchSetsOverlap([]string{"lib/env-schema.nix"}, []string{"lib/env-schema.nix", "README.md"}) {
 		t.Error("expected overlap on lib/env-schema.nix")
-	}
-}
-
-// TestTouchSetsOverlap_Disjoint verifies unrelated path globs never collide.
-func TestTouchSetsOverlap_Disjoint(t *testing.T) {
-	if touchSetsOverlap([]string{"cmd/launcher/*.go"}, []string{"docs/*.md"}) {
-		t.Error("expected no overlap between cmd/launcher/*.go and docs/*.md")
-	}
-}
-
-// TestTouchSetsOverlap_SingleSegmentWildcard verifies a single-segment "*"
-// glob overlaps a literal file in the same directory.
-func TestTouchSetsOverlap_SingleSegmentWildcard(t *testing.T) {
-	if !touchSetsOverlap([]string{"cmd/launcher/*.go"}, []string{"cmd/launcher/main.go"}) {
-		t.Error("expected cmd/launcher/*.go to overlap cmd/launcher/main.go")
-	}
-}
-
-// TestTouchSetsOverlap_DoubleStarAnyDepth verifies "**" overlaps a path
-// nested arbitrarily deep, mirroring MERGE_GUARD_PATHS' doublestar semantics.
-func TestTouchSetsOverlap_DoubleStarAnyDepth(t *testing.T) {
-	if !touchSetsOverlap([]string{"lib/**"}, []string{"lib/nested/dir/file.nix"}) {
-		t.Error("expected lib/** to overlap lib/nested/dir/file.nix")
-	}
-}
-
-// TestTouchSetsOverlap_DifferentDepthNoWildcardNoOverlap verifies that
-// without a "**" a mismatched segment count never overlaps.
-func TestTouchSetsOverlap_DifferentDepthNoWildcardNoOverlap(t *testing.T) {
-	if touchSetsOverlap([]string{"cmd/launcher/*.go"}, []string{"cmd/launcher/internal/forge/exec.go"}) {
-		t.Error("expected no overlap: extra path segment with no ** present")
-	}
-}
-
-// TestTouchSetsOverlap_ManyDoubleStarsDoesNotHang verifies that a declared
-// touch glob with many "**" segments — issue bodies are untrusted prompt
-// input, so a hostile filer could write one — does not blow up the naive
-// exponential backtracking a recursive "** matches any suffix" check would
-// hit; overlap checking must stay polynomial in the segment count.
-func TestTouchSetsOverlap_ManyDoubleStarsDoesNotHang(t *testing.T) {
-	// Every "**" can match the run of "y" segments, so the mismatch is only
-	// ever discovered at the final "x" vs "y" comparison — naive backtracking
-	// must re-explore every star/segment split before concluding no overlap.
-	pathological := strings.Repeat("**/", 20) + "x"
-	noTrailingX := strings.TrimSuffix(strings.Repeat("y/", 20), "/")
-
-	done := make(chan bool, 1)
-	go func() { done <- touchSetsOverlap([]string{pathological}, []string{noTrailingX}) }()
-
-	select {
-	case overlap := <-done:
-		if overlap {
-			t.Error("expected no overlap: no segment in the ** chain is literally x")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("touchSetsOverlap did not return within 2s — likely exponential backtracking on repeated **")
 	}
 }
 
