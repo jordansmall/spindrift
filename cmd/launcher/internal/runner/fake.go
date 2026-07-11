@@ -35,6 +35,13 @@ type Fake struct {
 
 	// WriteToOutput, if non-nil, is written to box.Output before Run returns.
 	WriteToOutput []byte
+
+	// RunFunc, if non-nil, is called instead of the RunErrs/RunErr logic —
+	// tests use it to control completion order and timing (e.g. staggered
+	// finishes for continuous-dispatch tests) without real sleeps. Called
+	// with the Fake's lock released, so it may block or trigger concurrent
+	// Run calls without deadlocking.
+	RunFunc func(Box) error
 }
 
 // NewFake returns an empty Fake runner.
@@ -56,25 +63,37 @@ func (f *Fake) IsReady() error {
 	return f.IsReadyErr
 }
 
-// Run records the box and returns the error for this call index. If RunErrs
-// is non-nil, RunErrs[i] is used (last element reused when exhausted);
-// otherwise RunErr is returned. If WriteToOutput is set and box.Output is
-// non-nil, the bytes are written to box.Output before returning.
+// Run records the box and returns the error for this call index. When
+// RunFunc is set, it is called instead (lock released first, so it may
+// block or trigger concurrent Run calls). Otherwise, if RunErrs is non-nil,
+// RunErrs[i] is used (last element reused when exhausted); otherwise RunErr
+// is returned. If WriteToOutput is set and box.Output is non-nil, the bytes
+// are written to box.Output before returning.
 func (f *Fake) Run(box Box) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	i := len(f.RunCalls)
 	f.RunCalls = append(f.RunCalls, box)
 	if len(f.WriteToOutput) > 0 && box.Output != nil {
 		box.Output.Write(f.WriteToOutput) //nolint:errcheck
 	}
-	if len(f.RunErrs) > 0 {
+	fn := f.RunFunc
+	var err error
+	switch {
+	case fn == nil && len(f.RunErrs) > 0:
 		if i < len(f.RunErrs) {
-			return f.RunErrs[i]
+			err = f.RunErrs[i]
+		} else {
+			err = f.RunErrs[len(f.RunErrs)-1]
 		}
-		return f.RunErrs[len(f.RunErrs)-1]
+	case fn == nil:
+		err = f.RunErr
 	}
-	return f.RunErr
+	f.mu.Unlock()
+
+	if fn != nil {
+		return fn(box)
+	}
+	return err
 }
 
 // Reap records the name.
