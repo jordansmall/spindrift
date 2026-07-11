@@ -13,55 +13,14 @@ func TestGitClient_ImplementsCodeForge(t *testing.T) {
 	var _ CodeForge = NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
 }
 
-// TestGitClient_PushOnly verifies the git Code Forge reports itself as
-// push-only, the capability settle uses instead of a codeForge=="git" string
-// comparison.
-func TestGitClient_PushOnly(t *testing.T) {
+// TestGitClient_NoPRForgeConcept verifies that the git Code Forge implements
+// no PR/CI/auto-merge surface at all — a type assertion against PRForge
+// reports absence, the mechanism callers use instead of a removed PushOnly()
+// flag.
+func TestGitClient_NoPRForgeConcept(t *testing.T) {
 	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
-	if !g.PushOnly() {
-		t.Error("PushOnly() = false, want true for the git Code Forge")
-	}
-}
-
-// TestGitClient_NoPRConcept verifies that OpenPRForBranch and PRForBranch
-// always report "not found" — the git Code Forge is push-only and has no PR
-// concept at all.
-func TestGitClient_NoPRConcept(t *testing.T) {
-	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
-
-	if pr, ok, err := g.OpenPRForBranch("agent/issue-1"); err != nil || ok {
-		t.Errorf("OpenPRForBranch = (%+v, %v, %v), want (_, false, nil)", pr, ok, err)
-	}
-	if url, ok, err := g.PRForBranch("agent/issue-1"); err != nil || ok {
-		t.Errorf("PRForBranch = (%q, %v, %v), want (_, false, nil)", url, ok, err)
-	}
-}
-
-// TestGitClient_NoCIOrAutoMergeConcept verifies the remaining CodeForge
-// methods that have no meaning off github: PRState and ListPRFiles report
-// "not supported", CheckState reports no checks, CanAutoMerge always reports
-// false, and EnqueueAutoMerge fails with an actionable message.
-func TestGitClient_NoCIOrAutoMergeConcept(t *testing.T) {
-	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
-
-	if _, err := g.PRState("agent/issue-1"); err == nil {
-		t.Error("PRState: want error, got nil")
-	}
-	if state, err := g.CheckState("agent/issue-1"); err != nil || state != StateNone {
-		t.Errorf("CheckState = (%v, %v), want (StateNone, nil)", state, err)
-	}
-	if _, err := g.ListPRFiles("agent/issue-1"); err == nil {
-		t.Error("ListPRFiles: want error, got nil")
-	}
-	if ok, err := g.CanAutoMerge(); err != nil || ok {
-		t.Errorf("CanAutoMerge = (%v, %v), want (false, nil)", ok, err)
-	}
-	err := g.EnqueueAutoMerge("agent/issue-1")
-	if err == nil {
-		t.Fatal("EnqueueAutoMerge: want error, got nil")
-	}
-	if !strings.Contains(err.Error(), "CODE_FORGE=github") {
-		t.Errorf("EnqueueAutoMerge error should point at CODE_FORGE=github, got: %v", err)
+	if _, ok := g.(PRForge); ok {
+		t.Error("gitClient satisfies PRForge, want it to implement CodeForge only")
 	}
 }
 

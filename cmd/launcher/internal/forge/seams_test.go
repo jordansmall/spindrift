@@ -57,50 +57,20 @@ func TestFake_ImplementsCodeForge(t *testing.T) {
 	var _ forge.CodeForge = forge.NewFake()
 }
 
-// TestFake_PushOnly_Configurable verifies the fake defaults to false (github)
-// and can be scripted true (git) for settle path tests.
-func TestFake_PushOnly_Configurable(t *testing.T) {
+// TestFake_ImplementsPRForge asserts that *Fake satisfies the optional
+// PRForge surface, matching the github adapter's shape.
+func TestFake_ImplementsPRForge(t *testing.T) {
+	var _ forge.PRForge = forge.NewFake()
+}
+
+// TestFake_AsPushOnly_HidesPRForge verifies that AsPushOnly wraps a Fake so a
+// type assertion against PRForge reports absence, matching the git adapter's
+// shape — the mechanism Settle uses in place of the removed PushOnly() flag.
+func TestFake_AsPushOnly_HidesPRForge(t *testing.T) {
 	f := forge.NewFake()
-	if f.PushOnly() {
-		t.Error("PushOnly() default = true, want false")
-	}
-	f.IsPushOnly = true
-	if !f.PushOnly() {
-		t.Error("PushOnly() after IsPushOnly=true = false, want true")
-	}
-}
-
-// TestFake_ImplementsClient asserts that *Fake still satisfies the combined Client.
-func TestFake_ImplementsClient(t *testing.T) {
-	var _ forge.Client = forge.NewFake()
-}
-
-// TestNewClient_ComposesIndependentSeams asserts that NewClient lets the
-// IssueTracker and CodeForge axes vary independently (ADR 0013): calls route
-// to the seam that declares them, and the ambiguous Probe method resolves to
-// the CodeForge.
-func TestNewClient_ComposesIndependentSeams(t *testing.T) {
-	it := forge.NewFake(testLabels)
-	it.SetIssue(forge.Issue{Number: "1", Title: "from tracker", Labels: []string{"ready-for-agent"}})
-	cf := forge.NewFake()
-	cf.ProbeRepo = "from code forge"
-
-	client := forge.NewClient(it, cf)
-
-	issues, err := client.ListIssues(forge.Dispatchable)
-	if err != nil {
-		t.Fatalf("ListIssues: %v", err)
-	}
-	if len(issues) != 1 || issues[0].Title != "from tracker" {
-		t.Errorf("ListIssues = %+v, want issue from the it Fake", issues)
-	}
-
-	repo, err := client.Probe()
-	if err != nil {
-		t.Fatalf("Probe: %v", err)
-	}
-	if repo != "from code forge" {
-		t.Errorf("Probe() = %q, want %q (the CodeForge's Probe)", repo, "from code forge")
+	cf := f.AsPushOnly()
+	if _, ok := cf.(forge.PRForge); ok {
+		t.Error("AsPushOnly() satisfies PRForge, want it hidden")
 	}
 }
 

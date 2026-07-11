@@ -184,11 +184,6 @@ func (e *execClient) Probe() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// PushOnly is always false: the github Code Forge opens a PR and watches CI.
-func (e *execClient) PushOnly() bool {
-	return false
-}
-
 // ListLabels returns the names of all labels defined in the repository.
 func (e *execClient) ListLabels() ([]string, error) {
 	out, err := exec.Command("gh", "label", "list",
