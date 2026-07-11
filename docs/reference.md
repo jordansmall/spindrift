@@ -173,7 +173,7 @@ targeted fix, committing, pushing, and waiting for CI — emitting the same
 byte-identical to before this prompt existed.
 
 On genuine-red, `selfHeal` also fetches the failed check names plus a bounded
-log excerpt for the PR's head commit (`forge.Client.FailureDetail`, the same
+log excerpt for the PR's head commit (`forge.PRForge.FailureDetail`, the same
 fine-grained-PAT-safe GraphQL `statusCheckRollup` query `CheckState` uses) and
 forwards it into the fix box as `CI_FAILURE_SUMMARY`. `fix-prompt.md` renders
 it as a `# CI FAILURE` section ahead of `# CONTEXT`, so the fix agent goes
