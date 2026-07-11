@@ -373,8 +373,6 @@ in
         };
         concurrency = {
           maxJobs = 2;
-          depsPollSecs = 60;
-          depsWaitSecs = 3600;
         };
         branches = {
           mergePollInterval = 90;
@@ -422,10 +420,6 @@ in
           || { echo "TRANSIENT_RETRY_MAX:-5 not baked in run cmd" >&2; exit 1; }
         grep -q 'MAX_JOBS:-2' "$behaviorRun/bin/run" \
           || { echo "MAX_JOBS:-2 not baked in run cmd" >&2; exit 1; }
-        grep -q 'DEPS_POLL_SECS:-60' "$behaviorRun/bin/run" \
-          || { echo "DEPS_POLL_SECS:-60 not baked in run cmd" >&2; exit 1; }
-        grep -q 'DEPS_WAIT_SECS:-3600' "$behaviorRun/bin/run" \
-          || { echo "DEPS_WAIT_SECS:-3600 not baked in run cmd" >&2; exit 1; }
         grep -q 'MERGE_POLL_INTERVAL:-90' "$behaviorRun/bin/run" \
           || { echo "MERGE_POLL_INTERVAL:-90 not baked in run cmd" >&2; exit 1; }
         grep -q 'MERGE_POLL_TIMEOUT:-3600' "$behaviorRun/bin/run" \

@@ -114,6 +114,19 @@ func TestParseFlags_MissingValue(t *testing.T) {
 	}
 }
 
+// TestSchemaFlags_ExcludesRemovedDepsKnobs: DEPS_POLL_SECS/DEPS_WAIT_SECS
+// configured the in-process dependency-wave poll, deleted by #522/#524; the
+// knobs must not survive in the schema-generated flag table (ADR 0019).
+func TestSchemaFlags_ExcludesRemovedDepsKnobs(t *testing.T) {
+	for _, removed := range []string{"DEPS_POLL_SECS", "DEPS_WAIT_SECS"} {
+		for _, entry := range schemaFlags {
+			if entry.env == removed {
+				t.Errorf("removed knob %s must not appear in schemaFlags", removed)
+			}
+		}
+	}
+}
+
 // TestParseFlags_SecretsExcluded: secret knobs must not appear in schemaFlags.
 func TestParseFlags_SecretsExcluded(t *testing.T) {
 	secrets := []string{"GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}

@@ -86,11 +86,7 @@
             #   mergePollTimeout = 1800;
             # };
             # concurrency = {
-            #   # seconds between dependency-wave poll iterations
-            #   depsPollSecs = 30;
-            #   # total seconds to wait for dependency-wave completion before aborting
-            #   depsWaitSecs = 7200;
-            #   # dependency-wave concurrency cap; 0 means unlimited
+            #   # caps the wave size; 0 means uncapped
             #   maxJobs = 0;
             #   # maximum concurrent agent containers
             #   maxParallel = 3;
