@@ -28,8 +28,8 @@ func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
-	if err := drainMaxJobs(c, fc, dir, f, s, []Issue{
+	s := newSettle(fc, fc)
+	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "blocked issue"},
 		{Number: "2", Title: "unblocked issue"},
 	}, edges, OriginDiscovered); err != nil {
@@ -74,8 +74,8 @@ func TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
-	if err := drainMaxJobs(c, fc, dir, f, s, []Issue{
+	s := newSettle(fc, fc)
+	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "overlapping issue"},
 		{Number: "2", Title: "clean issue"},
 	}, map[string][]string{}, OriginDiscovered); err != nil {
@@ -111,8 +111,8 @@ func TestDrainMaxJobs_FailsDependentWhenBlockerFails(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
-	if err := drainMaxJobs(c, fc, dir, f, s, []Issue{
+	s := newSettle(fc, fc)
+	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "dependent"},
 		{Number: "2", Title: "unblocked"},
 	}, edges, OriginDiscovered); err != nil {
@@ -155,8 +155,8 @@ func TestDrainMaxJobs_MaxJobsCapHonored(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
-	if err := drainMaxJobs(c, fc, dir, f, s, []Issue{
+	s := newSettle(fc, fc)
+	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
 		{Number: "3", Title: "third"},
@@ -189,8 +189,8 @@ func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
-	err := drainMaxJobs(c, fc, dir, f, s, []Issue{
+	s := newSettle(fc, fc)
+	err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "blocked issue"},
 	}, edges, OriginDiscovered)
 
@@ -223,10 +223,10 @@ func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
+	s := newSettle(fc, fc)
 	// The claimed path returns nil (writes blocked marker path internally),
 	// not ErrOpenNoneDispatchable and not a cascade-fail.
-	if err := drainMaxJobs(c, fc, dir, f, s, []Issue{
+	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
 	}, edges, OriginClaimed); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)

@@ -66,7 +66,7 @@ func TestBatchHasTouchOverlap_DetectsOverlap(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- lib/env-schema.nix", State: "OPEN", Labels: []string{c.InProgressLabel}})
 
-	if !batchHasTouchOverlap(c, fc, []Issue{{Number: "10"}}) {
+	if !batchHasTouchOverlap(c, fc, fc, []Issue{{Number: "10"}}) {
 		t.Error("expected batch overlap to be detected")
 	}
 }
@@ -79,7 +79,7 @@ func TestBatchHasTouchOverlap_GateOffNeverOverlaps(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- lib/env-schema.nix", State: "OPEN", Labels: []string{c.InProgressLabel}})
 
-	if batchHasTouchOverlap(c, fc, []Issue{{Number: "10"}}) {
+	if batchHasTouchOverlap(c, fc, fc, []Issue{{Number: "10"}}) {
 		t.Error("expected OVERLAP_GATE=off to disable the check")
 	}
 }
@@ -113,7 +113,7 @@ func TestOverlapsInProgress_CollidesViaOpenPRChangedFiles(t *testing.T) {
 	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
 	fc.SetPRFiles("https://github.com/owner/repo/pull/20", []string{"internal/pkgx/foo.go"})
 
-	checkOverlap := waveOverlapCheck(c, fc)
+	checkOverlap := waveOverlapCheck(c, fc, fc)
 	collider, held := checkOverlap("10")
 	if !held || collider != "20" {
 		t.Errorf("checkOverlap(10) = (%q, %v), want (\"20\", true) via #20's open PR changed files", collider, held)
@@ -139,11 +139,10 @@ func TestPRTouchesOf_ReturnsOpenPRChangedFiles(t *testing.T) {
 // no PR concept — never attempts a PR-file lookup, matching v1 fallback.
 func TestPRTouchesOf_NonGithubForgeReturnsNil(t *testing.T) {
 	fc := forge.NewFake()
-	fc.IsPushOnly = true
 	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
 	fc.SetPRFiles("https://github.com/owner/repo/pull/20", []string{"lib/env-schema.nix"})
 
-	if got := prTouchesOf(fc, "20"); got != nil {
+	if got := prTouchesOf(fc.AsPushOnly(), "20"); got != nil {
 		t.Errorf("prTouchesOf on a non-github forge = %v, want nil", got)
 	}
 }

@@ -38,8 +38,8 @@ func TestDispatchWaves_TouchOverlapDeadlocksWithoutRelease(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
-	err := dispatchWaves(c, fc, f, s, []Issue{
+	s := newSettle(fc, fc)
+	err := dispatchWaves(c, fc, fc, f, s, []Issue{
 		{Number: "10", Title: "candidate"},
 	}, map[string][]string{})
 	if err == nil {
@@ -84,8 +84,8 @@ func TestDispatchWaves_TouchOverlapDispatchesAfterColliderCompletes(t *testing.T
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
-	if err := dispatchWaves(c, fc, f, s, []Issue{
+	s := newSettle(fc, fc)
+	if err := dispatchWaves(c, fc, fc, f, s, []Issue{
 		{Number: "10", Title: "candidate"},
 	}, map[string][]string{}); err != nil {
 		t.Fatalf("dispatchWaves: %v", err)
@@ -128,8 +128,8 @@ func TestDispatchWaves_NoTouchesDeclaredDispatchesImmediately(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
-	if err := dispatchWaves(c, fc, f, s, []Issue{
+	s := newSettle(fc, fc)
+	if err := dispatchWaves(c, fc, fc, f, s, []Issue{
 		{Number: "10", Title: "candidate"},
 	}, map[string][]string{}); err != nil {
 		t.Fatalf("dispatchWaves: %v", err)
@@ -172,8 +172,8 @@ func TestDispatchWaves_OverlapV2HoldsOnPRChangedFiles(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
-	err := dispatchWaves(c, fc, f, s, []Issue{
+	s := newSettle(fc, fc)
+	err := dispatchWaves(c, fc, fc, f, s, []Issue{
 		{Number: "10", Title: "candidate"},
 	}, map[string][]string{})
 	if err == nil {
@@ -205,8 +205,8 @@ func TestDispatchWaves_FailsDependentWhenBlockerFails(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
-	if err := dispatchWaves(c, fc, f, s, []Issue{
+	s := newSettle(fc, fc)
+	if err := dispatchWaves(c, fc, fc, f, s, []Issue{
 		{Number: "1", Title: "blocker"},
 		{Number: "2", Title: "dependent"},
 	}, edges); err != nil {
@@ -249,8 +249,8 @@ func TestDispatchWaves_OverlapGateOffDisablesCheck(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
-	if err := dispatchWaves(c, fc, f, s, []Issue{
+	s := newSettle(fc, fc)
+	if err := dispatchWaves(c, fc, fc, f, s, []Issue{
 		{Number: "10", Title: "candidate"},
 	}, map[string][]string{}); err != nil {
 		t.Fatalf("dispatchWaves: %v", err)

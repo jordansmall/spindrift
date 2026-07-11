@@ -12,9 +12,12 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// countingForge wraps a forge.Client and counts InProgress transitions atomically.
+// countingForge wraps a *forge.Fake and counts InProgress transitions
+// atomically. Embedding the concrete *Fake (rather than an interface)
+// promotes its full IssueTracker + CodeForge + PRForge surface, so a
+// countingForge value satisfies whichever seam(s) a call site needs.
 type countingForge struct {
-	forge.Client
+	*forge.Fake
 	claimCount *int32
 }
 
@@ -22,7 +25,7 @@ func (f *countingForge) TransitionState(num string, from, to forge.DispatchState
 	if to == forge.InProgress {
 		atomic.AddInt32(f.claimCount, 1)
 	}
-	return f.Client.TransitionState(num, from, to)
+	return f.Fake.TransitionState(num, from, to)
 }
 
 // signalRunner blocks the first Run call until released; subsequent calls return immediately.
@@ -58,7 +61,7 @@ func TestDispatchWave_ClaimsGatedByMaxParallel(t *testing.T) {
 	inner.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
 
 	var count int32
-	fc := &countingForge{Client: inner, claimCount: &count}
+	fc := &countingForge{Fake: inner, claimCount: &count}
 	fr := &signalRunner{
 		firstStarted: make(chan struct{}),
 		release:      make(chan struct{}),
@@ -66,7 +69,7 @@ func TestDispatchWave_ClaimsGatedByMaxParallel(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
+	s := newSettle(fc, fc)
 	waveDone := make(chan struct{})
 	go func() {
 		dispatchWave(c, fc, f, s, []Issue{
@@ -118,14 +121,14 @@ func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
 
 	var count int32
-	cfc := &countingForge{Client: fc, claimCount: &count}
+	cfc := &countingForge{Fake: fc, claimCount: &count}
 
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil} // first slot: fail; second: succeed
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(cfc)
+	s := newSettle(cfc, cfc)
 	dispatchWave(c, cfc, f, s, []Issue{
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
@@ -177,7 +180,7 @@ func TestDispatchWave_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
+	s := newSettle(fc, fc)
 	dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}})
 
 	iss, err := fc.Issue("1")
@@ -201,7 +204,6 @@ func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	c.MaxParallel = 2
 
 	fc := forge.NewFake(dispatchLabels(c))
-	fc.IsPushOnly = true
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.InProgressLabel}})
 	// The real git Code Forge has no PR concept — PRState always errors. A
 	// settle path that (incorrectly) called verifyMerged for a push-only
@@ -216,7 +218,7 @@ func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
+	s := newSettle(fc, fc.AsPushOnly())
 	dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}})
 
 	iss, err := fc.Issue("1")
@@ -247,7 +249,6 @@ func TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 	c.MaxParallel = 2
 
 	fc := forge.NewFake()
-	fc.IsPushOnly = true
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.InProgressLabel}})
 	fc.PRStateErr = errors.New("PRState: not supported by the git Code Forge (push-only, no PR concept)")
 
@@ -258,7 +259,7 @@ func TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
+	s := newSettle(fc, fc.AsPushOnly())
 	dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}})
 
 	iss, err := fc.Issue("1")

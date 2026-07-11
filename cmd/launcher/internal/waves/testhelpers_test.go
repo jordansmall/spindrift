@@ -31,7 +31,7 @@ func baseConfig() Config {
 	}
 }
 
-// dispatchLabels builds the DispatchLabels mapping a fake forge.Client needs
+// dispatchLabels builds the DispatchLabels mapping a fake forge adapter needs
 // from a test Config.
 func dispatchLabels(cfg Config) forge.DispatchLabels {
 	return forge.DispatchLabels{
@@ -77,11 +77,11 @@ func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
 
 // newSettle builds a *settle.Settle with the immediate-merge, no-poll-delay
 // settings the wave/drain tests exercise.
-func newSettle(fc forge.Client) *settle.Settle {
+func newSettle(it forge.IssueTracker, cf forge.CodeForge) *settle.Settle {
 	return settle.New(settle.Config{
 		MergeMode:         "immediate",
 		CompleteLabel:     "agent-complete",
 		MergePollInterval: 0,
 		MergePollTimeout:  100,
-	}, fc)
+	}, it, cf)
 }
