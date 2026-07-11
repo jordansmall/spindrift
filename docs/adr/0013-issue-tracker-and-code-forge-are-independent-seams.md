@@ -59,3 +59,35 @@ file frontmatter). The two axes are **freely combinable and permissive** — eve
   local `created` frontmatter); the launcher never compares IDs numerically. The
   `fanout-blocker` barrier was retired as legacy dogfooding scaffolding and is
   not carried into the new backends.
+
+## Amendment (issue #517): narrow Code Forge, optional PRForge, retire Client
+
+The original Code Forge interface still carried 13 methods, and the push-only
+`git` adapter stubbed six of them (PR lookup/open, PR state, check state,
+failure detail, PR files) plus the auto-merge pair, gated by a `PushOnly()`
+capability flag. That flag let capability knowledge leak across the seam
+into `internal/settle`, which had to ask "am I push-only?" before touching
+any PR/CI method — the exact "lying about capabilities" failure mode this
+ADR's Considered Options already rejected for a single stubbed interface.
+
+The fix narrows `CodeForge` to the four methods every adapter honors with
+real behavior — `AgentBranch`, `Merge`, `Rebase`, `Probe` — and moves the
+PR/CI-rollup/auto-merge surface to a new **`PRForge`** interface
+(`OpenPRForBranch`, `PRForBranch`, `PRState`, `CheckState`, `FailureDetail`,
+`ListPRFiles`, `CanAutoMerge`, `EnqueueAutoMerge`). Only the `github` adapter
+implements `PRForge`; the `git` adapter implements `CodeForge` alone, with no
+stub methods at all. Callers discover the PR surface with the standard Go
+optional-interface pattern — `pr, ok := cf.(forge.PRForge)` — instead of a
+boolean flag, so `internal/settle` branches on whether the concrete adapter
+actually has a PR to manage rather than on a self-reported capability.
+
+This also let the combined `Client` interface and its `combinedClient`
+wrapper (`forge.NewClient(it, cf)`) retire. A type assertion against
+`PRForge` must reach the real adapter value; a wrapper embedding both seams
+would still satisfy the assertion even when composed from an IssueTracker
+that has nothing to do with the CodeForge's PR capability, defeating the
+point. `bootstrap` now wires `IssueTracker` and `CodeForge` as two
+independently-typed values (mirroring what `doctor` already did by probing
+each seam through its own adapter, per the "git+github" example in
+Considered Options), and every consumer takes the exact seam(s) it calls
+methods on instead of the combined type.

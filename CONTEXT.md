@@ -89,19 +89,22 @@ Dispatch states, never in a backend's native mechanism.
 _Avoid_: issue source, ticketing, backlog.
 
 **Code Forge**:
-The seam through which the Harness lands code. A second axis independent of the
-Issue Tracker, freely combinable with any of them. **A git remote always exists**
-— the Box clones from it and pushes to it exactly as it does today; there is no
+The seam through which the Harness lands code — the narrow core every adapter
+honors with real behavior: agent branch naming, rebase, merge/landing under
+`MERGE_MODE`, and a connectivity probe. A second axis independent of the Issue
+Tracker, freely combinable with any of them. **A git remote always exists** —
+the Box clones from it and pushes to it exactly as it does today; there is no
 mounting of a host working copy and no launcher-side git. Two values:
 
 - `github` — the full flow: open a PR, watch the CI rollup, rebase, merge. The
-  `forge.Client` `gh`-exec adapter; only this value has a PR, CI-watch, or merge
-  gate.
+  `gh`-exec adapter; the only value that additionally implements **PRForge**
+  (see below).
 - `git` — **push-only** to a plain git remote URL (self-hosted git, gitea,
   GitLab-without-MRs, a bare server repo): clone, commit to a per-issue branch,
-  push, and stop. No PR, no CI, no merge gate. `MERGE_MODE` maps to remote pushes
-  — `manual` pushes the feature branch; `immediate` pushes straight to the target
-  branch; `auto` is native GitHub auto-merge and has no meaning here.
+  push, and stop. No PR, no CI, no merge gate — it implements CodeForge only,
+  with no stub methods. `MERGE_MODE` maps to remote pushes — `manual` pushes
+  the feature branch; `immediate` pushes straight to the target branch; `auto`
+  is native GitHub auto-merge and has no meaning here.
 
 The no-remote / fully-local code path (mount the operator's repo, launcher lands
 the branch) was considered and **cut**: a git remote to push to is a hard
@@ -110,6 +113,20 @@ requirement. Solo/private use is served by pairing `git` here with an
 _Was_: "Forge" (a single seam over the Target repo host); split into Issue
 Tracker + Code Forge once issues and code host became independent axes.
 _Avoid_: GitHub adapter, API layer, client wrapper.
+
+**PRForge**:
+The optional PR, CI-rollup, and auto-merge surface (`OpenPRForBranch`,
+`PRForBranch`, `PRState`, `CheckState`, `FailureDetail`, `ListPRFiles`,
+`CanAutoMerge`, `EnqueueAutoMerge`) split out of Code Forge (ADR 0013
+amendment, issue #517). Only the `github` adapter implements it; callers
+discover it with a type assertion — `pr, ok := cf.(forge.PRForge)` — the
+standard Go optional-interface pattern, rather than a `PushOnly()` capability
+flag. `internal/settle` is the primary consumer: it resolves `PRForge` once at
+construction and branches on its presence to skip the CI-wait/merge-gate
+entirely for a push-only forge.
+_Was_: a `PushOnly()` bool on the combined Code Forge interface, plus six
+stubbed methods on the `git` adapter.
+_Avoid_: PR client, GitHub-only interface.
 
 **Backend matrix**:
 Issue Tracker and Code Forge are two independent, freely-combinable axes
