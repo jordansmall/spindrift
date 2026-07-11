@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/waves"
 )
 
 // selectiveListDispatch dispatches a hand-picked list of issues. It bypasses the
@@ -36,7 +36,7 @@ func selectiveListDispatch(c config, fc forge.Client, pwd string, f *dispatch.Fa
 	}
 
 	// Build blocker graph and evict dependents with unmet external blockers.
-	edges, err := buildEdges(fc, issues)
+	edges, err := waves.BuildEdges(fc, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
@@ -51,28 +51,11 @@ func selectiveListDispatch(c config, fc forge.Client, pwd string, f *dispatch.Fa
 		return nil
 	}
 
-	if err := os.MkdirAll(pwd+"/logs", 0o755); err != nil {
+	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(issues), Edges: edges})
+	if err != nil {
 		return err
 	}
-
-	hasEdges := false
-	for _, iss := range issues {
-		if len(edges[iss.number]) > 0 {
-			hasEdges = true
-			break
-		}
-	}
-
-	if hasEdges {
-		if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
-			return fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
-		}
-		fmt.Fprintf(stdout, "==> %d issue(s); dispatching in dependency order\n", len(issues))
-		return dispatchWaves(c, fc, f, s, issues, edges)
-	}
-	fmt.Fprintf(stdout, "==> %d issue(s); launching up to %d container(s) at a time\n", len(issues), c.maxParallel)
-	dispatchWave(c, fc, f, s, issues)
-	return nil
+	return waves.Run(selectiveWavesConfig(c), fc, pwd, f, s, plan)
 }
 
 // fetchSelectiveIssues fetches each issue by number and returns the full list
@@ -128,7 +111,7 @@ func evictUnmetBlockers(c config, fc forge.Client, issues []issue, edges map[str
 		if willRun[blocker] {
 			return true
 		}
-		return blockerReady(c, fc, blocker)
+		return waves.BlockerReady(fc, blocker)
 	}
 
 	// Iterate the issues slice (not the map) to produce stable output order.
@@ -168,7 +151,7 @@ func evictUnmetBlockers(c config, fc forge.Client, issues []issue, edges map[str
 // already satisfied (closed/complete). Used only for notice formatting.
 func firstUnmet(c config, fc forge.Client, willRun map[string]bool, deps []string) string {
 	for _, dep := range deps {
-		if !willRun[dep] && !blockerReady(c, fc, dep) {
+		if !willRun[dep] && !waves.BlockerReady(fc, dep) {
 			return dep
 		}
 	}

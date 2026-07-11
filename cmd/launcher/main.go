@@ -13,14 +13,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/waves"
 )
 
 type config struct {
@@ -454,6 +453,43 @@ func newSettle(c config, fc forge.Client) *settle.Settle {
 	return settle.New(settleConfig(c), fc)
 }
 
+// wavesConfig builds the subset of config the wave engine (internal/waves)
+// needs.
+func wavesConfig(c config) waves.Config {
+	return waves.Config{
+		MaxParallel:     c.maxParallel,
+		MaxJobs:         c.maxJobs,
+		DepsPollSecs:    c.depsPollSecs,
+		DepsWaitSecs:    c.depsWaitSecs,
+		OverlapGate:     c.overlapGate,
+		Label:           c.label,
+		InProgressLabel: c.inProgressLabel,
+		CompleteLabel:   c.completeLabel,
+		FailedLabel:     c.failedLabel,
+	}
+}
+
+// selectiveWavesConfig builds the wave-engine config for the operator-
+// specified `dispatch <nums>` path: MAX_JOBS never applies to an explicit
+// selection (the operator already named the exact issues to run), so it's
+// zeroed regardless of the global config value — matching the original
+// behaviour of drain being run()-only.
+func selectiveWavesConfig(c config) waves.Config {
+	cfg := wavesConfig(c)
+	cfg.MaxJobs = 0
+	return cfg
+}
+
+// toWaveIssues converts main's local issue type to waves.Issue for a call
+// into the wave engine.
+func toWaveIssues(issues []issue) []waves.Issue {
+	out := make([]waves.Issue, len(issues))
+	for i, iss := range issues {
+		out[i] = waves.Issue{Number: iss.number, Title: iss.title}
+	}
+	return out
+}
+
 // build realizes the sandbox image or store closures without running any agent.
 func build() error {
 	c := loadConfig()
@@ -472,25 +508,6 @@ func build() error {
 		r = runner.NewOCI(rc, pwd)
 	}
 	return r.EnsureReady()
-}
-
-// transitionState is a best-effort dispatch-state transition that logs but
-// does not propagate errors, matching the original behaviour.
-func transitionState(fc forge.Client, num string, from, to forge.DispatchState) {
-	if err := fc.TransitionState(num, from, to); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %d\n", num, to)
-	}
-}
-
-// claimIssue marks an issue in-progress before dispatch. When discovery already
-// runs off the in-progress label — the workflow claimed the issue in YAML
-// before the launcher started — the transition would be a no-op, so it is
-// skipped.
-func claimIssue(c config, fc forge.Client, num string) {
-	if c.label == c.inProgressLabel {
-		return
-	}
-	transitionState(fc, num, forge.Dispatchable, forge.InProgress)
 }
 
 // checkAutoMergePreflight verifies that the repo allows GitHub's native
@@ -523,91 +540,15 @@ func openPRForBranch(fc forge.Client, branch string) (url string, isDraft bool, 
 	return pr.URL, pr.IsDraft, true, nil
 }
 
-// Sentinel errors translated to specific exit codes so callers like dogfood.sh
-// can distinguish termination reasons without a separate gh probe.
+// Sentinel error translated to a specific exit code so callers like
+// dogfood.sh can distinguish termination reasons without a separate gh
+// probe.
 //
 //	exit 2 (errQueueEmpty): discoverIssues found no open dispatchable issues.
-//	exit 3 (errOpenNoneDispatchable): open dispatchable issues exist but drain
-//	  selected zero (all blocked/deferred); the driving loop should stop with a
-//	  triage message rather than hot-looping.
-var (
-	errQueueEmpty           = errors.New("queue empty")
-	errOpenNoneDispatchable = errors.New("open issues exist but none are dispatchable")
-)
-
-// buildEdges returns the dependency graph for the given batch of issues by
-// calling the IssueTracker's DepsOf for each. Non-fatal per-issue errors are
-// skipped, matching the original best-effort behaviour.
-func buildEdges(fc forge.Client, issues []issue) (map[string][]string, error) {
-	edges := map[string][]string{}
-	for _, iss := range issues {
-		deps, err := fc.DepsOf(iss.number)
-		if err != nil {
-			// Non-fatal: skip issues whose data cannot be fetched.
-			continue
-		}
-		if len(deps) > 0 {
-			edges[iss.number] = deps
-		}
-	}
-	return edges, nil
-}
-
-// detectCycle runs Kahn's algorithm on the in-batch portion of the dependency
-// graph. Only edges where both endpoints appear in nums are considered; external
-// blockers (not in the batch) are ignored. Returns a cycle-member issue number
-// and true when a cycle exists; returns "" and false for an acyclic graph.
-func detectCycle(edges map[string][]string, nums []string) (string, bool) {
-	inBatch := make(map[string]bool, len(nums))
-	for _, n := range nums {
-		inBatch[n] = true
-	}
-
-	indegree := make(map[string]int, len(nums))
-	adj := map[string][]string{}
-	for _, n := range nums {
-		indegree[n] = 0
-	}
-	for child, blockers := range edges {
-		if !inBatch[child] {
-			continue
-		}
-		for _, blocker := range blockers {
-			if !inBatch[blocker] {
-				continue
-			}
-			indegree[child]++
-			adj[blocker] = append(adj[blocker], child)
-		}
-	}
-
-	queue := make([]string, 0, len(nums))
-	for _, n := range nums {
-		if indegree[n] == 0 {
-			queue = append(queue, n)
-		}
-	}
-	done := 0
-	for len(queue) > 0 {
-		node := queue[0]
-		queue = queue[1:]
-		done++
-		for _, dep := range adj[node] {
-			indegree[dep]--
-			if indegree[dep] == 0 {
-				queue = append(queue, dep)
-			}
-		}
-	}
-	if done < len(nums) {
-		for _, n := range nums {
-			if indegree[n] > 0 {
-				return n, true
-			}
-		}
-	}
-	return "", false
-}
+//	exit 3 (waves.ErrOpenNoneDispatchable): open dispatchable issues exist but
+//	  drain selected zero (all blocked/deferred); the driving loop should
+//	  stop with a triage message rather than hot-looping.
+var errQueueEmpty = errors.New("queue empty")
 
 func containsLabel(labels []string, target string) bool {
 	for _, l := range labels {
@@ -618,102 +559,43 @@ func containsLabel(labels []string, target string) bool {
 	return false
 }
 
-// blockerReady returns true when the blocker's PR is merged, or when the
-// blocker issue is closed with no discoverable PR (human-handled work).
-func blockerReady(c config, fc forge.Client, dep string) bool {
-	branch := fc.AgentBranch(dep)
-	prURL, ok, err := fc.PRForBranch(branch)
-	if err == nil && ok {
-		state, stateErr := fc.PRState(prURL)
-		if stateErr == nil {
-			return state == forge.PRMerged
-		}
-		return false
-	}
-	fi, err := fc.Issue(dep)
-	if err != nil {
-		return false
-	}
-	if fi.State == forge.IssueClosed {
-		fmt.Printf("    .. blocker #%s is closed (no discoverable PR); treating as satisfied\n", dep)
-		return true
-	}
-	return false
-}
-
-// issueIsReady returns true when all of num's declared blockers are ready.
-func issueIsReady(c config, fc forge.Client, num string, edges map[string][]string) bool {
-	return len(unreadyBlockers(c, fc, num, edges)) == 0
-}
-
-// hasFailedInBatchBlocker returns true when any of num's in-batch declared
-// blockers carry failedLabel, meaning the dependent can never proceed.
-func hasFailedInBatchBlocker(c config, fc forge.Client, num string, edges map[string][]string) bool {
-	for _, dep := range edges[num] {
-		fi, err := fc.Issue(dep)
-		if err != nil {
-			continue
-		}
-		if containsLabel(fi.Labels, c.failedLabel) {
-			return true
-		}
-	}
-	return false
-}
-
-// unreadyBlockers returns num's declared blockers that are not yet satisfied,
-// in edge order. Empty means the issue is ready to dispatch.
-func unreadyBlockers(c config, fc forge.Client, num string, edges map[string][]string) []string {
-	var out []string
-	for _, dep := range edges[num] {
-		if !blockerReady(c, fc, dep) {
-			out = append(out, dep)
-		}
-	}
-	return out
-}
-
-// blockedMarker is the file the launcher drops under logs/ when a claimed
-// single issue cannot start because a blocker is unmet. The dispatching
-// pipeline reads it to release the claim and comment; detection stays here so
-// the two blocker formats are parsed once, in one place.
-const blockedMarker = "blocked.txt"
-
-// writeBlockedMarker records the unmet blockers as a "#a, #b" list for the
-// workflow to interpolate into its release comment.
-func writeBlockedMarker(pwd string, blockers []string) error {
-	refs := make([]string, len(blockers))
-	for i, b := range blockers {
-		refs[i] = "#" + b
-	}
-	path := filepath.Join(pwd, "logs", blockedMarker)
-	return os.WriteFile(path, []byte(strings.Join(refs, ", ")), 0o644)
-}
-
-// discoverIssues resolves the batch of issues to dispatch. When ISSUE_NUMBER is
-// set the workflow has already claimed exactly this issue (label swapped to
-// in-progress before the build), so we target it directly rather than querying
-// by label — a label query could otherwise pick up a different issue stranded
-// on the same in-progress label by an earlier crash.
-func discoverIssues(c config, fc forge.Client) ([]issue, error) {
+// resolveOrigin is the one place c.issueNumber is consulted as the
+// claimed-single-issue-vs-discovered-batch sentinel; every other call site
+// (discovery, run, drain, preview) reads the derived Origin value instead of
+// re-checking the sentinel itself.
+func resolveOrigin(c config) waves.Origin {
 	if c.issueNumber != "" {
+		return waves.OriginClaimed
+	}
+	return waves.OriginDiscovered
+}
+
+// discoverIssues resolves the batch of issues to dispatch and the Origin that
+// batch came from. When ISSUE_NUMBER is set the workflow has already claimed
+// exactly this issue (label swapped to in-progress before the build), so we
+// target it directly rather than querying by label — a label query could
+// otherwise pick up a different issue stranded on the same in-progress label
+// by an earlier crash.
+func discoverIssues(c config, fc forge.Client) ([]issue, waves.Origin, error) {
+	origin := resolveOrigin(c)
+	if origin == waves.OriginClaimed {
 		fmt.Printf("==> targeting claimed issue #%s in %s\n", c.issueNumber, c.repoSlug)
 		fi, err := fc.Issue(c.issueNumber)
 		if err != nil {
-			return nil, err
+			return nil, origin, err
 		}
-		return []issue{{number: fi.Number, title: fi.Title}}, nil
+		return []issue{{number: fi.Number, title: fi.Title}}, origin, nil
 	}
 	fmt.Printf("==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
 	rawIssues, err := fc.ListIssues(forge.Dispatchable)
 	if err != nil {
-		return nil, err
+		return nil, origin, err
 	}
 	var issues []issue
 	for _, fi := range rawIssues {
 		issues = append(issues, issue{number: fi.Number, title: fi.Title})
 	}
-	return issues, nil
+	return issues, origin, nil
 }
 
 // reconcileStranded discovers open issues carrying inProgressLabel that also
@@ -890,26 +772,30 @@ func previewIssues(c config, fc forge.Client, w io.Writer, issueNums []string) e
 		return previewSelectiveList(c, fc, w, issueNums)
 	}
 
-	issues, err := discoverIssues(c, fc)
+	issues, origin, err := discoverIssues(c, fc)
 	if err != nil {
 		return err
 	}
-	if c.issueNumber == "" && len(issues) == 0 {
+	if origin == waves.OriginDiscovered && len(issues) == 0 {
 		fmt.Fprintf(w, "repo: %s  merge-mode: %s\nno open '%s' issues — nothing to dispatch.\n", c.repoSlug, c.mergeMode, c.label)
 		return nil
 	}
-	edges, err := buildEdges(fc, issues)
+	edges, err := waves.BuildEdges(fc, toWaveIssues(issues))
+	if err != nil {
+		return err
+	}
+	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: edges})
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
-	fmt.Fprintf(w, "%d issue(s) would be dispatched:\n", len(issues))
-	for _, iss := range issues {
-		blockers := edges[iss.number]
+	fmt.Fprintf(w, "%d issue(s) would be dispatched:\n", len(plan.Issues))
+	for _, iss := range plan.Issues {
+		blockers := plan.Edges[iss.Number]
 		if len(blockers) > 0 {
-			fmt.Fprintf(w, "  #%s  %s  (blocked by #%s)\n", iss.number, iss.title, strings.Join(blockers, ", #"))
+			fmt.Fprintf(w, "  #%s  %s  (blocked by #%s)\n", iss.Number, iss.Title, strings.Join(blockers, ", #"))
 		} else {
-			fmt.Fprintf(w, "  #%s  %s\n", iss.number, iss.title)
+			fmt.Fprintf(w, "  #%s  %s\n", iss.Number, iss.Title)
 		}
 	}
 	return nil
@@ -930,7 +816,7 @@ func previewSelectiveList(c config, fc forge.Client, w io.Writer, nums []string)
 	}
 
 	// Parse blocker graph.
-	edges, err := buildEdges(fc, issues)
+	edges, err := waves.BuildEdges(fc, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
@@ -946,13 +832,17 @@ func previewSelectiveList(c config, fc forge.Client, w io.Writer, nums []string)
 		fmt.Fprintf(w, "no issues would be dispatched after eviction\n")
 		return nil
 	}
-	fmt.Fprintf(w, "%d issue(s) would be dispatched:\n", len(kept))
-	for _, iss := range kept {
-		blockers := edges[iss.number]
+	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(kept), Edges: edges})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "%d issue(s) would be dispatched:\n", len(plan.Issues))
+	for _, iss := range plan.Issues {
+		blockers := plan.Edges[iss.Number]
 		if len(blockers) > 0 {
-			fmt.Fprintf(w, "  #%s  %s  (blocked by #%s)\n", iss.number, iss.title, strings.Join(blockers, ", #"))
+			fmt.Fprintf(w, "  #%s  %s  (blocked by #%s)\n", iss.Number, iss.Title, strings.Join(blockers, ", #"))
 		} else {
-			fmt.Fprintf(w, "  #%s  %s\n", iss.number, iss.title)
+			fmt.Fprintf(w, "  #%s  %s\n", iss.Number, iss.Title)
 		}
 	}
 	return nil
@@ -966,176 +856,6 @@ func preview(issueNums []string) error {
 	}
 	fc := newForgeClient(c)
 	return previewIssues(c, fc, os.Stdout, issueNums)
-}
-
-// issueNums returns the number strings from a slice of issues.
-func issueNums(issues []issue) []string {
-	nums := make([]string, len(issues))
-	for i, iss := range issues {
-		nums[i] = iss.number
-	}
-	return nums
-}
-
-// dispatchWave dispatches a batch of issues in parallel (up to maxParallel at once).
-// Each goroutine claims its issue only after acquiring a semaphore slot so that
-// at most maxParallel issues are ever in the in-progress state simultaneously.
-func dispatchWave(c config, fc forge.Client, f *dispatch.Factory, s settle.Settler, batch []issue) {
-	sem := make(chan struct{}, c.maxParallel)
-	var wg sync.WaitGroup
-	for _, iss := range batch {
-		wg.Add(1)
-		iss := iss
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			claimIssue(c, fc, iss.number)
-			d := f.New(iss.number, iss.title)
-			defer d.Close()
-			result := d.Run()
-			if !result.Success {
-				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.number, iss.number)
-				transitionState(fc, iss.number, forge.InProgress, forge.Failed)
-			} else {
-				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.number, iss.number)
-				s.Settle(d, iss.number, result)
-			}
-		}()
-	}
-	wg.Wait()
-}
-
-// dispatchWaves fans issues out in dependency order. Each wave dispatches the
-// currently unblocked set; blocked issues are held and rechecked after
-// depsPollSecs. The deadlock timer resets on any progress; if no issue becomes
-// ready within depsWaitSecs the function returns an error rather than blocking
-// forever. Dispatched issues leave the remaining set even when they fail.
-func dispatchWaves(c config, fc forge.Client, f *dispatch.Factory, s settle.Settler, issues []issue, edges map[string][]string) error {
-	remaining := make([]issue, len(issues))
-	copy(remaining, issues)
-	elapsed := 0
-
-	for len(remaining) > 0 {
-		checkOverlap := waveOverlapCheck(c, fc)
-		var ready, blockerFailed, held []issue
-		for _, iss := range remaining {
-			collider, overlapped := checkOverlap(iss.number)
-			switch {
-			case issueIsReady(c, fc, iss.number, edges) && !overlapped:
-				ready = append(ready, iss)
-			case hasFailedInBatchBlocker(c, fc, iss.number, edges):
-				blockerFailed = append(blockerFailed, iss)
-			default:
-				if overlapped {
-					fmt.Printf("    ~~ #%s touches overlap in-progress #%s; deferring\n", iss.number, collider)
-				}
-				held = append(held, iss)
-			}
-		}
-
-		for _, iss := range blockerFailed {
-			fmt.Printf("    !! #%s  status=blocker-failed  note=a dependency failed; skipping\n", iss.number)
-			transitionState(fc, iss.number, forge.Dispatchable, forge.Failed)
-		}
-
-		if len(ready) == 0 {
-			if len(blockerFailed) > 0 {
-				elapsed = 0
-				remaining = held
-				continue
-			}
-			if elapsed >= c.depsWaitSecs {
-				fmt.Fprintf(os.Stderr,
-					"ERROR: dependency deadlock — blockers did not reach '%s' after %ds\n",
-					c.completeLabel, c.depsWaitSecs)
-				for _, iss := range remaining {
-					fmt.Fprintf(os.Stderr, "    #%s %s\n", iss.number, iss.title)
-				}
-				return fmt.Errorf("dependency deadlock")
-			}
-			fmt.Printf("    .. all remaining issues blocked; retrying in %ds (%ds elapsed)\n",
-				c.depsPollSecs, elapsed)
-			time.Sleep(time.Duration(c.depsPollSecs) * time.Second)
-			elapsed += c.depsPollSecs
-			continue
-		}
-
-		// Progress: reset the deadlock timer.
-		elapsed = 0
-		dispatchWave(c, fc, f, s, ready)
-		remaining = held
-	}
-	return nil
-}
-
-// drainMaxJobs drains up to c.maxJobs currently-unblocked issues from the
-// batch and exits. Blocked issues are skipped so no slot is wasted on a
-// dependency that hasn't merged yet; they wait for the next invocation.
-// A cycle in the in-batch dependency graph is an error returned immediately.
-func drainMaxJobs(c config, fc forge.Client, pwd string, f *dispatch.Factory, s settle.Settler, issues []issue, edges map[string][]string) error {
-	if len(edges) > 0 {
-		if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
-			return fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
-		}
-	}
-	checkOverlap := waveOverlapCheck(c, fc)
-	var selected, blockerFailed []issue
-outer:
-	for _, iss := range issues {
-		switch {
-		// Cascade-fail only in the multi-issue drain path (c.issueNumber == "").
-		// The claimed single-issue path swaps the issue onto in-progress before
-		// calling here; cascading it would add Failed on top of in-progress,
-		// leaving the issue double-labeled. That path has its own blocked-marker
-		// signaling via the writeBlockedMarker call below.
-		case c.issueNumber == "" && hasFailedInBatchBlocker(c, fc, iss.number, edges):
-			blockerFailed = append(blockerFailed, iss)
-		case !issueIsReady(c, fc, iss.number, edges):
-			fmt.Printf("    ~~ #%s blocked (a blocker is not '%s'); skipping\n", iss.number, c.completeLabel)
-		default:
-			if collider, overlapped := checkOverlap(iss.number); overlapped {
-				fmt.Printf("    ~~ #%s touches overlap in-progress #%s; deferring\n", iss.number, collider)
-				continue
-			}
-			selected = append(selected, iss)
-			if len(selected) >= c.maxJobs {
-				break outer
-			}
-		}
-	}
-	for _, iss := range blockerFailed {
-		fmt.Printf("    !! #%s  status=blocker-failed  note=a dependency failed; skipping\n", iss.number)
-		transitionState(fc, iss.number, forge.Dispatchable, forge.Failed)
-	}
-	if len(selected) == 0 {
-		// Claimed single-issue path: the caller already swapped this issue
-		// onto the in-progress label, so a bare skip would strand it there.
-		// Drop a marker naming the unmet blockers; the dispatching pipeline
-		// releases the claim and comments. Give up — no wait, no recovery.
-		if c.issueNumber != "" {
-			if blockers := unreadyBlockers(c, fc, c.issueNumber, edges); len(blockers) > 0 {
-				if err := writeBlockedMarker(pwd, blockers); err != nil {
-					return err
-				}
-				fmt.Printf("==> #%s blocked; wrote logs/%s for the pipeline to release the claim\n", c.issueNumber, blockedMarker)
-			}
-			fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", c.label)
-			return nil
-		}
-		// Unattended drain path: if issues remain after cascade-failing blockers,
-		// signal callers with exit 3 so they stop instead of hot-looping.
-		remaining := len(issues) - len(blockerFailed)
-		if remaining > 0 {
-			fmt.Printf("no unblocked '%s' issues to drain — %d remain blocked or deferred.\n", c.label, remaining)
-			return errOpenNoneDispatchable
-		}
-		fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", c.label)
-		return nil
-	}
-	fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), c.maxJobs)
-	dispatchWave(c, fc, f, s, selected)
-	return nil
 }
 
 // run is the orchestration logic for the `dispatch` subcommand: preflight,
@@ -1153,53 +873,32 @@ func run(lc *launchContext) error {
 
 	// Reconcile stranded in-progress issues before dispatching new work.
 	// Skip when ISSUE_NUMBER is set — the caller already claimed a specific issue.
-	if c.issueNumber == "" {
+	if resolveOrigin(c) == waves.OriginDiscovered {
 		reconcileStranded(c, fc, f, s)
 	}
 
-	issues, err := discoverIssues(c, fc)
+	issues, origin, err := discoverIssues(c, fc)
 	if err != nil {
 		return err
 	}
 
-	if c.issueNumber == "" && len(issues) == 0 {
+	if origin == waves.OriginDiscovered && len(issues) == 0 {
 		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
 		return errQueueEmpty
 	}
 
 	// Build the dependency graph for the batch.
-	edges, err := buildEdges(fc, issues)
+	edges, err := waves.BuildEdges(fc, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
-	hasEdges := len(edges) > 0
 
-	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
+	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: edges})
+	if err != nil {
 		return err
 	}
-
-	if c.maxJobs > 0 {
-		if err := drainMaxJobs(c, fc, pwd, f, s, issues, edges); err != nil {
-			return err
-		}
-	} else if hasEdges || batchHasTouchOverlap(c, fc, issues) {
-		// MAX_JOBS = 0 with dependency edges, or a declared touch-set
-		// overlapping an already in-progress issue: multi-wave dispatch.
-		if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
-			return fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
-		}
-		if hasEdges {
-			fmt.Println("==> dependency edges found; dispatching in waves")
-		} else {
-			fmt.Println("==> declared touches overlap an in-progress issue; dispatching in waves")
-		}
-		if err := dispatchWaves(c, fc, f, s, issues, edges); err != nil {
-			return err
-		}
-	} else {
-		// MAX_JOBS = 0, no declared edges: original single-wave dispatch.
-		fmt.Printf("==> %d issue(s); launching up to %d container(s) at a time\n", len(issues), c.maxParallel)
-		dispatchWave(c, fc, f, s, issues)
+	if err := waves.Run(wavesConfig(c), fc, pwd, f, s, plan); err != nil {
+		return err
 	}
 
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
@@ -1282,7 +981,7 @@ func runExitCode(lc *launchContext) int {
 	if errors.Is(err, errQueueEmpty) {
 		return 2
 	}
-	if errors.Is(err, errOpenNoneDispatchable) {
+	if errors.Is(err, waves.ErrOpenNoneDispatchable) {
 		return 3
 	}
 	fmt.Fprintf(os.Stderr, "%s\n", err)
