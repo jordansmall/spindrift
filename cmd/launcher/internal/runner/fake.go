@@ -79,13 +79,15 @@ func (f *Fake) Run(box Box) error {
 	fn := f.RunFunc
 	var err error
 	switch {
-	case fn == nil && len(f.RunErrs) > 0:
+	case fn != nil:
+		// i unused; RunFunc decides the outcome below.
+	case len(f.RunErrs) > 0:
 		if i < len(f.RunErrs) {
 			err = f.RunErrs[i]
 		} else {
 			err = f.RunErrs[len(f.RunErrs)-1]
 		}
-	case fn == nil:
+	default:
 		err = f.RunErr
 	}
 	f.mu.Unlock()
