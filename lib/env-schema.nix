@@ -323,23 +323,7 @@
     env = "MAX_JOBS";
     group = "Concurrency & dependency waves";
     default = 0;
-    doc = "dependency-wave concurrency cap; 0 means unlimited";
-    flakeOption = true;
-    boxEnv = false;
-  };
-  depsPollSecs = {
-    env = "DEPS_POLL_SECS";
-    group = "Concurrency & dependency waves";
-    default = 30;
-    doc = "seconds between dependency-wave poll iterations";
-    flakeOption = true;
-    boxEnv = false;
-  };
-  depsWaitSecs = {
-    env = "DEPS_WAIT_SECS";
-    group = "Concurrency & dependency waves";
-    default = 7200;
-    doc = "total seconds to wait for dependency-wave completion before aborting";
+    doc = "caps the wave size; 0 means uncapped";
     flakeOption = true;
     boxEnv = false;
   };
