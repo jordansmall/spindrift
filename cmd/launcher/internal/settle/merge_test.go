@@ -251,6 +251,24 @@ func TestApplyMergeMode_Auto_EnqueuesAutoMerge(t *testing.T) {
 	}
 }
 
+// TestApplyMergeMode_Auto_PushOnlyForgeReturnsError verifies that MERGE_MODE=auto
+// against a push-only Code Forge (no PRForge — e.g. CODE_FORGE=git reaching
+// applyMergeMode via recover/selective dispatch, which do not run the
+// run()-only auto-merge preflight) returns an actionable error instead of
+// nil-dereferencing the absent PRForge.
+func TestApplyMergeMode_Auto_PushOnlyForgeReturnsError(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "auto"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc.AsPushOnly())
+
+	err := s.applyMergeMode("1", testPR, nil)
+	if err == nil {
+		t.Fatal("applyMergeMode auto on a push-only forge: want error, got nil")
+	}
+}
+
 // TestApplyMergeMode_Auto_EnqueueFailureFallsBack verifies that when
 // EnqueueAutoMerge fails, applyMergeMode returns nil (no agent-failed) and
 // posts a warning comment to the issue.
