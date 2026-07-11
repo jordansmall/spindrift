@@ -347,6 +347,105 @@ func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 	}
 }
 
+// TestDrainMaxJobs_Selective_PartialWave_PrintsRemainingAndRerunCommand is
+// the regression test for #524's acceptance criterion: `dispatch 12 15`
+// where #15 is blocked by in-list, unmerged #12 dispatches #12 only in one
+// invocation; #15 is not claimed; the output names #15 and the exact re-run
+// command so the operator can carry the remainder themselves (selective
+// dispatch bypasses the label gate, so re-discovery can't).
+func TestDrainMaxJobs_Selective_PartialWave_PrintsRemainingAndRerunCommand(t *testing.T) {
+	c := baseConfig()
+	c.Label = "ready-for-agent"
+	c.MaxParallel = 2
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "12", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "15", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+
+	edges := map[string][]string{"15": {"12"}}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	out := captureStdout(t, func() {
+		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+			{Number: "12", Title: "blocker"},
+			{Number: "15", Title: "dependent"},
+		}, edges, OriginSelective); err != nil {
+			t.Fatalf("drainMaxJobs: %v", err)
+		}
+	})
+
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "12" {
+		t.Fatalf("RunCalls: got %v, want exactly issue 12", fr.RunCalls)
+	}
+
+	iss15, err := fc.Issue("15")
+	if err != nil {
+		t.Fatalf("Issue(15): %v", err)
+	}
+	if containsLabel(iss15.Labels, c.InProgressLabel) {
+		t.Errorf("issue 15 must not be claimed while its blocker is unmet; labels=%v", iss15.Labels)
+	}
+
+	if !strings.Contains(out, "15") {
+		t.Errorf("output must name the remaining issue #15; got:\n%s", out)
+	}
+	if !strings.Contains(out, "spindrift dispatch --yes 15") {
+		t.Errorf("output must print the exact re-run command; got:\n%s", out)
+	}
+}
+
+// TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint is the
+// regression test for #524's acceptance criterion: zero selected with
+// issues held (everything overlap-deferred) exits 3 (ErrOpenNoneDispatchable)
+// and still prints the re-run hint, rather than waiting in-process.
+func TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+	c.OverlapGate = "defer"
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{
+		Number: "10",
+		Body:   "## Touches\n- lib/env-schema.nix",
+		Labels: []string{c.Label},
+	})
+	fc.SetIssue(forge.Issue{
+		Number: "20",
+		Body:   "## Touches\n- lib/env-schema.nix",
+		State:  "OPEN",
+		Labels: []string{c.InProgressLabel},
+	})
+
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+			{Number: "10", Title: "candidate"},
+		}, map[string][]string{}, OriginSelective)
+	})
+
+	if !errors.Is(runErr, ErrOpenNoneDispatchable) {
+		t.Fatalf("drainMaxJobs: got %v, want ErrOpenNoneDispatchable", runErr)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
+	}
+	if !strings.Contains(out, "spindrift dispatch --yes 10") {
+		t.Errorf("output must print the exact re-run command; got:\n%s", out)
+	}
+}
+
 // TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade verifies that
 // when Origin is OriginClaimed (the single-issue path), an in-batch blocker
 // reaching failed state does NOT cascade-fail the claimed issue. The issue is
