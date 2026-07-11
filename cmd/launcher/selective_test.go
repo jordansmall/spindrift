@@ -238,7 +238,7 @@ func TestPreviewIssues_WithList_ShowsAnnotations(t *testing.T) {
 		Body: "## Blocked by\n- #99\n"})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, []string{"15", "99"}); err != nil {
+	if err := previewIssues(c, fc, fc, &buf, []string{"15", "99"}, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -268,7 +268,7 @@ func TestPreviewIssues_WithList_ShowsEviction(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "200", State: "OPEN", Labels: []string{}})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, []string{"15"}); err != nil {
+	if err := previewIssues(c, fc, fc, &buf, []string{"15"}, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -289,7 +289,7 @@ func TestPreviewIssues_WithList_ShowsUnlabeledWarning(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "15", Title: "unlabeled", Labels: []string{}})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, []string{"15"}); err != nil {
+	if err := previewIssues(c, fc, fc, &buf, []string{"15"}, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -318,7 +318,7 @@ func TestPreviewIssues_WithList_NoMutatingCalls(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "15", Title: "second", Labels: []string{c.label}})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, []string{"12", "15"}); err != nil {
+	if err := previewIssues(c, fc, fc, &buf, []string{"12", "15"}, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
