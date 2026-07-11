@@ -82,7 +82,7 @@ func TestUnreadyBlockers_Pending(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"}) // no complete label, still open
 	edges := map[string][]string{"10": {"11"}}
-	got := unreadyBlockers(fc, "10", edges)
+	got := unreadyBlockers(fc, fc, "10", edges)
 	if !reflect.DeepEqual(got, []string{"11"}) {
 		t.Errorf("expected [11], got %v", got)
 	}
@@ -97,7 +97,7 @@ func TestUnreadyBlockers_MergedAndClosedAreReady(t *testing.T) {
 	// #12: issue closed with no PR — fallback satisfied.
 	fc.SetIssue(forge.Issue{Number: "12", State: "CLOSED"})
 	edges := map[string][]string{"10": {"11", "12"}}
-	if got := unreadyBlockers(fc, "10", edges); len(got) != 0 {
+	if got := unreadyBlockers(fc, fc, "10", edges); len(got) != 0 {
 		t.Errorf("expected no unready blockers, got %v", got)
 	}
 }
@@ -111,7 +111,7 @@ func TestUnreadyBlockers_Mixed(t *testing.T) {
 	// #12: still open with no merged PR — blocking.
 	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN"})
 	edges := map[string][]string{"10": {"11", "12"}}
-	if got := unreadyBlockers(fc, "10", edges); !reflect.DeepEqual(got, []string{"12"}) {
+	if got := unreadyBlockers(fc, fc, "10", edges); !reflect.DeepEqual(got, []string{"12"}) {
 		t.Errorf("expected [12], got %v", got)
 	}
 }
@@ -123,7 +123,7 @@ func TestBlockerReady_MergedPR(t *testing.T) {
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
 	fc.SetPRState("https://github.com/owner/repo/pull/99", forge.PRMerged)
 
-	if !BlockerReady(fc, "99") {
+	if !BlockerReady(fc, fc, "99") {
 		t.Error("blockerReady: want true for merged PR, got false")
 	}
 }
@@ -137,7 +137,7 @@ func TestBlockerReady_OpenPRWithCompleteLabel(t *testing.T) {
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
 	// state defaults to OPEN when SetPR is called without SetPRState override
 
-	if BlockerReady(fc, "99") {
+	if BlockerReady(fc, fc, "99") {
 		t.Error("blockerReady: want false for open PR with agent-complete label, got true")
 	}
 }
@@ -147,7 +147,7 @@ func TestBlockerReady_ClosedIssueFallback(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "99", State: "CLOSED"})
 	// No PR registered — simulates human-handled work absorbed outside spindrift.
 
-	if !BlockerReady(fc, "99") {
+	if !BlockerReady(fc, fc, "99") {
 		t.Error("blockerReady: want true for closed issue with no PR, got false")
 	}
 }

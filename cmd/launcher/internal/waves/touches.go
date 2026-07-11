@@ -8,8 +8,8 @@ import (
 // touchesOf returns the declared touch-set for issue num, parsed from its
 // body's "## Touches" section. An issue with no such section returns nil,
 // nil — it never participates in the overlap gate.
-func touchesOf(fc forge.Client, num string) ([]string, error) {
-	fi, err := fc.Issue(num)
+func touchesOf(it forge.IssueTracker, num string) ([]string, error) {
+	fi, err := it.Issue(num)
 	if err != nil {
 		return nil, err
 	}
@@ -18,19 +18,20 @@ func touchesOf(fc forge.Client, num string) ([]string, error) {
 
 // prTouchesOf returns the changed-file paths of num's open PR, augmenting its
 // declared touch-set with files the issue itself never declared in
-// ## Touches. Restricted to a non-push-only Code Forge, the only kind with a
-// PR to inspect; off github, or when num has no open PR yet, or the fetch
-// fails, it returns nil with no error — v1's declared-only behavior applies
-// unchanged.
-func prTouchesOf(fc forge.Client, num string) []string {
-	if fc.PushOnly() {
+// ## Touches. Restricted to a Code Forge with a PRForge surface, the only
+// kind with a PR to inspect; off github, or when num has no open PR yet, or
+// the fetch fails, it returns nil with no error — v1's declared-only behavior
+// applies unchanged.
+func prTouchesOf(cf forge.CodeForge, num string) []string {
+	pr, ok := cf.(forge.PRForge)
+	if !ok {
 		return nil
 	}
-	pr, found, err := fc.OpenPRForBranch(fc.AgentBranch(num))
-	if err != nil || !found {
+	found, ok, err := pr.OpenPRForBranch(cf.AgentBranch(num))
+	if err != nil || !ok {
 		return nil
 	}
-	files, err := fc.ListPRFiles(pr.URL)
+	files, err := pr.ListPRFiles(found.URL)
 	if err != nil {
 		return nil
 	}
@@ -51,23 +52,23 @@ type inProgressTouches struct {
 // (each candidate still costs its own touchesOf fetch). OVERLAP_GATE=off (or
 // a failed fetch) yields a check that always reports no overlap, leaving
 // dispatch unaffected.
-func waveOverlapCheck(cfg Config, fc forge.Client) func(num string) (string, bool) {
+func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) func(num string) (string, bool) {
 	noOverlap := func(string) (string, bool) { return "", false }
 	if cfg.OverlapGate != "defer" {
 		return noOverlap
 	}
-	inProgress, err := fc.ListIssues(forge.InProgress)
+	inProgress, err := it.ListIssues(forge.InProgress)
 	if err != nil {
 		return noOverlap
 	}
 	entries := make([]inProgressTouches, len(inProgress))
 	for i, fi := range inProgress {
 		touches := forge.ParseTouchPaths(fi.Body)
-		touches = append(touches, prTouchesOf(fc, fi.Number)...)
+		touches = append(touches, prTouchesOf(cf, fi.Number)...)
 		entries[i] = inProgressTouches{number: fi.Number, touches: touches}
 	}
 	return func(num string) (string, bool) {
-		return overlapsInProgress(fc, num, entries)
+		return overlapsInProgress(it, num, entries)
 	}
 }
 
@@ -75,8 +76,8 @@ func waveOverlapCheck(cfg Config, fc forge.Client) func(num string) (string, boo
 // touch-set overlapping an already InProgress issue's — used by Run to
 // decide whether a no-edges batch still needs the wave/retry dispatch path
 // rather than a single immediate wave.
-func batchHasTouchOverlap(cfg Config, fc forge.Client, batch []Issue) bool {
-	checkOverlap := waveOverlapCheck(cfg, fc)
+func batchHasTouchOverlap(cfg Config, it forge.IssueTracker, cf forge.CodeForge, batch []Issue) bool {
+	checkOverlap := waveOverlapCheck(cfg, it, cf)
 	for _, iss := range batch {
 		if _, overlapped := checkOverlap(iss.Number); overlapped {
 			return true
@@ -91,8 +92,8 @@ func batchHasTouchOverlap(cfg Config, fc forge.Client, batch []Issue) bool {
 // issue's number. A candidate with no declared touches never collides —
 // issues with no ## Touches section are dispatched exactly as today, per the
 // OVERLAP_GATE acceptance criteria.
-func overlapsInProgress(fc forge.Client, num string, inProgress []inProgressTouches) (string, bool) {
-	touches, err := touchesOf(fc, num)
+func overlapsInProgress(it forge.IssueTracker, num string, inProgress []inProgressTouches) (string, bool) {
+	touches, err := touchesOf(it, num)
 	if err != nil || len(touches) == 0 {
 		return "", false
 	}

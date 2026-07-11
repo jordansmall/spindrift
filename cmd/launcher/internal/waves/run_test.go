@@ -38,12 +38,12 @@ func TestRun_Selective_NoEdges_IgnoresTouchOverlap(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
+	s := newSettle(fc, fc)
 	plan, err := NewPlan(c, Input{Origin: OriginSelective, Issues: []Issue{{Number: "10", Title: "candidate"}}})
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	if err := Run(c, fc, dir, f, s, plan); err != nil {
+	if err := Run(c, fc, fc, dir, f, s, plan); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(fr.RunCalls) != 1 {
@@ -81,12 +81,12 @@ func TestRun_Discovered_NoEdges_TouchOverlapDefersToWaves(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc)
+	s := newSettle(fc, fc)
 	plan, err := NewPlan(c, Input{Origin: OriginDiscovered, Issues: []Issue{{Number: "10", Title: "candidate"}}})
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	if err := Run(c, fc, dir, f, s, plan); err == nil {
+	if err := Run(c, fc, fc, dir, f, s, plan); err == nil {
 		t.Fatal("Run must deadlock while #20 stays in-progress with an overlapping touch-set")
 	}
 	if len(fr.RunCalls) != 0 {

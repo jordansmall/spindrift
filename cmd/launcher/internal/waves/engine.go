@@ -15,8 +15,8 @@ import (
 
 // transitionState is a best-effort dispatch-state transition that logs but
 // does not propagate errors, matching the original behaviour.
-func transitionState(fc forge.Client, num string, from, to forge.DispatchState) {
-	if err := fc.TransitionState(num, from, to); err != nil {
+func transitionState(it forge.IssueTracker, num string, from, to forge.DispatchState) {
+	if err := it.TransitionState(num, from, to); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %d\n", num, to)
 	}
 }
@@ -25,11 +25,11 @@ func transitionState(fc forge.Client, num string, from, to forge.DispatchState) 
 // runs off the in-progress label — the workflow claimed the issue in YAML
 // before the launcher started — the transition would be a no-op, so it is
 // skipped.
-func claimIssue(cfg Config, fc forge.Client, num string) {
+func claimIssue(cfg Config, it forge.IssueTracker, num string) {
 	if cfg.Label == cfg.InProgressLabel {
 		return
 	}
-	transitionState(fc, num, forge.Dispatchable, forge.InProgress)
+	transitionState(it, num, forge.Dispatchable, forge.InProgress)
 }
 
 // blockedMarker is the file the launcher drops under logs/ when a claimed
@@ -53,7 +53,7 @@ func writeBlockedMarker(pwd string, blockers []string) error {
 // at once). Each goroutine claims its issue only after acquiring a semaphore
 // slot so that at most MaxParallel issues are ever in the in-progress state
 // simultaneously.
-func dispatchWave(cfg Config, fc forge.Client, f *dispatch.Factory, s settle.Settler, batch []Issue) {
+func dispatchWave(cfg Config, it forge.IssueTracker, f *dispatch.Factory, s settle.Settler, batch []Issue) {
 	sem := make(chan struct{}, cfg.MaxParallel)
 	var wg sync.WaitGroup
 	for _, iss := range batch {
@@ -63,13 +63,13 @@ func dispatchWave(cfg Config, fc forge.Client, f *dispatch.Factory, s settle.Set
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			claimIssue(cfg, fc, iss.Number)
+			claimIssue(cfg, it, iss.Number)
 			d := f.New(iss.Number, iss.Title)
 			defer d.Close()
 			result := d.Run()
 			if !result.Success {
 				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.Number, iss.Number)
-				transitionState(fc, iss.Number, forge.InProgress, forge.Failed)
+				transitionState(it, iss.Number, forge.InProgress, forge.Failed)
 			} else {
 				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.Number, iss.Number)
 				s.Settle(d, iss.Number, result)
@@ -84,20 +84,20 @@ func dispatchWave(cfg Config, fc forge.Client, f *dispatch.Factory, s settle.Set
 // DepsPollSecs. The deadlock timer resets on any progress; if no issue becomes
 // ready within DepsWaitSecs the function returns an error rather than blocking
 // forever. Dispatched issues leave the remaining set even when they fail.
-func dispatchWaves(cfg Config, fc forge.Client, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string) error {
+func dispatchWaves(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string) error {
 	remaining := make([]Issue, len(issues))
 	copy(remaining, issues)
 	elapsed := 0
 
 	for len(remaining) > 0 {
-		checkOverlap := waveOverlapCheck(cfg, fc)
+		checkOverlap := waveOverlapCheck(cfg, it, cf)
 		var ready, blockerFailed, held []Issue
 		for _, iss := range remaining {
 			collider, overlapped := checkOverlap(iss.Number)
 			switch {
-			case issueIsReady(fc, iss.Number, edges) && !overlapped:
+			case issueIsReady(it, cf, iss.Number, edges) && !overlapped:
 				ready = append(ready, iss)
-			case hasFailedInBatchBlocker(cfg, fc, iss.Number, edges):
+			case hasFailedInBatchBlocker(cfg, it, iss.Number, edges):
 				blockerFailed = append(blockerFailed, iss)
 			default:
 				if overlapped {
@@ -109,7 +109,7 @@ func dispatchWaves(cfg Config, fc forge.Client, f *dispatch.Factory, s settle.Se
 
 		for _, iss := range blockerFailed {
 			fmt.Printf("    !! #%s  status=blocker-failed  note=a dependency failed; skipping\n", iss.Number)
-			transitionState(fc, iss.Number, forge.Dispatchable, forge.Failed)
+			transitionState(it, iss.Number, forge.Dispatchable, forge.Failed)
 		}
 
 		if len(ready) == 0 {
@@ -136,7 +136,7 @@ func dispatchWaves(cfg Config, fc forge.Client, f *dispatch.Factory, s settle.Se
 
 		// Progress: reset the deadlock timer.
 		elapsed = 0
-		dispatchWave(cfg, fc, f, s, ready)
+		dispatchWave(cfg, it, f, s, ready)
 		remaining = held
 	}
 	return nil
@@ -146,8 +146,8 @@ func dispatchWaves(cfg Config, fc forge.Client, f *dispatch.Factory, s settle.Se
 // batch and exits. Blocked issues are skipped so no slot is wasted on a
 // dependency that hasn't merged yet; they wait for the next invocation. The
 // in-batch dependency graph is assumed already cycle-checked by NewPlan.
-func drainMaxJobs(cfg Config, fc forge.Client, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, origin Origin) error {
-	checkOverlap := waveOverlapCheck(cfg, fc)
+func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, origin Origin) error {
+	checkOverlap := waveOverlapCheck(cfg, it, cf)
 	var selected, blockerFailed []Issue
 outer:
 	for _, iss := range issues {
@@ -158,9 +158,9 @@ outer:
 		// top of in-progress, leaving the issue double-labeled. That path
 		// has its own blocked-marker signaling via the writeBlockedMarker
 		// call below.
-		case origin != OriginClaimed && hasFailedInBatchBlocker(cfg, fc, iss.Number, edges):
+		case origin != OriginClaimed && hasFailedInBatchBlocker(cfg, it, iss.Number, edges):
 			blockerFailed = append(blockerFailed, iss)
-		case !issueIsReady(fc, iss.Number, edges):
+		case !issueIsReady(it, cf, iss.Number, edges):
 			fmt.Printf("    ~~ #%s blocked (a blocker is not '%s'); skipping\n", iss.Number, cfg.CompleteLabel)
 		default:
 			if collider, overlapped := checkOverlap(iss.Number); overlapped {
@@ -175,7 +175,7 @@ outer:
 	}
 	for _, iss := range blockerFailed {
 		fmt.Printf("    !! #%s  status=blocker-failed  note=a dependency failed; skipping\n", iss.Number)
-		transitionState(fc, iss.Number, forge.Dispatchable, forge.Failed)
+		transitionState(it, iss.Number, forge.Dispatchable, forge.Failed)
 	}
 	if len(selected) == 0 {
 		// Claimed single-issue path: the caller already swapped this issue
@@ -184,7 +184,7 @@ outer:
 		// releases the claim and comments. Give up — no wait, no recovery.
 		if origin == OriginClaimed && len(issues) > 0 {
 			num := issues[0].Number
-			if blockers := unreadyBlockers(fc, num, edges); len(blockers) > 0 {
+			if blockers := unreadyBlockers(it, cf, num, edges); len(blockers) > 0 {
 				if err := writeBlockedMarker(pwd, blockers); err != nil {
 					return err
 				}
@@ -205,7 +205,7 @@ outer:
 		return nil
 	}
 	fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), cfg.MaxJobs)
-	dispatchWave(cfg, fc, f, s, selected)
+	dispatchWave(cfg, it, f, s, selected)
 	return nil
 }
 
@@ -221,24 +221,24 @@ outer:
 // applies to OriginDiscovered/OriginClaimed (the run() queue-drain path) —
 // OriginSelective (operator-specified `dispatch <nums>`) never consulted the
 // overlap gate for its mode decision and must not start blocking on it now.
-func Run(cfg Config, fc forge.Client, pwd string, f *dispatch.Factory, s settle.Settler, plan Plan) error {
+func Run(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, plan Plan) error {
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
 		return err
 	}
 	if plan.Mode == ModeDrain {
-		return drainMaxJobs(cfg, fc, pwd, f, s, plan.Issues, plan.Edges, plan.Origin)
+		return drainMaxJobs(cfg, it, cf, pwd, f, s, plan.Issues, plan.Edges, plan.Origin)
 	}
 	hasEdges := len(plan.Edges) > 0
-	overlaps := !hasEdges && plan.Origin != OriginSelective && batchHasTouchOverlap(cfg, fc, plan.Issues)
+	overlaps := !hasEdges && plan.Origin != OriginSelective && batchHasTouchOverlap(cfg, it, cf, plan.Issues)
 	if hasEdges || overlaps {
 		if hasEdges {
 			fmt.Println("==> dependency edges found; dispatching in waves")
 		} else {
 			fmt.Println("==> declared touches overlap an in-progress issue; dispatching in waves")
 		}
-		return dispatchWaves(cfg, fc, f, s, plan.Issues, plan.Edges)
+		return dispatchWaves(cfg, it, cf, f, s, plan.Issues, plan.Edges)
 	}
 	fmt.Printf("==> %d issue(s); launching up to %d container(s) at a time\n", len(plan.Issues), cfg.MaxParallel)
-	dispatchWave(cfg, fc, f, s, plan.Issues)
+	dispatchWave(cfg, it, f, s, plan.Issues)
 	return nil
 }
