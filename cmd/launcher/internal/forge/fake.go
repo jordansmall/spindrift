@@ -101,9 +101,6 @@ type Fake struct {
 	// CreateLabelErr, if non-nil, is returned by every CreateLabel call.
 	CreateLabelErr error
 
-	// IsPushOnly controls what PushOnly returns (default false, matching github).
-	IsPushOnly bool
-
 	// BranchPrefix is baked into AgentBranch's output. Zero value "" matches
 	// an unconfigured config.branchPrefix; set explicitly to exercise a real
 	// prefix (e.g. "agent/issue-").
@@ -443,9 +440,18 @@ func (f *Fake) CreateLabel(name, description, color string) error {
 	return f.CreateLabelErr
 }
 
-// PushOnly returns IsPushOnly (default false, matching the github adapter).
-func (f *Fake) PushOnly() bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.IsPushOnly
-}
+// pushOnlyForge adapts a Fake to expose only the core CodeForge surface,
+// hiding its PRForge methods so a type assertion against it reports absence
+// — the git adapter's shape, for tests that need to exercise push-only-forge
+// behavior without a removed PushOnly() flag.
+type pushOnlyForge struct{ f *Fake }
+
+// AsPushOnly returns f wrapped so it satisfies CodeForge but not PRForge.
+func (f *Fake) AsPushOnly() CodeForge { return pushOnlyForge{f} }
+
+func (p pushOnlyForge) AgentBranch(num string) string { return p.f.AgentBranch(num) }
+func (p pushOnlyForge) Merge(url string) error        { return p.f.Merge(url) }
+func (p pushOnlyForge) Rebase(url string) error       { return p.f.Rebase(url) }
+func (p pushOnlyForge) Probe() (string, error)        { return p.f.Probe() }
+
+var _ CodeForge = pushOnlyForge{}

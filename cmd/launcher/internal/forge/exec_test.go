@@ -10,13 +10,10 @@ import (
 	"testing"
 )
 
-// TestExecClient_PushOnly verifies the github Code Forge reports itself as
-// not push-only — it opens a PR and watches CI.
-func TestExecClient_PushOnly(t *testing.T) {
-	e := NewExecClient("owner/repo", testLabels, "agent/issue-")
-	if e.PushOnly() {
-		t.Error("PushOnly() = true, want false for the github Code Forge")
-	}
+// TestExecClient_ImplementsPRForge verifies the github Code Forge satisfies
+// PRForge — it opens PRs and watches CI, unlike the push-only git adapter.
+func TestExecClient_ImplementsPRForge(t *testing.T) {
+	var _ PRForge = NewExecClient("owner/repo", testLabels, "agent/issue-")
 }
 
 // prependFakeGH writes a counting-wrapper gh script to a temp dir, prepends
@@ -46,7 +43,7 @@ func TestProbe_PositionalSlug(t *testing.T) {
 	dir := prependFakeGH(t, "")
 
 	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
-	c.(interface{ Probe() (string, error) }).Probe() //nolint:errcheck
+	c.Probe() //nolint:errcheck
 
 	// call-01.txt is the `gh repo view …` invocation.
 	raw, err := os.ReadFile(filepath.Join(dir, "call-01.txt"))
@@ -81,7 +78,7 @@ fi
 `)
 
 	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
-	_, err := c.(interface{ Probe() (string, error) }).Probe()
+	_, err := c.Probe()
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
@@ -104,9 +101,7 @@ fi
 `)
 
 	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
-	detail, err := c.(interface {
-		FailureDetail(string) (string, error)
-	}).FailureDetail("https://github.com/owner/repo/pull/42")
+	detail, err := c.FailureDetail("https://github.com/owner/repo/pull/42")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

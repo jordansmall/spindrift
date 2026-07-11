@@ -10,8 +10,8 @@ import (
 
 // gitClient is the push-only Code Forge adapter for a plain git remote
 // (self-hosted git, gitea, GitLab-without-MRs, a bare server repo). It has no
-// PR or CI concept: OpenPRForBranch/PRForBranch always report "not found",
-// and Merge/Rebase land code by pushing directly to the remote instead of
+// PR or CI concept — it implements CodeForge only, never PRForge — and
+// Merge/Rebase land code by pushing directly to the remote instead of
 // merging a pull request.
 type gitClient struct {
 	remoteURL    string
@@ -40,30 +40,6 @@ func NewGitClient(remoteURL, baseBranch, userName, userEmail, branchPrefix strin
 // AgentBranch returns branchPrefix + num.
 func (g *gitClient) AgentBranch(num string) string {
 	return g.branchPrefix + num
-}
-
-func (g *gitClient) OpenPRForBranch(branch string) (PR, bool, error) {
-	return PR{}, false, nil
-}
-
-func (g *gitClient) PRForBranch(branch string) (string, bool, error) {
-	return "", false, nil
-}
-
-func (g *gitClient) PRState(url string) (PRState, error) {
-	return "", fmt.Errorf("PRState: not supported by the git Code Forge (push-only, no PR concept)")
-}
-
-func (g *gitClient) CheckState(url string) (RollupState, error) {
-	return StateNone, nil
-}
-
-func (g *gitClient) FailureDetail(url string) (string, error) {
-	return "", nil
-}
-
-func (g *gitClient) ListPRFiles(url string) ([]string, error) {
-	return nil, fmt.Errorf("ListPRFiles: not supported by the git Code Forge (MERGE_GUARD_PATHS applies to the github Code Forge only)")
 }
 
 // validateGitRef rejects a ref that git would parse as an option rather than
@@ -178,23 +154,10 @@ func (g *gitClient) Rebase(branch string) error {
 	return gitForcePush(dir)
 }
 
-func (g *gitClient) CanAutoMerge() (bool, error) {
-	return false, nil
-}
-
-func (g *gitClient) EnqueueAutoMerge(branch string) error {
-	return fmt.Errorf("EnqueueAutoMerge: not supported by the git Code Forge — MERGE_MODE=auto requires CODE_FORGE=github")
-}
-
 // Probe checks that the configured remote is reachable.
 func (g *gitClient) Probe() (string, error) {
 	if err := exec.Command("git", "ls-remote", g.remoteURL).Run(); err != nil {
 		return "", fmt.Errorf("%w: %s", ErrRepoNotFound, g.remoteURL)
 	}
 	return g.remoteURL, nil
-}
-
-// PushOnly is always true: the git Code Forge has no PR/CI/merge concept.
-func (g *gitClient) PushOnly() bool {
-	return true
 }
