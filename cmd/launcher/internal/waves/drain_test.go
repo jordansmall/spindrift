@@ -169,6 +169,39 @@ func TestDrainMaxJobs_MaxJobsCapHonored(t *testing.T) {
 	}
 }
 
+// TestDrainMaxJobs_ZeroMeansUncapped verifies that cfg.MaxJobs == 0 drains
+// every unblocked issue in the batch in one wave — the cap does not apply at
+// zero (ADR 0019: MAX_JOBS=0 is an uncapped drain batch, not "dispatch
+// nothing").
+func TestDrainMaxJobs_ZeroMeansUncapped(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 3
+	c.MaxJobs = 0
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+		{Number: "1", Title: "first"},
+		{Number: "2", Title: "second"},
+		{Number: "3", Title: "third"},
+	}, map[string][]string{}, OriginDiscovered); err != nil {
+		t.Fatalf("drainMaxJobs: %v", err)
+	}
+
+	if len(fr.RunCalls) != 3 {
+		t.Fatalf("RunCalls: got %d, want 3 (MaxJobs=0 must drain every unblocked issue)", len(fr.RunCalls))
+	}
+}
+
 // TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable verifies that drainMaxJobs
 // returns ErrOpenNoneDispatchable when open dispatchable issues exist but none
 // can be selected (all blocked), so a driving loop stops instead of hot-looping.

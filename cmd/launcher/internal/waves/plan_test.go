@@ -2,7 +2,11 @@ package waves
 
 import "testing"
 
-func TestNewPlan_NoEdges_DefaultsToWavesMode(t *testing.T) {
+// TestNewPlan_Discovered_NoEdges_SelectsDrainMode verifies a label-discovered
+// batch always selects ModeDrain, even with MaxJobs unset (0) — MAX_JOBS=0 is
+// the uncapped drain case (ADR 0019); ModeWaves is no longer reachable for
+// OriginDiscovered/OriginClaimed.
+func TestNewPlan_Discovered_NoEdges_SelectsDrainMode(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginDiscovered,
@@ -12,16 +16,16 @@ func TestNewPlan_NoEdges_DefaultsToWavesMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	if plan.Mode != ModeWaves {
-		t.Errorf("Mode = %v, want ModeWaves", plan.Mode)
+	if plan.Mode != ModeDrain {
+		t.Errorf("Mode = %v, want ModeDrain", plan.Mode)
 	}
 }
 
-// TestNewPlan_Edges_OrderedWaves verifies a batch with in-batch blocker
-// edges (and MaxJobs unset) still selects ModeWaves — the dependency-order
-// engine, not the drain cap — carrying the edges through unchanged for Run
-// to order.
-func TestNewPlan_Edges_OrderedWaves(t *testing.T) {
+// TestNewPlan_Discovered_Edges_SelectsDrainMode verifies a batch with
+// in-batch blocker edges also selects ModeDrain for OriginDiscovered — the
+// per-issue readiness gate in drainMaxJobs holds a blocked dependent for the
+// next invocation instead of looping waves in-process.
+func TestNewPlan_Discovered_Edges_SelectsDrainMode(t *testing.T) {
 	cfg := Config{}
 	in := Input{
 		Origin: OriginDiscovered,
@@ -32,11 +36,29 @@ func TestNewPlan_Edges_OrderedWaves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPlan: %v", err)
 	}
-	if plan.Mode != ModeWaves {
-		t.Errorf("Mode = %v, want ModeWaves", plan.Mode)
+	if plan.Mode != ModeDrain {
+		t.Errorf("Mode = %v, want ModeDrain", plan.Mode)
 	}
 	if len(plan.Edges["2"]) != 1 || plan.Edges["2"][0] != "1" {
 		t.Errorf("Edges not carried through: %v", plan.Edges)
+	}
+}
+
+// TestNewPlan_Selective_NoEdges_DefaultsToWavesMode verifies OriginSelective
+// still selects ModeWaves when MaxJobs is unset — selective-list dispatch
+// keeps the old multi-wave loop until #524 reroutes it (ADR 0019 scope note).
+func TestNewPlan_Selective_NoEdges_DefaultsToWavesMode(t *testing.T) {
+	cfg := Config{}
+	in := Input{
+		Origin: OriginSelective,
+		Issues: []Issue{{Number: "1", Title: "a"}},
+	}
+	plan, err := NewPlan(cfg, in)
+	if err != nil {
+		t.Fatalf("NewPlan: %v", err)
+	}
+	if plan.Mode != ModeWaves {
+		t.Errorf("Mode = %v, want ModeWaves", plan.Mode)
 	}
 }
 
