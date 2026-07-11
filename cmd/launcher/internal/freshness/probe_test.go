@@ -86,6 +86,32 @@ func TestProbe_FreshWhenDrvPathMatches(t *testing.T) {
 	}
 }
 
+// TestProbe_EvalReceivesFetchedRev verifies that Probe passes the fetched
+// base-tip sha (not the local clone's own checked-out HEAD) to Eval — the
+// wiring that makes the eval hermetic against the fetched tip rather than
+// whatever pwd happens to have checked out.
+func TestProbe_EvalReceivesFetchedRev(t *testing.T) {
+	pwd := newCloneWithOrigin(t, "main")
+	localHead := gitOutput(t, pwd, "rev-parse", "HEAD")
+	advancedSha, err := gitAdvanceOrigin(t, pwd, "main")
+	if err != nil {
+		t.Fatalf("gitAdvanceOrigin: %v", err)
+	}
+	eval := &Fake{DrvPath: "/nix/store/same.drv"}
+
+	Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "/nix/store/same.drv", eval)
+
+	if len(eval.Calls) != 1 {
+		t.Fatalf("Eval called %d times, want 1", len(eval.Calls))
+	}
+	if eval.Calls[0].Rev != advancedSha {
+		t.Errorf("Eval called with rev %q, want the fetched base tip %q", eval.Calls[0].Rev, advancedSha)
+	}
+	if eval.Calls[0].Rev == localHead {
+		t.Errorf("Eval called with rev %q, the clone's own stale checked-out HEAD, not the fetched tip", eval.Calls[0].Rev)
+	}
+}
+
 // TestProbe_RebuildNeededWhenDrvPathDiffers verifies that a base-tip commit
 // which changed image inputs — a different evaluated drvPath — reports
 // rebuild-needed, not fresh.
@@ -140,6 +166,22 @@ func TestProbe_FetchFailureFailsClosed(t *testing.T) {
 	}
 	if len(eval.Calls) != 0 {
 		t.Errorf("Eval called %d times, want 0 when fetch fails", len(eval.Calls))
+	}
+}
+
+// TestProbe_FetchFailure_MessageIncludesGitStderr verifies that the loud
+// fetch-failure message surfaces git's own diagnostic (its stderr), not just
+// the bare exit status, so an operator reading `preview` output can see why.
+func TestProbe_FetchFailure_MessageIncludesGitStderr(t *testing.T) {
+	pwd := t.TempDir()
+	gitRun(t, pwd, "init")
+	gitRun(t, pwd, "remote", "add", "origin", filepath.Join(pwd, "does-not-exist.git"))
+	eval := &Fake{DrvPath: "/nix/store/same.drv"}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "/nix/store/same.drv", eval)
+
+	if strings.Contains(res.Message, "exit status") && !strings.Contains(res.Message, "does-not-exist") {
+		t.Errorf("Message %q looks like a bare exit code, want git's stderr detail", res.Message)
 	}
 }
 
