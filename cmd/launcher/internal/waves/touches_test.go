@@ -115,6 +115,32 @@ func TestOverlapsInProgress_DisjointTouches(t *testing.T) {
 	}
 }
 
+// TestBatchHasTouchOverlap_DetectsOverlap verifies a batch containing an
+// issue whose declared touches overlap an in-progress issue's is reported.
+func TestBatchHasTouchOverlap_DetectsOverlap(t *testing.T) {
+	c := Config{OverlapGate: "defer", InProgressLabel: "agent-in-progress"}
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
+	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- lib/env-schema.nix", State: "OPEN", Labels: []string{c.InProgressLabel}})
+
+	if !batchHasTouchOverlap(c, fc, []Issue{{Number: "10"}}) {
+		t.Error("expected batch overlap to be detected")
+	}
+}
+
+// TestBatchHasTouchOverlap_GateOffNeverOverlaps verifies OVERLAP_GATE=off
+// short-circuits the check regardless of declared touches.
+func TestBatchHasTouchOverlap_GateOffNeverOverlaps(t *testing.T) {
+	c := Config{OverlapGate: "off", InProgressLabel: "agent-in-progress"}
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
+	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- lib/env-schema.nix", State: "OPEN", Labels: []string{c.InProgressLabel}})
+
+	if batchHasTouchOverlap(c, fc, []Issue{{Number: "10"}}) {
+		t.Error("expected OVERLAP_GATE=off to disable the check")
+	}
+}
+
 // TestOverlapsInProgress_NoDeclaredTouches verifies a candidate with no
 // ## Touches section is never held, matching the "dispatched exactly as
 // today" acceptance criterion.

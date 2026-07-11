@@ -214,6 +214,13 @@ outer:
 // dependency-wave deadlock timer, and the Touches overlap check between
 // concurrent Dispatches. pwd is the working directory; Run creates its
 // logs/ subdirectory before dispatching any issue.
+//
+// A no-edges batch only enters the wave-retry engine (with its ongoing
+// per-candidate overlap check and deadlock timer) when an upfront touch-set
+// overlap against an in-progress issue is found; that upfront check only
+// applies to OriginDiscovered/OriginClaimed (the run() queue-drain path) —
+// OriginSelective (operator-specified `dispatch <nums>`) never consulted the
+// overlap gate for its mode decision and must not start blocking on it now.
 func Run(cfg Config, fc forge.Client, pwd string, f *dispatch.Factory, s settle.Settler, plan Plan) error {
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
 		return err
@@ -221,10 +228,17 @@ func Run(cfg Config, fc forge.Client, pwd string, f *dispatch.Factory, s settle.
 	if plan.Mode == ModeDrain {
 		return drainMaxJobs(cfg, fc, pwd, f, s, plan.Issues, plan.Edges, plan.Origin)
 	}
-	if len(plan.Edges) > 0 {
-		fmt.Println("==> dependency edges found; dispatching in waves")
-	} else {
-		fmt.Printf("==> %d issue(s); launching up to %d container(s) at a time\n", len(plan.Issues), cfg.MaxParallel)
+	hasEdges := len(plan.Edges) > 0
+	overlaps := !hasEdges && plan.Origin != OriginSelective && batchHasTouchOverlap(cfg, fc, plan.Issues)
+	if hasEdges || overlaps {
+		if hasEdges {
+			fmt.Println("==> dependency edges found; dispatching in waves")
+		} else {
+			fmt.Println("==> declared touches overlap an in-progress issue; dispatching in waves")
+		}
+		return dispatchWaves(cfg, fc, f, s, plan.Issues, plan.Edges)
 	}
-	return dispatchWaves(cfg, fc, f, s, plan.Issues, plan.Edges)
+	fmt.Printf("==> %d issue(s); launching up to %d container(s) at a time\n", len(plan.Issues), cfg.MaxParallel)
+	dispatchWave(cfg, fc, f, s, plan.Issues)
+	return nil
 }
