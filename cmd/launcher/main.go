@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/waves"
@@ -57,6 +58,13 @@ type config struct {
 	failedLabel     string
 	completeLabel   string
 	maxJobs         int
+
+	// continuousDispatch opts into the slot-refill dispatch mode (#527):
+	// instead of a single wave, the launcher runs long enough to refill each
+	// freed slot from a live re-discovery, gated by the image-freshness
+	// probe before every launch. Off by default; the queue-discovery path
+	// only (ISSUE_NUMBER-claimed and selective dispatch ignore it).
+	continuousDispatch bool
 
 	// issueTracker selects the IssueTracker adapter: "github" (default),
 	// "local", or "jira". localIssuesDir is the local adapter's issue
@@ -191,16 +199,17 @@ func loadConfig() config {
 		driver:          os.Getenv("DRIVER"),
 		image:           image,
 
-		repoSlug:        os.Getenv("REPO_SLUG"),
-		label:           getenv("LABEL", "ready-for-agent"),
-		issueNumber:     os.Getenv("ISSUE_NUMBER"),
-		baseBranch:      getenv("BASE_BRANCH", "main"),
-		maxParallel:     atoi(getenv("MAX_PARALLEL", "3"), 3),
-		branchPrefix:    getenv("BRANCH_PREFIX", "agent/issue-"),
-		inProgressLabel: getenv("IN_PROGRESS_LABEL", "agent-in-progress"),
-		failedLabel:     getenv("FAILED_LABEL", "agent-failed"),
-		completeLabel:   getenv("COMPLETE_LABEL", "agent-complete"),
-		maxJobs:         atoiNonneg(os.Getenv("MAX_JOBS"), 0),
+		repoSlug:           os.Getenv("REPO_SLUG"),
+		label:              getenv("LABEL", "ready-for-agent"),
+		issueNumber:        os.Getenv("ISSUE_NUMBER"),
+		baseBranch:         getenv("BASE_BRANCH", "main"),
+		maxParallel:        atoi(getenv("MAX_PARALLEL", "3"), 3),
+		branchPrefix:       getenv("BRANCH_PREFIX", "agent/issue-"),
+		inProgressLabel:    getenv("IN_PROGRESS_LABEL", "agent-in-progress"),
+		failedLabel:        getenv("FAILED_LABEL", "agent-failed"),
+		completeLabel:      getenv("COMPLETE_LABEL", "agent-complete"),
+		maxJobs:            atoiNonneg(os.Getenv("MAX_JOBS"), 0),
+		continuousDispatch: os.Getenv("CONTINUOUS_DISPATCH") != "",
 
 		issueTracker:        getenv("ISSUE_TRACKER", "github"),
 		localIssuesDir:      getenv("LOCAL_ISSUES_DIR", ".spindrift/issues"),
@@ -536,6 +545,10 @@ func openPRForBranch(cf forge.CodeForge, branch string) (url string, isDraft boo
 //	exit 3 (waves.ErrOpenNoneDispatchable): open dispatchable issues exist but
 //	  drain selected zero (all blocked/deferred); the driving loop should
 //	  stop with a triage message rather than hot-looping.
+//	exit 4 (waves.ErrImageStale): CONTINUOUS_DISPATCH mode only — the
+//	  image-freshness probe found the loaded image would be rebuilt against
+//	  the current base-branch tip; in-flight Boxes finished, no new ones
+//	  launched, and the driving loop should rebuild and re-invoke.
 var errQueueEmpty = errors.New("queue empty")
 
 func containsLabel(labels []string, target string) bool {
@@ -662,6 +675,10 @@ func run(lc *launchContext) error {
 	// Skip when ISSUE_NUMBER is set — the caller already claimed a specific issue.
 	if resolveOrigin(c) == waves.OriginDiscovered {
 		reconcileStranded(c, it, cf, f, s)
+
+		if c.continuousDispatch {
+			return runContinuousDispatch(c, it, cf, pwd, f, s, runner.NixEvaluator{})
+		}
 	}
 
 	issues, origin, err := discoverIssues(c, it)
@@ -688,6 +705,49 @@ func run(lc *launchContext) error {
 		return err
 	}
 
+	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
+	return nil
+}
+
+// runContinuousDispatch is the entry point for CONTINUOUS_DISPATCH: the
+// opt-in slot-refill dispatch mode (#527). It performs the same empty-queue
+// check as the batch path (errQueueEmpty), then hands off to
+// waves.RunContinuous with a Discoverer that re-runs the label query and
+// edge build on every refill, and a FreshnessChecker wired to
+// freshness.Probe against the fetched base-branch tip. eval is injected so
+// tests can substitute a Fake instead of shelling out to nix — mirrors
+// previewIssues's own eval parameter.
+func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, eval freshness.Evaluator) error {
+	issues, origin, err := discoverIssues(c, it)
+	if err != nil {
+		return err
+	}
+	if origin == waves.OriginDiscovered && len(issues) == 0 {
+		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
+		return errQueueEmpty
+	}
+
+	discover := func() ([]waves.Issue, map[string][]string, error) {
+		issues, _, err := discoverIssues(c, it)
+		if err != nil {
+			return nil, nil, err
+		}
+		waveIssues := toWaveIssues(issues)
+		edges, err := waves.BuildEdges(it, waveIssues)
+		if err != nil {
+			return nil, nil, err
+		}
+		return waveIssues, edges, nil
+	}
+
+	fresh := func() (bool, bool, string) {
+		res := freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageDrv, eval)
+		return res.Applicable, res.Fresh, res.Message
+	}
+
+	if err := waves.RunContinuous(wavesConfig(c), it, cf, pwd, f, s, discover, fresh); err != nil {
+		return err
+	}
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
 	return nil
 }
@@ -772,9 +832,10 @@ func cmdDispatchSelective(lc *launchContext, nums []string, forceYes bool) int {
 
 // runExitCode translates run's result into the launcher's process exit
 // code: 2 for an empty dispatch queue, 3 for open issues that exist but
-// none are dispatchable, 1 for any other error, 0 on success. Split out
-// from cmdDispatch so it's unit-testable against a fake-populated
-// launchContext without going through bootstrap.
+// none are dispatchable, 4 for CONTINUOUS_DISPATCH mode stopping on a stale
+// image, 1 for any other error, 0 on success. Split out from cmdDispatch so
+// it's unit-testable against a fake-populated launchContext without going
+// through bootstrap.
 func runExitCode(lc *launchContext) int {
 	err := run(lc)
 	if err == nil {
@@ -785,6 +846,9 @@ func runExitCode(lc *launchContext) int {
 	}
 	if errors.Is(err, waves.ErrOpenNoneDispatchable) {
 		return 3
+	}
+	if errors.Is(err, waves.ErrImageStale) {
+		return 4
 	}
 	fmt.Fprintf(os.Stderr, "%s\n", err)
 	return 1

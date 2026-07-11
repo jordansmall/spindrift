@@ -327,6 +327,14 @@
     flakeOption = true;
     boxEnv = false;
   };
+  continuousDispatch = {
+    env = "CONTINUOUS_DISPATCH";
+    group = "Concurrency & dependency waves";
+    default = false;
+    doc = "when non-empty, dispatch runs as a long-running slot-refill loop instead of a single wave (#527): as each Box finishes, the launcher re-discovers the queue and refills the freed slot when the image-freshness probe (#526) reports fresh; a rebuild-needed result stops refilling, lets in-flight Boxes finish, and exits with the new documented code (see README's exit-code table). Off by default; applies to queue discovery only — ISSUE_NUMBER-claimed and selective dispatch ignore it";
+    flakeOption = true;
+    boxEnv = false;
+  };
   overlapGate = {
     env = "OVERLAP_GATE";
     group = "Concurrency & dependency waves";
