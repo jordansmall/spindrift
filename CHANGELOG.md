@@ -1,5 +1,189 @@
 # Changelog
 
+## [0.3.0](https://github.com/jordansmall/spindrift/compare/v0.2.1...v0.3.0) (2026-07-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* spindrift no longer provides flake outputs for x86_64-darwin.
+
+### Features
+
+* **checks:** add driver-names-gen drift guard ([168f06c](https://github.com/jordansmall/spindrift/commit/168f06c1b7c6df51427102ceca5647174123dc48))
+* **checks:** pin lifecycle-label literals in agent workflows ([719cd82](https://github.com/jordansmall/spindrift/commit/719cd8263b8615c823eb0cb71c6aa3dc8f8cb972))
+* **claudetranscript:** add claude stream-json transcript-parse package ([0942e5a](https://github.com/jordansmall/spindrift/commit/0942e5a77b4517a0d901bfeac2cdabbfd64dafff))
+* **dispatch:** add internal/dispatch, the per-issue execution module ([b869e5a](https://github.com/jordansmall/spindrift/commit/b869e5a40c0dd798d1aeea93b7f2400720a19a4b))
+* **dogfood:** bake bats and shellcheck into spindrift box ([b504f5a](https://github.com/jordansmall/spindrift/commit/b504f5a4c2146a35138262b67deb46e165025dbd))
+* **dogfood:** enable AUTO_LINT for spindrift's own runs ([543d2f8](https://github.com/jordansmall/spindrift/commit/543d2f8c8df6705fa2462afcfe9d4394664d2952))
+* **dogfood:** enable in-box nix flake check for spindrift itself ([1140603](https://github.com/jordansmall/spindrift/commit/114060380e5b063fc3549ae29836d9603ccaa987))
+* **dogfood:** parallel by default via bounded drain batches ([71db991](https://github.com/jordansmall/spindrift/commit/71db9919c821ad0584a7aff138797fc5e1707620)), closes [#476](https://github.com/jordansmall/spindrift/issues/476)
+* **dogfood:** stop gracefully after the current wave ([03f62c3](https://github.com/jordansmall/spindrift/commit/03f62c3b8cdfc564e6f3d167e0a3e4b946af7956))
+* **drain:** cascade-fail when in-batch blocker has failed ([96d46ef](https://github.com/jordansmall/spindrift/commit/96d46ef369b1aa488085d01777f9586822299859))
+* **drain:** exit 3 when issues exist but none are dispatchable ([b9ffbbe](https://github.com/jordansmall/spindrift/commit/b9ffbbe5c97afb09b5812b110ea8f67fd6c9aac3))
+* **driver:** generate nixDriverNames from Nix registry ([0deec83](https://github.com/jordansmall/spindrift/commit/0deec83663d9afc92924558922f7ceeb974aef01))
+* **drivers:** claude declares its session-cache dir ([6b199b2](https://github.com/jordansmall/spindrift/commit/6b199b2e862b6870edca394d5b73ff4f6c29320c))
+* **entrypoint:** extend outcome-contract injection to COMMS/CHECK ([bd274df](https://github.com/jordansmall/spindrift/commit/bd274df16444ba601a36a77134925cfa1e9a35bf))
+* **entrypoint:** inject AUTO_FORMAT_STEP when knob is on ([b84c05b](https://github.com/jordansmall/spindrift/commit/b84c05bc81327ba059b856870a6e44a67ef677b0))
+* **entrypoint:** inject AUTO_LINT_STEP when knob is on ([54b22cf](https://github.com/jordansmall/spindrift/commit/54b22cf324bee708f74d3fb24e05eceaf34012b0))
+* **entrypoint:** warn loudly when the nix store is writable ([2d7e562](https://github.com/jordansmall/spindrift/commit/2d7e562b7dcc411ca4d913978012b0292b3eb32b))
+* **forge:** add CodeForge.PushOnly() capability predicate ([d103d9f](https://github.com/jordansmall/spindrift/commit/d103d9f859581e47e1ba47470064b451fae70fc6))
+* **harness:** add nixStoreWritable + extraClosures knobs ([6a67fcc](https://github.com/jordansmall/spindrift/commit/6a67fcc29140992616ce6fdb6b3c26321c24367b))
+* **harness:** render Driver functions for bats preamble ([565dc47](https://github.com/jordansmall/spindrift/commit/565dc47223f5f71d233de713db5dbef619734b5e))
+* **launcher:** add bootstrap for the shared dispatch prologue ([92cfb07](https://github.com/jordansmall/spindrift/commit/92cfb07df808c606bb27c5fe6ab39379b7fe69b7))
+* **launcher:** read Driver mount targets from nix-baked env vars ([7a24412](https://github.com/jordansmall/spindrift/commit/7a2441258b9b9f3c6dbe04c563179ea954af8e76))
+* **logscan:** add shared line-scan helper with oversized-line policy ([745f6f4](https://github.com/jordansmall/spindrift/commit/745f6f4568651c39aa5d17a559d9314bcf5ec5f2))
+* **mkHarness:** bake prompt fragments into the image ([2468724](https://github.com/jordansmall/spindrift/commit/2468724bc7466d7c27edd565195d0bfd1b0ad3fd))
+* **nix:** pin and bake upstream caveman skill into dogfood ([a463a20](https://github.com/jordansmall/spindrift/commit/a463a20cf993c7de3cdd781a74e7746b2a67b871))
+* **oci:** print image-present line on EnsureReady early return ([5b5ce8b](https://github.com/jordansmall/spindrift/commit/5b5ce8b38000e4a8fba9e0f451d9e94ccb728f20))
+* **prompts:** default in-box agents to caveman narration ([f790abc](https://github.com/jordansmall/spindrift/commit/f790abc57e734bf8a29e35349bf7cb85250291cf))
+* **prompts:** fix prompt sources shared blocks instead of copying ([d4eb1a8](https://github.com/jordansmall/spindrift/commit/d4eb1a87234c6d1cc5295458b0e9a12ee39a8058))
+* **runner:** compute mount decisions once via MountSpec ([c329bad](https://github.com/jordansmall/spindrift/commit/c329bad87d15b1eb1f1cb8326eaa02e74a0c7a80))
+* **schema:** add AUTO_FORMAT boolean knob ([848c454](https://github.com/jordansmall/spindrift/commit/848c454ee9835453ef55fa5e01718335e88e6d58))
+* **schema:** add AUTO_LINT boolean knob ([b9741ee](https://github.com/jordansmall/spindrift/commit/b9741eef1e05ccd920093305fc96017c8b422299))
+* **settle:** add internal/settle, the merge-gate execution module ([5120911](https://github.com/jordansmall/spindrift/commit/5120911cb142104777a4ba08e0645d2eba890ab9))
+* **tests:** add schema-derived set_box_env helper ([a96f310](https://github.com/jordansmall/spindrift/commit/a96f3100bda812f34a4baa4bda28e68e9d6f5f9e))
+
+
+### Bug Fixes
+
+* **checks:** add AUTO_LINT to boxEnvOnly list ([e4c2242](https://github.com/jordansmall/spindrift/commit/e4c224232ec8cc085b803c9065a85bf3afb9c7af))
+* **checks:** drain tar stream in extraClosures greps (SIGPIPE race) ([d95b29a](https://github.com/jordansmall/spindrift/commit/d95b29a1c5ed9be36898def6053f8c21c33e69cf))
+* **checks:** drift-guard caveman-default fragment into image ([4a25a5f](https://github.com/jordansmall/spindrift/commit/4a25a5f188bb9eaf8b24943a96f19a04620d8c01))
+* **checks:** nixfmt the new per-concern check modules ([6cb403e](https://github.com/jordansmall/spindrift/commit/6cb403e9273bb7bb89e0df9b30d957de9c47bdca))
+* **checks:** tighten caveman drift guard to non-empty file ([adcce72](https://github.com/jordansmall/spindrift/commit/adcce7206989d069afaffd8b7fc58b14ad8530b6))
+* **checks:** use a distinctive literal for the WATCH CI grep pin ([42e6e89](https://github.com/jordansmall/spindrift/commit/42e6e89cd59c173bbbba961035ab98080a950c53))
+* **checks:** use a plain string for the groupOrder entry regex ([121b072](https://github.com/jordansmall/spindrift/commit/121b072532b5379483badaea3894de7e5c6e7db7))
+* **dogfood:** cover claudetranscript in heartbeatFilterBin fileset ([b2bd6b3](https://github.com/jordansmall/spindrift/commit/b2bd6b332239716685c299df804ec1a0f1aa6661))
+* **dogfood:** migrate off deprecated nix app aliases ([57dd9fe](https://github.com/jordansmall/spindrift/commit/57dd9fe7e821fbc044a705616798eb53c1962a7f)), closes [#431](https://github.com/jordansmall/spindrift/issues/431)
+* **dogfood:** write the pid file after the dirty-tree check ([6c4dc50](https://github.com/jordansmall/spindrift/commit/6c4dc50013a711f20ed8ad4501ffcaa55f272091))
+* **drain:** guard cascade behind issueNumber=="" check ([7a73369](https://github.com/jordansmall/spindrift/commit/7a73369cc3e99e4ff2c6e96da27540fe5ba96040))
+* **entrypoint:** restore blank-line separator after fragment reads ([a244d39](https://github.com/jordansmall/spindrift/commit/a244d3941add89b31cf27434a50c8336eff48eb7))
+* **entrypoint:** suppress SC2016 on AUTO_FORMAT_STEP ([94029d3](https://github.com/jordansmall/spindrift/commit/94029d37cb604cb5bb86dd61bd88acafcaa7a9ea))
+* **fixtures:** sync harness defaults with dogfood module ([b1a1f53](https://github.com/jordansmall/spindrift/commit/b1a1f534c94fdaec38c2b3e46bd4eae53dfa08f4))
+* **fixtures:** sync harness defaults with dogfood module ([faf8d2d](https://github.com/jordansmall/spindrift/commit/faf8d2ded2d9fe2134d21fc7171157cb18c3f5ab))
+* **image:** bake /home/agent/.claude/projects owned 1000:1000 ([9cc5788](https://github.com/jordansmall/spindrift/commit/9cc578818ff6d4227a888d19faf2990faf6c6c51)), closes [#447](https://github.com/jordansmall/spindrift/issues/447)
+* **launcher:** delete printOutcomeReport ([6790d81](https://github.com/jordansmall/spindrift/commit/6790d812f6dc87a6902758e894469ddaa6aca40e))
+* **mkHarness:** collapse flagDflt to single line ([739c2e8](https://github.com/jordansmall/spindrift/commit/739c2e8ee69a09f0c8c616e635cf30ee4f0bfcad))
+* **mkHarness:** restrict heartbeatFilterBin src via fileset ([e28ab3f](https://github.com/jordansmall/spindrift/commit/e28ab3f1b2cb3d0f8965b257ae9c1414f65e329b))
+* **prompts:** move CAVEMAN_STEP off the COMMS slice boundary ([50e3020](https://github.com/jordansmall/spindrift/commit/50e3020dbb6e5572437c6944726e1b5e8288b7c5))
+* **prompts:** steer AUTO-FORMAT away from doomed nix fmt ([364fe98](https://github.com/jordansmall/spindrift/commit/364fe98cc974b4dcc4687ea399ccccfdb01e3452))
+* **runner/bwrap:** create agent-owned .claude parent before bind ([b7e031c](https://github.com/jordansmall/spindrift/commit/b7e031c7d30d168eeda18d74c2965a11f6971bc6)), closes [#447](https://github.com/jordansmall/spindrift/issues/447)
+* **runner:** bwrap skills fallback must not mask a broken override ([161da81](https://github.com/jordansmall/spindrift/commit/161da81903a51a88da99bec49eaa19e072c0de8f))
+* **template:** add promptSkillIteration to settings example ([eec74aa](https://github.com/jordansmall/spindrift/commit/eec74aaadaff8a3bd9ccc5adabb508a0e9667f40))
+* **test:** check projects mountpoint in Layers[-1] only ([98b9ac7](https://github.com/jordansmall/spindrift/commit/98b9ac70c9c90867e4f503434ddf8f98959b5fa0))
+
+
+### Documentation
+
+* **adr:** dispatch exits at the wave boundary ([88bcfcf](https://github.com/jordansmall/spindrift/commit/88bcfcfb19dcd074d37ccf6407136c4eaa9f6cad))
+* **adr:** lifecycle stays call-site transitions ([392c93a](https://github.com/jordansmall/spindrift/commit/392c93acd4662e98b21f29715be0e57b7cf84ed9)), closes [#139](https://github.com/jordansmall/spindrift/issues/139)
+* **context:** add dispatch and settle terms ([4a24988](https://github.com/jordansmall/spindrift/commit/4a249887aa5b2dd88a68bcccafed2300e4383f52))
+* document AUTO_FORMAT knob in README and CHANGELOG ([279ed39](https://github.com/jordansmall/spindrift/commit/279ed3993ec695dee09a18d67e5c6bdf7524b53a))
+* document AUTO_LINT knob in README and CHANGELOG ([b557060](https://github.com/jordansmall/spindrift/commit/b5570600c35627b6484b81e9ec1357d6ad6db719))
+* document caveman-default narration and opt-out ([cdddeb4](https://github.com/jordansmall/spindrift/commit/cdddeb4d3005b9b596049399a8fbc79753f37c8c))
+* document the baked caveman skill ([953dde7](https://github.com/jordansmall/spindrift/commit/953dde7d373f7d1fc647b2490ee2da65f238f7ce))
+* drop nix fmt from AUTO_FORMAT docs ([1984890](https://github.com/jordansmall/spindrift/commit/1984890f571592af1194f4a9a101c143c5c8f295))
+* fix stale pass-1 comment, clarify Message field union ([a6242ed](https://github.com/jordansmall/spindrift/commit/a6242edea8662146006dc16c9673f516bdf8a450))
+* **forge:** fix stale issueQueryLimit reference in jira test ([0375d3e](https://github.com/jordansmall/spindrift/commit/0375d3e61f5245bfb72602037fbebb7444350aec))
+* instruct agents to shellcheck shell files in-box ([493f6a5](https://github.com/jordansmall/spindrift/commit/493f6a550987077d57d87c4f696e21919727d5a5))
+* **nix:** credit ADR 0018 knobs to issue [#469](https://github.com/jordansmall/spindrift/issues/469), not [#470](https://github.com/jordansmall/spindrift/issues/470) ([9b8c5f1](https://github.com/jordansmall/spindrift/commit/9b8c5f1e8604e1f3f74094bbe2c83cc69d5bdaae))
+* **nix:** make nix flake check the primary in-box gate ([2bf08e5](https://github.com/jordansmall/spindrift/commit/2bf08e5a6d65e1040d2fdd0efdeba20858e79811))
+* note fix-pass transient retry now holds instead of burning ([a790d65](https://github.com/jordansmall/spindrift/commit/a790d659cffbefb740efbc8937af7809c9dfd08f))
+* record ADR 0018 and the new option surface ([6ec6273](https://github.com/jordansmall/spindrift/commit/6ec6273a663b2df7e9dbf131090a9e868f18107b))
+* **reference:** document Driver-authoring mount-target fields ([3d21008](https://github.com/jordansmall/spindrift/commit/3d2100809a4ea18ce05ae76801af23f80b53f774))
+* **reference:** document fragment/SPINDRIFT_PROMPT_DIR interaction ([b6fcf27](https://github.com/jordansmall/spindrift/commit/b6fcf27acad57546ebe61fd09d0ecac1518eac8c))
+* **reference:** note image bakes the driver-cache mountpoint ([67b3346](https://github.com/jordansmall/spindrift/commit/67b3346e0d6517ae3fda5682b488370ef9aeb02c))
+* **settle:** note Settle's concurrent-use safety contract ([7e0933c](https://github.com/jordansmall/spindrift/commit/7e0933ca63bc89389c404db43fa5e2d0e77af401))
+* **tests:** fix stale entrypoint.bats comments post-set_box_env ([8d549e1](https://github.com/jordansmall/spindrift/commit/8d549e11f5686a30b229ad9676ef8a8e82352865))
+
+
+### Code Refactoring
+
+* **checks:** manpage check renders toKebab via renderers.nix ([9f31e93](https://github.com/jordansmall/spindrift/commit/9f31e933a938fcf296c10a3f5d0100a86a55c510))
+* **checks:** split nix/checks.nix into per-concern modules ([0edd67d](https://github.com/jordansmall/spindrift/commit/0edd67d39758a18cff017605065ea74b7135eba9))
+* **dispatch:** skip cache creation when Driver declares none ([31af707](https://github.com/jordansmall/spindrift/commit/31af707a36be7dc94efdf18286d81848a8e6ff40))
+* **entrypoint:** delete fallback Driver function bodies ([bf664e0](https://github.com/jordansmall/spindrift/commit/bf664e0125690c034f605e96c9b23075154669b4))
+* **entrypoint:** move conditional prompt prose to fragment files ([eb8a373](https://github.com/jordansmall/spindrift/commit/eb8a37347a1d7bdd8abe18828f08348dc1dad14a))
+* **entrypoint:** render the driver pipeline from one source ([c200083](https://github.com/jordansmall/spindrift/commit/c200083902e954b9ea87e66d5ec708867a86c1eb))
+* **fixtures:** share dogfood leaf values between wiring paths ([3f3b4db](https://github.com/jordansmall/spindrift/commit/3f3b4dba5547890ab0d27f6c4d48e076a0d12282))
+* **flakeModule:** import groupToAttr from renderers.nix ([cdbd924](https://github.com/jordansmall/spindrift/commit/cdbd9245e489e3b6786b6947609f8e47059c12f5))
+* **forge:** dedup "## Comments" append helper ([5939663](https://github.com/jordansmall/spindrift/commit/5939663adfa5a4570ebf7b3251d35644cf75d671))
+* **forge:** dedup page-limit cap and backlog warning ([c79bff9](https://github.com/jordansmall/spindrift/commit/c79bff9273ae0f94f8938c4fb2aa24dd23a6c341))
+* **forge:** delete DefaultDispatchLabels, fake takes labels ([1ce6293](https://github.com/jordansmall/spindrift/commit/1ce6293701c2c672ec91ab73dcb956ffb92669a7))
+* **forge:** split exec.go by responsibility ([b06ca89](https://github.com/jordansmall/spindrift/commit/b06ca89deb503078813f3df3ef931ae808a97313))
+* **forge:** typed states, AgentBranch owner ([72c05ae](https://github.com/jordansmall/spindrift/commit/72c05aeff171555bb113ee19feb453c85352237e))
+* **heartbeat:** consume claudetranscript; split formatting helpers ([a7a526d](https://github.com/jordansmall/spindrift/commit/a7a526d55a93756bf208596c7f02a5e613bdc262))
+* **launcher:** delete newRunner/newBuildRunner wrappers ([999473e](https://github.com/jordansmall/spindrift/commit/999473e262e11e5bb3156f77435b3c84915c609f))
+* **launcher:** drive dispatch through a per-issue Factory ([b348a69](https://github.com/jordansmall/spindrift/commit/b348a69f3121adb368d02342932e2b498c0710c9))
+* **launcher:** drive the merge gate through settle.Settle ([c6ade73](https://github.com/jordansmall/spindrift/commit/c6ade73876c2b6663f0f7bec0793b3c4685a5be3))
+* **launcher:** recover and dispatch &lt;nums&gt; use bootstrap ([24f848e](https://github.com/jordansmall/spindrift/commit/24f848ee0142e1dce1b8583df63990a330ab81c4))
+* **launcher:** run takes a launchContext, wired via bootstrap ([c8f6eef](https://github.com/jordansmall/spindrift/commit/c8f6eef955a799cc21d8b2ea46408273d6176d89))
+* **launcher:** thread launchContext through subcommand functions ([3e6569d](https://github.com/jordansmall/spindrift/commit/3e6569d525b64cbf3738a9038af6119fc3133b44))
+* **logscan:** drop unused test helper params, cross-ref caveat ([ef2a43d](https://github.com/jordansmall/spindrift/commit/ef2a43d49773a8cf62efc1d4118bc4fe77ce7340))
+* **mkHarness:** extract shared driverFunctionDefs binding ([cd523ee](https://github.com/jordansmall/spindrift/commit/cd523eee4d8a00984fdc9e52152617746efa08a9))
+* **mkHarness:** render the man page via renderers.nix ([799b2f9](https://github.com/jordansmall/spindrift/commit/799b2f9b73f4dd79dfd71e7d887032f04d128427))
+* **outcome,usage:** migrate scans onto logscan.ForEachLine ([4ec8e2a](https://github.com/jordansmall/spindrift/commit/4ec8e2aa1891af59c6a5c32da91a963b6dee0eca))
+* **outcome:** migrate classify scan onto logscan.ForEachLine ([c396f38](https://github.com/jordansmall/spindrift/commit/c396f38ead9d6e1ae9cc04e18eb4ff02cda24bf8))
+* **renderers:** promote helpers, add man-page renderer ([14c5da0](https://github.com/jordansmall/spindrift/commit/14c5da0ed677aa48dc4062acfb750095af25a113))
+* **runner:** adapters take Driver-declared mount targets ([de12207](https://github.com/jordansmall/spindrift/commit/de12207b1a9a6e1c9425d4f1f8b041f32f823561))
+* **runner:** bwrap adapter renders MountSpec, not its own gates ([1f8b4ff](https://github.com/jordansmall/spindrift/commit/1f8b4ffbb8d4f8ad87db934d5b9a8fa45820bbd9))
+* **runner:** move RUNTIME validation next to Config ([11e7080](https://github.com/jordansmall/spindrift/commit/11e7080f90cb4d5a7cad88db3abc0ef97e32af24))
+* **runner:** NewOCI/NewBwrap/NewBwrapBuild take Config ([22b7359](https://github.com/jordansmall/spindrift/commit/22b7359ac8b327bd5b2b23a6f0603adb59bfd8fc))
+* **runner:** OCI adapter renders MountSpec, not its own gates ([6806eb6](https://github.com/jordansmall/spindrift/commit/6806eb67f354f842223bbf002220bfb9fe61921e))
+* **runner:** thread Driver mount targets through Config ([d3ea5d7](https://github.com/jordansmall/spindrift/commit/d3ea5d79446fca7e14e0e64ad2024c0b9cbed279))
+* **settle,forge:** per-group validation next to Config ([f935f30](https://github.com/jordansmall/spindrift/commit/f935f3073ab0059f513796f75b5637e639845fef))
+* **tests:** entrypoint.bats consumes set_box_env ([dd496ed](https://github.com/jordansmall/spindrift/commit/dd496ed01f8764fdb7045c8eddf3b7406bfffda3))
+* unify fan-out terminology on wave ([c528e22](https://github.com/jordansmall/spindrift/commit/c528e22b63b45c9e79347dc49a546380bc72bfbb))
+* **usage:** consume claudetranscript for role resolution ([03ea1f8](https://github.com/jordansmall/spindrift/commit/03ea1f81b9d5a87df8fbc0883b5b6134c00cdd18))
+
+
+### Tests
+
+* **checks:** assert bats/shellcheck baked into dogfood ([57eb06f](https://github.com/jordansmall/spindrift/commit/57eb06f634c47f324cac45aa3ecd89c054b0c35f))
+* **checks:** assert both sides of the new nix image knobs ([be7e89d](https://github.com/jordansmall/spindrift/commit/be7e89d1f0d61ad1d85118a7fcaa5757b6ce7352))
+* **checks:** assert heartbeat-filter src excludes tests ([32ade8f](https://github.com/jordansmall/spindrift/commit/32ade8f8a7c588351373af87ab7a163e0e499c97))
+* **checks:** drift-guard the caveman skill baked into dogfood ([9a55019](https://github.com/jordansmall/spindrift/commit/9a55019a37867fc7dcd4b375ded091c008c5df4d))
+* **checks:** guard set_box_env against schema drift ([ea9595a](https://github.com/jordansmall/spindrift/commit/ea9595a5c3d9b01b5859ae4d041eab2feefd8ac5))
+* **checks:** pin dogfood leaf values to one definition ([27119d5](https://github.com/jordansmall/spindrift/commit/27119d5dad186f98cd4d3188b94297ed40e918d1))
+* **checks:** pin flags.go groupOrder against renderers.nix ([010fa4a](https://github.com/jordansmall/spindrift/commit/010fa4a56dec13dddd98c51012a9449c4ce63b40))
+* **classify:** cover all transient markers and Driver seam ([a433176](https://github.com/jordansmall/spindrift/commit/a43317680eaa3a9f649ce87b651406d0ac28ea2f))
+* **classify:** isolate bare Overloaded and no-such-host markers ([c075fb6](https://github.com/jordansmall/spindrift/commit/c075fb635a8eebd551cf35c6623194644cdb5011))
+* **entrypoint:** cover /caveman skill preamble advertisement ([bf79c05](https://github.com/jordansmall/spindrift/commit/bf79c05704a5bec23291bd3370fb5e7fbd15bff4))
+* **entrypoint:** cover AUTO-FORMAT step gating ([c9d4fdd](https://github.com/jordansmall/spindrift/commit/c9d4fddfa82bc747fe21157c214f3d4e0e7f8661))
+* **entrypoint:** cover AUTO-LINT step gating ([9d01ce9](https://github.com/jordansmall/spindrift/commit/9d01ce93567d9cbd1ca39f9cba284e4aa0642f11))
+* **entrypoint:** cover caveman-default narration default ([492a3aa](https://github.com/jordansmall/spindrift/commit/492a3aa1f73865b8b3bd60dee38a709c689c2d2e))
+* **launcher:** migrate tests onto dispatch.Factory/Fake, add pin ([109f3a9](https://github.com/jordansmall/spindrift/commit/109f3a93b800050298acb44c91bf56c3f162d428))
+* **launcher:** pin no state literal outside forge ([00c22a4](https://github.com/jordansmall/spindrift/commit/00c22a43c8cf55f450cf8b67d8a40a17f17d61fb))
+* **runner:** pin no-duplication and cross-backend mount rendering ([a2b49f0](https://github.com/jordansmall/spindrift/commit/a2b49f09ff5d7900515ce17681905372585891ce))
+* **settle:** pass real labels to git-forge merged-status test ([aaa6d81](https://github.com/jordansmall/spindrift/commit/aaa6d81ae88ff7dafd2e9912dc8f97203031d372))
+
+
+### Build System
+
+* drop x86_64-darwin from supported systems ([ee448fb](https://github.com/jordansmall/spindrift/commit/ee448fb8046d4e5f53de91e368bb5de6b4dcb6ac))
+
+
+### Continuous Integration
+
+* **actions:** add agent-setup composite action ([e87ab1c](https://github.com/jordansmall/spindrift/commit/e87ab1ce6a9695d0e64eb2a635355544665a8eb5))
+* **workflows:** wire dispatch/recover to agent-setup ([b647627](https://github.com/jordansmall/spindrift/commit/b6476277f2676675ac31099603363ae49fa37f50)), closes [#458](https://github.com/jordansmall/spindrift/issues/458)
+
+
+### Miscellaneous Chores
+
+* **regen:** regenerate schema-derived artifacts for AUTO_FORMAT ([cc3e61c](https://github.com/jordansmall/spindrift/commit/cc3e61cb898a6b8b7f65c897f2d9512b6d348c86))
+* **regen:** update generated surfaces for AUTO_LINT ([263970e](https://github.com/jordansmall/spindrift/commit/263970e7b74ff58351876783bddb738adafc957c))
+
+
+### Styles
+
+* **checks:** nixfmt equivalence.nix ([f47fa28](https://github.com/jordansmall/spindrift/commit/f47fa28b6c970e9c7bdd88b02d8f1860cc6a9c94))
+* **checks:** nixfmt image.nix ([8a21ae6](https://github.com/jordansmall/spindrift/commit/8a21ae63c474753b62dcad9968e91d97f5dac711))
+* **checks:** nixfmt the caveman drift guard ([57e34aa](https://github.com/jordansmall/spindrift/commit/57e34aa882feff633d9e02da2e095c76fd95c714))
+* **entrypoint:** restore blank line dropped by fragment refactor ([c0131a6](https://github.com/jordansmall/spindrift/commit/c0131a66dd5e10daa8a42c107441305af5ef7afe))
+* nixfmt lib/mkHarness.nix and nix/checks/prompts.nix ([c77701d](https://github.com/jordansmall/spindrift/commit/c77701df6cc404e7321c04ecf50ea0cc70fac72c))
+* **nix:** nixfmt the multi-item inherit lists ([a1f5d47](https://github.com/jordansmall/spindrift/commit/a1f5d477c77a56f3bfa1b3e66493cb518b45573e))
+
 ## [Unreleased]
 
 ### Features
