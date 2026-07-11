@@ -201,6 +201,17 @@ run larger batches or remove the cap.
 | 0    | dispatched work | pull + rebuild, then continue |
 | 2    | queue empty (no open issues with the dispatch label) | exit cleanly |
 | 3    | open issues exist but none are dispatchable | stop and print a triage message — typically a failed blocker needs re-labeling before the queue can drain |
+| 4    | `CONTINUOUS_DISPATCH` mode only: the image-freshness probe found the loaded image would be rebuilt against the current base-branch tip; in-flight Boxes finished, no new ones launched | not yet handled here — falls into the `nix_exit -ne 0` branch and is treated as a failure until a driving loop opts in and handles it explicitly (#528) |
+
+Set `CONTINUOUS_DISPATCH=1` to opt into the slot-refill dispatch mode
+(#527): instead of draining one wave and exiting, the launcher runs long
+enough to refill each freed slot from a live re-discovery — re-applying
+blocker readiness, the Touches overlap gate, and blocker-failed cascade —
+gated by the image-freshness probe (#526) before every launch. A merge that
+changes image inputs stops refilling — in-flight Boxes still finish — and
+the invocation exits 4 instead of launching a new Box on a stale image.
+Off by default; `dogfood.sh` does not set it today, so its batch-shaped
+drain above remains what actually runs.
 
 **Baked skill, on by default.** The dogfood Box bakes the pinned upstream
 [`caveman` skill](https://github.com/juliusbrussee/caveman), advertised
