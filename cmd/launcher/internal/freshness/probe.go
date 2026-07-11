@@ -8,6 +8,7 @@
 package freshness
 
 import (
+	"bytes"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -80,8 +81,11 @@ func Probe(runtime, pwd, baseBranch, flakeImageAttr, imageDrv string, eval Evalu
 // fetchBaseTip fetches baseBranch from origin at pwd — no checkout, no pull,
 // no working-copy mutation — and returns the fetched commit sha.
 func fetchBaseTip(pwd, baseBranch string) (string, error) {
-	if err := exec.Command("git", "-C", pwd, "fetch", "origin", baseBranch).Run(); err != nil {
-		return "", fmt.Errorf("git fetch origin %s: %w", baseBranch, err)
+	fetch := exec.Command("git", "-C", pwd, "fetch", "origin", baseBranch)
+	var stderr bytes.Buffer
+	fetch.Stderr = &stderr
+	if err := fetch.Run(); err != nil {
+		return "", fmt.Errorf("git fetch origin %s: %w: %s", baseBranch, err, strings.TrimSpace(stderr.String()))
 	}
 	out, err := exec.Command("git", "-C", pwd, "rev-parse", "FETCH_HEAD").Output()
 	if err != nil {

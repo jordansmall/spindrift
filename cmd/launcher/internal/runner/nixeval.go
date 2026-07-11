@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -24,9 +25,12 @@ type NixEvaluator struct{}
 // against a git+file flake reference — no checkout, no pull.
 func (NixEvaluator) Eval(pwd, rev, attr string) (string, error) {
 	ref := nixEvalRef(pwd, rev, attr)
-	out, err := exec.Command("nix", "eval", "--raw", ref).Output()
+	cmd := exec.Command("nix", "eval", "--raw", ref)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("nix eval %s: %w", ref, err)
+		return "", fmt.Errorf("nix eval %s: %w: %s", ref, err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(string(out)), nil
 }
