@@ -107,7 +107,7 @@ in
   # shared-block markers at all — must still gain all three, in COMMS, CHECK,
   # outcome-contract order, the same #420 runtime-override parity the issue
   # prompt already has (proven at the Nix layer here; agent/entrypoint.sh's
-  # own runtime injection is covered by tests/entrypoint.bats).
+  # own runtime injection is covered by tests/entrypoint-outcome-contract.bats).
   mkharness-prompt-fix-consumer-override-injected =
     pkgs.runCommand "mkharness-prompt-fix-consumer-override-injected" { }
       ''
