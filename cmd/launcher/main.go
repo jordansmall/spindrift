@@ -965,16 +965,31 @@ func cmdPreview(issueNums []string) int {
 	return 0
 }
 
+// selectiveDispatchExitCode translates selectiveListDispatch's result into
+// the launcher's process exit code: 3 for open issues that exist but none
+// are dispatchable (the same ErrOpenNoneDispatchable sentinel the queue
+// path uses — a selective wave can defer every listed issue just as a
+// queue drain can), 1 for any other error, 0 on success. Split out from
+// cmdDispatchSelective so it's unit-testable against a fake-populated
+// launchContext without going through bootstrap.
+func selectiveDispatchExitCode(lc *launchContext, nums []string, forceYes bool) int {
+	err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, os.Stdout)
+	if err == nil {
+		return 0
+	}
+	if errors.Is(err, waves.ErrOpenNoneDispatchable) {
+		return 3
+	}
+	fmt.Fprintf(os.Stderr, "%s\n", err)
+	return 1
+}
+
 // cmdDispatchSelective is the `dispatch <nums>` subcommand: an
 // operator-supplied issue list that bypasses the label/barrier gates. lc is
 // wired by bootstrap in production; tests construct it directly with fakes.
 func cmdDispatchSelective(lc *launchContext, nums []string, forceYes bool) int {
 	defer lc.cleanup()
-	if err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return 1
-	}
-	return 0
+	return selectiveDispatchExitCode(lc, nums, forceYes)
 }
 
 // runExitCode translates run's result into the launcher's process exit

@@ -84,3 +84,41 @@ func TestRunExitCode_QueueMaxJobsZero_NoneDispatchable_ReturnsExitCode3(t *testi
 		t.Errorf("runExitCode(lc) = %d, want 3 (ErrOpenNoneDispatchable)", got)
 	}
 }
+
+// TestSelectiveDispatchExitCode_ZeroSelected_ReturnsExitCode3 is the
+// regression test for #524's acceptance criterion: zero selected with
+// issues held (here, everything overlap-deferred) exits 3, matching the
+// queue path's ErrOpenNoneDispatchable translation, instead of the generic
+// exit 1 every other selective-dispatch error uses.
+func TestSelectiveDispatchExitCode_ZeroSelected_ReturnsExitCode3(t *testing.T) {
+	c := baseConfig()
+	c.label = "agent-trigger"
+	c.overlapGate = "defer"
+	dir := tempLogDir(t)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{
+		Number: "10",
+		Body:   "## Touches\n- lib/env-schema.nix",
+		Labels: []string{c.label},
+	})
+	fc.SetIssue(forge.Issue{
+		Number: "20",
+		Body:   "## Touches\n- lib/env-schema.nix",
+		State:  "OPEN",
+		Labels: []string{c.inProgressLabel},
+	})
+
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       settle.NewFake(),
+	}
+
+	if got := selectiveDispatchExitCode(lc, []string{"10"}, true); got != 3 {
+		t.Errorf("selectiveDispatchExitCode(lc, [10], true) = %d, want 3 (ErrOpenNoneDispatchable)", got)
+	}
+}
