@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/waves"
@@ -761,12 +762,16 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 	return fmt.Errorf("one or more triage labels are still missing after creation")
 }
 
-// previewIssues is the testable core of the preview verb. When issueNums is
-// non-empty it performs a selective dry-run: fetches exactly those issues,
-// prints label-bypass warnings, blocker annotations, and cascade-eviction
-// notices without launching any Box or prompting. When issueNums is empty it
-// falls back to queue-drain discovery.
-func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Writer, issueNums []string) error {
+// previewIssues is the testable core of the preview verb. It always prints
+// an image-freshness line first (freshness.Probe against pwd/eval), then:
+// when issueNums is non-empty it performs a selective dry-run — fetches
+// exactly those issues, prints label-bypass warnings, blocker annotations,
+// and cascade-eviction notices without launching any Box or prompting; when
+// issueNums is empty it falls back to queue-drain discovery.
+func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Writer, issueNums []string, pwd string, eval freshness.Evaluator) error {
+	res := freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageDrv, eval)
+	fmt.Fprintf(w, "image-freshness: %s\n", res.Message)
+
 	if len(issueNums) > 0 {
 		return previewSelectiveList(c, it, cf, w, issueNums)
 	}
@@ -855,7 +860,11 @@ func preview(issueNums []string) error {
 	}
 	it := newIssueTracker(c)
 	cf := newCodeForge(c)
-	return previewIssues(c, it, cf, os.Stdout, issueNums)
+	pwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	return previewIssues(c, it, cf, os.Stdout, issueNums, pwd, runner.NixEvaluator{})
 }
 
 // run is the orchestration logic for the `dispatch` subcommand: preflight,

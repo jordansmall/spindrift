@@ -19,7 +19,7 @@ func TestPreviewIssues_ListsIssuesAndRepo(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "20", Title: "second issue", Labels: []string{c.label}})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil); err != nil {
+	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -51,7 +51,7 @@ func TestPreviewIssues_PrintsMergeMode(t *testing.T) {
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil); err != nil {
+	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -79,7 +79,7 @@ func TestPreviewIssues_EmptyQueue(t *testing.T) {
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil); err != nil {
+	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -89,6 +89,31 @@ func TestPreviewIssues_EmptyQueue(t *testing.T) {
 	}
 	if !strings.Contains(out, "nothing to dispatch") {
 		t.Errorf("output should mention nothing to dispatch; got:\n%s", out)
+	}
+}
+
+// TestPreviewIssues_PrintsImageFreshnessLine verifies that previewIssues
+// surfaces the image-freshness probe result as its own line — bwrap has no
+// loaded image, so it must report "not applicable" rather than attempting a
+// fetch or eval.
+func TestPreviewIssues_PrintsImageFreshnessLine(t *testing.T) {
+	c := baseConfig()
+	c.repoSlug = "owner/repo"
+	c.label = "ready-for-agent"
+	c.runtime = "bwrap"
+	fc := forge.NewFake()
+
+	var buf bytes.Buffer
+	if err := previewIssues(c, fc, fc, &buf, nil, "/unused", nil); err != nil {
+		t.Fatalf("previewIssues: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "image-freshness:") {
+		t.Errorf("output missing image-freshness line; got:\n%s", out)
+	}
+	if !strings.Contains(out, "not applicable") {
+		t.Errorf("output missing not-applicable freshness message for bwrap; got:\n%s", out)
 	}
 }
 
@@ -104,7 +129,7 @@ func TestPreviewIssues_BareAnnotatesBlockers(t *testing.T) {
 		Body: "## Blocked by\n- #99\n"})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil); err != nil {
+	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
