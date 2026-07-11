@@ -2,11 +2,43 @@ package waves
 
 import (
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 )
+
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns
+// everything written to it.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+
+	fn()
+
+	w.Close()
+	os.Stdout = orig
+
+	var buf strings.Builder
+	tmp := make([]byte, 4096)
+	for {
+		n, rerr := r.Read(tmp)
+		if n > 0 {
+			buf.Write(tmp[:n])
+		}
+		if rerr != nil {
+			break
+		}
+	}
+	return buf.String()
+}
 
 // TestDrainMaxJobs_SkipsBlockedDispatchesNext verifies that when MAX_JOBS=1
 // the oldest blocked issue is skipped and the next unblocked issue is dispatched.
@@ -199,6 +231,47 @@ func TestDrainMaxJobs_ZeroMeansUncapped(t *testing.T) {
 
 	if len(fr.RunCalls) != 3 {
 		t.Fatalf("RunCalls: got %d, want 3 (MaxJobs=0 must drain every unblocked issue)", len(fr.RunCalls))
+	}
+}
+
+// TestDrainMaxJobs_PrintsRemainingCountAfterPartialWave verifies that when a
+// wave dispatches some issues but others stay blocked or deferred, the
+// launcher says how many remain and names re-running dispatch as the way to
+// continue — a bare `dispatch` caller must never be left believing the queue
+// drained (ADR 0019).
+func TestDrainMaxJobs_PrintsRemainingCountAfterPartialWave(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 2
+	c.MaxJobs = 0
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // #2's blocker, not yet complete
+
+	fr := runner.NewFake()
+
+	edges := map[string][]string{"2": {"3"}}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	out := captureStdout(t, func() {
+		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+			{Number: "1", Title: "unblocked"},
+			{Number: "2", Title: "dependent"},
+		}, edges, OriginDiscovered); err != nil {
+			t.Fatalf("drainMaxJobs: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "1 issue(s) remain") {
+		t.Errorf("output must report how many issues remain; got:\n%s", out)
+	}
+	if !strings.Contains(out, "dispatch") {
+		t.Errorf("output must name re-running dispatch as the way to continue; got:\n%s", out)
 	}
 }
 

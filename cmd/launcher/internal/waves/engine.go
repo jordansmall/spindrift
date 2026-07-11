@@ -207,21 +207,28 @@ outer:
 	}
 	fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), cfg.MaxJobs)
 	dispatchWave(cfg, it, f, s, selected)
+	if remaining := len(issues) - len(selected) - len(blockerFailed); remaining > 0 {
+		fmt.Printf("==> %d issue(s) remain blocked or deferred; re-run `spindrift dispatch` to continue the drain\n", remaining)
+	}
 	return nil
 }
 
 // Run executes plan: the claim/dispatch/settle loop per issue, the
-// MAX_PARALLEL semaphore within a wave, MAX_JOBS drain concurrency, the
-// dependency-wave deadlock timer, and the Touches overlap check between
-// concurrent Dispatches. pwd is the working directory; Run creates its
-// logs/ subdirectory before dispatching any issue.
+// MAX_PARALLEL semaphore within a wave, MAX_JOBS drain concurrency, and the
+// Touches overlap check between concurrent Dispatches. pwd is the working
+// directory; Run creates its logs/ subdirectory before dispatching any
+// issue.
 //
-// A no-edges batch only enters the wave-retry engine (with its ongoing
-// per-candidate overlap check and deadlock timer) when an upfront touch-set
-// overlap against an in-progress issue is found; that upfront check only
-// applies to OriginDiscovered/OriginClaimed (the run() queue-drain path) —
-// OriginSelective (operator-specified `dispatch <nums>`) never consulted the
-// overlap gate for its mode decision and must not start blocking on it now.
+// ModeDrain (ADR 0019) is the only mode NewPlan selects for
+// OriginDiscovered/OriginClaimed — the queue path — so drainMaxJobs alone
+// handles their edges, deadlock-free single-wave-then-exit dispatch,
+// including the Touches overlap check per candidate. ModeWaves, and the
+// no-edges overlaps check below that decides whether to enter it, are
+// therefore only ever reached for OriginSelective, which forces overlaps to
+// false: the wave-retry engine (with its deadlock timer) is only entered for
+// a selective batch with in-batch dependency edges. Rerouting selective
+// dispatch off ModeWaves, and removing this now-narrower branch along with
+// dispatchWaves, is follow-up work (#524).
 func Run(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, plan Plan) error {
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
 		return err

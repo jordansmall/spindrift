@@ -54,3 +54,33 @@ func TestRunExitCode_EmptyQueue_ReturnsExitCode2(t *testing.T) {
 		t.Errorf("runExitCode(lc) = %d, want 2 (errQueueEmpty)", got)
 	}
 }
+
+// TestRunExitCode_QueueMaxJobsZero_NoneDispatchable_ReturnsExitCode3 is the
+// end-to-end regression test for #522/#477: with MAX_JOBS unset (0, the
+// uncapped drain default) the queue path no longer loops dispatchWaves
+// waiting for a blocker — a batch with nothing currently dispatchable exits
+// straight to code 3.
+func TestRunExitCode_QueueMaxJobsZero_NoneDispatchable_ReturnsExitCode3(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	dir := tempLogDir(t)
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{
+		Number: "1",
+		Body:   "## Blocked by\n- #2",
+		Labels: []string{c.label},
+	})
+	fc.SetIssue(forge.Issue{Number: "2", State: "OPEN"}) // blocker, not yet complete
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       settle.NewFake(),
+	}
+
+	if got := runExitCode(lc); got != 3 {
+		t.Errorf("runExitCode(lc) = %d, want 3 (ErrOpenNoneDispatchable)", got)
+	}
+}
