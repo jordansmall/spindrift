@@ -185,14 +185,24 @@ touch-set overlap](docs/reference.md#declared-touch-set-overlap).
 
 ## Dogfood loop
 
-`dogfood.sh` drives spindrift building itself. Each iteration drains one
-bounded batch of currently-unblocked issues, then pulls and rebuilds the image
-before the next iteration — so each wave always sees any fix the previous wave
-landed (build is a no-op unless the merged diff changed the image hash).
+`dogfood.sh` drives spindrift building itself, with `CONTINUOUS_DISPATCH=1`
+on by default (#528): instead of draining one bounded batch and returning,
+the launcher runs a long-lived slot-refill loop — as each Box finishes, it
+re-discovers the queue and refills the freed slot immediately, re-applying
+blocker readiness, the Touches overlap gate, and blocker-failed cascade —
+gated by the image-freshness probe (#526) before every launch. An operator
+can still set `CONTINUOUS_DISPATCH=` (empty) in `harness.env` to fall back to
+the older one-wave-and-exit shape (#527).
+
+The freshness boundary is no longer every iteration: a refill launches
+straight onto the already-loaded image so long as it's still fresh, and
+`dogfood.sh` only pulls and rebuilds when the launcher reports the image has
+actually gone stale (build is a no-op unless the merged diff changed the
+image hash).
 
 **Parallel by default.** `MAX_JOBS` defaults to `MAX_PARALLEL` (default 3),
-so each batch drains exactly one slot-sized wave. Set `MAX_JOBS` explicitly to
-run larger batches or remove the cap.
+so the slot pool holds that many Boxes at once. Set `MAX_JOBS` explicitly to
+run a larger or unbounded pool.
 
 **Termination.** The loop is driven entirely by the launcher's exit code:
 
@@ -201,17 +211,11 @@ run larger batches or remove the cap.
 | 0    | dispatched work | pull + rebuild, then continue |
 | 2    | queue empty (no open issues with the dispatch label) | exit cleanly |
 | 3    | open issues exist but none are dispatchable | stop and print a triage message — typically a failed blocker needs re-labeling before the queue can drain |
-| 4    | `CONTINUOUS_DISPATCH` mode only: the image-freshness probe found the loaded image would be rebuilt against the current base-branch tip; in-flight Boxes finished, no new ones launched | not yet handled here — falls into the `nix_exit -ne 0` branch and is treated as a failure until a driving loop opts in and handles it explicitly (#528) |
+| 4    | `CONTINUOUS_DISPATCH` mode: the image-freshness probe found the loaded image would be rebuilt against the current base-branch tip; in-flight Boxes finished, no new ones launched | pull + rebuild, then re-invoke — the same boundary exit 0 runs |
 
-Set `CONTINUOUS_DISPATCH=1` to opt into the slot-refill dispatch mode
-(#527): instead of draining one wave and exiting, the launcher runs long
-enough to refill each freed slot from a live re-discovery — re-applying
-blocker readiness, the Touches overlap gate, and blocker-failed cascade —
-gated by the image-freshness probe (#526) before every launch. A merge that
-changes image inputs stops refilling — in-flight Boxes still finish — and
-the invocation exits 4 instead of launching a new Box on a stale image.
-Off by default; `dogfood.sh` does not set it today, so its batch-shaped
-drain above remains what actually runs.
+Set `CONTINUOUS_DISPATCH=1` to opt into the slot-refill dispatch mode (#527)
+in a driving loop other than `dogfood.sh`; see `lib/env-schema.nix`'s
+`continuousDispatch` entry for the full behavior.
 
 **Baked skill, on by default.** The dogfood Box bakes the pinned upstream
 [`caveman` skill](https://github.com/juliusbrussee/caveman), advertised
