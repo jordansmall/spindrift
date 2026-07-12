@@ -7,6 +7,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -864,8 +865,9 @@ func cmdDispatch(lc *launchContext) int {
 
 // mainRun parses argv and dispatches to the selected subcommand, returning
 // the process exit code. It contains no business logic of its own beyond
-// arg parsing and subcommand selection.
-func mainRun(argv []string) int {
+// arg parsing and subcommand selection. stdout/stderr are injected so tests
+// can assert on help/error output without touching the real process streams.
+func mainRun(argv []string, stdout, stderr io.Writer) int {
 	help, helpAll := false, false
 	for _, a := range argv {
 		switch a {
@@ -874,51 +876,57 @@ func mainRun(argv []string) int {
 		case "--all":
 			helpAll = true
 		case "--version":
-			printVersion(os.Stdout)
+			printVersion(stdout)
 			return 0
 		}
 	}
 	if help {
 		if helpAll {
-			printHelpFull(os.Stdout)
+			printHelpFull(stdout)
 		} else {
-			printHelp(os.Stdout)
+			printHelp(stdout)
 		}
 		return 0
 	}
 	args, err := parseFlags(argv)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
+		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
-	if len(args) > 0 && args[0] == "build" {
+	if len(args) == 0 {
+		// Bare `spindrift`: print help rather than silently dispatching
+		// (issue #555). `dispatch` remains the sole way to drain the queue.
+		printHelp(stdout)
+		return 0
+	}
+	if args[0] == "build" {
 		return cmdBuild()
 	}
-	if len(args) > 0 && args[0] == "doctor" {
+	if args[0] == "doctor" {
 		return cmdDoctor()
 	}
-	if len(args) > 0 && args[0] == "recover" {
+	if args[0] == "recover" {
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: spindrift recover <issue-number>")
+			fmt.Fprintln(stderr, "usage: spindrift recover <issue-number>")
 			return 1
 		}
 		lc, err := bootstrap(true)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
+			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
 		}
 		return cmdRecover(lc, args[1])
 	}
-	if len(args) > 0 && args[0] == "preview" {
+	if args[0] == "preview" {
 		return cmdPreview(dispatchIssueArgs(args[1:]))
 	}
-	if len(args) > 0 && args[0] == "dispatch" {
+	if args[0] == "dispatch" {
 		noBuild, dispatchArgs := dispatchNoBuildArgs(args[1:])
 		forceYes, dispatchArgs := dispatchYesArgs(dispatchArgs)
 		nums := dispatchIssueArgs(dispatchArgs)
 		lc, err := bootstrap(!noBuild)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
+			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
 		}
 		if len(nums) > 0 {
@@ -926,14 +934,13 @@ func mainRun(argv []string) int {
 		}
 		return cmdDispatch(lc)
 	}
-	lc, err := bootstrap(true)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return 1
-	}
-	return cmdDispatch(lc)
+	// Unrecognized subcommand: print help rather than silently dispatching
+	// (issue #555).
+	fmt.Fprintf(stderr, "unknown subcommand: %s\n\n", args[0])
+	printHelp(stderr)
+	return 1
 }
 
 func main() {
-	os.Exit(mainRun(os.Args[1:]))
+	os.Exit(mainRun(os.Args[1:], os.Stdout, os.Stderr))
 }

@@ -14,6 +14,40 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
+// TestMainRun_NoArgs_PrintsHelpAndDoesNotDispatch verifies a bare `spindrift`
+// (no subcommand) prints the concise help to stdout and exits 0, instead of
+// falling through to the dispatch default (issue #555).
+func TestMainRun_NoArgs_PrintsHelpAndDoesNotDispatch(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := mainRun(nil, &stdout, &stderr)
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+	if !strings.Contains(stdout.String(), "Usage: spindrift [flags] <subcommand>") {
+		t.Errorf("stdout missing help usage line, got:\n%s", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Errorf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+// TestMainRun_UnknownSubcommand_PrintsHelpToStderrAndExits1 verifies an
+// unrecognized subcommand prints help to stderr and exits 1, instead of
+// falling through to the dispatch default (issue #555).
+func TestMainRun_UnknownSubcommand_PrintsHelpToStderrAndExits1(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"frobnicate"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "Usage: spindrift [flags] <subcommand>") {
+		t.Errorf("stderr missing help usage line, got:\n%s", stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+}
+
 // TestConfigHasNoModelFields enforces that model/scoutModel/reviewModel were
 // removed from the config struct; models forward via BOX_ENV_VARS instead.
 func TestConfigHasNoModelFields(t *testing.T) {
