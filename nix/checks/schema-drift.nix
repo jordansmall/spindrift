@@ -262,4 +262,53 @@ in
         ${secretChecks}
         touch $out
       '';
+
+  # The generated bash completion script must totally cover the schema and the
+  # launcher's hardcoded subcommand set: every non-secret flag, the --issue
+  # alias, every secret --*-file flag, and all five subcommands. A new knob or
+  # subcommand with no completion presence fails here. Mirrors launcher-manpage.
+  launcher-bash-completion =
+    let
+      schema = import ../../lib/env-schema.nix;
+      inherit (pkgs.lib)
+        filter
+        attrValues
+        concatMapStrings
+        ;
+      nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
+      secretEntries = filter (e: e.secret or false) (attrValues schema);
+      subcommands = [
+        "dispatch"
+        "preview"
+        "build"
+        "recover"
+        "doctor"
+      ];
+      flagChecks = concatMapStrings (e: "need -F -- '--${renderers.toKebab e.env}'\n") nonSecret;
+      aliasChecks = concatMapStrings (
+        e: if e ? alias then "need -F -- '--${e.alias}'\n" else ""
+      ) nonSecret;
+      secretChecks = concatMapStrings (
+        e: "need -F -- '--${renderers.toKebab e.env}-file'\n"
+      ) secretEntries;
+      subcommandChecks = concatMapStrings (s: "need -F -- '${s}'\n") subcommands;
+    in
+    pkgs.runCommand "launcher-bash-completion"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.shellcheck
+        ];
+        completion = "${harness.bashCompletion}/share/bash-completion/completions/spindrift";
+      }
+      ''
+        need() { grep -q "$@" "$completion" || { echo "bash completion missing: $*" >&2; exit 1; }; }
+        bash -n "$completion"
+        shellcheck --shell=bash "$completion"
+        ${flagChecks}
+        ${aliasChecks}
+        ${secretChecks}
+        ${subcommandChecks}
+        touch $out
+      '';
 }
