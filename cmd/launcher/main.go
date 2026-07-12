@@ -855,9 +855,8 @@ func runExitCode(lc *launchContext) int {
 	return 1
 }
 
-// cmdDispatch is the default `dispatch` subcommand (and the no-args
-// default): drain the labeled queue. lc is wired by bootstrap in
-// production; tests construct it directly with fakes.
+// cmdDispatch is the `dispatch` subcommand: drain the labeled queue. lc is
+// wired by bootstrap in production; tests construct it directly with fakes.
 func cmdDispatch(lc *launchContext) int {
 	defer lc.cleanup()
 	return runExitCode(lc)

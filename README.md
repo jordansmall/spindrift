@@ -104,9 +104,9 @@ your inputs and import the flake-parts module:
 ```
 
 This yields the **`spindrift` CLI** as `packages.<system>.spindrift` and as
-`apps.<system>.default`. The bare form (`nix run .`) prints help and exits;
-drain the queue with `nix run . -- dispatch`. Plus the Linux-only
-`agent-image`. See [`docs/reference.md`](docs/reference.md) for the
+`apps.<system>.default`, plus the Linux-only `agent-image`. The bare form
+(`nix run .`) prints help and exits; drain the queue with
+`nix run . -- dispatch`. See [`docs/reference.md`](docs/reference.md) for the
 `mkHarness`-direct variant and the devShell-targeting pattern (one image,
 many differently-toolchained Target repos).
 
