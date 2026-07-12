@@ -13,18 +13,26 @@
 #                                `nix run .# -- build` reads from ($PWD).
 #   2. `nix run .# -- build` — re-bake the image from that updated tree.
 #
-# Each iteration drains one bounded batch of currently-unblocked issues.
-# Concurrency is bounded by MAX_PARALLEL (default 3); MAX_JOBS defaults to
-# MAX_PARALLEL so each batch drains exactly one slot-sized wave. An operator
-# can override MAX_JOBS explicitly to run larger or unbounded batches.
-# The pull + rebuild between iterations keep each wave on a fresh tree and
-# image, so dependent issues always see any fix the previous wave landed.
+# Each invocation runs CONTINUOUS_DISPATCH's slot-refill loop (#527): as each
+# Box finishes, the launcher re-discovers the queue and refills the freed slot
+# immediately, gated by the image-freshness probe, instead of draining one
+# bounded batch and returning. Concurrency is bounded by MAX_PARALLEL (default
+# 3); MAX_JOBS defaults to MAX_PARALLEL. An operator can override MAX_JOBS
+# explicitly to run a larger or unbounded slot pool, or unset
+# CONTINUOUS_DISPATCH to fall back to the older one-wave-and-exit shape.
+# The freshness probe, not this loop, decides when a rebuild is due: it fires
+# only once a merge actually changed the image hash, not on every iteration.
+# When it does, the launcher exits 4 and this loop pulls, rebuilds, and
+# re-invokes so later refills launch on the fresh image.
 #
 # Termination is driven by the launcher's exit code — no separate gh probe:
 #   exit 0 — dispatched work; loop continues after rebuilding from updated tree.
 #   exit 2 — queue empty (no open issues with the dispatch label); loop exits.
 #   exit 3 — open issues exist but none are dispatchable; loop stops and asks
 #             for human triage (typically a failed blocker needing re-label).
+#   exit 4 — CONTINUOUS_DISPATCH mode: the image-freshness probe found the
+#             loaded image stale; in-flight Boxes finished, no new ones
+#             launched. Loop pulls, rebuilds, and re-invokes, like exit 0.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -40,6 +48,11 @@ fi
 BASE_BRANCH="${BASE_BRANCH:-main}"      # must match env-schema.nix baseBranch.default
 MAX_PARALLEL="${MAX_PARALLEL:-3}"      # must match env-schema.nix maxParallel.default
 export MAX_JOBS="${MAX_JOBS:-$MAX_PARALLEL}"
+# env-schema.nix continuousDispatch.default is off (empty); dogfood overrides
+# it to on so the loop drives slot-refill dispatch instead of one wave and
+# exit (#528). `-` (not `:-`) preserves an operator setting CONTINUOUS_DISPATCH=
+# (empty) in harness.env to opt back out.
+export CONTINUOUS_DISPATCH="${CONTINUOUS_DISPATCH-1}"
 : "${REPO_SLUG:?set REPO_SLUG=owner/repo in harness.env}"
 
 if [ -n "$(git status --porcelain)" ]; then
@@ -86,7 +99,9 @@ while :; do
     break
   fi
 
-  if [ "$nix_exit" -ne 0 ]; then
+  if [ "$nix_exit" -eq 4 ]; then
+    echo "==> dogfood: image stale — rebuilding and re-invoking"
+  elif [ "$nix_exit" -ne 0 ]; then
     echo "!! dogfood: launcher failed (exit $nix_exit)" >&2
     exit 1
   fi

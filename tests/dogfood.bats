@@ -29,6 +29,35 @@ EOF
   chmod +x "$FAKE_BIN/nix"
 }
 
+# Replaces the fake nix with one that exits each of $@ in order on successive
+# `nix run .# -- dispatch` calls (running past the list re-exits the last
+# code); exits 0 on all other nix calls.
+_install_sequence_exit_nix() {
+  local codes=("$@")
+  local counter="$BATS_TEST_TMPDIR/dispatch-call-count"
+  echo 0 >"$counter"
+  local shebang
+  shebang="$(head -n1 "$FAKE_BIN/nix")"
+  {
+    printf '%s\n' "$shebang"
+    cat <<EOF
+: "\${NIX_LOG:?NIX_LOG must point at a log file}"
+printf '%s\n' "\$*" >>"\$NIX_LOG"
+if printf '%s ' "\$@" | grep -q -- '-- dispatch'; then
+  codes=(${codes[*]})
+  n=\$(cat "$counter")
+  last=\$(( \${#codes[@]} - 1 ))
+  [ "\$n" -gt "\$last" ] && n="\$last"
+  echo \$((n + 1)) >"$counter"
+  exit "\${codes[\$n]}"
+fi
+exit 0
+EOF
+  } >"$FAKE_BIN/nix.tmp"
+  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
+  chmod +x "$FAKE_BIN/nix"
+}
+
 # Replaces the fake nix with one that logs MAX_JOBS on every `nix run .# -- dispatch`
 # call, then exits 2 so the dogfood loop terminates cleanly.
 _install_env_logging_nix() {
@@ -109,6 +138,14 @@ setup() {
   run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
   [ "$status" -eq 0 ]
   ! grep -q '^MAX_JOBS=1$' "$NIX_ENV_LOG"
+}
+
+@test "dogfood pulls, rebuilds, and re-invokes when launcher exits 4 (image stale)" {
+  _install_sequence_exit_nix 4 2
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"image stale"* ]]
+  [ "$(grep -c -- '-- dispatch' "$NIX_LOG")" -eq 2 ]
 }
 
 @test "dogfood terminates cleanly with triage message when launcher exits 3" {
