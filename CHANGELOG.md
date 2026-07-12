@@ -1,5 +1,91 @@
 # Changelog
 
+## [0.4.0](https://github.com/jordansmall/spindrift/compare/v0.3.0...v0.4.0) (2026-07-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **settings:** settings.concurrency.depsPollSecs/depsWaitSecs (DEPS_POLL_SECS/DEPS_WAIT_SECS) are removed. A consumer that still sets either gets an unknown-key eval error naming the valid keys, per the pre-1.0 policy (ADR 0010). MAX_JOBS still caps the wave size (0 = uncapped); re-invocation drains a dependency graph wave by wave.
+
+### Features
+
+* **dogfood:** drive slot-refill dispatch, handle exit 4 ([253c2fb](https://github.com/jordansmall/spindrift/commit/253c2fbb9370aee3929b5a364a01ae96904c9483)), closes [#528](https://github.com/jordansmall/spindrift/issues/528)
+* **freshness:** add image-freshness probe seam ([ec575c6](https://github.com/jordansmall/spindrift/commit/ec575c6cdbcda9342d8a61a708cdf3149be49572))
+* **launcher:** add internal/glob package (Match + Overlap) ([4b86264](https://github.com/jordansmall/spindrift/commit/4b8626424db085209e1eb2d145b72e0dbb616a54))
+* **launcher:** add internal/waves package with Plan/Run ([5e5ecc3](https://github.com/jordansmall/spindrift/commit/5e5ecc3bde738eb8f64c57c6b67145034eab270a))
+* **launcher:** wire CONTINUOUS_DISPATCH mode and exit code 4 ([8b529f0](https://github.com/jordansmall/spindrift/commit/8b529f0d490297a051ff7b25dfdfa2039a4cd1c7))
+* **lib:** add prompt-inject module with eval-level tests ([ab95a3b](https://github.com/jordansmall/spindrift/commit/ab95a3ba41071dde2bce7d870faf255a261d7d72)), closes [#512](https://github.com/jordansmall/spindrift/issues/512)
+* **nix:** add lib/preambles.nix renderers ([4875f44](https://github.com/jordansmall/spindrift/commit/4875f44979ac746d007604e377f0dbc2d80f4a89)), closes [#513](https://github.com/jordansmall/spindrift/issues/513)
+* **preview:** surface image-freshness on the preview verb ([d08f749](https://github.com/jordansmall/spindrift/commit/d08f7493b0682c9ebe7ea514742fb957757b3803))
+* **regen:** generate the bats box-env fixture and template settings ([8a86509](https://github.com/jordansmall/spindrift/commit/8a865096c5308c165e53d34bd963601afc908ffe))
+* **runner:** add RunFunc hook to Fake for deterministic timing ([a011031](https://github.com/jordansmall/spindrift/commit/a011031032f83ea802e82e8abea4196f6c67d503))
+* **settings:** drop DEPS_POLL_SECS/DEPS_WAIT_SECS from schema ([910636b](https://github.com/jordansmall/spindrift/commit/910636b074c62eb95187308587f5feb8eef35930))
+* **waves:** add RunContinuous slot-refill dispatch engine ([07b3298](https://github.com/jordansmall/spindrift/commit/07b329894a84c894d1fdc09fbc2fe63481ae0cee))
+* **waves:** print remaining issues and re-run command for selective drain ([38eb033](https://github.com/jordansmall/spindrift/commit/38eb0335c5ac0940ac4cd57681d9f298332fe4e0))
+* **waves:** report remaining issues after a partial drain wave ([fbcd8a4](https://github.com/jordansmall/spindrift/commit/fbcd8a4fdea7016bc31db4b442bc392413a1fb2f))
+
+
+### Bug Fixes
+
+* **dispatch:** translate ErrOpenNoneDispatchable to exit 3 for selective ([8218be7](https://github.com/jordansmall/spindrift/commit/8218be7fec7e4861492b81d5951a3ccb6355642e))
+* **entrypoint:** keep conflict-resolve out of the devShell ([e2abab6](https://github.com/jordansmall/spindrift/commit/e2abab6dc7ed298a1d465c8357deb1e98fc16781))
+* **freshness:** surface git/nix stderr in fail-closed messages ([3772cdd](https://github.com/jordansmall/spindrift/commit/3772cdd059c502077ec57966490650359b0f0207))
+* **launcher:** scope the touch-overlap precheck to run(), not selective ([c1df5fe](https://github.com/jordansmall/spindrift/commit/c1df5feb207be9f8bd1f14d05064e4607366d125))
+* **settle:** guard MERGE_MODE=auto against a push-only forge ([bc0b60f](https://github.com/jordansmall/spindrift/commit/bc0b60fe08e0ff5cd553eb6ff2858aacd6d77d7e))
+* **waves:** correct remaining-count wording for a MAX_JOBS cap ([d56c192](https://github.com/jordansmall/spindrift/commit/d56c1927b8bc4667d8a47846dc959ba39365486b))
+* **waves:** route selective dispatch through ModeDrain ([f98227b](https://github.com/jordansmall/spindrift/commit/f98227b298db0df729bfcf518f6cc6d04338eb93))
+* **waves:** unify queue dispatch on drain semantics ([bf30cfc](https://github.com/jordansmall/spindrift/commit/bf30cfc7c1fb3bf07edd7ee2fac5e93b194ba36a))
+
+
+### Documentation
+
+* **adr:** amend 0009 with copilot auth spike result ([c6bd7e5](https://github.com/jordansmall/spindrift/commit/c6bd7e5108d3c326469f1fcb255c81f1132e1559)), closes [#260](https://github.com/jordansmall/spindrift/issues/260)
+* align MAX_JOBS wording and MIGRATING.md table ([1ae7879](https://github.com/jordansmall/spindrift/commit/1ae7879e20976fab7727f2a78c1bb59aac5f2749))
+* drop stale dependency-wave poll/wait wording ([0297b95](https://github.com/jordansmall/spindrift/commit/0297b95694223a76d255ed8b67d6d8b30962577a))
+* **nix:** repoint entrypoint.bats comments at the split suites ([4b56a7e](https://github.com/jordansmall/spindrift/commit/4b56a7eda163f86f59b17011b3871c071ddd472b))
+* **readme:** document exit code 4 and CONTINUOUS_DISPATCH ([6b4b56e](https://github.com/jordansmall/spindrift/commit/6b4b56edd3357a9e937954b3f0af65a25a3a6230))
+* **readme:** dogfood loop drives slot-refill dispatch ([af03d1f](https://github.com/jordansmall/spindrift/commit/af03d1f8fe0e56b9b466e501bc14fc42fc115afe))
+* record the PRForge split in ADR 0013 and CONTEXT.md ([72eac62](https://github.com/jordansmall/spindrift/commit/72eac62c2518dfc3caee0d47f9ce0d09a87b5566))
+
+
+### Code Refactoring
+
+* **entrypoint:** fold Driver invocation into run_driver_in_env ([fed86fd](https://github.com/jordansmall/spindrift/commit/fed86fd3085c79ed4aa5d0efd196eb0017332109))
+* **entrypoint:** restructure into phase functions behind main() ([ee3fec4](https://github.com/jordansmall/spindrift/commit/ee3fec437ecca1a8cc9163d614ce420b8c36f45b)), closes [#515](https://github.com/jordansmall/spindrift/issues/515)
+* **entrypoint:** scope cross-phase sentinels local to main() ([48d69b3](https://github.com/jordansmall/spindrift/commit/48d69b3b4b092472887f1146171e23b623f2a233))
+* **forge:** narrow CodeForge, add optional PRForge, retire Client ([96e8d86](https://github.com/jordansmall/spindrift/commit/96e8d86f88261977b571a48780777ed9e5ef7672))
+* **image:** extract Box image assembly into lib/image.nix ([7a50ee4](https://github.com/jordansmall/spindrift/commit/7a50ee4c5bcdfae0031835fcb0dd32725a96d0a3)), closes [#514](https://github.com/jordansmall/spindrift/issues/514)
+* **launcher:** bootstrap wires IssueTracker and CodeForge separately ([26de516](https://github.com/jordansmall/spindrift/commit/26de516371b94ab23a5a9d81f2b98581f41afa71))
+* **launcher:** consume internal/waves from run and dispatch &lt;nums&gt; ([bb841bc](https://github.com/jordansmall/spindrift/commit/bb841bc82b14e87b02514c2bd566828bb3a5517e))
+* **launcher:** delete dead deps-wave config wiring ([401819c](https://github.com/jordansmall/spindrift/commit/401819cbedcd2a9a1209ba542e697cf0bf636e7c))
+* **launcher:** extract doctor subcommand into doctor.go ([85604f9](https://github.com/jordansmall/spindrift/commit/85604f95c53f339cd671e1dde1eef88f7271e3fa))
+* **launcher:** extract preview formatting into preview.go ([cb2faae](https://github.com/jordansmall/spindrift/commit/cb2faae13bbb6f6a57c9adf28e087d609c5aed7e))
+* **launcher:** Merge guard consumes internal/glob.Match ([9d5e89e](https://github.com/jordansmall/spindrift/commit/9d5e89e661e8bfca9c55889e1fa1b4917287e618))
+* **launcher:** Touches overlap gate consumes internal/glob.Overlap ([6699986](https://github.com/jordansmall/spindrift/commit/669998607f0f390a3aa202e56e22453d1db6af01))
+* **launcher:** wire mkHarness to lib/prompt-inject ([8285f43](https://github.com/jordansmall/spindrift/commit/8285f43497a93984bba15978622767873d0bcd94)), closes [#512](https://github.com/jordansmall/spindrift/issues/512)
+* **mkHarness:** delegate preamble marshalling to lib/preambles.nix ([daeb810](https://github.com/jordansmall/spindrift/commit/daeb8105a24dc79e464ed75d947b061ed212d7a9)), closes [#513](https://github.com/jordansmall/spindrift/issues/513)
+* **schema:** derive launcher-env-coverage exclusions ([3579f5b](https://github.com/jordansmall/spindrift/commit/3579f5bc3a5da78d674e1327cb29effc8e187035))
+* **settle:** consume IssueTracker/CodeForge and PRForge assertion ([f63159c](https://github.com/jordansmall/spindrift/commit/f63159cf32e675466232f857c7d6e6a04cd4ea70))
+* **waves:** delete batchHasTouchOverlap, dead since Run's reroute ([f7f56f2](https://github.com/jordansmall/spindrift/commit/f7f56f21ec5560bcf2efec01921b6e2f61614006))
+* **waves:** delete the multi-wave dispatch loop ([6da7d4b](https://github.com/jordansmall/spindrift/commit/6da7d4b86bf7de596032dd5180b71edfd57c4081))
+* **waves:** thread IssueTracker/CodeForge instead of forge.Client ([e32afe8](https://github.com/jordansmall/spindrift/commit/e32afe8f8a2c378f3f9cfa147dc69ad61c904c7c))
+
+
+### Tests
+
+* **bats:** rewrite dependency-wave integration tests for ADR 0019 ([1d975a6](https://github.com/jordansmall/spindrift/commit/1d975a6b04001b41e61a438d16adfefe000627b6))
+* **entrypoint:** split entrypoint.bats into per-concern suites ([f2e1a3a](https://github.com/jordansmall/spindrift/commit/f2e1a3a8e5805ada743b00a132053ab1a6c36354))
+* **helper:** extract setup_run_env for split run-*.bats suites ([e469e19](https://github.com/jordansmall/spindrift/commit/e469e19460ed53491b9da6f243cd3b8e0d3af730))
+* **launcher:** pin a negative Match/Overlap consistency case ([3d3e7c3](https://github.com/jordansmall/spindrift/commit/3d3e7c360162be22f01aef69189d8c87a4482613))
+* **run:** split run.bats into per-concern suites ([b617084](https://github.com/jordansmall/spindrift/commit/b617084431dd09615a32302e0c9e086ebd98c52f))
+* **waves:** regression tests for [#477](https://github.com/jordansmall/spindrift/issues/477) exit-after-wave drain ([9d9f729](https://github.com/jordansmall/spindrift/commit/9d9f7296ab7cff7816edba3357b533d86ef128d8))
+
+
+### Miscellaneous Chores
+
+* bump flake ([ea78ca9](https://github.com/jordansmall/spindrift/commit/ea78ca92674e6994c7b3046a32f2a48d6ef8f8a1))
+* gitignore claude local files ([1cab79e](https://github.com/jordansmall/spindrift/commit/1cab79e13e917dc53f2e731d3c141a4d29729b4b))
+
 ## [0.3.0](https://github.com/jordansmall/spindrift/compare/v0.2.1...v0.3.0) (2026-07-11)
 
 
