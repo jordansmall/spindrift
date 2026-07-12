@@ -274,6 +274,7 @@ in
         filter
         attrValues
         concatMapStrings
+        concatStringsSep
         ;
       nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
       secretEntries = filter (e: e.secret or false) (attrValues schema);
@@ -284,14 +285,18 @@ in
         "recover"
         "doctor"
       ];
-      flagChecks = concatMapStrings (e: "need -F -- '--${renderers.toKebab e.env}'\n") nonSecret;
-      aliasChecks = concatMapStrings (
-        e: if e ? alias then "need -F -- '--${e.alias}'\n" else ""
-      ) nonSecret;
-      secretChecks = concatMapStrings (
-        e: "need -F -- '--${renderers.toKebab e.env}-file'\n"
-      ) secretEntries;
-      subcommandChecks = concatMapStrings (s: "need -F -- '${s}'\n") subcommands;
+      # Token-boundary match (quote or whitespace on both sides): a plain
+      # substring grep would let e.g. `--issue` pass as "covered" merely
+      # because `--issue-number` contains it as a prefix.
+      flagChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}'\n") nonSecret;
+      aliasChecks = concatMapStrings (e: if e ? alias then "need '--${e.alias}'\n" else "") nonSecret;
+      secretChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}-file'\n") secretEntries;
+      # Subcommand names are plain English words that can legitimately show
+      # up in a comment (e.g. "rendered at build time"); a per-word boundary
+      # check would pass even with a subcommand missing. Require the exact
+      # assembled list the renderer emits for the first-word case, so a
+      # dropped/renamed/reordered subcommand fails here.
+      subcommandLine = concatStringsSep " " subcommands;
     in
     pkgs.runCommand "launcher-bash-completion"
       {
@@ -302,13 +307,17 @@ in
         completion = "${harness.bashCompletion}/share/bash-completion/completions/spindrift";
       }
       ''
-        need() { grep -q "$@" "$completion" || { echo "bash completion missing: $*" >&2; exit 1; }; }
+        need() {
+          grep -Eq -- "(^|[\"[:space:]])$1([\"[:space:]]|\$)" "$completion" \
+            || { echo "bash completion missing: $1" >&2; exit 1; }
+        }
         bash -n "$completion"
         shellcheck --shell=bash "$completion"
         ${flagChecks}
         ${aliasChecks}
         ${secretChecks}
-        ${subcommandChecks}
+        grep -qF -- '${subcommandLine}' "$completion" \
+          || { echo "bash completion missing subcommand list: ${subcommandLine}" >&2; exit 1; }
         touch $out
       '';
 }
