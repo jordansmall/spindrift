@@ -28,7 +28,9 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 Every runtime knob is also a `--flag`, with **flag > env > default** precedence.
 `spindrift --help` stays scannable; the full generated table lives in
 `man spindrift` (and `spindrift --help --all` for the same thing in the
-terminal). Bare `spindrift` with no subcommand is `spindrift dispatch`.
+terminal). Bare `spindrift` with no subcommand — or an unrecognized
+subcommand — prints this concise help instead of dispatching; `dispatch`
+remains the sole way to drain the queue.
 
 > **Deprecated (removed in v0.2.0, see [`MIGRATING.md`](../MIGRATING.md)):**
 > `nix run .#run` and `nix run .#build` still work but print a notice and forward
