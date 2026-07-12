@@ -54,6 +54,19 @@ Run commands **from your Consumer flake's directory**: `spindrift build` reads t
 flake from `$PWD` for its container fallback, and `spindrift dispatch` reads `harness.env`
 from `$PWD` (the same convention). Per-issue logs land in `logs/issue-<n>.log`.
 
+`spindrift` ships bash tab-completion, generated from the same schema as
+`--help` and the man page: subcommands (`dispatch`, `preview`, `build`,
+`recover`, `doctor`) complete as the first word, every flag (including the
+`--issue` alias and the secret `--*-file` flags) completes anywhere after
+it, and a `--*-file` flag's argument completes as a filesystem path. `nix
+develop` puts the completion script on `share/bash-completion/completions`
+under `spindrift`'s store path; source it directly to enable it in your
+shell:
+
+```sh
+source "$(dirname "$(command -v spindrift)")/../share/bash-completion/completions/spindrift"
+```
+
 ## Adding spindrift to your flake
 
 If you prefer to wire it by hand rather than `nix flake init`, add spindrift to
