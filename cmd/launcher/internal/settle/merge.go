@@ -53,11 +53,22 @@ func (s *Settle) applyMergeMode(num, pr string, d dispatch.Dispatcher) error {
 func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 	rebaseAttempts := 0
 	pushRetries := 0
+	checksBlockedAttempts := 0
 	skipRebase := false
 	for {
 		err := s.cf.Merge(pr)
 		if err == nil {
 			return nil
+		}
+		if errors.Is(err, forge.ErrMergeBlockedByChecks) {
+			if checksBlockedAttempts >= s.cfg.MaxRebaseAttempts {
+				return err
+			}
+			checksBlockedAttempts++
+			fmt.Printf("    #%s  pr=%s  status=merge-blocked-by-checks  attempt=%d/%d\n",
+				num, pr, checksBlockedAttempts, s.cfg.MaxRebaseAttempts)
+			time.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
+			continue
 		}
 		if !errors.Is(err, forge.ErrMergeConflict) {
 			return err
