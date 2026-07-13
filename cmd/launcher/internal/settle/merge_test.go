@@ -3,11 +3,43 @@ package settle
 import (
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 )
+
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns
+// everything written to it.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+
+	fn()
+
+	w.Close()
+	os.Stdout = orig
+
+	var buf strings.Builder
+	tmp := make([]byte, 4096)
+	for {
+		n, rerr := r.Read(tmp)
+		if n > 0 {
+			buf.Write(tmp[:n])
+		}
+		if rerr != nil {
+			break
+		}
+	}
+	return buf.String()
+}
 
 // TestMergeImmediate verifies the rebase-retry and conflict-resolve behaviors
 // that run inside applyMergeMode for the immediate merge mode. Conflict
@@ -192,6 +224,66 @@ func TestMergeImmediate(t *testing.T) {
 				t.Errorf("ResolveConflict called %d times, want %d", gotConflictResolveCalled, tc.wantConflictResolveCalled)
 			}
 		})
+	}
+}
+
+// TestMergeImmediate_BlockedByChecks verifies that a merge refusal classified
+// as forge.ErrMergeBlockedByChecks (issue #566) triggers neither a rebase nor
+// a conflict-resolve dispatch, and that the status output names checks — not
+// a conflict — as the reason the merge is waiting.
+func TestMergeImmediate_BlockedByChecks(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake()
+	fc.MergeErrs = []error{forge.ErrMergeBlockedByChecks, nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+
+	df := dispatch.NewFake()
+	s := New(c, fc, fc)
+
+	var err error
+	out := captureStdout(t, func() {
+		err = s.mergeImmediate("1", testPR, df)
+	})
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("Merge not called to completion; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.RebasedURLs) != 0 {
+		t.Errorf("blocked-by-checks must not trigger Rebase; called %d times", len(fc.RebasedURLs))
+	}
+	if len(df.ResolveConflictCalls) != 0 {
+		t.Errorf("blocked-by-checks must not trigger conflict-resolve; called %d times", len(df.ResolveConflictCalls))
+	}
+	if !strings.Contains(out, "checks") {
+		t.Errorf("status output must name checks as the reason the merge is waiting; got: %q", out)
+	}
+	if strings.Contains(out, "conflict") {
+		t.Errorf("status output must not name a conflict for a blocked-by-checks refusal; got: %q", out)
+	}
+}
+
+// TestMergeImmediate_BlockedByChecksExhausted verifies that a merge
+// permanently blocked by checks eventually bails out with the
+// ErrMergeBlockedByChecks error, rather than polling forever.
+func TestMergeImmediate_BlockedByChecksExhausted(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 2
+	fc := forge.NewFake()
+	fc.MergeErr = forge.ErrMergeBlockedByChecks
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+
+	s := New(c, fc, fc)
+	err := s.mergeImmediate("1", testPR, nil)
+
+	if !errors.Is(err, forge.ErrMergeBlockedByChecks) {
+		t.Fatalf("want ErrMergeBlockedByChecks, got: %v", err)
+	}
+	if len(fc.RebasedURLs) != 0 {
+		t.Errorf("blocked-by-checks must never trigger Rebase; called %d times", len(fc.RebasedURLs))
 	}
 }
 
