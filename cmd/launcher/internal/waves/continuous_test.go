@@ -271,3 +271,44 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
 	}
 }
+
+// TestRunContinuous_StaleDiscoveryNeverDoubleDispatches verifies #560: a
+// Discoverer that keeps listing an already-claimed issue as dispatchable —
+// modeling GitHub's eventually-consistent search index right after the
+// label swap — must not launch a second Box for it, and the suppressed
+// re-discovery must not re-attempt the dispatch-state transition (the live
+// run's agent-in-progress claim is left untouched).
+func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 2
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error { return nil }
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	// Always reports #1 as dispatchable, regardless of the claim already
+	// made against it — a stale search result, not a live forge query.
+	discover := func() ([]Issue, map[string][]string, error) {
+		return []Issue{{Number: "1", Title: "stale"}}, map[string][]string{}, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	err := RunContinuous(c, fc, fc, dir, f, s, discover, fresh)
+	if err != nil {
+		t.Fatalf("RunContinuous: got %v, want nil", err)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1 (stale re-discovery of #1 must not double-dispatch)", len(fr.RunCalls))
+	}
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Fatalf("TransitionStateCalls: got %d, want 1 (suppressed stale entry must not re-attempt the claim)", len(fc.TransitionStateCalls))
+	}
+}

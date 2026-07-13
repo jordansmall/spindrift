@@ -37,9 +37,11 @@ type FreshnessChecker func() (applicable, fresh bool, message string)
 // blocker-failed cascade, blocked skip, touch-overlap defer — but returns
 // after the first match rather than collecting a whole wave, since a
 // refill only ever needs to fill one freed slot.
-func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string) (Issue, bool) {
+func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, claimed map[string]bool) (Issue, bool) {
 	for _, iss := range issues {
 		switch {
+		case claimed[iss.Number]:
+			fmt.Printf("    ~~ #%s already claimed this run; stale re-discovery, skipping\n", iss.Number)
 		case hasFailedInBatchBlocker(cfg, it, iss.Number, edges):
 			fmt.Printf("    !! #%s  status=blocker-failed  note=a dependency failed; skipping\n", iss.Number)
 			transitionState(it, iss.Number, forge.Dispatchable, forge.Failed)
@@ -64,10 +66,13 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 // the next unblocked issue; a rebuild-needed result stops refilling — the
 // slot stays empty and in-flight Boxes still run to completion — and
 // RunContinuous returns ErrImageStale once every Box has finished. Claim
-// stays in-process: discovery and claim both happen under one mutex, so a
-// re-discovery mid-run never double-claims an issue a concurrent refill
-// already claimed (the label swap already removes it from the next
-// Dispatchable query).
+// stays in-process: every issue claimed during this invocation is recorded
+// in a claimed set guarded by the same mutex as discovery, and every
+// refill's discovery result is filtered against it before selection. The
+// forge's label swap is not the authority here — GitHub's search-backed
+// issue listing is eventually consistent, so a refill soon after a claim
+// can still see the just-claimed issue as dispatchable; the in-run record
+// is what actually stops a second Box from launching for it.
 func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, discover Discoverer, fresh FreshnessChecker) error {
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
 		return err
@@ -77,6 +82,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	var wg sync.WaitGroup
 	stale := false
 	dispatchedAny := false
+	claimed := make(map[string]bool)
 
 	var refill func()
 	refill = func() {
@@ -101,11 +107,12 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			}
 		}
 		checkOverlap := waveOverlapCheck(cfg, it, cf)
-		iss, ok := nextReady(cfg, it, cf, checkOverlap, issues, edges)
+		iss, ok := nextReady(cfg, it, cf, checkOverlap, issues, edges, claimed)
 		if !ok {
 			return
 		}
 		dispatchedAny = true
+		claimed[iss.Number] = true
 		claimIssue(cfg, it, iss.Number)
 		wg.Add(1)
 		go func() {
