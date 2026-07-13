@@ -2,6 +2,7 @@ package waves
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -300,7 +301,10 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	err := RunContinuous(c, fc, fc, dir, f, s, discover, fresh)
+	var err error
+	out := captureStdout(t, func() {
+		err = RunContinuous(c, fc, fc, dir, f, s, discover, fresh)
+	})
 	if err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
@@ -310,5 +314,8 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	}
 	if len(fc.TransitionStateCalls) != 1 {
 		t.Fatalf("TransitionStateCalls: got %d, want 1 (suppressed stale entry must not re-attempt the claim)", len(fc.TransitionStateCalls))
+	}
+	if !strings.Contains(out, "#1 already claimed this run") {
+		t.Fatalf("output missing suppressed-stale line for #1, got:\n%s", out)
 	}
 }
