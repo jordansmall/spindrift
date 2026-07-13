@@ -25,6 +25,14 @@ import (
 //
 // Applies uniformly to Run and Fix (issue #441): a 429 during a fix pass now
 // holds until reset instead of burning a fix attempt.
+//
+// A zero-exit box that reports no SPINDRIFT_OUTCOME line is classified the
+// same as a non-zero exit (issue #565): a transient classification — rate
+// limit or otherwise — feeds into the same hold/backoff decision below
+// instead of dead-ending as status=missing. Only a genuinely terminal
+// classification (no transient marker at all) returns as before, so
+// status=missing still means "box finished cleanly but told us nothing, and
+// there's nothing to retry."
 func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
 	holdCount := 0
 	transientCount := 0
@@ -32,22 +40,32 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
 
 	for {
 		err := once()
+
+		var cls outcome.Classification
 		if err == nil {
-			return d.successResult(logPath)
-		}
+			result := d.successResult(logPath)
+			if result.OutcomeFound || result.ParseErr != nil || result.ClassifyErr != nil {
+				return result
+			}
+			if result.Classification.Class != outcome.Transient {
+				return result
+			}
+			cls = result.Classification
+		} else {
+			if errors.Is(err, runner.ErrAlreadyRunning) {
+				return Result{AlreadyInFlight: true}
+			}
 
-		if errors.Is(err, runner.ErrAlreadyRunning) {
-			return Result{AlreadyInFlight: true}
-		}
+			var clsErr error
+			cls, clsErr = d.driver.ClassifyTransient(logPath)
+			if clsErr != nil {
+				fmt.Fprintf(os.Stderr, "    ?? #%s: classify error: %v\n", d.number, clsErr)
+				return Result{Success: false}
+			}
 
-		cls, err := d.driver.ClassifyTransient(logPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "    ?? #%s: classify error: %v\n", d.number, err)
-			return Result{Success: false}
-		}
-
-		if cls.Class == outcome.Terminal {
-			return Result{Success: false}
+			if cls.Class == outcome.Terminal {
+				return Result{Success: false}
+			}
 		}
 
 		if cls.Reason == outcome.RateLimit && cls.ResetAt != nil {
