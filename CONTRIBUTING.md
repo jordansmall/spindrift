@@ -33,15 +33,29 @@ check for the declarative surface.
 
 spindrift's own dogfood Consumer config opts into `nixStoreWritable` and bakes
 the check/dev closure via `extraClosures` (ADR 0018, issue #470), so a Box
-working a spindrift issue has a writable `/nix/store` and can run real
-`nix flake check` in-box — that's the primary gate, the same one CI runs.
-This is OCI-runner only; the bwrap runner keeps its store read-only.
+working a spindrift issue has a writable `/nix/store` and can run real checks
+in-box. The primary in-box gate is the scoped `checks-inbox` target, not the
+full flake check (issue #581):
+
+```sh
+nix build .#checks-inbox      # source-level checks only: go, shellcheck,
+                               # nil-clean, marker/parity — no image build
+```
+
+`checks-inbox` excludes the checks that build/inspect the OCI image
+(`dockerTools.buildLayeredImage`, `lib/image.nix:198`) or assert facts about
+the box's own baked toolchain — the box working the issue is already built
+from that image, so re-baking it in-box is redundant and the nested build is
+heavy/unreliable in a Box (issue #565 saw one killed with `EXIT:137`). Those
+checks still run in CI's full `nix flake check` below, so coverage isn't
+lost — just moved out of the box. Both are OCI-runner only; the bwrap runner
+keeps its store read-only.
 
 For faster, store-free per-file iteration (or as a fallback on a Box built
 without the self-test knobs), use `nil diagnostics path/to/file.nix` for
 changed `*.nix` files and `shellcheck path/to/file.sh` for changed shell
 files. Both tools are baked into the Box and complement, but do not replace,
-a full `nix flake check` run before opening a PR.
+a `checks-inbox` (or full `nix flake check`) run before opening a PR.
 
 The dogfood Box also bakes the upstream [`caveman`
 skill](https://github.com/juliusbrussee/caveman) (issue #486), advertised
