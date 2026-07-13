@@ -55,7 +55,12 @@ jobs:
           repo: ${{ github.repository }}
           base-branch: ${{ github.event.repository.default_branch }}
           claim-add-label: agent-in-progress
-          claim-remove-labels: agent-trigger ready-for-agent
+          # Strip every other lifecycle label, not just the trigger and
+          # ready-for-agent: a re-triggered issue may still carry a stale
+          # terminal label (agent-complete / agent-failed) or a leftover
+          # agent-recover, and the claim must land it cleanly on
+          # agent-in-progress regardless of what it was wearing before.
+          claim-remove-labels: agent-trigger ready-for-agent agent-recover agent-complete agent-failed
           git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
           git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
 
