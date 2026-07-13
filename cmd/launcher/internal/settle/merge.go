@@ -104,11 +104,35 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 					fmt.Printf("    #%s  pr=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
 					return crErr
 				}
+				if rwErr := s.rewaitAfterForcePush(num, pr); rwErr != nil {
+					return rwErr
+				}
 				skipRebase = true
 			} else {
 				fmt.Printf("    #%s  pr=%s  status=rebase-failed  !! %v\n", num, pr, rbErr)
 				return rbErr
 			}
+			continue
+		}
+		// Rebase succeeded: the force-push reset the PR's required checks, so
+		// the next merge attempt must wait for the new head to go green
+		// rather than retrying against checks the push itself just reset.
+		if rwErr := s.rewaitAfterForcePush(num, pr); rwErr != nil {
+			return rwErr
 		}
 	}
+}
+
+// rewaitAfterForcePush blocks for CI to reach green on the PR's current head
+// after a gate-driven force-push (rebase or conflict-resolve) reset its
+// required checks. It reuses gateToGreen's timeout/poll bounds, so a wait
+// that ends in genuine CI failure or a timeout returns an error distinct from
+// forge.ErrMergeConflict — the caller's conflict-retry path is never
+// re-entered for it.
+func (s *Settle) rewaitAfterForcePush(num, pr string) error {
+	fmt.Printf("    #%s  pr=%s  status=post-force-push-wait\n", num, pr)
+	if green, _ := s.gateToGreen(num, pr); !green {
+		return fmt.Errorf("CI did not reach green after force-push on %s", pr)
+	}
+	return nil
 }
