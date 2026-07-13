@@ -74,6 +74,18 @@ store path; fish's `vendor_completions.d` convention loads it automatically
 once that directory is on `$fish_complete_path`, or copy/symlink it into
 `~/.config/fish/completions/spindrift.fish`.
 
+It also ships zsh tab-completion with the same coverage, plus a per-flag
+description drawn from the same `doc` string, so `spindrift --<TAB>` shows
+each flag's one-line purpose alongside its name. `nix develop` puts the
+completion function on `share/zsh/site-functions/_spindrift` under
+`spindrift`'s store path; add that directory to `fpath` before `compinit`
+runs to enable it:
+
+```sh
+fpath=("$(dirname "$(command -v spindrift)")/../share/zsh/site-functions" $fpath)
+autoload -Uz compinit && compinit
+```
+
 ## Adding spindrift to your flake
 
 If you prefer to wire it by hand rather than `nix flake init`, add spindrift to
