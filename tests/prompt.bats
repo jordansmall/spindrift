@@ -134,6 +134,21 @@ setup() {
   grep -qi 'note=' <<<"$comms"
 }
 
+@test "CHECK section forbids backgrounding a blocking gate and requires a terminal outcome" {
+  # The WATCH CI never-background rule (issue #571) must generalize to the
+  # CHECK phase's long build/test gates, not just the CI-watch loop -- an
+  # agent that backgrounds `nix build .#checks-inbox` and ends its turn
+  # never emits SPINDRIFT_OUTCOME and the run is lost.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  local check
+  check="$(sed -n '/^# CHECK$/,/^# REVIEW$/p' "$prompt")"
+  [ -n "$check" ]
+  grep -qi 'never background' <<<"$check"
+  grep -qi 'foreground' <<<"$check"
+  grep -q 'SPINDRIFT_OUTCOME' <<<"$check"
+}
+
 @test "prompt branches CODE_FORGE=git to a push-only outcome, no PR/CI" {
   # CODE_FORGE=git (#330) must skip PR creation and CI-watch entirely and
   # emit a branch ref where a PR URL would go.

@@ -70,6 +70,15 @@ log the fallback. Go module without a devShell:
 - `go vet ./...`
 - `go test ./...`
 
+Run every check or build gate in the foreground and block on it yourself —
+never background it (`&`, detached job, background task) and end your turn
+while it is still pending. Backgrounding a gate here is the same failure as
+backgrounding WATCH CI below: your turn ends before the gate finishes, no
+`SPINDRIFT_OUTCOME` line is ever printed, and the run is lost even when the
+underlying work was green. Wait for the gate to finish before moving on, and
+do not stop this run until a terminal `SPINDRIFT_OUTCOME` line (`status=ready`
+or `status=blocked`) has been printed.
+
 ${AUTO_FORMAT_STEP}${AUTO_LINT_STEP}# COMMIT
 
 Strict Conventional Commits v1.0.0, hard-wrapped (subject ≤50, body ≤72).
