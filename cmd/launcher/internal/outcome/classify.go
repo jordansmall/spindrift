@@ -82,6 +82,11 @@ type scanResult struct {
 // describing whether the failure is transient (retryable) or terminal
 // (genuine).
 //
+// Markers are scoped to lines that are not agent-authored content: a
+// tool_result, assistant-text, or file-edit line quoting a rate-limit string
+// verbatim (e.g. a box working on rate-limit code) is not attributed as the
+// cause (issue #579). See isAgentContentEvent.
+//
 // When the log contains a 429 rate-limit marker with a "resetsAt" field, the
 // returned Classification carries a non-nil ResetAt so callers can hold until
 // the known reset time.
@@ -109,10 +114,15 @@ func Classify(logPath string) (Classification, error) {
 	return cl, nil
 }
 
-// scanLog reads logPath line by line and returns a scanResult with the first
-// transient reason found and any resetsAt timestamp extracted from anywhere in
-// the log. Oversized lines (> 4 MiB) are processed in chunks rather than
-// skipped, so markers in large JSON blobs are still detected.
+// scanLog reads logPath line by line and returns a scanResult with the
+// transient reason and resetsAt timestamp of the last unrecovered candidate:
+// a match is dropped once agent-authored content (see isAgentContentEvent)
+// is seen after it, since that means the run continued past it. Oversized
+// lines (> 4 MiB) are processed in chunks rather than skipped, so markers in
+// large JSON blobs are still detected — except a chunk of an oversized
+// agent-content line, which fails the whole-chunk JSON parse in
+// isAgentContentEvent and so falls through to the normal scan (known gap,
+// issue #579 review).
 func scanLog(logPath string) (scanResult, error) {
 	var sr scanResult
 	err := logscan.ForEachLine(logPath, logscan.ChunkOversized, func(chunk string) {
