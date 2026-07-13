@@ -24,6 +24,13 @@ Run headless [Claude Code](https://claude.com/claude-code) agents in
 - **nix** with flakes enabled.
 - **podman** (or set `runtime = "docker"`; or `runtime = "bwrap"` for the
   daemonless bubblewrap sandbox on Linux, which needs no container runtime).
+  On macOS/Windows, podman runs containers inside a VM ("podman machine")
+  with its own fixed RAM — give that machine at least as much memory as
+  `MEMORY_LIMIT` (default `4g`), e.g. `podman machine set --memory 4096`. A
+  smaller machine lets the VM's own Linux OOM-killer fire before the
+  per-container `--memory` cgroup cap ever bites, silently killing whatever
+  is running (`dogfood.sh` checks for this mismatch and aborts before
+  dispatching — see [Dogfood loop](#dogfood-loop)).
 - A **fine-grained single-repo GitHub PAT** — scoped to the Target repo only
   (see [Before you deploy](#before-you-deploy)).
 - **Claude Code auth**: run `claude setup-token` on the host, or an API key.
@@ -217,6 +224,15 @@ in-progress issue's, retrying once the collider completes — see [Declared
 touch-set overlap](docs/reference.md#declared-touch-set-overlap).
 
 ## Dogfood loop
+
+`dogfood.sh` refuses to start against a podman machine whose RAM is smaller
+than `MEMORY_LIMIT` (default `4g`): that mismatch lets the VM's own
+OOM-killer kill an in-box build before the per-container `--memory` cap ever
+bites (#580). The check reads `podman machine inspect`, compares its
+`Resources.Memory` (MiB) against `MEMORY_LIMIT`, and on shortfall prints both
+numbers plus `podman machine set --memory <N>` before exiting 1 — no box is
+dispatched. It's a no-op with adequate machine RAM, and skips cleanly when
+there's no active podman machine (native Linux, or a non-podman runtime).
 
 `dogfood.sh` drives spindrift building itself, with `CONTINUOUS_DISPATCH=1`
 on by default (#528): instead of draining one bounded batch and returning,
