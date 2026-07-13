@@ -41,8 +41,25 @@ git worktree add ../spindrift-<task> -b <branch> origin/main
 spindrift dogfoods the `nixStoreWritable` + `extraClosures` knobs (ADR 0018,
 issue #469) on its own Consumer config (issue #470), so the Box working a
 spindrift issue has a writable `/nix/store` and the check/dev closure
-pre-baked. That makes real `nix flake check` the primary in-box gate — prefer
-it over guessing:
+pre-baked. That makes real checks the primary in-box gate — prefer them over
+guessing. But run the **scoped** target, not the full flake check (issue
+#581): `checks-inbox` covers every source-level check (go test/vet/fmt,
+shellcheck, nil-clean, marker/parity checks) and skips the checks that
+build/inspect the OCI image (`dockerTools.buildLayeredImage`) or assert facts
+about the box's own baked toolchain — the box is already built from that
+image, so re-baking it in-box tests nothing the pre-dispatch build didn't,
+and nested image builds are heavy/unreliable in a Box (issue #565 saw one
+kicked with `EXIT:137`):
+
+```sh
+nix build .#checks-inbox
+```
+
+The full `nix flake check` — including the image-building checks
+`checks-inbox` skips — is what CI runs pre-dispatch/pre-merge; it isn't the
+in-box gate. Run it in-box only if you touched `nix/checks/image.nix`,
+`lib/image.nix`, or anything else that changes what gets baked into the
+image, since that's the one case the scoped target can't cover:
 
 ```sh
 nix flake check
@@ -57,10 +74,10 @@ nil diagnostics path/to/file.nix
 ```
 
 `nil diagnostics` exits non-zero on errors (warnings still exit 0). It
-complements, but does not replace, a full `nix flake check` before finishing
-the task — `nil` catches structural mistakes early; only `nix flake check`
-catches evaluation and build errors. If `nix flake check` is genuinely
-unavailable (e.g. a Box built without the self-test knobs, or the bwrap
+complements, but does not replace, `checks-inbox` before finishing the task —
+`nil` catches structural mistakes early; only a real check build catches
+evaluation and build errors. If neither `checks-inbox` nor `nix flake check`
+is available (e.g. a Box built without the self-test knobs, or the bwrap
 runner, which keeps its store read-only), fall back to `nil diagnostics` and
 say so.
 
