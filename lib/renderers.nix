@@ -459,29 +459,24 @@ rec {
           doc = "check forge credentials, repository connectivity, and triage label presence";
         }
       ];
-      # A zsh _arguments option-spec description lives inside '...[...]'; a
-      # literal ']' would close the description early and an unescaped "'"
-      # would close the spec's own quoting, so both (and a literal '\') are
-      # backslash-escaped. Order matters: backslashes first, so the escapes
-      # this function itself inserts are never re-escaped.
-      zshEsc =
-        s:
-        let
-          s1 = builtins.replaceStrings [ "\\" ] [ "\\\\" ] s;
-          s2 = builtins.replaceStrings [ "]" ] [ "\\]" ] s1;
-          s3 = builtins.replaceStrings [ "[" ] [ "\\[" ] s2;
-        in
-        builtins.replaceStrings [ "'" ] [ "'\\''" ] s3;
+      # A `_describe` array entry is 'completion:description' (colon-split
+      # on the first colon, same convention the subcommands array above
+      # uses); the only character that needs escaping to survive the
+      # surrounding single-quoted zsh string literal is an embedded "'"
+      # itself (and a literal '\', so the quote-escape this function
+      # inserts is never re-escaped — hence backslash first).
+      zshEsc = s: builtins.replaceStrings [ "\\" "'" ] [ "\\\\" "'\\''" ] s;
       subcommandSpecs = map (s: "    '${s.name}:${zshEsc s.doc}'\n") subcommands;
-      knobSpec = e: "    '--${toKebab e.env}[${zshEsc e.doc}]:value:'\n";
-      aliasSpec = e: "    '--${e.alias}[${zshEsc e.doc}]:value:'\n";
-      fileSpec = e: "    '--${toKebab e.env}-file[${zshEsc e.doc}]:file:_files'\n";
+      knobSpec = e: "    '--${toKebab e.env}:${zshEsc e.doc}'\n";
+      aliasSpec = e: "    '--${e.alias}:${zshEsc e.doc}'\n";
+      fileSpec = e: "    '--${toKebab e.env}-file:${zshEsc e.doc}'\n";
+      fileFlags = map (e: "--" + toKebab e.env + "-file") secretEntries;
       extraFlagSpecs = [
-        "    '--no-build[fail fast if the image is absent instead of building it]'\n"
-        "    '--yes[skip the confirmation prompt when dispatching unlabeled issues]'\n"
-        "    '--force[alias for --yes]'\n"
-        "    '(-)--help[show usage]'\n"
-        "    '(-)--version[show version]'\n"
+        "    '--no-build:fail fast if the image is absent instead of building it'\n"
+        "    '--yes:skip the confirmation prompt when dispatching unlabeled issues'\n"
+        "    '--force:alias for --yes'\n"
+        "    '--help:show usage'\n"
+        "    '--version:show version'\n"
       ];
       allFlagSpecs = concatStrings (
         map knobSpec nonSecret
@@ -490,6 +485,22 @@ rec {
         ++ extraFlagSpecs
       );
       allSubcommandSpecs = concatStrings subcommandSpecs;
+      # A `case "$prev" in ) ... esac` (empty pattern) is a syntax error, so
+      # the file-flag branch is omitted entirely if the schema ever has no
+      # secret knobs. Mirrors renderBashCompletion's fileFlagBranch.
+      fileFlagBranch =
+        if fileFlags == [ ] then
+          ""
+        else
+          ''
+            case "$prev" in
+              ${builtins.concatStringsSep "|" fileFlags})
+                _files
+                return
+                ;;
+            esac
+
+          '';
     in
     ''
       #compdef spindrift
@@ -506,21 +517,17 @@ rec {
         flags=(
       ${allFlagSpecs}  )
 
-        local curcontext="$curcontext" state
+        local cur="''${words[CURRENT]}" prev="''${words[CURRENT-1]}"
 
-        _arguments -C \
-          "$flags[@]" \
-          '1: :->subcmd' \
-          '*::arg:->args'
+        ${fileFlagBranch}if [[ "$cur" == -* ]]; then
+          _describe -t options 'spindrift flag' flags
+          return
+        fi
 
-        case $state in
-          subcmd)
-            _describe -t subcommands 'spindrift subcommand' subcommands
-            ;;
-        esac
+        if (( CURRENT == 2 )); then
+          _describe -t subcommands 'spindrift subcommand' subcommands
+        fi
       }
-
-      _spindrift "$@"
     '';
 
   # `man spindrift` roff content: the full flag reference that keeps
