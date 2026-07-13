@@ -55,6 +55,7 @@ func TestMergeImmediate(t *testing.T) {
 		rebaseErrs                []error
 		conflictResolveErr        error
 		noDispatcher              bool
+		postForcePushGreen        bool
 		wantErr                   bool
 		wantMerged                bool
 		wantRebaseCalled          int
@@ -72,12 +73,13 @@ func TestMergeImmediate(t *testing.T) {
 			wantMerged: false,
 		},
 		{
-			name:              "conflict → rebase → retry succeeds",
-			maxRebaseAttempts: 3,
-			mergeErrs:         []error{forge.ErrMergeConflict, nil},
-			wantErr:           false,
-			wantMerged:        true,
-			wantRebaseCalled:  1,
+			name:               "conflict → rebase → retry succeeds",
+			maxRebaseAttempts:  3,
+			mergeErrs:          []error{forge.ErrMergeConflict, nil},
+			postForcePushGreen: true,
+			wantErr:            false,
+			wantMerged:         true,
+			wantRebaseCalled:   1,
 		},
 		{
 			name:              "conflict → rebase fails → error returned",
@@ -101,6 +103,7 @@ func TestMergeImmediate(t *testing.T) {
 			maxRebaseAttempts:         3,
 			mergeErrs:                 []error{forge.ErrMergeConflict, nil},
 			rebaseErr:                 forge.ErrMergeConflict,
+			postForcePushGreen:        true,
 			wantErr:                   false,
 			wantMerged:                true,
 			wantRebaseCalled:          1,
@@ -127,6 +130,7 @@ func TestMergeImmediate(t *testing.T) {
 			maxRebaseAttempts:         3,
 			mergeErrs:                 []error{forge.ErrMergeConflict, forge.ErrMergeConflict, nil},
 			rebaseErr:                 forge.ErrMergeConflict,
+			postForcePushGreen:        true,
 			wantErr:                   false,
 			wantMerged:                true,
 			wantRebaseCalled:          1,
@@ -147,13 +151,14 @@ func TestMergeImmediate(t *testing.T) {
 			// A transient push failure (forge outage, network fault) during
 			// the force-push must not block the merge outright — it's
 			// retried, and here the retry succeeds.
-			name:              "conflict → rebase transient push failure → retry succeeds",
-			maxRebaseAttempts: 3,
-			mergeErrs:         []error{forge.ErrMergeConflict, nil},
-			rebaseErrs:        []error{forge.ErrTransientPushFailure, nil},
-			wantErr:           false,
-			wantMerged:        true,
-			wantRebaseCalled:  2,
+			name:               "conflict → rebase transient push failure → retry succeeds",
+			maxRebaseAttempts:  3,
+			mergeErrs:          []error{forge.ErrMergeConflict, nil},
+			rebaseErrs:         []error{forge.ErrTransientPushFailure, nil},
+			postForcePushGreen: true,
+			wantErr:            false,
+			wantMerged:         true,
+			wantRebaseCalled:   2,
 		},
 		{
 			// The forge stays down: every retry hits the same transient
@@ -191,6 +196,9 @@ func TestMergeImmediate(t *testing.T) {
 			} else {
 				fc.RebaseErr = tc.rebaseErr
 			}
+			if tc.postForcePushGreen {
+				fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+			}
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 
 			var d dispatch.Dispatcher
@@ -224,6 +232,87 @@ func TestMergeImmediate(t *testing.T) {
 				t.Errorf("ResolveConflict called %d times, want %d", gotConflictResolveCalled, tc.wantConflictResolveCalled)
 			}
 		})
+	}
+}
+
+// TestMergeImmediate_RewaitsAfterForcePush verifies that a Rebase force-push
+// resets the PR's checks, so mergeImmediate must not retry the merge until a
+// fresh gateToGreen wait confirms the new head is green (issue #567). With no
+// checks ever registering, the re-wait times out and the merge must not be
+// retried a second time.
+func TestMergeImmediate_RewaitsAfterForcePush(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	c.MergePollTimeout = 0 // no checks ever register after the force-push
+	fc := forge.NewFake()
+	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", testPR, nil)
+
+	if err == nil {
+		t.Fatal("mergeImmediate: want error when CI never reaches green after force-push, got nil")
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge must not succeed while the post-force-push CI wait never confirmed green; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.RebasedURLs) != 1 {
+		t.Errorf("Rebase called %d times, want 1 (merge must wait for CI, not retry rebase)", len(fc.RebasedURLs))
+	}
+}
+
+// TestMergeImmediate_RewaitGreenMergesWithoutFurtherRebase verifies that once
+// the post-force-push re-wait confirms green, the merge proceeds and the
+// stale-conflict retry consumes no further rebase attempt.
+func TestMergeImmediate_RewaitGreenMergesWithoutFurtherRebase(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 1
+	fc := forge.NewFake()
+	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", testPR, nil)
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("Merge not called to completion; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.RebasedURLs) != 1 {
+		t.Errorf("Rebase called %d times, want 1 (single rebase attempt, no extra attempt consumed)", len(fc.RebasedURLs))
+	}
+}
+
+// TestMergeImmediate_RewaitGenuineRedNotTreatedAsConflict verifies that a
+// re-wait ending in genuine CI failure (not just a timeout) is surfaced as an
+// error without dispatching a second rebase attempt — it must not be folded
+// into the conflict-retry path.
+func TestMergeImmediate_RewaitGenuineRedNotTreatedAsConflict(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake()
+	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", testPR, nil)
+
+	if err == nil {
+		t.Fatal("mergeImmediate: want error when re-wait confirms genuine CI red, got nil")
+	}
+	if errors.Is(err, forge.ErrMergeConflict) {
+		t.Errorf("genuine CI red after force-push must not surface as forge.ErrMergeConflict; got %v", err)
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge must not succeed after genuine CI red; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.RebasedURLs) != 1 {
+		t.Errorf("Rebase called %d times, want 1 (no further rebase attempt on CI red)", len(fc.RebasedURLs))
 	}
 }
 
