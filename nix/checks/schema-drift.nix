@@ -263,6 +263,30 @@ in
         touch $out
       '';
 
+  # Pure-eval pin on renderZshCompletion's shape (issue #552): a schema flag,
+  # its alias, and a secret file flag must each carry a `[description]` zsh
+  # completion annotation sourced from the schema's `doc` string, and a
+  # secret file flag's argument must complete via `_files`. Complements
+  # launcher-zsh-completion below, which covers the built artifact end to
+  # end; this one pins the renderer's output shape without a store build.
+  renderer-zsh-completion-shape =
+    let
+      schema = import ../../lib/env-schema.nix;
+      inherit (pkgs.lib) assertMsg hasInfix;
+      out = renderers.renderZshCompletion schema;
+    in
+    assert assertMsg (hasInfix "#compdef spindrift" out)
+      "renderZshCompletion must emit a #compdef spindrift header, got: ${out}";
+    assert assertMsg (hasInfix "'--issue-number[${schema.issueNumber.doc}]" out)
+      "renderZshCompletion must annotate --issue-number with its schema doc string, got: ${out}";
+    assert assertMsg (hasInfix "'--issue[${schema.issueNumber.doc}]" out)
+      "renderZshCompletion must complete the --issue alias with a description, got: ${out}";
+    assert assertMsg (hasInfix "'--gh-token-file[${schema.ghToken.doc}]" out)
+      "renderZshCompletion must annotate --gh-token-file with its schema doc string, got: ${out}";
+    assert assertMsg (hasInfix "--gh-token-file[${schema.ghToken.doc}]:file:_files" out)
+      "renderZshCompletion must complete a --*-file flag's argument via _files, got: ${out}";
+    pkgs.runCommand "renderer-zsh-completion-shape" { } "touch $out";
+
   # The generated bash completion script must totally cover the schema and the
   # launcher's hardcoded subcommand set: every non-secret flag, the --issue
   # alias, every secret --*-file flag, and all five subcommands. A new knob or
