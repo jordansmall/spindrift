@@ -193,10 +193,10 @@ func (a *ociAdapter) buildInContainer() error {
 	return a.loadImage(filepath.Join(tmpDir, "image.tar"))
 }
 
-// containerIsRunning reports whether name is currently in the "running" state.
+// IsRunning reports whether name is currently in the "running" state.
 // Returns false when the container is absent, exited, or inspect fails — in all
 // of those cases the caller may safely proceed with rm -f.
-func (a *ociAdapter) containerIsRunning(name string) bool {
+func (a *ociAdapter) IsRunning(name string) bool {
 	out, err := exec.Command(a.cli, "inspect", "--format={{.State.Status}}", name).Output()
 	if err != nil {
 		return false
@@ -282,11 +282,14 @@ func (a *ociAdapter) Run(box Box) error {
 	reapOrphanedRebaseDirs(os.TempDir())
 	// Reap any stale (exited or created) container from a prior interrupted run.
 	// Never touch a running container — a concurrent launcher invocation may own it,
-	// and a force-remove would destroy that run's work silently.
-	if !a.containerIsRunning(box.Name) {
-		reap := exec.Command(a.cli, "rm", "-f", box.Name)
-		_ = reap.Run()
+	// and a force-remove would destroy that run's work silently. A running
+	// container also means launching would collide on the name; recognize
+	// that as ErrAlreadyRunning instead of attempting the launch (issue #562).
+	if a.IsRunning(box.Name) {
+		return ErrAlreadyRunning
 	}
+	reap := exec.Command(a.cli, "rm", "-f", box.Name)
+	_ = reap.Run()
 
 	out := box.Output
 	if out == nil {
@@ -312,7 +315,7 @@ func reapAfterSuccess(err error) bool {
 
 // Reap removes a named container (best-effort). Never removes a running container.
 func (a *ociAdapter) Reap(name string) error {
-	if !a.containerIsRunning(name) {
+	if !a.IsRunning(name) {
 		reap := exec.Command(a.cli, "rm", "-f", name)
 		_ = reap.Run()
 	}

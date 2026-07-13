@@ -42,6 +42,12 @@ type Fake struct {
 	// with the Fake's lock released, so it may block or trigger concurrent
 	// Run calls without deadlocking.
 	RunFunc func(Box) error
+
+	// IsRunningRet is returned by every IsRunning call.
+	IsRunningRet bool
+
+	// IsRunningCalls records the names passed to IsRunning, in order.
+	IsRunningCalls []string
 }
 
 // NewFake returns an empty Fake runner.
@@ -104,4 +110,12 @@ func (f *Fake) Reap(name string) error {
 	defer f.mu.Unlock()
 	f.ReapCalls = append(f.ReapCalls, name)
 	return nil
+}
+
+// IsRunning records name and returns IsRunningRet.
+func (f *Fake) IsRunning(name string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.IsRunningCalls = append(f.IsRunningCalls, name)
+	return f.IsRunningRet
 }

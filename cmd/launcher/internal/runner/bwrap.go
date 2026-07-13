@@ -185,6 +185,11 @@ func (a *bwrapAdapter) Run(box Box) error {
 // Reap is a no-op for bwrap — sandboxes are ephemeral and exit when done.
 func (a *bwrapAdapter) Reap(_ string) error { return nil }
 
+// IsRunning always reports false for bwrap: sandboxes are unnamed child
+// processes, not persistent named containers, so there is nothing to collide
+// with by name.
+func (a *bwrapAdapter) IsRunning(_ string) bool { return false }
+
 // bwrapBuildAdapter implements Runner for the `launcher build` bwrap path.
 // EnsureReady realizes the agent store closures; Run is not supported.
 type bwrapBuildAdapter struct {
@@ -234,3 +239,7 @@ func (a *bwrapBuildAdapter) Run(_ Box) error {
 
 // Reap is a no-op for the build adapter.
 func (a *bwrapBuildAdapter) Reap(_ string) error { return nil }
+
+// IsRunning always reports false for the build adapter: it never launches a
+// box, so there is nothing to be running.
+func (a *bwrapBuildAdapter) IsRunning(_ string) bool { return false }
