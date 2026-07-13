@@ -40,13 +40,16 @@ jobs:
       # REPO_SLUG, BASE_BRANCH, tokens, bot identity) written to $GITHUB_ENV
       # for every step below. The claim normalises onto agent-in-progress up
       # front so recover's terminal swaps (which read from agent-in-progress)
-      # have the state they expect: removing agent-recover self-clears the
-      # trigger (no re-fire); removing the terminal labels makes a
-      # retry-from-agent-failed / re-run-on-agent-complete start clean;
-      # removing ready-for-agent keeps a concurrent dispatch from grabbing it.
-      # The SPINDRIFT_GH_TOKEN secret is a fine-grained PAT scoped to this
-      # repo: Issues RW, Contents RW, Pull requests RW, Metadata R — the
-      # default GITHUB_TOKEN is not enough (the launcher merges PRs).
+      # have the state they expect: it strips every other lifecycle label so
+      # the issue lands cleanly on agent-in-progress regardless of prior
+      # state. Removing agent-recover self-clears the trigger (no re-fire);
+      # removing the terminal labels makes a retry-from-agent-failed /
+      # re-run-on-agent-complete start clean; removing ready-for-agent keeps a
+      # concurrent dispatch from grabbing it; removing agent-trigger drops a
+      # stale dispatch trigger that never fired. The SPINDRIFT_GH_TOKEN secret
+      # is a fine-grained PAT scoped to this repo: Issues RW, Contents RW,
+      # Pull requests RW, Metadata R — the default GITHUB_TOKEN is not enough
+      # (the launcher merges PRs).
       - name: Agent setup
         uses: ./.github/actions/agent-setup
         with:
@@ -56,7 +59,7 @@ jobs:
           repo: ${{ github.repository }}
           base-branch: ${{ github.event.repository.default_branch }}
           claim-add-label: agent-in-progress
-          claim-remove-labels: agent-recover agent-failed agent-complete ready-for-agent
+          claim-remove-labels: agent-recover agent-failed agent-complete ready-for-agent agent-trigger
           git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
           git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
 
