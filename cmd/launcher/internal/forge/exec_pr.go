@@ -92,6 +92,35 @@ func (e *execClient) CheckState(url string) (RollupState, error) {
 	return RollupState(s), nil
 }
 
+// Mergeable queries the PR's content-mergeability state via GraphQL — the
+// `mergeable` field, distinct from the statusCheckRollup CheckState queries —
+// so Merge can tell a genuine conflict (CONFLICTING) apart from a PR that is
+// merely blocked by pending or failing checks (MERGEABLE).
+func (e *execClient) Mergeable(url string) (MergeableState, error) {
+	parts := strings.Split(url, "/")
+	if len(parts) < 7 {
+		return MergeableUnknown, fmt.Errorf("invalid PR URL: %s", url)
+	}
+	owner, repo, number := parts[3], parts[4], parts[6]
+	const gql = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){mergeable}}}`
+	cmd := exec.Command("gh", "api", "graphql",
+		"-f", "query="+gql,
+		"-f", "owner="+owner,
+		"-f", "repo="+repo,
+		"-F", "number="+number,
+		"--jq", `.data.repository.pullRequest.mergeable // ""`,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return MergeableUnknown, fmt.Errorf("gh api graphql: %w", err)
+	}
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return MergeableUnknown, nil
+	}
+	return MergeableState(s), nil
+}
+
 // ListPRFiles returns every path changed by the PR (added, modified, and
 // deleted alike) via the REST pulls/files endpoint, which — unlike
 // check-runs — works under a fine-grained PAT scoped to Pull requests RW.
@@ -126,12 +155,33 @@ func (e *execClient) Merge(url string) error {
 	cmd := exec.Command("gh", "pr", "merge", url, "--rebase", "--delete-branch")
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		if isMergeConflict(stderr.String()) {
-			return ErrMergeConflict
-		}
-		return fmt.Errorf("gh pr merge %s: %w", url, err)
+		return e.classifyMergeFailure(url, err, stderr.String())
 	}
 	return nil
+}
+
+// classifyMergeFailure distinguishes a genuine merge conflict from a PR that
+// is merely blocked by pending or failing required checks. gh's stderr
+// carries the same "not mergeable" wording for both refusals, so the
+// distinction is made by querying the PR's mergeable state instead
+// (issue #566). A mergeable state this function cannot map to either outcome
+// is surfaced as its own error rather than folded into ErrMergeConflict.
+func (e *execClient) classifyMergeFailure(url string, mergeErr error, stderr string) error {
+	if !isMergeConflict(stderr) {
+		return fmt.Errorf("gh pr merge %s: %w: %s", url, mergeErr, strings.TrimSpace(stderr))
+	}
+	state, err := e.Mergeable(url)
+	if err != nil {
+		return fmt.Errorf("gh pr merge %s: %w (mergeable state unavailable: %v)", url, mergeErr, err)
+	}
+	switch state {
+	case MergeableConflicting:
+		return ErrMergeConflict
+	case MergeableMergeable:
+		return ErrMergeBlockedByChecks
+	default:
+		return fmt.Errorf("gh pr merge %s: %w (mergeable state %q undetermined)", url, mergeErr, state)
+	}
 }
 
 // CanAutoMerge queries whether the repo allows GitHub's native auto-merge feature.

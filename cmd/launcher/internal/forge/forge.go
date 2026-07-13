@@ -9,6 +9,16 @@ import "errors"
 // rebase the head branch and retry.
 var ErrMergeConflict = errors.New("merge conflict")
 
+// ErrMergeBlockedByChecks is returned by Merge when the PR itself has no
+// content conflict (mergeable state MERGEABLE) but required status checks
+// are still pending or failing, so the forge refuses the merge. GitHub's gh
+// CLI reports this refusal with the same "not mergeable" wording as a
+// genuine conflict; callers must tell the two apart by querying the PR's
+// mergeable state (see PRForge.Mergeable) rather than the refusal text.
+// Unlike ErrMergeConflict, this is not conflict-resolvable — retrying the
+// merge once checks settle is the only valid next step.
+var ErrMergeBlockedByChecks = errors.New("merge blocked by checks")
+
 // ErrTransientPushFailure is returned by Rebase when its force-push fails
 // for a reason unrelated to the branch state — a forge outage, network
 // fault, or locked ref — as opposed to a genuine stale-lease or
@@ -59,6 +69,20 @@ const (
 	PROpen   PRState = "OPEN"
 	PRMerged PRState = "MERGED"
 	PRClosed PRState = "CLOSED"
+)
+
+// MergeableState is GitHub's PR-content mergeability classification —
+// whether the PR's changes conflict with its base branch. It is distinct
+// from RollupState (CI check results) and from required-review/branch-
+// protection gating: a MergeableMergeable PR can still be refused by Merge
+// if its checks haven't passed.
+type MergeableState string
+
+// Known MergeableState values returned by the GitHub API or by the fake.
+const (
+	MergeableUnknown     MergeableState = "UNKNOWN"
+	MergeableMergeable   MergeableState = "MERGEABLE"
+	MergeableConflicting MergeableState = "CONFLICTING"
 )
 
 // RollupState is the aggregate CI status of a PR's head commit.

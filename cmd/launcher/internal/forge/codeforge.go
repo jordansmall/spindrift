@@ -32,6 +32,10 @@ type PRForge interface {
 	PRForBranch(branch string) (string, bool, error)
 	// PRState returns the canonical state of the given PR URL.
 	PRState(url string) (PRState, error)
+	// Mergeable returns the PR's content-mergeability state — whether the
+	// PR's changes conflict with its base branch, as distinct from CI checks
+	// or branch-protection gating.
+	Mergeable(url string) (MergeableState, error)
 	// CheckState returns the aggregate CI rollup state for the PR's head commit.
 	CheckState(url string) (RollupState, error)
 	// FailureDetail returns the failed check names plus a bounded log excerpt

@@ -174,6 +174,83 @@ func TestRenderFailureDetail(t *testing.T) {
 	})
 }
 
+// TestMerge_BlockedByChecksNotClassifiedAsConflict verifies that when gh pr
+// merge refuses with "not mergeable" wording but the PR's queried mergeable
+// state is MERGEABLE (not CONFLICTING), Merge returns ErrMergeBlockedByChecks
+// rather than ErrMergeConflict — the two refusals share the same stderr
+// wording, so substring-matching alone cannot tell them apart (issue #566).
+func TestMerge_BlockedByChecksNotClassifiedAsConflict(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
+  printf 'GraphQL: Pull Request is not mergeable (mergePullRequest)\n' >&2
+  exit 1
+fi
+if [ "$1" = "api" ]; then
+  printf 'MERGEABLE\n'
+fi
+`)
+
+	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	err := c.Merge("https://github.com/owner/repo/pull/42")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if errors.Is(err, ErrMergeConflict) {
+		t.Fatalf("blocked-by-checks refusal must not classify as ErrMergeConflict, got: %v", err)
+	}
+	if !errors.Is(err, ErrMergeBlockedByChecks) {
+		t.Fatalf("want ErrMergeBlockedByChecks, got: %v", err)
+	}
+}
+
+// TestMerge_GenuineConflictStillClassifiedAsConflict verifies that a "not
+// mergeable" refusal on a PR whose queried mergeable state is CONFLICTING
+// still returns ErrMergeConflict, so the rebase-retry path keeps engaging
+// for real conflicts.
+func TestMerge_GenuineConflictStillClassifiedAsConflict(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
+  printf 'GraphQL: Pull Request is not mergeable (mergePullRequest)\n' >&2
+  exit 1
+fi
+if [ "$1" = "api" ]; then
+  printf 'CONFLICTING\n'
+fi
+`)
+
+	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	err := c.Merge("https://github.com/owner/repo/pull/42")
+	if !errors.Is(err, ErrMergeConflict) {
+		t.Fatalf("want ErrMergeConflict, got: %v", err)
+	}
+}
+
+// TestMerge_UndeterminedMergeableStateIsItsOwnError verifies that a "not
+// mergeable" refusal whose queried mergeable state is neither CONFLICTING nor
+// MERGEABLE (e.g. UNKNOWN — GitHub hasn't finished computing it) is surfaced
+// as its own error rather than silently folded into ErrMergeConflict or
+// ErrMergeBlockedByChecks.
+func TestMerge_UndeterminedMergeableStateIsItsOwnError(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
+  printf 'GraphQL: Pull Request is not mergeable (mergePullRequest)\n' >&2
+  exit 1
+fi
+if [ "$1" = "api" ]; then
+  printf 'UNKNOWN\n'
+fi
+`)
+
+	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	err := c.Merge("https://github.com/owner/repo/pull/42")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if errors.Is(err, ErrMergeConflict) {
+		t.Fatalf("undetermined mergeable state must not classify as ErrMergeConflict, got: %v", err)
+	}
+	if errors.Is(err, ErrMergeBlockedByChecks) {
+		t.Fatalf("undetermined mergeable state must not classify as ErrMergeBlockedByChecks, got: %v", err)
+	}
+}
+
 // TestGitForcePush_CapturesStderr verifies that a rejected force-with-lease
 // push returns an error containing git's stderr, not just the exit status.
 func TestGitForcePush_CapturesStderr(t *testing.T) {
