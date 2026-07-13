@@ -167,6 +167,7 @@ func TestDispatchWithRetry_HoldThenSuccess(t *testing.T) {
 
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil} // first fails, second succeeds
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
 	}}
@@ -198,6 +199,7 @@ func TestDispatchWithRetry_HoldJitterAdded(t *testing.T) {
 
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil}
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
 	}}
@@ -256,6 +258,7 @@ func TestDispatchWithRetry_HoldNotCountedAfterProgress(t *testing.T) {
 	fr := runner.NewFake()
 	// run1 fails (429), run2 fails (529 — different class), run3 succeeds
 	fr.RunErrs = []error{boxErr, boxErr, nil}
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
 
 	rateLimitCls := outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}
 	overloadedCls := outcome.Classification{Class: outcome.Transient, Reason: outcome.Overloaded}
@@ -290,6 +293,7 @@ func TestDispatchWithRetry_HoldNotCountedAfterProgress(t *testing.T) {
 func TestDispatchWithRetry_TransientBackoffRetryAndSucceed(t *testing.T) {
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil} // first fails (529), second succeeds
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		return outcome.Classification{Class: outcome.Transient, Reason: outcome.Overloaded}, nil
 	}}
@@ -350,6 +354,7 @@ func TestDispatchWithRetry_TransientCapExhausted(t *testing.T) {
 func TestDispatchWithRetry_RateLimitWithoutResetAtUsesBackoff(t *testing.T) {
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil}
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: nil}, nil
 	}}
@@ -378,6 +383,7 @@ func TestDispatchWithRetry_HoldWithPastResetUsesJitterOnly(t *testing.T) {
 
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil}
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
 	}}
@@ -394,6 +400,118 @@ func TestDispatchWithRetry_HoldWithPastResetUsesJitterOnly(t *testing.T) {
 	}
 }
 
+// TestDispatchWithRetry_ZeroExitRateLimitHoldsAndRedispatches verifies issue
+// #565: a box that exits zero but writes no SPINDRIFT_OUTCOME line, whose log
+// nonetheless classifies as a rate limit with a known resetsAt, is held and
+// re-dispatched exactly like a non-zero 429 exit — instead of dead-ending as
+// status=missing.
+func TestDispatchWithRetry_ZeroExitRateLimitHoldsAndRedispatches(t *testing.T) {
+	fixedNow := time.Unix(1_000_000, 0).UTC()
+	resetAt := fixedNow.Add(2 * time.Hour)
+
+	fr := runner.NewFake()
+	calls := 0
+	fr.RunFunc = func(box runner.Box) error {
+		calls++
+		if calls == 2 && box.Output != nil {
+			box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")) //nolint:errcheck
+		}
+		return nil // always exits zero, first attempt writes no outcome line
+	}
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // holdJitter=0
+
+	result := d.Run()
+
+	if !result.Success {
+		t.Error("want Success=true, got false")
+	}
+	if !result.OutcomeFound {
+		t.Fatal("want OutcomeFound=true after hold + re-dispatch")
+	}
+	if calls != 2 {
+		t.Errorf("Run calls: got %d, want 2 (initial zero-exit + hold re-dispatch)", calls)
+	}
+	if len(sleeps) != 1 {
+		t.Fatalf("sleep calls: got %d, want 1", len(sleeps))
+	}
+	wantSleep := 2 * time.Hour
+	if sleeps[0] != wantSleep {
+		t.Errorf("sleep duration: got %v, want %v", sleeps[0], wantSleep)
+	}
+}
+
+// TestDispatchWithRetry_ZeroExitTransientWithoutResetAtUsesBackoff verifies
+// issue #565's third acceptance criterion: a zero-exit, no-outcome run whose
+// log carries a transient marker but no resetsAt (or a non-rate-limit
+// transient) follows the existing backoff-retry path rather than an
+// indefinite hold or an immediate status=missing.
+func TestDispatchWithRetry_ZeroExitTransientWithoutResetAtUsesBackoff(t *testing.T) {
+	fr := runner.NewFake()
+	calls := 0
+	fr.RunFunc = func(box runner.Box) error {
+		calls++
+		if calls == 2 && box.Output != nil {
+			box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")) //nolint:errcheck
+		}
+		return nil // always exits zero
+	}
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return outcome.Classification{Class: outcome.Transient, Reason: outcome.Overloaded}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 15, 0), fr, drv, fakeClock(time.Time{}, &sleeps)) // backoffSecs=15
+
+	result := d.Run()
+
+	if !result.Success {
+		t.Error("want Success=true, got false")
+	}
+	if !result.OutcomeFound {
+		t.Fatal("want OutcomeFound=true after backoff + re-dispatch")
+	}
+	if calls != 2 {
+		t.Errorf("Run calls: got %d, want 2 (initial zero-exit + backoff re-dispatch)", calls)
+	}
+	if len(sleeps) != 1 {
+		t.Fatalf("sleep calls: got %d, want 1", len(sleeps))
+	}
+	if sleeps[0] != 15*time.Second {
+		t.Errorf("sleep duration: got %v, want 15s (backoff, not hold)", sleeps[0])
+	}
+}
+
+// TestDispatchWithRetry_ZeroExitConsecutiveHoldsConsumeCapAndFail verifies
+// issue #565's second acceptance criterion: consecutive zero-exit rate-limit
+// holds that never recover count against the transient retry cap, landing on
+// Success=false rather than a silent or confusing status=missing.
+func TestDispatchWithRetry_ZeroExitConsecutiveHoldsConsumeCapAndFail(t *testing.T) {
+	fixedNow := time.Unix(1_000_000, 0).UTC()
+	resetAt := fixedNow.Add(30 * time.Minute)
+
+	fr := runner.NewFake() // always exits zero, never writes an outcome line
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // max=3
+
+	result := d.Run()
+
+	if result.Success {
+		t.Error("want Success=false (cap exhausted), got true")
+	}
+	if len(fr.RunCalls) != 4 {
+		t.Errorf("RunCalls: got %d, want 4", len(fr.RunCalls))
+	}
+	if len(sleeps) != 3 {
+		t.Errorf("sleep calls: got %d, want 3 (one per hold before cap)", len(sleeps))
+	}
+}
+
 // TestDispatchWithRetry_AppliesToFixToo verifies the behavior change called
 // out in issue #441: a 429 during a fix pass now holds until reset instead
 // of burning a fix attempt, because the retry policy applies uniformly to
@@ -404,6 +522,7 @@ func TestDispatchWithRetry_AppliesToFixToo(t *testing.T) {
 
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil} // fix pass fails once (429), then succeeds
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
 	}}
