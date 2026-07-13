@@ -29,14 +29,15 @@ type CommentCall struct {
 type Fake struct {
 	mu sync.Mutex
 
-	labels    DispatchLabels
-	issues    map[string]Issue
-	prs       map[string]PR      // URL → PR
-	branchPRs map[string]string  // branch → PR URL
-	prStates  map[string]PRState // URL → canonical PR state
-	checkQ    map[string][]RollupState
-	checkErrQ map[string][]error  // per-call error queue; nil entry = consult checkQ
-	prFiles   map[string][]string // URL → scripted ListPRFiles result
+	labels          DispatchLabels
+	issues          map[string]Issue
+	prs             map[string]PR             // URL → PR
+	branchPRs       map[string]string         // branch → PR URL
+	prStates        map[string]PRState        // URL → canonical PR state
+	mergeableStates map[string]MergeableState // URL → scripted Mergeable result
+	checkQ          map[string][]RollupState
+	checkErrQ       map[string][]error  // per-call error queue; nil entry = consult checkQ
+	prFiles         map[string][]string // URL → scripted ListPRFiles result
 
 	failureDetail map[string]string // URL → scripted FailureDetail result
 	// FailureDetailErr, if non-nil, is returned by every FailureDetail call.
@@ -117,14 +118,15 @@ func NewFake(labels ...DispatchLabels) *Fake {
 		l = labels[0]
 	}
 	return &Fake{
-		labels:    l,
-		issues:    map[string]Issue{},
-		prs:       map[string]PR{},
-		branchPRs: map[string]string{},
-		prStates:  map[string]PRState{},
-		checkQ:    map[string][]RollupState{},
-		checkErrQ: map[string][]error{},
-		prFiles:   map[string][]string{},
+		labels:          l,
+		issues:          map[string]Issue{},
+		prs:             map[string]PR{},
+		branchPRs:       map[string]string{},
+		prStates:        map[string]PRState{},
+		mergeableStates: map[string]MergeableState{},
+		checkQ:          map[string][]RollupState{},
+		checkErrQ:       map[string][]error{},
+		prFiles:         map[string][]string{},
 
 		failureDetail: map[string]string{},
 	}
@@ -160,6 +162,24 @@ func (f *Fake) SetPRState(url string, state PRState) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.prStates[url] = state
+}
+
+// SetMergeableState scripts the MergeableState Mergeable returns for url.
+func (f *Fake) SetMergeableState(url string, state MergeableState) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mergeableStates[url] = state
+}
+
+// Mergeable returns the scripted MergeableState for url, or MergeableUnknown
+// when nothing was scripted.
+func (f *Fake) Mergeable(url string) (MergeableState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if s, ok := f.mergeableStates[url]; ok {
+		return s, nil
+	}
+	return MergeableUnknown, nil
 }
 
 // SetCheckStates scripts the sequence of RollupState values returned by
