@@ -54,6 +54,18 @@ case "$runtime" in
           exit $?
         fi
         ;;
+      machine)
+        # podman machine inspect: emits a one-machine array with the memory
+        # (MiB) the test wants, when set; empty output (exit 0) simulates the
+        # native-Linux no-machine case the preflight must skip.
+        if [ "${2:-}" = "inspect" ]; then
+          mem_var="FAKE_${rt}_MACHINE_MEMORY_MIB"
+          if [ -n "${!mem_var:-}" ]; then
+            printf '[{"Resources":{"Memory":%s}}]\n' "${!mem_var}"
+          fi
+          exit 0
+        fi
+        ;;
       inspect)
         # Container liveness probe: returns "running" when the named container
         # state var is set to "running".
