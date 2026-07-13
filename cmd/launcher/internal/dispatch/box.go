@@ -74,8 +74,15 @@ func (d *Dispatch) Close() {
 }
 
 // runOnce opens logPath fresh, dispatches one box with env, and blocks until
-// it exits.
+// it exits. Any log already at logPath -- left by an earlier attempt at the
+// same path, whether a retry within this dispatch or a duplicate/collided
+// launch -- is rotated aside first so it survives the fresh attempt's
+// os.Create instead of being truncated away (issue #561).
 func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir string) error {
+	if err := rotateStaleLog(logPath); err != nil {
+		return fmt.Errorf("rotate stale log: %w", err)
+	}
+
 	logFile, err := os.Create(logPath)
 	if err != nil {
 		return fmt.Errorf("create log: %w", err)
@@ -90,4 +97,22 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		DriverCacheDir: driverCacheDir,
 	}
 	return d.runner.Run(box)
+}
+
+// rotateStaleLog renames an existing file at logPath aside to the first
+// available logPath.N suffix, so a subsequent os.Create(logPath) starts
+// clean without destroying it. A missing logPath is a no-op.
+func rotateStaleLog(logPath string) error {
+	if _, err := os.Stat(logPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for n := 1; ; n++ {
+		candidate := fmt.Sprintf("%s.%d", logPath, n)
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return os.Rename(logPath, candidate)
+		}
+	}
 }
