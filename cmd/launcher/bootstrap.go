@@ -64,7 +64,7 @@ func bootstrap(ensureReady bool) (*launchContext, error) {
 
 	it := newIssueTracker(c)
 	cf := newCodeForge(c)
-	f := newDispatchFactory(c, pwd, r)
+	f := newDispatchFactory(c, pwd, r, cf)
 	s := newSettle(c, it, cf)
 
 	return &launchContext{

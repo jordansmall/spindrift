@@ -404,15 +404,26 @@ func newDriver(c config) driver.Driver {
 	return d
 }
 
-// dispatchConfig builds the subset of config a dispatch.Factory needs.
-func dispatchConfig(c config) dispatch.Config {
-	return dispatch.Config{
+// dispatchConfig builds the subset of config a dispatch.Factory needs. cf
+// wires OpenPRForIssue when the Code Forge supports PR lookup (issue #565),
+// so a zero-exit rate-limited retry never re-runs a box whose work already
+// landed a PR; left nil (retry proceeds unguarded) for a push-only Code
+// Forge, matching settle's own PRForge-unavailable fallback.
+func dispatchConfig(c config, cf forge.CodeForge) dispatch.Config {
+	cfg := dispatch.Config{
 		BoxEnvVars:            c.boxEnvVars,
 		TransientRetryMax:     c.transientRetryMax,
 		TransientBackoffSecs:  c.transientBackoffSecs,
 		HoldJitterSecs:        c.holdJitterSecs,
 		DriverSessionCacheDir: c.driverSessionCacheDir,
 	}
+	if pr, ok := cf.(forge.PRForge); ok {
+		cfg.OpenPRForIssue = func(number string) (bool, error) {
+			_, found, err := pr.OpenPRForBranch(cf.AgentBranch(number))
+			return found, err
+		}
+	}
+	return cfg
 }
 
 // newDispatchFactory constructs the dispatch.Factory for one top-level
@@ -420,8 +431,8 @@ func dispatchConfig(c config) dispatch.Config {
 // recover). A driver-cache creation failure is logged and degrades to no
 // cache (fix boxes cold-start) rather than failing the dispatch -- the cache
 // is a resume optimization, not a correctness requirement (issue #427).
-func newDispatchFactory(c config, pwd string, r runner.Runner) *dispatch.Factory {
-	f, err := dispatch.NewFactory(dispatchConfig(c), pwd, r, newDriver(c), dispatch.RealClock())
+func newDispatchFactory(c config, pwd string, r runner.Runner, cf forge.CodeForge) *dispatch.Factory {
+	f, err := dispatch.NewFactory(dispatchConfig(c, cf), pwd, r, newDriver(c), dispatch.RealClock())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "==> driver cache unavailable (%v) -- fix boxes will cold-start\n", err)
 	}
