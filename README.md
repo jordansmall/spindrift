@@ -273,7 +273,7 @@ consumer that skips it gets prompts with zero caveman residue.
 | [`CONTEXT.md`](CONTEXT.md) | Vocabulary — Harness, Consumer flake, Target repo, Box, Forge, and the three roles |
 | [`MIGRATING.md`](MIGRATING.md) | Deprecated commands and breaking changes by version |
 | [`VERSIONING.md`](VERSIONING.md) | Semver policy and the stability guarantees for each surface |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Dev workflow (`nix flake check`, `nix run .#regen`), where code goes, ADRs, commit/release conventions |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Dev workflow (`nix flake check`, the scoped in-box `checks-inbox` target, `nix run .#regen`), where code goes, ADRs, commit/release conventions |
 | [`SECURITY.md`](SECURITY.md) | How to report a vulnerability privately, plus the deployment threat model |
 
 ## Credits
