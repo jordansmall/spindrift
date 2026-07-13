@@ -131,6 +131,52 @@ func TestRunOnce_RotatesPreExistingLogFromDuplicateLaunch(t *testing.T) {
 	}
 }
 
+// TestRunOnce_SkipsAlreadyRunningContainerWithoutTouchingLog verifies that
+// when the runner reports the box's container/sandbox name is already
+// running, runOnce returns without ever rotating or creating the log file:
+// the live run's per-issue log must stay exactly as it was found, and
+// runner.Run must never be called (issue #562).
+func TestRunOnce_SkipsAlreadyRunningContainerWithoutTouchingLog(t *testing.T) {
+	fr := runner.NewFake()
+	fr.IsRunningRet = true
+
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, fakeDriver{}, RealClock())
+
+	liveContent := "live Box still streaming output\n"
+	if err := writeFile(d.logPath(), liveContent); err != nil {
+		t.Fatalf("seed live log: %v", err)
+	}
+
+	result := d.Run()
+
+	if result.Success {
+		t.Fatalf("Run: want Success=false for an already-in-flight skip, got %+v", result)
+	}
+	if !result.AlreadyInFlight {
+		t.Fatalf("Run: want AlreadyInFlight=true, got %+v", result)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("runner.Run: want 0 calls when already running, got %d", len(fr.RunCalls))
+	}
+
+	cur, err := os.ReadFile(d.logPath())
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if string(cur) != liveContent {
+		t.Errorf("log was touched by the skipped attempt: got %q, want %q", cur, liveContent)
+	}
+
+	dir := filepath.Dir(d.logPath())
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read log dir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("expected no rotated .N sibling from the skipped attempt; got entries=%v", entries)
+	}
+}
+
 // TestRotateStaleLog_UsesFirstAvailableSuffix verifies that repeated
 // rotations of the same logPath do not clobber each other -- each rotation
 // picks the next unused .N suffix.

@@ -9,6 +9,14 @@ type Result struct {
 	// Success is true when the box's final attempt exited zero.
 	Success bool
 
+	// AlreadyInFlight is true when the dispatch was skipped because a
+	// container/sandbox named for this issue was already running -- a live
+	// run, possibly orphaned by a killed launcher, still owns it. This is a
+	// distinct outcome from failure: the caller must not transition the
+	// issue's dispatch state (the live run's in-progress claim stands) and
+	// must not retry (issue #562).
+	AlreadyInFlight bool
+
 	// Outcome is populated when OutcomeFound is true.
 	Outcome outcome.Outcome
 
