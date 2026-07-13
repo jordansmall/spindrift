@@ -678,7 +678,13 @@ main() {
   local claude_rc=0
   run_driver_in_env "$prompt" "$agents_json" "$_driver_session_mode" || claude_rc=$?
 
-  if [ -z "$_last_outcome_line" ]; then
+  # Only a driver that exited cleanly yet told us nothing gets the synthetic
+  # backstop. A non-zero exit is left to propagate untouched -- the
+  # launcher's own ClassifyTransient/retry path (cmd/launcher/internal/dispatch)
+  # already owns that case, and only runs when the container's own exit code
+  # is non-zero; forcing exit 0 here would silently turn a retryable
+  # transient failure into a terminal synthetic status=blocked (issue #593).
+  if [ "$claude_rc" -eq 0 ] && [ -z "$_last_outcome_line" ]; then
     emit_outcome_backstop
     exit 0
   fi
