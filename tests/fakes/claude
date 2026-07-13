@@ -113,4 +113,13 @@ else
     "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
 fi
 
+# FAKE_CLAUDE_CRASH_EXIT simulates a driver killed by a transient
+# infrastructure failure (rate limit, overload, network blip) with no outcome
+# line: the launcher's own ClassifyTransient/retry path -- not the
+# entrypoint's outcome backstop -- owns this case (issue #593), so the
+# entrypoint must propagate this exit code untouched.
+if [ -n "${FAKE_CLAUDE_CRASH_EXIT:-}" ]; then
+  exit "$FAKE_CLAUDE_CRASH_EXIT"
+fi
+
 exit 0

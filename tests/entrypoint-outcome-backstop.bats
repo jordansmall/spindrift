@@ -35,8 +35,8 @@ setup() {
 # A best-effort push failure during the backstop must be surfaced in the
 # outcome note, not swallowed. Shims `git push --force-with-lease origin
 # agent/issue-7` (the backstop's exact call) to fail, while every other git
-# invocation -- clone, checkout, rebase, the fake driver's own push -- passes
-# through to the real git untouched.
+# invocation -- clone, checkout, rebase -- passes through to the real git
+# untouched.
 @test "push failure during the backstop is reflected in the outcome note" {
   local real_git
   real_git="$(command -v git)"
@@ -62,4 +62,20 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 pr=agent/issue-7 status=blocked note=.*push failed.*simulated push failure' <<<"$output"
+}
+
+# A driver killed by a transient infrastructure failure (rate limit,
+# overload, network) exits non-zero with no outcome line either -- but that
+# case is NOT this backstop's to handle: the launcher's own
+# ClassifyTransient/retry path (cmd/launcher/internal/dispatch) already owns
+# it, and only runs when the container's own exit code is non-zero. The
+# backstop must not swallow that non-zero exit under a synthetic
+# status=blocked, which would silently turn a retryable transient failure
+# into a terminal one.
+@test "driver crashes non-zero with no outcome -> non-zero exit propagates, no synthetic line" {
+  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_CLAUDE_CRASH_EXIT=17
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 17 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 0 ]
 }
