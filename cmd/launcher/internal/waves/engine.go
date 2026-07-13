@@ -66,10 +66,17 @@ func dispatchWave(cfg Config, it forge.IssueTracker, f *dispatch.Factory, s sett
 			d := f.New(iss.Number, iss.Title)
 			defer d.Close()
 			result := d.Run()
-			if !result.Success {
+			switch {
+			case result.AlreadyInFlight:
+				// A live run (possibly orphaned by a killed launcher) still
+				// owns this issue's container/sandbox -- skip without any
+				// dispatch-state transition, so its in-progress claim stands
+				// untouched (issue #562).
+				fmt.Printf("    ~~ #%s already in flight; skipping (live run continues)\n", iss.Number)
+			case !result.Success:
 				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.Number, iss.Number)
 				transitionState(it, iss.Number, forge.InProgress, forge.Failed)
-			} else {
+			default:
 				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.Number, iss.Number)
 				s.Settle(d, iss.Number, result)
 			}
