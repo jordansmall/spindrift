@@ -113,6 +113,9 @@
               pkgs.git
               pkgs.gh
               pkgs.jq
+              # go: iterate on cmd/launcher tests without a store round-trip;
+              # matches the pkgs.go the launcher-go-* checks build with.
+              pkgs.go
               config.packages.spindrift
             ];
             # `dogfood-stop`: ask a running ./dogfood.sh to exit after its current
