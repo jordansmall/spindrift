@@ -3,12 +3,76 @@ package runner
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// fakeCall scripts one invocation of a fake CLI binary: the exit code it
+// returns and the stdout it prints.
+type fakeCall struct {
+	exit   int
+	stdout string
+}
+
+// newFakeCLI writes a stub runtime binary that records each invocation's
+// argv to call-NN.txt (zero-indexed, mirroring prependFakeGH's convention in
+// internal/forge/exec_test.go) inside a temp dir, and exits/prints per the
+// scripted calls in order. Once the number of invocations exceeds len(calls),
+// the last scripted call repeats. Returns the script path (for assignment to
+// ociAdapter.cli) and the dir (for reading back recorded calls).
+func newFakeCLI(t *testing.T, calls ...fakeCall) (script, dir string) {
+	t.Helper()
+	if len(calls) == 0 {
+		t.Fatal("newFakeCLI: at least one scripted call required")
+	}
+	dir = t.TempDir()
+	script = filepath.Join(dir, "fake-cli")
+
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\n")
+	fmt.Fprintf(&b, "n=$(ls %q/call-*.txt 2>/dev/null | wc -l)\n", dir)
+	fmt.Fprintf(&b, "printf '%%s\\n' \"$@\" > %q/call-$(printf '%%02d' $n).txt\n", dir)
+	b.WriteString("case $n in\n")
+	for i, c := range calls {
+		pattern := fmt.Sprintf("%d", i)
+		if i == len(calls)-1 {
+			pattern += "|*"
+		}
+		fmt.Fprintf(&b, "%s) printf '%%s' %q; exit %d ;;\n", pattern, c.stdout, c.exit)
+	}
+	b.WriteString("esac\n")
+
+	if err := os.WriteFile(script, []byte(b.String()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script, dir
+}
+
+// readCall returns the argv (split on newline) recorded for the n-th
+// (zero-indexed) invocation of a fake CLI built by newFakeCLI.
+func readCall(t *testing.T, dir string, n int) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("call-%02d.txt", n)))
+	if err != nil {
+		t.Fatalf("call-%02d.txt not written: %v", n, err)
+	}
+	return strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+}
+
+// callCount returns the number of invocations recorded for a fake CLI built
+// by newFakeCLI.
+func callCount(t *testing.T, dir string) int {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(dir, "call-*.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(matches)
+}
 
 // TestEnsureReady_ImagePresentPrintsMessage verifies that EnsureReady emits
 // the "image present — no rebuild needed" line when the image is already loaded,
@@ -446,4 +510,172 @@ func containsArg(args []string, flag string) bool {
 		}
 	}
 	return false
+}
+
+// TestReap_NeverRemovesRunningContainer verifies the safety guard: when the
+// fake CLI reports the container is running, Reap must not issue `rm -f`.
+func TestReap_NeverRemovesRunningContainer(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{stdout: "running"},
+	)
+	a := &ociAdapter{cli: script}
+
+	if err := a.Reap("agent-issue-1"); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+
+	if calls := callCount(t, dir); calls != 1 {
+		t.Errorf("Reap: want 1 call (inspect only), got %d", calls)
+	}
+}
+
+// TestReap_RemovesStaleContainer verifies the other side of the guard: when
+// the fake CLI reports the container is not running, Reap issues `rm -f`.
+func TestReap_RemovesStaleContainer(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{stdout: "exited"},
+		fakeCall{},
+	)
+	a := &ociAdapter{cli: script}
+
+	if err := a.Reap("agent-issue-1"); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+
+	rm := readCall(t, dir, 1)
+	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "agent-issue-1") {
+		t.Errorf("Reap: want `rm -f agent-issue-1`, got %v", rm)
+	}
+}
+
+// TestLoadImage_InvokesLoadThenTag verifies loadImage issues `load -i
+// <archive>` followed by `tag spindrift:latest <imageTag>`, in that order.
+func TestLoadImage_InvokesLoadThenTag(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{},
+		fakeCall{},
+	)
+	a := &ociAdapter{cli: script, imageTag: "spindrift:abc123"}
+
+	if err := a.loadImage("/tmp/spindrift-image.tar"); err != nil {
+		t.Fatalf("loadImage: %v", err)
+	}
+
+	load := readCall(t, dir, 0)
+	want := []string{"load", "-i", "/tmp/spindrift-image.tar"}
+	if strings.Join(load, " ") != strings.Join(want, " ") {
+		t.Errorf("load call: got %v, want %v", load, want)
+	}
+
+	tag := readCall(t, dir, 1)
+	want = []string{"tag", "spindrift:latest", "spindrift:abc123"}
+	if strings.Join(tag, " ") != strings.Join(want, " ") {
+		t.Errorf("tag call: got %v, want %v", tag, want)
+	}
+}
+
+// TestIsReady_ImageAbsentReturnsError verifies IsReady surfaces a descriptive
+// error when `image inspect` fails (the image is not loaded).
+func TestIsReady_ImageAbsentReturnsError(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 1})
+	a := &ociAdapter{cli: script, image: "spindrift:abc123"}
+
+	if err := a.IsReady(); err == nil {
+		t.Error("IsReady: want error when image absent, got nil")
+	}
+}
+
+// TestIsReady_ImagePresentReturnsNil verifies IsReady succeeds when `image
+// inspect` exits 0 (the image is loaded).
+func TestIsReady_ImagePresentReturnsNil(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	a := &ociAdapter{cli: script, image: "spindrift:abc123"}
+
+	if err := a.IsReady(); err != nil {
+		t.Errorf("IsReady: want nil when image present, got %v", err)
+	}
+}
+
+// TestIsRunning_ScriptedStatuses verifies IsRunning reports true only for
+// the exact "running" status string, across scripted successive calls with
+// different outputs and exit codes.
+func TestIsRunning_ScriptedStatuses(t *testing.T) {
+	script, _ := newFakeCLI(t,
+		fakeCall{stdout: "running"},
+		fakeCall{stdout: "exited"},
+		fakeCall{exit: 1},
+	)
+	a := &ociAdapter{cli: script}
+
+	if !a.IsRunning("c") {
+		t.Error(`IsRunning: want true for "running" status`)
+	}
+	if a.IsRunning("c") {
+		t.Error(`IsRunning: want false for "exited" status`)
+	}
+	if a.IsRunning("c") {
+		t.Error("IsRunning: want false when inspect fails (exit 1)")
+	}
+}
+
+// TestEnsureReady_ImageAbsentFallsBackToContainerBuild verifies the
+// image-absent branch: EnsureReady tries a host build first, and when that
+// fails with a builder-missing error, falls back to buildInContainer — which
+// emits the non-digest-pinned supply-chain warning for an unpinned builder
+// image.
+func TestEnsureReady_ImageAbsentFallsBackToContainerBuild(t *testing.T) {
+	cliScript, _ := newFakeCLI(t,
+		fakeCall{exit: 1}, // image inspect: absent
+		fakeCall{},        // run (container build)
+		fakeCall{},        // load
+		fakeCall{},        // tag
+	)
+
+	// nix build is invoked directly (not through the cli field); stub it on
+	// PATH so the host build fails with a builder-missing error.
+	nixDir := t.TempDir()
+	nixStub := "#!/bin/sh\necho 'error: a Linux system is required to build a Linux derivation' 1>&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(nixDir, "nix"), []byte(nixStub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldPath := os.Getenv("PATH")
+	t.Cleanup(func() { os.Setenv("PATH", oldPath) })
+	os.Setenv("PATH", nixDir+":"+oldPath)
+
+	a := &ociAdapter{
+		cli:             cliScript,
+		image:           "spindrift:abc123",
+		imageDrv:        "/nix/store/fake.drv",
+		imageTag:        "spindrift:abc123",
+		nixBuilderImage: "docker.io/nixos/nix:latest", // unpinned -> triggers warning
+		nixVolume:       "spindrift-nix",
+		pwd:             "/work",
+		flakeImageAttr:  ".#packages.aarch64-linux.agent-image",
+	}
+
+	// Capture stderr — the supply-chain warning is written there directly.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStderr := os.Stderr
+	os.Stderr = w
+
+	ensureErr := a.EnsureReady()
+
+	w.Close()
+	os.Stderr = oldStderr
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+
+	if ensureErr != nil {
+		t.Fatalf("EnsureReady: %v", ensureErr)
+	}
+	stderr := buf.String()
+	if !strings.Contains(stderr, "not digest-pinned") {
+		t.Errorf("expected supply-chain warning in stderr; got: %q", stderr)
+	}
 }
