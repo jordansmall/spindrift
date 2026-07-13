@@ -67,6 +67,13 @@ shell:
 source "$(dirname "$(command -v spindrift)")/../share/bash-completion/completions/spindrift"
 ```
 
+`spindrift` also ships fish tab-completion, with the same coverage as the
+bash slice plus a one-line description on every flag. `nix develop` puts the
+completion script on `share/fish/vendor_completions.d` under `spindrift`'s
+store path; fish's `vendor_completions.d` convention loads it automatically
+once that directory is on `$fish_complete_path`, or copy/symlink it into
+`~/.config/fish/completions/spindrift.fish`.
+
 ## Adding spindrift to your flake
 
 If you prefer to wire it by hand rather than `nix flake init`, add spindrift to
