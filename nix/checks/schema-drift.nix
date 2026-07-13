@@ -320,4 +320,58 @@ in
           || { echo "bash completion missing subcommand list: ${subcommandLine}" >&2; exit 1; }
         touch $out
       '';
+
+  # The generated fish completion script must totally cover the schema and the
+  # launcher's hardcoded subcommand set: every non-secret flag, the --issue
+  # alias, every secret --*-file flag, and all five subcommands. Mirrors
+  # launcher-bash-completion above.
+  launcher-fish-completion =
+    let
+      schema = import ../../lib/env-schema.nix;
+      inherit (pkgs.lib)
+        filter
+        attrValues
+        concatMapStrings
+        ;
+      nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
+      secretEntries = filter (e: e.secret or false) (attrValues schema);
+      subcommands = [
+        "dispatch"
+        "preview"
+        "build"
+        "recover"
+        "doctor"
+      ];
+      # fish's `-l LONG_OPTION` takes the flag name without its leading `--`,
+      # so the needle is `-l <name>` (still boundary-checked on both sides:
+      # `-l issue` must not match inside `-l issue-number`).
+      flagChecks = concatMapStrings (e: "need '-l ${renderers.toKebab e.env}'\n") nonSecret;
+      aliasChecks = concatMapStrings (e: if e ? alias then "need '-l ${e.alias}'\n" else "") nonSecret;
+      secretChecks = concatMapStrings (e: "need '-l ${renderers.toKebab e.env}-file'\n") secretEntries;
+      # Subcommands render one per line as `-a '<name>'`; that exact quoted
+      # token can't appear incidentally in a comment (unlike the bare word),
+      # so a plain fixed-string search is enough — no boundary check needed.
+      subcommandChecks = concatMapStrings (s: "needF \"-a '${s}'\"\n") subcommands;
+    in
+    pkgs.runCommand "launcher-fish-completion"
+      {
+        nativeBuildInputs = [ pkgs.fish ];
+        completion = "${harness.fishCompletion}/share/fish/vendor_completions.d/spindrift.fish";
+      }
+      ''
+        need() {
+          grep -Eq -- "(^|[\"'[:space:]])$1([\"'[:space:]]|\$)" "$completion" \
+            || { echo "fish completion missing: $1" >&2; exit 1; }
+        }
+        needF() {
+          grep -qF -- "$1" "$completion" \
+            || { echo "fish completion missing: $1" >&2; exit 1; }
+        }
+        fish -n "$completion"
+        ${flagChecks}
+        ${aliasChecks}
+        ${secretChecks}
+        ${subcommandChecks}
+        touch $out
+      '';
 }
