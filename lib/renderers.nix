@@ -375,15 +375,15 @@ rec {
       extraFlags = [
         {
           flag = "no-build";
-          doc = "skip the image build step";
+          doc = "fail fast if the image is absent instead of building; pair with 'spindrift build' for split build/run flows";
         }
         {
           flag = "yes";
-          doc = "skip confirmation prompts";
+          doc = "skip confirmation prompt when dispatching unlabeled issues (alias: --force)";
         }
         {
           flag = "force";
-          doc = "override safety checks";
+          doc = "skip confirmation prompt when dispatching unlabeled issues (alias: --yes)";
         }
         {
           flag = "help";
