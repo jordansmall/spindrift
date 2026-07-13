@@ -100,9 +100,17 @@ fi
 # Emit a stream-json transcript to stdout, matching `--output-format stream-json`:
 # NDJSON events ending in a `result` event whose `.result` holds the agent's final
 # message — here a status=ready outcome line the entrypoint must surface.
+#
+# FAKE_CLAUDE_NO_OUTCOME=1 simulates a driver that forgot to emit one (issue
+# #593's entrypoint backstop): the result event's text carries no
+# SPINDRIFT_OUTCOME line at all.
 printf '{"type":"system","subtype":"init","session_id":"fake"}\n'
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"implementing #%s"}]}}\n' "${ISSUE_NUMBER:-0}"
-printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME issue=%s pr=https://github.com/%s/pull/1 status=ready note=fake"}\n' \
-  "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
+if [ "${FAKE_CLAUDE_NO_OUTCOME:-0}" = "1" ]; then
+  printf '{"type":"result","subtype":"success","is_error":false,"result":"done, but forgot to report back"}\n'
+else
+  printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME issue=%s pr=https://github.com/%s/pull/1 status=ready note=fake"}\n' \
+    "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
+fi
 
 exit 0
