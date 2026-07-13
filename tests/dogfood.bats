@@ -164,3 +164,25 @@ setup() {
   grep -q '^MAX_JOBS=5$' "$NIX_ENV_LOG"
 }
 
+@test "dogfood aborts when podman machine RAM is below MEMORY_LIMIT" {
+  export FAKE_PODMAN_MACHINE_MEMORY_MIB=2048
+  run env BASE_BRANCH=main MEMORY_LIMIT=4g bash "$WORK/dogfood.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"2048"* ]]
+  [[ "$output" == *"4g"* ]]
+  [[ "$output" == *"podman machine set --memory"* ]]
+}
+
+@test "dogfood proceeds when podman machine RAM meets MEMORY_LIMIT" {
+  export FAKE_PODMAN_MACHINE_MEMORY_MIB=4096
+  run env BASE_BRANCH=main MEMORY_LIMIT=4g bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"podman machine set --memory"* ]]
+}
+
+@test "dogfood skips the memory preflight when no podman machine exists" {
+  run env BASE_BRANCH=main MEMORY_LIMIT=4g bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"podman machine set --memory"* ]]
+}
+
