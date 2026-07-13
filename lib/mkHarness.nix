@@ -540,6 +540,17 @@ let
       "$out/share/fish/vendor_completions.d/spindrift.fish"
   '';
 
+  # Zsh completion script rendered from the schema (issue #552), same
+  # build-time-only pattern as the bash completion and man page: no
+  # committed copy, out of `nix run .#regen`, coverage-guarded by
+  # nix/checks/schema-drift.nix.
+  zshCompletionScript = renderers.renderZshCompletion schema;
+
+  zshCompletion = hostPkgs.runCommand "spindrift-zsh-completion" { } ''
+    install -Dm644 ${hostPkgs.writeText "_spindrift" zshCompletionScript} \
+      "$out/share/zsh/site-functions/_spindrift"
+  '';
+
   # The spindrift CLI: bakes nix-computed config as env vars and execs the Go
   # launcher. Exposed as packages.spindrift, apps.default, and in devShells.
   # The man page is joined into the same output so `man spindrift` resolves
@@ -567,6 +578,7 @@ let
       manpage
       bashCompletion
       fishCompletion
+      zshCompletion
     ];
     meta.license = lib.licenses.mit;
   };
@@ -610,6 +622,7 @@ else
       manpage
       bashCompletion
       fishCompletion
+      zshCompletion
       imagePath
       promptDir
       skillsDir
@@ -626,6 +639,7 @@ else
       spindrift-manpage = manpage;
       spindrift-bash-completion = bashCompletion;
       spindrift-fish-completion = fishCompletion;
+      spindrift-zsh-completion = zshCompletion;
     }
     # The OCI image is not relevant for the bwrap runner (no image build/load).
     // lib.optionalAttrs (isLinux && runtime != "bwrap") { agent-image = image; };

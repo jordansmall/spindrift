@@ -398,4 +398,53 @@ in
         ${subcommandChecks}
         touch $out
       '';
+
+  # zsh equivalent of launcher-bash-completion: every non-secret flag, the
+  # --issue alias, every secret --*-file flag, and all five subcommands must
+  # appear in the rendered zsh completion function. renderZshCompletion emits
+  # each as a single-quoted _arguments spec `'--flag[description]...'` (or
+  # `'name:description'` for a subcommand), so the flag/subcommand name
+  # immediately followed by `[`/`:` inside its opening quote is itself an
+  # unambiguous token boundary — a substring check suffices (no --issue vs
+  # --issue-number collision, since the bracket/colon only follows the exact
+  # name).
+  launcher-zsh-completion =
+    let
+      schema = import ../../lib/env-schema.nix;
+      inherit (pkgs.lib)
+        filter
+        attrValues
+        concatMapStrings
+        ;
+      nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
+      secretEntries = filter (e: e.secret or false) (attrValues schema);
+      subcommands = [
+        "dispatch"
+        "preview"
+        "build"
+        "recover"
+        "doctor"
+      ];
+      flagChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}[\"\n") nonSecret;
+      aliasChecks = concatMapStrings (e: if e ? alias then "need \"'--${e.alias}[\"\n" else "") nonSecret;
+      secretChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}-file[\"\n") secretEntries;
+      subcommandChecks = concatMapStrings (s: "need \"'${s}:\"\n") subcommands;
+    in
+    pkgs.runCommand "launcher-zsh-completion"
+      {
+        nativeBuildInputs = [ pkgs.zsh ];
+        completion = "${harness.zshCompletion}/share/zsh/site-functions/_spindrift";
+      }
+      ''
+        need() {
+          grep -qF -- "$1" "$completion" \
+            || { echo "zsh completion missing: $1" >&2; exit 1; }
+        }
+        zsh -n "$completion"
+        ${flagChecks}
+        ${aliasChecks}
+        ${secretChecks}
+        ${subcommandChecks}
+        touch $out
+      '';
 }
