@@ -78,7 +78,18 @@ func (d *Dispatch) Close() {
 // same path, whether a retry within this dispatch or a duplicate/collided
 // launch -- is rotated aside first so it survives the fresh attempt's
 // os.Create instead of being truncated away (issue #561).
+//
+// Before touching the log at all, it checks whether a container/sandbox
+// already named for this issue is running: if so, a live run (possibly
+// orphaned by a killed launcher) still owns that log, so runOnce returns
+// runner.ErrAlreadyRunning without rotating, creating, or otherwise
+// disturbing it (issue #562).
 func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir string) error {
+	name := "agent-issue-" + d.number
+	if d.runner.IsRunning(name) {
+		return runner.ErrAlreadyRunning
+	}
+
 	if err := rotateStaleLog(logPath); err != nil {
 		return fmt.Errorf("rotate stale log: %w", err)
 	}
@@ -91,7 +102,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 
 	box := runner.Box{
 		Issue:          d.number,
-		Name:           "agent-issue-" + d.number,
+		Name:           name,
 		Env:            env,
 		Output:         d.driver.NewHeartbeatWriter(logFile, d.number, os.Stdout),
 		DriverCacheDir: driverCacheDir,

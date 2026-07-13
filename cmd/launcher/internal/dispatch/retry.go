@@ -1,11 +1,13 @@
 package dispatch
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
 
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // dispatchWithRetry runs once, retrying transient failures according to
@@ -29,8 +31,13 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
 	prevWasHold := false
 
 	for {
-		if err := once(); err == nil {
+		err := once()
+		if err == nil {
 			return d.successResult(logPath)
+		}
+
+		if errors.Is(err, runner.ErrAlreadyRunning) {
+			return Result{AlreadyInFlight: true}
 		}
 
 		cls, err := d.driver.ClassifyTransient(logPath)
