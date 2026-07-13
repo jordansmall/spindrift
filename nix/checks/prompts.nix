@@ -141,6 +141,21 @@ in
     touch $out
   '';
 
+  # The CHECK-phase never-background / emit-outcome guardrail (issue #592)
+  # generalizes WATCH CI's rule to the CHECK phase's own blocking gates
+  # (`nix build .#checks-inbox`, test suites). Written once in
+  # issue-prompt.md's CHECK section and inherited by fix-prompt.md through
+  # the CHECK block injection above, so asserting it on both rendered
+  # prompts proves the single source of truth actually reaches both.
+  mkharness-prompt-check-never-background =
+    pkgs.runCommand "mkharness-prompt-check-never-background" { }
+      ''
+        grep -q 'never background it' ${batsHarness.promptDir}/issue-prompt.md
+        grep -q 'never background it' ${batsHarness.promptDir}/fix-prompt.md
+        grep -q 'SPINDRIFT_OUTCOME' ${batsHarness.promptDir}/fix-prompt.md
+        touch $out
+      '';
+
   mkharness-prompt-fix-outcome-no-drift =
     pkgs.runCommand "mkharness-prompt-fix-outcome-no-drift" { }
       ''
