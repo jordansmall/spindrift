@@ -186,3 +186,10 @@ setup() {
   [[ "$output" != *"podman machine set --memory"* ]]
 }
 
+@test "dogfood skips the memory preflight when MEMORY_LIMIT is explicitly disabled" {
+  export FAKE_PODMAN_MACHINE_MEMORY_MIB=2048
+  run env BASE_BRANCH=main MEMORY_LIMIT= bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"podman machine set --memory"* ]]
+}
+

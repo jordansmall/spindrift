@@ -81,7 +81,10 @@ _memory_limit_to_mib() {
 # #565). Skips cleanly when there's no active machine (native Linux, or a
 # non-podman runtime): `podman machine inspect` then errors or prints nothing.
 check_podman_machine_memory() {
-  local limit="${MEMORY_LIMIT:-4g}"
+  # `-` (not `:-`): MEMORY_LIMIT="" is a deliberate opt-out (env-schema.nix
+  # memoryLimit.default's doc: "empty string disables the limit"), distinct
+  # from unset. Same reasoning as CONTINUOUS_DISPATCH above.
+  local limit="${MEMORY_LIMIT-4g}"
   [ -z "$limit" ] && return 0
   command -v podman >/dev/null 2>&1 || return 0
 
