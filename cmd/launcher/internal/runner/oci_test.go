@@ -357,6 +357,66 @@ func TestBuildRunArgs_SkillsDirUnset_NoMount(t *testing.T) {
 	}
 }
 
+// TestRun_AlreadyRunningContainerSkipsLaunch verifies that Run detects a
+// same-named container already in the "running" state and returns
+// ErrAlreadyRunning without ever invoking `podman/docker run` — the
+// collision must not be attempted, only recognized (issue #562).
+func TestRun_AlreadyRunningContainerSkipsLaunch(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "run-invoked")
+	script := filepath.Join(dir, "fake-podman")
+	scriptContent := "#!/bin/sh\ncase \"$1\" in\n" +
+		"  inspect) echo running ;;\n" +
+		"  run) touch " + marker + " ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(script, []byte(scriptContent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+
+	err := a.Run(box)
+	if !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Error("Run: launched the container despite it already running")
+	}
+}
+
+// TestRun_ExitedContainerReapedThenLaunches verifies today's behavior stays
+// intact for the non-collision case: a stale (exited/created, i.e. not
+// running) same-named container is reaped with `rm -f`, and the launch
+// proceeds normally (issue #562 acceptance criterion 3).
+func TestRun_ExitedContainerReapedThenLaunches(t *testing.T) {
+	dir := t.TempDir()
+	rmMarker := filepath.Join(dir, "rm-invoked")
+	runMarker := filepath.Join(dir, "run-invoked")
+	script := filepath.Join(dir, "fake-podman")
+	scriptContent := "#!/bin/sh\ncase \"$1\" in\n" +
+		"  inspect) echo exited ;;\n" +
+		"  rm) touch " + rmMarker + " ;;\n" +
+		"  run) touch " + runMarker + " ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(script, []byte(scriptContent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+
+	if err := a.Run(box); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, statErr := os.Stat(rmMarker); statErr != nil {
+		t.Error("Run: did not reap the stale exited container")
+	}
+	if _, statErr := os.Stat(runMarker); statErr != nil {
+		t.Error("Run: did not launch after reaping the stale container")
+	}
+}
+
 func TestReapAfterSuccess(t *testing.T) {
 	if !reapAfterSuccess(nil) {
 		t.Error("exit 0 (nil error) must reap the container")

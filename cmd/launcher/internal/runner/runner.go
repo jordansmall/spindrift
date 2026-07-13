@@ -5,6 +5,7 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"io"
 )
@@ -41,12 +42,28 @@ type Runner interface {
 	// Returns an error with a "run `spindrift build`" hint when absent.
 	IsReady() error
 
-	// Run dispatches box and blocks until it exits. A non-zero exit is an error.
+	// Run dispatches box and blocks until it exits. A non-zero exit is an
+	// error. Returns ErrAlreadyRunning instead of launching when a sandbox
+	// named for this box is already running.
 	Run(box Box) error
 
 	// Reap performs best-effort cleanup of a leftover sandbox by name.
 	Reap(name string) error
+
+	// IsRunning reports whether a sandbox named name is currently running.
+	// Callers use this to skip a dispatch attempt before touching any of
+	// its artifacts (e.g. its per-issue log) rather than discovering the
+	// collision only after Run attempts to launch (issue #562).
+	IsRunning(name string) bool
 }
+
+// ErrAlreadyRunning is returned by Run when a sandbox already named for this
+// box is in the running state — a concurrent launcher invocation, or a live
+// run orphaned by a killed launcher, may still own it. This is a distinct
+// dispatch outcome, not a failure: the caller must skip the issue without
+// any failure transition, leaving the live run's in-progress claim and log
+// untouched (issue #562).
+var ErrAlreadyRunning = errors.New("box: a container/sandbox for this issue is already running")
 
 // RunError wraps a non-zero exit from a box.
 type RunError struct {
