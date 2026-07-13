@@ -60,6 +60,51 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
+# Converts a --memory value (e.g. "4g", "512m") to MiB for comparison against
+# `podman machine inspect`'s Resources.Memory (already MiB). No suffix is
+# treated as bytes, matching podman/docker's own --memory parsing.
+_memory_limit_to_mib() {
+  local limit="$1"
+  case "$limit" in
+    *[Gg]) echo $(( ${limit%[Gg]} * 1024 )) ;;
+    *[Mm]) echo "${limit%[Mm]}" ;;
+    *[Kk]) echo $(( ${limit%[Kk]} / 1024 )) ;;
+    *) echo $(( limit / 1024 / 1024 )) ;;
+  esac
+}
+
+# Preflight (#580): on macOS/Windows, podman runs containers inside a VM
+# ("podman machine") with its own fixed RAM, independent of the per-container
+# --memory cap (MEMORY_LIMIT). When the machine has less RAM than that cap,
+# the VM's own Linux OOM-killer fires before the cgroup cap ever bites — it
+# silently killed an in-box `nix build` under agent-issue-565 (EXIT:137,
+# #565). Skips cleanly when there's no active machine (native Linux, or a
+# non-podman runtime): `podman machine inspect` then errors or prints nothing.
+check_podman_machine_memory() {
+  local limit="${MEMORY_LIMIT:-4g}"
+  [ -z "$limit" ] && return 0
+  command -v podman >/dev/null 2>&1 || return 0
+
+  local info
+  info="$(podman machine inspect 2>/dev/null)" || return 0
+  [ -z "$info" ] && return 0
+
+  local machine_mib
+  machine_mib="$(printf '%s' "$info" | jq -r '.[0].Resources.Memory // empty' 2>/dev/null)"
+  [ -z "$machine_mib" ] && return 0
+
+  local limit_mib
+  limit_mib="$(_memory_limit_to_mib "$limit")"
+
+  if [ "$machine_mib" -lt "$limit_mib" ]; then
+    echo "!! podman machine has ${machine_mib}MiB RAM but MEMORY_LIMIT=$limit needs ${limit_mib}MiB per container." >&2
+    echo "!! the VM's own OOM-killer will fire before the --memory cgroup cap ever bites." >&2
+    echo "!! fix: podman machine set --memory $limit_mib (then restart the machine)." >&2
+    exit 1
+  fi
+}
+check_podman_machine_memory
+
 # Graceful stop: signal this PID with USR1 or TERM (the devShell `dogfood-stop`
 # alias does this) to exit after the current wave instead of aborting it. Bash
 # defers a trapped signal until the in-flight `nix run` returns, so the wave
