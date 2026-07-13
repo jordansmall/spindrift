@@ -277,14 +277,28 @@ in
     in
     assert assertMsg (hasInfix "#compdef spindrift" out)
       "renderZshCompletion must emit a #compdef spindrift header, got: ${out}";
-    assert assertMsg (hasInfix "'--issue-number[${schema.issueNumber.doc}]" out)
+    assert assertMsg (hasInfix "'--issue-number:${schema.issueNumber.doc}'" out)
       "renderZshCompletion must annotate --issue-number with its schema doc string, got: ${out}";
-    assert assertMsg (hasInfix "'--issue[${schema.issueNumber.doc}]" out)
+    assert assertMsg (hasInfix "'--issue:${schema.issueNumber.doc}'" out)
       "renderZshCompletion must complete the --issue alias with a description, got: ${out}";
-    assert assertMsg (hasInfix "'--gh-token-file[${schema.ghToken.doc}]" out)
+    assert assertMsg (hasInfix "'--gh-token-file:${schema.ghToken.doc}'" out)
       "renderZshCompletion must annotate --gh-token-file with its schema doc string, got: ${out}";
-    assert assertMsg (hasInfix "--gh-token-file[${schema.ghToken.doc}]:file:_files" out)
+    assert assertMsg (hasInfix ''case "$prev" in'' out && hasInfix "--gh-token-file" out)
+      "renderZshCompletion must complete a --*-file flag's argument via a case \"$prev\" branch, got: ${out}";
+    assert assertMsg (hasInfix "_files" out)
       "renderZshCompletion must complete a --*-file flag's argument via _files, got: ${out}";
+    # Regression pin for issue #552's review round 1: an `_arguments -C
+    # ... '*::arg:->args'` state machine with no `args)` case arm silently
+    # swallows every word after the subcommand, so flags never complete
+    # post-subcommand even though the flags array itself looks complete.
+    # Pin the flag-prefix branch to an unconditional, reachable _describe
+    # call on the flags array instead of a case-dispatched state.
+    assert assertMsg (hasInfix ''if [[ "$cur" == -* ]]'' out)
+      "renderZshCompletion must branch on a literal cur/prev flag-prefix check, not an _arguments state machine, got: ${out}";
+    assert assertMsg (hasInfix "_describe -t options 'spindrift flag' flags" out)
+      "renderZshCompletion's flag-prefix branch must _describe the flags array directly (reachable, unconditional), got: ${out}";
+    assert assertMsg (!hasInfix "_arguments" out)
+      "renderZshCompletion must not use _arguments' '*::state:->state' catch-all — issue #552 review found it swallows post-subcommand words with no matching case arm, got: ${out}";
     pkgs.runCommand "renderer-zsh-completion-shape" { } "touch $out";
 
   # The generated bash completion script must totally cover the schema and the
@@ -402,12 +416,11 @@ in
   # zsh equivalent of launcher-bash-completion: every non-secret flag, the
   # --issue alias, every secret --*-file flag, and all five subcommands must
   # appear in the rendered zsh completion function. renderZshCompletion emits
-  # each as a single-quoted _arguments spec `'--flag[description]...'` (or
+  # each as a single-quoted `_describe` entry `'--flag:description'` (or
   # `'name:description'` for a subcommand), so the flag/subcommand name
-  # immediately followed by `[`/`:` inside its opening quote is itself an
+  # immediately followed by `:` inside its opening quote is itself an
   # unambiguous token boundary — a substring check suffices (no --issue vs
-  # --issue-number collision, since the bracket/colon only follows the exact
-  # name).
+  # --issue-number collision, since the colon only follows the exact name).
   launcher-zsh-completion =
     let
       schema = import ../../lib/env-schema.nix;
@@ -425,9 +438,9 @@ in
         "recover"
         "doctor"
       ];
-      flagChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}[\"\n") nonSecret;
-      aliasChecks = concatMapStrings (e: if e ? alias then "need \"'--${e.alias}[\"\n" else "") nonSecret;
-      secretChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}-file[\"\n") secretEntries;
+      flagChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}:\"\n") nonSecret;
+      aliasChecks = concatMapStrings (e: if e ? alias then "need \"'--${e.alias}:\"\n" else "") nonSecret;
+      secretChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}-file:\"\n") secretEntries;
       subcommandChecks = concatMapStrings (s: "need \"'${s}:\"\n") subcommands;
     in
     pkgs.runCommand "launcher-zsh-completion"
