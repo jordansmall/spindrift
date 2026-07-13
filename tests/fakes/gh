@@ -213,14 +213,36 @@ EOF
   api)
     case "${2:-}" in
       graphql)
-        # Extract PR number from -F number=N.
+        # Extract PR number from -F number=N and the query body from -f query=...
         pr_num=""
+        query=""
         args=("$@")
         for ((i = 0; i < ${#args[@]}; i++)); do
           if [ "${args[i]}" = "-F" ] && [[ "${args[i+1]:-}" = number=* ]]; then
             pr_num="${args[i+1]#number=}"
           fi
+          if [ "${args[i]}" = "-f" ] && [[ "${args[i+1]:-}" = query=* ]]; then
+            query="${args[i+1]#query=}"
+          fi
         done
+        # The Mergeable() query asks for PR content-mergeability (issue #566)
+        # rather than the statusCheckRollup queried by CheckState(); it is
+        # scripted separately so a conflict-vs-checks scenario is not
+        # conflated with the rollup-state sequence below.
+        if [[ "$query" == *mergeable* ]]; then
+          mergeablevar="FAKE_GH_PR_MERGEABLE_${pr_num}"
+          if [ -n "${!mergeablevar:-}" ]; then
+            printf '%s\n' "${!mergeablevar}"
+          else
+            conflict_var="FAKE_GH_PR_MERGE_CONFLICT_${pr_num}"
+            if [ -n "${!conflict_var:-}" ]; then
+              printf 'CONFLICTING\n'
+            else
+              printf 'MERGEABLE\n'
+            fi
+          fi
+          exit 0
+        fi
         # Advance per-PR call counter (enables sequence tests).
         counter_key="graphql-count-${pr_num}"
         count=0
