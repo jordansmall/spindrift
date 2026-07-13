@@ -417,6 +417,54 @@ func TestNewCodeForge_Github_ImplementsPRForge(t *testing.T) {
 	}
 }
 
+// TestDispatchConfig_PRForge_WiresOpenPRForIssue verifies issue #565's
+// wiring: when cf implements forge.PRForge, dispatchConfig sets
+// OpenPRForIssue to a closure that resolves the issue's agent branch and
+// reports whether it already has an open PR.
+func TestDispatchConfig_PRForge_WiresOpenPRForIssue(t *testing.T) {
+	cf := forge.NewFake()
+	cf.SetPR(cf.AgentBranch("42"), forge.PR{URL: "https://github.com/o/r/pull/1"})
+
+	cfg := dispatchConfig(minimalValidConfig(), cf)
+
+	if cfg.OpenPRForIssue == nil {
+		t.Fatal("want OpenPRForIssue set for a PRForge-implementing Code Forge")
+	}
+	found, err := cfg.OpenPRForIssue("42")
+	if err != nil {
+		t.Fatalf("OpenPRForIssue: unexpected error: %v", err)
+	}
+	if !found {
+		t.Error("want found=true for an issue with an open PR")
+	}
+	found, err = cfg.OpenPRForIssue("99")
+	if err != nil {
+		t.Fatalf("OpenPRForIssue: unexpected error: %v", err)
+	}
+	if found {
+		t.Error("want found=false for an issue with no PR")
+	}
+}
+
+// TestDispatchConfig_NonPRForge_LeavesOpenPRForIssueNil verifies that a
+// push-only Code Forge (no PR lookup) leaves OpenPRForIssue nil, so a
+// zero-exit rate-limited retry proceeds unguarded rather than erroring.
+func TestDispatchConfig_NonPRForge_LeavesOpenPRForIssueNil(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "git"
+	c.codeForgeRemoteURL = "https://example.com/repo.git"
+	cf := newCodeForge(c)
+	if _, ok := cf.(forge.PRForge); ok {
+		t.Fatal("test setup: expected a non-PRForge Code Forge")
+	}
+
+	cfg := dispatchConfig(c, cf)
+
+	if cfg.OpenPRForIssue != nil {
+		t.Error("want OpenPRForIssue nil for a non-PRForge Code Forge")
+	}
+}
+
 // minimalValidConfig returns a config that passes validate() so tests can
 // mutate exactly one field at a time.
 func minimalValidConfig() config {
