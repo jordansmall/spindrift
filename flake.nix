@@ -68,6 +68,16 @@
               caveman
               ;
           };
+          checksResult = import ./nix/checks {
+            inherit
+              pkgs
+              config
+              fixtures
+              nixpkgs
+              system
+              flake-parts
+              ;
+          };
         in
         {
           # The dogfood's real packages/apps flow through the flake-parts shim,
@@ -86,16 +96,12 @@
             settings.promptSkillIteration.autoLint = dogfoodDefaults.defaults.autoLint;
           };
 
-          checks = import ./nix/checks {
-            inherit
-              pkgs
-              config
-              fixtures
-              nixpkgs
-              system
-              flake-parts
-              ;
-          };
+          checks = checksResult.checks;
+
+          # Scoped in-box gate (issue #581): `nix build .#checks-inbox`
+          # builds the source-level checks only, skipping the OCI-image
+          # realization the full `checks` set above still covers for CI.
+          packages.checks-inbox = checksResult.checks-inbox;
 
           # Repo-internal dev tooling, not consumer surface (issue #402):
           # `nix run .#regen` regenerates every schema-generated artifact that
