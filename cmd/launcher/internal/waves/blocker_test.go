@@ -7,6 +7,67 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
+// --- BuildEdges tests ---
+
+func TestBuildEdges_MultipleIssuesWithBlockers(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Body: "## Blocked by\n- #2\n- #3"})
+	fc.SetIssue(forge.Issue{Number: "2", Body: "## Blocked by\n- #3"})
+	fc.SetIssue(forge.Issue{Number: "3", Body: ""})
+
+	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
+	got, err := BuildEdges(fc, issues)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	want := map[string][]string{
+		"1": {"2", "3"},
+		"2": {"3"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestBuildEdges_NoBlockersOmitted(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Body: "## Blocked by\n- #2"})
+	fc.SetIssue(forge.Issue{Number: "2", Body: ""})
+
+	issues := []Issue{{Number: "1"}, {Number: "2"}}
+	got, err := BuildEdges(fc, issues)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if _, ok := got["2"]; ok {
+		t.Errorf("issue 2 has no blockers, expected no map key, got %v", got["2"])
+	}
+	want := map[string][]string{"1": {"2"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestBuildEdges_DepsOfErrorNonFatal(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Body: "## Blocked by\n- #2"})
+	// Issue "2" is deliberately not registered, so DepsOf("2") errors.
+	fc.SetIssue(forge.Issue{Number: "3", Body: "## Blocked by\n- #1"})
+
+	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
+	got, err := BuildEdges(fc, issues)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	want := map[string][]string{
+		"1": {"2"},
+		"3": {"1"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 // --- detectCycle tests ---
 
 func TestDetectCycle_Empty(t *testing.T) {
