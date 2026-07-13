@@ -3,6 +3,7 @@ package waves
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -35,9 +36,10 @@ type signalRunner struct {
 	once         sync.Once
 }
 
-func (r *signalRunner) EnsureReady() error { return nil }
-func (r *signalRunner) IsReady() error     { return nil }
-func (r *signalRunner) Reap(string) error  { return nil }
+func (r *signalRunner) EnsureReady() error    { return nil }
+func (r *signalRunner) IsReady() error        { return nil }
+func (r *signalRunner) Reap(string) error     { return nil }
+func (r *signalRunner) IsRunning(string) bool { return false }
 func (r *signalRunner) Run(_ runner.Box) error {
 	isFirst := false
 	r.once.Do(func() { isFirst = true })
@@ -154,6 +156,47 @@ func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.
 	}
 	if failed != 1 {
 		t.Errorf("exactly 1 issue should carry failedLabel; got %d", failed)
+	}
+}
+
+// TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition verifies that
+// when the runner reports the issue's container is already running,
+// dispatchWave skips it as a distinct outcome: no failed-transition, the
+// live run's in-progress claim stands untouched, no settle/merge attempt is
+// made, and a distinct output line names the issue (issue #562).
+func TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) {
+	c := baseConfig()
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.InProgressLabel}})
+
+	fr := runner.NewFake()
+	fr.IsRunningRet = true
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	out := captureStdout(t, func() {
+		dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}})
+	})
+
+	iss, err := fc.Issue("1")
+	if err != nil {
+		t.Fatalf("Issue(%q): %v", "1", err)
+	}
+	if containsLabel(iss.Labels, c.FailedLabel) {
+		t.Errorf("issue must NOT have %q when already in flight; labels=%v", c.FailedLabel, iss.Labels)
+	}
+	if !containsLabel(iss.Labels, c.InProgressLabel) {
+		t.Errorf("issue must remain %q (live run's claim stands); labels=%v", c.InProgressLabel, iss.Labels)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("runner.Run: want 0 calls when already running, got %d", len(fr.RunCalls))
+	}
+	if !strings.Contains(out, "#1") || !strings.Contains(out, "already in flight") {
+		t.Errorf("want a distinct 'already in flight' line naming #1; got output=%q", out)
 	}
 }
 
