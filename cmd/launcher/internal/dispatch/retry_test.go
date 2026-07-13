@@ -512,6 +512,44 @@ func TestDispatchWithRetry_ZeroExitConsecutiveHoldsConsumeCapAndFail(t *testing.
 	}
 }
 
+// TestDispatchWithRetry_ZeroExitTransientSkipsRetryWhenPRExists verifies
+// issue #565's safety guard: a zero-exit, no-outcome box that classifies as
+// transient is NOT re-dispatched when OpenPRForIssue reports an open PR
+// already exists for the branch -- the box's work already landed, so retrying
+// would duplicate it. The Result passes through unchanged, exactly as before
+// #565, letting settle's own PR lookup route it.
+func TestDispatchWithRetry_ZeroExitTransientSkipsRetryWhenPRExists(t *testing.T) {
+	fixedNow := time.Unix(1_000_000, 0).UTC()
+	resetAt := fixedNow.Add(2 * time.Hour)
+
+	fr := runner.NewFake() // always exits zero, never writes an outcome line
+	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
+		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
+	}}
+	var sleeps []time.Duration
+	cfg := retryConfig(3, 0, 0)
+	cfg.OpenPRForIssue = func(string) (bool, error) { return true, nil }
+	d := newTestDispatch(t, cfg, fr, drv, fakeClock(fixedNow, &sleeps))
+
+	result := d.Run()
+
+	if !result.Success {
+		t.Error("want Success=true (zero exit passthrough), got false")
+	}
+	if result.OutcomeFound {
+		t.Error("want OutcomeFound=false")
+	}
+	if result.Classification.Reason != outcome.RateLimit {
+		t.Errorf("Classification: got %+v, want RateLimit passthrough", result.Classification)
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Errorf("RunCalls: got %d, want 1 (no re-dispatch when a PR already exists)", len(fr.RunCalls))
+	}
+	if len(sleeps) != 0 {
+		t.Errorf("sleep calls: got %d, want 0 (no hold when a PR already exists)", len(sleeps))
+	}
+}
+
 // TestDispatchWithRetry_AppliesToFixToo verifies the behavior change called
 // out in issue #441: a 429 during a fix pass now holds until reset instead
 // of burning a fix attempt, because the retry policy applies uniformly to

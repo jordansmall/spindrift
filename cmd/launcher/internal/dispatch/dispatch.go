@@ -36,6 +36,16 @@ type Config struct {
 	// none, in which case the Factory creates no per-issue cache directory
 	// at all -- there is nowhere in-box to mount it (issue #448).
 	DriverSessionCacheDir string
+
+	// OpenPRForIssue reports whether an open PR already exists for the
+	// issue's agent branch. Consulted before a zero-exit, no-outcome box is
+	// held-and-retried on a transient classification (issue #565), so a box
+	// whose work already landed a PR is never re-run -- the same guard
+	// settle's status=missing path applies. Nil when the Code Forge has no
+	// PR lookup (push-only git remote); a zero-exit transient retry then
+	// proceeds unguarded, matching settle's own PRForge-unavailable
+	// fallback.
+	OpenPRForIssue func(number string) (bool, error)
 }
 
 // buildBoxEnv assembles the env map forwarded into a Box. It combines the
