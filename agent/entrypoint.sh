@@ -627,11 +627,33 @@ DRIVER_WRAPPER_EOF
   # The launcher greps '^SPINDRIFT_OUTCOME ' from the container log, but the
   # Driver's raw transcript format buries it (claude wraps it in a stream-json
   # result event); _driver_extract_outcome surfaces it as a bare line so that
-  # contract is unchanged.
-  _driver_extract_outcome "$stream_log"
+  # contract is unchanged. Captured (rather than left to print directly) so
+  # main's post-return backstop (issue #593) can tell whether the Driver
+  # actually emitted one.
+  _last_outcome_line="$(_driver_extract_outcome "$stream_log")"
   rm -f "$stream_log"
+  if [ -n "$_last_outcome_line" ]; then
+    printf '%s\n' "$_last_outcome_line"
+  fi
 
   return "$claude_rc"
+}
+
+# emit_outcome_backstop pushes any committed work on BRANCH best-effort, then
+# prints a single synthetic status=blocked SPINDRIFT_OUTCOME line -- called
+# from main only when the Driver's run produced no parseable outcome line, so
+# the launcher always gets a terminal signal to classify (issue #593) instead
+# of a silent gap.
+emit_outcome_backstop() {
+  local note="driver exited without emitting an outcome"
+  local push_log
+  push_log="$(mktemp)"
+  if ! git push --force-with-lease origin "$BRANCH" 2>"$push_log"; then
+    note="${note}; push failed: $(tail -1 "$push_log")"
+  fi
+  rm -f "$push_log"
+  echo "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop"
+  echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} pr=${BRANCH} status=blocked note=${note}"
 }
 
 main() {
@@ -641,6 +663,7 @@ main() {
   local _rebase_and_publish _had_rebase_conflict
   local _use_dev_shell _harness_path
   local prompt agents_json _driver_session_mode
+  local _last_outcome_line
 
   configure_env
   clone_repo
@@ -654,6 +677,11 @@ main() {
   echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
   local claude_rc=0
   run_driver_in_env "$prompt" "$agents_json" "$_driver_session_mode" || claude_rc=$?
+
+  if [ -z "$_last_outcome_line" ]; then
+    emit_outcome_backstop
+    exit 0
+  fi
 
   [ "$claude_rc" -eq 0 ] || exit "$claude_rc"
   echo "==> entrypoint complete for issue #$ISSUE_NUMBER"
