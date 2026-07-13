@@ -90,7 +90,7 @@ check_podman_machine_memory() {
   [ -z "$info" ] && return 0
 
   local machine_mib
-  machine_mib="$(printf '%s' "$info" | jq -r '.[0].Resources.Memory // empty' 2>/dev/null)"
+  machine_mib="$(printf '%s' "$info" | jq -r '.[0].Resources.Memory // empty' 2>/dev/null)" || return 0
   [ -z "$machine_mib" ] && return 0
 
   local limit_mib
