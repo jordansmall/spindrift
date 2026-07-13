@@ -1,6 +1,7 @@
 package outcome
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"regexp"
@@ -115,6 +116,16 @@ func Classify(logPath string) (Classification, error) {
 func scanLog(logPath string) (scanResult, error) {
 	var sr scanResult
 	err := logscan.ForEachLine(logPath, logscan.ChunkOversized, func(chunk string) {
+		if isAgentContentEvent(chunk) {
+			// The agent's own tool_result / assistant-text / file-edit
+			// content can quote rate-limit markers verbatim (e.g. while
+			// working on rate-limit code). Any transient candidate found so
+			// far is unattributable to the actual exit — the run continued
+			// past it — so drop it and look for a later, genuine cause
+			// (issue #579).
+			sr = scanResult{}
+			return
+		}
 		if !sr.found {
 			if reason, ok := matchTransient(chunk); ok {
 				sr.found = true
@@ -131,6 +142,30 @@ func scanLog(logPath string) (scanResult, error) {
 		return scanResult{}, err
 	}
 	return sr, nil
+}
+
+// agentContentEvent is the minimal envelope needed to identify a Claude Code
+// stream-json line as agent-authored content (an "assistant" turn or a
+// "user" tool-result turn) rather than a genuine terminating API error event.
+type agentContentEvent struct {
+	Type string `json:"type"`
+}
+
+// isAgentContentEvent reports whether chunk is a stream-json line carrying
+// agent-authored content — an assistant message (prose, or a file-edit tool
+// call's input) or a user message (tool_result content, per the Claude API's
+// convention of returning tool results as a user-role turn). Markers inside
+// either are the agent's own work product, not a genuine terminating API
+// error, and must not be scanned for transient patterns or a resetsAt
+// timestamp. Lines that fail to parse as JSON (plain-text driver/network
+// error output) or that parse with any other type ("error", "system",
+// "result", or none) are left to the normal scan.
+func isAgentContentEvent(chunk string) bool {
+	var ev agentContentEvent
+	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
+		return false
+	}
+	return ev.Type == "assistant" || ev.Type == "user"
 }
 
 // matchTransient checks whether line contains a known transient marker.

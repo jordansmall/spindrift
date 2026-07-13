@@ -216,6 +216,67 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// Rate-limit markers nested inside an assistant message's own content
+		// (the agent's prose about rate-limit code, or a diff/test fixture it
+		// wrote) must not poison classification — no terminating API error
+		// event means Terminal, not RateLimit (issue #579).
+		name: "Terminal_SelfPoisoning_MarkersOnlyInAssistantContent",
+		lines: []string{
+			`{"type":"assistant","message":{"content":[{"type":"text","text":"Adding a rate_limit_error test case with 429 Too Many Requests and resetsAt:1783963200 fixture data"}]}}`,
+		},
+		wantClass:   outcome.Terminal,
+		wantReason:  outcome.TaskFailed,
+		wantResetAt: nil,
+	},
+	{
+		// Rate-limit markers nested inside a tool_result turn (the agent
+		// grepping/catting its own rate-limit source or a fixture log) must
+		// not poison classification either (issue #579).
+		name: "Terminal_SelfPoisoning_MarkersOnlyInToolResultContent",
+		lines: []string{
+			`{"type":"user","message":{"content":[{"type":"tool_result","content":"logs/issue-565.log:1: rate_limit_error 429 Too Many Requests \"resetsAt\":1783963200"}]}}`,
+		},
+		wantClass:   outcome.Terminal,
+		wantReason:  outcome.TaskFailed,
+		wantResetAt: nil,
+	},
+	{
+		// A genuine terminating rate-limit event followed by continued,
+		// substantive agent activity means the run recovered — the earlier
+		// event is not the reason the box eventually exited, so it must not
+		// be attributed as the cause (issue #579).
+		name: "Terminal_RecoveredMidRun429NotAttributed",
+		lines: []string{
+			`{"type":"error","error":{"type":"rate_limit_error","message":"Rate limit exceeded"},"resetsAt":1783192800}`,
+			`{"type":"assistant","message":{"content":[{"type":"text","text":"Hit a rate limit, retrying..."}]}}`,
+			`{"type":"assistant","message":{"content":[{"type":"text","text":"Continuing the task after the retry succeeded."}]}}`,
+			`Agent completed with no valid outcome.`,
+		},
+		wantClass:   outcome.Terminal,
+		wantReason:  outcome.TaskFailed,
+		wantResetAt: nil,
+	},
+	{
+		// Redacted reconstruction of the box log that stranded
+		// agent-issue-565 (issue #579): the box edits rate-limit-handling
+		// code, its own diff/test-fixture content quotes rate_limit_error /
+		// 429 / a fixture "resetsAt" timestamp, and it then OOM-dies with no
+		// SPINDRIFT_OUTCOME line and no genuine terminating API error event.
+		// Must classify as Terminal/TaskFailed — no multi-hour hold on the
+		// fixture timestamp.
+		name: "Terminal_Issue565Reconstruction_NoHoldOnFixtureResetsAt",
+		lines: []string{
+			`{"type":"assistant","message":{"content":[{"type":"text","text":"Working on issue #565: hold-and-retry rate-limited boxes."}]}}`,
+			`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"classify_test.go","new_string":"lines: []string{\"429 Too Many Requests\", \"rate_limit_error\"}, wantResetAt: \"resetsAt\":1783963200"}}]}}`,
+			`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"File edited successfully."}]}}`,
+			`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"go test ./..."}}]}}`,
+			`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"ok  	spindrift.dev/launcher/internal/outcome	0.05s"}]}}`,
+		},
+		wantClass:   outcome.Terminal,
+		wantReason:  outcome.TaskFailed,
+		wantResetAt: nil,
+	},
+	{
 		// Issue numbers, byte counts, or port numbers containing "429" or "529"
 		// must not be mistaken for API rate-limit / overload errors.
 		name: "Terminal_NoBareDigitFalsePositive",
