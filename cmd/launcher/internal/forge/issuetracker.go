@@ -81,6 +81,14 @@ type IssueTracker interface {
 	// unavailable. Native wins when non-empty — body text is never merged
 	// with a non-empty native result.
 	DepsOf(num string) ([]Dependency, error)
+	// TouchesOf returns the declared touch-set for the given issue — the
+	// path globs an issue names as the files/areas its work will touch,
+	// used by the wave engine's overlap gate. All adapters currently share
+	// the body-grammar default (a "## Touches" section, ParseTouchPaths);
+	// adapters remain free to go native later, mirroring DepsOf's
+	// native-preferred-over-body pattern. An issue with no such section
+	// returns nil, nil.
+	TouchesOf(num string) ([]string, error)
 	// Comment posts a comment on the issue.
 	Comment(num, body string) error
 	// Probe checks issue tracker connectivity and returns the resolved slug.

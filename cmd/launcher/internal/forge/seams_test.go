@@ -224,6 +224,25 @@ func TestFake_DepsOf_MissingIssue(t *testing.T) {
 	}
 }
 
+// --- TouchesOf tests ---
+
+func TestFake_TouchesOf_ParsesBody(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{
+		Number: "10",
+		Body:   "## Touches\n- lib/env-schema.nix\n- cmd/launcher/*.go",
+	})
+
+	touches, err := f.TouchesOf("10")
+	if err != nil {
+		t.Fatalf("TouchesOf: %v", err)
+	}
+	want := []string{"lib/env-schema.nix", "cmd/launcher/*.go"}
+	if len(touches) != len(want) || touches[0] != want[0] || touches[1] != want[1] {
+		t.Errorf("TouchesOf = %v, want %v", touches, want)
+	}
+}
+
 // --- ParseBlockerRefs tests (moved from main package) ---
 
 func TestParseBlockerRefs_Empty(t *testing.T) {

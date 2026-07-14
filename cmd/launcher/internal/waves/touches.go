@@ -5,17 +5,6 @@ import (
 	"spindrift.dev/launcher/internal/glob"
 )
 
-// touchesOf returns the declared touch-set for issue num, parsed from its
-// body's "## Touches" section. An issue with no such section returns nil,
-// nil — it never participates in the overlap gate.
-func touchesOf(it forge.IssueTracker, num string) ([]string, error) {
-	fi, err := it.Issue(num)
-	if err != nil {
-		return nil, err
-	}
-	return forge.ParseTouchPaths(fi.Body), nil
-}
-
 // prTouchesOf returns the changed-file paths of num's open PR, augmenting its
 // declared touch-set with files the issue itself never declared in
 // ## Touches. Restricted to a Code Forge with a PRForge surface, the only
@@ -49,7 +38,7 @@ type inProgressTouches struct {
 // waveOverlapCheck returns a per-candidate overlap check bound to a single
 // snapshot of InProgress issues (and, on github, their open PRs' changed
 // files), fetched once per wave/drain call rather than once per candidate
-// (each candidate still costs its own touchesOf fetch). OVERLAP_GATE=off (or
+// (each candidate still costs its own TouchesOf fetch). OVERLAP_GATE=off (or
 // a failed fetch) yields a check that always reports no overlap, leaving
 // dispatch unaffected.
 func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) func(num string) (string, bool) {
@@ -63,7 +52,7 @@ func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) fun
 	}
 	entries := make([]inProgressTouches, len(inProgress))
 	for i, fi := range inProgress {
-		touches := forge.ParseTouchPaths(fi.Body)
+		touches, _ := it.TouchesOf(fi.Number)
 		touches = append(touches, prTouchesOf(cf, fi.Number)...)
 		entries[i] = inProgressTouches{number: fi.Number, touches: touches}
 	}
@@ -79,7 +68,7 @@ func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) fun
 // issues with no ## Touches section are dispatched exactly as today, per the
 // OVERLAP_GATE acceptance criteria.
 func overlapsInProgress(it forge.IssueTracker, num string, inProgress []inProgressTouches) (string, bool) {
-	touches, err := touchesOf(it, num)
+	touches, err := it.TouchesOf(num)
 	if err != nil || len(touches) == 0 {
 		return "", false
 	}

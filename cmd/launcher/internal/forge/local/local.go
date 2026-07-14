@@ -204,6 +204,17 @@ func (lt *LocalTracker) DepsOf(num string) ([]forge.Dependency, error) {
 	return forge.WithSource(parseLocalBlockers(li.body), forge.DepSourceBody), nil
 }
 
+// TouchesOf returns the declared touch-set parsed from issue num's body —
+// the shared body-grammar default (forge.ParseTouchPaths); the local tracker
+// has no native touch-set concept to prefer over it.
+func (lt *LocalTracker) TouchesOf(num string) ([]string, error) {
+	li, err := lt.readIssueFile(num)
+	if err != nil {
+		return nil, err
+	}
+	return forge.ParseTouchPaths(li.body), nil
+}
+
 // parseLocalBlockers extracts dependency slugs from a "## Blocked by" section
 // (reusing blockers.go's header/heading detection), one slug per bullet line.
 func parseLocalBlockers(body string) []string {

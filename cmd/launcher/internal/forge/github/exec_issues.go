@@ -133,6 +133,17 @@ func (e *execClient) nativeDepsOf(num string) ([]string, error) {
 	return deps, nil
 }
 
+// TouchesOf returns the declared touch-set parsed from issue num's body —
+// the shared body-grammar default (forge.ParseTouchPaths); this adapter has
+// no native touch-set concept to prefer over it.
+func (e *execClient) TouchesOf(num string) ([]string, error) {
+	iss, err := e.Issue(num)
+	if err != nil {
+		return nil, err
+	}
+	return forge.ParseTouchPaths(iss.Body), nil
+}
+
 func (e *execClient) Comment(num, body string) error {
 	cmd := exec.Command("gh", "issue", "comment", num,
 		"--repo", e.repo,
