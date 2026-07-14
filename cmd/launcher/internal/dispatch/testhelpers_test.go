@@ -58,3 +58,7 @@ func (d fakeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Write
 func (d fakeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 	return driverclaude.ExtractUsage(logPath)
 }
+
+func (d fakeDriver) RenderTranscript(logPath string) (string, error) {
+	return driverclaude.RenderTranscript(logPath)
+}
