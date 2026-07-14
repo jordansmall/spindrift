@@ -177,9 +177,9 @@ type jiraIssuePayload struct {
 // link type uses to mean "this issue is blocked by the linked issue".
 const jiraBlockedByLink = "is blocked by"
 
-// DepsOf returns the canonical dependency IDs for issue num, resolved from
-// native Jira issue links (not prose parsing).
-func (j *jiraClient) DepsOf(num string) ([]string, error) {
+// DepsOf returns the canonical dependencies for issue num, resolved from
+// native Jira issue links (not prose parsing) — always DepSourceNative.
+func (j *jiraClient) DepsOf(num string) ([]Dependency, error) {
 	var payload jiraIssuePayload
 	status, err := j.do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload)
 	if err != nil {
@@ -194,7 +194,7 @@ func (j *jiraClient) DepsOf(num string) ([]string, error) {
 			deps = append(deps, link.InwardIssue.Key)
 		}
 	}
-	return deps, nil
+	return WithSource(deps, DepSourceNative), nil
 }
 
 // issueState maps Jira's statusCategory to the canonical IssueState: "done"

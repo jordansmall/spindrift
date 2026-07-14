@@ -90,14 +90,14 @@ func (e *execClient) TransitionState(num string, from, to DispatchState) error {
 	return nil
 }
 
-// DepsOf returns the canonical dependency IDs for issue num, preferring
+// DepsOf returns the canonical dependencies for issue num, preferring
 // GitHub's native issue-dependencies API and falling back to body-text
 // parsing (inline refs / "## Blocked by" section) when the native lookup
 // errors or yields no relationships.
-func (e *execClient) DepsOf(num string) ([]string, error) {
+func (e *execClient) DepsOf(num string) ([]Dependency, error) {
 	deps, err := e.nativeDepsOf(num)
 	if err == nil && len(deps) > 0 {
-		return deps, nil
+		return WithSource(deps, DepSourceNative), nil
 	}
 	if err != nil {
 		fmt.Printf("WARNING: native dependency lookup for issue %s failed (%v); falling back to body parsing\n", num, err)
@@ -106,7 +106,7 @@ func (e *execClient) DepsOf(num string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseBlockerRefs(iss.Body), nil
+	return WithSource(ParseBlockerRefs(iss.Body), DepSourceBody), nil
 }
 
 // nativeDepsOf queries GitHub's issue-dependencies API for the issues that

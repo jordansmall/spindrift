@@ -188,10 +188,13 @@ func TestFake_DepsOf_ParsesBody(t *testing.T) {
 	}
 	found3, found5 := false, false
 	for _, d := range deps {
-		if d == "3" {
+		if d.Source != forge.DepSourceBody {
+			t.Errorf("want DepSourceBody for %v, got %v", d, d.Source)
+		}
+		if d.ID == "3" {
 			found3 = true
 		}
-		if d == "5" {
+		if d.ID == "5" {
 			found5 = true
 		}
 	}

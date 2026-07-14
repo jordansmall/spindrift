@@ -191,14 +191,15 @@ func (lt *LocalTracker) TransitionState(num string, from, to DispatchState) erro
 }
 
 // DepsOf returns the dependency slugs listed under issue num's "## Blocked
-// by" section. Unlike ParseBlockerRefs (GitHub "#N" refs), local issues
-// reference each other by filename slug, one per bullet line.
-func (lt *LocalTracker) DepsOf(num string) ([]string, error) {
+// by" section — always DepSourceBody; the local tracker has no native
+// relationship concept. Unlike ParseBlockerRefs (GitHub "#N" refs), local
+// issues reference each other by filename slug, one per bullet line.
+func (lt *LocalTracker) DepsOf(num string) ([]Dependency, error) {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
 		return nil, err
 	}
-	return parseLocalBlockers(li.body), nil
+	return WithSource(parseLocalBlockers(li.body), DepSourceBody), nil
 }
 
 // parseLocalBlockers extracts dependency slugs from a "## Blocked by" section

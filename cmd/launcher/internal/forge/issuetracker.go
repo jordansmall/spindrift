@@ -1,5 +1,63 @@
 package forge
 
+import "fmt"
+
+// DepSource records whether a Dependency was resolved from the tracker's
+// native dependency-relationship API or parsed from issue/file body text.
+type DepSource int
+
+const (
+	// DepSourceUnknown is the zero value: no source was recorded for this
+	// ref (e.g. a sources map lookup miss). Keeping it — rather than
+	// DepSourceNative — as the zero value means a missing entry renders
+	// "unknown" instead of silently misreporting "native".
+	DepSourceUnknown DepSource = iota
+	// DepSourceNative means the ref came from a native relationship (GitHub
+	// issue-dependencies API, Jira "is blocked by" issue links).
+	DepSourceNative
+	// DepSourceBody means the ref was parsed from body text (inline
+	// "blocked by #N" / "depends on #N", or a "## Blocked by" section).
+	DepSourceBody
+)
+
+// String renders the source for operator-facing diagnostics.
+func (s DepSource) String() string {
+	switch s {
+	case DepSourceNative:
+		return "native"
+	case DepSourceBody:
+		return "body"
+	default:
+		return "unknown"
+	}
+}
+
+// Dependency is a single resolved blocker reference: the blocking issue's
+// canonical ID and the source DepsOf resolved it from.
+type Dependency struct {
+	ID     string
+	Source DepSource
+}
+
+// Ref formats a blocker ID with its source annotation for operator-facing
+// diagnostics, e.g. "#42 (native)" — the single renderer shared by the
+// preview, blocked-skip, and blocked-claim marker call sites so the format
+// exists exactly once.
+func Ref(id string, source DepSource) string {
+	return fmt.Sprintf("#%s (%s)", id, source)
+}
+
+// WithSource tags a batch of same-sourced IDs, the shape every DepsOf
+// implementation resolves in one shot (a native list, or ParseBlockerRefs'
+// output).
+func WithSource(ids []string, source DepSource) []Dependency {
+	deps := make([]Dependency, len(ids))
+	for i, id := range ids {
+		deps[i] = Dependency{ID: id, Source: source}
+	}
+	return deps
+}
+
 // IssueTracker is the seam through which the launcher reads issues and
 // transitions their dispatch state. Implementations map DispatchState to
 // their native mechanism (GitHub labels, Jira workflow statuses, local
@@ -14,14 +72,15 @@ type IssueTracker interface {
 	// the label for to and removes the label for from, matching the
 	// SwapLabel(add, remove) contract with typed state identifiers.
 	TransitionState(num string, from, to DispatchState) error
-	// DepsOf returns the canonical dependency IDs for the given issue.
-	// Implementations prefer the tracker's native dependency relationships
-	// (e.g. GitHub's issue-dependencies API, Jira's "is blocked by" issue
-	// links) and fall back to body-text parsing (GitHub body "depends on
-	// #N" / "## Blocked by" section) only when native lookup yields no
-	// relationships or is unavailable. Native wins when non-empty — body
-	// text is never merged with a non-empty native result.
-	DepsOf(num string) ([]string, error)
+	// DepsOf returns the canonical dependencies for the given issue, each
+	// tagged with the source it was resolved from. Implementations prefer
+	// the tracker's native dependency relationships (e.g. GitHub's
+	// issue-dependencies API, Jira's "is blocked by" issue links) and fall
+	// back to body-text parsing (GitHub body "depends on #N" / "## Blocked
+	// by" section) only when native lookup yields no relationships or is
+	// unavailable. Native wins when non-empty — body text is never merged
+	// with a non-empty native result.
+	DepsOf(num string) ([]Dependency, error)
 	// Comment posts a comment on the issue.
 	Comment(num, body string) error
 	// Probe checks issue tracker connectivity and returns the resolved slug.

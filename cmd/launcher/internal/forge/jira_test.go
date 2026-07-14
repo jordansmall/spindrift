@@ -316,8 +316,8 @@ func TestJiraClient_DepsOf_NativeLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
-	if len(deps) != 1 || deps[0] != "PROJ-3" {
-		t.Errorf("DepsOf = %v, want [PROJ-3] (native is-blocked-by link only)", deps)
+	if len(deps) != 1 || deps[0] != (forge.Dependency{ID: "PROJ-3", Source: forge.DepSourceNative}) {
+		t.Errorf("DepsOf = %v, want [PROJ-3 (native)] (native is-blocked-by link only)", deps)
 	}
 }
 
