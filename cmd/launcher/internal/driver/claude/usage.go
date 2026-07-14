@@ -145,9 +145,9 @@ func BreakdownByRole(path string) ([]usage.RoleUsage, error) {
 	return result, nil
 }
 
-// ExtractUsage scans logPath once for its result event and its per-role
-// breakdown, returning both in one usage.Report — the claude Driver's
-// implementation of the Driver interface's ExtractUsage method.
+// ExtractUsage scans logPath for its result event and, separately, its
+// per-role breakdown, returning both in one usage.Report — the claude
+// Driver's implementation of the Driver interface's ExtractUsage method.
 func ExtractUsage(logPath string) (usage.Report, error) {
 	u, found, err := LastInLog(logPath)
 	if err != nil {
