@@ -708,6 +708,15 @@ Forge stays `github` regardless (Jira issues, GitHub PRs).
   `spindrift doctor`'s `Probe()` check validates Jira auth and reachability
   independently of the GitHub Code Forge probe.
 
+  A [research dispatch](../README.md#research-dispatch)'s verdict terminals
+  (`recommend` / `reject` / `unclear`) always ride this same label-fallback
+  mechanism — they swap the `agent-research-*` labels, never a Jira workflow
+  status. `JIRA_STATUS_MAPPING` has no research-state keys, and none are
+  planned: jira-native workflow-status mapping for research states is
+  deferred until a Jira user exists (ADR 0022). The `local` tracker maps
+  research states the same way it maps work states, through its frontmatter
+  `state` field.
+
 #### Merge guard
 
 Between CI going green and the merge itself, the launcher checks the PR's
