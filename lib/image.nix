@@ -61,7 +61,9 @@
   injectFixSharedBlocks,
   # The conditional prompt fragments directory (issue #463).
   fragmentsSourceDir,
-  # Skill files baked into the image at /home/agent/.claude/skills.
+  # Skill files baked into the image at /home/agent/.claude/skills. Each
+  # element is a path, a pre-built derivation, or a { name; src; } content
+  # entry (issue #597) realized with this (image) pkgs.
   skills,
 }:
 let
@@ -170,11 +172,23 @@ let
     cp -r ${fragmentsSourceDir} $out/agent/prompts/fragments
     ${lib.optionalString (skills != [ ]) ''
       mkdir -p $out/home/agent/${driverEntry.skillsDirRelative}
-      ${lib.concatMapStrings (f: ''
-        cp ${f} $out/home/agent/${driverEntry.skillsDirRelative}/${
-          if lib.isDerivation f then f.name else builtins.baseNameOf f
-        }
-      '') skills}
+      ${lib.concatMapStrings (
+        f:
+        # A { name; src; } content entry is re-realized with THIS pkgs (the
+        # image's own Linux instantiation, mirroring the prompts above) rather
+        # than copied as a pre-built derivation, so the skill never carries a
+        # consumer host's system into the image's derivation graph (#597).
+        if builtins.isAttrs f && !(lib.isDerivation f) then
+          ''
+            cp ${pkgs.writeText f.name f.src} $out/home/agent/${driverEntry.skillsDirRelative}/${f.name}
+          ''
+        else
+          ''
+            cp ${f} $out/home/agent/${driverEntry.skillsDirRelative}/${
+              if lib.isDerivation f then f.name else builtins.baseNameOf f
+            }
+          ''
+      ) skills}
     ''}
   '';
 

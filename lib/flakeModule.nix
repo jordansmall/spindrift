@@ -114,9 +114,26 @@ in
       };
 
       skills = mkOption {
-        type = types.nullOr (types.listOf types.path);
+        type = types.nullOr (
+          types.listOf (
+            types.either types.path (
+              types.submodule {
+                options = {
+                  name = mkOption {
+                    type = types.str;
+                    description = "Basename the skill is baked under.";
+                  };
+                  src = mkOption {
+                    type = types.str;
+                    description = "Skill file content, re-realized with the image's own Linux pkgs.";
+                  };
+                };
+              }
+            )
+          )
+        );
         default = null;
-        description = "Skill files baked into the image at /home/agent/.claude/skills. Each element is a path to a skill file. SPINDRIFT_SKILLS_DIR at runtime mounts over the same path and takes precedence.";
+        description = "Skill files baked into the image at /home/agent/.claude/skills. Each element is a path to a skill file, or a { name; src; } content entry realized with the image's Linux pkgs (issue #597). SPINDRIFT_SKILLS_DIR at runtime mounts over the same path and takes precedence.";
       };
 
       # Generated from env-schema.nix: one sub-option per section (matching
