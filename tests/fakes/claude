@@ -109,7 +109,7 @@ printf '{"type":"assistant","message":{"content":[{"type":"text","text":"impleme
 if [ "${FAKE_CLAUDE_NO_OUTCOME:-0}" = "1" ]; then
   printf '{"type":"result","subtype":"success","is_error":false,"result":"done, but forgot to report back"}\n'
 else
-  printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME issue=%s pr=https://github.com/%s/pull/1 status=ready note=fake"}\n' \
+  printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake"}\n' \
     "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
 fi
 
