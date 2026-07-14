@@ -171,6 +171,45 @@ func TestRun_PickCommand_WithLauncher_LaunchesRealDispatch(t *testing.T) {
 	}
 }
 
+// TestRun_WithLauncher_RendersLiveQueueState verifies every render — not
+// just the one right after a pick — reflects the launcher's live Queue
+// state, so a transition that happens entirely in the background (claim,
+// run, settle, or a raced-claim dissolve) actually reaches the operator's
+// screen instead of freezing at "queued" (#646 AC4, AC6).
+func TestRun_WithLauncher_RendersLiveQueueState(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	// Simulate a state transition that happened entirely on the background
+	// Queue (a real launch's claim/run/settle), bypassing Run's own "p"
+	// handling so this test isolates the render-sync behavior.
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickDissolved, Reason: "issue is closed"})
+
+	var out strings.Builder
+	if err := Run(f, t.TempDir(), strings.NewReader("r\nq\n"), &out, launch); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.String(), "dissolved") || !strings.Contains(out.String(), "issue is closed") {
+		t.Errorf("output = %q, want the background dissolve reflected on a later render", out.String())
+	}
+}
+
+// TestRun_BarePickCommand_IsNoop verifies a bare "p" (no issue number) makes
+// no tracker call and queues nothing, instead of promoting a phantom pick
+// numbered "".
+func TestRun_BarePickCommand_IsNoop(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+
+	var out strings.Builder
+	if err := Run(f, t.TempDir(), strings.NewReader("p\nq\n"), &out, nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none for a bare pick", f.TransitionStateCalls)
+	}
+}
+
 // newAlphaBetaFake returns a Fake tracker with two open issues, "alpha"
 // labeled "a" and "beta" labeled "b" — shared fixture for filter tests.
 func newAlphaBetaFake() *forge.Fake {

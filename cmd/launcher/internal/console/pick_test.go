@@ -49,6 +49,21 @@ func TestUpdate_PickFailedMsg_AddsDissolvedRow(t *testing.T) {
 	}
 }
 
+// TestUpdate_QueueSnapshotMsg_ReplacesPicks verifies Update installs the
+// launcher's live queue snapshot verbatim, so a render after the snapshot
+// reflects claim/run/settle/dissolve transitions that happened entirely on
+// the background Queue, not just the initial pick (#646).
+func TestUpdate_QueueSnapshotMsg_ReplacesPicks(t *testing.T) {
+	m := NewModel()
+	m = Update(m, PickQueuedMsg{Number: "42", Title: "fix the thing", Kind: KindWork})
+
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{{Number: "42", Title: "fix the thing", State: PickRunning}}})
+
+	if len(m.Picks) != 1 || m.Picks[0].State != PickRunning {
+		t.Errorf("Picks = %+v, want [{42 ... running}]", m.Picks)
+	}
+}
+
 // TestUpdate_UnpickMsg_LeavesNonQueuedPickAlone verifies Unpick only ever
 // removes a pick still holding at PickQueued — a pick already claiming,
 // running, or settled cannot be unpicked out from under its Dispatch.
