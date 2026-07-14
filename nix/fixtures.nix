@@ -13,7 +13,7 @@ let
 
   # The dogfood's baked skills, shared with flake.nix's `spindrift` module
   # config the same way (issue #486).
-  dogfoodSkills = import ./dogfood-skills.nix { inherit pkgs caveman; };
+  dogfoodSkills = import ./dogfood-skills.nix { inherit caveman; };
 
   # The launchers pin the real `gh` via runtimeInputs, which would shadow
   # a PATH-injected fake; so the bats-driven harnesses below overlay `gh`
@@ -217,18 +217,24 @@ let
   # skillsDir assertion; the image-layer check is Linux-gated.
   # Uses ghFakeOverlay so the run command drives the offline fake gh, not
   # the real gh pinned into runtimeInputs (same pattern as batsHarness).
+  # A { name; src; } content entry (issue #597), not a pre-built pkgs.writeText
+  # derivation — proves the fixture itself carries no host-tagged skill into
+  # either harness below.
+  bakedSkillFixture = {
+    name = "baked-skill.md";
+    src = ''
+      ---
+      name: baked-skill
+      description: A skill baked into the image at build time.
+      ---
+      BAKED-SKILL-MARKER
+    '';
+  };
+
   skillsHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     overlays = [ ghFakeOverlay ];
-    skills = [
-      (pkgs.writeText "baked-skill.md" ''
-        ---
-        name: baked-skill
-        description: A skill baked into the image at build time.
-        ---
-        BAKED-SKILL-MARKER
-      '')
-    ];
+    skills = [ bakedSkillFixture ];
     packages = p: [ p.hello ];
   };
 
@@ -238,15 +244,7 @@ let
     inherit nixpkgs system;
     overlays = [ ghFakeOverlay ];
     runtime = "bwrap";
-    skills = [
-      (pkgs.writeText "baked-skill.md" ''
-        ---
-        name: baked-skill
-        description: A skill baked into the image at build time.
-        ---
-        BAKED-SKILL-MARKER
-      '')
-    ];
+    skills = [ bakedSkillFixture ];
     packages = p: [ p.hello ];
   };
 

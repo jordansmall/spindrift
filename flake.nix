@@ -57,7 +57,7 @@
         let
           revision = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
           dogfoodDefaults = import ./nix/dogfood-defaults.nix;
-          dogfoodSkills = import ./nix/dogfood-skills.nix { inherit pkgs caveman; };
+          dogfoodSkills = import ./nix/dogfood-skills.nix { inherit caveman; };
           fixtures = import ./nix/fixtures.nix {
             inherit
               pkgs
