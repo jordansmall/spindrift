@@ -40,6 +40,36 @@ func captureStdout(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
+// captureStderr runs fn with os.Stderr redirected to a pipe and returns
+// everything written to it.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+
+	fn()
+
+	w.Close()
+	os.Stderr = orig
+
+	var buf strings.Builder
+	tmp := make([]byte, 4096)
+	for {
+		n, rerr := r.Read(tmp)
+		if n > 0 {
+			buf.Write(tmp[:n])
+		}
+		if rerr != nil {
+			break
+		}
+	}
+	return buf.String()
+}
+
 // TestDrainMaxJobs_SkipsBlockedDispatchesNext verifies that when MAX_JOBS=1
 // the oldest blocked issue is skipped and the next unblocked issue is dispatched.
 func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
