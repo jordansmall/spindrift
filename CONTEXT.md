@@ -244,7 +244,12 @@ Edges come from each Issue Tracker adapter's `DepsOf`: `github` and `jira`
 both prefer native dependency relationships (GitHub's issue-dependencies API,
 Jira's "is blocked by" issue links) and use body/prose refs only as a
 fallback where the adapter has one — native wins whenever it's non-empty,
-never merged with body text.
+never merged with body text. `DepsOf` tags each ref with the source it
+resolved from (native vs body), carried alongside the edges as `Sources` and
+surfaced in every operator-facing blocker rendering — `preview`'s blocker
+annotations, blocked-skip notices, and the blocked-claim marker (and the
+release comment posted from it) — so drift between a stale body section and
+changed native links is visible instead of silent.
 Every dispatch invocation runs at most one wave (ADR 0019): `MAX_PARALLEL`
 caps the number of concurrent Boxes within a wave (default 3); `MAX_JOBS`
 caps the wave size (default 0 = uncapped). Held issues stay on the dispatch
