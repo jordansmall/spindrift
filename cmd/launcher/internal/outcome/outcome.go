@@ -13,34 +13,34 @@ import (
 )
 
 // Outcome is the machine-readable result written by a Box as its final line.
-// Grammar: SPINDRIFT_OUTCOME issue=<num> pr=<landing-ref> status=<status> note=<text>
+// Grammar: SPINDRIFT_OUTCOME issue=<num> landing=<landing-ref> status=<status> note=<text>
 // Note may contain spaces and '='; all other fields are space-delimited tokens.
 type Outcome struct {
 	Issue string
-	// PR is the landing reference: a PR URL under CODE_FORGE=github, or a
+	// Landing is the landing reference: a PR URL under CODE_FORGE=github, a
 	// branch ref (e.g. "agent/issue-42") under the push-only CODE_FORGE=git,
-	// which has no PR concept.
-	PR     string
-	Status string // ready | blocked | failed | merged | …
-	Note   string // free text; may contain spaces and '='
+	// or a verdict-comment URL for the research dispatch kind.
+	Landing string
+	Status  string // ready | blocked | failed | merged | …
+	Note    string // free text; may contain spaces and '='
 }
 
 // Parse parses a single SPINDRIFT_OUTCOME line.
 // Returns an error if the line lacks the required prefix or is missing the
-// pr or status fields.
+// landing or status fields.
 func Parse(line string) (Outcome, error) {
 	const prefix = "SPINDRIFT_OUTCOME "
 	if !strings.HasPrefix(line, prefix) {
 		return Outcome{}, fmt.Errorf("outcome: line missing %q prefix", prefix)
 	}
 	o := Outcome{
-		Issue:  tokenField(line, "issue"),
-		PR:     tokenField(line, "pr"),
-		Status: tokenField(line, "status"),
-		Note:   tailField(line, "note"),
+		Issue:   tokenField(line, "issue"),
+		Landing: tokenField(line, "landing"),
+		Status:  tokenField(line, "status"),
+		Note:    tailField(line, "note"),
 	}
-	if o.PR == "" {
-		return Outcome{}, errors.New("outcome: missing pr field")
+	if o.Landing == "" {
+		return Outcome{}, errors.New("outcome: missing landing field")
 	}
 	if o.Status == "" {
 		return Outcome{}, errors.New("outcome: missing or empty status field")
@@ -51,8 +51,8 @@ func Parse(line string) (Outcome, error) {
 // Line returns the canonical SPINDRIFT_OUTCOME representation of o.
 // Parse(o.Line()) == o for all valid Outcomes.
 func (o Outcome) Line() string {
-	return fmt.Sprintf("SPINDRIFT_OUTCOME issue=%s pr=%s status=%s note=%s",
-		o.Issue, o.PR, o.Status, o.Note)
+	return fmt.Sprintf("SPINDRIFT_OUTCOME issue=%s landing=%s status=%s note=%s",
+		o.Issue, o.Landing, o.Status, o.Note)
 }
 
 // LastInLog scans the file at path and returns the last SPINDRIFT_OUTCOME
