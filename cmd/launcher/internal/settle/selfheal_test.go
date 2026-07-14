@@ -23,12 +23,9 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	fc.MergeErr = errors.New("required review missing")
 	s := New(c, fc, fc)
 
-	ok, merged := s.selfHeal(dispatch.NewFake(), "1", testPR)
-	if !ok {
-		t.Error("selfHeal must return ok=true when CI reached green (even if merge fails)")
-	}
-	if merged {
-		t.Error("selfHeal must return merged=false when merge fails")
+	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
+	if landing != LandingManual {
+		t.Errorf("selfHeal = %v, want LandingManual (CI green, merge failed)", landing)
 	}
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, "agent-complete") {
@@ -53,12 +50,9 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{"src/main.go", ".github/workflows/ci.yml"})
 	s := New(c, fc, fc)
 
-	ok, merged := s.selfHeal(dispatch.NewFake(), "1", testPR)
-	if !ok {
-		t.Error("selfHeal must return ok=true — CI reached green")
-	}
-	if merged {
-		t.Error("selfHeal must return merged=false when the merge guard hits")
+	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
+	if landing != LandingManual {
+		t.Errorf("selfHeal = %v, want LandingManual (merge guard hit)", landing)
 	}
 	if fc.Merged != "" {
 		t.Errorf("merge guard must prevent Merge from being called; fc.Merged=%q", fc.Merged)
@@ -92,9 +86,9 @@ func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
 	s := New(c, fc, fc)
 
-	ok, merged := s.selfHeal(dispatch.NewFake(), "1", testPR)
-	if !ok || merged {
-		t.Errorf("selfHeal(ok=%v, merged=%v), want (true, false) for a guard-hit auto-mode PR", ok, merged)
+	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
+	if landing != LandingManual {
+		t.Errorf("selfHeal = %v, want LandingManual for a guard-hit auto-mode PR", landing)
 	}
 	if len(fc.EnqueueAutoMergeCalls) != 0 {
 		t.Errorf("guard hit must prevent EnqueueAutoMerge; calls=%v", fc.EnqueueAutoMergeCalls)
@@ -116,9 +110,9 @@ func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{"src/main.go"})
 	s := New(c, fc, fc)
 
-	ok, merged := s.selfHeal(dispatch.NewFake(), "1", testPR)
-	if !ok || !merged {
-		t.Errorf("selfHeal(ok=%v, merged=%v), want (true, true) for a non-guarded green PR", ok, merged)
+	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
+	if landing != LandingMerged {
+		t.Errorf("selfHeal = %v, want LandingMerged for a non-guarded green PR", landing)
 	}
 	if fc.Merged != testPR {
 		t.Errorf("expected Merge to be called; fc.Merged=%q", fc.Merged)
@@ -142,12 +136,9 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
 	s := New(c, fc, fc)
 
-	ok, merged := s.selfHeal(dispatch.NewFake(), "1", testPR)
-	if !ok {
-		t.Error("selfHeal must return ok=true — CI reached green")
-	}
-	if merged {
-		t.Error("selfHeal must return merged=false when the guard check errors")
+	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
+	if landing != LandingManual {
+		t.Errorf("selfHeal = %v, want LandingManual (guard check errored)", landing)
 	}
 	if fc.Merged != "" {
 		t.Errorf("a guard-check error must prevent Merge from being called; fc.Merged=%q", fc.Merged)
@@ -170,12 +161,12 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 // Complete immediately, then applies MERGE_MODE against the push-only Merge.
 func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 	cases := []struct {
-		name       string
-		mergeMode  string
-		wantMerged bool
+		name        string
+		mergeMode   string
+		wantLanding LandingResult
 	}{
-		{name: "manual leaves the branch as pushed", mergeMode: "manual", wantMerged: false},
-		{name: "immediate pushes to the target branch", mergeMode: "immediate", wantMerged: true},
+		{name: "manual leaves the branch as pushed", mergeMode: "manual", wantLanding: LandingManual},
+		{name: "immediate pushes to the target branch", mergeMode: "immediate", wantLanding: LandingMerged},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -187,18 +178,16 @@ func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 			branch := "agent/issue-1"
 			s := New(c, fc, fc.AsPushOnly())
 
-			ok, merged := s.selfHeal(dispatch.NewFake(), "1", branch)
+			landing := s.selfHeal(dispatch.NewFake(), "1", branch)
 
-			if !ok {
-				t.Fatal("selfHeal must return ok=true for a push-only forge — there is no CI to fail")
+			if landing != tc.wantLanding {
+				t.Errorf("selfHeal = %v, want %v", landing, tc.wantLanding)
 			}
-			if merged != tc.wantMerged {
-				t.Errorf("selfHeal merged=%v, want %v", merged, tc.wantMerged)
-			}
-			if tc.wantMerged && fc.Merged != branch {
+			wantMerged := tc.wantLanding == LandingMerged
+			if wantMerged && fc.Merged != branch {
 				t.Errorf("expected Merge(%q); fc.Merged=%q", branch, fc.Merged)
 			}
-			if !tc.wantMerged && fc.Merged != "" {
+			if !wantMerged && fc.Merged != "" {
 				t.Errorf("Merge must not be called; fc.Merged=%q", fc.Merged)
 			}
 			iss, _ := fc.Issue("1")
@@ -222,13 +211,10 @@ func TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed(t *testing.T) {
 	branch := "agent/issue-1"
 	s := New(c, fc, fc.AsPushOnly())
 
-	ok, merged := s.selfHeal(dispatch.NewFake(), "1", branch)
+	landing := s.selfHeal(dispatch.NewFake(), "1", branch)
 
-	if !ok {
-		t.Error("selfHeal must return ok=true — there is no CI to fail for a push-only forge")
-	}
-	if merged {
-		t.Error("selfHeal must return merged=false when the push fails")
+	if landing != LandingManual {
+		t.Errorf("selfHeal = %v, want LandingManual when the push fails", landing)
 	}
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, "agent-complete") {
