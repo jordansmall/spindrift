@@ -2,12 +2,18 @@ package console
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 )
+
+// errNoDriver is DrillInMsg's Err when "d <num>" is issued with no Driver
+// available — a launch-less session, or a Launcher built without a Factory.
+var errNoDriver = errors.New("drill-in unavailable: no Driver configured")
 
 // Run drives the console's read-render loop: load the backlog, render it,
 // then repeatedly read one command per line from in and re-render until the
@@ -60,7 +66,13 @@ func applyCommand(m Model, tracker forge.IssueTracker, pwd string, launch *Launc
 	case "q", "quit":
 		return Update(m, QuitMsg{})
 	case "r", "refresh":
-		return Update(m, Refresh(tracker))
+		m = Update(m, Refresh(tracker))
+		if m.DrillIn != nil {
+			if drv := driverOf(launch); drv != nil {
+				m = Update(m, DrillIn(drv, pwd, m.DrillIn.Number))
+			}
+		}
+		return m
 	case "f", "filter":
 		return Update(m, FilterChangedMsg{Filter: arg})
 	case "p", "pick":
@@ -90,9 +102,33 @@ func applyCommand(m Model, tracker forge.IssueTracker, pwd string, launch *Launc
 			launch.Queue.Remove(arg)
 		}
 		return Update(m, UnpickMsg{Number: arg})
+	case "d", "drill":
+		if arg == "" {
+			return m
+		}
+		drv := driverOf(launch)
+		if drv == nil {
+			return Update(m, DrillInMsg{Number: arg, Err: errNoDriver})
+		}
+		return Update(m, DrillIn(drv, pwd, arg))
+	case "t", "toggle":
+		return Update(m, DrillInToggleMsg{})
+	case "x", "close":
+		return Update(m, DrillInCloseMsg{})
 	default:
 		return m
 	}
+}
+
+// driverOf returns the Driver a Launcher's Factory was constructed with, or
+// nil when no Driver is available (a launch-less session, or a Launcher
+// built without a Factory) — driver-less callers get errNoDriver instead of
+// a nil-interface panic on drv.RenderTranscript.
+func driverOf(launch *Launcher) driver.Driver {
+	if launch == nil || launch.Factory == nil {
+		return nil
+	}
+	return launch.Factory.Driver()
 }
 
 // titleOf returns num's title from m.All, or "" when the backlog hasn't

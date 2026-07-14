@@ -79,3 +79,29 @@ type UnpickMsg struct {
 }
 
 func (UnpickMsg) isConsoleMsg() {}
+
+// DrillInMsg carries a Dispatch's whole rendered transcript — every pass
+// concatenated in order, with pass boundaries marked — plus its byte-exact
+// raw form, loaded together so the raw toggle needs no further I/O. Err is
+// set instead when loading or rendering failed (e.g. no Driver configured,
+// no logs on disk yet).
+type DrillInMsg struct {
+	Number        string
+	Rendered, Raw string
+	Err           error
+}
+
+func (DrillInMsg) isConsoleMsg() {}
+
+// DrillInToggleMsg is the run loop's signal that the operator asked to
+// switch between the rendered transcript and the raw byte-exact log — a
+// no-op when no drill-in is open.
+type DrillInToggleMsg struct{}
+
+func (DrillInToggleMsg) isConsoleMsg() {}
+
+// DrillInCloseMsg is the run loop's signal that the operator asked to leave
+// the transcript view and return to the backlog/queue view.
+type DrillInCloseMsg struct{}
+
+func (DrillInCloseMsg) isConsoleMsg() {}

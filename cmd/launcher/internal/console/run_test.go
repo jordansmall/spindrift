@@ -261,3 +261,98 @@ func newTestLauncher(t *testing.T, cf forge.CodeForge) *Launcher {
 	t.Cleanup(factory.Cleanup)
 	return &Launcher{CodeForge: cf, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
 }
+
+// TestRun_DrillCommand_ShowsRenderedTranscript verifies "d <num>" loads the
+// issue's Dispatch logs through the Launcher's Driver and renders the
+// transcript view, replacing the backlog on the next render (#648).
+func TestRun_DrillCommand_ShowsRenderedTranscript(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"working on it"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	launch := newTestLauncher(t, f)
+
+	var out strings.Builder
+	if err := Run(f, dir, strings.NewReader("d 42\nq\n"), &out, launch); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.String(), "working on it") {
+		t.Errorf("output = %q, want the rendered transcript", out.String())
+	}
+}
+
+// TestRun_ToggleCommand_SwitchesToRawLog verifies "t" swaps the drill-in
+// view from rendered to the raw byte-exact log.
+func TestRun_ToggleCommand_SwitchesToRawLog(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"working on it"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	launch := newTestLauncher(t, f)
+
+	var out strings.Builder
+	if err := Run(f, dir, strings.NewReader("d 42\nt\nq\n"), &out, launch); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.String(), `"type":"assistant"`) {
+		t.Errorf("output = %q, want the raw log after toggling", out.String())
+	}
+}
+
+// TestRun_CloseCommand_ReturnsToBacklog verifies "x" leaves the drill-in
+// view and restores the backlog rendering.
+func TestRun_CloseCommand_ReturnsToBacklog(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"working on it"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	launch := newTestLauncher(t, f)
+
+	var out strings.Builder
+	if err := Run(f, dir, strings.NewReader("d 42\nx\nq\n"), &out, launch); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.String(), "fix the thing") {
+		t.Errorf("output = %q, want the backlog restored after close", out.String())
+	}
+}
+
+// TestRun_DrillCommand_NoLauncher_SurfacesError verifies "d <num>" with no
+// Launcher (a launch-less session) surfaces an error instead of panicking
+// on a nil Driver.
+func TestRun_DrillCommand_NoLauncher_SurfacesError(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	var out strings.Builder
+	if err := Run(f, t.TempDir(), strings.NewReader("d 42\nq\n"), &out, nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.String(), "no Driver configured") {
+		t.Errorf("output = %q, want a no-Driver error surfaced", out.String())
+	}
+}
