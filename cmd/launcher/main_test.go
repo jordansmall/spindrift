@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -697,6 +698,36 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "ok: all triage labels present") {
 		t.Errorf("want success message after creation, got:\n%s", out)
+	}
+}
+
+// TestReferenceDocLabelSnippetMatchesTriageDefaults guards against the docs'
+// manual `gh label create` fallback (for consumers who skip `spindrift
+// doctor`) drifting from triageLabelMeta, the doctor subcommand's actual
+// defaults (#611).
+func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "reference.md"))
+	if err != nil {
+		t.Fatalf("read docs/reference.md: %v", err)
+	}
+	line := regexp.MustCompile(`gh label create (\S+)\s+--repo owner/repo --color (\S+) --description "([^"]*)"`)
+	matches := line.FindAllStringSubmatch(string(raw), -1)
+	if len(matches) != len(triageLabelMeta) {
+		t.Fatalf("want %d `gh label create` lines in docs/reference.md, got %d", len(triageLabelMeta), len(matches))
+	}
+	for _, m := range matches {
+		name, color, description := m[1], m[2], m[3]
+		want, ok := triageLabelMeta[name]
+		if !ok {
+			t.Errorf("docs/reference.md snippet creates unknown label %q", name)
+			continue
+		}
+		if color != want.color {
+			t.Errorf("label %q: docs color = %q, want %q (doctor default)", name, color, want.color)
+		}
+		if description != want.description {
+			t.Errorf("label %q: docs description = %q, want %q (doctor default)", name, description, want.description)
+		}
 	}
 }
 
