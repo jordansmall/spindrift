@@ -255,6 +255,17 @@ func TestPrintSubcommands_ConsoleFirst(t *testing.T) {
 	}
 }
 
+// TestPrintHelp_ShowsResearchSubcommand verifies the research dispatch kind
+// (ADR 0022) is discoverable beside dispatch, not buried in a flag doc.
+func TestPrintHelp_ShowsResearchSubcommand(t *testing.T) {
+	var buf bytes.Buffer
+	printHelp(&buf)
+	out := buf.String()
+	if !strings.Contains(out, "research") {
+		t.Errorf("help output must show 'research' subcommand, got:\n%s", out)
+	}
+}
+
 // TestPrintHelpFull_ContainsLabelEntry: the full reference includes --label with its doc.
 func TestPrintHelpFull_ContainsLabelEntry(t *testing.T) {
 	var buf bytes.Buffer

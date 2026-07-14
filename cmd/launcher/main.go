@@ -151,6 +151,41 @@ type config struct {
 	// codeForgeRemoteURL is the plain git remote URL the Box clones from and
 	// pushes to when codeForge is "git". Unused (and unrequired) otherwise.
 	codeForgeRemoteURL string
+
+	// dispatchKind is "work" (the default, zero value) or "research" (ADR
+	// 0022). Set once by bootstrap via applyDispatchKind, never read from
+	// the environment directly — it is operator intent carried by which
+	// subcommand launched (dispatch vs research), not a config knob.
+	dispatchKind string
+}
+
+// dispatchKindWork and dispatchKindResearch are the two Dispatch kinds (ADR
+// 0022). Kinds share the four canonical DispatchState lifecycle states;
+// research selects the fixed agent-research label family (see
+// applyDispatchKind) and a one-shot Settle instead of work's full merge
+// gate.
+const (
+	dispatchKindWork     = "work"
+	dispatchKindResearch = "research"
+)
+
+// applyDispatchKind sets c's dispatchKind marker and, for research, swaps
+// the four lifecycle label fields to the fixed research family
+// (forge.ResearchDispatchLabels) — unlike the work labels these aren't
+// operator-configurable, since the research CI workflow and prompt key off
+// them directly. completeLabel is left blank: the verdict-carrying
+// transition uses IssueTracker.CompleteVerdict instead of a single Complete
+// label.
+func applyDispatchKind(c config, kind string) config {
+	c.dispatchKind = kind
+	if kind == dispatchKindResearch {
+		rl := forge.ResearchDispatchLabels()
+		c.label = rl.Dispatchable
+		c.inProgressLabel = rl.InProgress
+		c.completeLabel = rl.Complete
+		c.failedLabel = rl.Failed
+	}
+	return c
 }
 
 type issue struct {
@@ -366,12 +401,26 @@ func dispatchLabels(c config) forge.DispatchLabels {
 	}
 }
 
+// researchVerdictLabels returns the fixed verdict-label mapping for
+// research-kind construction, or the zero value for work — only
+// ResearchSettle ever calls CompleteVerdict, so a work-kind tracker carrying
+// a zero VerdictLabels is inert.
+func researchVerdictLabels(c config) forge.VerdictLabels {
+	if c.dispatchKind == dispatchKindResearch {
+		return forge.ResearchVerdictLabels()
+	}
+	return forge.VerdictLabels{}
+}
+
 // newIssueTracker returns the IssueTracker adapter selected by ISSUE_TRACKER
-// (default "github").
+// (default "github"), carrying c.dispatchKind's label family (dispatchLabels)
+// and verdict labels (researchVerdictLabels) — the kind-aware seam ADR 0022
+// describes.
 func newIssueTracker(c config) forge.IssueTracker {
+	vl := researchVerdictLabels(c)
 	switch c.issueTracker {
 	case "local":
-		return local.NewLocalTracker(c.localIssuesDir, dispatchLabels(c))
+		return local.NewLocalTracker(c.localIssuesDir, dispatchLabels(c), vl)
 	case "jira":
 		statusMapping, err := jira.ParseStatusMapping(c.jiraStatusMapping)
 		if err != nil {
@@ -387,10 +436,11 @@ func newIssueTracker(c config) forge.IssueTracker {
 			Token:           c.jiraToken,
 			StatusMapping:   statusMapping,
 			Labels:          dispatchLabels(c),
+			VerdictLabels:   vl,
 			IncludeComments: c.jiraIncludeComments,
 		})
 	default:
-		return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
+		return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix, vl)
 	}
 }
 
@@ -454,6 +504,7 @@ func newDriver(c config) driver.Driver {
 func dispatchConfig(c config, cf forge.CodeForge) dispatch.Config {
 	cfg := dispatch.Config{
 		BoxEnvVars:            c.boxEnvVars,
+		Kind:                  c.dispatchKind,
 		TransientRetryMax:     c.transientRetryMax,
 		TransientBackoffSecs:  c.transientBackoffSecs,
 		HoldJitterSecs:        c.holdJitterSecs,
@@ -500,9 +551,13 @@ func settleConfig(c config) settle.Config {
 	}
 }
 
-// newSettle constructs the settle.Settle for one top-level dispatch entry
-// point, reused across every issue in that invocation.
-func newSettle(c config, it forge.IssueTracker, cf forge.CodeForge) *settle.Settle {
+// newSettle constructs the Settler for one top-level dispatch entry point,
+// reused across every issue in that invocation: the research kind's one-shot
+// ResearchSettle, or work's full merge-gate Settle.
+func newSettle(c config, it forge.IssueTracker, cf forge.CodeForge) settle.Settler {
+	if c.dispatchKind == dispatchKindResearch {
+		return settle.NewResearchSettle(it)
+	}
 	return settle.New(settleConfig(c), it, cf)
 }
 
@@ -517,6 +572,7 @@ func wavesConfig(c config) waves.Config {
 		InProgressLabel: c.inProgressLabel,
 		CompleteLabel:   c.completeLabel,
 		FailedLabel:     c.failedLabel,
+		IgnoreBlockers:  c.dispatchKind == dispatchKindResearch,
 	}
 }
 
@@ -950,7 +1006,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "usage: spindrift recover <issue-number>")
 			return 1
 		}
-		lc, err := bootstrap(true)
+		lc, err := bootstrap(true, dispatchKindWork)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
@@ -964,7 +1020,21 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		noBuild, dispatchArgs := dispatchNoBuildArgs(args[1:])
 		forceYes, dispatchArgs := dispatchYesArgs(dispatchArgs)
 		nums := dispatchIssueArgs(dispatchArgs)
-		lc, err := bootstrap(!noBuild)
+		lc, err := bootstrap(!noBuild, dispatchKindWork)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s\n", err)
+			return 1
+		}
+		if len(nums) > 0 {
+			return cmdDispatchSelective(lc, nums, forceYes)
+		}
+		return cmdDispatch(lc)
+	}
+	if args[0] == "research" {
+		noBuild, researchArgs := dispatchNoBuildArgs(args[1:])
+		forceYes, researchArgs := dispatchYesArgs(researchArgs)
+		nums := dispatchIssueArgs(researchArgs)
+		lc, err := bootstrap(!noBuild, dispatchKindResearch)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
