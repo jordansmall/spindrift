@@ -165,7 +165,7 @@ var classifyTests = []struct {
 		name: "Terminal_GenuineTaskFailure",
 		lines: []string{
 			`Agent completed with no valid outcome.`,
-			`SPINDRIFT_OUTCOME issue=1 pr= status=blocked note=failed to open PR`,
+			`SPINDRIFT_OUTCOME issue=1 landing= status=blocked note=failed to open PR`,
 		},
 		wantClass:   outcome.Terminal,
 		wantReason:  outcome.TaskFailed,

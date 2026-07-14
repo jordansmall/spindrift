@@ -11,7 +11,7 @@ import (
 // --- Parse tests ---
 
 func TestParse_WellFormed(t *testing.T) {
-	line := "SPINDRIFT_OUTCOME issue=127 pr=https://github.com/o/r/pull/1 status=ready note=all good"
+	line := "SPINDRIFT_OUTCOME issue=127 landing=https://github.com/o/r/pull/1 status=ready note=all good"
 	o, err := outcome.Parse(line)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -19,8 +19,8 @@ func TestParse_WellFormed(t *testing.T) {
 	if o.Issue != "127" {
 		t.Errorf("Issue: got %q, want %q", o.Issue, "127")
 	}
-	if o.PR != "https://github.com/o/r/pull/1" {
-		t.Errorf("PR: got %q, want %q", o.PR, "https://github.com/o/r/pull/1")
+	if o.Landing != "https://github.com/o/r/pull/1" {
+		t.Errorf("Landing: got %q, want %q", o.Landing, "https://github.com/o/r/pull/1")
 	}
 	if o.Status != "ready" {
 		t.Errorf("Status: got %q, want %q", o.Status, "ready")
@@ -31,7 +31,7 @@ func TestParse_WellFormed(t *testing.T) {
 }
 
 func TestParse_NoteWithEquals(t *testing.T) {
-	line := "SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=blocked note=key=value"
+	line := "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=blocked note=key=value"
 	o, err := outcome.Parse(line)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -42,7 +42,7 @@ func TestParse_NoteWithEquals(t *testing.T) {
 }
 
 func TestParse_NoteWithSpacesAndEquals(t *testing.T) {
-	line := "SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=blocked note=stalled on feat=2"
+	line := "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=blocked note=stalled on feat=2"
 	o, err := outcome.Parse(line)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -52,16 +52,16 @@ func TestParse_NoteWithSpacesAndEquals(t *testing.T) {
 	}
 }
 
-func TestParse_MissingPR(t *testing.T) {
+func TestParse_MissingLanding(t *testing.T) {
 	line := "SPINDRIFT_OUTCOME issue=1 status=ready note=ok"
 	_, err := outcome.Parse(line)
 	if err == nil {
-		t.Fatal("expected error for missing pr, got nil")
+		t.Fatal("expected error for missing landing, got nil")
 	}
 }
 
 func TestParse_EmptyStatus(t *testing.T) {
-	line := "SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status= note=ok"
+	line := "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status= note=ok"
 	_, err := outcome.Parse(line)
 	if err == nil {
 		t.Fatal("expected error for empty status, got nil")
@@ -69,7 +69,7 @@ func TestParse_EmptyStatus(t *testing.T) {
 }
 
 func TestParse_MissingStatus(t *testing.T) {
-	line := "SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 note=ok"
+	line := "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 note=ok"
 	_, err := outcome.Parse(line)
 	if err == nil {
 		t.Fatal("expected error for missing status, got nil")
@@ -77,7 +77,7 @@ func TestParse_MissingStatus(t *testing.T) {
 }
 
 func TestParse_WrongPrefix(t *testing.T) {
-	line := "OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok"
+	line := "OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"
 	_, err := outcome.Parse(line)
 	if err == nil {
 		t.Fatal("expected error for wrong prefix, got nil")
@@ -94,11 +94,11 @@ func TestParse_EmptyLine(t *testing.T) {
 // --- Line / round-trip tests ---
 
 var roundTripCases = []outcome.Outcome{
-	{Issue: "127", PR: "https://github.com/o/r/pull/1", Status: "ready", Note: "all good"},
-	{Issue: "1", PR: "https://github.com/o/r/pull/99", Status: "blocked", Note: "stalled"},
-	{Issue: "42", PR: "https://github.com/o/r/pull/5", Status: "ready", Note: "key=value"},
-	{Issue: "7", PR: "https://github.com/o/r/pull/7", Status: "blocked", Note: "stalled on feat=2"},
-	{Issue: "3", PR: "https://github.com/o/r/pull/3", Status: "merged", Note: ""},
+	{Issue: "127", Landing: "https://github.com/o/r/pull/1", Status: "ready", Note: "all good"},
+	{Issue: "1", Landing: "https://github.com/o/r/pull/99", Status: "blocked", Note: "stalled"},
+	{Issue: "42", Landing: "https://github.com/o/r/pull/5", Status: "ready", Note: "key=value"},
+	{Issue: "7", Landing: "https://github.com/o/r/pull/7", Status: "blocked", Note: "stalled on feat=2"},
+	{Issue: "3", Landing: "https://github.com/o/r/pull/3", Status: "merged", Note: ""},
 }
 
 func TestLine_RoundTrip(t *testing.T) {
@@ -167,7 +167,7 @@ func writeBigLog(t *testing.T, preLines []string, bigLineSize int, postLines []s
 func TestLastInLog_Found(t *testing.T) {
 	path := writeLog(t,
 		"some output",
-		"SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok",
+		"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok",
 	)
 	o, found, err := outcome.LastInLog(path)
 	if err != nil {
@@ -183,9 +183,9 @@ func TestLastInLog_Found(t *testing.T) {
 
 func TestLastInLog_TakesLast(t *testing.T) {
 	path := writeLog(t,
-		"SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=blocked note=stale",
+		"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=blocked note=stale",
 		"some more output",
-		"SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=final",
+		"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=final",
 	)
 	o, found, err := outcome.LastInLog(path)
 	if err != nil {
@@ -228,7 +228,7 @@ func TestLastInLog_OversizedLineBeforeOutcome(t *testing.T) {
 	path := writeBigLog(t,
 		nil,
 		fiveMiB,
-		[]string{"SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok"},
+		[]string{"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"},
 	)
 	o, found, err := outcome.LastInLog(path)
 	if err != nil {
@@ -245,9 +245,9 @@ func TestLastInLog_OversizedLineBeforeOutcome(t *testing.T) {
 func TestLastInLog_OversizedLine_TakesLast(t *testing.T) {
 	const fiveMiB = 5 * 1024 * 1024
 	path := writeBigLog(t,
-		[]string{"SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=blocked note=stale"},
+		[]string{"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=blocked note=stale"},
 		fiveMiB,
-		[]string{"SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=final"},
+		[]string{"SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=final"},
 	)
 	o, found, err := outcome.LastInLog(path)
 	if err != nil {
