@@ -37,8 +37,8 @@ func TestSelfHeal_ForwardsFailureDetailToFix(t *testing.T) {
 	d := dispatch.NewFake()
 	landing := s.selfHeal(d, "1", testPR)
 
-	if landing != LandingMerged {
-		t.Fatalf("selfHeal = %v, want LandingMerged after one fix pass", landing)
+	if landing != landingMerged {
+		t.Fatalf("selfHeal = %v, want landingMerged after one fix pass", landing)
 	}
 	if len(d.FixCalls) != 1 || d.FixCalls[0].CIFailureSummary != "lint: FAILURE\n2 errors" {
 		t.Errorf("want fix pass forwarded the scripted failure detail; got %+v", d.FixCalls)
@@ -60,7 +60,7 @@ func TestSelfHeal_EmptyFailureDetailFallsBackWithNoError(t *testing.T) {
 	d := dispatch.NewFake()
 	landing := s.selfHeal(d, "1", testPR)
 
-	if landing != LandingMerged {
+	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v; a FailureDetail fetch error must not block the fix pass", landing)
 	}
 	if len(d.FixCalls) != 1 || d.FixCalls[0].CIFailureSummary != "" {
@@ -78,8 +78,8 @@ func TestSelfHeal_SuccessFirstTry(t *testing.T) {
 	d := dispatch.NewFake()
 	landing := s.selfHeal(d, "1", testPR)
 
-	if landing != LandingMerged {
-		t.Errorf("selfHeal = %v, want LandingMerged on first-try SUCCESS", landing)
+	if landing != landingMerged {
+		t.Errorf("selfHeal = %v, want landingMerged on first-try SUCCESS", landing)
 	}
 	if len(d.FixCalls) != 0 {
 		t.Errorf("expected no fix calls, got %+v", d.FixCalls)
@@ -102,8 +102,8 @@ func TestSelfHeal_GenuineRedMaxZero(t *testing.T) {
 	d := dispatch.NewFake()
 	landing := s.selfHeal(d, "1", testPR)
 
-	if landing != LandingFailed {
-		t.Errorf("selfHeal = %v, want LandingFailed (maxFixAttempts=0)", landing)
+	if landing != landingFailed {
+		t.Errorf("selfHeal = %v, want landingFailed (maxFixAttempts=0)", landing)
 	}
 	if len(d.FixCalls) != 0 {
 		t.Errorf("expected no fix calls (maxFixAttempts=0), got %+v", d.FixCalls)
@@ -127,8 +127,8 @@ func TestSelfHeal_GenuineRedFixSucceeds(t *testing.T) {
 	d := dispatch.NewFake()
 	landing := s.selfHeal(d, "1", testPR)
 
-	if landing != LandingMerged {
-		t.Errorf("selfHeal = %v, want LandingMerged after one fix pass", landing)
+	if landing != landingMerged {
+		t.Errorf("selfHeal = %v, want landingMerged after one fix pass", landing)
 	}
 	if passes := fixPasses(d); len(passes) != 1 || passes[0] != 1 {
 		t.Errorf("expected exactly fix-pass-1, got %v", passes)
@@ -156,8 +156,8 @@ func TestSelfHeal_ExhaustsAllPasses(t *testing.T) {
 	d := dispatch.NewFake()
 	landing := s.selfHeal(d, "1", testPR)
 
-	if landing != LandingFailed {
-		t.Errorf("selfHeal = %v, want LandingFailed after exhausting all fix passes", landing)
+	if landing != landingFailed {
+		t.Errorf("selfHeal = %v, want landingFailed after exhausting all fix passes", landing)
 	}
 	passes := fixPasses(d)
 	if len(passes) != 2 {
@@ -188,8 +188,8 @@ func TestSelfHeal_ErrorStateTriggersFixPass(t *testing.T) {
 	d := dispatch.NewFake()
 	landing := s.selfHeal(d, "1", testPR)
 
-	if landing != LandingMerged {
-		t.Errorf("selfHeal = %v, want LandingMerged after ERROR then SUCCESS with fix pass", landing)
+	if landing != landingMerged {
+		t.Errorf("selfHeal = %v, want landingMerged after ERROR then SUCCESS with fix pass", landing)
 	}
 	if len(d.FixCalls) != 1 {
 		t.Errorf("expected 1 fix call, got %+v", d.FixCalls)
@@ -207,8 +207,8 @@ func TestSelfHeal_PendingTimeoutNoFix(t *testing.T) {
 	d := dispatch.NewFake()
 	landing := s.selfHeal(d, "1", testPR)
 
-	if landing != LandingFailed {
-		t.Errorf("selfHeal = %v, want LandingFailed on PENDING timeout", landing)
+	if landing != landingFailed {
+		t.Errorf("selfHeal = %v, want landingFailed on PENDING timeout", landing)
 	}
 	if len(d.FixCalls) != 0 {
 		t.Errorf("expected no fix calls on PENDING timeout, got %+v", d.FixCalls)

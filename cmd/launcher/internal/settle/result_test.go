@@ -2,23 +2,23 @@ package settle
 
 import "testing"
 
-// TestGateResultZeroValueIsTerminal verifies the GateResult zero value is
-// GateTerminal — the safe outcome (no label swap performed by the caller
+// TestGateResult_ZeroValueIsTerminal verifies the gateResult zero value is
+// gateTerminal — the safe outcome (no label swap performed by the caller
 // without an explicit assignment defaults to the non-retriable case, never
 // to green).
-func TestGateResultZeroValueIsTerminal(t *testing.T) {
-	var g GateResult
-	if g != GateTerminal {
-		t.Errorf("zero value GateResult = %v, want GateTerminal", g)
+func TestGateResult_ZeroValueIsTerminal(t *testing.T) {
+	var g gateResult
+	if g != gateTerminal {
+		t.Errorf("zero value gateResult = %v, want gateTerminal", g)
 	}
 }
 
-// TestLandingResultZeroValueIsFailed verifies the LandingResult zero value
-// is LandingFailed — an unset landing result must never read as merged or
+// TestLandingResult_ZeroValueIsFailed verifies the landingResult zero value
+// is landingFailed — an unset landing result must never read as merged or
 // manual.
-func TestLandingResultZeroValueIsFailed(t *testing.T) {
-	var l LandingResult
-	if l != LandingFailed {
-		t.Errorf("zero value LandingResult = %v, want LandingFailed", l)
+func TestLandingResult_ZeroValueIsFailed(t *testing.T) {
+	var l landingResult
+	if l != landingFailed {
+		t.Errorf("zero value landingResult = %v, want landingFailed", l)
 	}
 }
