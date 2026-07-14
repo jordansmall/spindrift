@@ -104,9 +104,11 @@ is the in-box entrypoint. Respect that split — it is the point of the project.
   the core is language-agnostic ([ADR 0003](docs/adr/0003-language-agnostic-core.md)).
 - **`cmd/launcher/`** — the Go host-side launcher (its own module). Public
   behavior lives at the top level; `internal/` holds the seams — `forge`,
-  `outcome`, `runner`, `heartbeat`, `usage`. The flag table
-  (`flagtable_gen.go`) and the knob-defaults table (`defaults_gen.go`) are
-  generated and pinned by a check; don't hand-edit them.
+  `outcome`, `runner`, `driver` (the Driver interface and registry; each
+  Driver's own behavior lives in a sibling subpackage, e.g. `driver/claude`),
+  `usage`. The flag table (`flagtable_gen.go`) and the knob-defaults table
+  (`defaults_gen.go`) are generated and pinned by a check; don't hand-edit
+  them.
   Go tests use standard `_test` files alongside the code.
 - **`agent/`** — the in-box entrypoint (`entrypoint.sh` and friends). Bash here
   is deliberately thin: nix computes the glue, bash only executes it
