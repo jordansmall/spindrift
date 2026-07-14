@@ -523,12 +523,20 @@ in
   '';
 
   # The agent-image drvPath must be a pure function of flake content, not the
-  # Consumer's host system (issue #597, ADR 0019's freshness probe relies on
-  # this). Reproduces the darwin-vs-linux divergence at pure eval time — no
-  # darwin builder is needed to read a foreign-system derivation's drvPath —
-  # by baking the *same* { name; src; } skill entry through mkHarness calls
-  # that differ only in `system`. Before the fix a pre-built host derivation
-  # in `skills` would tag the whole image graph with the host's system; the
+  # Consumer's host system (issue #597). ADR 0019's freshness probe evaluates
+  # `.#packages.<linuxSystem>.agent-image.drvPath` fresh and compares it
+  # against the launcher's baked IMAGE_DRV. On Linux the two hosts coincide,
+  # so a host-tagged drvPath still matches by accident; on a macOS Consumer
+  # they never can, so the probe reports "rebuild needed" forever and
+  # continuous dispatch loops rebuilding an already-current image instead of
+  # claiming work (issue #598) — this check locks in the invariant so a
+  # future baked input (a new skill, prompt, or tool built with the
+  # Consumer's host pkgs) can't silently reintroduce that regression.
+  # Reproduces the darwin-vs-linux divergence at pure eval time — no darwin
+  # builder is needed to read a foreign-system derivation's drvPath — by
+  # baking the *same* { name; src; } skill entry through mkHarness calls that
+  # differ only in `system`. Before the fix a pre-built host derivation in
+  # `skills` would tag the whole image graph with the host's system; the
   # content form never constructs a derivation outside the image's own
   # (always-Linux) pkgs, so the two must coincide.
   skills-content-form-drvpath-host-independent =
