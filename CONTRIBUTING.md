@@ -88,7 +88,7 @@ the launcher's Go wiring (when the binary reads the knob directly) is the only
 other hand-edit.
 
 To exercise the whole loop end to end against a live repo, use `./dogfood.sh`
-(never hand-run `nix run .#run`) — see [`docs/reference.md`](docs/reference.md).
+(never hand-run `spindrift dispatch`) — see [`docs/reference.md`](docs/reference.md).
 
 ## Where code goes
 

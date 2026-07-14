@@ -32,9 +32,9 @@ terminal). Bare `spindrift` with no subcommand — or an unrecognized
 subcommand — prints this concise help instead of dispatching; `dispatch`
 remains the sole way to drain the queue.
 
-> **Deprecated (removed in v0.2.0, see [`MIGRATING.md`](../MIGRATING.md)):**
-> `nix run .#run` and `nix run .#build` still work but print a notice and forward
-> to `spindrift dispatch` / `spindrift build`.
+> **Removed in v0.5.0 (see [`MIGRATING.md`](../MIGRATING.md)):** `nix run
+> .#run` and `nix run .#build` no longer exist as flake outputs; use
+> `spindrift dispatch` / `spindrift build` instead.
 
 If you use **direnv**, the template's `.envrc` (`use flake`) activates the dev
 shell automatically on `cd` — no manual `nix develop` needed.

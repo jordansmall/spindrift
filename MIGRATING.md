@@ -1,9 +1,11 @@
 # Migration Guide
 
-## `nix run .#run` / `nix run .#build` → `spindrift` CLI
+## `nix run .#run` / `nix run .#build` (removed in v0.5.0)
 
-spindrift 0.1.1 introduces a unified CLI. The `nix run .#run` and `nix run
-.#build` app idioms are deprecated and will be removed in **v0.2.0**.
+spindrift 0.1.1 introduced a unified CLI. The `nix run .#run` and `nix run
+.#build` app idioms were deprecated at that point and were removed in
+**v0.5.0** (issue #613) — a Consumer invoking either now gets an
+unknown-flake-output error, not a forwarding alias.
 
 ### Quick-start with the new CLI
 
@@ -34,9 +36,9 @@ spindrift --version
 
 | Old command              | New command              | Notes                               |
 |--------------------------|--------------------------|-------------------------------------|
-| `nix run .#run`          | `spindrift dispatch`     | Deprecated alias prints a notice    |
+| `nix run .#run`          | `spindrift dispatch`     | Removed alias (v0.5.0)              |
 | `nix run .`              | `spindrift dispatch`     | `apps.default` now points to CLI    |
-| `nix run .#build`        | `spindrift build`        | Deprecated alias prints a notice    |
+| `nix run .#build`        | `spindrift build`        | Removed alias (v0.5.0)              |
 | `ISSUE_NUMBER=42 nix run .#run` | `spindrift dispatch 42` | Positional arg replaces env var |
 
 ### Template quick-start

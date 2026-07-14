@@ -65,6 +65,9 @@ yet:
   release as warn-then-exec aliases that print a one-line stderr notice naming
   the new command and the removal version, then exec through so nothing breaks
   today.
+  **Note (issue #613):** `apps.{build,run}` were removed in v0.5.0, two minor
+  versions after the promised v0.2.0 — the aliases outlived their one-release
+  grace period until this cleanup.
 - **Flake options** deprecate module-style: renames use
   `mkRenamedOptionModule` / `mkRemovedOptionModule` (the Home-Manager idiom) so
   the old option keeps evaluating with a deprecation warning that points at the
@@ -115,6 +118,8 @@ guarantee.
   `apps.{build,run}` retained as deprecated aliases for one release. Consumer
   docs, the template `flake.nix`, and a new template `.envrc` move to the
   devShell-first flow.
+  **Note (issue #613):** `apps.{build,run}` (and the matching
+  `packages.{build,run}`) are gone as of v0.5.0.
 - A `.release-please-config.json` + `.release-please-manifest.json` + a
   release-please GitHub workflow are added; the two hardcoded `version = "0.1.0"`
   strings in `mkHarness.nix` are replaced by a read of the manifest, threaded
