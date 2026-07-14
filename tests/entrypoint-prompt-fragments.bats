@@ -268,4 +268,3 @@ EOF
   [ "$status" -eq 0 ]
   grep -q 'FIXTURE-ROW-MARKER' "$CLAUDE_PROMPT_FILE"
 }
-
