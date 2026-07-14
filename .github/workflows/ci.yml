@@ -36,3 +36,11 @@ jobs:
       # assert at eval time. On a Linux runner this needs no podman fallback.
       - name: Build the agent image
         run: nix build .#packages.x86_64-linux.agent-image --print-build-logs
+
+      # Enforcement tests (issue #576): launch a real bwrap/OCI sandbox and
+      # assert isolation holds from inside it, not just that the flags land on
+      # argv. Gated behind the `integration` build tag and self-skipping when no
+      # real runtime is usable, so a runner lacking user namespaces or a
+      # container daemon degrades to a clean skip rather than a failure.
+      - name: Runner sandbox integration tests
+        run: nix develop -c bash -c 'cd cmd/launcher && go test -tags=integration -v ./internal/runner/...'
