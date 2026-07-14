@@ -330,15 +330,20 @@ in a driving loop other than `dogfood.sh`; see `lib/env-schema.nix`'s
 only layout Claude Code discovers, so a flat `<name>.md` file is silently
 ignored — so the in-box agent can invoke them as slash commands:
 
-- [`caveman`](https://github.com/juliusbrussee/caveman) — advertised as
-  `/caveman`, and the rendered issue-pass and fix-pass prompts direct the
-  agent to default to it for narration and prose, compressing narration
-  ~65% in output tokens without touching code, commands, error messages, or
-  commit messages.
+- [`caveman`](https://github.com/juliusbrussee/caveman) — `/caveman`. The
+  rendered issue-pass and fix-pass prompts direct the agent to default to it
+  for narration and prose, compressing narration ~65% in output tokens
+  without touching code, commands, error messages, or commit messages.
 - [`tdd`](https://github.com/mattpocock/skills) and
-  [`to-issues`](https://github.com/mattpocock/skills) — `/tdd`,
-  `/to-issues`.
-- [`commit`](https://github.com/jordansmall/skills) — `/commit`.
+  [`to-tickets`](https://github.com/mattpocock/skills) — `/tdd`,
+  `/to-tickets` (pinned at tag `v1.1.0`). The IMPLEMENT section defers its
+  test-first workflow to `/tdd` when baked.
+- [`commit`](https://github.com/jordansmall/skills) — `/commit`. The COMMIT
+  section defers commit-message formatting to `/commit` when baked.
+
+Beyond the generic "skills available, prefer them" preamble, each of these
+skills gets a deferral placed at the exact prompt section its inline guidance
+would otherwise duplicate, gated on that skill being baked.
 
 The pins are non-flake `caveman` / `matt-skills` / `jordan-skills` inputs in
 `flake.nix` (`flake.lock` owns the revs); the baked set lives in
@@ -346,9 +351,9 @@ The pins are non-flake `caveman` / `matt-skills` / `jordan-skills` inputs in
 wired.
 
 To opt out of a skill, drop it from the consumer's `skills` list (see
-`nix/dogfood-skills.nix`). The caveman-default instruction is rendered only
-when `caveman/SKILL.md` is actually present at the baked skills path, so a
-consumer that skips it gets prompts with zero caveman residue.
+`nix/dogfood-skills.nix`). Each per-skill deferral is rendered only when that
+skill's `SKILL.md` is actually present at the baked skills path, so a
+consumer that skips a skill gets prompts with zero residue for it.
 
 ## Console
 

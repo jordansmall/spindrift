@@ -40,7 +40,7 @@ elsewhere.
 
 # IMPLEMENT
 
-${SKILL_PREAMBLE}Work test-first, one slice at a time. Hard rule:
+${SKILL_PREAMBLE}${TDD_STEP}Work test-first, one slice at a time. Hard rule:
 
 1. RED: write ONE failing test, run it, confirm it fails for the right reason.
    Never write implementation code before a failing test exists.
@@ -81,7 +81,7 @@ or `status=blocked`) has been printed.
 
 ${AUTO_FORMAT_STEP}${AUTO_LINT_STEP}# COMMIT
 
-Strict Conventional Commits v1.0.0, hard-wrapped (subject ≤50, body ≤72).
+${COMMIT_STEP}Strict Conventional Commits v1.0.0, hard-wrapped (subject ≤50, body ≤72).
 Prefer several small focused commits over one big one — commit each logical
 unit (domain change, then wiring, then tests) so each stands alone. Add a body
 only when the change isn't self-evident.

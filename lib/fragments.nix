@@ -9,10 +9,10 @@
 #   gate     - bash variable name tested for non-emptiness to include the
 #              step. The three knob-gated steps (auto-format, auto-lint,
 #              CI-failure summary) name their launcher-delivered env var
-#              directly; the three computed-gate steps (skills discovery,
-#              caveman-baked, filer-enabled) name a variable a short
-#              precompute line sets before the loop runs (agent/entrypoint.sh,
-#              phase_prompt_assembly).
+#              directly; the computed-gate steps (skills discovery, the
+#              per-skill caveman/tdd/commit deferrals, filer-enabled) name a
+#              variable a short precompute line sets before the loop runs
+#              (agent/entrypoint.sh, phase_prompt_assembly).
 #   fragment - basename under prompts/fragments/ (templates/default or a
 #              SPINDRIFT_PROMPT_DIR override) to render via `_subst` when the
 #              gate is non-empty.
@@ -36,6 +36,16 @@
     gate = "CAVEMAN_BAKED";
     fragment = "caveman-default.md";
     var = "CAVEMAN_STEP";
+  }
+  {
+    gate = "TDD_BAKED";
+    fragment = "tdd-default.md";
+    var = "TDD_STEP";
+  }
+  {
+    gate = "COMMIT_BAKED";
+    fragment = "commit-default.md";
+    var = "COMMIT_STEP";
   }
   {
     gate = "FILER_ENABLED";
