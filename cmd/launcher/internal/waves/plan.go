@@ -84,6 +84,14 @@ type Config struct {
 	InProgressLabel string
 	CompleteLabel   string
 	FailedLabel     string
+
+	// IgnoreBlockers skips blocker-edge gating entirely — the research
+	// dispatch kind (ADR 0022): research lands no code, so it is never held
+	// on an unmerged dependency, a batch sibling's Failed label never
+	// cascades to it, and the OriginClaimed single-issue path never writes
+	// logs/blocked.txt. Wave caps (MaxParallel/MaxJobs) and dispatch order
+	// still apply unchanged.
+	IgnoreBlockers bool
 }
 
 // NewPlan decides how in.Issues should be dispatched. Every origin —

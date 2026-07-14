@@ -139,9 +139,9 @@ outer:
 		// top of in-progress, leaving the issue double-labeled. That path
 		// has its own blocked-marker signaling via the writeBlockedMarker
 		// call below.
-		case origin != OriginClaimed && hasFailedInBatchBlocker(cfg, it, iss.Number, edges):
+		case !cfg.IgnoreBlockers && origin != OriginClaimed && hasFailedInBatchBlocker(cfg, it, iss.Number, edges):
 			blockerFailed = append(blockerFailed, iss)
-		case !issueIsReady(it, cf, iss.Number, edges):
+		case !cfg.IgnoreBlockers && !issueIsReady(it, cf, iss.Number, edges):
 			fmt.Printf("    ~~ #%s blocked (a blocker is not '%s'); skipping\n", iss.Number, cfg.CompleteLabel)
 		default:
 			if collider, overlapped := checkOverlap(iss.Number); overlapped {
@@ -165,11 +165,13 @@ outer:
 		// releases the claim and comments. Give up — no wait, no recovery.
 		if origin == OriginClaimed && len(issues) > 0 {
 			num := issues[0].Number
-			if blockers := unreadyBlockers(it, cf, num, edges); len(blockers) > 0 {
-				if err := writeBlockedMarker(pwd, blockers, sources[num]); err != nil {
-					return err
+			if !cfg.IgnoreBlockers {
+				if blockers := unreadyBlockers(it, cf, num, edges); len(blockers) > 0 {
+					if err := writeBlockedMarker(pwd, blockers, sources[num]); err != nil {
+						return err
+					}
+					fmt.Printf("==> #%s blocked; wrote logs/%s for the pipeline to release the claim\n", num, blockedMarker)
 				}
-				fmt.Printf("==> #%s blocked; wrote logs/%s for the pipeline to release the claim\n", num, blockedMarker)
 			}
 			fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", cfg.Label)
 			return nil
