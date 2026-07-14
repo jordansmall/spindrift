@@ -170,6 +170,32 @@ func TestFake_ListIssues_ByDispatchState(t *testing.T) {
 	}
 }
 
+// --- ListOpenIssues tests ---
+
+// TestFake_ListOpenIssues_AllStatesAscendingExcludesClosed verifies
+// ListOpenIssues returns every open issue regardless of dispatch label
+// (including one with none at all), ascending by number, and skips closed
+// issues — the full backlog the Console browses, unlike ListIssues which
+// filters to a single dispatch state.
+func TestFake_ListOpenIssues_AllStatesAscendingExcludesClosed(t *testing.T) {
+	f := forge.NewFake(testLabels)
+	f.SetIssue(forge.Issue{Number: "3", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "1", State: forge.IssueOpen, Labels: []string{"agent-in-progress"}})
+	f.SetIssue(forge.Issue{Number: "2", State: forge.IssueOpen}) // untriaged: no dispatch label
+	f.SetIssue(forge.Issue{Number: "9", State: forge.IssueClosed, Labels: []string{"agent-complete"}})
+
+	issues, err := f.ListOpenIssues()
+	if err != nil {
+		t.Fatalf("ListOpenIssues: %v", err)
+	}
+	if len(issues) != 3 {
+		t.Fatalf("want 3 open issues, got %d: %+v", len(issues), issues)
+	}
+	if issues[0].Number != "1" || issues[1].Number != "2" || issues[2].Number != "3" {
+		t.Errorf("wrong order: %v", issues)
+	}
+}
+
 // --- DepsOf tests ---
 
 func TestFake_DepsOf_ParsesBody(t *testing.T) {

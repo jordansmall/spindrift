@@ -118,6 +118,38 @@ func TestLocalTracker_ListIssues_OrderedByCreated(t *testing.T) {
 	}
 }
 
+// TestLocalTracker_ListOpenIssues_AllStatesOrderedByCreated verifies
+// ListOpenIssues returns every issue regardless of its frontmatter state
+// marker, ordered by created ascending — unlike ListIssues, which filters
+// to a single state.
+func TestLocalTracker_ListOpenIssues_AllStatesOrderedByCreated(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+
+	writeLocalIssue(t, dir, "second", localIssue{frontmatter: localFrontmatter{
+		Title: "Second", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z",
+	}})
+	writeLocalIssue(t, dir, "first", localIssue{frontmatter: localFrontmatter{
+		Title: "First", State: labels.Dispatchable, Created: "2026-07-08T12:00:00Z",
+	}})
+	writeLocalIssue(t, dir, "in-progress", localIssue{frontmatter: localFrontmatter{
+		Title: "In Progress", State: labels.InProgress, Created: "2026-07-07T12:00:00Z",
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	issues, err := lt.ListOpenIssues()
+	if err != nil {
+		t.Fatalf("ListOpenIssues: %v", err)
+	}
+	if len(issues) != 3 {
+		t.Fatalf("len(issues) = %d, want 3: %+v", len(issues), issues)
+	}
+	if issues[0].Number != "in-progress" || issues[1].Number != "first" || issues[2].Number != "second" {
+		t.Errorf("order = [%s, %s, %s], want [in-progress, first, second]",
+			issues[0].Number, issues[1].Number, issues[2].Number)
+	}
+}
+
 func TestLocalTracker_TransitionState_RewritesFrontmatterInPlace(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
