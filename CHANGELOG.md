@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.2](https://github.com/jordansmall/spindrift/compare/v0.4.1...v0.4.2) (2026-07-14)
+
+
+### Features
+
+* **dogfood:** enable the Filer on spindrift's own harness ([cfbdd64](https://github.com/jordansmall/spindrift/commit/cfbdd641414ff25f8131cd8354b8635ee67228e7)), closes [#616](https://github.com/jordansmall/spindrift/issues/616)
+
+
+### Bug Fixes
+
+* **nix:** scope the dogfood filer-model check to the filer entry ([667ed59](https://github.com/jordansmall/spindrift/commit/667ed5974c8653238aeef774e6863bf314fbc778))
+
+
+### Documentation
+
+* **claude:** document the agent-review-finding label ([f5413a1](https://github.com/jordansmall/spindrift/commit/f5413a188e34869bd335d586eea87acce6a4a391))
+
 ## [0.4.1](https://github.com/jordansmall/spindrift/compare/v0.4.0...v0.4.1) (2026-07-14)
 
 
