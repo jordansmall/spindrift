@@ -360,23 +360,26 @@ phase_prompt_assembly() {
   # Discover available skills at DRIVER_SKILLS_DIR and build a directive to
   # prefer them over the inline guidance where they apply -- the gate
   # variable the skill-preamble registry row (lib/fragments.nix) names.
+  # Claude Code discovers a skill as a directory holding a SKILL.md
+  # (DRIVER_SKILLS_DIR/<name>/SKILL.md), never a flat <name>.md file, so the
+  # skill name advertised in SKILLS_FOUND is the directory basename.
   local SKILLS_FOUND=""
   if [ -d "$DRIVER_SKILLS_DIR" ]; then
     local _sf _sn
-    for _sf in "${DRIVER_SKILLS_DIR}/"*.md; do
+    for _sf in "${DRIVER_SKILLS_DIR}/"*/SKILL.md; do
       [ -f "$_sf" ] || continue
-      _sn="$(basename "$_sf" .md)"
+      _sn="$(basename "$(dirname "$_sf")")"
       SKILLS_FOUND="${SKILLS_FOUND:+${SKILLS_FOUND}, }${_sn}"
     done
   fi
 
   # One-liners setting the two other computed gates the caveman-default and
   # file-issues registry rows name: the caveman skill actually baked at
-  # DRIVER_SKILLS_DIR/caveman.md (issue #487), and the filer opt-in
+  # DRIVER_SKILLS_DIR/caveman/SKILL.md (issue #487), and the filer opt-in
   # provisioned in AGENTS_JSON_TEMPLATE.
   local CAVEMAN_BAKED=""
   # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-  [ -f "${DRIVER_SKILLS_DIR}/caveman.md" ] && CAVEMAN_BAKED=1
+  [ -f "${DRIVER_SKILLS_DIR}/caveman/SKILL.md" ] && CAVEMAN_BAKED=1
   local FILER_ENABLED=""
   if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
     # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below

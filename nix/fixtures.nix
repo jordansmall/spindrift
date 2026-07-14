@@ -4,6 +4,8 @@
   system,
   flake-parts,
   caveman,
+  matt-skills,
+  jordan-skills,
   revision ? "unknown",
 }:
 let
@@ -13,7 +15,9 @@ let
 
   # The dogfood's baked skills, shared with flake.nix's `spindrift` module
   # config the same way (issue #486).
-  dogfoodSkills = import ./dogfood-skills.nix { inherit caveman; };
+  dogfoodSkills = import ./dogfood-skills.nix {
+    inherit caveman matt-skills jordan-skills;
+  };
 
   # The launchers pin the real `gh` via runtimeInputs, which would shadow
   # a PATH-injected fake; so the bats-driven harnesses below overlay `gh`
@@ -221,7 +225,7 @@ let
   # derivation — proves the fixture itself carries no host-tagged skill into
   # either harness below.
   bakedSkillFixture = {
-    name = "baked-skill.md";
+    name = "baked-skill";
     src = ''
       ---
       name: baked-skill

@@ -12,12 +12,12 @@ setup() {
 # /home/agent (mkHarness.nix sets HOME=/home/agent for OCI; bwrap.go passes
 # --setenv HOME /home/agent). The entrypoint invokes `claude -p` which
 # discovers skills from HOME. The fake claude stub mirrors real discovery:
-# it scans $HOME/.claude/skills/*.md and logs each file found. The test
-# seeds a skill there and asserts the fake claude discovers it, proving the
-# full discovery path without requiring a live LLM.
+# it scans $HOME/.claude/skills/*/SKILL.md and logs each skill dir found. The
+# test seeds a skill there and asserts the fake claude discovers it, proving
+# the full discovery path without requiring a live LLM.
 @test "headless agent discovers a skill seeded at HOME/.claude/skills" {
-  mkdir -p "$HOME/.claude/skills"
-  cat >"$HOME/.claude/skills/test-skill.md" <<'SKILL'
+  mkdir -p "$HOME/.claude/skills/test-skill"
+  cat >"$HOME/.claude/skills/test-skill/SKILL.md" <<'SKILL'
 ---
 name: test-skill
 description: A stub skill used only by this test.
@@ -26,8 +26,9 @@ Do the test thing.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # The fake claude reports each discovered skill; assert this one was found.
-  grep -q "skill discovered: test-skill.md" "$CLAUDE_LOG"
+  # The fake claude reports each discovered skill by its directory name; assert
+  # this one was found.
+  grep -q "skill discovered: test-skill" "$CLAUDE_LOG"
 }
 
 # --- prompt skill preference (issue #120) -------------------------------------
@@ -36,8 +37,8 @@ SKILL
 # with no skill reference — the inline path is the floor, the skill the upgrade.
 
 @test "prompt references available skill when present at HOME/.claude/skills" {
-  mkdir -p "$HOME/.claude/skills"
-  cat >"$HOME/.claude/skills/tdd.md" <<'SKILL'
+  mkdir -p "$HOME/.claude/skills/tdd"
+  cat >"$HOME/.claude/skills/tdd/SKILL.md" <<'SKILL'
 ---
 name: tdd
 description: Test-driven development skill.
@@ -59,11 +60,11 @@ SKILL
 }
 
 @test "prompt advertises /caveman when the caveman skill is baked (issue #486)" {
-  # The dogfood Box bakes the pinned upstream caveman skill under the
-  # basename caveman.md; discovery is name-driven (basename minus .md), so
-  # a skill file at that basename must surface "caveman" in SKILLS_FOUND.
-  mkdir -p "$HOME/.claude/skills"
-  cat >"$HOME/.claude/skills/caveman.md" <<'SKILL'
+  # The dogfood Box bakes the pinned upstream caveman skill as the directory
+  # caveman/SKILL.md; discovery is name-driven (the skill dir basename), so a
+  # skill at that path must surface "caveman" in SKILLS_FOUND.
+  mkdir -p "$HOME/.claude/skills/caveman"
+  cat >"$HOME/.claude/skills/caveman/SKILL.md" <<'SKILL'
 ---
 name: caveman
 description: Ultra-compressed communication mode.
@@ -82,8 +83,8 @@ SKILL
 # above already satisfies without this feature.
 
 @test "prompt directs the agent to caveman narration by default when caveman is baked" {
-  mkdir -p "$HOME/.claude/skills"
-  cat >"$HOME/.claude/skills/caveman.md" <<'SKILL'
+  mkdir -p "$HOME/.claude/skills/caveman"
+  cat >"$HOME/.claude/skills/caveman/SKILL.md" <<'SKILL'
 ---
 name: caveman
 description: Ultra-compressed communication mode.
@@ -97,8 +98,8 @@ SKILL
 }
 
 @test "prompt carries no caveman-default narration instruction when caveman is not baked" {
-  mkdir -p "$HOME/.claude/skills"
-  cat >"$HOME/.claude/skills/tdd.md" <<'SKILL'
+  mkdir -p "$HOME/.claude/skills/tdd"
+  cat >"$HOME/.claude/skills/tdd/SKILL.md" <<'SKILL'
 ---
 name: tdd
 description: Test-driven development skill.
@@ -117,8 +118,8 @@ SKILL
 # way the COMMS/CHECK/outcome injection tests above do.
 @test "fix pass gets caveman-default narration via the injected COMMS block when caveman is baked" {
   export FIX_PASS="2"
-  mkdir -p "$HOME/.claude/skills"
-  cat >"$HOME/.claude/skills/caveman.md" <<'SKILL'
+  mkdir -p "$HOME/.claude/skills/caveman"
+  cat >"$HOME/.claude/skills/caveman/SKILL.md" <<'SKILL'
 ---
 name: caveman
 description: Ultra-compressed communication mode.

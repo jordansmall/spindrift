@@ -34,6 +34,39 @@
         "type": "github"
       }
     },
+    "jordan-skills": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783004250,
+        "narHash": "sha256-10A2e2XtkDIih4TrXJqElhxitzpMI+q2WJ/Y30Azb2k=",
+        "owner": "jordansmall",
+        "repo": "skills",
+        "rev": "aec9cb4e1bbec666423c5f7fd678c25514a481b7",
+        "type": "github"
+      },
+      "original": {
+        "owner": "jordansmall",
+        "repo": "skills",
+        "type": "github"
+      }
+    },
+    "matt-skills": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783516840,
+        "narHash": "sha256-XqF709Y9GMKINzZITlbCTyatG9AxRZh0qn2vcv1Z8yo=",
+        "owner": "mattpocock",
+        "repo": "skills",
+        "rev": "d574778f94cf620fcc8ce741584093bc650a61d3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "mattpocock",
+        "ref": "v1.1.0",
+        "repo": "skills",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1783522502,
@@ -69,6 +102,8 @@
       "inputs": {
         "caveman": "caveman",
         "flake-parts": "flake-parts",
+        "jordan-skills": "jordan-skills",
+        "matt-skills": "matt-skills",
         "nixpkgs": "nixpkgs"
       }
     }

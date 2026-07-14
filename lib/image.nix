@@ -65,9 +65,12 @@
   injectFixSharedBlocks,
   # The conditional prompt fragments directory (issue #463).
   fragmentsSourceDir,
-  # Skill files baked into the image at /home/agent/.claude/skills. Each
-  # element is a path, a pre-built derivation, or a { name; src; } content
-  # entry (issue #597) realized with this (image) pkgs.
+  # Skills baked into the image at /home/agent/.claude/skills. Each element is
+  # baked as a `<name>/SKILL.md` directory — Claude Code discovers skills only
+  # as directories, never flat `<name>.md` files. A { name; src; } content
+  # entry (issue #597) supplies the skill name and SKILL.md body, realized with
+  # this (image) pkgs; a path or derivation is a skill directory copied under
+  # its own basename.
   skills,
 }:
 let
@@ -179,17 +182,23 @@ let
       mkdir -p $out/home/agent/${driverEntry.skillsDirRelative}
       ${lib.concatMapStrings (
         f:
-        # A { name; src; } content entry is re-realized with THIS pkgs (the
-        # image's own Linux instantiation, mirroring the prompts above) rather
-        # than copied as a pre-built derivation, so the skill never carries a
-        # consumer host's system into the image's derivation graph (#597).
+        # Claude Code discovers a skill only as a directory holding a SKILL.md
+        # (~/.claude/skills/<name>/SKILL.md); a flat <name>.md file is ignored,
+        # so every entry is baked under its own <name>/ directory. A
+        # { name; src; } content entry names the skill via `name` and is
+        # re-realized with THIS pkgs (the image's own Linux instantiation,
+        # mirroring the prompts above) rather than copied as a pre-built
+        # derivation, so the skill never carries a consumer host's system into
+        # the image's derivation graph (#597); a path/derivation entry is a
+        # skill directory copied verbatim under its own basename.
         if builtins.isAttrs f && !(lib.isDerivation f) then
           ''
-            cp ${pkgs.writeText f.name f.src} $out/home/agent/${driverEntry.skillsDirRelative}/${f.name}
+            mkdir -p $out/home/agent/${driverEntry.skillsDirRelative}/${f.name}
+            cp ${pkgs.writeText "SKILL.md" f.src} $out/home/agent/${driverEntry.skillsDirRelative}/${f.name}/SKILL.md
           ''
         else
           ''
-            cp ${f} $out/home/agent/${driverEntry.skillsDirRelative}/${
+            cp -r ${f} $out/home/agent/${driverEntry.skillsDirRelative}/${
               if lib.isDerivation f then f.name else builtins.baseNameOf f
             }
           ''

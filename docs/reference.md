@@ -74,7 +74,7 @@ shared options fall through to `mkHarness`'s own defaults.
 | `prefetch`  | shared         | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
 | `prompt`    | shared         | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent — a prompt that already has it is untouched) |
 | `scoutPrompt` / `reviewPrompt` / `filerPrompt` | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `SPINDRIFT_PROMPT_DIR` regardless of which caller baked the image |
-| `skills`    | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skill files baked into the image at `/home/agent/.claude/skills` so the headless agent can `/invoke` them; a `{ name; src; }` content entry is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `SPINDRIFT_SKILLS_DIR` mounts over them at runtime |
+| `skills`    | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at `/home/agent/.claude/skills`, each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `SPINDRIFT_SKILLS_DIR` mounts over them at runtime |
 | `settings`  | shared         | submodule, grouped by section (see below) | `{}` | non-secret run defaults baked into the `spindrift` CLI |
 | `runtime`   | shared         | `"podman"` \| `"docker"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime, or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
 | `driver`    | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` is the only Driver today |
@@ -171,7 +171,7 @@ entrypoint reads the fragment unconditionally once its gate is on, with no
 baked-in fallback.
 
 The caveman-default step is keyed on the baked skill itself rather than a
-separate knob: whenever `DRIVER_SKILLS_DIR/caveman.md` is present at
+separate knob: whenever `DRIVER_SKILLS_DIR/caveman/SKILL.md` is present at
 runtime, both the issue pass and the fix pass (via the shared COMMS block,
 see below) direct the agent to use `/caveman` for narration and prose,
 exempting code, commands, error messages, and commit messages. A Consumer

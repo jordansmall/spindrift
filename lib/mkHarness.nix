@@ -397,10 +397,11 @@ let
   '';
 
   # The baked-skills directory as a host store path (native-buildable on
-  # darwin). Each skill file is copied under its basename; a { name; src; }
-  # content entry (issue #597) is realized with hostPkgs here — this
-  # directory is a host-only test artifact, never an input to the (Linux)
-  # image itself, so it carries no host-independence requirement.
+  # darwin), laid out exactly as lib/image.nix bakes it: each skill is a
+  # `<name>/SKILL.md` directory (Claude Code discovers skills only as
+  # directories). A { name; src; } content entry (issue #597) is realized with
+  # hostPkgs here — this directory is a host-only test artifact, never an input
+  # to the (Linux) image itself, so it carries no host-independence requirement.
   skillsDir = hostPkgs.runCommand "skills-dir" { } (
     if skills == [ ] then
       "mkdir -p $out"
@@ -411,11 +412,12 @@ let
           f:
           if builtins.isAttrs f && !(lib.isDerivation f) then
             ''
-              cp ${hostPkgs.writeText f.name f.src} $out/${f.name}
+              mkdir -p $out/${f.name}
+              cp ${hostPkgs.writeText "SKILL.md" f.src} $out/${f.name}/SKILL.md
             ''
           else
             ''
-              cp ${f} $out/${if lib.isDerivation f then f.name else builtins.baseNameOf f}
+              cp -r ${f} $out/${if lib.isDerivation f then f.name else builtins.baseNameOf f}
             ''
         ) skills}
       ''

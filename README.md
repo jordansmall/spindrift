@@ -325,18 +325,29 @@ Set `CONTINUOUS_DISPATCH=1` to opt into the slot-refill dispatch mode (#527)
 in a driving loop other than `dogfood.sh`; see `lib/env-schema.nix`'s
 `continuousDispatch` entry for the full behavior.
 
-**Baked skill, on by default.** The dogfood Box bakes the pinned upstream
-[`caveman` skill](https://github.com/juliusbrussee/caveman), advertised
-in-box as `/caveman`, and the rendered issue-pass and fix-pass prompts
-direct the agent to default to it for narration and prose — so agents
-draining this loop compress narration ~65% in output tokens without
-touching code, commands, error messages, or commit messages. The pin is a
-non-flake `caveman` input in `flake.nix` (`flake.lock` owns the rev); see
-[Contributing](CONTRIBUTING.md) for how it's wired.
+**Baked skills.** The dogfood Box bakes four pinned upstream skills into
+`/home/agent/.claude/skills`, each as a `<name>/SKILL.md` directory — the
+only layout Claude Code discovers, so a flat `<name>.md` file is silently
+ignored — so the in-box agent can invoke them as slash commands:
 
-To opt out, don't bake the skill: drop `caveman` from the consumer's
-`skills` list (see `nix/dogfood-skills.nix`). The instruction is rendered
-only when `caveman.md` is actually present at the baked skills path, so a
+- [`caveman`](https://github.com/juliusbrussee/caveman) — advertised as
+  `/caveman`, and the rendered issue-pass and fix-pass prompts direct the
+  agent to default to it for narration and prose, compressing narration
+  ~65% in output tokens without touching code, commands, error messages, or
+  commit messages.
+- [`tdd`](https://github.com/mattpocock/skills) and
+  [`to-issues`](https://github.com/mattpocock/skills) — `/tdd`,
+  `/to-issues`.
+- [`commit`](https://github.com/jordansmall/skills) — `/commit`.
+
+The pins are non-flake `caveman` / `matt-skills` / `jordan-skills` inputs in
+`flake.nix` (`flake.lock` owns the revs); the baked set lives in
+`nix/dogfood-skills.nix`. See [Contributing](CONTRIBUTING.md) for how it's
+wired.
+
+To opt out of a skill, drop it from the consumer's `skills` list (see
+`nix/dogfood-skills.nix`). The caveman-default instruction is rendered only
+when `caveman/SKILL.md` is actually present at the baked skills path, so a
 consumer that skips it gets prompts with zero caveman residue.
 
 ## Console

@@ -36,12 +36,13 @@ printf '%s' "$prompt" >"${CLAUDE_PROMPT_FILE:-/dev/null}"
 printf '%s' "$agents" >"${CLAUDE_AGENTS_FILE:-/dev/null}"
 printf 'claude invoked for issue #%s model=%s\n' "${ISSUE_NUMBER:-?}" "$model" >>"$CLAUDE_LOG"
 
-# Report any skill files discoverable at the path Claude Code scans.
-# Real claude -p reads $HOME/.claude/skills/; this fake does the same so
-# tests can assert discovery without a live LLM.
+# Report any skills discoverable at the path Claude Code scans. Real claude -p
+# discovers a skill only as a directory holding a SKILL.md
+# ($HOME/.claude/skills/<name>/SKILL.md), never a flat <name>.md file; this
+# fake mirrors that so tests assert real discovery without a live LLM.
 if [ -d "${HOME:-}/.claude/skills" ]; then
-  for _skill in "${HOME}/.claude/skills/"*.md; do
-    [ -f "$_skill" ] && printf 'skill discovered: %s\n' "$(basename "$_skill")" >>"$CLAUDE_LOG"
+  for _skill in "${HOME}/.claude/skills/"*/SKILL.md; do
+    [ -f "$_skill" ] && printf 'skill discovered: %s\n' "$(basename "$(dirname "$_skill")")" >>"$CLAUDE_LOG"
   done
 fi
 
