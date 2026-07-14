@@ -227,6 +227,15 @@ inline or a `## Blocked by` list) are a fallback used only when the native
 lookup is empty or unavailable, and only `github` and `local` support that
 fallback — see [Issue Tracker backends](docs/reference.md#issue-tracker-backends).
 
+Every place a blocker ref is shown to an operator — the `preview` command's
+blocker annotations, a selective dispatch's blocked-skip notices, and the
+blocked-claim marker (and the release comment the workflow posts from it) —
+tags the ref with the source it was resolved from: `(native)` for a tracker's
+native dependency relationship, `(body)` for a body-text ref. This makes
+drift visible, e.g. a stale `## Blocked by` section on an issue whose native
+links have since changed shows up as a `(body)`-tagged ref instead of being
+silently indistinguishable from a native one.
+
 An issue may also declare a `## Touches` section listing the paths it expects
 to change; dispatch defers it while its touch-set overlaps an already
 in-progress issue's, retrying once the collider completes — see [Declared

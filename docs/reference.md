@@ -676,6 +676,15 @@ Forge stays `github` regardless (Jira issues, GitHub PRs).
   is empty or unavailable (older GHES, missing token scope, API error); Jira
   has no such fallback.
 
+  Every operator-facing blocker rendering — `preview`'s blocker annotations,
+  a selective dispatch's blocked-skip notices, and the blocked-claim marker
+  (and the release comment posted from it) — tags each ref with the source
+  it resolved from: `(native)` for a tracker's native relationship, `(body)`
+  for a body-text ref. `jira` refs always render `(native)`; `local` refs
+  (no native concept) always render `(body)`; `github` renders whichever the
+  precedence above actually used for that issue, so drift between a stale
+  body section and changed native links is visible instead of silent.
+
   By default the agent's prompt input is the issue's summary and description
   only; set `JIRA_INCLUDE_COMMENTS` (non-empty) to also append the comment
   thread — opt-in, to keep the prompt-injection surface tight.
