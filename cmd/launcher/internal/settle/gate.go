@@ -41,7 +41,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 			return
 		}
 		if pr.IsDraft {
-			fmt.Printf("    #%s  landing=%s  status=blocked  note=draft PR on %s; no outcome line\n", num, pr.URL, branch)
+			fmt.Printf("    #%s  pr=%s  status=blocked  note=draft PR on %s; no outcome line\n", num, pr.URL, branch)
 			return
 		}
 		s.SettleAdopted(d, num, pr.URL)
@@ -51,7 +51,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 	o := result.Outcome
 	switch o.Status {
 	case "blocked":
-		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
+		fmt.Printf("    #%s  pr=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
 		s.postUsageComment(num, d)
 	case "ready":
 		ok, merged := s.selfHeal(d, num, o.Landing)
@@ -63,7 +63,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 				s.verifyMerged(num, o.Landing)
 			}
 		} else {
-			fmt.Printf("    #%s  landing=%s  status=failed  !! CI or merge failed\n", num, o.Landing)
+			fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", num, o.Landing)
 		}
 		s.postUsageComment(num, d)
 	case "merged":
@@ -72,11 +72,11 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 		if s.pr != nil {
 			s.verifyMerged(num, o.Landing)
 		} else {
-			fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
+			fmt.Printf("    #%s  pr=%s  status=%s\n", num, o.Landing, o.Status)
 		}
 		s.postUsageComment(num, d)
 	default:
-		fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
+		fmt.Printf("    #%s  pr=%s  status=%s\n", num, o.Landing, o.Status)
 		s.postUsageComment(num, d)
 	}
 }
@@ -114,7 +114,7 @@ func (s *Settle) gateToGreen(num, pr string) (bool, bool) {
 	for {
 		state, stateErr := s.pr.CheckState(pr)
 		if stateErr != nil {
-			fmt.Printf("    #%s  landing=%s  status=check-state-error  !! %v\n", num, pr, stateErr)
+			fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, stateErr)
 			return false, false
 		}
 
@@ -127,7 +127,7 @@ func (s *Settle) gateToGreen(num, pr string) (bool, bool) {
 			// registration can briefly show SUCCESS before all jobs appear.
 			confirm, confirmErr := s.pr.CheckState(pr)
 			if confirmErr != nil {
-				fmt.Printf("    #%s  landing=%s  status=check-state-error  !! %v\n", num, pr, confirmErr)
+				fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, confirmErr)
 				return false, false
 			}
 			if confirm != forge.StateSuccess {
