@@ -15,12 +15,10 @@ import (
 func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num, prURL string) {
 	branch := s.cf.AgentBranch(num)
 	fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", num, prURL, branch)
-	ok, merged := s.selfHeal(d, num, prURL)
-	if ok {
-		if merged {
-			s.verifyMerged(num, prURL)
-		}
-	} else {
+	switch s.selfHeal(d, num, prURL) {
+	case LandingMerged:
+		s.verifyMerged(num, prURL)
+	case LandingFailed:
 		fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", num, prURL)
 	}
 }
