@@ -341,9 +341,10 @@ consumer that skips it gets prompts with zero caveman residue.
 
 ## Console
 
-`spindrift console` opens the interactive Console (ADR 0023) in read-only
-form: an in-terminal loop that lists every open issue from the Issue
-Tracker — number, title, labels — oldest-first per dispatch order.
+`spindrift console` opens the interactive Console (ADR 0023): an
+in-terminal loop that lists every open issue from the Issue Tracker —
+number, title, labels — oldest-first per dispatch order, and lets you Pick
+issues to launch as Dispatches.
 
 ```sh
 spindrift console
@@ -356,6 +357,8 @@ Type a command and press enter:
 | `r` / `refresh` | re-query the Issue Tracker and re-render the backlog |
 | `f <text>` / `filter <text>` | narrow the list to issues with a label containing `<text>` |
 | `f` / `filter` (no text) | clear the filter, restoring the full list |
+| `p <num>` / `pick <num>` | Pick issue `<num>` — the launch button |
+| `u <num>` / `unpick <num>` | Unpick a queued-but-unlaunched pick |
 | `q` / `quit` | exit cleanly |
 
 If a `.dogfood.pid` file is present at startup — a headless loop
@@ -363,8 +366,24 @@ If a `.dogfood.pid` file is present at startup — a headless loop
 informational notice and keeps going; it never blocks or refuses to start,
 and the two are safe to run side by side (claims are atomic label swaps).
 
-This tracer-bullet slice is browsing only: it does not yet Pick issues or
-launch Dispatches (see #644 for the full picks-only driving loop).
+**Pick** is the launch button. An unlabeled issue is promoted through the
+normal `Dispatchable` transition first — recorded durably on the tracker —
+then queued; an already-`Dispatchable` issue queues directly. The pick
+launches through the same continuous engine the headless loops use, single
+slot: its queue row tracks `queued` → `claiming` → `running` → `settled`.
+Queued-but-unlaunched picks hold at `Dispatchable` on the tracker, never
+`InProgress` — the claim to `InProgress` only happens when the pick's turn
+to launch actually arrives. If that claim races (another loop, the issue
+closed, a relabel), the pick dissolves and its row shows why, instead of
+launching a Box for a stale listing.
+
+**Unpick** removes a queued-but-unlaunched pick from the session with zero
+Issue Tracker calls — it only ever un-does the in-session queue entry, never
+the durable promotion a pick already recorded.
+
+Every pick defaults to a `work` Dispatch; the record carries a kind field so
+research picks can arrive later as a UI gesture rather than a remodel — only
+`work` is exposed today.
 
 ## Documentation
 
