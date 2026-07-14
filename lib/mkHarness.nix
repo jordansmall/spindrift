@@ -36,8 +36,11 @@
   # check/fix/commit/push/watch-CI.
   fixPrompt ? builtins.readFile ../templates/default/prompts/fix-prompt.md,
   # Skill files baked into the image at /home/agent/.claude/skills so the
-  # headless agent can invoke them without a runtime mount. Each element must
-  # be a path to a skill file; the file is copied under its basename.
+  # headless agent can invoke them without a runtime mount. Each element is
+  # either a path/derivation (copied under its basename), or a
+  # { name; src; } content entry (issue #597) baked under the given name by
+  # re-realizing src with the image's own Linux pkgs — never a consumer host
+  # derivation, which would tag the image's drvPath with the host system.
   # SPINDRIFT_SKILLS_DIR at runtime mounts over the same path and takes
   # precedence, shadowing all baked skills.
   skills ? [ ],
@@ -351,17 +354,27 @@ let
   '';
 
   # The baked-skills directory as a host store path (native-buildable on
-  # darwin). Each skill file is copied under its basename. When skills is
-  # empty this derivation is an empty directory.
+  # darwin). Each skill file is copied under its basename; a { name; src; }
+  # content entry (issue #597) is realized with hostPkgs here — this
+  # directory is a host-only test artifact, never an input to the (Linux)
+  # image itself, so it carries no host-independence requirement.
   skillsDir = hostPkgs.runCommand "skills-dir" { } (
     if skills == [ ] then
       "mkdir -p $out"
     else
       ''
         mkdir -p $out
-        ${lib.concatMapStrings (f: ''
-          cp ${f} $out/${if lib.isDerivation f then f.name else builtins.baseNameOf f}
-        '') skills}
+        ${lib.concatMapStrings (
+          f:
+          if builtins.isAttrs f && !(lib.isDerivation f) then
+            ''
+              cp ${hostPkgs.writeText f.name f.src} $out/${f.name}
+            ''
+          else
+            ''
+              cp ${f} $out/${if lib.isDerivation f then f.name else builtins.baseNameOf f}
+            ''
+        ) skills}
       ''
   );
 
