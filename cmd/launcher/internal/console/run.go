@@ -13,7 +13,9 @@ import (
 // then repeatedly read one command per line from in and re-render until the
 // operator quits or in runs out. It is the only place that touches a real
 // terminal in production; tests drive it with a scripted io.Reader instead.
-func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer) error {
+// launch is nil for a launch-less session (Pick still promotes and queues,
+// but nothing runs); production wires a real Launcher.
+func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer, launch *Launcher) error {
 	m := NewModel()
 	m = Update(m, DogfoodNotice(pwd))
 	m = Update(m, Refresh(tracker))
@@ -21,7 +23,7 @@ func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer) er
 
 	scanner := bufio.NewScanner(in)
 	for !m.Quitting && scanner.Scan() {
-		m = applyCommand(m, tracker, scanner.Text())
+		m = applyCommand(m, tracker, pwd, launch, scanner.Text())
 		if !m.Quitting {
 			fmt.Fprint(out, View(m))
 		}
@@ -32,8 +34,10 @@ func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer) er
 // applyCommand parses one line of operator input into a Msg and applies it.
 // Recognized commands: "q"/"quit" to exit, "r"/"refresh" to re-query the
 // tracker, "f" (bare) to clear the label filter, "f <text>" to set it,
-// "p <num>" to pick an issue, "u <num>" to unpick a queued one.
-func applyCommand(m Model, tracker forge.IssueTracker, line string) Model {
+// "p <num>" to pick an issue, "u <num>" to unpick a queued one. A successful
+// pick also lands on launch.Queue and kicks off a background launch attempt,
+// when launch is non-nil.
+func applyCommand(m Model, tracker forge.IssueTracker, pwd string, launch *Launcher, line string) Model {
 	cmd, arg, _ := strings.Cut(strings.TrimSpace(line), " ")
 	switch cmd {
 	case "q", "quit":
@@ -43,8 +47,16 @@ func applyCommand(m Model, tracker forge.IssueTracker, line string) Model {
 	case "f", "filter":
 		return Update(m, FilterChangedMsg{Filter: arg})
 	case "p", "pick":
-		return Update(m, PickIssue(tracker, arg, titleOf(m, arg), KindWork))
+		msg := PickIssue(tracker, arg, titleOf(m, arg), KindWork)
+		if queued, ok := msg.(PickQueuedMsg); ok && launch != nil {
+			launch.Queue.Add(Pick{Number: queued.Number, Title: queued.Title, Kind: queued.Kind, State: PickQueued})
+			launch.tryLaunch(tracker, pwd)
+		}
+		return Update(m, msg)
 	case "u", "unpick":
+		if launch != nil {
+			launch.Queue.Remove(arg)
+		}
 		return Update(m, UnpickMsg{Number: arg})
 	default:
 		return m

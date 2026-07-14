@@ -1,10 +1,17 @@
 package console
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/settle"
 )
 
 // TestRun_QuitCommand_ExitsCleanly verifies "q" ends the loop and returns
@@ -14,7 +21,7 @@ func TestRun_QuitCommand_ExitsCleanly(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
 
 	var out strings.Builder
-	if err := Run(f, t.TempDir(), strings.NewReader("q\n"), &out); err != nil {
+	if err := Run(f, t.TempDir(), strings.NewReader("q\n"), &out, nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !strings.Contains(out.String(), "first") {
@@ -27,7 +34,7 @@ func TestRun_QuitCommand_ExitsCleanly(t *testing.T) {
 // closed pipe) must never hang the loop.
 func TestRun_EOF_ExitsCleanlyWithoutQuitCommand(t *testing.T) {
 	f := forge.NewFake()
-	if err := Run(f, t.TempDir(), strings.NewReader(""), &strings.Builder{}); err != nil {
+	if err := Run(f, t.TempDir(), strings.NewReader(""), &strings.Builder{}, nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 }
@@ -40,14 +47,14 @@ func TestRun_RefreshCommand_ReQueriesTracker(t *testing.T) {
 
 	var out strings.Builder
 	in := strings.NewReader("r\nq\n")
-	if err := Run(f, t.TempDir(), in, &out); err != nil {
+	if err := Run(f, t.TempDir(), in, &out, nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	f.SetIssue(forge.Issue{Number: "5", Title: "late arrival", State: forge.IssueOpen})
 
 	out.Reset()
 	in = strings.NewReader("r\nq\n")
-	if err := Run(f, t.TempDir(), in, &out); err != nil {
+	if err := Run(f, t.TempDir(), in, &out, nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !strings.Contains(out.String(), "late arrival") {
@@ -66,7 +73,7 @@ func TestRun_FilterCommand_Narrows(t *testing.T) {
 	f := newAlphaBetaFake()
 
 	var out strings.Builder
-	if err := Run(f, t.TempDir(), strings.NewReader("f b\nq\n"), &out); err != nil {
+	if err := Run(f, t.TempDir(), strings.NewReader("f b\nq\n"), &out, nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := strings.Count(out.String(), "alpha"); got != 1 {
@@ -84,7 +91,7 @@ func TestRun_BareFilterCommand_RestoresFullList(t *testing.T) {
 	f := newAlphaBetaFake()
 
 	var out strings.Builder
-	if err := Run(f, t.TempDir(), strings.NewReader("f b\nf\nq\n"), &out); err != nil {
+	if err := Run(f, t.TempDir(), strings.NewReader("f b\nf\nq\n"), &out, nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := strings.Count(out.String(), "alpha"); got != 2 {
@@ -100,7 +107,7 @@ func TestRun_PickCommand_PromotesAndQueues(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	var out strings.Builder
-	if err := Run(f, t.TempDir(), strings.NewReader("p 42\nq\n"), &out); err != nil {
+	if err := Run(f, t.TempDir(), strings.NewReader("p 42\nq\n"), &out, nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !strings.Contains(out.String(), "queued") {
@@ -123,7 +130,7 @@ func TestRun_UnpickCommand_RemovesFromQueue(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	var out strings.Builder
-	if err := Run(f, t.TempDir(), strings.NewReader("p 42\nu 42\nq\n"), &out); err != nil {
+	if err := Run(f, t.TempDir(), strings.NewReader("p 42\nu 42\nq\n"), &out, nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -136,6 +143,34 @@ func TestRun_UnpickCommand_RemovesFromQueue(t *testing.T) {
 	}
 }
 
+// TestRun_PickCommand_WithLauncher_LaunchesRealDispatch verifies that when
+// Run is given a Launcher, "p <num>" doesn't just queue the pick — it
+// drives the pick through the continuous engine to settle, in the
+// background, so the read loop stays responsive (#646).
+func TestRun_PickCommand_WithLauncher_LaunchesRealDispatch(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+
+	launch := newTestLauncher(t, f)
+
+	var out strings.Builder
+	if err := Run(f, t.TempDir(), strings.NewReader("p 42\nq\n"), &out, launch); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		snap := launch.Queue.Snapshot()
+		if len(snap) == 1 && snap[0].State == PickSettled {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pick never settled: %+v", snap)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // newAlphaBetaFake returns a Fake tracker with two open issues, "alpha"
 // labeled "a" and "beta" labeled "b" — shared fixture for filter tests.
 func newAlphaBetaFake() *forge.Fake {
@@ -143,4 +178,26 @@ func newAlphaBetaFake() *forge.Fake {
 	f.SetIssue(forge.Issue{Number: "1", Title: "alpha", State: forge.IssueOpen, Labels: []string{"a"}})
 	f.SetIssue(forge.Issue{Number: "2", Title: "beta", State: forge.IssueOpen, Labels: []string{"b"}})
 	return f
+}
+
+// newTestLauncher builds a Launcher wired to a runner.Fake Box and a
+// settle.Fake, matching the waves package's own dispatch.Factory test
+// helper — enough plumbing to prove a picked issue runs a real (fake) Box
+// and settles.
+func newTestLauncher(t *testing.T, cf forge.CodeForge) *Launcher {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, runner.NewFake(), drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+	return &Launcher{CodeForge: cf, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
 }
