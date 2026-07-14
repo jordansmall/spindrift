@@ -24,13 +24,20 @@ type Message struct {
 	Usage   TokenUsage     `json:"usage"`
 }
 
-// ContentBlock is one block of an assistant message's content array.
+// ContentBlock is one block of an assistant or tool-result message's content
+// array. ToolUseID, Content, and IsError are populated only on a "tool_result"
+// block (a "user"-typed event, per the Claude API's convention of returning
+// tool results as a user-role turn) — the transcript renderer's fields, unused
+// by the heartbeat writer or usage extractor.
 type ContentBlock struct {
-	Type  string          `json:"type"`
-	ID    string          `json:"id,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
-	Text  string          `json:"text,omitempty"`
+	Type      string          `json:"type"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	Text      string          `json:"text,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
 }
 
 // TaskInput is the input payload of a Task tool-use block.

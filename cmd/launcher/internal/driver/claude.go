@@ -37,6 +37,10 @@ func (claudeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 	return claude.ExtractUsage(logPath)
 }
 
+func (claudeDriver) RenderTranscript(logPath string) (string, error) {
+	return claude.RenderTranscript(logPath)
+}
+
 func init() {
 	register(claudeDriver{})
 }

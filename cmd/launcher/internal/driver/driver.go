@@ -37,6 +37,11 @@ type Driver interface {
 	// ExtractUsage scans the box log at logPath and returns its aggregate and
 	// per-role usage in one report, in this Driver's own log format.
 	ExtractUsage(logPath string) (usage.Report, error)
+
+	// RenderTranscript scans the box log at logPath and returns a readable
+	// rendering of its assistant turns and tool calls, in this Driver's own
+	// transcript format — a Console drill-in's rendered view (#648).
+	RenderTranscript(logPath string) (string, error)
 }
 
 // registry maps a Driver name to its strategy. Populated by each driver's

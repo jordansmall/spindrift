@@ -194,3 +194,30 @@ func TestClaudeDriverClassifyTransient(t *testing.T) {
 		}
 	})
 }
+
+// TestClaudeDriverRenderTranscript verifies the claude Driver's fifth
+// method delegates to the claude subpackage's RenderTranscript strategy —
+// the Driver seam's transcript-rendering capability (#648), beside
+// heartbeat parsing and usage extraction.
+func TestClaudeDriverRenderTranscript(t *testing.T) {
+	d, err := New("claude")
+	if err != nil {
+		t.Fatalf("New(claude): %v", err)
+	}
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "issue-1.log")
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"Investigating."}]}}`
+	if err := os.WriteFile(logPath, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := d.RenderTranscript(logPath)
+	if err != nil {
+		t.Fatalf("RenderTranscript: %v", err)
+	}
+	want := "[implementor] Investigating.\n"
+	if got != want {
+		t.Errorf("RenderTranscript = %q, want %q", got, want)
+	}
+}
