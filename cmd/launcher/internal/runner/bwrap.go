@@ -8,6 +8,12 @@ import (
 	"path/filepath"
 )
 
+// execCommand builds the *exec.Cmd for hardcoded-binary orchestration (nix,
+// bwrap) that has no configurable CLI field to intercept. Tests swap this
+// package-level seam to substitute a fake binary; production always uses the
+// standard library's exec.Command unmodified.
+var execCommand = exec.Command
+
 // bwrapSecrets is the set of box.Env keys whose values must not appear on the
 // bwrap command line. They are delivered via the process environment instead
 // so that ps/proc cannot expose them to other local users.
@@ -176,7 +182,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 	// cmd.Env = nil: the bwrap process inherits the launcher's full environment.
 	// Without --clearenv, the sandbox also inherits it. Secrets (GH_TOKEN, auth
 	// tokens) are therefore available inside the sandbox without appearing on argv.
-	cmd := exec.Command("bwrap", a.buildArgs(etcDir, box)...)
+	cmd := execCommand("bwrap", a.buildArgs(etcDir, box)...)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	return cmd.Run()
@@ -211,14 +217,14 @@ func NewBwrapBuild(cfg Config) Runner {
 func (a *bwrapBuildAdapter) EnsureReady() error {
 	fmt.Println("==> bwrap runner: realizing agent store closures (no image build/load)")
 
-	nixFiles := exec.Command("nix", "build", a.agentFilesDrv+"^*", "--no-link")
+	nixFiles := execCommand("nix", "build", a.agentFilesDrv+"^*", "--no-link")
 	nixFiles.Stdout = os.Stdout
 	nixFiles.Stderr = os.Stderr
 	if err := nixFiles.Run(); err != nil {
 		return fmt.Errorf("nix build agent-files: %w", err)
 	}
 
-	nixEnv := exec.Command("nix", "build", a.agentEnvDrv+"^*", "--no-link")
+	nixEnv := execCommand("nix", "build", a.agentEnvDrv+"^*", "--no-link")
 	nixEnv.Stdout = os.Stdout
 	nixEnv.Stderr = os.Stderr
 	if err := nixEnv.Run(); err != nil {
