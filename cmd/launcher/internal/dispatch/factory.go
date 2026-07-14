@@ -67,3 +67,10 @@ func (f *Factory) New(number, title string) *Dispatch {
 func (f *Factory) Cleanup() {
 	f.cache.cleanup()
 }
+
+// Driver returns the Driver strategy this Factory was constructed with — a
+// Console drill-in's route to RenderTranscript, so rendering a Dispatch's
+// logs needs no second Driver-holding type (#648).
+func (f *Factory) Driver() driver.Driver {
+	return f.driver
+}

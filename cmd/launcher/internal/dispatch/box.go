@@ -26,15 +26,31 @@ type Dispatch struct {
 var _ Dispatcher = (*Dispatch)(nil)
 
 func (d *Dispatch) logPath() string {
-	return filepath.Join(d.pwd, "logs", "issue-"+d.number+".log")
+	return logPathFor(d.pwd, d.number)
 }
 
 func (d *Dispatch) fixLogPath(pass int) string {
-	return filepath.Join(d.pwd, "logs", fmt.Sprintf("issue-%s-fix-%d.log", d.number, pass))
+	return fixLogPathFor(d.pwd, d.number, pass)
 }
 
 func (d *Dispatch) conflictLogPath() string {
-	return filepath.Join(d.pwd, "logs", fmt.Sprintf("issue-%s-conflict-resolve.log", d.number))
+	return conflictLogPathFor(d.pwd, d.number)
+}
+
+// logPathFor, fixLogPathFor, and conflictLogPathFor are the single source of
+// truth for a Dispatch's log naming, shared with LogPaths (logs.go) so a
+// drill-in's pass discovery can never drift from the paths a Dispatch itself
+// writes.
+func logPathFor(pwd, number string) string {
+	return filepath.Join(pwd, "logs", "issue-"+number+".log")
+}
+
+func fixLogPathFor(pwd, number string, pass int) string {
+	return filepath.Join(pwd, "logs", fmt.Sprintf("issue-%s-fix-%d.log", number, pass))
+}
+
+func conflictLogPathFor(pwd, number string) string {
+	return filepath.Join(pwd, "logs", fmt.Sprintf("issue-%s-conflict-resolve.log", number))
 }
 
 // Run dispatches the initial box for this issue.
