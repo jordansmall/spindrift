@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -41,13 +42,13 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
 	for {
 		err := once()
 
-		var cls outcome.Classification
+		var cls driver.Classification
 		if err == nil {
 			result := d.successResult(logPath)
 			if result.OutcomeFound || result.ParseErr != nil || result.ClassifyErr != nil {
 				return result
 			}
-			if result.Classification.Class != outcome.Transient {
+			if result.Classification.Class != driver.Transient {
 				return result
 			}
 			if d.cfg.OpenPRForIssue != nil {
@@ -71,12 +72,12 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
 				return Result{Success: false}
 			}
 
-			if cls.Class == outcome.Terminal {
+			if cls.Class == driver.Terminal {
 				return Result{Success: false}
 			}
 		}
 
-		if cls.Reason == outcome.RateLimit && cls.ResetAt != nil {
+		if cls.Reason == driver.RateLimit && cls.ResetAt != nil {
 			// 429 with known reset: hold until reset + jitter. A hold
 			// following another hold (prevWasHold=true) means the token has
 			// not recovered — consume the cap. A hold after a non-hold

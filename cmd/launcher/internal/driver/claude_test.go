@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"spindrift.dev/launcher/internal/outcome"
 )
 
 // TestClaudeDriverHeartbeatWriterForwardsRaw verifies that the claude
@@ -36,10 +34,10 @@ func TestClaudeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
 	}
 }
 
-// TestClaudeDriverClassifyTransientDelegatesToOutcomeClassify verifies the
-// claude Driver's classifier matches outcome.Classify's own behavior on a
-// known transient marker.
-func TestClaudeDriverClassifyTransientDelegatesToOutcomeClassify(t *testing.T) {
+// TestClaudeDriverClassifyTransientDelegatesToClaudeClassify verifies the
+// claude Driver's classifier matches the claude subpackage's own Classify
+// behavior on a known transient marker.
+func TestClaudeDriverClassifyTransientDelegatesToClaudeClassify(t *testing.T) {
 	d, err := New("claude")
 	if err != nil {
 		t.Fatalf("New(claude): %v", err)
@@ -55,8 +53,66 @@ func TestClaudeDriverClassifyTransientDelegatesToOutcomeClassify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClassifyTransient: %v", err)
 	}
-	if got.Class != outcome.Transient || got.Reason != outcome.RateLimit {
-		t.Errorf("got %+v, want Class=%s Reason=%s", got, outcome.Transient, outcome.RateLimit)
+	if got.Class != Transient || got.Reason != RateLimit {
+		t.Errorf("got %+v, want Class=%s Reason=%s", got, Transient, RateLimit)
+	}
+}
+
+// TestClaudeDriverExtractUsage verifies the claude Driver's fourth method
+// extracts the aggregate result-event usage and the per-role breakdown from
+// a Box log in one report, replacing the former usage.LastInLog +
+// usage.BreakdownByRole two-call dance at the dispatch call site.
+func TestClaudeDriverExtractUsage(t *testing.T) {
+	d, err := New("claude")
+	if err != nil {
+		t.Fatalf("New(claude): %v", err)
+	}
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "issue-1.log")
+	lines := []string{
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_scout","name":"Task","input":{"subagent_type":"scout"}}],"usage":{"input_tokens":100,"output_tokens":30}}}`,
+		`{"type":"assistant","message":{"content":[],"usage":{"input_tokens":200,"output_tokens":60}},"parent_tool_use_id":"toolu_scout"}`,
+		`{"type":"result","num_turns":5,"total_cost_usd":0.25,"duration_ms":3000,"duration_api_ms":2000,"usage":{"input_tokens":300,"output_tokens":90}}`,
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := d.ExtractUsage(logPath)
+	if err != nil {
+		t.Fatalf("ExtractUsage: %v", err)
+	}
+	if !report.Found {
+		t.Fatal("Found: got false, want true")
+	}
+	if report.NumTurns != 5 {
+		t.Errorf("NumTurns: got %d, want 5", report.NumTurns)
+	}
+	if report.TotalCostUSD != 0.25 {
+		t.Errorf("TotalCostUSD: got %f, want 0.25", report.TotalCostUSD)
+	}
+
+	var scout, implementor bool
+	for _, r := range report.Roles {
+		if r.Role == "scout" {
+			scout = true
+			if r.InputTokens != 200 {
+				t.Errorf("scout InputTokens: got %d, want 200", r.InputTokens)
+			}
+		}
+		if r.Role == "implementor" {
+			implementor = true
+			if r.InputTokens != 100 {
+				t.Errorf("implementor InputTokens: got %d, want 100", r.InputTokens)
+			}
+		}
+	}
+	if !scout {
+		t.Error("Roles: missing scout bucket")
+	}
+	if !implementor {
+		t.Error("Roles: missing implementor bucket")
 	}
 }
 
@@ -84,8 +140,8 @@ func TestClaudeDriverClassifyTransient(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ClassifyTransient: %v", err)
 		}
-		if got.Class != outcome.Transient || got.Reason != outcome.RateLimit {
-			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, outcome.Transient, outcome.RateLimit)
+		if got.Class != Transient || got.Reason != RateLimit {
+			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, Transient, RateLimit)
 		}
 		if got.ResetAt == nil {
 			t.Fatal("ResetAt: got nil, want non-nil")
@@ -102,8 +158,8 @@ func TestClaudeDriverClassifyTransient(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ClassifyTransient: %v", err)
 		}
-		if got.Class != outcome.Transient || got.Reason != outcome.Overloaded {
-			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, outcome.Transient, outcome.Overloaded)
+		if got.Class != Transient || got.Reason != Overloaded {
+			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, Transient, Overloaded)
 		}
 		if got.ResetAt != nil {
 			t.Errorf("ResetAt: got %v, want nil", got.ResetAt)
@@ -116,8 +172,8 @@ func TestClaudeDriverClassifyTransient(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ClassifyTransient: %v", err)
 		}
-		if got.Class != outcome.Transient || got.Reason != outcome.Network {
-			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, outcome.Transient, outcome.Network)
+		if got.Class != Transient || got.Reason != Network {
+			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, Transient, Network)
 		}
 		if got.ResetAt != nil {
 			t.Errorf("ResetAt: got %v, want nil", got.ResetAt)
@@ -130,8 +186,8 @@ func TestClaudeDriverClassifyTransient(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ClassifyTransient: %v", err)
 		}
-		if got.Class != outcome.Terminal || got.Reason != outcome.TaskFailed {
-			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, outcome.Terminal, outcome.TaskFailed)
+		if got.Class != Terminal || got.Reason != TaskFailed {
+			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, Terminal, TaskFailed)
 		}
 		if got.ResetAt != nil {
 			t.Errorf("ResetAt: got %v, want nil", got.ResetAt)

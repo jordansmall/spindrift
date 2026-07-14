@@ -1,7 +1,10 @@
 // Package driver is the host-side half of the Driver seam (ADR 0009): the
-// strategy through which the launcher varies its transient classification and
-// heartbeat parsing by agent CLI. The in-box half (invocation, agent-config
-// rendering, skill wiring, outcome extraction) is nix-generated and lives in
+// strategy through which the launcher varies its transient classification,
+// heartbeat parsing, and usage extraction by agent CLI. Each Driver's own
+// behaviour lives in its sibling subpackage (e.g. driver/claude); this
+// package owns only the interface, the shared classification vocabulary, and
+// the registry wiring. The in-box half (invocation, agent-config rendering,
+// skill wiring, outcome extraction) is nix-generated and lives in
 // lib/drivers/; the two registries are kept from drifting by a parity test.
 package driver
 
@@ -10,12 +13,12 @@ import (
 	"io"
 	"sort"
 
-	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 // Driver is the seam through which the launcher varies its transient
-// classification and heartbeat parsing by agent CLI, selected at runtime by
-// the DRIVER value (defaulting to "claude").
+// classification, heartbeat parsing, and usage extraction by agent CLI,
+// selected at runtime by the DRIVER value (defaulting to "claude").
 type Driver interface {
 	// Name returns the Driver identifier, matching a key in the nix
 	// lib/drivers/ registry.
@@ -24,12 +27,16 @@ type Driver interface {
 	// ClassifyTransient scans the box log at logPath and reports whether a
 	// non-zero exit is a retryable infrastructure failure or a genuine task
 	// failure, in this Driver's own error taxonomy.
-	ClassifyTransient(logPath string) (outcome.Classification, error)
+	ClassifyTransient(logPath string) (Classification, error)
 
 	// NewHeartbeatWriter wraps raw (the log file) with a writer that emits
 	// coarse status lines to out at natural event boundaries in this
 	// Driver's own transcript format, forwarding all bytes to raw unchanged.
 	NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer) io.Writer
+
+	// ExtractUsage scans the box log at logPath and returns its aggregate and
+	// per-role usage in one report, in this Driver's own log format.
+	ExtractUsage(logPath string) (usage.Report, error)
 }
 
 // registry maps a Driver name to its strategy. Populated by each driver's

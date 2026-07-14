@@ -9,16 +9,16 @@ import (
 )
 
 // UsageReport returns the Markdown usage-summary comment body for this
-// issue's initial run, reading the log Run wrote. If no result event is
-// found the body notes that usage is unavailable rather than erroring.
+// issue's initial run, reading the log Run wrote through the Driver's
+// ExtractUsage. If no result event is found the body notes that usage is
+// unavailable rather than erroring.
 func (d *Dispatch) UsageReport() string {
 	model := os.Getenv("MODEL")
 	if model == "" {
 		model = "unknown"
 	}
-	logPath := d.logPath()
-	u, found, err := usage.LastInLog(logPath)
-	if err != nil || !found {
+	r, err := d.driver.ExtractUsage(d.logPath())
+	if err != nil || !r.Found {
 		return fmt.Sprintf("## Run usage\n\nModel: `%s`\n\nUsage data unavailable (no result event in log).", model)
 	}
 	body := fmt.Sprintf(
@@ -35,24 +35,23 @@ func (d *Dispatch) UsageReport() string {
 			"| API time | %s |\n"+
 			"| Turns | %d |",
 		model,
-		u.TotalCostUSD,
-		u.InputTokens,
-		u.OutputTokens,
-		u.CacheReadInputTokens,
-		u.CacheCreationInputTokens,
-		usage.FormatDuration(u.DurationMs),
-		usage.FormatDuration(u.DurationApiMs),
-		u.NumTurns,
+		r.TotalCostUSD,
+		r.InputTokens,
+		r.OutputTokens,
+		r.CacheReadInputTokens,
+		r.CacheCreationInputTokens,
+		usage.FormatDuration(r.DurationMs),
+		usage.FormatDuration(r.DurationApiMs),
+		r.NumTurns,
 	)
-	body += breakdownSection(logPath)
+	body += breakdownSection(r.Roles)
 	return body
 }
 
 // breakdownSection returns a Markdown per-role breakdown section, or empty
-// string if no assistant events are found or the log cannot be read.
-func breakdownSection(logPath string) string {
-	roles, err := usage.BreakdownByRole(logPath)
-	if err != nil || len(roles) == 0 {
+// string if roles is empty.
+func breakdownSection(roles []usage.RoleUsage) string {
+	if len(roles) == 0 {
 		return ""
 	}
 	var sb strings.Builder
