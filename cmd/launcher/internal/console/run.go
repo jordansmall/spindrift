@@ -68,9 +68,18 @@ func applyCommand(m Model, tracker forge.IssueTracker, pwd string, launch *Launc
 			return m
 		}
 		msg := PickIssue(tracker, arg, titleOf(m, arg), KindWork)
-		if queued, ok := msg.(PickQueuedMsg); ok && launch != nil {
-			launch.Queue.Add(Pick{Number: queued.Number, Title: queued.Title, Kind: queued.Kind, State: PickQueued})
-			launch.tryLaunch(tracker, pwd)
+		if launch != nil {
+			switch msg := msg.(type) {
+			case PickQueuedMsg:
+				launch.Queue.Add(Pick{Number: msg.Number, Title: msg.Title, Kind: msg.Kind, State: PickQueued})
+				launch.tryLaunch(tracker, pwd)
+			case PickFailedMsg:
+				// Landed on Queue too (already dissolved), not just Model via
+				// the Update below — Run's per-render resync overwrites
+				// Model.Picks from Queue, so a row that only ever touched
+				// Update would vanish on the very next render.
+				launch.Queue.Add(Pick{Number: msg.Number, Title: msg.Title, State: PickDissolved, Reason: msg.Reason})
+			}
 		}
 		return Update(m, msg)
 	case "u", "unpick":

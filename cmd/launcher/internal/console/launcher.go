@@ -40,17 +40,33 @@ func (l *Launcher) tryLaunch(tracker forge.IssueTracker, pwd string) {
 	l.wg.Add(1)
 	l.mu.Unlock()
 
-	go func() {
-		defer func() {
-			l.mu.Lock()
+	go l.drain(tracker, pwd)
+}
+
+// drain runs waves.RunContinuous to completion, then — still holding
+// l.mu — checks Queue for a pick that landed too late for that run's last
+// discover() to see (RunContinuous returns as soon as its wg count hits
+// zero, with no listener for a subsequent Add). Finding one re-drains
+// immediately instead of clearing l.launching, so a concurrent tryLaunch
+// call racing this same window can never observe l.launching==true with
+// nothing left to pick it up — either this loop sees the new pick, or its
+// Add()+tryLaunch happens-after this critical section releases l.mu and
+// starts a fresh drain itself.
+func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
+	defer l.wg.Done()
+	discover := func() ([]waves.Issue, map[string][]string, error) { return l.Queue.Discover(tracker) }
+	fresh := func() (bool, bool, string) { return false, true, "" }
+	for {
+		_ = waves.RunContinuous(waves.Config{MaxParallel: 1}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue}, discover, fresh)
+
+		l.mu.Lock()
+		if !l.Queue.hasQueued() {
 			l.launching = false
 			l.mu.Unlock()
-			l.wg.Done()
-		}()
-		discover := func() ([]waves.Issue, map[string][]string, error) { return l.Queue.Discover(tracker) }
-		fresh := func() (bool, bool, string) { return false, true, "" }
-		_ = waves.RunContinuous(waves.Config{MaxParallel: 1}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue}, discover, fresh)
-	}()
+			return
+		}
+		l.mu.Unlock()
+	}
 }
 
 // Wait blocks until any in-flight background drain finishes — Run calls it
