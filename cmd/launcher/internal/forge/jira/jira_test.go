@@ -499,6 +499,134 @@ func TestJiraClient_TransitionState_InfraErrorPropagates(t *testing.T) {
 // TestJiraClient_ListIssues_JQLAndOrder verifies ListIssues queries by the
 // mapped status (falling back to the label for issues stuck there) scoped to
 // the project, and trusts the server's created-ascending ordering.
+// researchLabels/researchVerdictLabels mirror ResearchDispatchLabels /
+// ResearchVerdictLabels so research-kind jira tests don't restate the label
+// strings.
+var researchLabels = forge.ResearchDispatchLabels()
+var researchVerdictLabels = forge.ResearchVerdictLabels()
+
+// TestJiraClient_CompleteVerdict_SwapsInProgressForVerdictLabel verifies
+// CompleteVerdict rides the same label-fallback swapLabel mechanism
+// TransitionState uses when a state is unmapped — no jira workflow-status
+// mapping exists for research verdicts (ADR 0022) — for each of the three
+// verdicts, removing the InProgress fallback label.
+func TestJiraClient_CompleteVerdict_SwapsInProgressForVerdictLabel(t *testing.T) {
+	cases := []struct {
+		verdict   forge.Verdict
+		wantLabel string
+	}{
+		{forge.Recommend, "agent-research-recommend"},
+		{forge.Reject, "agent-research-reject"},
+		{forge.Unclear, "agent-research-unclear"},
+	}
+	for _, tc := range cases {
+		var gotLabelOps []map[string]string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-3":
+				var body struct {
+					Update struct {
+						Labels []map[string]string `json:"labels"`
+					} `json:"update"`
+				}
+				json.NewDecoder(r.Body).Decode(&body)
+				gotLabelOps = body.Update.Labels
+				w.WriteHeader(http.StatusOK)
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			}
+		}))
+		defer srv.Close()
+
+		jc := jira.NewJiraClient(jira.JiraConfig{
+			BaseURL:       srv.URL,
+			Token:         "tok",
+			Labels:        researchLabels,
+			VerdictLabels: researchVerdictLabels,
+		})
+
+		if err := jc.CompleteVerdict("PROJ-3", tc.verdict); err != nil {
+			t.Fatalf("CompleteVerdict(%v): %v", tc.verdict, err)
+		}
+		want := []map[string]string{{"remove": "agent-research-in-progress"}, {"add": tc.wantLabel}}
+		if len(gotLabelOps) != len(want) || gotLabelOps[0]["remove"] != want[0]["remove"] || gotLabelOps[1]["add"] != want[1]["add"] {
+			t.Errorf("verdict %v: label ops = %v, want %v", tc.verdict, gotLabelOps, want)
+		}
+	}
+}
+
+// TestJiraClient_CompleteVerdict_UnconfiguredErrorsWithoutRequest verifies
+// that CompleteVerdict on a client constructed with no VerdictLabels (the
+// work-kind construction path) errors instead of issuing a Jira request with
+// an empty label — matching the github adapter's guard.
+func TestJiraClient_CompleteVerdict_UnconfiguredErrorsWithoutRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{
+		BaseURL: srv.URL,
+		Token:   "tok",
+		Labels:  researchLabels,
+	})
+
+	if err := jc.CompleteVerdict("PROJ-4", forge.Recommend); err == nil {
+		t.Fatal("want error for unconfigured VerdictLabels, got nil")
+	}
+}
+
+// TestJiraClient_CompleteVerdict_ThenRetryResearchable verifies that after a
+// verdict terminal lands, re-marking the issue researchable (the retry
+// gesture, TransitionState(Untriaged, Dispatchable)) still works — the
+// Untriaged "from" label is empty, so the swap is add-only.
+func TestJiraClient_CompleteVerdict_ThenRetryResearchable(t *testing.T) {
+	var completeOps, retryOps []map[string]string
+	call := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-5":
+			var body struct {
+				Update struct {
+					Labels []map[string]string `json:"labels"`
+				} `json:"update"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			call++
+			if call == 1 {
+				completeOps = body.Update.Labels
+			} else {
+				retryOps = body.Update.Labels
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{
+		BaseURL:       srv.URL,
+		Token:         "tok",
+		Labels:        researchLabels,
+		VerdictLabels: researchVerdictLabels,
+	})
+
+	if err := jc.CompleteVerdict("PROJ-5", forge.Reject); err != nil {
+		t.Fatalf("CompleteVerdict: %v", err)
+	}
+	if len(completeOps) != 2 || completeOps[1]["add"] != "agent-research-reject" {
+		t.Fatalf("CompleteVerdict ops = %v, want add agent-research-reject", completeOps)
+	}
+
+	if err := jc.TransitionState("PROJ-5", forge.Untriaged, forge.Dispatchable); err != nil {
+		t.Fatalf("TransitionState(Untriaged, Dispatchable): %v", err)
+	}
+	if len(retryOps) != 1 || retryOps[0]["add"] != "agent-research" {
+		t.Errorf("retry ops = %v, want a single add of agent-research", retryOps)
+	}
+}
+
 func TestJiraClient_ListIssues_JQLAndOrder(t *testing.T) {
 	var gotJQL string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
