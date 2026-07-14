@@ -1,6 +1,8 @@
 package console
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -41,6 +43,25 @@ func TestRefresh_TrackerErr_WrapsErr(t *testing.T) {
 	}
 	if loaded.Err == nil {
 		t.Fatal("Err = nil, want the tracker error")
+	}
+}
+
+// TestDogfoodNotice_PresentVsAbsent verifies DogfoodNotice reports Live true
+// when .dogfood.pid exists under the given directory, and false when it
+// doesn't — the presence check dogfood.sh's `echo $$ > .dogfood.pid` /
+// `trap 'rm -f .dogfood.pid' EXIT` pair leaves behind.
+func TestDogfoodNotice_PresentVsAbsent(t *testing.T) {
+	dir := t.TempDir()
+
+	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); msg.Live {
+		t.Error("Live = true with no pid-file, want false")
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, ".dogfood.pid"), []byte("123\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); !msg.Live {
+		t.Error("Live = false with a pid-file present, want true")
 	}
 }
 
