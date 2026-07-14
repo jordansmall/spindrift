@@ -134,3 +134,87 @@ SKILL
   grep -qi 'exempt' "$CLAUDE_PROMPT_FILE"
 }
 
+
+# --- per-skill deferral: /tdd at IMPLEMENT, /commit at COMMIT ----------------
+# The generic SKILL_PREAMBLE lists every baked skill; these steps additionally
+# place a deferral at the exact section whose inline guidance the named skill
+# supersedes, gated on that skill being baked (same conditional-residue idiom
+# as caveman-default). A box baking neither skill sees neither deferral.
+
+@test "prompt defers the test-first workflow to /tdd when the tdd skill is baked" {
+  mkdir -p "$HOME/.claude/skills/tdd"
+  cat >"$HOME/.claude/skills/tdd/SKILL.md" <<'SKILL'
+---
+name: tdd
+description: Test-driven development skill.
+---
+Use TDD.
+SKILL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # Distinctive to tdd-default.md, not the inline RED/GREEN/REFACTOR steps.
+  grep -qi 'red-green-refactor' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "prompt carries no /tdd deferral when the tdd skill is not baked" {
+  mkdir -p "$HOME/.claude/skills/caveman"
+  cat >"$HOME/.claude/skills/caveman/SKILL.md" <<'SKILL'
+---
+name: caveman
+description: Ultra-compressed communication mode.
+---
+Respond terse like smart caveman.
+SKILL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -qi 'red-green-refactor' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "prompt defers commit messages to /commit when the commit skill is baked" {
+  mkdir -p "$HOME/.claude/skills/commit"
+  cat >"$HOME/.claude/skills/commit/SKILL.md" <<'SKILL'
+---
+name: commit
+description: Conventional commit messages.
+---
+Write conventional commits.
+SKILL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # Distinctive to commit-default.md.
+  grep -qi 'supersedes the inline format rules' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "prompt carries no /commit deferral when the commit skill is not baked" {
+  mkdir -p "$HOME/.claude/skills/caveman"
+  cat >"$HOME/.claude/skills/caveman/SKILL.md" <<'SKILL'
+---
+name: caveman
+description: Ultra-compressed communication mode.
+---
+Respond terse like smart caveman.
+SKILL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -qi 'supersedes the inline format rules' "$CLAUDE_PROMPT_FILE"
+}
+
+# The /commit deferral sits in the COMMIT section, part of the CHECK/COMMIT
+# block fix-prompt.md receives via the shared-block injection (issue #455),
+# so a warm fix pass favors /commit too when the skill is baked.
+@test "fix pass gets the /commit deferral via the injected CHECK/COMMIT block when commit is baked" {
+  export FIX_PASS="2"
+  mkdir -p "$HOME/.claude/skills/commit"
+  cat >"$HOME/.claude/skills/commit/SKILL.md" <<'SKILL'
+---
+name: commit
+description: Conventional commit messages.
+---
+Write conventional commits.
+SKILL
+  export CHECK_CONTRACT_FILE="$BATS_TEST_TMPDIR/check-contract.md"
+  printf '# CHECK\n\n%sStrict Conventional Commits.\n' '${COMMIT_STEP}' >"$CHECK_CONTRACT_FILE"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qi 'supersedes the inline format rules' "$CLAUDE_PROMPT_FILE"
+}

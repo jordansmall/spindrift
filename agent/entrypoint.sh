@@ -373,13 +373,23 @@ phase_prompt_assembly() {
     done
   fi
 
-  # One-liners setting the two other computed gates the caveman-default and
-  # file-issues registry rows name: the caveman skill actually baked at
-  # DRIVER_SKILLS_DIR/caveman/SKILL.md (issue #487), and the filer opt-in
-  # provisioned in AGENTS_JSON_TEMPLATE.
+  # One-liners setting the computed gates the caveman-default, tdd-default,
+  # commit-default, and file-issues registry rows name: each per-skill gate is
+  # the specific skill actually baked at DRIVER_SKILLS_DIR/<name>/SKILL.md, so
+  # the prompt step directing the agent to that skill renders only when it is
+  # present (issue #487); and the filer opt-in provisioned in
+  # AGENTS_JSON_TEMPLATE. These sit alongside the generic SKILLS_FOUND preamble:
+  # that lists every baked skill, while these place a deferral at the exact
+  # section whose inline guidance the named skill supersedes.
   local CAVEMAN_BAKED=""
   # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   [ -f "${DRIVER_SKILLS_DIR}/caveman/SKILL.md" ] && CAVEMAN_BAKED=1
+  local TDD_BAKED=""
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+  [ -f "${DRIVER_SKILLS_DIR}/tdd/SKILL.md" ] && TDD_BAKED=1
+  local COMMIT_BAKED=""
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+  [ -f "${DRIVER_SKILLS_DIR}/commit/SKILL.md" ] && COMMIT_BAKED=1
   local FILER_ENABLED=""
   if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
     # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
