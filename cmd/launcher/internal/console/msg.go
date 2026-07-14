@@ -62,6 +62,15 @@ type PickFailedMsg struct {
 
 func (PickFailedMsg) isConsoleMsg() {}
 
+// QueueSnapshotMsg carries the launcher's live Queue state into the pure
+// core — Run's per-render sync, since claim/run/settle/dissolve transitions
+// happen on the background Queue, not through Update.
+type QueueSnapshotMsg struct {
+	Picks []Pick
+}
+
+func (QueueSnapshotMsg) isConsoleMsg() {}
+
 // UnpickMsg is the run loop's signal that the operator asked to remove a
 // queued-but-unlaunched pick. It carries no tracker interaction: Update
 // only ever drops it from Model.Picks.

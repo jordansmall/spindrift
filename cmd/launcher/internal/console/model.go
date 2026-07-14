@@ -73,6 +73,8 @@ func Update(m Model, msg Msg) Model {
 		m.Picks = append(m.Picks, Pick{Number: msg.Number, Title: msg.Title, State: PickDissolved, Reason: msg.Reason})
 	case UnpickMsg:
 		m.Picks = removePick(m.Picks, msg.Number)
+	case QueueSnapshotMsg:
+		m.Picks = msg.Picks
 	}
 	return m
 }

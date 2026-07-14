@@ -19,16 +19,33 @@ func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer, la
 	m := NewModel()
 	m = Update(m, DogfoodNotice(pwd))
 	m = Update(m, Refresh(tracker))
+	m = syncQueue(m, launch)
 	fmt.Fprint(out, View(m))
 
 	scanner := bufio.NewScanner(in)
 	for !m.Quitting && scanner.Scan() {
 		m = applyCommand(m, tracker, pwd, launch, scanner.Text())
 		if !m.Quitting {
+			m = syncQueue(m, launch)
 			fmt.Fprint(out, View(m))
 		}
 	}
+	if launch != nil {
+		launch.Wait()
+	}
 	return scanner.Err()
+}
+
+// syncQueue installs launch's live Queue state onto m, so every render —
+// not just the one right after a pick — reflects claim/run/settle/dissolve
+// transitions that happen entirely on the background Queue. A nil launch
+// leaves m untouched: Picks then tracks only what PickQueuedMsg/PickFailedMsg
+// /UnpickMsg applied directly.
+func syncQueue(m Model, launch *Launcher) Model {
+	if launch == nil {
+		return m
+	}
+	return Update(m, QueueSnapshotMsg{Picks: launch.Queue.Snapshot()})
 }
 
 // applyCommand parses one line of operator input into a Msg and applies it.
@@ -47,6 +64,9 @@ func applyCommand(m Model, tracker forge.IssueTracker, pwd string, launch *Launc
 	case "f", "filter":
 		return Update(m, FilterChangedMsg{Filter: arg})
 	case "p", "pick":
+		if arg == "" {
+			return m
+		}
 		msg := PickIssue(tracker, arg, titleOf(m, arg), KindWork)
 		if queued, ok := msg.(PickQueuedMsg); ok && launch != nil {
 			launch.Queue.Add(Pick{Number: queued.Number, Title: queued.Title, Kind: queued.Kind, State: PickQueued})
@@ -54,6 +74,9 @@ func applyCommand(m Model, tracker forge.IssueTracker, pwd string, launch *Launc
 		}
 		return Update(m, msg)
 	case "u", "unpick":
+		if arg == "" {
+			return m
+		}
 		if launch != nil {
 			launch.Queue.Remove(arg)
 		}
