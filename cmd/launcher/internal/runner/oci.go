@@ -85,7 +85,7 @@ func (a *ociAdapter) EnsureReady() error {
 
 	// 1. Try host build; tee stderr so errors are visible AND inspectable.
 	var hostStderr bytes.Buffer
-	nixBuild := exec.Command("nix", "build", a.imageDrv+"^*", "--no-link")
+	nixBuild := execCommand("nix", "build", a.imageDrv+"^*", "--no-link")
 	nixBuild.Stdout = os.Stdout
 	nixBuild.Stderr = io.MultiWriter(os.Stderr, &hostStderr)
 	if err := nixBuild.Run(); err == nil {

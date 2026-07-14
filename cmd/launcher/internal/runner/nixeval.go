@@ -3,7 +3,6 @@ package runner
 import (
 	"bytes"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -25,7 +24,7 @@ type NixEvaluator struct{}
 // against a git+file flake reference — no checkout, no pull.
 func (NixEvaluator) Eval(pwd, rev, attr string) (string, error) {
 	ref := nixEvalRef(pwd, rev, attr)
-	cmd := exec.Command("nix", "eval", "--raw", ref)
+	cmd := execCommand("nix", "eval", "--raw", ref)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
