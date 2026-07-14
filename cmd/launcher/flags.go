@@ -183,6 +183,7 @@ var groupOrder = []string{
 // printSubcommands writes the shared subcommand listing used by both help modes.
 func printSubcommands(w io.Writer) {
 	fmt.Fprintln(w, "Subcommands:")
+	fmt.Fprintln(w, "  console                                    browse the open backlog interactively (read-only)")
 	fmt.Fprintln(w, "  dispatch [--no-build] [--yes] [issue...]  dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)")
 	fmt.Fprintln(w, "  preview [issue...]                        dry-run: show what dispatch would pick up, in order")
 	fmt.Fprintln(w, "  build                                     realize the agent image without running any agent")

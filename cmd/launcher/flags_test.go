@@ -239,6 +239,22 @@ func TestPrintHelp_ShowsDispatchSubcommand(t *testing.T) {
 	}
 }
 
+// TestPrintSubcommands_ConsoleFirst verifies console is the first
+// subcommand line advertised — bare `spindrift` now points operators at the
+// interactive console first (ADR 0023's "bare invocation keeps printing
+// help, now pointing at console").
+func TestPrintSubcommands_ConsoleFirst(t *testing.T) {
+	var buf bytes.Buffer
+	printSubcommands(&buf)
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("printSubcommands output too short: %q", buf.String())
+	}
+	if !strings.Contains(lines[1], "console") {
+		t.Errorf("first subcommand line = %q, want it to mention console", lines[1])
+	}
+}
+
 // TestPrintHelpFull_ContainsLabelEntry: the full reference includes --label with its doc.
 func TestPrintHelpFull_ContainsLabelEntry(t *testing.T) {
 	var buf bytes.Buffer

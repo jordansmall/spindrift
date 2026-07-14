@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"spindrift.dev/launcher/internal/console"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
@@ -799,6 +800,25 @@ func cmdDoctor() int {
 	return 0
 }
 
+// cmdConsole is the `console` subcommand: launch the read-only backlog
+// browser (#645). Like cmdDoctor, it only needs the IssueTracker seam, not
+// the runner/dispatch/settle wiring bootstrap provides, so it does not go
+// through bootstrap.
+func cmdConsole() int {
+	c := loadConfig()
+	it := newIssueTracker(c)
+	pwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
+	}
+	if err := console.Run(it, pwd, os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
+	}
+	return 0
+}
+
 // cmdRecover is the `recover` subcommand: adopt an already-discovered open
 // non-draft PR with no outcome line and drive it through the merge gate. lc
 // is wired by bootstrap in production; tests construct it directly with
@@ -921,6 +941,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	if args[0] == "doctor" {
 		return cmdDoctor()
+	}
+	if args[0] == "console" {
+		return cmdConsole()
 	}
 	if args[0] == "recover" {
 		if len(args) < 2 {
