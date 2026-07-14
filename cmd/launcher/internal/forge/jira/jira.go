@@ -253,6 +253,17 @@ func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 	}, nil
 }
 
+// TouchesOf returns the declared touch-set parsed from issue num's
+// description — the shared body-grammar default (forge.ParseTouchPaths);
+// Jira has no native touch-set concept to prefer over it.
+func (j *jiraClient) TouchesOf(num string) ([]string, error) {
+	iss, err := j.Issue(num)
+	if err != nil {
+		return nil, err
+	}
+	return forge.ParseTouchPaths(iss.Body), nil
+}
+
 // Comment posts a comment on the Jira issue.
 func (j *jiraClient) Comment(num, body string) error {
 	status, err := j.do(http.MethodPost, "/rest/api/2/issue/"+num+"/comment",

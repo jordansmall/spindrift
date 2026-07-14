@@ -17,12 +17,14 @@ func TestTouchSetsOverlap_LiteralPathHit(t *testing.T) {
 }
 
 // declaredOnly converts raw forge.Issue entries into inProgressTouches using
-// only their declared ## Touches section, mirroring v1 behavior for tests
-// that exercise overlapsInProgress directly without a PR-file fetch.
-func declaredOnly(issues []forge.Issue) []inProgressTouches {
+// only their declared touch-set (via the tracker's TouchesOf, not by
+// re-parsing body grammar), mirroring v1 behavior for tests that exercise
+// overlapsInProgress directly without a PR-file fetch.
+func declaredOnly(it forge.IssueTracker, issues []forge.Issue) []inProgressTouches {
 	entries := make([]inProgressTouches, len(issues))
 	for i, fi := range issues {
-		entries[i] = inProgressTouches{number: fi.Number, touches: forge.ParseTouchPaths(fi.Body)}
+		touches, _ := it.TouchesOf(fi.Number)
+		entries[i] = inProgressTouches{number: fi.Number, touches: touches}
 	}
 	return entries
 }
@@ -39,7 +41,7 @@ func TestOverlapsInProgress_CollidingTouches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListIssues: %v", err)
 	}
-	collider, held := overlapsInProgress(fc, "10", declaredOnly(inProgress))
+	collider, held := overlapsInProgress(fc, "10", declaredOnly(fc, inProgress))
 	if !held || collider != "20" {
 		t.Errorf("overlapsInProgress = (%q, %v), want (\"20\", true)", collider, held)
 	}
@@ -53,7 +55,7 @@ func TestOverlapsInProgress_DisjointTouches(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- docs/reference.md", State: "OPEN", Labels: []string{"agent-in-progress"}})
 
 	inProgress, _ := fc.ListIssues(forge.InProgress)
-	if _, held := overlapsInProgress(fc, "10", declaredOnly(inProgress)); held {
+	if _, held := overlapsInProgress(fc, "10", declaredOnly(fc, inProgress)); held {
 		t.Error("expected no hold: disjoint touch-sets")
 	}
 }
@@ -67,7 +69,7 @@ func TestOverlapsInProgress_NoDeclaredTouches(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- lib/env-schema.nix", State: "OPEN", Labels: []string{"agent-in-progress"}})
 
 	inProgress, _ := fc.ListIssues(forge.InProgress)
-	if _, held := overlapsInProgress(fc, "10", declaredOnly(inProgress)); held {
+	if _, held := overlapsInProgress(fc, "10", declaredOnly(fc, inProgress)); held {
 		t.Error("expected no hold: candidate declared no touches")
 	}
 }

@@ -298,6 +298,18 @@ func (f *Fake) DepsOf(num string) ([]Dependency, error) {
 	return WithSource(ParseBlockerRefs(iss.Body), DepSourceBody), nil
 }
 
+// TouchesOf returns the touch-set parsed from num's issue body, mirroring
+// the real adapters' shared body-grammar default.
+func (f *Fake) TouchesOf(num string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	iss, ok := f.issues[num]
+	if !ok {
+		return nil, fmt.Errorf("issue %s not found", num)
+	}
+	return ParseTouchPaths(iss.Body), nil
+}
+
 func (f *Fake) Comment(num, body string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
