@@ -7,9 +7,9 @@ setup() {
   setup_run_env
 }
 
-# --- Reconcile stranded issues (issue #193) -----------------------------------
+# --- Automatic adoption of a bare in-progress issue is never safe (issue #600) -
 
-@test "reconcile: stranded in-progress issue with green PR is adopted and merged without new dispatch" {
+@test "reconcile: stranded in-progress issue with green open PR is left untouched (#600)" {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tStranded issue'
@@ -19,13 +19,14 @@ setup() {
   # FAKE_GH_PR_DRAFT_1 not set → defaults to "false" (non-draft)
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   run "$RUN_CMD"
-  # After reconcile merges the stranded PR, discoverIssues finds no
-  # ready-for-agent issues → launcher exits 2 (queue empty).
+  # A bare agent-in-progress issue is indistinguishable from one a live runner
+  # is still working — dispatch must never adopt it on the strength of the
+  # label alone, green PR or not (#600). discoverIssues finds no
+  # ready-for-agent issues → launcher exits 2 (queue empty), untouched.
   [ "$status" -eq 2 ]
-  [[ "$output" == *"status=adopted"* ]]
-  [[ "$output" == *"status=verified-merged"* ]]
-  grep -q 'pr merge' "$GH_LOG"
-  grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-complete --remove-label agent-in-progress' "$GH_LOG"
+  [[ "$output" != *"status=adopted"* ]]
+  ! grep -q 'pr merge' "$GH_LOG"
+  ! grep -q -- 'agent-complete' "$GH_LOG"
   ! grep -q 'ISSUE_NUMBER=1' "$PODMAN_LOG"
 }
 
