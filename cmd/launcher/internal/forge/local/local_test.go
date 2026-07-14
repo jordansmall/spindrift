@@ -284,6 +284,53 @@ func TestLocalTracker_CompleteVerdict_ThenRetryResearchable(t *testing.T) {
 	}
 }
 
+// TestLocalTracker_ResearchDispatch_InProgressAndFailedUseResearchLabels
+// verifies the research kind's InProgress and Failed transitions (plain
+// TransitionState, not CompleteVerdict) rewrite the frontmatter state field
+// to the research label family, distinct from every verdict terminal —
+// Failed strictly means the Box crashed or produced no verdict (ADR 0022),
+// never a concluded verdict.
+func TestLocalTracker_ResearchDispatch_InProgressAndFailedUseResearchLabels(t *testing.T) {
+	labels := forge.ResearchDispatchLabels()
+	verdictLabels := forge.ResearchVerdictLabels()
+	dir := t.TempDir()
+	writeLocalIssue(t, dir, "research-me", localIssue{frontmatter: localFrontmatter{
+		Title: "Research me", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z",
+	}})
+
+	lt := NewLocalTracker(dir, labels, verdictLabels)
+	if err := lt.TransitionState("research-me", forge.Dispatchable, forge.InProgress); err != nil {
+		t.Fatalf("TransitionState(Dispatchable, InProgress): %v", err)
+	}
+	inProg, err := lt.ListIssues(forge.InProgress)
+	if err != nil {
+		t.Fatalf("ListIssues(InProgress): %v", err)
+	}
+	if len(inProg) != 1 || inProg[0].Number != "research-me" {
+		t.Fatalf("ListIssues(InProgress) = %+v, want [research-me]", inProg)
+	}
+
+	if err := lt.TransitionState("research-me", forge.InProgress, forge.Failed); err != nil {
+		t.Fatalf("TransitionState(InProgress, Failed): %v", err)
+	}
+	failed, err := lt.ListIssues(forge.Failed)
+	if err != nil {
+		t.Fatalf("ListIssues(Failed): %v", err)
+	}
+	if len(failed) != 1 || failed[0].Number != "research-me" {
+		t.Fatalf("ListIssues(Failed) = %+v, want [research-me]", failed)
+	}
+
+	terminals := []string{labels.Failed, verdictLabels.Recommend, verdictLabels.Reject, verdictLabels.Unclear}
+	seen := map[string]bool{}
+	for _, l := range terminals {
+		if seen[l] {
+			t.Fatalf("terminal state %q collides with another terminal: %v", l, terminals)
+		}
+		seen[l] = true
+	}
+}
+
 func TestLocalTracker_DepsOf_ParsesBlockedBySlugSection(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
