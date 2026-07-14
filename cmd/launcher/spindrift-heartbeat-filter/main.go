@@ -5,11 +5,12 @@
 //
 // Usage: spindrift-heartbeat-filter -n ISSUE_NUMBER -f /tmp/heartbeat.log
 //
-// This is the in-box companion to the launcher-side heartbeat.Writer (#182).
-// It reuses the same heartbeat package so the output format is identical.
-// Decoupling mechanism: raw stream-json stays on stdout (captured by the
-// launcher into logs/issue-N.log); cleaned heartbeat goes to -f (default
-// /tmp/heartbeat.log inside the box). To view heartbeat in a running box:
+// This is the in-box companion to the launcher-side claude Driver's
+// heartbeat writer (#182). It goes through the same Driver seam (ADR 0009)
+// so the output format is identical. Decoupling mechanism: raw stream-json
+// stays on stdout (captured by the launcher into logs/issue-N.log); cleaned
+// heartbeat goes to -f (default /tmp/heartbeat.log inside the box). To view
+// heartbeat in a running box:
 //
 //	podman exec <box> tail -f /tmp/heartbeat.log
 //
@@ -22,7 +23,7 @@ import (
 	"io"
 	"os"
 
-	"spindrift.dev/launcher/internal/heartbeat"
+	"spindrift.dev/launcher/internal/driver"
 )
 
 func main() {
@@ -47,7 +48,11 @@ func run(issue, filePath string, in io.Reader, out io.Writer) error {
 		return fmt.Errorf("open heartbeat file: %w", err)
 	}
 	defer f.Close()
-	w := heartbeat.New(out, issue, f)
+	d, err := driver.New("claude")
+	if err != nil {
+		return err
+	}
+	w := d.NewHeartbeatWriter(out, issue, f)
 	_, err = io.Copy(w, in)
 	return err
 }
