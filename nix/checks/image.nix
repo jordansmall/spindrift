@@ -15,6 +15,7 @@ let
     skillsHarness
     nixStoreWritableHarness
     extraClosuresHarness
+    harness
     ;
 in
 {
@@ -75,6 +76,14 @@ in
       || { echo "filer-only harness unexpectedly bakes a scout entry" >&2; exit 1; }
     ! grep -q '"reviewer"' <<<"$filer_line" \
       || { echo "filer-only harness unexpectedly bakes a reviewer entry" >&2; exit 1; }
+
+    # The dogfood harness itself opts into the Filer (issue #616): the
+    # baked template must carry a filer entry at the recommended model.
+    dogfood_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${harness.agentFiles}/agent/entrypoint.sh)
+    grep -q '"filer"' <<<"$dogfood_line" \
+      || { echo "dogfood harness missing filer entry in baked template" >&2; exit 1; }
+    grep -q 'claude-haiku-4-5-20251001' <<<"$dogfood_line" \
+      || { echo "dogfood harness filer entry missing the configured model" >&2; exit 1; }
 
     touch $out
   '';
