@@ -7,20 +7,21 @@ import (
 	"strings"
 )
 
-// isMergeConflict returns true when gh's stderr indicates a merge-conflict
+// IsMergeConflict returns true when gh's stderr indicates a merge-conflict
 // failure rather than a permissions error, network failure, or other cause.
-func isMergeConflict(stderr string) bool {
+func IsMergeConflict(stderr string) bool {
 	s := strings.ToLower(stderr)
 	return strings.Contains(s, "merge conflict") ||
 		strings.Contains(s, "not mergeable")
 }
 
-// gitForcePush force-with-lease-pushes the current branch of the repo
+// GitForcePush force-with-lease-pushes the current branch of the repo
 // checked out at dir, capturing git's stderr into the returned error so
 // callers can tell a stale lease apart from an auth or network fault. A
 // failure without a genuine ref-rejection marker in stderr is wrapped in
-// ErrTransientPushFailure so callers know it's safe to retry.
-func gitForcePush(dir string) error {
+// ErrTransientPushFailure so callers know it's safe to retry. Shared by the
+// git and github adapters, both of which force-push a rebased branch.
+func GitForcePush(dir string) error {
 	var stderr bytes.Buffer
 	cmd := exec.Command("git", "-C", dir, "push", "--force-with-lease")
 	cmd.Stderr = &stderr

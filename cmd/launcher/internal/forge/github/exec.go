@@ -1,12 +1,15 @@
-package forge
+// Package github is the gh-exec adapter: it satisfies the parent forge
+// package's IssueTracker, CodeForge, and PRForge interfaces using the gh
+// CLI. GH_TOKEN is read from the ambient environment; the repo slug and
+// dispatch label mapping are fixed at construction time.
+package github
 
-// execClient is the gh-exec adapter. It satisfies IssueTracker, CodeForge,
-// and PRForge using the gh CLI. GH_TOKEN is read from the ambient
-// environment; the repo slug and dispatch label mapping are fixed at
-// construction time.
+import "spindrift.dev/launcher/internal/forge"
+
+// execClient is the gh-exec adapter.
 type execClient struct {
 	repo         string // owner/repo slug
-	labels       DispatchLabels
+	labels       forge.DispatchLabels
 	branchPrefix string
 }
 
@@ -16,7 +19,7 @@ type execClient struct {
 // instance may be constructed twice (once per seam) or once and used for
 // both. labels maps canonical DispatchState values to GitHub label names.
 // branchPrefix is baked into AgentBranch's output.
-func NewExecClient(repo string, labels DispatchLabels, branchPrefix string) *execClient {
+func NewExecClient(repo string, labels forge.DispatchLabels, branchPrefix string) *execClient {
 	return &execClient{repo: repo, labels: labels, branchPrefix: branchPrefix}
 }
 

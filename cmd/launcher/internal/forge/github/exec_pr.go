@@ -1,4 +1,4 @@
-package forge
+package github
 
 import (
 	"bufio"
@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
-func (e *execClient) OpenPRForBranch(branch string) (PR, bool, error) {
+func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	cmd := exec.Command("gh", "pr", "list",
 		"--repo", e.repo,
 		"--head", branch,
@@ -19,20 +21,20 @@ func (e *execClient) OpenPRForBranch(branch string) (PR, bool, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return PR{}, false, fmt.Errorf("gh pr list: %w", err)
+		return forge.PR{}, false, fmt.Errorf("gh pr list: %w", err)
 	}
 	url := strings.TrimSpace(string(out))
 	if url == "" {
-		return PR{}, false, nil
+		return forge.PR{}, false, nil
 	}
 	viewCmd := exec.Command("gh", "pr", "view", url, "--json", "isDraft", "--jq", ".isDraft")
 	out, err = viewCmd.Output()
 	if err != nil {
 		// Cannot determine draft status — do not adopt.
-		return PR{}, false, fmt.Errorf("gh pr view %s isDraft: %w", url, err)
+		return forge.PR{}, false, fmt.Errorf("gh pr view %s isDraft: %w", url, err)
 	}
 	isDraft := strings.TrimSpace(string(out)) == "true"
-	return PR{URL: url, IsDraft: isDraft}, true, nil
+	return forge.PR{URL: url, IsDraft: isDraft}, true, nil
 }
 
 func (e *execClient) PRForBranch(branch string) (string, bool, error) {
@@ -54,23 +56,23 @@ func (e *execClient) PRForBranch(branch string) (string, bool, error) {
 	return url, true, nil
 }
 
-func (e *execClient) PRState(url string) (PRState, error) {
+func (e *execClient) PRState(url string) (forge.PRState, error) {
 	cmd := exec.Command("gh", "pr", "view", url, "--json", "state", "--jq", ".state")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("gh pr view %s state: %w", url, err)
 	}
-	return PRState(strings.TrimSpace(string(out))), nil
+	return forge.PRState(strings.TrimSpace(string(out))), nil
 }
 
 // CheckState queries the aggregate statusCheckRollup state of the PR's head
 // commit via GraphQL and returns the result as a RollupState. Returns StateNone
 // when no checks are registered or the rollup is absent.
-func (e *execClient) CheckState(url string) (RollupState, error) {
+func (e *execClient) CheckState(url string) (forge.RollupState, error) {
 	// Parse https://github.com/OWNER/REPO/pull/NUMBER
 	parts := strings.Split(url, "/")
 	if len(parts) < 7 {
-		return StateNone, fmt.Errorf("invalid PR URL: %s", url)
+		return forge.StateNone, fmt.Errorf("invalid PR URL: %s", url)
 	}
 	owner, repo, number := parts[3], parts[4], parts[6]
 	const gql = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}`
@@ -83,23 +85,23 @@ func (e *execClient) CheckState(url string) (RollupState, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return StateNone, fmt.Errorf("gh api graphql: %w", err)
+		return forge.StateNone, fmt.Errorf("gh api graphql: %w", err)
 	}
 	s := strings.TrimSpace(string(out))
 	if s == "" {
-		return StateNone, nil
+		return forge.StateNone, nil
 	}
-	return RollupState(s), nil
+	return forge.RollupState(s), nil
 }
 
 // Mergeable queries the PR's content-mergeability state via GraphQL — the
 // `mergeable` field, distinct from the statusCheckRollup CheckState queries —
 // so Merge can tell a genuine conflict (CONFLICTING) apart from a PR that is
 // merely blocked by pending or failing checks (MERGEABLE).
-func (e *execClient) Mergeable(url string) (MergeableState, error) {
+func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 	parts := strings.Split(url, "/")
 	if len(parts) < 7 {
-		return MergeableUnknown, fmt.Errorf("invalid PR URL: %s", url)
+		return forge.MergeableUnknown, fmt.Errorf("invalid PR URL: %s", url)
 	}
 	owner, repo, number := parts[3], parts[4], parts[6]
 	const gql = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){mergeable}}}`
@@ -112,13 +114,13 @@ func (e *execClient) Mergeable(url string) (MergeableState, error) {
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return MergeableUnknown, fmt.Errorf("gh api graphql: %w", err)
+		return forge.MergeableUnknown, fmt.Errorf("gh api graphql: %w", err)
 	}
 	s := strings.TrimSpace(string(out))
 	if s == "" {
-		return MergeableUnknown, nil
+		return forge.MergeableUnknown, nil
 	}
-	return MergeableState(s), nil
+	return forge.MergeableState(s), nil
 }
 
 // ListPRFiles returns every path changed by the PR (added, modified, and
@@ -167,7 +169,7 @@ func (e *execClient) Merge(url string) error {
 // (issue #566). A mergeable state this function cannot map to either outcome
 // is surfaced as its own error rather than folded into ErrMergeConflict.
 func (e *execClient) classifyMergeFailure(url string, mergeErr error, stderr string) error {
-	if !isMergeConflict(stderr) {
+	if !forge.IsMergeConflict(stderr) {
 		return fmt.Errorf("gh pr merge %s: %w: %s", url, mergeErr, strings.TrimSpace(stderr))
 	}
 	state, err := e.Mergeable(url)
@@ -175,10 +177,10 @@ func (e *execClient) classifyMergeFailure(url string, mergeErr error, stderr str
 		return fmt.Errorf("gh pr merge %s: %w (mergeable state unavailable: %v)", url, mergeErr, err)
 	}
 	switch state {
-	case MergeableConflicting:
-		return ErrMergeConflict
-	case MergeableMergeable:
-		return ErrMergeBlockedByChecks
+	case forge.MergeableConflicting:
+		return forge.ErrMergeConflict
+	case forge.MergeableMergeable:
+		return forge.ErrMergeBlockedByChecks
 	default:
 		return fmt.Errorf("gh pr merge %s: %w (mergeable state %q undetermined)", url, mergeErr, state)
 	}
@@ -220,7 +222,7 @@ func (e *execClient) EnqueueAutoMerge(prURL string) error {
 // the credential check fails, or ErrRepoNotFound if the repo cannot be found.
 func (e *execClient) Probe() (string, error) {
 	if err := exec.Command("gh", "auth", "status").Run(); err != nil {
-		return "", fmt.Errorf("%w: %s", ErrAuthFailure, err)
+		return "", fmt.Errorf("%w: %s", forge.ErrAuthFailure, err)
 	}
 	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "repo", "view", e.repo,
@@ -229,7 +231,7 @@ func (e *execClient) Probe() (string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("%w: %s", ErrRepoNotFound, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("%w: %s", forge.ErrRepoNotFound, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -308,7 +310,7 @@ func (e *execClient) Rebase(prURL string) error {
 	}
 	if err := gitIn("rebase", "origin/"+base).Run(); err != nil {
 		_ = gitIn("rebase", "--abort").Run()
-		return ErrMergeConflict
+		return forge.ErrMergeConflict
 	}
-	return gitForcePush(dir)
+	return forge.GitForcePush(dir)
 }

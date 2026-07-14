@@ -1,4 +1,4 @@
-package forge_test
+package jira_test
 
 import (
 	"encoding/json"
@@ -9,12 +9,23 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/jira"
 )
+
+// testLabels is the conventional lifecycle-label set, mirrored from
+// lib/env-schema.nix (issue #460); this package's tests share it instead of
+// each test restating the four label strings.
+var testLabels = forge.DispatchLabels{
+	Dispatchable: "ready-for-agent",
+	InProgress:   "agent-in-progress",
+	Complete:     "agent-complete",
+	Failed:       "agent-failed",
+}
 
 // TestParseStatusMapping_Empty verifies an empty string parses to an empty
 // mapping (every state falls back to its label) rather than an error.
 func TestParseStatusMapping_Empty(t *testing.T) {
-	m, err := forge.ParseStatusMapping("")
+	m, err := jira.ParseStatusMapping("")
 	if err != nil {
 		t.Fatalf("ParseStatusMapping(\"\"): %v", err)
 	}
@@ -26,7 +37,7 @@ func TestParseStatusMapping_Empty(t *testing.T) {
 // TestParseStatusMapping_AllStates verifies the JSON knob format maps every
 // dispatch-state key to its DispatchState.
 func TestParseStatusMapping_AllStates(t *testing.T) {
-	m, err := forge.ParseStatusMapping(`{"dispatchable":"To Do","inProgress":"In Progress","complete":"Done","failed":"Blocked"}`)
+	m, err := jira.ParseStatusMapping(`{"dispatchable":"To Do","inProgress":"In Progress","complete":"Done","failed":"Blocked"}`)
 	if err != nil {
 		t.Fatalf("ParseStatusMapping: %v", err)
 	}
@@ -46,14 +57,14 @@ func TestParseStatusMapping_AllStates(t *testing.T) {
 // TestParseStatusMapping_UnknownKey rejects a typo'd key instead of silently
 // dropping it, so a misconfigured mapping fails fast at startup.
 func TestParseStatusMapping_UnknownKey(t *testing.T) {
-	if _, err := forge.ParseStatusMapping(`{"disptchable":"To Do"}`); err == nil {
+	if _, err := jira.ParseStatusMapping(`{"disptchable":"To Do"}`); err == nil {
 		t.Fatal("want error for unknown key, got nil")
 	}
 }
 
 // TestParseStatusMapping_InvalidJSON rejects malformed JSON.
 func TestParseStatusMapping_InvalidJSON(t *testing.T) {
-	if _, err := forge.ParseStatusMapping(`{not json`); err == nil {
+	if _, err := jira.ParseStatusMapping(`{not json`); err == nil {
 		t.Fatal("want error for invalid JSON, got nil")
 	}
 }
@@ -62,7 +73,7 @@ func TestParseStatusMapping_InvalidJSON(t *testing.T) {
 // IssueTracker (Jira implements only this seam, per ADR 0013 — code still
 // lands via the github CodeForge).
 func TestJiraClient_ImplementsIssueTracker(t *testing.T) {
-	var _ forge.IssueTracker = forge.NewJiraClient(forge.JiraConfig{})
+	var _ forge.IssueTracker = jira.NewJiraClient(jira.JiraConfig{})
 }
 
 // TestJiraClient_Probe_Success verifies Probe() confirms connectivity and
@@ -77,7 +88,7 @@ func TestJiraClient_Probe_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{
+	jc := jira.NewJiraClient(jira.JiraConfig{
 		BaseURL:    srv.URL,
 		ProjectKey: "PROJ",
 		Token:      "tok",
@@ -100,7 +111,7 @@ func TestJiraClient_Probe_AuthFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{
+	jc := jira.NewJiraClient(jira.JiraConfig{
 		BaseURL:    srv.URL,
 		ProjectKey: "PROJ",
 		Token:      "bad-token",
@@ -124,7 +135,7 @@ func TestJiraClient_Comment_PostsBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
 	if err := jc.Comment("PROJ-42", "hello from the agent"); err != nil {
 		t.Fatalf("Comment: %v", err)
 	}
@@ -159,7 +170,7 @@ func TestJiraClient_Issue_FetchesFields(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
 	iss, err := jc.Issue("PROJ-7")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -199,7 +210,7 @@ func TestJiraClient_Issue_DoneStatusCategoryIsClosed(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
 	iss, err := jc.Issue("PROJ-8")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -231,7 +242,7 @@ func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 	defer srv.Close()
 
 	// Default: no comments included.
-	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
 	iss, err := jc.Issue("PROJ-7")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -241,7 +252,7 @@ func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 	}
 
 	// Opt-in: comments appended.
-	jcWithComments := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok", IncludeComments: true})
+	jcWithComments := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", IncludeComments: true})
 	iss2, err := jcWithComments.Issue("PROJ-7")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -274,7 +285,7 @@ func TestJiraClient_Issue_IncludeComments_MultilineCommentIsOneBullet(t *testing
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok", IncludeComments: true})
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", IncludeComments: true})
 	iss, err := jc.Issue("PROJ-8")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -311,7 +322,7 @@ func TestJiraClient_DepsOf_NativeLinks(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
 	deps, err := jc.DepsOf("PROJ-10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
@@ -358,7 +369,7 @@ func TestJiraClient_TransitionState_MappedStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{
+	jc := jira.NewJiraClient(jira.JiraConfig{
 		BaseURL: srv.URL,
 		Token:   "tok",
 		StatusMapping: map[forge.DispatchState]string{
@@ -400,7 +411,7 @@ func TestJiraClient_TransitionState_UnmappedFallsBackToLabel(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{
+	jc := jira.NewJiraClient(jira.JiraConfig{
 		BaseURL:       srv.URL,
 		Token:         "tok",
 		StatusMapping: map[forge.DispatchState]string{}, // no mapping for InProgress
@@ -436,7 +447,7 @@ func TestJiraClient_TransitionState_BlockedFallsBackToLabel(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{
+	jc := jira.NewJiraClient(jira.JiraConfig{
 		BaseURL: srv.URL,
 		Token:   "tok",
 		StatusMapping: map[forge.DispatchState]string{
@@ -471,7 +482,7 @@ func TestJiraClient_TransitionState_InfraErrorPropagates(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{
+	jc := jira.NewJiraClient(jira.JiraConfig{
 		BaseURL: srv.URL,
 		Token:   "tok",
 		StatusMapping: map[forge.DispatchState]string{
@@ -503,7 +514,7 @@ func TestJiraClient_ListIssues_JQLAndOrder(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{
+	jc := jira.NewJiraClient(jira.JiraConfig{
 		BaseURL:    srv.URL,
 		Token:      "tok",
 		ProjectKey: "PROJ",
@@ -547,7 +558,7 @@ func TestJiraClient_ListIssues_CapsMaxResults(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: testLabels})
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: testLabels})
 	if _, err := jc.ListIssues(forge.Dispatchable); err != nil {
 		t.Fatalf("ListIssues: %v", err)
 	}
@@ -570,7 +581,7 @@ func TestJiraClient_ListIssues_ExcludesDoneCategory(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: testLabels})
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ", Labels: testLabels})
 	if _, err := jc.ListIssues(forge.Dispatchable); err != nil {
 		t.Fatalf("ListIssues: %v", err)
 	}
@@ -590,7 +601,7 @@ func TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{
+	jc := jira.NewJiraClient(jira.JiraConfig{
 		BaseURL:       srv.URL,
 		Token:         "tok",
 		ProjectKey:    "PROJ",
@@ -621,7 +632,7 @@ func TestJiraClient_ListLabels_ReturnsSiteLabels(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
 	labels, err := jc.ListLabels()
 	if err != nil {
 		t.Fatalf("ListLabels: %v", err)
@@ -640,7 +651,7 @@ func TestJiraClient_CreateLabel_NoOp(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	jc := forge.NewJiraClient(forge.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
 	if err := jc.CreateLabel("agent-failed", "desc", "d93f0b"); err != nil {
 		t.Fatalf("CreateLabel: %v", err)
 	}

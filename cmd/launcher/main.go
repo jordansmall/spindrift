@@ -15,6 +15,10 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/git"
+	"spindrift.dev/launcher/internal/forge/github"
+	"spindrift.dev/launcher/internal/forge/jira"
+	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
@@ -334,7 +338,7 @@ func validate(c config) error {
 		return fmt.Errorf("ISSUE_TRACKER=%q is not valid; must be github, local, or jira", c.issueTracker)
 	}
 	if c.issueTracker == "jira" {
-		if err := forge.ValidateJiraEnv(c.jiraBaseURL, c.jiraProjectKey, c.jiraToken, c.jiraStatusMapping); err != nil {
+		if err := jira.ValidateJiraEnv(c.jiraBaseURL, c.jiraProjectKey, c.jiraToken, c.jiraStatusMapping); err != nil {
 			return err
 		}
 	}
@@ -366,16 +370,16 @@ func dispatchLabels(c config) forge.DispatchLabels {
 func newIssueTracker(c config) forge.IssueTracker {
 	switch c.issueTracker {
 	case "local":
-		return forge.NewLocalTracker(c.localIssuesDir, dispatchLabels(c))
+		return local.NewLocalTracker(c.localIssuesDir, dispatchLabels(c))
 	case "jira":
-		statusMapping, err := forge.ParseStatusMapping(c.jiraStatusMapping)
+		statusMapping, err := jira.ParseStatusMapping(c.jiraStatusMapping)
 		if err != nil {
 			// validate() already rejects a malformed mapping before this is
 			// reached; treat it as unmapped (label-only lifecycle) as a
 			// fallback.
 			statusMapping = map[forge.DispatchState]string{}
 		}
-		return forge.NewJiraClient(forge.JiraConfig{
+		return jira.NewJiraClient(jira.JiraConfig{
 			BaseURL:         c.jiraBaseURL,
 			ProjectKey:      c.jiraProjectKey,
 			Email:           c.jiraEmail,
@@ -385,7 +389,7 @@ func newIssueTracker(c config) forge.IssueTracker {
 			IncludeComments: c.jiraIncludeComments,
 		})
 	default:
-		return forge.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
+		return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
 	}
 }
 
@@ -394,9 +398,9 @@ func newIssueTracker(c config) forge.IssueTracker {
 // PR, CI-watch, or merge gate).
 func newCodeForge(c config) forge.CodeForge {
 	if c.codeForge == "git" {
-		return forge.NewGitClient(c.codeForgeRemoteURL, c.baseBranch, c.gitUserName, c.gitUserEmail, c.branchPrefix)
+		return git.NewGitClient(c.codeForgeRemoteURL, c.baseBranch, c.gitUserName, c.gitUserEmail, c.branchPrefix)
 	}
-	return forge.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
+	return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
 }
 
 // runnerConfig builds the runner.Config a runner adapter needs from loaded
