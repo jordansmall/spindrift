@@ -218,13 +218,20 @@ func (lt *LocalTracker) TransitionState(num string, from, to forge.DispatchState
 
 // CompleteVerdict rewrites issue num's frontmatter "state" marker from the
 // InProgress label to verdict's terminal label — the local adapter's single
-// scalar state field, same shape as TransitionState's overwrite.
+// scalar state field, same shape as TransitionState's overwrite. It errors
+// without touching the file when no state is configured for verdict (the
+// work-kind construction path), rather than overwriting frontmatter.State
+// with an empty string.
 func (lt *LocalTracker) CompleteVerdict(num string, verdict forge.Verdict) error {
+	state := lt.verdictLabels.Label(verdict)
+	if state == "" {
+		return fmt.Errorf("local: no state configured for verdict %v", verdict)
+	}
 	li, err := lt.readIssueFile(num)
 	if err != nil {
 		return err
 	}
-	li.frontmatter.State = lt.verdictLabels.Label(verdict)
+	li.frontmatter.State = state
 	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
 		return fmt.Errorf("write local issue %s: %w", num, err)
 	}

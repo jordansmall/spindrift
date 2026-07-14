@@ -187,6 +187,103 @@ func TestLocalTracker_TransitionState_RewritesFrontmatterInPlace(t *testing.T) {
 	}
 }
 
+// TestLocalTracker_CompleteVerdict_UnconfiguredErrorsWithoutWriting verifies
+// that CompleteVerdict on a tracker constructed with no VerdictLabels (the
+// work-kind construction path) errors instead of overwriting the frontmatter
+// state field with an empty string — matching the github/jira adapters'
+// guard against silently corrupting the state marker.
+func TestLocalTracker_CompleteVerdict_UnconfiguredErrorsWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "fix-thing", localIssue{frontmatter: localFrontmatter{
+		Title: "Fix thing", State: labels.InProgress, Created: "2026-07-09T12:00:00Z",
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	if err := lt.CompleteVerdict("fix-thing", forge.Recommend); err == nil {
+		t.Fatal("want error for unconfigured VerdictLabels, got nil")
+	}
+
+	inProg, err := lt.ListIssues(forge.InProgress)
+	if err != nil {
+		t.Fatalf("ListIssues(InProgress): %v", err)
+	}
+	if len(inProg) != 1 || inProg[0].Number != "fix-thing" {
+		t.Errorf("frontmatter state changed despite unconfigured VerdictLabels: ListIssues(InProgress) = %+v", inProg)
+	}
+}
+
+// TestLocalTracker_CompleteVerdict_RewritesFrontmatterToVerdictLabel verifies
+// that CompleteVerdict rewrites a research-kind issue's frontmatter state
+// field from InProgress to each of the three verdict terminals, mirroring
+// TransitionState_RewritesFrontmatterInPlace's file-rewrite assertion.
+func TestLocalTracker_CompleteVerdict_RewritesFrontmatterToVerdictLabel(t *testing.T) {
+	labels := forge.ResearchDispatchLabels()
+	verdictLabels := forge.ResearchVerdictLabels()
+
+	cases := []struct {
+		verdict   forge.Verdict
+		wantState string
+	}{
+		{forge.Recommend, verdictLabels.Recommend},
+		{forge.Reject, verdictLabels.Reject},
+		{forge.Unclear, verdictLabels.Unclear},
+	}
+	for _, tc := range cases {
+		dir := t.TempDir()
+		writeLocalIssue(t, dir, "research-me", localIssue{frontmatter: localFrontmatter{
+			Title: "Research me", State: labels.InProgress, Created: "2026-07-09T12:00:00Z",
+		}})
+
+		lt := NewLocalTracker(dir, labels, verdictLabels)
+		if err := lt.CompleteVerdict("research-me", tc.verdict); err != nil {
+			t.Fatalf("CompleteVerdict(%v): %v", tc.verdict, err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(dir, "research-me.md"))
+		if err != nil {
+			t.Fatalf("read issue file: %v", err)
+		}
+		li, err := parseLocalIssue(data)
+		if err != nil {
+			t.Fatalf("parseLocalIssue: %v", err)
+		}
+		if li.frontmatter.State != tc.wantState {
+			t.Errorf("verdict %v: state = %q, want %q", tc.verdict, li.frontmatter.State, tc.wantState)
+		}
+	}
+}
+
+// TestLocalTracker_CompleteVerdict_ThenRetryResearchable verifies that after
+// a verdict terminal lands, re-marking the issue researchable (the retry
+// gesture, TransitionState(Untriaged, Dispatchable)) still works — the
+// verdict state must not wedge the file against a fresh research pass.
+func TestLocalTracker_CompleteVerdict_ThenRetryResearchable(t *testing.T) {
+	labels := forge.ResearchDispatchLabels()
+	verdictLabels := forge.ResearchVerdictLabels()
+	dir := t.TempDir()
+	writeLocalIssue(t, dir, "research-me", localIssue{frontmatter: localFrontmatter{
+		Title: "Research me", State: labels.InProgress, Created: "2026-07-09T12:00:00Z",
+	}})
+
+	lt := NewLocalTracker(dir, labels, verdictLabels)
+	if err := lt.CompleteVerdict("research-me", forge.Reject); err != nil {
+		t.Fatalf("CompleteVerdict: %v", err)
+	}
+
+	if err := lt.TransitionState("research-me", forge.Untriaged, forge.Dispatchable); err != nil {
+		t.Fatalf("TransitionState(Untriaged, Dispatchable): %v", err)
+	}
+
+	dispatchable, err := lt.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues(Dispatchable): %v", err)
+	}
+	if len(dispatchable) != 1 || dispatchable[0].Number != "research-me" {
+		t.Errorf("ListIssues(Dispatchable) = %+v, want [research-me]", dispatchable)
+	}
+}
+
 func TestLocalTracker_DepsOf_ParsesBlockedBySlugSection(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
