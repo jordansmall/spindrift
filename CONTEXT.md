@@ -176,12 +176,37 @@ distinct from the Driver's resumable conversation session, which the
 Driver-cache entry preserves across a Dispatch's fix passes.
 _Avoid_: session (collides with the Driver's conversation session), run, job.
 
+**Dispatch kind**:
+The axis naming what a Dispatch delivers: `work` (the original kind — lands
+code through the Code Forge) or `research` (lands a verdict and enrichment
+comments on the Issue Tracker; never touches the Code Forge). Kinds share the
+canonical Dispatch lifecycle; on the `github` tracker each kind maps the
+states to its own label family.
+_Avoid_: mode, dispatch type, pipeline.
+
+**Research dispatch**:
+A Dispatch whose Agent (the "researcher") reviews a posted issue from inside
+the Box — exploring the Target repo for real context — then posts an
+enrichment comment and a verdict. Advise-only: it never promotes an issue to
+dispatchable, never closes one; a human acts on the verdict, preserving the
+rule that a human is the launch button. Verdicts are a closed set carried by
+`Complete`: `recommend` (relevant, enriched, ready to promote), `reject`
+(false positive, not worth doing, or duplicate — reason in the comment),
+`unclear` (relevance needs answers only a human has; answer, then re-apply
+the trigger label to re-research). A crashed or verdict-less Box is `Failed`,
+never a verdict. On `github` the label family is `agent-research` (dual-role:
+standing state and trigger) → `agent-research-in-progress` → terminals
+`agent-research-recommend` / `-reject` / `-unclear` / `-failed`.
+_Avoid_: triage (the human action on `Failed` issues), scout (the in-box
+subagent role).
+
 **Dispatch lifecycle**:
 The canonical dispatch states the launcher reasons in, independent of how any
 one Issue Tracker stores them: `Dispatchable` (a human marked the issue ready —
 the launch button) → `InProgress` (a Box has been dispatched; re-runs skip it) →
-`Complete` (the agent finished its work — a green PR on `github`, or a landed
-branch when the Code Forge is push-only/absent) or `Failed` (the Box crashed or
+`Complete` (the agent finished its work — a green PR on `github`, a landed
+branch when the Code Forge is push-only/absent, or a posted verdict for a
+research dispatch) or `Failed` (the Box crashed or
 never reached green past MAX_FIX_ATTEMPTS; human triage, re-transition to retry).
 Each Issue Tracker adapter maps these states to its native mechanism:
 
@@ -233,12 +258,21 @@ _Avoid_: fan-out, batch, round.
 
 **Outcome line**:
 The machine-readable final line a Box writes to stdout, parsed by the Launcher
-to learn whether a PR is ready for CI-watch-and-merge, blocked, or failed.
-Grammar: `SPINDRIFT_OUTCOME issue=<num> pr=<url> status=<status> note=<text>`
-where `note` may contain spaces and `=`. The `cmd/launcher/internal/outcome`
-package is the authoritative spec and implementation: `Parse` validates the
-grammar, `Line` produces the canonical form, and `LastInLog` scans a Box log
-while gracefully skipping lines too large for the scanner buffer.
+to learn where the deliverable landed and whether the Dispatch is ready for
+settle, blocked, or failed. Grammar:
+`SPINDRIFT_OUTCOME issue=<num> landing=<ref> status=<status> note=<text>`
+where `note` may contain spaces and `=`. `landing` is the landing reference —
+a PR URL (`github` Code Forge), a branch ref (push-only `git`), or a
+verdict-comment URL (research dispatch); `status` values are scoped to the
+Dispatch kind (`ready`/`blocked` for work, the verdicts plus `blocked` for
+research). The line carries only what the Launcher cannot know without the
+Box — never backend identity or other run config, which the Launcher already
+holds authoritatively. The `cmd/launcher/internal/outcome` package is the
+authoritative spec and implementation: `Parse` validates the grammar, `Line`
+produces the canonical form, and `LastInLog` scans a Box log while gracefully
+skipping lines too large for the scanner buffer.
+_Was_: `pr=<url>` — renamed once the field carried branch refs and comment
+URLs; PR-vs-issue is a GitHub-ism that confuses on split backends.
 _Avoid_: result line, output line, status line.
 
 **Guardrail prompt**:
