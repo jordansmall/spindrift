@@ -1,5 +1,107 @@
 # Changelog
 
+## [0.4.1](https://github.com/jordansmall/spindrift/compare/v0.4.0...v0.4.1) (2026-07-14)
+
+
+### Features
+
+* **checks:** scope in-box gate to source-level checks ([fe9f8d1](https://github.com/jordansmall/spindrift/commit/fe9f8d1d4e3dbdf3ff9311b36b3f722bcef10807))
+* **dogfood:** abort when podman machine RAM undercuts MEMORY_LIMIT ([6c3dc1a](https://github.com/jordansmall/spindrift/commit/6c3dc1add92b30150a2e60a87c2c2d9aa85453d7)), closes [#580](https://github.com/jordansmall/spindrift/issues/580)
+* **forge:** distinguish conflicts from blocked-by-checks refusals ([676049b](https://github.com/jordansmall/spindrift/commit/676049b41aa345f86a14eddc47136f61a7cfcde2))
+* **mkharness:** install bash completion at build time ([9ba887e](https://github.com/jordansmall/spindrift/commit/9ba887e05bfe11ba3288604228f627772cfa7d01))
+* **mkharness:** install fish completion at build time ([30aa69c](https://github.com/jordansmall/spindrift/commit/30aa69c6a63f2477d36c6bd6c684758448429fc9))
+* **mkharness:** install zsh completion at build time ([4a2afb5](https://github.com/jordansmall/spindrift/commit/4a2afb573703a504f8c7ecf6a1ab1f50de508e79))
+* **prompts:** forbid backgrounding blocking CHECK gates ([0bc8977](https://github.com/jordansmall/spindrift/commit/0bc8977047f58f473fdd757878593726f3093892))
+* **renderers:** add renderBashCompletion for the CLI ([a411c42](https://github.com/jordansmall/spindrift/commit/a411c421662a416c3e9c7914dd42ae7d5e99be9e))
+* **renderers:** add renderFishCompletion for the CLI ([6be1bf4](https://github.com/jordansmall/spindrift/commit/6be1bf474ed9cf57cbfad9f1e99e1e90f0323f29))
+* **renderers:** add renderZshCompletion with per-flag descriptions ([de7a07a](https://github.com/jordansmall/spindrift/commit/de7a07a823c326027803505a1f87a806aa5d6b02))
+
+
+### Bug Fixes
+
+* **agent:** scope the backstop to a clean, outcome-less exit ([716452a](https://github.com/jordansmall/spindrift/commit/716452ac064ce8cb56ae6aa889e65858068b161e))
+* **agent:** strip all lifecycle labels on claim ([02d2ced](https://github.com/jordansmall/spindrift/commit/02d2ced5ac10e7c712c97b6dd72f86b979082dd3))
+* **agent:** synthesize a blocked outcome when the driver prints none ([f24cc9c](https://github.com/jordansmall/spindrift/commit/f24cc9c637b5d530e5c830ffbeb25b96edbdf923))
+* **checks:** tighten bash-completion coverage guard ([ebbbda8](https://github.com/jordansmall/spindrift/commit/ebbbda8aa22b28f103ad413c5a34e083568ee50b))
+* **dispatch:** don't re-dispatch a zero-exit hold when a PR exists ([d1c7e92](https://github.com/jordansmall/spindrift/commit/d1c7e929c2a4cc9c999d9dc13948d7f032edf4b7))
+* **dispatch:** hold-and-retry zero-exit rate-limited boxes ([10e809f](https://github.com/jordansmall/spindrift/commit/10e809fa531582c732bc9c5d07ca357c7aec8a06)), closes [#565](https://github.com/jordansmall/spindrift/issues/565)
+* **dispatch:** rotate stale per-issue log instead of truncating ([f482199](https://github.com/jordansmall/spindrift/commit/f482199ba1facf6bd434bd551c72b07ef13d3c50)), closes [#561](https://github.com/jordansmall/spindrift/issues/561)
+* **dispatch:** skip already-in-flight box before touching its log ([865743e](https://github.com/jordansmall/spindrift/commit/865743e6c7ce74b526def1eeb38d0e486bb4e3ce))
+* **dogfood:** guard jq failure in memory preflight ([82a060d](https://github.com/jordansmall/spindrift/commit/82a060dd25730e8fd96245a89e62228a2697460c))
+* **dogfood:** stop baking skills with host pkgs ([8dc8cf0](https://github.com/jordansmall/spindrift/commit/8dc8cf0dcd32069745d3973f915a0cf1c4ae596e)), closes [#597](https://github.com/jordansmall/spindrift/issues/597)
+* **dogfood:** treat empty MEMORY_LIMIT as disabling the preflight ([7763013](https://github.com/jordansmall/spindrift/commit/7763013b454a48326dc41005eaffd3f878b3b5f4))
+* **image:** bake skill content with the image's own Linux pkgs ([463a8fc](https://github.com/jordansmall/spindrift/commit/463a8fcbe02cb000184cbc6f97539dda56fb2c20)), closes [#597](https://github.com/jordansmall/spindrift/issues/597)
+* **launcher:** key freshness probe on image tag, not drvPath ([666a527](https://github.com/jordansmall/spindrift/commit/666a527549e07a1013430125f2fe9c95e57b8cec))
+* **launcher:** print help on bare or unknown subcommand ([fcfc004](https://github.com/jordansmall/spindrift/commit/fcfc00478228258a4caaaa304e790dd93d66fa1e)), closes [#555](https://github.com/jordansmall/spindrift/issues/555)
+* **launcher:** stop auto-adopting agent-in-progress issues ([c555800](https://github.com/jordansmall/spindrift/commit/c5558003c49b4bece8be9e62ae5f4f0f91392992)), closes [#600](https://github.com/jordansmall/spindrift/issues/600)
+* **nix:** scope CHECK guardrail assertion to the CHECK block ([3c34502](https://github.com/jordansmall/spindrift/commit/3c345028a9067284cf3112c4b1f4a021b87e8997))
+* **outcome:** scope rate-limit classification to real API errors ([ebe7276](https://github.com/jordansmall/spindrift/commit/ebe7276268668f8da969c2fadd25d60004d9f91c)), closes [#579](https://github.com/jordansmall/spindrift/issues/579)
+* **renderers:** correct fish --no-build/--force descriptions ([1b1b7c4](https://github.com/jordansmall/spindrift/commit/1b1b7c4d832853145388bae133f8b397d8407491))
+* **renderers:** fix dead post-subcommand flag completion in zsh ([4ab8b49](https://github.com/jordansmall/spindrift/commit/4ab8b49f771609bd193bdf51108ae862f8b32e09))
+* **runner:** recognize already-running collision, don't launch ([2f6999e](https://github.com/jordansmall/spindrift/commit/2f6999ea93a794f389cdee27769d01148405791d))
+* **settle:** re-wait for CI green after gate-driven force-push ([b3de6f4](https://github.com/jordansmall/spindrift/commit/b3de6f4ef8a5cd0b16b1d41c804106635ccbe408))
+* **settle:** skip rebase-retry on blocked-by-checks refusals ([1a5553b](https://github.com/jordansmall/spindrift/commit/1a5553b4a9f9c712662165426c6adcc80d2d3081))
+* **tests:** script Mergeable() query in the fake gh client ([cfc1ac4](https://github.com/jordansmall/spindrift/commit/cfc1ac4e0a9821b89066531b272ddfb43b7da734))
+* **tests:** update bats reconcile fixtures for [#600](https://github.com/jordansmall/spindrift/issues/600) ([79dc3ff](https://github.com/jordansmall/spindrift/commit/79dc3ffc53a700fbb64cd85b5526c5e58d396a8b))
+* **waves:** don't fail-transition an already-in-flight issue ([710aa2f](https://github.com/jordansmall/spindrift/commit/710aa2f844574ea597a3109ec2e560677f61eed4))
+* **waves:** track in-run claims to stop stale-discovery dupes ([aa1b1a9](https://github.com/jordansmall/spindrift/commit/aa1b1a9345dc7dddcccb4123414dde2aeab52c0f)), closes [#560](https://github.com/jordansmall/spindrift/issues/560)
+
+
+### Documentation
+
+* address review nits from [#555](https://github.com/jordansmall/spindrift/issues/555) ([9f5b871](https://github.com/jordansmall/spindrift/commit/9f5b871d457db1dc21b67d4e42a885f650295f40))
+* **adr:** describe the freshness probe's tag currency ([15a25ba](https://github.com/jordansmall/spindrift/commit/15a25ba41a8e9a2120b1ea14ed1119e933034937))
+* correct bare-invocation help behavior ([7cd7970](https://github.com/jordansmall/spindrift/commit/7cd79702a8b6349d4d7220a4e0e4167246ebf2ad))
+* **nix:** describe the checks-inbox vs full check split ([f777e53](https://github.com/jordansmall/spindrift/commit/f777e5342522662bc1711187bff7472af3c9437f))
+* **nix:** explain the freshness-probe stakes on the drvPath guard ([56236e7](https://github.com/jordansmall/spindrift/commit/56236e7b135b1b1240e4223d7804ae6bce7c9df0)), closes [#598](https://github.com/jordansmall/spindrift/issues/598)
+* **outcome:** correct Classify/scanLog doc comments ([393bf2b](https://github.com/jordansmall/spindrift/commit/393bf2b8e9115742991b5b5b3c9e97a8e92b1dcf))
+* **readme:** document bash tab-completion ([9a87c5b](https://github.com/jordansmall/spindrift/commit/9a87c5b414fb95675c5a01f28da488043fbca781))
+* **readme:** document fish tab-completion ([b0e9e7d](https://github.com/jordansmall/spindrift/commit/b0e9e7d8f4bb5d7f1822998a8bde2f417ad13728))
+* **readme:** document zsh tab-completion ([0660874](https://github.com/jordansmall/spindrift/commit/06608742433b0a9d2434899b569df135cfc70e99))
+* **readme:** point CONTRIBUTING row at checks-inbox ([e09fa77](https://github.com/jordansmall/spindrift/commit/e09fa7738ebe71060f471899ba11d1ececc72b1a))
+* **readme:** state minimum podman machine memory for dogfood ([a1ffbd2](https://github.com/jordansmall/spindrift/commit/a1ffbd22da4d076835454a0758f5f7d19559cc3b))
+* **reference:** document the skills content form ([e007c59](https://github.com/jordansmall/spindrift/commit/e007c59057f38facb5a0ccb24e4fd703c7787cf8)), closes [#597](https://github.com/jordansmall/spindrift/issues/597)
+* **reference:** drop automatic stranded-issue reconcile claims ([7411629](https://github.com/jordansmall/spindrift/commit/7411629f3c91dae3f0097ead5086eed841db55cd))
+
+
+### Code Refactoring
+
+* **runner:** route hardcoded nix/bwrap calls through exec seam ([3add948](https://github.com/jordansmall/spindrift/commit/3add94838b4e8812629f59055f18d7138a051f79))
+
+
+### Tests
+
+* **checks:** guard bash completion coverage ([bf1066b](https://github.com/jordansmall/spindrift/commit/bf1066bfc6c018ef9632ba77dfc10c28d1436e55))
+* **checks:** guard fish completion coverage ([ca65260](https://github.com/jordansmall/spindrift/commit/ca652605ef899909c77375589fd451ae175fd12f))
+* **dispatch:** cover stale log preservation on rotate ([7bbfd99](https://github.com/jordansmall/spindrift/commit/7bbfd99545718086f47728dc121b090634d89a08))
+* **entrypoint:** cover the outcome backstop's three paths ([99c11dc](https://github.com/jordansmall/spindrift/commit/99c11dc185fbcededca0270d5399afd4ebcb1f66))
+* **entrypoint:** guard the backstop against a non-zero driver exit ([507a860](https://github.com/jordansmall/spindrift/commit/507a8601c157b7e0547cb6cb4e11f24d51a2a1b3))
+* **fakes:** add FAKE_CLAUDE_NO_OUTCOME to the claude stub ([e54e312](https://github.com/jordansmall/spindrift/commit/e54e31262e4cc9dabc824e4d2a4883449ee24883))
+* **fakes:** stub podman machine inspect in runtime fake ([e75ed29](https://github.com/jordansmall/spindrift/commit/e75ed29202f24535659f8941acc58226b53e5372))
+* **freshness:** cover image-tag currency and livelock regression ([10acb6c](https://github.com/jordansmall/spindrift/commit/10acb6cac1fa6eea40e3108e8d320600eca6797a))
+* **nix:** assert agent-image drvPath is host-independent ([2f62a9c](https://github.com/jordansmall/spindrift/commit/2f62a9c3a0a3116a92ad21edb628629bae2858ea)), closes [#597](https://github.com/jordansmall/spindrift/issues/597)
+* **nix:** assert CHECK guardrail reaches both prompts ([c5b6563](https://github.com/jordansmall/spindrift/commit/c5b6563d2b788e19c24ed42adab1fdbda0c052ea))
+* **runner:** assert bwrap enforces isolation, not just argv ([e3e32d9](https://github.com/jordansmall/spindrift/commit/e3e32d9acc92c6ba6ed0c798890d9e0522eeb8d1))
+* **runner:** assert OCI hardening is enforced by the daemon ([5dd253e](https://github.com/jordansmall/spindrift/commit/5dd253e48f5a4414e30a9f2ed7c9bba283fec90a))
+* **runner:** cover exec-seam orchestration paths ([33a749c](https://github.com/jordansmall/spindrift/commit/33a749cdf3ddaace75898632a46b3e250499e5a5))
+* **runner:** cover isNoBuilderError predicate ([4ae8cc9](https://github.com/jordansmall/spindrift/commit/4ae8cc9e50f3fe24cedc31eb6dadf104a968a9c2))
+* **runner:** fake-CLI harness + OCI orchestration coverage ([742bcd3](https://github.com/jordansmall/spindrift/commit/742bcd35d7f680fbcab00471013b9cc8b677262a)), closes [#574](https://github.com/jordansmall/spindrift/issues/574)
+* **runner:** read container stdout apart from the daemon's pull progress ([e607cb5](https://github.com/jordansmall/spindrift/commit/e607cb5dadaad0553586898c7e58f303124d8cc3))
+* **waves:** cover BuildEdges dependency-graph construction ([cae133e](https://github.com/jordansmall/spindrift/commit/cae133e6adcf5db78953226fa31db5da5c841389)), closes [#569](https://github.com/jordansmall/spindrift/issues/569)
+* **waves:** cover nextReady cascade and overlap-defer ([f606b3e](https://github.com/jordansmall/spindrift/commit/f606b3eb4aa44dc94d149e488f5226fc1cb6e093)), closes [#570](https://github.com/jordansmall/spindrift/issues/570)
+* **waves:** cover RunContinuous mid-refill cycle guard ([996a6b0](https://github.com/jordansmall/spindrift/commit/996a6b0178f081648e1551289c033941aa51ee2d)), closes [#571](https://github.com/jordansmall/spindrift/issues/571)
+* **waves:** pin the suppressed-stale launcher output line ([bbc0db9](https://github.com/jordansmall/spindrift/commit/bbc0db9009b19f0e28a6424c3034b5b6e3096966))
+
+
+### Build System
+
+* **nix:** add go and bubblewrap to the dev shell ([82cb5ca](https://github.com/jordansmall/spindrift/commit/82cb5ca30e2e42ea1b5ab1a1667f155dc86cc84d))
+
+
+### Continuous Integration
+
+* run the runner sandbox integration tests on Linux ([4d7c820](https://github.com/jordansmall/spindrift/commit/4d7c820c79cc3eb9fe4fc69e0d6538a0e3c8f92f))
+
 ## [0.4.0](https://github.com/jordansmall/spindrift/compare/v0.3.0...v0.4.0) (2026-07-12)
 
 
