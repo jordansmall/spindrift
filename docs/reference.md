@@ -450,8 +450,9 @@ the authoritative list.
 An issue body may declare the paths it expects to change in a `## Touches`
 section — a bullet list of path globs, parsed the same way regardless of
 `ISSUE_TRACKER` (unlike dependency edges, where the `jira` adapter resolves
-native issue links instead of `## Blocked by` prose — see [Issue Tracker
-backends](#issue-tracker-backends)):
+native issue links and the `github` adapter prefers its own native
+issue-dependencies relationships, both falling back to `## Blocked by` prose
+only where applicable — see [Issue Tracker backends](#issue-tracker-backends)):
 
 ```markdown
 ## Touches
@@ -663,8 +664,12 @@ Forge stays `github` regardless (Jira issues, GitHub PRs).
   for this backend, in place of GitHub's issue-number order).
 
   Dependencies resolve from **native Jira issue links** (the built-in
-  `Blocks` link type's "is blocked by" direction) rather than prose parsing —
-  unlike `github`'s `## Blocked by` / `depends on #N` body conventions.
+  `Blocks` link type's "is blocked by" direction) rather than prose parsing.
+  The `github` tracker resolves the same way in principle — native
+  issue-dependencies relationships first — but falls back to its
+  `## Blocked by` / `depends on #N` body conventions when the native lookup
+  is empty or unavailable (older GHES, missing token scope, API error); Jira
+  has no such fallback.
 
   By default the agent's prompt input is the issue's summary and description
   only; set `JIRA_INCLUDE_COMMENTS` (non-empty) to also append the comment
@@ -973,10 +978,15 @@ of a Dockerfile. The trade-offs:
   orchestration is a small, nix-built Go binary (`cmd/launcher`, ADR 0007); the
   only bash left is the in-box entrypoint. No orchestration library, no Node
   runtime to import.
-- **Cross-issue dependency ordering within a run.** The launcher parses
-  `depends on #N` / `blocked by #N` (inline or a `## Blocked by` list) from issue
-  bodies and dispatches in dependency waves, holding a dependent until its
-  blockers reach `agent-complete`; a cycle aborts the run. Independent issues
+- **Cross-issue dependency ordering within a run.** For the `github` tracker,
+  the launcher resolves each issue's blockers from GitHub's native
+  issue-dependencies relationships first, falling back to parsing
+  `depends on #N` / `blocked by #N` (inline or a `## Blocked by` list) from the
+  issue body only when the native lookup yields nothing or errors — native
+  wins whenever it returns any relationships, body text is never merged in.
+  The launcher dispatches in dependency waves from the resolved edges, holding
+  a dependent until its blockers reach `agent-complete`; a cycle aborts the
+  run. Independent issues
   still run concurrently up to `MAX_PARALLEL`. A declared `## Touches`
   section gets the same wave-and-retry treatment when it overlaps an
   in-progress issue's (`OVERLAP_GATE`, default `defer`) — see [Declared
