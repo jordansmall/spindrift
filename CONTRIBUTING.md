@@ -70,7 +70,8 @@ dogfood-only — the generic harness keeps its empty `skills` default.
 
 After editing `lib/env-schema.nix`, regenerate the artifacts it drives —
 `templates/default/harness.env.example`, `cmd/launcher/flagtable_gen.go`,
-`docs/flake-options.md`, `tests/box_env_gen.bash`, and the generated section of
+`cmd/launcher/defaults_gen.go`, `docs/flake-options.md`,
+`tests/box_env_gen.bash`, and the generated section of
 `templates/default/flake.nix`'s commented-out `settings` example — instead of
 hand-editing them until the drift-guard checks (`nix/checks.nix`) go quiet:
 
@@ -104,7 +105,8 @@ is the in-box entrypoint. Respect that split — it is the point of the project.
 - **`cmd/launcher/`** — the Go host-side launcher (its own module). Public
   behavior lives at the top level; `internal/` holds the seams — `forge`,
   `outcome`, `runner`, `heartbeat`, `usage`. The flag table
-  (`flagtable_gen.go`) is generated and pinned by a check; don't hand-edit it.
+  (`flagtable_gen.go`) and the knob-defaults table (`defaults_gen.go`) are
+  generated and pinned by a check; don't hand-edit them.
   Go tests use standard `_test` files alongside the code.
 - **`agent/`** — the in-box entrypoint (`entrypoint.sh` and friends). Bash here
   is deliberately thin: nix computes the glue, bash only executes it
