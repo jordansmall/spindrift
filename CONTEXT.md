@@ -256,6 +256,45 @@ _Was_: "fan-out" — the launch act and the batch carried two names; unified on
 the batch noun.
 _Avoid_: fan-out, batch, round.
 
+**Console**:
+The interactive driving loop: a launcher session in which an operator composes
+the running work by Picking issues (promoting them as needed), watches live
+Dispatches, drills into each Dispatch's work, and ends them (Unpick,
+Terminate). Discovery is picks-only — nothing launches that the operator did
+not Pick; "pick all ready" is an explicit bulk gesture, not standing
+discovery. The issue listing is advisory and the claim authoritative: a stale
+listing can only produce a failed claim, never a wrong dispatch. The session
+queue is in-memory; durable state lives on the Issue Tracker alone. A peer of
+the headless driving loops (dogfood, CI), not a replacement for them.
+_Avoid_: TUI (names the rendering, not the role), dashboard (it drives, not
+merely displays), monitor.
+
+**Pick**:
+The operator's act of selecting an issue into the running session's queue for
+dispatch. Picking an issue that is not yet `Dispatchable` promotes it through
+the normal lifecycle transition first — the pick *is* the human launch button,
+recorded durably on the Issue Tracker. A picked issue waits in the queue until
+a parallelism slot frees; queued-but-unlaunched picks hold at `Dispatchable`,
+never `InProgress`.
+_Avoid_: select, schedule, enqueue.
+
+**Unpick**:
+Retracting a queued-but-not-yet-launched Pick. Purely a session-queue edit —
+no Issue Tracker interaction; the issue simply remains `Dispatchable`.
+_Avoid_: cancel (ambiguous with Terminate), dequeue, remove.
+
+**Terminate**:
+The operator-initiated ending of a live Dispatch, valid anywhere from claim to
+verdict: any running Box is reaped, the settle is abandoned wherever it stands
+(CI watch, fix pass, merge gate), and the issue returns to `Dispatchable` —
+never `Failed` (nothing to triage; the human just decided) and never a new
+lifecycle state. Terminate abandons watching, never un-lands work: pushed
+branches and open PRs stay put, and the terminate comment on the issue links
+them so a later re-dispatch can adopt rather than collide. The ending is
+recorded outside the state machine: a terminal line in the Box log and that
+comment. Distinct from Unpick, which retracts a Pick that never launched.
+_Avoid_: kill, cancel, abort.
+
 **Outcome line**:
 The machine-readable final line a Box writes to stdout, parsed by the Launcher
 to learn where the deliverable landed and whether the Dispatch is ready for
