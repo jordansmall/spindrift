@@ -1,5 +1,11 @@
 # The agent CLI is a pluggable Driver; opencode joins claude behind it
 
+> Note (issue #609): the decision below is the seam's design target, not
+> shipped behavior. `opencode` has not landed — `claude` remains the only
+> implemented Driver (single entry in the `lib/drivers/` registry and in the
+> generated Go driver-name list). See CONTEXT.md's Driver/Provider
+> definitions and `docs/reference.md`.
+
 Until now the Box ran exactly one agent CLI — `claude -p … --dangerously-skip-permissions` — and Claude-specific assumptions leaked into six places: the invocation, the auth env, the `stream-json` outcome extraction, the `--agents` subagent JSON, skill discovery, and the launcher's Anthropic-specific transient classifier. To add **opencode** (with GitHub Copilot as a model *provider*), the agent CLI becomes a *Driver* seam: a swappable in-box tool selected at build time, exactly analogous to the `runtime` runner seam (ADR 0006). `claude` stays the default; `opencode` is the second Driver. `Driver` is a provisional name.
 
 The Driver is a **build-time** choice — one Driver per image, picked by a `mkHarness`/flake option beside `runtime`. Switching binaries is a closure change, so it belongs at build time; `MODEL` stays a runtime knob because it is only a string arg to the same binary. Build produces one lean image per Driver — named in the `agent-image-<driver>` family (`agent-image-claude`, `agent-image-opencode`, …), since the `spindrift` output name is reserved for the host CLI and ADR 0010 is authoritative on flake-output naming — rather than one fat image carrying every tool. Per-image packaging does **not** foreclose a mixed fleet: because the images exist as separate artifacts, per-issue routing (a `driver:opencode` label → the matching image) is a later launcher feature, not a repackaging. Routing granularity is deliberately deferred — this run ships global per-run selection only.

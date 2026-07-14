@@ -129,6 +129,9 @@ guarantee.
   earlier `spindrift-<driver>` illustration. The `spindrift` output name is
   reserved for the host CLI; no image output is `spindrift`-prefixed. All of
   these outputs are covered by the versioned flake-output contract.
+  **Note (issue #609):** this `agent-image-<driver>` family does not exist
+  yet — only the bare `agent-image` output is built today. The family lands
+  once a second Driver ships (ADR 0009).
 - The flake option surface `perSystem.spindrift.defaults.*` was replaced by
   `perSystem.spindrift.settings.<section>.<knob>` (ADR 0015). This is a MINOR
   bump under the pre-1.0 policy; no external consumers existed at migration time.
