@@ -29,20 +29,24 @@ type launchContext struct {
 }
 
 // bootstrap wires the prologue shared by run, the selective `dispatch <nums>`
-// path, and recover: working-dir resolution, config load+validate, runner
-// construction, a readiness check, the forge client, the dispatch factory
-// (including driver-cache setup), and settle. ensureReady selects
-// EnsureReady() (build if absent, the default) over IsReady() (fail fast
-// without building, --no-build) -- the one axis that varies per entry point.
-// No step here can fail after the dispatch factory is constructed, so an
-// error return never carries a launch context that still needs cleanup.
-func bootstrap(ensureReady bool) (*launchContext, error) {
+// path, research (and `research <nums>`), and recover: working-dir
+// resolution, config load+validate, runner construction, a readiness check,
+// the forge client, the dispatch factory (including driver-cache setup), and
+// settle. ensureReady selects EnsureReady() (build if absent, the default)
+// over IsReady() (fail fast without building, --no-build) -- the one axis
+// that varies per entry point. kind (dispatchKindWork or
+// dispatchKindResearch, ADR 0022) selects the label family, waves blocker
+// handling, and Settle implementation via applyDispatchKind — the other axis,
+// carried by which subcommand launched. No step here can fail after the
+// dispatch factory is constructed, so an error return never carries a launch
+// context that still needs cleanup.
+func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 	pwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
 
-	c := loadConfig()
+	c := applyDispatchKind(loadConfig(), kind)
 	if err := validate(c); err != nil {
 		return nil, err
 	}

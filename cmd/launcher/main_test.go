@@ -49,6 +49,32 @@ func TestMainRun_UnknownSubcommand_PrintsHelpToStderrAndExits1(t *testing.T) {
 	}
 }
 
+// TestMainRun_Research_RoutesThroughBootstrap verifies the `research`
+// subcommand parses like `dispatch` (bare, `<nums>`, `--no-build`, `--yes`)
+// and reaches the same bootstrap/validate prologue — proven here by a
+// missing REPO_SLUG surfacing the same validation error dispatch would hit,
+// without needing a real runner or gh.
+func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
+	t.Setenv("REPO_SLUG", "")
+
+	cases := [][]string{
+		{"research"},
+		{"research", "42"},
+		{"research", "--no-build", "42"},
+		{"research", "--yes", "42"},
+	}
+	for _, argv := range cases {
+		var stdout, stderr bytes.Buffer
+		code := mainRun(argv, &stdout, &stderr)
+		if code != 1 {
+			t.Errorf("mainRun(%v) code = %d, want 1", argv, code)
+		}
+		if !strings.Contains(stderr.String(), "REPO_SLUG") {
+			t.Errorf("mainRun(%v) stderr = %q, want a REPO_SLUG validation error", argv, stderr.String())
+		}
+	}
+}
+
 // TestConfigHasNoModelFields enforces that model/scoutModel/reviewModel were
 // removed from the config struct; models forward via BOX_ENV_VARS instead.
 func TestConfigHasNoModelFields(t *testing.T) {
