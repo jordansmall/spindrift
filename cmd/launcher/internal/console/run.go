@@ -31,7 +31,8 @@ func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer) er
 
 // applyCommand parses one line of operator input into a Msg and applies it.
 // Recognized commands: "q"/"quit" to exit, "r"/"refresh" to re-query the
-// tracker, "f" (bare) to clear the label filter, "f <text>" to set it.
+// tracker, "f" (bare) to clear the label filter, "f <text>" to set it,
+// "p <num>" to pick an issue, "u <num>" to unpick a queued one.
 func applyCommand(m Model, tracker forge.IssueTracker, line string) Model {
 	cmd, arg, _ := strings.Cut(strings.TrimSpace(line), " ")
 	switch cmd {
@@ -41,7 +42,22 @@ func applyCommand(m Model, tracker forge.IssueTracker, line string) Model {
 		return Update(m, Refresh(tracker))
 	case "f", "filter":
 		return Update(m, FilterChangedMsg{Filter: arg})
+	case "p", "pick":
+		return Update(m, PickIssue(tracker, arg, titleOf(m, arg), KindWork))
+	case "u", "unpick":
+		return Update(m, UnpickMsg{Number: arg})
 	default:
 		return m
 	}
+}
+
+// titleOf returns num's title from m.All, or "" when the backlog hasn't
+// (yet) loaded it — Pick still promotes and queues by number alone.
+func titleOf(m Model, num string) string {
+	for _, iss := range m.All {
+		if iss.Number == num {
+			return iss.Title
+		}
+	}
+	return ""
 }
