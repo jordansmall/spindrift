@@ -43,3 +43,29 @@ type DogfoodNoticeMsg struct {
 }
 
 func (DogfoodNoticeMsg) isConsoleMsg() {}
+
+// PickQueuedMsg carries a successfully-promoted pick onto the session
+// queue — the Pick adapter's success result.
+type PickQueuedMsg struct {
+	Number, Title string
+	Kind          Kind
+}
+
+func (PickQueuedMsg) isConsoleMsg() {}
+
+// PickFailedMsg carries a pick whose promotion failed — the Pick adapter's
+// error result. The issue never joins the queue.
+type PickFailedMsg struct {
+	Number, Reason string
+}
+
+func (PickFailedMsg) isConsoleMsg() {}
+
+// UnpickMsg is the run loop's signal that the operator asked to remove a
+// queued-but-unlaunched pick. It carries no tracker interaction: Update
+// only ever drops it from Model.Picks.
+type UnpickMsg struct {
+	Number string
+}
+
+func (UnpickMsg) isConsoleMsg() {}
