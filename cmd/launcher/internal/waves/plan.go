@@ -58,19 +58,21 @@ type Issue struct {
 // blocker edges among them (child -> blockers), already resolved by the
 // caller — Plan itself makes no Forge calls.
 type Input struct {
-	Origin Origin
-	Issues []Issue
-	Edges  map[string][]string
+	Origin  Origin
+	Issues  []Issue
+	Edges   map[string][]string
+	Sources Sources
 }
 
 // Plan is the pure result of validating a batch of issues for dispatch:
 // which Mode (always ModeDrain), in what order, and against which blocker
 // edges.
 type Plan struct {
-	Mode   Mode
-	Origin Origin
-	Issues []Issue
-	Edges  map[string][]string
+	Mode    Mode
+	Origin  Origin
+	Issues  []Issue
+	Edges   map[string][]string
+	Sources Sources
 }
 
 // Config carries the subset of launcher config the wave engine needs.
@@ -98,7 +100,7 @@ func NewPlan(cfg Config, in Input) (Plan, error) {
 			return Plan{}, fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
 		}
 	}
-	return Plan{Mode: ModeDrain, Origin: in.Origin, Issues: in.Issues, Edges: in.Edges}, nil
+	return Plan{Mode: ModeDrain, Origin: in.Origin, Issues: in.Issues, Edges: in.Edges, Sources: in.Sources}, nil
 }
 
 // issueNums returns the number strings from a slice of issues.
