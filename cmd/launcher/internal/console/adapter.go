@@ -25,3 +25,15 @@ func DogfoodNotice(pwd string) Msg {
 	_, err := os.Stat(filepath.Join(pwd, dogfoodPidFile))
 	return DogfoodNoticeMsg{Live: err == nil}
 }
+
+// PickIssue promotes num through the Untriaged->Dispatchable transition —
+// the Pick's human-launch-button record, durable on the tracker whether the
+// issue was unlabeled or already Dispatchable (the transition is a no-op
+// relabel in the latter case) — and wraps the result into a Msg. A failed
+// promotion (raced, closed, relabeled) never queues the issue.
+func PickIssue(tracker forge.IssueTracker, num, title string, kind Kind) Msg {
+	if err := tracker.TransitionState(num, forge.Untriaged, forge.Dispatchable); err != nil {
+		return PickFailedMsg{Number: num, Title: title, Reason: err.Error()}
+	}
+	return PickQueuedMsg{Number: num, Title: title, Kind: kind}
+}
