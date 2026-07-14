@@ -35,6 +35,13 @@
   # prompt skips scout/implement-from-scratch and goes straight to
   # check/fix/commit/push/watch-CI.
   fixPrompt ? builtins.readFile ../templates/default/prompts/fix-prompt.md,
+  # The Conditional fragment registry (issue #622, CONTEXT.md): rows of
+  # (gate, fragment, var) the entrypoint's single fragment loop and its
+  # `_subst` substitution allowlist are both rendered from. Not
+  # Consumer-tunable like `prompt`/`scoutPrompt`/etc above (see
+  # fragmentsSourceDir below); overridable here only for the bats
+  # fixture-row test proving a new row needs no entrypoint edit.
+  fragments ? import ./fragments.nix,
   # Skill files baked into the image at /home/agent/.claude/skills so the
   # headless agent can invoke them without a runtime mount. Each element is
   # either a path/derivation (copied under its basename), or a
@@ -248,6 +255,25 @@ let
     + "\n"
     + driverFunctionDefs;
 
+  # The Conditional fragment registry (issue #622, CONTEXT.md), rendered into
+  # agent/entrypoint.sh's single fragment loop input and `_subst`
+  # substitution allowlist: a bash array of "gate|fragment|var" rows, plus a
+  # space-separated list of every var an envsubst call must know about (each
+  # row's own var, plus any extraSubstVars a fragment's body interpolates).
+  # entrypoint.sh's loop and `_subst` are both generic over this data — a new
+  # row needs no entrypoint edit. Shared between the image preamble and the
+  # bats harness file the same way driverPreamble/driverFunctionsFile are
+  # (issue #433), so neither can drift from the other.
+  fragmentRegistryRows = map (row: "${row.gate}|${row.fragment}|${row.var}") fragments;
+  fragmentSubstVars = lib.concatMap (row: [ row.var ] ++ (row.extraSubstVars or [ ])) fragments;
+  fragmentRegistryPreamble =
+    "_FRAGMENT_ROWS=(\n"
+    + lib.concatMapStrings (row: "  " + lib.escapeShellArg row + "\n") fragmentRegistryRows
+    + ")\n"
+    + "_FRAGMENT_SUBST_VARS=(\n"
+    + lib.concatMapStrings (v: "  " + lib.escapeShellArg v + "\n") fragmentSubstVars
+    + ")\n";
+
   # Version sourced from the release-please manifest so mkHarness always tracks
   # the bot-maintained source of truth (ADR-0010).
   spindriftVersion = (builtins.fromJSON (builtins.readFile ../.release-please-manifest.json)).".";
@@ -314,6 +340,7 @@ let
       heartbeatFilterBin
       agentsJsonTemplate
       driverPreamble
+      fragmentRegistryPreamble
       prompt
       scoutPrompt
       reviewPrompt
@@ -347,6 +374,12 @@ let
   # exercise the same registry-rendered bodies that mkHarness bakes into the
   # image — not any hand-copied duplicates in the entrypoint itself.
   driverFunctionsFile = hostPkgs.writeText "driver-functions.sh" driverFunctionDefs;
+
+  # The Conditional fragment registry as a host store-path file (issue #622,
+  # mirrors driverFunctionsFile above). The bats harness prepends this before
+  # exec-ing the entrypoint so tests exercise the same registry-rendered loop
+  # input and substitution allowlist that mkHarness bakes into the image.
+  fragmentRegistryFile = hostPkgs.writeText "fragment-registry.sh" fragmentRegistryPreamble;
 
   # The rendered prompt directory as a host store path (native-buildable on
   # darwin, so it needs no Linux builder). The prompt is normally baked into
@@ -666,6 +699,7 @@ else
       commsContractFile
       checkContractFile
       driverFunctionsFile
+      fragmentRegistryFile
       heartbeatFilterBin
       driverEntry
       ;

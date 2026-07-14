@@ -38,6 +38,10 @@
   # The Driver's in-box half rendered into agent/entrypoint.sh's
   # ${DRIVER_*:-<default>} vars and the Driver function definitions.
   driverPreamble,
+  # The Conditional fragment registry (issue #622) rendered into
+  # agent/entrypoint.sh's _FRAGMENT_ROWS loop input and _FRAGMENT_SUBST_VARS
+  # substitution allowlist.
+  fragmentRegistryPreamble,
   # The schema-derived defaults block (mkHarness's `renderDefaultsPreamble { }`),
   # prepended to the entrypoint so it carries the baked values without
   # hardcoding them in the source script.
@@ -138,6 +142,7 @@ let
       + lib.escapeShellArg agentsJsonTemplate
       + "\n"
       + driverPreamble
+      + fragmentRegistryPreamble
       + entrypointDefaultsPreamble
       + stripShebang (builtins.readFile ../agent/entrypoint.sh);
   };
