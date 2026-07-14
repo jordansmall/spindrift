@@ -81,14 +81,22 @@ func parseLocalIssue(data []byte) (localIssue, error) {
 // forge.DispatchState values to the frontmatter "state" marker, the same way the
 // GitHub adapter maps them to label names.
 type LocalTracker struct {
-	dir    string
-	labels forge.DispatchLabels
+	dir           string
+	labels        forge.DispatchLabels
+	verdictLabels forge.VerdictLabels
 }
 
 // NewLocalTracker returns a forge.IssueTracker backed by Markdown + YAML
-// frontmatter files in dir.
-func NewLocalTracker(dir string, labels forge.DispatchLabels) *LocalTracker {
-	return &LocalTracker{dir: dir, labels: labels}
+// frontmatter files in dir. verdictLabels configures CompleteVerdict (the
+// research dispatch kind's Complete transition); omitted for work-kind
+// construction sites, matching NewFake's variadic convention for an
+// optional, kind-specific config value.
+func NewLocalTracker(dir string, labels forge.DispatchLabels, verdictLabels ...forge.VerdictLabels) *LocalTracker {
+	var vl forge.VerdictLabels
+	if len(verdictLabels) > 0 {
+		vl = verdictLabels[0]
+	}
+	return &LocalTracker{dir: dir, labels: labels, verdictLabels: vl}
 }
 
 // slugPath returns the file path for issue num.
@@ -202,6 +210,21 @@ func (lt *LocalTracker) TransitionState(num string, from, to forge.DispatchState
 		return err
 	}
 	li.frontmatter.State = lt.labels.Label(to)
+	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
+		return fmt.Errorf("write local issue %s: %w", num, err)
+	}
+	return nil
+}
+
+// CompleteVerdict rewrites issue num's frontmatter "state" marker from the
+// InProgress label to verdict's terminal label — the local adapter's single
+// scalar state field, same shape as TransitionState's overwrite.
+func (lt *LocalTracker) CompleteVerdict(num string, verdict forge.Verdict) error {
+	li, err := lt.readIssueFile(num)
+	if err != nil {
+		return err
+	}
+	li.frontmatter.State = lt.verdictLabels.Label(verdict)
 	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
 		return fmt.Errorf("write local issue %s: %w", num, err)
 	}

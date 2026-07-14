@@ -78,6 +78,13 @@ type IssueTracker interface {
 	// the label for to and removes the label for from, matching the
 	// SwapLabel(add, remove) contract with typed state identifiers.
 	TransitionState(num string, from, to DispatchState) error
+	// CompleteVerdict moves issue num from InProgress to its verdict-specific
+	// terminal label — the research dispatch kind's Complete transition
+	// (ADR 0022), which carries data plain TransitionState(num, InProgress,
+	// Complete) cannot express: which of the three verdicts a human should
+	// act on. Work-kind dispatches never call this; work's Complete carries
+	// no verdict.
+	CompleteVerdict(num string, verdict Verdict) error
 	// DepsOf returns the canonical dependencies for the given issue, each
 	// tagged with the source it was resolved from. Implementations prefer
 	// the tracker's native dependency relationships (e.g. GitHub's
