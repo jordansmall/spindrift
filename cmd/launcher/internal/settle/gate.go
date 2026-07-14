@@ -88,13 +88,13 @@ func (s *Settle) transitionState(num string, from, to forge.DispatchState) {
 // reaches confirmed SUCCESS, a terminal failure, or MergePollTimeout seconds
 // elapse. On confirmed green, agent-complete is swapped unconditionally.
 //
-// Returns (green, genuineRed):
-//   - (true, false)  — CI confirmed green; issue swapped to CompleteLabel.
-//   - (false, true)  — CI red (FAILURE or ERROR); caller decides whether to
+// Returns:
+//   - GateGreen     — CI confirmed green; issue swapped to CompleteLabel.
+//   - GateRedRetry  — CI red (FAILURE or ERROR); caller decides whether to
 //     dispatch a fix box. No label swap performed.
-//   - (false, false) — non-retriable outcome (timeout, API error); no label
+//   - GateTerminal  — non-retriable outcome (timeout, API error); no label
 //     swap. Caller must swap to failedLabel.
-func (s *Settle) gateToGreen(num, pr string) (bool, bool) {
+func (s *Settle) gateToGreen(num, pr string) GateResult {
 	pollIv := s.cfg.MergePollInterval
 	deadline := s.cfg.MergePollTimeout
 	// actualIv is used for elapsed tracking; floor to 1 so we don't
@@ -110,7 +110,7 @@ func (s *Settle) gateToGreen(num, pr string) (bool, bool) {
 		state, stateErr := s.pr.CheckState(pr)
 		if stateErr != nil {
 			fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, stateErr)
-			return false, false
+			return GateTerminal
 		}
 
 		switch state {
@@ -123,21 +123,21 @@ func (s *Settle) gateToGreen(num, pr string) (bool, bool) {
 			confirm, confirmErr := s.pr.CheckState(pr)
 			if confirmErr != nil {
 				fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, confirmErr)
-				return false, false
+				return GateTerminal
 			}
 			if confirm != forge.StateSuccess {
 				if confirm == forge.StateFailure || confirm == forge.StateError {
-					return false, true
+					return GateRedRetry
 				}
 				// PENDING/EXPECTED/NONE — keep waiting for checks to settle.
 				break
 			}
 			// Confirmed green: mark complete regardless of merge outcome.
 			s.transitionState(num, forge.InProgress, forge.Complete)
-			return true, false
+			return GateGreen
 		case forge.StateFailure, forge.StateError:
 			// Genuine red — signal caller so it can dispatch a fix pass.
-			return false, true
+			return GateRedRetry
 		}
 
 		// PENDING, EXPECTED, NONE (no checks yet), or unrecognised — keep
@@ -150,5 +150,5 @@ func (s *Settle) gateToGreen(num, pr string) (bool, bool) {
 		time.Sleep(time.Duration(pollIv) * time.Second)
 		elapsed += actualIv
 	}
-	return false, false
+	return GateTerminal
 }

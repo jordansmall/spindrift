@@ -131,7 +131,7 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 // re-entered for it.
 func (s *Settle) rewaitAfterForcePush(num, pr string) error {
 	fmt.Printf("    #%s  pr=%s  status=post-force-push-wait\n", num, pr)
-	if green, _ := s.gateToGreen(num, pr); !green {
+	if s.gateToGreen(num, pr) != GateGreen {
 		return fmt.Errorf("CI did not reach green after force-push on %s", pr)
 	}
 	return nil

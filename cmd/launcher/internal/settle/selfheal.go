@@ -41,7 +41,9 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) (ok bool, merge
 		return s.landPushOnly(num, pr)
 	}
 	for attempt := 0; ; attempt++ {
-		green, genuineRed := s.gateToGreen(num, pr)
+		gate := s.gateToGreen(num, pr)
+		green := gate == GateGreen
+		genuineRed := gate == GateRedRetry
 		if green {
 			matched, guardErr := s.mergeGuardHit(pr)
 			if guardErr != nil {

@@ -39,8 +39,7 @@ func TestGateToGreen(t *testing.T) {
 		timeout        int
 		checkStates    []forge.RollupState
 		checkStateErrs []error
-		wantGreen      bool
-		wantGenuineRed bool
+		want           GateResult
 		wantTransition bool
 		wantTo         forge.DispatchState
 	}{
@@ -48,8 +47,7 @@ func TestGateToGreen(t *testing.T) {
 			name:           "SUCCESS on first poll swaps agent-complete",
 			timeout:        100,
 			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
-			wantGreen:      true,
-			wantGenuineRed: false,
+			want:           GateGreen,
 			wantTransition: true,
 			wantTo:         forge.Complete,
 		},
@@ -57,40 +55,35 @@ func TestGateToGreen(t *testing.T) {
 			name:           "PENDING then SUCCESS swaps after one wait iteration",
 			timeout:        100,
 			checkStates:    []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess},
-			wantGreen:      true,
-			wantGenuineRed: false,
+			want:           GateGreen,
 			wantTransition: true,
 			wantTo:         forge.Complete,
 		},
 		{
-			name:           "FAILURE signals genuine-red without swap",
-			timeout:        100,
-			checkStates:    []forge.RollupState{forge.StateFailure},
-			wantGreen:      false,
-			wantGenuineRed: true,
+			name:        "FAILURE signals genuine-red without swap",
+			timeout:     100,
+			checkStates: []forge.RollupState{forge.StateFailure},
+			want:        GateRedRetry,
 		},
 		{
-			name:           "ERROR signals genuine-red without swap",
-			timeout:        100,
-			checkStates:    []forge.RollupState{forge.StateError},
-			wantGreen:      false,
-			wantGenuineRed: true,
+			name:        "ERROR signals genuine-red without swap",
+			timeout:     100,
+			checkStates: []forge.RollupState{forge.StateError},
+			want:        GateRedRetry,
 		},
 		{
-			name:           "NONE times out — non-genuine failure without swap",
-			timeout:        0,
-			checkStates:    nil,
-			wantGreen:      false,
-			wantGenuineRed: false,
+			name:        "NONE times out — non-genuine failure without swap",
+			timeout:     0,
+			checkStates: nil,
+			want:        GateTerminal,
 		},
 		{
 			// A partial check snapshot can briefly show SUCCESS before all jobs
 			// are registered. A second poll that returns FAILURE is genuine red.
-			name:           "SUCCESS then FAILURE in confirmation poll is genuine red",
-			timeout:        100,
-			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateFailure},
-			wantGreen:      false,
-			wantGenuineRed: true,
+			name:        "SUCCESS then FAILURE in confirmation poll is genuine red",
+			timeout:     100,
+			checkStates: []forge.RollupState{forge.StateSuccess, forge.StateFailure},
+			want:        GateRedRetry,
 		},
 		{
 			// Confirmation returns PENDING — another check registered but not
@@ -98,7 +91,7 @@ func TestGateToGreen(t *testing.T) {
 			name:           "SUCCESS then PENDING in confirmation poll defers completion",
 			timeout:        100,
 			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StatePending, forge.StateSuccess, forge.StateSuccess},
-			wantGreen:      true,
+			want:           GateGreen,
 			wantTransition: true,
 			wantTo:         forge.Complete,
 		},
@@ -109,8 +102,7 @@ func TestGateToGreen(t *testing.T) {
 			timeout:        100,
 			checkStateErrs: []error{errors.New("gh api graphql: 403 Forbidden")},
 			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
-			wantGreen:      false,
-			wantGenuineRed: false,
+			want:           GateTerminal,
 		},
 		{
 			// A 403 on the confirmation poll must surface as non-retriable.
@@ -118,8 +110,7 @@ func TestGateToGreen(t *testing.T) {
 			timeout:        100,
 			checkStateErrs: []error{nil, errors.New("gh api graphql: 403 Forbidden")},
 			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
-			wantGreen:      false,
-			wantGenuineRed: false,
+			want:           GateTerminal,
 		},
 	}
 	for _, tc := range cases {
@@ -137,13 +128,10 @@ func TestGateToGreen(t *testing.T) {
 			}
 			s := New(c, fc, fc)
 
-			green, genuineRed := s.gateToGreen("1", testPR)
+			got := s.gateToGreen("1", testPR)
 
-			if green != tc.wantGreen {
-				t.Errorf("gateToGreen green=%v, want %v", green, tc.wantGreen)
-			}
-			if genuineRed != tc.wantGenuineRed {
-				t.Errorf("gateToGreen genuineRed=%v, want %v", genuineRed, tc.wantGenuineRed)
+			if got != tc.want {
+				t.Errorf("gateToGreen = %v, want %v", got, tc.want)
 			}
 			if tc.wantTransition {
 				if len(fc.TransitionStateCalls) == 0 {
