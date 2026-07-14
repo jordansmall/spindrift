@@ -15,8 +15,12 @@ type IssueTracker interface {
 	// SwapLabel(add, remove) contract with typed state identifiers.
 	TransitionState(num string, from, to DispatchState) error
 	// DepsOf returns the canonical dependency IDs for the given issue.
-	// Implementations parse the issue's native dependency format (e.g. GitHub
-	// body "depends on #N" / "## Blocked by" section).
+	// Implementations prefer the tracker's native dependency relationships
+	// (e.g. GitHub's issue-dependencies API, Jira's "is blocked by" issue
+	// links) and fall back to body-text parsing (GitHub body "depends on
+	// #N" / "## Blocked by" section) only when native lookup yields no
+	// relationships or is unavailable. Native wins when non-empty — body
+	// text is never merged with a non-empty native result.
 	DepsOf(num string) ([]string, error)
 	// Comment posts a comment on the issue.
 	Comment(num, body string) error
