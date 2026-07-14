@@ -24,7 +24,7 @@ func TestRunOnce_PreservesPriorAttemptLogOnRetry(t *testing.T) {
 			box.Output.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error"}}` + "\n")) //nolint:errcheck
 			return boxErr
 		}
-		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")) //nolint:errcheck
+		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok\n")) //nolint:errcheck
 		return nil
 	}
 
@@ -85,7 +85,7 @@ func TestRunOnce_PreservesPriorAttemptLogOnRetry(t *testing.T) {
 // finding another attempt's log already there.
 func TestRunOnce_RotatesPreExistingLogFromDuplicateLaunch(t *testing.T) {
 	fr := runner.NewFake()
-	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok\n")
 
 	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, fakeDriver{}, RealClock())
 

@@ -23,7 +23,7 @@ func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 	result := dispatch.Result{
 		Success:      true,
 		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, PR: prURL, Status: "blocked", Note: "tests failing"},
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
 	}
 
 	s := New(baseConfig(), fc, fc)
@@ -52,7 +52,7 @@ func TestSettle_UsageMissing_NoCrash(t *testing.T) {
 	result := dispatch.Result{
 		Success:      true,
 		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, PR: prURL, Status: "blocked", Note: "no result"},
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "no result"},
 	}
 
 	s := New(baseConfig(), fc, fc)
@@ -81,7 +81,7 @@ func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 	result := dispatch.Result{
 		Success:      true,
 		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, PR: prURL, Status: "ready", Note: "ok"},
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
 	}
 
 	c := baseConfig()
@@ -130,7 +130,7 @@ func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 	result := dispatch.Result{
 		Success:      true,
 		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: "1", PR: branch, Status: "merged", Note: "ok"},
+		Outcome:      outcome.Outcome{Issue: "1", Landing: branch, Status: "merged", Note: "ok"},
 	}
 
 	s := New(baseConfig(), fc, fc.AsPushOnly())
