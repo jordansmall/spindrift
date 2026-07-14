@@ -11,8 +11,8 @@ setup() {
 
 @test "outcome report lists every dispatched issue with number pr and status" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=merged note=ok"
-  export FAKE_PODMAN_OUTCOME_2="SPINDRIFT_OUTCOME issue=2 pr=https://github.com/owner/repo/pull/2 status=merged note=ok"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=merged note=ok"
+  export FAKE_PODMAN_OUTCOME_2="SPINDRIFT_OUTCOME issue=2 landing=https://github.com/owner/repo/pull/2 status=merged note=ok"
   export FAKE_GH_PR_STATE_1="MERGED"
   export FAKE_GH_PR_STATE_2="MERGED"
   export FAKE_GH_ISSUE_LABELS_1="agent-complete"
@@ -27,7 +27,7 @@ setup() {
 @test "outcome report flags blocked issue distinctly with its note" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tBlocker'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=blocked note=stalled"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=blocked note=stalled"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   [[ "$output" == *"!!"* ]]
@@ -44,10 +44,10 @@ setup() {
 
 @test "malformed outcome line renders as malformed; subsequent issue is verified independently" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
-  # Issue 1: outcome line present but missing required pr= and status= tokens.
+  # Issue 1: outcome line present but missing required landing= and status= tokens.
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 note=missing-required-tokens"
   # Issue 2: well-formed outcome already merged.
-  export FAKE_PODMAN_OUTCOME_2="SPINDRIFT_OUTCOME issue=2 pr=https://github.com/owner/repo/pull/2 status=merged note=ok"
+  export FAKE_PODMAN_OUTCOME_2="SPINDRIFT_OUTCOME issue=2 landing=https://github.com/owner/repo/pull/2 status=merged note=ok"
   export FAKE_GH_PR_STATE_2="MERGED"
   export FAKE_GH_ISSUE_LABELS_2="agent-complete"
   run "$RUN_CMD"

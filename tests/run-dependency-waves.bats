@@ -87,7 +87,7 @@ setup() {
   export FAKE_GH_ISSUE_BODY_2="depends on #1"
   # Issue 1 box writes a ready outcome; the launcher gates it (CI SUCCESS →
   # merge → agent-complete). No FAKE_PODMAN_AUTO_COMPLETE shortcut.
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ok"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ok"
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   export GH_STATE="$GH_LOG.state"
   # PRForBranch needs this to find the PR URL; gh pr merge then writes MERGED
