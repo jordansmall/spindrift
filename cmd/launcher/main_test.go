@@ -173,6 +173,24 @@ func TestMaxJobsEdgeCases(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_LabelDefaultComesFromSchemaTable proves loadConfig() sources
+// LABEL's default from the generated schemaDefaults table (issue #621)
+// rather than a hand-written literal: swapping the table's entry changes
+// what an unset LABEL resolves to.
+func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("LABEL") })
+	os.Unsetenv("LABEL")
+
+	orig := schemaDefaults
+	t.Cleanup(func() { schemaDefaults = orig })
+	schemaDefaults = []defaultEntry{{env: "LABEL", dflt: "custom-default-from-table"}}
+
+	c := loadConfig()
+	if c.label != "custom-default-from-table" {
+		t.Errorf("label should come from schemaDefaults table, got %q", c.label)
+	}
+}
+
 // TestValidate_RepoSlugRequired verifies that validate() fails when REPO_SLUG
 // is empty, confirming the required-validation contract is not masked by any
 // settings-baked preamble default (which bakes an empty ${REPO_SLUG:-}).

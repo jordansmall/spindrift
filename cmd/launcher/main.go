@@ -178,6 +178,43 @@ func atoiNonneg(s string, def int) int {
 	return def
 }
 
+// schemaDefault returns key's baked-in default from the generated
+// schemaDefaults table (cmd/launcher/defaults_gen.go), or "" when the knob
+// has none — the sole source of a schema knob's default value (issue #621).
+func schemaDefault(key string) string {
+	for _, e := range schemaDefaults {
+		if e.env == key {
+			return e.dflt
+		}
+	}
+	return ""
+}
+
+// intSchemaDefault parses key's schema default as an int; a non-numeric or
+// absent default parses to 0.
+func intSchemaDefault(key string) int {
+	n, _ := strconv.Atoi(schemaDefault(key))
+	return n
+}
+
+// getenvSchema reads key from the environment, falling back to its schema
+// default instead of a hand-written literal.
+func getenvSchema(key string) string {
+	return getenv(key, schemaDefault(key))
+}
+
+// atoiSchema parses key's env value as a positive integer (see atoi),
+// falling back to its schema default instead of a literal.
+func atoiSchema(key string) int {
+	return atoi(os.Getenv(key), intSchemaDefault(key))
+}
+
+// atoiNonnegSchema parses key's env value as a non-negative integer (see
+// atoiNonneg), falling back to its schema default instead of a literal.
+func atoiNonnegSchema(key string) int {
+	return atoiNonneg(os.Getenv(key), intSchemaDefault(key))
+}
+
 func loadConfig() config {
 	imageTag := getenv("IMAGE_TAG", "spindrift:latest")
 	image := os.Getenv("IMAGE")
@@ -201,19 +238,19 @@ func loadConfig() config {
 		image:           image,
 
 		repoSlug:           os.Getenv("REPO_SLUG"),
-		label:              getenv("LABEL", "ready-for-agent"),
+		label:              getenvSchema("LABEL"),
 		issueNumber:        os.Getenv("ISSUE_NUMBER"),
-		baseBranch:         getenv("BASE_BRANCH", "main"),
-		maxParallel:        atoi(getenv("MAX_PARALLEL", "3"), 3),
-		branchPrefix:       getenv("BRANCH_PREFIX", "agent/issue-"),
-		inProgressLabel:    getenv("IN_PROGRESS_LABEL", "agent-in-progress"),
-		failedLabel:        getenv("FAILED_LABEL", "agent-failed"),
-		completeLabel:      getenv("COMPLETE_LABEL", "agent-complete"),
-		maxJobs:            atoiNonneg(os.Getenv("MAX_JOBS"), 0),
+		baseBranch:         getenvSchema("BASE_BRANCH"),
+		maxParallel:        atoiSchema("MAX_PARALLEL"),
+		branchPrefix:       getenvSchema("BRANCH_PREFIX"),
+		inProgressLabel:    getenvSchema("IN_PROGRESS_LABEL"),
+		failedLabel:        getenvSchema("FAILED_LABEL"),
+		completeLabel:      getenvSchema("COMPLETE_LABEL"),
+		maxJobs:            atoiNonnegSchema("MAX_JOBS"),
 		continuousDispatch: os.Getenv("CONTINUOUS_DISPATCH") != "",
 
-		issueTracker:        getenv("ISSUE_TRACKER", "github"),
-		localIssuesDir:      getenv("LOCAL_ISSUES_DIR", ".spindrift/issues"),
+		issueTracker:        getenvSchema("ISSUE_TRACKER"),
+		localIssuesDir:      getenvSchema("LOCAL_ISSUES_DIR"),
 		jiraBaseURL:         os.Getenv("JIRA_BASE_URL"),
 		jiraProjectKey:      os.Getenv("JIRA_PROJECT_KEY"),
 		jiraEmail:           os.Getenv("JIRA_EMAIL"),
@@ -221,16 +258,16 @@ func loadConfig() config {
 		jiraStatusMapping:   os.Getenv("JIRA_STATUS_MAPPING"),
 		jiraIncludeComments: os.Getenv("JIRA_INCLUDE_COMMENTS") != "",
 
-		transientRetryMax:    atoi(getenv("TRANSIENT_RETRY_MAX", "3"), 3),
-		transientBackoffSecs: atoi(getenv("TRANSIENT_BACKOFF_SECS", "30"), 30),
-		holdJitterSecs:       atoiNonneg(getenv("HOLD_JITTER_SECS", "5"), 5),
+		transientRetryMax:    atoiSchema("TRANSIENT_RETRY_MAX"),
+		transientBackoffSecs: atoiSchema("TRANSIENT_BACKOFF_SECS"),
+		holdJitterSecs:       atoiNonnegSchema("HOLD_JITTER_SECS"),
 
-		overlapGate: getenv("OVERLAP_GATE", "defer"),
+		overlapGate: getenvSchema("OVERLAP_GATE"),
 
-		mergePollInterval: atoiNonneg(getenv("MERGE_POLL_INTERVAL", "30"), 30),
-		mergePollTimeout:  atoiNonneg(getenv("MERGE_POLL_TIMEOUT", "1800"), 1800),
-		maxFixAttempts:    atoiNonneg(getenv("MAX_FIX_ATTEMPTS", "3"), 3),
-		maxRebaseAttempts: atoiNonneg(getenv("MAX_REBASE_ATTEMPTS", "3"), 3),
+		mergePollInterval: atoiNonnegSchema("MERGE_POLL_INTERVAL"),
+		mergePollTimeout:  atoiNonnegSchema("MERGE_POLL_TIMEOUT"),
+		maxFixAttempts:    atoiNonnegSchema("MAX_FIX_ATTEMPTS"),
+		maxRebaseAttempts: atoiNonnegSchema("MAX_REBASE_ATTEMPTS"),
 
 		ghToken:          os.Getenv("GH_TOKEN"),
 		claudeOAuthToken: os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
@@ -246,15 +283,15 @@ func loadConfig() config {
 
 		podmanNetwork:   os.Getenv("PODMAN_NETWORK"),
 		bwrapUnshareNet: os.Getenv("BWRAP_UNSHARE_NET") != "",
-		pidsLimit:       getenv("PIDS_LIMIT", "512"),
-		memoryLimit:     getenv("MEMORY_LIMIT", "4g"),
+		pidsLimit:       getenvSchema("PIDS_LIMIT"),
+		memoryLimit:     getenvSchema("MEMORY_LIMIT"),
 
 		boxEnvVars: os.Getenv("BOX_ENV_VARS"),
 
-		mergeMode:       getenv("MERGE_MODE", "manual"),
-		mergeGuardPaths: getenv("MERGE_GUARD_PATHS", ".github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**"),
+		mergeMode:       getenvSchema("MERGE_MODE"),
+		mergeGuardPaths: getenvSchema("MERGE_GUARD_PATHS"),
 
-		codeForge:          getenv("CODE_FORGE", "github"),
+		codeForge:          getenvSchema("CODE_FORGE"),
 		codeForgeRemoteURL: os.Getenv("CODE_FORGE_REMOTE_URL"),
 	}
 }
