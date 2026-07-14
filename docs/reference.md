@@ -244,8 +244,10 @@ Go launcher's OCI and bwrap adapters mount over — no Driver-specific path
 literal lives in the runner adapters or the image staging step.
 
 The SPINDRIFT_OUTCOME contract — the sections that instruct the agent to
-print the `SPINDRIFT_OUTCOME issue=… pr=… status=… note=…` line the launcher
-parses to learn the PR — is harness-owned, not Consumer-tunable. At
+print the `SPINDRIFT_OUTCOME issue=… landing=… status=… note=…` line the
+launcher parses to learn the landing reference (a PR URL under
+`CODE_FORGE=github`, a branch ref under `CODE_FORGE=git`) — is harness-owned,
+not Consumer-tunable. At
 `spindrift build` time, a `prompt` that omits the contract gets it appended
 automatically (idempotent: a prompt that already has it is left untouched).
 A runtime `SPINDRIFT_PROMPT_DIR` override is covered too: the entrypoint
@@ -509,7 +511,7 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
              └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
                 └─ implement → check → commit → push → self-review (reviewer subagent)
                    → open PR → wait for CI to register
-                   → print  SPINDRIFT_OUTCOME issue=N pr=<url> status=ready
+                   → print  SPINDRIFT_OUTCOME issue=N landing=<url> status=ready
         │
         └─ back on the host, the launcher runs the MERGE GATE for that issue:
            ├─ poll CI on the PR head until green (or red, or timeout)
@@ -547,7 +549,7 @@ human (`manual`).
 
 **`CODE_FORGE=git`** (push-only, [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md))
 replaces everything from *open PR* onward: the Box pushes its branch to
-`CODE_FORGE_REMOTE_URL` and prints `SPINDRIFT_OUTCOME ... pr=agent/issue-N status=ready`
+`CODE_FORGE_REMOTE_URL` and prints `SPINDRIFT_OUTCOME ... landing=agent/issue-N status=ready`
 — no PR, no CI-watch. The launcher skips the CI-poll entirely (there is
 nothing to poll) and swaps the issue straight to `agent-complete`, then
 applies `MERGE_MODE` as a plain push: `manual` leaves the branch as pushed,

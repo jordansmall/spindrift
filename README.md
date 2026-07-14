@@ -178,7 +178,7 @@ in CI (no TTY) it reports missing labels and exits non-zero.
 spindrift dispatch  ─▶  find ready-for-agent issues
                           └─ one container per issue (up to MAX_PARALLEL)
                                clone repo → run claude → commit → push → open PR
-                               └─ SPINDRIFT_OUTCOME issue=N pr=<url> status=ready
+                               └─ SPINDRIFT_OUTCOME issue=N landing=<url> status=ready
 
 host launcher  ─▶  merge gate per issue
                     poll CI → green → agent-complete → merge guard → apply MERGE_MODE
