@@ -787,10 +787,10 @@ Target repo. `spindrift doctor` checks this and, in interactive mode, offers to
 create any missing labels. To create them manually:
 
 ```sh
-gh label create ready-for-agent   --repo owner/repo --color 0e8a16 --description "dispatch to a spindrift agent"
-gh label create agent-in-progress --repo owner/repo --color fbca04 --description "a spindrift Box is working this issue"
-gh label create agent-complete    --repo owner/repo --color 5319e7 --description "the PR was merged by the launcher's merge gate"
-gh label create agent-failed      --repo owner/repo --color b60205 --description "the Box failed or the PR could not merge; needs triage"
+gh label create ready-for-agent   --repo owner/repo --color 0075ca --description "Fully specified; ready for an AFK agent"
+gh label create agent-in-progress --repo owner/repo --color e4e669 --description "An AFK agent is actively working this issue"
+gh label create agent-complete    --repo owner/repo --color 0e8a16 --description "Agent work merged and green"
+gh label create agent-failed      --repo owner/repo --color d93f0b --description "Box exited non-zero; needs human triage"
 ```
 
 #### Caveat: a killed launcher can strand an issue
