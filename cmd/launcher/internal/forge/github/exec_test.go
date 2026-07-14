@@ -1,4 +1,4 @@
-package forge
+package github
 
 import (
 	"errors"
@@ -8,12 +8,24 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
+// testLabels is the conventional lifecycle-label set, mirrored from
+// lib/env-schema.nix (issue #460); this package's tests share it instead of
+// each test restating the four label strings.
+var testLabels = forge.DispatchLabels{
+	Dispatchable: "ready-for-agent",
+	InProgress:   "agent-in-progress",
+	Complete:     "agent-complete",
+	Failed:       "agent-failed",
+}
+
 // TestExecClient_ImplementsPRForge verifies the github Code Forge satisfies
-// PRForge — it opens PRs and watches CI, unlike the push-only git adapter.
+// forge.PRForge — it opens PRs and watches CI, unlike the push-only git adapter.
 func TestExecClient_ImplementsPRForge(t *testing.T) {
-	var _ PRForge = NewExecClient("owner/repo", testLabels, "agent/issue-")
+	var _ forge.PRForge = NewExecClient("owner/repo", testLabels, "agent/issue-")
 }
 
 // prependFakeGH writes a counting-wrapper gh script to a temp dir, prepends
@@ -51,12 +63,12 @@ func TestExecClient_DepsOf_NativeWins(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	deps, err := c.DepsOf("10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
-	want := []Dependency{{ID: "3", Source: DepSourceNative}, {ID: "5", Source: DepSourceNative}}
+	want := []forge.Dependency{{ID: "3", Source: forge.DepSourceNative}, {ID: "5", Source: forge.DepSourceNative}}
 	if len(deps) != 2 || deps[0] != want[0] || deps[1] != want[1] {
 		t.Fatalf("want %v, got %v", want, deps)
 	}
@@ -75,12 +87,12 @@ func TestExecClient_DepsOf_FallsBackOnEmptyNative(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	deps, err := c.DepsOf("10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
-	if len(deps) != 1 || deps[0] != (Dependency{ID: "7", Source: DepSourceBody}) {
+	if len(deps) != 1 || deps[0] != (forge.Dependency{ID: "7", Source: forge.DepSourceBody}) {
 		t.Fatalf("want [7 (body)], got %v", deps)
 	}
 }
@@ -98,12 +110,12 @@ func TestExecClient_DepsOf_FallsBackOnNativeError(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	deps, err := c.DepsOf("10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
-	if len(deps) != 1 || deps[0] != (Dependency{ID: "9", Source: DepSourceBody}) {
+	if len(deps) != 1 || deps[0] != (forge.Dependency{ID: "9", Source: forge.DepSourceBody}) {
 		t.Fatalf("want [9 (body)], got %v", deps)
 	}
 }
@@ -121,12 +133,12 @@ func TestExecClient_DepsOf_NativeIgnoresBody(t *testing.T) {
 	;;
 esac`)
 
-	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	deps, err := c.DepsOf("10")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
-	if len(deps) != 1 || deps[0] != (Dependency{ID: "4", Source: DepSourceNative}) {
+	if len(deps) != 1 || deps[0] != (forge.Dependency{ID: "4", Source: forge.DepSourceNative}) {
 		t.Fatalf("want [4 (native)] (native only, body ignored), got %v", deps)
 	}
 }
@@ -137,7 +149,7 @@ func TestProbe_PositionalSlug(t *testing.T) {
 	// Both gh calls exit 0. Probe may error on empty output — that's fine.
 	dir := prependFakeGH(t, "")
 
-	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	c.Probe() //nolint:errcheck
 
 	// call-01.txt is the `gh repo view …` invocation.
@@ -172,13 +184,13 @@ func TestProbe_StderrSurfaced(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	_, err := c.Probe()
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
-	if !errors.Is(err, ErrRepoNotFound) {
-		t.Fatalf("want ErrRepoNotFound, got: %v", err)
+	if !errors.Is(err, forge.ErrRepoNotFound) {
+		t.Fatalf("want forge.ErrRepoNotFound, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "unknown flag") {
 		t.Fatalf("error must contain gh's stderr; got: %v", err)
@@ -195,7 +207,7 @@ func TestFailureDetail_GraphQLArgShape(t *testing.T) {
 fi
 `)
 
-	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	detail, err := c.FailureDetail("https://github.com/owner/repo/pull/42")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -271,8 +283,8 @@ func TestRenderFailureDetail(t *testing.T) {
 
 // TestMerge_BlockedByChecksNotClassifiedAsConflict verifies that when gh pr
 // merge refuses with "not mergeable" wording but the PR's queried mergeable
-// state is MERGEABLE (not CONFLICTING), Merge returns ErrMergeBlockedByChecks
-// rather than ErrMergeConflict — the two refusals share the same stderr
+// state is MERGEABLE (not CONFLICTING), Merge returns forge.ErrMergeBlockedByChecks
+// rather than forge.ErrMergeConflict — the two refusals share the same stderr
 // wording, so substring-matching alone cannot tell them apart (issue #566).
 func TestMerge_BlockedByChecksNotClassifiedAsConflict(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
@@ -284,22 +296,22 @@ if [ "$1" = "api" ]; then
 fi
 `)
 
-	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	err := c.Merge("https://github.com/owner/repo/pull/42")
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
-	if errors.Is(err, ErrMergeConflict) {
-		t.Fatalf("blocked-by-checks refusal must not classify as ErrMergeConflict, got: %v", err)
+	if errors.Is(err, forge.ErrMergeConflict) {
+		t.Fatalf("blocked-by-checks refusal must not classify as forge.ErrMergeConflict, got: %v", err)
 	}
-	if !errors.Is(err, ErrMergeBlockedByChecks) {
-		t.Fatalf("want ErrMergeBlockedByChecks, got: %v", err)
+	if !errors.Is(err, forge.ErrMergeBlockedByChecks) {
+		t.Fatalf("want forge.ErrMergeBlockedByChecks, got: %v", err)
 	}
 }
 
 // TestMerge_GenuineConflictStillClassifiedAsConflict verifies that a "not
 // mergeable" refusal on a PR whose queried mergeable state is CONFLICTING
-// still returns ErrMergeConflict, so the rebase-retry path keeps engaging
+// still returns forge.ErrMergeConflict, so the rebase-retry path keeps engaging
 // for real conflicts.
 func TestMerge_GenuineConflictStillClassifiedAsConflict(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
@@ -311,18 +323,18 @@ if [ "$1" = "api" ]; then
 fi
 `)
 
-	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	err := c.Merge("https://github.com/owner/repo/pull/42")
-	if !errors.Is(err, ErrMergeConflict) {
-		t.Fatalf("want ErrMergeConflict, got: %v", err)
+	if !errors.Is(err, forge.ErrMergeConflict) {
+		t.Fatalf("want forge.ErrMergeConflict, got: %v", err)
 	}
 }
 
 // TestMerge_UndeterminedMergeableStateIsItsOwnError verifies that a "not
 // mergeable" refusal whose queried mergeable state is neither CONFLICTING nor
 // MERGEABLE (e.g. UNKNOWN — GitHub hasn't finished computing it) is surfaced
-// as its own error rather than silently folded into ErrMergeConflict or
-// ErrMergeBlockedByChecks.
+// as its own error rather than silently folded into forge.ErrMergeConflict or
+// forge.ErrMergeBlockedByChecks.
 func TestMerge_UndeterminedMergeableStateIsItsOwnError(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
   printf 'GraphQL: Pull Request is not mergeable (mergePullRequest)\n' >&2
@@ -333,16 +345,16 @@ if [ "$1" = "api" ]; then
 fi
 `)
 
-	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	err := c.Merge("https://github.com/owner/repo/pull/42")
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
-	if errors.Is(err, ErrMergeConflict) {
-		t.Fatalf("undetermined mergeable state must not classify as ErrMergeConflict, got: %v", err)
+	if errors.Is(err, forge.ErrMergeConflict) {
+		t.Fatalf("undetermined mergeable state must not classify as forge.ErrMergeConflict, got: %v", err)
 	}
-	if errors.Is(err, ErrMergeBlockedByChecks) {
-		t.Fatalf("undetermined mergeable state must not classify as ErrMergeBlockedByChecks, got: %v", err)
+	if errors.Is(err, forge.ErrMergeBlockedByChecks) {
+		t.Fatalf("undetermined mergeable state must not classify as forge.ErrMergeBlockedByChecks, got: %v", err)
 	}
 }
 
@@ -394,7 +406,7 @@ func TestGitForcePush_CapturesStderr(t *testing.T) {
 	// work's remote-tracking ref is now stale relative to origin/main.
 	run(work, "commit", "--allow-empty", "-m", "local change")
 
-	err := gitForcePush(work)
+	err := forge.GitForcePush(work)
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
@@ -431,12 +443,12 @@ func TestGitForcePush_TransientFailureIsRetryable(t *testing.T) {
 	// no stale-lease/rejection markers in stderr.
 	run(work, "remote", "add", "origin", filepath.Join(dir, "does-not-exist"))
 
-	err := gitForcePush(work)
+	err := forge.GitForcePush(work)
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
-	if !errors.Is(err, ErrTransientPushFailure) {
-		t.Fatalf("want ErrTransientPushFailure, got: %v", err)
+	if !errors.Is(err, forge.ErrTransientPushFailure) {
+		t.Fatalf("want forge.ErrTransientPushFailure, got: %v", err)
 	}
 }
 
@@ -486,11 +498,11 @@ func TestGitForcePush_StaleLeaseIsNotTransient(t *testing.T) {
 	// work's remote-tracking ref is now stale relative to origin/main.
 	run(work, "commit", "--allow-empty", "-m", "local change")
 
-	err := gitForcePush(work)
+	err := forge.GitForcePush(work)
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
-	if errors.Is(err, ErrTransientPushFailure) {
+	if errors.Is(err, forge.ErrTransientPushFailure) {
 		t.Fatalf("want a terminal (non-transient) error for a genuine stale-lease rejection, got: %v", err)
 	}
 }

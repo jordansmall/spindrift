@@ -1,4 +1,4 @@
-package forge
+package git
 
 import (
 	"bytes"
@@ -6,11 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // gitClient is the push-only Code Forge adapter for a plain git remote
 // (self-hosted git, gitea, GitLab-without-MRs, a bare server repo). It has no
-// PR or CI concept — it implements CodeForge only, never PRForge — and
+// PR or CI concept — it implements forge.CodeForge only, never PRForge — and
 // Merge/Rebase land code by pushing directly to the remote instead of
 // merging a pull request.
 type gitClient struct {
@@ -21,13 +23,13 @@ type gitClient struct {
 	branchPrefix string
 }
 
-// NewGitClient returns a CodeForge backed by a plain git remote URL.
+// NewGitClient returns a forge.CodeForge backed by a plain git remote URL.
 // baseBranch is the target branch Merge pushes onto for MERGE_MODE=immediate.
 // userName/userEmail configure the commit identity on Merge's throwaway
 // clone (a merge commit needs a committer) instead of depending on ambient
 // host git config, which may be unset on a bare CI runner. branchPrefix is
 // baked into AgentBranch's output.
-func NewGitClient(remoteURL, baseBranch, userName, userEmail, branchPrefix string) CodeForge {
+func NewGitClient(remoteURL, baseBranch, userName, userEmail, branchPrefix string) forge.CodeForge {
 	return &gitClient{
 		remoteURL:    remoteURL,
 		baseBranch:   baseBranch,
@@ -89,7 +91,7 @@ func (g *gitClient) setCommitIdentity(gitIn func(args ...string) *exec.Cmd) erro
 
 // Merge lands branch onto baseBranch by cloning the remote, merging branch in,
 // and pushing the result — the MERGE_MODE=immediate mapping for a push-only
-// forge. Returns ErrMergeConflict when the merge cannot be completed
+// forge. Returns forge.ErrMergeConflict when the merge cannot be completed
 // automatically, so callers can retry via Rebase exactly as they do for the
 // github adapter.
 func (g *gitClient) Merge(branch string) error {
@@ -117,8 +119,8 @@ func (g *gitClient) Merge(branch string) error {
 	mergeCmd.Stderr = &out
 	if err := mergeCmd.Run(); err != nil {
 		_ = gitIn("merge", "--abort").Run()
-		if isMergeConflict(out.String()) {
-			return ErrMergeConflict
+		if forge.IsMergeConflict(out.String()) {
+			return forge.ErrMergeConflict
 		}
 		return fmt.Errorf("git merge %s: %w: %s", branch, err, strings.TrimSpace(out.String()))
 	}
@@ -129,7 +131,7 @@ func (g *gitClient) Merge(branch string) error {
 }
 
 // Rebase rebases branch onto baseBranch and force-pushes it back to the
-// remote. Returns ErrMergeConflict when the rebase cannot be completed
+// remote. Returns forge.ErrMergeConflict when the rebase cannot be completed
 // automatically.
 func (g *gitClient) Rebase(branch string) error {
 	if err := validateGitRef(branch); err != nil {
@@ -149,15 +151,15 @@ func (g *gitClient) Rebase(branch string) error {
 	}
 	if err := gitIn("rebase", "origin/"+g.baseBranch).Run(); err != nil {
 		_ = gitIn("rebase", "--abort").Run()
-		return ErrMergeConflict
+		return forge.ErrMergeConflict
 	}
-	return gitForcePush(dir)
+	return forge.GitForcePush(dir)
 }
 
 // Probe checks that the configured remote is reachable.
 func (g *gitClient) Probe() (string, error) {
 	if err := exec.Command("git", "ls-remote", g.remoteURL).Run(); err != nil {
-		return "", fmt.Errorf("%w: %s", ErrRepoNotFound, g.remoteURL)
+		return "", fmt.Errorf("%w: %s", forge.ErrRepoNotFound, g.remoteURL)
 	}
 	return g.remoteURL, nil
 }

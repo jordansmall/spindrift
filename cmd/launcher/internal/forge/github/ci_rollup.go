@@ -1,4 +1,4 @@
-package forge
+package github
 
 import (
 	"encoding/json"

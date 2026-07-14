@@ -1,4 +1,4 @@
-package forge
+package git
 
 import (
 	"os"
@@ -6,21 +6,23 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestGitClient_ImplementsCodeForge asserts that GitClient satisfies CodeForge.
+// TestGitClient_ImplementsCodeForge asserts that GitClient satisfies forge.CodeForge.
 func TestGitClient_ImplementsCodeForge(t *testing.T) {
-	var _ CodeForge = NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
+	var _ forge.CodeForge = NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
 }
 
 // TestGitClient_NoPRForgeConcept verifies that the git Code Forge implements
-// no PR/CI/auto-merge surface at all — a type assertion against PRForge
+// no PR/CI/auto-merge surface at all — a type assertion against forge.PRForge
 // reports absence, the mechanism callers use instead of a removed PushOnly()
 // flag.
 func TestGitClient_NoPRForgeConcept(t *testing.T) {
 	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
-	if _, ok := g.(PRForge); ok {
-		t.Error("gitClient satisfies PRForge, want it to implement CodeForge only")
+	if _, ok := g.(forge.PRForge); ok {
+		t.Error("gitClient satisfies forge.PRForge, want it to implement forge.CodeForge only")
 	}
 }
 
@@ -89,7 +91,7 @@ func TestGitClient_Merge_PushOnlyLanding(t *testing.T) {
 }
 
 // TestGitClient_Merge_ConflictReturnsErrMergeConflict verifies that Merge
-// reports ErrMergeConflict when the feature branch conflicts with base,
+// reports forge.ErrMergeConflict when the feature branch conflicts with base,
 // leaving base unpushed.
 func TestGitClient_Merge_ConflictReturnsErrMergeConflict(t *testing.T) {
 	dir := t.TempDir()
@@ -120,8 +122,8 @@ func TestGitClient_Merge_ConflictReturnsErrMergeConflict(t *testing.T) {
 
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 	err := g.Merge("agent/issue-1")
-	if err != ErrMergeConflict {
-		t.Fatalf("Merge: want ErrMergeConflict, got: %v", err)
+	if err != forge.ErrMergeConflict {
+		t.Fatalf("Merge: want forge.ErrMergeConflict, got: %v", err)
 	}
 }
 

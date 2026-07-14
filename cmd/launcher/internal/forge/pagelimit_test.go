@@ -37,28 +37,28 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 // TestWarnPageMayTruncateBacklog_AtLimitWarns verifies the shared page-limit
-// warning fires once count reaches resultPageLimit, for both the github and
+// warning fires once count reaches ResultPageLimit, for both the github and
 // jira sources that consume it.
 func TestWarnPageMayTruncateBacklog_AtLimitWarns(t *testing.T) {
 	for _, source := range []string{"gh issue list", "jira search"} {
 		t.Run(source, func(t *testing.T) {
 			out := captureStdout(t, func() {
-				warnPageMayTruncateBacklog(source, resultPageLimit)
+				WarnPageMayTruncateBacklog(source, ResultPageLimit)
 			})
 			if !strings.Contains(out, source) || !strings.Contains(out, "backlog may be larger") {
-				t.Errorf("warnPageMayTruncateBacklog(%q, limit) output = %q, want it to mention the source and the backlog warning", source, out)
+				t.Errorf("WarnPageMayTruncateBacklog(%q, limit) output = %q, want it to mention the source and the backlog warning", source, out)
 			}
 		})
 	}
 }
 
 // TestWarnPageMayTruncateBacklog_UnderLimitSilent verifies the warning is
-// silent when a page comes back under resultPageLimit.
+// silent when a page comes back under ResultPageLimit.
 func TestWarnPageMayTruncateBacklog_UnderLimitSilent(t *testing.T) {
 	out := captureStdout(t, func() {
-		warnPageMayTruncateBacklog("gh issue list", resultPageLimit-1)
+		WarnPageMayTruncateBacklog("gh issue list", ResultPageLimit-1)
 	})
 	if out != "" {
-		t.Errorf("warnPageMayTruncateBacklog under the limit printed %q, want silence", out)
+		t.Errorf("WarnPageMayTruncateBacklog under the limit printed %q, want silence", out)
 	}
 }

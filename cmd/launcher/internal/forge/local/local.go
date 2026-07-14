@@ -1,4 +1,4 @@
-package forge
+package local
 
 import (
 	"fmt"
@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
 const frontmatterDelim = "---"
@@ -73,19 +75,19 @@ func parseLocalIssue(data []byte) (localIssue, error) {
 	return localIssue{frontmatter: fm, body: body}, nil
 }
 
-// LocalTracker is the file-based IssueTracker adapter (ADR 0013): one
+// LocalTracker is the file-based forge.IssueTracker adapter (ADR 0013): one
 // Markdown file per issue, with YAML frontmatter, in a directory the operator
 // keeps git-ignored (default .spindrift/issues/). labels maps canonical
-// DispatchState values to the frontmatter "state" marker, the same way the
+// forge.DispatchState values to the frontmatter "state" marker, the same way the
 // GitHub adapter maps them to label names.
 type LocalTracker struct {
 	dir    string
-	labels DispatchLabels
+	labels forge.DispatchLabels
 }
 
-// NewLocalTracker returns an IssueTracker backed by Markdown + YAML
+// NewLocalTracker returns a forge.IssueTracker backed by Markdown + YAML
 // frontmatter files in dir.
-func NewLocalTracker(dir string, labels DispatchLabels) *LocalTracker {
+func NewLocalTracker(dir string, labels forge.DispatchLabels) *LocalTracker {
 	return &LocalTracker{dir: dir, labels: labels}
 }
 
@@ -113,20 +115,20 @@ func (lt *LocalTracker) readIssueFile(num string) (localIssue, error) {
 // Labels so cross-backend logic that checks for a specific dispatch label
 // (e.g. failedLabel) works the same as it does against the GitHub adapter,
 // whose Labels already include whatever label represents current state.
-func toIssue(num string, li localIssue) Issue {
+func toIssue(num string, li localIssue) forge.Issue {
 	labels := append(append([]string(nil), li.frontmatter.Labels...), li.frontmatter.State)
-	return Issue{
+	return forge.Issue{
 		Number: num,
 		Title:  li.frontmatter.Title,
 		Body:   li.body,
-		State:  IssueOpen,
+		State:  forge.IssueOpen,
 		Labels: labels,
 	}
 }
 
 // ListIssues returns issues whose frontmatter state marker matches state, in
 // canonical order (ascending by the created timestamp).
-func (lt *LocalTracker) ListIssues(state DispatchState) ([]Issue, error) {
+func (lt *LocalTracker) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 	entries, err := os.ReadDir(lt.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -137,7 +139,7 @@ func (lt *LocalTracker) ListIssues(state DispatchState) ([]Issue, error) {
 	want := lt.labels.Label(state)
 
 	type entry struct {
-		iss     Issue
+		iss     forge.Issue
 		created time.Time
 	}
 	var matches []entry
@@ -158,7 +160,7 @@ func (lt *LocalTracker) ListIssues(state DispatchState) ([]Issue, error) {
 	}
 	sort.SliceStable(matches, func(i, j int) bool { return matches[i].created.Before(matches[j].created) })
 
-	issues := make([]Issue, len(matches))
+	issues := make([]forge.Issue, len(matches))
 	for i, m := range matches {
 		issues[i] = m.iss
 	}
@@ -166,10 +168,10 @@ func (lt *LocalTracker) ListIssues(state DispatchState) ([]Issue, error) {
 }
 
 // Issue returns full details for the local issue num.
-func (lt *LocalTracker) Issue(num string) (Issue, error) {
+func (lt *LocalTracker) Issue(num string) (forge.Issue, error) {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
-		return Issue{}, err
+		return forge.Issue{}, err
 	}
 	return toIssue(num, li), nil
 }
@@ -178,7 +180,7 @@ func (lt *LocalTracker) Issue(num string) (Issue, error) {
 // label for from to the label for to. Unlike the GitHub adapter's label
 // add/remove pair, the local file has a single scalar state field, so the
 // transition is a plain overwrite.
-func (lt *LocalTracker) TransitionState(num string, from, to DispatchState) error {
+func (lt *LocalTracker) TransitionState(num string, from, to forge.DispatchState) error {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
 		return err
@@ -191,15 +193,15 @@ func (lt *LocalTracker) TransitionState(num string, from, to DispatchState) erro
 }
 
 // DepsOf returns the dependency slugs listed under issue num's "## Blocked
-// by" section — always DepSourceBody; the local tracker has no native
+// by" section — always forge.DepSourceBody; the local tracker has no native
 // relationship concept. Unlike ParseBlockerRefs (GitHub "#N" refs), local
 // issues reference each other by filename slug, one per bullet line.
-func (lt *LocalTracker) DepsOf(num string) ([]Dependency, error) {
+func (lt *LocalTracker) DepsOf(num string) ([]forge.Dependency, error) {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
 		return nil, err
 	}
-	return WithSource(parseLocalBlockers(li.body), DepSourceBody), nil
+	return forge.WithSource(parseLocalBlockers(li.body), forge.DepSourceBody), nil
 }
 
 // parseLocalBlockers extracts dependency slugs from a "## Blocked by" section
@@ -210,15 +212,15 @@ func parseLocalBlockers(body string) []string {
 	inSection := false
 	for _, rawLine := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
 		line := strings.TrimRight(rawLine, "\r")
-		if blockedByHeader.MatchString(strings.TrimSpace(line)) {
+		if forge.BlockedByHeader.MatchString(strings.TrimSpace(line)) {
 			inSection = true
 			continue
 		}
-		if anyHeading.MatchString(line) {
+		if forge.AnyHeading.MatchString(line) {
 			inSection = false
 		}
-		if inSection && bulletItem.MatchString(line) {
-			slug := strings.TrimSpace(bulletItem.ReplaceAllString(line, ""))
+		if inSection && forge.BulletItem.MatchString(line) {
+			slug := strings.TrimSpace(forge.BulletItem.ReplaceAllString(line, ""))
 			slug = strings.Trim(slug, "`")
 			if slug != "" && !seen[slug] {
 				seen[slug] = true
@@ -236,7 +238,7 @@ func (lt *LocalTracker) Comment(num, body string) error {
 	if err != nil {
 		return err
 	}
-	li.body = appendComment(li.body, body)
+	li.body = forge.AppendComment(li.body, body)
 	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
 		return fmt.Errorf("write local issue %s: %w", num, err)
 	}

@@ -1,4 +1,4 @@
-package forge
+package local
 
 import (
 	"os"
@@ -6,15 +6,17 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // testLabels is the conventional lifecycle-label set, mirrored from
 // lib/env-schema.nix and pinned against the agent workflows by
 // nix/checks/dispatch-labels.nix (issue #460). NewFake and the production
 // adapters (Exec, Local, Jira) take labels as an explicit constructor
-// argument rather than baking in a copy, so package-forge tests share this
+// argument rather than baking in a copy, so this package's tests share this
 // one value instead of each restating the four label strings.
-var testLabels = DispatchLabels{
+var testLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
 	Complete:     "agent-complete",
@@ -32,7 +34,7 @@ func writeLocalIssue(t *testing.T, dir, slug string, li localIssue) {
 }
 
 func TestLocalTracker_ImplementsIssueTracker(t *testing.T) {
-	var _ IssueTracker = NewLocalTracker(t.TempDir(), testLabels)
+	var _ forge.IssueTracker = NewLocalTracker(t.TempDir(), testLabels)
 }
 
 func TestParseLocalIssue_Frontmatter(t *testing.T) {
@@ -104,7 +106,7 @@ func TestLocalTracker_ListIssues_OrderedByCreated(t *testing.T) {
 	}})
 
 	lt := NewLocalTracker(dir, labels)
-	issues, err := lt.ListIssues(Dispatchable)
+	issues, err := lt.ListIssues(forge.Dispatchable)
 	if err != nil {
 		t.Fatalf("ListIssues: %v", err)
 	}
@@ -124,7 +126,7 @@ func TestLocalTracker_TransitionState_RewritesFrontmatterInPlace(t *testing.T) {
 	}})
 
 	lt := NewLocalTracker(dir, labels)
-	if err := lt.TransitionState("fix-thing", Dispatchable, InProgress); err != nil {
+	if err := lt.TransitionState("fix-thing", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("TransitionState: %v", err)
 	}
 
@@ -137,14 +139,14 @@ func TestLocalTracker_TransitionState_RewritesFrontmatterInPlace(t *testing.T) {
 	if iss.Title != "Fix thing" {
 		t.Fatalf("Title changed unexpectedly: %q", iss.Title)
 	}
-	inProgress, err := lt.ListIssues(InProgress)
+	inProgress, err := lt.ListIssues(forge.InProgress)
 	if err != nil {
 		t.Fatalf("ListIssues(InProgress): %v", err)
 	}
 	if len(inProgress) != 1 || inProgress[0].Number != "fix-thing" {
 		t.Errorf("ListIssues(InProgress) = %+v, want [fix-thing]", inProgress)
 	}
-	dispatchable, err := lt.ListIssues(Dispatchable)
+	dispatchable, err := lt.ListIssues(forge.Dispatchable)
 	if err != nil {
 		t.Fatalf("ListIssues(Dispatchable): %v", err)
 	}
@@ -167,9 +169,9 @@ func TestLocalTracker_DepsOf_ParsesBlockedBySlugSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
-	want := []Dependency{
-		{ID: "init-database", Source: DepSourceBody},
-		{ID: "setup-ci", Source: DepSourceBody},
+	want := []forge.Dependency{
+		{ID: "init-database", Source: forge.DepSourceBody},
+		{ID: "setup-ci", Source: forge.DepSourceBody},
 	}
 	if !reflect.DeepEqual(deps, want) {
 		t.Errorf("DepsOf = %v, want %v", deps, want)

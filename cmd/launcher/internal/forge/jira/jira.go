@@ -1,4 +1,7 @@
-package forge
+// Package jira is the Jira REST adapter. It satisfies the parent forge
+// package's IssueTracker interface only — per ADR 0013, code still lands via
+// the github Code Forge.
+package jira
 
 import (
 	"bytes"
@@ -10,10 +13,11 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
-// JiraConfig configures the Jira IssueTracker adapter. Per ADR 0013, Jira
-// implements only IssueTracker — code still lands via the github CodeForge.
+// JiraConfig configures the Jira IssueTracker adapter.
 type JiraConfig struct {
 	BaseURL    string // Jira site base URL, e.g. https://yourcompany.atlassian.net
 	ProjectKey string
@@ -24,10 +28,10 @@ type JiraConfig struct {
 	// names. TransitionState performs the matching workflow transition; when a
 	// state is unmapped, or the mapped transition is not available on the
 	// issue's current workflow, TransitionState falls back to Labels.
-	StatusMapping map[DispatchState]string
+	StatusMapping map[forge.DispatchState]string
 	// Labels are the fallback labels applied when a transition is unmapped or
 	// blocked by the project's workflow.
-	Labels DispatchLabels
+	Labels forge.DispatchLabels
 	// IncludeComments, when true, appends the issue's comment thread to the
 	// Body returned by Issue. Opt-in to keep the prompt-injection surface tight
 	// by default.
@@ -40,11 +44,11 @@ type JiraConfig struct {
 
 // statusMappingKeys maps the JSON keys accepted by ParseStatusMapping to
 // their canonical DispatchState.
-var statusMappingKeys = map[string]DispatchState{
-	"dispatchable": Dispatchable,
-	"inProgress":   InProgress,
-	"complete":     Complete,
-	"failed":       Failed,
+var statusMappingKeys = map[string]forge.DispatchState{
+	"dispatchable": forge.Dispatchable,
+	"inProgress":   forge.InProgress,
+	"complete":     forge.Complete,
+	"failed":       forge.Failed,
 }
 
 // ParseStatusMapping parses the JIRA_STATUS_MAPPING config knob: a JSON
@@ -52,8 +56,8 @@ var statusMappingKeys = map[string]DispatchState{
 // to native Jira status names. An empty string yields an empty mapping (every
 // state falls back to its label). An unknown key is a config error, so a
 // typo fails fast at startup rather than silently dropping the mapping.
-func ParseStatusMapping(s string) (map[DispatchState]string, error) {
-	out := map[DispatchState]string{}
+func ParseStatusMapping(s string) (map[forge.DispatchState]string, error) {
+	out := map[forge.DispatchState]string{}
 	if s == "" {
 		return out, nil
 	}
@@ -97,7 +101,7 @@ type jiraClient struct {
 }
 
 // NewJiraClient returns an IssueTracker backed by the Jira REST API.
-func NewJiraClient(cfg JiraConfig) IssueTracker {
+func NewJiraClient(cfg JiraConfig) forge.IssueTracker {
 	hc := cfg.HTTPClient
 	if hc == nil {
 		hc = http.DefaultClient
@@ -179,7 +183,7 @@ const jiraBlockedByLink = "is blocked by"
 
 // DepsOf returns the canonical dependencies for issue num, resolved from
 // native Jira issue links (not prose parsing) — always DepSourceNative.
-func (j *jiraClient) DepsOf(num string) ([]Dependency, error) {
+func (j *jiraClient) DepsOf(num string) ([]forge.Dependency, error) {
 	var payload jiraIssuePayload
 	status, err := j.do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload)
 	if err != nil {
@@ -194,17 +198,17 @@ func (j *jiraClient) DepsOf(num string) ([]Dependency, error) {
 			deps = append(deps, link.InwardIssue.Key)
 		}
 	}
-	return WithSource(deps, DepSourceNative), nil
+	return forge.WithSource(deps, forge.DepSourceNative), nil
 }
 
 // issueState maps Jira's statusCategory to the canonical IssueState: "done"
 // is Jira's terminal category (regardless of the workflow's custom terminal
 // status name, e.g. "Done", "Won't Fix", "Resolved").
-func issueState(p jiraIssuePayload) IssueState {
+func issueState(p jiraIssuePayload) forge.IssueState {
 	if p.Fields.Status.StatusCategory.Key == "done" {
-		return IssueClosed
+		return forge.IssueClosed
 	}
-	return IssueOpen
+	return forge.IssueOpen
 }
 
 type jiraCommentsPayload struct {
@@ -215,14 +219,14 @@ type jiraCommentsPayload struct {
 
 // Issue returns the Jira issue's summary, description, status, and labels.
 // When IncludeComments is set, the comment thread is appended to Body.
-func (j *jiraClient) Issue(num string) (Issue, error) {
+func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 	var payload jiraIssuePayload
 	status, err := j.do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload)
 	if err != nil {
-		return Issue{}, err
+		return forge.Issue{}, err
 	}
 	if status != http.StatusOK {
-		return Issue{}, fmt.Errorf("jira: issue %s: unexpected status %d", num, status)
+		return forge.Issue{}, fmt.Errorf("jira: issue %s: unexpected status %d", num, status)
 	}
 
 	body := payload.Fields.Description
@@ -230,17 +234,17 @@ func (j *jiraClient) Issue(num string) (Issue, error) {
 		var comments jiraCommentsPayload
 		cStatus, cErr := j.do(http.MethodGet, "/rest/api/2/issue/"+num+"/comment", nil, &comments)
 		if cErr != nil {
-			return Issue{}, cErr
+			return forge.Issue{}, cErr
 		}
 		if cStatus != http.StatusOK {
-			return Issue{}, fmt.Errorf("jira: issue %s comments: unexpected status %d", num, cStatus)
+			return forge.Issue{}, fmt.Errorf("jira: issue %s comments: unexpected status %d", num, cStatus)
 		}
 		for _, c := range comments.Comments {
-			body = appendComment(body, c.Body)
+			body = forge.AppendComment(body, c.Body)
 		}
 	}
 
-	return Issue{
+	return forge.Issue{
 		Number: payload.Key,
 		Title:  payload.Fields.Summary,
 		Body:   body,
@@ -342,7 +346,7 @@ func (j *jiraClient) swapLabel(num, add, remove string) error {
 // unmapped or the matching transition is not available on the issue's
 // current workflow, it falls back to swapping the DispatchLabels for from/to
 // (per ADR 0013) so the lifecycle always makes progress.
-func (j *jiraClient) TransitionState(num string, from, to DispatchState) error {
+func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) error {
 	if target, ok := j.cfg.StatusMapping[to]; ok && target != "" {
 		err := j.transitionByStatus(num, target)
 		if err == nil {
@@ -374,7 +378,7 @@ type jiraSearchPayload struct {
 // state when one is configured; the fallback label for state is always
 // included in the query too, so issues that fell back to a label (because
 // the mapped transition was unmapped or blocked) are still found.
-func (j *jiraClient) ListIssues(state DispatchState) ([]Issue, error) {
+func (j *jiraClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 	clauses := []string{fmt.Sprintf("project = %q", j.cfg.ProjectKey)}
 	var stateClauses []string
 	if target, ok := j.cfg.StatusMapping[state]; ok && target != "" {
@@ -400,10 +404,10 @@ func (j *jiraClient) ListIssues(state DispatchState) ([]Issue, error) {
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("jira: search: unexpected status %d", status)
 	}
-	warnPageMayTruncateBacklog("jira search", len(payload.Issues))
-	issues := make([]Issue, len(payload.Issues))
+	forge.WarnPageMayTruncateBacklog("jira search", len(payload.Issues))
+	issues := make([]forge.Issue, len(payload.Issues))
 	for i, p := range payload.Issues {
-		issues[i] = Issue{
+		issues[i] = forge.Issue{
 			Number: p.Key,
 			Title:  p.Fields.Summary,
 			Body:   p.Fields.Description,
@@ -416,7 +420,7 @@ func (j *jiraClient) ListIssues(state DispatchState) ([]Issue, error) {
 
 // doSearch issues a Jira JQL search request via GET /rest/api/2/search.
 func (j *jiraClient) doSearch(jql string, out any) (int, error) {
-	q := url.Values{"jql": {jql}, "maxResults": {fmt.Sprintf("%d", resultPageLimit)}}
+	q := url.Values{"jql": {jql}, "maxResults": {fmt.Sprintf("%d", forge.ResultPageLimit)}}
 	return j.do(http.MethodGet, "/rest/api/2/search?"+q.Encode(), nil, out)
 }
 
@@ -448,13 +452,13 @@ func (j *jiraClient) CreateLabel(name, description, color string) error {
 func (j *jiraClient) Probe() (string, error) {
 	status, err := j.do(http.MethodGet, "/rest/api/2/myself", nil, nil)
 	if err != nil {
-		return "", fmt.Errorf("%w: %s", ErrRepoNotFound, err)
+		return "", fmt.Errorf("%w: %s", forge.ErrRepoNotFound, err)
 	}
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return "", fmt.Errorf("%w: jira returned %d", ErrAuthFailure, status)
+		return "", fmt.Errorf("%w: jira returned %d", forge.ErrAuthFailure, status)
 	}
 	if status != http.StatusOK {
-		return "", fmt.Errorf("%w: jira returned %d", ErrRepoNotFound, status)
+		return "", fmt.Errorf("%w: jira returned %d", forge.ErrRepoNotFound, status)
 	}
 	return j.cfg.ProjectKey, nil
 }
