@@ -12,15 +12,15 @@ import (
 // the fetch fails, it returns nil with no error — v1's declared-only behavior
 // applies unchanged.
 func prTouchesOf(cf forge.CodeForge, num string) []string {
+	res, err := forge.ResolveOpenPR(cf, num)
+	if err != nil || !res.Found {
+		return nil
+	}
 	pr, ok := cf.(forge.PRForge)
 	if !ok {
 		return nil
 	}
-	found, ok, err := pr.OpenPRForBranch(cf.AgentBranch(num))
-	if err != nil || !ok {
-		return nil
-	}
-	files, err := pr.ListPRFiles(found.URL)
+	files, err := pr.ListPRFiles(res.URL)
 	if err != nil {
 		return nil
 	}
