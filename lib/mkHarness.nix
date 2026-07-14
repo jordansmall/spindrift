@@ -255,14 +255,18 @@ let
   # In-box heartbeat filter: reuses the #182 heartbeat parser as a CLI binary
   # so the entrypoint can pipe claude's stream-json output through it without
   # modifying the raw capture channel. Built for Linux (pkgs, not hostPkgs).
+  # Goes through the Driver seam (driver.New("claude").NewHeartbeatWriter,
+  # ADR 0009 / issue #620) rather than a heartbeat package directly.
   #
   # INVARIANT: the agent image drvPath must not change when host-side launcher
   # code outside this binary's import closure is modified (e.g. test-only
   # launcher commits). The fileset is intentionally tight: go.mod,
-  # spindrift-heartbeat-filter, internal/heartbeat, and internal/claudetranscript
-  # (heartbeat's transcript-parse import) only, with *_test.go excluded. If a
-  # new import is added outside this closure the build fails loudly (missing
-  # package) — that is the intended failure mode (#474).
+  # spindrift-heartbeat-filter, internal/driver, internal/driver/claude (the
+  # claude Driver's heartbeat/transcript/classify/usage parsing),
+  # internal/usage (Driver-agnostic report types), and internal/logscan
+  # (claude's log-scan helper) only, with *_test.go excluded. If a new import
+  # is added outside this closure the build fails loudly (missing package) —
+  # that is the intended failure mode (#474).
   heartbeatFilterBin = pkgs.buildGoModule {
     pname = "spindrift-heartbeat-filter";
     version = spindriftVersion;
@@ -275,10 +279,16 @@ let
         ) ../cmd/launcher/spindrift-heartbeat-filter)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/heartbeat)
+        ) ../cmd/launcher/internal/driver)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/claudetranscript)
+        ) ../cmd/launcher/internal/driver/claude)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/usage)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/logscan)
       ];
     };
     vendorHash = null;
