@@ -62,6 +62,40 @@ func ociProbeArgs(a *ociAdapter, box Box, script string) []string {
 	return append(args, a.image, "sh", "-c", script)
 }
 
+// runProbe launches the probe container and returns only its stdout. The
+// container's own output goes to stdout; the runtime's first-run image-pull
+// progress ("Trying to pull...", "Copying blob...") and any warnings go to
+// stderr, so we must keep the two apart — CombinedOutput would fold the pull
+// progress into the parse and break it on whichever probe runs first.
+func runProbe(t *testing.T, cli string, args []string) []byte {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command(cli, args...)
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("%s run failed: %v: %s", cli, err, stderr.String())
+	}
+	return stdout.Bytes()
+}
+
+// statusField returns the sole value of the /proc/self/status line beginning
+// with prefix (e.g. "CapEff:\t0000000000000000" -> "0000000000000000"),
+// scanning line by line so an unexpected extra line can't shift the parse.
+func statusField(t *testing.T, out []byte, prefix string) string {
+	t.Helper()
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, prefix) {
+			fields := strings.Fields(line)
+			if len(fields) != 2 {
+				t.Fatalf("unexpected %s line: %q", prefix, line)
+			}
+			return fields[1]
+		}
+	}
+	t.Fatalf("no %q line in probe output: %q", prefix, out)
+	return ""
+}
+
 // TestOCIIntegration_CapabilitiesDropped launches a real container and
 // asserts, from inside it, that its effective capability set is empty — the
 // kernel enforcing --cap-drop=all, not just the flag being present on argv
@@ -73,16 +107,8 @@ func TestOCIIntegration_CapabilitiesDropped(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command(cli, "rm", "-f", box.Name).Run() })
 
 	args := ociProbeArgs(a, box, "grep ^CapEff /proc/self/status")
-	out, err := exec.Command(cli, args...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("%s run failed: %v: %s", cli, err, out)
-	}
-	fields := strings.Fields(string(out))
-	if len(fields) != 2 {
-		t.Fatalf("unexpected CapEff line: %q", out)
-	}
-	if fields[1] != "0000000000000000" {
-		t.Errorf("CapEff = %s, want all-zero (--cap-drop=all not enforced)", fields[1])
+	if got := statusField(t, runProbe(t, cli, args), "CapEff:"); got != "0000000000000000" {
+		t.Errorf("CapEff = %s, want all-zero (--cap-drop=all not enforced)", got)
 	}
 }
 
@@ -97,16 +123,8 @@ func TestOCIIntegration_NoNewPrivileges(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command(cli, "rm", "-f", box.Name).Run() })
 
 	args := ociProbeArgs(a, box, "grep ^NoNewPrivs /proc/self/status")
-	out, err := exec.Command(cli, args...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("%s run failed: %v: %s", cli, err, out)
-	}
-	fields := strings.Fields(string(out))
-	if len(fields) != 2 {
-		t.Fatalf("unexpected NoNewPrivs line: %q", out)
-	}
-	if fields[1] != "1" {
-		t.Errorf("NoNewPrivs = %s, want \"1\" (--security-opt=no-new-privileges not enforced)", fields[1])
+	if got := statusField(t, runProbe(t, cli, args), "NoNewPrivs:"); got != "1" {
+		t.Errorf("NoNewPrivs = %s, want \"1\" (--security-opt=no-new-privileges not enforced)", got)
 	}
 }
 
@@ -124,10 +142,7 @@ func TestOCIIntegration_SecretNotOnContainerProcessArgv(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command(cli, "rm", "-f", box.Name).Run() })
 
 	args := ociProbeArgs(a, box, "cat /proc/self/cmdline")
-	out, err := exec.Command(cli, args...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("%s run failed: %v: %s", cli, err, out)
-	}
+	out := runProbe(t, cli, args)
 	if bytes.Contains(out, []byte(marker)) {
 		t.Errorf("secret %q found in the container process's own argv: %q", marker, out)
 	}
