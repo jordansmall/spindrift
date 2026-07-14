@@ -11,6 +11,18 @@
       url = "github:juliusbrussee/caveman";
       flake = false;
     };
+    # More upstream skills baked into the dogfood Box the same way as caveman
+    # (issue #486): Matt Pocock's tdd + to-issues live in one repo, jordansmall's
+    # commit in another. Pinned via flake.lock; neither is a flake, so
+    # `flake = false` — dogfood-skills.nix reads the SKILL.md content directly.
+    matt-skills = {
+      url = "github:mattpocock/skills/v1.1.0";
+      flake = false;
+    };
+    jordan-skills = {
+      url = "github:jordansmall/skills";
+      flake = false;
+    };
   };
 
   outputs =
@@ -18,6 +30,8 @@
       flake-parts,
       nixpkgs,
       caveman,
+      matt-skills,
+      jordan-skills,
       ...
     }:
     flake-parts.lib.mkFlake { inherit inputs; } {
@@ -57,7 +71,9 @@
         let
           revision = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
           dogfoodDefaults = import ./nix/dogfood-defaults.nix;
-          dogfoodSkills = import ./nix/dogfood-skills.nix { inherit caveman; };
+          dogfoodSkills = import ./nix/dogfood-skills.nix {
+            inherit caveman matt-skills jordan-skills;
+          };
           fixtures = import ./nix/fixtures.nix {
             inherit
               pkgs
@@ -66,6 +82,8 @@
               flake-parts
               revision
               caveman
+              matt-skills
+              jordan-skills
               ;
           };
           checksResult = import ./nix/checks {

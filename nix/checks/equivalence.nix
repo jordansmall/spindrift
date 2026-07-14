@@ -167,7 +167,7 @@ in
   # the image-layer check is below, Linux-gated).
   mkharness-skills = pkgs.runCommand "mkharness-skills" { } ''
     grep -q 'BAKED-SKILL-MARKER' \
-      ${skillsHarness.skillsDir}/baked-skill.md
+      ${skillsHarness.skillsDir}/baked-skill/SKILL.md
     touch $out
   '';
 
@@ -242,12 +242,17 @@ in
     assert assertMsg hasShellcheck "expected shellcheck to be baked into the dogfood toolchain";
     pkgs.runCommand "shellcheck-baked-in-dogfood" { } "touch $out";
 
-  # The pinned upstream caveman skill (juliusbrussee/caveman) is baked into
-  # the dogfood image at its .md basename so the in-box skill preamble
-  # advertises /caveman, the skill-file analogue of the nil/shellcheck
-  # baked-toolchain guards above (issue #486).
+  # The dogfood skills (nix/dogfood-skills.nix) are each baked into the image
+  # as a <name>/SKILL.md directory — the layout Claude Code actually discovers
+  # (a flat <name>.md is ignored) — so the in-box skill preamble advertises
+  # /caveman, /tdd, /to-tickets, and /commit. The skill-file analogue of the
+  # nil/shellcheck baked-toolchain guards above (issue #486); fails if the
+  # dogfood config stops baking any of them or reverts to the flat layout.
   caveman-baked-in-dogfood = pkgs.runCommand "caveman-baked-in-dogfood" { } ''
-    test -s ${harness.skillsDir}/caveman.md
+    test -s ${harness.skillsDir}/caveman/SKILL.md
+    test -s ${harness.skillsDir}/tdd/SKILL.md
+    test -s ${harness.skillsDir}/to-tickets/SKILL.md
+    test -s ${harness.skillsDir}/commit/SKILL.md
     touch $out
   '';
 

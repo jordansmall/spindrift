@@ -122,8 +122,8 @@ setup() {
 }
 
 @test "CAVEMAN_STEP stays separated from the COMMS body text" {
-  mkdir -p "$HOME/.claude/skills"
-  cat >"$HOME/.claude/skills/caveman.md" <<'SKILL'
+  mkdir -p "$HOME/.claude/skills/caveman"
+  cat >"$HOME/.claude/skills/caveman/SKILL.md" <<'SKILL'
 ---
 name: caveman
 description: Ultra-compressed communication mode.

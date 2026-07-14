@@ -199,7 +199,7 @@ in
   # image checks.
   skills-baked-into-image = pkgs.runCommand "skills-baked-into-image" { } ''
     grep -q 'BAKED-SKILL-MARKER' \
-      ${skillsHarness.agentFiles}/home/agent/${skillsHarness.driverEntry.skillsDirRelative}/baked-skill.md
+      ${skillsHarness.agentFiles}/home/agent/${skillsHarness.driverEntry.skillsDirRelative}/baked-skill/SKILL.md
     touch $out
   '';
 
