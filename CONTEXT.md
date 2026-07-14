@@ -42,12 +42,13 @@ strategy in the launcher (transient classification, heartbeat). _Provisional
 name_ — may be renamed (e.g. "agent harness"). _Avoid_: engine, backend, tool.
 
 **Provider**:
-The model backend a Driver talks to: Anthropic, GitHub Copilot, OpenAI. Distinct
-from the Driver — once `opencode` ships, it is meant to be provider-flexible, so
+The model backend a Driver talks to. Only Anthropic is available today, via
+the `claude` Driver, which is effectively locked to it; GitHub Copilot and
+OpenAI are design targets (ADR 0009), not yet built. Distinct from the
+Driver — once `opencode` ships, it is meant to be provider-flexible, so
 "GitHub Copilot support" would be the opencode Driver pointed at the
 `github-copilot` provider, with `MODEL` provider-namespaced (`github-copilot/…`).
-None of that is built yet: `claude` is the only Driver today, and it is
-effectively locked to Anthropic. _Avoid_: model host, vendor, backend.
+_Avoid_: model host, vendor, backend.
 
 **Filer**:
 The opt-in subagent role (beside the scout and reviewer) that turns the final
