@@ -94,6 +94,7 @@
             settings.branches.mergeMode = dogfoodDefaults.defaults.mergeMode;
             settings.promptSkillIteration.autoFormat = dogfoodDefaults.defaults.autoFormat;
             settings.promptSkillIteration.autoLint = dogfoodDefaults.defaults.autoLint;
+            settings.models.filerModel = dogfoodDefaults.defaults.filerModel;
           };
 
           checks = checksResult.checks;

@@ -30,5 +30,9 @@
     mergeMode = "immediate";
     autoFormat = true;
     autoLint = true;
+    # Opt spindrift's own dogfood run into the Filer (#393, landed
+    # 2026-07-09): non-blocking review findings become tracked
+    # `agent-review-finding` issues instead of staying stuck in PR bodies.
+    filerModel = "claude-haiku-4-5-20251001";
   };
 }
