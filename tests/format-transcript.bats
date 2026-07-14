@@ -47,7 +47,7 @@ setup() {
 
 @test "result event renders a summary line with turn count" {
   run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
-    <<< '{"type":"result","subtype":"success","is_error":false,"num_turns":3,"total_cost_usd":0.05,"duration_ms":1200,"result":"SPINDRIFT_OUTCOME issue=7 pr=https://github.com/o/r/pull/1 status=ready note=fake","session_id":"fake"}'
+    <<< '{"type":"result","subtype":"success","is_error":false,"num_turns":3,"total_cost_usd":0.05,"duration_ms":1200,"result":"SPINDRIFT_OUTCOME issue=7 landing=https://github.com/o/r/pull/1 status=ready note=fake","session_id":"fake"}'
   [ "$status" -eq 0 ]
   [[ "$output" == *"3 turns"* ]]
   [[ "$output" == *"─── "* ]]

@@ -13,7 +13,7 @@ setup() {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
@@ -25,7 +25,7 @@ setup() {
 @test "rollup FAILURE → does NOT merge, swaps to agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   export FAKE_GH_GRAPHQL_ROLLUP_1="FAILURE"
   export MAX_FIX_ATTEMPTS=0  # bare gate test — self-heal disabled
   run "$RUN_CMD"
@@ -39,7 +39,7 @@ setup() {
 @test "rollup ERROR → does NOT merge, swaps to agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   export FAKE_GH_GRAPHQL_ROLLUP_1="ERROR"
   export MAX_FIX_ATTEMPTS=0  # bare gate test — self-heal disabled
   run "$RUN_CMD"
@@ -52,7 +52,7 @@ setup() {
 @test "rollup PENDING (timeout) → does NOT merge, swaps to agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   export FAKE_GH_GRAPHQL_ROLLUP_1="PENDING"
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=0
@@ -66,7 +66,7 @@ setup() {
 @test "rollup null/no checks (timeout) → does NOT merge, swaps to agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   # FAKE_GH_GRAPHQL_ROLLUP_1 unset → empty rollup (no checks registered yet)
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=0
@@ -82,7 +82,7 @@ setup() {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING,SUCCESS"
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=3
@@ -100,7 +100,7 @@ setup() {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   # seq: initial=SUCCESS, confirmation=PENDING (late job registered), next poll=SUCCESS (sticks)
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS,PENDING,SUCCESS"
   export MERGE_POLL_INTERVAL=0
@@ -119,7 +119,7 @@ setup() {
 @test "late-registered check fails after SUCCESS snapshot → no merge, agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   # seq: initial=SUCCESS, confirmation=FAILURE (late job registered and already red)
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS,FAILURE"
   export MERGE_POLL_INTERVAL=0
@@ -139,7 +139,7 @@ setup() {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   # First GraphQL call returns FAILURE (triggers fix box); second returns SUCCESS.
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="FAILURE,SUCCESS"
   export MERGE_POLL_INTERVAL=0
@@ -158,7 +158,7 @@ setup() {
 @test "self-heal: red-through-cap → exhausts passes and marks agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   # CI is always FAILURE — never recovers.
   export FAKE_GH_GRAPHQL_ROLLUP_1="FAILURE"
   export MERGE_POLL_INTERVAL=0
@@ -192,7 +192,7 @@ setup() {
 
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   # CI returns SUCCESS twice: once before the merge attempt, once after rebase.
   export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="SUCCESS,SUCCESS"
   # First merge call fails with conflict; second succeeds.
@@ -218,7 +218,7 @@ setup() {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
   export FAKE_GH_PR_MERGE_CONFLICT_1=99  # all merge calls fail with conflict
   # gh repo clone is a no-op here (no real git remote configured), so the
@@ -239,7 +239,7 @@ setup() {
 @test "self-heal: pending timeout does not consume fix passes" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
-  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 pr=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=ready note=ci-pending"
   export FAKE_GH_GRAPHQL_ROLLUP_1="PENDING"
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=0

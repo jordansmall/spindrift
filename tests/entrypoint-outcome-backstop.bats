@@ -18,7 +18,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 pr=agent/issue-7 status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
   # The commit the fake driver made must have reached the remote branch.
   git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
@@ -29,7 +29,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 pr=https://github.com/owner/repo/pull/1 status=ready note=fake$' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready note=fake$' <<<"$output"
 }
 
 # A best-effort push failure during the backstop must be surfaced in the
@@ -61,7 +61,7 @@ EOF
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 pr=agent/issue-7 status=blocked note=.*push failed.*simulated push failure' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*push failed.*simulated push failure' <<<"$output"
 }
 
 # A driver killed by a transient infrastructure failure (rate limit,
