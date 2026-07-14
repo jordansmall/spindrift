@@ -50,14 +50,14 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 		s.postUsageComment(num, d)
 	case "ready":
 		switch s.selfHeal(d, num, o.Landing) {
-		case LandingMerged:
+		case landingMerged:
 			// verifyMerged reads PR state, which a push-only Code Forge
 			// does not have — landPushOnly's own cf.Merge success already
 			// confirms the push landed, so there is nothing left to verify.
 			if s.pr != nil {
 				s.verifyMerged(num, o.Landing)
 			}
-		case LandingFailed:
+		case landingFailed:
 			fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", num, o.Landing)
 		}
 		s.postUsageComment(num, d)

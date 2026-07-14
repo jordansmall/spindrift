@@ -20,54 +20,54 @@ import (
 // then applies the merge mode; a merge failure after green leaves the issue
 // agent-complete and is never demoted to agent-failed.
 //
-// Returns LandingFailed when CI never reached green (genuine red exhausted
+// Returns landingFailed when CI never reached green (genuine red exhausted
 // or a gate timeout — the issue is swapped to failedLabel). Otherwise CI
-// reached green: LandingMerged when immediate mode completed an actual
-// merge, LandingManual for every other green outcome (manual/auto mode, a
+// reached green: landingMerged when immediate mode completed an actual
+// merge, landingManual for every other green outcome (manual/auto mode, a
 // guard hit, or a merge failure — the issue stays at agent-complete with a
 // merge-blocked note).
 //
 // d dispatches fix passes and, when a rebase conflict arises, an
 // agent-assisted conflict resolution -- both subject to dispatch's own
 // in-session transient retry (issue #441).
-func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) LandingResult {
+func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
 	if s.pr == nil {
 		return s.landPushOnly(num, pr)
 	}
 	for attempt := 0; ; attempt++ {
 		switch s.gateToGreen(num, pr) {
-		case GateGreen:
+		case gateGreen:
 			matched, guardErr := s.mergeGuardHit(pr)
 			if guardErr != nil {
 				fmt.Printf("    #%s  pr=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
 				s.it.Comment(num, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
-				return LandingManual
+				return landingManual
 			}
 			if len(matched) > 0 {
 				fmt.Printf("    #%s  pr=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
 				s.it.Comment(num, mergeGuardComment(matched))
-				return LandingManual
+				return landingManual
 			}
 			if err := s.applyMergeMode(num, pr, d); err != nil {
 				fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, pr, err)
 				s.it.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
-				return LandingManual
+				return landingManual
 			}
 			if s.cfg.MergeMode == "immediate" {
-				return LandingMerged
+				return landingMerged
 			}
-			return LandingManual
-		case GateTerminal:
+			return landingManual
+		case gateTerminal:
 			s.transitionState(num, forge.InProgress, forge.Failed)
-			return LandingFailed
-		case GateRedRetry:
+			return landingFailed
+		case gateRedRetry:
 			if attempt >= s.cfg.MaxFixAttempts {
 				if s.cfg.MaxFixAttempts > 0 {
 					fmt.Printf("    #%s  pr=%s  status=fix-exhausted  !! exhausted %d fix pass(es)\n",
 						num, pr, s.cfg.MaxFixAttempts)
 				}
 				s.transitionState(num, forge.InProgress, forge.Failed)
-				return LandingFailed
+				return landingFailed
 			}
 			fmt.Printf("    #%s  pr=%s  fix-pass=%d/%d\n", num, pr, attempt+1, s.cfg.MaxFixAttempts)
 			// Best-effort: a failure to fetch the CI failure detail must
@@ -91,17 +91,17 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) LandingResult {
 // A merge failure leaves the issue Complete with a merge-blocked note,
 // matching the github adapter's post-green contract (ADR 0012) — it is never
 // demoted to Failed.
-func (s *Settle) landPushOnly(num, branch string) LandingResult {
+func (s *Settle) landPushOnly(num, branch string) landingResult {
 	s.transitionState(num, forge.InProgress, forge.Complete)
 	if err := s.applyMergeMode(num, branch, nil); err != nil {
 		fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, branch, err)
 		s.it.Comment(num, fmt.Sprintf("merge blocked after push: %v", err))
-		return LandingManual
+		return landingManual
 	}
 	if s.cfg.MergeMode == "immediate" {
-		return LandingMerged
+		return landingMerged
 	}
-	return LandingManual
+	return landingManual
 }
 
 // gateToGreen polls CheckState on the PR's head commit until the state
@@ -109,12 +109,12 @@ func (s *Settle) landPushOnly(num, branch string) LandingResult {
 // elapse. On confirmed green, agent-complete is swapped unconditionally.
 //
 // Returns:
-//   - GateGreen     — CI confirmed green; issue swapped to CompleteLabel.
-//   - GateRedRetry  — CI red (FAILURE or ERROR); caller decides whether to
+//   - gateGreen     — CI confirmed green; issue swapped to CompleteLabel.
+//   - gateRedRetry  — CI red (FAILURE or ERROR); caller decides whether to
 //     dispatch a fix box. No label swap performed.
-//   - GateTerminal  — non-retriable outcome (timeout, API error); no label
+//   - gateTerminal  — non-retriable outcome (timeout, API error); no label
 //     swap. Caller must swap to failedLabel.
-func (s *Settle) gateToGreen(num, pr string) GateResult {
+func (s *Settle) gateToGreen(num, pr string) gateResult {
 	pollIv := s.cfg.MergePollInterval
 	deadline := s.cfg.MergePollTimeout
 	// actualIv is used for elapsed tracking; floor to 1 so we don't
@@ -130,7 +130,7 @@ func (s *Settle) gateToGreen(num, pr string) GateResult {
 		state, stateErr := s.pr.CheckState(pr)
 		if stateErr != nil {
 			fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, stateErr)
-			return GateTerminal
+			return gateTerminal
 		}
 
 		switch state {
@@ -143,21 +143,21 @@ func (s *Settle) gateToGreen(num, pr string) GateResult {
 			confirm, confirmErr := s.pr.CheckState(pr)
 			if confirmErr != nil {
 				fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, confirmErr)
-				return GateTerminal
+				return gateTerminal
 			}
 			if confirm != forge.StateSuccess {
 				if confirm == forge.StateFailure || confirm == forge.StateError {
-					return GateRedRetry
+					return gateRedRetry
 				}
 				// PENDING/EXPECTED/NONE — keep waiting for checks to settle.
 				break
 			}
 			// Confirmed green: mark complete regardless of merge outcome.
 			s.transitionState(num, forge.InProgress, forge.Complete)
-			return GateGreen
+			return gateGreen
 		case forge.StateFailure, forge.StateError:
 			// Genuine red — signal caller so it can dispatch a fix pass.
-			return GateRedRetry
+			return gateRedRetry
 		}
 
 		// PENDING, EXPECTED, NONE (no checks yet), or unrecognised — keep
@@ -170,7 +170,7 @@ func (s *Settle) gateToGreen(num, pr string) GateResult {
 		time.Sleep(time.Duration(pollIv) * time.Second)
 		elapsed += actualIv
 	}
-	return GateTerminal
+	return gateTerminal
 }
 
 // mergeGuardHit checks a green PR's changed files against MergeGuardPaths,
@@ -310,7 +310,7 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 // re-entered for it.
 func (s *Settle) rewaitAfterForcePush(num, pr string) error {
 	fmt.Printf("    #%s  pr=%s  status=post-force-push-wait\n", num, pr)
-	if s.gateToGreen(num, pr) != GateGreen {
+	if s.gateToGreen(num, pr) != gateGreen {
 		return fmt.Errorf("CI did not reach green after force-push on %s", pr)
 	}
 	return nil

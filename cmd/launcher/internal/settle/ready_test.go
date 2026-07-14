@@ -24,8 +24,8 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	s := New(c, fc, fc)
 
 	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
-	if landing != LandingManual {
-		t.Errorf("selfHeal = %v, want LandingManual (CI green, merge failed)", landing)
+	if landing != landingManual {
+		t.Errorf("selfHeal = %v, want landingManual (CI green, merge failed)", landing)
 	}
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, "agent-complete") {
@@ -51,8 +51,8 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	s := New(c, fc, fc)
 
 	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
-	if landing != LandingManual {
-		t.Errorf("selfHeal = %v, want LandingManual (merge guard hit)", landing)
+	if landing != landingManual {
+		t.Errorf("selfHeal = %v, want landingManual (merge guard hit)", landing)
 	}
 	if fc.Merged != "" {
 		t.Errorf("merge guard must prevent Merge from being called; fc.Merged=%q", fc.Merged)
@@ -87,8 +87,8 @@ func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	s := New(c, fc, fc)
 
 	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
-	if landing != LandingManual {
-		t.Errorf("selfHeal = %v, want LandingManual for a guard-hit auto-mode PR", landing)
+	if landing != landingManual {
+		t.Errorf("selfHeal = %v, want landingManual for a guard-hit auto-mode PR", landing)
 	}
 	if len(fc.EnqueueAutoMergeCalls) != 0 {
 		t.Errorf("guard hit must prevent EnqueueAutoMerge; calls=%v", fc.EnqueueAutoMergeCalls)
@@ -111,8 +111,8 @@ func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	s := New(c, fc, fc)
 
 	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
-	if landing != LandingMerged {
-		t.Errorf("selfHeal = %v, want LandingMerged for a non-guarded green PR", landing)
+	if landing != landingMerged {
+		t.Errorf("selfHeal = %v, want landingMerged for a non-guarded green PR", landing)
 	}
 	if fc.Merged != testPR {
 		t.Errorf("expected Merge to be called; fc.Merged=%q", fc.Merged)
@@ -137,8 +137,8 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	s := New(c, fc, fc)
 
 	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
-	if landing != LandingManual {
-		t.Errorf("selfHeal = %v, want LandingManual (guard check errored)", landing)
+	if landing != landingManual {
+		t.Errorf("selfHeal = %v, want landingManual (guard check errored)", landing)
 	}
 	if fc.Merged != "" {
 		t.Errorf("a guard-check error must prevent Merge from being called; fc.Merged=%q", fc.Merged)
@@ -163,10 +163,10 @@ func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 	cases := []struct {
 		name        string
 		mergeMode   string
-		wantLanding LandingResult
+		wantLanding landingResult
 	}{
-		{name: "manual leaves the branch as pushed", mergeMode: "manual", wantLanding: LandingManual},
-		{name: "immediate pushes to the target branch", mergeMode: "immediate", wantLanding: LandingMerged},
+		{name: "manual leaves the branch as pushed", mergeMode: "manual", wantLanding: landingManual},
+		{name: "immediate pushes to the target branch", mergeMode: "immediate", wantLanding: landingMerged},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -183,7 +183,7 @@ func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 			if landing != tc.wantLanding {
 				t.Errorf("selfHeal = %v, want %v", landing, tc.wantLanding)
 			}
-			wantMerged := tc.wantLanding == LandingMerged
+			wantMerged := tc.wantLanding == landingMerged
 			if wantMerged && fc.Merged != branch {
 				t.Errorf("expected Merge(%q); fc.Merged=%q", branch, fc.Merged)
 			}
@@ -213,8 +213,8 @@ func TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed(t *testing.T) {
 
 	landing := s.selfHeal(dispatch.NewFake(), "1", branch)
 
-	if landing != LandingManual {
-		t.Errorf("selfHeal = %v, want LandingManual when the push fails", landing)
+	if landing != landingManual {
+		t.Errorf("selfHeal = %v, want landingManual when the push fails", landing)
 	}
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, "agent-complete") {
