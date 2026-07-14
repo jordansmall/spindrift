@@ -139,7 +139,7 @@ gate): skip OPEN A PULL REQUEST and WATCH CI below entirely.
 1. `git push --force-with-lease -u origin ${BRANCH}` (if not already pushed).
 2. Print exactly one line as your final output and stop:
    ```
-   SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} pr=${BRANCH} status=ready note=<short reason>
+   SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ready note=<short reason>
    ```
    The launcher applies `MERGE_MODE` after this line (push straight to the
    target branch on `immediate`; leave the branch as pushed on `manual`).
@@ -195,7 +195,7 @@ and stopped under LAND THE CHANGE above.)
 Once CI has registered, print exactly one line as your final output:
 
 ```
-SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} pr=<pr-url> status=ready note=<short reason>
+SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=ready note=<short reason>
 ```
 
 This must be the literal final message — nothing after it, no prose summary, no
@@ -239,5 +239,5 @@ Then:
 5. Print exactly one line and stop:
 
 ```
-SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} pr=<pr-url> status=blocked note=<short reason>
+SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=blocked note=<short reason>
 ```
