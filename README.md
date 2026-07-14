@@ -141,7 +141,7 @@ tools the agent needs (no LSP, no GUI tooling), set `DEV_SHELL_NAME=ci` — or
 bake it as the Consumer default:
 
 ```nix
-spindrift.devShellName = "ci";
+spindrift.settings.sandbox.devShellName = "ci";
 ```
 
 The Box enters that shell instead of `devShells.default`, giving the agent a
