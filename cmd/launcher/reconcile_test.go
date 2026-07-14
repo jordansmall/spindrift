@@ -16,94 +16,14 @@ func reconcileConfig() config {
 	return c
 }
 
-// --- reconcileStranded tests --------------------------------------------------
-
-func TestReconcileStranded_GreenPRMergesAndCompletes(t *testing.T) {
-	c := reconcileConfig()
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
-
-	// Issue on the in-progress label with a green open non-draft PR.
-	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
-	branch := fc.AgentBranch("5")
-	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
-	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-
-	reconcileStranded(c, fc, fc, testFactory(t, t.TempDir(), nil), newSettle(c, fc, fc))
-
-	if fc.Merged != testReconcilePR {
-		t.Errorf("expected green stranded PR to be merged; fc.Merged=%q", fc.Merged)
-	}
-	if len(fc.TransitionStateCalls) == 0 {
-		t.Fatal("expected TransitionState call for completeLabel")
-	}
-	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Complete {
-		t.Errorf("last transition To=%v, want Complete", last.To)
-	}
-}
-
-func TestReconcileStranded_RedFollowsSelfHeal(t *testing.T) {
-	c := reconcileConfig()
-	c.maxFixAttempts = 0
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.BranchPrefix = c.branchPrefix
-
-	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
-	branch := fc.AgentBranch("5")
-	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: false})
-	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
-
-	reconcileStranded(c, fc, fc, testFactory(t, t.TempDir(), nil), newSettle(c, fc, fc))
-
-	if fc.Merged != "" {
-		t.Errorf("expected no merge on red CI; fc.Merged=%q", fc.Merged)
-	}
-	if len(fc.TransitionStateCalls) == 0 {
-		t.Fatal("expected TransitionState call for failedLabel")
-	}
-	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
-		t.Errorf("last transition To=%v, want Failed", last.To)
-	}
-}
-
-func TestReconcileStranded_DraftPRSkipped(t *testing.T) {
-	c := reconcileConfig()
-	fc := forge.NewFake()
-	fc.BranchPrefix = c.branchPrefix
-
-	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
-	branch := fc.AgentBranch("5")
-	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: true})
-
-	reconcileStranded(c, fc, fc, testFactory(t, t.TempDir(), nil), newSettle(c, fc, fc))
-
-	if fc.Merged != "" {
-		t.Errorf("draft PR must not be merged; fc.Merged=%q", fc.Merged)
-	}
-	if len(fc.TransitionStateCalls) != 0 {
-		t.Errorf("draft PR must not trigger label churn; got %v", fc.TransitionStateCalls)
-	}
-}
-
-func TestReconcileStranded_NoPRSkipped(t *testing.T) {
-	c := reconcileConfig()
-	fc := forge.NewFake()
-	fc.BranchPrefix = c.branchPrefix
-
-	// In-progress issue with no PR registered.
-	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
-
-	reconcileStranded(c, fc, fc, testFactory(t, t.TempDir(), nil), newSettle(c, fc, fc))
-
-	if fc.Merged != "" {
-		t.Errorf("no-PR issue must not be merged; fc.Merged=%q", fc.Merged)
-	}
-	if len(fc.TransitionStateCalls) != 0 {
-		t.Errorf("no-PR issue must not trigger label churn; got %v", fc.TransitionStateCalls)
-	}
-}
-
 // --- recoverByNumber tests ----------------------------------------------------
+//
+// recoverByNumber is the sole adopt-and-gate path (#600): reconcileStranded,
+// the unguarded automatic sweep over every agent-in-progress issue, was
+// removed because a bare agent-in-progress label carries no liveness signal
+// (see TestRun_DoesNotAdoptLiveRunnersInProgressIssue in run_test.go).
+// recoverByNumber is reached only via the operator's explicit agent-recover
+// label (.github/workflows/agent-recover.yml -> `spindrift recover <n>`).
 
 func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()

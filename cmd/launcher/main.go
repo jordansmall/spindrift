@@ -611,37 +611,12 @@ func discoverIssues(c config, it forge.IssueTracker) ([]issue, waves.Origin, err
 	return issues, origin, nil
 }
 
-// reconcileStranded discovers open issues carrying inProgressLabel that also
-// have an open non-draft PR on their agent branch, and runs the merge gate on
-// each. Draft PRs and in-progress issues with no open PR are skipped silently.
-// Called at launcher start, before any new dispatch.
-func reconcileStranded(c config, it forge.IssueTracker, cf forge.CodeForge, f *dispatch.Factory, s settle.Settler) {
-	fiList, err := it.ListIssues(forge.InProgress)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "reconcile: list in-progress issues: %v\n", err)
-		return
-	}
-	if len(fiList) == 0 {
-		return
-	}
-	fmt.Println("==> reconciling stranded in-progress issues")
-	for _, fi := range fiList {
-		iss := issue{number: fi.Number, title: fi.Title}
-		branch := cf.AgentBranch(iss.number)
-		prURL, isDraft, found, prErr := openPRForBranch(cf, branch)
-		if prErr != nil || !found || isDraft {
-			continue
-		}
-		d := f.New(iss.number, iss.title)
-		s.SettleAdopted(d, iss.number, prURL)
-		d.Close()
-	}
-}
-
 // recoverByNumber resolves the open non-draft PR for the issue numbered issueNum
-// and drives the same adopt-and-gate path used by reconcileStranded. Returns an
-// error when the issue cannot be fetched, the PR is a draft, or no open PR
-// exists; the caller should treat those as non-success exits.
+// and drives the adopt-and-gate path: the sole way an agent-in-progress issue
+// is ever adopted, gated on the operator's explicit agent-recover label (see
+// .github/workflows/agent-recover.yml) rather than any automatic sweep (#600).
+// Returns an error when the issue cannot be fetched, the PR is a draft, or no
+// open PR exists; the caller should treat those as non-success exits.
 func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issueNum string) error {
 	fi, err := it.Issue(issueNum)
 	if err != nil {
@@ -683,14 +658,14 @@ func run(lc *launchContext) error {
 		return err
 	}
 
-	// Reconcile stranded in-progress issues before dispatching new work.
-	// Skip when ISSUE_NUMBER is set — the caller already claimed a specific issue.
-	if resolveOrigin(c) == waves.OriginDiscovered {
-		reconcileStranded(c, it, cf, f, s)
-
-		if c.continuousDispatch {
-			return runContinuousDispatch(c, it, cf, pwd, f, s, runner.NixEvaluator{})
-		}
+	// A bare agent-in-progress issue is never adopted automatically here: it
+	// carries no liveness signal, so it cannot be told apart from an issue a
+	// live runner (another Box, or an overlapping local run) is actively
+	// committing to right now (#600). The only adopt path is the explicit,
+	// operator-driven `spindrift recover <n>`, fired by the agent-recover
+	// label — see recoverByNumber and .github/workflows/agent-recover.yml.
+	if resolveOrigin(c) == waves.OriginDiscovered && c.continuousDispatch {
+		return runContinuousDispatch(c, it, cf, pwd, f, s, runner.NixEvaluator{})
 	}
 
 	issues, origin, err := discoverIssues(c, it)

@@ -183,6 +183,51 @@ func TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0(t *testing.T
 	}
 }
 
+// TestRun_DoesNotAdoptLiveRunnersInProgressIssue is the regression test for
+// #600: a bare agent-in-progress issue with an open non-draft PR is what a
+// live runner's in-flight work looks like from the outside (a second local
+// dogfood run, or an overlapping agent-dispatch box) — the same shape a
+// crash-stranded issue has. Before #600 the discovered-origin sweep could not
+// tell the two apart and force-pushed/merged over the live runner. Simulating
+// two "runners" sharing one fake forge: this run must leave that issue's PR
+// and labels completely untouched.
+func TestRun_DoesNotAdoptLiveRunnersInProgressIssue(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.branchPrefix = "agent/issue-"
+	dir := tempLogDir(t)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = c.branchPrefix
+	// Issue #5: another runner's live work — agent-in-progress with an open
+	// non-draft PR, no explicit recovery signal.
+	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.inProgressLabel}})
+	fc.SetPR(fc.AgentBranch("5"), forge.PR{URL: "https://github.com/owner/repo/pull/5", IsDraft: false})
+
+	sf := settle.NewFake()
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       sf,
+	}
+
+	if err := run(lc); !errors.Is(err, errQueueEmpty) {
+		t.Fatalf("run(lc) = %v, want errQueueEmpty (no other issue dispatchable)", err)
+	}
+	if len(sf.SettleAdoptedCalls) != 0 {
+		t.Errorf("expected no SettleAdopted calls on a bare in-progress issue; got %v", sf.SettleAdoptedCalls)
+	}
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("expected no label churn on issue #5; got %v", fc.TransitionStateCalls)
+	}
+	if fc.Merged != "" {
+		t.Errorf("expected no merge; fc.Merged=%q", fc.Merged)
+	}
+}
+
 // TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4 verifies
 // the new exit code (#527 AC): with the freshness probe reporting
 // rebuild-needed (here, forced by a base-branch fetch that fails — pwd has
