@@ -564,4 +564,20 @@ in
         aarch64-linux:  ${harnessLinux.image.drvPath}
         aarch64-darwin: ${harnessDarwin.image.drvPath}'';
     pkgs.runCommand "skills-content-form-drvpath-host-independent" { } "touch $out";
+
+  # The `run`/`build` app-style aliases promised gone in v0.2.0 (MIGRATING.md)
+  # must stay gone from the flake-output surface: a Consumer invoking
+  # `nix run .#run` or `nix run .#build` should get an unknown-output error,
+  # not a forwarding alias (issue #613). Guards against silent
+  # reintroduction, the nix-output analogue of TestEngageAliasRemoved.
+  run-build-aliases-removed =
+    let
+      inherit (pkgs.lib) assertMsg;
+    in
+    assert assertMsg (!(harness.apps ? build)) "apps.build must not exist (removed, issue #613)";
+    assert assertMsg (!(harness.apps ? run)) "apps.run must not exist (removed, issue #613)";
+    assert assertMsg (!(harness.packages ? build))
+      "packages.build must not exist (removed, issue #613)";
+    assert assertMsg (!(harness.packages ? run)) "packages.run must not exist (removed, issue #613)";
+    pkgs.runCommand "run-build-aliases-removed" { } "touch $out";
 }

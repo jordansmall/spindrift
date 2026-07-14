@@ -508,14 +508,15 @@ let
     meta.license = lib.licenses.mit;
   };
 
-  # Deprecated build alias: prints a one-line stderr notice and execs the same
-  # build logic. Kept for one release (ADR-0010); removal target: next minor after 0.1.x.
+  # Single-verb wrapper execing `launcher build`. The `apps.build`/
+  # `packages.build` flake outputs that once forwarded to this were removed
+  # in issue #613; this derivation lives on, off the flake surface, only as
+  # a bats/equivalence test fixture for the build-time preamble baking.
   build =
     (hostPkgs.writeShellApplication {
       name = "build";
       runtimeInputs = [ hostPkgs.coreutils ];
       text = goBuildPreamble + ''
-        >&2 echo "spindrift: 'nix run .#build' is deprecated; use 'spindrift build' instead. Removal: v0.2.0. See MIGRATING.md."
         exec ${launcherBin}/bin/launcher build
       '';
     }).overrideAttrs
@@ -523,7 +524,7 @@ let
         meta.license = lib.licenses.mit;
       });
 
-  # Shared shell body used by both the spindrift CLI and the deprecated run alias.
+  # Shared shell body used by both the spindrift CLI and the `run` test fixture.
   # Bakes nix-computed config into env vars, sources harness.env for runtime
   # overrides, then execs the Go binary (ADR 0007).
   runShellBody =
@@ -617,8 +618,10 @@ let
     meta.license = lib.licenses.mit;
   };
 
-  # Deprecated run alias: prints a one-line stderr notice and execs spindrift dispatch.
-  # Kept for one release (ADR-0010); removal target: next minor after 0.1.x.
+  # Single-verb wrapper execing `launcher dispatch`. The `apps.run`/
+  # `packages.run` flake outputs that once forwarded to this were removed
+  # in issue #613; this derivation lives on, off the flake surface, only as
+  # a bats/equivalence test fixture for the dispatch-time preamble baking.
   run =
     (hostPkgs.writeShellApplication {
       name = "run";
@@ -628,7 +631,6 @@ let
         coreutils
       ];
       text = runShellBody + ''
-        >&2 echo "spindrift: 'nix run .#run' is deprecated; use 'spindrift dispatch' instead. Removal: v0.2.0. See MIGRATING.md."
         exec ${launcherBin}/bin/launcher dispatch "$@"
       '';
     }).overrideAttrs
@@ -669,7 +671,7 @@ else
       ;
 
     packages = {
-      inherit build run spindrift;
+      inherit spindrift;
       spindrift-manpage = manpage;
       spindrift-bash-completion = bashCompletion;
       spindrift-fish-completion = fishCompletion;
@@ -678,20 +680,12 @@ else
     # The OCI image is not relevant for the bwrap runner (no image build/load).
     // lib.optionalAttrs (isLinux && runtime != "bwrap") { agent-image = image; };
 
-    apps = {
-      build = {
-        type = "app";
-        program = "${build}/bin/build";
-      };
-      # apps.default is the primary entry point: spindrift CLI.
-      default = {
-        type = "app";
-        program = "${spindrift}/bin/spindrift";
-      };
-      # Deprecated: kept for one release. Prints a notice and execs spindrift dispatch.
-      run = {
-        type = "app";
-        program = "${run}/bin/run";
-      };
+    # apps.default (`nix run .`) is the sole app output: the spindrift CLI.
+    # The `build`/`run` app-style aliases were removed (issue #613); the
+    # `build`/`run` derivations themselves live on as bats/equivalence test
+    # fixtures (see `inherit build run` above), just off the flake surface.
+    apps.default = {
+      type = "app";
+      program = "${spindrift}/bin/spindrift";
     };
   }
