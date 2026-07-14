@@ -10,7 +10,13 @@
   # VERSIONING.md. Pure eval — reads both files, no builder needed.
   release-please-changelog =
     let
-      inherit (pkgs.lib) assertMsg concatMapStringsSep hasInfix;
+      inherit (pkgs.lib)
+        assertMsg
+        any
+        concatMapStringsSep
+        hasInfix
+        splitString
+        ;
       # Source of truth for the section map. Order here is the order the
       # headings render in CHANGELOG.md. Nothing is hidden (see VERSIONING.md).
       sections = [
@@ -69,6 +75,11 @@
       ];
       cfg = builtins.fromJSON (builtins.readFile ../../.release-please-config.json);
       versioningDoc = builtins.readFile ../../VERSIONING.md;
+      # CHANGELOG.md is checked line-by-line rather than with hasInfix's
+      # `.*pattern.*` regex match (lib/strings.nix): std::regex backtracking
+      # over a 100+KB file segfaults, whereas VERSIONING.md is small enough
+      # for the regex path to stay safe.
+      changelogLines = splitString "\n" (builtins.readFile ../../CHANGELOG.md);
       missingFromDoc = builtins.filter (s: !hasInfix s.section versioningDoc) sections;
     in
     assert assertMsg (cfg ? "changelog-sections")
@@ -79,5 +90,9 @@
       "VERSIONING.md is missing changelog headings: ${
         concatMapStringsSep ", " (s: s.section) missingFromDoc
       }";
+    # release-please never emits an `[Unreleased]` heading; one appearing in
+    # CHANGELOG.md is always a stale, hand-inserted duplicate (issue #614).
+    assert assertMsg (!any (line: line == "## [Unreleased]") changelogLines)
+      "CHANGELOG.md contains a stale ## [Unreleased] heading; release-please never emits one, remove the hand-inserted block";
     pkgs.runCommand "release-please-changelog" { } "touch $out";
 }
