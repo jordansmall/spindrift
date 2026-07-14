@@ -31,6 +31,11 @@ type Fake struct {
 
 	labels          DispatchLabels
 	issues          map[string]Issue
+	// NativeDeps, when set for an issue number, is returned by DepsOf as
+	// DepSourceNative and takes precedence over body parsing — mirroring
+	// the GitHub adapter's native-wins-when-non-empty rule, so tests can
+	// script native-sourced, body-sourced, and mixed-batch blockers.
+	NativeDeps map[string][]string
 	prs             map[string]PR             // URL → PR
 	branchPRs       map[string]string         // branch → PR URL
 	prStates        map[string]PRState        // URL → canonical PR state
@@ -278,15 +283,19 @@ func (f *Fake) TransitionState(num string, from, to DispatchState) error {
 	return nil
 }
 
-// DepsOf returns the dependency IDs parsed from the issue body.
-func (f *Fake) DepsOf(num string) ([]string, error) {
+// DepsOf returns num's scripted NativeDeps (DepSourceNative) when set,
+// otherwise the dependency IDs parsed from the issue body (DepSourceBody).
+func (f *Fake) DepsOf(num string) ([]Dependency, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if native, ok := f.NativeDeps[num]; ok && len(native) > 0 {
+		return WithSource(native, DepSourceNative), nil
+	}
 	iss, ok := f.issues[num]
 	if !ok {
 		return nil, fmt.Errorf("issue %s not found", num)
 	}
-	return ParseBlockerRefs(iss.Body), nil
+	return WithSource(ParseBlockerRefs(iss.Body), DepSourceBody), nil
 }
 
 func (f *Fake) Comment(num, body string) error {

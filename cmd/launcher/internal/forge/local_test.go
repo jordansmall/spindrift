@@ -167,7 +167,10 @@ func TestLocalTracker_DepsOf_ParsesBlockedBySlugSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
-	want := []string{"init-database", "setup-ci"}
+	want := []Dependency{
+		{ID: "init-database", Source: DepSourceBody},
+		{ID: "setup-ci", Source: DepSourceBody},
+	}
 	if !reflect.DeepEqual(deps, want) {
 		t.Errorf("DepsOf = %v, want %v", deps, want)
 	}

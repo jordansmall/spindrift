@@ -56,8 +56,9 @@ esac`)
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
-	if len(deps) != 2 || deps[0] != "3" || deps[1] != "5" {
-		t.Fatalf("want [3 5], got %v", deps)
+	want := []Dependency{{ID: "3", Source: DepSourceNative}, {ID: "5", Source: DepSourceNative}}
+	if len(deps) != 2 || deps[0] != want[0] || deps[1] != want[1] {
+		t.Fatalf("want %v, got %v", want, deps)
 	}
 }
 
@@ -79,8 +80,8 @@ esac`)
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
-	if len(deps) != 1 || deps[0] != "7" {
-		t.Fatalf("want [7], got %v", deps)
+	if len(deps) != 1 || deps[0] != (Dependency{ID: "7", Source: DepSourceBody}) {
+		t.Fatalf("want [7 (body)], got %v", deps)
 	}
 }
 
@@ -102,8 +103,8 @@ esac`)
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
-	if len(deps) != 1 || deps[0] != "9" {
-		t.Fatalf("want [9], got %v", deps)
+	if len(deps) != 1 || deps[0] != (Dependency{ID: "9", Source: DepSourceBody}) {
+		t.Fatalf("want [9 (body)], got %v", deps)
 	}
 }
 
@@ -125,8 +126,8 @@ esac`)
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
-	if len(deps) != 1 || deps[0] != "4" {
-		t.Fatalf("want [4] (native only, body ignored), got %v", deps)
+	if len(deps) != 1 || deps[0] != (Dependency{ID: "4", Source: DepSourceNative}) {
+		t.Fatalf("want [4 (native)] (native only, body ignored), got %v", deps)
 	}
 }
 
