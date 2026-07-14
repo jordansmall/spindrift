@@ -16,6 +16,10 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
 - `agent-in-progress` — an AFK agent is actively working the issue.
 - `agent-complete` — agent work merged and green.
 - `agent-failed` — the Box exited non-zero; needs human triage, re-label to retry.
+- `agent-review-finding` — filed by the Filer from a non-blocking review
+  finding (#393). Never carries a dispatch label
+  (`agent-trigger`/`ready-for-agent`) — a human promotes it to
+  `ready-for-agent` like any other issue before an agent picks it up.
 
 ### Comment injection trust boundary
 
