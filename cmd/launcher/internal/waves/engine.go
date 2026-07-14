@@ -37,12 +37,14 @@ func claimIssue(cfg Config, it forge.IssueTracker, num string) {
 // the two blocker formats are parsed once, in one place.
 const blockedMarker = "blocked.txt"
 
-// writeBlockedMarker records the unmet blockers as a "#a, #b" list for the
-// workflow to interpolate into its release comment.
-func writeBlockedMarker(pwd string, blockers []string) error {
+// writeBlockedMarker records the unmet blockers as a "#a (native), #b
+// (body)" list for the workflow to interpolate into its release comment,
+// annotating each with the source (native relationship vs body-text
+// parsing) it was resolved from.
+func writeBlockedMarker(pwd string, blockers []string, sources map[string]forge.DepSource) error {
 	refs := make([]string, len(blockers))
 	for i, b := range blockers {
-		refs[i] = "#" + b
+		refs[i] = forge.Ref(b, sources[b])
 	}
 	path := filepath.Join(pwd, "logs", blockedMarker)
 	return os.WriteFile(path, []byte(strings.Join(refs, ", ")), 0o644)
@@ -125,7 +127,7 @@ func printSelectiveRerunHint(held []Issue) {
 // issue in the batch. Blocked issues are skipped so no slot is wasted on a
 // dependency that hasn't merged yet; they wait for the next invocation. The
 // in-batch dependency graph is assumed already cycle-checked by NewPlan.
-func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, origin Origin) error {
+func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, sources Sources, origin Origin) error {
 	checkOverlap := waveOverlapCheck(cfg, it, cf)
 	var selected, blockerFailed []Issue
 outer:
@@ -164,7 +166,7 @@ outer:
 		if origin == OriginClaimed && len(issues) > 0 {
 			num := issues[0].Number
 			if blockers := unreadyBlockers(it, cf, num, edges); len(blockers) > 0 {
-				if err := writeBlockedMarker(pwd, blockers); err != nil {
+				if err := writeBlockedMarker(pwd, blockers, sources[num]); err != nil {
 					return err
 				}
 				fmt.Printf("==> #%s blocked; wrote logs/%s for the pipeline to release the claim\n", num, blockedMarker)
@@ -215,5 +217,5 @@ func Run(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *d
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
 		return err
 	}
-	return drainMaxJobs(cfg, it, cf, pwd, f, s, plan.Issues, plan.Edges, plan.Origin)
+	return drainMaxJobs(cfg, it, cf, pwd, f, s, plan.Issues, plan.Edges, plan.Sources, plan.Origin)
 }

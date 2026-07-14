@@ -3,6 +3,7 @@ package waves
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -94,7 +95,7 @@ func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "blocked issue"},
 		{Number: "2", Title: "unblocked issue"},
-	}, edges, OriginDiscovered); err != nil {
+	}, edges, nil, OriginDiscovered); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -140,7 +141,7 @@ func TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext(t *testing.T) {
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "overlapping issue"},
 		{Number: "2", Title: "clean issue"},
-	}, map[string][]string{}, OriginDiscovered); err != nil {
+	}, map[string][]string{}, nil, OriginDiscovered); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -177,7 +178,7 @@ func TestDrainMaxJobs_FailsDependentWhenBlockerFails(t *testing.T) {
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "dependent"},
 		{Number: "2", Title: "unblocked"},
-	}, edges, OriginDiscovered); err != nil {
+	}, edges, nil, OriginDiscovered); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -222,7 +223,7 @@ func TestDrainMaxJobs_MaxJobsCapHonored(t *testing.T) {
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
 		{Number: "3", Title: "third"},
-	}, map[string][]string{}, OriginDiscovered); err != nil {
+	}, map[string][]string{}, nil, OriginDiscovered); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -257,7 +258,7 @@ func TestDrainMaxJobs_PrintsRemainingCountAfterCapNotFalselyBlocked(t *testing.T
 			{Number: "1", Title: "first"},
 			{Number: "2", Title: "second"},
 			{Number: "3", Title: "third"},
-		}, map[string][]string{}, OriginDiscovered); err != nil {
+		}, map[string][]string{}, nil, OriginDiscovered); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -294,7 +295,7 @@ func TestDrainMaxJobs_ZeroMeansUncapped(t *testing.T) {
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
 		{Number: "3", Title: "third"},
-	}, map[string][]string{}, OriginDiscovered); err != nil {
+	}, map[string][]string{}, nil, OriginDiscovered); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -331,7 +332,7 @@ func TestDrainMaxJobs_PrintsRemainingCountAfterPartialWave(t *testing.T) {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "unblocked"},
 			{Number: "2", Title: "dependent"},
-		}, edges, OriginDiscovered); err != nil {
+		}, edges, nil, OriginDiscovered); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -367,7 +368,7 @@ func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 	s := newSettle(fc, fc)
 	err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "blocked issue"},
-	}, edges, OriginDiscovered)
+	}, edges, nil, OriginDiscovered)
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Errorf("drainMaxJobs: got %v, want ErrOpenNoneDispatchable", err)
@@ -404,7 +405,7 @@ func TestDrainMaxJobs_Selective_PartialWave_PrintsRemainingAndRerunCommand(t *te
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "12", Title: "blocker"},
 			{Number: "15", Title: "dependent"},
-		}, edges, OriginSelective); err != nil {
+		}, edges, nil, OriginSelective); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -462,7 +463,7 @@ func TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint(t *testing.T) {
 	out := captureStdout(t, func() {
 		runErr = drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "10", Title: "candidate"},
-		}, map[string][]string{}, OriginSelective)
+		}, map[string][]string{}, nil, OriginSelective)
 	})
 
 	if !errors.Is(runErr, ErrOpenNoneDispatchable) {
@@ -473,6 +474,44 @@ func TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint(t *testing.T) {
 	}
 	if !strings.Contains(out, "spindrift dispatch --yes 10") {
 		t.Errorf("output must print the exact re-run command; got:\n%s", out)
+	}
+}
+
+// TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource verifies that the
+// blocked-claim marker drainMaxJobs writes for the OriginClaimed path
+// carries the same source annotation (native relationship vs body-text
+// parsing) as preview and the blocked-skip notice, since the release
+// workflow interpolates this file's contents verbatim into its comment.
+func TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+	c.MaxJobs = 1
+
+	fc := forge.NewFake()
+	// Issue #1 is claimed (in-progress); its blocker #3 is open (unmet, native-sourced).
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.InProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
+
+	fr := runner.NewFake()
+	edges := map[string][]string{"1": {"3"}}
+	sources := Sources{"1": {"3": forge.DepSourceNative}}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+		{Number: "1", Title: "claimed issue"},
+	}, edges, sources, OriginClaimed); err != nil {
+		t.Fatalf("drainMaxJobs: %v", err)
+	}
+
+	b, err := os.ReadFile(filepath.Join(dir, "logs", blockedMarker))
+	if err != nil {
+		t.Fatalf("reading blocked marker: %v", err)
+	}
+	if got := string(b); got != "#3 (native)" {
+		t.Errorf("blocked marker = %q, want %q", got, "#3 (native)")
 	}
 }
 
@@ -502,7 +541,7 @@ func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 	// not ErrOpenNoneDispatchable and not a cascade-fail.
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
-	}, edges, OriginClaimed); err != nil {
+	}, edges, nil, OriginClaimed); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 

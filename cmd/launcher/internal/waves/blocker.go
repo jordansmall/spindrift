@@ -6,23 +6,41 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
+// Sources maps an issue number to the source (native relationship vs
+// body-text parsing) DepsOf resolved each of its blockers from, mirroring
+// the keys of the edges map BuildEdges returns alongside it. Carrying source
+// as data keyed off the same edges — rather than switching on adapter type
+// at render time — is what lets Jira (always native) and the local tracker
+// (always body) render correctly without display-layer special cases.
+type Sources map[string]map[string]forge.DepSource
+
 // BuildEdges returns the dependency graph for the given batch of issues by
-// calling the IssueTracker's DepsOf for each. Non-fatal per-issue errors are
-// skipped, matching the original best-effort behaviour. Callers pass the
-// result as Input.Edges to NewPlan.
-func BuildEdges(it forge.IssueTracker, issues []Issue) (map[string][]string, error) {
+// calling the IssueTracker's DepsOf for each, plus the source each blocker
+// ref was resolved from. Non-fatal per-issue errors are skipped, matching
+// the original best-effort behaviour. Callers pass the edges result as
+// Input.Edges and the sources result as Input.Sources to NewPlan.
+func BuildEdges(it forge.IssueTracker, issues []Issue) (map[string][]string, Sources, error) {
 	edges := map[string][]string{}
+	sources := Sources{}
 	for _, iss := range issues {
 		deps, err := it.DepsOf(iss.Number)
 		if err != nil {
 			// Non-fatal: skip issues whose data cannot be fetched.
 			continue
 		}
-		if len(deps) > 0 {
-			edges[iss.Number] = deps
+		if len(deps) == 0 {
+			continue
 		}
+		ids := make([]string, len(deps))
+		srcs := make(map[string]forge.DepSource, len(deps))
+		for i, d := range deps {
+			ids[i] = d.ID
+			srcs[d.ID] = d.Source
+		}
+		edges[iss.Number] = ids
+		sources[iss.Number] = srcs
 	}
-	return edges, nil
+	return edges, sources, nil
 }
 
 // detectCycle runs Kahn's algorithm on the in-batch portion of the dependency

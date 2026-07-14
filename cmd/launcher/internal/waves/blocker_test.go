@@ -16,7 +16,7 @@ func TestBuildEdges_MultipleIssuesWithBlockers(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "3", Body: ""})
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
-	got, err := BuildEdges(fc, issues)
+	got, _, err := BuildEdges(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -35,7 +35,7 @@ func TestBuildEdges_NoBlockersOmitted(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "2", Body: ""})
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}}
-	got, err := BuildEdges(fc, issues)
+	got, _, err := BuildEdges(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -55,7 +55,7 @@ func TestBuildEdges_DepsOfErrorNonFatal(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "3", Body: "## Blocked by\n- #1"})
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
-	got, err := BuildEdges(fc, issues)
+	got, _, err := BuildEdges(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -65,6 +65,31 @@ func TestBuildEdges_DepsOfErrorNonFatal(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// TestBuildEdges_MixedNativeAndBodySources verifies BuildEdges tags each
+// blocker ref with the source DepsOf resolved it from — one issue's
+// native-relationship blocker and another's body-parsed blocker must not
+// collapse into the same source, so mixed-batch preview/skip/marker
+// annotations can tell them apart.
+func TestBuildEdges_MixedNativeAndBodySources(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Body: ""})
+	fc.SetIssue(forge.Issue{Number: "2", Body: "## Blocked by\n- #3"})
+	fc.SetIssue(forge.Issue{Number: "3", Body: ""})
+	fc.NativeDeps = map[string][]string{"1": {"3"}}
+
+	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
+	_, sources, err := BuildEdges(fc, issues)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if got := sources["1"]["3"]; got != forge.DepSourceNative {
+		t.Errorf("issue 1's blocker 3 source = %v, want native", got)
+	}
+	if got := sources["2"]["3"]; got != forge.DepSourceBody {
+		t.Errorf("issue 2's blocker 3 source = %v, want body", got)
 	}
 }
 
