@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -502,8 +503,10 @@ func TestJiraClient_TransitionState_InfraErrorPropagates(t *testing.T) {
 // researchLabels/researchVerdictLabels mirror ResearchDispatchLabels /
 // ResearchVerdictLabels so research-kind jira tests don't restate the label
 // strings.
-var researchLabels = forge.ResearchDispatchLabels()
-var researchVerdictLabels = forge.ResearchVerdictLabels()
+var (
+	researchLabels        = forge.ResearchDispatchLabels()
+	researchVerdictLabels = forge.ResearchVerdictLabels()
+)
 
 // TestJiraClient_CompleteVerdict_SwapsInProgressForVerdictLabel verifies
 // CompleteVerdict rides the same label-fallback swapLabel mechanism
@@ -624,6 +627,65 @@ func TestJiraClient_CompleteVerdict_ThenRetryResearchable(t *testing.T) {
 	}
 	if len(retryOps) != 1 || retryOps[0]["add"] != "agent-research" {
 		t.Errorf("retry ops = %v, want a single add of agent-research", retryOps)
+	}
+}
+
+// TestJiraClient_ResearchDispatch_InProgressAndFailedUseResearchLabels
+// verifies the research kind's InProgress and Failed transitions (plain
+// TransitionState, not CompleteVerdict) swap the research label family and
+// land distinct labels from every verdict terminal — Failed strictly means
+// the Box crashed or produced no verdict (ADR 0022), never a concluded
+// verdict.
+func TestJiraClient_ResearchDispatch_InProgressAndFailedUseResearchLabels(t *testing.T) {
+	var ops []map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/rest/api/2/issue/"):
+			var body struct {
+				Update struct {
+					Labels []map[string]string `json:"labels"`
+				} `json:"update"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			ops = append(ops, body.Update.Labels...)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{
+		BaseURL:       srv.URL,
+		Token:         "tok",
+		Labels:        researchLabels,
+		VerdictLabels: researchVerdictLabels,
+	})
+
+	if err := jc.TransitionState("PROJ-6", forge.Dispatchable, forge.InProgress); err != nil {
+		t.Fatalf("TransitionState(Dispatchable, InProgress): %v", err)
+	}
+	if err := jc.TransitionState("PROJ-7", forge.InProgress, forge.Failed); err != nil {
+		t.Fatalf("TransitionState(InProgress, Failed): %v", err)
+	}
+
+	wantAdds := map[string]bool{"agent-research-in-progress": true, "agent-research-failed": true}
+	gotAdds := map[string]bool{}
+	for _, op := range ops {
+		if add, ok := op["add"]; ok && add != "" {
+			gotAdds[add] = true
+		}
+	}
+	if !reflect.DeepEqual(gotAdds, wantAdds) {
+		t.Fatalf("added labels = %v, want %v", gotAdds, wantAdds)
+	}
+	terminals := []string{"agent-research-failed", researchVerdictLabels.Recommend, researchVerdictLabels.Reject, researchVerdictLabels.Unclear}
+	seen := map[string]bool{}
+	for _, l := range terminals {
+		if seen[l] {
+			t.Fatalf("terminal label %q collides with another terminal: %v", l, terminals)
+		}
+		seen[l] = true
 	}
 }
 
