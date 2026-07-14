@@ -7,14 +7,37 @@ setup() {
   setup_entrypoint_env
 }
 
-# The main issue-prompt's FILE ISSUES step is substituted in only when the
-# filer is provisioned (same ${...} envsubst mechanism as SKILL_PREAMBLE) —
-# off by default, zero prompt residue.
-@test "issue prompt gains a FILE ISSUES step when the filer is provisioned" {
-  export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -q '# FILE ISSUES' "$CLAUDE_PROMPT_FILE"
+# issue #622: these three knob-gated registry rows (lib/fragments.nix) used
+# to be six bespoke on/off test pairs; one mechanism test now walks the
+# table and covers the same off/on matrix -- each row renders its marker
+# heading only when its knob is on, and leaves zero residue when it's off
+# (the conditional-residue mechanism every registry row shares).
+@test "conditional prompt steps appear only when their knob is on" {
+  local case i=0
+  for case in \
+    'AGENTS_JSON_TEMPLATE={"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}|# FILE ISSUES' \
+    'AUTO_FORMAT=1|# AUTO-FORMAT' \
+    'AUTO_LINT=1|# AUTO-LINT'
+  do
+    local assign="${case%%|*}" marker="${case#*|}"
+
+    # A fresh WORK_DIR per invocation -- entrypoint.sh clones into it, and
+    # this test execs the entrypoint six times (off/on for three knobs), so
+    # reusing one dir across invocations would collide on the second clone.
+    i=$((i + 1))
+    export WORK_DIR="$BATS_TEST_TMPDIR/work-$i-off"
+    run bash "$ENTRYPOINT"
+    [ "$status" -eq 0 ]
+    ! grep -qF "$marker" "$CLAUDE_PROMPT_FILE"
+
+    # shellcheck disable=SC2163 # $assign is itself a NAME=value pair
+    export "$assign"
+    export WORK_DIR="$BATS_TEST_TMPDIR/work-$i-on"
+    run bash "$ENTRYPOINT"
+    [ "$status" -eq 0 ]
+    grep -qF "$marker" "$CLAUDE_PROMPT_FILE"
+    unset "${assign%%=*}"
+  done
 }
 
 # A scout/reviewer-only template (no "filer" key) must not require
@@ -31,27 +54,6 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   jq -e 'has("filer") | not' "$CLAUDE_AGENTS_FILE" >/dev/null
-}
-
-@test "issue prompt has no FILE ISSUES step when the filer is not configured" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  ! grep -q 'FILE ISSUES' "$CLAUDE_PROMPT_FILE"
-}
-
-# AUTO_FORMAT knob: the AUTO-FORMAT step is injected only when AUTO_FORMAT is
-# non-empty — same conditional-residue mechanism as FILE_ISSUES_STEP.
-@test "issue prompt gains an AUTO-FORMAT step when AUTO_FORMAT is enabled" {
-  export AUTO_FORMAT=1
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -q '# AUTO-FORMAT' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "issue prompt has no AUTO-FORMAT step when AUTO_FORMAT is disabled" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  ! grep -q 'AUTO-FORMAT' "$CLAUDE_PROMPT_FILE"
 }
 
 # issue #452: `nix fmt` can never succeed in-box (uid 1000 has no
@@ -71,21 +73,6 @@ setup() {
   [ "$status" -eq 0 ]
   grep -q 'nix fmt' "$CLAUDE_PROMPT_FILE"
   grep -qi 'permission' "$CLAUDE_PROMPT_FILE"
-}
-
-# AUTO_LINT knob: the AUTO-LINT step is injected only when AUTO_LINT is
-# non-empty — same conditional-residue mechanism as AUTO_FORMAT_STEP.
-@test "issue prompt gains an AUTO-LINT step when AUTO_LINT is enabled" {
-  export AUTO_LINT=1
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -q '# AUTO-LINT' "$CLAUDE_PROMPT_FILE"
-}
-
-@test "issue prompt has no AUTO-LINT step when AUTO_LINT is disabled" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  ! grep -q 'AUTO-LINT' "$CLAUDE_PROMPT_FILE"
 }
 
 # issue #463: the conditional prompt steps above (SKILL_PREAMBLE,
@@ -252,5 +239,33 @@ EOF
   [ "$status" -eq 0 ]
   grep -q 'status=ready' "$CLAUDE_PROMPT_FILE"
   ! grep -q 'status=merged' "$CLAUDE_PROMPT_FILE"
+}
+
+# issue #622: the fragment loop and its substitution allowlist are rendered
+# from the nix-owned registry (lib/fragments.nix), not hardcoded per-step in
+# agent/entrypoint.sh -- proven here by hand-appending one extra row to the
+# real, nix-rendered registry data and confirming it renders with zero edits
+# to the entrypoint source itself.
+@test "a hand-appended registry row renders without any entrypoint edit" {
+  local prompt_dir="$BATS_TEST_TMPDIR/fixture-prompts"
+  mkdir -p "$prompt_dir/fragments"
+  printf 'fixture stub ${FIXTURE_ROW_STEP}end\n' >"$prompt_dir/issue-prompt.md"
+  printf '# FIXTURE ROW\n\nFIXTURE-ROW-MARKER\n\n' >"$prompt_dir/fragments/fixture-row.md"
+  export PROMPTS_DIR="$prompt_dir"
+
+  local wrapped="$BATS_TEST_TMPDIR/fixture-entrypoint.sh"
+  {
+    cat "$DRIVER_PREAMBLE_FILE"
+    cat "$FRAGMENT_REGISTRY_FILE"
+    printf '_FRAGMENT_ROWS+=("FIXTURE_ROW_ON|fixture-row.md|FIXTURE_ROW_STEP")\n'
+    printf '_FRAGMENT_SUBST_VARS+=("FIXTURE_ROW_STEP")\n'
+    tail -n +2 "$ENTRYPOINT_SRC"
+  } >"$wrapped"
+  chmod +x "$wrapped"
+
+  export FIXTURE_ROW_ON=1
+  run bash "$wrapped"
+  [ "$status" -eq 0 ]
+  grep -q 'FIXTURE-ROW-MARKER' "$CLAUDE_PROMPT_FILE"
 }
 

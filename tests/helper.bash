@@ -84,14 +84,29 @@ setup_fakes() {
     printf '# CHECK\n\ncanonical check contract fixture\n' >"$CHECK_CONTRACT_FILE"
   fi
 
+  # The pre-wrap entrypoint path, preserved before ENTRYPOINT is reassigned
+  # below, so a test that needs its own custom-wrapped variant (e.g. the
+  # Conditional fragment registry fixture-row test, issue #622) can still
+  # build one from the real source.
+  export ENTRYPOINT_SRC="$ENTRYPOINT"
+
   # DRIVER_PREAMBLE_FILE is the registry-rendered Driver function definitions
-  # (issue #433): prepend them to the entrypoint so the suite exercises the
-  # same bodies the image bakes in, not any hand-copied duplicates.  The nix
-  # check derivation sets this; a bare bats run outside nix leaves ENTRYPOINT
-  # as-is (functions undefined → tests fail, by design: use nix flake check).
+  # (issue #433), and FRAGMENT_REGISTRY_FILE is the registry-rendered
+  # Conditional fragment loop input and substitution allowlist (issue #622):
+  # prepend both to the entrypoint so the suite exercises the same bodies and
+  # data the image bakes in, not any hand-copied duplicates. The nix check
+  # derivation sets these; a bare bats run outside nix leaves ENTRYPOINT
+  # as-is (functions/registry undefined → tests fail, by design: use nix
+  # flake check).
   if [ -n "${DRIVER_PREAMBLE_FILE:-}" ]; then
     local _wrapped="$BATS_TEST_TMPDIR/entrypoint.sh"
-    { cat "$DRIVER_PREAMBLE_FILE"; tail -n +2 "$ENTRYPOINT"; } >"$_wrapped"
+    {
+      cat "$DRIVER_PREAMBLE_FILE"
+      if [ -n "${FRAGMENT_REGISTRY_FILE:-}" ]; then
+        cat "$FRAGMENT_REGISTRY_FILE"
+      fi
+      tail -n +2 "$ENTRYPOINT"
+    } >"$_wrapped"
     chmod +x "$_wrapped"
     ENTRYPOINT="$_wrapped"
     export ENTRYPOINT
