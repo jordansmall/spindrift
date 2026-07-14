@@ -186,6 +186,11 @@ _Avoid_: issue number, sequence, priority.
 **Wave**:
 One batch of Dispatches launched concurrently. With no blocker edges the whole
 ready-set is a single wave; declared edges split a run into dependency waves.
+Edges come from each Issue Tracker adapter's `DepsOf`: `github` and `jira`
+both prefer native dependency relationships (GitHub's issue-dependencies API,
+Jira's "is blocked by" issue links) and use body/prose refs only as a
+fallback where the adapter has one — native wins whenever it's non-empty,
+never merged with body text.
 Every dispatch invocation runs at most one wave (ADR 0019): `MAX_PARALLEL`
 caps the number of concurrent Boxes within a wave (default 3); `MAX_JOBS`
 caps the wave size (default 0 = uncapped). Held issues stay on the dispatch
