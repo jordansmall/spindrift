@@ -26,6 +26,8 @@ type Model struct {
 	// DogfoodLive is whether a live dogfood pid-file was found at startup —
 	// informational only, set once and never gated on.
 	DogfoodLive bool
+	// Picks is the session's operator queue, in pick order.
+	Picks []Pick
 }
 
 // NewModel returns the zero-value console state: no issues loaded yet, no
@@ -65,8 +67,26 @@ func Update(m Model, msg Msg) Model {
 		m.Quitting = true
 	case DogfoodNoticeMsg:
 		m.DogfoodLive = msg.Live
+	case PickQueuedMsg:
+		m.Picks = append(m.Picks, Pick{Number: msg.Number, Title: msg.Title, Kind: msg.Kind, State: PickQueued})
+	case UnpickMsg:
+		m.Picks = removePick(m.Picks, msg.Number)
 	}
 	return m
+}
+
+// removePick drops the queued pick numbered num, if any — Unpick only ever
+// removes a pick still holding at PickQueued; a pick already claiming,
+// running, or settled is left alone.
+func removePick(picks []Pick, num string) []Pick {
+	var out []Pick
+	for _, p := range picks {
+		if p.Number == num && p.State == PickQueued {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // issueHasLabelContaining reports whether any of iss's labels contains

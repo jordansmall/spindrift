@@ -1,0 +1,41 @@
+package console
+
+// Kind is the dispatch kind a Pick carries. Only KindWork is exposed by the
+// operator-facing commands today; KindResearch exists so the Pick record
+// does not need a remodel when research dispatch ships end-to-end (#646).
+type Kind string
+
+const (
+	KindWork     Kind = "work"
+	KindResearch Kind = "research"
+)
+
+// PickState is a queue row's position in its launch lifecycle.
+type PickState int
+
+const (
+	// PickQueued is a pick that has been promoted to Dispatchable but not
+	// yet claimed — it holds here for as long as the single launch slot is
+	// occupied, and Unpick can still remove it.
+	PickQueued PickState = iota
+	// PickClaiming is a pick whose atomic Dispatchable->InProgress claim is
+	// in flight.
+	PickClaiming
+	// PickRunning is a pick whose claim succeeded and whose Box is running.
+	PickRunning
+	// PickSettled is a pick whose Dispatch reached settle.
+	PickSettled
+	// PickDissolved is a pick whose claim failed (raced, closed,
+	// relabeled) — Reason names why. A dissolved pick never launches.
+	PickDissolved
+)
+
+// Pick is one row of the session's operator queue: an issue the operator
+// has picked, its Dispatch kind, and its current lifecycle state.
+type Pick struct {
+	Number string
+	Title  string
+	Kind   Kind
+	State  PickState
+	Reason string
+}
