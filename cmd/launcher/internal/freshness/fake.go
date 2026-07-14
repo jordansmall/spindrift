@@ -7,19 +7,19 @@ type FakeCall struct {
 
 // Fake is an in-memory Evaluator for unit tests — no nix round-trip.
 type Fake struct {
-	// DrvPath is returned by Eval when Err is nil.
-	DrvPath string
-	// Err, if non-nil, is returned by Eval instead of DrvPath.
+	// OutPath is returned by Eval when Err is nil.
+	OutPath string
+	// Err, if non-nil, is returned by Eval instead of OutPath.
 	Err error
 	// Calls records the (pwd, rev, attr) tuples passed to Eval, in order.
 	Calls []FakeCall
 }
 
-// Eval records the call and returns DrvPath, or Err if set.
+// Eval records the call and returns OutPath, or Err if set.
 func (f *Fake) Eval(pwd, rev, attr string) (string, error) {
 	f.Calls = append(f.Calls, FakeCall{pwd, rev, attr})
 	if f.Err != nil {
 		return "", f.Err
 	}
-	return f.DrvPath, nil
+	return f.OutPath, nil
 }
