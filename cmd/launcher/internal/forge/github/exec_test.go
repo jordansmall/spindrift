@@ -143,6 +143,28 @@ esac`)
 	}
 }
 
+// TestExecClient_TouchesOf_FetchesFullIssueBody verifies that TouchesOf
+// fetches the issue's full body via `gh issue view` (unlike ListIssues,
+// whose --json number,title summary never includes body) and parses its
+// "## Touches" section — the same shared body-grammar default DepsOf's
+// body-parsing fallback already relies on.
+func TestExecClient_TouchesOf_FetchesFullIssueBody(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*"issue view"*)
+	printf '{"number":10,"title":"t","body":"## Touches\\n- lib/env-schema.nix","state":"OPEN","labels":[]}'
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	touches, err := c.TouchesOf("10")
+	if err != nil {
+		t.Fatalf("TouchesOf: %v", err)
+	}
+	if len(touches) != 1 || touches[0] != "lib/env-schema.nix" {
+		t.Fatalf("want [lib/env-schema.nix], got %v", touches)
+	}
+}
+
 // TestProbe_PositionalSlug verifies that Probe passes the slug as a positional
 // argument to `gh repo view` with no --repo/-R flag.
 func TestProbe_PositionalSlug(t *testing.T) {

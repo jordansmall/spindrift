@@ -458,6 +458,12 @@ func dispatchConfig(c config, cf forge.CodeForge) dispatch.Config {
 		HoldJitterSecs:        c.holdJitterSecs,
 		DriverSessionCacheDir: c.driverSessionCacheDir,
 	}
+	// forge.ResolveOpenPR already resolves to Found: false, nil for a
+	// push-only Code Forge, so this guard is redundant for correctness; it
+	// stays to keep cfg.OpenPRForIssue's nil-ness itself meaningful — the
+	// retry path's own `!= nil` check (dispatch/retry.go) and its pinned
+	// test (TestDispatchConfig_NonPRForge_LeavesOpenPRForIssueNil) depend on
+	// a push-only Code Forge leaving the field unset, not just false-valued.
 	if _, ok := cf.(forge.PRForge); ok {
 		cfg.OpenPRForIssue = func(number string) (bool, error) {
 			res, err := forge.ResolveOpenPR(cf, number)

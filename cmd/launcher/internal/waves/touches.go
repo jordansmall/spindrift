@@ -16,10 +16,10 @@ func prTouchesOf(cf forge.CodeForge, num string) []string {
 	if err != nil || !res.Found {
 		return nil
 	}
-	pr, ok := cf.(forge.PRForge)
-	if !ok {
-		return nil
-	}
+	// res.Found is only true when cf implements PRForge (ResolveOpenPR's own
+	// contract), so this assertion always succeeds here — needed only
+	// because ListPRFiles isn't part of the open-PR resolver's job.
+	pr := cf.(forge.PRForge)
 	files, err := pr.ListPRFiles(res.URL)
 	if err != nil {
 		return nil
@@ -52,6 +52,14 @@ func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) fun
 	}
 	entries := make([]inProgressTouches, len(inProgress))
 	for i, fi := range inProgress {
+		// it.TouchesOf fetches num's full issue afresh — ListIssues' summary
+		// (github: --json number,title) never carries body — the same
+		// per-issue-fetch cost BuildEdges already pays calling it.DepsOf on a
+		// ListIssues batch. On github this also means an in-progress issue's
+		// own declared touches are now seen here for the first time (the old
+		// direct-body-parse read ListIssues' body-less summary and so never
+		// saw them); prTouchesOf's PR-changed-files augmentation was the
+		// only github coverage before.
 		touches, _ := it.TouchesOf(fi.Number)
 		touches = append(touches, prTouchesOf(cf, fi.Number)...)
 		entries[i] = inProgressTouches{number: fi.Number, touches: touches}
