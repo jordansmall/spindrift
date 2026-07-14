@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -694,5 +695,40 @@ func TestEnsureReady_ImageAbsentFallsBackToContainerBuild(t *testing.T) {
 	stderr := buf.String()
 	if !strings.Contains(stderr, "not digest-pinned") {
 		t.Errorf("expected supply-chain warning in stderr; got: %q", stderr)
+	}
+}
+
+// TestEnsureReady_HostNixBuildInvokedViaSeam verifies that the host `nix
+// build` step in EnsureReady goes through the execCommand seam, and that a
+// genuine (non-builder-missing) scripted failure surfaces as an error
+// without falling back to the container build.
+func TestEnsureReady_HostNixBuildInvokedViaSeam(t *testing.T) {
+	cliScript, _ := newFakeCLI(t, fakeCall{exit: 1}) // image inspect: absent
+
+	nixScript, nixDir := newFakeCLI(t, fakeCall{exit: 1, stdout: "genuine derivation error"})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var gotName string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotName = name
+		return exec.Command(nixScript, args...)
+	}
+
+	a := &ociAdapter{
+		cli:      cliScript,
+		image:    "spindrift:abc123",
+		imageDrv: "/nix/store/fake.drv",
+	}
+
+	err := a.EnsureReady()
+
+	if gotName != "nix" {
+		t.Errorf("execCommand called with %q, want %q", gotName, "nix")
+	}
+	if err == nil {
+		t.Error("expected error from scripted nix build failure, got nil")
+	}
+	if got := callCount(t, nixDir); got != 1 {
+		t.Errorf("callCount = %d, want 1 (no container-build fallback for a genuine error)", got)
 	}
 }
