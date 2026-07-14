@@ -146,6 +146,87 @@ func TestNewIssueTracker_Jira(t *testing.T) {
 	}
 }
 
+// --- dispatch kind tests (ADR 0022) ---
+
+// TestApplyDispatchKind_Research_SetsResearchLabelFamily verifies that the
+// research kind overrides the four lifecycle label fields to the fixed
+// research family, leaving completeLabel blank since research's Complete
+// transition carries a verdict instead of a single label.
+func TestApplyDispatchKind_Research_SetsResearchLabelFamily(t *testing.T) {
+	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
+	rl := forge.ResearchDispatchLabels()
+
+	if c.dispatchKind != dispatchKindResearch {
+		t.Errorf("dispatchKind = %q, want %q", c.dispatchKind, dispatchKindResearch)
+	}
+	if c.label != rl.Dispatchable {
+		t.Errorf("label = %q, want %q", c.label, rl.Dispatchable)
+	}
+	if c.inProgressLabel != rl.InProgress {
+		t.Errorf("inProgressLabel = %q, want %q", c.inProgressLabel, rl.InProgress)
+	}
+	if c.failedLabel != rl.Failed {
+		t.Errorf("failedLabel = %q, want %q", c.failedLabel, rl.Failed)
+	}
+	if c.completeLabel != "" {
+		t.Errorf("completeLabel = %q, want empty (verdict carries Complete instead)", c.completeLabel)
+	}
+}
+
+// TestApplyDispatchKind_Work_LeavesConfiguredLabelsAlone verifies the work
+// kind is a no-op on the label fields: the operator-configurable
+// LABEL/*_LABEL knobs are untouched.
+func TestApplyDispatchKind_Work_LeavesConfiguredLabelsAlone(t *testing.T) {
+	c := minimalValidConfig()
+	c.label, c.inProgressLabel, c.completeLabel, c.failedLabel = "custom-ready", "custom-wip", "custom-done", "custom-broken"
+
+	got := applyDispatchKind(c, dispatchKindWork)
+
+	if got.dispatchKind != dispatchKindWork {
+		t.Errorf("dispatchKind = %q, want %q", got.dispatchKind, dispatchKindWork)
+	}
+	if got.label != "custom-ready" || got.inProgressLabel != "custom-wip" || got.completeLabel != "custom-done" || got.failedLabel != "custom-broken" {
+		t.Errorf("applyDispatchKind(work) mutated configured labels: %+v", got)
+	}
+}
+
+// TestNewIssueTracker_ResearchKind_WiresVerdictLabels verifies that a
+// research-kind config's IssueTracker actually resolves verdict labels
+// (CompleteVerdict), while a work-kind config's does not — the kind-aware
+// seam ADR 0022 describes, exercised end-to-end through the local adapter
+// since its state field is trivially observable from disk.
+func TestNewIssueTracker_ResearchKind_WiresVerdictLabels(t *testing.T) {
+	dir := t.TempDir()
+	issueFile := `---
+title: Some issue
+state: agent-research-in-progress
+labels: []
+created: 2026-07-09T12:00:00Z
+---
+body
+`
+	if err := os.WriteFile(filepath.Join(dir, "42.md"), []byte(issueFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := minimalValidConfig()
+	c.issueTracker = "local"
+	c.localIssuesDir = dir
+	c = applyDispatchKind(c, dispatchKindResearch)
+
+	it := newIssueTracker(c)
+	if err := it.CompleteVerdict("42", forge.Recommend); err != nil {
+		t.Fatalf("CompleteVerdict: %v", err)
+	}
+	iss, err := it.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !containsLabel(iss.Labels, "agent-research-recommend") {
+		t.Errorf("issue labels = %v, want agent-research-recommend", iss.Labels)
+	}
+}
+
 // --- integer-knob parsing tests ---
 
 // TestMaxParallelEdgeCases covers the atoi() fallback for values where zero
