@@ -64,6 +64,9 @@ in
   # forge's tests shell out to git (TestGitForcePush_CapturesStderr), so
   # git must be on PATH in the sandbox alongside go. CGO_ENABLED=0 for
   # the same reason as launcher-go-vet above.
+  # docs/ is copied alongside cmd/launcher, mirroring the repo layout,
+  # so TestReferenceDocLabelSnippetMatchesTriageDefaults can resolve its
+  # ../../docs/reference.md path (#611).
   launcher-go-test =
     pkgs.runCommand "launcher-go-test"
       {
@@ -73,14 +76,16 @@ in
         ];
       }
       ''
-        cp -r ${../../cmd/launcher} src
+        mkdir -p src/cmd
+        cp -r ${../../cmd/launcher} src/cmd/launcher
+        cp -r ${../../docs} src/docs
         chmod -R +w src
         export GOPROXY=off
         export GONOSUMCHECK='*'
         export GOMODCACHE="$TMPDIR/gomodcache"
         export GOCACHE="$TMPDIR/gocache"
         export CGO_ENABLED=0
-        cd src
+        cd src/cmd/launcher
         go test ./...
         touch $out
       '';
