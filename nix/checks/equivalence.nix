@@ -48,22 +48,20 @@ in
   # direct `mkHarness` call with the same inputs (#5). Compare store
   # paths at eval time — no Linux builder needed, since the launcher
   # commands are native and the image path is baked into them as text.
+  # Uses `packages.spindrift` (the CLI); `packages.{build,run}` were
+  # removed from the flake surface (issue #613).
   flakemodule-equivalence =
     pkgs.runCommand "flakemodule-equivalence"
       {
-        moduleBuild = config.packages.build;
-        directBuild = harness.build;
-        moduleRun = config.packages.run;
-        directRun = harness.run;
+        moduleSpindrift = config.packages.spindrift;
+        directSpindrift = harness.spindrift;
         imagePath = harness.imagePath;
       }
       ''
-        [ "$moduleBuild" = "$directBuild" ] \
-          || { echo "build mismatch: $moduleBuild != $directBuild" >&2; exit 1; }
-        [ "$moduleRun" = "$directRun" ] \
-          || { echo "run mismatch: $moduleRun != $directRun" >&2; exit 1; }
+        [ "$moduleSpindrift" = "$directSpindrift" ] \
+          || { echo "spindrift mismatch: $moduleSpindrift != $directSpindrift" >&2; exit 1; }
         # The module bakes the very same (Linux) image store path.
-        grep -q "$imagePath" "$moduleRun/bin/run"
+        grep -q "$imagePath" "$moduleSpindrift/bin/spindrift"
         touch $out
       '';
 
@@ -72,55 +70,44 @@ in
   flakemodule-fixture =
     pkgs.runCommand "flakemodule-fixture"
       {
-        fixtureBuild = consumerPkgs.build;
-        directBuild = minimalDirect.build;
-        fixtureRun = consumerPkgs.run;
-        directRun = minimalDirect.run;
+        fixtureSpindrift = consumerPkgs.spindrift;
+        directSpindrift = minimalDirect.spindrift;
         imagePath = minimalDirect.imagePath;
       }
       ''
-        [ "$fixtureBuild" = "$directBuild" ] \
-          || { echo "build mismatch: $fixtureBuild != $directBuild" >&2; exit 1; }
-        [ "$fixtureRun" = "$directRun" ] \
-          || { echo "run mismatch: $fixtureRun != $directRun" >&2; exit 1; }
+        [ "$fixtureSpindrift" = "$directSpindrift" ] \
+          || { echo "spindrift mismatch: $fixtureSpindrift != $directSpindrift" >&2; exit 1; }
         # The fixture's image store path matches the direct call's,
-        # asserted via the path baked into its `run` command.
-        grep -q "$imagePath" "$fixtureRun/bin/run"
+        # asserted via the path baked into its `spindrift` command.
+        grep -q "$imagePath" "$fixtureSpindrift/bin/spindrift"
         touch $out
       '';
 
-  # The `templates.default` starter (#6): its `build`/`run` commands
-  # must have the Linux image store path substituted in, and — since
-  # its config mirrors the dogfood's — be byte-identical to the direct
-  # call. Eval-only; the Linux realize is done on the podman builder
-  # against an instantiated copy.
+  # The `templates.default` starter (#6): its `spindrift` command must have
+  # the Linux image store path substituted in, and — since its config
+  # mirrors the dogfood's — be byte-identical to the direct call. Eval-only;
+  # the Linux realize is done on the podman builder against an instantiated
+  # copy.
   template-fixture =
     pkgs.runCommand "template-fixture"
       {
-        templateBuild = templatePkgs.build;
-        templateRun = templatePkgs.run;
-        directBuild = harnessNoRevision.build;
-        directRun = harnessNoRevision.run;
+        templateSpindrift = templatePkgs.spindrift;
+        directSpindrift = harnessNoRevision.spindrift;
         imagePath = harnessNoRevision.imagePath;
       }
       ''
-        buildCmd="$templateBuild/bin/build"
-        runCmd="$templateRun/bin/run"
+        spindriftCmd="$templateSpindrift/bin/spindrift"
 
-        ! grep -q '@imagePath@' "$buildCmd"
-        ! grep -q '@imagePath@' "$runCmd"
-        grep -q "$imagePath" "$buildCmd"
-        grep -q "$imagePath" "$runCmd"
+        ! grep -q '@imagePath@' "$spindriftCmd"
+        grep -q "$imagePath" "$spindriftCmd"
         case "$imagePath" in
           /nix/store/*spindrift*) : ;;
           *) echo "unexpected image path: $imagePath" >&2; exit 1 ;;
         esac
 
         # Same config as the template ⇒ identical launcher commands.
-        [ "$templateBuild" = "$directBuild" ] \
-          || { echo "build mismatch: $templateBuild != $directBuild" >&2; exit 1; }
-        [ "$templateRun" = "$directRun" ] \
-          || { echo "run mismatch: $templateRun != $directRun" >&2; exit 1; }
+        [ "$templateSpindrift" = "$directSpindrift" ] \
+          || { echo "spindrift mismatch: $templateSpindrift != $directSpindrift" >&2; exit 1; }
         touch $out
       '';
 
@@ -319,16 +306,12 @@ in
     in
     pkgs.runCommand "flakemodule-schema-options"
       {
-        moduleBuild = consumerPkgs105.build;
-        directBuild = direct105.build;
-        moduleRun = consumerPkgs105.run;
-        directRun = direct105.run;
+        moduleSpindrift = consumerPkgs105.spindrift;
+        directSpindrift = direct105.spindrift;
       }
       ''
-        [ "$moduleBuild" = "$directBuild" ] \
-          || { echo "build mismatch: $moduleBuild != $directBuild" >&2; exit 1; }
-        [ "$moduleRun" = "$directRun" ] \
-          || { echo "run mismatch: $moduleRun != $directRun" >&2; exit 1; }
+        [ "$moduleSpindrift" = "$directSpindrift" ] \
+          || { echo "spindrift mismatch: $moduleSpindrift != $directSpindrift" >&2; exit 1; }
         touch $out
       '';
 
@@ -361,7 +344,7 @@ in
               settings = settingsCfg;
             };
           }
-        ).packages.${system}.run;
+        ).packages.${system}.spindrift;
 
       behaviorRun = mkRun {
         selfHealing = {
@@ -408,36 +391,36 @@ in
         inherit behaviorRun identityRun defaultRun;
       }
       ''
-        grep -q 'MAX_FIX_ATTEMPTS:-5' "$behaviorRun/bin/run" \
+        grep -q 'MAX_FIX_ATTEMPTS:-5' "$behaviorRun/bin/spindrift" \
           || { echo "MAX_FIX_ATTEMPTS:-5 not baked in run cmd" >&2; exit 1; }
-        grep -q 'MAX_REBASE_ATTEMPTS:-2' "$behaviorRun/bin/run" \
+        grep -q 'MAX_REBASE_ATTEMPTS:-2' "$behaviorRun/bin/spindrift" \
           || { echo "MAX_REBASE_ATTEMPTS:-2 not baked in run cmd" >&2; exit 1; }
-        grep -q 'HOLD_JITTER_SECS:-10' "$behaviorRun/bin/run" \
+        grep -q 'HOLD_JITTER_SECS:-10' "$behaviorRun/bin/spindrift" \
           || { echo "HOLD_JITTER_SECS:-10 not baked in run cmd" >&2; exit 1; }
-        grep -q 'TRANSIENT_BACKOFF_SECS:-60' "$behaviorRun/bin/run" \
+        grep -q 'TRANSIENT_BACKOFF_SECS:-60' "$behaviorRun/bin/spindrift" \
           || { echo "TRANSIENT_BACKOFF_SECS:-60 not baked in run cmd" >&2; exit 1; }
-        grep -q 'TRANSIENT_RETRY_MAX:-5' "$behaviorRun/bin/run" \
+        grep -q 'TRANSIENT_RETRY_MAX:-5' "$behaviorRun/bin/spindrift" \
           || { echo "TRANSIENT_RETRY_MAX:-5 not baked in run cmd" >&2; exit 1; }
-        grep -q 'MAX_JOBS:-2' "$behaviorRun/bin/run" \
+        grep -q 'MAX_JOBS:-2' "$behaviorRun/bin/spindrift" \
           || { echo "MAX_JOBS:-2 not baked in run cmd" >&2; exit 1; }
-        grep -q 'MERGE_POLL_INTERVAL:-90' "$behaviorRun/bin/run" \
+        grep -q 'MERGE_POLL_INTERVAL:-90' "$behaviorRun/bin/spindrift" \
           || { echo "MERGE_POLL_INTERVAL:-90 not baked in run cmd" >&2; exit 1; }
-        grep -q 'MERGE_POLL_TIMEOUT:-3600' "$behaviorRun/bin/run" \
+        grep -q 'MERGE_POLL_TIMEOUT:-3600' "$behaviorRun/bin/spindrift" \
           || { echo "MERGE_POLL_TIMEOUT:-3600 not baked in run cmd" >&2; exit 1; }
-        grep -q 'REPO_SLUG:-test-org/test-repo' "$identityRun/bin/run" \
+        grep -q 'REPO_SLUG:-test-org/test-repo' "$identityRun/bin/spindrift" \
           || { echo "REPO_SLUG:-test-org/test-repo not baked in run cmd" >&2; exit 1; }
-        grep -q 'GIT_USER_NAME:-Test Bot' "$identityRun/bin/run" \
+        grep -q 'GIT_USER_NAME:-Test Bot' "$identityRun/bin/spindrift" \
           || { echo "GIT_USER_NAME:-Test Bot not baked in run cmd" >&2; exit 1; }
-        grep -q 'GIT_USER_EMAIL:-bot@test.example' "$identityRun/bin/run" \
+        grep -q 'GIT_USER_EMAIL:-bot@test.example' "$identityRun/bin/spindrift" \
           || { echo "GIT_USER_EMAIL:-bot@test.example not baked in run cmd" >&2; exit 1; }
-        grep -q 'REPO_SLUG:-}"' "$defaultRun/bin/run" \
+        grep -q 'REPO_SLUG:-}"' "$defaultRun/bin/spindrift" \
           || { echo "REPO_SLUG must have empty baked default (REPO_SLUG:-}) when not set; required validation must not be masked" >&2; exit 1; }
         touch $out
       '';
 
   # Unknown section or knob keys in `settings` must throw at eval time; the
   # NixOS module system rejects undeclared option names.  We force evaluation
-  # down to `.packages.${system}.run` so the module config is actually
+  # down to `.packages.${system}.spindrift` so the module config is actually
   # evaluated (flake-parts evaluates perSystem configs lazily on attribute
   # access).
   flakemodule-rejects-unknown-settings =
@@ -462,7 +445,7 @@ in
             }
             // cfg;
           }
-        ).packages.${system}.run;
+        ).packages.${system}.spindrift;
       badSection = builtins.tryEval (mkBadFlake {
         settings.typoSection.label = "oops";
       });
@@ -576,8 +559,9 @@ in
     in
     assert assertMsg (!(harness.apps ? build)) "apps.build must not exist (removed, issue #613)";
     assert assertMsg (!(harness.apps ? run)) "apps.run must not exist (removed, issue #613)";
-    assert assertMsg (!(harness.packages ? build))
-      "packages.build must not exist (removed, issue #613)";
+    assert assertMsg (
+      !(harness.packages ? build)
+    ) "packages.build must not exist (removed, issue #613)";
     assert assertMsg (!(harness.packages ? run)) "packages.run must not exist (removed, issue #613)";
     pkgs.runCommand "run-build-aliases-removed" { } "touch $out";
 }
