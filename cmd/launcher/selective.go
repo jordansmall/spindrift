@@ -36,12 +36,12 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	}
 
 	// Build blocker graph and evict dependents with unmet external blockers.
-	edges, err := waves.BuildEdges(it, toWaveIssues(issues))
+	edges, sources, err := waves.BuildEdges(it, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
 
-	issues, notices := evictUnmetBlockers(c, it, cf, issues, edges)
+	issues, notices := evictUnmetBlockers(c, it, cf, issues, edges, sources)
 	for _, n := range notices {
 		fmt.Fprintln(stdout, n)
 	}
@@ -51,7 +51,7 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return nil
 	}
 
-	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(issues), Edges: edges})
+	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(issues), Edges: edges, Sources: sources})
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func confirmUnlabeled(n int, forceYes bool, stdin io.Reader, stdout io.Writer) b
 // evictUnmetBlockers removes issues whose unmerged blockers are absent from the
 // list. Eviction cascades: if A is evicted, anything blocked by A is also
 // evicted. Returns the retained issues and a notice string per evicted issue.
-func evictUnmetBlockers(c config, it forge.IssueTracker, cf forge.CodeForge, issues []issue, edges map[string][]string) ([]issue, []string) {
+func evictUnmetBlockers(c config, it forge.IssueTracker, cf forge.CodeForge, issues []issue, edges map[string][]string, sources waves.Sources) ([]issue, []string) {
 	// willRun tracks which issue numbers are still candidates.
 	willRun := make(map[string]bool, len(issues))
 	for _, iss := range issues {
@@ -132,8 +132,9 @@ func evictUnmetBlockers(c config, it forge.IssueTracker, cf forge.CodeForge, iss
 			break
 		}
 		for _, num := range toEvict {
-			notices = append(notices, fmt.Sprintf("⚠ #%s blocked by #%s (not in list, unmerged); skipping",
-				num, firstUnmet(c, it, cf, willRun, edges[num])))
+			dep := firstUnmet(c, it, cf, willRun, edges[num])
+			notices = append(notices, fmt.Sprintf("⚠ #%s blocked by %s (not in list, unmerged); skipping",
+				num, forge.Ref(dep, sources[num][dep])))
 			delete(willRun, num)
 		}
 	}

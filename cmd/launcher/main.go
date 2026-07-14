@@ -679,12 +679,12 @@ func run(lc *launchContext) error {
 	}
 
 	// Build the dependency graph for the batch.
-	edges, err := waves.BuildEdges(it, toWaveIssues(issues))
+	edges, sources, err := waves.BuildEdges(it, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
 
-	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: edges})
+	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: edges, Sources: sources})
 	if err != nil {
 		return err
 	}
@@ -720,7 +720,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			return nil, nil, err
 		}
 		waveIssues := toWaveIssues(issues)
-		edges, err := waves.BuildEdges(it, waveIssues)
+		edges, _, err := waves.BuildEdges(it, waveIssues)
 		if err != nil {
 			return nil, nil, err
 		}
