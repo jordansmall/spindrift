@@ -478,14 +478,15 @@ in
     ) "flakeModule must throw on unknown knob 'typoKnob' in settings.branches";
     pkgs.runCommand "flakemodule-rejects-unknown-settings" { } "touch $out";
 
-  # The dogfood's tuned leaf values (mergeMode, autoFormat, autoLint) must be
-  # defined exactly once, in nix/dogfood-defaults.nix, and consumed by both
-  # flake.nix's `spindrift` module config and fixtures.nix's direct
-  # mkHarness mirror — not hand-restated at each site (issue #459). Commit
-  # faf8d2d is that hand-restatement drifting once already. `prefetch` is
-  # not pinned here: fixtures.nix's harnessNoRevision legitimately reuses the
-  # same command string for the (out-of-scope, per issue #459) template
-  # mirror, so it isn't a safe drift discriminant.
+  # The dogfood's tuned leaf values (mergeMode, autoFormat, autoLint,
+  # filerModel) must be defined exactly once, in nix/dogfood-defaults.nix,
+  # and consumed by both flake.nix's `spindrift` module config and
+  # fixtures.nix's direct mkHarness mirror — not hand-restated at each site
+  # (issue #459). Commit faf8d2d is that hand-restatement drifting once
+  # already. `prefetch` is not pinned here: fixtures.nix's
+  # harnessNoRevision legitimately reuses the same command string for the
+  # (out-of-scope, per issue #459) template mirror, so it isn't a safe
+  # drift discriminant.
   dogfood-leaf-values-single-source =
     let
       inherit (pkgs.lib)
@@ -500,6 +501,7 @@ in
         ''mergeMode = "immediate"''
         "autoFormat = true"
         "autoLint = true"
+        ''filerModel = "claude-haiku-4-5-20251001"''
       ];
       leaked = filter (l: hasInfix l flakeSrc || hasInfix l fixturesSrc) literals;
     in
