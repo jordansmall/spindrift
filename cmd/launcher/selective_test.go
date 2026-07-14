@@ -7,6 +7,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/waves"
 )
 
 // TestSelectiveListDispatch_AllLabeledNoPrompt: when all listed issues carry the
@@ -260,8 +261,8 @@ func TestSelectiveListDispatch_UnmetExternalEviction(t *testing.T) {
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls: got %d, want 0 (evicted issue must not be dispatched)", len(fr.RunCalls))
 	}
-	if !strings.Contains(stdout.String(), "99") {
-		t.Errorf("output should mention unmet blocker #99, got: %s", stdout.String())
+	if !strings.Contains(stdout.String(), "#99 (body)") {
+		t.Errorf("output should mention unmet blocker #99, body-sourced end to end, got: %s", stdout.String())
 	}
 }
 
@@ -382,7 +383,7 @@ func TestEvictUnmetBlockers_EvictsExternalUnmet(t *testing.T) {
 	issues := []issue{{number: "15", title: "needs 99"}}
 	edges := map[string][]string{"15": {"99"}}
 
-	kept, notices := evictUnmetBlockers(c, fc, fc, issues, edges)
+	kept, notices := evictUnmetBlockers(c, fc, fc, issues, edges, nil)
 
 	if len(kept) != 0 {
 		t.Errorf("kept = %v, want empty (issue should be evicted)", kept)
@@ -392,6 +393,31 @@ func TestEvictUnmetBlockers_EvictsExternalUnmet(t *testing.T) {
 	}
 	if !strings.Contains(notices[0], "15") || !strings.Contains(notices[0], "99") {
 		t.Errorf("notice should mention #15 and #99, got: %s", notices[0])
+	}
+}
+
+// TestEvictUnmetBlockers_NoticeAnnotatesSource verifies the eviction notice
+// carries the source (native relationship vs body-text parsing) the evicted
+// blocker ref was resolved from, mirroring preview's annotation so an
+// operator can tell drift between a stale body section and native links
+// apart from the notice alone.
+func TestEvictUnmetBlockers_NoticeAnnotatesSource(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Labels: []string{}})
+	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Labels: []string{}})
+
+	issues := []issue{{number: "15", title: "needs 99"}}
+	edges := map[string][]string{"15": {"99"}}
+	sources := waves.Sources{"15": {"99": forge.DepSourceNative}}
+
+	_, notices := evictUnmetBlockers(c, fc, fc, issues, edges, sources)
+
+	if len(notices) != 1 {
+		t.Fatalf("notices = %v, want 1 notice", notices)
+	}
+	if !strings.Contains(notices[0], "#99 (native)") {
+		t.Errorf("notice missing native source annotation, got: %s", notices[0])
 	}
 }
 
@@ -410,7 +436,7 @@ func TestEvictUnmetBlockers_KeepsInListBlocker(t *testing.T) {
 	}
 	edges := map[string][]string{"15": {"10"}}
 
-	kept, notices := evictUnmetBlockers(c, fc, fc, issues, edges)
+	kept, notices := evictUnmetBlockers(c, fc, fc, issues, edges, nil)
 
 	if len(kept) != 2 {
 		t.Errorf("kept = %v, want 2 issues (both should survive)", kept)
@@ -432,7 +458,7 @@ func TestEvictUnmetBlockers_KeepsMergedBlocker(t *testing.T) {
 	issues := []issue{{number: "15", title: "needs 99"}}
 	edges := map[string][]string{"15": {"99"}}
 
-	kept, notices := evictUnmetBlockers(c, fc, fc, issues, edges)
+	kept, notices := evictUnmetBlockers(c, fc, fc, issues, edges, nil)
 
 	if len(kept) != 1 {
 		t.Errorf("kept = %v, want [#15] (closed blocker satisfies edge)", kept)
@@ -461,7 +487,7 @@ func TestEvictUnmetBlockers_CascadingEviction(t *testing.T) {
 		"10": {"99"},  // in-list blocker (but 99 will be evicted)
 	}
 
-	kept, notices := evictUnmetBlockers(c, fc, fc, issues, edges)
+	kept, notices := evictUnmetBlockers(c, fc, fc, issues, edges, nil)
 
 	if len(kept) != 0 {
 		t.Errorf("kept = %v, want empty (both should cascade-evict)", kept)

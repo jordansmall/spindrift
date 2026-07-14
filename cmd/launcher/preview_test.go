@@ -72,7 +72,8 @@ func TestPrintPlan_AnnotatesBlockers(t *testing.T) {
 			{Number: "99", Title: "blocker issue"},
 			{Number: "15", Title: "dependent"},
 		},
-		Edges: map[string][]string{"15": {"99"}},
+		Edges:   map[string][]string{"15": {"99"}},
+		Sources: waves.Sources{"15": {"99": forge.DepSourceNative}},
 	}
 
 	var buf bytes.Buffer
@@ -82,7 +83,7 @@ func TestPrintPlan_AnnotatesBlockers(t *testing.T) {
 	if !strings.Contains(out, "2 issue(s) would be dispatched") {
 		t.Errorf("output missing dispatch count; got:\n%s", out)
 	}
-	if !strings.Contains(out, "#15  dependent  (blocked by #99)") {
+	if !strings.Contains(out, "#15  dependent  (blocked by #99 (native))") {
 		t.Errorf("output missing blocker annotation for #15; got:\n%s", out)
 	}
 	for _, line := range strings.Split(out, "\n") {
@@ -168,14 +169,46 @@ func TestPreviewIssues_BareAnnotatesBlockers(t *testing.T) {
 	if !strings.Contains(out, "#15") {
 		t.Errorf("output missing #15; got:\n%s", out)
 	}
-	// #15 must show its blocker annotation.
-	if !strings.Contains(out, "blocked by #99") {
-		t.Errorf("output missing blocker annotation for #15; got:\n%s", out)
+	// #15 must show its blocker annotation, sourced from body-text parsing
+	// (the Fake's blocker ref came from #15's "## Blocked by" section, not
+	// NativeDeps).
+	if !strings.Contains(out, "blocked by #99 (body)") {
+		t.Errorf("output missing body-sourced blocker annotation for #15; got:\n%s", out)
 	}
 	// #99 has no blockers — its own line must not carry a "blocked by" suffix.
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "blocker issue") && strings.Contains(line, "blocked by") {
 			t.Errorf("#99 line should not have blocker annotation; got: %s", line)
 		}
+	}
+}
+
+// TestPreviewIssues_MixedBatchAnnotatesEachSource verifies that in a batch
+// spanning both sources, preview labels each dependent's blocker with the
+// source that specific ref was resolved from — a native-relationship ref on
+// one issue does not bleed into a body-sourced ref on another.
+func TestPreviewIssues_MixedBatchAnnotatesEachSource(t *testing.T) {
+	c := baseConfig()
+	c.repoSlug = "owner/repo"
+	c.label = "ready-for-agent"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "50", Title: "native blocker", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "60", Title: "body blocker", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "10", Title: "native dependent", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "20", Title: "body dependent", Labels: []string{c.label},
+		Body: "## Blocked by\n- #60\n"})
+	fc.NativeDeps = map[string][]string{"10": {"50"}}
+
+	var buf bytes.Buffer
+	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
+		t.Fatalf("previewIssues: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "#10  native dependent  (blocked by #50 (native))") {
+		t.Errorf("output missing native-sourced annotation for #10; got:\n%s", out)
+	}
+	if !strings.Contains(out, "#20  body dependent  (blocked by #60 (body))") {
+		t.Errorf("output missing body-sourced annotation for #20; got:\n%s", out)
 	}
 }

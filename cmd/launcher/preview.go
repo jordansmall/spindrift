@@ -34,11 +34,11 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Wri
 		fmt.Fprintf(w, "repo: %s  merge-mode: %s\nno open '%s' issues — nothing to dispatch.\n", c.repoSlug, c.mergeMode, c.label)
 		return nil
 	}
-	edges, err := waves.BuildEdges(it, toWaveIssues(issues))
+	edges, sources, err := waves.BuildEdges(it, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
-	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: edges})
+	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: edges, Sources: sources})
 	if err != nil {
 		return err
 	}
@@ -62,13 +62,13 @@ func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, w
 	}
 
 	// Parse blocker graph.
-	edges, err := waves.BuildEdges(it, toWaveIssues(issues))
+	edges, sources, err := waves.BuildEdges(it, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
 
 	// Eviction pass (dry-run; no side effects).
-	kept, notices := evictUnmetBlockers(c, it, cf, issues, edges)
+	kept, notices := evictUnmetBlockers(c, it, cf, issues, edges, sources)
 	for _, n := range notices {
 		fmt.Fprintln(w, n)
 	}
@@ -78,7 +78,7 @@ func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, w
 		fmt.Fprintf(w, "no issues would be dispatched after eviction\n")
 		return nil
 	}
-	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(kept), Edges: edges})
+	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(kept), Edges: edges, Sources: sources})
 	if err != nil {
 		return err
 	}
@@ -94,7 +94,11 @@ func printPlan(w io.Writer, plan waves.Plan) {
 	for _, iss := range plan.Issues {
 		blockers := plan.Edges[iss.Number]
 		if len(blockers) > 0 {
-			fmt.Fprintf(w, "  #%s  %s  (blocked by #%s)\n", iss.Number, iss.Title, strings.Join(blockers, ", #"))
+			refs := make([]string, len(blockers))
+			for i, b := range blockers {
+				refs[i] = forge.Ref(b, plan.Sources[iss.Number][b])
+			}
+			fmt.Fprintf(w, "  #%s  %s  (blocked by %s)\n", iss.Number, iss.Title, strings.Join(refs, ", "))
 		} else {
 			fmt.Fprintf(w, "  #%s  %s\n", iss.Number, iss.Title)
 		}
