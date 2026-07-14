@@ -753,7 +753,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	}
 
 	fresh := func() (bool, bool, string) {
-		res := freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageDrv, eval)
+		res := freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
 		return res.Applicable, res.Fresh, res.Message
 	}
 

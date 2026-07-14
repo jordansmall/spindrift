@@ -19,7 +19,7 @@ import (
 // and cascade-eviction notices without launching any Box or prompting; when
 // issueNums is empty it falls back to queue-drain discovery.
 func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Writer, issueNums []string, pwd string, eval freshness.Evaluator) error {
-	res := freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageDrv, eval)
+	res := freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
 	fmt.Fprintf(w, "image-freshness: %s\n", res.Message)
 
 	if len(issueNums) > 0 {
