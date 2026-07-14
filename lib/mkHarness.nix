@@ -462,6 +462,16 @@ let
   # into each container, derived from schema boxEnv=true entries.
   boxEnvVarsPreamble = preambles.renderBoxEnvVarsPreamble schema;
 
+  # buildGoModule's checkPhase runs `go test` from within its src, so docs/
+  # must sit alongside cmd/launcher there too, mirroring the repo layout, for
+  # TestReferenceDocLabelSnippetMatchesTriageDefaults's ../../docs/reference.md
+  # path to resolve (#611).
+  launcherSrc = hostPkgs.runCommand "launcher-src" { } ''
+    mkdir -p $out/cmd/launcher
+    cp -r ${../cmd/launcher}/. $out/cmd/launcher/
+    cp -r ${../docs} $out/docs
+  '';
+
   # The Go launcher binary, built hermetically by buildGoModule.
   #
   # vendorHash policy:
@@ -477,7 +487,8 @@ let
   launcherBin = hostPkgs.buildGoModule {
     pname = "spindrift-launcher";
     version = spindriftVersion;
-    src = ../cmd/launcher;
+    src = launcherSrc;
+    modRoot = "cmd/launcher";
     vendorHash = null;
     subPackages = [ "." ]; # build only the launcher; heartbeat-filter is in-box only
     ldflags = [
