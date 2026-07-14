@@ -79,10 +79,15 @@ in
 
     # The dogfood harness itself opts into the Filer (issue #616): the
     # baked template must carry a filer entry at the recommended model.
+    # Scout also defaults to claude-haiku-4-5-20251001 (see agents-json-baked
+    # above), so the model literal is matched against the filer object only
+    # -- it has no nested braces (tools is an array), so `[^}]*` can't
+    # overrun into the next top-level key -- not the whole template line.
     dogfood_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${harness.agentFiles}/agent/entrypoint.sh)
-    grep -q '"filer"' <<<"$dogfood_line" \
+    filer_entry=$(grep -oE '"filer":\{[^}]*\}' <<<"$dogfood_line" || true)
+    [ -n "$filer_entry" ] \
       || { echo "dogfood harness missing filer entry in baked template" >&2; exit 1; }
-    grep -q 'claude-haiku-4-5-20251001' <<<"$dogfood_line" \
+    grep -q 'claude-haiku-4-5-20251001' <<<"$filer_entry" \
       || { echo "dogfood harness filer entry missing the configured model" >&2; exit 1; }
 
     touch $out
