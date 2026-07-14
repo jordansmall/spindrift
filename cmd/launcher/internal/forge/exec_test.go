@@ -36,6 +36,100 @@ printf '%%s\n' "$@" > "%s/call-$(printf '%%02d' $n).txt"
 	return dir
 }
 
+// TestExecClient_DepsOf_NativeWins verifies that when the native
+// dependencies API returns entries, DepsOf uses them and does not fall
+// back to body parsing at all — the fake gh script only handles the
+// dependencies call; if DepsOf also called `gh issue view`, that call
+// would fail and DepsOf would return an error.
+func TestExecClient_DepsOf_NativeWins(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*dependencies/blocked_by*)
+	printf '3\n5\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	deps, err := c.DepsOf("10")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	if len(deps) != 2 || deps[0] != "3" || deps[1] != "5" {
+		t.Fatalf("want [3 5], got %v", deps)
+	}
+}
+
+// TestExecClient_DepsOf_FallsBackOnEmptyNative verifies that when the
+// native dependencies API succeeds but returns no relationships, DepsOf
+// falls back to parsing the issue body for blocker refs.
+func TestExecClient_DepsOf_FallsBackOnEmptyNative(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*dependencies/blocked_by*)
+	printf ''
+	;;
+*"issue view"*)
+	printf '{"number":10,"title":"t","body":"This depends on #7.","state":"OPEN","labels":[]}'
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	deps, err := c.DepsOf("10")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	if len(deps) != 1 || deps[0] != "7" {
+		t.Fatalf("want [7], got %v", deps)
+	}
+}
+
+// TestExecClient_DepsOf_FallsBackOnNativeError verifies that when the
+// native dependencies API call errors (e.g. unsupported GHES, missing
+// scope), DepsOf degrades to body parsing rather than failing dispatch.
+func TestExecClient_DepsOf_FallsBackOnNativeError(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*dependencies/blocked_by*)
+	exit 1
+	;;
+*"issue view"*)
+	printf '{"number":10,"title":"t","body":"blocked by #9","state":"OPEN","labels":[]}'
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	deps, err := c.DepsOf("10")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	if len(deps) != 1 || deps[0] != "9" {
+		t.Fatalf("want [9], got %v", deps)
+	}
+}
+
+// TestExecClient_DepsOf_NativeIgnoresBody verifies that when an issue has
+// both native dependencies and body-text blocker refs, DepsOf reports the
+// native set only — body refs are ignored, not merged.
+func TestExecClient_DepsOf_NativeIgnoresBody(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*dependencies/blocked_by*)
+	printf '4\n'
+	;;
+*"issue view"*)
+	printf '{"number":10,"title":"t","body":"blocked by #99","state":"OPEN","labels":[]}'
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", DispatchLabels{}, "agent/issue-")
+	deps, err := c.DepsOf("10")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	if len(deps) != 1 || deps[0] != "4" {
+		t.Fatalf("want [4] (native only, body ignored), got %v", deps)
+	}
+}
+
 // TestProbe_PositionalSlug verifies that Probe passes the slug as a positional
 // argument to `gh repo view` with no --repo/-R flag.
 func TestProbe_PositionalSlug(t *testing.T) {

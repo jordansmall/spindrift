@@ -90,14 +90,45 @@ func (e *execClient) TransitionState(num string, from, to DispatchState) error {
 	return nil
 }
 
-// DepsOf returns the canonical dependency IDs for issue num by fetching its
-// body and parsing GitHub-format blocker references.
+// DepsOf returns the canonical dependency IDs for issue num, preferring
+// GitHub's native issue-dependencies API and falling back to body-text
+// parsing (inline refs / "## Blocked by" section) when the native lookup
+// errors or yields no relationships.
 func (e *execClient) DepsOf(num string) ([]string, error) {
+	deps, err := e.nativeDepsOf(num)
+	if err == nil && len(deps) > 0 {
+		return deps, nil
+	}
+	if err != nil {
+		fmt.Printf("WARNING: native dependency lookup for issue %s failed (%v); falling back to body parsing\n", num, err)
+	}
 	iss, err := e.Issue(num)
 	if err != nil {
 		return nil, err
 	}
 	return ParseBlockerRefs(iss.Body), nil
+}
+
+// nativeDepsOf queries GitHub's issue-dependencies API for the issues that
+// block num.
+func (e *execClient) nativeDepsOf(num string) ([]string, error) {
+	cmd := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/issues/%s/dependencies/blocked_by", e.repo, num),
+		"--jq", ".[].number",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh api dependencies/blocked_by %s: %w", num, err)
+	}
+	var deps []string
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			deps = append(deps, line)
+		}
+	}
+	return deps, nil
 }
 
 func (e *execClient) Comment(num, body string) error {
