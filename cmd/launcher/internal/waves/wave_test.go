@@ -218,7 +218,7 @@ func TestDispatchWave_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	// before returning, simulating a box that ran successfully and emitted its result.
 	fr := runner.NewFake()
 	fr.WriteToOutput = []byte(fmt.Sprintf(
-		"SPINDRIFT_OUTCOME issue=1 pr=%s status=ready note=ok\n", prURL,
+		"SPINDRIFT_OUTCOME issue=1 landing=%s status=ready note=ok\n", prURL,
 	))
 
 	dir := tempLogDir(t)
@@ -256,7 +256,7 @@ func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 
 	fr := runner.NewFake()
 	fr.WriteToOutput = []byte(fmt.Sprintf(
-		"SPINDRIFT_OUTCOME issue=1 pr=%s status=ready note=ok\n", branch,
+		"SPINDRIFT_OUTCOME issue=1 landing=%s status=ready note=ok\n", branch,
 	))
 
 	dir := tempLogDir(t)
@@ -297,7 +297,7 @@ func TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 
 	fr := runner.NewFake()
 	fr.WriteToOutput = []byte(fmt.Sprintf(
-		"SPINDRIFT_OUTCOME issue=1 pr=%s status=merged note=ok\n", branch,
+		"SPINDRIFT_OUTCOME issue=1 landing=%s status=merged note=ok\n", branch,
 	))
 
 	dir := tempLogDir(t)

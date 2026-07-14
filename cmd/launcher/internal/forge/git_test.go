@@ -173,10 +173,10 @@ func TestGitClient_Rebase_ForcePushesRebasedBranch(t *testing.T) {
 
 // TestGitClient_Merge_RejectsFlagLikeRef verifies that Merge refuses a landing
 // ref starting with "-" instead of passing it to git, where it would be
-// parsed as an option (e.g. a maliciously crafted outcome line's pr= field —
-// the outcome line is untrusted input per CLAUDE.md's comment-injection trust
-// boundary). Regression test for argument-injection RCE via `git fetch origin
-// <branch>`.
+// parsed as an option (e.g. a maliciously crafted outcome line's landing=
+// field — the outcome line is untrusted input per CLAUDE.md's
+// comment-injection trust boundary). Regression test for argument-injection
+// RCE via `git fetch origin <branch>`.
 func TestGitClient_Merge_RejectsFlagLikeRef(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")

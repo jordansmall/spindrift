@@ -46,7 +46,7 @@ func newTestDispatch(t *testing.T, cfg Config, fr runner.Runner, drv fakeDriver,
 // sleep calls.
 func TestDispatchWithRetry_SuccessOnFirstRun(t *testing.T) {
 	fr := runner.NewFake() // RunErr = nil → success
-	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok\n")
 	called := false
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		called = true
@@ -109,7 +109,7 @@ func TestDispatchWithRetry_SuccessWithoutOutcomeClassifies(t *testing.T) {
 // classification.
 func TestDispatchWithRetry_SuccessWithMalformedOutcomeSetsParseErr(t *testing.T) {
 	fr := runner.NewFake()
-	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1\n") // missing pr= and status=
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1\n") // missing landing= and status=
 	called := false
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		called = true
@@ -167,7 +167,7 @@ func TestDispatchWithRetry_HoldThenSuccess(t *testing.T) {
 
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil} // first fails, second succeeds
-	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok\n")
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
 	}}
@@ -199,7 +199,7 @@ func TestDispatchWithRetry_HoldJitterAdded(t *testing.T) {
 
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil}
-	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok\n")
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
 	}}
@@ -258,7 +258,7 @@ func TestDispatchWithRetry_HoldNotCountedAfterProgress(t *testing.T) {
 	fr := runner.NewFake()
 	// run1 fails (429), run2 fails (529 — different class), run3 succeeds
 	fr.RunErrs = []error{boxErr, boxErr, nil}
-	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok\n")
 
 	rateLimitCls := outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}
 	overloadedCls := outcome.Classification{Class: outcome.Transient, Reason: outcome.Overloaded}
@@ -293,7 +293,7 @@ func TestDispatchWithRetry_HoldNotCountedAfterProgress(t *testing.T) {
 func TestDispatchWithRetry_TransientBackoffRetryAndSucceed(t *testing.T) {
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil} // first fails (529), second succeeds
-	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok\n")
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		return outcome.Classification{Class: outcome.Transient, Reason: outcome.Overloaded}, nil
 	}}
@@ -354,7 +354,7 @@ func TestDispatchWithRetry_TransientCapExhausted(t *testing.T) {
 func TestDispatchWithRetry_RateLimitWithoutResetAtUsesBackoff(t *testing.T) {
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil}
-	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok\n")
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: nil}, nil
 	}}
@@ -383,7 +383,7 @@ func TestDispatchWithRetry_HoldWithPastResetUsesJitterOnly(t *testing.T) {
 
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil}
-	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok\n")
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
 	}}
@@ -414,7 +414,7 @@ func TestDispatchWithRetry_ZeroExitRateLimitHoldsAndRedispatches(t *testing.T) {
 	fr.RunFunc = func(box runner.Box) error {
 		calls++
 		if calls == 2 && box.Output != nil {
-			box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")) //nolint:errcheck
+			box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok\n")) //nolint:errcheck
 		}
 		return nil // always exits zero, first attempt writes no outcome line
 	}
@@ -455,7 +455,7 @@ func TestDispatchWithRetry_ZeroExitTransientWithoutResetAtUsesBackoff(t *testing
 	fr.RunFunc = func(box runner.Box) error {
 		calls++
 		if calls == 2 && box.Output != nil {
-			box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")) //nolint:errcheck
+			box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok\n")) //nolint:errcheck
 		}
 		return nil // always exits zero
 	}
@@ -560,7 +560,7 @@ func TestDispatchWithRetry_AppliesToFixToo(t *testing.T) {
 
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil} // fix pass fails once (429), then succeeds
-	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 pr=https://github.com/o/r/pull/1 status=ready note=ok\n")
+	fr.WriteToOutput = []byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok\n")
 	drv := fakeDriver{ClassifyFn: func(string) (outcome.Classification, error) {
 		return outcome.Classification{Class: outcome.Transient, Reason: outcome.RateLimit, ResetAt: &resetAt}, nil
 	}}
