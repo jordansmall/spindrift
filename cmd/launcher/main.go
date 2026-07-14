@@ -458,10 +458,10 @@ func dispatchConfig(c config, cf forge.CodeForge) dispatch.Config {
 		HoldJitterSecs:        c.holdJitterSecs,
 		DriverSessionCacheDir: c.driverSessionCacheDir,
 	}
-	if pr, ok := cf.(forge.PRForge); ok {
+	if _, ok := cf.(forge.PRForge); ok {
 		cfg.OpenPRForIssue = func(number string) (bool, error) {
-			_, found, err := pr.OpenPRForBranch(cf.AgentBranch(number))
-			return found, err
+			res, err := forge.ResolveOpenPR(cf, number)
+			return res.Found, err
 		}
 	}
 	return cfg
@@ -575,21 +575,6 @@ func checkAutoMergePreflight(c config, cf forge.CodeForge) error {
 	return nil
 }
 
-// openPRForBranch wraps cf.(forge.PRForge).OpenPRForBranch to unpack the PR
-// struct for callers that need the URL and draft flag separately. A
-// push-only Code Forge (no PRForge) never has a PR to discover.
-func openPRForBranch(cf forge.CodeForge, branch string) (url string, isDraft bool, found bool, err error) {
-	prForge, ok := cf.(forge.PRForge)
-	if !ok {
-		return "", false, false, nil
-	}
-	pr, ok, err := prForge.OpenPRForBranch(branch)
-	if err != nil || !ok {
-		return "", false, false, err
-	}
-	return pr.URL, pr.IsDraft, true, nil
-}
-
 // Sentinel error translated to a specific exit code so callers like
 // dogfood.sh can distinguish termination reasons without a separate gh
 // probe.
@@ -665,16 +650,16 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	}
 	iss := issue{number: fi.Number, title: fi.Title}
 	branch := cf.AgentBranch(iss.number)
-	prURL, isDraft, found, prErr := openPRForBranch(cf, branch)
+	res, prErr := forge.ResolveOpenPR(cf, iss.number)
 	if prErr != nil {
 		return fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr)
 	}
-	if !found {
+	if !res.Found {
 		fmt.Printf("    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
 		return fmt.Errorf("issue %s: no open PR", issueNum)
 	}
-	if isDraft {
-		fmt.Printf("    #%s  pr=%s  status=skipped  note=draft PR; recover operates on non-draft PRs only\n", issueNum, prURL)
+	if res.IsDraft {
+		fmt.Printf("    #%s  pr=%s  status=skipped  note=draft PR; recover operates on non-draft PRs only\n", issueNum, res.URL)
 		return fmt.Errorf("issue %s: draft PR", issueNum)
 	}
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
@@ -682,7 +667,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	}
 	d := f.New(iss.number, iss.title)
 	defer d.Close()
-	s.SettleAdopted(d, iss.number, prURL)
+	s.SettleAdopted(d, iss.number, res.URL)
 	return nil
 }
 

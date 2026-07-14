@@ -20,14 +20,9 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 		return
 	}
 	if !result.OutcomeFound {
-		var pr forge.PR
-		var prFound bool
-		var prErr error
 		branch := s.cf.AgentBranch(num)
-		if s.pr != nil {
-			pr, prFound, prErr = s.pr.OpenPRForBranch(branch)
-		}
-		if prErr != nil || !prFound {
+		res, prErr := forge.ResolveOpenPR(s.cf, num)
+		if prErr != nil || !res.Found {
 			clsNote := ""
 			if result.ClassifyErr != nil {
 				fmt.Fprintf(os.Stderr, "    ?? #%s: classify: %v\n", num, result.ClassifyErr)
@@ -40,11 +35,11 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 			fmt.Printf("    #%s  status=missing%s  note=no outcome in log\n", num, clsNote)
 			return
 		}
-		if pr.IsDraft {
-			fmt.Printf("    #%s  pr=%s  status=blocked  note=draft PR on %s; no outcome line\n", num, pr.URL, branch)
+		if res.IsDraft {
+			fmt.Printf("    #%s  pr=%s  status=blocked  note=draft PR on %s; no outcome line\n", num, res.URL, branch)
 			return
 		}
-		s.SettleAdopted(d, num, pr.URL)
+		s.SettleAdopted(d, num, res.URL)
 		return
 	}
 
