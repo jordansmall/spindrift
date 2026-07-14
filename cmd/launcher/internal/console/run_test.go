@@ -92,6 +92,50 @@ func TestRun_BareFilterCommand_RestoresFullList(t *testing.T) {
 	}
 }
 
+// TestRun_PickCommand_PromotesAndQueues verifies "p <num>" promotes the
+// named issue on the tracker and renders it queued — the operator's launch
+// button (#646).
+func TestRun_PickCommand_PromotesAndQueues(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	var out strings.Builder
+	if err := Run(f, t.TempDir(), strings.NewReader("p 42\nq\n"), &out); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.String(), "queued") {
+		t.Errorf("output = %q, want the pick rendered queued", out.String())
+	}
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasLabel(iss, "ready-for-agent") {
+		t.Errorf("issue #42 labels = %v, want ready-for-agent promoted onto it", iss.Labels)
+	}
+}
+
+// TestRun_UnpickCommand_RemovesFromQueue verifies "u <num>" removes a
+// queued pick and makes zero further tracker calls.
+func TestRun_UnpickCommand_RemovesFromQueue(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	var out strings.Builder
+	if err := Run(f, t.TempDir(), strings.NewReader("p 42\nu 42\nq\n"), &out); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	callsAfterPick := len(f.TransitionStateCalls)
+	if callsAfterPick != 1 {
+		t.Fatalf("TransitionStateCalls after pick+unpick = %d, want 1 (unpick makes none)", callsAfterPick)
+	}
+	if strings.Count(out.String(), "queued") != 1 {
+		t.Errorf("output = %q, want \"queued\" to appear only in the pick's own render, not after unpick", out.String())
+	}
+}
+
 // newAlphaBetaFake returns a Fake tracker with two open issues, "alpha"
 // labeled "a" and "beta" labeled "b" — shared fixture for filter tests.
 func newAlphaBetaFake() *forge.Fake {
