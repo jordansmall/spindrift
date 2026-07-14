@@ -375,6 +375,9 @@ Type a command and press enter:
 | `f` / `filter` (no text) | clear the filter, restoring the full list |
 | `p <num>` / `pick <num>` | Pick issue `<num>` — the launch button |
 | `u <num>` / `unpick <num>` | Unpick a queued-but-unlaunched pick |
+| `d <num>` / `drill <num>` | Drill in: open `<num>`'s rendered transcript |
+| `t` / `toggle` | toggle the open transcript between rendered and raw |
+| `x` / `close` | close the transcript view, back to the backlog/queue |
 | `q` / `quit` | exit cleanly |
 
 If a `.dogfood.pid` file is present at startup — a headless loop
@@ -400,6 +403,18 @@ the durable promotion a pick already recorded.
 Every pick defaults to a `work` Dispatch; the record carries a kind field so
 research picks can arrive later as a UI gesture rather than a remodel — only
 `work` is exposed today.
+
+**Drill-in** (`d <num>`) opens `<num>`'s rendered transcript: assistant turns
+and tool calls, readable, spanning the whole Dispatch — initial run, every fix
+pass, and conflict-resolve — concatenated in order with a `=== pass: ... ===`
+boundary between them, since the Dispatch (claim to verdict) is the domain
+object and per-pass logs are storage detail. Re-running `r`/`refresh` while a
+transcript is open reloads it too, so a running Dispatch's view grows as you
+refresh. `t`/`toggle` switches to the raw byte-exact log for debugging the
+harness itself, and back; `x`/`close` returns to the backlog/queue. Rendering
+is a per-Driver strategy (beside heartbeat parsing and usage extraction) — a
+Driver with no configured strategy, or an issue with no Dispatch logs on disk
+yet, surfaces an error in place of the transcript rather than a blank pane.
 
 ## Documentation
 
