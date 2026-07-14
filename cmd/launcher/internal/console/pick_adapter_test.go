@@ -53,6 +53,24 @@ func TestPickIssue_TransitionErr_ReturnsFailedMsg(t *testing.T) {
 	}
 }
 
+// TestPickIssue_LeavesIssueDispatchable_NeverInProgress verifies a pick
+// stops at the promotion step — the issue is Dispatchable, never
+// InProgress, until something actually claims and launches it (#646 AC3).
+func TestPickIssue_LeavesIssueDispatchable_NeverInProgress(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing"})
+
+	PickIssue(f, "42", "fix the thing", KindWork)
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasLabel(iss, "agent-in-progress") {
+		t.Errorf("issue #42 labels = %v, want no in-progress label from a pick alone", iss.Labels)
+	}
+}
+
 func hasLabel(iss forge.Issue, label string) bool {
 	for _, l := range iss.Labels {
 		if l == label {
