@@ -298,6 +298,33 @@ To opt out, don't bake the skill: drop `caveman` from the consumer's
 only when `caveman.md` is actually present at the baked skills path, so a
 consumer that skips it gets prompts with zero caveman residue.
 
+## Console
+
+`spindrift console` opens the interactive Console (ADR 0023) in read-only
+form: an in-terminal loop that lists every open issue from the Issue
+Tracker — number, title, labels — oldest-first per dispatch order.
+
+```sh
+spindrift console
+```
+
+Type a command and press enter:
+
+| command | effect |
+|---------|--------|
+| `r` / `refresh` | re-query the Issue Tracker and re-render the backlog |
+| `f <text>` / `filter <text>` | narrow the list to issues with a label containing `<text>` |
+| `f` / `filter` (no text) | clear the filter, restoring the full list |
+| `q` / `quit` | exit cleanly |
+
+If a `.dogfood.pid` file is present at startup — a headless loop
+(`dogfood.sh`) already draining the same queue — the Console prints an
+informational notice and keeps going; it never blocks or refuses to start,
+and the two are safe to run side by side (claims are atomic label swaps).
+
+This tracer-bullet slice is browsing only: it does not yet Pick issues or
+launch Dispatches (see #644 for the full picks-only driving loop).
+
 ## Documentation
 
 | document | what's in it |
