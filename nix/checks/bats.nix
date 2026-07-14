@@ -86,6 +86,10 @@ in
         # prepends this before exec-ing the entrypoint so the bats suite
         # exercises the same bodies the image bakes in (issue #433).
         DRIVER_PREAMBLE_FILE = batsHarness.driverFunctionsFile;
+        # The Conditional fragment registry's rendered loop input and
+        # substitution allowlist (issue #622); helper.bash prepends this
+        # alongside DRIVER_PREAMBLE_FILE for the same reason.
+        FRAGMENT_REGISTRY_FILE = batsHarness.fragmentRegistryFile;
         # Harnesses with baked skills for skills-precedence tests.
         SKILLS_RUN_CMD = "${skillsHarness.run}/bin/run";
         SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.run}/bin/run";
