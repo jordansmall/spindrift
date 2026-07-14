@@ -90,6 +90,12 @@ an explicit override into hidden machine state.
   establishes — an image is never reused across a freshness boundary — by
   moving the boundary from the invocation to the slot refill: a long-running
   dispatch mode re-checks freshness before each launch (fetch + eval of the
-  image drvPath at the base ref, compared against the baked `IMAGE_DRV`) and
-  exits for rebuild only when the hash actually changed. That work is
+  image's output identity — the `imageHash`/`spindrift:<hash>` tag — at the
+  base ref, compared against the loaded image's baked `IMAGE_TAG`) and exits
+  for rebuild only when the tag actually changed. Comparing the tag, the same
+  currency `build`/`EnsureReady` gates a rebuild on, keeps the two checks
+  consistent by construction: a stale verdict here always corresponds to a
+  tag `build` would find absent and so actually rebuild (#587; a `drvPath` vs
+  baked `IMAGE_DRV` comparison could desync with no path to reconcile,
+  stranding dispatch in an unbreakable rebuild loop). That work is
   investigated on #478 and does not change this decision; it extends it.
