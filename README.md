@@ -55,6 +55,7 @@ cp harness.env.example harness.env       # fill in REPO_SLUG, GH_TOKEN, Claude a
 nix develop                              # enter the dev shell — puts spindrift on PATH
 spindrift build                          # realize the image, then load it  (slow first time)
 spindrift dispatch                       # launch one container per ready-for-agent issue
+spindrift research                       # advise-only: launch one container per agent-research issue
 ```
 
 Run commands **from your Consumer flake's directory**: `spindrift build` reads the
@@ -62,8 +63,8 @@ flake from `$PWD` for its container fallback, and `spindrift dispatch` reads `ha
 from `$PWD` (the same convention). Per-issue logs land in `logs/issue-<n>.log`.
 
 `spindrift` ships bash tab-completion, generated from the same schema as
-`--help` and the man page: subcommands (`dispatch`, `preview`, `build`,
-`recover`, `doctor`) complete as the first word, every flag (including the
+`--help` and the man page: subcommands (`dispatch`, `research`, `preview`,
+`build`, `recover`, `doctor`) complete as the first word, every flag (including the
 `--issue` alias and the secret `--*-file` flags) completes anywhere after
 it, and a `--*-file` flag's argument completes as a filesystem path. `nix
 develop` puts the completion script on `share/bash-completion/completions`
@@ -240,6 +241,46 @@ An issue may also declare a `## Touches` section listing the paths it expects
 to change; dispatch defers it while its touch-set overlaps an already
 in-progress issue's, retrying once the collider completes — see [Declared
 touch-set overlap](docs/reference.md#declared-touch-set-overlap).
+
+## Research dispatch
+
+`spindrift research` (and the selective `research <nums>` form, mirroring
+`dispatch <nums>`) is a second, advise-only Dispatch kind (ADR 0022): each
+container reviews one posted issue from inside a fresh clone of the Target
+repo, then posts a single structured comment carrying a verdict — it never
+edits the issue body, never closes it, and never promotes it to
+`ready-for-agent`. A human always acts on the verdict.
+
+```
+spindrift research  ─▶  find agent-research issues
+                          └─ one container per issue
+                               clone repo → review issue → post verdict comment
+                               └─ SPINDRIFT_OUTCOME issue=N landing=<comment-url> status=recommend|reject|unclear|blocked
+```
+
+Research shares the launcher's four canonical Dispatch states with `dispatch`,
+but maps them to its own disjoint `github` label family — claiming an issue
+never touches `ready-for-agent`/`agent-in-progress`/`agent-complete`, so an
+issue can legitimately wear both a work label and a research label at once:
+
+| label | meaning |
+|-------|---------|
+| `agent-research` | dual-role: standing state and trigger — apply it to fire a research dispatch |
+| `agent-research-in-progress` | a Box is reviewing the issue |
+| `agent-research-recommend` | relevant and enriched — promote it |
+| `agent-research-reject` | false positive, not worth doing, or a duplicate (named in the comment) — close it |
+| `agent-research-unclear` | relevance needs an answer only a human has — answer, then re-apply `agent-research` |
+| `agent-research-failed` | the Box crashed or produced no verdict — a human triage queue, distinct from `agent-research-reject` (a *successful* "this is a false positive" conclusion is `Complete`, never `Failed`) |
+
+Settle is strictly one-shot: parse the Outcome line, apply exactly one
+terminal label, done — no CI watch, no self-heal fix passes, no merge, since
+research never lands code. Retry is the same gesture as `dispatch`:
+re-applying `agent-research`. Research dispatches also ignore blocker edges
+entirely (enriching an issue is useful *especially* while it waits on a
+blocker) and are homogeneous in kind — `research` and `dispatch` never mix
+issues within one invocation. See the **Dispatch kind** / **Research
+dispatch** glossary entries in [`CONTEXT.md`](CONTEXT.md) for the full
+vocabulary.
 
 ## Dogfood loop
 

@@ -16,6 +16,8 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift dispatch 42 57`       | dispatch exactly these issues, bypassing the label/barrier gates                |
 | `spindrift dispatch --no-build`  | fail fast if the image is absent instead of building it first (split build/run) |
 | `spindrift dispatch --yes`       | skip the confirmation prompt when dispatching unlabeled issues (alias `--force`)|
+| `spindrift research`             | advise-only research dispatch: launch one container per `agent-research` issue, post a verdict comment, apply the terminal label — see [Research dispatch](../README.md#research-dispatch) |
+| `spindrift research 42 57`       | research exactly these issues, same selective semantics as `dispatch <nums>`    |
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
@@ -30,7 +32,8 @@ Every runtime knob is also a `--flag`, with **flag > env > default** precedence.
 `man spindrift` (and `spindrift --help --all` for the same thing in the
 terminal). Bare `spindrift` with no subcommand — or an unrecognized
 subcommand — prints this concise help instead of dispatching; `dispatch`
-remains the sole way to drain the queue.
+remains the sole way to drain the work queue, `research` the sole way to
+drain the research queue.
 
 > **Removed in v0.5.0 (see [`MIGRATING.md`](../MIGRATING.md)):** `nix run
 > .#run` and `nix run .#build` no longer exist as flake outputs; use
