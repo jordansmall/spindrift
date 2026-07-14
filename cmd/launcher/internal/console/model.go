@@ -28,6 +28,19 @@ type Model struct {
 	DogfoodLive bool
 	// Picks is the session's operator queue, in pick order.
 	Picks []Pick
+	// DrillIn is the open transcript view, if any — nil when the operator is
+	// looking at the backlog/queue instead.
+	DrillIn *DrillInState
+}
+
+// DrillInState is one Dispatch's loaded transcript: both the Driver-rendered
+// form and the byte-exact raw form, loaded together so ShowRaw toggles with
+// no further I/O.
+type DrillInState struct {
+	Number        string
+	Rendered, Raw string
+	ShowRaw       bool
+	Err           error
 }
 
 // NewModel returns the zero-value console state: no issues loaded yet, no
@@ -75,6 +88,18 @@ func Update(m Model, msg Msg) Model {
 		m.Picks = removePick(m.Picks, msg.Number)
 	case QueueSnapshotMsg:
 		m.Picks = msg.Picks
+	case DrillInMsg:
+		showRaw := false
+		if m.DrillIn != nil && m.DrillIn.Number == msg.Number {
+			showRaw = m.DrillIn.ShowRaw
+		}
+		m.DrillIn = &DrillInState{Number: msg.Number, Rendered: msg.Rendered, Raw: msg.Raw, Err: msg.Err, ShowRaw: showRaw}
+	case DrillInToggleMsg:
+		if m.DrillIn != nil {
+			m.DrillIn.ShowRaw = !m.DrillIn.ShowRaw
+		}
+	case DrillInCloseMsg:
+		m.DrillIn = nil
 	}
 	return m
 }

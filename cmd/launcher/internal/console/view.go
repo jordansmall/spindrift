@@ -7,8 +7,15 @@ import (
 
 // View renders m as the text the run loop writes to the terminal: an
 // optional dogfood-competition notice, the visible backlog (one line per
-// issue: number, title, labels), and any refresh error.
+// issue: number, title, labels), and any refresh error. An open drill-in
+// (m.DrillIn != nil) replaces the backlog/queue rendering entirely with the
+// transcript view — the operator is looking at one Dispatch's work, not the
+// list.
 func View(m Model) string {
+	if m.DrillIn != nil {
+		return renderDrillIn(*m.DrillIn)
+	}
+
 	var b strings.Builder
 	if m.DogfoodLive {
 		b.WriteString("notice: a live dogfood loop (.dogfood.pid) is competing for the same queue\n")
@@ -29,5 +36,34 @@ func View(m Model) string {
 			b.WriteString("\n")
 		}
 	}
+	return b.String()
+}
+
+// renderDrillIn renders one Dispatch's transcript view: a header naming the
+// pick and current mode, the loaded content (rendered by default, raw when
+// ShowRaw), and a keystroke hint. Err renders in place of content instead of
+// a blank pane.
+func renderDrillIn(d DrillInState) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "transcript #%s", d.Number)
+	if d.ShowRaw {
+		b.WriteString(" (raw)")
+	}
+	b.WriteString("\n")
+
+	if d.Err != nil {
+		fmt.Fprintf(&b, "drill-in failed: %s\n", d.Err)
+		return b.String()
+	}
+
+	content := d.Rendered
+	if d.ShowRaw {
+		content = d.Raw
+	}
+	b.WriteString(content)
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("[t] toggle raw · [x] close\n")
 	return b.String()
 }

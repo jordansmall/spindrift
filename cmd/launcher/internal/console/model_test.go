@@ -108,3 +108,81 @@ func TestUpdate_DogfoodNoticeMsg_SetsLive(t *testing.T) {
 		t.Error("DogfoodLive = true after Live:false, want false")
 	}
 }
+
+// TestUpdate_DrillInMsg_OpensTranscriptView verifies a DrillInMsg installs
+// the drill-in's rendered and raw content on Model, so View can render the
+// transcript instead of the backlog — the queue row's drill-in gesture
+// (#648).
+func TestUpdate_DrillInMsg_OpensTranscriptView(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi\n", Raw: `{"type":"assistant"}` + "\n"})
+
+	if m.DrillIn == nil {
+		t.Fatal("DrillIn = nil, want non-nil after DrillInMsg")
+	}
+	if m.DrillIn.Number != "42" {
+		t.Errorf("DrillIn.Number = %q, want %q", m.DrillIn.Number, "42")
+	}
+	if m.DrillIn.Rendered != "[implementor] hi\n" {
+		t.Errorf("DrillIn.Rendered = %q, want the rendered transcript", m.DrillIn.Rendered)
+	}
+	if m.DrillIn.ShowRaw {
+		t.Error("DrillIn.ShowRaw = true, want false (rendered is the default view)")
+	}
+}
+
+// TestUpdate_DrillInToggleMsg_FlipsShowRaw verifies the toggle switches
+// between rendered and raw with no I/O — both forms are already loaded on
+// Model from the DrillInMsg that opened the view.
+func TestUpdate_DrillInToggleMsg_FlipsShowRaw(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "rendered", Raw: "raw"})
+
+	m = Update(m, DrillInToggleMsg{})
+	if !m.DrillIn.ShowRaw {
+		t.Error("ShowRaw = false after one toggle, want true")
+	}
+
+	m = Update(m, DrillInToggleMsg{})
+	if m.DrillIn.ShowRaw {
+		t.Error("ShowRaw = true after two toggles, want false")
+	}
+}
+
+// TestUpdate_DrillInToggleMsg_NoOpWhenNoDrillInOpen verifies toggling with
+// no transcript open does not panic or fabricate a DrillIn state.
+func TestUpdate_DrillInToggleMsg_NoOpWhenNoDrillInOpen(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInToggleMsg{})
+	if m.DrillIn != nil {
+		t.Errorf("DrillIn = %+v, want nil", m.DrillIn)
+	}
+}
+
+// TestUpdate_DrillInCloseMsg_ReturnsToBacklog verifies close clears the
+// drill-in state so View falls back to rendering the backlog/queue.
+func TestUpdate_DrillInCloseMsg_ReturnsToBacklog(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "rendered"})
+	m = Update(m, DrillInCloseMsg{})
+	if m.DrillIn != nil {
+		t.Errorf("DrillIn = %+v, want nil after close", m.DrillIn)
+	}
+}
+
+// TestUpdate_DrillInMsg_RefreshSameNumber_PreservesShowRaw verifies a
+// second DrillInMsg for the same pick (a refresh while live-tailing) keeps
+// the operator's raw/rendered toggle instead of resetting to rendered.
+func TestUpdate_DrillInMsg_RefreshSameNumber_PreservesShowRaw(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "first"})
+	m = Update(m, DrillInToggleMsg{})
+
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "second (grew)"})
+	if !m.DrillIn.ShowRaw {
+		t.Error("ShowRaw reset to false on refresh, want it preserved as true")
+	}
+	if m.DrillIn.Rendered != "second (grew)" {
+		t.Errorf("Rendered = %q, want the refreshed content", m.DrillIn.Rendered)
+	}
+}

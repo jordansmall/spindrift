@@ -67,3 +67,54 @@ func TestView_RefreshError_Surfaced(t *testing.T) {
 		t.Errorf("View() = %q, want it to contain %q", out, errBoom.Error())
 	}
 }
+
+// TestView_DrillInOpen_RendersTranscriptInsteadOfBacklog verifies an open
+// drill-in replaces the backlog/queue rendering with the transcript, the
+// rendered form by default, plus a hint for the toggle/close keystrokes —
+// the operator's view of the work, not just liveness (#648).
+func TestView_DrillInOpen_RendersTranscriptInsteadOfBacklog(t *testing.T) {
+	m := NewModel()
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
+
+	out := View(m)
+	if strings.Contains(out, "should not show") {
+		t.Errorf("View() = %q, want the backlog hidden while drilled in", out)
+	}
+	if !strings.Contains(out, "42") {
+		t.Errorf("View() = %q, want the drilled-in issue number", out)
+	}
+	if !strings.Contains(out, "[implementor] hi") {
+		t.Errorf("View() = %q, want the rendered transcript", out)
+	}
+	if strings.Contains(out, `{"type":"assistant"}`) {
+		t.Errorf("View() = %q, want the raw form hidden by default", out)
+	}
+}
+
+// TestView_DrillInShowRaw_RendersRawInsteadOfRendered verifies toggling
+// ShowRaw swaps which form View shows.
+func TestView_DrillInShowRaw_RendersRawInsteadOfRendered(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
+	m = Update(m, DrillInToggleMsg{})
+
+	out := View(m)
+	if strings.Contains(out, "[implementor] hi") {
+		t.Errorf("View() = %q, want the rendered form hidden while ShowRaw", out)
+	}
+	if !strings.Contains(out, `{"type":"assistant"}`) {
+		t.Errorf("View() = %q, want the raw form shown while ShowRaw", out)
+	}
+}
+
+// TestView_DrillInErr_Surfaced verifies a failed drill-in's error text
+// appears instead of blank content.
+func TestView_DrillInErr_Surfaced(t *testing.T) {
+	m := Update(NewModel(), DrillInMsg{Number: "42", Err: errBoom})
+
+	out := View(m)
+	if !strings.Contains(out, errBoom.Error()) {
+		t.Errorf("View() = %q, want it to contain %q", out, errBoom.Error())
+	}
+}
