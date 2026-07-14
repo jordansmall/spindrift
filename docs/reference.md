@@ -149,17 +149,23 @@ The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
 at any directory to override it at runtime for zero-rebuild iteration.
 
-Six prompt steps are conditional on a runtime signal (the skill preamble,
-the caveman-default narration directive, `FILE ISSUES`, `AUTO-FORMAT`,
-`AUTO-LINT`, and `CI FAILURE`) and are rendered from fragment files under
-`prompts/fragments/` rather than authored inline, so all instruction prose —
-conditional or not — lives with the rest of the prompt surface.
-`SPINDRIFT_PROMPT_DIR` therefore overrides fragments the same way it
-overrides `prompts/issue-prompt.md` itself: a directory that enables a knob
-(`AUTO_FORMAT`, `AUTO_LINT`, a filer model, etc.) must ship the matching
-`fragments/*.md` file, exactly as it already must ship `filer-prompt.md`
-when the filer is configured — the entrypoint reads the fragment
-unconditionally once its knob is on, with no baked-in fallback.
+Opt-in prompt steps (the skill preamble, the caveman-default narration
+directive, `FILE ISSUES`, `AUTO-FORMAT`, `AUTO-LINT`, and `CI FAILURE`) are
+each one row in a nix-owned **Conditional fragment registry**
+(`lib/fragments.nix`) — a gate variable, a fragment file under
+`prompts/fragments/`, and a substitution variable — rendered into the
+entrypoint's single fragment loop and its substitution allowlist together,
+so a fragment can never reference a variable the substitution step doesn't
+know about. Adding an opt-in prompt step is a nix-only change: one registry
+row plus one fragment file, no entrypoint edit. All instruction prose —
+conditional or not — lives with the rest of the prompt surface rather than
+as heredocs in the entrypoint script. `SPINDRIFT_PROMPT_DIR` therefore
+overrides fragments the same way it overrides `prompts/issue-prompt.md`
+itself: a directory that enables a knob (`AUTO_FORMAT`, `AUTO_LINT`, a filer
+model, etc.) must ship the matching `fragments/*.md` file, exactly as it
+already must ship `filer-prompt.md` when the filer is configured — the
+entrypoint reads the fragment unconditionally once its gate is on, with no
+baked-in fallback.
 
 The caveman-default step is keyed on the baked skill itself rather than a
 separate knob: whenever `DRIVER_SKILLS_DIR/caveman.md` is present at
