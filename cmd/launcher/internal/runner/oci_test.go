@@ -168,6 +168,23 @@ func TestIsDigestPinned(t *testing.T) {
 	}
 }
 
+func TestIsNoBuilderError(t *testing.T) {
+	tests := []struct {
+		stderr string
+		want   bool
+	}{
+		{"error: a Linux system is required to build a Linux derivation", true},
+		{"error: no build machines available", true},
+		{"error: attribute 'nonexistent' missing", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := isNoBuilderError(tc.stderr); got != tc.want {
+			t.Errorf("isNoBuilderError(%q) = %v, want %v", tc.stderr, got, tc.want)
+		}
+	}
+}
+
 func TestBuildRunArgsIncludesHardeningFlags(t *testing.T) {
 	a := &ociAdapter{
 		cli:         "podman",
