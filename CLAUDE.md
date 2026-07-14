@@ -40,6 +40,23 @@ worktree per task keeps each change isolated on its own branch from the start.
 git worktree add ../spindrift-<task> -b <branch> origin/main
 ```
 
+## Build and check output
+
+Whatever the tool — `nix build`, `nix flake check`, `go test`, `shellcheck`
+sweeps — redirect its output to a file on disk and grep/tail that file for
+what you need. Never stream the full output into the conversation context:
+build logs, store paths, and eval traces are huge and mostly noise, and they
+crowd out room for the actual task.
+
+```sh
+nix build .#checks-inbox >"$TMPDIR/checks.log" 2>&1; echo "exit=$?"
+grep -nE 'error|FAIL' "$TMPDIR/checks.log" || tail -n 40 "$TMPDIR/checks.log"
+```
+
+Write the log and grep it in the **same shell invocation and sandbox mode** —
+`$TMPDIR` differs across the sandbox boundary, so a file written sandboxed is
+not visible to an unsandboxed follow-up (and vice versa).
+
 ## Nix edits
 
 spindrift dogfoods the `nixStoreWritable` + `extraClosures` knobs (ADR 0018,
