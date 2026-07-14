@@ -392,27 +392,27 @@ in
       }
       ''
         grep -q 'MAX_FIX_ATTEMPTS:-5' "$behaviorRun/bin/spindrift" \
-          || { echo "MAX_FIX_ATTEMPTS:-5 not baked in run cmd" >&2; exit 1; }
+          || { echo "MAX_FIX_ATTEMPTS:-5 not baked in spindrift cmd" >&2; exit 1; }
         grep -q 'MAX_REBASE_ATTEMPTS:-2' "$behaviorRun/bin/spindrift" \
-          || { echo "MAX_REBASE_ATTEMPTS:-2 not baked in run cmd" >&2; exit 1; }
+          || { echo "MAX_REBASE_ATTEMPTS:-2 not baked in spindrift cmd" >&2; exit 1; }
         grep -q 'HOLD_JITTER_SECS:-10' "$behaviorRun/bin/spindrift" \
-          || { echo "HOLD_JITTER_SECS:-10 not baked in run cmd" >&2; exit 1; }
+          || { echo "HOLD_JITTER_SECS:-10 not baked in spindrift cmd" >&2; exit 1; }
         grep -q 'TRANSIENT_BACKOFF_SECS:-60' "$behaviorRun/bin/spindrift" \
-          || { echo "TRANSIENT_BACKOFF_SECS:-60 not baked in run cmd" >&2; exit 1; }
+          || { echo "TRANSIENT_BACKOFF_SECS:-60 not baked in spindrift cmd" >&2; exit 1; }
         grep -q 'TRANSIENT_RETRY_MAX:-5' "$behaviorRun/bin/spindrift" \
-          || { echo "TRANSIENT_RETRY_MAX:-5 not baked in run cmd" >&2; exit 1; }
+          || { echo "TRANSIENT_RETRY_MAX:-5 not baked in spindrift cmd" >&2; exit 1; }
         grep -q 'MAX_JOBS:-2' "$behaviorRun/bin/spindrift" \
-          || { echo "MAX_JOBS:-2 not baked in run cmd" >&2; exit 1; }
+          || { echo "MAX_JOBS:-2 not baked in spindrift cmd" >&2; exit 1; }
         grep -q 'MERGE_POLL_INTERVAL:-90' "$behaviorRun/bin/spindrift" \
-          || { echo "MERGE_POLL_INTERVAL:-90 not baked in run cmd" >&2; exit 1; }
+          || { echo "MERGE_POLL_INTERVAL:-90 not baked in spindrift cmd" >&2; exit 1; }
         grep -q 'MERGE_POLL_TIMEOUT:-3600' "$behaviorRun/bin/spindrift" \
-          || { echo "MERGE_POLL_TIMEOUT:-3600 not baked in run cmd" >&2; exit 1; }
+          || { echo "MERGE_POLL_TIMEOUT:-3600 not baked in spindrift cmd" >&2; exit 1; }
         grep -q 'REPO_SLUG:-test-org/test-repo' "$identityRun/bin/spindrift" \
-          || { echo "REPO_SLUG:-test-org/test-repo not baked in run cmd" >&2; exit 1; }
+          || { echo "REPO_SLUG:-test-org/test-repo not baked in spindrift cmd" >&2; exit 1; }
         grep -q 'GIT_USER_NAME:-Test Bot' "$identityRun/bin/spindrift" \
-          || { echo "GIT_USER_NAME:-Test Bot not baked in run cmd" >&2; exit 1; }
+          || { echo "GIT_USER_NAME:-Test Bot not baked in spindrift cmd" >&2; exit 1; }
         grep -q 'GIT_USER_EMAIL:-bot@test.example' "$identityRun/bin/spindrift" \
-          || { echo "GIT_USER_EMAIL:-bot@test.example not baked in run cmd" >&2; exit 1; }
+          || { echo "GIT_USER_EMAIL:-bot@test.example not baked in spindrift cmd" >&2; exit 1; }
         grep -q 'REPO_SLUG:-}"' "$defaultRun/bin/spindrift" \
           || { echo "REPO_SLUG must have empty baked default (REPO_SLUG:-}) when not set; required validation must not be masked" >&2; exit 1; }
         touch $out

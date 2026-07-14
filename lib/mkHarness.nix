@@ -1,6 +1,6 @@
 # The engine. A pure function a Consumer flake calls with its own locked
-# `nixpkgs` input and `system`; returns the agent image plus nix-built `build`
-# and `run` commands (as both `packages.*` and `apps.*`).
+# `nixpkgs` input and `system`; returns the agent image plus the `spindrift`
+# CLI (as both `packages.spindrift` and `apps.default`).
 #
 # Takes the locked *input* rather than a pre-built `pkgs` so it can map a darwin
 # `system` to its Linux twin and re-instantiate for the OCI image, keeping the
