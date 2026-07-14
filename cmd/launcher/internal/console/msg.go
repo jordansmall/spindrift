@@ -54,9 +54,10 @@ type PickQueuedMsg struct {
 func (PickQueuedMsg) isConsoleMsg() {}
 
 // PickFailedMsg carries a pick whose promotion failed — the Pick adapter's
-// error result. The issue never joins the queue.
+// error result. The issue never queues; Update instead lands it already
+// dissolved so the operator sees why.
 type PickFailedMsg struct {
-	Number, Reason string
+	Number, Title, Reason string
 }
 
 func (PickFailedMsg) isConsoleMsg() {}

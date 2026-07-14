@@ -69,6 +69,8 @@ func Update(m Model, msg Msg) Model {
 		m.DogfoodLive = msg.Live
 	case PickQueuedMsg:
 		m.Picks = append(m.Picks, Pick{Number: msg.Number, Title: msg.Title, Kind: msg.Kind, State: PickQueued})
+	case PickFailedMsg:
+		m.Picks = append(m.Picks, Pick{Number: msg.Number, Title: msg.Title, State: PickDissolved, Reason: msg.Reason})
 	case UnpickMsg:
 		m.Picks = removePick(m.Picks, msg.Number)
 	}

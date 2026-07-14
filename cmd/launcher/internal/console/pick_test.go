@@ -32,6 +32,23 @@ func TestUpdate_UnpickMsg_RemovesQueuedPick(t *testing.T) {
 	}
 }
 
+// TestUpdate_PickFailedMsg_AddsDissolvedRow verifies a failed promotion
+// lands on Model.Picks already dissolved, reason attached, rather than
+// vanishing silently — the operator still sees why their pick never queued
+// (#646).
+func TestUpdate_PickFailedMsg_AddsDissolvedRow(t *testing.T) {
+	m := NewModel()
+	m = Update(m, PickFailedMsg{Number: "42", Title: "fix the thing", Reason: "issue is closed"})
+
+	if len(m.Picks) != 1 {
+		t.Fatalf("Picks = %+v, want one dissolved pick", m.Picks)
+	}
+	got := m.Picks[0]
+	if got.Number != "42" || got.State != PickDissolved || got.Reason != "issue is closed" {
+		t.Errorf("Picks[0] = %+v, want dissolved #42 with reason", got)
+	}
+}
+
 // TestUpdate_UnpickMsg_LeavesNonQueuedPickAlone verifies Unpick only ever
 // removes a pick still holding at PickQueued — a pick already claiming,
 // running, or settled cannot be unpicked out from under its Dispatch.
