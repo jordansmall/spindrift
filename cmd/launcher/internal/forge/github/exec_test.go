@@ -204,6 +204,24 @@ esac`)
 	}
 }
 
+// TestExecClient_CompleteVerdict_UnconfiguredErrorsWithoutShellingOut
+// verifies that CompleteVerdict on a client constructed with no
+// VerdictLabels (the work-kind construction path) errors instead of
+// shelling out `gh issue edit --add-label ""` — an empty label would
+// silently corrupt the issue's label set.
+func TestExecClient_CompleteVerdict_UnconfiguredErrorsWithoutShellingOut(t *testing.T) {
+	dir := prependFakeGH(t, "")
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	if err := c.CompleteVerdict("10", forge.Recommend); err == nil {
+		t.Fatal("want error for unconfigured VerdictLabels, got nil")
+	}
+
+	if entries, _ := os.ReadDir(dir); len(entries) > 1 {
+		t.Errorf("CompleteVerdict must not shell out to gh when no verdict label is configured; recorded calls: %v", entries)
+	}
+}
+
 // TestProbe_PositionalSlug verifies that Probe passes the slug as a positional
 // argument to `gh repo view` with no --repo/-R flag.
 func TestProbe_PositionalSlug(t *testing.T) {

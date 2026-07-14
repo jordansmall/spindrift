@@ -324,7 +324,7 @@ in
 
   # The generated bash completion script must totally cover the schema and the
   # launcher's hardcoded subcommand set: every non-secret flag, the --issue
-  # alias, every secret --*-file flag, and all five subcommands. A new knob or
+  # alias, every secret --*-file flag, and all six subcommands. A new knob or
   # subcommand with no completion presence fails here. Mirrors launcher-manpage.
   launcher-bash-completion =
     let
@@ -339,6 +339,7 @@ in
       secretEntries = filter (e: e.secret or false) (attrValues schema);
       subcommands = [
         "dispatch"
+        "research"
         "preview"
         "build"
         "recover"
@@ -382,7 +383,7 @@ in
 
   # The generated fish completion script must totally cover the schema and the
   # launcher's hardcoded subcommand set: every non-secret flag, the --issue
-  # alias, every secret --*-file flag, and all five subcommands. Mirrors
+  # alias, every secret --*-file flag, and all six subcommands. Mirrors
   # launcher-bash-completion above.
   launcher-fish-completion =
     let
@@ -396,6 +397,7 @@ in
       secretEntries = filter (e: e.secret or false) (attrValues schema);
       subcommands = [
         "dispatch"
+        "research"
         "preview"
         "build"
         "recover"
@@ -435,7 +437,7 @@ in
       '';
 
   # zsh equivalent of launcher-bash-completion: every non-secret flag, the
-  # --issue alias, every secret --*-file flag, and all five subcommands must
+  # --issue alias, every secret --*-file flag, and all six subcommands must
   # appear in the rendered zsh completion function. renderZshCompletion emits
   # each as a single-quoted `_describe` entry `'--flag:description'` (or
   # `'name:description'` for a subcommand), so the flag/subcommand name
@@ -454,6 +456,7 @@ in
       secretEntries = filter (e: e.secret or false) (attrValues schema);
       subcommands = [
         "dispatch"
+        "research"
         "preview"
         "build"
         "recover"

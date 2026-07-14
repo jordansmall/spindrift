@@ -92,6 +92,12 @@ type Config struct {
 	// logs/blocked.txt. Wave caps (MaxParallel/MaxJobs) and dispatch order
 	// still apply unchanged.
 	IgnoreBlockers bool
+
+	// Verb is the CLI subcommand name a selective wave's rerun hint tells the
+	// operator to re-invoke (e.g. "spindrift research --yes <nums>" instead
+	// of "spindrift dispatch --yes <nums>"). Empty defaults to "dispatch",
+	// matching every pre-existing (kind-unaware) construction site.
+	Verb string
 }
 
 // NewPlan decides how in.Issues should be dispatched. Every origin —
