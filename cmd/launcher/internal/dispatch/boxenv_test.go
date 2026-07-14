@@ -43,3 +43,16 @@ func TestBuildBoxEnvSetsFixPassAndSummary(t *testing.T) {
 		t.Errorf("CI_FAILURE_SUMMARY: got %q, want %q", env["CI_FAILURE_SUMMARY"], "lint failed")
 	}
 }
+
+// TestBuildBoxEnvSetsDispatchKind verifies DISPATCH_KIND is forwarded into
+// every Box (the kind env plumbing seam, ADR 0022), defaulting to "work"
+// when Config.Kind is unset so every pre-existing (kind-unaware) caller
+// keeps behaving the same way.
+func TestBuildBoxEnvSetsDispatchKind(t *testing.T) {
+	if got := buildBoxEnv(Config{}, "3", "T", 0, "")["DISPATCH_KIND"]; got != "work" {
+		t.Errorf("DISPATCH_KIND with unset Config.Kind: got %q, want %q", got, "work")
+	}
+	if got := buildBoxEnv(Config{Kind: "research"}, "3", "T", 0, "")["DISPATCH_KIND"]; got != "research" {
+		t.Errorf("DISPATCH_KIND with Config.Kind=research: got %q, want %q", got, "research")
+	}
+}

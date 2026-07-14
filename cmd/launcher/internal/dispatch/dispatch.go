@@ -37,6 +37,13 @@ type Config struct {
 	// at all -- there is nowhere in-box to mount it (issue #448).
 	DriverSessionCacheDir string
 
+	// Kind is the dispatch kind ("work" or "research", ADR 0022) forwarded
+	// into every Box as DISPATCH_KIND, so the entrypoint can select its
+	// prompt and skip clone-branch/PR/CI phases for research. Empty defaults
+	// to "work" in buildBoxEnv, matching every pre-existing (kind-unaware)
+	// construction site.
+	Kind string
+
 	// OpenPRForIssue reports whether an open PR already exists for the
 	// issue's agent branch. Consulted before a zero-exit, no-outcome box is
 	// held-and-retried on a transient classification (issue #565), so a box
@@ -58,6 +65,11 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	}
 	env["ISSUE_NUMBER"] = number
 	env["ISSUE_TITLE"] = title
+	kind := cfg.Kind
+	if kind == "" {
+		kind = "work"
+	}
+	env["DISPATCH_KIND"] = kind
 	if fixPass > 0 {
 		env["FIX_PASS"] = strconv.Itoa(fixPass)
 	}
