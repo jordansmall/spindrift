@@ -17,21 +17,6 @@ func containsLabel(labels []string, target string) bool {
 	return false
 }
 
-// mergeGuardHit checks a green PR's changed files against MergeGuardPaths,
-// returning the subset that hit a guarded glob. A nil, nil result means the
-// guard is disabled (empty patterns) or found no match; a non-nil error means
-// the changed-file list could not be read at all.
-func (s *Settle) mergeGuardHit(pr string) ([]string, error) {
-	if strings.TrimSpace(s.cfg.MergeGuardPaths) == "" {
-		return nil, nil
-	}
-	files, err := s.pr.ListPRFiles(pr)
-	if err != nil {
-		return nil, err
-	}
-	return matchedGuardPaths(s.cfg.MergeGuardPaths, files), nil
-}
-
 // mergeGuardComment is the PR comment posted when the guard downgrades a
 // merge to manual — it names the matched path(s) and the knob that fired so
 // a human reviewer knows exactly what to look at.
