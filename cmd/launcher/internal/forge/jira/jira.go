@@ -416,6 +416,32 @@ func (j *jiraClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 		return nil, fmt.Errorf("jira: search: unexpected status %d", status)
 	}
 	forge.WarnPageMayTruncateBacklog("jira search", len(payload.Issues))
+	return issuesFromPayload(payload), nil
+}
+
+// ListOpenIssues returns every open issue scoped to the project, in
+// canonical order (created-time ascending), regardless of dispatch state —
+// unlike ListIssues, it carries no status/label clause, so untriaged issues
+// (no dispatch status or label yet) are included too.
+func (j *jiraClient) ListOpenIssues() ([]forge.Issue, error) {
+	jql := fmt.Sprintf("project = %q AND statusCategory != Done order by created asc", j.cfg.ProjectKey)
+
+	var payload jiraSearchPayload
+	status, err := j.doSearch(jql, &payload)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("jira: search: unexpected status %d", status)
+	}
+	forge.WarnPageMayTruncateBacklog("jira search", len(payload.Issues))
+	return issuesFromPayload(payload), nil
+}
+
+// issuesFromPayload converts a jiraSearchPayload's raw issues into the
+// launcher's canonical forge.Issue shape, shared by ListIssues and
+// ListOpenIssues.
+func issuesFromPayload(payload jiraSearchPayload) []forge.Issue {
 	issues := make([]forge.Issue, len(payload.Issues))
 	for i, p := range payload.Issues {
 		issues[i] = forge.Issue{
@@ -426,7 +452,7 @@ func (j *jiraClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 			Labels: p.Fields.Labels,
 		}
 	}
-	return issues, nil
+	return issues
 }
 
 // doSearch issues a Jira JQL search request via GET /rest/api/2/search.

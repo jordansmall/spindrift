@@ -620,6 +620,47 @@ func TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly(t *testing.T) {
 	}
 }
 
+// TestJiraClient_ListOpenIssues_NoStateClauseExcludesDone verifies
+// ListOpenIssues scopes to the project and excludes done-category issues
+// but places no status/label clause — unlike ListIssues, it returns every
+// open issue regardless of dispatch state.
+func TestJiraClient_ListOpenIssues_NoStateClauseExcludesDone(t *testing.T) {
+	var gotJQL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotJQL = r.URL.Query().Get("jql")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"issues": [
+			{"key": "PROJ-2", "fields": {"summary": "untriaged", "status": {"name": "Backlog"}, "labels": []}},
+			{"key": "PROJ-3", "fields": {"summary": "in progress", "status": {"name": "In Progress"}, "labels": ["agent-in-progress"]}}
+		]}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{
+		BaseURL:    srv.URL,
+		Token:      "tok",
+		ProjectKey: "PROJ",
+		Labels:     testLabels,
+	})
+
+	issues, err := jc.ListOpenIssues()
+	if err != nil {
+		t.Fatalf("ListOpenIssues: %v", err)
+	}
+	if len(issues) != 2 || issues[0].Number != "PROJ-2" || issues[1].Number != "PROJ-3" {
+		t.Fatalf("issues = %+v", issues)
+	}
+	if !strings.Contains(gotJQL, `project = "PROJ"`) {
+		t.Errorf("jql = %q, want project clause", gotJQL)
+	}
+	if !strings.Contains(gotJQL, "statusCategory != Done") {
+		t.Errorf("jql = %q, want done-category exclusion", gotJQL)
+	}
+	if strings.Contains(gotJQL, "status =") || strings.Contains(gotJQL, "labels =") {
+		t.Errorf("jql = %q, must not scope by status or label", gotJQL)
+	}
+}
+
 // TestJiraClient_ListLabels_ReturnsSiteLabels verifies ListLabels reads
 // Jira's site-wide label list.
 func TestJiraClient_ListLabels_ReturnsSiteLabels(t *testing.T) {

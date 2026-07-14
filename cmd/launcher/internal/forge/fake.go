@@ -246,6 +246,26 @@ func (f *Fake) ListIssues(state DispatchState) ([]Issue, error) {
 	return out, nil
 }
 
+// ListOpenIssues returns every non-closed issue regardless of dispatch
+// label, ascending by number — mirroring ListIssues' canonical order.
+func (f *Fake) ListOpenIssues() ([]Issue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []Issue
+	for _, iss := range f.issues {
+		if iss.State == IssueClosed {
+			continue
+		}
+		out = append(out, iss)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ni, _ := strconv.Atoi(out[i].Number)
+		nj, _ := strconv.Atoi(out[j].Number)
+		return ni < nj
+	})
+	return out, nil
+}
+
 func (f *Fake) Issue(num string) (Issue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

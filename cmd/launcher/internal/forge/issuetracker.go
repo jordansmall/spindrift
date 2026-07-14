@@ -66,6 +66,12 @@ type IssueTracker interface {
 	// ListIssues returns open issues in the given dispatch state, in canonical
 	// order (GitHub: ascending issue number).
 	ListIssues(state DispatchState) ([]Issue, error)
+	// ListOpenIssues returns every open issue, in canonical order (GitHub:
+	// ascending issue number), regardless of dispatch state — including
+	// issues the operator has not yet triaged onto the dispatch lifecycle.
+	// Unlike ListIssues, which filters to a single dispatch state's label,
+	// this is the full backlog the Console browses.
+	ListOpenIssues() ([]Issue, error)
 	// Issue returns full details (body, labels, state) for the given number.
 	Issue(num string) (Issue, error)
 	// TransitionState moves issue num from state from to state to. It adds

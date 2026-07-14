@@ -129,6 +129,23 @@ func toIssue(num string, li localIssue) forge.Issue {
 // ListIssues returns issues whose frontmatter state marker matches state, in
 // canonical order (ascending by the created timestamp).
 func (lt *LocalTracker) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
+	want := lt.labels.Label(state)
+	return lt.listIssues(func(li localIssue) bool { return li.frontmatter.State == want })
+}
+
+// ListOpenIssues returns every issue file in dir, in canonical order
+// (ascending by the created timestamp), regardless of its frontmatter state
+// marker — unlike ListIssues, which filters to a single state. Local issues
+// have no closed/open concept of their own (toIssue always reports OPEN), so
+// every file in dir is "open".
+func (lt *LocalTracker) ListOpenIssues() ([]forge.Issue, error) {
+	return lt.listIssues(func(localIssue) bool { return true })
+}
+
+// listIssues scans dir for issue files matching keep, in canonical order
+// (ascending by the created timestamp) — the shared walk behind ListIssues
+// and ListOpenIssues.
+func (lt *LocalTracker) listIssues(keep func(localIssue) bool) ([]forge.Issue, error) {
 	entries, err := os.ReadDir(lt.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -136,7 +153,6 @@ func (lt *LocalTracker) ListIssues(state forge.DispatchState) ([]forge.Issue, er
 		}
 		return nil, fmt.Errorf("read local issues dir %s: %w", lt.dir, err)
 	}
-	want := lt.labels.Label(state)
 
 	type entry struct {
 		iss     forge.Issue
@@ -152,7 +168,7 @@ func (lt *LocalTracker) ListIssues(state forge.DispatchState) ([]forge.Issue, er
 		if err != nil {
 			return nil, err
 		}
-		if li.frontmatter.State != want {
+		if !keep(li) {
 			continue
 		}
 		created, _ := time.Parse(time.RFC3339, li.frontmatter.Created)

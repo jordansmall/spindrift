@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -39,6 +40,49 @@ func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 		}
 		issues = append(issues, forge.Issue{Number: parts[0], Title: parts[1]})
 	}
+	forge.WarnPageMayTruncateBacklog("gh issue list", len(issues))
+	return issues, nil
+}
+
+// ListOpenIssues returns every open issue, in canonical order (ascending
+// issue number), regardless of dispatch state — unlike ListIssues, which
+// scopes to one dispatch state's label, this carries no --label filter, so
+// untriaged issues (no dispatch label yet) are included too.
+func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
+	cmd := exec.Command("gh", "issue", "list",
+		"--repo", e.repo,
+		"--state", "open",
+		"--limit", strconv.Itoa(forge.ResultPageLimit),
+		"--search", "sort:created-asc",
+		"--json", "number,title,labels",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh issue list: %w", err)
+	}
+	var raw []struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, fmt.Errorf("parse gh issue list: %w", err)
+	}
+	issues := make([]forge.Issue, len(raw))
+	for i, r := range raw {
+		iss := forge.Issue{Number: strconv.Itoa(r.Number), Title: r.Title}
+		for _, l := range r.Labels {
+			iss.Labels = append(iss.Labels, l.Name)
+		}
+		issues[i] = iss
+	}
+	sort.Slice(issues, func(i, j int) bool {
+		ni, _ := strconv.Atoi(issues[i].Number)
+		nj, _ := strconv.Atoi(issues[j].Number)
+		return ni < nj
+	})
 	forge.WarnPageMayTruncateBacklog("gh issue list", len(issues))
 	return issues, nil
 }

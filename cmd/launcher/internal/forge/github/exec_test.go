@@ -165,6 +165,45 @@ esac`)
 	}
 }
 
+// TestExecClient_ListOpenIssues_NoLabelFilterIncludesLabels verifies
+// ListOpenIssues queries every open issue with no --label filter (unlike
+// ListIssues, which scopes to one dispatch state's label) and returns each
+// issue's labels, ascending by number.
+func TestExecClient_ListOpenIssues_NoLabelFilterIncludesLabels(t *testing.T) {
+	dir := prependFakeGH(t, `case "$*" in
+*"issue list"*)
+	printf '[{"number":3,"title":"third","labels":[{"name":"ready-for-agent"}]},{"number":1,"title":"first","labels":[]}]'
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	issues, err := c.ListOpenIssues()
+	if err != nil {
+		t.Fatalf("ListOpenIssues: %v", err)
+	}
+	if len(issues) != 2 || issues[0].Number != "1" || issues[1].Number != "3" {
+		t.Fatalf("want ascending [1 3], got %+v", issues)
+	}
+	if len(issues[1].Labels) != 1 || issues[1].Labels[0] != "ready-for-agent" {
+		t.Errorf("issue 3 labels = %v, want [ready-for-agent]", issues[1].Labels)
+	}
+	if len(issues[0].Labels) != 0 {
+		t.Errorf("issue 1 labels = %v, want none", issues[0].Labels)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatalf("read call-00.txt: %v", err)
+	}
+	argv := string(raw)
+	if !strings.Contains(argv, "--state\nopen") {
+		t.Errorf("argv = %q, want --state open", argv)
+	}
+	if strings.Contains(argv, "--label") {
+		t.Errorf("argv = %q, must not scope by --label", argv)
+	}
+}
+
 // TestProbe_PositionalSlug verifies that Probe passes the slug as a positional
 // argument to `gh repo view` with no --repo/-R flag.
 func TestProbe_PositionalSlug(t *testing.T) {
