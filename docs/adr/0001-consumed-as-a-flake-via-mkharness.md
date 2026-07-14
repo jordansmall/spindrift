@@ -7,6 +7,10 @@ who want declarative options. `mkHarness` is the foundation because it works for
 *any* flake; the flake-parts module would otherwise force that framework on
 every consumer.
 
+**Note (issue #613):** `packages.build`/`packages.run` and the matching
+`apps.build`/`apps.run` were removed in v0.5.0 — deprecated since 0.1.1 in
+favor of `packages.spindrift`/`apps.default` (ADR 0010).
+
 ## Considered Options
 
 - **flake-parts module only** — idiomatic given our own flake, but forces
