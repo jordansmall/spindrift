@@ -653,7 +653,7 @@ emit_outcome_backstop() {
   fi
   rm -f "$push_log"
   echo "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop"
-  echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} pr=${BRANCH} status=blocked note=${note}"
+  echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=blocked note=${note}"
 }
 
 main() {
