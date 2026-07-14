@@ -389,14 +389,6 @@
 * nixfmt lib/mkHarness.nix and nix/checks/prompts.nix ([c77701d](https://github.com/jordansmall/spindrift/commit/c77701df6cc404e7321c04ecf50ea0cc70fac72c))
 * **nix:** nixfmt the multi-item inherit lists ([a1f5d47](https://github.com/jordansmall/spindrift/commit/a1f5d477c77a56f3bfa1b3e66493cb518b45573e))
 
-## [Unreleased]
-
-### Features
-
-* **entrypoint:** add AUTO_FORMAT knob — opt-in auto-formatting of changed files before each commit; detects project fmt scripts or language defaults, never `nix fmt` (unrunnable in-box: it needs `/nix/store` write access the agent user lacks); skips silently when none is found (off by default, enabled for spindrift's own dogfood runs)
-* **entrypoint:** add AUTO_LINT knob — opt-in auto-linting of changed files before each commit; detects project lint scripts or language-standard linters; applies auto-fix then resolves remaining findings; skips silently when none is found (off by default, enabled for spindrift's own dogfood runs)
-* **harness:** add `nixStoreWritable` + `extraClosures` knobs — self-test mode (ADR 0018) makes `/nix/store` agent-writable inside the OCI Box so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES (off by default, loud `==> WARNING` when enabled, OCI runners only); `extraClosures` bakes extra derivation closures into the image and store DB so in-box nix sees them as already present
-
 ## [0.2.1](https://github.com/jordansmall/spindrift/compare/v0.2.0...v0.2.1) (2026-07-10)
 
 
