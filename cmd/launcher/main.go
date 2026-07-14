@@ -1001,7 +1001,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return cmdDoctor()
 	}
 	if args[0] == "console" {
-		lc, err := bootstrap(true)
+		lc, err := bootstrap(true, dispatchKindWork)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
