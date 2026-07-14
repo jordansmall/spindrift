@@ -273,6 +273,69 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	}
 }
 
+// TestRunContinuous_RefillCycleGuardSkipsAndReports verifies #571: a refill
+// whose re-discovery returns an edge set with a cycle among in-batch issues
+// must not launch a Box for any of them, must surface the offending issue
+// number, and must return through RunContinuous's normal completion path
+// rather than hanging.
+func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 2
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	// Cyclic dependency among all three in-batch issues: 1 -> 2 -> 3 -> 1.
+	edges := map[string][]string{
+		"1": {"2"},
+		"2": {"3"},
+		"3": {"1"},
+	}
+	discover := func() ([]Issue, map[string][]string, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return nil, nil, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return out, edges, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	var err error
+	resultCh := make(chan error, 1)
+	errOut := captureStderr(t, func() {
+		resultCh <- RunContinuous(c, fc, fc, dir, f, s, discover, fresh)
+	})
+
+	select {
+	case err = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return — cycle guard may have hung a refill")
+	}
+
+	if !errors.Is(err, ErrOpenNoneDispatchable) {
+		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable (no issue in the cycle is ever dispatchable)", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("RunCalls: got %d, want 0 (no Box may launch for a cyclic batch)", len(fr.RunCalls))
+	}
+	if !strings.Contains(errOut, "cycle") || !strings.Contains(errOut, "#1") {
+		t.Fatalf("stderr missing cycle report naming issue #1, got:\n%s", errOut)
+	}
+}
+
 // TestRunContinuous_StaleDiscoveryNeverDoubleDispatches verifies #560: a
 // Discoverer that keeps listing an already-claimed issue as dispatchable —
 // modeling GitHub's eventually-consistent search index right after the
