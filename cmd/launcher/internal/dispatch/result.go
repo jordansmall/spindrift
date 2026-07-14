@@ -1,6 +1,9 @@
 package dispatch
 
-import "spindrift.dev/launcher/internal/outcome"
+import (
+	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/outcome"
+)
 
 // Result is what Run and Fix return: the parsed Outcome line on success (or
 // a zero-exit box that wrote no outcome line), and a best-effort transient
@@ -32,7 +35,7 @@ type Result struct {
 	// Classification and ClassifyErr are populated only when OutcomeFound is
 	// false and ParseErr is nil, to explain what the box did instead of
 	// reporting an outcome.
-	Classification outcome.Classification
+	Classification driver.Classification
 	ClassifyErr    error
 }
 

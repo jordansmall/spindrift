@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/driver"
+	driverclaude "spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 // tempLogDir creates a temp dir with a logs/ subdirectory.
@@ -32,20 +34,27 @@ func writeFile(path, content string) error {
 }
 
 // fakeDriver is a test double for driver.Driver. ClassifyFn, when set,
-// overrides the default Terminal/TaskFailed classification.
+// overrides the default Terminal/TaskFailed classification. ExtractUsage
+// delegates to the real claude subpackage's log parsing (not faked) so
+// dispatch's UsageReport tests can exercise real claude-format stream-json
+// fixtures through the Driver seam.
 type fakeDriver struct {
-	ClassifyFn func(logPath string) (outcome.Classification, error)
+	ClassifyFn func(logPath string) (driver.Classification, error)
 }
 
 func (d fakeDriver) Name() string { return "fake" }
 
-func (d fakeDriver) ClassifyTransient(logPath string) (outcome.Classification, error) {
+func (d fakeDriver) ClassifyTransient(logPath string) (driver.Classification, error) {
 	if d.ClassifyFn != nil {
 		return d.ClassifyFn(logPath)
 	}
-	return outcome.Classification{Class: outcome.Terminal, Reason: outcome.TaskFailed}, nil
+	return driver.Classification{Class: driver.Terminal, Reason: driver.TaskFailed}, nil
 }
 
 func (d fakeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer) io.Writer {
 	return raw
+}
+
+func (d fakeDriver) ExtractUsage(logPath string) (usage.Report, error) {
+	return driverclaude.ExtractUsage(logPath)
 }
