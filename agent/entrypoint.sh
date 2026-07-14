@@ -247,28 +247,31 @@ phase_prefetch() {
 }
 
 # Substitute only known placeholders so literal `$` in the prompt body (shell
-# snippets, etc.) survives. The single-quoted variable list is envsubst's
-# literal, not a shell expansion — hence SC2016. Defined ahead of the
-# fragment-gated blocks below (issue #463) since each one is itself rendered
-# through this function.
+# snippets, etc.) survives. The shared vars below are fixed; the Conditional
+# fragment registry (lib/fragments.nix, issue #622) contributes the rest via
+# the nix-rendered _FRAGMENT_SUBST_VARS array (see fragmentRegistryPreamble in
+# lib/mkHarness.nix) — a fragment can reference only what its registry row
+# declares, and a forgotten allowlist entry is impossible by construction:
+# adding a row needs no edit here. Defined ahead of the fragment loop below
+# (issue #463) since each row is itself rendered through this function.
 _subst() {
-  # shellcheck disable=SC2016
-  ISSUE_NUMBER="$ISSUE_NUMBER" \
-    ISSUE_TITLE="${ISSUE_TITLE:-}" \
-    BRANCH="$BRANCH" \
-    BASE_BRANCH="${BASE_BRANCH:-}" \
-    IN_PROGRESS_LABEL="${IN_PROGRESS_LABEL:-}" \
-    COMPLETE_LABEL="${COMPLETE_LABEL:-}" \
-    SKILL_PREAMBLE="${SKILL_PREAMBLE:-}" \
-    CAVEMAN_STEP="${CAVEMAN_STEP:-}" \
-    FILE_ISSUES_STEP="${FILE_ISSUES_STEP:-}" \
-    AUTO_FORMAT_STEP="${AUTO_FORMAT_STEP:-}" \
-    AUTO_LINT_STEP="${AUTO_LINT_STEP:-}" \
-    CI_FAILURE_STEP="${CI_FAILURE_STEP:-}" \
-    SKILLS_FOUND="${SKILLS_FOUND:-}" \
-    CI_FAILURE_SUMMARY="${CI_FAILURE_SUMMARY:-}" \
-    envsubst '$ISSUE_NUMBER $ISSUE_TITLE $BRANCH $BASE_BRANCH $IN_PROGRESS_LABEL $COMPLETE_LABEL $SKILL_PREAMBLE $CAVEMAN_STEP $FILE_ISSUES_STEP $AUTO_FORMAT_STEP $AUTO_LINT_STEP $CI_FAILURE_STEP $SKILLS_FOUND $CI_FAILURE_SUMMARY' \
-    <"$1"
+  local f="$1" v
+  local -a _names=(
+    ISSUE_NUMBER
+    ISSUE_TITLE
+    BRANCH
+    BASE_BRANCH
+    IN_PROGRESS_LABEL
+    COMPLETE_LABEL
+    "${_FRAGMENT_SUBST_VARS[@]}"
+  )
+  local -a _assign=()
+  local _vars=""
+  for v in "${_names[@]}"; do
+    _assign+=("$v=${!v:-}")
+    _vars+="\$$v "
+  done
+  env "${_assign[@]}" envsubst "$_vars" <"$f"
 }
 
 # A SPINDRIFT_PROMPT_DIR mount replaces the whole prompt dir, so a rendered
@@ -355,7 +358,8 @@ phase_prompt_assembly() {
   # "$f")"$'\n\n'`, never `"$(some_wrapper "$f")"`.
 
   # Discover available skills at DRIVER_SKILLS_DIR and build a directive to
-  # prefer them over the inline guidance where they apply.
+  # prefer them over the inline guidance where they apply -- the gate
+  # variable the skill-preamble registry row (lib/fragments.nix) names.
   local SKILLS_FOUND=""
   if [ -d "$DRIVER_SKILLS_DIR" ]; then
     local _sf _sn
@@ -365,58 +369,39 @@ phase_prompt_assembly() {
       SKILLS_FOUND="${SKILLS_FOUND:+${SKILLS_FOUND}, }${_sn}"
     done
   fi
-  local SKILL_PREAMBLE=""
-  if [ -n "$SKILLS_FOUND" ]; then
-    SKILL_PREAMBLE="$(_subst "${PROMPTS_DIR}/fragments/skill-preamble.md")"$'\n\n'
-  fi
 
-  # CAVEMAN_STEP is substituted into the COMMS section (shared by both agent
-  # passes, issue #455) only when the caveman skill is actually baked at
-  # DRIVER_SKILLS_DIR/caveman.md -- the same conditional-residue mechanism as
-  # SKILL_PREAMBLE above: a consumer that never bakes the skill carries no
-  # trace of it, so the rendered prompt never mentions a skill the agent can't
-  # invoke (issue #487).
-  local CAVEMAN_STEP=""
-  if [ -f "${DRIVER_SKILLS_DIR}/caveman.md" ]; then
-    CAVEMAN_STEP="$(_subst "${PROMPTS_DIR}/fragments/caveman-default.md")"$'\n\n'
-  fi
-
-  # The FILE ISSUES step is substituted into the issue prompt only when the
-  # filer opt-in is set (FILER_MODEL non-empty), the same conditional-residue
-  # mechanism as SKILL_PREAMBLE above: empty when off, so a filer-free box's
-  # rendered prompt carries no trace of the step.
-  local FILE_ISSUES_STEP=""
+  # One-liners setting the two other computed gates the caveman-default and
+  # file-issues registry rows name: the caveman skill actually baked at
+  # DRIVER_SKILLS_DIR/caveman.md (issue #487), and the filer opt-in
+  # provisioned in AGENTS_JSON_TEMPLATE.
+  local CAVEMAN_BAKED=""
+  # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+  [ -f "${DRIVER_SKILLS_DIR}/caveman.md" ] && CAVEMAN_BAKED=1
+  local FILER_ENABLED=""
   if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
-    FILE_ISSUES_STEP="$(_subst "${PROMPTS_DIR}/fragments/file-issues.md")"$'\n\n'
+    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+    FILER_ENABLED=1
   fi
 
-  # AUTO_FORMAT_STEP is substituted into the issue prompt only when AUTO_FORMAT
-  # is non-empty (opt-in knob) — the same conditional-residue mechanism as
-  # FILE_ISSUES_STEP above: empty when off, so a default box carries no trace of
-  # the step and the formatter is never mentioned.
-  local AUTO_FORMAT_STEP=""
-  if [ -n "${AUTO_FORMAT:-}" ]; then
-    AUTO_FORMAT_STEP="$(_subst "${PROMPTS_DIR}/fragments/auto-format.md")"$'\n\n'
-  fi
-
-  # AUTO_LINT_STEP is substituted into the issue prompt only when AUTO_LINT is
-  # non-empty (opt-in knob) — the same conditional-residue mechanism as
-  # AUTO_FORMAT_STEP above: empty when off, so a default box carries no trace of
-  # the step and the linter is never mentioned.
-  local AUTO_LINT_STEP=""
-  if [ -n "${AUTO_LINT:-}" ]; then
-    AUTO_LINT_STEP="$(_subst "${PROMPTS_DIR}/fragments/auto-lint.md")"$'\n\n'
-  fi
-
-  # CI_FAILURE_STEP is substituted into the fix prompt only when the launcher
-  # forwarded a CI_FAILURE_SUMMARY (selfHeal captured it on genuine-red, issue
-  # #426) — the same conditional-residue mechanism as SKILL_PREAMBLE above:
-  # empty when absent, so a fix box with no fetched detail carries no trace of
-  # the step and the prompt falls back to its own local-check flow with no error.
-  local CI_FAILURE_STEP=""
-  if [ -n "${CI_FAILURE_SUMMARY:-}" ]; then
-    CI_FAILURE_STEP="$(_subst "${PROMPTS_DIR}/fragments/ci-failure.md")"$'\n\n'
-  fi
+  # One loop over the Conditional fragment registry (lib/fragments.nix, issue
+  # #622), rendered into _FRAGMENT_ROWS by lib/mkHarness.nix's
+  # fragmentRegistryPreamble: each row's gate variable (a knob env var for
+  # auto-format/auto-lint/CI-failure, or one of the three precompute
+  # variables set above) controls whether its fragment renders into its
+  # substitution variable or is left empty -- the same conditional-residue
+  # mechanism the six blocks this replaced each had: a default box's
+  # rendered prompt carries no trace of a step whose gate is off. Adding a
+  # row is a nix-only change (lib/fragments.nix): no edit here.
+  local _frow _fgate _ffile _fvar
+  for _frow in "${_FRAGMENT_ROWS[@]}"; do
+    IFS='|' read -r _fgate _ffile _fvar <<<"$_frow"
+    local "$_fvar"
+    if [ -n "${!_fgate:-}" ]; then
+      printf -v "$_fvar" '%s' "$(_subst "${PROMPTS_DIR}/fragments/${_ffile}")"$'\n\n'
+    else
+      printf -v "$_fvar" '%s' ""
+    fi
+  done
 
   phase_conflict_resolve
 
