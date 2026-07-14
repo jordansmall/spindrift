@@ -32,6 +32,11 @@ type JiraConfig struct {
 	// Labels are the fallback labels applied when a transition is unmapped or
 	// blocked by the project's workflow.
 	Labels forge.DispatchLabels
+	// VerdictLabels configures CompleteVerdict (the research dispatch kind's
+	// Complete transition), applied via the same label-fallback path as
+	// Labels — jira-native status mapping for research verdicts is deferred
+	// (ADR 0022) until a Jira user exists.
+	VerdictLabels forge.VerdictLabels
 	// IncludeComments, when true, appends the issue's comment thread to the
 	// Body returned by Issue. Opt-in to keep the prompt-injection surface tight
 	// by default.
@@ -378,6 +383,18 @@ func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) e
 		return fmt.Errorf("jira: no status mapping or fallback label configured for state %v", to)
 	}
 	return j.swapLabel(num, toLabel, j.cfg.Labels.Label(from))
+}
+
+// CompleteVerdict swaps num's InProgress fallback label for verdict's
+// terminal label, riding the same label-fallback mechanism TransitionState
+// falls back to (ADR 0022: jira has no native status mapping for research
+// verdicts yet).
+func (j *jiraClient) CompleteVerdict(num string, verdict forge.Verdict) error {
+	add := j.cfg.VerdictLabels.Label(verdict)
+	if add == "" {
+		return fmt.Errorf("jira: no label configured for verdict %v", verdict)
+	}
+	return j.swapLabel(num, add, j.cfg.Labels.Label(forge.InProgress))
 }
 
 type jiraSearchPayload struct {

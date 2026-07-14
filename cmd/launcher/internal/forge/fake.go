@@ -13,6 +13,12 @@ type TransitionStateCall struct {
 	From, To DispatchState
 }
 
+// CompleteVerdictCall records a single CompleteVerdict invocation.
+type CompleteVerdictCall struct {
+	Num     string
+	Verdict Verdict
+}
+
 // CreateLabelCall records a single CreateLabel invocation.
 type CreateLabelCall struct {
 	Name, Description, Color string
@@ -30,7 +36,12 @@ type Fake struct {
 	mu sync.Mutex
 
 	labels DispatchLabels
-	issues map[string]Issue
+	// VerdictLabels configures the Verdict-to-label mapping CompleteVerdict
+	// uses, the same way labels configures TransitionState; set directly
+	// (there is no constructor argument for it) since only research-kind
+	// tests exercise it.
+	VerdictLabels VerdictLabels
+	issues        map[string]Issue
 	// NativeDeps, when set for an issue number, is returned by DepsOf as
 	// DepSourceNative and takes precedence over body parsing — mirroring
 	// the GitHub adapter's native-wins-when-non-empty rule, so tests can
@@ -74,6 +85,10 @@ type Fake struct {
 	TransitionStateCalls []TransitionStateCall
 	// TransitionStateErr, if non-nil, is returned by every TransitionState call.
 	TransitionStateErr error
+	// CompleteVerdictCalls records all CompleteVerdict invocations in order.
+	CompleteVerdictCalls []CompleteVerdictCall
+	// CompleteVerdictErr, if non-nil, is returned by every CompleteVerdict call.
+	CompleteVerdictErr error
 	// CommentCalls records all Comment invocations in order.
 	CommentCalls []CommentCall
 
@@ -291,6 +306,34 @@ func (f *Fake) TransitionState(num string, from, to DispatchState) error {
 	}
 	add := f.labels.Label(to)
 	remove := f.labels.Label(from)
+	var next []string
+	for _, l := range iss.Labels {
+		if l != remove {
+			next = append(next, l)
+		}
+	}
+	next = append(next, add)
+	iss.Labels = next
+	f.issues[num] = iss
+	return nil
+}
+
+// CompleteVerdict swaps the InProgress label for verdict's terminal label on
+// issue num. Best-effort on missing issues (no error), matching
+// TransitionState's contract.
+func (f *Fake) CompleteVerdict(num string, verdict Verdict) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.CompleteVerdictCalls = append(f.CompleteVerdictCalls, CompleteVerdictCall{num, verdict})
+	if f.CompleteVerdictErr != nil {
+		return f.CompleteVerdictErr
+	}
+	iss, ok := f.issues[num]
+	if !ok {
+		return nil // best-effort
+	}
+	add := f.VerdictLabels.Label(verdict)
+	remove := f.labels.Label(InProgress)
 	var next []string
 	for _, l := range iss.Labels {
 		if l != remove {

@@ -136,6 +136,26 @@ func (e *execClient) TransitionState(num string, from, to forge.DispatchState) e
 	return nil
 }
 
+// CompleteVerdict swaps the InProgress label for verdict's terminal label on
+// issue num, emitting exactly one --add-label and one --remove-label —
+// TransitionState's contract, with the to-label resolved from verdictLabels
+// instead of DispatchLabels.Complete.
+func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
+	add := e.verdictLabels.Label(verdict)
+	if add == "" {
+		return fmt.Errorf("gh issue edit %s: no label configured for verdict %v", num, verdict)
+	}
+	args := []string{"issue", "edit", num, "--repo", e.repo, "--add-label", add}
+	if remove := e.labels.Label(forge.InProgress); remove != "" {
+		args = append(args, "--remove-label", remove)
+	}
+	cmd := exec.Command("gh", args...)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("gh issue edit %s: %w", num, err)
+	}
+	return nil
+}
+
 // DepsOf returns the canonical dependencies for issue num, preferring
 // GitHub's native issue-dependencies API and falling back to body-text
 // parsing (inline refs / "## Blocked by" section) when the native lookup

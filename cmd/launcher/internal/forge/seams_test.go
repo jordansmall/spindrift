@@ -141,6 +141,41 @@ func TestFake_TransitionState_Err(t *testing.T) {
 	}
 }
 
+// --- CompleteVerdict tests ---
+
+// researchLabels mirrors ResearchDispatchLabels/ResearchVerdictLabels so
+// research-kind Fake tests don't restate the label strings.
+var researchLabels = forge.ResearchDispatchLabels()
+var researchVerdictLabels = forge.ResearchVerdictLabels()
+
+func TestFake_CompleteVerdict_SwapsInProgressForVerdictLabel(t *testing.T) {
+	f := forge.NewFake(researchLabels)
+	f.VerdictLabels = researchVerdictLabels
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
+
+	if err := f.CompleteVerdict("42", forge.Recommend); err != nil {
+		t.Fatalf("CompleteVerdict: %v", err)
+	}
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !containsLabel(iss.Labels, "agent-research-recommend") {
+		t.Error("want agent-research-recommend label, not present")
+	}
+	if containsLabel(iss.Labels, "agent-research-in-progress") {
+		t.Error("want agent-research-in-progress removed, still present")
+	}
+	if len(f.CompleteVerdictCalls) != 1 {
+		t.Fatalf("want 1 CompleteVerdictCall, got %d", len(f.CompleteVerdictCalls))
+	}
+	call := f.CompleteVerdictCalls[0]
+	if call.Num != "42" || call.Verdict != forge.Recommend {
+		t.Errorf("unexpected call: %+v", call)
+	}
+}
+
 // --- ListIssues(DispatchState) tests ---
 
 func TestFake_ListIssues_ByDispatchState(t *testing.T) {
