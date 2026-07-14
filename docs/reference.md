@@ -55,27 +55,30 @@ instructions.
 
 ### Option surface
 
-Both `mkHarness` and the `perSystem.spindrift.*` module options take the same
-knobs. Unset options fall through to `mkHarness`'s own defaults.
+`mkHarness` is the engine; `perSystem.spindrift.*` is a flake-parts shim that
+exposes most — not all — of its arguments as declared options (`lib/flakeModule.nix`).
+The NixOS module system rejects undeclared options, so the **scope** column
+below marks which knobs only exist as `mkHarness` function arguments. Unset
+shared options fall through to `mkHarness`'s own defaults.
 
-| option      | type                        | default            | meaning                                                              |
-| ----------- | --------------------------- | ------------------ | -------------------------------------------------------------------- |
-| `nixpkgs`   | flake input                 | your `nixpkgs`     | locked nixpkgs the image and host commands build from                |
-| `system`    | string                      | perSystem's system | your host system; mapped to its Linux twin for the image            |
-| `overlays`  | list                        | `[]`               | overlays applied to the instantiated nixpkgs                         |
-| `config`    | attrs                       | `{ allowUnfree = true; }` | nixpkgs config attrs                                          |
-| `packages`  | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
-| `prefetch`  | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
-| `prompt`    | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent — a prompt that already has it is untouched) |
-| `scoutPrompt` / `reviewPrompt` / `filerPrompt` | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); baked in, overridable via `SPINDRIFT_PROMPT_DIR` |
-| `skills`    | list of path/derivation/`{ name; src; }` | `[]`  | skill files baked into the image at `/home/agent/.claude/skills` so the headless agent can `/invoke` them; a `{ name; src; }` content entry is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `SPINDRIFT_SKILLS_DIR` mounts over them at runtime |
-| `settings`  | submodule, grouped by section (see below) | `{}` | non-secret run defaults baked into the `spindrift` CLI |
-| `runtime`   | `"podman"` \| `"docker"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime, or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
-| `driver`    | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` is the only Driver today |
-| `nixInBox`  | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
-| `nixStoreWritable` | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; OCI runners only, the bwrap runner keeps its read-only store bind |
-| `extraClosures` | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
-| `nixBuilderImage` | string                | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
+| option      | scope          | type                        | default            | meaning                                                              |
+| ----------- | -------------- | --------------------------- | ------------------ | -------------------------------------------------------------------- |
+| `nixpkgs`   | shared         | flake input                 | your `nixpkgs`     | locked nixpkgs the image and host commands build from                |
+| `system`    | shared         | string                      | perSystem's system | your host system; mapped to its Linux twin for the image            |
+| `overlays`  | shared         | list                        | `[]`               | overlays applied to the instantiated nixpkgs                         |
+| `config`    | shared         | attrs                       | `{ allowUnfree = true; }` | nixpkgs config attrs                                          |
+| `packages`  | shared         | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
+| `prefetch`  | shared         | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
+| `prompt`    | shared         | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent — a prompt that already has it is untouched) |
+| `scoutPrompt` / `reviewPrompt` / `filerPrompt` | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `SPINDRIFT_PROMPT_DIR` regardless of which caller baked the image |
+| `skills`    | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skill files baked into the image at `/home/agent/.claude/skills` so the headless agent can `/invoke` them; a `{ name; src; }` content entry is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `SPINDRIFT_SKILLS_DIR` mounts over them at runtime |
+| `settings`  | shared         | submodule, grouped by section (see below) | `{}` | non-secret run defaults baked into the `spindrift` CLI |
+| `runtime`   | shared         | `"podman"` \| `"docker"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime, or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
+| `driver`    | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` is the only Driver today |
+| `nixInBox`  | shared         | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
+| `nixStoreWritable` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; OCI runners only, the bwrap runner keeps its read-only store bind |
+| `extraClosures` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
+| `nixBuilderImage` | **`mkHarness` only** | string        | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
 
 The `settings` submodule bakes run knobs into the `spindrift` CLI; a matching
 env var still wins at runtime, so one built command can be re-pointed without a
@@ -764,7 +767,9 @@ PR or changes the outcome line — the main agent falls back to pasting the raw
 Non-blocking findings into the PR body, exactly as when the filer is off.
 
 Override the filer's system prompt the same way as `scoutPrompt`/
-`reviewPrompt`, via the `filerPrompt` flake option or `SPINDRIFT_PROMPT_DIR`.
+`reviewPrompt`: the `filerPrompt` `mkHarness` argument (image rebuild), or
+`SPINDRIFT_PROMPT_DIR` at runtime (zero-rebuild, works regardless of which
+caller baked the image).
 
 #### Create the labels on the Target repo
 
