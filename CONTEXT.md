@@ -38,7 +38,8 @@ build-time seam (one Driver per image, picked beside `runtime`), analogous to
 the Forge and runner seams. Each Driver normalizes its tool's quirks at its own
 boundary and has two coordinated halves keyed by one name — a nix-generated
 in-box half (invocation, agent-config, outcome extraction) and a Go host-side
-strategy in the launcher (transient classification, heartbeat). _Provisional
+strategy in the launcher (transient classification, heartbeat, usage
+extraction). _Provisional
 name_ — may be renamed (e.g. "agent harness"). _Avoid_: engine, backend, tool.
 
 **Provider**:
@@ -49,6 +50,18 @@ Driver — once `opencode` ships, it is meant to be provider-flexible, so
 "GitHub Copilot support" would be the opencode Driver pointed at the
 `github-copilot` provider, with `MODEL` provider-namespaced (`github-copilot/…`).
 _Avoid_: model host, vendor, backend.
+
+**driver-exec**:
+The in-box, nix-built Go unit that runs one Driver invocation: it takes the
+prompt/agents/session file paths, the Driver's bin and flags, and a
+`--devshell` switch; spawns the Driver (via `nix develop --command` when
+asked), tees the stream to the Box log, filters heartbeats in-process
+(absorbing the former standalone heartbeat-filter binary), and returns the
+Driver's exit code. Owns process mechanics only — invocation data and outcome
+extraction stay with the Driver's nix half (ADR 0009). Replaces
+entrypoint.sh's temp-file/eval marshalling across the devShell process
+boundary. Decided 2026-07-13; lands with the entrypoint deepening work.
+_Avoid_: runner (that is the Box isolation seam), wrapper, shim.
 
 **Filer**:
 The opt-in subagent role (beside the scout and reviewer) that turns the final
@@ -140,6 +153,21 @@ reject "incoherent" pairings (e.g. github-issues + no-code-forge); an operator
 who selects one owns the consequences.
 _Avoid_: preset, profile, mode.
 
+**Launcher input**:
+The nix-rendered JSON document that carries every nix-computed value from the
+generated wrapper to the launcher through a single `--input` store path: a
+`settings` section (the resolved knob values after the Consumer flake's
+`settings` are applied) and an `artifacts` section (built references — image
+archive, agent files, driver name, …). Knob precedence is document < explicit
+CLI flag; ambient env no longer configures knobs (staged: warn, then error)
+and remains only for secrets and launcher→Box plumbing. The document is the
+Consumer flake's voice, flags are the operator's per-run voice, env is
+secrets. Decided 2026-07-13 (ADR 0020), replacing the exported
+`VAR="${VAR:-baked}"` run preamble whose env-wins fallback let ambient
+variables silently override flake settings.
+_Avoid_: config file (generated, never operator-edited), env preamble,
+defaults preamble.
+
 **Dispatch**:
 The per-issue execution, from claim to verdict: every Box launched for one
 issue — initial run, fix passes, conflict-resolve — plus its results and its
@@ -224,6 +252,17 @@ harness-issued invocations but cannot bind a fresh Driver process the Agent
 spawns itself — that containment belongs to the Box and token scope.
 _Avoid_: system prompt (ambiguous with the Driver's own), jailbreak prompt,
 safety prompt.
+
+**Conditional fragment**:
+An opt-in prompt step rendered into an Agent prompt only when its gate is on:
+one registry row — gate variable, fragment file, substitution variable — in a
+harness-owned nix registry, consumed by a single entrypoint loop that also
+derives the substitution allowlist from the same rows. Gates are normalized
+to env-nonempty on launcher-delivered Box plumbing; computed gates (skills
+discovery, filer, caveman) are precomputed into variables before the loop.
+Replaces the six hand-unrolled "conditional residue" blocks in
+`phase_prompt_assembly`. Decided 2026-07-13; lands with the prompt-registry
+work. _Avoid_: prompt toggle, feature flag, optional section.
 
 **Settle**:
 Driving a Dispatch from Box-exit to its terminal lifecycle state, whatever
