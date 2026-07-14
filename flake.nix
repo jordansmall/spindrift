@@ -119,8 +119,13 @@
               pkgs.git
               pkgs.gh
               pkgs.jq
+              pkgs.go
               config.packages.spindrift
-            ];
+            ]
+            # bubblewrap only builds on Linux; the runner integration tests
+            # (go test -tags=integration ./cmd/launcher/internal/runner/...,
+            # issue #576) need it on PATH to exercise a real sandbox.
+            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
             # `dogfood-stop`: ask a running ./dogfood.sh to exit after its current
             # wave (see the USR1/TERM trap in dogfood.sh) instead of Ctrl-C, which
             # would abort the wave mid-flight.
