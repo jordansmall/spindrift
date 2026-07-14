@@ -54,8 +54,9 @@ No `agent-awaiting-review` label is introduced. A green-but-unmerged PR is fully
 described by `agent-complete` (the agent is done) plus the issue being **open**
 (not yet merged); when the merge lands — by human, by GitHub `--auto`, or
 immediately — the PR closes the issue, and open-vs-closed *is* the merged
-signal. `reconcileStranded` keys only on `agent-in-progress`, so a handed-off
-`agent-complete` issue is left alone on later runs regardless.
+signal. Adoption (automatic, at the time this ADR was written; explicit-only
+via `spindrift recover <n>` since #600) keys only on `agent-in-progress`, so a
+handed-off `agent-complete` issue is left alone on later runs regardless.
 
 ## The dependency-satisfaction fix this forces (ADR is authoritative)
 

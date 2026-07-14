@@ -208,9 +208,9 @@ to the remote or attached to the PR). The cache is keyed strictly
 issue's trust domain; it is evicted as soon as that issue reaches a terminal
 state (`agent-complete` or `agent-failed`), and the whole cache is removed
 when the launcher process exits. A fresh `spindrift dispatch` — or a crash —
-therefore always starts with an empty cache; `reconcileStranded` (see
-[Runtime flow](#how-a-run-works)) still adopts stranded PRs, just without a
-session to resume, so they take the same cold-context fix flow described
+therefore always starts with an empty cache; `spindrift recover <n>` (see
+[Runtime flow](#how-a-run-works)) still adopts a stranded PR, just without a
+session to resume, so it takes the same cold-context fix flow described
 above.
 
 The actual pin/resume verb lives behind the Driver seam (ADR 0009): on the
@@ -499,7 +499,6 @@ behavior exactly as above.
 
 ```
 spindrift dispatch   (the nix-built Go launcher, host-side)
-  ├─ reconcile any stranded agent-in-progress issues with an open PR (adopt + gate)
   └─ gh issue list --label ready-for-agent        (find the work)
      └─ for each issue, up to MAX_PARALLEL at once:
         podman run  spindrift:latest               (disposable box)
@@ -621,10 +620,14 @@ ready-for-agent ──dispatch──▶ agent-in-progress ─────CI gree
   box as `CI_FAILURE_SUMMARY`. The fetch is best-effort — a fetch failure
   never blocks the fix pass, it just falls back to the fix box rediscovering
   the failure itself (`gh run view --log-failed`, the pre-#426 behavior).
-- **Stranded issues are reconciled.** At startup `spindrift dispatch` scans open
-  `agent-in-progress` issues that already have an open non-draft PR and re-runs
-  the merge gate on each ("adopts" them) — so a launcher killed mid-gate picks up
-  where it left off on the next run, without a fresh agent pass.
+- **Stranded issues are recovered explicitly, never adopted automatically.** A
+  bare `agent-in-progress` label carries no liveness signal — it cannot tell an
+  issue a crashed launcher stranded apart from one a live runner (another Box,
+  or an overlapping local run) is actively committing to right now. `spindrift
+  dispatch` never adopts on the strength of the label alone. The unstick is the
+  `agent-recover` label (`agent-recover.yml` → `spindrift recover <n>`): an
+  operator's explicit assertion that the issue is no longer owned by a live
+  runner, re-running the merge gate on its open non-draft PR.
 
 Rename any of these with the `inProgressLabel` / `failedLabel` / `completeLabel`
 knobs under `settings.lifecycleLabels` (baked) or the
@@ -773,13 +776,18 @@ gh label create agent-failed      --repo owner/repo --color b60205 --description
 
 The label swaps are best-effort. If the launcher is killed mid-run (Ctrl-C, a
 crashed host, a laptop closing) an issue can be left in `agent-in-progress` with
-no container running. The next `spindrift dispatch` **reconciles automatically**
-for the common case: it adopts any `agent-in-progress` issue that already has an
-open non-draft PR and re-runs the merge gate on it. What it cannot recover on its
-own is an issue stranded *before* a PR was opened (or with only a draft PR) —
-there is nothing to adopt, and the `LABEL` query skips it. The unstick there is a
-**manual label flip**: move it back to `ready-for-agent` to re-dispatch (or to
-`agent-failed` to park it).
+no container running. `spindrift dispatch` never reconciles this on its own —
+a bare `agent-in-progress` label is indistinguishable from an issue a live
+runner is still working, so automatic adoption would risk force-pushing or
+merging over that runner's in-flight commits (#600). Recovery is always an
+explicit, opt-in operator action:
+
+- **An open non-draft PR already exists** — label the issue `agent-recover`.
+  `agent-recover.yml` claims it and runs `spindrift recover <n>`, re-running the
+  merge gate on that PR.
+- **No PR was opened yet (or only a draft PR)** — there is nothing to adopt.
+  Move it back to `ready-for-agent` to re-dispatch (or to `agent-failed` to park
+  it).
 
 ```sh
 gh issue edit <n> --repo owner/repo --add-label ready-for-agent --remove-label agent-in-progress
