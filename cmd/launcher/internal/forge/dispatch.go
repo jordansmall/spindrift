@@ -8,6 +8,13 @@ const (
 	InProgress                        // an agent is actively working this issue
 	Complete                          // agent work merged and green
 	Failed                            // box exited non-zero; needs human triage
+	// Untriaged is not a real tracker state — it is the "from" state a
+	// promotion TransitionState(Untriaged, Dispatchable) call names for an
+	// issue that has never carried a dispatch label. Its Label is "", so
+	// every adapter's remove-label step is a no-op (TransitionState only
+	// ever adds the Dispatchable label), matching the "an unlabeled issue
+	// is first promoted" step of the Console's Pick (#646).
+	Untriaged
 )
 
 // DispatchLabels maps canonical DispatchState values to their issue-tracker
