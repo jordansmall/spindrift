@@ -521,4 +521,37 @@ in
     fi
     touch $out
   '';
+
+  # The agent-image drvPath must be a pure function of flake content, not the
+  # Consumer's host system (issue #597, ADR 0019's freshness probe relies on
+  # this). Reproduces the darwin-vs-linux divergence at pure eval time — no
+  # darwin builder is needed to read a foreign-system derivation's drvPath —
+  # by baking the *same* { name; src; } skill entry through mkHarness calls
+  # that differ only in `system`. Before the fix a pre-built host derivation
+  # in `skills` would tag the whole image graph with the host's system; the
+  # content form never constructs a derivation outside the image's own
+  # (always-Linux) pkgs, so the two must coincide.
+  skills-content-form-drvpath-host-independent =
+    let
+      inherit (pkgs.lib) assertMsg;
+      skills = [
+        {
+          name = "cross-system-skill.md";
+          src = "cross-system marker content";
+        }
+      ];
+      harnessLinux = import ../../lib/mkHarness.nix {
+        inherit nixpkgs skills;
+        system = "aarch64-linux";
+      };
+      harnessDarwin = import ../../lib/mkHarness.nix {
+        inherit nixpkgs skills;
+        system = "aarch64-darwin";
+      };
+    in
+    assert assertMsg (harnessLinux.image.drvPath == harnessDarwin.image.drvPath) ''
+      agent-image drvPath depends on the Consumer's host system (issue #597):
+        aarch64-linux:  ${harnessLinux.image.drvPath}
+        aarch64-darwin: ${harnessDarwin.image.drvPath}'';
+    pkgs.runCommand "skills-content-form-drvpath-host-independent" { } "touch $out";
 }
