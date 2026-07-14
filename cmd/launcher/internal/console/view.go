@@ -19,5 +19,15 @@ func View(m Model) string {
 	if m.Err != nil {
 		fmt.Fprintf(&b, "refresh failed: %s\n", m.Err)
 	}
+	if len(m.Picks) > 0 {
+		b.WriteString("picks:\n")
+		for _, p := range m.Picks {
+			fmt.Fprintf(&b, "  #%s  %s  %s", p.Number, p.State, p.Title)
+			if p.Reason != "" {
+				fmt.Fprintf(&b, "  (%s)", p.Reason)
+			}
+			b.WriteString("\n")
+		}
+	}
 	return b.String()
 }

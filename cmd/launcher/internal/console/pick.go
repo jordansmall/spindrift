@@ -30,6 +30,24 @@ const (
 	PickDissolved
 )
 
+// String renders s as the word View shows on a queue row.
+func (s PickState) String() string {
+	switch s {
+	case PickQueued:
+		return "queued"
+	case PickClaiming:
+		return "claiming"
+	case PickRunning:
+		return "running"
+	case PickSettled:
+		return "settled"
+	case PickDissolved:
+		return "dissolved"
+	default:
+		return "unknown"
+	}
+}
+
 // Pick is one row of the session's operator queue: an issue the operator
 // has picked, its Dispatch kind, and its current lifecycle state.
 type Pick struct {

@@ -39,6 +39,24 @@ func TestView_DogfoodNotice_ShownWhenLiveSilentOtherwise(t *testing.T) {
 	}
 }
 
+// TestView_ListsPicksWithNumberTitleState verifies View renders each queue
+// row's number, title, and state — a dissolved row also carries its reason
+// — so the operator can see the queue without a separate command (#646).
+func TestView_ListsPicksWithNumberTitleState(t *testing.T) {
+	m := NewModel()
+	m.Picks = []Pick{
+		{Number: "42", Title: "fix the thing", State: PickQueued},
+		{Number: "7", Title: "raced pick", State: PickDissolved, Reason: "issue is closed"},
+	}
+
+	out := View(m)
+	for _, want := range []string{"42", "fix the thing", "queued", "7", "raced pick", "dissolved", "issue is closed"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("View() = %q, want it to contain %q", out, want)
+		}
+	}
+}
+
 // TestView_RefreshError_Surfaced verifies a failed refresh's error text
 // appears in View so the operator sees why the list went stale.
 func TestView_RefreshError_Surfaced(t *testing.T) {
