@@ -3,6 +3,7 @@ package waves
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -72,6 +73,43 @@ func TestDrainMaxJobs_IgnoreBlockers_FailedBlockerDoesNotCascade(t *testing.T) {
 
 	if len(fr.RunCalls) != 1 {
 		t.Fatalf("RunCalls: got %d, want 1 (a failed blocker must not cascade-fail research)", len(fr.RunCalls))
+	}
+}
+
+// TestDrainMaxJobs_Selective_RerunHint_UsesConfigVerb verifies that a
+// research selective wave's rerun hint names `spindrift research`, not a
+// hardcoded `spindrift dispatch` — the operator must be told the verb that
+// actually carries the remainder into the next invocation (ADR 0022).
+func TestDrainMaxJobs_Selective_RerunHint_UsesConfigVerb(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-research"
+	c.MaxParallel = 1
+	c.MaxJobs = 1
+	c.Verb = "research"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "10", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "15", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	out := captureStdout(t, func() {
+		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+			{Number: "10", Title: "first"},
+			{Number: "15", Title: "second"},
+		}, nil, nil, OriginSelective); err != nil {
+			t.Fatalf("drainMaxJobs: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "spindrift research --yes 15") {
+		t.Errorf("output must print the research re-run command; got:\n%s", out)
+	}
+	if strings.Contains(out, "spindrift dispatch") {
+		t.Errorf("output must not print the dispatch re-run command for a research wave; got:\n%s", out)
 	}
 }
 

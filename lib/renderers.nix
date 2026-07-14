@@ -328,6 +328,7 @@ rec {
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
       subcommands = [
         "dispatch"
+        "research"
         "preview"
         "build"
         "recover"
@@ -403,6 +404,7 @@ rec {
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
       subcommands = [
         "dispatch"
+        "research"
         "preview"
         "build"
         "recover"
@@ -477,6 +479,10 @@ rec {
         {
           name = "dispatch";
           doc = "dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)";
+        }
+        {
+          name = "research";
+          doc = "advise-only research dispatch: post a verdict comment per issue; never merges, never promotes";
         }
         {
           name = "preview";
@@ -622,6 +628,14 @@ rec {
         Fan out agents. With no issue list, discover dispatchable issues by label;
         an explicit issue list dispatches exactly those, bypassing the label and
         barrier gates.
+        .TP
+        .B research [\-\-no-build] [\-\-yes] [issue...]
+        Advise-only research dispatch: same selective semantics as
+        .BR dispatch ,
+        but drains the
+        .I agent-research
+        label instead and posts a verdict comment per issue rather than landing
+        code.
         .TP
         .B preview [issue...]
         Dry run: show what dispatch would pick up, in order, without launching any

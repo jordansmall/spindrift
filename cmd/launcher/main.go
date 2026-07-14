@@ -564,6 +564,11 @@ func newSettle(c config, it forge.IssueTracker, cf forge.CodeForge) settle.Settl
 // wavesConfig builds the subset of config the wave engine (internal/waves)
 // needs.
 func wavesConfig(c config) waves.Config {
+	// "work" is not a CLI verb; the dispatch subcommand is.
+	verb := "dispatch"
+	if c.dispatchKind == dispatchKindResearch {
+		verb = dispatchKindResearch
+	}
 	return waves.Config{
 		MaxParallel:     c.maxParallel,
 		MaxJobs:         c.maxJobs,
@@ -573,6 +578,7 @@ func wavesConfig(c config) waves.Config {
 		CompleteLabel:   c.completeLabel,
 		FailedLabel:     c.failedLabel,
 		IgnoreBlockers:  c.dispatchKind == dispatchKindResearch,
+		Verb:            verb,
 	}
 }
 

@@ -109,17 +109,23 @@ func heldIssues(issues, selected, blockerFailed []Issue) []Issue {
 }
 
 // printSelectiveRerunHint names the issues a selective-list wave left behind
-// and the exact command that carries them into the next invocation.
-// Selective dispatch bypasses the label gate (ADR 0011), so re-discovery
-// cannot pick the remainder back up the way the queue path does — the
-// operator carries it instead (ADR 0019).
-func printSelectiveRerunHint(held []Issue) {
+// and the exact command that carries them into the next invocation. cfg.Verb
+// names the subcommand (dispatch or research, ADR 0022) so the hint carries
+// the remainder back into the same kind that produced it; empty defaults to
+// "dispatch". Selective dispatch bypasses the label gate (ADR 0011), so
+// re-discovery cannot pick the remainder back up the way the queue path does
+// — the operator carries it instead (ADR 0019).
+func printSelectiveRerunHint(cfg Config, held []Issue) {
+	verb := cfg.Verb
+	if verb == "" {
+		verb = "dispatch"
+	}
 	nums := make([]string, len(held))
 	for i, iss := range held {
 		nums[i] = iss.Number
 	}
 	fmt.Printf("==> %d issue(s) remain: #%s\n", len(held), strings.Join(nums, ", #"))
-	fmt.Printf("==> re-run to continue: spindrift dispatch --yes %s\n", strings.Join(nums, " "))
+	fmt.Printf("==> re-run to continue: spindrift %s --yes %s\n", verb, strings.Join(nums, " "))
 }
 
 // drainMaxJobs drains up to cfg.MaxJobs currently-unblocked issues from the
@@ -182,7 +188,7 @@ outer:
 		held := heldIssues(issues, selected, blockerFailed)
 		if len(held) > 0 {
 			if origin == OriginSelective {
-				printSelectiveRerunHint(held)
+				printSelectiveRerunHint(cfg, held)
 			} else {
 				fmt.Printf("no unblocked '%s' issues to drain — %d remain blocked or deferred.\n", cfg.Label, len(held))
 			}
@@ -195,7 +201,7 @@ outer:
 	dispatchWave(cfg, it, f, s, selected)
 	if held := heldIssues(issues, selected, blockerFailed); len(held) > 0 {
 		if origin == OriginSelective {
-			printSelectiveRerunHint(held)
+			printSelectiveRerunHint(cfg, held)
 		} else {
 			fmt.Printf("==> %d issue(s) remain for a later invocation (blocked, deferred, or past MAX_JOBS); re-run `spindrift dispatch` to continue the drain\n", len(held))
 		}
