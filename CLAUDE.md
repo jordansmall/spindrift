@@ -3,7 +3,7 @@
 ## Issue tracker
 
 Issues live on GitHub (`jordansmall/spindrift`). File agent-ready issues via the
-`/to-issues` skill, never ad-hoc `gh issue create`.
+`/to-tickets` skill, never ad-hoc `gh issue create`.
 
 ### Triage label lifecycle
 
