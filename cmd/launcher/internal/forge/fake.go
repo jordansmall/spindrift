@@ -29,13 +29,13 @@ type CommentCall struct {
 type Fake struct {
 	mu sync.Mutex
 
-	labels          DispatchLabels
-	issues          map[string]Issue
+	labels DispatchLabels
+	issues map[string]Issue
 	// NativeDeps, when set for an issue number, is returned by DepsOf as
 	// DepSourceNative and takes precedence over body parsing — mirroring
 	// the GitHub adapter's native-wins-when-non-empty rule, so tests can
 	// script native-sourced, body-sourced, and mixed-batch blockers.
-	NativeDeps map[string][]string
+	NativeDeps      map[string][]string
 	prs             map[string]PR             // URL → PR
 	branchPRs       map[string]string         // branch → PR URL
 	prStates        map[string]PRState        // URL → canonical PR state
