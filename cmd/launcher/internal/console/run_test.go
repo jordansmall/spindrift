@@ -210,6 +210,27 @@ func TestRun_BarePickCommand_IsNoop(t *testing.T) {
 	}
 }
 
+// TestRun_PickCommand_WithLauncher_PromotionFails_DissolvedRowSurvivesRender
+// verifies a failed promotion's dissolved row is landed on launch.Queue too
+// — not just Model.Picks via PickFailedMsg — so it survives Run's
+// per-render resync from the live Queue instead of vanishing on the very
+// next render (#646 AC6).
+func TestRun_PickCommand_WithLauncher_PromotionFails_DissolvedRowSurvivesRender(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	f.TransitionStateErr = errBoom
+
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+
+	var out strings.Builder
+	if err := Run(f, t.TempDir(), strings.NewReader("p 42\nr\nq\n"), &out, launch); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Count(out.String(), "dissolved") != 2 {
+		t.Errorf("output = %q, want the dissolved row on both post-pick renders (after \"p 42\" and after \"r\"), not just the first", out.String())
+	}
+}
+
 // newAlphaBetaFake returns a Fake tracker with two open issues, "alpha"
 // labeled "a" and "beta" labeled "b" — shared fixture for filter tests.
 func newAlphaBetaFake() *forge.Fake {

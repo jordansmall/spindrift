@@ -45,6 +45,18 @@ func (q *Queue) Remove(num string) bool {
 	return false
 }
 
+// hasQueued reports whether any pick still holds at PickQueued.
+func (q *Queue) hasQueued() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, p := range q.picks {
+		if p.State == PickQueued {
+			return true
+		}
+	}
+	return false
+}
+
 // Snapshot returns a copy of the queue's current picks, in pick order.
 func (q *Queue) Snapshot() []Pick {
 	q.mu.Lock()
