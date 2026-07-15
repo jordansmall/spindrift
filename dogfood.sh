@@ -54,6 +54,18 @@ export MAX_JOBS="${MAX_JOBS:-$MAX_PARALLEL}"
 # (empty) in harness.env to opt back out.
 export CONTINUOUS_DISPATCH="${CONTINUOUS_DISPATCH-1}"
 : "${REPO_SLUG:?set REPO_SLUG=owner/repo in harness.env}"
+# Selects which Dispatch kind (ADR 0022) the loop drives: "dispatch" (default,
+# work) or "research". Both share the launcher's exit-code contract (2 empty
+# queue, 3 none dispatchable, 4 stale image), so the loop logic below needs no
+# other change to drive research instead.
+DOGFOOD_KIND="${DOGFOOD_KIND:-dispatch}"
+case "$DOGFOOD_KIND" in
+  dispatch | research) ;;
+  *)
+    echo "!! DOGFOOD_KIND must be 'dispatch' or 'research', got: $DOGFOOD_KIND" >&2
+    exit 1
+    ;;
+esac
 
 if [ -n "$(git status --porcelain)" ]; then
   echo "!! working tree is dirty — commit/stash before dogfooding (build reads \$PWD)." >&2
@@ -133,9 +145,9 @@ echo "==> dogfood: nix run .# -- build"
 nix run .# -- build
 
 while :; do
-  echo "==> dogfood: nix run .# -- dispatch"
+  echo "==> dogfood: nix run .# -- $DOGFOOD_KIND"
   nix_exit=0
-  nix run .# -- dispatch || nix_exit=$?
+  nix run .# -- "$DOGFOOD_KIND" || nix_exit=$?
 
   if [ "$nix_exit" -eq 2 ]; then
     echo "==> dogfood: queue empty — done after $iteration iteration(s)."
