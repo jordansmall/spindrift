@@ -383,13 +383,13 @@ func TestMergeImmediate_BlockedByChecksExhausted(t *testing.T) {
 }
 
 // TestMergeImmediate_StaleBaseTriggersProactiveRebase verifies that a PR the
-// forge reports as behind its base (NeedsUpdate — GitHub's mergeStateStatus
-// BEHIND) is rebased and re-confirmed green *before* mergeImmediate ever
-// calls Merge — even though the PR carries no textual conflict and Merge
-// would otherwise succeed outright. This is the gap that let #670 and #672
-// land a combined compile break on main (issue #936): each was individually
-// green against its own stale base, but neither was ever rebased and
-// re-tested against the other's changes before landing.
+// forge reports as behind its base (NeedsUpdate) is rebased and
+// re-confirmed green *before* mergeImmediate ever calls Merge — even though
+// the PR carries no textual conflict and Merge would otherwise succeed
+// outright. This is the gap that let #670 and #672 land a combined compile
+// break on main (issue #936): each was individually green against its own
+// stale base, but neither was ever rebased and re-tested against the
+// other's changes before landing.
 func TestMergeImmediate_StaleBaseTriggersProactiveRebase(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
