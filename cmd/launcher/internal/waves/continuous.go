@@ -78,17 +78,48 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 		return err
 	}
 
+	limiter := cfg.Limiter
+	if limiter == nil {
+		// Headless (CONTINUOUS_DISPATCH) and every pre-#653 call site: a
+		// fixed cap for this invocation only, never resized -- behaviour is
+		// unchanged from the plain int cfg.MaxParallel this replaces.
+		limiter = NewLimiter(cfg.MaxParallel)
+	}
+
+	// mu also guards stale/dispatchedAny/claimed/outstanding below, exactly
+	// as it guarded refill's shared state before #653 -- every refill call,
+	// whether from the bootstrap loop, a completing Box, or the grow
+	// listener below, runs under this one lock, so they never interleave.
 	var mu sync.Mutex
-	var wg sync.WaitGroup
+	idle := sync.NewCond(&mu)
 	stale := false
 	dispatchedAny := false
 	claimed := make(map[string]bool)
+	// outstanding counts in-flight Boxes. A plain sync.WaitGroup can't
+	// coordinate safely here: the grow listener below can call refill --
+	// and so wg.Add -- from a goroutine with no causal link to any counted
+	// Box, which risks the documented WaitGroup race (Add landing after a
+	// concurrent Wait has already committed to returning). Tracking the
+	// count under mu instead makes "is anything still outstanding" and "am
+	// I about to add more" the same critical section, so the two can never
+	// race.
+	outstanding := 0
+	closed := false
 
 	var refill func()
 	refill = func() {
-		if stale {
+		if stale || closed {
 			return
 		}
+		if !limiter.TryAcquire() {
+			return
+		}
+		launched := false
+		defer func() {
+			if !launched {
+				limiter.Release()
+			}
+		}()
 		applicable, isFresh, msg := fresh()
 		if applicable && !isFresh {
 			stale = true
@@ -114,9 +145,9 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 		dispatchedAny = true
 		claimed[iss.Number] = true
 		claimIssue(cfg, it, iss.Number)
-		wg.Add(1)
+		launched = true
+		outstanding++
 		go func() {
-			defer wg.Done()
 			d := f.New(iss.Number, iss.Title)
 			defer d.Close()
 			result := d.Run()
@@ -134,19 +165,52 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.Number, iss.Number)
 				s.Settle(d, iss.Number, result)
 			}
+			limiter.Release()
 			mu.Lock()
+			outstanding--
 			refill()
+			if outstanding == 0 {
+				idle.Broadcast()
+			}
 			mu.Unlock()
 		}()
 	}
 
+	// growDone stops the grow listener once this call is finished; done
+	// confirms it has actually exited before RunContinuous returns, so no
+	// call ever leaks a goroutine watching a Limiter shared across a whole
+	// Console session.
+	growDone := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-limiter.Grown():
+				// A Console "+" mid-drain (ADR 0023, issue #653): the
+				// operator's raise should launch a held pick right away, not
+				// wait for an unrelated Box to settle or a background poll.
+				mu.Lock()
+				refill()
+				mu.Unlock()
+			case <-growDone:
+				return
+			}
+		}
+	}()
+
 	mu.Lock()
-	for i := 0; i < cfg.MaxParallel; i++ {
+	for i := 0; i < limiter.Cap(); i++ {
 		refill()
 	}
+	for outstanding > 0 {
+		idle.Wait()
+	}
+	closed = true
 	mu.Unlock()
 
-	wg.Wait()
+	close(growDone)
+	<-done
 
 	if stale {
 		return ErrImageStale
