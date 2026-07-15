@@ -1,10 +1,14 @@
-package forge
+// Package gitplumbing holds git-specific plumbing helpers shared by the git
+// and github forge adapters: stderr classification and force-push handling.
+package gitplumbing
 
 import (
 	"bytes"
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // IsMergeConflict returns true when gh's stderr indicates a merge-conflict
@@ -19,8 +23,8 @@ func IsMergeConflict(stderr string) bool {
 // checked out at dir, capturing git's stderr into the returned error so
 // callers can tell a stale lease apart from an auth or network fault. A
 // failure without a genuine ref-rejection marker in stderr is wrapped in
-// ErrTransientPushFailure so callers know it's safe to retry. Shared by the
-// git and github adapters, both of which force-push a rebased branch.
+// forge.ErrTransientPushFailure so callers know it's safe to retry. Shared by
+// the git and github adapters, both of which force-push a rebased branch.
 func GitForcePush(dir string) error {
 	var stderr bytes.Buffer
 	cmd := exec.Command("git", "-C", dir, "push", "--force-with-lease")
@@ -34,7 +38,7 @@ func GitForcePush(dir string) error {
 		if isStalePushRejection(s) {
 			return fmt.Errorf("git push --force-with-lease: %w%s", err, suffix)
 		}
-		return fmt.Errorf("git push --force-with-lease: %w%s: %w", err, suffix, ErrTransientPushFailure)
+		return fmt.Errorf("git push --force-with-lease: %w%s: %w", err, suffix, forge.ErrTransientPushFailure)
 	}
 	return nil
 }
