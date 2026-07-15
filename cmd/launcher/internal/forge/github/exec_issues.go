@@ -183,9 +183,11 @@ func (e *execClient) nativeDepsOf(num string) ([]string, error) {
 		fmt.Sprintf("repos/%s/issues/%s/dependencies/blocked_by", e.repo, num),
 		"--jq", ".[].number",
 	)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("gh api dependencies/blocked_by %s: %w", num, err)
+		return nil, fmt.Errorf("gh api dependencies/blocked_by %s: %w: %s", num, err, strings.TrimSpace(stderr.String()))
 	}
 	var deps []string
 	seen := map[string]bool{}

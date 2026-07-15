@@ -120,6 +120,31 @@ esac`)
 	}
 }
 
+// TestExecClient_DepsOf_NativeErrorSurfacesStderr verifies that when the
+// native dependencies API call fails, the fallback warning contains gh's
+// actual stderr rather than just "exit status 1".
+func TestExecClient_DepsOf_NativeErrorSurfacesStderr(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*dependencies/blocked_by*)
+	printf 'HTTP 404: Not Found\n' >&2
+	exit 1
+	;;
+*"issue view"*)
+	printf '{"number":10,"title":"t","body":"blocked by #9","state":"OPEN","labels":[]}'
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	out := captureStderr(t, func() {
+		if _, err := c.DepsOf("10"); err != nil {
+			t.Fatalf("DepsOf: %v", err)
+		}
+	})
+	if !strings.Contains(out, "HTTP 404: Not Found") {
+		t.Fatalf("fallback warning must contain gh's stderr; got: %q", out)
+	}
+}
+
 // captureStderr runs fn with os.Stderr redirected to a pipe and returns
 // everything written to it.
 func captureStderr(t *testing.T, fn func()) string {
