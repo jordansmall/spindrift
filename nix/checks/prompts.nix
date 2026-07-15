@@ -317,4 +317,20 @@ in
         }
         touch $out
       '';
+
+  # The Conditional fragment registry's computed-gate rows (lib/fragments.nix,
+  # issue #622) name a bash variable entrypoint.sh's precompute block sets;
+  # nothing else forces the two to agree, so a typo in either would leave the
+  # fragment loop's `"${!_fgate}"` indirection silently reading an unset
+  # variable -- the row just never renders, no error (issue #689). Same
+  # drift-guard shape as outcome-contract-marker-parity in nix/checks/image.nix,
+  # grep-based and eval-only so it belongs in checks-inbox, not the
+  # image-realizing checks.
+  fragment-gate-parity = pkgs.runCommand "fragment-gate-parity" { } ''
+    for gate in SKILLS_FOUND CAVEMAN_BAKED TDD_BAKED COMMIT_BAKED FILER_ENABLED; do
+      grep -qF "gate = \"$gate\";" ${../../lib/fragments.nix}
+      grep -qF "local $gate=" ${../../agent/entrypoint.sh}
+    done
+    touch $out
+  '';
 }
