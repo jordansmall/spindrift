@@ -31,8 +31,11 @@
   # The selected Driver's in-box half (ADR 0009): invocation binary/flags,
   # skill wiring, and outcome extraction.
   driverEntry,
-  # In-box heartbeat filter (#183), built for Linux by mkHarness.
-  heartbeatFilterBin,
+  # In-box Driver runner (#626), built for Linux by mkHarness: runs one
+  # Driver invocation direct or inside the devShell, tees the stream, and
+  # filters heartbeats in-process (absorbing the former standalone
+  # spindrift-heartbeat-filter binary, #183).
+  driverExecBin,
   # --agents JSON, rendered by the selected Driver (ADR 0009).
   agentsJsonTemplate,
   # The Driver's in-box half rendered into agent/entrypoint.sh's
@@ -108,7 +111,7 @@ let
       gh
       (driverEntry.package pkgs)
       cacert
-      heartbeatFilterBin # in-box heartbeat filter (#183)
+      driverExecBin # in-box Driver runner (#626)
     ])
     # The nix CLI is included by default so `nix flake check` / `nix develop`
     # work inside the box. Omitted only when the Consumer opts into the lean image.
@@ -140,7 +143,7 @@ let
       gettext # envsubst
       coreutils
       jq # extracts the outcome from the stream-json transcript
-      heartbeatFilterBin # in-box heartbeat view (#183)
+      driverExecBin # in-box Driver runner (#626)
     ];
     # Prepend the schema-derived defaults block so the entrypoint carries the
     # baked values without hardcoding them in the source script.
