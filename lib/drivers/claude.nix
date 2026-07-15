@@ -99,6 +99,7 @@
               "Read"
               "Bash"
               "WebFetch"
+              "Agent"
             ];
             model = reviewModel;
           };
