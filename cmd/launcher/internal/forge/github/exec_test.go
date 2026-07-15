@@ -420,6 +420,55 @@ fi
 	}
 }
 
+// TestNeedsUpdate_BehindReturnsTrue verifies NeedsUpdate queries
+// mergeStateStatus via GraphQL and reports true for BEHIND (issue #936).
+func TestNeedsUpdate_BehindReturnsTrue(t *testing.T) {
+	dir := prependFakeGH(t, `if [ "$1" = "api" ]; then
+  printf 'BEHIND\n'
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	stale, err := c.NeedsUpdate("https://github.com/owner/repo/pull/42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !stale {
+		t.Fatal("NeedsUpdate: want true for mergeStateStatus BEHIND, got false")
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatalf("call-00.txt not written: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "graphql") {
+		t.Fatalf("NeedsUpdate must use gh api graphql; args: %q", args)
+	}
+	if !strings.Contains(joined, "mergeStateStatus") {
+		t.Fatalf("NeedsUpdate must query mergeStateStatus; args: %q", args)
+	}
+}
+
+// TestNeedsUpdate_CleanReturnsFalse verifies NeedsUpdate reports false for
+// any mergeStateStatus other than BEHIND (e.g. CLEAN).
+func TestNeedsUpdate_CleanReturnsFalse(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "api" ]; then
+  printf 'CLEAN\n'
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	stale, err := c.NeedsUpdate("https://github.com/owner/repo/pull/42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stale {
+		t.Fatal("NeedsUpdate: want false for mergeStateStatus CLEAN, got true")
+	}
+}
+
 // TestRenderFailureDetail verifies the failing-context filter and the
 // maxFailureDetailBytes truncation.
 func TestRenderFailureDetail(t *testing.T) {
