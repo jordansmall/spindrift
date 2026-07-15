@@ -25,6 +25,22 @@ var triageLabelMeta = map[string]labelMeta{
 	"agent-complete":    {description: "Agent work merged and green", color: "0e8a16"},
 }
 
+// researchLabelMeta is the single source of truth for default research
+// label (ADR 0022) colors and descriptions. Unlike triageLabelMeta, `spindrift
+// doctor` never checks or creates these: the research family is a fixed,
+// non-configurable vocabulary agent-research.yml and the research prompt key
+// off directly, not a user-tunable knob — see docs/reference.md's "Create
+// the research labels on the Target repo" for the manual creation path this
+// map keeps in sync with.
+var researchLabelMeta = map[string]labelMeta{
+	"agent-research":             {description: "Apply to fire a research dispatch", color: "fbca04"},
+	"agent-research-in-progress": {description: "A Box is reviewing this issue", color: "bfd4f2"},
+	"agent-research-recommend":   {description: "Relevant and enriched — promote it", color: "0e8a16"},
+	"agent-research-reject":      {description: "False positive, not worth it, or a duplicate — close it", color: "d93f0b"},
+	"agent-research-unclear":     {description: "Needs a human answer — answer, then re-apply agent-research", color: "d4c5f9"},
+	"agent-research-failed":      {description: "Box crashed or produced no verdict; needs human triage", color: "b60205"},
+}
+
 // runDoctor probes both seams (IssueTracker + CodeForge), then checks that
 // all configured triage labels exist in the repository. When interactive is
 // true and labels are missing, it prompts to create them; otherwise it reports
