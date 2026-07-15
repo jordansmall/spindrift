@@ -20,11 +20,12 @@ import (
 // main.go's runExitCode).
 var ErrImageStale = errors.New("image stale; rebuild and re-invoke")
 
-// Discoverer re-queries the dispatchable batch and its blocker edges.
-// RunContinuous calls it once at startup and again before every slot
-// refill, so a blocker that merges mid-run is picked up without a fresh
-// invocation.
-type Discoverer func() (issues []Issue, edges map[string][]string, err error)
+// Discoverer re-queries the dispatchable batch, its blocker edges, and the
+// source (native relationship vs body-text parsing) each blocker was
+// resolved from. RunContinuous calls it once at startup and again before
+// every slot refill, so a blocker that merges mid-run is picked up without a
+// fresh invocation.
+type Discoverer func() (issues []Issue, edges map[string][]string, sources Sources, err error)
 
 // FreshnessChecker answers whether a refill may launch a new Box.
 // Applicable is false for a runtime with no loaded image to compare
@@ -36,8 +37,13 @@ type FreshnessChecker func() (applicable, fresh bool, message string)
 // applying the same selection drainMaxJobs does for a whole batch —
 // blocker-failed cascade, blocked skip, touch-overlap defer — but returns
 // after the first match rather than collecting a whole wave, since a
-// refill only ever needs to fill one freed slot.
-func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, claimed map[string]bool) (Issue, bool) {
+// refill only ever needs to fill one freed slot. sources carries each
+// blocker's provenance alongside edges, mirroring drainMaxJobs' own
+// parameter (engine.go) — like that function's general blocked-skip line,
+// nextReady's does not render it: the only current Sources consumer,
+// writeBlockedMarker, fires for OriginClaimed only, a mode continuous
+// dispatch never uses (issue #662).
+func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, sources Sources, claimed map[string]bool) (Issue, bool) {
 	for _, iss := range issues {
 		switch {
 		case claimed[iss.Number]:
@@ -126,7 +132,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			fmt.Printf("==> %s\n", msg)
 			return
 		}
-		issues, edges, err := discover()
+		issues, edges, sources, err := discover()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "continuous: re-discover: %v\n", err)
 			return
@@ -138,7 +144,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			}
 		}
 		checkOverlap := waveOverlapCheck(cfg, it, cf)
-		iss, ok := nextReady(cfg, it, cf, checkOverlap, issues, edges, claimed)
+		iss, ok := nextReady(cfg, it, cf, checkOverlap, issues, edges, sources, claimed)
 		if !ok {
 			return
 		}
