@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/gitplumbing"
 )
 
 func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
@@ -169,7 +170,7 @@ func (e *execClient) Merge(url string) error {
 // (issue #566). A mergeable state this function cannot map to either outcome
 // is surfaced as its own error rather than folded into ErrMergeConflict.
 func (e *execClient) classifyMergeFailure(url string, mergeErr error, stderr string) error {
-	if !forge.IsMergeConflict(stderr) {
+	if !gitplumbing.IsMergeConflict(stderr) {
 		return fmt.Errorf("gh pr merge %s: %w: %s", url, mergeErr, strings.TrimSpace(stderr))
 	}
 	state, err := e.Mergeable(url)
@@ -312,5 +313,5 @@ func (e *execClient) Rebase(prURL string) error {
 		_ = gitIn("rebase", "--abort").Run()
 		return forge.ErrMergeConflict
 	}
-	return forge.GitForcePush(dir)
+	return gitplumbing.GitForcePush(dir)
 }

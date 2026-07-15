@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/gitplumbing"
 )
 
 // gitClient is the push-only Code Forge adapter for a plain git remote
@@ -119,7 +120,7 @@ func (g *gitClient) Merge(branch string) error {
 	mergeCmd.Stderr = &out
 	if err := mergeCmd.Run(); err != nil {
 		_ = gitIn("merge", "--abort").Run()
-		if forge.IsMergeConflict(out.String()) {
+		if gitplumbing.IsMergeConflict(out.String()) {
 			return forge.ErrMergeConflict
 		}
 		return fmt.Errorf("git merge %s: %w: %s", branch, err, strings.TrimSpace(out.String()))
@@ -153,7 +154,7 @@ func (g *gitClient) Rebase(branch string) error {
 		_ = gitIn("rebase", "--abort").Run()
 		return forge.ErrMergeConflict
 	}
-	return forge.GitForcePush(dir)
+	return gitplumbing.GitForcePush(dir)
 }
 
 // Probe checks that the configured remote is reachable.
