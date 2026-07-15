@@ -55,17 +55,10 @@ let
     + "}\n";
 
   # The Driver's in-box half rendered into agent/entrypoint.sh's DRIVER_* vars
-  # and function definitions (ADR 0009). DRIVER_BIN and DRIVER_FLAGS_COMMON
-  # are pure identity constants with no legitimate runtime variance, so they
-  # bake byte-identical to what mkHarness.nix used to string-build inline.
-  # DRIVER_SKILLS_DIR is different: it is inherently a runtime filesystem
-  # path, and $HOME is already the single source of truth for it -- set once
-  # via the image's `HOME=/home/agent` Env entry (lib/image.nix) and the
-  # bwrap runner's equivalent --setenv -- so computing it from $HOME here
-  # (exactly what agent/entrypoint.sh's now-deleted fallback line did) avoids
-  # a second, independently-baked copy of "/home/agent" drifting from the
-  # first, and lets a bats fixture exercise real skill discovery under its
-  # own $HOME with no test-only override.
+  # and function definitions (ADR 0009). /home/agent is the image's fixed
+  # HOME (see lib/image.nix's passwdFile), so the skills dir is baked as an
+  # absolute path rather than depending on $HOME at run time -- byte-identical
+  # to what mkHarness.nix used to string-build inline for all three vars.
   renderPreamble =
     driverEntry:
     "DRIVER_BIN="
@@ -74,7 +67,8 @@ let
     + "DRIVER_FLAGS_COMMON="
     + lib.escapeShellArg driverEntry.flagsCommon
     + "\n"
-    + ''DRIVER_SKILLS_DIR="''${HOME:-}/${driverEntry.skillsDirRelative}"''
+    + "DRIVER_SKILLS_DIR="
+    + lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
     + "\n"
     + renderFunctions driverEntry;
 in
