@@ -540,7 +540,7 @@ let
     src = launcherSrc;
     modRoot = "cmd/launcher";
     vendorHash = null;
-    subPackages = [ "." ]; # build only the launcher; heartbeat-filter is in-box only
+    subPackages = [ "." ]; # build only the launcher; driver-exec is in-box only
     ldflags = [
       "-X main.version=${spindriftVersion}"
       "-X main.revision=${revision}"
