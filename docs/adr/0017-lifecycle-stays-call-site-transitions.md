@@ -22,6 +22,14 @@ merge-blocked, landed), plus the unchanged push-only-landing site: five call
 sites, ten overall. Still the same edge, still every call site naming its
 typed `from`/`to` inline — no new edge, no conditional edge, no table.
 
+Issue #758 (2026-07-15) added a new reason for the existing `InProgress→Failed`
+edge inside `selfHeal`'s green branch: a force-pushed head (a conflict-resolve
+dispatch failure, or a post-force-push re-wait that ends red or times out)
+never re-confirms green, so there is no green PR at the current head — the
+same "never produced a green PR" condition `InProgress→Failed` already covers
+for a box crash or exhausted fix passes, just discovered later, mid-landing.
+Still the same edge, still named inline at its call site — no new edge.
+
 Re-open trigger: a transition added outside the claim or settle paths, or a
 conditional edge — one whose legality depends on runtime state rather than
 the static table above. Until then, architecture reviews should not

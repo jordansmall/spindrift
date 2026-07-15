@@ -207,9 +207,10 @@ the launch button) → `InProgress` (a Box has been dispatched; re-runs skip it)
 `Complete` (the agent has nothing left to do — its landing path has settled:
 a merged/handed-off PR on `github`, a landed branch when the Code Forge is
 push-only/absent, or a posted verdict for a research dispatch) or `Failed`
-(the Box crashed or never reached green past MAX_FIX_ATTEMPTS; human triage,
-re-transition to retry). Each Issue Tracker adapter maps these states to its
-native mechanism:
+(the Box crashed, never reached green past MAX_FIX_ATTEMPTS, or — on `github`
+— a force-pushed head from rebase-retry or an agent conflict-resolve box never
+re-confirmed green; human triage, re-transition to retry). Each Issue Tracker
+adapter maps these states to its native mechanism:
 
 - `github` — labels (`ready-for-agent` → `agent-in-progress` →
   `agent-complete`/`agent-failed`), swapped atomically. This is the original,
@@ -230,7 +231,10 @@ landing path: `immediate` merges automatically (locally, via a push that
 updates a clean checked-out branch); `manual` (default) leaves the branch/PR
 for a human; `auto` is native GitHub auto-merge and has no meaning off
 `github`. A merge failure after green leaves the issue `Complete` with a
-merge-blocked note — never `Failed` — once that landing attempt settles.
+merge-blocked note — never `Failed` — once that landing attempt settles,
+except when the post-force-push re-wait (after rebase or conflict-resolve)
+ends red or times out, or the conflict-resolve dispatch itself fails: there
+the force-pushed head never went green, so the issue ends `Failed` instead.
 _Was_: "Label lifecycle" — labels were GitHub's storage mechanism, mistaken for
 the states themselves.
 _Avoid_: status, queue, state machine.
