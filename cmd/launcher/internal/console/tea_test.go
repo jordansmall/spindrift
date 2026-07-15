@@ -491,6 +491,27 @@ func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
+// TestTea_PickKey_FollowedByQuit_PicksThenQuits verifies "p" followed by
+// "q" still exits the program — the pending "pa" chord resolves the pick
+// (same as any non-"a" key) but must not swallow the universal quit
+// keystroke along with it (issue #785 review).
+func TestTea_PickKey_FollowedByQuit_PicksThenQuits(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "p")
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	fm := tm.FinalModel(t).(teaModel)
+	if len(fm.m.Picks) != 1 {
+		t.Errorf("Picks = %+v, want the pick to have landed before quitting", fm.m.Picks)
+	}
+}
+
 // TestTea_PickKey_FollowedByNonA_ResolvesToSinglePick verifies "p" followed
 // by any key other than "a" resolves the leader chord to a single-issue
 // pick immediately, rather than making the operator wait out the timeout
@@ -509,6 +530,39 @@ func TestTea_PickKey_FollowedByNonA_ResolvesToSinglePick(t *testing.T) {
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_PickKey_AlreadyPicked_NoDuplicateRow verifies picking an issue
+// that already has an active (non-terminal) row never appends a second one
+// — Queue's row-scan helpers (setState, tryMarkClaiming) assume at most one
+// non-terminal row per issue number; a duplicate leaves one row stuck at
+// PickQueued forever and can hang the drain loop (issue #785 review).
+func TestTea_PickKey_AlreadyPicked_NoDuplicateRow(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "p")
+	sendKey(tm, "z") // resolve the "pa" chord to a single pick right away
+	waitForOutput(t, tm, "picks:", "#42")
+
+	sendKey(tm, "p")
+	sendKey(tm, "z")
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	fm := tm.FinalModel(t).(teaModel)
+	count := 0
+	for _, p := range fm.m.Picks {
+		if p.Number == "42" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("Picks = %+v, want exactly one row for #42, got %d", fm.m.Picks, count)
+	}
 }
 
 // TestTea_PickKey_FailedPromotion_SurvivesQueueResync verifies a raced/
@@ -721,6 +775,33 @@ func TestTea_ResizeKeys_RaiseAndLowerLiveCap(t *testing.T) {
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_RebuildKey_NotStale_NeverRunsRebuildFn verifies "b" is a no-op
+// while the image is fresh — the trigger is a stale image (both the AC and
+// the help text say "rebuild the stale image"), not a bare keypress (issue
+// #785 review).
+func TestTea_RebuildKey_NotStale_NeverRunsRebuildFn(t *testing.T) {
+	f := forge.NewFake()
+	rebuilt := make(chan struct{}, 1)
+	launch := &Launcher{
+		CodeForge: f,
+		Queue:     NewQueue(),
+		RebuildFn: func() error { rebuilt <- struct{}{}; return nil },
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "cap:")
+
+	sendKey(tm, "b")
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	select {
+	case <-rebuilt:
+		t.Error("RebuildFn ran while the image was fresh")
+	default:
+	}
 }
 
 // TestTea_RebuildKey_RunsRebuildFnAndClearsStale verifies "b" triggers the
