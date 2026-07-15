@@ -190,7 +190,7 @@ func TestView_ShowHelp_ListsBoundKeys(t *testing.T) {
 	if strings.Contains(out, "should not show") {
 		t.Errorf("View() = %q, want the backlog hidden while help is open", out)
 	}
-	for _, want := range []string{"j", "k", "/", "enter", "esc", "r", "q", "?"} {
+	for _, want := range []string{"j", "k", "/", "enter", "esc", "r", "q", "?", "d", "t", "x", "pgup", "pgdown"} {
 		if !strings.Contains(strings.ToLower(out), want) {
 			t.Errorf("View() = %q, want it to mention key %q", out, want)
 		}
@@ -234,6 +234,23 @@ func TestView_DrillInShowRaw_RendersRawInsteadOfRendered(t *testing.T) {
 	}
 	if !strings.Contains(out, `{"type":"assistant"}`) {
 		t.Errorf("View() = %q, want the raw form shown while ShowRaw", out)
+	}
+}
+
+// TestView_DrillInOffset_HidesLinesBeforeOffset verifies scrolling (a
+// non-zero Offset) drops the leading lines from the rendered pane instead of
+// always showing the transcript's start (issue #786).
+func TestView_DrillInOffset_HidesLinesBeforeOffset(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3"})
+	m = Update(m, DrillInScrollMsg{Delta: 2})
+
+	out := View(m)
+	if strings.Contains(out, "l0") || strings.Contains(out, "l1") {
+		t.Errorf("View() = %q, want lines before the offset hidden", out)
+	}
+	if !strings.Contains(out, "l2") || !strings.Contains(out, "l3") {
+		t.Errorf("View() = %q, want lines from the offset onward", out)
 	}
 }
 

@@ -121,6 +121,17 @@ type DrillInCloseMsg struct{}
 
 func (DrillInCloseMsg) isConsoleMsg() {}
 
+// DrillInScrollMsg is the tea layer's signal that the operator pressed a
+// scroll key while the drill-in transcript pane is open — Delta is the
+// number of lines to move (positive scrolls down/later, negative scrolls
+// up/earlier); Update clamps the result into the loaded content's line
+// bounds, a no-op when no drill-in is open (issue #786).
+type DrillInScrollMsg struct {
+	Delta int
+}
+
+func (DrillInScrollMsg) isConsoleMsg() {}
+
 // TerminateRequestedMsg is the run loop's signal that the operator typed
 // "k"/"kill"/"terminate" <num> — arms a pending confirm (ADR 0024, issue
 // #649) rather than acting immediately.

@@ -82,6 +82,9 @@ type DrillInState struct {
 	Rendered, Raw string
 	ShowRaw       bool
 	Err           error
+	// Offset is the index of the first visible line in the currently active
+	// form (Rendered, or Raw while ShowRaw) — the scroll position (#786).
+	Offset int
 }
 
 // NewModel returns the zero-value console state: no issues loaded yet, no
@@ -136,16 +139,22 @@ func Update(m Model, msg Msg) Model {
 		m.Picks = msg.Picks
 	case DrillInMsg:
 		showRaw := false
+		offset := 0
 		if m.DrillIn != nil && m.DrillIn.Number == msg.Number {
 			showRaw = m.DrillIn.ShowRaw
+			offset = m.DrillIn.Offset
 		}
-		m.DrillIn = &DrillInState{Number: msg.Number, Rendered: msg.Rendered, Raw: msg.Raw, Err: msg.Err, ShowRaw: showRaw}
+		m.DrillIn = &DrillInState{Number: msg.Number, Rendered: msg.Rendered, Raw: msg.Raw, Err: msg.Err, ShowRaw: showRaw, Offset: offset}
 	case DrillInToggleMsg:
 		if m.DrillIn != nil {
 			m.DrillIn.ShowRaw = !m.DrillIn.ShowRaw
 		}
 	case DrillInCloseMsg:
 		m.DrillIn = nil
+	case DrillInScrollMsg:
+		if m.DrillIn != nil {
+			m.DrillIn.Offset += msg.Delta
+		}
 	case TerminateRequestedMsg:
 		m.PendingTerminate = msg.Number
 	case TerminateConfirmedMsg:
@@ -174,6 +183,7 @@ func Update(m Model, msg Msg) Model {
 		m.Filter = m.preEditFilter
 	}
 	m.Cursor = clampCursor(m.Cursor, len(m.Visible()))
+	clampDrillInOffset(m.DrillIn)
 	return m
 }
 
@@ -191,6 +201,29 @@ func clampCursor(cursor, n int) int {
 		return n - 1
 	}
 	return cursor
+}
+
+// clampDrillInOffset pulls d.Offset into [0, lines-1] — the drill-in
+// analogue of clampCursor, so a scroll commanded past either end of the
+// active form (Rendered, or Raw while ShowRaw) never leaves an Offset
+// renderDrillIn can't slice with, and a raw/rendered toggle whose other form
+// has fewer lines still lands somewhere valid (issue #786). A nil d is a
+// no-op — Update calls this unconditionally, matching the cursor clamp.
+func clampDrillInOffset(d *DrillInState) {
+	if d == nil {
+		return
+	}
+	content := d.Rendered
+	if d.ShowRaw {
+		content = d.Raw
+	}
+	maxOffset := len(strings.Split(content, "\n")) - 1
+	switch {
+	case d.Offset < 0:
+		d.Offset = 0
+	case d.Offset > maxOffset:
+		d.Offset = maxOffset
+	}
 }
 
 // removePick drops the queued or held pick numbered num, if any — Unpick

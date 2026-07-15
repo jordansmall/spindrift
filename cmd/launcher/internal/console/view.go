@@ -83,6 +83,10 @@ func renderHelp() string {
 		"  /           filter by label substring",
 		"  enter       apply filter",
 		"  esc         cancel filter edit",
+		"  d / enter   drill into the highlighted dispatch's transcript",
+		"  t           toggle rendered <-> raw JSONL (while drilled in)",
+		"  x / esc     close the transcript pane (while drilled in)",
+		"  j/k, pgup/pgdown  scroll the transcript (while drilled in)",
 		"  r           refresh the backlog",
 		"  q / ctrl+c  quit",
 		"  ?           toggle this help",
@@ -111,8 +115,14 @@ func renderDrillIn(d DrillInState) string {
 	if d.ShowRaw {
 		content = d.Raw
 	}
-	b.WriteString(content)
-	if content != "" && !strings.HasSuffix(content, "\n") {
+	lines := strings.Split(content, "\n")
+	offset := d.Offset
+	if offset > len(lines) {
+		offset = len(lines)
+	}
+	visible := strings.Join(lines[offset:], "\n")
+	b.WriteString(visible)
+	if visible != "" && !strings.HasSuffix(visible, "\n") {
 		b.WriteString("\n")
 	}
 	b.WriteString("[t] toggle raw · [x] close\n")

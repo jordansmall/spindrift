@@ -288,6 +288,45 @@ func TestUpdate_DrillInCloseMsg_ReturnsToBacklog(t *testing.T) {
 	}
 }
 
+// TestUpdate_DrillInScrollMsg_MovesOffset verifies a scroll message moves
+// DrillIn.Offset by Delta, clamped into the loaded content's line bounds so
+// paging past either end leaves the pane showing its first or last line
+// instead of an invalid Offset (issue #786).
+func TestUpdate_DrillInScrollMsg_MovesOffset(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
+
+	m = Update(m, DrillInScrollMsg{Delta: 2})
+	if m.DrillIn.Offset != 2 {
+		t.Errorf("Offset = %d, want 2", m.DrillIn.Offset)
+	}
+
+	m = Update(m, DrillInScrollMsg{Delta: -1})
+	if m.DrillIn.Offset != 1 {
+		t.Errorf("Offset = %d, want 1", m.DrillIn.Offset)
+	}
+
+	m = Update(m, DrillInScrollMsg{Delta: -100})
+	if m.DrillIn.Offset != 0 {
+		t.Errorf("Offset = %d, want 0 (clamped at the top)", m.DrillIn.Offset)
+	}
+
+	m = Update(m, DrillInScrollMsg{Delta: 100})
+	if m.DrillIn.Offset != 4 {
+		t.Errorf("Offset = %d, want 4 (clamped to the last line)", m.DrillIn.Offset)
+	}
+}
+
+// TestUpdate_DrillInScrollMsg_NoOpWhenNoDrillInOpen verifies scrolling with
+// no transcript open does not panic or fabricate a DrillIn state.
+func TestUpdate_DrillInScrollMsg_NoOpWhenNoDrillInOpen(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInScrollMsg{Delta: 1})
+	if m.DrillIn != nil {
+		t.Errorf("DrillIn = %+v, want nil", m.DrillIn)
+	}
+}
+
 // TestUpdate_StaleStatusMsg_SetsFields verifies StaleStatusMsg installs the
 // launcher's live freshness/rebuild state onto Model verbatim — the
 // per-render sync View's stale banner reads from (issue #652).
