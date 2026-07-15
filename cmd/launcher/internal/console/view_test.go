@@ -94,6 +94,32 @@ func TestView_Header_Banner_ShownWhenTallCollapsedWhenShort(t *testing.T) {
 	}
 }
 
+// TestView_Header_AlertsRenderBeforeEphemeralPrompts verifies the
+// stale-image and competing-dogfood alert lines render as part of the
+// header — grouped with the status line, ahead of ephemeral operator
+// prompts like an in-progress filter edit — rather than interleaved with
+// them (issue #843, ADR 0025).
+func TestView_Header_AlertsRenderBeforeEphemeralPrompts(t *testing.T) {
+	m := NewModel()
+	m = Update(m, StaleStatusMsg{Stale: true, Message: "rebuild needed"})
+	m = Update(m, DogfoodNoticeMsg{Live: true})
+	m = Update(m, FilterEditStartMsg{})
+	m = Update(m, FilterChangedMsg{Filter: "bug"})
+
+	out := View(m)
+	statusIdx := strings.Index(out, "running 0/0")
+	staleIdx := strings.Index(out, "stale")
+	dogfoodIdx := strings.Index(out, "dogfood")
+	filterIdx := strings.Index(out, "/bug")
+
+	if statusIdx == -1 || staleIdx == -1 || dogfoodIdx == -1 || filterIdx == -1 {
+		t.Fatalf("View() = %q, want status/stale/dogfood/filter all present", out)
+	}
+	if !(statusIdx < staleIdx && staleIdx < dogfoodIdx && dogfoodIdx < filterIdx) {
+		t.Errorf("View() = %q, want status < stale < dogfood < filter prompt ordering", out)
+	}
+}
+
 // TestView_ListsPicksWithNumberTitleState verifies View renders each queue
 // row's number, title, and state — a dissolved row also carries its reason
 // — so the operator can see the queue without a separate command (#646).

@@ -5,12 +5,12 @@ import (
 	"strings"
 )
 
-// View renders m as the text the run loop writes to the terminal: an
-// optional dogfood-competition notice, the visible backlog (one line per
-// issue: number, title, labels), and any refresh error. An open drill-in
-// (m.DrillIn != nil) replaces the backlog/queue rendering entirely with the
-// transcript view — the operator is looking at one Dispatch's work, not the
-// list.
+// View renders m as the text the run loop writes to the terminal: the
+// full-width header (banner, status line, stale/dogfood alerts), the
+// visible backlog (one line per issue: number, title, labels), and any
+// refresh error. An open drill-in (m.DrillIn != nil) replaces the
+// backlog/queue rendering entirely with the transcript view — the operator
+// is looking at one Dispatch's work, not the list.
 func View(m Model) string {
 	if m.DrillIn != nil {
 		return renderDrillIn(*m.DrillIn)
@@ -29,18 +29,6 @@ func View(m Model) string {
 	}
 	if m.PendingQuit {
 		b.WriteString("quit with live Dispatches: drain (d, default) / terminate-all (t) / stay (s)?\n")
-	}
-	if m.Stale {
-		fmt.Fprintf(&b, "!! image stale: %s — new launches held; press [b] to rebuild\n", m.StaleMessage)
-	}
-	if m.Rebuilding {
-		b.WriteString("==> rebuilding image...\n")
-	}
-	if m.RebuildErr != "" {
-		fmt.Fprintf(&b, "!! rebuild failed: %s\n", m.RebuildErr)
-	}
-	if m.DogfoodLive {
-		b.WriteString("notice: a live dogfood loop (.dogfood.pid) is competing for the same queue\n")
 	}
 	for i, iss := range m.Visible() {
 		marker := " "
@@ -87,10 +75,11 @@ const banner = `
 var bannerHeight = strings.Count(banner, "\n")
 
 // renderHeader renders the Console's full-width header: the fixed banner
-// (when the terminal is tall enough to afford it) and the status line
-// (running/cap, waiting, held, settled), every count derived from Cap, Live,
-// and the Picks slice's PickState tags rather than a new stored counter
-// (issue #843, ADR 0025).
+// (when the terminal is tall enough to afford it), the status line
+// (running/cap, waiting, held, settled), and the stale-image/competing-
+// dogfood alert lines. Status counts are derived from Cap, Live, and the
+// Picks slice's PickState tags rather than a new stored counter (issue
+// #843, ADR 0025).
 func renderHeader(m Model) string {
 	var waiting, held, settled int
 	for _, p := range m.Picks {
@@ -109,6 +98,18 @@ func renderHeader(m Model) string {
 		b.WriteString(strings.TrimPrefix(banner, "\n"))
 	}
 	fmt.Fprintf(&b, "running %d/%d · waiting %d · held %d · settled %d\n", m.Live, m.Cap, waiting, held, settled)
+	if m.Stale {
+		fmt.Fprintf(&b, "!! image stale: %s — new launches held; press [b] to rebuild\n", m.StaleMessage)
+	}
+	if m.Rebuilding {
+		b.WriteString("==> rebuilding image...\n")
+	}
+	if m.RebuildErr != "" {
+		fmt.Fprintf(&b, "!! rebuild failed: %s\n", m.RebuildErr)
+	}
+	if m.DogfoodLive {
+		b.WriteString("notice: a live dogfood loop (.dogfood.pid) is competing for the same queue\n")
+	}
 	return b.String()
 }
 
