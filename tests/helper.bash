@@ -118,7 +118,7 @@ setup_fakes() {
       # has, byte-identical to what mkHarness.nix bakes into the image, but
       # a bats sandbox has no such directory to write into. Redirect it at
       # this test's own $HOME instead, by stripping the baked /home/agent/
-      # prefix the line just above set and re-rooting the same relative
+      # prefix the line just above sets and re-rooting the same relative
       # suffix under $HOME -- no second hand-copied ".claude/skills" here,
       # just the one the registry already rendered. Written as literal
       # unexpanded text so it resolves against whatever HOME setup_bare_repo
