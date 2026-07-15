@@ -19,6 +19,13 @@ setup_entrypoint_env() {
   export ISSUE_NUMBER="7"
   export ISSUE_TITLE="Do the thing"
   export WORK_DIR="$BATS_TEST_TMPDIR/work"
+  # DRIVER_SKILLS_DIR is baked absolute (/home/agent/...) by the Driver
+  # registry (issue #624) since a real Box always runs with HOME=/home/agent;
+  # a bats fixture has no such directory to write into, so every
+  # entrypoint-*.bats suite points it at this test's own $HOME instead, the
+  # same directory every skill fixture in these suites already seeds under.
+  # Never set outside tests -- a real Box always takes the baked default.
+  export DRIVER_SKILLS_DIR="$HOME/.claude/skills"
 }
 
 # Shared setup for the split run-*.bats suites (issue #519): every concern
