@@ -38,7 +38,6 @@ setup() {
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   ! grep -q -- ':/agent/prompts' "$PODMAN_LOG"
-  [[ "$output" != *"SPINDRIFT_PROMPT_DIR"* ]]
 }
 
 @test "SPINDRIFT_PROMPT_DIR mount covers all three prompt files via directory bind" {

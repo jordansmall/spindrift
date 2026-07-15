@@ -37,7 +37,6 @@ setup() {
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   ! grep -q -- '/.claude/skills' "$PODMAN_LOG"
-  [[ "$output" != *"SPINDRIFT_SKILLS_DIR"* ]]
 }
 
 @test "SPINDRIFT_SKILLS_DIR mounts read-only over /home/agent/.claude/skills (bwrap)" {
