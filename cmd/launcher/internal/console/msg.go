@@ -130,3 +130,13 @@ func (TerminateConfirmedMsg) isConsoleMsg() {}
 type TerminateCancelledMsg struct{}
 
 func (TerminateCancelledMsg) isConsoleMsg() {}
+
+// CapMsg carries the session's live parallelism cap and current live count
+// (issue #653) — Run's per-render sync, the same pattern QueueSnapshotMsg
+// uses, since both live entirely on the background Launcher rather than
+// through an operator command.
+type CapMsg struct {
+	Cap, Live int
+}
+
+func (CapMsg) isConsoleMsg() {}

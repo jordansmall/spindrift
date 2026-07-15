@@ -125,8 +125,12 @@ func doRefresh(m Model, tracker forge.IssueTracker, pwd string, launch *Launcher
 // row's Heartbeat is also refreshed from its on-disk log on the way in
 // (#647 AC2) — a plain local read, unlike the backlog refresh, so it is not
 // gated behind the write/poll-triggered cadence the tracker's rate limit
-// forces on Refresh. A nil launch leaves m untouched: Picks then tracks only
-// what PickQueuedMsg/PickFailedMsg/UnpickMsg applied directly.
+// forces on Refresh. It also installs the session's current live
+// parallelism cap and live count (issue #653), read straight off the
+// Launcher's Limiter — no Msg carries a resize, so this per-render pull is
+// the only path that keeps them current. A nil launch leaves m untouched:
+// Picks then tracks only what PickQueuedMsg/PickFailedMsg/UnpickMsg applied
+// directly, and Cap/Live stay zero.
 func syncQueue(m Model, launch *Launcher, pwd string) Model {
 	if launch == nil {
 		return m
@@ -139,7 +143,8 @@ func syncQueue(m Model, launch *Launcher, pwd string) Model {
 			}
 		}
 	}
-	return Update(m, QueueSnapshotMsg{Picks: picks})
+	m = Update(m, QueueSnapshotMsg{Picks: picks})
+	return Update(m, CapMsg{Cap: launch.Cap(), Live: launch.Live()})
 }
 
 // applyCommand parses one line of operator input into a Msg and applies it.

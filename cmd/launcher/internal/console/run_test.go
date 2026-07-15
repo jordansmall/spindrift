@@ -310,14 +310,36 @@ func TestRun_ResizeCommand_LowersCapNeverTerminatesGatesLaunch(t *testing.T) {
 		t.Fatalf("dispatch.NewFactory: %v", err)
 	}
 	t.Cleanup(factory.Cleanup)
-	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue(), MaxParallel: 2}
+	// MaxParallel starts at 1: the bootstrap fill only ever attempts as many
+	// refills as the cap allows, so picking #43 (and later #44) before it
+	// has a slot is deterministic -- each one sits PickQueued until the "+"
+	// below re-scans the queue, rather than racing the bootstrap's fixed
+	// attempt count the way concurrently picking two issues under a cap≥2
+	// would (the drain goroutine and the run loop's own command processing
+	// have no ordering guarantee between them).
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue(), MaxParallel: 1}
 
 	inR, inW := io.Pipe()
 	var out syncBuilder
 	done := make(chan error, 1)
 	go func() { done <- Run(f, dir, inR, &out, launch) }()
 
-	if _, err := inW.Write([]byte("p 42\np 43\np 44\n")); err != nil {
+	if _, err := inW.Write([]byte("p 42\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickRunning})
+
+	if _, err := inW.Write([]byte("p 43\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickRunning, "43": PickQueued})
+
+	if _, err := inW.Write([]byte("+\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickRunning, "43": PickRunning})
+
+	if _, err := inW.Write([]byte("p 44\n")); err != nil {
 		t.Fatal(err)
 	}
 	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickRunning, "43": PickRunning, "44": PickQueued})
@@ -325,6 +347,18 @@ func TestRun_ResizeCommand_LowersCapNeverTerminatesGatesLaunch(t *testing.T) {
 	if _, err := inW.Write([]byte("-\n")); err != nil {
 		t.Fatal(err)
 	}
+
+	// Wait for the "-" line to actually reach applyCommand (the scanner
+	// goroutine and the run loop's select both add scheduling delay) before
+	// asserting anything about its effect.
+	capDeadline := time.Now().Add(2 * time.Second)
+	for launch.Cap() != 1 {
+		if time.Now().After(capDeadline) {
+			t.Fatalf("Cap: got %d, want 1 after \"-\"", launch.Cap())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
 	deadline := time.Now().Add(200 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		if launch.Cap() != 1 {
@@ -360,6 +394,23 @@ func TestRun_ResizeCommand_LowersCapNeverTerminatesGatesLaunch(t *testing.T) {
 	}
 	if err := <-done; err != nil {
 		t.Fatalf("Run: %v", err)
+	}
+}
+
+// TestRun_WithLauncher_RendersCapAndLive verifies the session's live
+// parallelism cap and current live count (issue #653) reach the rendered
+// output through the same per-render sync QueueSnapshotMsg uses, in a
+// launch-less-free session with nothing running yet.
+func TestRun_WithLauncher_RendersCapAndLive(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	launch := &Launcher{CodeForge: f, Queue: NewQueue(), MaxParallel: 3}
+
+	var out strings.Builder
+	if err := Run(f, t.TempDir(), strings.NewReader("q\n"), &out, launch); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.String(), "cap: 0/3") {
+		t.Errorf("output = %q, want the session's \"cap: 0/3\" line", out.String())
 	}
 }
 

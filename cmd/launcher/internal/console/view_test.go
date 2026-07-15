@@ -39,6 +39,19 @@ func TestView_DogfoodNotice_ShownWhenLiveSilentOtherwise(t *testing.T) {
 	}
 }
 
+// TestView_CapAndLive_Shown verifies View renders the session's live
+// parallelism cap and current live count (issue #653) — visible without a
+// separate command, the same way the queue rows already are.
+func TestView_CapAndLive_Shown(t *testing.T) {
+	m := NewModel()
+	m = Update(m, CapMsg{Cap: 3, Live: 1})
+
+	out := View(m)
+	if !strings.Contains(out, "cap: 1/3") {
+		t.Errorf("View() = %q, want a \"cap: 1/3\" line (live/cap)", out)
+	}
+}
+
 // TestView_ListsPicksWithNumberTitleState verifies View renders each queue
 // row's number, title, and state — a dissolved row also carries its reason
 // — so the operator can see the queue without a separate command (#646).

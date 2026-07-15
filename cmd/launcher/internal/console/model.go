@@ -35,6 +35,11 @@ type Model struct {
 	// after "k"/"kill"/"terminate" <num> — empty when no terminate is
 	// pending (ADR 0024, issue #649).
 	PendingTerminate string
+	// Cap and Live are the session's live parallelism cap and current live
+	// count (issue #653, ADR 0023) — zero in a launch-less session, since
+	// syncQueue never sends a CapMsg when there is no Launcher to read them
+	// from.
+	Cap, Live int
 }
 
 // DrillInState is one Dispatch's loaded transcript: both the Driver-rendered
@@ -110,6 +115,9 @@ func Update(m Model, msg Msg) Model {
 		m.PendingTerminate = ""
 	case TerminateCancelledMsg:
 		m.PendingTerminate = ""
+	case CapMsg:
+		m.Cap = msg.Cap
+		m.Live = msg.Live
 	}
 	return m
 }
