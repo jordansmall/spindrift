@@ -93,12 +93,15 @@ func TestRun_TerminateCommand_ConfirmedYes_ActsAndDissolvesPick(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if len(f.TransitionStateCalls) != 1 {
-		t.Fatalf("TransitionStateCalls: want 1, got %+v", f.TransitionStateCalls)
+	// Terminate clears both possible "from" labels (InProgress and
+	// Complete); see TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel.
+	if len(f.TransitionStateCalls) != 2 {
+		t.Fatalf("TransitionStateCalls: want 2, got %+v", f.TransitionStateCalls)
 	}
-	call := f.TransitionStateCalls[0]
-	if call.From != forge.InProgress || call.To != forge.Dispatchable {
-		t.Errorf("transition = %+v, want InProgress -> Dispatchable", call)
+	for _, call := range f.TransitionStateCalls {
+		if call.To != forge.Dispatchable {
+			t.Errorf("transition = %+v, want To=Dispatchable", call)
+		}
 	}
 	if len(f.CommentCalls) != 1 {
 		t.Errorf("CommentCalls = %+v, want exactly one terminate comment", f.CommentCalls)

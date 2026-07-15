@@ -62,12 +62,18 @@ func TestLauncher_Terminate_ReapsTransitionsAndComments(t *testing.T) {
 		t.Errorf("KillCalls: want [agent-issue-42], got %v", fr.KillCalls)
 	}
 
-	if len(fc.TransitionStateCalls) != 1 {
-		t.Fatalf("TransitionStateCalls: want 1, got %+v", fc.TransitionStateCalls)
+	// Terminate clears both possible "from" labels (InProgress for a
+	// running Box/CI watch, Complete if it landed during the merge gate —
+	// see TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel) since
+	// it cannot know which one is actually present without adapter-specific
+	// label inspection.
+	if len(fc.TransitionStateCalls) != 2 {
+		t.Fatalf("TransitionStateCalls: want 2, got %+v", fc.TransitionStateCalls)
 	}
-	call := fc.TransitionStateCalls[0]
-	if call.From != forge.InProgress || call.To != forge.Dispatchable {
-		t.Errorf("transition = %+v, want InProgress -> Dispatchable", call)
+	for _, call := range fc.TransitionStateCalls {
+		if call.To != forge.Dispatchable {
+			t.Errorf("transition = %+v, want To=Dispatchable", call)
+		}
 	}
 
 	if len(fc.CommentCalls) != 1 {
@@ -85,6 +91,63 @@ func TestLauncher_Terminate_ReapsTransitionsAndComments(t *testing.T) {
 	if len(snap) != 1 || snap[0].State != PickTerminated {
 		t.Errorf("queue pick = %+v, want PickTerminated", snap)
 	}
+}
+
+// TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel verifies
+// Terminate cleanly returns the issue to Dispatchable even when it lands
+// during the merge gate: gateToGreen swaps InProgress -> Complete as soon as
+// CI confirms green, before selfHeal ever attempts the merge, so an issue
+// terminated while merge-gate retries were still in flight already carries
+// Complete, not InProgress. Terminate must not leave it holding both
+// Complete and Dispatchable at once.
+func TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel(t *testing.T) {
+	labels := forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Complete: "agent-complete"}
+	fc := forge.NewFake(labels)
+	fc.BranchPrefix = "agent/issue-"
+	// Simulates gateToGreen's own transition, already applied before
+	// Terminate is ever called.
+	fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-complete"}})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, runner.NewFake(), drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+	s := settle.New(settle.Config{MergeMode: "manual", CompleteLabel: "agent-complete"}, fc, fc)
+	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, Queue: NewQueue()}
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	if err := launch.Terminate(fc, "42"); err != nil {
+		t.Fatalf("Terminate: %v", err)
+	}
+
+	iss, err := fc.Issue("42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsString(iss.Labels, "agent-complete") {
+		t.Errorf("labels = %v, want agent-complete cleared", iss.Labels)
+	}
+	if !containsString(iss.Labels, "ready-for-agent") {
+		t.Errorf("labels = %v, want ready-for-agent present", iss.Labels)
+	}
+}
+
+func containsString(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // TestLauncher_Terminate_NoOpenPR_CommentNotesNone verifies the comment still

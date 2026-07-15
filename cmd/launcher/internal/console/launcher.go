@@ -95,8 +95,20 @@ func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 		}
 	}
 
+	// The issue's actual current label depends on which phase Terminate
+	// caught: still InProgress for a running Box or CI watch, but already
+	// swapped to Complete if it landed during the merge gate --
+	// gateToGreen swaps to Complete as soon as CI confirms green, before
+	// selfHeal ever attempts the merge itself (ready.go). TransitionState is
+	// an unconditional label swap with no compare-and-swap, so both calls
+	// run regardless of which (if either) label is actually present: a
+	// remove of an absent label is a no-op on every adapter, and the second
+	// call's add of Dispatchable is idempotent.
 	if err := tracker.TransitionState(num, forge.InProgress, forge.Dispatchable); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: transition to Dispatchable: %v\n", num, err)
+	}
+	if err := tracker.TransitionState(num, forge.Complete, forge.Dispatchable); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: clear Complete: %v\n", num, err)
 	}
 	comment := fmt.Sprintf("Terminated by operator: reclaimed back to Dispatchable. %s", danglingNote)
 	if err := tracker.Comment(num, comment); err != nil {
@@ -187,7 +199,7 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		maxParallel = 1
 	}
 	for {
-		_ = waves.RunContinuous(waves.Config{MaxParallel: maxParallel, Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue, l.signalRefresh}, discover, fresh)
+		_ = waves.RunContinuous(waves.Config{MaxParallel: maxParallel, Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue, l.signalRefresh, l.registry()}, discover, fresh)
 
 		l.mu.Lock()
 		if !l.Queue.hasQueued() {
