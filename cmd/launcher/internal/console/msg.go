@@ -140,3 +140,16 @@ type CapMsg struct {
 }
 
 func (CapMsg) isConsoleMsg() {}
+
+// StaleStatusMsg carries the launcher's live image-freshness/rebuild state
+// into the pure core — Run's per-render sync, alongside QueueSnapshotMsg,
+// since the background drain (not Update) is what learns the probe result
+// and a rebuild's outcome (issue #652).
+type StaleStatusMsg struct {
+	Stale      bool
+	Message    string
+	Rebuilding bool
+	RebuildErr string
+}
+
+func (StaleStatusMsg) isConsoleMsg() {}

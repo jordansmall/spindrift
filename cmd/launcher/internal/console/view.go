@@ -20,6 +20,15 @@ func View(m Model) string {
 	if m.PendingTerminate != "" {
 		fmt.Fprintf(&b, "terminate #%s? [y/N]\n", m.PendingTerminate)
 	}
+	if m.Stale {
+		fmt.Fprintf(&b, "!! image stale: %s — new launches held; press [b] to rebuild\n", m.StaleMessage)
+	}
+	if m.Rebuilding {
+		b.WriteString("==> rebuilding image...\n")
+	}
+	if m.RebuildErr != "" {
+		fmt.Fprintf(&b, "!! rebuild failed: %s\n", m.RebuildErr)
+	}
 	if m.DogfoodLive {
 		b.WriteString("notice: a live dogfood loop (.dogfood.pid) is competing for the same queue\n")
 	}

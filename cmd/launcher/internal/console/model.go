@@ -40,6 +40,19 @@ type Model struct {
 	// syncQueue never sends a CapMsg when there is no Launcher to read them
 	// from.
 	Cap, Live int
+	// Stale is whether the freshness probe found the loaded image would be
+	// rebuilt against the current base-branch tip — new launches hold while
+	// true; a running Box rides it out (issue #652).
+	Stale bool
+	// StaleMessage is the probe's human-readable explanation, shown
+	// alongside Stale in the banner.
+	StaleMessage string
+	// Rebuilding is whether an operator-triggered in-session rebuild is in
+	// flight.
+	Rebuilding bool
+	// RebuildErr is the last rebuild's failure, if any — "" on success or
+	// when no rebuild has run yet.
+	RebuildErr string
 }
 
 // DrillInState is one Dispatch's loaded transcript: both the Driver-rendered
@@ -118,6 +131,11 @@ func Update(m Model, msg Msg) Model {
 	case CapMsg:
 		m.Cap = msg.Cap
 		m.Live = msg.Live
+	case StaleStatusMsg:
+		m.Stale = msg.Stale
+		m.StaleMessage = msg.Message
+		m.Rebuilding = msg.Rebuilding
+		m.RebuildErr = msg.RebuildErr
 	}
 	return m
 }
