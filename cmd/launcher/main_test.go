@@ -381,8 +381,8 @@ func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 // default parses, a non-numeric one falls back to 0, and an absent key falls
 // back to 0 too (issue #672).
 func TestIntSchemaDefault(t *testing.T) {
-	orig := schemaDefaults
-	t.Cleanup(func() { schemaDefaults = orig })
+	orig := schemaFlags
+	t.Cleanup(func() { schemaFlags = orig })
 
 	cases := []struct {
 		name string
@@ -393,13 +393,13 @@ func TestIntSchemaDefault(t *testing.T) {
 		{"non-numeric default", "abc", 0},
 	}
 	for _, tc := range cases {
-		schemaDefaults = []defaultEntry{{env: "SOME_KEY", dflt: tc.dflt}}
+		schemaFlags = []flagEntry{{env: "SOME_KEY", dflt: tc.dflt}}
 		if got := intSchemaDefault("SOME_KEY"); got != tc.want {
 			t.Errorf("%s: intSchemaDefault(SOME_KEY) = %d, want %d", tc.name, got, tc.want)
 		}
 	}
 
-	schemaDefaults = []defaultEntry{}
+	schemaFlags = []flagEntry{}
 	if got := intSchemaDefault("ABSENT_KEY"); got != 0 {
 		t.Errorf("absent key: intSchemaDefault(ABSENT_KEY) = %d, want 0", got)
 	}
@@ -411,9 +411,9 @@ func TestIntSchemaDefault(t *testing.T) {
 func TestAtoiSchema(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("SOME_KEY") })
 
-	orig := schemaDefaults
-	t.Cleanup(func() { schemaDefaults = orig })
-	schemaDefaults = []defaultEntry{{env: "SOME_KEY", dflt: "10"}}
+	orig := schemaFlags
+	t.Cleanup(func() { schemaFlags = orig })
+	schemaFlags = []flagEntry{{env: "SOME_KEY", dflt: "10"}}
 
 	cases := []struct {
 		env  string
@@ -439,9 +439,9 @@ func TestAtoiSchema(t *testing.T) {
 func TestAtoiNonnegSchema(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("SOME_KEY") })
 
-	orig := schemaDefaults
-	t.Cleanup(func() { schemaDefaults = orig })
-	schemaDefaults = []defaultEntry{{env: "SOME_KEY", dflt: "0"}}
+	orig := schemaFlags
+	t.Cleanup(func() { schemaFlags = orig })
+	schemaFlags = []flagEntry{{env: "SOME_KEY", dflt: "0"}}
 
 	cases := []struct {
 		env  string
