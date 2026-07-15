@@ -15,6 +15,13 @@ import (
 // form, loaded together so the raw toggle needs no further I/O. Wraps the
 // result into a Msg Update can apply directly, matching Refresh and
 // PickIssue's adapter shape.
+//
+// This is a one-shot load: nothing in the console package polls or ticks to
+// refresh an open pane, so a running Dispatch's transcript does not
+// live-tail — see openDrillInCmd, the pane's only caller. Update does
+// preserve the ShowRaw toggle and scroll Offset across a same-number
+// DrillInMsg (issue #719), so a future keystroke-driven refresh needs only
+// to call this again, not to change Update.
 func DrillIn(drv driver.Driver, pwd, number string) Msg {
 	passes := dispatch.LogPaths(pwd, number)
 	if len(passes) == 0 {
