@@ -107,6 +107,15 @@ type Config struct {
 	// Settle — Terminate already reclaimed it. Nil (every headless dispatch
 	// path) means "never terminated"; only the Console wires a Registry.
 	Terminated *terminate.Registry
+
+	// Limiter is the resizable concurrency bound RunContinuous acquires a
+	// slot from before claiming an issue (issue #653). Nil (every headless
+	// dispatch path) means "build one fresh from MaxParallel for this call
+	// and never resize it" — a fixed cap, matching pre-#653 behaviour. The
+	// Console builds one persistent Limiter per session and passes it here
+	// so a live "+"/"-" resize takes effect on the RunContinuous call
+	// already in flight, not just the next one.
+	Limiter *Limiter
 }
 
 // NewPlan decides how in.Issues should be dispatched. Every origin —

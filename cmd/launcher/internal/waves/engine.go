@@ -51,19 +51,21 @@ func writeBlockedMarker(pwd string, blockers []string, sources map[string]forge.
 }
 
 // dispatchWave dispatches a batch of issues in parallel (up to cfg.MaxParallel
-// at once). Each goroutine claims its issue only after acquiring a semaphore
+// at once). Each goroutine claims its issue only after acquiring a Limiter
 // slot so that at most MaxParallel issues are ever in the in-progress state
-// simultaneously.
+// simultaneously. The Limiter is built fresh from cfg.MaxParallel and never
+// resized — the live, resizable cap (issue #653) is a RunContinuous/Console
+// concept; a one-shot wave's cap is fixed for its whole call.
 func dispatchWave(cfg Config, it forge.IssueTracker, f *dispatch.Factory, s settle.Settler, batch []Issue) {
-	sem := make(chan struct{}, cfg.MaxParallel)
+	limiter := NewLimiter(cfg.MaxParallel)
 	var wg sync.WaitGroup
 	for _, iss := range batch {
 		wg.Add(1)
 		iss := iss
 		go func() {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+			limiter.Acquire()
+			defer limiter.Release()
 			claimIssue(cfg, it, iss.Number)
 			d := f.New(iss.Number, iss.Title)
 			defer d.Close()

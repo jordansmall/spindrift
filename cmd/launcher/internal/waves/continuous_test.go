@@ -159,6 +159,187 @@ func TestRunContinuous_RefillPicksUpIssueUnblockedMidRun(t *testing.T) {
 	}
 }
 
+// TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue verifies issue #653:
+// raising a live Limiter's cap while a Box is running launches a second,
+// already-ready issue immediately — it does not wait for the first Box to
+// settle or for any other refill trigger.
+func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+	limiter := NewLimiter(1)
+	c.Limiter = limiter
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	release1 := make(chan struct{})
+	started2 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		switch box.Issue {
+		case "1":
+			<-release1
+		case "2":
+			close(started2)
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discover := func() ([]Issue, map[string][]string, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return nil, nil, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return out, map[string][]string{}, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	resultCh := make(chan error, 1)
+	go func() { resultCh <- RunContinuous(c, fc, fc, dir, f, s, discover, fresh) }()
+
+	select {
+	case <-started2:
+		t.Fatal("issue #2 started before the cap was ever raised above 1")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	limiter.Resize(2)
+
+	select {
+	case <-started2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("issue #2 was never dispatched after Resize(2) — raising the cap must launch immediately")
+	}
+
+	close(release1)
+
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatalf("RunContinuous: got %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return after #1 was released")
+	}
+
+	if len(fr.RunCalls) != 2 {
+		t.Fatalf("RunCalls: got %d, want 2", len(fr.RunCalls))
+	}
+}
+
+// TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches verifies issue
+// #653: lowering a live Limiter's cap below the current live count kills
+// nothing already running, and a third ready issue is held back — not
+// launched over the lowered cap — until enough in-flight Boxes settle to
+// bring live back under it.
+func TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 2
+	limiter := NewLimiter(2)
+	c.Limiter = limiter
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	started1 := make(chan struct{})
+	started2 := make(chan struct{})
+	release1 := make(chan struct{})
+	release2 := make(chan struct{})
+	started3 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		switch box.Issue {
+		case "1":
+			close(started1)
+			<-release1
+		case "2":
+			close(started2)
+			<-release2
+		case "3":
+			close(started3)
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discover := func() ([]Issue, map[string][]string, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return nil, nil, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return out, map[string][]string{}, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	resultCh := make(chan error, 1)
+	go func() { resultCh <- RunContinuous(c, fc, fc, dir, f, s, discover, fresh) }()
+
+	for _, ch := range []chan struct{}{started1, started2} {
+		select {
+		case <-ch:
+		case <-time.After(2 * time.Second):
+			t.Fatal("both #1 and #2 should have started with cap=2")
+		}
+	}
+
+	limiter.Resize(1)
+
+	select {
+	case <-started3:
+		t.Fatal("#3 launched over the lowered cap while #1 and #2 were both still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release1)
+
+	select {
+	case <-started3:
+		t.Fatal("#3 launched with live==lowered cap (only #1 freed, #2 still running)")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release2)
+
+	select {
+	case <-started3:
+	case <-time.After(2 * time.Second):
+		t.Fatal("#3 never launched once live sank under the lowered cap")
+	}
+
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatalf("RunContinuous: got %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return")
+	}
+
+	if len(fr.RunCalls) != 3 {
+		t.Fatalf("RunCalls: got %d, want 3 (lowering must never terminate #1 or #2 — all three run to completion)", len(fr.RunCalls))
+	}
+}
+
 // TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish verifies #527
 // AC3: once the freshness checker reports rebuild-needed, no further Box
 // launches, the Box already in flight still runs to completion, and
