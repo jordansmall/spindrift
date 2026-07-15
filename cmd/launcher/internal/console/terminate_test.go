@@ -94,18 +94,17 @@ func TestLauncher_Terminate_ReapsTransitionsAndComments(t *testing.T) {
 }
 
 // TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel verifies
-// Terminate cleanly returns the issue to Dispatchable even when it lands
-// during the merge gate: gateToGreen swaps InProgress -> Complete as soon as
-// CI confirms green, before selfHeal ever attempts the merge, so an issue
-// terminated while merge-gate retries were still in flight already carries
-// Complete, not InProgress. Terminate must not leave it holding both
+// Terminate cleanly returns the issue to Dispatchable even when it already
+// carries Complete -- selfHeal now holds that swap until the landing path
+// settles (issue #757), but Terminate can still race a settle that completed
+// just before it ran. Terminate must not leave the issue holding both
 // Complete and Dispatchable at once.
 func TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Complete: "agent-complete"}
 	fc := forge.NewFake(labels)
 	fc.BranchPrefix = "agent/issue-"
-	// Simulates gateToGreen's own transition, already applied before
-	// Terminate is ever called.
+	// Simulates the landing path having just settled (selfHeal's swap to
+	// Complete) right before Terminate is called.
 	fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-complete"}})
 
 	dir := t.TempDir()
