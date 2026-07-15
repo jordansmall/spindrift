@@ -71,6 +71,63 @@ func TestPickIssue_LeavesIssueDispatchable_NeverInProgress(t *testing.T) {
 	}
 }
 
+// TestPickIssue_AlreadyInProgress_ReturnsFailedMsg_NoTransition verifies a
+// pick on an issue already claimed by a live Box is rejected outright —
+// never relabeled Dispatchable on top of its existing InProgress label,
+// which would let a second Box's claim succeed for the same issue (#707).
+func TestPickIssue_AlreadyInProgress_ReturnsFailedMsg_NoTransition(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
+
+	msg := PickIssue(f, "42", "fix the thing", KindWork)
+
+	failed, ok := msg.(PickFailedMsg)
+	if !ok {
+		t.Fatalf("PickIssue() = %T, want PickFailedMsg", msg)
+	}
+	if failed.Number != "42" || failed.Reason == "" {
+		t.Errorf("PickFailedMsg = %+v, want #42 with a reason", failed)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none — an InProgress issue must never be relabeled", f.TransitionStateCalls)
+	}
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasLabel(iss, "ready-for-agent") {
+		t.Errorf("issue #42 labels = %v, want ready-for-agent never added", iss.Labels)
+	}
+}
+
+// TestPickIssue_AlreadyComplete_ReturnsFailedMsg_NoTransition mirrors
+// TestPickIssue_AlreadyInProgress_ReturnsFailedMsg_NoTransition for the other
+// terminal state a stray pick must never relabel out of (#707).
+func TestPickIssue_AlreadyComplete_ReturnsFailedMsg_NoTransition(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", Complete: "agent-complete"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-complete"}})
+
+	msg := PickIssue(f, "42", "fix the thing", KindWork)
+
+	failed, ok := msg.(PickFailedMsg)
+	if !ok {
+		t.Fatalf("PickIssue() = %T, want PickFailedMsg", msg)
+	}
+	if failed.Number != "42" || failed.Reason == "" {
+		t.Errorf("PickFailedMsg = %+v, want #42 with a reason", failed)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none — a Complete issue must never be relabeled", f.TransitionStateCalls)
+	}
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasLabel(iss, "ready-for-agent") {
+		t.Errorf("issue #42 labels = %v, want ready-for-agent never added", iss.Labels)
+	}
+}
+
 // TestPickAllReady_ReturnsOneMsgPerCurrentlyDispatchableIssue verifies
 // PickAllReady picks exactly the issues currently Dispatchable on the
 // tracker, and nothing else — an issue with no dispatch label yet is left
