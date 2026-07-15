@@ -322,10 +322,18 @@ func (a *ociAdapter) Reap(name string) error {
 	return nil
 }
 
-// Kill force-stops and removes name unconditionally, running or not — `rm
-// -f` on podman/docker stops a running container before removing it, so no
-// prior IsRunning check (and its inspect round-trip) is needed. Unlike Reap,
-// a failure is returned rather than swallowed.
+// Kill force-stops and removes name, running or not, once confirmed to
+// exist — `rm -f` on podman/docker stops a running container before
+// removing it, so no running/exited distinction is needed the way Reap's
+// IsRunning guard makes. A container that no longer exists at all (the
+// common settle-phase case: the initial Box already exited successfully and
+// Run's own reapAfterSuccess already removed it — CI watch and the merge
+// gate never have a running Box) is not an error, matching the Runner.Kill
+// contract; only a genuine removal failure on a container confirmed present
+// is returned rather than swallowed.
 func (a *ociAdapter) Kill(name string) error {
+	if err := exec.Command(a.cli, "inspect", name).Run(); err != nil {
+		return nil
+	}
 	return exec.Command(a.cli, "rm", "-f", name).Run()
 }
