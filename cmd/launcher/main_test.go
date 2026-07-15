@@ -377,6 +377,90 @@ func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 	}
 }
 
+// TestIntSchemaDefault covers intSchemaDefault directly: a numeric schema
+// default parses, a non-numeric one falls back to 0, and an absent key falls
+// back to 0 too (issue #672).
+func TestIntSchemaDefault(t *testing.T) {
+	orig := schemaDefaults
+	t.Cleanup(func() { schemaDefaults = orig })
+
+	cases := []struct {
+		name string
+		dflt string
+		want int
+	}{
+		{"numeric default", "42", 42},
+		{"non-numeric default", "abc", 0},
+	}
+	for _, tc := range cases {
+		schemaDefaults = []defaultEntry{{env: "SOME_KEY", dflt: tc.dflt}}
+		if got := intSchemaDefault("SOME_KEY"); got != tc.want {
+			t.Errorf("%s: intSchemaDefault(SOME_KEY) = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+
+	schemaDefaults = []defaultEntry{}
+	if got := intSchemaDefault("ABSENT_KEY"); got != 0 {
+		t.Errorf("absent key: intSchemaDefault(ABSENT_KEY) = %d, want 0", got)
+	}
+}
+
+// TestAtoiSchema covers atoiSchema directly: a valid positive env value wins
+// over the schema default; zero, negative, non-numeric, and unset env all
+// fall back to the schema default (issue #672).
+func TestAtoiSchema(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("SOME_KEY") })
+
+	orig := schemaDefaults
+	t.Cleanup(func() { schemaDefaults = orig })
+	schemaDefaults = []defaultEntry{{env: "SOME_KEY", dflt: "10"}}
+
+	cases := []struct {
+		env  string
+		want int
+	}{
+		{"5", 5},
+		{"0", 10},
+		{"-1", 10},
+		{"abc", 10},
+		{"", 10},
+	}
+	for _, tc := range cases {
+		os.Setenv("SOME_KEY", tc.env)
+		if got := atoiSchema("SOME_KEY"); got != tc.want {
+			t.Errorf("SOME_KEY=%q: atoiSchema(SOME_KEY) = %d, want %d", tc.env, got, tc.want)
+		}
+	}
+}
+
+// TestAtoiNonnegSchema covers atoiNonnegSchema directly: zero and positive env
+// values win over the schema default; negative, non-numeric, and unset env
+// all fall back to the schema default (issue #672).
+func TestAtoiNonnegSchema(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("SOME_KEY") })
+
+	orig := schemaDefaults
+	t.Cleanup(func() { schemaDefaults = orig })
+	schemaDefaults = []defaultEntry{{env: "SOME_KEY", dflt: "0"}}
+
+	cases := []struct {
+		env  string
+		want int
+	}{
+		{"0", 0},
+		{"5", 5},
+		{"-1", 0},
+		{"abc", 0},
+		{"", 0},
+	}
+	for _, tc := range cases {
+		os.Setenv("SOME_KEY", tc.env)
+		if got := atoiNonnegSchema("SOME_KEY"); got != tc.want {
+			t.Errorf("SOME_KEY=%q: atoiNonnegSchema(SOME_KEY) = %d, want %d", tc.env, got, tc.want)
+		}
+	}
+}
+
 // TestGitIdentityField_FallsBackToHostGitConfig proves GIT_USER_NAME/
 // GIT_USER_EMAIL fall back to the host git config when the document/flag/env
 // chain supplies nothing — the in-process replacement for the wrapper's
