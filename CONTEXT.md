@@ -58,9 +58,9 @@ prompt/agents/session file paths, the Driver's bin and flags, and a
 asked), tees the stream to the Box log, filters heartbeats in-process
 (absorbing the former standalone heartbeat-filter binary), and returns the
 Driver's exit code. Owns process mechanics only — invocation data and outcome
-extraction stay with the Driver's nix half (ADR 0009). Replaces
+extraction stay with the Driver's nix half (ADR 0009). Replaced
 entrypoint.sh's temp-file/eval marshalling across the devShell process
-boundary. Decided 2026-07-13; lands with the entrypoint deepening work.
+boundary (issue #626).
 _Avoid_: runner (that is the Box isolation seam), wrapper, shim.
 
 **Filer**:
