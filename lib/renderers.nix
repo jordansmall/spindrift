@@ -181,11 +181,14 @@ rec {
     "# Copy to harness.env (gitignored) and fill in — or export these in your shell.\n\n"
     + concatStrings (mapAttrsToList renderEntry schema);
 
-  # cmd/launcher/internal/driver/drivernames_gen.go content.
+  # cmd/launcher/internal/driver/drivernames_gen.go content. driverEntries is
+  # the registry's `entries` attrset (name -> Driver entry), not the whole
+  # registry -- the registry also exports its shape-assertion and rendering
+  # functions (issue #624), which are not Driver names.
   renderDriverNamesGo =
-    driverRegistry:
+    driverEntries:
     let
-      names = builtins.sort builtins.lessThan (builtins.attrNames driverRegistry);
+      names = builtins.sort builtins.lessThan (builtins.attrNames driverEntries);
       quotedNames = map (n: "\"${n}\"") names;
       namesList = builtins.concatStringsSep ", " quotedNames;
     in
