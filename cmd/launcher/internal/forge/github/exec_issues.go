@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -166,7 +167,7 @@ func (e *execClient) DepsOf(num string) ([]forge.Dependency, error) {
 		return forge.WithSource(deps, forge.DepSourceNative), nil
 	}
 	if err != nil {
-		fmt.Printf("WARNING: native dependency lookup for issue %s failed (%v); falling back to body parsing\n", num, err)
+		fmt.Fprintf(os.Stderr, "WARNING: native dependency lookup for issue %s failed (%v); falling back to body parsing\n", num, err)
 	}
 	iss, err := e.Issue(num)
 	if err != nil {

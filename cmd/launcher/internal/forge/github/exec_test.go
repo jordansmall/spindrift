@@ -120,6 +120,60 @@ esac`)
 	}
 }
 
+// captureStderr runs fn with os.Stderr redirected to a pipe and returns
+// everything written to it.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+
+	fn()
+
+	w.Close()
+	os.Stderr = orig
+
+	var buf strings.Builder
+	tmp := make([]byte, 4096)
+	for {
+		n, err := r.Read(tmp)
+		if n > 0 {
+			buf.Write(tmp[:n])
+		}
+		if err != nil {
+			break
+		}
+	}
+	return buf.String()
+}
+
+// TestExecClient_DepsOf_WarnsOnStderr verifies that when the native
+// dependencies lookup fails, DepsOf's fallback warning goes to stderr, not
+// stdout, so it doesn't interfere with programmatic stdout consumers.
+func TestExecClient_DepsOf_WarnsOnStderr(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*dependencies/blocked_by*)
+	exit 1
+	;;
+*"issue view"*)
+	printf '{"number":10,"title":"t","body":"blocked by #9","state":"OPEN","labels":[]}'
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	out := captureStderr(t, func() {
+		if _, err := c.DepsOf("10"); err != nil {
+			t.Fatalf("DepsOf: %v", err)
+		}
+	})
+	if !strings.Contains(out, "WARNING") || !strings.Contains(out, "10") {
+		t.Errorf("DepsOf fallback warning on stderr = %q, want it to mention WARNING and issue 10", out)
+	}
+}
+
 // TestExecClient_DepsOf_NativeIgnoresBody verifies that when an issue has
 // both native dependencies and body-text blocker refs, DepsOf reports the
 // native set only — body refs are ignored, not merged.

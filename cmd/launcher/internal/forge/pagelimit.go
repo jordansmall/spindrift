@@ -1,6 +1,9 @@
 package forge
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 // ResultPageLimit bounds a single issue-tracker list/search page across
 // adapters; a backlog larger than this drains over successive dispatch runs
@@ -12,7 +15,7 @@ const ResultPageLimit = 100
 // backlog may be larger than what was returned.
 func WarnPageMayTruncateBacklog(source string, count int) {
 	if count >= ResultPageLimit {
-		fmt.Printf("WARNING: %s returned %d issues (limit %d); backlog may be larger — rerun to drain\n",
+		fmt.Fprintf(os.Stderr, "WARNING: %s returned %d issues (limit %d); backlog may be larger — rerun to drain\n",
 			source, count, ResultPageLimit)
 	}
 }
