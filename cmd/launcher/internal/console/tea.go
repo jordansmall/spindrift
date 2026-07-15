@@ -9,6 +9,7 @@
 package console
 
 import (
+	"fmt"
 	"io"
 	"time"
 
