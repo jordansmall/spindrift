@@ -51,6 +51,7 @@ type Fake struct {
 	branchPRs       map[string]string         // branch → PR URL
 	prStates        map[string]PRState        // URL → canonical PR state
 	mergeableStates map[string]MergeableState // URL → scripted Mergeable result
+	needsUpdate     map[string]bool           // URL → scripted NeedsUpdate result
 	checkQ          map[string][]RollupState
 	checkErrQ       map[string][]error  // per-call error queue; nil entry = consult checkQ
 	prFiles         map[string][]string // URL → scripted ListPRFiles result
@@ -75,6 +76,8 @@ type Fake struct {
 
 	// MergeErr, if non-nil, is returned by every Merge call (after MergeErrs is drained).
 	MergeErr error
+	// NeedsUpdateErr, if non-nil, is returned by every NeedsUpdate call.
+	NeedsUpdateErr error
 	// MergeErrs is a per-call queue drained before MergeErr is checked.
 	// A nil entry means success; a non-nil entry is returned as the error.
 	MergeErrs []error
@@ -151,6 +154,7 @@ func NewFake(labels ...DispatchLabels) *Fake {
 		branchPRs:       map[string]string{},
 		prStates:        map[string]PRState{},
 		mergeableStates: map[string]MergeableState{},
+		needsUpdate:     map[string]bool{},
 		checkQ:          map[string][]RollupState{},
 		checkErrQ:       map[string][]error{},
 		prFiles:         map[string][]string{},
@@ -207,6 +211,24 @@ func (f *Fake) Mergeable(url string) (MergeableState, error) {
 		return s, nil
 	}
 	return MergeableUnknown, nil
+}
+
+// SetNeedsUpdate scripts the NeedsUpdate result for url.
+func (f *Fake) SetNeedsUpdate(url string, stale bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.needsUpdate[url] = stale
+}
+
+// NeedsUpdate returns the scripted staleness for url (false when nothing was
+// scripted), or NeedsUpdateErr if set.
+func (f *Fake) NeedsUpdate(url string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.NeedsUpdateErr != nil {
+		return false, f.NeedsUpdateErr
+	}
+	return f.needsUpdate[url], nil
 }
 
 // SetCheckStates scripts the sequence of RollupState values returned by

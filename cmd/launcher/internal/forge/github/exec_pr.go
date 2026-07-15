@@ -123,6 +123,32 @@ func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 	return forge.MergeableState(s), nil
 }
 
+// NeedsUpdate queries the PR's mergeStateStatus via GraphQL and reports
+// whether it is BEHIND — the head branch's tested tree predates the base
+// branch's current tip, a purely ancestry-based fact GitHub computes
+// regardless of branch-protection settings (issue #936), unlike Mergeable's
+// content-conflict check.
+func (e *execClient) NeedsUpdate(url string) (bool, error) {
+	parts := strings.Split(url, "/")
+	if len(parts) < 7 {
+		return false, fmt.Errorf("invalid PR URL: %s", url)
+	}
+	owner, repo, number := parts[3], parts[4], parts[6]
+	const gql = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){mergeStateStatus}}}`
+	cmd := exec.Command("gh", "api", "graphql",
+		"-f", "query="+gql,
+		"-f", "owner="+owner,
+		"-f", "repo="+repo,
+		"-F", "number="+number,
+		"--jq", `.data.repository.pullRequest.mergeStateStatus // ""`,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("gh api graphql: %w", err)
+	}
+	return strings.TrimSpace(string(out)) == "BEHIND", nil
+}
+
 // ListPRFiles returns every path changed by the PR (added, modified, and
 // deleted alike) via the REST pulls/files endpoint, which — unlike
 // check-runs — works under a fine-grained PAT scoped to Pull requests RW.
