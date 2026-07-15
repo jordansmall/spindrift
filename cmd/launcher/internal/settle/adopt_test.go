@@ -2,11 +2,35 @@ package settle
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 )
+
+// TestSettleAdopted_ConsoleUsesLandingLabel verifies that SettleAdopted's
+// operator-report console print uses the landing= label, not the stale pr=
+// label (issue #655) — prURL here may be a res.URL discovery, not always
+// literally a PR under the wire grammar's landing vocabulary.
+func TestSettleAdopted_ConsoleUsesLandingLabel(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "77", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	s := New(c, fc, fc)
+
+	out := captureStdout(t, func() {
+		s.SettleAdopted(dispatch.NewFake(), "77", testPR)
+	})
+
+	if !strings.Contains(out, "landing="+testPR) {
+		t.Errorf("console output must print landing=%s; got: %q", testPR, out)
+	}
+	if strings.Contains(out, "pr=") {
+		t.Errorf("console output must not use the stale pr= label; got: %q", out)
+	}
+}
 
 // TestSettleAdopted_ImmediateMergeFailureStaysComplete verifies that
 // SettleAdopted in immediate mode does not demote the issue to agent-failed

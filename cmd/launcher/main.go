@@ -752,7 +752,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 		return fmt.Errorf("issue %s: no open PR", issueNum)
 	}
 	if res.IsDraft {
-		fmt.Printf("    #%s  pr=%s  status=skipped  note=draft PR; recover operates on non-draft PRs only\n", issueNum, res.URL)
+		fmt.Printf("    #%s  landing=%s  status=skipped  note=draft PR; recover operates on non-draft PRs only\n", issueNum, res.URL)
 		return fmt.Errorf("issue %s: draft PR", issueNum)
 	}
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {

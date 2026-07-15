@@ -36,7 +36,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 			return
 		}
 		if res.IsDraft {
-			fmt.Printf("    #%s  pr=%s  status=blocked  note=draft PR on %s; no outcome line\n", num, res.URL, branch)
+			fmt.Printf("    #%s  landing=%s  status=blocked  note=draft PR on %s; no outcome line\n", num, res.URL, branch)
 			return
 		}
 		s.SettleAdopted(d, num, res.URL)
@@ -46,7 +46,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 	o := result.Outcome
 	switch o.Status {
 	case "blocked":
-		fmt.Printf("    #%s  pr=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
+		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
 		s.postUsageComment(num, d)
 	case "ready":
 		switch s.selfHeal(d, num, o.Landing) {
@@ -58,7 +58,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 				s.verifyMerged(num, o.Landing)
 			}
 		case landingFailed:
-			fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", num, o.Landing)
+			fmt.Printf("    #%s  landing=%s  status=failed  !! CI or merge failed\n", num, o.Landing)
 		case landingAbandoned:
 			// Terminate already recorded its own comment and log line; a
 			// usage comment here would be noise on an issue it reclaimed.
@@ -71,11 +71,11 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 		if s.pr != nil {
 			s.verifyMerged(num, o.Landing)
 		} else {
-			fmt.Printf("    #%s  pr=%s  status=%s\n", num, o.Landing, o.Status)
+			fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
 		}
 		s.postUsageComment(num, d)
 	default:
-		fmt.Printf("    #%s  pr=%s  status=%s\n", num, o.Landing, o.Status)
+		fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
 		s.postUsageComment(num, d)
 	}
 }

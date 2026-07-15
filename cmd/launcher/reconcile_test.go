@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -62,7 +63,10 @@ func TestRecoverByNumber_DraftPRSkipped(t *testing.T) {
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR, IsDraft: true})
 
 	dir := tempLogDir(t)
-	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, fc), "42")
+	var err error
+	out := captureStdout(t, func() {
+		err = recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, fc), "42")
+	})
 
 	if err == nil {
 		t.Error("expected error for draft PR; got nil")
@@ -72,6 +76,14 @@ func TestRecoverByNumber_DraftPRSkipped(t *testing.T) {
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("draft PR must not trigger label churn; got %v", fc.TransitionStateCalls)
+	}
+	// operator-report console prints use landing=, not the stale pr= label
+	// (issue #655), even for a genuine forge.ResolveOpenPR lookup.
+	if !strings.Contains(out, "landing="+testReconcilePR) {
+		t.Errorf("console output must print landing=%s; got: %q", testReconcilePR, out)
+	}
+	if strings.Contains(out, "pr=") {
+		t.Errorf("console output must not use the stale pr= label; got: %q", out)
 	}
 }
 

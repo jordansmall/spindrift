@@ -63,13 +63,13 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
 		case gateGreen:
 			matched, guardErr := s.mergeGuardHit(pr)
 			if guardErr != nil {
-				fmt.Printf("    #%s  pr=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
+				fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
 				s.it.Comment(num, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
 				s.transitionState(num, forge.InProgress, forge.Complete)
 				return landingManual
 			}
 			if len(matched) > 0 {
-				fmt.Printf("    #%s  pr=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
+				fmt.Printf("    #%s  landing=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
 				s.it.Comment(num, mergeGuardComment(matched))
 				s.transitionState(num, forge.InProgress, forge.Complete)
 				return landingManual
@@ -79,12 +79,12 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
 					return landingAbandoned
 				}
 				if errors.Is(err, errLandingNeverGreen) {
-					fmt.Printf("    #%s  pr=%s  status=landing-failed  !! %v\n", num, pr, err)
+					fmt.Printf("    #%s  landing=%s  status=landing-failed  !! %v\n", num, pr, err)
 					s.it.Comment(num, fmt.Sprintf("landing failed: %v — no green PR exists at the current head", err))
 					s.transitionState(num, forge.InProgress, forge.Failed)
 					return landingFailed
 				}
-				fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, pr, err)
+				fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, pr, err)
 				s.it.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
 				s.transitionState(num, forge.InProgress, forge.Complete)
 				return landingManual
@@ -103,18 +103,18 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
 		case gateRedRetry:
 			if attempt >= s.cfg.MaxFixAttempts {
 				if s.cfg.MaxFixAttempts > 0 {
-					fmt.Printf("    #%s  pr=%s  status=fix-exhausted  !! exhausted %d fix pass(es)\n",
+					fmt.Printf("    #%s  landing=%s  status=fix-exhausted  !! exhausted %d fix pass(es)\n",
 						num, pr, s.cfg.MaxFixAttempts)
 				}
 				s.transitionState(num, forge.InProgress, forge.Failed)
 				return landingFailed
 			}
-			fmt.Printf("    #%s  pr=%s  fix-pass=%d/%d\n", num, pr, attempt+1, s.cfg.MaxFixAttempts)
+			fmt.Printf("    #%s  landing=%s  fix-pass=%d/%d\n", num, pr, attempt+1, s.cfg.MaxFixAttempts)
 			// Best-effort: a failure to fetch the CI failure detail must
 			// never block the fix pass — fall back to an empty summary.
 			detail, detailErr := s.pr.FailureDetail(pr)
 			if detailErr != nil {
-				fmt.Printf("    #%s  pr=%s  status=failure-detail-unavailable  !! %v\n", num, pr, detailErr)
+				fmt.Printf("    #%s  landing=%s  status=failure-detail-unavailable  !! %v\n", num, pr, detailErr)
 				detail = ""
 			}
 			if result := d.Fix(attempt+1, detail); !result.Success {
@@ -134,7 +134,7 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
 func (s *Settle) landPushOnly(num, branch string) landingResult {
 	s.transitionState(num, forge.InProgress, forge.Complete)
 	if err := s.applyMergeMode(num, branch, nil); err != nil {
-		fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, branch, err)
+		fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
 		s.it.Comment(num, fmt.Sprintf("merge blocked after push: %v", err))
 		return landingManual
 	}
@@ -175,7 +175,7 @@ func (s *Settle) gateToGreen(num, pr string) gateResult {
 		}
 		state, stateErr := s.pr.CheckState(pr)
 		if stateErr != nil {
-			fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, stateErr)
+			fmt.Printf("    #%s  landing=%s  status=check-state-error  !! %v\n", num, pr, stateErr)
 			return gateTerminal
 		}
 
@@ -188,7 +188,7 @@ func (s *Settle) gateToGreen(num, pr string) gateResult {
 			// registration can briefly show SUCCESS before all jobs appear.
 			confirm, confirmErr := s.pr.CheckState(pr)
 			if confirmErr != nil {
-				fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, confirmErr)
+				fmt.Printf("    #%s  landing=%s  status=check-state-error  !! %v\n", num, pr, confirmErr)
 				return gateTerminal
 			}
 			if confirm != forge.StateSuccess {
@@ -248,14 +248,14 @@ func (s *Settle) applyMergeMode(num, pr string, d dispatch.Dispatcher) error {
 			return fmt.Errorf("MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)")
 		}
 		if err := s.pr.EnqueueAutoMerge(pr); err != nil {
-			fmt.Printf("    #%s  pr=%s  status=auto-merge-enqueue-failed  !! %v\n", num, pr, err)
+			fmt.Printf("    #%s  landing=%s  status=auto-merge-enqueue-failed  !! %v\n", num, pr, err)
 			s.it.Comment(num, fmt.Sprintf("auto-merge enqueue failed: %v — PR is green; approve and merge manually", err))
 			return nil
 		}
-		fmt.Printf("    #%s  pr=%s  status=auto-merge-enqueued\n", num, pr)
+		fmt.Printf("    #%s  landing=%s  status=auto-merge-enqueued\n", num, pr)
 		return nil
 	case "manual":
-		fmt.Printf("    #%s  pr=%s  status=agent-complete  merge-mode=%s\n", num, pr, s.cfg.MergeMode)
+		fmt.Printf("    #%s  landing=%s  status=agent-complete  merge-mode=%s\n", num, pr, s.cfg.MergeMode)
 		return nil
 	default:
 		return fmt.Errorf("unrecognised MERGE_MODE: %q", s.cfg.MergeMode)
@@ -291,7 +291,7 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 				return err
 			}
 			checksBlockedAttempts++
-			fmt.Printf("    #%s  pr=%s  status=merge-blocked-by-checks  attempt=%d/%d\n",
+			fmt.Printf("    #%s  landing=%s  status=merge-blocked-by-checks  attempt=%d/%d\n",
 				num, pr, checksBlockedAttempts, s.cfg.MaxRebaseAttempts)
 			time.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
 			continue
@@ -301,7 +301,7 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 		}
 		if skipRebase {
 			skipRebase = false
-			fmt.Printf("    #%s  pr=%s  status=merge-retry-settle\n", num, pr)
+			fmt.Printf("    #%s  landing=%s  status=merge-retry-settle\n", num, pr)
 			time.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
 			continue
 		}
@@ -309,25 +309,25 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 			return err
 		}
 		rebaseAttempts++
-		fmt.Printf("    #%s  pr=%s  status=rebase-retry  attempt=%d/%d\n",
+		fmt.Printf("    #%s  landing=%s  status=rebase-retry  attempt=%d/%d\n",
 			num, pr, rebaseAttempts, s.cfg.MaxRebaseAttempts)
 		rbErr := s.cf.Rebase(pr)
 		for rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && pushRetries < s.cfg.MaxRebaseAttempts {
 			pushRetries++
-			fmt.Printf("    #%s  pr=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
+			fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
 				num, pr, pushRetries, s.cfg.MaxRebaseAttempts, rbErr)
 			rbErr = s.cf.Rebase(pr)
 		}
 		if rbErr != nil {
 			if errors.Is(rbErr, forge.ErrTransientPushFailure) {
-				fmt.Printf("    #%s  pr=%s  status=rebase-push-retries-exhausted  attempts=%d  !! %v\n",
+				fmt.Printf("    #%s  landing=%s  status=rebase-push-retries-exhausted  attempts=%d  !! %v\n",
 					num, pr, pushRetries, rbErr)
 				return rbErr
 			}
 			if errors.Is(rbErr, forge.ErrMergeConflict) && d != nil {
-				fmt.Printf("    #%s  pr=%s  status=conflict-resolve\n", num, pr)
+				fmt.Printf("    #%s  landing=%s  status=conflict-resolve\n", num, pr)
 				if crErr := d.ResolveConflict(pr); crErr != nil {
-					fmt.Printf("    #%s  pr=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
+					fmt.Printf("    #%s  landing=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
 					return fmt.Errorf("%w: conflict-resolve dispatch failed: %v", errLandingNeverGreen, crErr)
 				}
 				if rwErr := s.rewaitAfterForcePush(num, pr); rwErr != nil {
@@ -335,7 +335,7 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 				}
 				skipRebase = true
 			} else {
-				fmt.Printf("    #%s  pr=%s  status=rebase-failed  !! %v\n", num, pr, rbErr)
+				fmt.Printf("    #%s  landing=%s  status=rebase-failed  !! %v\n", num, pr, rbErr)
 				return rbErr
 			}
 			continue
@@ -356,7 +356,7 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 // forge.ErrMergeConflict — the caller's conflict-retry path is never
 // re-entered for it.
 func (s *Settle) rewaitAfterForcePush(num, pr string) error {
-	fmt.Printf("    #%s  pr=%s  status=post-force-push-wait\n", num, pr)
+	fmt.Printf("    #%s  landing=%s  status=post-force-push-wait\n", num, pr)
 	if s.gateToGreen(num, pr) != gateGreen {
 		return fmt.Errorf("%w: CI did not reach green after force-push on %s", errLandingNeverGreen, pr)
 	}

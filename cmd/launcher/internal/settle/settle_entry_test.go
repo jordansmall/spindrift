@@ -37,6 +37,37 @@ func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 	}
 }
 
+// TestSettle_ConsoleUsesLandingLabel verifies that Settle's operator-report
+// console print uses the landing= label (matching the wire grammar's
+// o.Landing field name), not the stale pr= label the value may not even be
+// a PR (issue #655).
+func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
+	const issNum = "42"
+	const prURL = "https://github.com/owner/repo/pull/99"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+	}
+
+	s := New(baseConfig(), fc, fc)
+	out := captureStdout(t, func() {
+		s.Settle(d, issNum, result)
+	})
+
+	if !strings.Contains(out, "landing="+prURL) {
+		t.Errorf("console output must print landing=%s; got: %q", prURL, out)
+	}
+	if strings.Contains(out, "pr=") {
+		t.Errorf("console output must not use the stale pr= label; got: %q", out)
+	}
+}
+
 // TestSettle_UsageMissing_NoCrash verifies that Settle still posts whatever
 // UsageReport returns (including its "unavailable" fallback body) without
 // crashing.
