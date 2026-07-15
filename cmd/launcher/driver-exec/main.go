@@ -31,6 +31,9 @@ func main() {
 	heartbeatLog := flag.String("heartbeat-log", "/tmp/heartbeat.log", "path to write coarse heartbeat status lines")
 	flag.Parse()
 
+	if *issue == "" {
+		*issue = "0"
+	}
 	if *promptFile == "" {
 		fmt.Fprintln(os.Stderr, "driver-exec: -prompt-file is required")
 		os.Exit(1)

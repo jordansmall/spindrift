@@ -39,9 +39,6 @@ case "${1:-}" in
         fi
       done
       if [ "${#_cmd_args[@]}" -gt 0 ]; then
-        if [ "${FAKE_NIX_DEV_SHELL_LAUNCH_FAIL:-0}" = "1" ] && [ "${_cmd_args[0]}" = "bash" ]; then
-          exit 1
-        fi
         exec "${_cmd_args[@]}"
       fi
       exit 0
