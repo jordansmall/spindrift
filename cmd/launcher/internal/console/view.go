@@ -17,6 +17,9 @@ func View(m Model) string {
 	}
 
 	var b strings.Builder
+	if m.PendingTerminate != "" {
+		fmt.Fprintf(&b, "terminate #%s? [y/N]\n", m.PendingTerminate)
+	}
 	if m.DogfoodLive {
 		b.WriteString("notice: a live dogfood loop (.dogfood.pid) is competing for the same queue\n")
 	}
