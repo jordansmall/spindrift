@@ -140,8 +140,8 @@ func TestView_RefreshError_Surfaced(t *testing.T) {
 }
 
 // TestView_Cursor_MarksHighlightedRow verifies the row at m.Cursor is
-// visually marked so the operator can see which issue j/k/arrows will act
-// on (issue #784).
+// visually marked so the operator can see which issue j/down or the up
+// arrow will act on (issue #784).
 func TestView_Cursor_MarksHighlightedRow(t *testing.T) {
 	m := NewModel()
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
