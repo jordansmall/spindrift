@@ -272,23 +272,25 @@ let
   # the bot-maintained source of truth (ADR-0010).
   spindriftVersion = (builtins.fromJSON (builtins.readFile ../.release-please-manifest.json)).".";
 
-  # In-box heartbeat filter: reuses the #182 heartbeat parser as a CLI binary
-  # so the entrypoint can pipe claude's stream-json output through it without
-  # modifying the raw capture channel. Built for Linux (pkgs, not hostPkgs).
-  # Goes through the Driver seam (driver.New("claude").NewHeartbeatWriter,
-  # ADR 0009 / issue #620) rather than a heartbeat package directly.
+  # In-box Driver runner (issue #626): runs one Driver invocation, direct or
+  # inside the Project devShell, tees the stream to a log path, and filters
+  # heartbeats in-process -- absorbing the standalone spindrift-heartbeat-filter
+  # binary the image used to bake alongside it, so there is one in-box Go unit,
+  # not two. Built for Linux (pkgs, not hostPkgs). Goes through the Driver seam
+  # (driver.New("claude").NewHeartbeatWriter, ADR 0009 / issue #620) rather than
+  # a heartbeat package directly.
   #
   # INVARIANT: the agent image drvPath must not change when host-side launcher
   # code outside this binary's import closure is modified (e.g. test-only
-  # launcher commits). The fileset is intentionally tight: go.mod,
-  # spindrift-heartbeat-filter, internal/driver, internal/driver/claude (the
-  # claude Driver's heartbeat/transcript/classify/usage parsing),
-  # internal/usage (Driver-agnostic report types), and internal/logscan
-  # (claude's log-scan helper) only, with *_test.go excluded. If a new import
-  # is added outside this closure the build fails loudly (missing package) —
-  # that is the intended failure mode (#474).
-  heartbeatFilterBin = pkgs.buildGoModule {
-    pname = "spindrift-heartbeat-filter";
+  # launcher commits). The fileset is intentionally tight: go.mod, driver-exec,
+  # internal/driver, internal/driver/claude (the claude Driver's
+  # heartbeat/transcript/classify/usage parsing), internal/usage
+  # (Driver-agnostic report types), and internal/logscan (claude's log-scan
+  # helper) only, with *_test.go excluded. If a new import is added outside
+  # this closure the build fails loudly (missing package) — that is the
+  # intended failure mode (#474).
+  driverExecBin = pkgs.buildGoModule {
+    pname = "driver-exec";
     version = spindriftVersion;
     src = lib.fileset.toSource {
       root = ../cmd/launcher;
@@ -296,7 +298,7 @@ let
         ../cmd/launcher/go.mod
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/spindrift-heartbeat-filter)
+        ) ../cmd/launcher/driver-exec)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/driver)
@@ -312,7 +314,7 @@ let
       ];
     };
     vendorHash = null;
-    subPackages = [ "spindrift-heartbeat-filter" ];
+    subPackages = [ "driver-exec" ];
     meta.license = lib.licenses.mit;
   };
 
@@ -331,7 +333,7 @@ let
       nixStoreWritable
       extraClosures
       driverEntry
-      heartbeatFilterBin
+      driverExecBin
       agentsJsonTemplate
       driverPreamble
       fragmentRegistryPreamble
@@ -706,7 +708,7 @@ else
       researchOutcomeContractFile
       driverPreambleFile
       fragmentRegistryFile
-      heartbeatFilterBin
+      driverExecBin
       driverEntry
       ;
 
