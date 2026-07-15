@@ -75,6 +75,23 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 	}
 }
 
+// TestMainRun_Console_RoutesThroughBootstrap verifies the `console`
+// subcommand reaches the same bootstrap/validate prologue as the other
+// subcommands — proven here by a missing REPO_SLUG surfacing the same
+// validation error, without needing a real terminal or launcher (issue #694).
+func TestMainRun_Console_RoutesThroughBootstrap(t *testing.T) {
+	t.Setenv("REPO_SLUG", "")
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"console"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("mainRun([console]) code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "REPO_SLUG") {
+		t.Errorf("mainRun([console]) stderr = %q, want a REPO_SLUG validation error", stderr.String())
+	}
+}
+
 // TestMainRun_AmbientKnobEnv_WarnsAndStillHonored is the verb-level proof of
 // ADR 0020's staged deprecation: mainRun on a real subcommand (research,
 // which reaches bootstrap/validate without touching a real runner or gh —
