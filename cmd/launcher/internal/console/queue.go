@@ -79,11 +79,14 @@ func (q *Queue) Snapshot() []Pick {
 // pick's atomic Dispatchable->InProgress claim, once it races (another
 // loop, a closed issue, a relabel), dissolves that pick with the reason and
 // Discover moves on too, so a stale queue can only produce a failed claim,
-// never a wrong dispatch. The first pick that claims successfully is
-// returned as a single-issue batch (edges always empty — Discover already
-// resolved this pick's own readiness, so the engine's own blocker gate has
-// nothing left to check); a refill with nothing launchable returns no
-// issues, which may still have moved one or more picks onto PickHeld.
+// never a wrong dispatch. tryMarkClaiming re-checks the pick is still
+// PickQueued or PickHeld right before that claim, so a concurrent Unpick
+// landing anywhere in the readiness check above is never raced into a
+// launch. The first pick that claims successfully is returned as a
+// single-issue batch (edges always empty — Discover already resolved this
+// pick's own readiness, so the engine's own blocker gate has nothing left
+// to check); a refill with nothing launchable returns no issues, which may
+// still have moved one or more picks onto PickHeld.
 func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string) ([]waves.Issue, map[string][]string, error) {
 	for _, pick := range q.claimable() {
 		edges, sources, err := waves.BuildEdges(tracker, []waves.Issue{{Number: pick.Number, Title: pick.Title}})
@@ -95,7 +98,9 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			q.setHeld(pick.Number, unready, failed, sources[pick.Number])
 			continue
 		}
-		q.setState(pick.Number, PickClaiming, "")
+		if !q.tryMarkClaiming(pick.Number) {
+			continue // removed (Unpick) between the readiness snapshot and this claim
+		}
 		if err := tracker.TransitionState(pick.Number, forge.Dispatchable, forge.InProgress); err != nil {
 			q.dissolve(pick.Number, err.Error())
 			continue
@@ -150,12 +155,37 @@ func refList(nums []string, sources map[string]forge.DepSource) string {
 	return strings.Join(refs, ", ")
 }
 
+// tryMarkClaiming marks the pick numbered num PickClaiming and reports
+// success, but only if it is still present and still holding at PickQueued
+// or PickHeld — closing the window between Discover's readiness snapshot
+// and its actual tracker claim so a concurrent Unpick (Remove) always wins:
+// a pick removed in that window is never claimed, matching Unpick's "zero
+// Issue Tracker calls, never launches" guarantee (#650).
+func (q *Queue) tryMarkClaiming(num string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for i := range q.picks {
+		if q.picks[i].Number == num {
+			if q.picks[i].State != PickQueued && q.picks[i].State != PickHeld {
+				return false
+			}
+			q.picks[i].State = PickClaiming
+			q.picks[i].BlockedBy = ""
+			return true
+		}
+	}
+	return false
+}
+
 // setState updates the newest (most recently Add()ed) pick numbered num in
 // place. Scanning back-to-front, rather than stopping at the first match,
 // matters once a number can appear more than once — a terminated pick's row
 // (ADR 0024, issue #649) is never removed, so a later re-pick appends a
 // second row for the same number; the newest one is always the live claim,
-// the older one(s) already terminal and never touched again.
+// the older one(s) already terminal and never touched again. BlockedBy is
+// always cleared here — it is PickHeld-only data setHeld sets directly, so
+// any other transition (claiming, running, dissolved) must not carry a
+// stale badge forward.
 func (q *Queue) setState(num string, state PickState, reason string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -163,6 +193,7 @@ func (q *Queue) setState(num string, state PickState, reason string) {
 		if q.picks[i].Number == num {
 			q.picks[i].State = state
 			q.picks[i].Reason = reason
+			q.picks[i].BlockedBy = ""
 			return
 		}
 	}

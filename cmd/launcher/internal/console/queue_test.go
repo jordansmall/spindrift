@@ -119,7 +119,7 @@ func TestQueue_Discover_DuplicateNumber_ClaimTargetsNewestRow(t *testing.T) {
 
 // TestQueue_Discover_HoldsPickWithOpenBlocker verifies a pick whose declared
 // blocker is not yet ready holds at PickHeld instead of launching — edge
-// resolution reuses waves.BuildEdges/BlockerReady, no second parser (#650).
+// resolution reuses waves.BuildEdges/BlockerStatus, no second parser (#650).
 func TestQueue_Discover_HoldsPickWithOpenBlocker(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
@@ -182,6 +182,50 @@ func TestQueue_Discover_FailedBlockerSurfacedPickStaysHeld(t *testing.T) {
 	if !strings.Contains(snap.Reason, "#41") || !strings.Contains(snap.Reason, "failed") {
 		t.Errorf("Reason = %q, want it to name #41 as a failed blocker", snap.Reason)
 	}
+}
+
+// TestQueue_Discover_UnpickDuringClaimCheck_NeverLaunches verifies an Unpick
+// that lands in the window between Discover reading a pick as a candidate
+// and claiming it never lets that claim through — Unpick's "zero Issue
+// Tracker calls, never launches" guarantee holds even when it races
+// Discover's own blocker-readiness check (#650).
+func TestQueue_Discover_UnpickDuringClaimCheck_NeverLaunches(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+
+	issues, _, err := q.Discover(removeOnDepsOf{Fake: f, q: q, num: "42"}, f, "")
+
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Errorf("issues = %+v, want none — the pick was unpicked mid-check", issues)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none — an unpicked issue is never claimed", f.TransitionStateCalls)
+	}
+	if snap := q.Snapshot(); len(snap) != 0 {
+		t.Errorf("Snapshot = %+v, want empty — Remove already dropped #42", snap)
+	}
+}
+
+// removeOnDepsOf wraps a *forge.Fake so its first DepsOf call for num
+// synchronously Removes that pick from q — simulating an operator's Unpick
+// landing in Discover's window between reading a pick as a candidate and
+// claiming it.
+type removeOnDepsOf struct {
+	*forge.Fake
+	q   *Queue
+	num string
+}
+
+func (r removeOnDepsOf) DepsOf(num string) ([]forge.Dependency, error) {
+	if num == r.num {
+		r.q.Remove(num)
+	}
+	return r.Fake.DepsOf(num)
 }
 
 // raceOnNum wraps a *forge.Fake so TransitionState fails for exactly one
