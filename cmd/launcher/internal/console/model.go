@@ -134,6 +134,12 @@ type DrillInState struct {
 	// Offset is the index of the first visible line in the currently active
 	// form (Rendered, or Raw while ShowRaw) — the scroll position (#786).
 	Offset int
+	// Lines is the active form (Rendered, or Raw while ShowRaw) pre-split on
+	// "\n". Update recomputes it only when the content or ShowRaw changes
+	// (DrillInMsg, DrillInToggleMsg), so clampDrillInOffset and the render
+	// functions never re-split the full transcript on every keystroke (issue
+	// #722).
+	Lines []string
 }
 
 // NewModel returns the zero-value console state: no issues loaded yet, no
@@ -193,10 +199,19 @@ func Update(m Model, msg Msg) Model {
 			showRaw = m.DrillIn.ShowRaw
 			offset = m.DrillIn.Offset
 		}
-		m.DrillIn = &DrillInState{Number: msg.Number, Rendered: msg.Rendered, Raw: msg.Raw, Err: msg.Err, ShowRaw: showRaw, Offset: offset}
+		content := msg.Rendered
+		if showRaw {
+			content = msg.Raw
+		}
+		m.DrillIn = &DrillInState{Number: msg.Number, Rendered: msg.Rendered, Raw: msg.Raw, Err: msg.Err, ShowRaw: showRaw, Offset: offset, Lines: strings.Split(content, "\n")}
 	case DrillInToggleMsg:
 		if m.DrillIn != nil {
 			m.DrillIn.ShowRaw = !m.DrillIn.ShowRaw
+			content := m.DrillIn.Rendered
+			if m.DrillIn.ShowRaw {
+				content = m.DrillIn.Raw
+			}
+			m.DrillIn.Lines = strings.Split(content, "\n")
 		}
 	case DrillInCloseMsg:
 		m.DrillIn = nil
@@ -282,11 +297,7 @@ func clampDrillInOffset(d *DrillInState) {
 	if d == nil {
 		return
 	}
-	content := d.Rendered
-	if d.ShowRaw {
-		content = d.Raw
-	}
-	maxOffset := len(strings.Split(content, "\n")) - 1
+	maxOffset := len(d.Lines) - 1
 	switch {
 	case d.Offset < 0:
 		d.Offset = 0
