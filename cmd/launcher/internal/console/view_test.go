@@ -40,15 +40,37 @@ func TestView_DogfoodNotice_ShownWhenLiveSilentOtherwise(t *testing.T) {
 }
 
 // TestView_CapAndLive_Shown verifies View renders the session's live
-// parallelism cap and current live count (issue #653) — visible without a
-// separate command, the same way the queue rows already are.
+// parallelism cap and current live count (issue #653) in the header status
+// line — visible without a separate command, the same way the queue rows
+// already are.
 func TestView_CapAndLive_Shown(t *testing.T) {
 	m := NewModel()
 	m = Update(m, CapMsg{Cap: 3, Live: 1})
 
 	out := View(m)
-	if !strings.Contains(out, "cap: 1/3") {
-		t.Errorf("View() = %q, want a \"cap: 1/3\" line (live/cap)", out)
+	if !strings.Contains(out, "running 1/3") {
+		t.Errorf("View() = %q, want a \"running 1/3\" line (live/cap)", out)
+	}
+}
+
+// TestView_Header_StatusLine_ShowsRunningWaitingHeldSettled verifies the
+// header's status line reports running/cap, waiting, held, and settled
+// counts derived from Cap/Live and the Picks slice's PickState tags — no new
+// stored counters (issue #843, ADR 0025).
+func TestView_Header_StatusLine_ShowsRunningWaitingHeldSettled(t *testing.T) {
+	m := NewModel()
+	m = Update(m, CapMsg{Cap: 3, Live: 1})
+	m.Picks = []Pick{
+		{Number: "1", State: PickQueued},
+		{Number: "2", State: PickHeld},
+		{Number: "3", State: PickSettled},
+		{Number: "4", State: PickSettled},
+	}
+
+	out := View(m)
+	want := "running 1/3 · waiting 1 · held 1 · settled 2"
+	if !strings.Contains(out, want) {
+		t.Errorf("View() = %q, want it to contain status line %q", out, want)
 	}
 }
 

@@ -391,7 +391,7 @@ func TestTea_WithLauncher_RendersCapAndLive(t *testing.T) {
 	launch := &Launcher{CodeForge: f, Queue: NewQueue(), MaxParallel: 3}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "cap: 0/3")
+	waitForOutput(t, tm, "running 0/3")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
@@ -808,14 +808,14 @@ func TestTea_ResizeKeys_RaiseAndLowerLiveCap(t *testing.T) {
 	launch := &Launcher{CodeForge: f, Queue: NewQueue(), MaxParallel: 3}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "cap: 0/3")
+	waitForOutput(t, tm, "running 0/3")
 
 	sendKey(tm, "+")
-	waitForOutput(t, tm, "cap: 0/4")
+	waitForOutput(t, tm, "running 0/4")
 
 	sendKey(tm, "-")
 	sendKey(tm, "-")
-	waitForOutput(t, tm, "cap: 0/2")
+	waitForOutput(t, tm, "running 0/2")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
@@ -835,7 +835,7 @@ func TestTea_RebuildKey_NotStale_NeverRunsRebuildFn(t *testing.T) {
 	}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "cap:")
+	waitForOutput(t, tm, "running ")
 
 	sendKey(tm, "b")
 	sendKey(tm, "q")
