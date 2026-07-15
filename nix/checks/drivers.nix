@@ -40,8 +40,8 @@ in
       "renderPreamble must bake DRIVER_BIN from the Driver entry's bin, got: ${out}";
     assert assertMsg (hasInfix "DRIVER_FLAGS_COMMON='--stub-flag --two'" out)
       "renderPreamble must shell-escape DRIVER_FLAGS_COMMON from the Driver entry's flagsCommon, got: ${out}";
-    assert assertMsg (hasInfix "DRIVER_SKILLS_DIR=/home/agent/.stub/skills" out)
-      "renderPreamble must bake DRIVER_SKILLS_DIR under /home/agent, got: ${out}";
+    assert assertMsg (hasInfix ''DRIVER_SKILLS_DIR="''${HOME:-}/.stub/skills"'' out)
+      "renderPreamble must compute DRIVER_SKILLS_DIR from \$HOME at run time, got: ${out}";
     assert assertMsg (hasInfix "_driver_extract_outcome() {\necho stub-outcome" out)
       "renderPreamble must fold in the Driver entry's outcomeExtractFnBody, got: ${out}";
     assert assertMsg (hasInfix "_driver_session_flags() {\necho stub-session" out)
