@@ -73,6 +73,97 @@ func TestRunContinuous_DrainsScriptedQueue_LaunchesOneDispatchEndToEnd(t *testin
 	}
 }
 
+// TestRunContinuous_ConsoleConfig_SkipsRedundantClaim pins the coupling
+// launcher.go's drain loop relies on (#706): passing waves.Config with
+// Label and InProgressLabel both left zero-value (equal) makes claimIssue
+// (engine.go) skip a second Dispatchable->InProgress transition, because
+// Queue.Discover (queue.go) already performed that transition when it
+// claimed the pick. Only one TransitionState call should ever happen.
+func TestRunContinuous_ConsoleConfig_SkipsRedundantClaim(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+
+	fr := runner.NewFake()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	inner := settle.NewFake()
+	qs := queueSettler{Settler: inner, q: q}
+
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) { return q.Discover(f, f, "") }
+	fresh := func() (bool, bool, string) { return false, true, "" }
+
+	// Same zero-value Label/InProgressLabel/OverlapGate as launcher.go's
+	// own waves.Config construction — MaxParallel stands in for the
+	// Limiter that field would otherwise build internally.
+	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, f, f, dir, factory, qs, discover, fresh)
+	if err != nil {
+		t.Fatalf("RunContinuous: %v", err)
+	}
+
+	if len(f.TransitionStateCalls) != 1 {
+		t.Errorf("TransitionStateCalls = %+v, want exactly one (redundant claim must be skipped)", f.TransitionStateCalls)
+	}
+}
+
+// TestRunContinuous_DivergentLabels_DoubleClaims is the negative case for
+// TestRunContinuous_ConsoleConfig_SkipsRedundantClaim (#706): if Label and
+// InProgressLabel are ever passed as different values, claimIssue no longer
+// recognizes Queue.Discover's upstream claim as already done and issues a
+// second Dispatchable->InProgress transition. This is why the Console's
+// drain-path Config must keep the two equal (both left zero-value).
+func TestRunContinuous_DivergentLabels_DoubleClaims(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+
+	fr := runner.NewFake()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	inner := settle.NewFake()
+	qs := queueSettler{Settler: inner, q: q}
+
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) { return q.Discover(f, f, "") }
+	fresh := func() (bool, bool, string) { return false, true, "" }
+
+	err = waves.RunContinuous(waves.Config{MaxParallel: 1, Label: "ready-for-agent", InProgressLabel: "agent-in-progress"}, f, f, dir, factory, qs, discover, fresh)
+	if err != nil {
+		t.Fatalf("RunContinuous: %v", err)
+	}
+
+	if len(f.TransitionStateCalls) != 2 {
+		t.Errorf("TransitionStateCalls = %+v, want exactly two (Queue.Discover's claim plus claimIssue's redundant one)", f.TransitionStateCalls)
+	}
+}
+
 // TestLauncher_MaxParallel_CapsConcurrency_RefillsOnSettle verifies a
 // Launcher with MaxParallel=2 and three queued picks runs exactly two at
 // once, holding the third queued, then launches it as soon as one of the
