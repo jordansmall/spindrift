@@ -103,11 +103,16 @@ func (q *Queue) nextQueued() (Pick, bool) {
 	return Pick{}, false
 }
 
-// setState updates the pick numbered num in place.
+// setState updates the newest (most recently Add()ed) pick numbered num in
+// place. Scanning back-to-front, rather than stopping at the first match,
+// matters once a number can appear more than once — a terminated pick's row
+// (ADR 0024, issue #649) is never removed, so a later re-pick appends a
+// second row for the same number; the newest one is always the live claim,
+// the older one(s) already terminal and never touched again.
 func (q *Queue) setState(num string, state PickState, reason string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for i := range q.picks {
+	for i := len(q.picks) - 1; i >= 0; i-- {
 		if q.picks[i].Number == num {
 			q.picks[i].State = state
 			q.picks[i].Reason = reason

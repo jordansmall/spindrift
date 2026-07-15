@@ -84,6 +84,38 @@ func TestQueue_Discover_RacedClaim_DissolvesAndTriesNext(t *testing.T) {
 	}
 }
 
+// TestQueue_Discover_DuplicateNumber_ClaimTargetsNewestRow verifies that
+// when two picks share the same issue number (e.g. an old PickTerminated row
+// ADR 0024's Terminate left behind, plus a fresh re-pick queued after it),
+// Discover's claim updates the newest (most recently added) row to
+// PickRunning, not the stale terminal one — a re-pick must actually track
+// the new Dispatch, not silently corrupt an already-finished row while
+// leaving the real claim stuck at PickClaiming forever.
+func TestQueue_Discover_DuplicateNumber_ClaimTargetsNewestRow(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickTerminated, Reason: "terminated by operator"})
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+
+	issues, _, err := q.Discover(f)
+
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(issues) != 1 || issues[0].Number != "42" {
+		t.Fatalf("issues = %+v, want #42", issues)
+	}
+
+	snap := q.Snapshot()
+	if snap[0].State != PickTerminated {
+		t.Errorf("old row = %+v, want it left untouched at PickTerminated", snap[0])
+	}
+	if snap[1].State != PickRunning {
+		t.Errorf("new row = %+v, want it to become PickRunning (the actual claim)", snap[1])
+	}
+}
+
 // raceOnNum wraps a *forge.Fake so TransitionState fails for exactly one
 // issue number, simulating another loop winning the claim race for it while
 // every other issue's claim still succeeds normally.
