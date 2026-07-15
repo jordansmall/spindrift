@@ -1,11 +1,10 @@
-package claude_test
+package claude
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -29,7 +28,7 @@ func TestLastInLog_FullResultEvent(t *testing.T) {
 	line := `{"type":"result","num_turns":7,"total_cost_usd":0.1234,"duration_ms":5000,"duration_api_ms":3000,"usage":{"input_tokens":800,"output_tokens":200,"cache_read_input_tokens":150,"cache_creation_input_tokens":50}}`
 	path := writeLog(t, "some output", line)
 
-	u, found, err := claude.LastInLog(path)
+	u, found, err := lastInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -67,7 +66,7 @@ func TestLastInLog_TakesLast(t *testing.T) {
 	last := `{"type":"result","num_turns":9,"total_cost_usd":0.99,"duration_ms":9000,"usage":{"input_tokens":900,"output_tokens":90}}`
 	path := writeLog(t, first, "some other output", last)
 
-	u, found, err := claude.LastInLog(path)
+	u, found, err := lastInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -83,7 +82,7 @@ func TestLastInLog_NoCacheFields(t *testing.T) {
 	line := `{"type":"result","num_turns":3,"total_cost_usd":0.05,"duration_ms":2000,"usage":{"input_tokens":100,"output_tokens":40}}`
 	path := writeLog(t, line)
 
-	u, found, err := claude.LastInLog(path)
+	u, found, err := lastInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -100,7 +99,7 @@ func TestLastInLog_NoCacheFields(t *testing.T) {
 
 func TestLastInLog_NotFound(t *testing.T) {
 	path := writeLog(t, "some output", "no result event here")
-	_, found, err := claude.LastInLog(path)
+	_, found, err := lastInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -110,7 +109,7 @@ func TestLastInLog_NotFound(t *testing.T) {
 }
 
 func TestLastInLog_FileNotFound(t *testing.T) {
-	_, found, err := claude.LastInLog("/nonexistent/path/test.log")
+	_, found, err := lastInLog("/nonexistent/path/test.log")
 	if err != nil {
 		t.Fatalf("unexpected error for missing file: %v", err)
 	}
@@ -121,7 +120,7 @@ func TestLastInLog_FileNotFound(t *testing.T) {
 
 func TestLastInLog_MalformedJSON(t *testing.T) {
 	path := writeLog(t, `{"type":"result","num_turns":INVALID}`)
-	_, found, err := claude.LastInLog(path)
+	_, found, err := lastInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error for malformed JSON: %v", err)
 	}
@@ -145,7 +144,7 @@ func TestBreakdownByRole_ScoutAndReviewer(t *testing.T) {
 
 	path := writeLog(t, implMain1, scoutMsg1, scoutMsg2, implMain2, reviewerMsg1, implMain3)
 
-	breakdown, err := claude.BreakdownByRole(path)
+	breakdown, err := breakdownByRole(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -186,7 +185,7 @@ func TestBreakdownByRole_Filer(t *testing.T) {
 
 	path := writeLog(t, implMain1, filerMsg1)
 
-	breakdown, err := claude.BreakdownByRole(path)
+	breakdown, err := breakdownByRole(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -219,7 +218,7 @@ func TestBreakdownByRole_ReviewerReinvoked(t *testing.T) {
 
 	path := writeLog(t, implMain1, reviewerMsg1, implMain2, reviewerMsg2)
 
-	breakdown, err := claude.BreakdownByRole(path)
+	breakdown, err := breakdownByRole(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -245,7 +244,7 @@ func TestBreakdownByRole_NoSubagents(t *testing.T) {
 
 	path := writeLog(t, implMsg1, implMsg2)
 
-	breakdown, err := claude.BreakdownByRole(path)
+	breakdown, err := breakdownByRole(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -261,7 +260,7 @@ func TestBreakdownByRole_NoSubagents(t *testing.T) {
 }
 
 func TestBreakdownByRole_FileNotFound(t *testing.T) {
-	breakdown, err := claude.BreakdownByRole("/nonexistent/path/test.log")
+	breakdown, err := breakdownByRole("/nonexistent/path/test.log")
 	if err != nil {
 		t.Fatalf("unexpected error for missing file: %v", err)
 	}
@@ -287,7 +286,7 @@ func TestLastInLog_OversizedLine(t *testing.T) {
 	f.WriteString(`{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":200,"usage":{"input_tokens":20,"output_tokens":10}}` + "\n")
 	f.Close()
 
-	u, found, err := claude.LastInLog(path)
+	u, found, err := lastInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

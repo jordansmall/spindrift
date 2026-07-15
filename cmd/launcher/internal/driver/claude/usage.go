@@ -26,14 +26,14 @@ type usageData struct {
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 }
 
-// LastInLog scans the file at path and returns the last result event parsed
+// lastInLog scans the file at path and returns the last result event parsed
 // as a usage.Usage. Lines larger than the 4 MiB scan buffer are skipped
 // rather than aborting the scan; the last result event wins.
 //
 // Returns (usage.Usage{}, false, nil) when no result event is present or the
 // file does not exist. Returns (usage.Usage{}, false, err) on I/O errors
 // other than file-not-found or oversized lines.
-func LastInLog(path string) (usage.Usage, bool, error) {
+func lastInLog(path string) (usage.Usage, bool, error) {
 	var last *usage.Usage
 	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
 		s := strings.TrimSpace(line)
@@ -67,14 +67,14 @@ func LastInLog(path string) (usage.Usage, bool, error) {
 	return *last, true, nil
 }
 
-// BreakdownByRole scans the file at path and returns per-role token
+// breakdownByRoleFile scans the file at path and returns per-role token
 // breakdowns by parsing assistant message events. Messages with no
 // parent_tool_use_id are attributed to the implementor. Task tool-use IDs are
 // mapped to roles via the subagent_type field in each Task's input (e.g.
 // "scout", "reviewer").
 //
 // Returns (nil, nil) when the file does not exist.
-func BreakdownByRole(path string) ([]usage.RoleUsage, error) {
+func breakdownByRoleFile(path string) ([]usage.RoleUsage, error) {
 	var lines []string
 	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
 		if s := strings.TrimSpace(line); s != "" {
@@ -145,23 +145,23 @@ func BreakdownByRole(path string) ([]usage.RoleUsage, error) {
 	return result, nil
 }
 
-// breakdownByRole indirects to BreakdownByRole so tests can simulate a
-// BreakdownByRole I/O error without a real filesystem race between it and
-// the LastInLog scan.
-var breakdownByRole = BreakdownByRole
+// breakdownByRole indirects to breakdownByRoleFile so tests can simulate a
+// breakdownByRoleFile I/O error without a real filesystem race between it
+// and the lastInLog scan.
+var breakdownByRole = breakdownByRoleFile
 
 // ExtractUsage scans logPath for its result event and, separately, its
 // per-role breakdown, returning both in one usage.Report — the claude
 // Driver's implementation of the Driver interface's ExtractUsage method.
 func ExtractUsage(logPath string) (usage.Report, error) {
-	u, found, err := LastInLog(logPath)
+	u, found, err := lastInLog(logPath)
 	if err != nil {
 		return usage.Report{}, err
 	}
 	if !found {
 		return usage.Report{}, nil
 	}
-	// A BreakdownByRole I/O error degrades the per-role section, not the
+	// A breakdownByRole I/O error degrades the per-role section, not the
 	// aggregate totals already parsed above — see issue #674.
 	roles, err := breakdownByRole(logPath)
 	if err != nil {

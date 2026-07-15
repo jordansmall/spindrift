@@ -79,7 +79,7 @@ func (w *Writer) parseLine(line string) {
 	case "assistant":
 		if ev.Message != nil {
 			// Collect Task tool-use IDs → subagent role from implementor messages,
-			// online as events stream in (BreakdownByRole does the same
+			// online as events stream in (breakdownByRole does the same
 			// resolution buffered, over a full log, via the same helpers).
 			CollectTaskRoles(ev, w.taskRole)
 

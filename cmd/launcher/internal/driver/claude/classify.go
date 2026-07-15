@@ -101,7 +101,7 @@ type scanResult struct {
 //
 // A missing log file is treated as terminal/taskFailed. Lines larger than the
 // 4 MiB scan buffer are processed in chunks, matching the same resilience
-// contract as LastInLog.
+// contract as lastInLog.
 func Classify(logPath string) (Classification, error) {
 	sr, err := scanLog(logPath)
 	if err != nil {
