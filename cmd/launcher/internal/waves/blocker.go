@@ -12,6 +12,16 @@ import (
 // as data keyed off the same edges — rather than switching on adapter type
 // at render time — is what lets Jira (always native) and the local tracker
 // (always body) render correctly without display-layer special cases.
+//
+// The inner map is keyed per-blocker, but no current adapter ever mixes
+// sources within one issue: DepsOf resolves and tags a whole issue's
+// blockers in a single call via forge.WithSource (see the GitHub adapter's
+// DepsOf, which tries the native API first and only falls back to body
+// parsing for the entire issue if that errors or is empty), so every entry
+// under a given issue number is guaranteed to share one DepSource. The
+// per-blocker keying is future-proofing for an adapter that could someday
+// resolve a mix of native and body-sourced blockers for the same issue —
+// it is not a reflection of current behaviour.
 type Sources map[string]map[string]forge.DepSource
 
 // BuildEdges returns the dependency graph for the given batch of issues by
