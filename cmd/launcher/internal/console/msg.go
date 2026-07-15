@@ -168,3 +168,39 @@ type StaleStatusMsg struct {
 }
 
 func (StaleStatusMsg) isConsoleMsg() {}
+
+// CursorMoveMsg is the tea layer's signal that the operator pressed a
+// navigation key (j/k or an arrow) — Delta is +1 (down) or -1 (up); Update
+// clamps the result into Visible()'s bounds (issue #784).
+type CursorMoveMsg struct {
+	Delta int
+}
+
+func (CursorMoveMsg) isConsoleMsg() {}
+
+// HelpToggleMsg is the tea layer's signal that the operator pressed "?" —
+// opens the help overlay, or closes it if already open (issue #784).
+type HelpToggleMsg struct{}
+
+func (HelpToggleMsg) isConsoleMsg() {}
+
+// FilterEditStartMsg is the tea layer's signal that the operator pressed
+// "/" — arms filter-input mode, saving the current Filter so Esc can revert
+// to it (issue #784).
+type FilterEditStartMsg struct{}
+
+func (FilterEditStartMsg) isConsoleMsg() {}
+
+// FilterEditConfirmMsg is the tea layer's signal that the operator pressed
+// Enter while editing the filter — leaves the already-live-narrowed Filter
+// as-is and exits editing mode.
+type FilterEditConfirmMsg struct{}
+
+func (FilterEditConfirmMsg) isConsoleMsg() {}
+
+// FilterEditCancelMsg is the tea layer's signal that the operator pressed
+// Esc while editing the filter — restores the Filter active before editing
+// started and exits editing mode.
+type FilterEditCancelMsg struct{}
+
+func (FilterEditCancelMsg) isConsoleMsg() {}

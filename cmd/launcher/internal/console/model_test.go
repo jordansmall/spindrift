@@ -78,6 +78,124 @@ func TestUpdate_FilterChangedMsg_NarrowsAndClearingRestores(t *testing.T) {
 	}
 }
 
+// TestUpdate_CursorMoveMsg_MovesWithinVisibleBounds verifies a positive
+// Delta moves the cursor down the visible list and clamps at the last row —
+// the backlog cursor never walks past what's on screen (issue #784).
+func TestUpdate_CursorMoveMsg_MovesWithinVisibleBounds(t *testing.T) {
+	m := NewModel()
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
+
+	m = Update(m, CursorMoveMsg{Delta: 1})
+	if m.Cursor != 1 {
+		t.Errorf("Cursor = %d, want 1 after one down-move", m.Cursor)
+	}
+
+	m = Update(m, CursorMoveMsg{Delta: 1})
+	if m.Cursor != 1 {
+		t.Errorf("Cursor = %d, want clamped at 1 (last row)", m.Cursor)
+	}
+}
+
+// TestUpdate_CursorMoveMsg_ClampsAtZero verifies a negative Delta never
+// drives the cursor below the first row.
+func TestUpdate_CursorMoveMsg_ClampsAtZero(t *testing.T) {
+	m := NewModel()
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
+
+	m = Update(m, CursorMoveMsg{Delta: -1})
+	if m.Cursor != 0 {
+		t.Errorf("Cursor = %d, want clamped at 0", m.Cursor)
+	}
+}
+
+// TestUpdate_CursorMoveMsg_EmptyVisible_StaysZero verifies an empty backlog
+// never leaves the cursor pointing past the (nonexistent) end.
+func TestUpdate_CursorMoveMsg_EmptyVisible_StaysZero(t *testing.T) {
+	m := NewModel()
+	m = Update(m, CursorMoveMsg{Delta: 1})
+	if m.Cursor != 0 {
+		t.Errorf("Cursor = %d, want 0 with nothing visible", m.Cursor)
+	}
+}
+
+// TestUpdate_FilterChangedMsg_NarrowingClampsCursor verifies narrowing the
+// visible list via a filter pulls a cursor that was pointing past the new,
+// shorter list back to its last row.
+func TestUpdate_FilterChangedMsg_NarrowingClampsCursor(t *testing.T) {
+	m := NewModel()
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Labels: []string{"a"}},
+		{Number: "2", Labels: []string{"b"}},
+	}})
+	m = Update(m, CursorMoveMsg{Delta: 1})
+
+	m = Update(m, FilterChangedMsg{Filter: "a"})
+	if m.Cursor != 0 {
+		t.Errorf("Cursor = %d, want clamped to 0 after the filter narrowed to one row", m.Cursor)
+	}
+}
+
+// TestUpdate_HelpToggleMsg_FlipsShowHelp verifies "?" opens the help overlay
+// and a second "?" closes it (issue #784).
+func TestUpdate_HelpToggleMsg_FlipsShowHelp(t *testing.T) {
+	m := NewModel()
+	m = Update(m, HelpToggleMsg{})
+	if !m.ShowHelp {
+		t.Error("ShowHelp = false after one toggle, want true")
+	}
+
+	m = Update(m, HelpToggleMsg{})
+	if m.ShowHelp {
+		t.Error("ShowHelp = true after two toggles, want false")
+	}
+}
+
+// TestUpdate_FilterEditStartMsg_EntersEditingMode verifies "/" arms
+// FilterEditing so the tea layer routes further keystrokes as filter text
+// instead of navigation (issue #784).
+func TestUpdate_FilterEditStartMsg_EntersEditingMode(t *testing.T) {
+	m := NewModel()
+	m = Update(m, FilterEditStartMsg{})
+	if !m.FilterEditing {
+		t.Error("FilterEditing = false after FilterEditStartMsg, want true")
+	}
+}
+
+// TestUpdate_FilterEditConfirmMsg_KeepsFilterExitsEditing verifies Enter
+// leaves the already-live-narrowed Filter untouched and just exits editing
+// mode.
+func TestUpdate_FilterEditConfirmMsg_KeepsFilterExitsEditing(t *testing.T) {
+	m := NewModel()
+	m = Update(m, FilterEditStartMsg{})
+	m = Update(m, FilterChangedMsg{Filter: "bug"})
+
+	m = Update(m, FilterEditConfirmMsg{})
+	if m.FilterEditing {
+		t.Error("FilterEditing = true after confirm, want false")
+	}
+	if m.Filter != "bug" {
+		t.Errorf("Filter = %q after confirm, want %q kept", m.Filter, "bug")
+	}
+}
+
+// TestUpdate_FilterEditCancelMsg_RevertsFilterExitsEditing verifies Esc
+// restores whatever Filter was active before "/" was pressed, discarding
+// the in-progress edit.
+func TestUpdate_FilterEditCancelMsg_RevertsFilterExitsEditing(t *testing.T) {
+	m := NewModel()
+	m = Update(m, FilterChangedMsg{Filter: "bug"})
+	m = Update(m, FilterEditStartMsg{})
+	m = Update(m, FilterChangedMsg{Filter: "bug-and-more"})
+
+	m = Update(m, FilterEditCancelMsg{})
+	if m.FilterEditing {
+		t.Error("FilterEditing = true after cancel, want false")
+	}
+	if m.Filter != "bug" {
+		t.Errorf("Filter = %q after cancel, want %q restored", m.Filter, "bug")
+	}
+}
+
 // TestUpdate_QuitMsg_SetsQuitting verifies QuitMsg is the sole way Quitting
 // flips true — the run loop's signal to exit its read loop cleanly.
 func TestUpdate_QuitMsg_SetsQuitting(t *testing.T) {

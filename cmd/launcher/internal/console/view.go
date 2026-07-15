@@ -15,8 +15,14 @@ func View(m Model) string {
 	if m.DrillIn != nil {
 		return renderDrillIn(*m.DrillIn)
 	}
+	if m.ShowHelp {
+		return renderHelp()
+	}
 
 	var b strings.Builder
+	if m.FilterEditing {
+		fmt.Fprintf(&b, "/%s  [enter] apply · [esc] cancel\n", m.Filter)
+	}
 	if m.PendingTerminate != "" {
 		fmt.Fprintf(&b, "terminate #%s? [y/N]\n", m.PendingTerminate)
 	}
@@ -35,8 +41,12 @@ func View(m Model) string {
 	if m.DogfoodLive {
 		b.WriteString("notice: a live dogfood loop (.dogfood.pid) is competing for the same queue\n")
 	}
-	for _, iss := range m.Visible() {
-		fmt.Fprintf(&b, "#%s  %s  [%s]\n", iss.Number, iss.Title, strings.Join(iss.Labels, ", "))
+	for i, iss := range m.Visible() {
+		marker := " "
+		if i == m.Cursor {
+			marker = ">"
+		}
+		fmt.Fprintf(&b, "%s #%s  %s  [%s]\n", marker, iss.Number, iss.Title, strings.Join(iss.Labels, ", "))
 	}
 	if m.Err != nil {
 		fmt.Fprintf(&b, "refresh failed: %s\n", m.Err)
@@ -61,6 +71,23 @@ func View(m Model) string {
 		}
 	}
 	return b.String()
+}
+
+// renderHelp renders the "?" overlay: every key the tea layer binds,
+// replacing the backlog/queue rendering entirely while open (issue #784).
+func renderHelp() string {
+	return strings.Join([]string{
+		"help",
+		"  j / down    move cursor down",
+		"  k / up      move cursor up",
+		"  /           filter by label substring",
+		"  enter       apply filter",
+		"  esc         cancel filter edit",
+		"  r           refresh the backlog",
+		"  q           quit",
+		"  ?           toggle this help",
+		"",
+	}, "\n")
 }
 
 // renderDrillIn renders one Dispatch's transcript view: a header naming the
