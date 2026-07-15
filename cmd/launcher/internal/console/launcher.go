@@ -45,6 +45,51 @@ type Launcher struct {
 	// created by registry() so a bare struct literal (every production and
 	// test call site) needs no constructor.
 	terminated *terminate.Registry
+	// cap is the session's live, resizable parallelism cap (ADR 0023, issue
+	// #653) — one Limiter shared across every drain() this Launcher runs,
+	// so a Console "+"/"-" takes effect on the RunContinuous call already
+	// in flight, not just the next one. Lazily created by limiter() at the
+	// MaxParallel starting cap, the same fallback-to-1 tryLaunch already
+	// applied.
+	cap *waves.Limiter
+}
+
+// limiter lazily constructs l.cap at the MaxParallel starting cap (1 when
+// unset), mirroring registry()'s lazy-construction pattern so a bare struct
+// literal (every production and test call site) needs no constructor.
+func (l *Launcher) limiter() *waves.Limiter {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.cap == nil {
+		maxParallel := l.MaxParallel
+		if maxParallel <= 0 {
+			maxParallel = 1
+		}
+		l.cap = waves.NewLimiter(maxParallel)
+	}
+	return l.cap
+}
+
+// Cap returns the session's current live parallelism cap.
+func (l *Launcher) Cap() int {
+	return l.limiter().Cap()
+}
+
+// Live returns the number of Dispatches this session currently has running.
+func (l *Launcher) Live() int {
+	return l.limiter().Live()
+}
+
+// Resize adjusts the live parallelism cap by delta (+1/-1 from the
+// Console's raise/lower keybinding), clamped to at least 1. Raising it
+// takes effect immediately -- a held pick launches into the freed slot
+// without waiting for a running Dispatch to settle. Lowering it never
+// terminates a running Dispatch; it only gates new launches until the live
+// count sinks under the new cap on its own (ADR 0023) -- Terminate remains
+// the only way a running Dispatch dies by hand.
+func (l *Launcher) Resize(delta int) {
+	lim := l.limiter()
+	lim.Resize(lim.Cap() + delta)
 }
 
 // registry lazily constructs l.terminated and, the first time, wires it into
@@ -198,12 +243,8 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		return issues, edges, err
 	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
-	maxParallel := l.MaxParallel
-	if maxParallel <= 0 {
-		maxParallel = 1
-	}
 	for {
-		_ = waves.RunContinuous(waves.Config{MaxParallel: maxParallel, Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue, l.signalRefresh, l.registry()}, discover, fresh)
+		_ = waves.RunContinuous(waves.Config{Limiter: l.limiter(), Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue, l.signalRefresh, l.registry()}, discover, fresh)
 
 		l.mu.Lock()
 		if !l.Queue.hasQueued() {

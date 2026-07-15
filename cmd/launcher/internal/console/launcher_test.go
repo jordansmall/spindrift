@@ -13,6 +13,19 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
+// TestLauncher_CapDefaultsToMaxParallel verifies the session's live
+// parallelism cap (issue #653) starts at MaxParallel, with nothing running
+// yet, before any Dispatch has launched.
+func TestLauncher_CapDefaultsToMaxParallel(t *testing.T) {
+	launch := &Launcher{MaxParallel: 3}
+	if got := launch.Cap(); got != 3 {
+		t.Fatalf("Cap: got %d, want 3", got)
+	}
+	if got := launch.Live(); got != 0 {
+		t.Fatalf("Live: got %d, want 0", got)
+	}
+}
+
 // TestLauncher_Wait_BlocksUntilBackgroundDrainFinishes verifies Wait
 // doesn't return while tryLaunch's background RunContinuous drain still has
 // a Box in flight — quitting the console must never race the caller's
