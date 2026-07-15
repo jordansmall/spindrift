@@ -59,6 +59,13 @@ configure_env() {
   CHECK_CONTRACT_MARKER="# CHECK"
   CHECK_CONTRACT_FILE="${CHECK_CONTRACT_FILE:-/agent/check-contract.md}"
 
+  # The research dispatch kind's own harness-owned outcome contract (ADR 0022,
+  # issue #640): posting the verdict comment and emitting the outcome line.
+  # Baked and injected the same way as the work contract above, so a
+  # SPINDRIFT_PROMPT_DIR override of research-prompt.md gets it too.
+  RESEARCH_OUTCOME_CONTRACT_MARKER="# POST THE VERDICT"
+  RESEARCH_OUTCOME_CONTRACT_FILE="${RESEARCH_OUTCOME_CONTRACT_FILE:-/agent/research-outcome-contract.md}"
+
   # DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are baked by the
   # selected Driver's lib/drivers/<name>.nix (ADR 0009); the defaults here keep
   # the :-expansions below quiet under set -u when the nix preamble is absent.
@@ -418,11 +425,20 @@ phase_prompt_assembly() {
 
   phase_conflict_resolve
 
+  # DISPATCH_KIND=research (ADR 0022, issue #640) selects the research prompt
+  # instead of the work issue-prompt.md; it takes precedence over FIX_PASS
+  # since a research dispatch never has a warm fix pass. Kind is forwarded by
+  # the launcher (cmd/launcher/internal/dispatch); defaults to "work" so every
+  # pre-existing (kind-unaware) construction site is unaffected.
+  #
   # FIX_PASS is set by the launcher on a fix box (dispatched when CI comes back
   # red on an already-open PR, ADR: selfHeal/runFix in cmd/launcher). A warm fix
   # pass already has the branch checked out and prior work in place, so it runs
   # a dedicated fix-prompt instead of the cold issue-prompt a fresh run uses.
-  if [ -n "${FIX_PASS:-}" ] && [ "${FIX_PASS}" -gt 0 ]; then
+  if [ "${DISPATCH_KIND:-work}" = "research" ]; then
+    prompt="$(_subst "${PROMPTS_DIR}/research-prompt.md")"
+    _driver_session_mode="initial"
+  elif [ -n "${FIX_PASS:-}" ] && [ "${FIX_PASS}" -gt 0 ]; then
     prompt="$(_subst "${PROMPTS_DIR}/fix-prompt.md")"
     _driver_session_mode="resume"
   else
@@ -431,10 +447,15 @@ phase_prompt_assembly() {
   fi
   # Applied in COMMS, CHECK, OUTCOME order so a prompt missing all three (e.g.
   # fix-prompt.md's fix-specific-preamble-only default) ends up with them in
-  # the same order the issue prompt carries them.
-  _inject_shared_block "$COMMS_CONTRACT_MARKER" "$COMMS_CONTRACT_FILE"
-  _inject_shared_block "$CHECK_CONTRACT_MARKER" "$CHECK_CONTRACT_FILE"
-  _inject_shared_block "$OUTCOME_CONTRACT_MARKER" "$OUTCOME_CONTRACT_FILE"
+  # the same order the issue prompt carries them. The research prompt carries
+  # none of these work-only blocks -- it gets its own outcome contract instead.
+  if [ "${DISPATCH_KIND:-work}" = "research" ]; then
+    _inject_shared_block "$RESEARCH_OUTCOME_CONTRACT_MARKER" "$RESEARCH_OUTCOME_CONTRACT_FILE"
+  else
+    _inject_shared_block "$COMMS_CONTRACT_MARKER" "$COMMS_CONTRACT_FILE"
+    _inject_shared_block "$CHECK_CONTRACT_MARKER" "$CHECK_CONTRACT_FILE"
+    _inject_shared_block "$OUTCOME_CONTRACT_MARKER" "$OUTCOME_CONTRACT_FILE"
+  fi
 
   # Forward the nix-baked --agents JSON to the Agent. AGENTS_JSON_TEMPLATE is
   # computed by nix (builtins.toJSON) and set to empty when no subagent model is
@@ -644,13 +665,19 @@ DRIVER_WRAPPER_EOF
 # of a silent gap.
 emit_outcome_backstop() {
   local note="driver exited without emitting an outcome"
+  echo "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop"
+  # A research dispatch never cuts a branch (ADR 0022) -- there is nothing to
+  # push best-effort, and no landing reference beyond "none".
+  if [ "${DISPATCH_KIND:-work}" = "research" ]; then
+    echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=none status=blocked note=${note}"
+    return
+  fi
   local push_log
   push_log="$(mktemp)"
   if ! git push --force-with-lease origin "$BRANCH" 2>"$push_log"; then
     note="${note}; push failed: $(tail -1 "$push_log")"
   fi
   rm -f "$push_log"
-  echo "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop"
   echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=blocked note=${note}"
 }
 
@@ -665,8 +692,12 @@ main() {
 
   configure_env
   clone_repo
-  phase_branch_recovery
-  phase_prework_rebase
+  # A research dispatch (ADR 0022, issue #640) explores the fresh clone but
+  # never lands code: no branch to cut, adopt, or rebase.
+  if [ "${DISPATCH_KIND:-work}" != "research" ]; then
+    phase_branch_recovery
+    phase_prework_rebase
+  fi
   phase_toolchain_nudge
   phase_devshell_probe
   phase_prefetch
