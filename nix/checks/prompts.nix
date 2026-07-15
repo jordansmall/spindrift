@@ -71,6 +71,17 @@ in
     touch $out
   '';
 
+  # The no-drift check above only proves the injected block matches the
+  # *same-source* contract slice -- it never asserts the slice says the right
+  # thing. A source regression from `landing=` back to the pre-#638 `pr=`
+  # grammar would still pass that diff, since both sides would drift
+  # together. Pin the literal token directly (issue #654).
+  mkharness-prompt-outcome-contract-has-landing-token =
+    pkgs.runCommand "mkharness-prompt-outcome-contract-has-landing-token" { } ''
+      grep -q 'landing=' ${batsHarness.outcomeContractFile}
+      touch $out
+    '';
+
   # fix-prompt.md's default template carries only its fix-specific preamble
   # (issue #455): the rendered prompt must still gain the COMMS, CHECK/COMMIT,
   # and outcome-contract blocks, each exactly once, mirroring the issue
