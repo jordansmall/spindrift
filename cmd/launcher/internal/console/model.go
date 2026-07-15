@@ -73,6 +73,10 @@ type Model struct {
 	// restored verbatim by FilterEditCancelMsg — Update-internal, not
 	// rendered.
 	preEditFilter string
+	// Width and Height are the terminal's current size, set by the tea
+	// layer's translation of Bubble Tea's WindowSizeMsg (issue #842). Zero
+	// until the first size event; no region reads them yet.
+	Width, Height int
 }
 
 // DrillInState is one Dispatch's loaded transcript: both the Driver-rendered
@@ -182,9 +186,14 @@ func Update(m Model, msg Msg) Model {
 	case FilterEditCancelMsg:
 		m.FilterEditing = false
 		m.Filter = m.preEditFilter
+	case SizeChangedMsg:
+		m.Width = msg.Width
+		m.Height = msg.Height
 	}
 	m.Cursor = clampCursor(m.Cursor, len(m.Visible()))
 	clampDrillInOffset(m.DrillIn)
+	m.Width = clampSize(m.Width)
+	m.Height = clampSize(m.Height)
 	return m
 }
 
@@ -225,6 +234,22 @@ func clampDrillInOffset(d *DrillInState) {
 	case d.Offset > maxOffset:
 		d.Offset = maxOffset
 	}
+}
+
+// minTerminalDimension is the safe floor Width and Height clamp to — a
+// non-sensical size (zero, or negative from a malformed WindowSizeMsg) never
+// leaves Model claiming a terminal too small to lay anything out in (issue
+// #842).
+const minTerminalDimension = 1
+
+// clampSize pulls a terminal dimension up to minTerminalDimension — the
+// Width/Height analogue of clampCursor, so Update stays total over any
+// resize input.
+func clampSize(dim int) int {
+	if dim < minTerminalDimension {
+		return minTerminalDimension
+	}
+	return dim
 }
 
 // removePick drops the queued or held pick numbered num, if any — Unpick

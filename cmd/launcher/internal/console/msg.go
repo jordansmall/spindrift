@@ -216,3 +216,13 @@ func (FilterEditConfirmMsg) isConsoleMsg() {}
 type FilterEditCancelMsg struct{}
 
 func (FilterEditCancelMsg) isConsoleMsg() {}
+
+// SizeChangedMsg carries the terminal's current width/height — the tea
+// layer's translation of Bubble Tea's WindowSizeMsg, sent on every resize
+// including the initial size event (issue #842). Update clamps non-sensical
+// values (zero/negative) to a safe floor.
+type SizeChangedMsg struct {
+	Width, Height int
+}
+
+func (SizeChangedMsg) isConsoleMsg() {}

@@ -364,3 +364,32 @@ func TestUpdate_DrillInMsg_RefreshSameNumber_PreservesShowRaw(t *testing.T) {
 		t.Errorf("Rendered = %q, want the refreshed content", m.DrillIn.Rendered)
 	}
 }
+
+// TestUpdate_SizeChangedMsg_AppliesWidthHeight verifies a SizeChangedMsg
+// lands its Width/Height straight onto Model (issue #842).
+func TestUpdate_SizeChangedMsg_AppliesWidthHeight(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 100, Height: 40})
+
+	if m.Width != 100 {
+		t.Errorf("Width = %d, want 100", m.Width)
+	}
+	if m.Height != 40 {
+		t.Errorf("Height = %d, want 40", m.Height)
+	}
+}
+
+// TestUpdate_SizeChangedMsg_ClampsNonPositive verifies a zero or negative
+// width/height clamps to the safe floor instead of landing on Model
+// unchanged (issue #842).
+func TestUpdate_SizeChangedMsg_ClampsNonPositive(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 0, Height: -5})
+
+	if m.Width != minTerminalDimension {
+		t.Errorf("Width = %d, want clamped to %d", m.Width, minTerminalDimension)
+	}
+	if m.Height != minTerminalDimension {
+		t.Errorf("Height = %d, want clamped to %d", m.Height, minTerminalDimension)
+	}
+}
