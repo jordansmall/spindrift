@@ -314,11 +314,12 @@ let
         ) ../cmd/launcher/internal/logscan)
       ];
     };
-    # Same go.mod/go.sum as launcherBin above, so the same vendorHash applies
-    # even though driver-exec itself imports none of the tea dependency —
-    # buildGoModule vendors the whole module graph go.mod/go.sum declare,
-    # independent of which subPackages are actually built.
-    vendorHash = "sha256-pz95WwGNc065UWJspokZ4heMGKWh8Bsi+5O+UmCAtqA=";
+    # Same go.mod/go.sum as launcherBin above, but NOT the same vendorHash:
+    # `go mod vendor` prunes to packages actually imported by the source tree
+    # present, and driver-exec's fileset (above) is narrower than
+    # launcherBin's full cmd/launcher tree, so the two vendor differently even
+    # off identical go.mod/go.sum (#784 fix pass).
+    vendorHash = "sha256-+RUFTEQDCn3oSihBzDfYaWgyMdoGGQMf47oAotLfvaA=";
     subPackages = [ "driver-exec" ];
     meta.license = lib.licenses.mit;
   };
