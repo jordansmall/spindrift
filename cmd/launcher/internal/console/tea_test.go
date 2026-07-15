@@ -70,6 +70,49 @@ func TestTea_InitialRender_ShowsBacklog(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
+// TestTeaUpdate_WindowSizeMsg_SetsModelDimensions verifies the tea layer
+// translates Bubble Tea's WindowSizeMsg into the pure Model's Width/Height
+// (issue #842) — exercised by calling teaModel.Update directly, since AC4
+// leaves View unchanged for this slice and there is nothing rendered to
+// assert on yet.
+func TestTeaUpdate_WindowSizeMsg_SetsModelDimensions(t *testing.T) {
+	f := forge.NewFake()
+	tm := newTeaModel(f, t.TempDir(), nil)
+
+	updated, _ := tm.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	got := updated.(teaModel).m
+
+	if got.Width != 100 {
+		t.Errorf("Width = %d, want 100", got.Width)
+	}
+	if got.Height != 40 {
+		t.Errorf("Height = %d, want 40", got.Height)
+	}
+}
+
+// TestTea_InitialTermSize_SetsModelDimensions verifies the program's initial
+// size event (teatest.WithInitialTermSize, sent through the real Bubble Tea
+// program before Init) lands on the pure Model the same as a later resize
+// (issue #842 AC3).
+func TestTea_InitialTermSize_SetsModelDimensions(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(100, 40))
+	waitForOutput(t, tm, "first")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	final := tm.FinalModel(t).(teaModel).m
+	if final.Width != 100 {
+		t.Errorf("Width = %d, want 100", final.Width)
+	}
+	if final.Height != 40 {
+		t.Errorf("Height = %d, want 40", final.Height)
+	}
+}
+
 // TestTea_QuitKey_ExitsCleanly verifies "q" ends the program.
 func TestTea_QuitKey_ExitsCleanly(t *testing.T) {
 	f := forge.NewFake()
