@@ -74,6 +74,26 @@ func TestView_Header_StatusLine_ShowsRunningWaitingHeldSettled(t *testing.T) {
 	}
 }
 
+// TestView_Header_Banner_ShownWhenTallCollapsedWhenShort verifies the fixed
+// "spindrift" banner renders above the status line when the terminal has
+// room for it, and collapses to the status line alone on a short terminal
+// rather than pushing the backlog/queue off-screen (issue #843, ADR 0025).
+func TestView_Header_Banner_ShownWhenTallCollapsedWhenShort(t *testing.T) {
+	tall := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	if out := View(tall); !strings.Contains(out, "spindrift") {
+		t.Errorf("View() on a tall terminal = %q, want the spindrift banner", out)
+	}
+
+	short := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 3})
+	out := View(short)
+	if strings.Contains(out, "spindrift") {
+		t.Errorf("View() on a short terminal = %q, want the banner collapsed", out)
+	}
+	if !strings.Contains(out, "running 0/0") {
+		t.Errorf("View() on a short terminal = %q, want the status line to remain", out)
+	}
+}
+
 // TestView_ListsPicksWithNumberTitleState verifies View renders each queue
 // row's number, title, and state — a dissolved row also carries its reason
 // — so the operator can see the queue without a separate command (#646).
