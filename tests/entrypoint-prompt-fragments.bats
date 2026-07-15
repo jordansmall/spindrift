@@ -141,6 +141,38 @@ SKILL
   ! grep -q 'verbatim\.Your text output' "$CLAUDE_PROMPT_FILE"
 }
 
+# issue #689: TDD_BAKED had zero test coverage of its gate mechanism before
+# this test -- mirrors the CAVEMAN_STEP case above.
+@test "TDD_STEP renders when the tdd skill is baked" {
+  mkdir -p "$HOME/.claude/skills/tdd"
+  cat >"$HOME/.claude/skills/tdd/SKILL.md" <<'SKILL'
+---
+name: tdd
+description: Test-driven development.
+---
+Red, green, refactor.
+SKILL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'Use the `/tdd` skill to run the test-first loop below' "$CLAUDE_PROMPT_FILE"
+}
+
+# issue #689: COMMIT_BAKED had zero test coverage of its gate mechanism
+# before this test -- mirrors the CAVEMAN_STEP case above.
+@test "COMMIT_STEP renders when the commit skill is baked" {
+  mkdir -p "$HOME/.claude/skills/commit"
+  cat >"$HOME/.claude/skills/commit/SKILL.md" <<'SKILL'
+---
+name: commit
+description: Write git commit messages in Conventional Commits style.
+---
+Hard-wrapped Conventional Commits.
+SKILL
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'Use the `/commit` skill to write every commit message' "$CLAUDE_PROMPT_FILE"
+}
+
 # issue #626: driver-exec absorbed the direct-path/devShell-wrapper dual
 # pipeline text (issue #463) entirely -- entrypoint.sh now calls driver-exec
 # exactly once, direct and devShell invocation are the same call path, and
