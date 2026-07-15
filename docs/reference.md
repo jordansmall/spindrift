@@ -559,7 +559,11 @@ files the in-progress issue never declared. An in-progress issue with no open
 PR yet contributes only its declared touch-set — no error, no over-blocking.
 Off `github` — where there is no PR to inspect — and for any in-progress
 issue whose PR-file fetch fails, the gate falls back to declared-only
-behavior exactly as above.
+behavior exactly as above. Conversely, a failed fetch of an in-progress
+issue's own declared touches (e.g. a transient `gh issue view` error) falls
+back to its open PR's changed files only, printing a diagnostic naming the
+issue so the gap is visible rather than silent — the check itself never
+errors.
 
 ---
 
