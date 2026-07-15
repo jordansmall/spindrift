@@ -57,6 +57,21 @@ type Model struct {
 	// operator's drain/terminate-all/stay answer — only when live
 	// Dispatches exist at quit time (issue #651, ADR 0023).
 	PendingQuit bool
+	// Cursor indexes the highlighted row in Visible() — the tea layer's j/k
+	// and arrow-key navigation target (issue #784). Always clamped into
+	// [0, len(Visible())-1], 0 when Visible() is empty.
+	Cursor int
+	// ShowHelp is whether the "?" help overlay is open, listing every key
+	// the tea layer binds (issue #784).
+	ShowHelp bool
+	// FilterEditing is whether "/" has been pressed and not yet confirmed
+	// (Enter) or cancelled (Esc) — while true, the tea layer routes typed
+	// runes into FilterChangedMsg instead of navigation keys (issue #784).
+	FilterEditing bool
+	// preEditFilter is Filter's value from just before FilterEditStartMsg,
+	// restored verbatim by FilterEditCancelMsg — Update-internal, not
+	// rendered.
+	preEditFilter string
 }
 
 // DrillInState is one Dispatch's loaded transcript: both the Driver-rendered
@@ -145,8 +160,37 @@ func Update(m Model, msg Msg) Model {
 		m.StaleMessage = msg.Message
 		m.Rebuilding = msg.Rebuilding
 		m.RebuildErr = msg.RebuildErr
+	case CursorMoveMsg:
+		m.Cursor += msg.Delta
+	case HelpToggleMsg:
+		m.ShowHelp = !m.ShowHelp
+	case FilterEditStartMsg:
+		m.FilterEditing = true
+		m.preEditFilter = m.Filter
+	case FilterEditConfirmMsg:
+		m.FilterEditing = false
+	case FilterEditCancelMsg:
+		m.FilterEditing = false
+		m.Filter = m.preEditFilter
 	}
+	m.Cursor = clampCursor(m.Cursor, len(m.Visible()))
 	return m
+}
+
+// clampCursor pulls cursor into [0, n-1], or 0 when n is zero — the single
+// invariant every Update case shares, so a list that shrinks (a filter, a
+// refresh) never leaves the cursor pointing past the end.
+func clampCursor(cursor, n int) int {
+	if n == 0 {
+		return 0
+	}
+	if cursor < 0 {
+		return 0
+	}
+	if cursor >= n {
+		return n - 1
+	}
+	return cursor
 }
 
 // removePick drops the queued or held pick numbered num, if any — Unpick

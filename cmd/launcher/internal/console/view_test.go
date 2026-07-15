@@ -139,6 +139,64 @@ func TestView_RefreshError_Surfaced(t *testing.T) {
 	}
 }
 
+// TestView_Cursor_MarksHighlightedRow verifies the row at m.Cursor is
+// visually marked so the operator can see which issue j/k/arrows will act
+// on (issue #784).
+func TestView_Cursor_MarksHighlightedRow(t *testing.T) {
+	m := NewModel()
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
+	m = Update(m, CursorMoveMsg{Delta: 1})
+
+	out := View(m)
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	var marked, unmarked string
+	for _, l := range lines {
+		if strings.Contains(l, "#1") {
+			unmarked = l
+		}
+		if strings.Contains(l, "#2") {
+			marked = l
+		}
+	}
+	if !strings.HasPrefix(marked, ">") {
+		t.Errorf("cursor row = %q, want a leading marker", marked)
+	}
+	if strings.HasPrefix(unmarked, ">") {
+		t.Errorf("non-cursor row = %q, want no leading marker", unmarked)
+	}
+}
+
+// TestView_FilterEditing_ShowsInputLine verifies an in-progress filter edit
+// renders a visible input line with the text typed so far (issue #784).
+func TestView_FilterEditing_ShowsInputLine(t *testing.T) {
+	m := NewModel()
+	m = Update(m, FilterEditStartMsg{})
+	m = Update(m, FilterChangedMsg{Filter: "bug"})
+
+	out := View(m)
+	if !strings.Contains(out, "/bug") && !strings.Contains(out, "/ bug") {
+		t.Errorf("View() = %q, want the in-progress filter text shown", out)
+	}
+}
+
+// TestView_ShowHelp_ListsBoundKeys verifies the help overlay lists every key
+// the tea layer binds, replacing the normal backlog rendering (issue #784).
+func TestView_ShowHelp_ListsBoundKeys(t *testing.T) {
+	m := NewModel()
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
+	m = Update(m, HelpToggleMsg{})
+
+	out := View(m)
+	if strings.Contains(out, "should not show") {
+		t.Errorf("View() = %q, want the backlog hidden while help is open", out)
+	}
+	for _, want := range []string{"j", "k", "/", "enter", "esc", "r", "q", "?"} {
+		if !strings.Contains(strings.ToLower(out), want) {
+			t.Errorf("View() = %q, want it to mention key %q", out, want)
+		}
+	}
+}
+
 // TestView_DrillInOpen_RendersTranscriptInsteadOfBacklog verifies an open
 // drill-in replaces the backlog/queue rendering with the transcript, the
 // rendered form by default, plus a hint for the toggle/close keystrokes —
