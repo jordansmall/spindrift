@@ -3,6 +3,9 @@ package console
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -19,11 +22,22 @@ func Refresh(tracker forge.IssueTracker) Msg {
 // duration of its run (`echo $$ > .dogfood.pid`, removed by an EXIT trap).
 const dogfoodPidFile = ".dogfood.pid"
 
-// DogfoodNotice checks whether a live dogfood pid-file exists under pwd and
-// wraps the result into a Msg — informational only, never a gate.
+// DogfoodNotice checks whether pwd holds a pid-file naming a still-running
+// process and wraps the result into a Msg — informational only, never a
+// gate. A stale pid-file left behind by a crashed loop (EXIT trap never
+// fired, #565) reports Live false, same as a missing or malformed one: a
+// signal-0 probe on the parsed pid distinguishes a live session from bare
+// file presence.
 func DogfoodNotice(pwd string) Msg {
-	_, err := os.Stat(filepath.Join(pwd, dogfoodPidFile))
-	return DogfoodNoticeMsg{Live: err == nil}
+	raw, err := os.ReadFile(filepath.Join(pwd, dogfoodPidFile))
+	if err != nil {
+		return DogfoodNoticeMsg{Live: false}
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		return DogfoodNoticeMsg{Live: false}
+	}
+	return DogfoodNoticeMsg{Live: syscall.Kill(pid, 0) == nil}
 }
 
 // PickIssue promotes num through the Untriaged->Dispatchable transition —
