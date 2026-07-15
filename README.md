@@ -45,14 +45,16 @@ mkdir my-agents && cd my-agents
 nix flake init -t github:jordansmall/spindrift
 ```
 
-That drops a ready-to-edit starter: a `flake.nix` importing the harness, a
-`prompts/` directory, a `harness.env.example`, and a `.gitignore` for
-`harness.env`. Then:
+That drops a ready-to-edit starter: a `flake.nix` importing the harness (with
+a commented `settings.repository.repoSlug` you uncomment and fill in), a
+`prompts/` directory, a `harness.env.example` (secrets only — see
+[Runtime configuration](docs/reference.md#runtime-configuration)), and a
+`.gitignore` for `harness.env`. Then:
 
 ```sh
-$EDITOR flake.nix                        # tune the toolchain/packages for your stack
+$EDITOR flake.nix                        # set settings.repository.repoSlug; tune toolchain/packages
 $EDITOR prompts/issue-prompt.md          # tune the agent's workflow
-cp harness.env.example harness.env       # fill in REPO_SLUG, GH_TOKEN, Claude auth
+cp harness.env.example harness.env       # fill in GH_TOKEN, Claude auth (secrets only)
 nix develop                              # enter the dev shell — puts spindrift on PATH
 spindrift build                          # realize the image, then load it  (slow first time)
 spindrift dispatch                       # launch one container per ready-for-agent issue
@@ -61,7 +63,7 @@ spindrift research                       # advise-only: launch one container per
 
 Run commands **from your Consumer flake's directory**: `spindrift build` reads the
 flake from `$PWD` for its container fallback, and `spindrift dispatch` reads `harness.env`
-from `$PWD` (the same convention). Per-issue logs land in `logs/issue-<n>.log`.
+from `$PWD` (the same convention) for secrets. Per-issue logs land in `logs/issue-<n>.log`.
 
 `spindrift` ships bash tab-completion, generated from the same schema as
 `--help` and the man page: subcommands (`dispatch`, `research`, `preview`,

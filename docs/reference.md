@@ -27,7 +27,14 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `man spindrift`                  | the manual page (installed alongside the binary on your PATH)                    |
 | `spindrift --version`            | installed version and revision                                                  |
 
-Every runtime knob is also a `--flag`, with **flag > env > default** precedence.
+Every runtime knob is also a `--flag`. Precedence is **flag > flake `settings`
+> baked default** (ADR 0020): nix renders the resolved `settings` values (plus
+image/agent-file artifacts) into one Launcher input document, passed to the
+binary via `--input`; an explicit flag overrides it. A knob env var still
+wins over the flake setting this release — deprecated, and the launcher warns
+with the flag/settings equivalent when it finds one — but env's role shrinks
+to secrets and internal launcher→Box plumbing from here on; see
+[`MIGRATING.md`](../MIGRATING.md).
 `spindrift --help` stays scannable; the full generated table lives in
 `man spindrift` (and `spindrift --help --all` for the same thing in the
 terminal). Bare `spindrift` with no subcommand — or an unrecognized
@@ -83,12 +90,13 @@ shared options fall through to `mkHarness`'s own defaults.
 | `extraClosures` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
 | `nixBuilderImage` | **`mkHarness` only** | string        | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
 
-The `settings` submodule bakes run knobs into the `spindrift` CLI; a matching
-env var still wins at runtime, so one built command can be re-pointed without a
-rebuild. Knobs are grouped by section — the same headings as `spindrift --help
---all` — so the flake surface is self-documenting and stays in lockstep with the
-CLI help. Sections and knobs derive from `lib/env-schema.nix`; unknown section
-or knob names are rejected at eval time by the NixOS module system.
+The `settings` submodule bakes run knobs into the Launcher input document the
+`spindrift` CLI passes to the launcher binary via `--input`; an explicit
+`--flag` at dispatch time re-points a value without a rebuild. Knobs are
+grouped by section — the same headings as `spindrift --help --all` — so the
+flake surface is self-documenting and stays in lockstep with the CLI help.
+Sections and knobs derive from `lib/env-schema.nix`; unknown section or knob
+names are rejected at eval time by the NixOS module system.
 
 ```nix
 settings = {
@@ -425,9 +433,12 @@ rationale and the lean-image escape hatch.
 
 ## Runtime configuration
 
-The target, secrets, and commit identity are **runtime env** (in `harness.env`
-or your shell) — never Nix options — so one image drives any Target repo without
-a rebuild (ADR 0001):
+The target, secrets, and commit identity are set at **dispatch time** — never
+baked as Nix options — so one image drives any Target repo without a rebuild
+(ADR 0001). Secrets stay **runtime env** (`harness.env` or your shell, never
+the flake); every other knob below is a flake `settings.*` value or a
+`--flag` (ADR 0020) — the env var column still works this release (deprecated,
+warns) but is no longer the primary channel:
 
 | var                       | default                | meaning                                  |
 | ------------------------- | ---------------------- | ---------------------------------------- |
@@ -459,21 +470,25 @@ a rebuild (ADR 0001):
 | `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | hot-override the mounted prompt dir (not bakeable) |
 | `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override the mounted skills dir (not bakeable) |
 
-Every `settings`-baked knob above can be re-pointed at runtime; the env var
-wins over whatever was baked. `(baked)` marks knobs whose defaults are baked
-into the `spindrift` CLI via `settings`; `(not bakeable)` marks knobs
-deliberately kept off the flake surface (secrets, per-run overrides, and
-dev-iteration host-path mounts). Commit identity is **required**: an override
-wins, else the host's `git config user.name`/`user.email` is inherited; if
-neither is set, `spindrift dispatch` exits rather than committing under an
-arbitrary identity.
+Every `settings`-baked knob above can be re-pointed at dispatch time with its
+`--flag` (see `spindrift --help --all` / `man spindrift`); a knob env var
+still wins over the flake setting this release, but is deprecated and warns
+(ADR 0020) — see [`MIGRATING.md`](../MIGRATING.md) for the flag/settings
+equivalents. `(baked)` marks knobs whose defaults are baked into the Launcher
+input document via `settings`; `(not bakeable)` marks knobs deliberately kept
+off the flake surface (secrets, per-run overrides, and dev-iteration host-path
+mounts, though the latter are still flags — see the full reference). Commit
+identity is **required**: an override wins, else the host's `git config
+user.name`/`user.email` is inherited; if neither is set, `spindrift dispatch`
+exits rather than committing under an arbitrary identity.
 
 ### Advanced tuning
 
 These knobs are rarely changed. All except `SPINDRIFT_PROMPT_DIR`,
 `SPINDRIFT_SKILLS_DIR`, and `ISSUE_NUMBER` can be baked via `settings` (see
-[Option surface](#option-surface)) or overridden at runtime via env var or CLI
-flag — whichever wins at runtime takes precedence. See `lib/env-schema.nix` for
+[Option surface](#option-surface)) or overridden at dispatch time via
+`--flag` (env still works this release too, deprecated — ADR 0020). See
+`lib/env-schema.nix` for
 the authoritative list.
 
 | var                    | default | `settings` section | meaning                                                |
