@@ -324,6 +324,60 @@ func TestExecClient_CompleteVerdict_UnconfiguredErrorsWithoutShellingOut(t *test
 	}
 }
 
+// TestExecClient_CompleteVerdict_MissingInProgressErrorsWithoutEditing
+// verifies that CompleteVerdict refuses to swap labels on an issue that does
+// not currently carry InProgress — the double-dispatch guard from issue
+// #701 — instead of silently leaving the issue multi-labeled.
+func TestExecClient_CompleteVerdict_MissingInProgressErrorsWithoutEditing(t *testing.T) {
+	dir := prependFakeGH(t, `case "$*" in
+*"issue view"*)
+	printf '{"number":10,"title":"t","body":"b","state":"OPEN","labels":[{"name":"agent-research-recommend"}]}\n'
+	;;
+esac
+`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-", forge.ResearchVerdictLabels())
+	if err := c.CompleteVerdict("10", forge.Recommend); err == nil {
+		t.Fatal("want error when issue lacks InProgress label, got nil")
+	}
+
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if e.Name() == "call-01.txt" {
+			t.Fatalf("CompleteVerdict must not shell out to gh issue edit when InProgress is missing; found %s", e.Name())
+		}
+	}
+}
+
+// TestExecClient_CompleteVerdict_InProgressPresentEditsIssue verifies the
+// happy path: when the issue does carry InProgress, CompleteVerdict shells
+// out to swap it for the verdict's terminal label as before.
+func TestExecClient_CompleteVerdict_InProgressPresentEditsIssue(t *testing.T) {
+	dir := prependFakeGH(t, `case "$*" in
+*"issue view"*)
+	printf '{"number":10,"title":"t","body":"b","state":"OPEN","labels":[{"name":"agent-in-progress"}]}\n'
+	;;
+esac
+`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-", forge.ResearchVerdictLabels())
+	if err := c.CompleteVerdict("10", forge.Recommend); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "call-01.txt"))
+	if err != nil {
+		t.Fatalf("call-01.txt (gh issue edit) not written: %v", err)
+	}
+	argv := string(raw)
+	if !strings.Contains(argv, "--add-label\nagent-research-recommend") {
+		t.Errorf("argv = %q, want --add-label agent-research-recommend", argv)
+	}
+	if !strings.Contains(argv, "--remove-label\nagent-in-progress") {
+		t.Errorf("argv = %q, want --remove-label agent-in-progress", argv)
+	}
+}
+
 // TestProbe_PositionalSlug verifies that Probe passes the slug as a positional
 // argument to `gh repo view` with no --repo/-R flag.
 func TestProbe_PositionalSlug(t *testing.T) {
