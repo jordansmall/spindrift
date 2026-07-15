@@ -64,6 +64,16 @@ func TestNoRunnerExecOutsidePackage(t *testing.T) {
 			}
 			return nil
 		}
+		// driver-exec is a standalone in-box binary (issue #626) that spawns
+		// the Driver, optionally via `nix develop`, from inside the disposable
+		// container — a different process-spawning seam than the host-side
+		// runner.Runner this guard polices (which launches the Box itself).
+		if strings.HasPrefix(filepath.ToSlash(path), "driver-exec") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if info.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
@@ -143,6 +153,15 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 			return err
 		}
 		if strings.HasPrefix(filepath.ToSlash(path), "internal/dispatch") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		// driver-exec's own os.Create (its teed stream-log file, issue #626)
+		// is unrelated to the launcher's per-issue Box log this guard
+		// polices — a different file, a different process, a different seam.
+		if strings.HasPrefix(filepath.ToSlash(path), "driver-exec") {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
