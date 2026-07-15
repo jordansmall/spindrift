@@ -500,7 +500,7 @@ the authoritative list.
 | `MAX_JOBS`             | `0`     | `concurrency`      | caps the wave size (`0` = uncapped) |
 | `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the image-freshness probe before every launch; exits with a new documented code when the probe finds the loaded image stale (see the [exit-code table](../README.md#dogfood-loop)) |
 | `MAX_FIX_ATTEMPTS`     | `3`     | `selfHealing`      | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
-| `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts after a sibling merge (`0` disables) |
+| `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts after a sibling merge, or is merely stale (behind base, no conflict) — see [Stale-base preflight](#stale-base-preflight) (`0` disables both) |
 | `MERGE_POLL_INTERVAL`  | `30`    | `branches`         | seconds between CI-status polls in the merge gate      |
 | `MERGE_POLL_TIMEOUT`   | `1800`  | `branches`         | seconds to wait for CI green before abandoning the merge |
 | `OVERLAP_GATE`         | `defer` | `concurrency`      | declared `## Touches` overlap policy: `defer` (hold a Dispatchable issue whose declared touch-set intersects an in-progress issue's, retrying once the collider completes) or `off` (disable the check — see [Declared touch-set overlap](#declared-touch-set-overlap)) |
@@ -601,6 +601,10 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
            │          failure, so the box skips SCOUT, re-implementation,
            │          and blind rediscovery and goes straight to check/fix/
            │          commit/push), then re-gate
+           ├─ stale base, no conflict (immediate) → preflight-rebase and
+           │                                        re-wait for green before
+           │                                        the first merge attempt
+           │                                        (up to MAX_REBASE_ATTEMPTS)
            ├─ merge conflict (immediate) → rebase the PR (up to MAX_REBASE_ATTEMPTS)
            └─ post an aggregate usage/cost comment to the issue
 ```
@@ -827,6 +831,38 @@ guard at all.
 Configure it via `settings.branches.mergeGuardPaths` (baked) or the
 `MERGE_GUARD_PATHS` env var (runtime) — see the [flake options
 reference](flake-options.md) for the full knob surface.
+
+#### Stale-base preflight
+
+A green PR can still be **behind** its base: main may have advanced past a
+just-merged sibling whose changes the PR's tested tree never saw, even
+though the PR itself carries no textual conflict. GitHub's mergeability check
+(`Mergeable`/`ErrMergeConflict`, driving the existing rebase-retry above)
+only catches content conflicts, so two individually-green, non-conflicting
+PRs can still combine into a broken tree once both land — exactly what
+happened when #670 and #672 merged ~90 seconds apart: `f8d9e9b` deleted a
+symbol `a463411`'s concurrently-merged tests still referenced, and no check
+ever compiled the two together before `launcher-go-vet` failed on `main`
+(issue #936).
+
+Under `MERGE_MODE=immediate`, before the first `Merge` attempt, the launcher
+checks the PR's `mergeStateStatus` (GitHub GraphQL) for `BEHIND` — an
+ancestry fact GitHub computes independent of branch-protection settings. A
+hit **proactively rebases the branch and re-waits for CI to confirm green on
+the rebased tree** (reusing the same rebase/re-wait machinery
+`MAX_REBASE_ATTEMPTS` already bounds for genuine conflicts) before merging —
+so a PR whose rebase no longer compiles against a freshly-merged sibling is
+blocked at that point instead of landing on the strength of its stale green
+result. A query error is logged and swallowed rather than blocking the
+merge; the ordinary `Merge` call surfaces any real problem through its
+already-tested error handling.
+
+This is a launcher-side sanity check, not an adversary-proof gate, and it
+exists only on the `github` Code Forge merge path for the same reason the
+merge guard does — see [ADR
+0026](adr/0026-preflight-stale-base-before-merge.md) for the root-cause
+writeup and the trade-off against gating GitHub branch protection or
+downgrading every stale PR to manual.
 
 #### Filer
 
