@@ -14,7 +14,7 @@ func TestQueue_Discover_EmptyQueue_ReturnsNoIssues(t *testing.T) {
 	q := NewQueue()
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 
-	issues, edges, err := q.Discover(f, f, "")
+	issues, edges, _, err := q.Discover(f, f, "")
 
 	if err != nil || len(issues) != 0 || len(edges) != 0 {
 		t.Errorf("Discover() = %v, %v, %v, want no issues", issues, edges, err)
@@ -31,7 +31,7 @@ func TestQueue_Discover_ClaimsAndReturnsFrontQueuedPick(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	issues, edges, err := q.Discover(f, f, "")
+	issues, edges, _, err := q.Discover(f, f, "")
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -67,7 +67,7 @@ func TestQueue_Discover_RacedClaim_DissolvesAndTriesNext(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 	f.SetIssue(forge.Issue{Number: "43", Labels: []string{"ready-for-agent"}})
 
-	issues, _, err := q.Discover(raceOnNum{Fake: f, racedNum: "42"}, f, "")
+	issues, _, _, err := q.Discover(raceOnNum{Fake: f, racedNum: "42"}, f, "")
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -99,7 +99,7 @@ func TestQueue_Discover_DuplicateNumber_ClaimTargetsNewestRow(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	issues, _, err := q.Discover(f, f, "")
+	issues, _, _, err := q.Discover(f, f, "")
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -128,7 +128,7 @@ func TestQueue_Discover_HoldsPickWithOpenBlocker(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen})
 	f.NativeDeps = map[string][]string{"42": {"41"}}
 
-	issues, _, err := q.Discover(f, f, "agent-failed")
+	issues, _, _, err := q.Discover(f, f, "agent-failed")
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -167,7 +167,7 @@ func TestQueue_Discover_FailedBlockerSurfacedPickStaysHeld(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen, Labels: []string{"agent-failed"}})
 	f.NativeDeps = map[string][]string{"42": {"41"}}
 
-	issues, _, err := q.Discover(f, f, "agent-failed")
+	issues, _, _, err := q.Discover(f, f, "agent-failed")
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -195,7 +195,7 @@ func TestQueue_Discover_UnpickDuringClaimCheck_NeverLaunches(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	issues, _, err := q.Discover(removeOnDepsOf{Fake: f, q: q, num: "42"}, f, "")
+	issues, _, _, err := q.Discover(removeOnDepsOf{Fake: f, q: q, num: "42"}, f, "")
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)

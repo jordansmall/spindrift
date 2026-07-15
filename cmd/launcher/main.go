@@ -833,17 +833,17 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return errQueueEmpty
 	}
 
-	discover := func() ([]waves.Issue, map[string][]string, error) {
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) {
 		issues, _, err := discoverIssues(c, it)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		waveIssues := toWaveIssues(issues)
-		edges, _, err := waves.BuildEdges(it, waveIssues)
+		edges, sources, err := waves.BuildEdges(it, waveIssues)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		return waveIssues, edges, nil
+		return waveIssues, edges, sources, nil
 	}
 
 	fresh := func() (bool, bool, string) {

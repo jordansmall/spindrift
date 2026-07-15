@@ -46,7 +46,7 @@ func TestRunContinuous_DrainsScriptedQueue_LaunchesOneDispatchEndToEnd(t *testin
 	inner := settle.NewFake()
 	qs := queueSettler{Settler: inner, q: q}
 
-	discover := func() ([]waves.Issue, map[string][]string, error) { return q.Discover(f, f, "") }
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) { return q.Discover(f, f, "") }
 	fresh := func() (bool, bool, string) { return false, true, "" }
 
 	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, f, f, dir, factory, qs, discover, fresh)
@@ -179,7 +179,9 @@ func TestQueue_Discover_HeldPickLaunchesOnceBlockerClears(t *testing.T) {
 	inner := settle.NewFake()
 	qs := queueSettler{Settler: inner, q: q}
 
-	discover := func() ([]waves.Issue, map[string][]string, error) { return q.Discover(f, f, "agent-failed") }
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) {
+		return q.Discover(f, f, "agent-failed")
+	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
 
 	resultCh := make(chan error, 1)

@@ -83,11 +83,12 @@ func (q *Queue) Snapshot() []Pick {
 // PickQueued or PickHeld right before that claim, so a concurrent Unpick
 // landing anywhere in the readiness check above is never raced into a
 // launch. The first pick that claims successfully is returned as a
-// single-issue batch (edges always empty — Discover already resolved this
-// pick's own readiness, so the engine's own blocker gate has nothing left
-// to check); a refill with nothing launchable returns no issues, which may
+// single-issue batch (edges and sources always empty — Discover already
+// resolved this pick's own readiness and rendered BlockedBy itself via
+// setHeld below, so the engine's own blocker gate has nothing left to
+// check); a refill with nothing launchable returns no issues, which may
 // still have moved one or more picks onto PickHeld.
-func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string) ([]waves.Issue, map[string][]string, error) {
+func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string) ([]waves.Issue, map[string][]string, waves.Sources, error) {
 	for _, pick := range q.claimable() {
 		edges, sources, err := waves.BuildEdges(tracker, []waves.Issue{{Number: pick.Number, Title: pick.Title}})
 		if err != nil {
@@ -106,9 +107,9 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			continue
 		}
 		q.setState(pick.Number, PickRunning, "")
-		return []waves.Issue{{Number: pick.Number, Title: pick.Title}}, map[string][]string{}, nil
+		return []waves.Issue{{Number: pick.Number, Title: pick.Title}}, map[string][]string{}, waves.Sources{}, nil
 	}
-	return nil, nil, nil
+	return nil, nil, nil, nil
 }
 
 // claimable returns a snapshot, in queue order, of every pick still

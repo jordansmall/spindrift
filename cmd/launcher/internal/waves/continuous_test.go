@@ -45,16 +45,16 @@ func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, error) {
+	discover := func() ([]Issue, map[string][]string, Sources, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil
+		return out, map[string][]string{}, nil, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -115,16 +115,16 @@ func TestRunContinuous_RefillPicksUpIssueUnblockedMidRun(t *testing.T) {
 	s := newSettle(fc, fc)
 
 	edges := map[string][]string{"2": {"3"}}
-	discover := func() ([]Issue, map[string][]string, error) {
+	discover := func() ([]Issue, map[string][]string, Sources, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, edges, nil
+		return out, edges, nil, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -191,16 +191,16 @@ func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, error) {
+	discover := func() ([]Issue, map[string][]string, Sources, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil
+		return out, map[string][]string{}, nil, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -278,16 +278,16 @@ func TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, error) {
+	discover := func() ([]Issue, map[string][]string, Sources, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil
+		return out, map[string][]string{}, nil, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -367,16 +367,16 @@ func TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	discover := func() ([]Issue, map[string][]string, error) {
+	discover := func() ([]Issue, map[string][]string, Sources, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil
+		return out, map[string][]string{}, nil, nil
 	}
 
 	// Fresh for the first refill (fills #1's slot), stale for every
@@ -434,16 +434,16 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	s := newSettle(fc, fc)
 
 	edges := map[string][]string{"1": {"2"}}
-	discover := func() ([]Issue, map[string][]string, error) {
+	discover := func() ([]Issue, map[string][]string, Sources, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, edges, nil
+		return out, edges, nil, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -453,6 +453,61 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
+	}
+}
+
+// TestRunContinuous_DiscoverSourcesReachRefill verifies issue #662: the
+// discover closure's Sources return value (BuildEdges' native/body
+// provenance for each blocker) survives the trip through RunContinuous's
+// refill loop instead of being silently discarded. #2's declared blocker is
+// body-parsed, populating Sources; RunContinuous must complete without
+// error, dispatching only the unblocked #1 and leaving #2 held.
+func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Body: "blocked by #3", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // #2's blocker, unmet
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discover := func() ([]Issue, map[string][]string, Sources, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		edges, sources, err := BuildEdges(fc, out)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return out, edges, sources, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	if err := RunContinuous(c, fc, fc, dir, f, s, discover, fresh); err != nil {
+		t.Fatalf("RunContinuous: got %v, want nil", err)
+	}
+
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
+		t.Fatalf("RunCalls: got %v, want exactly issue 1 (#2 stays held on its unmet body-parsed blocker)", fr.RunCalls)
+	}
+
+	iss2, err := fc.Issue("2")
+	if err != nil {
+		t.Fatalf("Issue(2): %v", err)
+	}
+	if !containsLabel(iss2.Labels, c.Label) {
+		t.Errorf("issue 2 must remain %q (held, not cascaded) — sources threading must not change selection; labels=%v", c.Label, iss2.Labels)
 	}
 }
 
@@ -483,16 +538,16 @@ func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 		"2": {"3"},
 		"3": {"1"},
 	}
-	discover := func() ([]Issue, map[string][]string, error) {
+	discover := func() ([]Issue, map[string][]string, Sources, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, edges, nil
+		return out, edges, nil, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -542,8 +597,8 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 
 	// Always reports #1 as dispatchable, regardless of the claim already
 	// made against it — a stale search result, not a live forge query.
-	discover := func() ([]Issue, map[string][]string, error) {
-		return []Issue{{Number: "1", Title: "stale"}}, map[string][]string{}, nil
+	discover := func() ([]Issue, map[string][]string, Sources, error) {
+		return []Issue{{Number: "1", Title: "stale"}}, map[string][]string{}, nil, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -590,16 +645,16 @@ func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.
 	f := testFactory(t, dir, fr)
 	fakeSettle := settle.NewFake()
 
-	discover := func() ([]Issue, map[string][]string, error) {
+	discover := func() ([]Issue, map[string][]string, Sources, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		out := make([]Issue, len(raw))
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		return out, map[string][]string{}, nil
+		return out, map[string][]string{}, nil, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 

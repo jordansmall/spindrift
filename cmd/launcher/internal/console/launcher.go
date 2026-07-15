@@ -284,9 +284,9 @@ func (l *Launcher) tryLaunch(tracker forge.IssueTracker, pwd string) {
 // starts a fresh drain itself.
 func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 	defer l.wg.Done()
-	discover := func() ([]waves.Issue, map[string][]string, error) {
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) {
 		defer l.signalRefresh() // a claim attempt is always a tracker write, win or lose
-		issues, edges, err := l.Queue.Discover(tracker, l.CodeForge, l.FailedLabel)
+		issues, edges, sources, err := l.Queue.Discover(tracker, l.CodeForge, l.FailedLabel)
 		// A successful claim here is a fresh Dispatch starting for issues,
 		// so any earlier Terminate mark for these numbers must not carry
 		// over — otherwise a re-pick's own settle would abandon on its very
@@ -295,7 +295,7 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		for _, iss := range issues {
 			l.registry().Unmark(iss.Number)
 		}
-		return issues, edges, err
+		return issues, edges, sources, err
 	}
 	for {
 		err := waves.RunContinuous(waves.Config{Limiter: l.limiter(), Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue, l.signalRefresh, l.registry()}, discover, l.freshnessChecker())
