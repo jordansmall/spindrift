@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -141,13 +142,32 @@ func (e *execClient) TransitionState(num string, from, to forge.DispatchState) e
 // issue num, emitting exactly one --add-label and one --remove-label —
 // TransitionState's contract, with the to-label resolved from verdictLabels
 // instead of DispatchLabels.Complete.
+//
+// Before editing, it asserts num currently carries InProgress: a
+// double-dispatched issue would otherwise have InProgress silently left in
+// place alongside the verdict label instead of erroring. This is a
+// check-then-edit, not an atomic compare-and-swap — another process could
+// still flip the label between the read below and the edit, so it narrows
+// the double-dispatch window without closing it.
 func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 	add := e.verdictLabels.Label(verdict)
 	if add == "" {
 		return fmt.Errorf("gh issue edit %s: no label configured for verdict %v", num, verdict)
 	}
+
+	remove := e.labels.Label(forge.InProgress)
+	if remove != "" {
+		iss, err := e.Issue(num)
+		if err != nil {
+			return fmt.Errorf("gh issue edit %s: %w", num, err)
+		}
+		if !slices.Contains(iss.Labels, remove) {
+			return fmt.Errorf("gh issue edit %s: expected %q label, issue has %v", num, remove, iss.Labels)
+		}
+	}
+
 	args := []string{"issue", "edit", num, "--repo", e.repo, "--add-label", add}
-	if remove := e.labels.Label(forge.InProgress); remove != "" {
+	if remove != "" {
 		args = append(args, "--remove-label", remove)
 	}
 	cmd := exec.Command("gh", args...)
