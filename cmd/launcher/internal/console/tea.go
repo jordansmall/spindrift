@@ -340,8 +340,8 @@ func (t teaModel) highlightedNumber() string {
 // row per issue number, scanning back-to-front for "the" live row; landing
 // a second one for a number that's still active leaves the older row stuck
 // forever and can hang the drain loop (issue #785 review). A terminal row
-// (settled, dissolved, terminated) never blocks a fresh pick — that's the
-// legitimate re-pick/adopt path ADR 0024 describes.
+// (settled, dissolved, terminated, failed) never blocks a fresh pick —
+// that's the legitimate re-pick/adopt path ADR 0024 describes.
 func (t teaModel) alreadyActive(num string) bool {
 	for _, p := range t.m.Picks {
 		if p.Number != num {

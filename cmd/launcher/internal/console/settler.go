@@ -40,3 +40,18 @@ func (qs queueSettler) Settle(d dispatch.Dispatcher, num string, result dispatch
 		qs.notify()
 	}
 }
+
+// Fail delegates to the wrapped Settler, then — unless num was terminated
+// while this Box was in flight — marks num failed and notifies, so a Box
+// that ran and exited non-zero reaches a terminal queue row instead of
+// stranding at PickRunning (issue #705).
+func (qs queueSettler) Fail(num string, result dispatch.Result) {
+	qs.Settler.Fail(num, result)
+	if qs.terminated.Marked(num) {
+		return
+	}
+	qs.q.setState(num, PickFailed, "box exited non-zero")
+	if qs.notify != nil {
+		qs.notify()
+	}
+}

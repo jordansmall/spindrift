@@ -39,6 +39,11 @@ const (
 	// #649) — distinct from PickDissolved (a claim that never launched):
 	// this pick ran, and the operator reclaimed it mid-flight.
 	PickTerminated
+	// PickFailed is a pick whose Box ran and exited non-zero (issue #705) —
+	// distinct from PickDissolved (a claim that never launched) and
+	// PickTerminated (the operator ended a still-running pick by hand):
+	// this pick ran to completion on its own and failed.
+	PickFailed
 )
 
 // String renders s as the word View shows on a queue row.
@@ -58,6 +63,8 @@ func (s PickState) String() string {
 		return "dissolved"
 	case PickTerminated:
 		return "terminated"
+	case PickFailed:
+		return "failed"
 	default:
 		return "unknown"
 	}

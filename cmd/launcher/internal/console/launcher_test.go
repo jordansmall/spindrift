@@ -1,6 +1,7 @@
 package console
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -76,6 +77,41 @@ func TestLauncher_Wait_BlocksUntilBackgroundDrainFinishes(t *testing.T) {
 	case <-waitDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Wait never returned after the Box finished")
+	}
+}
+
+// TestLauncher_TryLaunch_BoxFailureReachesPickFailed verifies that a Box
+// which runs and exits non-zero moves its queue row to the terminal
+// PickFailed state instead of stranding it at PickRunning — the gap issue
+// #705 closes: RunContinuous's failure branch previously transitioned only
+// the tracker issue, never the Console's own queue.
+func TestLauncher_TryLaunch_BoxFailureReachesPickFailed(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.RunErr = errors.New("exit 1")
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch.tryLaunch(f, dir)
+	launch.Wait()
+
+	if got := launch.Queue.Snapshot()[0].State; got != PickFailed {
+		t.Fatalf("pick state = %v, want PickFailed", got)
 	}
 }
 

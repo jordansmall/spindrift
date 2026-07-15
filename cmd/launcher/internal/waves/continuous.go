@@ -167,6 +167,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			case !result.Success:
 				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.Number, iss.Number)
 				transitionState(it, iss.Number, forge.InProgress, forge.Failed)
+				s.Fail(iss.Number, result)
 			default:
 				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.Number, iss.Number)
 				s.Settle(d, iss.Number, result)
