@@ -77,10 +77,11 @@ in
   # grammar would still pass that diff, since both sides would drift
   # together. Pin the literal token directly (issue #654).
   mkharness-prompt-outcome-contract-has-landing-token =
-    pkgs.runCommand "mkharness-prompt-outcome-contract-has-landing-token" { } ''
-      grep -q 'landing=' ${batsHarness.outcomeContractFile}
-      touch $out
-    '';
+    pkgs.runCommand "mkharness-prompt-outcome-contract-has-landing-token" { }
+      ''
+        grep -q 'landing=' ${batsHarness.outcomeContractFile}
+        touch $out
+      '';
 
   # fix-prompt.md's default template carries only its fix-specific preamble
   # (issue #455): the rendered prompt must still gain the COMMS, CHECK/COMMIT,
@@ -274,10 +275,11 @@ in
   # Same gap as mkharness-prompt-outcome-contract-has-landing-token, for the
   # research kind's own contract (issue #654).
   mkharness-prompt-research-outcome-contract-has-landing-token =
-    pkgs.runCommand "mkharness-prompt-research-outcome-contract-has-landing-token" { } ''
-      grep -q 'landing=' ${batsHarness.researchOutcomeContractFile}
-      touch $out
-    '';
+    pkgs.runCommand "mkharness-prompt-research-outcome-contract-has-landing-token" { }
+      ''
+        grep -q 'landing=' ${batsHarness.researchOutcomeContractFile}
+        touch $out
+      '';
 
   # A Consumer researchPrompt carrying only a research-specific preamble --
   # no "# POST THE VERDICT" marker at all -- must still gain the contract,
