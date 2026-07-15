@@ -31,13 +31,12 @@ func ParseTouchPaths(body string) []string {
 			inSection = true
 			continue
 		}
-		if AnyHeading.MatchString(line) {
+		if IsAnyHeading(line) {
 			inSection = false
 		}
 
-		if inSection && BulletItem.MatchString(line) {
-			item := BulletItem.ReplaceAllString(line, "")
-			addPath(strings.TrimSpace(item))
+		if inSection && IsBulletItem(line) {
+			addPath(ExtractBulletContent(line))
 		}
 	}
 	return paths

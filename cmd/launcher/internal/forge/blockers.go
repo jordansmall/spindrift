@@ -6,16 +6,36 @@ import (
 )
 
 var (
-	blockKeyword = regexp.MustCompile(`(?i)(?:depends on|blocked by)\s*:?\s*`)
-	issueRef     = regexp.MustCompile(`#([0-9]+)`)
-	// BlockedByHeader, AnyHeading, and BulletItem are exported for the local
-	// adapter's parseLocalBlockers, which reuses this section-parsing grammar
-	// for slug-based (rather than "#N") blocker refs.
-	BlockedByHeader = regexp.MustCompile(`(?i)^#+\s*blocked by\s*:?\s*$`)
-	AnyHeading      = regexp.MustCompile(`^#+`)
-	BulletItem      = regexp.MustCompile(`^[ \t]*[-*][ \t]*`)
+	blockKeyword    = regexp.MustCompile(`(?i)(?:depends on|blocked by)\s*:?\s*`)
+	issueRef        = regexp.MustCompile(`#([0-9]+)`)
+	blockedByHeader = regexp.MustCompile(`(?i)^#+\s*blocked by\s*:?\s*$`)
+	anyHeading      = regexp.MustCompile(`^#+`)
+	bulletItem      = regexp.MustCompile(`^[ \t]*[-*][ \t]*`)
 	refListPrefix   = regexp.MustCompile(`^(?:#[0-9]+|[,/]|\s+|\band\b)+`)
 )
+
+// IsBlockedByHeader reports whether line is a "## Blocked by" section header.
+// The local adapter's parseLocalBlockers calls this to reuse the same
+// section-parsing grammar for slug-based (rather than "#N") blocker refs.
+func IsBlockedByHeader(line string) bool {
+	return blockedByHeader.MatchString(strings.TrimSpace(line))
+}
+
+// IsAnyHeading reports whether line is a markdown heading of any level.
+func IsAnyHeading(line string) bool {
+	return anyHeading.MatchString(line)
+}
+
+// IsBulletItem reports whether line is a "-" or "*" bullet list item.
+func IsBulletItem(line string) bool {
+	return bulletItem.MatchString(line)
+}
+
+// ExtractBulletContent strips the bullet prefix from line and trims
+// surrounding whitespace, returning the item's content.
+func ExtractBulletContent(line string) string {
+	return strings.TrimSpace(bulletItem.ReplaceAllString(line, ""))
+}
 
 // ParseBlockerRefs extracts all blocker issue numbers referenced in a body.
 // Recognises two formats:
@@ -37,15 +57,15 @@ func ParseBlockerRefs(body string) []string {
 	for _, rawLine := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
 		line := strings.TrimRight(rawLine, "\r")
 
-		if BlockedByHeader.MatchString(strings.TrimSpace(line)) {
+		if IsBlockedByHeader(line) {
 			inSection = true
 			continue
 		}
-		if AnyHeading.MatchString(line) {
+		if IsAnyHeading(line) {
 			inSection = false
 		}
 
-		if inSection && BulletItem.MatchString(line) {
+		if inSection && IsBulletItem(line) {
 			for _, m := range issueRef.FindAllStringSubmatch(line, -1) {
 				addRef(m[1])
 			}
