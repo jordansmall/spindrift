@@ -170,3 +170,25 @@ func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edge
 	}
 	return out
 }
+
+// BlockerStatus reports num's blocker readiness against edges without
+// transitioning any tracker state — the seam the Console (#650) reuses to
+// hold a pick rather than the headless engine's own cascade-to-Failed
+// (nextReady's hasFailedInBatchBlocker, which moves the dependent issue
+// itself to Failed). ready is true when every declared blocker is satisfied
+// (BlockerReady); unready names every blocker not yet satisfied, in edge
+// order; failed is unready's subset that carries cfg.FailedLabel — never
+// satisfiable on its own.
+func BlockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string) (ready bool, failed, unready []string) {
+	unready = unreadyBlockers(it, cf, num, edges)
+	for _, dep := range unready {
+		fi, err := it.Issue(dep)
+		if err != nil {
+			continue
+		}
+		if containsLabel(fi.Labels, cfg.FailedLabel) {
+			failed = append(failed, dep)
+		}
+	}
+	return len(unready) == 0, failed, unready
+}
