@@ -86,7 +86,29 @@ type Model struct {
 	// column's own cursor, independent of Cursor (the backlog column's) and
 	// clamped into [0, len(Picks)-1] the same way (issue #845).
 	QueueCursor int
+	// PaneMode is the operator-selected layout for an open DrillIn's
+	// Transcript — docked (the zero value), floating, or fullscreen — cycled
+	// by a key and derived down to fullscreen at View time on a terminal too
+	// narrow for three columns, regardless of this stored value (issue #846,
+	// ADR 0025).
+	PaneMode TranscriptPaneMode
 }
+
+// TranscriptPaneMode is the Transcript pane's layout while a DrillIn is open
+// (issue #846, ADR 0025).
+type TranscriptPaneMode int
+
+const (
+	// PaneDocked is the zero value — the Transcript renders as a third
+	// column beside the backlog and work queue, which stay visible.
+	PaneDocked TranscriptPaneMode = iota
+	// PaneFloating — the Transcript renders as an overlay atop the
+	// two-column body.
+	PaneFloating
+	// PaneFullscreen — the Transcript takes the whole body, as it did before
+	// issue #846.
+	PaneFullscreen
+)
 
 // FocusedColumn is which of the two body columns holds the operator's
 // cursor (issue #845).
@@ -221,6 +243,10 @@ func Update(m Model, msg Msg) Model {
 		} else {
 			m.Focus = FocusBacklog
 		}
+	case PaneModeCycleMsg:
+		if m.DrillIn != nil {
+			m.PaneMode = nextPaneMode(m.PaneMode)
+		}
 	}
 	m.Cursor = clampCursor(m.Cursor, len(m.Visible()))
 	m.QueueCursor = clampCursor(m.QueueCursor, len(m.Picks))
@@ -283,6 +309,20 @@ func clampSize(dim int) int {
 		return minTerminalDimension
 	}
 	return dim
+}
+
+// nextPaneMode advances mode one step through the fixed cycle docked ->
+// floating -> fullscreen -> docked — PaneModeCycleMsg's transition table
+// (issue #846).
+func nextPaneMode(mode TranscriptPaneMode) TranscriptPaneMode {
+	switch mode {
+	case PaneDocked:
+		return PaneFloating
+	case PaneFloating:
+		return PaneFullscreen
+	default:
+		return PaneDocked
+	}
 }
 
 // removePick drops the queued or held pick numbered num, if any — Unpick

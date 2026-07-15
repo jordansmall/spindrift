@@ -223,6 +223,14 @@ type FocusToggleMsg struct{}
 
 func (FocusToggleMsg) isConsoleMsg() {}
 
+// PaneModeCycleMsg is the tea layer's signal that the operator pressed the
+// pane-mode key — advances Model.PaneMode through docked -> floating ->
+// fullscreen -> docked, a no-op when no drill-in is open (issue #846, ADR
+// 0025).
+type PaneModeCycleMsg struct{}
+
+func (PaneModeCycleMsg) isConsoleMsg() {}
+
 // SizeChangedMsg carries the terminal's current width/height — the tea
 // layer's translation of Bubble Tea's WindowSizeMsg, sent on every resize
 // including the initial size event (issue #842). Update clamps non-sensical

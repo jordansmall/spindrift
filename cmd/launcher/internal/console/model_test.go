@@ -451,3 +451,40 @@ func TestUpdate_CursorMoveMsg_QueueCursorClampsToPicksLength(t *testing.T) {
 		t.Errorf("QueueCursor = %d, want clamped at 0", m.QueueCursor)
 	}
 }
+
+// TestUpdate_PaneModeCycleMsg_AdvancesDockedFloatingFullscreenDocked verifies
+// the pane-mode key's message steps PaneMode through the fixed cycle
+// docked -> floating -> fullscreen -> docked, only while a drill-in is open
+// (issue #846, ADR 0025).
+func TestUpdate_PaneModeCycleMsg_AdvancesDockedFloatingFullscreenDocked(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "hi"})
+	if m.PaneMode != PaneDocked {
+		t.Errorf("PaneMode = %v, want PaneDocked as the zero value", m.PaneMode)
+	}
+
+	m = Update(m, PaneModeCycleMsg{})
+	if m.PaneMode != PaneFloating {
+		t.Errorf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
+	}
+
+	m = Update(m, PaneModeCycleMsg{})
+	if m.PaneMode != PaneFullscreen {
+		t.Errorf("PaneMode = %v, want PaneFullscreen after two cycles", m.PaneMode)
+	}
+
+	m = Update(m, PaneModeCycleMsg{})
+	if m.PaneMode != PaneDocked {
+		t.Errorf("PaneMode = %v, want PaneDocked after three cycles (wraps)", m.PaneMode)
+	}
+}
+
+// TestUpdate_PaneModeCycleMsg_NoOpWhenNoDrillInOpen verifies cycling with no
+// transcript open leaves PaneMode untouched (issue #846).
+func TestUpdate_PaneModeCycleMsg_NoOpWhenNoDrillInOpen(t *testing.T) {
+	m := NewModel()
+	m = Update(m, PaneModeCycleMsg{})
+	if m.PaneMode != PaneDocked {
+		t.Errorf("PaneMode = %v, want PaneDocked (unchanged, no drill-in open)", m.PaneMode)
+	}
+}
