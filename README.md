@@ -185,7 +185,7 @@ spindrift dispatch  ─▶  find ready-for-agent issues
                                └─ SPINDRIFT_OUTCOME issue=N landing=<url> status=ready
 
 host launcher  ─▶  merge gate per issue
-                    poll CI → green → agent-complete → merge guard → apply MERGE_MODE
+                    poll CI → green → merge guard → apply MERGE_MODE → agent-complete
                            → red   → fix boxes (up to MAX_FIX_ATTEMPTS) → re-gate
                            → exhausted → agent-failed (human triage, re-label to retry)
 ```
