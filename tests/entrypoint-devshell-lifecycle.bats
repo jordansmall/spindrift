@@ -17,8 +17,11 @@ setup() {
   export FAKE_NIX_DEV_SHELL_OK=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # nix develop --command bash <wrapper> must appear in NIX_LOG (beyond the probe)
-  grep -q 'develop.*--command bash' "$NIX_LOG"
+  # driver-exec's own nix develop --command <driver-bin> invocation must
+  # appear in NIX_LOG beyond the probe's `--command true` (issue #626: the
+  # entrypoint no longer renders its own bash wrapper for this).
+  grep -v -- '--command true$' "$NIX_LOG" | grep -q -- '--command'
+  grep -q "claude invoked for issue #7" "$CLAUDE_LOG"
 }
 
 @test "DEV_SHELL_NAME default: nix develop targets .#default when name is default" {
@@ -39,17 +42,11 @@ setup() {
   grep -q 'develop .#ci' "$NIX_LOG"
 }
 
-@test "launch-failure relaunch: entrypoint relaunches in baked env when nix develop cannot exec Driver" {
-  seed_flake_repo
-  export FAKE_NIX_DEV_SHELL_OK=1
-  export FAKE_NIX_DEV_SHELL_LAUNCH_FAIL=1
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  # nix develop was attempted for the Driver
-  grep -q 'develop.*--command bash' "$NIX_LOG"
-  # Claude was still invoked (in baked env as fallback)
-  grep -q "claude invoked for issue" "$CLAUDE_LOG"
-}
+# The launch-failure relaunch-once-in-the-baked-env policy (formerly this
+# entrypoint's own bash fallback) moved wholesale into driver-exec (issue
+# #626); it is covered there by a Go unit test
+# (TestRunRelaunchesInBakedEnvOnEmptyStreamLaunchFailure) using a fake nix on
+# PATH, not by a bats double reimplementing driver-exec's own branching.
 
 @test "devShell-present prefetch: prefetch runs inside nix develop when devShell is found" {
   seed_flake_repo
@@ -67,8 +64,9 @@ FAKE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q "warmed" "$PREFETCH_LOG"
-  # Both prefetch and Driver wrappers use --command bash (probe uses --command true).
-  [ "$(grep -c 'develop.*--command bash' "$NIX_LOG")" -ge 2 ]
+  # Prefetch still renders its own bash wrapper (issue #626 only changed the
+  # Driver run's own invocation, via driver-exec's --command <driver-bin>).
+  [ "$(grep -c 'develop.*--command bash' "$NIX_LOG")" -eq 1 ]
 }
 
 @test "devShell-present Driver: MODEL is forwarded into nix develop wrapper" {

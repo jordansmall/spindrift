@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Fake driver-exec for bats tests (issue #626). Stands in for the real in-box
+# Go binary closely enough to prove agent/entrypoint.sh wires it correctly:
+# reads the prompt/agents/session file paths, builds the Driver's argv, runs
+# it directly or -- when --devshell is set -- wrapped in
+# `nix develop --command`, writes its raw output to -log-path (and echoes it
+# to stdout, the launcher's byte-exact capture channel), and appends a
+# synthetic heartbeat line to -heartbeat-log (absorbing the former standalone
+# spindrift-heartbeat-filter fake). The real binary's own devShell-wrapping,
+# exit-code propagation, stream-teeing, heartbeat-filtering, and
+# relaunch-on-empty-stream logic are covered by Go unit tests
+# (cmd/launcher/driver-exec), not this fake.
+set -euo pipefail
+
+prompt_file="" agents_file="" session_file=""
+driver_bin="" driver_flags="" model="" issue="${ISSUE_NUMBER:-0}"
+devshell=0 devshell_name="default" log_path="" heartbeat_log="/tmp/heartbeat.log"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prompt-file) prompt_file="$2"; shift 2 ;;
+    --agents-file) agents_file="$2"; shift 2 ;;
+    --session-file) session_file="$2"; shift 2 ;;
+    --driver-bin) driver_bin="$2"; shift 2 ;;
+    --driver-flags) driver_flags="$2"; shift 2 ;;
+    --model) model="$2"; shift 2 ;;
+    --devshell) devshell=1; shift ;;
+    --devshell-name) devshell_name="$2"; shift 2 ;;
+    --issue) issue="$2"; shift 2 ;;
+    --log-path) log_path="$2"; shift 2 ;;
+    --heartbeat-log) heartbeat_log="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+args=(-p "$(cat "$prompt_file")" --model "$model")
+if [ -s "$agents_file" ]; then
+  args+=(--agents "$(cat "$agents_file")")
+fi
+if [ -n "$session_file" ] && [ -s "$session_file" ]; then
+  # `read` returns non-zero on a file with no trailing newline (session_file
+  # is written with a bare printf '%s', never one) even though it still
+  # populates the array correctly -- swallow that under set -e.
+  read -ra _session_args < "$session_file" || true
+  args+=("${_session_args[@]}")
+fi
+if [ -n "$driver_flags" ]; then
+  read -ra _flag_args <<< "$driver_flags"
+  args+=("${_flag_args[@]}")
+fi
+
+rc=0
+if [ "$devshell" = "1" ]; then
+  nix develop ".#$devshell_name" --command "$driver_bin" "${args[@]}" >"$log_path" || rc=$?
+else
+  "$driver_bin" "${args[@]}" >"$log_path" || rc=$?
+fi
+
+cat "$log_path"
+printf '#%s · fake heartbeat\n' "$issue" >>"$heartbeat_log"
+exit "$rc"
