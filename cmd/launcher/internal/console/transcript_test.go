@@ -11,7 +11,7 @@ import (
 
 // TestDrillIn_SinglePass_RendersWithBoundary verifies DrillIn loads the
 // initial run's log, renders it through the given Driver, and marks the
-// single pass boundary -- the base case before any fix/conflict pass exists.
+// single pass boundary — the base case before any fix/conflict pass exists.
 func TestDrillIn_SinglePass_RendersWithBoundary(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
@@ -46,7 +46,7 @@ func TestDrillIn_SinglePass_RendersWithBoundary(t *testing.T) {
 
 // TestDrillIn_ControlSequences_StrippedFromRendered verifies ANSI/control
 // sequences embedded in untrusted model text reach the rendered pane
-// stripped, while the raw byte-exact copy keeps them intact (issue 721).
+// stripped, while the raw byte-exact copy keeps them intact (#721).
 func TestDrillIn_ControlSequences_StrippedFromRendered(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
@@ -86,7 +86,7 @@ func TestDrillIn_ControlSequences_StrippedFromRendered(t *testing.T) {
 
 // TestDrillIn_MultiplePasses_ConcatenatesInOrderWithBoundaries verifies an
 // initial run plus a fix pass render as one transcript spanning both, in
-// chronological order, each with its own boundary marker (issue 648 AC3).
+// chronological order, each with its own boundary marker (#648 AC3).
 func TestDrillIn_MultiplePasses_ConcatenatesInOrderWithBoundaries(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
