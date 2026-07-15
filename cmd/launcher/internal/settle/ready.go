@@ -278,6 +278,9 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 	pushRetries := 0
 	checksBlockedAttempts := 0
 	skipRebase := false
+	if err := s.preflightStaleBase(num, pr, &rebaseAttempts, &pushRetries); err != nil {
+		return err
+	}
 	for {
 		if s.terminated(num) {
 			return errAbandoned
@@ -347,6 +350,51 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 			return rwErr
 		}
 	}
+}
+
+// preflightStaleBase proactively rebases pr when the forge reports its head
+// is behind base (NeedsUpdate — issue #936) — even though the PR shows no
+// textual conflict and CI is already green on its current head. A green PR
+// can still be stale: main may have advanced past a just-merged sibling
+// whose changes the PR's tested tree never saw. Reuses the same
+// Rebase/rewaitAfterForcePush path the reactive conflict-retry loop below
+// uses, so the rebased head must reach green again before mergeImmediate's
+// loop ever calls Merge.
+//
+// A NeedsUpdate query error or a Rebase failure is logged and swallowed
+// rather than returned: the caller's normal Merge attempt will surface the
+// same underlying problem (a genuine conflict, blocked checks, or a clean
+// merge if the staleness turns out to be harmless) through its own,
+// already-tested error handling. Only a rebase that force-pushes but never
+// re-confirms green is a hard failure here, matching rewaitAfterForcePush's
+// contract elsewhere in this file.
+func (s *Settle) preflightStaleBase(num, pr string, rebaseAttempts, pushRetries *int) error {
+	if s.pr == nil {
+		return nil
+	}
+	stale, err := s.pr.NeedsUpdate(pr)
+	if err != nil {
+		fmt.Printf("    #%s  landing=%s  status=needs-update-check-error  !! %v\n", num, pr, err)
+		return nil
+	}
+	if !stale || *rebaseAttempts >= s.cfg.MaxRebaseAttempts {
+		return nil
+	}
+	*rebaseAttempts++
+	fmt.Printf("    #%s  landing=%s  status=stale-base-rebase  attempt=%d/%d\n",
+		num, pr, *rebaseAttempts, s.cfg.MaxRebaseAttempts)
+	rbErr := s.cf.Rebase(pr)
+	for rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && *pushRetries < s.cfg.MaxRebaseAttempts {
+		*pushRetries++
+		fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
+			num, pr, *pushRetries, s.cfg.MaxRebaseAttempts, rbErr)
+		rbErr = s.cf.Rebase(pr)
+	}
+	if rbErr != nil {
+		fmt.Printf("    #%s  landing=%s  status=stale-base-rebase-failed  !! %v\n", num, pr, rbErr)
+		return nil
+	}
+	return s.rewaitAfterForcePush(num, pr)
 }
 
 // rewaitAfterForcePush blocks for CI to reach green on the PR's current head
