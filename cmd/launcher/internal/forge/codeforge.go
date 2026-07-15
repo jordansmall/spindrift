@@ -38,12 +38,12 @@ type PRForge interface {
 	Mergeable(url string) (MergeableState, error)
 	// CheckState returns the aggregate CI rollup state for the PR's head commit.
 	CheckState(url string) (RollupState, error)
-	// NeedsUpdate reports whether the PR's head is behind its base branch's
-	// current tip (GitHub's mergeStateStatus BEHIND) — distinct from
-	// Mergeable's conflict check: a PR can be BEHIND (its tested tree
-	// predates a just-merged sibling) while still MERGEABLE (no textual
-	// conflict). That gap let #670 and #672 land a combined compile break on
-	// main even though each was individually green (issue #936).
+	// NeedsUpdate reports whether the PR's base branch has commits its head
+	// branch has not yet incorporated — a pure git-ancestry fact, distinct
+	// from Mergeable's conflict check: a PR can need updating (its tested
+	// tree predates a just-merged sibling) while still being MERGEABLE (no
+	// textual conflict). That gap let #670 and #672 land a combined compile
+	// break on main even though each was individually green (issue #936).
 	NeedsUpdate(url string) (bool, error)
 	// FailureDetail returns the failed check names plus a bounded log excerpt
 	// for the PR's head commit, or "" when nothing is currently failing.

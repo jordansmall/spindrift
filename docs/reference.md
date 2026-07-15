@@ -846,16 +846,20 @@ ever compiled the two together before `launcher-go-vet` failed on `main`
 (issue #936).
 
 Under `MERGE_MODE=immediate`, before the first `Merge` attempt, the launcher
-checks the PR's `mergeStateStatus` (GitHub GraphQL) for `BEHIND` — an
-ancestry fact GitHub computes independent of branch-protection settings. A
-hit **proactively rebases the branch and re-waits for CI to confirm green on
-the rebased tree** (reusing the same rebase/re-wait machinery
-`MAX_REBASE_ATTEMPTS` already bounds for genuine conflicts) before merging —
-so a PR whose rebase no longer compiles against a freshly-merged sibling is
-blocked at that point instead of landing on the strength of its stale green
-result. A query error is logged and swallowed rather than blocking the
-merge; the ordinary `Merge` call surfaces any real problem through its
-already-tested error handling.
+compares the PR's branch against its base via GitHub's REST compare API
+(`behind_by`) — a plain git-ancestry count between two refs, not GitHub's
+GraphQL `mergeStateStatus` field, which only reports `BEHIND` when branch
+protection requires branches to be up to date before merging (a setting
+this project's fine-grained PAT cannot even read, let alone rely on being
+enabled). A `behind_by > 0` hit **proactively rebases the branch and
+re-waits for CI to confirm green on the rebased tree** (its own attempt
+budget off `MAX_REBASE_ATTEMPTS`, independent of the reactive
+conflict-retry loop's counters) before merging — so a PR whose rebase no
+longer compiles against a freshly-merged sibling is blocked at that point
+instead of landing on the strength of its stale green result. A query error
+is logged and swallowed rather than blocking the merge; the ordinary
+`Merge` call surfaces any real problem through its already-tested error
+handling.
 
 This is a launcher-side sanity check, not an adversary-proof gate, and it
 exists only on the `github` Code Forge merge path for the same reason the

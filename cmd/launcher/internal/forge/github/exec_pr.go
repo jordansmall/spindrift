@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -123,30 +125,47 @@ func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 	return forge.MergeableState(s), nil
 }
 
-// NeedsUpdate queries the PR's mergeStateStatus via GraphQL and reports
-// whether it is BEHIND — the head branch's tested tree predates the base
-// branch's current tip, a purely ancestry-based fact GitHub computes
-// regardless of branch-protection settings (issue #936), unlike Mergeable's
-// content-conflict check.
-func (e *execClient) NeedsUpdate(url string) (bool, error) {
-	parts := strings.Split(url, "/")
-	if len(parts) < 7 {
-		return false, fmt.Errorf("invalid PR URL: %s", url)
-	}
-	owner, repo, number := parts[3], parts[4], parts[6]
-	const gql = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){mergeStateStatus}}}`
-	cmd := exec.Command("gh", "api", "graphql",
-		"-f", "query="+gql,
-		"-f", "owner="+owner,
-		"-f", "repo="+repo,
-		"-F", "number="+number,
-		"--jq", `.data.repository.pullRequest.mergeStateStatus // ""`,
-	)
-	out, err := cmd.Output()
+// NeedsUpdate reports whether the PR's base branch has commits its head
+// branch has not yet incorporated — via the REST compare API's `behind_by`,
+// a pure git-ancestry count between two refs, not GitHub's GraphQL
+// mergeStateStatus BEHIND. mergeStateStatus only reports BEHIND when branch
+// protection requires branches to be up to date before merging; this
+// project's fine-grained PAT cannot even read that setting (403 on the
+// branch-protection endpoint), let alone rely on it being enabled, so a
+// check gated on it would silently never fire (issue #936). The compare API
+// needs no such setting: it always reports the commit-graph relationship
+// between the two refs.
+func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
+	out, err := exec.Command("gh", "pr", "view", prURL,
+		"--json", "headRefName,baseRefName",
+		"--jq", "[.headRefName,.baseRefName]|@tsv",
+	).Output()
 	if err != nil {
-		return false, fmt.Errorf("gh api graphql: %w", err)
+		return false, fmt.Errorf("gh pr view %s: %w", prURL, err)
 	}
-	return strings.TrimSpace(string(out)) == "BEHIND", nil
+	fields := strings.SplitN(strings.TrimSpace(string(out)), "\t", 2)
+	if len(fields) != 2 {
+		return false, fmt.Errorf("gh pr view: unexpected output %q", string(out))
+	}
+	head, base := fields[0], fields[1]
+
+	// basehead is "base...head": behind_by then counts commits reachable
+	// from base but not head — i.e. how many commits the PR's branch is
+	// missing from its base's current tip. Ref names are path-escaped since
+	// this project's own agent branches (agent/issue-N) contain a slash.
+	basehead := neturl.PathEscape(base) + "..." + neturl.PathEscape(head)
+	cmpOut, err := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/compare/%s", e.repo, basehead),
+		"--jq", ".behind_by",
+	).Output()
+	if err != nil {
+		return false, fmt.Errorf("gh api compare %s: %w", basehead, err)
+	}
+	behindBy, convErr := strconv.Atoi(strings.TrimSpace(string(cmpOut)))
+	if convErr != nil {
+		return false, fmt.Errorf("gh api compare %s: unexpected output %q", basehead, string(cmpOut))
+	}
+	return behindBy > 0, nil
 }
 
 // ListPRFiles returns every path changed by the PR (added, modified, and

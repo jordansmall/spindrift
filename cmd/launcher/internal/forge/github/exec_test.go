@@ -421,11 +421,17 @@ fi
 	}
 }
 
-// TestNeedsUpdate_BehindReturnsTrue verifies NeedsUpdate queries
-// mergeStateStatus via GraphQL and reports true for BEHIND (issue #936).
-func TestNeedsUpdate_BehindReturnsTrue(t *testing.T) {
-	dir := prependFakeGH(t, `if [ "$1" = "api" ]; then
-  printf 'BEHIND\n'
+// TestNeedsUpdate_BehindByPositiveReturnsTrue verifies NeedsUpdate compares
+// the PR's branch against its base via the compare API (`behind_by`) — a
+// pure git-ancestry fact, unlike GraphQL's mergeStateStatus BEHIND, which
+// GitHub only reports when branch protection requires branches to be up to
+// date before merging (a setting this project's fine-grained PAT cannot
+// even read, let alone guarantee is enabled — issue #936).
+func TestNeedsUpdate_BehindByPositiveReturnsTrue(t *testing.T) {
+	dir := prependFakeGH(t, `if [ "$1" = "pr" ]; then
+  printf 'agent/issue-42\tmain\n'
+elif [ "$1" = "api" ]; then
+  printf '3\n'
 fi
 `)
 
@@ -435,28 +441,31 @@ fi
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !stale {
-		t.Fatal("NeedsUpdate: want true for mergeStateStatus BEHIND, got false")
+		t.Fatal("NeedsUpdate: want true when behind_by > 0, got false")
 	}
 
-	raw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
-	if err != nil {
-		t.Fatalf("call-00.txt not written: %v", err)
+	viewArgs := readCallArgs(t, dir, 0)
+	if !strings.Contains(viewArgs, "headRefName") || !strings.Contains(viewArgs, "baseRefName") {
+		t.Fatalf("first call must read headRefName/baseRefName; args: %q", viewArgs)
 	}
-	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "graphql") {
-		t.Fatalf("NeedsUpdate must use gh api graphql; args: %q", args)
+
+	cmpArgs := readCallArgs(t, dir, 1)
+	if !strings.Contains(cmpArgs, "compare/main...agent%2Fissue-42") {
+		t.Fatalf("compare call must diff base...head (base branch first, PR branch's slash escaped); args: %q", cmpArgs)
 	}
-	if !strings.Contains(joined, "mergeStateStatus") {
-		t.Fatalf("NeedsUpdate must query mergeStateStatus; args: %q", args)
+	if !strings.Contains(cmpArgs, "behind_by") {
+		t.Fatalf("compare call must read behind_by; args: %q", cmpArgs)
 	}
 }
 
-// TestNeedsUpdate_CleanReturnsFalse verifies NeedsUpdate reports false for
-// any mergeStateStatus other than BEHIND (e.g. CLEAN).
-func TestNeedsUpdate_CleanReturnsFalse(t *testing.T) {
-	prependFakeGH(t, `if [ "$1" = "api" ]; then
-  printf 'CLEAN\n'
+// TestNeedsUpdate_BehindByZeroReturnsFalse verifies NeedsUpdate reports
+// false when the PR branch already contains its base's current tip
+// (behind_by == 0).
+func TestNeedsUpdate_BehindByZeroReturnsFalse(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "pr" ]; then
+  printf 'feature\tmain\n'
+elif [ "$1" = "api" ]; then
+  printf '0\n'
 fi
 `)
 
@@ -466,8 +475,19 @@ fi
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if stale {
-		t.Fatal("NeedsUpdate: want false for mergeStateStatus CLEAN, got true")
+		t.Fatal("NeedsUpdate: want false when behind_by == 0, got true")
 	}
+}
+
+// readCallArgs reads the n-th recorded fake-gh invocation's args as a single
+// space-joined string.
+func readCallArgs(t *testing.T, dir string, n int) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("call-%02d.txt", n)))
+	if err != nil {
+		t.Fatalf("call-%02d.txt not written: %v", n, err)
+	}
+	return strings.Join(strings.Split(strings.TrimSpace(string(raw)), "\n"), " ")
 }
 
 // TestRenderFailureDetail verifies the failing-context filter and the
