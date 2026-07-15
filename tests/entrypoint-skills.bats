@@ -5,6 +5,13 @@ load helper
 
 setup() {
   setup_entrypoint_env
+  # DRIVER_SKILLS_DIR is baked absolute (/home/agent/...) by the Driver
+  # registry (issue #624) since the real Box always runs with HOME=/home/agent;
+  # a bats fixture has no such directory to write into, so point it at this
+  # test's own $HOME the same way every skills fixture below already seeds
+  # skills there. Never set outside tests -- a real Box always takes the
+  # baked default.
+  export DRIVER_SKILLS_DIR="$HOME/.claude/skills"
 }
 
 # --- skills dir discovery path (issue #118) -----------------------------------
