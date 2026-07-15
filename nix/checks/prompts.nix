@@ -271,6 +271,14 @@ in
         touch $out
       '';
 
+  # Same gap as mkharness-prompt-outcome-contract-has-landing-token, for the
+  # research kind's own contract (issue #654).
+  mkharness-prompt-research-outcome-contract-has-landing-token =
+    pkgs.runCommand "mkharness-prompt-research-outcome-contract-has-landing-token" { } ''
+      grep -q 'landing=' ${batsHarness.researchOutcomeContractFile}
+      touch $out
+    '';
+
   # A Consumer researchPrompt carrying only a research-specific preamble --
   # no "# POST THE VERDICT" marker at all -- must still gain the contract,
   # and survive the round trip byte-identical to what a runtime
