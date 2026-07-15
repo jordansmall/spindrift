@@ -121,3 +121,15 @@ FAKE
   [ "$status" -ne 0 ]
   [[ "$output" == *"DRIVER_BIN"* ]]
 }
+
+@test "entrypoint fails fast naming DRIVER_FLAGS_COMMON when only it is unset" {
+  run env -u DRIVER_FLAGS_COMMON -u DRIVER_SKILLS_DIR DRIVER_BIN=claude bash "$ENTRYPOINT_SRC"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"DRIVER_FLAGS_COMMON"* ]]
+}
+
+@test "entrypoint fails fast naming DRIVER_SKILLS_DIR when only it is unset" {
+  run env -u DRIVER_SKILLS_DIR DRIVER_BIN=claude DRIVER_FLAGS_COMMON=--verbose bash "$ENTRYPOINT_SRC"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"DRIVER_SKILLS_DIR"* ]]
+}
