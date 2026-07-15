@@ -1,6 +1,8 @@
 package settle
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -81,6 +83,28 @@ func TestResearchSettle_Unclear(t *testing.T) {
 
 	if len(fc.CompleteVerdictCalls) != 1 || fc.CompleteVerdictCalls[0].Verdict != forge.Unclear {
 		t.Fatalf("want 1 CompleteVerdict(Unclear) call, got %+v", fc.CompleteVerdictCalls)
+	}
+}
+
+// TestResearchSettle_CompleteVerdictError verifies that a CompleteVerdict
+// failure prints only the error line — no success-shaped landing=…
+// status=… line follows a failed label application (#699).
+func TestResearchSettle_CompleteVerdictError(t *testing.T) {
+	fc := newResearchFake("42")
+	fc.CompleteVerdictErr = errors.New("label API down")
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+	}
+
+	s := NewResearchSettle(fc)
+	out := captureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), "42", result)
+	})
+
+	if strings.Contains(out, "status=recommend") {
+		t.Errorf("stdout must not contain a success-style status line on CompleteVerdict error, got %q", out)
 	}
 }
 
