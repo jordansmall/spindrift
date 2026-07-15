@@ -393,3 +393,61 @@ func TestUpdate_SizeChangedMsg_ClampsNonPositive(t *testing.T) {
 		t.Errorf("Height = %d, want clamped to %d", m.Height, minTerminalDimension)
 	}
 }
+
+// TestUpdate_FocusToggleMsg_SwitchesColumn verifies Tab's message flips
+// Focus between the backlog and work-queue columns, starting on the backlog
+// (the zero value) — the two-column focus split (issue #845).
+func TestUpdate_FocusToggleMsg_SwitchesColumn(t *testing.T) {
+	m := NewModel()
+	if m.Focus != FocusBacklog {
+		t.Errorf("Focus = %v, want FocusBacklog as the zero value", m.Focus)
+	}
+
+	m = Update(m, FocusToggleMsg{})
+	if m.Focus != FocusQueue {
+		t.Errorf("Focus = %v, want FocusQueue after one toggle", m.Focus)
+	}
+
+	m = Update(m, FocusToggleMsg{})
+	if m.Focus != FocusBacklog {
+		t.Errorf("Focus = %v, want FocusBacklog after a second toggle", m.Focus)
+	}
+}
+
+// TestUpdate_CursorMoveMsg_RoutesToFocusedColumnOnly verifies a cursor move
+// while Focus is FocusQueue moves QueueCursor and leaves the backlog's
+// Cursor untouched — each column owns an independent cursor (issue #845).
+func TestUpdate_CursorMoveMsg_RoutesToFocusedColumnOnly(t *testing.T) {
+	m := NewModel()
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
+	m.Picks = []Pick{{Number: "10"}, {Number: "11"}}
+
+	m = Update(m, FocusToggleMsg{})
+	m = Update(m, CursorMoveMsg{Delta: 1})
+
+	if m.QueueCursor != 1 {
+		t.Errorf("QueueCursor = %d, want 1 after one down-move while focused on the queue", m.QueueCursor)
+	}
+	if m.Cursor != 0 {
+		t.Errorf("Cursor = %d, want unchanged at 0 while focused on the queue", m.Cursor)
+	}
+}
+
+// TestUpdate_CursorMoveMsg_QueueCursorClampsToPicksLength verifies the
+// work-queue cursor clamps into [0, len(Picks)-1], mirroring the backlog
+// cursor's own clamp against Visible() (issue #845).
+func TestUpdate_CursorMoveMsg_QueueCursorClampsToPicksLength(t *testing.T) {
+	m := NewModel()
+	m.Picks = []Pick{{Number: "10"}}
+	m = Update(m, FocusToggleMsg{})
+
+	m = Update(m, CursorMoveMsg{Delta: 5})
+	if m.QueueCursor != 0 {
+		t.Errorf("QueueCursor = %d, want clamped at 0 (single-row queue)", m.QueueCursor)
+	}
+
+	m = Update(m, CursorMoveMsg{Delta: -5})
+	if m.QueueCursor != 0 {
+		t.Errorf("QueueCursor = %d, want clamped at 0", m.QueueCursor)
+	}
+}

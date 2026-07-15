@@ -78,7 +78,28 @@ type Model struct {
 	// Update's unconditional clamp floors both at minTerminalDimension
 	// before the first size event arrives; no region reads them yet.
 	Width, Height int
+	// Focus is which body column the cursor keys and context-Enter act on —
+	// Tab toggles it (issue #845). FocusBacklog, the zero value, matches the
+	// pre-#845 Console's backlog-only cursor.
+	Focus FocusedColumn
+	// QueueCursor indexes the highlighted row in Picks — the work-queue
+	// column's own cursor, independent of Cursor (the backlog column's) and
+	// clamped into [0, len(Picks)-1] the same way (issue #845).
+	QueueCursor int
 }
+
+// FocusedColumn is which of the two body columns holds the operator's
+// cursor (issue #845).
+type FocusedColumn int
+
+const (
+	// FocusBacklog is the zero value — cursor keys move Model.Cursor and
+	// Enter Picks the highlighted backlog row.
+	FocusBacklog FocusedColumn = iota
+	// FocusQueue — cursor keys move Model.QueueCursor and Enter drills into
+	// the highlighted pick's Transcript.
+	FocusQueue
+)
 
 // DrillInState is one Dispatch's loaded transcript: both the Driver-rendered
 // form and the byte-exact raw form, loaded together so ShowRaw toggles with
@@ -176,7 +197,11 @@ func Update(m Model, msg Msg) Model {
 		m.Rebuilding = msg.Rebuilding
 		m.RebuildErr = msg.RebuildErr
 	case CursorMoveMsg:
-		m.Cursor += msg.Delta
+		if m.Focus == FocusQueue {
+			m.QueueCursor += msg.Delta
+		} else {
+			m.Cursor += msg.Delta
+		}
 	case HelpToggleMsg:
 		m.ShowHelp = !m.ShowHelp
 	case FilterEditStartMsg:
@@ -190,8 +215,15 @@ func Update(m Model, msg Msg) Model {
 	case SizeChangedMsg:
 		m.Width = msg.Width
 		m.Height = msg.Height
+	case FocusToggleMsg:
+		if m.Focus == FocusBacklog {
+			m.Focus = FocusQueue
+		} else {
+			m.Focus = FocusBacklog
+		}
 	}
 	m.Cursor = clampCursor(m.Cursor, len(m.Visible()))
+	m.QueueCursor = clampCursor(m.QueueCursor, len(m.Picks))
 	clampDrillInOffset(m.DrillIn)
 	m.Width = clampSize(m.Width)
 	m.Height = clampSize(m.Height)
