@@ -145,6 +145,11 @@ func BreakdownByRole(path string) ([]usage.RoleUsage, error) {
 	return result, nil
 }
 
+// breakdownByRole indirects to BreakdownByRole so tests can simulate a
+// BreakdownByRole I/O error without a real filesystem race between it and
+// the LastInLog scan.
+var breakdownByRole = BreakdownByRole
+
 // ExtractUsage scans logPath for its result event and, separately, its
 // per-role breakdown, returning both in one usage.Report — the claude
 // Driver's implementation of the Driver interface's ExtractUsage method.
@@ -156,9 +161,11 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 	if !found {
 		return usage.Report{}, nil
 	}
-	roles, err := BreakdownByRole(logPath)
+	// A BreakdownByRole I/O error degrades the per-role section, not the
+	// aggregate totals already parsed above — see issue #674.
+	roles, err := breakdownByRole(logPath)
 	if err != nil {
-		return usage.Report{}, err
+		roles = nil
 	}
 	return usage.Report{Usage: u, Found: true, Roles: roles}, nil
 }
