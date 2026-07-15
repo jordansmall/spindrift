@@ -217,6 +217,12 @@ type FilterEditCancelMsg struct{}
 
 func (FilterEditCancelMsg) isConsoleMsg() {}
 
+// FocusToggleMsg is the tea layer's signal that the operator pressed Tab —
+// flips Focus between the backlog and work-queue columns (issue #845).
+type FocusToggleMsg struct{}
+
+func (FocusToggleMsg) isConsoleMsg() {}
+
 // SizeChangedMsg carries the terminal's current width/height — the tea
 // layer's translation of Bubble Tea's WindowSizeMsg, sent on every resize
 // including the initial size event (issue #842). Update clamps non-sensical
