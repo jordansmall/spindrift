@@ -84,6 +84,15 @@ setup_fakes() {
     printf '# CHECK\n\ncanonical check contract fixture\n' >"$CHECK_CONTRACT_FILE"
   fi
 
+  # Same fallback, for the research dispatch kind's outcome contract (issue
+  # #640). A test exercising the injection itself overrides this with its own
+  # fixture.
+  : "${RESEARCH_OUTCOME_CONTRACT_FILE:=$BATS_TEST_TMPDIR/research-outcome-contract.md}"
+  export RESEARCH_OUTCOME_CONTRACT_FILE
+  if [ ! -s "$RESEARCH_OUTCOME_CONTRACT_FILE" ]; then
+    printf '# POST THE VERDICT\n\ncanonical research outcome contract fixture\n' >"$RESEARCH_OUTCOME_CONTRACT_FILE"
+  fi
+
   # The pre-wrap entrypoint path, preserved before ENTRYPOINT is reassigned
   # below, so a test that needs its own custom-wrapped variant (e.g. the
   # Conditional fragment registry fixture-row test, issue #622) can still
