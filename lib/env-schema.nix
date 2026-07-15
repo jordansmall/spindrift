@@ -39,6 +39,11 @@
     group = "Issue discovery";
     default = "github";
     doc = "IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), or jira (see JIRA_BASE_URL/JIRA_PROJECT_KEY/JIRA_TOKEN); the Code Forge (PR/CI/merge) stays github regardless";
+    choices = [
+      "github"
+      "local"
+      "jira"
+    ];
     flakeOption = true;
     boxEnv = false;
   };
@@ -103,6 +108,11 @@
     group = "Branches & merge";
     default = "manual";
     doc = "post-green merge policy: immediate (merge on green), auto (enqueue GitHub native auto-merge; repo must have Allow auto-merge enabled), manual (leave PR open for human approval)";
+    choices = [
+      "immediate"
+      "auto"
+      "manual"
+    ];
     flakeOption = true;
     boxEnv = false;
   };
@@ -295,6 +305,10 @@
     group = "Repository & identity";
     default = "github";
     doc = "code-landing backend: github (open PR, watch CI, merge) or git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate)";
+    choices = [
+      "github"
+      "git"
+    ];
     flakeOption = true;
     boxEnv = true;
   };
@@ -343,6 +357,10 @@
     group = "Concurrency & dependency waves";
     default = "defer";
     doc = "declared ## Touches overlap policy: defer (hold a Dispatchable issue whose declared touch-set intersects an InProgress issue's, retrying once the collider completes), off (disable the check)";
+    choices = [
+      "defer"
+      "off"
+    ];
     flakeOption = true;
     boxEnv = false;
   };

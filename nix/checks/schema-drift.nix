@@ -99,6 +99,64 @@ in
       "main.go reads env vars absent from schema/documentArtifactKeys: ${concatStringsSep ", " extraInGo}";
     pkgs.runCommand "launcher-env-coverage" { } "touch $out";
 
+  # lib/env-schema.nix's optional `choices` field (issue #554) must be a
+  # non-empty list of strings, and a knob's `default` (if any) must be a
+  # member of its own `choices` — a knob completing values it can never
+  # legally hold would silently mislead a user tab-completing it. Also pins
+  # the exact value set for the four knobs the issue names by name, so a
+  # typo or dropped value fails here instead of silently narrowing/widening
+  # what `spindrift --merge-mode <TAB>` etc. offer.
+  schema-choices =
+    let
+      schema = import ../../lib/env-schema.nix;
+      inherit (pkgs.lib)
+        attrValues
+        assertMsg
+        concatStringsSep
+        filter
+        ;
+      withChoices = filter (e: e ? choices) (attrValues schema);
+      badShape = filter (
+        e: !(builtins.isList e.choices) || e.choices == [ ] || !(builtins.all builtins.isString e.choices)
+      ) withChoices;
+      badDefault = filter (e: (e ? default) && !(builtins.elem e.default e.choices)) withChoices;
+    in
+    assert assertMsg (badShape == [ ])
+      "lib/env-schema.nix: choices must be a non-empty list of strings for: ${
+        concatStringsSep ", " (map (e: e.env) badShape)
+      }";
+    assert assertMsg (badDefault == [ ])
+      "lib/env-schema.nix: default is not a member of choices for: ${
+        concatStringsSep ", " (map (e: e.env) badDefault)
+      }";
+    assert assertMsg (
+      schema.mergeMode.choices or [ ] == [
+        "immediate"
+        "auto"
+        "manual"
+      ]
+    ) "lib/env-schema.nix: mergeMode.choices must be [ immediate auto manual ]";
+    assert assertMsg (
+      schema.codeForge.choices or [ ] == [
+        "github"
+        "git"
+      ]
+    ) "lib/env-schema.nix: codeForge.choices must be [ github git ]";
+    assert assertMsg (
+      schema.issueTracker.choices or [ ] == [
+        "github"
+        "local"
+        "jira"
+      ]
+    ) "lib/env-schema.nix: issueTracker.choices must be [ github local jira ]";
+    assert assertMsg (
+      schema.overlapGate.choices or [ ] == [
+        "defer"
+        "off"
+      ]
+    ) "lib/env-schema.nix: overlapGate.choices must be [ defer off ]";
+    pkgs.runCommand "schema-choices" { } "touch $out";
+
   # tests/helper.bash's set_box_env fixture must export every boxEnv = true
   # schema knob, so the entrypoint-*.bats suites exercise the same defaults the nix
   # preamble bakes into the image at build time (issue #462). Fails when a new
