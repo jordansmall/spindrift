@@ -90,10 +90,14 @@ func maxLineWidth(s string) int {
 // the prior flat rendering, just under its own column label.
 func renderBacklogColumn(m Model) string {
 	var b strings.Builder
-	b.WriteString("backlog:\n")
+	if m.Focus == FocusBacklog {
+		b.WriteString("backlog [focus]:\n")
+	} else {
+		b.WriteString("backlog:\n")
+	}
 	for i, iss := range m.Visible() {
 		marker := " "
-		if i == m.Cursor {
+		if m.Focus == FocusBacklog && i == m.Cursor {
 			marker = ">"
 		}
 		fmt.Fprintf(&b, "%s #%s  %s  [%s]\n", marker, iss.Number, iss.Title, strings.Join(iss.Labels, ", "))
@@ -106,9 +110,17 @@ func renderBacklogColumn(m Model) string {
 // carries its heartbeat.
 func renderQueueColumn(m Model) string {
 	var b strings.Builder
-	b.WriteString("picks:\n")
-	for _, p := range m.Picks {
-		fmt.Fprintf(&b, "  #%s  [%s]  %s", p.Number, p.State, p.Title)
+	if m.Focus == FocusQueue {
+		b.WriteString("picks [focus]:\n")
+	} else {
+		b.WriteString("picks:\n")
+	}
+	for i, p := range m.Picks {
+		marker := " "
+		if m.Focus == FocusQueue && i == m.QueueCursor {
+			marker = ">"
+		}
+		fmt.Fprintf(&b, "%s #%s  [%s]  %s", marker, p.Number, p.State, p.Title)
 		if p.BlockedBy != "" {
 			fmt.Fprintf(&b, "  (held by %s)", p.BlockedBy)
 		}
@@ -228,10 +240,13 @@ func renderHelp() string {
 		"help",
 		"  j / down    move cursor down",
 		"  up          move cursor up",
+		"  tab         switch focus between the backlog and work-queue columns",
 		"  /           filter by label substring",
-		"  enter       apply filter",
+		"  enter       apply filter (while filter-editing); otherwise: pick the",
+		"              highlighted backlog row (backlog focus), or drill into the",
+		"              highlighted pick's transcript (queue focus, only when it has",
+		"              one)",
 		"  esc         cancel filter edit",
-		"  d / enter   drill into the highlighted dispatch's transcript",
 		"  t           toggle rendered <-> raw JSONL (while drilled in)",
 		"  x / esc     close the transcript pane (while drilled in)",
 		"  j/k, pgup/pgdown  scroll the transcript (while drilled in)",
