@@ -164,6 +164,36 @@ setup() {
   grep -q '^MAX_JOBS=5$' "$NIX_ENV_LOG"
 }
 
+@test "dogfood runs dispatch by default" {
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  grep -q -- '-- dispatch' "$NIX_LOG"
+  ! grep -q -- '-- research' "$NIX_LOG"
+}
+
+@test "DOGFOOD_KIND=research runs research instead of dispatch" {
+  local shebang
+  shebang="$(head -n1 "$FAKE_BIN/nix")"
+  {
+    printf '%s\n' "$shebang"
+    cat <<EOF
+: "\${NIX_LOG:?NIX_LOG must point at a log file}"
+printf '%s\n' "\$*" >>"\$NIX_LOG"
+if printf '%s ' "\$@" | grep -q -- '-- research'; then
+  exit 2
+fi
+exit 0
+EOF
+  } >"$FAKE_BIN/nix.tmp"
+  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
+  chmod +x "$FAKE_BIN/nix"
+
+  run timeout 15 env BASE_BRANCH=main DOGFOOD_KIND=research bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  grep -q -- '-- research' "$NIX_LOG"
+  ! grep -q -- '-- dispatch' "$NIX_LOG"
+}
+
 @test "dogfood aborts when podman machine RAM is below MEMORY_LIMIT" {
   export FAKE_PODMAN_MACHINE_MEMORY_MIB=2048
   run env BASE_BRANCH=main MEMORY_LIMIT=4g bash "$WORK/dogfood.sh"
