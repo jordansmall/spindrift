@@ -48,6 +48,11 @@
     var = "COMMIT_STEP";
   }
   {
+    gate = "CODE_REVIEW_BAKED";
+    fragment = "code-review-default.md";
+    var = "CODE_REVIEW_STEP";
+  }
+  {
     gate = "FILER_ENABLED";
     fragment = "file-issues.md";
     var = "FILE_ISSUES_STEP";
