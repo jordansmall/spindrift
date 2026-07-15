@@ -183,6 +183,25 @@ in
         touch $out
       '';
 
+  # Nix flakes only evaluate git-tracked files (issue #714): an agent that
+  # creates a new file and runs `nix build` before staging it hits a
+  # spurious "not tracked by Git" failure and burns a checks cycle. Same
+  # CHECK-section scoping as the never-background/vanished-marker checks
+  # above.
+  mkharness-prompt-check-git-add-before-nix-build =
+    pkgs.runCommand "mkharness-prompt-check-git-add-before-nix-build" { }
+      ''
+        awk '/^# CHECK$/{f=1} /^# REVIEW$/{exit} f' \
+          ${batsHarness.promptDir}/issue-prompt.md > issue-check.txt
+        awk '/^# CHECK$/{f=1} /^# LAND THE CHANGE$/{exit} f' \
+          ${batsHarness.promptDir}/fix-prompt.md > fix-check.txt
+        grep -qi 'git add' issue-check.txt
+        grep -qi 'git add' fix-check.txt
+        grep -qi 'tracked' issue-check.txt
+        grep -qi 'tracked' fix-check.txt
+        touch $out
+      '';
+
   mkharness-prompt-fix-outcome-no-drift =
     pkgs.runCommand "mkharness-prompt-fix-outcome-no-drift" { }
       ''
