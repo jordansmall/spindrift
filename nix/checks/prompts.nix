@@ -180,18 +180,16 @@ in
   # (issue #713): a build killed outright (OOM, SIGKILL) never writes the
   # exit marker a background+poll loop waits on, so the wait must be bounded
   # and a vanished marker treated as failure, not still-pending. Same
-  # CHECK-section scoping as the never-background check above.
+  # CHECK-section scoping as the never-background check above. Fix-prompt
+  # side is covered by mkharness-prompt-fix-check-no-drift's byte-for-byte
+  # diff, not re-pinned here (issue #725).
   mkharness-prompt-check-vanished-marker-is-failure =
     pkgs.runCommand "mkharness-prompt-check-vanished-marker-is-failure" { }
       ''
         awk '/^# CHECK$/{f=1} /^# REVIEW$/{exit} f' \
           ${batsHarness.promptDir}/issue-prompt.md > issue-check.txt
-        awk '/^# CHECK$/{f=1} /^# LAND THE CHANGE$/{exit} f' \
-          ${batsHarness.promptDir}/fix-prompt.md > fix-check.txt
         grep -qi 'vanished' issue-check.txt
-        grep -qi 'vanished' fix-check.txt
         grep -qi 'exit marker' issue-check.txt
-        grep -qi 'exit marker' fix-check.txt
         touch $out
       '';
 
