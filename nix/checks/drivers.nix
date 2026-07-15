@@ -1,10 +1,11 @@
 # Eval-level pins for lib/drivers/default.nix (issue #624): the registry's
-# required-attribute shape assertion, on top of the byte-identity equivalence
-# checks in equivalence.nix that already cover mkHarness.nix's generated
-# output and nix/checks/bats.nix's use of the same renderPreamble output.
+# required-attribute shape assertion, on top of nix/checks/bats.nix's use of
+# the same renderPreamble output the image bakes in.
 { pkgs, ... }:
 let
-  driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
+  lib = pkgs.lib;
+  driverRegistry = import ../../lib/drivers/default.nix { inherit lib; };
+  claudeEntry = import ../../lib/drivers/claude.nix { inherit lib; };
   inherit (pkgs.lib) assertMsg hasInfix;
 in
 {
@@ -47,4 +48,36 @@ in
     assert assertMsg (hasInfix "_driver_session_flags() {\necho stub-session" out)
       "renderPreamble must fold in the Driver entry's sessionFlagsFnBody, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-shape" { } "touch $out";
+
+  # DRIVER_SKILLS_DIR computes from $HOME at run time (issue #624) instead of
+  # the absolute /home/agent/.claude/skills literal mkHarness.nix used to
+  # bake -- a deliberate change from a second, independently-baked copy of
+  # /home/agent to the one the image's own `HOME=/home/agent` Env entry
+  # (lib/image.nix) already sets, not a behaviour change. This actually
+  # sources and runs the rendered preamble with HOME set to the image's
+  # fixed value and asserts the resulting DRIVER_SKILLS_DIR is byte-identical
+  # to what mkHarness.nix baked before -- an empirical no-behaviour-change
+  # proof, not just a literal-source-bytes comparison.
+  drivers-claude-skills-dir-matches-image-home =
+    let
+      preamble = driverRegistry.renderPreamble claudeEntry;
+      script = pkgs.writeText "drivers-claude-skills-dir.sh" ''
+        HOME=/home/agent
+        ${preamble}
+        printf '%s' "$DRIVER_SKILLS_DIR"
+      '';
+    in
+    pkgs.runCommand "drivers-claude-skills-dir-matches-image-home"
+      {
+        nativeBuildInputs = [ pkgs.bash ];
+      }
+      ''
+        resolved="$(bash ${script})"
+        expected="/home/agent/.claude/skills"
+        if [ "$resolved" != "$expected" ]; then
+          echo "DRIVER_SKILLS_DIR resolved to '$resolved' under the image's own HOME, expected '$expected'" >&2
+          exit 1
+        fi
+        touch $out
+      '';
 }
