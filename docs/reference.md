@@ -106,7 +106,7 @@ settings = {
                       reviewModel = "claude-opus-4-8";
                       filerModel  = ""; };
   sandbox         = { devShellName = "default"; devShellProbeTimeout = 300;
-                      memoryLimit = "4g"; pidsLimit = "512";
+                      memoryLimit = "5g"; pidsLimit = "512";
                       podmanNetwork = ""; bwrapUnshareNet = ""; };
   selfHealing     = { maxFixAttempts = 3; maxRebaseAttempts = 3;
                       holdJitterSecs = 5; transientBackoffSecs = 30;
