@@ -38,6 +38,11 @@ type teaModel struct {
 	pwd          string
 	launch       *Launcher
 	pollInterval time.Duration
+	// pendingPick is whether "p" is waiting on the "pa" leader window (issue
+	// #785 AC1) — tea-layer-only input-buffering state, not part of Model,
+	// since it has no rendering of its own (unlike PendingTerminate/
+	// PendingQuit, which arm a visible confirm prompt).
+	pendingPick bool
 }
 
 // newTeaModel builds the tea layer's starting state: the dogfood-competition
@@ -75,6 +80,22 @@ type pollTickMsg struct{}
 // asking for an out-of-band refresh (#647 AC4).
 type refreshSignalMsg struct{}
 
+// pickChordTimeout is how long "p" waits for a trailing "a" before resolving
+// to a single-issue pick — long enough that a deliberate two-key "pa" always
+// lands within it, short enough that a lone "p" still reads as instant
+// (issue #785 AC1).
+const pickChordTimeout = 200 * time.Millisecond
+
+// pickChordTimeoutMsg is the tea layer's signal that "p"'s leader window
+// elapsed with no trailing "a" — resolves a still-pending chord to a
+// single-issue pick.
+type pickChordTimeoutMsg struct{}
+
+// pickChordTick arms the leader-window timeout.
+func pickChordTick() tea.Cmd {
+	return tea.Tick(pickChordTimeout, func(time.Time) tea.Msg { return pickChordTimeoutMsg{} })
+}
+
 // Init starts the initial backlog load and both async signal sources
 // (background poll, launch-refresh) as Cmds — none of them block the
 // program's own startup.
@@ -106,6 +127,11 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = tea.Batch(refreshCmd(t.tracker), pollTick(t.pollInterval))
 	case refreshSignalMsg:
 		cmd = tea.Batch(refreshCmd(t.tracker), waitRefreshSignal(t.launch))
+	case pickChordTimeoutMsg:
+		if t.pendingPick {
+			t.pendingPick = false
+			t = t.pickHighlighted()
+		}
 	}
 
 	t.m = syncQueue(t.m, t.launch, t.pwd)
@@ -146,6 +172,16 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	if t.m.PendingTerminate != "" {
 		return t.handleTerminateConfirmKey(msg), nil
 	}
+	if t.pendingPick {
+		t.pendingPick = false
+		if msg.String() == "a" {
+			return t.pickAllReady(), nil
+		}
+		// Any other key resolves the chord to a single-issue pick, same as
+		// letting the leader window time out — that second key's own
+		// meaning (e.g. a cursor move) is not separately reprocessed.
+		return t.pickHighlighted(), nil
+	}
 	switch msg.String() {
 	case "j", "down":
 		t.m = Update(t.m, CursorMoveMsg{Delta: 1})
@@ -164,13 +200,12 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	case "?":
 		t.m = Update(t.m, HelpToggleMsg{})
 	case "p":
-		t = t.pickHighlighted()
+		t.pendingPick = true
+		return t, pickChordTick()
 	case "u":
 		t = t.unpickHighlighted()
-	case "P":
-		t = t.pickAllReady()
 	case "k":
-		if num := t.highlightedNumber(); num != "" {
+		if num := t.highlightedNumber(); num != "" && t.launch != nil {
 			t.m = Update(t.m, TerminateRequestedMsg{Number: num})
 		}
 	case "+":
@@ -241,7 +276,7 @@ func openDrillInCmd(launch *Launcher, pwd, number string) tea.Cmd {
 // Update") — anything else declines (ADR 0024, issue #649/#785).
 func (t teaModel) handleTerminateConfirmKey(msg tea.KeyMsg) teaModel {
 	num := t.m.PendingTerminate
-	if msg.String() == "y" {
+	if s := msg.String(); s == "y" || s == "Y" {
 		if t.launch != nil {
 			if err := t.launch.Terminate(t.tracker, num); err != nil {
 				fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: %v\n", num, err)
@@ -265,14 +300,12 @@ func (t teaModel) highlightedNumber() string {
 }
 
 // pickAllReady picks every issue currently Dispatchable on the tracker in
-// one bulk gesture (#647 AC3) — bound to shift+p ("P") so it can never
-// collide with, or need to wait behind, the single-issue "p" launch button.
+// one bulk gesture (#647 AC3) — reached via the "pa" leader chord (issue
+// #785 AC1).
 func (t teaModel) pickAllReady() teaModel {
 	for _, msg := range PickAllReady(t.tracker) {
 		t.m = Update(t.m, msg)
-		if queued, ok := msg.(PickQueuedMsg); ok && t.launch != nil {
-			t.launch.Queue.Add(Pick{Number: queued.Number, Title: queued.Title, Kind: queued.Kind, State: PickQueued})
-		}
+		t.landPick(msg)
 	}
 	if t.launch != nil {
 		t.launch.tryLaunch(t.tracker, t.pwd)
@@ -311,11 +344,39 @@ func (t teaModel) pickHighlighted() teaModel {
 	iss := visible[t.m.Cursor]
 	msg := PickIssue(t.tracker, iss.Number, iss.Title, KindWork)
 	t.m = Update(t.m, msg)
-	if queued, ok := msg.(PickQueuedMsg); ok && t.launch != nil {
-		t.launch.Queue.Add(Pick{Number: queued.Number, Title: queued.Title, Kind: queued.Kind, State: PickQueued})
+	t.landPick(msg)
+	if _, ok := msg.(PickQueuedMsg); ok && t.launch != nil {
 		t.launch.tryLaunch(t.tracker, t.pwd)
 	}
 	return t
+}
+
+// landPick mirrors a Pick adapter's result onto the Launcher's live Queue —
+// not just the pure Model — so the row survives the very next per-render
+// Queue resync (syncQueue's QueueSnapshotMsg replaces Model.Picks wholesale
+// from launch.Queue.Snapshot()). A failed promotion lands its dissolved row
+// on the Queue exactly as a queued one does; otherwise the operator's only
+// feedback that a pick raced, closed, or got relabeled would vanish on the
+// very next frame. A nil Launcher (matching the pre-#785 no-launch Console)
+// leaves Model.Picks as the pick's only record.
+func (t teaModel) landPick(msg Msg) {
+	if t.launch == nil {
+		return
+	}
+	switch msg := msg.(type) {
+	case PickQueuedMsg:
+		t.launch.Queue.Add(Pick{Number: msg.Number, Title: msg.Title, Kind: msg.Kind, State: PickQueued})
+	case PickFailedMsg:
+		t.launch.Queue.Add(Pick{Number: msg.Number, Title: msg.Title, State: PickDissolved, Reason: msg.Reason})
+	default:
+		return
+	}
+	// A pick's promotion attempt is always a tracker write, win or lose —
+	// the same rationale drain's own discover() closure documents — so it
+	// triggers the same out-of-band refresh every other session write does
+	// (#647 AC4), not just the eventual one a successful pick's own drain
+	// happens to also fire.
+	t.launch.signalRefresh()
 }
 
 // handleFilterKey routes one keypress while FilterEditing: Enter applies

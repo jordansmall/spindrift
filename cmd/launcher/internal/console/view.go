@@ -90,7 +90,7 @@ func renderHelp() string {
 		"  r           refresh the backlog",
 		"  p           pick the highlighted issue (launch button)",
 		"  u           unpick the highlighted queued pick",
-		"  P           pick all ready (bulk pick-all-ready gesture)",
+		"  pa          pick all ready (bulk pick-all-ready gesture)",
 		"  k           terminate the highlighted live Dispatch (confirm y/N)",
 		"  +           raise the live parallelism cap",
 		"  -           lower the live parallelism cap",

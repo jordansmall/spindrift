@@ -204,7 +204,7 @@ func TestView_ShowHelp_ListsNewKeybindings(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
-	for _, want := range []string{"p ", "u ", "P ", "k ", "+", "-", "b "} {
+	for _, want := range []string{"p ", "u ", "pa ", "k ", "+", "-", "b "} {
 		if !strings.Contains(out, want) {
 			t.Errorf("View() = %q, want it to mention key %q", out, want)
 		}
