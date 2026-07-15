@@ -71,7 +71,23 @@ func View(m Model) string {
 	return b.String()
 }
 
-// renderHeader renders the Console's full-width header: the status line
+// banner is the Console's fixed wordmark, printed at the top of the header
+// whenever the terminal has room for it (issue #843, ADR 0025). It is
+// hardcoded rather than figlet-rendered — the module carries no figlet
+// dependency, and the art never varies.
+const banner = `
+========================================
+  spindrift
+========================================
+`
+
+// bannerHeight is the banner's row count (including its leading blank line)
+// — the header collapses the banner away once Height drops below it, so the
+// banner never pushes the backlog/queue off-screen on a short terminal.
+var bannerHeight = strings.Count(banner, "\n")
+
+// renderHeader renders the Console's full-width header: the fixed banner
+// (when the terminal is tall enough to afford it) and the status line
 // (running/cap, waiting, held, settled), every count derived from Cap, Live,
 // and the Picks slice's PickState tags rather than a new stored counter
 // (issue #843, ADR 0025).
@@ -89,6 +105,9 @@ func renderHeader(m Model) string {
 	}
 
 	var b strings.Builder
+	if m.Height >= bannerHeight {
+		b.WriteString(strings.TrimPrefix(banner, "\n"))
+	}
 	fmt.Fprintf(&b, "running %d/%d · waiting %d · held %d · settled %d\n", m.Live, m.Cap, waiting, held, settled)
 	return b.String()
 }
