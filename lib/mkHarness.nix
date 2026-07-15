@@ -296,6 +296,7 @@ let
       root = ../cmd/launcher;
       fileset = lib.fileset.unions [
         ../cmd/launcher/go.mod
+        ../cmd/launcher/go.sum
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/driver-exec)
@@ -313,7 +314,11 @@ let
         ) ../cmd/launcher/internal/logscan)
       ];
     };
-    vendorHash = null;
+    # Same go.mod/go.sum as launcherBin above, so the same vendorHash applies
+    # even though driver-exec itself imports none of the tea dependency —
+    # buildGoModule vendors the whole module graph go.mod/go.sum declare,
+    # independent of which subPackages are actually built.
+    vendorHash = "sha256-pz95WwGNc065UWJspokZ4heMGKWh8Bsi+5O+UmCAtqA=";
     subPackages = [ "driver-exec" ];
     meta.license = lib.licenses.mit;
   };
@@ -544,21 +549,24 @@ let
   # The Go launcher binary, built hermetically by buildGoModule.
   #
   # vendorHash policy:
-  #   null  — stdlib-only; no go.sum / vendor dir required. Keep null as long
-  #           as cmd/launcher/go.mod has no external dependencies.
-  #   "<hash>" — when the first external dep is added, run:
+  #   null  — stdlib-only; no go.sum / vendor dir required.
+  #   "<hash>" — set once cmd/launcher/go.mod carries an external dependency
+  #             (charmbracelet/bubbletea, issue #784, was the first). To
+  #             recompute after a go.mod/go.sum change, run:
   #               nix build --impure --expr \
-  #                 '(import <nixpkgs> {}).buildGoModule { pname="x"; version="0"; \
+  #                 'let flake = builtins.getFlake (toString ./.); \
+  #                  pkgs = import flake.inputs.nixpkgs { system = builtins.currentSystem; }; \
+  #                  in pkgs.buildGoModule { pname="x"; version="0"; \
   #                  src = ./cmd/launcher; \
-  #                  vendorHash = (import <nixpkgs> {}).lib.fakeHash; }'
-  #             and replace lib.fakeHash with the hash Nix reports in the
+  #                  vendorHash = pkgs.lib.fakeHash; }'
+  #             and replace the string below with the hash Nix reports in the
   #             error output. Commit go.sum and the updated vendorHash together.
   launcherBin = hostPkgs.buildGoModule {
     pname = "spindrift-launcher";
     version = spindriftVersion;
     src = launcherSrc;
     modRoot = "cmd/launcher";
-    vendorHash = null;
+    vendorHash = "sha256-pz95WwGNc065UWJspokZ4heMGKWh8Bsi+5O+UmCAtqA=";
     subPackages = [ "." ]; # build only the launcher; driver-exec is in-box only
     ldflags = [
       "-X main.version=${spindriftVersion}"

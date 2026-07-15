@@ -8,6 +8,19 @@
 }:
 let
   inherit (fixtures) consumerFormatter;
+
+  # The vendored module tree for cmd/launcher's external deps
+  # (charmbracelet/bubbletea, issue #784) — GOPROXY=off below means these
+  # hand-rolled go build/vet/test checks need it on disk instead of
+  # reaching the network. vendorHash must match lib/mkHarness.nix's
+  # launcherBin/driverExecBin; update both together.
+  launcherGoModules =
+    (pkgs.buildGoModule {
+      pname = "spindrift-launcher-modules";
+      version = "0";
+      src = ../../cmd/launcher;
+      vendorHash = "sha256-pz95WwGNc065UWJspokZ4heMGKWh8Bsi+5O+UmCAtqA=";
+    }).goModules;
 in
 {
   # gofmt -l must exit cleanly — any output means unformatted files.
@@ -49,7 +62,9 @@ in
   launcher-go-vet = pkgs.runCommand "launcher-go-vet" { nativeBuildInputs = [ pkgs.go ]; } ''
     cp -r ${../../cmd/launcher} src
     chmod -R +w src
+    cp -r ${launcherGoModules} src/vendor
     export GOPROXY=off
+    export GOFLAGS=-mod=vendor
     export GONOSUMCHECK='*'
     export GOMODCACHE="$TMPDIR/gomodcache"
     export GOCACHE="$TMPDIR/gocache"
@@ -80,7 +95,9 @@ in
         cp -r ${../../cmd/launcher} src/cmd/launcher
         cp -r ${../../docs} src/docs
         chmod -R +w src
+        cp -r ${launcherGoModules} src/cmd/launcher/vendor
         export GOPROXY=off
+        export GOFLAGS=-mod=vendor
         export GONOSUMCHECK='*'
         export GOMODCACHE="$TMPDIR/gomodcache"
         export GOCACHE="$TMPDIR/gocache"
@@ -99,7 +116,9 @@ in
       ''
         cp -r ${../../cmd/launcher} src
         chmod -R +w src
+        cp -r ${launcherGoModules} src/vendor
         export GOPROXY=off
+        export GOFLAGS=-mod=vendor
         export GONOSUMCHECK='*'
         export GOMODCACHE="$TMPDIR/gomodcache"
         export GOCACHE="$TMPDIR/gocache"
