@@ -45,21 +45,32 @@ func View(m Model) string {
 // #844, ADR 0025).
 const minTwoColumnWidth = 60
 
+// leftColumnFraction caps the backlog column at two fifths of m.Width — the
+// work queue (state tag, blocker, heartbeat) tends to carry more text per
+// row than the backlog, so it gets the larger share of a wide terminal.
+const leftColumnFraction = 2.0 / 5.0
+
 // renderBody renders the backlog and work-queue columns side by side,
 // sized from m.Width — the two-column body under the header (issue #844,
 // ADR 0025). Backlog keeps its label filter and cursor; the queue lists
 // m.Picks in pick order, each row tagged with its PickState. The left
-// column's width tracks the backlog's own longest line rather than a fixed
-// fraction of m.Width, so a short backlog leaves the queue column more room
-// instead of wasting it on padding. Below minTwoColumnWidth the columns
-// stack instead of splitting.
+// column's width tracks the backlog's own longest line, capped at
+// leftColumnFraction of m.Width; both columns clip any line that still
+// overflows its share, so a joined row never exceeds m.Width regardless of
+// how long a title, label list, or blocker badge runs (issue #844 AC6).
+// Below minTwoColumnWidth the columns stack instead of splitting.
 func renderBody(m Model) string {
 	backlog := renderBacklogColumn(m)
 	queue := renderQueueColumn(m)
 	if m.Width < minTwoColumnWidth {
-		return backlog + queue
+		return backlog + "\n" + queue
 	}
-	return joinColumns(backlog, queue, maxLineWidth(backlog))
+	leftWidth := maxLineWidth(backlog)
+	if maxLeft := int(float64(m.Width) * leftColumnFraction); leftWidth > maxLeft {
+		leftWidth = maxLeft
+	}
+	rightWidth := m.Width - leftWidth
+	return joinColumns(backlog, queue, leftWidth, rightWidth)
 }
 
 // maxLineWidth returns the rune length of s's longest line, ignoring a
@@ -112,10 +123,12 @@ func renderQueueColumn(m Model) string {
 	return b.String()
 }
 
-// joinColumns zips left and right line by line, padding each left line out
-// to leftWidth so the right column lines up in a consistent gutter — the
-// side-by-side layout for a terminal wide enough to afford it.
-func joinColumns(left, right string, leftWidth int) string {
+// joinColumns zips left and right line by line, clipping each side to its
+// column width — left is padded out to leftWidth so the right column lines
+// up in a consistent gutter, right is truncated if it overflows rightWidth —
+// so a joined row never exceeds leftWidth+rightWidth regardless of how long
+// either side's content runs (issue #844 AC6).
+func joinColumns(left, right string, leftWidth, rightWidth int) string {
 	leftLines := strings.Split(strings.TrimRight(left, "\n"), "\n")
 	rightLines := strings.Split(strings.TrimRight(right, "\n"), "\n")
 	n := len(leftLines)
@@ -131,9 +144,27 @@ func joinColumns(left, right string, leftWidth int) string {
 		if i < len(rightLines) {
 			r = rightLines[i]
 		}
-		fmt.Fprintf(&b, "%-*s%s\n", leftWidth, l, r)
+		fmt.Fprintf(&b, "%s%s\n", clip(l, leftWidth, true), clip(r, rightWidth, false))
 	}
 	return b.String()
+}
+
+// clip fits s into width runes: truncated with a trailing ellipsis if s runs
+// over, space-padded out to width if pad is true and s is shorter, left
+// as-is if pad is false and s already fits.
+func clip(s string, width int, pad bool) string {
+	r := []rune(s)
+	switch {
+	case len(r) > width:
+		if width <= 1 {
+			return string(r[:width])
+		}
+		return string(r[:width-1]) + "…"
+	case pad:
+		return s + strings.Repeat(" ", width-len(r))
+	default:
+		return s
+	}
 }
 
 // banner is the Console's fixed wordmark, printed at the top of the header
