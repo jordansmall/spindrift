@@ -1,6 +1,8 @@
 package waves
 
 import (
+	"fmt"
+
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/glob"
 )
@@ -60,7 +62,15 @@ func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) fun
 		// direct-body-parse read ListIssues' body-less summary and so never
 		// saw them); prTouchesOf's PR-changed-files augmentation was the
 		// only github coverage before.
-		touches, _ := it.TouchesOf(fi.Number)
+		//
+		// A failed fetch (network, auth, rate-limit) is non-fatal: it falls
+		// back to PR-files-only for this entry, matching the original
+		// best-effort behaviour, but is printed so operators can see the
+		// gap rather than have it degrade silently.
+		touches, err := it.TouchesOf(fi.Number)
+		if err != nil {
+			fmt.Printf("    .. failed to fetch #%s's declared touches (%v); falling back to its open PR's changed files only\n", fi.Number, err)
+		}
 		touches = append(touches, prTouchesOf(cf, fi.Number)...)
 		entries[i] = inProgressTouches{number: fi.Number, touches: touches}
 	}

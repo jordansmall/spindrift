@@ -66,6 +66,13 @@ type Fake struct {
 	// PRFilesErr, if non-nil, is returned by every ListPRFiles call.
 	PRFilesErr error
 
+	// TouchesOfErr, keyed by issue number, is returned by TouchesOf for that
+	// number instead of parsing its body. Per-number (not blanket, unlike
+	// PRFilesErr) because a single overlap-gate check calls TouchesOf for
+	// both an in-progress issue and the candidate being checked against it —
+	// a blanket error couldn't isolate which side failed.
+	TouchesOfErr map[string]error
+
 	// MergeErr, if non-nil, is returned by every Merge call (after MergeErrs is drained).
 	MergeErr error
 	// MergeErrs is a per-call queue drained before MergeErr is checked.
@@ -366,6 +373,9 @@ func (f *Fake) DepsOf(num string) ([]Dependency, error) {
 func (f *Fake) TouchesOf(num string) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err, ok := f.TouchesOfErr[num]; ok {
+		return nil, err
+	}
 	iss, ok := f.issues[num]
 	if !ok {
 		return nil, fmt.Errorf("issue %s not found", num)
