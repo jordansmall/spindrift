@@ -12,7 +12,7 @@
 # The upstreams are pinned via flake.lock (flake.nix inputs), none floating to
 # a branch head:
 #   - caveman (juliusbrussee/caveman, issue #486): output-token compression.
-#   - matt-skills (mattpocock/skills, tag v1.1.0): tdd + to-tickets.
+#   - matt-skills (mattpocock/skills, tag v1.1.0): tdd + to-tickets + code-review.
 #   - jordan-skills (jordansmall/skills): commit.
 #
 # Defined once so flake.nix's `spindrift` module config and fixtures.nix's
@@ -39,5 +39,9 @@
   {
     name = "commit";
     src = builtins.readFile "${jordan-skills}/commit/SKILL.md";
+  }
+  {
+    name = "code-review";
+    src = builtins.readFile "${matt-skills}/skills/engineering/code-review/SKILL.md";
   }
 ]

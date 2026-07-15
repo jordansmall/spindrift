@@ -268,6 +268,7 @@ in
     test -s ${harness.skillsDir}/tdd/SKILL.md
     test -s ${harness.skillsDir}/to-tickets/SKILL.md
     test -s ${harness.skillsDir}/commit/SKILL.md
+    test -s ${harness.skillsDir}/code-review/SKILL.md
     touch $out
   '';
 
