@@ -311,7 +311,10 @@ func hasTranscript(state PickState) bool {
 // openDrillInCmd loads and renders number's whole transcript in the
 // background. A launch-less session (or a Launcher built without a Factory)
 // has no Driver to render with — that renders as a graceful DrillInMsg error
-// instead of dereferencing a nil Driver (issue #786 AC4).
+// instead of dereferencing a nil Driver (issue #786 AC4). This runs only on
+// open (Enter): handleDrillInKey has no refresh key, so the pane never
+// live-tails a running Dispatch on its own — close (x/Esc) and reopen to
+// reload (issue #719).
 func openDrillInCmd(launch *Launcher, pwd, number string) tea.Cmd {
 	return func() tea.Msg {
 		drv := driverOf(launch)

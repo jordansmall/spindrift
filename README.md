@@ -499,10 +499,12 @@ session's own writes and the operator's own `r` trigger a refresh in between.
 and tool calls, readable, spanning the whole Dispatch — initial run, every fix
 pass, and conflict-resolve — concatenated in order with a `=== pass: ... ===`
 boundary between them, since the Dispatch (claim to verdict) is the domain
-object and per-pass logs are storage detail. Re-running `r`/`refresh` while a
-transcript is open reloads it too, so a running Dispatch's view grows as you
-refresh. `t`/`toggle` switches to the raw byte-exact log for debugging the
-harness itself, and back; `x`/`close` returns to the backlog/queue. Rendering
+object and per-pass logs are storage detail. The pane is a one-shot load: it
+renders once on open and there is currently no keystroke that refreshes it in
+place — a running Dispatch's growing log is not live-tailed. Close (`x`/Esc)
+and reopen (Enter) to reload with fresh content. `t`/`toggle` switches to the
+raw byte-exact log for debugging the harness itself, and back; `x`/`close`
+returns to the backlog/queue. Rendering
 is a per-Driver strategy (beside heartbeat parsing and usage extraction) — a
 Driver with no configured strategy, or an issue with no Dispatch logs on disk
 yet, surfaces an error in place of the transcript rather than a blank pane.
