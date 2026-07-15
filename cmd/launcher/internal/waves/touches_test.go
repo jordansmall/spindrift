@@ -2,6 +2,7 @@ package waves
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -144,5 +145,33 @@ func TestPRTouchesOf_ListPRFilesErrorReturnsNil(t *testing.T) {
 
 	if got := prTouchesOf(fc, "20"); got != nil {
 		t.Errorf("prTouchesOf on ListPRFiles error = %v, want nil", got)
+	}
+}
+
+// TestWaveOverlapCheck_TouchesOfErrorFallsBackToPRFilesOnly verifies that a
+// failed it.TouchesOf fetch for one in-progress issue is surfaced via a
+// diagnostic (not silently discarded) and does not error the gate — the
+// entry still collides via its open PR's changed files, exactly as if its
+// declared touches were simply empty.
+func TestWaveOverlapCheck_TouchesOfErrorFallsBackToPRFilesOnly(t *testing.T) {
+	c := baseConfig()
+	c.OverlapGate = "defer"
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- internal/pkgx/foo.go", Labels: []string{"ready-for-agent"}})
+	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- docs/reference.md", State: "OPEN", Labels: []string{"agent-in-progress"}})
+	fc.TouchesOfErr = map[string]error{"20": fmt.Errorf("boom")}
+	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
+	fc.SetPRFiles("https://github.com/owner/repo/pull/20", []string{"internal/pkgx/foo.go"})
+
+	out := captureStdout(t, func() {
+		checkOverlap := waveOverlapCheck(c, fc, fc)
+		collider, held := checkOverlap("10")
+		if !held || collider != "20" {
+			t.Errorf("checkOverlap(10) = (%q, %v), want (\"20\", true) via #20's open PR changed files", collider, held)
+		}
+	})
+	if !strings.Contains(out, "20") {
+		t.Errorf("expected a diagnostic naming issue #20's failed TouchesOf fetch, got %q", out)
 	}
 }
