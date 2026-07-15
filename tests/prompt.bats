@@ -149,6 +149,23 @@ setup() {
   grep -q 'SPINDRIFT_OUTCOME' <<<"$check"
 }
 
+@test "CHECK section treats a vanished exit marker as a failure, not still-pending" {
+  # issue #713: the #640 incident agent backgrounded the check build anyway
+  # and polled for a NIXEXIT marker file. A SIGKILLed/OOM'd build never
+  # writes that marker, so an unbounded poll for it hangs forever instead of
+  # surfacing the kill as a failure. The primary rule above is "never
+  # background it"; this is the defensive fallback for when an agent does
+  # it anyway.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  local check
+  check="$(sed -n '/^# CHECK$/,/^# REVIEW$/p' "$prompt")"
+  [ -n "$check" ]
+  grep -qi 'vanished' <<<"$check"
+  grep -qi 'exit marker' <<<"$check"
+  grep -qi 'bound the wait' <<<"$check"
+}
+
 @test "prompt branches CODE_FORGE=git to a push-only outcome, no PR/CI" {
   # CODE_FORGE=git (#330) must skip PR creation and CI-watch entirely and
   # emit a branch ref where a PR URL would go.

@@ -79,6 +79,13 @@ underlying work was green. Wait for the gate to finish before moving on, and
 do not stop this run until a terminal `SPINDRIFT_OUTCOME` line (`status=ready`
 or `status=blocked`) has been printed.
 
+If you ever fall back to a background-and-poll pattern for a gate anyway,
+treat a vanished process as a failure, not as still-pending: a build that is
+killed outright (OOM, SIGKILL) never writes the exit marker you are polling
+for, so an unbounded wait for it hangs forever. Bound the wait, and the
+moment the marker fails to show up, emit a `status=blocked`
+`SPINDRIFT_OUTCOME` instead of looping.
+
 ${AUTO_FORMAT_STEP}${AUTO_LINT_STEP}# COMMIT
 
 ${COMMIT_STEP}Strict Conventional Commits v1.0.0, hard-wrapped (subject ≤50, body ≤72).

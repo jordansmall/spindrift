@@ -163,6 +163,25 @@ in
         touch $out
       '';
 
+  # The defensive fallback for an agent that backgrounds a check gate anyway
+  # (issue #713): a build killed outright (OOM, SIGKILL) never writes the
+  # exit marker a background+poll loop waits on, so the wait must be bounded
+  # and a vanished marker treated as failure, not still-pending. Same
+  # CHECK-section scoping as the never-background check above.
+  mkharness-prompt-check-vanished-marker-is-failure =
+    pkgs.runCommand "mkharness-prompt-check-vanished-marker-is-failure" { }
+      ''
+        awk '/^# CHECK$/{f=1} /^# REVIEW$/{exit} f' \
+          ${batsHarness.promptDir}/issue-prompt.md > issue-check.txt
+        awk '/^# CHECK$/{f=1} /^# LAND THE CHANGE$/{exit} f' \
+          ${batsHarness.promptDir}/fix-prompt.md > fix-check.txt
+        grep -qi 'vanished' issue-check.txt
+        grep -qi 'vanished' fix-check.txt
+        grep -qi 'exit marker' issue-check.txt
+        grep -qi 'exit marker' fix-check.txt
+        touch $out
+      '';
+
   mkharness-prompt-fix-outcome-no-drift =
     pkgs.runCommand "mkharness-prompt-fix-outcome-no-drift" { }
       ''
