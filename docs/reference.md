@@ -811,6 +811,22 @@ gh label create agent-complete    --repo owner/repo --color 0e8a16 --description
 gh label create agent-failed      --repo owner/repo --color d93f0b --description "Box exited non-zero; needs human triage"
 ```
 
+#### Create the research labels on the Target repo
+
+The research label family (ADR 0022) is a fixed, non-configurable vocabulary
+— `agent-research.yml` and the research prompt key off these names directly —
+so unlike the four triage labels above, `spindrift doctor` does not manage
+them. Create them manually before applying `agent-research` to an issue:
+
+```sh
+gh label create agent-research             --repo owner/repo --color fbca04 --description "Apply to fire a research dispatch"
+gh label create agent-research-in-progress --repo owner/repo --color bfd4f2 --description "A Box is reviewing this issue"
+gh label create agent-research-recommend   --repo owner/repo --color 0e8a16 --description "Relevant and enriched — promote it"
+gh label create agent-research-reject      --repo owner/repo --color d93f0b --description "False positive, not worth it, or a duplicate — close it"
+gh label create agent-research-unclear     --repo owner/repo --color d4c5f9 --description "Needs a human answer — answer, then re-apply agent-research"
+gh label create agent-research-failed      --repo owner/repo --color b60205 --description "Box crashed or produced no verdict; needs human triage"
+```
+
 #### Caveat: a killed launcher can strand an issue
 
 The label swaps are best-effort. If the launcher is killed mid-run (Ctrl-C, a
@@ -902,6 +918,31 @@ issues on the host.
 | Issues            | Read and write | read the issue; write to swap the dispatch labels (`agent-in-progress`/`agent-complete`/`agent-failed`) and post the per-issue usage/cost comment |
 | Metadata          | Read           | mandatory baseline, auto-selected            |
 | Workflows         | Read and write | **off by default** — grant only when an issue edits `.github/workflows/*`; agent branches run in-repo so `pull_request` events carry repository secrets; with this permission an injected agent can rewrite CI or exfiltrate those secrets |
+
+### Research token (least-privilege, optional)
+
+The research dispatch kind (ADR 0022) takes a second, separately scoped
+fine-grained PAT — set the `SPINDRIFT_RESEARCH_GH_TOKEN` repository secret and
+`agent-research.yml` picks it up automatically:
+
+| permission        | level     | why                                       |
+| ----------------- | --------- | ------------------------------------------ |
+| Contents          | Read      | clone the repo to review it — never push   |
+| Issues            | Read and write | read the issue; write the verdict comment and swap research labels |
+| Metadata          | Read      | mandatory baseline, auto-selected          |
+
+This is the enforcement boundary that makes advise-only real: with Contents
+read-only, a fully injection-steered researcher cannot push a branch, open a
+PR, or merge, regardless of what the prompt tells it to do — the blast radius
+collapses to a bad comment a human reads anyway.
+
+`SPINDRIFT_RESEARCH_GH_TOKEN` is optional. Leave it unset and
+`agent-research.yml` falls back to the same `SPINDRIFT_GH_TOKEN` the work
+dispatch uses (Contents/Pull requests/Issues RW + Metadata R, above) — research
+still works, but gives up the read-only guarantee: a compromised researcher
+could push to a branch or open a PR with the broader token, even though
+nothing in the research flow asks it to. Configure the dedicated token when
+the blast radius matters more than one extra repo secret to manage.
 
 ### Threat model
 
