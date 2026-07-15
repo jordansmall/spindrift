@@ -173,6 +173,40 @@ SKILL
   grep -qF 'Use the `/commit` skill to write every commit message' "$CLAUDE_PROMPT_FILE"
 }
 
+# issue #788: the reviewer subagent favors the /code-review skill when it is
+# baked at DRIVER_SKILLS_DIR/code-review/SKILL.md, same gated-fragment idiom
+# as CAVEMAN_STEP/TDD_STEP/COMMIT_STEP above. CODE_REVIEW_STEP renders into
+# review-prompt.md, which flows into the reviewer subagent's prompt in the
+# --agents JSON, not $CLAUDE_PROMPT_FILE -- so this reads it from
+# $CLAUDE_AGENTS_FILE's .reviewer.prompt instead.
+@test "CODE_REVIEW_STEP renders when the code-review skill is baked" {
+  mkdir -p "$HOME/.claude/skills/code-review"
+  cat >"$HOME/.claude/skills/code-review/SKILL.md" <<'SKILL'
+---
+name: code-review
+description: Review code changes for standards and spec compliance.
+---
+Two-axis review: Standards + Spec.
+SKILL
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","Agent"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  jq -e '.reviewer.prompt' "$CLAUDE_AGENTS_FILE" | grep -qF 'Use the `/code-review` skill'
+}
+
+# issue #788: the fallback -- no code-review skill baked -- must still end in
+# the VERDICT contract, with zero trace of the deferral (the same
+# conditional-residue guarantee CAVEMAN_STEP/TDD_STEP/COMMIT_STEP give).
+@test "reviewer prompt has no code-review deferral when the skill is absent" {
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","Agent"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local rendered
+  rendered="$(jq -r '.reviewer.prompt' "$CLAUDE_AGENTS_FILE")"
+  ! grep -qF 'Use the `/code-review` skill' <<<"$rendered"
+  grep -qF 'VERDICT: APPROVE | BLOCK' <<<"$rendered"
+}
+
 # issue #626: driver-exec absorbed the direct-path/devShell-wrapper dual
 # pipeline text (issue #463) entirely -- entrypoint.sh now calls driver-exec
 # exactly once, direct and devShell invocation are the same call path, and
