@@ -5,6 +5,7 @@ let
   inherit (fixtures)
     promptHarness
     fixPromptHarness
+    researchPromptHarness
     batsHarness
     ;
 in
@@ -187,6 +188,73 @@ in
       ''
         awk '/# LAND THE CHANGE/{f=1} f' ${fixPromptHarness.promptDir}/fix-prompt.md > injected-contract.txt
         diff ${batsHarness.outcomeContractFile} injected-contract.txt
+        touch $out
+      '';
+
+  # The research dispatch kind's own outcome contract (issue #640): a
+  # Consumer researchPrompt that drops "# POST THE VERDICT" must still ship
+  # an agent that posts the verdict comment and emits the outcome line --
+  # the harness appends the canonical contract exactly once.
+  mkharness-prompt-research-outcome-injected =
+    pkgs.runCommand "mkharness-prompt-research-outcome-injected" { }
+      ''
+        count=$(grep -c '# POST THE VERDICT' ${batsHarness.promptDir}/research-prompt.md)
+        [ "$count" -eq 1 ] || {
+          echo "expected the research prompt's outcome contract injected exactly once, got $count" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
+  # The default research prompt already contains the contract, so injection
+  # must be a no-op: no duplication (mirrors mkharness-prompt-outcome-not-duplicated).
+  mkharness-prompt-research-outcome-not-duplicated =
+    pkgs.runCommand "mkharness-prompt-research-outcome-not-duplicated" { }
+      ''
+        count=$(grep -c '# POST THE VERDICT' ${batsHarness.promptDir}/research-prompt.md)
+        [ "$count" -eq 1 ] || {
+          echo "expected the default research prompt's outcome contract to stay single, got $count" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
+  # The default box's rendered research prompt must be byte-identical to the
+  # template on disk -- injection must not touch a prompt that already has
+  # the contract (mirrors mkharness-prompt-outcome-default-unchanged).
+  mkharness-prompt-research-outcome-default-unchanged =
+    pkgs.runCommand "mkharness-prompt-research-outcome-default-unchanged" { }
+      ''
+        diff ${../../templates/default/prompts/research-prompt.md} ${batsHarness.promptDir}/research-prompt.md
+        touch $out
+      '';
+
+  # The block injected into a research prompt lacking the contract must be
+  # byte-identical to the default research prompt's own contract section --
+  # both sliced from the same marker in the same source file (issue #640,
+  # mirrors mkharness-prompt-outcome-no-drift).
+  mkharness-prompt-research-outcome-no-drift =
+    pkgs.runCommand "mkharness-prompt-research-outcome-no-drift" { }
+      ''
+        awk '/# POST THE VERDICT/{f=1} f' ${researchPromptHarness.promptDir}/research-prompt.md > injected-contract.txt
+        diff ${batsHarness.researchOutcomeContractFile} injected-contract.txt
+        touch $out
+      '';
+
+  # A Consumer researchPrompt carrying only a research-specific preamble --
+  # no "# POST THE VERDICT" marker at all -- must still gain the contract,
+  # and survive the round trip byte-identical to what a runtime
+  # SPINDRIFT_PROMPT_DIR override receives (issue #640, mirrors
+  # mkharness-prompt-fix-consumer-override-injected; agent/entrypoint.sh's
+  # own runtime injection is covered by tests/entrypoint-research-kind.bats).
+  mkharness-prompt-research-consumer-override-injected =
+    pkgs.runCommand "mkharness-prompt-research-consumer-override-injected" { }
+      ''
+        grep -q 'CONFIGURED-RESEARCH-PROMPT-MARKER' ${researchPromptHarness.promptDir}/research-prompt.md
+        [ "$(grep -c '# POST THE VERDICT' ${researchPromptHarness.promptDir}/research-prompt.md)" -eq 1 ]
+        marker_line=$(grep -n 'CONFIGURED-RESEARCH-PROMPT-MARKER' ${researchPromptHarness.promptDir}/research-prompt.md | head -1 | cut -d: -f1)
+        contract_line=$(grep -n '# POST THE VERDICT' ${researchPromptHarness.promptDir}/research-prompt.md | head -1 | cut -d: -f1)
+        [ "$marker_line" -lt "$contract_line" ]
         touch $out
       '';
 

@@ -54,6 +54,8 @@
   filerPrompt,
   conflictResolvePrompt,
   fixPrompt,
+  # Driven instead of `prompt` when DISPATCH_KIND=research (ADR 0022, issue #640).
+  researchPrompt,
   # The SPINDRIFT_OUTCOME / COMMS / CHECK-COMMIT shared blocks (issues #419,
   # #455) and their injectors, sliced from issue-prompt.md by mkHarness so the
   # host-side contract files (which stay in mkHarness) cannot drift from what
@@ -61,8 +63,12 @@
   outcomeContract,
   commsBlock,
   checkBlock,
+  # The research dispatch kind's own outcome contract (issue #640), sliced
+  # from research-prompt.md the same way.
+  researchOutcomeContract,
   injectOutcomeContract,
   injectFixSharedBlocks,
+  injectResearchOutcomeContract,
   # The conditional prompt fragments directory (issue #463).
   fragmentsSourceDir,
   # Skills baked into the image at /home/agent/.claude/skills. Each element is
@@ -171,12 +177,14 @@ let
     cp ${pkgs.writeText "outcome-contract.md" outcomeContract} $out/agent/outcome-contract.md
     cp ${pkgs.writeText "comms-contract.md" commsBlock} $out/agent/comms-contract.md
     cp ${pkgs.writeText "check-contract.md" checkBlock} $out/agent/check-contract.md
+    cp ${pkgs.writeText "research-outcome-contract.md" researchOutcomeContract} $out/agent/research-outcome-contract.md
     cp ${pkgs.writeText "issue-prompt.md" (injectOutcomeContract prompt)} $out/agent/prompts/issue-prompt.md
     cp ${pkgs.writeText "scout-prompt.md" scoutPrompt} $out/agent/prompts/scout-prompt.md
     cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md
     cp ${pkgs.writeText "filer-prompt.md" filerPrompt} $out/agent/prompts/filer-prompt.md
     cp ${pkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
     cp ${pkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/agent/prompts/fix-prompt.md
+    cp ${pkgs.writeText "research-prompt.md" (injectResearchOutcomeContract researchPrompt)} $out/agent/prompts/research-prompt.md
     cp -r ${fragmentsSourceDir} $out/agent/prompts/fragments
     ${lib.optionalString (skills != [ ]) ''
       mkdir -p $out/home/agent/${driverEntry.skillsDirRelative}

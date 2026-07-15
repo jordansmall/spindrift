@@ -216,6 +216,19 @@ let
     packages = p: [ p.hello ];
   };
 
+  # A Consumer-configured researchPrompt (issue #640): proves a research
+  # prompt carrying only a research-specific preamble -- no
+  # "# POST THE VERDICT" marker at all -- still gets the research
+  # outcome-contract block injected, mirroring fixPromptHarness above.
+  researchPromptHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    researchPrompt = ''
+      CONFIGURED-RESEARCH-PROMPT-MARKER
+      Research issue #''${ISSUE_NUMBER}: ''${ISSUE_TITLE}
+    '';
+    packages = p: [ p.hello ];
+  };
+
   # A Consumer-configured skill (#119): proves the `skills` argument bakes
   # the skill files into the image's skills path. Eval-only for the
   # skillsDir assertion; the image-layer check is Linux-gated.
@@ -314,6 +327,7 @@ in
     noRuntimeHarness
     promptHarness
     fixPromptHarness
+    researchPromptHarness
     skillsHarness
     skillsBwrapHarness
     minimalDirect

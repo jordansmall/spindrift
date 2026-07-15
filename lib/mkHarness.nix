@@ -35,6 +35,11 @@
   # prompt skips scout/implement-from-scratch and goes straight to
   # check/fix/commit/push/watch-CI.
   fixPrompt ? builtins.readFile ../templates/default/prompts/fix-prompt.md,
+  # Driven instead of `prompt` when DISPATCH_KIND=research (ADR 0022, issue
+  # #640): the researcher explores the fresh clone and posts a verdict
+  # comment instead of implementing the issue, so this prompt replaces the
+  # whole issue-prompt.md flow rather than sharing its COMMS/CHECK blocks.
+  researchPrompt ? builtins.readFile ../templates/default/prompts/research-prompt.md,
   # The Conditional fragment registry (issue #622, CONTEXT.md): rows of
   # (gate, fragment, var) the entrypoint's single fragment loop and its
   # `_subst` substitution allowlist are both rendered from. Not
@@ -198,6 +203,17 @@ let
   injectFixSharedBlocks =
     promptText: injectOutcomeContract (injectCheckCommit (injectComms promptText));
 
+  # research-prompt.md carries its own harness-owned outcome contract (issue
+  # #640) rather than sharing issue-prompt.md's COMMS/CHECK/outcome-contract
+  # blocks: posting the verdict comment and emitting the outcome line, sliced
+  # from the default research prompt's own "# POST THE VERDICT" heading
+  # through EOF (mirrors outcomeContractMarker/outcomeContract above) so the
+  # injected block and the default prompt's own copy cannot drift apart.
+  researchPromptSource = builtins.readFile ../templates/default/prompts/research-prompt.md;
+  researchOutcomeContractMarker = "# POST THE VERDICT";
+  researchOutcomeContract = sliceFromMarker researchOutcomeContractMarker researchPromptSource;
+  injectResearchOutcomeContract = injectSection researchOutcomeContractMarker researchOutcomeContract;
+
   # The Driver registry (ADR 0009); driverEntry is the selected Driver's
   # in-box half — invocation binary/flags, agent-config rendering, skill
   # wiring, and outcome extraction — baked into the image below.
@@ -347,11 +363,14 @@ let
       filerPrompt
       conflictResolvePrompt
       fixPrompt
+      researchPrompt
       outcomeContract
       commsBlock
       checkBlock
+      researchOutcomeContract
       injectOutcomeContract
       injectFixSharedBlocks
+      injectResearchOutcomeContract
       fragmentsSourceDir
       skills
       ;
@@ -368,6 +387,10 @@ let
   # drift-proof reason (issue #455).
   commsContractFile = hostPkgs.writeText "comms-contract.md" commsBlock;
   checkContractFile = hostPkgs.writeText "check-contract.md" checkBlock;
+
+  # The research dispatch kind's own outcome contract as a host store path,
+  # for the same drift-proof reason (issue #640).
+  researchOutcomeContractFile = hostPkgs.writeText "research-outcome-contract.md" researchOutcomeContract;
 
   # The Driver's function definitions as a host store-path file.  The bats
   # harness prepends this before exec-ing the entrypoint (issue #433) so tests
@@ -393,6 +416,7 @@ let
     cp ${hostPkgs.writeText "filer-prompt.md" filerPrompt} $out/filer-prompt.md
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/conflict-resolve-prompt.md
     cp ${hostPkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/fix-prompt.md
+    cp ${hostPkgs.writeText "research-prompt.md" (injectResearchOutcomeContract researchPrompt)} $out/research-prompt.md
     cp -r ${fragmentsSourceDir} $out/fragments
   '';
 
@@ -700,6 +724,7 @@ else
       outcomeContractFile
       commsContractFile
       checkContractFile
+      researchOutcomeContractFile
       driverFunctionsFile
       fragmentRegistryFile
       heartbeatFilterBin
