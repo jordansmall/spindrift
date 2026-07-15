@@ -114,13 +114,13 @@ func Update(m Model, msg Msg) Model {
 	return m
 }
 
-// removePick drops the queued pick numbered num, if any — Unpick only ever
-// removes a pick still holding at PickQueued; a pick already claiming,
-// running, or settled is left alone.
+// removePick drops the queued or held pick numbered num, if any — Unpick
+// only ever removes a pick still holding at PickQueued or PickHeld; a pick
+// already claiming, running, or settled is left alone.
 func removePick(picks []Pick, num string) []Pick {
 	var out []Pick
 	for _, p := range picks {
-		if p.Number == num && p.State == PickQueued {
+		if p.Number == num && (p.State == PickQueued || p.State == PickHeld) {
 			continue
 		}
 		out = append(out, p)
