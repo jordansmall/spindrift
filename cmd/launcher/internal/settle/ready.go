@@ -21,6 +21,14 @@ import (
 // an issue Terminate already reclaimed.
 var errAbandoned = errors.New("settle: abandoned by terminate")
 
+// errLandingNeverGreen marks a force-pushed head (rebase or conflict-resolve)
+// that never reached green — a conflict-resolve dispatch failure, or a
+// post-force-push re-wait that ends red or times out. Distinct from a merge
+// failure on an already-green PR: there, a green PR genuinely exists and the
+// issue stays agent-complete (ADR 0012). Here there is no green PR at the
+// current head, so selfHeal demotes to agent-failed instead (issue #758).
+var errLandingNeverGreen = errors.New("settle: force-pushed head never went green")
+
 // selfHeal polls the merge gate, dispatching fix boxes on genuine red up to
 // MaxFixAttempts times. On green it applies the merge mode, then swaps
 // agent-complete once the landing path settles (issue #757) — merged,
@@ -65,6 +73,12 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
 			if err := s.applyMergeMode(num, pr, d); err != nil {
 				if errors.Is(err, errAbandoned) {
 					return landingAbandoned
+				}
+				if errors.Is(err, errLandingNeverGreen) {
+					fmt.Printf("    #%s  pr=%s  status=landing-failed  !! %v\n", num, pr, err)
+					s.it.Comment(num, fmt.Sprintf("landing failed: %v — the force-pushed head never reached green CI", err))
+					s.transitionState(num, forge.InProgress, forge.Failed)
+					return landingFailed
 				}
 				fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, pr, err)
 				s.it.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
@@ -310,7 +324,7 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 				fmt.Printf("    #%s  pr=%s  status=conflict-resolve\n", num, pr)
 				if crErr := d.ResolveConflict(pr); crErr != nil {
 					fmt.Printf("    #%s  pr=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
-					return crErr
+					return fmt.Errorf("%w: conflict-resolve dispatch failed: %v", errLandingNeverGreen, crErr)
 				}
 				if rwErr := s.rewaitAfterForcePush(num, pr); rwErr != nil {
 					return rwErr
@@ -340,7 +354,7 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 func (s *Settle) rewaitAfterForcePush(num, pr string) error {
 	fmt.Printf("    #%s  pr=%s  status=post-force-push-wait\n", num, pr)
 	if s.gateToGreen(num, pr) != gateGreen {
-		return fmt.Errorf("CI did not reach green after force-push on %s", pr)
+		return fmt.Errorf("%w: CI did not reach green after force-push on %s", errLandingNeverGreen, pr)
 	}
 	return nil
 }
