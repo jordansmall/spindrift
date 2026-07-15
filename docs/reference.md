@@ -69,12 +69,16 @@ instructions.
 exposes most — not all — of its arguments as declared options (`lib/flakeModule.nix`).
 The NixOS module system rejects undeclared options, so the **scope** column
 below marks which knobs only exist as `mkHarness` function arguments. Unset
-shared options fall through to `mkHarness`'s own defaults.
+shared options fall through to `mkHarness`'s own defaults. `system` is neither
+a declared option nor an `mkHarness`-only argument: it's **auto-supplied** by
+flake-parts itself and passed through, so setting
+`perSystem.spindrift.system` errors the same way an `mkHarness`-only option
+would.
 
 | option      | scope          | type                        | default            | meaning                                                              |
 | ----------- | -------------- | --------------------------- | ------------------ | -------------------------------------------------------------------- |
 | `nixpkgs`   | shared         | flake input                 | your `nixpkgs`     | locked nixpkgs the image and host commands build from                |
-| `system`    | shared         | string                      | perSystem's system | your host system; mapped to its Linux twin for the image            |
+| `system`    | **auto-supplied** | string                   | perSystem's system | your host system; mapped to its Linux twin for the image; not a declared `perSystem.spindrift.*` option — flake-parts passes its own `system` argument straight through (`lib/flakeModule.nix`) |
 | `overlays`  | shared         | list                        | `[]`               | overlays applied to the instantiated nixpkgs                         |
 | `config`    | shared         | attrs                       | `{ allowUnfree = true; }` | nixpkgs config attrs                                          |
 | `packages`  | shared         | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
