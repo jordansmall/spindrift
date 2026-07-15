@@ -75,6 +75,50 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 	}
 }
 
+// TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument is the
+// verb-level proof of ADR 0020's precedence chain: a --input document
+// resolves REPO_SLUG (no env, no flag set), and an explicit --repo-slug flag
+// on top of that same document wins. Both cases are observed the same way
+// TestMainRun_Research_RoutesThroughBootstrap does — validate() fails on the
+// *next* required field (GIT_USER_NAME) once REPO_SLUG is satisfied, proving
+// resolution happened before any real gh/network call.
+func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
+	for _, key := range []string{"REPO_SLUG", "GIT_USER_NAME", "GIT_USER_EMAIL", "GH_TOKEN"} {
+		t.Setenv(key, "")
+		os.Unsetenv(key)
+	}
+
+	dir := t.TempDir()
+	docPath := filepath.Join(dir, "input.json")
+	body := `{"settings":{"REPO_SLUG":"doc-org/doc-repo"},"artifacts":{}}`
+	if err := os.WriteFile(docPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { loadedDoc = nil })
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"--input", docPath, "research"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("mainRun code = %d, want 1; stderr=%s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "REPO_SLUG") {
+		t.Errorf("stderr = %q, want REPO_SLUG resolved from the document (no REPO_SLUG complaint)", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "set ") {
+		t.Errorf("stderr = %q, want validate() to fail on some later required field", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = mainRun([]string{"--input", docPath, "--repo-slug", "flag-org/flag-repo", "research"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("mainRun code = %d, want 1; stderr=%s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "REPO_SLUG") {
+		t.Errorf("stderr = %q, want REPO_SLUG resolved (flag overrides document)", stderr.String())
+	}
+}
+
 // TestConfigHasNoModelFields enforces that model/scoutModel/reviewModel were
 // removed from the config struct; models forward via BOX_ENV_VARS instead.
 func TestConfigHasNoModelFields(t *testing.T) {
@@ -295,6 +339,107 @@ func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 	c := loadConfig()
 	if c.label != "custom-default-from-table" {
 		t.Errorf("label should come from schemaDefaults table, got %q", c.label)
+	}
+}
+
+// TestGitIdentityField_FallsBackToHostGitConfig proves GIT_USER_NAME/
+// GIT_USER_EMAIL fall back to the host git config when the document/flag/env
+// chain supplies nothing — the in-process replacement for the wrapper's
+// retired `${VAR:-$(git config ...)}` bash fallback (ADR 0020).
+func TestGitIdentityField_FallsBackToHostGitConfig(t *testing.T) {
+	t.Setenv("GIT_USER_NAME", "")
+	os.Unsetenv("GIT_USER_NAME")
+	orig := gitConfigLookup
+	t.Cleanup(func() { gitConfigLookup = orig })
+	gitConfigLookup = func(key string) string {
+		if key == "user.name" {
+			return "Host Git User"
+		}
+		return ""
+	}
+
+	if got := gitIdentityField("GIT_USER_NAME", "user.name"); got != "Host Git User" {
+		t.Errorf("gitIdentityField = %q, want Host Git User", got)
+	}
+}
+
+// TestGitIdentityField_ExplicitValueSkipsGitConfig proves an explicit
+// value (document/flag/env) wins over the host git config fallback.
+func TestGitIdentityField_ExplicitValueSkipsGitConfig(t *testing.T) {
+	t.Setenv("GIT_USER_NAME", "Explicit Name")
+	orig := gitConfigLookup
+	t.Cleanup(func() { gitConfigLookup = orig })
+	gitConfigLookup = func(string) string {
+		t.Fatal("gitConfigLookup should not be called when an explicit value is set")
+		return ""
+	}
+
+	if got := gitIdentityField("GIT_USER_NAME", "user.name"); got != "Explicit Name" {
+		t.Errorf("gitIdentityField = %q, want Explicit Name", got)
+	}
+}
+
+// TestLoadConfig_DocumentSettingBeatsSchemaDefault proves the Launcher input
+// document's settings value (ADR 0020: schema default < flake settings)
+// backs a knob ahead of the generated schemaDefaults table when neither an
+// explicit flag nor ambient env supplies one.
+func TestLoadConfig_DocumentSettingBeatsSchemaDefault(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("BASE_BRANCH"); loadedDoc = nil })
+	os.Unsetenv("BASE_BRANCH")
+
+	loadedDoc = &inputDocument{Settings: map[string]string{"BASE_BRANCH": "from-document"}}
+
+	c := loadConfig()
+	if c.baseBranch != "from-document" {
+		t.Errorf("baseBranch = %q, want from-document", c.baseBranch)
+	}
+}
+
+// TestLoadConfig_EnvBeatsDocument proves env (ambient or flag-set — the two
+// are indistinguishable at loadConfig()'s layer, ADR 0020 stage 1: an
+// ambient knob env var still wins this release, just with a deprecation
+// warning printed elsewhere) still overrides the document's settings value.
+func TestLoadConfig_EnvBeatsDocument(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("BASE_BRANCH"); loadedDoc = nil })
+
+	loadedDoc = &inputDocument{Settings: map[string]string{"BASE_BRANCH": "from-document"}}
+	os.Setenv("BASE_BRANCH", "from-env")
+
+	c := loadConfig()
+	if c.baseBranch != "from-env" {
+		t.Errorf("baseBranch = %q, want from-env", c.baseBranch)
+	}
+}
+
+// TestLoadConfig_ArtifactsFromDocument proves the nix-computed artifact
+// fields (image refs, driver name, ...) resolve from the loaded document's
+// artifacts section when no env var supplies them — the replacement for the
+// retired goRunPreamble/goBuildPreamble env exports (ADR 0020).
+func TestLoadConfig_ArtifactsFromDocument(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	for _, k := range []string{"IMAGE_ARCHIVE", "RUNTIME", "DRIVER", "BOX_ENV_VARS"} {
+		os.Unsetenv(k)
+	}
+
+	loadedDoc = &inputDocument{Artifacts: map[string]string{
+		"IMAGE_ARCHIVE": "/nix/store/doc-image",
+		"RUNTIME":       "podman",
+		"DRIVER":        "claude",
+		"BOX_ENV_VARS":  "MODEL BASE_BRANCH",
+	}}
+
+	c := loadConfig()
+	if c.imageArchive != "/nix/store/doc-image" {
+		t.Errorf("imageArchive = %q, want /nix/store/doc-image", c.imageArchive)
+	}
+	if c.runtime != "podman" {
+		t.Errorf("runtime = %q, want podman", c.runtime)
+	}
+	if c.driver != "claude" {
+		t.Errorf("driver = %q, want claude", c.driver)
+	}
+	if c.boxEnvVars != "MODEL BASE_BRANCH" {
+		t.Errorf("boxEnvVars = %q, want %q", c.boxEnvVars, "MODEL BASE_BRANCH")
 	}
 }
 
