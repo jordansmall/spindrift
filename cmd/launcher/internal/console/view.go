@@ -372,16 +372,11 @@ func renderTranscriptColumn(d DrillInState) string {
 		return b.String()
 	}
 
-	content := d.Rendered
-	if d.ShowRaw {
-		content = d.Raw
-	}
-	lines := strings.Split(content, "\n")
 	offset := d.Offset
-	if offset > len(lines) {
-		offset = len(lines)
+	if offset > len(d.Lines) {
+		offset = len(d.Lines)
 	}
-	b.WriteString(strings.Join(lines[offset:], "\n"))
+	b.WriteString(strings.Join(d.Lines[offset:], "\n"))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -403,16 +398,11 @@ func renderDrillIn(d DrillInState) string {
 		return b.String()
 	}
 
-	content := d.Rendered
-	if d.ShowRaw {
-		content = d.Raw
-	}
-	lines := strings.Split(content, "\n")
 	offset := d.Offset
-	if offset > len(lines) {
-		offset = len(lines)
+	if offset > len(d.Lines) {
+		offset = len(d.Lines)
 	}
-	visible := strings.Join(lines[offset:], "\n")
+	visible := strings.Join(d.Lines[offset:], "\n")
 	b.WriteString(visible)
 	if visible != "" && !strings.HasSuffix(visible, "\n") {
 		b.WriteString("\n")

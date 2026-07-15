@@ -249,6 +249,25 @@ func TestUpdate_DrillInMsg_OpensTranscriptView(t *testing.T) {
 	}
 }
 
+// TestUpdate_DrillInMsg_CachesLineSplit verifies DrillInMsg pre-splits the
+// active (rendered) form into DrillIn.Lines once, so clampDrillInOffset and
+// the render functions consume the cache instead of each re-splitting the
+// full content on every Update/View call (issue #722).
+func TestUpdate_DrillInMsg_CachesLineSplit(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2", Raw: "r0\nr1"})
+
+	want := []string{"l0", "l1", "l2"}
+	if len(m.DrillIn.Lines) != len(want) {
+		t.Fatalf("Lines = %v, want %v", m.DrillIn.Lines, want)
+	}
+	for i, line := range want {
+		if m.DrillIn.Lines[i] != line {
+			t.Errorf("Lines[%d] = %q, want %q", i, m.DrillIn.Lines[i], line)
+		}
+	}
+}
+
 // TestUpdate_DrillInToggleMsg_FlipsShowRaw verifies the toggle switches
 // between rendered and raw with no I/O — both forms are already loaded on
 // Model from the DrillInMsg that opened the view.
@@ -264,6 +283,26 @@ func TestUpdate_DrillInToggleMsg_FlipsShowRaw(t *testing.T) {
 	m = Update(m, DrillInToggleMsg{})
 	if m.DrillIn.ShowRaw {
 		t.Error("ShowRaw = true after two toggles, want false")
+	}
+}
+
+// TestUpdate_DrillInToggleMsg_RecachesLineSplit verifies toggling ShowRaw
+// recomputes DrillIn.Lines against the newly active form instead of leaving
+// it split against the form that was active before the toggle (issue #722).
+func TestUpdate_DrillInToggleMsg_RecachesLineSplit(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2", Raw: "r0\nr1"})
+
+	m = Update(m, DrillInToggleMsg{})
+
+	want := []string{"r0", "r1"}
+	if len(m.DrillIn.Lines) != len(want) {
+		t.Fatalf("Lines = %v, want %v", m.DrillIn.Lines, want)
+	}
+	for i, line := range want {
+		if m.DrillIn.Lines[i] != line {
+			t.Errorf("Lines[%d] = %q, want %q", i, m.DrillIn.Lines[i], line)
+		}
 	}
 }
 
