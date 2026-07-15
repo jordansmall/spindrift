@@ -85,6 +85,49 @@ func TestView_RunningPick_ShowsHeartbeat(t *testing.T) {
 	}
 }
 
+// TestView_StaleBanner_ShownWhenStaleSilentOtherwise verifies the stale
+// banner (with the probe's message and the rebuild-key hint) renders only
+// while Stale is true — a fresh session shows no mention of it (issue
+// #652).
+func TestView_StaleBanner_ShownWhenStaleSilentOtherwise(t *testing.T) {
+	fresh := View(NewModel())
+	if strings.Contains(fresh, "stale") {
+		t.Errorf("View() with no stale status = %q, want no mention of stale", fresh)
+	}
+
+	m := Update(NewModel(), StaleStatusMsg{Stale: true, Message: "rebuild needed (main tip abc123 produces spindrift:def, loaded image is spindrift:abc)"})
+	out := View(m)
+	if !strings.Contains(out, "stale") {
+		t.Errorf("View() = %q, want a stale banner", out)
+	}
+	if !strings.Contains(out, "rebuild needed (main tip abc123 produces spindrift:def, loaded image is spindrift:abc)") {
+		t.Errorf("View() = %q, want the probe's message", out)
+	}
+	if !strings.Contains(out, "[b]") {
+		t.Errorf("View() = %q, want the rebuild-key hint", out)
+	}
+}
+
+// TestView_Rebuilding_ShowsProgress verifies an in-flight rebuild renders a
+// progress line so the operator sees the confirm key took effect.
+func TestView_Rebuilding_ShowsProgress(t *testing.T) {
+	m := Update(NewModel(), StaleStatusMsg{Stale: true, Rebuilding: true})
+	out := View(m)
+	if !strings.Contains(out, "rebuild") {
+		t.Errorf("View() = %q, want a rebuilding-in-progress line", out)
+	}
+}
+
+// TestView_RebuildErr_Surfaced verifies a failed rebuild's error text
+// appears, and launches stay noted as held (Stale remains true).
+func TestView_RebuildErr_Surfaced(t *testing.T) {
+	m := Update(NewModel(), StaleStatusMsg{Stale: true, RebuildErr: "nix build failed"})
+	out := View(m)
+	if !strings.Contains(out, "nix build failed") {
+		t.Errorf("View() = %q, want the rebuild failure surfaced", out)
+	}
+}
+
 // TestView_RefreshError_Surfaced verifies a failed refresh's error text
 // appears in View so the operator sees why the list went stale.
 func TestView_RefreshError_Surfaced(t *testing.T) {

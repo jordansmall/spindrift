@@ -170,6 +170,27 @@ func TestUpdate_DrillInCloseMsg_ReturnsToBacklog(t *testing.T) {
 	}
 }
 
+// TestUpdate_StaleStatusMsg_SetsFields verifies StaleStatusMsg installs the
+// launcher's live freshness/rebuild state onto Model verbatim — the
+// per-render sync View's stale banner reads from (issue #652).
+func TestUpdate_StaleStatusMsg_SetsFields(t *testing.T) {
+	m := NewModel()
+	m = Update(m, StaleStatusMsg{Stale: true, Message: "rebuild needed", Rebuilding: true, RebuildErr: "boom"})
+
+	if !m.Stale {
+		t.Error("Stale = false, want true")
+	}
+	if m.StaleMessage != "rebuild needed" {
+		t.Errorf("StaleMessage = %q, want %q", m.StaleMessage, "rebuild needed")
+	}
+	if !m.Rebuilding {
+		t.Error("Rebuilding = false, want true")
+	}
+	if m.RebuildErr != "boom" {
+		t.Errorf("RebuildErr = %q, want %q", m.RebuildErr, "boom")
+	}
+}
+
 // TestUpdate_DrillInMsg_RefreshSameNumber_PreservesShowRaw verifies a
 // second DrillInMsg for the same pick (a refresh while live-tailing) keeps
 // the operator's raw/rendered toggle instead of resetting to rendered.
