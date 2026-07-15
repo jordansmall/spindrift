@@ -20,6 +20,7 @@ func View(m Model) string {
 	}
 
 	var b strings.Builder
+	b.WriteString(renderHeader(m))
 	if m.FilterEditing {
 		fmt.Fprintf(&b, "/%s  [enter] apply · [esc] cancel\n", m.Filter)
 	}
@@ -51,9 +52,6 @@ func View(m Model) string {
 	if m.Err != nil {
 		fmt.Fprintf(&b, "refresh failed: %s\n", m.Err)
 	}
-	if m.Cap > 0 {
-		fmt.Fprintf(&b, "cap: %d/%d\n", m.Live, m.Cap)
-	}
 	if len(m.Picks) > 0 {
 		b.WriteString("picks:\n")
 		for _, p := range m.Picks {
@@ -70,6 +68,28 @@ func View(m Model) string {
 			b.WriteString("\n")
 		}
 	}
+	return b.String()
+}
+
+// renderHeader renders the Console's full-width header: the status line
+// (running/cap, waiting, held, settled), every count derived from Cap, Live,
+// and the Picks slice's PickState tags rather than a new stored counter
+// (issue #843, ADR 0025).
+func renderHeader(m Model) string {
+	var waiting, held, settled int
+	for _, p := range m.Picks {
+		switch p.State {
+		case PickQueued:
+			waiting++
+		case PickHeld:
+			held++
+		case PickSettled:
+			settled++
+		}
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "running %d/%d · waiting %d · held %d · settled %d\n", m.Live, m.Cap, waiting, held, settled)
 	return b.String()
 }
 
