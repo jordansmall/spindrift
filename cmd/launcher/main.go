@@ -519,13 +519,13 @@ func newDriver(c config) driver.Driver {
 	return d
 }
 
-// dispatchConfig builds the subset of config a dispatch.Factory needs. cf
-// wires OpenPRForIssue when the Code Forge supports PR lookup (issue #565),
-// so a zero-exit rate-limited retry never re-runs a box whose work already
-// landed a PR; left nil (retry proceeds unguarded) for a push-only Code
-// Forge, matching settle's own PRForge-unavailable fallback.
+// dispatchConfig builds the subset of config a dispatch.Factory needs.
+// OpenPRForIssue wires forge.ResolveOpenPR (issue #565), so a zero-exit
+// rate-limited retry never re-runs a box whose work already landed a PR;
+// ResolveOpenPR itself resolves to Found: false, nil for a push-only Code
+// Forge, so the retry proceeds unguarded there without any guard here.
 func dispatchConfig(c config, cf forge.CodeForge) dispatch.Config {
-	cfg := dispatch.Config{
+	return dispatch.Config{
 		BoxEnvVars:            c.boxEnvVars,
 		ResolveEnv:            resolveBoxEnvVar,
 		Kind:                  c.dispatchKind,
@@ -533,20 +533,11 @@ func dispatchConfig(c config, cf forge.CodeForge) dispatch.Config {
 		TransientBackoffSecs:  c.transientBackoffSecs,
 		HoldJitterSecs:        c.holdJitterSecs,
 		DriverSessionCacheDir: c.driverSessionCacheDir,
-	}
-	// forge.ResolveOpenPR already resolves to Found: false, nil for a
-	// push-only Code Forge, so this guard is redundant for correctness; it
-	// stays to keep cfg.OpenPRForIssue's nil-ness itself meaningful — the
-	// retry path's own `!= nil` check (dispatch/retry.go) and its pinned
-	// test (TestDispatchConfig_NonPRForge_LeavesOpenPRForIssueNil) depend on
-	// a push-only Code Forge leaving the field unset, not just false-valued.
-	if _, ok := cf.(forge.PRForge); ok {
-		cfg.OpenPRForIssue = func(number string) (bool, error) {
+		OpenPRForIssue: func(number string) (bool, error) {
 			res, err := forge.ResolveOpenPR(cf, number)
 			return res.Found, err
-		}
+		},
 	}
-	return cfg
 }
 
 // newDispatchFactory constructs the dispatch.Factory for one top-level
