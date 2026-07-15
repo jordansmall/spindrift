@@ -7,11 +7,17 @@ setup() {
   setup_entrypoint_env
 }
 
-# issue #622: these three knob-gated registry rows (lib/fragments.nix) used
-# to be six bespoke on/off test pairs; one mechanism test now walks the
-# table and covers the same off/on matrix -- each row renders its marker
-# heading only when its knob is on, and leaves zero residue when it's off
-# (the conditional-residue mechanism every registry row shares).
+# issue #622/#688: this mechanism test walks 3 of the registry's current
+# eight rows (lib/fragments.nix) -- AUTO_FORMAT and AUTO_LINT, both
+# knob-gated, plus FILER_ENABLED/file-issues, which is computed-gated --
+# and covers their shared off/on matrix: each row renders its marker
+# heading only when its gate is on, and leaves zero residue when it's off
+# (the conditional-residue mechanism every registry row shares); it used
+# to be six bespoke on/off test pairs. The other five rows are covered
+# elsewhere, not in this file's other tests: skill-preamble/
+# caveman-default/tdd-default/commit-default in
+# tests/entrypoint-skills.bats, ci-failure's on/off gate in
+# tests/entrypoint-prompt-assembly.bats.
 @test "conditional prompt steps appear only when their knob is on" {
   local case i=0
   for case in \
