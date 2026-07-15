@@ -7,7 +7,10 @@ Consumer-tunable knobs available under `perSystem.spindrift.settings`.
 Grouped by section (matching `spindrift --help --all`); sections with no
 consumer-tunable knobs are omitted.
 
-A matching env var wins at runtime: CLI flag > env > flake setting > baked default.
+Precedence at runtime: CLI flag > flake setting (via the Launcher input
+document, ADR 0020) > baked default. A knob env var still wins over the
+flake setting this release, but is deprecated and warns; env configures
+only secrets and internal plumbing going forward.
 See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.
 
 ## Issue discovery (`settings.issueDiscovery`)

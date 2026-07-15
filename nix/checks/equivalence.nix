@@ -26,14 +26,20 @@ let
     ;
 in
 {
-  # Pure-eval-style assertion: the image store path is substituted into
-  # the generated commands and the placeholder is gone.
+  # Pure-eval-style assertion: the image store path is substituted into the
+  # generated Launcher input documents (ADR 0020 — the wrapper itself carries
+  # no knob/artifact env or store paths beyond the document's own, passed via
+  # a single --input flag) and the placeholder is gone.
   mkharness-substitution = pkgs.runCommand "mkharness-substitution" { } ''
     buildCmd=${harness.build}/bin/build
     runCmd=${harness.run}/bin/run
+    buildDoc=${harness.buildInputDocumentFile}
+    runDoc=${harness.runInputDocumentFile}
 
-    grep -q '${harness.imagePath}' "$buildCmd"
-    grep -q '${harness.imagePath}' "$runCmd"
+    grep -q -- '--input' "$buildCmd"
+    grep -q -- '--input' "$runCmd"
+    grep -q '${harness.imagePath}' "$buildDoc"
+    grep -q '${harness.imagePath}' "$runDoc"
     ! grep -q '@imagePath@' "$buildCmd"
     ! grep -q '@imagePath@' "$runCmd"
 
@@ -60,8 +66,11 @@ in
       ''
         [ "$moduleSpindrift" = "$directSpindrift" ] \
           || { echo "spindrift mismatch: $moduleSpindrift != $directSpindrift" >&2; exit 1; }
-        # The module bakes the very same (Linux) image store path.
-        grep -q "$imagePath" "$moduleSpindrift/bin/spindrift"
+        # The module wrapper carries an --input document, and (since the two
+        # wrapper store paths are byte-identical above) that document is the
+        # direct call's own — which bakes the very same (Linux) image store path.
+        grep -q -- '--input' "$moduleSpindrift/bin/spindrift"
+        grep -q "$imagePath" ${harness.runInputDocumentFile}
         touch $out
       '';
 
@@ -73,13 +82,15 @@ in
         fixtureSpindrift = consumerPkgs.spindrift;
         directSpindrift = minimalDirect.spindrift;
         imagePath = minimalDirect.imagePath;
+        runDoc = minimalDirect.runInputDocumentFile;
       }
       ''
         [ "$fixtureSpindrift" = "$directSpindrift" ] \
           || { echo "spindrift mismatch: $fixtureSpindrift != $directSpindrift" >&2; exit 1; }
-        # The fixture's image store path matches the direct call's,
-        # asserted via the path baked into its `spindrift` command.
-        grep -q "$imagePath" "$fixtureSpindrift/bin/spindrift"
+        # The fixture's image store path matches the direct call's, asserted
+        # via the path baked into its --input document.
+        grep -q -- '--input' "$fixtureSpindrift/bin/spindrift"
+        grep -q "$imagePath" "$runDoc"
         touch $out
       '';
 
@@ -94,12 +105,14 @@ in
         templateSpindrift = templatePkgs.spindrift;
         directSpindrift = harnessNoRevision.spindrift;
         imagePath = harnessNoRevision.imagePath;
+        runDoc = harnessNoRevision.runInputDocumentFile;
       }
       ''
         spindriftCmd="$templateSpindrift/bin/spindrift"
 
         ! grep -q '@imagePath@' "$spindriftCmd"
-        grep -q "$imagePath" "$spindriftCmd"
+        grep -q -- '--input' "$spindriftCmd"
+        grep -q "$imagePath" "$runDoc"
         case "$imagePath" in
           /nix/store/*spindrift*) : ;;
           *) echo "unexpected image path: $imagePath" >&2; exit 1 ;;
@@ -111,37 +124,39 @@ in
         touch $out
       '';
 
-  # The configured `defaults` and `runtime` are baked into the
-  # generated `run` command text (eval-only; no Linux builder).
+  # The configured `defaults` and `runtime` are baked into the generated
+  # `run`/`build` Launcher input documents (ADR 0020; eval-only, no Linux
+  # builder) — the wrapper command text itself carries no per-knob values
+  # any more, only a single --input flag pointing at the document below.
   mkharness-defaults = pkgs.runCommand "mkharness-defaults" { } ''
-    runCmd=${customHarness.run}/bin/run
-    ! grep -q -- '@label@' "$runCmd"
-    grep -q 'LABEL:-custom-label' "$runCmd"
-    grep -q 'BASE_BRANCH:-develop' "$runCmd"
-    grep -q 'MAX_PARALLEL:-5' "$runCmd"
-    grep -q 'BRANCH_PREFIX:-bot/' "$runCmd"
-    grep -q 'IN_PROGRESS_LABEL:-custom-wip' "$runCmd"
-    grep -q 'FAILED_LABEL:-custom-broken' "$runCmd"
-    grep -q 'SCOUT_MODEL:-custom-scout' "$runCmd"
-    grep -q 'REVIEW_MODEL:-custom-reviewer' "$runCmd"
-    grep -q 'COMPLETE_LABEL:-custom-done' "$runCmd"
+    runDoc=${customHarness.runInputDocumentFile}
+    ! grep -q -- '@label@' "$runDoc"
+    grep -q '"LABEL":"custom-label"' "$runDoc"
+    grep -q '"BASE_BRANCH":"develop"' "$runDoc"
+    grep -q '"MAX_PARALLEL":"5"' "$runDoc"
+    grep -q '"BRANCH_PREFIX":"bot/"' "$runDoc"
+    grep -q '"IN_PROGRESS_LABEL":"custom-wip"' "$runDoc"
+    grep -q '"FAILED_LABEL":"custom-broken"' "$runDoc"
+    grep -q '"SCOUT_MODEL":"custom-scout"' "$runDoc"
+    grep -q '"REVIEW_MODEL":"custom-reviewer"' "$runDoc"
+    grep -q '"COMPLETE_LABEL":"custom-done"' "$runDoc"
 
     # Default COMPLETE_LABEL baked into a default harness.
-    grep -q 'COMPLETE_LABEL:-agent-complete' ${harness.run}/bin/run
+    grep -q '"COMPLETE_LABEL":"agent-complete"' ${harness.runInputDocumentFile}
 
     # Default runtime is podman; the docker harness bakes docker.
-    grep -q 'RUNTIME="podman"' ${harness.run}/bin/run
-    grep -q 'RUNTIME="docker"' ${dockerHarness.run}/bin/run
+    grep -q '"RUNTIME":"podman"' ${harness.runInputDocumentFile}
+    grep -q '"RUNTIME":"docker"' ${dockerHarness.runInputDocumentFile}
 
     # bwrap harness bakes bwrap runtime and agent store paths; no OCI store paths.
-    grep -q 'RUNTIME="bwrap"' ${bwrapHarness.run}/bin/run
-    grep -q 'AGENT_FILES=' ${bwrapHarness.run}/bin/run
-    grep -q 'AGENT_ENV=' ${bwrapHarness.run}/bin/run
+    grep -q '"RUNTIME":"bwrap"' ${bwrapHarness.runInputDocumentFile}
+    grep -q '"AGENT_FILES":' ${bwrapHarness.runInputDocumentFile}
+    grep -q '"AGENT_ENV":' ${bwrapHarness.runInputDocumentFile}
     # IMAGE_ARCHIVE is not baked as a store path (empty-default guard is fine).
-    ! grep -q 'IMAGE_ARCHIVE="/nix/store/' ${bwrapHarness.run}/bin/run
-    grep -q 'AGENT_FILES_DRV=' ${bwrapHarness.build}/bin/build
-    grep -q 'AGENT_ENV_DRV=' ${bwrapHarness.build}/bin/build
-    ! grep -q 'IMAGE_DRV=' ${bwrapHarness.build}/bin/build
+    ! grep -q '"IMAGE_ARCHIVE":"/nix/store/' ${bwrapHarness.runInputDocumentFile}
+    grep -q '"AGENT_FILES_DRV":' ${bwrapHarness.buildInputDocumentFile}
+    grep -q '"AGENT_ENV_DRV":' ${bwrapHarness.buildInputDocumentFile}
+    ! grep -q '"IMAGE_DRV":' ${bwrapHarness.buildInputDocumentFile}
     touch $out
   '';
 
@@ -330,28 +345,57 @@ in
   flakemodule-widen-operator-knobs =
     let
       inherit (pkgs.lib) assertMsg;
+      # settings.<section>.<knob> is grouped by section; mkHarness's `defaults`
+      # is flat (schema attr name -> value, issue #353's own direct105 mirror
+      # above does the same flattening by hand). Schema attr names are unique
+      # across sections, so a plain right-biased merge is lossless.
+      flattenSettings = cfg: pkgs.lib.foldl' (acc: section: acc // section) { } (pkgs.lib.attrValues cfg);
       mkRun =
         settingsCfg:
-        (flake-parts.lib.mkFlake
-          {
-            inputs = {
-              inherit nixpkgs;
-              self = {
-                outPath = ../../.;
-              };
-            };
-          }
-          {
-            systems = [ system ];
-            imports = [ ../../lib/flakeModule.nix ];
-            perSystem.spindrift = {
-              packages = p: [ p.hello ];
-              settings = settingsCfg;
-            };
-          }
-        ).packages.${system}.spindrift;
+        let
+          moduleSpindrift =
+            (flake-parts.lib.mkFlake
+              {
+                inputs = {
+                  inherit nixpkgs;
+                  self = {
+                    outPath = ../../.;
+                  };
+                };
+              }
+              {
+                systems = [ system ];
+                imports = [ ../../lib/flakeModule.nix ];
+                perSystem.spindrift = {
+                  packages = p: [ p.hello ];
+                  settings = settingsCfg;
+                };
+              }
+            ).packages.${system}.spindrift;
+          # A direct mkHarness call with the equivalent flat `defaults`, so the
+          # baked document is reachable (the flakeModule shim exposes only
+          # `packages`/`apps`, not mkHarness's full attrset) — validated
+          # against the module path by the derivation-equality assert below,
+          # the same pattern flakemodule-schema-options above uses.
+          direct = import ../../lib/mkHarness.nix {
+            inherit nixpkgs system;
+            packages = p: [ p.hello ];
+            defaults = flattenSettings settingsCfg;
+          };
+        in
+        {
+          inherit moduleSpindrift;
+          inherit (direct) spindrift runInputDocumentFile;
+        };
 
-      behaviorRun = mkRun {
+      assertModuleMatchesDirect =
+        run:
+        assert assertMsg (
+          run.moduleSpindrift == run.spindrift
+        ) "spindrift mismatch: ${run.moduleSpindrift} != ${run.spindrift}";
+        run;
+
+      behaviorRun = assertModuleMatchesDirect (mkRun {
         selfHealing = {
           maxFixAttempts = 5;
           maxRebaseAttempts = 2;
@@ -366,60 +410,65 @@ in
           mergePollInterval = 90;
           mergePollTimeout = 3600;
         };
-      };
+      });
 
-      identityRun = mkRun {
+      identityRun = assertModuleMatchesDirect (mkRun {
         repository = {
           repoSlug = "test-org/test-repo";
           gitUserName = "Test Bot";
           gitUserEmail = "bot@test.example";
         };
-      };
+      });
 
-      # REPO_SLUG without a consumer setting must bake an *empty* default so
-      # runtime required-validation is not masked.  renderDefaultsPreamble
-      # emits `REPO_SLUG="${REPO_SLUG:-}"` (value = ""); the grep matches
-      # `REPO_SLUG:-}"` (i.e. `:-` immediately followed by `}"`).
-      defaultRun = mkRun { };
+      # REPO_SLUG without a consumer setting must bake an *empty* value so
+      # runtime required-validation is not masked. The document renders
+      # `"REPO_SLUG":""`; the grep matches that exact empty-string pair.
+      defaultRun = assertModuleMatchesDirect (mkRun { });
 
       # ISSUE_NUMBER must not be settable via settings (per-run dispatch
-      # override; keep-off list).
-      badIssueNumber = builtins.tryEval (mkRun {
-        issueDiscovery.issueNumber = "42";
-      });
+      # override; keep-off list). Forcing .moduleSpindrift (not just the
+      # lazily-returned mkRun attrset) is what actually reaches the
+      # flake-parts module evaluation an unknown option throws from.
+      badIssueNumber =
+        builtins.tryEval
+          (mkRun {
+            issueDiscovery.issueNumber = "42";
+          }).moduleSpindrift;
     in
     assert assertMsg (
       !badIssueNumber.success
     ) "ISSUE_NUMBER must not be settable via settings.issueDiscovery (keep-off list)";
     pkgs.runCommand "flakemodule-widen-operator-knobs"
       {
-        inherit behaviorRun identityRun defaultRun;
+        behaviorDoc = behaviorRun.runInputDocumentFile;
+        identityDoc = identityRun.runInputDocumentFile;
+        defaultDoc = defaultRun.runInputDocumentFile;
       }
       ''
-        grep -q 'MAX_FIX_ATTEMPTS:-5' "$behaviorRun/bin/spindrift" \
-          || { echo "MAX_FIX_ATTEMPTS:-5 not baked in spindrift cmd" >&2; exit 1; }
-        grep -q 'MAX_REBASE_ATTEMPTS:-2' "$behaviorRun/bin/spindrift" \
-          || { echo "MAX_REBASE_ATTEMPTS:-2 not baked in spindrift cmd" >&2; exit 1; }
-        grep -q 'HOLD_JITTER_SECS:-10' "$behaviorRun/bin/spindrift" \
-          || { echo "HOLD_JITTER_SECS:-10 not baked in spindrift cmd" >&2; exit 1; }
-        grep -q 'TRANSIENT_BACKOFF_SECS:-60' "$behaviorRun/bin/spindrift" \
-          || { echo "TRANSIENT_BACKOFF_SECS:-60 not baked in spindrift cmd" >&2; exit 1; }
-        grep -q 'TRANSIENT_RETRY_MAX:-5' "$behaviorRun/bin/spindrift" \
-          || { echo "TRANSIENT_RETRY_MAX:-5 not baked in spindrift cmd" >&2; exit 1; }
-        grep -q 'MAX_JOBS:-2' "$behaviorRun/bin/spindrift" \
-          || { echo "MAX_JOBS:-2 not baked in spindrift cmd" >&2; exit 1; }
-        grep -q 'MERGE_POLL_INTERVAL:-90' "$behaviorRun/bin/spindrift" \
-          || { echo "MERGE_POLL_INTERVAL:-90 not baked in spindrift cmd" >&2; exit 1; }
-        grep -q 'MERGE_POLL_TIMEOUT:-3600' "$behaviorRun/bin/spindrift" \
-          || { echo "MERGE_POLL_TIMEOUT:-3600 not baked in spindrift cmd" >&2; exit 1; }
-        grep -q 'REPO_SLUG:-test-org/test-repo' "$identityRun/bin/spindrift" \
-          || { echo "REPO_SLUG:-test-org/test-repo not baked in spindrift cmd" >&2; exit 1; }
-        grep -q 'GIT_USER_NAME:-Test Bot' "$identityRun/bin/spindrift" \
-          || { echo "GIT_USER_NAME:-Test Bot not baked in spindrift cmd" >&2; exit 1; }
-        grep -q 'GIT_USER_EMAIL:-bot@test.example' "$identityRun/bin/spindrift" \
-          || { echo "GIT_USER_EMAIL:-bot@test.example not baked in spindrift cmd" >&2; exit 1; }
-        grep -q 'REPO_SLUG:-}"' "$defaultRun/bin/spindrift" \
-          || { echo "REPO_SLUG must have empty baked default (REPO_SLUG:-}) when not set; required validation must not be masked" >&2; exit 1; }
+        grep -q '"MAX_FIX_ATTEMPTS":"5"' "$behaviorDoc" \
+          || { echo "MAX_FIX_ATTEMPTS=5 not baked in the input document" >&2; exit 1; }
+        grep -q '"MAX_REBASE_ATTEMPTS":"2"' "$behaviorDoc" \
+          || { echo "MAX_REBASE_ATTEMPTS=2 not baked in the input document" >&2; exit 1; }
+        grep -q '"HOLD_JITTER_SECS":"10"' "$behaviorDoc" \
+          || { echo "HOLD_JITTER_SECS=10 not baked in the input document" >&2; exit 1; }
+        grep -q '"TRANSIENT_BACKOFF_SECS":"60"' "$behaviorDoc" \
+          || { echo "TRANSIENT_BACKOFF_SECS=60 not baked in the input document" >&2; exit 1; }
+        grep -q '"TRANSIENT_RETRY_MAX":"5"' "$behaviorDoc" \
+          || { echo "TRANSIENT_RETRY_MAX=5 not baked in the input document" >&2; exit 1; }
+        grep -q '"MAX_JOBS":"2"' "$behaviorDoc" \
+          || { echo "MAX_JOBS=2 not baked in the input document" >&2; exit 1; }
+        grep -q '"MERGE_POLL_INTERVAL":"90"' "$behaviorDoc" \
+          || { echo "MERGE_POLL_INTERVAL=90 not baked in the input document" >&2; exit 1; }
+        grep -q '"MERGE_POLL_TIMEOUT":"3600"' "$behaviorDoc" \
+          || { echo "MERGE_POLL_TIMEOUT=3600 not baked in the input document" >&2; exit 1; }
+        grep -q '"REPO_SLUG":"test-org/test-repo"' "$identityDoc" \
+          || { echo "REPO_SLUG=test-org/test-repo not baked in the input document" >&2; exit 1; }
+        grep -q '"GIT_USER_NAME":"Test Bot"' "$identityDoc" \
+          || { echo "GIT_USER_NAME='Test Bot' not baked in the input document" >&2; exit 1; }
+        grep -q '"GIT_USER_EMAIL":"bot@test.example"' "$identityDoc" \
+          || { echo "GIT_USER_EMAIL=bot@test.example not baked in the input document" >&2; exit 1; }
+        grep -q '"REPO_SLUG":""' "$defaultDoc" \
+          || { echo "REPO_SLUG must be empty in the document when not set; required validation must not be masked" >&2; exit 1; }
         touch $out
       '';
 
