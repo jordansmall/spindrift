@@ -366,3 +366,92 @@ func TestView_DrillInErr_Surfaced(t *testing.T) {
 		t.Errorf("View() = %q, want it to contain %q", out, errBoom.Error())
 	}
 }
+
+// TestView_TwoColumn_BacklogColumn_HasLabel verifies the backlog renders
+// under its own "backlog" column label, so the two-column body (issue #844,
+// ADR 0025) reads as two named regions instead of a bare list.
+func TestView_TwoColumn_BacklogColumn_HasLabel(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "fix the thing"}}})
+
+	out := View(m)
+	if !strings.Contains(out, "backlog") {
+		t.Errorf("View() = %q, want a labeled backlog column", out)
+	}
+}
+
+// TestView_TwoColumn_WorkQueueColumn_HasLabelEvenWhenEmpty verifies the
+// work-queue column renders its label even with no picks yet — a labeled
+// empty column, not one that appears only once something is queued (issue
+// #844, ADR 0025).
+func TestView_TwoColumn_WorkQueueColumn_HasLabelEvenWhenEmpty(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+
+	out := View(m)
+	if !strings.Contains(out, "picks:") {
+		t.Errorf("View() = %q, want the work-queue column label even with no picks", out)
+	}
+}
+
+// TestView_TwoColumn_Body_RendersSideBySide verifies the backlog and
+// work-queue columns render side by side on a terminal wide enough for both,
+// so their rows share output lines instead of stacking one above the other
+// (issue #844, ADR 0025).
+func TestView_TwoColumn_Body_RendersSideBySide(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
+	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
+
+	out := View(m)
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "backlog issue") && strings.Contains(l, "queued pick") {
+			return
+		}
+	}
+	t.Errorf("View() = %q, want a line carrying both a backlog row and a work-queue row", out)
+}
+
+// TestView_TwoColumn_Body_StacksOnNarrowTerminal verifies the body stacks
+// the backlog above the work queue, rather than splitting them side by
+// side, on a terminal too narrow for two readable columns — degrading
+// gracefully instead of wrapping into an unreadable mess (issue #844, ADR
+// 0025 AC6).
+func TestView_TwoColumn_Body_StacksOnNarrowTerminal(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
+	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
+
+	out := View(m)
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "backlog issue") && strings.Contains(l, "queued pick") {
+			t.Errorf("View() on a narrow terminal = %q, want stacked columns, not a shared line", out)
+		}
+	}
+}
+
+// TestView_TwoColumn_Queue_RowsTaggedWithBracketedState verifies each
+// work-queue row carries its PickState as a bracketed tag — running, held,
+// queued distinguishable at a glance — with a held row also naming its
+// blocker and a running row also carrying its heartbeat (issue #844 AC3/
+// AC4, ADR 0025).
+func TestView_TwoColumn_Queue_RowsTaggedWithBracketedState(t *testing.T) {
+	m := NewModel()
+	m.Picks = []Pick{
+		{Number: "1", Title: "queued one", State: PickQueued},
+		{Number: "2", Title: "blocked one", State: PickHeld, BlockedBy: "#41 (native)"},
+		{Number: "3", Title: "running one", State: PickRunning, Heartbeat: "7 turns"},
+	}
+
+	out := View(m)
+	for _, want := range []string{"[queued]", "[held]", "[running]"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("View() = %q, want bracketed state tag %q", out, want)
+		}
+	}
+	if !strings.Contains(out, "held by #41 (native)") {
+		t.Errorf("View() = %q, want the held row's blocker", out)
+	}
+	if !strings.Contains(out, "7 turns") {
+		t.Errorf("View() = %q, want the running row's heartbeat", out)
+	}
+}

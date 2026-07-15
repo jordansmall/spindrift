@@ -404,7 +404,7 @@ func TestTea_WithLauncher_RendersCapAndLive(t *testing.T) {
 // screen (#646 AC4, AC6).
 func TestTea_WithLauncher_RendersLiveQueueState(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
 	// Simulate a state transition that happened entirely on the background
@@ -425,7 +425,7 @@ func TestTea_WithLauncher_RendersLiveQueueState(t *testing.T) {
 // "queue rows show ... blocked (with a held by #N badge)").
 func TestTea_WithLauncher_RendersHeldPickWithBlockedByBadge(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
 	// A held pick's badge is set entirely by Queue.Discover's blocker check
@@ -529,7 +529,11 @@ func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "p")
-	waitForOutput(t, tm, "picks:", "#42", "fix the thing")
+	// "  #42" (queue row's two-space indent) proves the pick landed on the
+	// work-queue column — the "picks:" label itself is static now (issue
+	// #844) and Bubble Tea never redraws an unchanged line, so it wouldn't
+	// reappear in this second WaitFor's freshly-read bytes.
+	waitForOutput(t, tm, "  #42", "fix the thing")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
@@ -570,7 +574,7 @@ func TestTea_PickKey_FollowedByNonA_ResolvesToSinglePick(t *testing.T) {
 
 	sendKey(tm, "p")
 	sendKey(tm, "z") // not "a" — resolves to a single pick right away
-	waitForOutput(t, tm, "picks:", "#42")
+	waitForOutput(t, tm, "  #42")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
@@ -590,7 +594,7 @@ func TestTea_PickKey_AlreadyPicked_NoDuplicateRow(t *testing.T) {
 
 	sendKey(tm, "p")
 	sendKey(tm, "z") // resolve the "pa" chord to a single pick right away
-	waitForOutput(t, tm, "picks:", "#42")
+	waitForOutput(t, tm, "  #42")
 
 	sendKey(tm, "p")
 	sendKey(tm, "z")
