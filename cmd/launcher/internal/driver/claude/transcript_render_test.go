@@ -1,11 +1,28 @@
 package claude_test
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver/claude"
 )
+
+func writeLog(t *testing.T, lines ...string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "test.log")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	for _, l := range lines {
+		if _, err := f.WriteString(l + "\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return path
+}
 
 func TestRenderTranscript_AssistantNarration_RendersImplementorLine(t *testing.T) {
 	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"Investigating the failing test."}]}}`
