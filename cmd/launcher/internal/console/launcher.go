@@ -2,6 +2,7 @@ package console
 
 import (
 	"sync"
+	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
@@ -19,14 +20,54 @@ type Launcher struct {
 	Factory   *dispatch.Factory
 	Settle    settle.Settler
 	Queue     *Queue
+	// MaxParallel caps how many Dispatches run at once. Zero (the default
+	// zero-value struct literal) falls back to 1, matching the pre-#647
+	// single-slot behaviour.
+	MaxParallel int
 
 	mu        sync.Mutex
 	launching bool
 	wg        sync.WaitGroup
+	refresh   chan struct{}
+	// pollInterval overrides Run's default background poll cadence — unset
+	// (zero) in every production construction site, so only same-package
+	// tests reach in to shrink it below defaultPollInterval.
+	pollInterval time.Duration
 }
 
-// tryLaunch starts draining Queue through waves.RunContinuous, single slot
-// (MaxParallel=1), in the background, unless a drain is already running —
+// refreshChan lazily constructs l.refresh, so a bare struct literal (every
+// production and test call site) needs no constructor to use it. Buffered
+// to exactly one slot: a burst of writes (claim, settle, promotion) coalesces
+// into a single pending refresh instead of queuing one per write.
+func (l *Launcher) refreshChan() chan struct{} {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.refresh == nil {
+		l.refresh = make(chan struct{}, 1)
+	}
+	return l.refresh
+}
+
+// signalRefresh marks a refresh pending — called after every write this
+// session makes to the tracker (a claim, a settle, a promotion), so Run's
+// select loop re-queries the backlog without the operator asking (#647 AC4).
+// Non-blocking: a refresh already pending is left alone.
+func (l *Launcher) signalRefresh() {
+	select {
+	case l.refreshChan() <- struct{}{}:
+	default:
+	}
+}
+
+// Refreshes returns the channel Run selects on for background-write-triggered
+// refreshes.
+func (l *Launcher) Refreshes() <-chan struct{} {
+	return l.refreshChan()
+}
+
+// tryLaunch starts draining Queue through waves.RunContinuous, up to
+// MaxParallel slots (1 when unset), in the background, unless a drain is
+// already running —
 // RunContinuous's own refill-on-completion picks up any pick Add()ed to
 // Queue while that drain is in flight, so a second concurrent invocation is
 // never needed, only a fresh one once the queue has gone idle.
@@ -54,10 +95,17 @@ func (l *Launcher) tryLaunch(tracker forge.IssueTracker, pwd string) {
 // starts a fresh drain itself.
 func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 	defer l.wg.Done()
-	discover := func() ([]waves.Issue, map[string][]string, error) { return l.Queue.Discover(tracker) }
+	discover := func() ([]waves.Issue, map[string][]string, error) {
+		defer l.signalRefresh() // a claim attempt is always a tracker write, win or lose
+		return l.Queue.Discover(tracker)
+	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
+	maxParallel := l.MaxParallel
+	if maxParallel <= 0 {
+		maxParallel = 1
+	}
 	for {
-		_ = waves.RunContinuous(waves.Config{MaxParallel: 1}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue}, discover, fresh)
+		_ = waves.RunContinuous(waves.Config{MaxParallel: maxParallel}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue, l.signalRefresh}, discover, fresh)
 
 		l.mu.Lock()
 		if !l.Queue.hasQueued() {

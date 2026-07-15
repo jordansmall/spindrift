@@ -33,6 +33,9 @@ func View(m Model) string {
 			if p.Reason != "" {
 				fmt.Fprintf(&b, "  (%s)", p.Reason)
 			}
+			if p.Heartbeat != "" {
+				fmt.Fprintf(&b, "  %s", p.Heartbeat)
+			}
 			b.WriteString("\n")
 		}
 	}

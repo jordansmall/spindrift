@@ -869,7 +869,7 @@ func cmdDoctor() int {
 // bootstrap in production; tests construct it directly with fakes.
 func cmdConsole(lc *launchContext) int {
 	defer lc.cleanup()
-	launch := &console.Launcher{CodeForge: lc.codeForge, Factory: lc.factory, Settle: lc.settle, Queue: console.NewQueue()}
+	launch := &console.Launcher{CodeForge: lc.codeForge, Factory: lc.factory, Settle: lc.settle, Queue: console.NewQueue(), MaxParallel: lc.config.maxParallel}
 	if err := console.Run(lc.issueTracker, lc.pwd, os.Stdin, os.Stdout, launch); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
