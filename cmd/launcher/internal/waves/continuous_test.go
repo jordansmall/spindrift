@@ -671,3 +671,58 @@ func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.
 		t.Errorf("Settle must not be called after termination; got %+v", fakeSettle.SettleCalls)
 	}
 }
+
+// TestRunContinuous_FailedBoxCallsSettlerFail verifies that when a Box exits
+// non-zero (result.Success == false, no termination in play), RunContinuous
+// transitions the tracker issue to Failed *and* calls the Settler's Fail
+// hook — the seam a wrapper like the Console's queueSettler uses to move its
+// queue row to a terminal state instead of stranding it at "running" (issue
+// #705).
+func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	fr.RunErr = boxErr
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	fakeSettle := settle.NewFake()
+
+	discover := func() ([]Issue, map[string][]string, Sources, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return out, map[string][]string{}, nil, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	if err := RunContinuous(c, fc, fc, dir, f, fakeSettle, discover, fresh); err != nil {
+		t.Fatalf("RunContinuous: got %v, want nil", err)
+	}
+
+	found := false
+	for _, call := range fc.TransitionStateCalls {
+		if call.To == forge.Failed {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("must transition to Failed; got %+v", fc.TransitionStateCalls)
+	}
+	if len(fakeSettle.FailCalls) != 1 || fakeSettle.FailCalls[0].Num != "1" {
+		t.Errorf("fakeSettle.FailCalls = %+v, want one call for #1", fakeSettle.FailCalls)
+	}
+	if len(fakeSettle.SettleCalls) != 0 {
+		t.Errorf("Settle must not be called on a Box failure; got %+v", fakeSettle.SettleCalls)
+	}
+}

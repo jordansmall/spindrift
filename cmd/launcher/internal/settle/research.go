@@ -62,3 +62,9 @@ func (r *ResearchSettle) fail(num, note string) {
 // Settler interface.
 func (r *ResearchSettle) SettleAdopted(d dispatch.Dispatcher, num, prURL string) {
 }
+
+// Fail is unreachable in practice: RunContinuous's Box-failure branch calls
+// it, but research dispatch runs through its own one-shot entry point, not
+// RunContinuous. Present only to satisfy the Settler interface.
+func (r *ResearchSettle) Fail(num string, result dispatch.Result) {
+}

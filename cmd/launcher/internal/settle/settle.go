@@ -46,6 +46,14 @@ type Settler interface {
 	// already-discovered open non-draft PR with no outcome line (the
 	// reconcile/recover entry point).
 	SettleAdopted(d dispatch.Dispatcher, num, prURL string)
+
+	// Fail records a Box that ran and exited non-zero (result.Success ==
+	// false). Unlike Settle, it runs no merge-gate machinery — the caller
+	// already transitioned the tracker issue to Failed itself — this hook
+	// exists solely so a wrapper (e.g. the Console's queueSettler) can react
+	// to a natural Box failure the same way it reacts to a settle (issue
+	// #705).
+	Fail(num string, result dispatch.Result)
 }
 
 // Settle is the prod adapter: constructed once per top-level dispatch entry
@@ -80,6 +88,12 @@ func (s *Settle) SetTerminated(reg *terminate.Registry) {
 func (s *Settle) terminated(num string) bool {
 	return s.term.Marked(num)
 }
+
+// Fail is a no-op: every headless dispatch path already transitions the
+// tracker issue to Failed itself before calling this, and Settle has no
+// queue or other UI-facing state of its own to react with. It exists only
+// to satisfy Settler so a wrapper (the Console's queueSettler) has a hook.
+func (s *Settle) Fail(num string, result dispatch.Result) {}
 
 var _ Settler = (*Settle)(nil)
 

@@ -50,3 +50,24 @@ func TestQueueSettler_Settle_SkipsPickUpdateWhenTerminated(t *testing.T) {
 		t.Errorf("pick state = %v, want it left at PickTerminated", got)
 	}
 }
+
+// TestQueueSettler_Fail_MarksPickFailedAndDelegates verifies the queue
+// settler marks the numbered pick failed and still drives the wrapped
+// Settler's own Fail hook, giving a naturally-failed Box a terminal queue
+// state instead of stranding it at PickRunning (issue #705).
+func TestQueueSettler_Fail_MarksPickFailedAndDelegates(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	inner := settle.NewFake()
+	qs := queueSettler{Settler: inner, q: q}
+
+	result := dispatch.Result{Success: false}
+	qs.Fail("42", result)
+
+	if len(inner.FailCalls) != 1 || inner.FailCalls[0].Num != "42" {
+		t.Errorf("inner.FailCalls = %+v, want one call for #42", inner.FailCalls)
+	}
+	if got := q.Snapshot()[0].State; got != PickFailed {
+		t.Errorf("pick state = %v, want failed", got)
+	}
+}
