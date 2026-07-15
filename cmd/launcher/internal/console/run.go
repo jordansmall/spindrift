@@ -54,6 +54,8 @@ func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer, la
 		close(lines)
 	}()
 
+	offerOrphanRecovery(out, launch, lines)
+
 	var refresh <-chan struct{}
 	if launch != nil {
 		refresh = launch.Refreshes()
@@ -106,6 +108,41 @@ func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer, la
 	// hang forever, so a clean quit reports no scan error rather than racing
 	// or blocking on the scanner it no longer owns.
 	return nil
+}
+
+// offerOrphanRecovery detects, once at Console startup, any sandbox still
+// running under the deterministic agent-issue-<N> naming scheme with
+// nothing in this fresh process tracking it — the signature of a hard death
+// (crash, dropped SSH) from a prior session (issue #651, ADR 0023). Each one
+// is offered to the operator by number, blocking on one line read from
+// lines per orphan; "y"/"yes" (case-insensitive) adopts it through
+// launch.RecoverFn (the existing recover path), anything else — including
+// input running out — declines and leaves that orphan, and every one after
+// it, untouched. A nil launch, or a Launcher with no RecoverFn wired (tests
+// not exercising recovery, and every pre-#651 call site), skips detection
+// entirely.
+func offerOrphanRecovery(out io.Writer, launch *Launcher, lines <-chan string) {
+	if launch == nil || launch.RecoverFn == nil {
+		return
+	}
+	nums, err := launch.OrphanedIssues()
+	if err != nil || len(nums) == 0 {
+		return
+	}
+	for _, num := range nums {
+		fmt.Fprintf(out, "orphaned container found for #%s (hard death from a prior session) — recover? [y/N]\n", num)
+		line, ok := <-lines
+		if !ok {
+			return
+		}
+		answer := strings.ToLower(strings.TrimSpace(line))
+		if answer != "y" && answer != "yes" {
+			continue
+		}
+		if err := launch.RecoverFn(num); err != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: recover: %v\n", num, err)
+		}
+	}
 }
 
 // doRefresh re-queries tracker for the backlog and, if a transcript is open,
@@ -179,9 +216,15 @@ func applyCommand(m Model, tracker forge.IssueTracker, pwd string, launch *Launc
 	if m.PendingTerminate != "" {
 		return applyTerminateConfirm(m, tracker, launch, line)
 	}
+	if m.PendingQuit {
+		return applyQuitConfirm(m, tracker, launch, line)
+	}
 	cmd, arg, _ := strings.Cut(strings.TrimSpace(line), " ")
 	switch cmd {
 	case "q", "quit":
+		if launch != nil && len(launch.LiveIssues()) > 0 {
+			return Update(m, QuitRequestedMsg{})
+		}
 		return Update(m, QuitMsg{})
 	case "r", "refresh":
 		return doRefresh(m, tracker, pwd, launch)
@@ -265,6 +308,60 @@ func applyTerminateConfirm(m Model, tracker forge.IssueTracker, launch *Launcher
 		}
 	}
 	return Update(m, TerminateConfirmedMsg{Number: num})
+}
+
+// applyQuitConfirm interprets one line of input as the operator's answer to
+// a pending "quit with live Dispatches" prompt (issue #651): "d"/"drain", or
+// a bare empty line, drops every queued/held pick (they hold at Dispatchable
+// already, so dropping is a pure session-queue edit) and lets every live
+// Dispatch settle naturally; "t"/"terminate-all" additionally applies
+// Terminate to every running pick (ADR 0024); anything else ("s"/"stay" or
+// unrecognized) cancels the pending quit and keeps the session running.
+func applyQuitConfirm(m Model, tracker forge.IssueTracker, launch *Launcher, line string) Model {
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "", "d", "drain":
+		dropQueuedAndHeld(launch)
+		return Update(m, QuitMsg{})
+	case "t", "terminate-all":
+		dropQueuedAndHeld(launch)
+		terminateAllRunning(tracker, launch)
+		return Update(m, QuitMsg{})
+	default:
+		return Update(m, QuitCancelledMsg{})
+	}
+}
+
+// dropQueuedAndHeld removes every pick still holding at PickQueued or
+// PickHeld from launch's Queue — drain's "launch nothing new" side effect
+// (issue #651): each dropped pick was already Dispatchable on the tracker
+// (a pick never claims until Discover's own atomic transition), so dropping
+// it here leaves its issue untouched at Dispatchable, exactly as Unpick
+// already guarantees. A nil launch is a no-op.
+func dropQueuedAndHeld(launch *Launcher) {
+	if launch == nil {
+		return
+	}
+	for _, p := range launch.Queue.Snapshot() {
+		if p.State == PickQueued || p.State == PickHeld {
+			launch.Queue.Remove(p.Number)
+		}
+	}
+}
+
+// terminateAllRunning applies Launcher.Terminate to every pick still
+// PickRunning — the quit dialog's terminate-all escalation (ADR 0024, issue
+// #651). A nil launch is a no-op.
+func terminateAllRunning(tracker forge.IssueTracker, launch *Launcher) {
+	if launch == nil {
+		return
+	}
+	for _, p := range launch.Queue.Snapshot() {
+		if p.State == PickRunning {
+			if err := launch.Terminate(tracker, p.Number); err != nil {
+				fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: %v\n", p.Number, err)
+			}
+		}
+	}
 }
 
 // applyPickMsg lands one PickIssue-adapter result (from a single "p <num>"
