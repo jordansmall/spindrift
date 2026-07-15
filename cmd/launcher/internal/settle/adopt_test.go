@@ -106,6 +106,27 @@ func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 	}
 }
 
+// TestSettleAdopted_PushOnlyForgeSkipsVerify verifies that SettleAdopted's
+// landingMerged case guards the verifyMerged call against a push-only
+// forge's nil s.pr (issue #697), mirroring Settle's own "ready"/"merged"
+// guards in gate.go.
+func TestSettleAdopted_PushOnlyForgeSkipsVerify(t *testing.T) {
+	const branch = "agent/issue-1"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+
+	c := baseConfig()
+	s := New(c, fc, fc.AsPushOnly())
+
+	s.SettleAdopted(dispatch.NewFake(), "1", branch)
+
+	iss, _ := fc.Issue("1")
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue 1 must NOT have agent-failed; got labels=%v", iss.Labels)
+	}
+}
+
 // TestSettleAdopted_GreenMergesAndCompletes verifies the green-CI path merges
 // the adopted PR and reaches agent-complete without dispatching any fix pass.
 func TestSettleAdopted_GreenMergesAndCompletes(t *testing.T) {

@@ -17,7 +17,11 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num, prURL string) {
 	fmt.Printf("    #%s  landing=%s  status=adopted  note=no outcome line; PR discovered on %s\n", num, prURL, branch)
 	switch s.selfHeal(d, num, prURL) {
 	case landingMerged:
-		s.verifyMerged(num, prURL)
+		// verifyMerged reads PR state, which a push-only Code Forge does not
+		// have (mirrors Settle's own "ready"/"merged" guards in gate.go).
+		if s.pr != nil {
+			s.verifyMerged(num, prURL)
+		}
 	case landingFailed:
 		fmt.Printf("    #%s  landing=%s  status=failed  !! CI or merge failed\n", num, prURL)
 	case landingAbandoned:
