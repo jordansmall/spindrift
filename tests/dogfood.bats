@@ -204,8 +204,24 @@ EOF
 }
 
 @test "dogfood proceeds when podman machine RAM meets MEMORY_LIMIT" {
-  export FAKE_PODMAN_MACHINE_MEMORY_MIB=4096
-  run env BASE_BRANCH=main MEMORY_LIMIT=4g bash "$WORK/dogfood.sh"
+  export FAKE_PODMAN_MACHINE_MEMORY_MIB=4608
+  run env BASE_BRANCH=main MEMORY_LIMIT=4g MAX_PARALLEL=1 bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"podman machine set --memory"* ]]
+}
+
+@test "dogfood aborts when podman machine RAM fits one container but not MAX_PARALLEL of them" {
+  export FAKE_PODMAN_MACHINE_MEMORY_MIB=8192
+  run env BASE_BRANCH=main MEMORY_LIMIT=4g MAX_PARALLEL=3 bash "$WORK/dogfood.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"8192"* ]]
+  [[ "$output" == *"MAX_PARALLEL=3"* ]]
+  [[ "$output" == *"lower MAX_PARALLEL"* ]]
+}
+
+@test "dogfood proceeds when podman machine RAM meets MEMORY_LIMIT times MAX_PARALLEL" {
+  export FAKE_PODMAN_MACHINE_MEMORY_MIB=16384
+  run env BASE_BRANCH=main MEMORY_LIMIT=4g MAX_PARALLEL=3 bash "$WORK/dogfood.sh"
   [ "$status" -eq 0 ]
   [[ "$output" != *"podman machine set --memory"* ]]
 }
@@ -221,5 +237,12 @@ EOF
   run env BASE_BRANCH=main MEMORY_LIMIT= bash "$WORK/dogfood.sh"
   [ "$status" -eq 0 ]
   [[ "$output" != *"podman machine set --memory"* ]]
+}
+
+@test "dogfood defaults MEMORY_LIMIT to 5g when unset" {
+  export FAKE_PODMAN_MACHINE_MEMORY_MIB=4096
+  run env BASE_BRANCH=main MAX_PARALLEL=1 bash "$WORK/dogfood.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"MEMORY_LIMIT=5g"* ]]
 }
 
