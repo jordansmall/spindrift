@@ -46,7 +46,7 @@ func TestRunContinuous_DrainsScriptedQueue_LaunchesOneDispatchEndToEnd(t *testin
 	inner := settle.NewFake()
 	qs := queueSettler{Settler: inner, q: q}
 
-	discover := func() ([]waves.Issue, map[string][]string, error) { return q.Discover(f) }
+	discover := func() ([]waves.Issue, map[string][]string, error) { return q.Discover(f, f, "") }
 	fresh := func() (bool, bool, string) { return false, true, "" }
 
 	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, f, f, dir, factory, qs, discover, fresh)
@@ -135,6 +135,82 @@ func TestLauncher_MaxParallel_CapsConcurrency_RefillsOnSettle(t *testing.T) {
 		if p.State != PickSettled {
 			t.Errorf("pick #%s state = %v, want settled", p.Number, p.State)
 		}
+	}
+}
+
+// TestQueue_Discover_HeldPickLaunchesOnceBlockerClears verifies a pick held
+// on an open blocker (#650) re-evaluates on the refill that follows the
+// blocker's own Dispatch settling, and launches with no operator action the
+// moment the blocker reads ready — "do this, then that" queued in one
+// sitting, driven end to end through the existing Discoverer seam.
+func TestQueue_Discover_HeldPickLaunchesOnceBlockerClears(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Failed: "agent-failed"})
+	f.SetIssue(forge.Issue{Number: "41", Title: "first", Labels: []string{"ready-for-agent"}, State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "42", Title: "then", Labels: []string{"ready-for-agent"}})
+	f.NativeDeps = map[string][]string{"42": {"41"}}
+
+	q := NewQueue()
+	q.Add(Pick{Number: "41", Title: "first", State: PickQueued})
+	q.Add(Pick{Number: "42", Title: "then", State: PickQueued})
+
+	fr := runner.NewFake()
+	release41 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Issue == "41" {
+			<-release41
+		}
+		return nil
+	}
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	inner := settle.NewFake()
+	qs := queueSettler{Settler: inner, q: q}
+
+	discover := func() ([]waves.Issue, map[string][]string, error) { return q.Discover(f, f, "agent-failed") }
+	fresh := func() (bool, bool, string) { return false, true, "" }
+
+	resultCh := make(chan error, 1)
+	go func() {
+		resultCh <- waves.RunContinuous(waves.Config{MaxParallel: 2}, f, f, dir, factory, qs, discover, fresh)
+	}()
+
+	waitForPickStates(t, q, map[string]PickState{"42": PickHeld})
+	if got := q.Snapshot(); len(got) != 2 || got[1].BlockedBy == "" {
+		t.Fatalf("pick #42 = %+v, want BlockedBy naming #41", got)
+	}
+
+	f.SetIssue(forge.Issue{Number: "41", Title: "first", Labels: []string{"agent-in-progress"}, State: forge.IssueClosed})
+	close(release41)
+
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatalf("RunContinuous: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return after the blocker cleared")
+	}
+
+	snap := q.Snapshot()
+	got := map[string]PickState{}
+	for _, p := range snap {
+		got[p.Number] = p.State
+	}
+	if got["41"] != PickSettled || got["42"] != PickSettled {
+		t.Errorf("pick states = %+v, want both settled", got)
 	}
 }
 

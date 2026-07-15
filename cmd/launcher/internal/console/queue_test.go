@@ -1,6 +1,7 @@
 package console
 
 import (
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -13,7 +14,7 @@ func TestQueue_Discover_EmptyQueue_ReturnsNoIssues(t *testing.T) {
 	q := NewQueue()
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 
-	issues, edges, err := q.Discover(f)
+	issues, edges, err := q.Discover(f, f, "")
 
 	if err != nil || len(issues) != 0 || len(edges) != 0 {
 		t.Errorf("Discover() = %v, %v, %v, want no issues", issues, edges, err)
@@ -30,7 +31,7 @@ func TestQueue_Discover_ClaimsAndReturnsFrontQueuedPick(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	issues, edges, err := q.Discover(f)
+	issues, edges, err := q.Discover(f, f, "")
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -66,7 +67,7 @@ func TestQueue_Discover_RacedClaim_DissolvesAndTriesNext(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 	f.SetIssue(forge.Issue{Number: "43", Labels: []string{"ready-for-agent"}})
 
-	issues, _, err := q.Discover(raceOnNum{Fake: f, racedNum: "42"})
+	issues, _, err := q.Discover(raceOnNum{Fake: f, racedNum: "42"}, f, "")
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -98,7 +99,7 @@ func TestQueue_Discover_DuplicateNumber_ClaimTargetsNewestRow(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
 
-	issues, _, err := q.Discover(f)
+	issues, _, err := q.Discover(f, f, "")
 
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -113,6 +114,73 @@ func TestQueue_Discover_DuplicateNumber_ClaimTargetsNewestRow(t *testing.T) {
 	}
 	if snap[1].State != PickRunning {
 		t.Errorf("new row = %+v, want it to become PickRunning (the actual claim)", snap[1])
+	}
+}
+
+// TestQueue_Discover_HoldsPickWithOpenBlocker verifies a pick whose declared
+// blocker is not yet ready holds at PickHeld instead of launching — edge
+// resolution reuses waves.BuildEdges/BlockerReady, no second parser (#650).
+func TestQueue_Discover_HoldsPickWithOpenBlocker(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Failed: "agent-failed"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen})
+	f.NativeDeps = map[string][]string{"42": {"41"}}
+
+	issues, _, err := q.Discover(f, f, "agent-failed")
+
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Errorf("issues = %+v, want none (held)", issues)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none — a held pick never claims", f.TransitionStateCalls)
+	}
+	snap := q.Snapshot()[0]
+	if snap.State != PickHeld {
+		t.Errorf("state = %v, want held", snap.State)
+	}
+	if !strings.Contains(snap.BlockedBy, "#41") {
+		t.Errorf("BlockedBy = %q, want it to name #41", snap.BlockedBy)
+	}
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasLabel(iss, "ready-for-agent") {
+		t.Errorf("issue #42 labels = %v, want ready-for-agent (still Dispatchable while held)", iss.Labels)
+	}
+}
+
+// TestQueue_Discover_FailedBlockerSurfacedPickStaysHeld verifies a blocker
+// that lands Failed is surfaced on the held row (Reason) rather than
+// dissolving the pick — the Console never auto-unpicks; the operator
+// decides whether to wait or unpick (#650).
+func TestQueue_Discover_FailedBlockerSurfacedPickStaysHeld(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Failed: "agent-failed"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen, Labels: []string{"agent-failed"}})
+	f.NativeDeps = map[string][]string{"42": {"41"}}
+
+	issues, _, err := q.Discover(f, f, "agent-failed")
+
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Errorf("issues = %+v, want none (still held)", issues)
+	}
+	snap := q.Snapshot()[0]
+	if snap.State != PickHeld {
+		t.Errorf("state = %v, want held, not dissolved — the Console never auto-unpicks", snap.State)
+	}
+	if !strings.Contains(snap.Reason, "#41") || !strings.Contains(snap.Reason, "failed") {
+		t.Errorf("Reason = %q, want it to name #41 as a failed blocker", snap.Reason)
 	}
 }
 
