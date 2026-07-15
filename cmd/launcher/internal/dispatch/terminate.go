@@ -3,14 +3,19 @@ package dispatch
 import (
 	"fmt"
 	"os"
+	"strings"
 )
+
+// boxNamePrefix is boxName's deterministic prefix — shared with
+// OrphanedIssues, the reverse direction of the same naming scheme.
+const boxNamePrefix = "agent-issue-"
 
 // boxName returns the deterministic sandbox name a Dispatch launches issue
 // number under. Shared between runOnce (which launches it) and Factory.Kill
 // (Terminate, issue #649, which has no live *Dispatch to ask) so the two can
 // never drift apart.
 func boxName(number string) string {
-	return "agent-issue-" + number
+	return boxNamePrefix + number
 }
 
 // Kill force-stops and removes the sandbox running (or last run) for number,
@@ -20,6 +25,25 @@ func boxName(number string) string {
 // beyond losing its running sandbox out from under it.
 func (f *Factory) Kill(number string) error {
 	return f.runner.Kill(boxName(number))
+}
+
+// OrphanedIssues returns the issue numbers of every sandbox the runner
+// currently reports running, parsed from the deterministic boxName scheme —
+// Console startup orphan detection (issue #651): a crash or dropped SSH
+// leaves these running with no live goroutine in a fresh process to account
+// for them. A name that doesn't match the scheme is silently skipped.
+func (f *Factory) OrphanedIssues() ([]string, error) {
+	names, err := f.runner.ListRunning()
+	if err != nil {
+		return nil, err
+	}
+	var nums []string
+	for _, name := range names {
+		if num, ok := strings.CutPrefix(name, boxNamePrefix); ok {
+			nums = append(nums, num)
+		}
+	}
+	return nums, nil
 }
 
 // AppendTerminalLine appends note, as its own line, to number's most
