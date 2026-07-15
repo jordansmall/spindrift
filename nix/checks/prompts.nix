@@ -327,7 +327,7 @@ in
   # grep-based and eval-only so it belongs in checks-inbox, not the
   # image-realizing checks.
   fragment-gate-parity = pkgs.runCommand "fragment-gate-parity" { } ''
-    for gate in SKILLS_FOUND CAVEMAN_BAKED TDD_BAKED COMMIT_BAKED FILER_ENABLED; do
+    for gate in SKILLS_FOUND CAVEMAN_BAKED TDD_BAKED COMMIT_BAKED CODE_REVIEW_BAKED FILER_ENABLED; do
       grep -qF "gate = \"$gate\";" ${../../lib/fragments.nix}
       grep -qF "local $gate=" ${../../agent/entrypoint.sh}
     done
