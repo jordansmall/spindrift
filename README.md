@@ -421,15 +421,27 @@ actually arrives. If that claim races (another loop, the issue closed, a
 relabel), the pick dissolves and its row shows why, instead of launching a
 Box for a stale listing.
 
+**Held picks**: picking an issue whose blockers are still open does not
+dissolve it — the row goes `held` with a "held by #N" badge naming the
+unmet blockers, and stays `Dispatchable` on the tracker the whole time it
+sits held. Blocker resolution reuses the same edge machinery the headless
+waves use (no second dependency parser); a held row re-evaluates on every
+refill and launches with no operator action the moment every blocker reaches
+`Complete` — queue "do this, then that" in one sitting and watch the second
+pick launch as soon as the first clears. If a blocker instead lands `Failed`,
+the row surfaces it (`blocker #N failed`) but stays held — the Console never
+auto-unpicks; `u <num>` still works on a held row exactly as it does on a
+queued one, so the operator decides whether to wait or give up on it.
+
 **Pick all ready** (`pa`) picks exactly the issues currently `Dispatchable`
 on the tracker, in one snapshot query — an explicit action, never standing
 discovery: an issue that becomes `Dispatchable` after `pa` returns is not
 picked until the operator asks again. Each issue queues through the same
 Pick path a single `p <num>` uses.
 
-**Unpick** removes a queued-but-unlaunched pick from the session with zero
-Issue Tracker calls — it only ever un-does the in-session queue entry, never
-the durable promotion a pick already recorded.
+**Unpick** removes a queued-but-unlaunched pick — including a held one — from
+the session with zero Issue Tracker calls — it only ever un-does the
+in-session queue entry, never the durable promotion a pick already recorded.
 
 Every pick defaults to a `work` Dispatch; the record carries a kind field so
 research picks can arrive later as a UI gesture rather than a remodel — only
