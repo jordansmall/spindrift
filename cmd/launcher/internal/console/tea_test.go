@@ -541,6 +541,30 @@ func TestTea_PickKey_FailedPromotion_SurvivesQueueResync(t *testing.T) {
 	}
 }
 
+// TestTea_TerminateKey_NotLive_NeverArmsConfirm verifies "k" only arms a
+// confirm for a highlighted issue with an actual live Dispatch (ADR 0024,
+// AC2: "the highlighted live Dispatch") — a plain backlog row that was never
+// picked, or a pick that hasn't reached PickRunning yet, must not trigger
+// Terminate's full side effects (relabel, comment) on nothing (issue #785
+// review).
+func TestTea_TerminateKey_NotLive_NeverArmsConfirm(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "k")
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.PendingTerminate != "" {
+		t.Errorf("PendingTerminate = %q, want empty for a non-live issue", fm.m.PendingTerminate)
+	}
+}
+
 // TestTea_TerminateKey_NilLauncher_NeverArmsConfirm verifies "k" is a no-op
 // in a launch-less session — there is no live Dispatch to reclaim, so no
 // confirm prompt should ever arm (issue #785 review).
@@ -653,6 +677,30 @@ func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
 	if !nums["42"] || !nums["43"] {
 		t.Errorf("Picks = %+v, want #42 and #43 both picked", fm.m.Picks)
 	}
+}
+
+// TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain verifies "+"
+// launches a held/queued pick immediately even when no drain is currently
+// active to catch the Limiter's Grown signal (ADR 0023: "raising launches a
+// held pick immediately") — a session that never called tryLaunch (no prior
+// pick, no poll tick yet) must not leave a queued pick stranded until one
+// finally does (issue #785 review).
+func TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	// No tryLaunch call yet — no drain is active to observe Resize's Grown
+	// signal.
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "+")
+	waitForOutput(t, tm, "settled")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
 // TestTea_ResizeKeys_RaiseAndLowerLiveCap verifies "+"/"-" adjust the live

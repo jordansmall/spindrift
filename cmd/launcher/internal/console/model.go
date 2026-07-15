@@ -57,9 +57,10 @@ type Model struct {
 	// operator's drain/terminate-all/stay answer — only when live
 	// Dispatches exist at quit time (issue #651, ADR 0023).
 	PendingQuit bool
-	// Cursor indexes the highlighted row in Visible() — the tea layer's j/k
-	// and arrow-key navigation target (issue #784). Always clamped into
-	// [0, len(Visible())-1], 0 when Visible() is empty.
+	// Cursor indexes the highlighted row in Visible() — the tea layer's j/
+	// down and up/arrow navigation target (issue #784; "k" moved to
+	// Terminate in #785). Always clamped into [0, len(Visible())-1], 0 when
+	// Visible() is empty.
 	Cursor int
 	// ShowHelp is whether the "?" help overlay is open, listing every key
 	// the tea layer binds (issue #784).
