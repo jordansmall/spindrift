@@ -172,13 +172,22 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	}
 	if t.pendingPick {
 		t.pendingPick = false
-		if msg.String() == "a" {
+		switch s := msg.String(); s {
+		case "a":
 			return t.pickAllReady(), nil
+		case "q", "ctrl+c":
+			// The universal quit keystroke must never be swallowed by the
+			// chord: resolve the pending pick (matching any other non-"a"
+			// key) and then still quit.
+			t = t.pickHighlighted()
+			t.m = Update(t.m, QuitMsg{})
+			return t, nil
+		default:
+			// Any other key resolves the chord to a single-issue pick, same
+			// as letting the leader window time out — that second key's own
+			// meaning (e.g. a cursor move) is not separately reprocessed.
+			return t.pickHighlighted(), nil
 		}
-		// Any other key resolves the chord to a single-issue pick, same as
-		// letting the leader window time out — that second key's own
-		// meaning (e.g. a cursor move) is not separately reprocessed.
-		return t.pickHighlighted(), nil
 	}
 	switch msg.String() {
 	case "j", "down":
@@ -221,7 +230,7 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 			t.launch.Resize(-1)
 		}
 	case "b":
-		if t.launch != nil {
+		if t.launch != nil && t.m.Stale {
 			t.launch.Rebuild(t.tracker, t.pwd)
 		}
 	}
@@ -321,11 +330,36 @@ func (t teaModel) highlightedNumber() string {
 	return visible[t.m.Cursor].Number
 }
 
+// alreadyActive reports whether num already has a non-terminal row on
+// Model.Picks (queued, held, claiming, or running) — Queue's row-scan
+// helpers (setState, tryMarkClaiming) both assume at most one non-terminal
+// row per issue number, scanning back-to-front for "the" live row; landing
+// a second one for a number that's still active leaves the older row stuck
+// forever and can hang the drain loop (issue #785 review). A terminal row
+// (settled, dissolved, terminated) never blocks a fresh pick — that's the
+// legitimate re-pick/adopt path ADR 0024 describes.
+func (t teaModel) alreadyActive(num string) bool {
+	for _, p := range t.m.Picks {
+		if p.Number != num {
+			continue
+		}
+		switch p.State {
+		case PickQueued, PickHeld, PickClaiming, PickRunning:
+			return true
+		}
+	}
+	return false
+}
+
 // pickAllReady picks every issue currently Dispatchable on the tracker in
 // one bulk gesture (#647 AC3) — reached via the "pa" leader chord (issue
-// #785 AC1).
+// #785 AC1). An issue already active from an earlier pick is skipped rather
+// than re-landed (see alreadyActive).
 func (t teaModel) pickAllReady() teaModel {
 	for _, msg := range PickAllReady(t.tracker) {
+		if queued, ok := msg.(PickQueuedMsg); ok && t.alreadyActive(queued.Number) {
+			continue
+		}
 		t.m = Update(t.m, msg)
 		t.landPick(msg)
 	}
@@ -364,6 +398,9 @@ func (t teaModel) pickHighlighted() teaModel {
 		return t
 	}
 	iss := visible[t.m.Cursor]
+	if t.alreadyActive(iss.Number) {
+		return t
+	}
 	msg := PickIssue(t.tracker, iss.Number, iss.Title, KindWork)
 	t.m = Update(t.m, msg)
 	t.landPick(msg)
