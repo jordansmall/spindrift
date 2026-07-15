@@ -3,9 +3,13 @@
 // is retired. teaModel is a thin adapter: tea.Model.Update translates
 // tea.KeyMsg and the two async signals (background poll, launch-refresh)
 // into the same console Msg values Update already handles; tea.Model.View
-// delegates straight to the pure View. Pick/Unpick/pick-all-ready/Terminate/
+// delegates straight to the pure View. Unpick/pick-all-ready/Terminate/
 // Resize/Rebuild act on the cursor's highlighted row (issue #785); DrillIn is
-// wired too (issue #786).
+// wired too (issue #786). Tab moves focus between the backlog and work-queue
+// columns, and Enter is context-sensitive: Pick (via the PickIssue adapter)
+// on a focused backlog row, drill into the Transcript on a focused
+// work-queue row when one exists (issue #845) — the old "d"/backlog-Enter
+// drill binding is retired in favour of this split.
 package console
 
 import (
@@ -194,16 +198,22 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		}
 	}
 	switch msg.String() {
+	case "tab":
+		t.m = Update(t.m, FocusToggleMsg{})
 	case "j", "down":
 		t.m = Update(t.m, CursorMoveMsg{Delta: 1})
 	case "up":
 		t.m = Update(t.m, CursorMoveMsg{Delta: -1})
 	case "/":
 		t.m = Update(t.m, FilterEditStartMsg{})
-	case "d", "enter":
-		if iss, ok := t.highlightedIssue(); ok {
-			return t, openDrillInCmd(t.launch, t.pwd, iss.Number)
+	case "enter":
+		if t.m.Focus == FocusQueue {
+			if p, ok := t.highlightedPick(); ok && hasTranscript(p.State) {
+				return t, openDrillInCmd(t.launch, t.pwd, p.Number)
+			}
+			return t, nil
 		}
+		t = t.pickHighlighted()
 	case "r":
 		return t, refreshCmd(t.tracker)
 	case "q", "ctrl+c":
@@ -263,13 +273,36 @@ func (t teaModel) handleDrillInKey(msg tea.KeyMsg) Model {
 }
 
 // highlightedIssue returns the backlog row under the cursor, or false when
-// Visible() is empty — the "d"/Enter drill-in target.
+// Visible() is empty.
 func (t teaModel) highlightedIssue() (forge.Issue, bool) {
 	vis := t.m.Visible()
 	if len(vis) == 0 {
 		return forge.Issue{}, false
 	}
 	return vis[t.m.Cursor], true
+}
+
+// highlightedPick returns the work-queue row under QueueCursor, or false
+// when Picks is empty — the focused-queue Enter's drill-in target (issue
+// #845).
+func (t teaModel) highlightedPick() (Pick, bool) {
+	if len(t.m.Picks) == 0 {
+		return Pick{}, false
+	}
+	return t.m.Picks[t.m.QueueCursor], true
+}
+
+// hasTranscript reports whether state is a PickState with an actual
+// Transcript to drill into — running, settled, terminated, or failed all
+// have a Box that ran (or is running) and left logs on disk; queued,
+// claiming, held, and dissolved never launched, so Enter is a no-op on those
+// rows (issue #845).
+func hasTranscript(state PickState) bool {
+	switch state {
+	case PickRunning, PickSettled, PickTerminated, PickFailed:
+		return true
+	}
+	return false
 }
 
 // openDrillInCmd loads and renders number's whole transcript in the
