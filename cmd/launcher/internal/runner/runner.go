@@ -47,8 +47,18 @@ type Runner interface {
 	// named for this box is already running.
 	Run(box Box) error
 
-	// Reap performs best-effort cleanup of a leftover sandbox by name.
+	// Reap performs best-effort cleanup of a leftover sandbox by name. It
+	// never touches a running sandbox — Kill is the operator-driven
+	// counterpart for that.
 	Reap(name string) error
+
+	// Kill force-stops and removes the sandbox named name, whether running
+	// or not — the operator's Terminate gesture (ADR 0024, issue #649).
+	// Unlike Reap, it destroys a live sandbox unconditionally; the caller
+	// (Terminate) is the one taking that action deliberately, not a
+	// best-effort cleanup pass. A no-op, nil-returning call on a sandbox
+	// already gone is not an error.
+	Kill(name string) error
 
 	// IsRunning reports whether a sandbox named name is currently running.
 	// Callers use this to skip a dispatch attempt before touching any of

@@ -3,6 +3,7 @@ package runner
 import (
 	"os/exec"
 	"testing"
+	"time"
 )
 
 // TestBwrapRun_LaunchesViaSeamAndSurfacesFailure verifies that Run invokes
@@ -78,5 +79,56 @@ func TestBwrapBuildEnsureReady_NixBuildSuccessReturnsNil(t *testing.T) {
 	}
 	if got := callCount(t, dir); got != 2 {
 		t.Errorf("callCount = %d, want 2 (agent-files + agent-env)", got)
+	}
+}
+
+// TestBwrapKill_TerminatesRunningProcess verifies Kill (issue #649) reaches
+// a bwrap sandbox's live process — the one Runner an external caller has no
+// other way to observe, since IsRunning/Reap are both no-ops for bwrap.
+func TestBwrapKill_TerminatesRunningProcess(t *testing.T) {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("sleep", "5")
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	done := make(chan error, 1)
+	go func() { done <- a.Run(Box{Name: "agent-issue-9", Env: map[string]string{}}) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		a.mu.Lock()
+		_, tracked := a.running["agent-issue-9"]
+		a.mu.Unlock()
+		if tracked {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Run never tracked its process")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if err := a.Kill("agent-issue-9"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("Run: want error from killed process, got nil")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after Kill")
+	}
+}
+
+// TestBwrapKill_UnknownNameIsNoop verifies Kill on a name Run never tracked
+// (already exited, or never launched) returns nil rather than erroring.
+func TestBwrapKill_UnknownNameIsNoop(t *testing.T) {
+	a := &bwrapAdapter{}
+	if err := a.Kill("agent-issue-404"); err != nil {
+		t.Errorf("Kill on unknown name: want nil, got %v", err)
 	}
 }

@@ -1,6 +1,9 @@
 package runner
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 // TestNewOCI_UsesConfigFields verifies NewOCI builds its adapter fields from
 // a single Config struct instead of a long positional-argument list (issue
@@ -97,8 +100,13 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		driverSessionCacheDir: cfg.DriverSessionCacheDir,
 		unshareNet:            cfg.BwrapUnshareNet,
 	}
-	if *a != want {
-		t.Errorf("NewBwrap(cfg) fields = %+v, want %+v", *a, want)
+	// reflect.DeepEqual over pointers, not !=: bwrapAdapter now also carries
+	// the mu/running process-tracking fields Kill (issue #649) uses, which a
+	// plain struct comparison can't handle (map[string]*os.Process is not
+	// comparable) — comparing pointers instead of dereferenced values avoids
+	// copying the embedded sync.Mutex.
+	if !reflect.DeepEqual(a, &want) {
+		t.Errorf("NewBwrap(cfg) fields = %+v, want %+v", a, &want)
 	}
 }
 

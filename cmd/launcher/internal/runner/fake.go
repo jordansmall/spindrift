@@ -19,6 +19,11 @@ type Fake struct {
 	// ReapCalls records names passed to Reap in order.
 	ReapCalls []string
 
+	// KillCalls records names passed to Kill in order.
+	KillCalls []string
+	// KillErr, if non-nil, is returned by every Kill call.
+	KillErr error
+
 	// EnsureReadyErr, if non-nil, is returned by EnsureReady.
 	EnsureReadyErr error
 
@@ -110,6 +115,14 @@ func (f *Fake) Reap(name string) error {
 	defer f.mu.Unlock()
 	f.ReapCalls = append(f.ReapCalls, name)
 	return nil
+}
+
+// Kill records the name and returns KillErr.
+func (f *Fake) Kill(name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.KillCalls = append(f.KillCalls, name)
+	return f.KillErr
 }
 
 // IsRunning records name and returns IsRunningRet.

@@ -65,6 +65,22 @@ func TestFake_ReapRecordsName(t *testing.T) {
 	}
 }
 
+// TestFake_KillRecordsName verifies that Kill records the container name,
+// distinct from Reap's own call log — Terminate (issue #649) needs to assert
+// on Kill without a Reap call also satisfying the assertion.
+func TestFake_KillRecordsName(t *testing.T) {
+	f := runner.NewFake()
+	if err := f.Kill("agent-issue-5"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if len(f.KillCalls) != 1 || f.KillCalls[0] != "agent-issue-5" {
+		t.Errorf("KillCalls: want [agent-issue-5], got %v", f.KillCalls)
+	}
+	if len(f.ReapCalls) != 0 {
+		t.Errorf("ReapCalls: want none, got %v", f.ReapCalls)
+	}
+}
+
 // TestFake_IsReadyRecordsCalls verifies that IsReady records invocations and
 // returns IsReadyErr.
 func TestFake_IsReadyRecordsCalls(t *testing.T) {

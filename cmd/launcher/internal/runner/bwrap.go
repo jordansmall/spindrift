@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 )
 
 // execCommand builds the *exec.Cmd for hardcoded-binary orchestration (nix,
@@ -38,6 +39,14 @@ type bwrapAdapter struct {
 	// box.DriverCacheDir is never bound regardless of its value.
 	driverSessionCacheDir string
 	unshareNet            bool // when true, adds --unshare-net (isolates from host netns)
+
+	// mu guards running, the box-name -> live process map Kill (issue #649)
+	// consults — bwrap sandboxes are unnamed child processes with no
+	// persistent daemon IsRunning/Reap can query by name, so Run tracks its
+	// own process handle here for the one caller (Terminate) that needs to
+	// reach a live one from outside Run's own goroutine.
+	mu      sync.Mutex
+	running map[string]*os.Process
 }
 
 // NewBwrap constructs a bwrap adapter for the run command from cfg.
@@ -185,11 +194,50 @@ func (a *bwrapAdapter) Run(box Box) error {
 	cmd := execCommand("bwrap", a.buildArgs(etcDir, box)...)
 	cmd.Stdout = out
 	cmd.Stderr = out
-	return cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	a.trackRunning(box.Name, cmd.Process)
+	defer a.untrackRunning(box.Name)
+	return cmd.Wait()
+}
+
+// trackRunning records proc as the live process for name, so a concurrent
+// Kill call can find it. A blank name (every call site but Terminate's ever
+// scripts one — box.Name is always set in production) is tracked like any
+// other; Kill on a blank name would then reach whichever box last ran
+// nameless, which never happens outside tests.
+func (a *bwrapAdapter) trackRunning(name string, proc *os.Process) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.running == nil {
+		a.running = map[string]*os.Process{}
+	}
+	a.running[name] = proc
+}
+
+// untrackRunning drops name's tracked process once Run's Wait returns.
+func (a *bwrapAdapter) untrackRunning(name string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.running, name)
 }
 
 // Reap is a no-op for bwrap — sandboxes are ephemeral and exit when done.
 func (a *bwrapAdapter) Reap(_ string) error { return nil }
+
+// Kill sends SIGKILL to name's tracked live process, if Run currently has
+// one running under that name. A miss (already exited, or never launched) is
+// not an error — Terminate's reap step is best-effort by design.
+func (a *bwrapAdapter) Kill(name string) error {
+	a.mu.Lock()
+	proc := a.running[name]
+	a.mu.Unlock()
+	if proc == nil {
+		return nil
+	}
+	return proc.Kill()
+}
 
 // IsRunning always reports false for bwrap: sandboxes are unnamed child
 // processes, not persistent named containers, so there is nothing to collide
@@ -245,6 +293,10 @@ func (a *bwrapBuildAdapter) Run(_ Box) error {
 
 // Reap is a no-op for the build adapter.
 func (a *bwrapBuildAdapter) Reap(_ string) error { return nil }
+
+// Kill is a no-op for the build adapter — it never launches a box, so there
+// is nothing to kill.
+func (a *bwrapBuildAdapter) Kill(_ string) error { return nil }
 
 // IsRunning always reports false for the build adapter: it never launches a
 // box, so there is nothing to be running.
