@@ -399,6 +399,7 @@ Type a command and press enter:
 | `d <num>` / `drill <num>` | Drill in: open `<num>`'s rendered transcript |
 | `t` / `toggle` | toggle the open transcript between rendered and raw |
 | `x` / `close` | close the transcript view, back to the backlog/queue |
+| `k <num>` / `kill <num>` / `terminate <num>` | ask to Terminate `<num>`'s live Dispatch — prompts `y`/`N` to confirm |
 | `q` / `quit` | exit cleanly |
 
 If a `.dogfood.pid` file is present at startup — a headless loop
@@ -458,6 +459,22 @@ harness itself, and back; `x`/`close` returns to the backlog/queue. Rendering
 is a per-Driver strategy (beside heartbeat parsing and usage extraction) — a
 Driver with no configured strategy, or an issue with no Dispatch logs on disk
 yet, surfaces an error in place of the transcript rather than a blank pane.
+
+**Terminate** (`k <num>` / `kill <num>` / `terminate <num>`) ends a live
+Dispatch by hand — ADR 0024 — valid anywhere from claim to verdict: a running
+Box, the CI watch, a fix pass, or the merge gate. It always requires an
+explicit `y`/`N` confirm before acting; anything but `y`/`yes` cancels with no
+effect. Once confirmed, Terminate reaps any running Box, abandons the settle
+wherever it stands, and returns the issue to `Dispatchable` — never `Failed`,
+since the operator decided and there is nothing to triage, and never a new
+tracker state. It never un-lands work: no branch deletion, no PR close, no
+force-push. The ending is recorded outside the state machine — a terminal
+line appended to the Box log, and a comment on the issue naming the terminate
+and linking any dangling branch/PR — so a terminated Dispatch with an open PR
+is never silently orphaned. Re-picking a terminated issue later dispatches a
+fresh Box and, through the existing settle adoption path, picks up the
+dangling PR instead of duplicating it — terminate-then-repick is a clean
+reclaim loop, not a collision.
 
 ## Documentation
 
