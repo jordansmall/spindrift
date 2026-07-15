@@ -166,6 +166,27 @@ setup() {
   grep -qi 'bound the wait' <<<"$check"
 }
 
+@test "CHECK section tells the agent to git add new files before nix build" {
+  # issue #714: nix flakes only evaluate git-tracked files. An agent that
+  # creates a new file and runs `nix build` before staging it hits a
+  # spurious "not tracked by Git" failure and burns a checks cycle. The
+  # guidance must land before the flake.nix paragraph so it primes every
+  # nix invocation, not just the first one.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  local check
+  check="$(sed -n '/^# CHECK$/,/^# REVIEW$/p' "$prompt")"
+  [ -n "$check" ]
+  grep -qi 'git add' <<<"$check"
+  grep -qi 'tracked' <<<"$check"
+  local add_line flake_line
+  add_line="$(grep -n -i 'git add' <<<"$check" | head -1 | cut -d: -f1)"
+  flake_line="$(grep -n 'flake.nix' <<<"$check" | head -1 | cut -d: -f1)"
+  [ -n "$add_line" ]
+  [ -n "$flake_line" ]
+  [ "$add_line" -lt "$flake_line" ]
+}
+
 @test "prompt branches CODE_FORGE=git to a push-only outcome, no PR/CI" {
   # CODE_FORGE=git (#330) must skip PR creation and CI-watch entirely and
   # emit a branch ref where a PR URL would go.
