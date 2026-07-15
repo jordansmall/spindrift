@@ -120,6 +120,23 @@ func TestView_Header_AlertsRenderBeforeEphemeralPrompts(t *testing.T) {
 	}
 }
 
+// TestView_Header_LaunchLessSession_RendersCleanly verifies a launch-less
+// session (no CapMsg, no picks, no size event ever delivered) renders a
+// clean header — zero/zero counts, no stale/dogfood alert text, no panic —
+// rather than requiring a Launcher round-trip before the header is usable
+// (issue #843 AC5).
+func TestView_Header_LaunchLessSession_RendersCleanly(t *testing.T) {
+	out := View(NewModel())
+	if !strings.Contains(out, "running 0/0 · waiting 0 · held 0 · settled 0") {
+		t.Errorf("View() = %q, want a clean zero/zero status line", out)
+	}
+	for _, unwanted := range []string{"stale", "dogfood", "!!"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("View() = %q, want no stray %q in a launch-less header", out, unwanted)
+		}
+	}
+}
+
 // TestView_ListsPicksWithNumberTitleState verifies View renders each queue
 // row's number, title, and state — a dissolved row also carries its reason
 // — so the operator can see the queue without a separate command (#646).
