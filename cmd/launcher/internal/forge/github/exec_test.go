@@ -197,6 +197,30 @@ esac`)
 	}
 }
 
+// TestExecClient_DepsOf_NativeDeduplicates verifies that when the native
+// dependencies API response repeats an issue number, DepsOf collapses the
+// duplicate rather than returning it twice.
+func TestExecClient_DepsOf_NativeDeduplicates(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*dependencies/blocked_by*)
+	printf '3\n5\n3\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	deps, err := c.DepsOf("10")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	want := []forge.Dependency{{ID: "3", Source: forge.DepSourceNative}, {ID: "5", Source: forge.DepSourceNative}}
+	if len(deps) != 2 || deps[0] != want[0] || deps[1] != want[1] {
+		t.Fatalf("want %v, got %v", want, deps)
+	}
+}
+
 // TestExecClient_TouchesOf_FetchesFullIssueBody verifies that TouchesOf
 // fetches the issue's full body via `gh issue view` (unlike ListIssues,
 // whose --json number,title summary never includes body) and parses its
