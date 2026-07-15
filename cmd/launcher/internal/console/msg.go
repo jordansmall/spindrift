@@ -181,8 +181,9 @@ type StaleStatusMsg struct {
 func (StaleStatusMsg) isConsoleMsg() {}
 
 // CursorMoveMsg is the tea layer's signal that the operator pressed a
-// navigation key (j/k or an arrow) — Delta is +1 (down) or -1 (up); Update
-// clamps the result into Visible()'s bounds (issue #784).
+// navigation key (j/down, or the up arrow — "k" moved to Terminate in
+// #785) — Delta is +1 (down) or -1 (up); Update clamps the result into
+// Visible()'s bounds (issue #784).
 type CursorMoveMsg struct {
 	Delta int
 }
