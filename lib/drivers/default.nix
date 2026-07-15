@@ -55,28 +55,27 @@ let
     + "}\n";
 
   # The Driver's in-box half rendered into agent/entrypoint.sh's DRIVER_* vars
-  # and function definitions (ADR 0009). /home/agent is the image's fixed
-  # HOME (see lib/image.nix's passwdFile), so the skills dir is baked as an
-  # absolute path rather than depending on $HOME at run time. Each var keeps
-  # the same override-if-unset behavior agent/entrypoint.sh's own copy used
-  # to hand-write (issue #624 kills that hand-written copy, not the
-  # behavior) so a real Box -- where nothing ever sets DRIVER_BIN/
-  # DRIVER_FLAGS_COMMON/DRIVER_SKILLS_DIR in its environment -- always runs
-  # the baked value, while a bats fixture can still redirect DRIVER_SKILLS_DIR
-  # at a writable test directory the same way it always could. The baked
-  # value is assigned as its own statement (never spliced inside a bash
-  # `${VAR:-default}`) so lib.escapeShellArg's quoting stays intact for a
-  # future Driver whose bin/flags/path contain shell metacharacters.
+  # and function definitions (ADR 0009). DRIVER_BIN and DRIVER_FLAGS_COMMON
+  # are pure identity constants with no legitimate runtime variance, so they
+  # bake byte-identical to what mkHarness.nix used to string-build inline.
+  # DRIVER_SKILLS_DIR is different: it is inherently a runtime filesystem
+  # path, and $HOME is already the single source of truth for it -- set once
+  # via the image's `HOME=/home/agent` Env entry (lib/image.nix) and the
+  # bwrap runner's equivalent --setenv -- so computing it from $HOME here
+  # (exactly what agent/entrypoint.sh's now-deleted fallback line did) avoids
+  # a second, independently-baked copy of "/home/agent" drifting from the
+  # first, and lets a bats fixture exercise real skill discovery under its
+  # own $HOME with no test-only override.
   renderPreamble =
     driverEntry:
-    ''
-      : "''${DRIVER_BIN:=}"
-      [ -n "''${DRIVER_BIN}" ] || DRIVER_BIN=${lib.escapeShellArg driverEntry.bin}
-      : "''${DRIVER_FLAGS_COMMON:=}"
-      [ -n "''${DRIVER_FLAGS_COMMON}" ] || DRIVER_FLAGS_COMMON=${lib.escapeShellArg driverEntry.flagsCommon}
-      : "''${DRIVER_SKILLS_DIR:=}"
-      [ -n "''${DRIVER_SKILLS_DIR}" ] || DRIVER_SKILLS_DIR=${lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"}
-    ''
+    "DRIVER_BIN="
+    + lib.escapeShellArg driverEntry.bin
+    + "\n"
+    + "DRIVER_FLAGS_COMMON="
+    + lib.escapeShellArg driverEntry.flagsCommon
+    + "\n"
+    + ''DRIVER_SKILLS_DIR="''${HOME:-}/${driverEntry.skillsDirRelative}"''
+    + "\n"
     + renderFunctions driverEntry;
 in
 {
