@@ -84,7 +84,7 @@ func renderHelp() string {
 		"  enter       apply filter",
 		"  esc         cancel filter edit",
 		"  r           refresh the backlog",
-		"  q           quit",
+		"  q / ctrl+c  quit",
 		"  ?           toggle this help",
 		"",
 	}, "\n")
