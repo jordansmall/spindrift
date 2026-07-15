@@ -99,11 +99,12 @@ setup_fakes() {
   # build one from the real source.
   export ENTRYPOINT_SRC="$ENTRYPOINT"
 
-  # DRIVER_PREAMBLE_FILE is the registry-rendered Driver function definitions
-  # (issue #433), and FRAGMENT_REGISTRY_FILE is the registry-rendered
-  # Conditional fragment loop input and substitution allowlist (issue #622):
-  # prepend both to the entrypoint so the suite exercises the same bodies and
-  # data the image bakes in, not any hand-copied duplicates. The nix check
+  # DRIVER_PREAMBLE_FILE is the registry-rendered Driver preamble -- the
+  # DRIVER_* variable block and function definitions alike (issue #624,
+  # #433) -- and FRAGMENT_REGISTRY_FILE is the registry-rendered Conditional
+  # fragment loop input and substitution allowlist (issue #622): prepend
+  # both to the entrypoint so the suite exercises the same bytes and data
+  # the image bakes in, not any hand-copied duplicates. The nix check
   # derivation sets these; a bare bats run outside nix leaves ENTRYPOINT
   # as-is (functions/registry undefined → tests fail, by design: use nix
   # flake check).
@@ -116,11 +117,15 @@ setup_fakes() {
       # DRIVER_SKILLS_DIR is the absolute /home/agent path a real Box always
       # has, byte-identical to what mkHarness.nix bakes into the image, but
       # a bats sandbox has no such directory to write into. Redirect it at
-      # this test's own $HOME instead -- written as the literal text `$HOME`
-      # so it resolves against whatever HOME setup_bare_repo below sets, not
-      # whatever HOME happens to be while this file is being assembled.
+      # this test's own $HOME instead, by stripping the baked /home/agent/
+      # prefix the line just above set and re-rooting the same relative
+      # suffix under $HOME -- no second hand-copied ".claude/skills" here,
+      # just the one the registry already rendered. Written as literal
+      # unexpanded text so it resolves against whatever HOME setup_bare_repo
+      # below sets, not whatever HOME happens to be while this file is
+      # assembled.
       # shellcheck disable=SC2016 # intentionally unexpanded -- written verbatim into $_wrapped
-      echo 'DRIVER_SKILLS_DIR="$HOME/.claude/skills"'
+      echo 'DRIVER_SKILLS_DIR="$HOME/${DRIVER_SKILLS_DIR#/home/agent/}"'
       if [ -n "${FRAGMENT_REGISTRY_FILE:-}" ]; then
         cat "$FRAGMENT_REGISTRY_FILE"
       fi

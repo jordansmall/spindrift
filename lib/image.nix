@@ -128,7 +128,7 @@ let
 
   # The in-container entrypoint, via writeShellApplication so shellcheck runs at
   # build time and its tools are pinned. Built for Linux. The source stays a
-  # complete, standalone script (the bats harness prepends driverFunctionsFile
+  # complete, standalone script (the bats harness prepends driverPreambleFile
   # before exec-ing it) so its shebang is stripped before it becomes this
   # derivation's body.
   entrypoint = pkgs.writeShellApplication {

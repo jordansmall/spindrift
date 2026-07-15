@@ -263,21 +263,22 @@ stays name-only by design (ADR 0009) — each half enforces its own entries'
 completeness independently.
 
 The registry also owns rendering: `renderPreamble` turns a validated entry
-into the `DRIVER_*` variable block and the
+into the `DRIVER_*` variable block (`DRIVER_BIN`, `DRIVER_FLAGS_COMMON`,
+`DRIVER_SKILLS_DIR` — the last baked as an absolute path under
+`/home/agent`, the image's fixed `HOME`) and the
 `_driver_extract_outcome`/`_driver_session_flags` function definitions
 `mkHarness` bakes into `agent/entrypoint.sh` ahead of its own body, instead
-of `mkHarness` string-building them inline. `DRIVER_BIN` and
-`DRIVER_FLAGS_COMMON` bake as constants; `DRIVER_SKILLS_DIR` computes from
-`$HOME` at run time instead (the entrypoint's own `$HOME`, fixed to
-`/home/agent` in a real Box — see below — but a bats fixture's own tmp
-`$HOME` in the test suite), so there is one source of truth for that
-directory instead of a second, independently-baked absolute copy. The bats
-harness sources the exact same rendered bytes (issue #433) before exec-ing
-the entrypoint, so a test run and a built image can never drift apart.
-`agent/entrypoint.sh` itself carries no Driver value literals — if the
-nix-rendered preamble never ran (a malformed image build), the entrypoint's
-`configure_env` fails fast with a message naming the missing variable rather
-than silently impersonating the claude Driver.
+of `mkHarness` string-building them inline. The bats harness sources the
+exact same rendered bytes (issue #433) before exec-ing the entrypoint, so a
+test run and a built image can never drift apart — a bats fixture has no
+real `/home/agent` to write skill files into, so `tests/helper.bash`
+appends one test-only line *after* the registry-rendered preamble,
+redirecting `DRIVER_SKILLS_DIR` at the test's own `$HOME`; the baked
+preamble itself renders identically for both. `agent/entrypoint.sh` itself
+carries no Driver value literals — if the nix-rendered preamble never ran (a
+malformed image build), the entrypoint's `configure_env` fails fast with a
+message naming the missing variable rather than silently impersonating the
+claude Driver.
 
 `mkHarness` also derives from the two directory declarations above for the
 *host*-side half: the image bake pre-creates each declared directory

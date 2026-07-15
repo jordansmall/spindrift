@@ -256,8 +256,8 @@ let
   # row's own var, plus any extraSubstVars a fragment's body interpolates).
   # entrypoint.sh's loop and `_subst` are both generic over this data — a new
   # row needs no entrypoint edit. Shared between the image preamble and the
-  # bats harness file the same way driverPreamble/driverFunctionsFile are
-  # (issue #433), so neither can drift from the other.
+  # bats harness file the same way driverPreamble/driverPreambleFile are
+  # shared (issue #433), so neither can drift from the other.
   fragmentRegistryRows = map (row: "${row.gate}|${row.fragment}|${row.var}") fragments;
   fragmentSubstVars = lib.concatMap (row: [ row.var ] ++ (row.extraSubstVars or [ ])) fragments;
   fragmentRegistryPreamble =
@@ -375,10 +375,10 @@ let
   # before exec-ing the entrypoint (issue #433) so tests exercise the exact
   # same registry-rendered bytes that mkHarness bakes into the image (issue
   # #624) — not any hand-copied duplicates or entrypoint fallback literals.
-  driverFunctionsFile = hostPkgs.writeText "driver-functions.sh" driverPreamble;
+  driverPreambleFile = hostPkgs.writeText "driver-preamble.sh" driverPreamble;
 
   # The Conditional fragment registry as a host store-path file (issue #622,
-  # mirrors driverFunctionsFile above). The bats harness prepends this before
+  # mirrors driverPreambleFile above). The bats harness prepends this before
   # exec-ing the entrypoint so tests exercise the same registry-rendered loop
   # input and substitution allowlist that mkHarness bakes into the image.
   fragmentRegistryFile = hostPkgs.writeText "fragment-registry.sh" fragmentRegistryPreamble;
@@ -704,7 +704,7 @@ else
       commsContractFile
       checkContractFile
       researchOutcomeContractFile
-      driverFunctionsFile
+      driverPreambleFile
       fragmentRegistryFile
       heartbeatFilterBin
       driverEntry

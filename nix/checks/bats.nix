@@ -85,7 +85,7 @@ in
         # The Driver's registry-rendered function definitions; helper.bash
         # prepends this before exec-ing the entrypoint so the bats suite
         # exercises the same bodies the image bakes in (issue #433).
-        DRIVER_PREAMBLE_FILE = batsHarness.driverFunctionsFile;
+        DRIVER_PREAMBLE_FILE = batsHarness.driverPreambleFile;
         # The Conditional fragment registry's rendered loop input and
         # substitution allowlist (issue #622); helper.bash prepends this
         # alongside DRIVER_PREAMBLE_FILE for the same reason.
