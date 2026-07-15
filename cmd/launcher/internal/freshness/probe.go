@@ -35,6 +35,12 @@ type Result struct {
 	Fresh bool
 	// Message is a human-readable summary safe to print on `preview`.
 	Message string
+	// Rev is the fetched base-tip sha Eval was hermetically evaluated at —
+	// "" when Applicable is false or the fetch itself failed. A caller that
+	// rebuilds against this same tip (the Console's in-session rebuild,
+	// issue #652) can recognize "already rebuilt this tip" against Rev
+	// without re-parsing Message.
+	Rev string
 }
 
 // storeHashPrefixLen and storeHashLen locate the 32-char base32 content
@@ -85,6 +91,7 @@ func Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evalu
 			Applicable: true,
 			Fresh:      false,
 			Message:    fmt.Sprintf("could not evaluate image at %s tip %s: %v — assuming rebuild needed", baseBranch, rev, err),
+			Rev:        rev,
 		}
 	}
 
@@ -94,6 +101,7 @@ func Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evalu
 			Applicable: true,
 			Fresh:      false,
 			Message:    fmt.Sprintf("could not derive image tag at %s tip %s: %v — assuming rebuild needed", baseBranch, rev, err),
+			Rev:        rev,
 		}
 	}
 
@@ -102,12 +110,14 @@ func Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evalu
 			Applicable: true,
 			Fresh:      true,
 			Message:    fmt.Sprintf("fresh (%s tip %s matches the loaded image %s)", baseBranch, rev, imageTag),
+			Rev:        rev,
 		}
 	}
 	return Result{
 		Applicable: true,
 		Fresh:      false,
 		Message:    fmt.Sprintf("rebuild needed (%s tip %s produces %s, loaded image is %s)", baseBranch, rev, tipTag, imageTag),
+		Rev:        rev,
 	}
 }
 
