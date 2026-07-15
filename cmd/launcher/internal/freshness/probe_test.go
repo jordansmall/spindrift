@@ -160,6 +160,26 @@ func TestProbe_LivelockRegression_FreshWhenTagMatchesDespiteOutPathNameDrift(t *
 	}
 }
 
+// TestProbe_Rev_MatchesFetchedTip verifies Result.Rev carries the same
+// fetched base-tip sha Eval was hermetically evaluated at — a caller (the
+// Console's in-session rebuild, issue #652) needs the rev itself, not just
+// the tag comparison, to recognize "I already rebuilt this exact tip"
+// without re-parsing Message.
+func TestProbe_Rev_MatchesFetchedTip(t *testing.T) {
+	pwd := newCloneWithOrigin(t, "main")
+	advancedSha, err := gitAdvanceOrigin(t, pwd, "main")
+	if err != nil {
+		t.Fatalf("gitAdvanceOrigin: %v", err)
+	}
+	eval := &Fake{OutPath: "/nix/store/" + diffHash + "-agent-image"}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+
+	if res.Rev != advancedSha {
+		t.Errorf("Rev = %q, want the fetched base tip %q", res.Rev, advancedSha)
+	}
+}
+
 // TestProbe_EvalFailureFailsClosed verifies that an eval error reports
 // rebuild-needed with a loud message rather than guessing fresh.
 func TestProbe_EvalFailureFailsClosed(t *testing.T) {
