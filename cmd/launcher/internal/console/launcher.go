@@ -199,11 +199,12 @@ func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 	}
 
 	// The issue's actual current label depends on which phase Terminate
-	// caught: still InProgress for a running Box or CI watch, but already
-	// swapped to Complete if it landed during the merge gate --
-	// gateToGreen swaps to Complete as soon as CI confirms green, before
-	// selfHeal ever attempts the merge itself (ready.go). TransitionState is
-	// an unconditional label swap with no compare-and-swap, so both calls
+	// caught: still InProgress for a running Box, a CI watch, or anywhere on
+	// the landing path (rebase-retry, conflict-resolve, post-force-push-wait)
+	// -- selfHeal holds the swap to Complete until the landing path settles
+	// (issue #757, ready.go), so InProgress is the common case here. Complete
+	// is still possible if Terminate lands just after settling. TransitionState
+	// is an unconditional label swap with no compare-and-swap, so both calls
 	// run regardless of which (if either) label is actually present: a
 	// remove of an absent label is a no-op on every adapter, and the second
 	// call's add of Dispatchable is idempotent.

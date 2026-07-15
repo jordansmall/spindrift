@@ -155,6 +155,76 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	}
 }
 
+// labelSnapshotDispatcher wraps a dispatch.Fake so its ResolveConflict call
+// snapshots the issue's labels before delegating — capturing what the label
+// looks like mid-landing-path (issue #757), the same wrapper pattern
+// terminatingDispatcher uses in terminate_test.go.
+type labelSnapshotDispatcher struct {
+	*dispatch.Fake
+	fc  *forge.Fake
+	num string
+
+	snapshot []string
+}
+
+func (d *labelSnapshotDispatcher) ResolveConflict(pr string) error {
+	iss, _ := d.fc.Issue(d.num)
+	d.snapshot = append([]string(nil), iss.Labels...)
+	return d.Fake.ResolveConflict(pr)
+}
+
+// TestSelfHeal_LabelStaysInProgressThroughConflictResolve verifies that the
+// InProgress->Complete swap is held until the landing path settles (issue
+// #757): mid-conflict-resolve, the issue must still carry agent-in-progress,
+// not agent-complete — the label must not claim the agent has nothing left
+// to do while a conflict-resolve box is still running. Only after the retried
+// merge succeeds does the issue swap to agent-complete, exactly once.
+func TestSelfHeal_LabelStaysInProgressThroughConflictResolve(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
+	fc.RebaseErr = forge.ErrMergeConflict
+	// 2 states for the initial gateToGreen confirm, 2 more for the
+	// post-force-push rewait's own gateToGreen confirm.
+	fc.SetCheckStates(testPR, []forge.RollupState{
+		forge.StateSuccess, forge.StateSuccess,
+		forge.StateSuccess, forge.StateSuccess,
+	})
+	s := New(c, fc, fc)
+	d := &labelSnapshotDispatcher{Fake: dispatch.NewFake(), fc: fc, num: "1"}
+
+	landing := s.selfHeal(d, "1", testPR)
+
+	if landing != landingMerged {
+		t.Fatalf("selfHeal = %v, want landingMerged", landing)
+	}
+	if len(d.ResolveConflictCalls) != 1 {
+		t.Fatalf("expected ResolveConflict to be called once, got %d", len(d.ResolveConflictCalls))
+	}
+	if !containsLabel(d.snapshot, "agent-in-progress") {
+		t.Errorf("issue must still carry agent-in-progress during conflict-resolve; snapshot=%v", d.snapshot)
+	}
+	if containsLabel(d.snapshot, "agent-complete") {
+		t.Errorf("issue must NOT carry agent-complete during conflict-resolve; snapshot=%v", d.snapshot)
+	}
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must carry agent-complete after the landing path settles; labels=%v", iss.Labels)
+	}
+	completeSwaps := 0
+	for _, call := range fc.TransitionStateCalls {
+		if call.To == forge.Complete {
+			completeSwaps++
+		}
+	}
+	if completeSwaps != 1 {
+		t.Errorf("expected exactly one InProgress->Complete swap, got %d: %+v", completeSwaps, fc.TransitionStateCalls)
+	}
+}
+
 // TestSelfHeal_GitForge_PushOnlyLanding verifies that for a push-only Code
 // Forge, selfHeal skips the CI-wait/merge-gate entirely (there is no CI or PR
 // to watch — the Box already pushed the branch) and instead marks the issue

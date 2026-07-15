@@ -22,9 +22,13 @@ import (
 var errAbandoned = errors.New("settle: abandoned by terminate")
 
 // selfHeal polls the merge gate, dispatching fix boxes on genuine red up to
-// MaxFixAttempts times. On green it swaps agent-complete (via gateToGreen)
-// then applies the merge mode; a merge failure after green leaves the issue
-// agent-complete and is never demoted to agent-failed.
+// MaxFixAttempts times. On green it applies the merge mode, then swaps
+// agent-complete once the landing path settles (issue #757) — merged,
+// auto-merge enqueued, manual hand-off, merge-blocked-with-note, or a merge
+// guard downgrade all count as settled. Until then (rebase-retry,
+// conflict-resolve, post-force-push-wait) the issue stays agent-in-progress,
+// so a merge failure after green leaves the issue agent-complete and is
+// never demoted to agent-failed.
 //
 // Returns landingFailed when CI never reached green (genuine red exhausted
 // or a gate timeout — the issue is swapped to failedLabel). Otherwise CI
@@ -49,11 +53,13 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
 			if guardErr != nil {
 				fmt.Printf("    #%s  pr=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
 				s.it.Comment(num, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
+				s.transitionState(num, forge.InProgress, forge.Complete)
 				return landingManual
 			}
 			if len(matched) > 0 {
 				fmt.Printf("    #%s  pr=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
 				s.it.Comment(num, mergeGuardComment(matched))
+				s.transitionState(num, forge.InProgress, forge.Complete)
 				return landingManual
 			}
 			if err := s.applyMergeMode(num, pr, d); err != nil {
@@ -62,8 +68,13 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
 				}
 				fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, pr, err)
 				s.it.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
+				s.transitionState(num, forge.InProgress, forge.Complete)
 				return landingManual
 			}
+			// The landing path has settled — merged, auto-merge enqueued, or
+			// manual hand-off. Only now does agent-complete claim the agent
+			// has nothing left to do.
+			s.transitionState(num, forge.InProgress, forge.Complete)
 			if s.cfg.MergeMode == "immediate" {
 				return landingMerged
 			}
@@ -117,14 +128,17 @@ func (s *Settle) landPushOnly(num, branch string) landingResult {
 
 // gateToGreen polls CheckState on the PR's head commit until the state
 // reaches confirmed SUCCESS, a terminal failure, or MergePollTimeout seconds
-// elapse. On confirmed green, agent-complete is swapped unconditionally.
+// elapse. It performs no label swap itself — the caller (selfHeal) owns
+// agent-complete, swapping it only once the landing path settles (issue
+// #757), since gateToGreen also re-runs mid-landing (rewaitAfterForcePush)
+// where a swap would be premature.
 //
 // Returns:
-//   - gateGreen     — CI confirmed green; issue swapped to CompleteLabel.
+//   - gateGreen     — CI confirmed green.
 //   - gateRedRetry  — CI red (FAILURE or ERROR); caller decides whether to
-//     dispatch a fix box. No label swap performed.
-//   - gateTerminal  — non-retriable outcome (timeout, API error); no label
-//     swap. Caller must swap to failedLabel.
+//     dispatch a fix box.
+//   - gateTerminal  — non-retriable outcome (timeout, API error). Caller
+//     must swap to failedLabel.
 func (s *Settle) gateToGreen(num, pr string) gateResult {
 	pollIv := s.cfg.MergePollInterval
 	deadline := s.cfg.MergePollTimeout
@@ -166,8 +180,6 @@ func (s *Settle) gateToGreen(num, pr string) gateResult {
 				// PENDING/EXPECTED/NONE — keep waiting for checks to settle.
 				break
 			}
-			// Confirmed green: mark complete regardless of merge outcome.
-			s.transitionState(num, forge.InProgress, forge.Complete)
 			return gateGreen
 		case forge.StateFailure, forge.StateError:
 			// Genuine red — signal caller so it can dispatch a fix pass.

@@ -13,7 +13,8 @@ const (
 	// gateRedRetry is a genuine CI failure (FAILURE or ERROR); the caller
 	// decides whether to dispatch a fix box.
 	gateRedRetry
-	// gateGreen is confirmed green CI; agent-complete is already swapped.
+	// gateGreen is confirmed green CI. agent-complete is not swapped yet —
+	// the caller (selfHeal) swaps it once the landing path settles.
 	gateGreen
 	// gateAbandoned is the operator's Terminate (ADR 0024, issue #649)
 	// landing while gateToGreen was polling. No label swap is performed —
