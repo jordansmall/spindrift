@@ -754,6 +754,30 @@ func TestDoctor_LabelsAllMissing(t *testing.T) {
 	}
 }
 
+// TestDoctor_NoTTY_ResearchLabelsMissing_ExitZero verifies missing research
+// labels (ADR 0022) are advisory only: doctor reports each one MISSING but
+// exits zero as long as the fatal work labels are all present (#796).
+func TestDoctor_NoTTY_ResearchLabelsMissing_ExitZero(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false)
+	if err != nil {
+		t.Fatalf("missing research labels must not fail doctor, got: %v", err)
+	}
+	out := buf.String()
+	for _, label := range []string{
+		"agent-research", "agent-research-in-progress", "agent-research-failed",
+		"agent-research-recommend", "agent-research-reject", "agent-research-unclear",
+	} {
+		if !strings.Contains(out, "MISSING: label \""+label+"\"") {
+			t.Errorf("want MISSING line for research label %q, got:\n%s", label, out)
+		}
+	}
+}
+
 func TestDoctor_NoTTY_NoPrompt(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -793,13 +817,16 @@ func TestDoctor_TTY_Decline(t *testing.T) {
 func TestDoctor_TTY_Confirm(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
-	// Two labels missing: agent-failed and agent-complete
-	f.Labels = []string{"ready-for-agent", "agent-in-progress"}
+	research := researchLabelNames()
+	// Two work labels missing: agent-failed and agent-complete. Research
+	// labels are all present throughout, so this test stays scoped to work
+	// label creation.
+	f.Labels = append([]string{"ready-for-agent", "agent-in-progress"}, research...)
 	// After creation the fake doesn't auto-add to Labels, so script the
-	// second ListLabels call (re-verify) to return all four.
+	// second ListLabels call (re-verify) to return all four work labels.
 	f.LabelsSeq = [][]string{
-		{"ready-for-agent", "agent-in-progress"},                                   // first check
-		{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, // re-verify
+		append([]string{"ready-for-agent", "agent-in-progress"}, research...),                                   // first check
+		append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...), // re-verify
 	}
 
 	var buf bytes.Buffer
@@ -826,11 +853,43 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 	}
 }
 
+// TestDoctor_TTY_Confirm_ResearchLabels verifies interactive doctor also
+// offers to create missing research labels (advisory tier, ADR 0022)
+// alongside work labels, and creates them with real colors/descriptions —
+// never the "ededed" gray fallback (#796).
+func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	research := researchLabelNames()
+	f.Labels = work // all work labels present, all six research labels missing
+	f.LabelsSeq = [][]string{
+		work,
+		append(append([]string{}, work...), research...), // re-verify: research now created too
+	}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader("y\n"), true)
+	if err != nil {
+		t.Fatalf("unexpected error after confirm: %v", err)
+	}
+	if len(f.CreateLabelCalls) != len(research) {
+		t.Fatalf("want %d CreateLabel calls, got %d", len(research), len(f.CreateLabelCalls))
+	}
+	for _, call := range f.CreateLabelCalls {
+		if call.Color == "" || call.Color == "ededed" {
+			t.Errorf("research label %q should use a named color, got %q", call.Name, call.Color)
+		}
+		if call.Description == "" {
+			t.Errorf("research label %q should have a description", call.Name)
+		}
+	}
+}
+
 // TestReferenceDocLabelSnippetMatchesTriageDefaults guards against the docs'
 // manual `gh label create` fallback commands (for consumers who skip
-// `spindrift doctor`, and for the research family `spindrift doctor` never
-// manages) drifting from triageLabelMeta/researchLabelMeta, the single
-// sources of truth for those defaults (#611, #641).
+// `spindrift doctor`) drifting from triageLabelMeta, the single source of
+// truth for those defaults — work and research tiers alike (#611, #641, #796).
 func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "reference.md"))
 	if err != nil {
@@ -838,16 +897,13 @@ func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
 	}
 	line := regexp.MustCompile(`gh label create (\S+)\s+--repo owner/repo --color (\S+) --description "([^"]*)"`)
 	matches := line.FindAllStringSubmatch(string(raw), -1)
-	wantCount := len(triageLabelMeta) + len(researchLabelMeta)
+	wantCount := len(triageLabelMeta)
 	if len(matches) != wantCount {
 		t.Fatalf("want %d `gh label create` lines in docs/reference.md, got %d", wantCount, len(matches))
 	}
 	for _, m := range matches {
 		name, color, description := m[1], m[2], m[3]
 		want, ok := triageLabelMeta[name]
-		if !ok {
-			want, ok = researchLabelMeta[name]
-		}
 		if !ok {
 			t.Errorf("docs/reference.md snippet creates unknown label %q", name)
 			continue
