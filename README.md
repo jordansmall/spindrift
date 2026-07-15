@@ -282,6 +282,19 @@ issues within one invocation. See the **Dispatch kind** / **Research
 dispatch** glossary entries in [`CONTEXT.md`](CONTEXT.md) for the full
 vocabulary.
 
+On GitHub, `.github/workflows/agent-research.yml` mirrors `agent-dispatch.yml`:
+applying `agent-research` to an issue fires exactly one research dispatch,
+claiming the issue (only the research-family labels above — a work lifecycle
+label like `ready-for-agent` survives the claim untouched), building, then
+running `spindrift research` against that issue. It serializes per
+`agent-research-<issue-number>`, so re-labeling the same issue queues behind
+itself but a research run on an issue never queues behind (or blocks) a work
+run on the same issue. It takes an optional second least-privilege token —
+see [Research token](docs/reference.md#research-token-least-privilege-optional)
+in the reference docs for the scopes and what the fallback gives up. Labels
+must exist on the Target repo before first use — see [Create the research
+labels](docs/reference.md#create-the-research-labels-on-the-target-repo).
+
 ## Dogfood loop
 
 `dogfood.sh` refuses to start against a podman machine whose RAM is smaller
@@ -324,6 +337,13 @@ run a larger or unbounded pool.
 Set `CONTINUOUS_DISPATCH=1` to opt into the slot-refill dispatch mode (#527)
 in a driving loop other than `dogfood.sh`; see `lib/env-schema.nix`'s
 `continuousDispatch` entry for the full behavior.
+
+**Research.** `dogfood.sh` drives `spindrift dispatch` (the work kind) by
+default; set `DOGFOOD_KIND=research` to drive `spindrift research` instead —
+the same slot-refill loop, `MAX_JOBS`, and exit-code contract apply
+unchanged, since both kinds share `cmdDispatch`'s exit codes (ADR 0022). Kinds
+are homogeneous per invocation (`research` and `dispatch` never mix issues in
+one run) — run `dogfood.sh` twice, once per kind, to drive both queues.
 
 **Baked skills.** The dogfood Box bakes four pinned upstream skills into
 `/home/agent/.claude/skills`, each as a `<name>/SKILL.md` directory — the

@@ -21,6 +21,44 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   (`agent-trigger`/`ready-for-agent`) — a human promotes it to
   `ready-for-agent` like any other issue before an agent picks it up.
 
+### Research label lifecycle
+
+A second, disjoint label family (ADR 0022; see `.github/workflows/agent-research.yml`)
+drives the advise-only research Dispatch kind — never the work path above.
+Claiming a research issue strips only these labels, so a work lifecycle label
+(`ready-for-agent`, `agent-in-progress`, ...) survives a research claim
+untouched, and an issue may legitimately wear one label from each family at
+once:
+
+- `agent-research` — dual-role: standing state and trigger. Apply it to fire
+  one research dispatch; re-apply it to retry (crash) or re-research (after
+  answering an `unclear` verdict's questions) — the same gesture as
+  `agent-trigger`.
+- `agent-research-in-progress` — a Box is reviewing the issue against the
+  Target repo and will post a single structured verdict comment.
+- `agent-research-recommend` — relevant and enriched with context for a
+  worker — promote it to `ready-for-agent`.
+- `agent-research-reject` — false positive, not worth doing, or a duplicate
+  (named in the comment) — close it. This is a *successful* conclusion
+  (`Complete`), never `agent-research-failed`.
+- `agent-research-unclear` — relevance needs an answer only a human has —
+  answer the researcher's questions in the comment, then re-apply
+  `agent-research`.
+- `agent-research-failed` — the Box crashed or produced no verdict; a human
+  triage queue distinct from `agent-research-reject`, so crash-retry and
+  verdict-review never mix.
+
+Research never opens a PR, watches CI, or merges — it posts one comment and
+stops. `spindrift doctor` does not manage these labels (they're a fixed
+vocabulary, not a configurable knob); create them manually — see [Create the
+research labels](docs/reference.md#create-the-research-labels-on-the-target-repo).
+The workflow accepts an optional `SPINDRIFT_RESEARCH_GH_TOKEN` least-privilege
+PAT (Issues RW, Contents R, Metadata R), falling back to the main
+`SPINDRIFT_GH_TOKEN` when unset — see [Research
+token](docs/reference.md#research-token-least-privilege-optional). To drive
+research through the dogfood loop instead of a one-off `spindrift research`,
+run `dogfood.sh` with `DOGFOOD_KIND=research`.
+
 ### Comment injection trust boundary
 
 The label gates which issues get dispatched — only triage-role holders can apply
