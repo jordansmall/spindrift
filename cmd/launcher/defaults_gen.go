@@ -44,7 +44,7 @@ var schemaDefaults = []defaultEntry{
 	{env: "MAX_JOBS", dflt: "0"},
 	{env: "MAX_PARALLEL", dflt: "3"},
 	{env: "MAX_REBASE_ATTEMPTS", dflt: "3"},
-	{env: "MEMORY_LIMIT", dflt: "4g"},
+	{env: "MEMORY_LIMIT", dflt: "5g"},
 	{env: "MERGE_GUARD_PATHS", dflt: ".github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**"},
 	{env: "MERGE_MODE", dflt: "manual"},
 	{env: "MERGE_POLL_INTERVAL", dflt: "30"},

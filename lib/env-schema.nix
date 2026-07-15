@@ -185,7 +185,10 @@
   memoryLimit = {
     env = "MEMORY_LIMIT";
     group = "Sandbox & resources";
-    default = "4g";
+    # #712: a single `nix build .#checks-inbox` peaks near 3.7 GiB RSS
+    # (agent-issue-640 dmesg); 4g left ~300MiB headroom and got cgroup
+    # OOM-killed. 5g gives real headroom above the observed peak.
+    default = "5g";
     doc = "max memory per agent container (--memory); empty string disables the limit";
     flakeOption = true;
     boxEnv = false;
