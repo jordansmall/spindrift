@@ -355,7 +355,7 @@ unchanged, since both kinds share `cmdDispatch`'s exit codes (ADR 0022). Kinds
 are homogeneous per invocation (`research` and `dispatch` never mix issues in
 one run) — run `dogfood.sh` twice, once per kind, to drive both queues.
 
-**Baked skills.** The dogfood Box bakes four pinned upstream skills into
+**Baked skills.** The dogfood Box bakes five pinned upstream skills into
 `/home/agent/.claude/skills`, each as a `<name>/SKILL.md` directory — the
 only layout Claude Code discovers, so a flat `<name>.md` file is silently
 ignored — so the in-box agent can invoke them as slash commands:
@@ -370,6 +370,9 @@ ignored — so the in-box agent can invoke them as slash commands:
   test-first workflow to `/tdd` when baked.
 - [`commit`](https://github.com/jordansmall/skills) — `/commit`. The COMMIT
   section defers commit-message formatting to `/commit` when baked.
+- [`code-review`](https://github.com/mattpocock/skills) — `/code-review`
+  (pinned at tag `v1.1.0`, the same upstream as `/tdd`/`/to-tickets`). Reviews
+  a diff along Standards and Spec axes in parallel sub-agents.
 
 Beyond the generic "skills available, prefer them" preamble, each of these
 skills gets a deferral placed at the exact prompt section its inline guidance
