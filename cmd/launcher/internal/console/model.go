@@ -53,6 +53,10 @@ type Model struct {
 	// RebuildErr is the last rebuild's failure, if any — "" on success or
 	// when no rebuild has run yet.
 	RebuildErr string
+	// PendingQuit is whether a quit confirm is armed, awaiting the
+	// operator's drain/terminate-all/stay answer — only when live
+	// Dispatches exist at quit time (issue #651, ADR 0023).
+	PendingQuit bool
 }
 
 // DrillInState is one Dispatch's loaded transcript: both the Driver-rendered
@@ -98,7 +102,12 @@ func Update(m Model, msg Msg) Model {
 		}
 	case FilterChangedMsg:
 		m.Filter = msg.Filter
+	case QuitRequestedMsg:
+		m.PendingQuit = true
+	case QuitCancelledMsg:
+		m.PendingQuit = false
 	case QuitMsg:
+		m.PendingQuit = false
 		m.Quitting = true
 	case DogfoodNoticeMsg:
 		m.DogfoodLive = msg.Live

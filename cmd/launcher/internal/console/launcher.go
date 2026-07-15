@@ -42,6 +42,12 @@ type Launcher struct {
 	// it to the operator's confirm key; nil (every pre-#652 call site, and
 	// any test not exercising Rebuild) makes Rebuild a no-op.
 	RebuildFn func() error
+	// RecoverFn adopts an orphaned issue's abandoned PR through the
+	// existing settle adoption path (recoverByNumber) — Console startup
+	// orphan recovery (issue #651). Wired by cmdConsole in main.go, since
+	// console cannot import the main package. Nil (every test not
+	// exercising recovery) skips orphan detection entirely.
+	RecoverFn func(issueNum string) error
 
 	mu        sync.Mutex
 	launching bool
@@ -97,6 +103,35 @@ func (l *Launcher) Cap() int {
 // Live returns the number of Dispatches this session currently has running.
 func (l *Launcher) Live() int {
 	return l.limiter().Live()
+}
+
+// LiveIssues returns the issue numbers of every pick this session currently
+// has PickRunning — the quit dialog's live-or-not gate and drain/
+// terminate-all's own enumeration (issue #651) all read this one source of
+// truth, synchronized through Queue's own lock, rather than the Limiter's
+// live count: a settle marks the queue pick Settled before releasing the
+// Limiter slot (queueSettler.Settle), so this can never observe "no live
+// Dispatches" a moment before the Limiter itself agrees.
+func (l *Launcher) LiveIssues() []string {
+	var nums []string
+	for _, p := range l.Queue.Snapshot() {
+		if p.State == PickRunning {
+			nums = append(nums, p.Number)
+		}
+	}
+	return nums
+}
+
+// OrphanedIssues returns the issue numbers of every sandbox still running
+// under the deterministic agent-issue-<N> naming scheme, with nothing in
+// this fresh process tracking it — the signature of a hard death (crash,
+// dropped SSH) from a prior session (issue #651, ADR 0023). A Launcher built
+// without a Factory reports none.
+func (l *Launcher) OrphanedIssues() ([]string, error) {
+	if l.Factory == nil {
+		return nil, nil
+	}
+	return l.Factory.OrphanedIssues()
 }
 
 // Resize adjusts the live parallelism cap by delta (+1/-1 from the

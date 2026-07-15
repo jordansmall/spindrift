@@ -679,6 +679,7 @@ func TestRun_RunningPick_RendersLiveHeartbeat(t *testing.T) {
 	}
 
 	close(release)
+	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickSettled})
 	if _, err := inW.Write([]byte("q\n")); err != nil {
 		t.Fatal(err)
 	}

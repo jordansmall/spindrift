@@ -20,6 +20,9 @@ func View(m Model) string {
 	if m.PendingTerminate != "" {
 		fmt.Fprintf(&b, "terminate #%s? [y/N]\n", m.PendingTerminate)
 	}
+	if m.PendingQuit {
+		b.WriteString("quit with live Dispatches: drain (d, default) / terminate-all (t) / stay (s)?\n")
+	}
 	if m.Stale {
 		fmt.Fprintf(&b, "!! image stale: %s — new launches held; press [b] to rebuild\n", m.StaleMessage)
 	}
