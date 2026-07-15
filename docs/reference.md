@@ -237,10 +237,15 @@ above, with no error.
 
 #### Authoring a new Driver
 
-A `lib/drivers/` entry (see `claude.nix`) declares, alongside the fields ADR
-0009 already documents (`name`, `package`, `bin`, `flagsCommon`,
-`outcomeExtractFnBody`, `sessionFlagsFnBody`, `agentsJsonTemplate`):
+`lib/drivers/default.nix` is the registry: the deep module that both
+validates and renders every `lib/drivers/` entry (see `claude.nix`), so a
+per-Driver file (`claude.nix` itself, and any future sibling) stays pure
+data with no validation or rendering logic of its own (issue #624). A new
+Driver entry declares:
 
+- `name`, `package`, `bin`, `flagsCommon`, `outcomeExtractFnBody`,
+  `sessionFlagsFnBody`, `agentsJsonTemplate` — the fields ADR 0009 already
+  documents.
 - `skillsDirRelative` — where the agent CLI scans for skill files, relative
   to `$HOME`. Required; the harness bakes skill files there and the runner
   adapters mount `SPINDRIFT_SKILLS_DIR` overrides over the same path.
@@ -248,12 +253,34 @@ A `lib/drivers/` entry (see `claude.nix`) declares, alongside the fields ADR
   live, relative to `$HOME`. Optional; a Driver that omits it has no
   resumable session state (see above).
 
-`mkHarness` derives from these two declarations: the image bake pre-creates
-each declared directory agent-owned (so podman/bwrap never fabricate a
-root-owned parent when the launcher mounts over it), and both are exported
-as absolute paths (`DRIVER_SKILLS_DIR`, `DRIVER_SESSION_CACHE_DIR`) that the
-Go launcher's OCI and bwrap adapters mount over — no Driver-specific path
-literal lives in the runner adapters or the image staging step.
+The registry validates every entry against this required-attribute list at
+eval time (`assertShape` in `lib/drivers/default.nix`): an entry missing one
+of the required fields above fails the build with a message naming the
+Driver and the missing attribute, before an image is ever produced.
+`sessionCacheDirRelative` is the one field this check treats as optional.
+Cross-half parity with the Go registry (`cmd/launcher/internal/driver`)
+stays name-only by design (ADR 0009) — each half enforces its own entries'
+completeness independently.
+
+The registry also owns rendering: `renderPreamble` and `renderFunctions`
+turn a validated entry into the `DRIVER_*` variable block and the
+`_driver_extract_outcome`/`_driver_session_flags` function definitions
+`mkHarness` bakes into `agent/entrypoint.sh` ahead of its own body, instead
+of `mkHarness` string-building them inline. The bats harness sources the
+exact same rendered bytes (issue #433) before exec-ing the entrypoint, so a
+test run and a built image can never drift apart. `agent/entrypoint.sh`
+itself carries no Driver value literals — if the nix-rendered preamble never
+ran (a malformed image build), the entrypoint's `configure_env` fails fast
+with a message naming the missing variable rather than silently
+impersonating the claude Driver.
+
+`mkHarness` also derives from the two directory declarations above: the
+image bake pre-creates each declared directory agent-owned (so podman/bwrap
+never fabricate a root-owned parent when the launcher mounts over it), and
+both are exported as absolute paths (`DRIVER_SKILLS_DIR`,
+`DRIVER_SESSION_CACHE_DIR`) that the Go launcher's OCI and bwrap adapters
+mount over — no Driver-specific path literal lives in the runner adapters or
+the image staging step.
 
 The SPINDRIFT_OUTCOME contract — the sections that instruct the agent to
 print the `SPINDRIFT_OUTCOME issue=… landing=… status=… note=…` line the

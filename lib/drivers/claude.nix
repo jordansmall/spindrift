@@ -1,9 +1,10 @@
-# The claude Driver: the in-box half (ADR 0009). Provides the data
-# lib/mkHarness.nix bakes into the image — the claude-code package, the
-# entrypoint's DRIVER_* preamble, and the --agents JSON.  The bats harness
-# sources mkHarness.driverFunctionsFile (derived from this registry) before
-# exec-ing the entrypoint, so the suite exercises the same function bodies the
-# image bakes in (issue #433).
+# The claude Driver: pure data only (ADR 0009, issue #624) -- the registry
+# (./default.nix) validates this entry's shape and renders it into the data
+# lib/mkHarness.nix bakes into the image: the claude-code package, the
+# entrypoint's DRIVER_* preamble, and the --agents JSON. The bats harness
+# sources mkHarness.driverFunctionsFile (the registry's rendered preamble,
+# byte-identical to what the image bakes in) before exec-ing the entrypoint,
+# so the suite exercises the exact same bytes (issue #433).
 { lib }:
 {
   name = "claude";
