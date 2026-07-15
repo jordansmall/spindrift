@@ -7,10 +7,11 @@ import (
 
 // View renders m as the text the run loop writes to the terminal: the
 // full-width header (banner, status line, stale/dogfood alerts), the
-// visible backlog (one line per issue: number, title, labels), and any
-// refresh error. An open drill-in (m.DrillIn != nil) replaces the
-// backlog/queue rendering entirely with the transcript view — the operator
-// is looking at one Dispatch's work, not the list.
+// two-column body (queueable backlog on the left, state-tagged work queue on
+// the right — issue #844, ADR 0025), and any refresh error. An open drill-in
+// (m.DrillIn != nil) replaces the backlog/queue rendering entirely with the
+// transcript view — the operator is looking at one Dispatch's work, not the
+// list.
 func View(m Model) string {
 	if m.DrillIn != nil {
 		return renderDrillIn(*m.DrillIn)
@@ -30,6 +31,55 @@ func View(m Model) string {
 	if m.PendingQuit {
 		b.WriteString("quit with live Dispatches: drain (d, default) / terminate-all (t) / stay (s)?\n")
 	}
+	b.WriteString(renderBody(m))
+	if m.Err != nil {
+		fmt.Fprintf(&b, "refresh failed: %s\n", m.Err)
+	}
+	return b.String()
+}
+
+// minTwoColumnWidth is the terminal width below which the body stacks the
+// backlog above the work queue instead of splitting them side by side —
+// below it there isn't room for two readable columns, so splitting would
+// wrap rows into an unreadable mess instead of degrading gracefully (issue
+// #844, ADR 0025).
+const minTwoColumnWidth = 60
+
+// renderBody renders the backlog and work-queue columns side by side,
+// sized from m.Width — the two-column body under the header (issue #844,
+// ADR 0025). Backlog keeps its label filter and cursor; the queue lists
+// m.Picks in pick order, each row tagged with its PickState. The left
+// column's width tracks the backlog's own longest line rather than a fixed
+// fraction of m.Width, so a short backlog leaves the queue column more room
+// instead of wasting it on padding. Below minTwoColumnWidth the columns
+// stack instead of splitting.
+func renderBody(m Model) string {
+	backlog := renderBacklogColumn(m)
+	queue := renderQueueColumn(m)
+	if m.Width < minTwoColumnWidth {
+		return backlog + queue
+	}
+	return joinColumns(backlog, queue, maxLineWidth(backlog))
+}
+
+// maxLineWidth returns the rune length of s's longest line, ignoring a
+// trailing newline.
+func maxLineWidth(s string) int {
+	width := 0
+	for _, l := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+		if n := len([]rune(l)); n > width {
+			width = n
+		}
+	}
+	return width
+}
+
+// renderBacklogColumn renders the queueable backlog: one line per visible
+// issue (number, title, labels), with the cursor row marked — unchanged from
+// the prior flat rendering, just under its own column label.
+func renderBacklogColumn(m Model) string {
+	var b strings.Builder
+	b.WriteString("backlog:\n")
 	for i, iss := range m.Visible() {
 		marker := " "
 		if i == m.Cursor {
@@ -37,24 +87,51 @@ func View(m Model) string {
 		}
 		fmt.Fprintf(&b, "%s #%s  %s  [%s]\n", marker, iss.Number, iss.Title, strings.Join(iss.Labels, ", "))
 	}
-	if m.Err != nil {
-		fmt.Fprintf(&b, "refresh failed: %s\n", m.Err)
-	}
-	if len(m.Picks) > 0 {
-		b.WriteString("picks:\n")
-		for _, p := range m.Picks {
-			fmt.Fprintf(&b, "  #%s  %s  %s", p.Number, p.State, p.Title)
-			if p.BlockedBy != "" {
-				fmt.Fprintf(&b, "  (held by %s)", p.BlockedBy)
-			}
-			if p.Reason != "" {
-				fmt.Fprintf(&b, "  (%s)", p.Reason)
-			}
-			if p.Heartbeat != "" {
-				fmt.Fprintf(&b, "  %s", p.Heartbeat)
-			}
-			b.WriteString("\n")
+	return b.String()
+}
+
+// renderQueueColumn renders the work queue: one pick-ordered line per Pick,
+// tagged with its PickState — a held row names its blocker, a running row
+// carries its heartbeat.
+func renderQueueColumn(m Model) string {
+	var b strings.Builder
+	b.WriteString("picks:\n")
+	for _, p := range m.Picks {
+		fmt.Fprintf(&b, "  #%s  [%s]  %s", p.Number, p.State, p.Title)
+		if p.BlockedBy != "" {
+			fmt.Fprintf(&b, "  (held by %s)", p.BlockedBy)
 		}
+		if p.Reason != "" {
+			fmt.Fprintf(&b, "  (%s)", p.Reason)
+		}
+		if p.Heartbeat != "" {
+			fmt.Fprintf(&b, "  %s", p.Heartbeat)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// joinColumns zips left and right line by line, padding each left line out
+// to leftWidth so the right column lines up in a consistent gutter — the
+// side-by-side layout for a terminal wide enough to afford it.
+func joinColumns(left, right string, leftWidth int) string {
+	leftLines := strings.Split(strings.TrimRight(left, "\n"), "\n")
+	rightLines := strings.Split(strings.TrimRight(right, "\n"), "\n")
+	n := len(leftLines)
+	if len(rightLines) > n {
+		n = len(rightLines)
+	}
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		var l, r string
+		if i < len(leftLines) {
+			l = leftLines[i]
+		}
+		if i < len(rightLines) {
+			r = rightLines[i]
+		}
+		fmt.Fprintf(&b, "%-*s%s\n", leftWidth, l, r)
 	}
 	return b.String()
 }
