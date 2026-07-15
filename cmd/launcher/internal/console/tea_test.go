@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -810,11 +811,22 @@ func TestTea_RebuildKey_NotStale_NeverRunsRebuildFn(t *testing.T) {
 func TestTea_RebuildKey_RunsRebuildFnAndClearsStale(t *testing.T) {
 	f := forge.NewFake()
 	rebuilt := make(chan struct{})
+	var stale atomic.Bool
+	stale.Store(true)
 	launch := &Launcher{
 		CodeForge: f,
 		Queue:     NewQueue(),
-		Fresh:     func() (bool, bool, string) { return true, false, "rebuild needed" },
-		RebuildFn: func() error { close(rebuilt); return nil },
+		Fresh: func() (bool, bool, string) {
+			if stale.Load() {
+				return true, false, "rebuild needed"
+			}
+			return true, true, ""
+		},
+		RebuildFn: func() error {
+			stale.Store(false)
+			close(rebuilt)
+			return nil
+		},
 	}
 	launch.tryLaunch(f, t.TempDir())
 	launch.Wait()
