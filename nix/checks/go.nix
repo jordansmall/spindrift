@@ -130,6 +130,57 @@ in
         touch $out
       '';
 
+  # ADR 0023: console is a leaf UI package with a strict one-way
+  # dependency — engine packages never import console. go list -deps walks
+  # the full transitive dependency graph, so an indirect reverse-import
+  # (engine package A -> engine package B -> console) is caught too, not
+  # just a direct one.
+  launcher-console-isolation =
+    let
+      guardedPackages = pkgs.lib.concatStringsSep " " [
+        "dispatch"
+        "waves"
+        "forge"
+        "settle"
+        "runner"
+        "driver"
+        "freshness"
+      ];
+    in
+    pkgs.runCommand "launcher-console-isolation"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        inherit guardedPackages;
+      }
+      ''
+        cp -r ${../../cmd/launcher} src
+        chmod -R +w src
+        cp -r ${launcherGoModules} src/vendor
+        export GOPROXY=off
+        export GOFLAGS=-mod=vendor
+        export GONOSUMCHECK='*'
+        export GOMODCACHE="$TMPDIR/gomodcache"
+        export GOCACHE="$TMPDIR/gocache"
+        export CGO_ENABLED=0
+        cd src
+        for pkg in $guardedPackages; do
+          if ! deps=$(go list -deps "./internal/$pkg" 2>&1); then
+            # console already imports most guarded packages, so a reverse
+            # import forms a cycle — go list fails outright instead of
+            # listing console as a dependency. Treat that failure itself
+            # as the violation signal.
+            echo "go list failed for internal/$pkg — likely an import cycle through internal/console, which violates ADR 0023's one-way dependency:" >&2
+            echo "$deps" >&2
+            exit 1
+          fi
+          if echo "$deps" | grep -qx 'spindrift.dev/launcher/internal/console'; then
+            echo "internal/$pkg imports internal/console — violates ADR 0023's one-way dependency (engine packages never import console)" >&2
+            exit 1
+          fi
+        done
+        touch $out
+      '';
+
   # formatter output must be the same store path as the pinned pkgs.nixfmt
   # used by the nix-fmt check — no drift between "how it's checked" and
   # "how it's fixed".
