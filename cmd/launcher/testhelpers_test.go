@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -11,6 +12,36 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 )
+
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns
+// everything written to it.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+
+	fn()
+
+	w.Close()
+	os.Stdout = orig
+
+	var buf strings.Builder
+	tmp := make([]byte, 4096)
+	for {
+		n, rerr := r.Read(tmp)
+		if n > 0 {
+			buf.Write(tmp[:n])
+		}
+		if rerr != nil {
+			break
+		}
+	}
+	return buf.String()
+}
 
 // testDispatchLabels is the conventional lifecycle-label set, mirrored from
 // lib/env-schema.nix and pinned against the agent workflows by

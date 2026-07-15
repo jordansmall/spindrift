@@ -14,12 +14,12 @@ import (
 // by Settle itself when a Box exits with no outcome line.
 func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num, prURL string) {
 	branch := s.cf.AgentBranch(num)
-	fmt.Printf("    #%s  pr=%s  status=adopted  note=no outcome line; PR discovered on %s\n", num, prURL, branch)
+	fmt.Printf("    #%s  landing=%s  status=adopted  note=no outcome line; PR discovered on %s\n", num, prURL, branch)
 	switch s.selfHeal(d, num, prURL) {
 	case landingMerged:
 		s.verifyMerged(num, prURL)
 	case landingFailed:
-		fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", num, prURL)
+		fmt.Printf("    #%s  landing=%s  status=failed  !! CI or merge failed\n", num, prURL)
 	case landingAbandoned:
 		// Terminate already recorded its own comment and log line.
 	}
@@ -32,7 +32,7 @@ func (s *Settle) verifyMerged(num, pr string) {
 	prState, _ := s.pr.PRState(pr)
 	iss, _ := s.it.Issue(num)
 	if prState == forge.PRMerged && containsLabel(iss.Labels, s.cfg.CompleteLabel) {
-		fmt.Printf("    #%s  pr=%s  status=verified-merged\n", num, pr)
+		fmt.Printf("    #%s  landing=%s  status=verified-merged\n", num, pr)
 		return
 	}
 	var reason string
@@ -45,7 +45,7 @@ func (s *Settle) verifyMerged(num, pr string) {
 	} else {
 		reason = fmt.Sprintf("issue does not carry '%s'", s.cfg.CompleteLabel)
 	}
-	fmt.Printf("    #%s  pr=%s  status=failed  !! %s\n", num, pr, reason)
+	fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, pr, reason)
 	s.transitionState(num, forge.InProgress, forge.Failed)
 }
 
