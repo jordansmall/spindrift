@@ -63,6 +63,7 @@ var transientPatterns = []struct {
 	{"rate_limit_error", RateLimit},
 	{"overloaded_error", Overloaded},
 	{"usage_limit_reached", RateLimit},
+	{"server_error", Overloaded},
 	// HTTP status phrase patterns — specific enough to avoid false positives.
 	{"429 Too Many Requests", RateLimit},
 	{"529 Overloaded", Overloaded},
@@ -165,7 +166,11 @@ func scanLog(logPath string) (scanResult, error) {
 // stream-json line as agent-authored content (an "assistant" turn or a
 // "user" tool-result turn) rather than a genuine terminating API error event.
 type agentContentEvent struct {
-	Type string `json:"type"`
+	Type    string `json:"type"`
+	Error   string `json:"error"`
+	Message struct {
+		Model string `json:"model"`
+	} `json:"message"`
 }
 
 // isAgentContentEvent reports whether chunk is a stream-json line carrying
@@ -177,9 +182,17 @@ type agentContentEvent struct {
 // timestamp. Lines that fail to parse as JSON (plain-text driver/network
 // error output) or that parse with any other type ("error", "system",
 // "result", or none) are left to the normal scan.
+//
+// The one exception: an assistant-typed event with message.model:"<synthetic>"
+// and a top-level "error" field is not agent-authored — it's the claude CLI's
+// own synthetic terminator for a mid-stream API error (issue #815) — so it is
+// left to the normal scan too.
 func isAgentContentEvent(chunk string) bool {
 	var ev agentContentEvent
 	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
+		return false
+	}
+	if ev.Type == "assistant" && ev.Message.Model == "<synthetic>" && ev.Error != "" {
 		return false
 	}
 	return ev.Type == "assistant" || ev.Type == "user"

@@ -95,6 +95,46 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// Anthropic mid-stream 5xx server error: structured JSON error type
+		// (issue #815) — maps onto the existing Overloaded reason.
+		name: "Overloaded_ServerError_ErrorType",
+		lines: []string{
+			`{"type":"error","error":{"type":"server_error","message":"Server error"}}`,
+		},
+		wantClass:   claude.Transient,
+		wantReason:  claude.Overloaded,
+		wantResetAt: nil,
+	},
+	{
+		// The claude CLI's synthetic terminator for a mid-stream 5xx: an
+		// assistant-typed event with model:"<synthetic>" and a top-level
+		// "error":"server_error" field. It is a CLI-injected terminator, not
+		// agent-authored content, so isAgentContentEvent must not swallow it
+		// (issue #815).
+		name: "Overloaded_SyntheticServerErrorTerminator",
+		lines: []string{
+			`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Server error mid-response. The response above may be incomplete."}],"stop_reason":"stop_sequence"},"error":"server_error"}`,
+			`{"type":"result","is_error":true,"result":"API Error: Server error mid-response","stop_reason":"stop_sequence","terminal_reason":"completed"}`,
+		},
+		wantClass:   claude.Transient,
+		wantReason:  claude.Overloaded,
+		wantResetAt: nil,
+	},
+	{
+		// A genuine assistant turn (real model, no top-level "error" field)
+		// that quotes "server_error" verbatim in its own prose — e.g. a box
+		// working on this classifier's error-handling code — must not be
+		// mistaken for the CLI's synthetic terminator; the #579 self-poison
+		// guard still applies (issue #815).
+		name: "Terminal_SelfPoisoning_ServerErrorMarkerInGenuineAssistantContent",
+		lines: []string{
+			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Adding a server_error transient pattern test case"}]}}`,
+		},
+		wantClass:   claude.Terminal,
+		wantReason:  claude.TaskFailed,
+		wantResetAt: nil,
+	},
+	{
 		name: "Network_ConnectionRefused",
 		lines: []string{
 			`dial tcp: connection refused`,
