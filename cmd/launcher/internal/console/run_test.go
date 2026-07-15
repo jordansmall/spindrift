@@ -372,6 +372,67 @@ func TestRun_BackgroundPoll_RefreshesWithoutOperatorInputOrTrackerWrite(t *testi
 	}
 }
 
+// TestRun_HeldPick_LaunchesOnBackgroundPollAfterDrainIdles verifies a pick
+// held on a blocker that clears out-of-band — no sibling Dispatch in this
+// session settles to trigger a refill — still launches with no further
+// operator action, once the background poll notices (#650).
+func TestRun_HeldPick_LaunchesOnBackgroundPollAfterDrainIdles(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen}) // #42's blocker, unmet at pick time
+	f.NativeDeps = map[string][]string{"42": {"41"}}
+
+	fr := runner.NewFake()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue(), pollInterval: 5 * time.Millisecond}
+
+	inR, inW := io.Pipe()
+	var out syncBuilder
+	done := make(chan error, 1)
+	go func() { done <- Run(f, dir, inR, &out, launch) }()
+
+	if _, err := inW.Write([]byte("p 42\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(out.String(), "held") {
+		if time.Now().After(deadline) {
+			t.Fatalf("output = %q, want #42 held on its open blocker", out.String())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueClosed})
+
+	deadline = time.Now().Add(2 * time.Second)
+	for len(fr.RunCalls) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("RunCalls = %v, want #42 dispatched once its blocker cleared, with no further operator action", fr.RunCalls)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if _, err := inW.Write([]byte("q\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
 // TestRun_RunningPick_RendersLiveHeartbeat verifies a running row's render
 // picks up the heartbeat line the Driver's own heartbeat parser emits as the
 // Box's log grows — scannable without drilling in (#647 AC2).
