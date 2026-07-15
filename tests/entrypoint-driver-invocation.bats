@@ -121,4 +121,3 @@ FAKE
   [ "$status" -ne 0 ]
   [[ "$output" == *"DRIVER_BIN"* ]]
 }
-
