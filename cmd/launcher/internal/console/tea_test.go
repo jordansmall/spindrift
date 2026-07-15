@@ -136,8 +136,10 @@ func TestTea_FilterMode_EscCancelRestoresPriorFilter(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
-// TestTea_CursorKeys_MoveHighlightedRow verifies j/down and k/up move the
-// cursor marker across the visible backlog (issue #784).
+// TestTea_CursorKeys_MoveHighlightedRow verifies j/down and the up arrow
+// move the cursor marker across the visible backlog (issue #784). "k" is
+// bound to Terminate (ADR 0024, issue #785), not cursor-up — only the arrow
+// key drives upward movement.
 func TestTea_CursorKeys_MoveHighlightedRow(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
@@ -149,7 +151,7 @@ func TestTea_CursorKeys_MoveHighlightedRow(t *testing.T) {
 	sendKey(tm, "j")
 	waitForOutput(t, tm, "> #2")
 
-	sendKey(tm, "k")
+	sendKey(tm, "up")
 	waitForOutput(t, tm, "> #1")
 
 	sendKey(tm, "down")
@@ -447,6 +449,182 @@ func TestTea_SettleTriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_PickKey_PromotesAndQueuesHighlighted verifies "p" promotes the
+// highlighted issue through the Untriaged->Dispatchable transition and lands
+// it on the queue — the launch button acting on the cursor row (issue #785).
+func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "p")
+	waitForOutput(t, tm, "picks:", "#42", "fix the thing")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_UnpickKey_RemovesQueuedHighlighted verifies "u" drops the
+// highlighted issue's queued-but-unlaunched pick, touching nothing on the
+// tracker (issue #785).
+func TestTea_UnpickKey_RemovesQueuedHighlighted(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "picks:", "queued")
+
+	sendKey(tm, "u")
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	fm := tm.FinalModel(t).(teaModel)
+	if len(fm.m.Picks) != 0 {
+		t.Errorf("Picks = %+v, want empty after unpick", fm.m.Picks)
+	}
+}
+
+// TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue verifies "P" picks
+// every currently-Dispatchable issue in one bulk gesture (#647 AC3, issue
+// #785) rather than requiring one "p" per row.
+func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "43", Title: "also ready", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing", "also ready")
+
+	sendKey(tm, "P")
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	fm := tm.FinalModel(t).(teaModel)
+	if len(fm.m.Picks) != 2 {
+		t.Fatalf("Picks = %+v, want 2 picks (one per Dispatchable issue)", fm.m.Picks)
+	}
+	nums := map[string]bool{fm.m.Picks[0].Number: true, fm.m.Picks[1].Number: true}
+	if !nums["42"] || !nums["43"] {
+		t.Errorf("Picks = %+v, want #42 and #43 both picked", fm.m.Picks)
+	}
+}
+
+// TestTea_ResizeKeys_RaiseAndLowerLiveCap verifies "+"/"-" adjust the live
+// parallelism cap immediately (ADR 0023, issue #785).
+func TestTea_ResizeKeys_RaiseAndLowerLiveCap(t *testing.T) {
+	f := forge.NewFake()
+	launch := &Launcher{CodeForge: f, Queue: NewQueue(), MaxParallel: 3}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "cap: 0/3")
+
+	sendKey(tm, "+")
+	waitForOutput(t, tm, "cap: 0/4")
+
+	sendKey(tm, "-")
+	sendKey(tm, "-")
+	waitForOutput(t, tm, "cap: 0/2")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_RebuildKey_RunsRebuildFnAndClearsStale verifies "b" triggers the
+// in-session rebuild (issue #652 AC3, issue #785): RebuildFn runs and, on
+// success, the stale gate clears.
+func TestTea_RebuildKey_RunsRebuildFnAndClearsStale(t *testing.T) {
+	f := forge.NewFake()
+	rebuilt := make(chan struct{})
+	launch := &Launcher{
+		CodeForge: f,
+		Queue:     NewQueue(),
+		Fresh:     func() (bool, bool, string) { return true, false, "rebuild needed" },
+		RebuildFn: func() error { close(rebuilt); return nil },
+	}
+	launch.tryLaunch(f, t.TempDir())
+	launch.Wait()
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "stale", "rebuild needed")
+
+	sendKey(tm, "b")
+	select {
+	case <-rebuilt:
+	case <-time.After(2 * time.Second):
+		t.Fatal(`RebuildFn never ran after "b"`)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if stale, _, _, _ := launch.StaleStatus(); !stale {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stale gate never cleared after a successful rebuild")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_TerminateKey_ConfirmThenYes_ReclaimsHighlightedDispatch verifies
+// "k" arms a confirm prompt naming the highlighted issue, and "y" then reaps
+// the Box and returns the issue to Dispatchable (ADR 0024, issue #785).
+func TestTea_TerminateKey_ConfirmThenYes_ReclaimsHighlightedDispatch(t *testing.T) {
+	launch, fc, fr, _ := newTermTestLauncher(t)
+
+	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "k")
+	waitForOutput(t, tm, "terminate #42?", "y/N")
+
+	sendKey(tm, "y")
+	waitForOutput(t, tm, "terminated")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	if len(fr.KillCalls) != 1 || fr.KillCalls[0] != "agent-issue-42" {
+		t.Errorf("KillCalls = %v, want exactly one kill of agent-issue-42", fr.KillCalls)
+	}
+}
+
+// TestTea_TerminateKey_ConfirmThenOther_Declines verifies any key other than
+// "y" at the confirm prompt declines the terminate — the running Dispatch is
+// left untouched (ADR 0024, issue #785).
+func TestTea_TerminateKey_ConfirmThenOther_Declines(t *testing.T) {
+	launch, fc, fr, _ := newTermTestLauncher(t)
+
+	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "k")
+	waitForOutput(t, tm, "terminate #42?")
+
+	sendKey(tm, "n")
+	waitForOutput(t, tm, "fix the thing") // confirm prompt gone, backlog/queue view back
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	if len(fr.KillCalls) != 0 {
+		t.Errorf("KillCalls = %v, want none after declining", fr.KillCalls)
+	}
+	snap := launch.Queue.Snapshot()
+	if len(snap) != 1 || snap[0].State != PickRunning {
+		t.Errorf("queue pick = %+v, want still PickRunning after declining", snap)
+	}
 }
 
 // newAlphaBetaFake returns a Fake tracker with two open issues, "alpha"

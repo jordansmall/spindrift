@@ -3,17 +3,15 @@
 // is retired. teaModel is a thin adapter: tea.Model.Update translates
 // tea.KeyMsg and the two async signals (background poll, launch-refresh)
 // into the same console Msg values Update already handles; tea.Model.View
-// delegates straight to the pure View. DrillIn is wired (issue #786);
-// Pick/Unpick/Terminate/Resize/Rebuild keybindings are still not wired here —
-// those commands lost their only entry point (the retired line loop) and
-// need their own cursor-driven design in a follow-up; the reducer and
-// Launcher/Queue plumbing behind them is untouched and stays fully tested at
-// their own seams.
+// delegates straight to the pure View. Pick/Unpick/pick-all-ready/Terminate/
+// Resize/Rebuild act on the cursor's highlighted row (issue #785); DrillIn is
+// wired too (issue #786).
 package console
 
 import (
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -145,10 +143,13 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	if t.m.FilterEditing {
 		return t.handleFilterKey(msg), nil
 	}
+	if t.m.PendingTerminate != "" {
+		return t.handleTerminateConfirmKey(msg), nil
+	}
 	switch msg.String() {
 	case "j", "down":
 		t.m = Update(t.m, CursorMoveMsg{Delta: 1})
-	case "k", "up":
+	case "up":
 		t.m = Update(t.m, CursorMoveMsg{Delta: -1})
 	case "/":
 		t.m = Update(t.m, FilterEditStartMsg{})
@@ -162,6 +163,28 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		t.m = Update(t.m, QuitMsg{})
 	case "?":
 		t.m = Update(t.m, HelpToggleMsg{})
+	case "p":
+		t = t.pickHighlighted()
+	case "u":
+		t = t.unpickHighlighted()
+	case "P":
+		t = t.pickAllReady()
+	case "k":
+		if num := t.highlightedNumber(); num != "" {
+			t.m = Update(t.m, TerminateRequestedMsg{Number: num})
+		}
+	case "+":
+		if t.launch != nil {
+			t.launch.Resize(1)
+		}
+	case "-":
+		if t.launch != nil {
+			t.launch.Resize(-1)
+		}
+	case "b":
+		if t.launch != nil {
+			t.launch.Rebuild(t.tracker, t.pwd)
+		}
 	}
 	return t, nil
 }
@@ -209,6 +232,90 @@ func openDrillInCmd(launch *Launcher, pwd, number string) tea.Cmd {
 		}
 		return DrillIn(drv, pwd, number)
 	}
+}
+
+// handleTerminateConfirmKey routes one keypress while PendingTerminate is
+// armed: "y" confirms — calling Launcher.Terminate before applying
+// TerminateConfirmedMsg, matching TerminateConfirmedMsg's own doc ("the run
+// loop has already called Launcher.Terminate by the time this reaches
+// Update") — anything else declines (ADR 0024, issue #649/#785).
+func (t teaModel) handleTerminateConfirmKey(msg tea.KeyMsg) teaModel {
+	num := t.m.PendingTerminate
+	if msg.String() == "y" {
+		if t.launch != nil {
+			if err := t.launch.Terminate(t.tracker, num); err != nil {
+				fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: %v\n", num, err)
+			}
+		}
+		t.m = Update(t.m, TerminateConfirmedMsg{Number: num})
+		return t
+	}
+	t.m = Update(t.m, TerminateCancelledMsg{})
+	return t
+}
+
+// highlightedNumber returns the cursor's highlighted issue number, or "" when
+// the backlog is empty.
+func (t teaModel) highlightedNumber() string {
+	visible := t.m.Visible()
+	if len(visible) == 0 {
+		return ""
+	}
+	return visible[t.m.Cursor].Number
+}
+
+// pickAllReady picks every issue currently Dispatchable on the tracker in
+// one bulk gesture (#647 AC3) — bound to shift+p ("P") so it can never
+// collide with, or need to wait behind, the single-issue "p" launch button.
+func (t teaModel) pickAllReady() teaModel {
+	for _, msg := range PickAllReady(t.tracker) {
+		t.m = Update(t.m, msg)
+		if queued, ok := msg.(PickQueuedMsg); ok && t.launch != nil {
+			t.launch.Queue.Add(Pick{Number: queued.Number, Title: queued.Title, Kind: queued.Kind, State: PickQueued})
+		}
+	}
+	if t.launch != nil {
+		t.launch.tryLaunch(t.tracker, t.pwd)
+	}
+	return t
+}
+
+// unpickHighlighted retracts the cursor's highlighted issue's queued pick, if
+// any — a pure session-queue edit with no tracker interaction (ADR 0023):
+// Update's own removePick already refuses to drop anything past PickQueued/
+// PickHeld, so this is safe to send even when the highlighted issue never
+// queued or already launched.
+func (t teaModel) unpickHighlighted() teaModel {
+	num := t.highlightedNumber()
+	if num == "" {
+		return t
+	}
+	t.m = Update(t.m, UnpickMsg{Number: num})
+	if t.launch != nil {
+		t.launch.Queue.Remove(num)
+	}
+	return t
+}
+
+// pickHighlighted promotes the cursor's highlighted issue through PickIssue
+// and lands the result on both the pure Model and the Launcher's live Queue
+// — the keypress translation of ADR 0023's Pick-is-the-launch-button rule. A
+// nil Launcher still promotes and lands the pick on Model.Picks (matching
+// the pre-#785 no-launch Console) but never queues on a live Queue or
+// launches, since there is nothing to launch it.
+func (t teaModel) pickHighlighted() teaModel {
+	visible := t.m.Visible()
+	if len(visible) == 0 {
+		return t
+	}
+	iss := visible[t.m.Cursor]
+	msg := PickIssue(t.tracker, iss.Number, iss.Title, KindWork)
+	t.m = Update(t.m, msg)
+	if queued, ok := msg.(PickQueuedMsg); ok && t.launch != nil {
+		t.launch.Queue.Add(Pick{Number: queued.Number, Title: queued.Title, Kind: queued.Kind, State: PickQueued})
+		t.launch.tryLaunch(t.tracker, t.pwd)
+	}
+	return t
 }
 
 // handleFilterKey routes one keypress while FilterEditing: Enter applies
