@@ -402,6 +402,7 @@ Type a command and press enter:
 | `k <num>` / `kill <num>` / `terminate <num>` | ask to Terminate `<num>`'s live Dispatch — prompts `y`/`N` to confirm |
 | `+` | raise the session's live parallelism cap by one |
 | `-` | lower the session's live parallelism cap by one |
+| `b` / `build` / `rebuild` | rebuild the image in-session when stale — no confirm needed |
 | `q` / `quit` | exit cleanly |
 
 If a `.dogfood.pid` file is present at startup — a headless loop
@@ -502,6 +503,23 @@ is never silently orphaned. Re-picking a terminated issue later dispatches a
 fresh Box and, through the existing settle adoption path, picks up the
 dangling PR instead of duplicating it — terminate-then-repick is a clean
 reclaim loop, not a collision.
+
+**Stale image** (issue #652) reshapes what is exit code 4 for the headless
+loops into an in-session banner: when the freshness probe finds the loaded
+image would be rebuilt against the current base branch tip, the Console
+prints `!! image stale: <reason> — new launches held; press [b] to rebuild`
+and holds every new launch — a queued pick stays at `queued` instead of
+claiming. A Box already running rides out the stale window on its original
+image untouched; staleness only gates a slot *refill*, never an in-flight
+Dispatch. `b`/`build`/`rebuild` fires the rebuild without leaving the
+session or needing a confirm (it's non-destructive): it pulls the base
+branch and re-realizes the image in the background while the session stays
+responsive, with `==> rebuilding image...` shown until it finishes. A
+successful rebuild clears the banner and resumes every held pick exactly
+where it queued — no re-pick needed. A failed rebuild prints
+`!! rebuild failed: <reason>` and leaves launches held, so the operator can
+retry `b` once the underlying problem (a merge conflict on pull, a broken
+derivation) is fixed.
 
 ## Documentation
 
