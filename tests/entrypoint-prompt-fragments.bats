@@ -135,13 +135,14 @@ SKILL
   ! grep -q 'verbatim\.Your text output' "$CLAUDE_PROMPT_FILE"
 }
 
-# issue #463: the claude|heartbeat-filter|tee pipeline used to be hand-copied
-# between the direct path and the devShell wrapper heredoc; a single
-# occurrence of this fragment proves it is now rendered from one source that
-# both paths execute (the direct-path and devShell behavioural tests above
+# issue #626: driver-exec absorbed the direct-path/devShell-wrapper dual
+# pipeline text (issue #463) entirely -- entrypoint.sh now calls driver-exec
+# exactly once, direct and devShell invocation are the same call path, and
+# driver-exec's own --devshell switch (not a second hand-copied pipeline)
+# tells it which (the direct-path and devShell behavioural tests above
 # already prove both paths still work).
-@test "driver pipeline is defined exactly once in entrypoint.sh source" {
-  count=$(grep -c 'spindrift-heartbeat-filter -n "\$ISSUE_NUMBER" -f /tmp/heartbeat.log' "$ENTRYPOINT")
+@test "driver-exec is invoked exactly once in entrypoint.sh source" {
+  count=$(grep -c '^  driver-exec \\$' "$ENTRYPOINT")
   [ "$count" -eq 1 ]
 }
 

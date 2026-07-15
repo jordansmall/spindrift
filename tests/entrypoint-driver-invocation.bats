@@ -38,10 +38,11 @@ setup() {
   grep -q -- "--verbose" "$CLAUDE_LOG"
 }
 
-# In-box heartbeat view (#183): the entrypoint pipes claude's output through
-# spindrift-heartbeat-filter so a human can `tail -f /tmp/heartbeat.log` inside
-# the box and see coarse status lines instead of raw NDJSON. Raw stream-json
-# still reaches stdout unchanged for the launcher's byte-exact capture.
+# In-box heartbeat view (#183, absorbed into driver-exec by #626): the
+# entrypoint delegates the Driver run to driver-exec, which filters heartbeats
+# in-process so a human can `tail -f /tmp/heartbeat.log` inside the box and
+# see coarse status lines instead of raw NDJSON. Raw stream-json still reaches
+# stdout unchanged for the launcher's byte-exact capture.
 
 @test "entrypoint writes coarse heartbeat log at /tmp/heartbeat.log" {
   run bash "$ENTRYPOINT"

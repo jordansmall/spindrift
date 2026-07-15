@@ -39,7 +39,7 @@ setup_fakes() {
   cp "$FAKES_DIR/runtime" "$FAKE_BIN/docker"
   cp "$FAKES_DIR/runtime" "$FAKE_BIN/bwrap"
   cp "$FAKES_DIR/gh" "$FAKES_DIR/claude" "$FAKES_DIR/nix" \
-     "$FAKES_DIR/spindrift-heartbeat-filter" "$FAKE_BIN/"
+     "$FAKES_DIR/driver-exec" "$FAKE_BIN/"
   chmod +x "$FAKE_BIN"/*
   export PATH="$FAKE_BIN:$PATH"
 

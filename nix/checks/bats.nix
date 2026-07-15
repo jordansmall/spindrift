@@ -31,7 +31,7 @@ in
           ${../../tests/fakes/gh} \
           ${../../tests/fakes/claude} \
           ${../../tests/fakes/nix} \
-          ${../../tests/fakes/spindrift-heartbeat-filter} \
+          ${../../tests/fakes/driver-exec} \
           ${../../tests/helper.bash} \
           ${../../tests/box_env_gen.bash}
         touch $out
