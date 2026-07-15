@@ -75,6 +75,41 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 	}
 }
 
+// TestMainRun_AmbientKnobEnv_WarnsAndStillHonored is the verb-level proof of
+// ADR 0020's staged deprecation: mainRun on a real subcommand (research,
+// which reaches bootstrap/validate without touching a real runner or gh —
+// see TestMainRun_Research_RoutesThroughBootstrap) both prints the
+// provenance warning for an ambient knob env var and still resolves it into
+// config, exercising the actual wiring (snapshot before parseFlags, flush
+// after the bare-invocation check) rather than warnAmbientKnobEnv in
+// isolation.
+func TestMainRun_AmbientKnobEnv_WarnsAndStillHonored(t *testing.T) {
+	t.Setenv("REPO_SLUG", "")
+	t.Setenv("MAX_JOBS", "5")
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"research"}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("mainRun code = %d, want 1; stderr=%s", code, stderr.String())
+	}
+	out := stderr.String()
+	if !strings.Contains(out, "MAX_JOBS=5 set in environment") {
+		t.Errorf("stderr = %q, want a MAX_JOBS provenance warning", out)
+	}
+	if !strings.Contains(out, "--max-jobs") || !strings.Contains(out, "settings.concurrency.maxJobs") {
+		t.Errorf("stderr = %q, want both the flag and settings migration targets named", out)
+	}
+
+	// The value is still honored this release: loadConfig() (called inside
+	// bootstrap, after the warning fires) resolves MAX_JOBS=5 from the same
+	// ambient env the warning just reported on.
+	c := loadConfig()
+	if c.maxJobs != 5 {
+		t.Errorf("maxJobs = %d, want 5 (ambient env still honored)", c.maxJobs)
+	}
+}
+
 // TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument is the
 // verb-level proof of ADR 0020's precedence chain: a --input document
 // resolves REPO_SLUG (no env, no flag set), and an explicit --repo-slug flag

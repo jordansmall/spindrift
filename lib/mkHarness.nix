@@ -639,8 +639,9 @@ let
       "$out/share/zsh/site-functions/_spindrift"
   '';
 
-  # The spindrift CLI: bakes nix-computed config as env vars and execs the Go
-  # launcher. Exposed as packages.spindrift, apps.default, and in devShells.
+  # The spindrift CLI: passes the rendered Launcher input document via
+  # --input and execs the Go launcher (ADR 0020) — no per-knob env export.
+  # Exposed as packages.spindrift, apps.default, and in devShells.
   # The man page is joined into the same output so `man spindrift` resolves
   # from the dev shell (nixpkgs adds share/man to MANPATH) and on install.
   spindriftBin =
