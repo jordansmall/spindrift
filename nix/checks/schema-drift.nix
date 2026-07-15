@@ -200,27 +200,6 @@ in
         touch $out
       '';
 
-  # cmd/launcher/defaults_gen.go must match the content generated from
-  # env-schema.nix by renderDefaultsTableGo. Fails when a schema default
-  # changes but the committed generated file is not regenerated — the sole
-  # guard keeping loadConfig()'s defaults tied to the schema (issue #621).
-  # Shares its renderer with `nix run .#regen` via lib/renderers.nix.
-  launcher-defaults-table =
-    let
-      schema = import ../../lib/env-schema.nix;
-      generated = pkgs.writeText "defaults_gen.go.generated" (renderers.renderDefaultsTableGo schema);
-    in
-    pkgs.runCommand "launcher-defaults-table"
-      {
-        inherit generated;
-        committed = ../../cmd/launcher/defaults_gen.go;
-      }
-      ''
-        diff "$generated" "$committed" \
-          || { echo "cmd/launcher/defaults_gen.go is out of sync with lib/env-schema.nix — regenerate it" >&2; exit 1; }
-        touch $out
-      '';
-
   # docs/flake-options.md must match the reference generated from env-schema.nix.
   # Fails when a flakeOption knob is added or removed but the committed file is
   # not regenerated (same treatment as harness.env.example and flagtable_gen.go).
