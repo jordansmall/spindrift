@@ -1,0 +1,86 @@
+name: Agent research
+
+# Adding the `agent-research` label to an issue fires one research dispatch
+# against it (ADR 0022): claim the issue (swap `agent-research` ->
+# `agent-research-in-progress` up front), build the image, then run
+# `spindrift research` against that single issue — a fresh clone, a review of
+# the issue against the Target repo, and one posted verdict comment. Research
+# never lands code: no PR, no CI watch, no merge. The claim clears
+# `agent-research` before any build work, so the label self-clears and will
+# not re-fire.
+on:
+  issues:
+    types: [labeled]
+
+# Serialise per kind per issue (ADR 0022): two labelings of the SAME issue
+# with `agent-research` queue behind each other (no double-dispatch), but a
+# research run on one issue and a work run on the same issue are separate
+# concurrency groups and may run simultaneously — permitted, operator's
+# responsibility, matching the existing dispatch rate-limit stance. Different
+# issues always run concurrently.
+concurrency:
+  group: agent-research-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    if: github.event.label.name == 'agent-research'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      MAX_JOBS: "1"
+    steps:
+      # Checkout must precede the local composite step below: GitHub resolves
+      # ./.github/actions/agent-setup from the checked-out tree.
+      - uses: actions/checkout@v4
+
+      # Claim (agent-research -> agent-research-in-progress, up front so
+      # ownership is atomic before the build), Install Nix, and build — plus
+      # the shared env block (RUNTIME, REPO_SLUG, BASE_BRANCH, tokens, bot
+      # identity) written to $GITHUB_ENV for every step below.
+      #
+      # Token: SPINDRIFT_RESEARCH_GH_TOKEN, when set, is a fine-grained PAT
+      # scoped Issues RW + Contents R + Metadata R — the token is the
+      # enforcement boundary that makes advise-only real, since Contents
+      # read-only means even a fully injection-steered researcher cannot push
+      # code, open a PR, or merge. Unset falls back to SPINDRIFT_GH_TOKEN (the
+      # dispatch/recover PAT, scoped Issues/Contents/Pull requests RW +
+      # Metadata R) — research still can't merge without a PR to merge, but
+      # loses the read-only guarantee: a compromised researcher could push to
+      # a branch or open a PR with the broader token. Configure the dedicated
+      # token for the tightest blast radius.
+      - name: Agent setup
+        uses: ./.github/actions/agent-setup
+        with:
+          gh-token: ${{ secrets.SPINDRIFT_RESEARCH_GH_TOKEN || secrets.SPINDRIFT_GH_TOKEN }}
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          repo: ${{ github.repository }}
+          base-branch: ${{ github.event.repository.default_branch }}
+          claim-add-label: agent-research-in-progress
+          # Strip only the research-family labels (ADR 0022): the claim never
+          # touches ready-for-agent/agent-in-progress/agent-complete/
+          # agent-failed — an issue wearing a work lifecycle label keeps it
+          # through a research claim, since the two kinds are disjoint and a
+          # research dispatch may legitimately run alongside a work dispatch
+          # on the same issue.
+          claim-remove-labels: >-
+            agent-research agent-research-recommend agent-research-reject
+            agent-research-unclear agent-research-failed
+          git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
+          git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
+
+      - name: Research the labeled issue
+        run: nix run . -- research
+
+      - name: Upload run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-research-logs-${{ github.event.issue.number }}
+          path: logs/
+          if-no-files-found: ignore
