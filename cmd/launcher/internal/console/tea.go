@@ -45,9 +45,10 @@ type teaModel struct {
 }
 
 // newTeaModel builds the tea layer's starting state: the dogfood-competition
-// notice is checked synchronously (a cheap os.Stat, matching the pre-#784
-// Run's own startup check) — the initial backlog load, background poll, and
-// launch-refresh listener all start as Cmds from Init instead.
+// notice is checked synchronously (a cheap pid-file read plus signal-0
+// probe, matching the pre-#784 Run's own startup check) — the initial
+// backlog load, background poll, and launch-refresh listener all start as
+// Cmds from Init instead.
 func newTeaModel(tracker forge.IssueTracker, pwd string, launch *Launcher) teaModel {
 	m := NewModel()
 	m = Update(m, DogfoodNotice(pwd))
