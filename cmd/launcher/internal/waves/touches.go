@@ -12,15 +12,7 @@ import (
 // the fetch fails, it returns nil with no error — v1's declared-only behavior
 // applies unchanged.
 func prTouchesOf(cf forge.CodeForge, num string) []string {
-	res, err := forge.ResolveOpenPR(cf, num)
-	if err != nil || !res.Found {
-		return nil
-	}
-	// res.Found is only true when cf implements PRForge (ResolveOpenPR's own
-	// contract), so this assertion always succeeds here — needed only
-	// because ListPRFiles isn't part of the open-PR resolver's job.
-	pr := cf.(forge.PRForge)
-	files, err := pr.ListPRFiles(res.URL)
+	files, err := forge.ResolveOpenPRFiles(cf, num)
 	if err != nil {
 		return nil
 	}
