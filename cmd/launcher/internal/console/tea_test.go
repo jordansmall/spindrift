@@ -375,6 +375,28 @@ func TestTea_WithLauncher_RendersLiveQueueState(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
+// TestTea_WithLauncher_RendersHeldPickWithBlockedByBadge verifies a held
+// pick's "held by #N" badge reaches the rendered output through the tea
+// layer's per-render Queue sync, not just the pure View tests (issue #785:
+// "queue rows show ... blocked (with a held by #N badge)").
+func TestTea_WithLauncher_RendersHeldPickWithBlockedByBadge(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	// A held pick's badge is set entirely by Queue.Discover's blocker check
+	// (queue.go setHeld); landing the state directly isolates the render-sync
+	// behavior under test from blocker-edge mechanics already covered at
+	// queue_test.go.
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickHeld, BlockedBy: "#41 (native)"})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "held", "held by #41 (native)")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
 // TestTea_StaleStatus_RendersBanner verifies the tea layer's per-render sync
 // installs the launcher's live stale verdict onto the view, exactly as
 // syncQueue does for the picks queue — the operator sees the banner without
@@ -469,6 +491,120 @@ func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
+// TestTea_PickKey_FollowedByNonA_ResolvesToSinglePick verifies "p" followed
+// by any key other than "a" resolves the leader chord to a single-issue
+// pick immediately, rather than making the operator wait out the timeout
+// (issue #785 AC1).
+func TestTea_PickKey_FollowedByNonA_ResolvesToSinglePick(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "p")
+	sendKey(tm, "z") // not "a" — resolves to a single pick right away
+	waitForOutput(t, tm, "picks:", "#42")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_PickKey_FailedPromotion_SurvivesQueueResync verifies a raced/
+// closed/relabeled promotion's dissolved row stays on screen — the launcher's
+// own per-render Queue resync (syncQueue) must not silently wipe it just
+// because the failed pick never landed on the live Queue (issue #785 review).
+func TestTea_PickKey_FailedPromotion_SurvivesQueueResync(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	f.TransitionStateErr = errBoom
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "p")
+	waitForOutput(t, tm, "dissolved")
+
+	// Force a second render (a plain refresh, not a pick) to prove the
+	// dissolved row survives more than the one render right after the
+	// keypress — the launcher's own per-render Queue resync must not wipe
+	// it just because it never landed on the live Queue.
+	sendKey(tm, "r")
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	fm := tm.FinalModel(t).(teaModel)
+	if len(fm.m.Picks) != 1 || fm.m.Picks[0].State != PickDissolved {
+		t.Errorf("Picks = %+v, want one dissolved pick surviving the resync", fm.m.Picks)
+	}
+}
+
+// TestTea_TerminateKey_NilLauncher_NeverArmsConfirm verifies "k" is a no-op
+// in a launch-less session — there is no live Dispatch to reclaim, so no
+// confirm prompt should ever arm (issue #785 review).
+func TestTea_TerminateKey_NilLauncher_NeverArmsConfirm(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "k")
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.PendingTerminate != "" {
+		t.Errorf("PendingTerminate = %q, want empty in a launch-less session", fm.m.PendingTerminate)
+	}
+}
+
+// TestTea_PickKey_TriggersAutoRefresh_NoExplicitRefreshKey verifies a pick's
+// promotion — the session's own tracker write — fires the same
+// signalRefresh auto-refresh every other write triggers (#647 AC4), so a
+// late-arriving issue surfaces without the operator pressing "r" (issue
+// #785 review: "a claim attempt is always a tracker write, win or lose").
+func TestTea_PickKey_TriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+	launch.pollInterval = time.Hour // isolate: only the pick's own signal should trigger this refresh
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	f.SetIssue(forge.Issue{Number: "99", Title: "late arrival", State: forge.IssueOpen})
+	sendKey(tm, "p")
+	waitForOutput(t, tm, "late arrival")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_PickKey_FailedPromotion_StillTriggersAutoRefresh verifies a raced/
+// closed/relabeled pick still fires signalRefresh — "a claim attempt is
+// always a tracker write, win or lose" (issue #785 review) — even though,
+// unlike a successful pick, it never reaches tryLaunch's own drain-side
+// signal.
+func TestTea_PickKey_FailedPromotion_StillTriggersAutoRefresh(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	f.TransitionStateErr = errBoom
+	launch := &Launcher{CodeForge: f, Queue: NewQueue(), pollInterval: time.Hour}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	f.SetIssue(forge.Issue{Number: "99", Title: "late arrival", State: forge.IssueOpen})
+	sendKey(tm, "p")
+	waitForOutput(t, tm, "late arrival")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
 // TestTea_UnpickKey_RemovesQueuedHighlighted verifies "u" drops the
 // highlighted issue's queued-but-unlaunched pick, touching nothing on the
 // tracker (issue #785).
@@ -491,9 +627,10 @@ func TestTea_UnpickKey_RemovesQueuedHighlighted(t *testing.T) {
 	}
 }
 
-// TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue verifies "P" picks
-// every currently-Dispatchable issue in one bulk gesture (#647 AC3, issue
-// #785) rather than requiring one "p" per row.
+// TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue verifies "pa" (the
+// literal two-key leader sequence named in issue #785's AC1) picks every
+// currently-Dispatchable issue in one bulk gesture (#647 AC3) rather than
+// requiring one "p" per row.
 func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
@@ -503,7 +640,8 @@ func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing", "also ready")
 
-	sendKey(tm, "P")
+	sendKey(tm, "p")
+	sendKey(tm, "a")
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 
@@ -597,6 +735,29 @@ func TestTea_TerminateKey_ConfirmThenYes_ReclaimsHighlightedDispatch(t *testing.
 
 	if len(fr.KillCalls) != 1 || fr.KillCalls[0] != "agent-issue-42" {
 		t.Errorf("KillCalls = %v, want exactly one kill of agent-issue-42", fr.KillCalls)
+	}
+}
+
+// TestTea_TerminateKey_ConfirmThenCapitalY_Confirms verifies the confirm
+// prompt accepts "Y" as well as "y" — the "[y/N]" prompt reads as
+// case-insensitive to an operator (issue #785 review).
+func TestTea_TerminateKey_ConfirmThenCapitalY_Confirms(t *testing.T) {
+	launch, fc, fr, _ := newTermTestLauncher(t)
+
+	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "k")
+	waitForOutput(t, tm, "terminate #42?")
+
+	tm.Type("Y")
+	waitForOutput(t, tm, "terminated")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	if len(fr.KillCalls) != 1 {
+		t.Errorf("KillCalls = %v, want exactly one kill", fr.KillCalls)
 	}
 }
 
