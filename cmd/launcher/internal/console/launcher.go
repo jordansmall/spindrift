@@ -1,6 +1,7 @@
 package console
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -31,11 +32,25 @@ type Launcher struct {
 	// threaded into Queue.Discover's held-pick check (#650) so a failed
 	// blocker surfaces on the held row instead of silently staying "open".
 	FailedLabel string
+	// Fresh answers whether the loaded image is stale against the current
+	// base-branch tip — the same waves.FreshnessChecker seam the headless
+	// exit-4 path already uses (issue #652). Nil (every pre-#652 call site)
+	// falls back to "always fresh, not applicable", matching drain's old
+	// hardcoded stub.
+	Fresh waves.FreshnessChecker
 
 	mu        sync.Mutex
 	launching bool
 	wg        sync.WaitGroup
 	refresh   chan struct{}
+	// stale and staleMessage record the last stale verdict a drain saw —
+	// read by StaleStatus for the console's banner. staleMessage is updated
+	// on every freshnessChecker() call, stale (and rebuilding/rebuildErr)
+	// only by drain/Rebuild themselves.
+	stale        bool
+	staleMessage string
+	rebuilding   bool
+	rebuildErr   error
 	// pollInterval overrides Run's default background poll cadence — unset
 	// (zero) in every production construction site, so only same-package
 	// tests reach in to shrink it below defaultPollInterval.
@@ -242,9 +257,20 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		}
 		return issues, edges, err
 	}
-	fresh := func() (bool, bool, string) { return false, true, "" }
 	for {
-		_ = waves.RunContinuous(waves.Config{Limiter: l.limiter(), Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue, l.signalRefresh, l.registry()}, discover, fresh)
+		err := waves.RunContinuous(waves.Config{Limiter: l.limiter(), Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue, l.signalRefresh, l.registry()}, discover, l.freshnessChecker())
+
+		if errors.Is(err, waves.ErrImageStale) {
+			// Every in-flight Box this run already finished (RunContinuous
+			// only returns ErrImageStale after wg.Wait()) — nothing left to
+			// race. Park here instead of looping: a tight re-drain would
+			// just re-hit the same stale verdict on every refill. Rebuild
+			// resumes draining on success by calling tryLaunch again.
+			l.mu.Lock()
+			l.launching = false
+			l.mu.Unlock()
+			return
+		}
 
 		l.mu.Lock()
 		if !l.Queue.hasQueued() {
@@ -254,6 +280,36 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		}
 		l.mu.Unlock()
 	}
+}
+
+// freshnessChecker wraps l.Fresh so every call also records the verdict for
+// StaleStatus to read — RunContinuous calls the checker directly and never
+// sees Launcher, so this is the only place that can capture its result. Nil
+// Fresh (every pre-#652 call site) falls back to the always-fresh stub
+// drain used to hardcode.
+func (l *Launcher) freshnessChecker() waves.FreshnessChecker {
+	if l.Fresh == nil {
+		return func() (bool, bool, string) { return false, true, "" }
+	}
+	return func() (bool, bool, string) {
+		applicable, fresh, msg := l.Fresh()
+		l.mu.Lock()
+		l.stale = applicable && !fresh
+		l.staleMessage = msg
+		l.mu.Unlock()
+		return applicable, fresh, msg
+	}
+}
+
+// StaleStatus returns the launcher's live image-freshness/rebuild state —
+// the console's per-render sync source for the stale banner (issue #652).
+func (l *Launcher) StaleStatus() (stale bool, message string, rebuilding bool, rebuildErr string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.rebuildErr != nil {
+		rebuildErr = l.rebuildErr.Error()
+	}
+	return l.stale, l.staleMessage, l.rebuilding, rebuildErr
 }
 
 // Wait blocks until any in-flight background drain finishes — Run calls it
