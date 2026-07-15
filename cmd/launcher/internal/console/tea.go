@@ -252,8 +252,9 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 }
 
 // handleDrillInKey routes one keypress while the drill-in transcript pane is
-// open: "t" toggles rendered/raw, "x"/Esc closes back to the backlog, and
-// the scroll keys page through the loaded content (issue #786).
+// open: "t" toggles rendered/raw, "x"/Esc closes back to the backlog, the
+// scroll keys page through the loaded content (issue #786), and "m" cycles
+// the pane's layout docked -> floating -> fullscreen (issue #846, ADR 0025).
 func (t teaModel) handleDrillInKey(msg tea.KeyMsg) Model {
 	switch msg.String() {
 	case "t":
@@ -268,6 +269,8 @@ func (t teaModel) handleDrillInKey(msg tea.KeyMsg) Model {
 		return Update(t.m, DrillInScrollMsg{Delta: drillInPageSize})
 	case "pgup":
 		return Update(t.m, DrillInScrollMsg{Delta: -drillInPageSize})
+	case "m":
+		return Update(t.m, PaneModeCycleMsg{})
 	}
 	return t.m
 }

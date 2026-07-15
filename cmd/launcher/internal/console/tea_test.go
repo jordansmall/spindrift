@@ -371,6 +371,47 @@ func TestTea_DrillInToggleKey_SwapsRenderedAndRaw(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
+// TestTea_PaneModeKey_CyclesDockedFloatingFullscreen verifies "m", pressed
+// while a drill-in is open, cycles Model.PaneMode through docked -> floating
+// -> fullscreen (issue #846, ADR 0025).
+func TestTea_PaneModeKey_CyclesDockedFloatingFullscreen(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(120, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "picks [focus]")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "[implementor] hi")
+
+	sendKey(tm, "m")
+	sendKey(tm, "m")
+	sendKey(tm, "x")
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.PaneMode != PaneFullscreen {
+		t.Errorf("PaneMode = %v, want PaneFullscreen after two presses of \"m\"", fm.m.PaneMode)
+	}
+}
+
 // TestTea_DrillInScrollKeys_PageThroughTranscript verifies pgdown/pgup move
 // the drill-in pane's scroll offset, hiding and restoring the leading lines
 // (issue #786).
