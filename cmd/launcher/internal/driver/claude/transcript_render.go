@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/logscan"
 )
@@ -77,8 +78,9 @@ const resultTextMaxLen = 200
 // block is IsError.
 func summarizeResult(block ContentBlock) string {
 	text := strings.TrimSpace(strings.ReplaceAll(resultText(block.Content), "\n", " "))
-	if len(text) > resultTextMaxLen {
-		text = text[:resultTextMaxLen-3] + "..."
+	if utf8.RuneCountInString(text) > resultTextMaxLen {
+		runes := []rune(text)
+		text = string(runes[:resultTextMaxLen-3]) + "..."
 	}
 	if text == "" {
 		text = "(empty result)"

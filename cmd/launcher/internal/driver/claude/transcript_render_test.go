@@ -3,7 +3,9 @@ package claude_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/driver/claude"
 )
@@ -61,6 +63,24 @@ func TestRenderTranscript_ToolResult_RendersSummarizedResult(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := "[implementor]   -> ok, file updated\n"
+	if got != want {
+		t.Errorf("RenderTranscript = %q, want %q", got, want)
+	}
+}
+
+func TestRenderTranscript_ToolResult_TruncatesOnRuneBoundary(t *testing.T) {
+	long := strings.Repeat("a", 196) + strings.Repeat("€", 6)
+	line := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"` + long + `"}]}}`
+	path := writeLog(t, line)
+
+	got, err := claude.RenderTranscript(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("RenderTranscript produced invalid UTF-8: %q", got)
+	}
+	want := "[implementor]   -> " + strings.Repeat("a", 196) + "€...\n"
 	if got != want {
 		t.Errorf("RenderTranscript = %q, want %q", got, want)
 	}
