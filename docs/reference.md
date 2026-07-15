@@ -885,10 +885,17 @@ The filer:
   (idempotent — it creates the label itself; this label is separate from the
   four triage labels `spindrift doctor` manages and is not required for
   dispatch to work);
-- searches existing issues carrying `agent-review-finding` in **any** state
-  (open and closed) and skips findings that already match — a closed finding
-  is a human triage decision (won't-fix, duplicate, already fixed) and is
-  never refiled;
+- searches **all open issues, regardless of label** and skips findings that
+  already match — an open issue means the problem is already tracked,
+  whether human-filed, `ready-for-agent`, filed via `/to-tickets`, or from a
+  prior Filer run;
+- additionally treats **closed** issues carrying `agent-review-finding` or
+  `agent-research-reject` as suppressing matches — a closed finding is a
+  human triage decision (won't-fix, duplicate, already fixed), and a closed
+  research rejection is the same class of deliberate dismissal
+  (false-positive, not-worth-doing, duplicate); neither is ever refiled. A
+  plain closed issue carrying neither label does **not** suppress filing — a
+  problem that was fixed and later regressed can still be refiled;
 - files one issue per surviving finding (merging only findings that are the
   same change), each with a conventional title, the finding's file:line refs
   and reviewing rationale, a `Found by review during #<issue> (PR <url>)`

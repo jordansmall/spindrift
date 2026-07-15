@@ -333,4 +333,30 @@ in
     done
     touch $out
   '';
+
+  # Grep pin (issue #908 acceptance criteria): the filer's dedup step must
+  # search open issues beyond the `agent-review-finding` label -- a
+  # regression back to the old `--label agent-review-finding --state all`
+  # query would silently stop catching human-filed/ready-for-agent/
+  # /to-tickets duplicates.
+  filer-prompt-dedup-searches-all-open-issues =
+    pkgs.runCommand "filer-prompt-dedup-searches-all-open-issues" { }
+      ''
+        grep -q -- '--state open' ${../../templates/default/prompts/filer-prompt.md}
+        ! grep -q -- '--label agent-review-finding --state all' \
+          ${../../templates/default/prompts/filer-prompt.md}
+        touch $out
+      '';
+
+  # Grep pin (issue #908 acceptance criteria): the filer's dedup step must
+  # also treat closed `agent-research-reject` issues -- a research pass's
+  # deliberate false-positive/not-worth-doing/duplicate verdict -- as
+  # suppressing matches, the same triage-decision class as a closed
+  # `agent-review-finding`.
+  filer-prompt-dedup-names-research-reject =
+    pkgs.runCommand "filer-prompt-dedup-names-research-reject" { }
+      ''
+        grep -q 'agent-research-reject' ${../../templates/default/prompts/filer-prompt.md}
+        touch $out
+      '';
 }

@@ -15,11 +15,22 @@ Steps:
      gh label create agent-review-finding --color d4c5f9 \
        --description "Filed from a non-blocking review finding" 2>/dev/null || true
 
-2. Dedup: search issues carrying `agent-review-finding` in ANY state — open
-   AND closed. A closed finding is a human triage decision (won't-fix,
-   already-fixed, duplicate) and is never refiled:
-     gh issue list --label agent-review-finding --state all --search "<terms>"
-   Skip any finding that already matches an existing issue by subject.
+2. Dedup — a finding must not already be tracked, or already dismissed:
+   - Search ALL open issues, regardless of label — an open issue describing
+     the same problem means it's already tracked, whether human-filed,
+     `ready-for-agent`, filed via `/to-tickets`, or from a prior Filer run:
+       gh issue list --state open --search "<terms>"
+   - Search closed issues carrying `agent-review-finding` OR
+     `agent-research-reject` — both are deliberate triage decisions (a
+     human's won't-fix/already-fixed/duplicate verdict, or a research pass's
+     false-positive/not-worth-doing/duplicate rejection) and neither is ever
+     refiled:
+       gh issue list --label agent-review-finding --state closed --search "<terms>"
+       gh issue list --label agent-research-reject --state closed --search "<terms>"
+   - A plain closed issue carrying neither label does NOT suppress filing —
+     a problem that was fixed and later regressed can still be refiled.
+   Skip any finding that matches an existing issue in either search by
+   subject.
 
 3. File one issue per surviving finding. Merge findings into a single issue
    only when they are the same change (e.g. the same file/function/fix) —
