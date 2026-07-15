@@ -301,7 +301,7 @@ func renderDrillInPane(m Model) string {
 	case PaneFloating:
 		return renderHeader(m) + renderFloatingBody(m)
 	default:
-		return renderDrillIn(*m.DrillIn)
+		return renderDrillIn(*m.DrillIn, m.Height)
 	}
 }
 
@@ -313,7 +313,7 @@ func renderDrillInPane(m Model) string {
 func renderDockedBody(m Model) string {
 	backlog := renderBacklogColumn(m)
 	queue := renderQueueColumn(m)
-	transcript := renderTranscriptColumn(*m.DrillIn)
+	transcript := renderTranscriptColumn(*m.DrillIn, m.Height)
 
 	transcriptWidth := int(float64(m.Width) * transcriptColumnFraction)
 	bodyWidth := m.Width - transcriptWidth
@@ -335,7 +335,7 @@ func renderDockedBody(m Model) string {
 // renderDockedBody's every-row column split.
 func renderFloatingBody(m Model) string {
 	body := renderBody(m)
-	transcript := renderTranscriptColumn(*m.DrillIn)
+	transcript := renderTranscriptColumn(*m.DrillIn, m.Height)
 	floatWidth := int(float64(m.Width) * transcriptColumnFraction)
 	return overlay(body, transcript, m.Width-floatWidth, floatWidth)
 }
@@ -356,11 +356,31 @@ func overlay(body, pane string, leftWidth, paneWidth int) string {
 	return strings.Join(bodyLines, "\n") + "\n"
 }
 
+// windowLines returns d.Lines[offset:end], where end stops budget lines past
+// offset (or at the end of d.Lines, whichever comes first) — so a render
+// joins only what the viewport can show instead of the whole tail from
+// Offset to the end of a (potentially multi-MB) transcript (issue #722). A
+// non-positive budget yields an empty window rather than a negative slice.
+func windowLines(d DrillInState, budget int) []string {
+	offset := d.Offset
+	if offset > len(d.Lines) {
+		offset = len(d.Lines)
+	}
+	end := offset + budget
+	if end < offset {
+		end = offset
+	}
+	if end > len(d.Lines) {
+		end = len(d.Lines)
+	}
+	return d.Lines[offset:end]
+}
+
 // renderTranscriptColumn renders d as a labeled column: a header naming the
-// pick and current form, then its loaded content from Offset onward — the
-// same content renderDrillIn shows fullscreen, reused for the docked and
-// floating pane modes (issue #846, ADR 0025).
-func renderTranscriptColumn(d DrillInState) string {
+// pick and current form, then as much of its loaded content from Offset
+// onward as height allows — the same content renderDrillIn shows fullscreen,
+// reused for the docked and floating pane modes (issue #846, ADR 0025).
+func renderTranscriptColumn(d DrillInState, height int) string {
 	var b strings.Builder
 	if d.ShowRaw {
 		fmt.Fprintf(&b, "transcript #%s (raw):\n", d.Number)
@@ -372,20 +392,17 @@ func renderTranscriptColumn(d DrillInState) string {
 		return b.String()
 	}
 
-	offset := d.Offset
-	if offset > len(d.Lines) {
-		offset = len(d.Lines)
-	}
-	b.WriteString(strings.Join(d.Lines[offset:], "\n"))
+	const headerLines = 1
+	b.WriteString(strings.Join(windowLines(d, height-headerLines), "\n"))
 	b.WriteString("\n")
 	return b.String()
 }
 
 // renderDrillIn renders one Dispatch's transcript view: a header naming the
-// pick and current mode, the loaded content (rendered by default, raw when
-// ShowRaw), and a keystroke hint. Err renders in place of content instead of
-// a blank pane.
-func renderDrillIn(d DrillInState) string {
+// pick and current mode, as much of the loaded content (rendered by default,
+// raw when ShowRaw) as height allows, and a keystroke hint. Err renders in
+// place of content instead of a blank pane.
+func renderDrillIn(d DrillInState, height int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "transcript #%s", d.Number)
 	if d.ShowRaw {
@@ -398,11 +415,8 @@ func renderDrillIn(d DrillInState) string {
 		return b.String()
 	}
 
-	offset := d.Offset
-	if offset > len(d.Lines) {
-		offset = len(d.Lines)
-	}
-	visible := strings.Join(d.Lines[offset:], "\n")
+	const headerFooterLines = 2
+	visible := strings.Join(windowLines(d, height-headerFooterLines), "\n")
 	b.WriteString(visible)
 	if visible != "" && !strings.HasSuffix(visible, "\n") {
 		b.WriteString("\n")

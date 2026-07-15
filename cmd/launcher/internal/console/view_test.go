@@ -318,7 +318,7 @@ func TestView_ShowHelp_ListsPaneModeKey(t *testing.T) {
 // rendered form by default, plus a hint for the toggle/close keystrokes —
 // the operator's view of the work, not just liveness (#648).
 func TestView_DrillInOpen_RendersTranscriptInsteadOfBacklog(t *testing.T) {
-	m := NewModel()
+	m := Update(NewModel(), SizeChangedMsg{Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
 	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
 
@@ -340,7 +340,7 @@ func TestView_DrillInOpen_RendersTranscriptInsteadOfBacklog(t *testing.T) {
 // TestView_DrillInShowRaw_RendersRawInsteadOfRendered verifies toggling
 // ShowRaw swaps which form View shows.
 func TestView_DrillInShowRaw_RendersRawInsteadOfRendered(t *testing.T) {
-	m := NewModel()
+	m := Update(NewModel(), SizeChangedMsg{Height: 24})
 	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
 	m = Update(m, DrillInToggleMsg{})
 
@@ -357,7 +357,7 @@ func TestView_DrillInShowRaw_RendersRawInsteadOfRendered(t *testing.T) {
 // non-zero Offset) drops the leading lines from the rendered pane instead of
 // always showing the transcript's start (issue #786).
 func TestView_DrillInOffset_HidesLinesBeforeOffset(t *testing.T) {
-	m := NewModel()
+	m := Update(NewModel(), SizeChangedMsg{Height: 24})
 	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3"})
 	m = Update(m, DrillInScrollMsg{Delta: 2})
 
@@ -378,6 +378,25 @@ func TestView_DrillInErr_Surfaced(t *testing.T) {
 	out := View(m)
 	if !strings.Contains(out, errBoom.Error()) {
 		t.Errorf("View() = %q, want it to contain %q", out, errBoom.Error())
+	}
+}
+
+// TestView_DrillInFullscreen_WindowsToViewportHeight verifies the fullscreen
+// transcript pane joins only as many lines as the viewport can show, instead
+// of the whole tail from Offset to the end of a (potentially multi-MB)
+// transcript, so scrolling near the top of a huge transcript doesn't
+// re-serialize content nowhere near the screen (issue #722).
+func TestView_DrillInFullscreen_WindowsToViewportHeight(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Height: 5})
+	content := "HEAD-MARKER\n" + strings.Repeat("x\n", 100) + "TAIL-MARKER"
+	m = Update(m, DrillInMsg{Number: "42", Rendered: content})
+
+	out := View(m)
+	if !strings.Contains(out, "HEAD-MARKER") {
+		t.Errorf("View() = %q, want the first visible line present", out)
+	}
+	if strings.Contains(out, "TAIL-MARKER") {
+		t.Errorf("View() = %q, want content past the viewport height hidden", out)
 	}
 }
 
