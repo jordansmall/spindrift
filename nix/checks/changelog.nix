@@ -78,7 +78,9 @@
       # CHANGELOG.md is checked line-by-line rather than with hasInfix's
       # `.*pattern.*` regex match (lib/strings.nix): std::regex backtracking
       # over a 100+KB file segfaults, whereas VERSIONING.md is small enough
-      # for the regex path to stay safe.
+      # for the regex path to stay safe. This is a perf/size limit, not a
+      # metacharacter-escaping problem: hasInfix already escapes its pattern
+      # via escapeRegex before building the match.
       changelogLines = splitString "\n" (builtins.readFile ../../CHANGELOG.md);
       missingFromDoc = builtins.filter (s: !hasInfix s.section versioningDoc) sections;
     in
