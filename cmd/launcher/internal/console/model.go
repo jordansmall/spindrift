@@ -31,6 +31,10 @@ type Model struct {
 	// DrillIn is the open transcript view, if any — nil when the operator is
 	// looking at the backlog/queue instead.
 	DrillIn *DrillInState
+	// PendingTerminate is the issue number awaiting an explicit y/N confirm
+	// after "k"/"kill"/"terminate" <num> — empty when no terminate is
+	// pending (ADR 0024, issue #649).
+	PendingTerminate string
 }
 
 // DrillInState is one Dispatch's loaded transcript: both the Driver-rendered
@@ -100,6 +104,12 @@ func Update(m Model, msg Msg) Model {
 		}
 	case DrillInCloseMsg:
 		m.DrillIn = nil
+	case TerminateRequestedMsg:
+		m.PendingTerminate = msg.Number
+	case TerminateConfirmedMsg:
+		m.PendingTerminate = ""
+	case TerminateCancelledMsg:
+		m.PendingTerminate = ""
 	}
 	return m
 }

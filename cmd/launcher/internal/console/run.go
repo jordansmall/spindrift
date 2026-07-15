@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -135,10 +136,15 @@ func syncQueue(m Model, launch *Launcher, pwd string) Model {
 // applyCommand parses one line of operator input into a Msg and applies it.
 // Recognized commands: "q"/"quit" to exit, "r"/"refresh" to re-query the
 // tracker, "f" (bare) to clear the label filter, "f <text>" to set it,
-// "p <num>" to pick an issue, "u <num>" to unpick a queued one. A successful
-// pick also lands on launch.Queue and kicks off a background launch attempt,
-// when launch is non-nil.
+// "p <num>" to pick an issue, "u <num>" to unpick a queued one,
+// "k"/"kill"/"terminate" <num> to arm a terminate confirm (ADR 0024, issue
+// #649) — the next line is read as its y/N answer instead of a new command,
+// see applyTerminateConfirm. A successful pick also lands on launch.Queue
+// and kicks off a background launch attempt, when launch is non-nil.
 func applyCommand(m Model, tracker forge.IssueTracker, pwd string, launch *Launcher, line string) Model {
+	if m.PendingTerminate != "" {
+		return applyTerminateConfirm(m, tracker, launch, line)
+	}
 	cmd, arg, _ := strings.Cut(strings.TrimSpace(line), " ")
 	switch cmd {
 	case "q", "quit":
@@ -179,9 +185,34 @@ func applyCommand(m Model, tracker forge.IssueTracker, pwd string, launch *Launc
 		return Update(m, DrillInToggleMsg{})
 	case "x", "close":
 		return Update(m, DrillInCloseMsg{})
+	case "k", "kill", "terminate":
+		if arg == "" || launch == nil {
+			return m
+		}
+		return Update(m, TerminateRequestedMsg{Number: arg})
 	default:
 		return m
 	}
+}
+
+// applyTerminateConfirm interprets one line of input as the operator's
+// answer to a pending "terminate #N? [y/N]" prompt: "y"/"yes"
+// (case-insensitive) calls Launcher.Terminate and confirms; anything else
+// declines and takes no action. Called instead of the normal command switch
+// whenever m.PendingTerminate is set, so a stray issue number the operator
+// types next is never misread as a new command.
+func applyTerminateConfirm(m Model, tracker forge.IssueTracker, launch *Launcher, line string) Model {
+	num := m.PendingTerminate
+	answer := strings.ToLower(strings.TrimSpace(line))
+	if answer != "y" && answer != "yes" {
+		return Update(m, TerminateCancelledMsg{})
+	}
+	if launch != nil {
+		if err := launch.Terminate(tracker, num); err != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: %v\n", num, err)
+		}
+	}
+	return Update(m, TerminateConfirmedMsg{Number: num})
 }
 
 // applyPickMsg lands one PickIssue-adapter result (from a single "p <num>"
