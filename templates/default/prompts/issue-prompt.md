@@ -58,6 +58,10 @@ load only failures:
 
   go test ./... > /tmp/test.log 2>&1 || tail -50 /tmp/test.log
 
+Nix flakes only evaluate git-tracked files — `git add` any new file (e.g.
+`git add -A`) before the first `nix build`/`nix flake check` that touches it,
+or the build aborts with "is not tracked by Git" and burns a checks cycle.
+
 If the repo has a `flake.nix` devShell, prefer its pinned toolchain:
 
   nix develop -c <check-command>   # run any check inside the devShell
