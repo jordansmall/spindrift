@@ -9,6 +9,7 @@ package settle
 import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/terminate"
 )
 
 // Config carries the subset of launcher config a Settle needs.
@@ -60,6 +61,24 @@ type Settle struct {
 	// assertion — nil for the push-only git adapter. Callers branch on pr ==
 	// nil instead of a removed PushOnly() flag.
 	pr forge.PRForge
+	// term is checked at every CI-watch/fix-pass/merge-gate loop checkpoint
+	// so a Terminate (ADR 0024, issue #649) landing mid-settle is noticed and
+	// abandoned instead of corrupting the issue's state after Terminate
+	// already reclaimed it. Nil (every construction site but the Console's)
+	// means "never terminated" — terminate.Registry is nil-safe.
+	term *terminate.Registry
+}
+
+// SetTerminated wires reg as this Settle's termination registry — called
+// once by the Console's launcher wiring (issue #649). A Settle with no
+// registry set (every headless dispatch path) behaves exactly as before.
+func (s *Settle) SetTerminated(reg *terminate.Registry) {
+	s.term = reg
+}
+
+// terminated reports whether num has been marked terminated on s.term.
+func (s *Settle) terminated(num string) bool {
+	return s.term.Marked(num)
 }
 
 var _ Settler = (*Settle)(nil)

@@ -15,6 +15,12 @@ import (
 // mergeGuardHit → applyMergeMode → mergeImmediate) top-to-bottom in one
 // place instead of jumping between files.
 
+// errAbandoned is mergeImmediate's signal that a Terminate (ADR 0024, issue
+// #649) landed mid-retry: distinct from a genuine merge failure so the
+// caller skips the merge-blocked print/comment instead of reporting one on
+// an issue Terminate already reclaimed.
+var errAbandoned = errors.New("settle: abandoned by terminate")
+
 // selfHeal polls the merge gate, dispatching fix boxes on genuine red up to
 // MaxFixAttempts times. On green it swaps agent-complete (via gateToGreen)
 // then applies the merge mode; a merge failure after green leaves the issue
@@ -36,6 +42,8 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
 	}
 	for attempt := 0; ; attempt++ {
 		switch s.gateToGreen(num, pr) {
+		case gateAbandoned:
+			return landingAbandoned
 		case gateGreen:
 			matched, guardErr := s.mergeGuardHit(pr)
 			if guardErr != nil {
@@ -49,6 +57,9 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
 				return landingManual
 			}
 			if err := s.applyMergeMode(num, pr, d); err != nil {
+				if errors.Is(err, errAbandoned) {
+					return landingAbandoned
+				}
 				fmt.Printf("    #%s  pr=%s  status=merge-blocked  !! %v\n", num, pr, err)
 				s.it.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
 				return landingManual
@@ -127,6 +138,9 @@ func (s *Settle) gateToGreen(num, pr string) gateResult {
 	elapsed := 0
 
 	for {
+		if s.terminated(num) {
+			return gateAbandoned
+		}
 		state, stateErr := s.pr.CheckState(pr)
 		if stateErr != nil {
 			fmt.Printf("    #%s  pr=%s  status=check-state-error  !! %v\n", num, pr, stateErr)
@@ -235,6 +249,9 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 	checksBlockedAttempts := 0
 	skipRebase := false
 	for {
+		if s.terminated(num) {
+			return errAbandoned
+		}
 		err := s.cf.Merge(pr)
 		if err == nil {
 			return nil
