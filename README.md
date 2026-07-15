@@ -25,11 +25,12 @@ Run headless [Claude Code](https://claude.com/claude-code) agents in
 - **podman** (or set `runtime = "docker"`; or `runtime = "bwrap"` for the
   daemonless bubblewrap sandbox on Linux, which needs no container runtime).
   On macOS/Windows, podman runs containers inside a VM ("podman machine")
-  with its own fixed RAM — give that machine at least as much memory as
-  `MEMORY_LIMIT` (default `4g`), e.g. `podman machine set --memory 4096`. A
-  smaller machine lets the VM's own Linux OOM-killer fire before the
-  per-container `--memory` cgroup cap ever bites, silently killing whatever
-  is running (`dogfood.sh` checks for this mismatch and aborts before
+  with its own fixed RAM — give that machine at least `MEMORY_LIMIT` ×
+  `MAX_PARALLEL` plus ~512MiB VM overhead (defaults `5g` × `3` + 512MiB =
+  15872MiB), e.g. `podman machine set --memory 16384` for the defaults. A
+  smaller machine lets the VM's own Linux OOM-killer fire before any single
+  container's `--memory` cgroup cap ever bites, silently killing whatever is
+  running (`dogfood.sh` checks for this mismatch and aborts before
   dispatching — see [Dogfood loop](#dogfood-loop)).
 - A **fine-grained single-repo GitHub PAT** — scoped to the Target repo only
   (see [Before you deploy](#before-you-deploy)).
@@ -298,13 +299,18 @@ labels](docs/reference.md#create-the-research-labels-on-the-target-repo).
 ## Dogfood loop
 
 `dogfood.sh` refuses to start against a podman machine whose RAM is smaller
-than `MEMORY_LIMIT` (default `4g`): that mismatch lets the VM's own
-OOM-killer kill an in-box build before the per-container `--memory` cap ever
-bites (#580). The check reads `podman machine inspect`, compares its
-`Resources.Memory` (MiB) against `MEMORY_LIMIT`, and on shortfall prints both
-numbers plus `podman machine set --memory <N>` before exiting 1 — no box is
-dispatched. It's a no-op with adequate machine RAM, and skips cleanly when
-there's no active podman machine (native Linux, or a non-podman runtime).
+than `MEMORY_LIMIT` × `MAX_PARALLEL` (plus a fixed 512MiB VM overhead): that
+mismatch lets the VM's own OOM-killer kill an in-box build — or, once enough
+boxes run concurrently, the whole VM — before any single container's
+`--memory` cap ever bites (#580, #712). The check reads `podman machine
+inspect`, compares its `Resources.Memory` (MiB) against the required total,
+and on shortfall prints the machine RAM, the required RAM, and a fix
+(`podman machine set --memory <N>`, lower `MAX_PARALLEL`, or lower
+`MEMORY_LIMIT`) before exiting 1 — no box is dispatched. It's a no-op with
+adequate machine RAM, and skips cleanly when there's no active podman
+machine (native Linux, or a non-podman runtime). With the defaults
+(`MEMORY_LIMIT=5g`, `MAX_PARALLEL=3`) a podman machine needs at least
+16384MiB (16GiB) RAM.
 
 `dogfood.sh` drives spindrift building itself, with `CONTINUOUS_DISPATCH=1`
 on by default (#528): instead of draining one bounded batch and returning,

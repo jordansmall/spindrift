@@ -125,7 +125,7 @@
             #   # seconds before the devShell probe is abandoned and the baked toolchain is used
             #   devShellProbeTimeout = 300;
             #   # max memory per agent container (--memory); empty string disables the limit
-            #   memoryLimit = "4g";
+            #   memoryLimit = "5g";
             #   # max processes per agent container (--pids-limit); empty string disables the limit
             #   pidsLimit = "512";
             #   # --network value for podman run; empty applies no flag (podman NAT default); set to 'pasta' to restrict egress
