@@ -204,6 +204,23 @@ func (a *ociAdapter) IsRunning(name string) bool {
 	return strings.TrimSpace(string(out)) == "running"
 }
 
+// ListRunning returns the names of every container currently in the
+// "running" state under this runtime (podman/docker) — Console startup
+// orphan detection (issue #651).
+func (a *ociAdapter) ListRunning() ([]string, error) {
+	out, err := exec.Command(a.cli, "ps", "--filter", "status=running", "--format", "{{.Names}}").Output()
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			names = append(names, line)
+		}
+	}
+	return names, nil
+}
+
 // mountSpecs computes the host-to-box mounts that apply for box, shared with
 // the bwrap adapter (buildMountSpecs); only the rendering below differs.
 func (a *ociAdapter) mountSpecs(box Box) []MountSpec {

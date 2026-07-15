@@ -53,6 +53,15 @@ type Fake struct {
 
 	// IsRunningCalls records the names passed to IsRunning, in order.
 	IsRunningCalls []string
+
+	// RunningNames is returned by ListRunning — the orphan-detection seam
+	// (issue #651): tests set this to simulate sandboxes still running from
+	// a prior, crashed session.
+	RunningNames []string
+
+	// ListRunningErr, if non-nil, is returned by ListRunning instead of
+	// RunningNames.
+	ListRunningErr error
 }
 
 // NewFake returns an empty Fake runner.
@@ -131,4 +140,14 @@ func (f *Fake) IsRunning(name string) bool {
 	defer f.mu.Unlock()
 	f.IsRunningCalls = append(f.IsRunningCalls, name)
 	return f.IsRunningRet
+}
+
+// ListRunning returns RunningNames, or ListRunningErr when set.
+func (f *Fake) ListRunning() ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ListRunningErr != nil {
+		return nil, f.ListRunningErr
+	}
+	return f.RunningNames, nil
 }

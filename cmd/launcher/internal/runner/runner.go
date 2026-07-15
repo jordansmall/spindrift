@@ -65,6 +65,14 @@ type Runner interface {
 	// its artifacts (e.g. its per-issue log) rather than discovering the
 	// collision only after Run attempts to launch (issue #562).
 	IsRunning(name string) bool
+
+	// ListRunning returns the names of every sandbox currently running
+	// under this runtime — Console startup orphan detection (issue #651):
+	// a crash or dropped SSH leaves these running with no live goroutine in
+	// a fresh process to account for them. bwrap sandboxes are unprivileged
+	// child processes with no daemon tracking them, so the bwrap adapter
+	// always returns an empty list, matching its already-false IsRunning.
+	ListRunning() ([]string, error)
 }
 
 // ErrAlreadyRunning is returned by Run when a sandbox already named for this

@@ -36,11 +36,12 @@ type signalRunner struct {
 	once         sync.Once
 }
 
-func (r *signalRunner) EnsureReady() error    { return nil }
-func (r *signalRunner) IsReady() error        { return nil }
-func (r *signalRunner) Reap(string) error     { return nil }
-func (r *signalRunner) Kill(string) error     { return nil }
-func (r *signalRunner) IsRunning(string) bool { return false }
+func (r *signalRunner) EnsureReady() error             { return nil }
+func (r *signalRunner) IsReady() error                 { return nil }
+func (r *signalRunner) Reap(string) error              { return nil }
+func (r *signalRunner) Kill(string) error              { return nil }
+func (r *signalRunner) IsRunning(string) bool          { return false }
+func (r *signalRunner) ListRunning() ([]string, error) { return nil, nil }
 func (r *signalRunner) Run(_ runner.Box) error {
 	isFirst := false
 	r.once.Do(func() { isFirst = true })
