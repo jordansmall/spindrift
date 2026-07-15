@@ -1,6 +1,7 @@
 package console
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,6 +47,10 @@ func sendKey(tm *teatest.TestModel, s string) {
 		tm.Send(tea.KeyMsg{Type: tea.KeyUp})
 	case "down":
 		tm.Send(tea.KeyMsg{Type: tea.KeyDown})
+	case "pgup":
+		tm.Send(tea.KeyMsg{Type: tea.KeyPgUp})
+	case "pgdown":
+		tm.Send(tea.KeyMsg{Type: tea.KeyPgDown})
 	default:
 		tm.Type(s)
 	}
@@ -152,6 +157,128 @@ func TestTea_CursorKeys_MoveHighlightedRow(t *testing.T) {
 
 	sendKey(tm, "up")
 	waitForOutput(t, tm, "> #1")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_DrillInKey_OpensTranscriptPane verifies "d" opens a full-screen
+// transcript pane for the highlighted Dispatch, replacing the backlog
+// (issue #786).
+func TestTea_DrillInKey_OpensTranscriptPane(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "d")
+	waitForOutput(t, tm, "transcript #42", "[implementor] hi")
+
+	sendKey(tm, "x")
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_DrillInToggleKey_SwapsRenderedAndRaw verifies "t" swaps the open
+// drill-in pane between the rendered transcript and the byte-exact raw JSONL
+// log (issue #786).
+func TestTea_DrillInToggleKey_SwapsRenderedAndRaw(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "d")
+	waitForOutput(t, tm, "[implementor] hi")
+
+	sendKey(tm, "t")
+	waitForOutput(t, tm, `"type":"assistant"`)
+
+	sendKey(tm, "x")
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_DrillInScrollKeys_PageThroughTranscript verifies pgdown/pgup move
+// the drill-in pane's scroll offset, hiding and restoring the leading lines
+// (issue #786).
+func TestTea_DrillInScrollKeys_PageThroughTranscript(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var lines strings.Builder
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(&lines, `{"type":"assistant","message":{"content":[{"type":"text","text":"line-%02d"}]}}`+"\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(lines.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "d")
+	waitForOutput(t, tm, "line-00")
+
+	sendKey(tm, "pgdown")
+	waitForOutput(t, tm, "line-19")
+
+	sendKey(tm, "pgup")
+	waitForOutput(t, tm, "line-00")
+
+	sendKey(tm, "x")
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_DrillInKey_NoDriver_ShowsGracefulMessage verifies drilling in
+// during a launch-less session (no Driver configured) surfaces a readable
+// error in the pane instead of panicking on a nil Driver (issue #786 AC4).
+func TestTea_DrillInKey_NoDriver_ShowsGracefulMessage(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "d")
+	waitForOutput(t, tm, "transcript #42", "drill-in failed")
+
+	sendKey(tm, "x")
+	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))

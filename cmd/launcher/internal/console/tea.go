@@ -3,14 +3,16 @@
 // is retired. teaModel is a thin adapter: tea.Model.Update translates
 // tea.KeyMsg and the two async signals (background poll, launch-refresh)
 // into the same console Msg values Update already handles; tea.Model.View
-// delegates straight to the pure View. Pick/Unpick/Terminate/Resize/Rebuild/
-// DrillIn keybindings are not wired here — those commands lost their only
-// entry point (the retired line loop) and need their own cursor-driven
-// design in a follow-up; the reducer and Launcher/Queue plumbing behind them
-// is untouched and stays fully tested at their own seams.
+// delegates straight to the pure View. DrillIn is wired (issue #786);
+// Pick/Unpick/Terminate/Resize/Rebuild keybindings are still not wired here —
+// those commands lost their only entry point (the retired line loop) and
+// need their own cursor-driven design in a follow-up; the reducer and
+// Launcher/Queue plumbing behind them is untouched and stays fully tested at
+// their own seams.
 package console
 
 import (
+	"fmt"
 	"io"
 	"time"
 
@@ -24,6 +26,10 @@ import (
 // Launcher doesn't override it (production always uses this) — slow enough
 // to never spend the rate-limit window the session's Agents share (#647 AC5).
 const defaultPollInterval = 90 * time.Second
+
+// drillInPageSize is how many lines pgup/pgdown move the drill-in scroll
+// offset — j/k and the arrows move one line at a time (issue #786).
+const drillInPageSize = 10
 
 // teaModel is the Bubble Tea adapter around the pure Model: it carries the
 // I/O seams (tracker, pwd, launch) Update itself never touches, and
@@ -93,6 +99,8 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t, cmd = t.handleKey(msg)
 	case IssuesLoadedMsg:
 		t.m = Update(t.m, msg)
+	case DrillInMsg:
+		t.m = Update(t.m, msg)
 	case pollTickMsg:
 		if t.launch != nil {
 			t.launch.tryLaunch(t.tracker, t.pwd)
@@ -118,10 +126,16 @@ func (t teaModel) View() string {
 }
 
 // handleKey translates one keypress into a console Msg and applies it,
-// gated by whichever modal state (help overlay, filter edit) is active —
-// mirroring applyCommand's old PendingTerminate/PendingQuit precedence, now
-// keyed off Model's own modal fields instead of a line parse.
+// gated by whichever modal state (drill-in pane, help overlay, filter edit)
+// is active — mirroring applyCommand's old PendingTerminate/PendingQuit
+// precedence, now keyed off Model's own modal fields instead of a line
+// parse. An open drill-in takes precedence over everything else: it replaces
+// the whole screen, so help/filter keys don't apply while it's up (#786).
 func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
+	if t.m.DrillIn != nil {
+		t.m = t.handleDrillInKey(msg)
+		return t, nil
+	}
 	if t.m.ShowHelp {
 		if s := msg.String(); s == "?" || s == "esc" {
 			t.m = Update(t.m, HelpToggleMsg{})
@@ -138,6 +152,10 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		t.m = Update(t.m, CursorMoveMsg{Delta: -1})
 	case "/":
 		t.m = Update(t.m, FilterEditStartMsg{})
+	case "d", "enter":
+		if iss, ok := t.highlightedIssue(); ok {
+			return t, openDrillInCmd(t.launch, t.pwd, iss.Number)
+		}
 	case "r":
 		return t, refreshCmd(t.tracker)
 	case "q", "ctrl+c":
@@ -146,6 +164,51 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		t.m = Update(t.m, HelpToggleMsg{})
 	}
 	return t, nil
+}
+
+// handleDrillInKey routes one keypress while the drill-in transcript pane is
+// open: "t" toggles rendered/raw, "x"/Esc closes back to the backlog, and
+// the scroll keys page through the loaded content (issue #786).
+func (t teaModel) handleDrillInKey(msg tea.KeyMsg) Model {
+	switch msg.String() {
+	case "t":
+		return Update(t.m, DrillInToggleMsg{})
+	case "x", "esc":
+		return Update(t.m, DrillInCloseMsg{})
+	case "j", "down":
+		return Update(t.m, DrillInScrollMsg{Delta: 1})
+	case "k", "up":
+		return Update(t.m, DrillInScrollMsg{Delta: -1})
+	case "pgdown":
+		return Update(t.m, DrillInScrollMsg{Delta: drillInPageSize})
+	case "pgup":
+		return Update(t.m, DrillInScrollMsg{Delta: -drillInPageSize})
+	}
+	return t.m
+}
+
+// highlightedIssue returns the backlog row under the cursor, or false when
+// Visible() is empty — the "d"/Enter drill-in target.
+func (t teaModel) highlightedIssue() (forge.Issue, bool) {
+	vis := t.m.Visible()
+	if len(vis) == 0 {
+		return forge.Issue{}, false
+	}
+	return vis[t.m.Cursor], true
+}
+
+// openDrillInCmd loads and renders number's whole transcript in the
+// background. A launch-less session (or a Launcher built without a Factory)
+// has no Driver to render with — that renders as a graceful DrillInMsg error
+// instead of dereferencing a nil Driver (issue #786 AC4).
+func openDrillInCmd(launch *Launcher, pwd, number string) tea.Cmd {
+	return func() tea.Msg {
+		drv := driverOf(launch)
+		if drv == nil {
+			return DrillInMsg{Number: number, Err: fmt.Errorf("no Driver available for this session")}
+		}
+		return DrillIn(drv, pwd, number)
+	}
 }
 
 // handleFilterKey routes one keypress while FilterEditing: Enter applies
