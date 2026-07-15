@@ -5,6 +5,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 )
 
 // TestQueueSettler_Settle_MarksPickSettledAndDelegates verifies the queue
@@ -25,5 +26,27 @@ func TestQueueSettler_Settle_MarksPickSettledAndDelegates(t *testing.T) {
 	}
 	if got := q.Snapshot()[0].State; got != PickSettled {
 		t.Errorf("pick state = %v, want settled", got)
+	}
+}
+
+// TestQueueSettler_Settle_SkipsPickUpdateWhenTerminated verifies that when
+// the settling issue was marked on the shared termination registry (ADR
+// 0024, issue #649) — Terminate landed mid-settle, in the window between
+// Run() succeeding and this Settle call completing — the queue settler
+// leaves the pick's row alone instead of overwriting Terminate's own
+// PickTerminated back to PickSettled.
+func TestQueueSettler_Settle_SkipsPickUpdateWhenTerminated(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickTerminated, Reason: "terminated by operator"})
+	reg := terminate.NewRegistry()
+	reg.Mark("42")
+	inner := settle.NewFake()
+	qs := queueSettler{Settler: inner, q: q, terminated: reg}
+
+	result := dispatch.Result{Success: true}
+	qs.Settle(nil, "42", result)
+
+	if got := q.Snapshot()[0].State; got != PickTerminated {
+		t.Errorf("pick state = %v, want it left at PickTerminated", got)
 	}
 }
