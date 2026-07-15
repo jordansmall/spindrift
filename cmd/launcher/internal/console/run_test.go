@@ -1,9 +1,12 @@
 package console
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -123,6 +126,41 @@ func TestRun_PickCommand_PromotesAndQueues(t *testing.T) {
 	}
 }
 
+// TestRun_PickAllReadyCommand_QueuesExactlyTheDispatchableSet verifies
+// "pa" picks exactly the issues currently Dispatchable on the tracker, and
+// nothing else — an explicit action, never standing discovery (#647 AC3).
+func TestRun_PickAllReadyCommand_QueuesExactlyTheDispatchableSet(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "first", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "43", Title: "second", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "44", Title: "not triaged", State: forge.IssueOpen})
+
+	launch := newTestLauncher(t, f)
+
+	var out strings.Builder
+	if err := Run(f, t.TempDir(), strings.NewReader("pa\nq\n"), &out, launch); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		snap := launch.Queue.Snapshot()
+		if len(snap) == 2 && snap[0].State == PickSettled && snap[1].State == PickSettled {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("picks never settled: %+v", snap)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	snap := launch.Queue.Snapshot()
+	got := map[string]bool{snap[0].Number: true, snap[1].Number: true}
+	if !got["42"] || !got["43"] {
+		t.Errorf("picked = %+v, want #42 and #43 only", snap)
+	}
+}
+
 // TestRun_UnpickCommand_RemovesFromQueue verifies "u <num>" removes a
 // queued pick and makes zero further tracker calls.
 func TestRun_UnpickCommand_RemovesFromQueue(t *testing.T) {
@@ -229,6 +267,183 @@ func TestRun_PickCommand_WithLauncher_PromotionFails_DissolvedRowSurvivesRender(
 	if strings.Count(out.String(), "dissolved") != 2 {
 		t.Errorf("output = %q, want the dissolved row on both post-pick renders (after \"p 42\" and after \"r\"), not just the first", out.String())
 	}
+}
+
+// TestRun_SettleTriggersAutoRefresh_NoExplicitRefreshCommand verifies a
+// settle — the session's own tracker write — fires a backlog refresh on its
+// own, so an issue added to the tracker while a Box is running appears on a
+// render once that Box settles, without the operator ever sending "r"
+// (#647 AC4).
+func TestRun_SettleTriggersAutoRefresh_NoExplicitRefreshCommand(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+
+	fr := runner.NewFake()
+	release := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		<-release
+		return nil
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+
+	inR, inW := io.Pipe()
+	var out syncBuilder
+	done := make(chan error, 1)
+	go func() { done <- Run(f, dir, inR, &out, launch) }()
+
+	if _, err := inW.Write([]byte("p 42\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		snap := launch.Queue.Snapshot()
+		if len(snap) == 1 && snap[0].State == PickRunning {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pick never started running: %+v", snap)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	f.SetIssue(forge.Issue{Number: "99", Title: "late arrival", State: forge.IssueOpen})
+	close(release)
+
+	deadline = time.Now().Add(2 * time.Second)
+	for !strings.Contains(out.String(), "late arrival") {
+		if time.Now().After(deadline) {
+			t.Fatalf("output = %q, want the late-arriving issue after a settle-triggered auto-refresh, no \"r\" sent", out.String())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if _, err := inW.Write([]byte("q\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+// TestRun_BackgroundPoll_RefreshesWithoutOperatorInputOrTrackerWrite verifies
+// a slow fixed background poll re-queries the tracker on its own — no
+// operator command, no settle/promotion/claim — so a late-arriving issue
+// still surfaces during an otherwise-idle session (#647 AC5).
+func TestRun_BackgroundPoll_RefreshesWithoutOperatorInputOrTrackerWrite(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
+
+	launch := &Launcher{CodeForge: f, Queue: NewQueue(), pollInterval: 5 * time.Millisecond}
+
+	inR, inW := io.Pipe()
+	var out syncBuilder
+	done := make(chan error, 1)
+	go func() { done <- Run(f, t.TempDir(), inR, &out, launch) }()
+
+	f.SetIssue(forge.Issue{Number: "2", Title: "late arrival", State: forge.IssueOpen})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(out.String(), "late arrival") {
+		if time.Now().After(deadline) {
+			t.Fatalf("output = %q, want the late-arriving issue after a background poll, no command sent", out.String())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if _, err := inW.Write([]byte("q\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+// TestRun_RunningPick_RendersLiveHeartbeat verifies a running row's render
+// picks up the heartbeat line the Driver's own heartbeat parser emits as the
+// Box's log grows — scannable without drilling in (#647 AC2).
+func TestRun_RunningPick_RendersLiveHeartbeat(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+
+	fr := runner.NewFake()
+	release := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		fmt.Fprintln(box.Output, `{"type":"result","num_turns":3}`)
+		<-release
+		return nil
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue(), pollInterval: 5 * time.Millisecond}
+
+	inR, inW := io.Pipe()
+	var out syncBuilder
+	done := make(chan error, 1)
+	go func() { done <- Run(f, dir, inR, &out, launch) }()
+
+	if _, err := inW.Write([]byte("p 42\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(out.String(), "3 turn") {
+		if time.Now().After(deadline) {
+			t.Fatalf("output = %q, want a rendered heartbeat line containing \"3 turn\"", out.String())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	close(release)
+	if _, err := inW.Write([]byte("q\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+// syncBuilder is a strings.Builder safe for concurrent Write/String calls —
+// Run's goroutine and the test's polling goroutine both touch out.
+type syncBuilder struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuilder) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuilder) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
 
 // newAlphaBetaFake returns a Fake tracker with two open issues, "alpha"

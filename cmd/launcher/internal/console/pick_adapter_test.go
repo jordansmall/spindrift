@@ -71,6 +71,31 @@ func TestPickIssue_LeavesIssueDispatchable_NeverInProgress(t *testing.T) {
 	}
 }
 
+// TestPickAllReady_ReturnsOneMsgPerCurrentlyDispatchableIssue verifies
+// PickAllReady picks exactly the issues currently Dispatchable on the
+// tracker, and nothing else — an issue with no dispatch label yet is left
+// alone (#647 AC3).
+func TestPickAllReady_ReturnsOneMsgPerCurrentlyDispatchableIssue(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "43", Title: "also ready", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "44", Title: "not triaged yet"})
+
+	msgs := PickAllReady(f)
+
+	if len(msgs) != 2 {
+		t.Fatalf("PickAllReady() = %+v, want 2 msgs (only the Dispatchable issues)", msgs)
+	}
+	first, ok := msgs[0].(PickQueuedMsg)
+	if !ok || first.Number != "42" {
+		t.Errorf("msgs[0] = %+v, want PickQueuedMsg for #42", msgs[0])
+	}
+	second, ok := msgs[1].(PickQueuedMsg)
+	if !ok || second.Number != "43" {
+		t.Errorf("msgs[1] = %+v, want PickQueuedMsg for #43", msgs[1])
+	}
+}
+
 func hasLabel(iss forge.Issue, label string) bool {
 	for _, l := range iss.Labels {
 		if l == label {

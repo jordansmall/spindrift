@@ -57,6 +57,21 @@ func TestView_ListsPicksWithNumberTitleState(t *testing.T) {
 	}
 }
 
+// TestView_RunningPick_ShowsHeartbeat verifies a running row renders its
+// latest heartbeat line alongside number/title/state, so the overview is
+// scannable without drilling in (#647 AC2).
+func TestView_RunningPick_ShowsHeartbeat(t *testing.T) {
+	m := NewModel()
+	m.Picks = []Pick{
+		{Number: "42", Title: "fix the thing", State: PickRunning, Heartbeat: "#42 [edit] \xc2\xb7 7 turns"},
+	}
+
+	out := View(m)
+	if !strings.Contains(out, "#42 [edit] \xc2\xb7 7 turns") {
+		t.Errorf("View() = %q, want the running row's heartbeat line", out)
+	}
+}
+
 // TestView_RefreshError_Surfaced verifies a failed refresh's error text
 // appears in View so the operator sees why the list went stale.
 func TestView_RefreshError_Surfaced(t *testing.T) {
