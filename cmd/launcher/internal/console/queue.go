@@ -102,6 +102,10 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 		if !q.tryMarkClaiming(pick.Number) {
 			continue // removed (Unpick) between the readiness snapshot and this claim
 		}
+		// This is the claim launcher.go's zero-value waves.Config
+		// (Label==InProgressLabel, both "") relies on Queue.Discover having
+		// already done (#706): it's why claimIssue (waves/engine.go) skips
+		// a second Dispatchable->InProgress transition for this pick.
 		if err := tracker.TransitionState(pick.Number, forge.Dispatchable, forge.InProgress); err != nil {
 			q.dissolve(pick.Number, err.Error())
 			continue
