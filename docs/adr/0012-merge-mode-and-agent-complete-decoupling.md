@@ -16,8 +16,14 @@ This ADR **decouples the label from the merge** and makes the merge a separate,
 policy-gated function.
 
 `agent-complete` is redefined to mean **"the agent has nothing left to do"** — a
-PR exists and its pipeline is green — and is swapped on the instant CI reaches
-green, in **every** mode, independent of any merge attempt. Merge becomes a
+PR exists, its pipeline is green, and the landing path has settled — and is
+swapped when the landing path settles, in **every** mode, independent of any
+merge attempt. (Amended by issue #757: `immediate` mode can still do real
+agent work after first green — rebase-retry, an agent-dispatched
+conflict-resolve box, a post-force-push CI re-wait — so the swap is held
+until that work finishes, not fired at first green while it demonstrably
+still has work left. `manual`/`auto`/push-only landings have no post-green
+agent work, so the swap point is unchanged for them.) Merge becomes a
 downstream step gated by a new three-valued **`MERGE_MODE`** knob:
 
 - **`immediate`** — merge on green (`gh pr merge --rebase --delete-branch`), the
@@ -29,8 +35,10 @@ downstream step gated by a new three-valued **`MERGE_MODE`** knob:
   clears. The human's only manual step is the approval — the irreducible one.
 
 The merge gate splits into **`gateToGreen`** (poll CI, self-heal red as today,
-then swap `agent-complete` unconditionally on green) and **`applyMergeMode`**
-(the mode-specific action). A merge that fails *after* green — an unmet approval
+report green with no label swap) and **`applyMergeMode`** (the mode-specific
+action); the caller swaps `agent-complete` once `applyMergeMode` returns —
+merged, auto-merge enqueued, manual hand-off, or merge-blocked-with-note all
+count as settled. A merge that fails *after* green — an unmet approval
 in `immediate`, an unresolvable conflict, a disallowed `--auto` — leaves the
 issue `agent-complete` with a merge-blocked note and **never** demotes it to
 `agent-failed`. `agent-failed` is reserved strictly for **"never produced a green
@@ -105,12 +113,13 @@ correctly recognized.
 
 ## Consequences
 
-- The merge gate is restructured into `gateToGreen` (owns the unconditional
-  `agent-complete` swap on green) + `applyMergeMode` (mode-specific), replacing
-  `mergeWhenGreen`'s `(merged, genuineRed)` tuple's overloaded
-  `(false, false)`-means-failed contract. `MERGE_MODE` is honored at this single
-  choke point, so `dispatch`, single-issue dispatch, and `recover` (ADR 0011) all
-  respect it identically.
+- The merge gate is restructured into `gateToGreen` (reports green, no label
+  swap) + `applyMergeMode` (mode-specific), replacing `mergeWhenGreen`'s
+  `(merged, genuineRed)` tuple's overloaded `(false, false)`-means-failed
+  contract. The caller swaps `agent-complete` once `applyMergeMode` returns,
+  i.e. once the landing path settles (issue #757). `MERGE_MODE` is honored at
+  this single choke point, so `dispatch`, single-issue dispatch, and `recover`
+  (ADR 0011) all respect it identically.
 - `MERGE_MODE` is added to `lib/env-schema.nix` (enum, default `manual`),
   regenerating the flag table; it joins the versioned CLI/flake contract
   (ADR 0010). `validate()` gains an enum check; the `dispatch`/`preview` banner

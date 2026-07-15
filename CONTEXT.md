@@ -204,11 +204,12 @@ subagent role).
 The canonical dispatch states the launcher reasons in, independent of how any
 one Issue Tracker stores them: `Dispatchable` (a human marked the issue ready —
 the launch button) → `InProgress` (a Box has been dispatched; re-runs skip it) →
-`Complete` (the agent finished its work — a green PR on `github`, a landed
-branch when the Code Forge is push-only/absent, or a posted verdict for a
-research dispatch) or `Failed` (the Box crashed or
-never reached green past MAX_FIX_ATTEMPTS; human triage, re-transition to retry).
-Each Issue Tracker adapter maps these states to its native mechanism:
+`Complete` (the agent has nothing left to do — its landing path has settled:
+a merged/handed-off PR on `github`, a landed branch when the Code Forge is
+push-only/absent, or a posted verdict for a research dispatch) or `Failed`
+(the Box crashed or never reached green past MAX_FIX_ATTEMPTS; human triage,
+re-transition to retry). Each Issue Tracker adapter maps these states to its
+native mechanism:
 
 - `github` — labels (`ready-for-agent` → `agent-in-progress` →
   `agent-complete`/`agent-failed`), swapped atomically. This is the original,
@@ -220,11 +221,16 @@ Each Issue Tracker adapter maps these states to its native mechanism:
   `github`'s labels) so the lifecycle always makes progress.
 - `local` — a field in the issue file (frontmatter/directory), rewritten in place.
 
-A merge failure after green leaves the issue `Complete` with a merge-blocked note
-— never `Failed`. MERGE_MODE controls what happens after `Complete`: `immediate`
-merges automatically (locally, via a push that updates a clean checked-out
-branch); `manual` (default) leaves the branch/PR for a human; `auto` is native
-GitHub auto-merge and has no meaning off `github`.
+On `github`, `Complete` is swapped once the landing path settles, not at first
+green: `immediate` mode can still do real agent work after green (rebase-retry,
+an agent-dispatched conflict-resolve box, a post-force-push CI re-wait), and
+the issue stays `InProgress` throughout that work so the label never claims
+"nothing left to do" while a Box may still run. MERGE_MODE governs that
+landing path: `immediate` merges automatically (locally, via a push that
+updates a clean checked-out branch); `manual` (default) leaves the branch/PR
+for a human; `auto` is native GitHub auto-merge and has no meaning off
+`github`. A merge failure after green leaves the issue `Complete` with a
+merge-blocked note — never `Failed` — once that landing attempt settles.
 _Was_: "Label lifecycle" — labels were GitHub's storage mechanism, mistaken for
 the states themselves.
 _Avoid_: status, queue, state machine.

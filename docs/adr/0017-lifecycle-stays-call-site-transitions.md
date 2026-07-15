@@ -14,6 +14,14 @@ attempt; deleting it (hypothetically) scatters nothing. The settle module
 additionally concentrates all terminal-transition sites in one place, so the
 locality a lifecycle module promised arrives without one.
 
+Issue #757 (2026-07-15) moved when `InProgress→Complete` fires — from the
+instant CI first confirms green to once the landing path settles — spreading
+that edge from one call site (`gateToGreen`) to the four outcomes `selfHeal`'s
+green branch can settle on (merge-guard-check-error, merge-guard-hit,
+merge-blocked, landed), plus the unchanged push-only-landing site: five call
+sites, ten overall. Still the same edge, still every call site naming its
+typed `from`/`to` inline — no new edge, no conditional edge, no table.
+
 Re-open trigger: a transition added outside the claim or settle paths, or a
 conditional edge — one whose legality depends on runtime state rather than
 the static table above. Until then, architecture reviews should not

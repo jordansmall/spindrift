@@ -563,9 +563,12 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
         │
         └─ back on the host, the launcher runs the MERGE GATE for that issue:
            ├─ poll CI on the PR head until green (or red, or timeout)
-           ├─ green → swap issue to agent-complete, then apply MERGE_MODE:
+           ├─ green → apply MERGE_MODE, then swap issue to agent-complete once
+           │          the landing path settles:
            │           manual    → leave the green PR for a human (default)
-           │           immediate → rebase-merge the PR now
+           │           immediate → rebase-merge the PR now (rebase-retry and
+           │                       an agent conflict-resolve box keep the
+           │                       issue agent-in-progress until this settles)
            │           auto      → enqueue GitHub native auto-merge
            ├─ red   → capture the failed checks + a bounded log excerpt
            │          (best-effort), then dispatch fix boxes (up to
@@ -583,9 +586,13 @@ The split is deliberate: the **Box** owns implementing the issue and opening the
 PR, but the **launcher** (host-side, the Go binary) owns the CI-green decision,
 the merge, and the terminal label swap — a Box cannot approve or merge its own
 PR, and keeping merge authority outside the throwaway container is what makes
-branch protection meaningful. `agent-complete` marks CI green (the agent's work
-is done); **whether the PR then merges is the `MERGE_MODE` policy**, decoupled so
-the same run can land PRs automatically or hand green PRs to a human reviewer. The
+branch protection meaningful. `agent-complete` marks the landing path settled
+— CI is green **and** `MERGE_MODE` has run its course (merged, auto-merge
+enqueued, handed off, or merge-blocked-with-note) — so the label never claims
+"nothing left to do" while a rebase-retry or conflict-resolve box might still
+be running. **Which of those outcomes happened is the `MERGE_MODE` policy**,
+decoupled so the same run can land PRs automatically or hand green PRs to a
+human reviewer. The
 Box's last line is a machine-readable `SPINDRIFT_OUTCOME` line (grammar in
 `cmd/launcher/internal/outcome`) that tells the launcher which PR to gate.
 
@@ -630,10 +637,12 @@ issue, which is what makes re-running it safe. It queries only `LABEL`
 up twice:
 
 ```
-ready-for-agent ──dispatch──▶ agent-in-progress ─────CI green─────▶ agent-complete
-   (launch button)              (a Box is running,                   (agent done; PR is
-                                 or the merge gate is                  green — then merged
-                                 polling CI; re-runs skip it)         per MERGE_MODE)
+ready-for-agent ──dispatch──▶ agent-in-progress ───landing settles───▶ agent-complete
+   (launch button)              (a Box is running,                     (agent done; CI was
+                                 CI is polling, or the                  green and MERGE_MODE
+                                 landing path — rebase-retry,           has run its course:
+                                 conflict-resolve, post-force-          merged, auto-merge
+                                 push-wait — is still running)          enqueued, or handed off)
                                        │
                                        ├─ Box exits ≠0 (after retries) ─┐
                                        └─ CI red after MAX_FIX_ATTEMPTS ─┤
@@ -647,15 +656,17 @@ ready-for-agent ──dispatch──▶ agent-in-progress ─────CI gree
   swaps `ready-for-agent` → `agent-in-progress`. Because the issue query matches
   only `ready-for-agent`, re-running `dispatch` while PRs are still in the merge
   gate re-dispatches nothing — in-progress issues are no longer selected.
-- **Green is labelled; merge is a separate policy.** When CI confirms green the
-  merge gate swaps `agent-in-progress` → `agent-complete` — the agent's work is
-  done and the PR is mergeable. What happens next is `MERGE_MODE`: `immediate`
-  rebase-merges the PR (then verifies it really is merged and the label landed);
-  `auto` enqueues GitHub's native auto-merge; `manual` (the default) leaves the
-  green PR open for a human. `Closes #N` in the PR body closes the issue whenever
-  the PR merges. (Dependency ordering keys off this label — a blocker is "ready"
-  once it carries `agent-complete` or is closed, so waves advance on green even in
-  `manual` mode.)
+- **Green is labelled only once the landing path settles; merge is a separate
+  policy.** When CI confirms green the launcher applies `MERGE_MODE` first:
+  `immediate` rebase-merges the PR (retrying rebase conflicts, dispatching an
+  agent conflict-resolve box, and re-waiting for CI on the new head as needed
+  — the issue stays `agent-in-progress` throughout), then verifies it really is
+  merged; `auto` enqueues GitHub's native auto-merge; `manual` (the default)
+  leaves the green PR open for a human. Only once that settles does the merge
+  gate swap `agent-in-progress` → `agent-complete` — the agent's work is done.
+  `Closes #N` in the PR body closes the issue whenever the PR merges.
+  (Dependency ordering keys off the PR actually being merged, not this label —
+  see [`BlockerReady`](../cmd/launcher/internal/waves/blocker.go).)
 - **Red CI self-heals before it fails.** If CI goes genuinely red, the launcher
   dispatches up to `MAX_FIX_ATTEMPTS` fix boxes on the same branch and re-gates
   after each. Only once those are exhausted (or a fix box exits non-zero
