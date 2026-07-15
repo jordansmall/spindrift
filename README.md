@@ -400,6 +400,8 @@ Type a command and press enter:
 | `t` / `toggle` | toggle the open transcript between rendered and raw |
 | `x` / `close` | close the transcript view, back to the backlog/queue |
 | `k <num>` / `kill <num>` / `terminate <num>` | ask to Terminate `<num>`'s live Dispatch — prompts `y`/`N` to confirm |
+| `+` | raise the session's live parallelism cap by one |
+| `-` | lower the session's live parallelism cap by one |
 | `q` / `quit` | exit cleanly |
 
 If a `.dogfood.pid` file is present at startup — a headless loop
@@ -411,10 +413,12 @@ and the two are safe to run side by side (claims are atomic label swaps).
 normal `Dispatchable` transition first — recorded durably on the tracker —
 then queued; an already-`Dispatchable` issue queues directly. The pick
 launches through the same continuous engine the headless loops use, up to
-`MAX_PARALLEL` slots at once (the same knob `run`'s wave dispatch honors):
-its queue row tracks `queued` → `claiming` → `running` → `settled`, and as
-each running pick settles, the next queued pick fills the slot it freed —
-the session's queue drains continuously without re-invocation. Queued-but-
+the session's live parallelism cap at once (starting at `MAX_PARALLEL`, the
+same knob `run`'s wave dispatch honors, and resizable in-session with `+`/`-`
+below): its queue row tracks `queued` → `claiming` → `running` →
+`settled`, and as each running pick settles, the next queued pick fills the
+slot it freed — the session's queue drains continuously without
+re-invocation. Queued-but-
 unlaunched picks hold at `Dispatchable` on the tracker, never `InProgress` —
 the claim to `InProgress` only happens when the pick's turn to launch
 actually arrives. If that claim races (another loop, the issue closed, a
@@ -432,6 +436,17 @@ pick launch as soon as the first clears. If a blocker instead lands `Failed`,
 the row surfaces it (`blocker #N failed`) but stays held — the Console never
 auto-unpicks; `u <num>` still works on a held row exactly as it does on a
 queued one, so the operator decides whether to wait or give up on it.
+
+**Live parallelism cap**: `+`/`-` raise or lower the session's parallelism
+cap by one, and the current `cap: <live>/<cap>` is always visible above the
+queue. Raising takes effect immediately — a held or queued pick launches
+into the freed slot right away, without waiting for a running Dispatch to
+settle or for the background poll. Lowering never terminates anything: it
+only gates new launches until the live count sinks under the new cap on its
+own, as running Dispatches settle — `k`/`kill`/`terminate` remains the only
+way a running Dispatch dies by hand. `MAX_JOBS` gets no Console control — it
+caps headless wave size, and in a picks-only session the operator is already
+the cap.
 
 **Pick all ready** (`pa`) picks exactly the issues currently `Dispatchable`
 on the tracker, in one snapshot query — an explicit action, never standing
