@@ -409,7 +409,7 @@ Type a command and press enter:
 | `+` | raise the session's live parallelism cap by one |
 | `-` | lower the session's live parallelism cap by one |
 | `b` / `build` / `rebuild` | rebuild the image in-session when stale — no confirm needed |
-| `q` / `quit` | exit cleanly |
+| `q` / `quit` | quit — immediately with nothing live, otherwise offers drain/terminate-all/stay (see Quit below) |
 
 If a `.dogfood.pid` file is present at startup — a headless loop
 (`dogfood.sh`) already draining the same queue — the Console prints an
@@ -526,6 +526,26 @@ where it queued — no re-pick needed. A failed rebuild prints
 `!! rebuild failed: <reason>` and leaves launches held, so the operator can
 retry `b` once the underlying problem (a merge conflict on pull, a broken
 derivation) is fixed.
+
+**Quit** (`q`/`quit`, issue #651): with no live Dispatches, quit exits
+immediately — no dialog. With one or more live Dispatches, it instead offers
+a choice: `drain (d, default) / terminate-all (t) / stay (s)`. Drain launches
+nothing new — every queued-but-unlaunched pick is dropped (it was already
+`Dispatchable` on the tracker, so dropping is a pure session-queue edit with
+no tracker call, exactly like Unpick) — and Run doesn't return until every
+still-running Dispatch settles on its own. Terminate-all additionally applies
+Terminate (ADR 0024, above) to every live Dispatch before exiting. Anything
+else, including a bare "stay", cancels the pending quit and keeps the session
+running.
+
+**Orphan recovery** (issue #651, ADR 0023): a hard death — a crash, a dropped
+SSH session — leaves its containers running with nothing left to track them.
+On its next start, the Console detects any sandbox still running under the
+deterministic `agent-issue-<N>` naming scheme and offers each one to the
+operator by number (`[y/N]`); `y`/`yes` adopts it through the existing
+recover path (the same adoption `spindrift recover <n>` and a re-pick after
+Terminate both use), so an ungraceful end is a speed bump, not a cleanup
+chore. Declining leaves that orphan, and every one after it, untouched.
 
 ## Documentation
 
