@@ -25,16 +25,28 @@ import (
 // are injected so tests can substitute fakes instead of shelling out to
 // git/nix; production wiring is consoleGitSync and consoleNixBuild.
 func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull func() error, build func() error) (waves.FreshnessChecker, func() error) {
+	probe := func() freshness.Result {
+		return freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
+	}
+	return newConsoleFreshnessChecker(c.baseBranch, probe, pull, build)
+}
+
+// newConsoleFreshnessChecker holds the rev-caching logic itself, with the
+// probe seam factored out as a plain func so it can be unit-tested with
+// scripted freshness.Result values instead of a real git/nix round-trip —
+// freshness.Probe's own git plumbing is exercised by internal/freshness's
+// own tests. See newConsoleFreshness for the production wiring.
+func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result, pull func() error, build func() error) (waves.FreshnessChecker, func() error) {
 	var mu sync.Mutex
 	var builtRev string
 
 	fresh := func() (bool, bool, string) {
-		res := freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
+		res := probe()
 		mu.Lock()
 		rebuiltThisTip := res.Rev != "" && res.Rev == builtRev
 		mu.Unlock()
 		if res.Applicable && !res.Fresh && rebuiltThisTip {
-			return true, true, fmt.Sprintf("fresh (rebuilt at %s tip %s)", c.baseBranch, res.Rev)
+			return true, true, fmt.Sprintf("fresh (rebuilt at %s tip %s)", baseBranch, res.Rev)
 		}
 		return res.Applicable, res.Fresh, res.Message
 	}
@@ -46,7 +58,7 @@ func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull fu
 		if err := build(); err != nil {
 			return err
 		}
-		res := freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
+		res := probe()
 		mu.Lock()
 		builtRev = res.Rev
 		mu.Unlock()
