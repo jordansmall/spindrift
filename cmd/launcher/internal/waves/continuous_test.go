@@ -9,6 +9,8 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 )
 
 // TestRunContinuous_RefillsFreedSlotWhileOthersRunning verifies the core
@@ -380,5 +382,56 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	}
 	if !strings.Contains(out, "#1 already claimed this run") {
 		t.Fatalf("output missing suppressed-stale line for #1, got:\n%s", out)
+	}
+}
+
+// TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle verifies
+// that when a Box's issue is marked on cfg.Terminated (Terminate landed
+// while it was running, ADR 0024, issue #649), a non-zero exit is neither
+// transitioned to Failed nor handed to Settle — Terminate already
+// transitioned the issue to Dispatchable itself, and a subsequent Failed
+// transition here would corrupt that.
+func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+	reg := terminate.NewRegistry()
+	reg.Mark("1")
+	c.Terminated = reg
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	fr.RunErr = boxErr
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	fakeSettle := settle.NewFake()
+
+	discover := func() ([]Issue, map[string][]string, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return nil, nil, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return out, map[string][]string{}, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	if err := RunContinuous(c, fc, fc, dir, f, fakeSettle, discover, fresh); err != nil {
+		t.Fatalf("RunContinuous: got %v, want nil", err)
+	}
+
+	for _, call := range fc.TransitionStateCalls {
+		if call.To == forge.Failed {
+			t.Errorf("must not transition to Failed after termination; got %+v", fc.TransitionStateCalls)
+		}
+	}
+	if len(fakeSettle.SettleCalls) != 0 {
+		t.Errorf("Settle must not be called after termination; got %+v", fakeSettle.SettleCalls)
 	}
 }
