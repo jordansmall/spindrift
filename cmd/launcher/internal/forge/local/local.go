@@ -269,16 +269,15 @@ func parseLocalBlockers(body string) []string {
 	inSection := false
 	for _, rawLine := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
 		line := strings.TrimRight(rawLine, "\r")
-		if forge.BlockedByHeader.MatchString(strings.TrimSpace(line)) {
+		if forge.IsBlockedByHeader(line) {
 			inSection = true
 			continue
 		}
-		if forge.AnyHeading.MatchString(line) {
+		if forge.IsAnyHeading(line) {
 			inSection = false
 		}
-		if inSection && forge.BulletItem.MatchString(line) {
-			slug := strings.TrimSpace(forge.BulletItem.ReplaceAllString(line, ""))
-			slug = strings.Trim(slug, "`")
+		if inSection && forge.IsBulletItem(line) {
+			slug := strings.Trim(forge.ExtractBulletContent(line), "`")
 			if slug != "" && !seen[slug] {
 				seen[slug] = true
 				refs = append(refs, slug)
