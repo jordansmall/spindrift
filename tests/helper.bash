@@ -111,6 +111,16 @@ setup_fakes() {
     local _wrapped="$BATS_TEST_TMPDIR/entrypoint.sh"
     {
       cat "$DRIVER_PREAMBLE_FILE"
+      # Test-only override, appended after the registry-rendered preamble
+      # above rather than folded into it (issue #624): the baked
+      # DRIVER_SKILLS_DIR is the absolute /home/agent path a real Box always
+      # has, byte-identical to what mkHarness.nix bakes into the image, but
+      # a bats sandbox has no such directory to write into. Redirect it at
+      # this test's own $HOME instead -- written as the literal text `$HOME`
+      # so it resolves against whatever HOME setup_bare_repo below sets, not
+      # whatever HOME happens to be while this file is being assembled.
+      # shellcheck disable=SC2016 # intentionally unexpanded -- written verbatim into $_wrapped
+      echo 'DRIVER_SKILLS_DIR="$HOME/.claude/skills"'
       if [ -n "${FRAGMENT_REGISTRY_FILE:-}" ]; then
         cat "$FRAGMENT_REGISTRY_FILE"
       fi
