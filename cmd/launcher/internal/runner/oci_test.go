@@ -566,6 +566,38 @@ func TestReap_RemovesStaleContainer(t *testing.T) {
 	}
 }
 
+// TestKill_ForceRemovesRegardlessOfRunningState verifies Kill's contract is
+// the opposite of Reap's: it issues `rm -f` unconditionally, with no inspect
+// call first, so it reaches a genuinely live container Reap would refuse to
+// touch.
+func TestKill_ForceRemovesRegardlessOfRunningState(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{})
+	a := &ociAdapter{cli: script}
+
+	if err := a.Kill("agent-issue-1"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	if calls := callCount(t, dir); calls != 1 {
+		t.Errorf("Kill: want 1 call (rm -f only, no inspect), got %d", calls)
+	}
+	rm := readCall(t, dir, 0)
+	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "agent-issue-1") {
+		t.Errorf("Kill: want `rm -f agent-issue-1`, got %v", rm)
+	}
+}
+
+// TestKill_SurfacesCLIError verifies a scripted rm failure is returned, not
+// swallowed — Terminate needs to know the reap did not land.
+func TestKill_SurfacesCLIError(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 1})
+	a := &ociAdapter{cli: script}
+
+	if err := a.Kill("agent-issue-1"); err == nil {
+		t.Error("Kill: want error from scripted rm failure, got nil")
+	}
+}
+
 // TestLoadImage_InvokesLoadThenTag verifies loadImage issues `load -i
 // <archive>` followed by `tag spindrift:latest <imageTag>`, in that order.
 func TestLoadImage_InvokesLoadThenTag(t *testing.T) {

@@ -321,3 +321,11 @@ func (a *ociAdapter) Reap(name string) error {
 	}
 	return nil
 }
+
+// Kill force-stops and removes name unconditionally, running or not — `rm
+// -f` on podman/docker stops a running container before removing it, so no
+// prior IsRunning check (and its inspect round-trip) is needed. Unlike Reap,
+// a failure is returned rather than swallowed.
+func (a *ociAdapter) Kill(name string) error {
+	return exec.Command(a.cli, "rm", "-f", name).Run()
+}
