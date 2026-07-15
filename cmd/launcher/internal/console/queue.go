@@ -1,6 +1,8 @@
 package console
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -30,14 +32,16 @@ func (q *Queue) Add(p Pick) {
 	q.picks = append(q.picks, p)
 }
 
-// Remove drops the queued pick numbered num, if any, reporting whether one
-// was removed. It only ever removes a pick still holding at PickQueued — a
-// pick already claiming, running, or settled is left alone.
+// Remove drops the queued or held pick numbered num, if any, reporting
+// whether one was removed. It only ever removes a pick still holding at
+// PickQueued or PickHeld — a pick already claiming, running, or settled is
+// left alone; the operator decides whether a held pick's failed blocker is
+// worth unpicking (#650), Discover never does it for them.
 func (q *Queue) Remove(num string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for i, p := range q.picks {
-		if p.Number == num && p.State == PickQueued {
+		if p.Number == num && (p.State == PickQueued || p.State == PickHeld) {
 			q.picks = append(q.picks[:i], q.picks[i+1:]...)
 			return true
 		}
@@ -66,20 +70,32 @@ func (q *Queue) Snapshot() []Pick {
 	return out
 }
 
-// Discover is the waves.Discoverer this queue backs. It claims the
-// front-most still-queued pick — the atomic Dispatchable->InProgress
-// transition — and returns it as a single-issue batch for the continuous
-// engine to launch. A claim that races (another loop, a closed issue, a
-// relabel) dissolves that pick with the reason and moves on to the next
-// queued one, so a stale queue can only produce a failed claim, never a
-// wrong dispatch. Edges are always empty: a single operator-picked issue
-// carries no in-batch blocker graph.
-func (q *Queue) Discover(tracker forge.IssueTracker) ([]waves.Issue, map[string][]string, error) {
-	for {
-		pick, ok := q.nextQueued()
-		if !ok {
-			return nil, nil, nil
+// Discover is the waves.Discoverer this queue backs. It walks queued and
+// held picks in order; a pick whose declared blockers (waves.BuildEdges,
+// waves.BlockerStatus — the same machinery headless waves use, no second
+// parser) are not all satisfied holds at PickHeld with BlockedBy naming
+// them, and Discover moves on to the next candidate rather than launching
+// it, so an earlier held pick never stalls a later ready one. A ready
+// pick's atomic Dispatchable->InProgress claim, once it races (another
+// loop, a closed issue, a relabel), dissolves that pick with the reason and
+// Discover moves on too, so a stale queue can only produce a failed claim,
+// never a wrong dispatch. The first pick that claims successfully is
+// returned as a single-issue batch (edges always empty — Discover already
+// resolved this pick's own readiness, so the engine's own blocker gate has
+// nothing left to check); a refill with nothing launchable returns no
+// issues, which may still have moved one or more picks onto PickHeld.
+func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string) ([]waves.Issue, map[string][]string, error) {
+	for _, pick := range q.claimable() {
+		edges, sources, err := waves.BuildEdges(tracker, []waves.Issue{{Number: pick.Number, Title: pick.Title}})
+		if err != nil {
+			continue
 		}
+		ready, failed, unready := waves.BlockerStatus(waves.Config{FailedLabel: failedLabel}, tracker, cf, pick.Number, edges)
+		if !ready {
+			q.setHeld(pick.Number, unready, failed, sources[pick.Number])
+			continue
+		}
+		q.setState(pick.Number, PickClaiming, "")
 		if err := tracker.TransitionState(pick.Number, forge.Dispatchable, forge.InProgress); err != nil {
 			q.dissolve(pick.Number, err.Error())
 			continue
@@ -87,20 +103,51 @@ func (q *Queue) Discover(tracker forge.IssueTracker) ([]waves.Issue, map[string]
 		q.setState(pick.Number, PickRunning, "")
 		return []waves.Issue{{Number: pick.Number, Title: pick.Title}}, map[string][]string{}, nil
 	}
+	return nil, nil, nil
 }
 
-// nextQueued returns the front-most PickQueued pick, if any, and marks it
-// PickClaiming.
-func (q *Queue) nextQueued() (Pick, bool) {
+// claimable returns a snapshot, in queue order, of every pick still
+// eligible to launch — queued or already held (re-evaluated every refill).
+func (q *Queue) claimable() []Pick {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for i, p := range q.picks {
-		if p.State == PickQueued {
-			q.picks[i].State = PickClaiming
-			return q.picks[i], true
+	var out []Pick
+	for _, p := range q.picks {
+		if p.State == PickQueued || p.State == PickHeld {
+			out = append(out, p)
 		}
 	}
-	return Pick{}, false
+	return out
+}
+
+// setHeld marks the pick numbered num held on unready, formatting it as the
+// BlockedBy badge; failed — unready's subset that carries the Failed label —
+// renders as Reason, surfacing on the row without dissolving the pick, since
+// the Console never auto-unpicks (#650).
+func (q *Queue) setHeld(num string, unready, failed []string, sources map[string]forge.DepSource) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for i := range q.picks {
+		if q.picks[i].Number == num {
+			q.picks[i].State = PickHeld
+			q.picks[i].BlockedBy = refList(unready, sources)
+			q.picks[i].Reason = ""
+			if len(failed) > 0 {
+				q.picks[i].Reason = fmt.Sprintf("blocker %s failed", refList(failed, sources))
+			}
+			return
+		}
+	}
+}
+
+// refList formats a blocker-ref list for operator-facing display, e.g. "#41
+// (native), #43 (body)".
+func refList(nums []string, sources map[string]forge.DepSource) string {
+	refs := make([]string, len(nums))
+	for i, n := range nums {
+		refs[i] = forge.Ref(n, sources[n])
+	}
+	return strings.Join(refs, ", ")
 }
 
 // setState updates the newest (most recently Add()ed) pick numbered num in

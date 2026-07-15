@@ -23,6 +23,13 @@ const (
 	PickClaiming
 	// PickRunning is a pick whose claim succeeded and whose Box is running.
 	PickRunning
+	// PickHeld is a pick whose declared blockers are not all satisfied yet —
+	// it stays Dispatchable on the tracker and re-evaluates on every refill,
+	// launching the moment every blocker reaches Complete. BlockedBy names
+	// the still-open blockers; Reason carries a "blocker #N failed" note
+	// when one of them landed Failed, but the pick stays held — the Console
+	// never auto-unpicks (#650).
+	PickHeld
 	// PickSettled is a pick whose Dispatch reached settle.
 	PickSettled
 	// PickDissolved is a pick whose claim failed (raced, closed,
@@ -43,6 +50,8 @@ func (s PickState) String() string {
 		return "claiming"
 	case PickRunning:
 		return "running"
+	case PickHeld:
+		return "held"
 	case PickSettled:
 		return "settled"
 	case PickDissolved:
@@ -62,6 +71,9 @@ type Pick struct {
 	Kind   Kind
 	State  PickState
 	Reason string
+	// BlockedBy names a PickHeld row's still-open blockers, e.g. "#41
+	// (native), #43 (body)" — "" for every other state.
+	BlockedBy string
 	// Heartbeat is the last status line RunningHeartbeat captured for a
 	// PickRunning row — "" until a running Box's log carries at least one
 	// complete heartbeat line, and left stale (not cleared) once a pick

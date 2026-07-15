@@ -27,6 +27,10 @@ type Launcher struct {
 	// zero-value struct literal) falls back to 1, matching the pre-#647
 	// single-slot behaviour.
 	MaxParallel int
+	// FailedLabel is the tracker label that marks a blocker issue Failed —
+	// threaded into Queue.Discover's held-pick check (#650) so a failed
+	// blocker surfaces on the held row instead of silently staying "open".
+	FailedLabel string
 
 	mu        sync.Mutex
 	launching bool
@@ -182,7 +186,7 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 	defer l.wg.Done()
 	discover := func() ([]waves.Issue, map[string][]string, error) {
 		defer l.signalRefresh() // a claim attempt is always a tracker write, win or lose
-		issues, edges, err := l.Queue.Discover(tracker)
+		issues, edges, err := l.Queue.Discover(tracker, l.CodeForge, l.FailedLabel)
 		// A successful claim here is a fresh Dispatch starting for issues,
 		// so any earlier Terminate mark for these numbers must not carry
 		// over — otherwise a re-pick's own settle would abandon on its very

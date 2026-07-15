@@ -33,6 +33,9 @@ func View(m Model) string {
 		b.WriteString("picks:\n")
 		for _, p := range m.Picks {
 			fmt.Fprintf(&b, "  #%s  %s  %s", p.Number, p.State, p.Title)
+			if p.BlockedBy != "" {
+				fmt.Fprintf(&b, "  (held by %s)", p.BlockedBy)
+			}
 			if p.Reason != "" {
 				fmt.Fprintf(&b, "  (%s)", p.Reason)
 			}
