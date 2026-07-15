@@ -360,20 +360,20 @@ func TestMaxJobsEdgeCases(t *testing.T) {
 }
 
 // TestLoadConfig_LabelDefaultComesFromSchemaTable proves loadConfig() sources
-// LABEL's default from the generated schemaDefaults table (issue #621)
-// rather than a hand-written literal: swapping the table's entry changes
-// what an unset LABEL resolves to.
+// LABEL's default from the generated schemaFlags table (issue #670 consolidates
+// the former separate schemaDefaults table into it) rather than a hand-written
+// literal: swapping the table's entry changes what an unset LABEL resolves to.
 func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("LABEL") })
 	os.Unsetenv("LABEL")
 
-	orig := schemaDefaults
-	t.Cleanup(func() { schemaDefaults = orig })
-	schemaDefaults = []defaultEntry{{env: "LABEL", dflt: "custom-default-from-table"}}
+	orig := schemaFlags
+	t.Cleanup(func() { schemaFlags = orig })
+	schemaFlags = []flagEntry{{env: "LABEL", dflt: "custom-default-from-table"}}
 
 	c := loadConfig()
 	if c.label != "custom-default-from-table" {
-		t.Errorf("label should come from schemaDefaults table, got %q", c.label)
+		t.Errorf("label should come from schemaFlags table, got %q", c.label)
 	}
 }
 
@@ -416,7 +416,7 @@ func TestGitIdentityField_ExplicitValueSkipsGitConfig(t *testing.T) {
 
 // TestLoadConfig_DocumentSettingBeatsSchemaDefault proves the Launcher input
 // document's settings value (ADR 0020: schema default < flake settings)
-// backs a knob ahead of the generated schemaDefaults table when neither an
+// backs a knob ahead of the generated schemaFlags table when neither an
 // explicit flag nor ambient env supplies one.
 func TestLoadConfig_DocumentSettingBeatsSchemaDefault(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("BASE_BRANCH"); loadedDoc = nil })

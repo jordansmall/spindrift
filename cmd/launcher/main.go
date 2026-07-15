@@ -226,7 +226,7 @@ func atoiNonneg(s string, def int) int {
 // schemaDefault returns key's resolved default: the loaded Launcher input
 // document's settings value (ADR 0020 — schema default overridden by the
 // Consumer flake's settings) when --input loaded one and it carries key,
-// else the generated schemaDefaults table (cmd/launcher/defaults_gen.go), or
+// else the generated schemaFlags table (cmd/launcher/flagtable_gen.go), or
 // "" when the knob has none. getenvSchema/atoiSchema/atoiNonnegSchema below
 // consult this, so document precedence applies to every knob they resolve
 // with no other call-site change (issue #625).
@@ -236,7 +236,7 @@ func schemaDefault(key string) string {
 			return v
 		}
 	}
-	for _, e := range schemaDefaults {
+	for _, e := range schemaFlags {
 		if e.env == key {
 			return e.dflt
 		}

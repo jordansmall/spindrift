@@ -22,7 +22,7 @@ type inputDocument struct {
 // loadedDoc is populated once by loadInputDocument, before loadConfig() runs,
 // from the --input flag's document path. Left nil for a direct binary
 // invocation with no --input flag (tests, manual debugging), in which case
-// every lookup falls through to os.Getenv/schemaDefaults as before this issue.
+// every lookup falls through to os.Getenv/schemaFlags as before this issue.
 var loadedDoc *inputDocument
 
 // loadInputDocument reads and parses the Launcher input document at path.
