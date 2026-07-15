@@ -85,18 +85,21 @@ _memory_limit_to_mib() {
   esac
 }
 
-# Preflight (#580): on macOS/Windows, podman runs containers inside a VM
-# ("podman machine") with its own fixed RAM, independent of the per-container
-# --memory cap (MEMORY_LIMIT). When the machine has less RAM than that cap,
-# the VM's own Linux OOM-killer fires before the cgroup cap ever bites — it
-# silently killed an in-box `nix build` under agent-issue-565 (EXIT:137,
-# #565). Skips cleanly when there's no active machine (native Linux, or a
-# non-podman runtime): `podman machine inspect` then errors or prints nothing.
+# Preflight (#580, parallelism-aware per #712): on macOS/Windows, podman runs
+# containers inside a VM ("podman machine") with its own fixed RAM,
+# independent of the per-container --memory cap (MEMORY_LIMIT). When the
+# machine has less RAM than MAX_PARALLEL containers each want, the VM's own
+# Linux OOM-killer fires before any single container's cgroup cap ever bites
+# — it silently killed an in-box `nix build` under agent-issue-565
+# (EXIT:137, #565) and, at higher concurrency, took down the whole VM under
+# agent-issue-640 (#712: global_oom, no in-box 137, no clean result). Skips
+# cleanly when there's no active machine (native Linux, or a non-podman
+# runtime): `podman machine inspect` then errors or prints nothing.
 check_podman_machine_memory() {
   # `-` (not `:-`): MEMORY_LIMIT="" is a deliberate opt-out (env-schema.nix
   # memoryLimit.default's doc: "empty string disables the limit"), distinct
   # from unset. Same reasoning as CONTINUOUS_DISPATCH above.
-  local limit="${MEMORY_LIMIT-4g}"
+  local limit="${MEMORY_LIMIT-5g}"
   [ -z "$limit" ] && return 0
   command -v podman >/dev/null 2>&1 || return 0
 
@@ -111,10 +114,15 @@ check_podman_machine_memory() {
   local limit_mib
   limit_mib="$(_memory_limit_to_mib "$limit")"
 
-  if [ "$machine_mib" -lt "$limit_mib" ]; then
-    echo "!! podman machine has ${machine_mib}MiB RAM but MEMORY_LIMIT=$limit needs ${limit_mib}MiB per container." >&2
-    echo "!! the VM's own OOM-killer will fire before the --memory cgroup cap ever bites." >&2
-    echo "!! fix: podman machine set --memory $limit_mib (then restart the machine)." >&2
+  # VM_OVERHEAD_MIB covers the podman machine's own OS/daemon footprint,
+  # which competes with the containers for the same fixed VM RAM.
+  local -r VM_OVERHEAD_MIB=512
+  local required_mib=$(( limit_mib * MAX_PARALLEL + VM_OVERHEAD_MIB ))
+
+  if [ "$machine_mib" -lt "$required_mib" ]; then
+    echo "!! podman machine has ${machine_mib}MiB RAM but MEMORY_LIMIT=$limit x MAX_PARALLEL=$MAX_PARALLEL needs ${required_mib}MiB (incl. ${VM_OVERHEAD_MIB}MiB VM overhead)." >&2
+    echo "!! the VM's own OOM-killer fires before any single container's --memory cgroup cap ever bites." >&2
+    echo "!! fix: lower MAX_PARALLEL, raise podman machine RAM (podman machine set --memory $required_mib; then restart the machine), or lower MEMORY_LIMIT." >&2
     exit 1
   fi
 }
