@@ -252,6 +252,12 @@ func (a *bwrapAdapter) Kill(name string) error {
 // with by name.
 func (a *bwrapAdapter) IsRunning(_ string) bool { return false }
 
+// ListRunning always returns an empty list for bwrap: sandboxes are
+// unprivileged child processes with no daemon tracking them by name, so
+// there is nothing for Console startup orphan detection (issue #651) to
+// find, matching IsRunning's already-false.
+func (a *bwrapAdapter) ListRunning() ([]string, error) { return nil, nil }
+
 // bwrapBuildAdapter implements Runner for the `launcher build` bwrap path.
 // EnsureReady realizes the agent store closures; Run is not supported.
 type bwrapBuildAdapter struct {
@@ -309,3 +315,7 @@ func (a *bwrapBuildAdapter) Kill(_ string) error { return nil }
 // IsRunning always reports false for the build adapter: it never launches a
 // box, so there is nothing to be running.
 func (a *bwrapBuildAdapter) IsRunning(_ string) bool { return false }
+
+// ListRunning always returns an empty list for the build adapter: it never
+// launches a box, so there is nothing running to find.
+func (a *bwrapBuildAdapter) ListRunning() ([]string, error) { return nil, nil }

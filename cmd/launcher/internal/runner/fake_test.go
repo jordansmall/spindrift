@@ -28,3 +28,20 @@ func TestFakeRunFuncOverridesDefault(t *testing.T) {
 		t.Errorf("RunCalls: got %v, want one call for issue 7", f.RunCalls)
 	}
 }
+
+// TestFakeListRunning_ReturnsConfiguredNames verifies ListRunning returns
+// whatever the test configured on RunningNames — orphan detection on
+// Console startup (issue #651) needs a fake source of "still running"
+// sandbox names with no live goroutine tracking them.
+func TestFakeListRunning_ReturnsConfiguredNames(t *testing.T) {
+	f := NewFake()
+	f.RunningNames = []string{"agent-issue-42", "agent-issue-43"}
+
+	got, err := f.ListRunning()
+	if err != nil {
+		t.Fatalf("ListRunning: %v", err)
+	}
+	if len(got) != 2 || got[0] != "agent-issue-42" || got[1] != "agent-issue-43" {
+		t.Errorf("ListRunning = %v, want [agent-issue-42 agent-issue-43]", got)
+	}
+}
