@@ -115,6 +115,8 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		t, cmd = t.handleKey(msg)
+	case tea.WindowSizeMsg:
+		t.m = Update(t.m, SizeChangedMsg{Width: msg.Width, Height: msg.Height})
 	case IssuesLoadedMsg:
 		t.m = Update(t.m, msg)
 	case DrillInMsg:
