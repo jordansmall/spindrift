@@ -11,6 +11,8 @@ package waves
 import (
 	"errors"
 	"fmt"
+
+	"spindrift.dev/launcher/internal/terminate"
 )
 
 // ErrOpenNoneDispatchable is returned by Run when ModeDrain selects zero
@@ -98,6 +100,13 @@ type Config struct {
 	// of "spindrift dispatch --yes <nums>"). Empty defaults to "dispatch",
 	// matching every pre-existing (kind-unaware) construction site.
 	Verb string
+
+	// Terminated is checked by RunContinuous's per-issue goroutine after a
+	// Box exits, so an issue the operator Terminated (ADR 0024, issue #649)
+	// while it was running is neither transitioned to Failed nor handed to
+	// Settle — Terminate already reclaimed it. Nil (every headless dispatch
+	// path) means "never terminated"; only the Console wires a Registry.
+	Terminated *terminate.Registry
 }
 
 // NewPlan decides how in.Issues should be dispatched. Every origin —

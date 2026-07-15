@@ -120,10 +120,17 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			d := f.New(iss.Number, iss.Title)
 			defer d.Close()
 			result := d.Run()
-			if !result.Success {
+			switch {
+			case cfg.Terminated.Marked(iss.Number):
+				// Terminate (ADR 0024, issue #649) already reaped this Box,
+				// transitioned the issue back to Dispatchable, and recorded
+				// its own comment/log line -- neither a Failed transition
+				// nor a Settle call belongs here now.
+				fmt.Printf("    ~~ #%s terminated by operator; abandoning\n", iss.Number)
+			case !result.Success:
 				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.Number, iss.Number)
 				transitionState(it, iss.Number, forge.InProgress, forge.Failed)
-			} else {
+			default:
 				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.Number, iss.Number)
 				s.Settle(d, iss.Number, result)
 			}
