@@ -256,6 +256,93 @@ func TestLauncher_Rebuild_Failure_SurfacesErrorAndKeepsHeld(t *testing.T) {
 	}
 }
 
+// TestLauncher_Rebuild_WhileOtherSlotAlreadyLatchedStale_ResumesBothPicks
+// reproduces the reviewer-flagged race (#652): with MaxParallel=2, one
+// slot's refill already saw a stale verdict and latched RunContinuous's own
+// one-shot `stale` flag for that whole invocation, while the other slot's
+// Box is still running. A concurrent Rebuild success flips the checker
+// fresh and calls tryLaunch, but that call is a no-op — the drain that
+// launched the running Box hasn't returned yet, so l.launching is still
+// true. Once the running Box finishes, RunContinuous's completion callback
+// short-circuits on its latched stale flag without ever consulting fresh()
+// again, so the *second* pick must not be permanently stranded at
+// PickQueued: drain must re-check freshness before deciding to park.
+func TestLauncher_Rebuild_WhileOtherSlotAlreadyLatchedStale_ResumesBothPicks(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "first", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "43", Title: "second", Labels: []string{"ready-for-agent"}})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	release42 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Issue == "42" {
+			<-release42
+		}
+		return nil
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	// Fresh reports fresh exactly once (slot 1 claiming #42), then stale
+	// (slot 2's refill, latching RunContinuous's one-shot flag) — until
+	// RebuildFn flips forcedFresh, which every call checks first.
+	var calls atomic.Int32
+	var forcedFresh atomic.Bool
+	launch := &Launcher{
+		CodeForge:   f,
+		Factory:     factory,
+		Settle:      settle.NewFake(),
+		Queue:       NewQueue(),
+		MaxParallel: 2,
+		Fresh: func() (bool, bool, string) {
+			if forcedFresh.Load() {
+				return true, true, ""
+			}
+			if calls.Add(1) <= 1 {
+				return true, true, ""
+			}
+			return true, false, "rebuild needed"
+		},
+		RebuildFn: func() error {
+			forcedFresh.Store(true)
+			return nil
+		},
+	}
+	launch.Queue.Add(Pick{Number: "42", Title: "first", State: PickQueued})
+	launch.Queue.Add(Pick{Number: "43", Title: "second", State: PickQueued})
+	launch.tryLaunch(f, dir)
+
+	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickRunning, "43": PickQueued})
+
+	launch.Rebuild(f, dir)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, _, rebuilding, rebuildErr := launch.StaleStatus(); !rebuilding && rebuildErr == "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("rebuild never finished")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	close(release42)
+	launch.Wait()
+
+	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickSettled, "43": PickSettled})
+}
+
 // TestLauncher_Rebuild_MarksRebuildingWhileInFlight verifies StaleStatus
 // reports Rebuilding while RebuildFn is still running — the "progress
 // surfaced" half of issue #652 AC3 — and clears it once RebuildFn returns.

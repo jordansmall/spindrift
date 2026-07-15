@@ -265,15 +265,25 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		err := waves.RunContinuous(waves.Config{Limiter: l.limiter(), Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue, l.signalRefresh, l.registry()}, discover, l.freshnessChecker())
 
 		if errors.Is(err, waves.ErrImageStale) {
-			// Every in-flight Box this run already finished (RunContinuous
-			// only returns ErrImageStale after wg.Wait()) — nothing left to
-			// race. Park here instead of looping: a tight re-drain would
-			// just re-hit the same stale verdict on every refill. Rebuild
-			// resumes draining on success by calling tryLaunch again.
-			l.mu.Lock()
-			l.launching = false
-			l.mu.Unlock()
-			return
+			// RunContinuous's own "stale" flag is a one-shot latch for this
+			// single invocation: once any refill sees a stale verdict, every
+			// later refill (including one triggered by a Box that was
+			// already running when staleness hit) short-circuits without
+			// ever consulting fresh() again. That leaves a window where a
+			// concurrent Rebuild finishes — flipping the checker back to
+			// fresh and calling tryLaunch — while this drain is still
+			// waiting on that in-flight Box; tryLaunch no-ops (l.launching
+			// is still true), and this loop would otherwise park a held
+			// pick with no one left to resume it. Re-checking freshness
+			// once more here catches that race: a fresh verdict re-drains
+			// immediately instead of parking, exactly as if Rebuild's own
+			// tryLaunch call had landed.
+			if applicable, fresh, _ := l.freshnessChecker()(); applicable && !fresh {
+				l.mu.Lock()
+				l.launching = false
+				l.mu.Unlock()
+				return
+			}
 		}
 
 		l.mu.Lock()
