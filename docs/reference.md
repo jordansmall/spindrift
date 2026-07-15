@@ -21,7 +21,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
-| `spindrift doctor`               | check forge credentials, repository connectivity, and triage label presence; when run interactively (TTY attached) and labels are missing it offers to create them with default colors and descriptions; in CI (no TTY) it reports the missing labels and exits non-zero without prompting |
+| `spindrift doctor`               | check forge credentials, repository connectivity, and label presence — the four triage labels (fatal if missing) and the six `agent-research*` labels (ADR 0022, advisory only); when run interactively (TTY attached) and labels are missing it offers to create them with default colors and descriptions; in CI (no TTY) it reports missing labels and exits non-zero only if a triage label is missing |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (same content as `man spindrift`)  |
 | `man spindrift`                  | the manual page (installed alongside the binary on your PATH)                    |
@@ -850,9 +850,11 @@ gh label create agent-failed      --repo owner/repo --color d93f0b --description
 #### Create the research labels on the Target repo
 
 The research label family (ADR 0022) is a fixed, non-configurable vocabulary
-— `agent-research.yml` and the research prompt key off these names directly —
-so unlike the four triage labels above, `spindrift doctor` does not manage
-them. Create them manually before applying `agent-research` to an issue:
+— `agent-research.yml` and the research prompt key off these names directly.
+`spindrift doctor` checks and, in interactive mode, offers to create these
+too, but treats them as advisory: unlike the four triage labels above, a
+missing research label never fails the check (so CI `doctor` runs stay green
+for deployments that don't use research yet). To create them manually:
 
 ```sh
 gh label create agent-research             --repo owner/repo --color fbca04 --description "Apply to fire a research dispatch"
