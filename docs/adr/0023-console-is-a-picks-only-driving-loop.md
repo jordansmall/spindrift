@@ -71,7 +71,8 @@ existing recover path, offered on next start.
 - Transcript rendering becomes a Driver capability beside heartbeat and usage
   extraction — the drill-in's default view is the rendered transcript of the
   whole Dispatch across pass logs, with a raw-JSONL toggle; heartbeats move
-  to the queue rows.
+  to the queue rows. (Superseded by ADR 0025: the transcript docks as a third
+  column rather than replacing the backlog/queue rendering entirely.)
 - The Pick record is kind-aware (`work` | `research`) from day one; the v1
   UI exposes only work picks until research dispatch ships.
 - `MAX_PARALLEL` becomes a resizable limiter in the engine; `MAX_JOBS`
