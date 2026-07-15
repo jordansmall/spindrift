@@ -155,6 +155,138 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	}
 }
 
+// TestSelfHeal_ConflictResolveFailure_EndsFailed verifies that a failed
+// conflict-resolve dispatch (the box exits non-zero, leaving the rebase
+// conflict unresolved) ends the issue at agent-failed, not agent-complete
+// (issue #758): the head is in an unresolved-conflict state, never green.
+func TestSelfHeal_ConflictResolveFailure_EndsFailed(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.MergeErrs = []error{forge.ErrMergeConflict}
+	fc.RebaseErr = forge.ErrMergeConflict
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	s := New(c, fc, fc)
+	d := dispatch.NewFake()
+	d.ResolveConflictErr = errors.New("conflict-resolve box exited 1")
+
+	landing := s.selfHeal(d, "1", testPR)
+
+	if landing != landingFailed {
+		t.Errorf("selfHeal = %v, want landingFailed (conflict-resolve dispatch failed)", landing)
+	}
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must carry agent-failed after a failed conflict-resolve dispatch; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must NOT carry agent-complete after a failed conflict-resolve dispatch; labels=%v", iss.Labels)
+	}
+}
+
+// TestSelfHeal_RewaitAfterForcePush_NeverGreen_EndsFailed verifies that when
+// the post-force-push re-wait (after a plain rebase, or after an
+// agent-resolved conflict) ends in genuine red CI or a timeout, the issue
+// ends agent-failed, not agent-complete (issue #758): the force-pushed head
+// never produced a green PR.
+func TestSelfHeal_RewaitAfterForcePush_NeverGreen_EndsFailed(t *testing.T) {
+	cases := []struct {
+		name        string
+		rebaseErr   error
+		resolveErr  error
+		pollTimeout int
+		checkStates []forge.RollupState
+	}{
+		{
+			name: "rewait after a plain rebase ends genuine red",
+			// Rebase succeeds outright (no conflict), so mergeImmediate goes
+			// straight to the post-force-push re-wait without a conflict-resolve.
+			rebaseErr:   nil,
+			pollTimeout: 100,
+			checkStates: []forge.RollupState{
+				forge.StateSuccess, forge.StateSuccess, // initial gateToGreen
+				forge.StateFailure, // rewait's gateToGreen: genuine red
+			},
+		},
+		{
+			name: "rewait after conflict-resolve times out",
+			// Rebase itself conflicts, so mergeImmediate dispatches
+			// conflict-resolve, which succeeds; the following re-wait then
+			// times out with no checks ever registering.
+			rebaseErr:   forge.ErrMergeConflict,
+			resolveErr:  nil,
+			pollTimeout: 0,
+			checkStates: []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseConfig()
+			c.MergeMode = "immediate"
+			c.MaxRebaseAttempts = 3
+			c.MergePollTimeout = tc.pollTimeout
+			fc := forge.NewFake(testDispatchLabels)
+			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+			fc.MergeErrs = []error{forge.ErrMergeConflict}
+			fc.RebaseErr = tc.rebaseErr
+			fc.SetCheckStates(testPR, tc.checkStates)
+			s := New(c, fc, fc)
+			d := dispatch.NewFake()
+			d.ResolveConflictErr = tc.resolveErr
+
+			landing := s.selfHeal(d, "1", testPR)
+
+			if landing != landingFailed {
+				t.Errorf("selfHeal = %v, want landingFailed (force-pushed head never went green)", landing)
+			}
+			iss, _ := fc.Issue("1")
+			if !containsLabel(iss.Labels, "agent-failed") {
+				t.Errorf("issue must carry agent-failed; labels=%v", iss.Labels)
+			}
+			if containsLabel(iss.Labels, "agent-complete") {
+				t.Errorf("issue must NOT carry agent-complete; labels=%v", iss.Labels)
+			}
+		})
+	}
+}
+
+// TestSelfHeal_UnresolvableConflictNoForcePush_KeepsComplete verifies that a
+// rebase conflict which exhausts MaxRebaseAttempts *before ever force-pushing*
+// leaves the issue agent-complete, not agent-failed: the pre-rebase head is
+// still the last green PR, so this is the "unresolvable conflict" merge
+// failure ADR 0012 already covers — distinct from issue #758's force-pushed-
+// head-never-went-green case, where a force-push (rebase or conflict-resolve)
+// did happen and the resulting head never re-confirmed green.
+func TestSelfHeal_UnresolvableConflictNoForcePush_KeepsComplete(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.MaxRebaseAttempts = 0
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.MergeErrs = []error{forge.ErrMergeConflict}
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	s := New(c, fc, fc)
+
+	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
+
+	if landing != landingManual {
+		t.Errorf("selfHeal = %v, want landingManual (unresolvable conflict, no force-push attempted)", landing)
+	}
+	if len(fc.RebasedURLs) != 0 {
+		t.Errorf("Rebase must not be called once MaxRebaseAttempts is exhausted; calls=%d", len(fc.RebasedURLs))
+	}
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must carry agent-complete; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must NOT carry agent-failed; labels=%v", iss.Labels)
+	}
+}
+
 // labelSnapshotDispatcher wraps a dispatch.Fake so its ResolveConflict call
 // snapshots the issue's labels before delegating — capturing what the label
 // looks like mid-landing-path (issue #757), the same wrapper pattern
