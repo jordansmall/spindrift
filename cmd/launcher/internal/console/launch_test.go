@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
@@ -69,5 +70,100 @@ func TestRunContinuous_DrainsScriptedQueue_LaunchesOneDispatchEndToEnd(t *testin
 	}
 	if !hasLabel(iss, "agent-in-progress") {
 		t.Errorf("issue #42 labels = %v, want agent-in-progress (claimed)", iss.Labels)
+	}
+}
+
+// TestLauncher_MaxParallel_CapsConcurrency_RefillsOnSettle verifies a
+// Launcher with MaxParallel=2 and three queued picks runs exactly two at
+// once, holding the third queued, then launches it as soon as one of the
+// first two settles (#647 AC1).
+func TestLauncher_MaxParallel_CapsConcurrency_RefillsOnSettle(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "first", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "43", Title: "second", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "44", Title: "third", Labels: []string{"ready-for-agent"}})
+
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "first", State: PickQueued})
+	q.Add(Pick{Number: "43", Title: "second", State: PickQueued})
+	q.Add(Pick{Number: "44", Title: "third", State: PickQueued})
+
+	fr := runner.NewFake()
+	release42 := make(chan struct{})
+	release43 := make(chan struct{})
+	release44 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		switch box.Issue {
+		case "42":
+			<-release42
+		case "43":
+			<-release43
+		case "44":
+			<-release44
+		}
+		return nil
+	}
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: q, MaxParallel: 2}
+	launch.tryLaunch(f, dir)
+
+	waitForPickStates(t, q, map[string]PickState{"42": PickRunning, "43": PickRunning, "44": PickQueued})
+
+	close(release42)
+	waitForPickStates(t, q, map[string]PickState{"44": PickRunning})
+
+	close(release43)
+	close(release44)
+	launch.Wait()
+
+	snap := q.Snapshot()
+	for _, p := range snap {
+		if p.State != PickSettled {
+			t.Errorf("pick #%s state = %v, want settled", p.Number, p.State)
+		}
+	}
+}
+
+// waitForPickStates polls q until every numbered pick in want holds the
+// expected state, or fails the test after a two-second deadline — the same
+// no-real-sleep-in-production, bounded-poll-in-test pattern the rest of the
+// package's launcher tests use.
+func waitForPickStates(t *testing.T, q *Queue, want map[string]PickState) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		snap := q.Snapshot()
+		got := make(map[string]PickState, len(snap))
+		for _, p := range snap {
+			got[p.Number] = p.State
+		}
+		ok := true
+		for num, state := range want {
+			if got[num] != state {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pick states = %+v, want %+v", got, want)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
