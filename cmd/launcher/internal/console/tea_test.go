@@ -52,6 +52,8 @@ func sendKey(tm *teatest.TestModel, s string) {
 		tm.Send(tea.KeyMsg{Type: tea.KeyPgUp})
 	case "pgdown":
 		tm.Send(tea.KeyMsg{Type: tea.KeyPgDown})
+	case "tab":
+		tm.Send(tea.KeyMsg{Type: tea.KeyTab})
 	default:
 		tm.Type(s)
 	}
@@ -208,9 +210,99 @@ func TestTea_CursorKeys_MoveHighlightedRow(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
-// TestTea_DrillInKey_OpensTranscriptPane verifies "d" opens a full-screen
-// transcript pane for the highlighted Dispatch, replacing the backlog
-// (issue #786).
+// TestTea_TabKey_SwitchesFocusBetweenColumns verifies Tab moves the focus
+// marker from the backlog column to the work-queue column and back, and that
+// cursor keys move the newly focused column's cursor — the two-column focus
+// split (issue #845).
+func TestTea_TabKey_SwitchesFocusBetweenColumns(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "10", Title: "pick one", State: PickQueued})
+	launch.Queue.Add(Pick{Number: "11", Title: "pick two", State: PickQueued})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "backlog [focus]")
+
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "picks [focus]")
+
+	sendKey(tm, "j")
+	waitForOutput(t, tm, "> #11")
+
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "backlog [focus]")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_EnterKey_OnFocusedQueue_DrillsRunningPick verifies Enter, with
+// focus on the work queue, opens the highlighted pick's Transcript when its
+// state is PickRunning — the context-sensitive Enter's queue-side drill
+// (issue #845).
+func TestTea_EnterKey_OnFocusedQueue_DrillsRunningPick(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "picks [focus]")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "transcript #42", "[implementor] hi")
+
+	sendKey(tm, "x")
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_EnterKey_OnFocusedQueue_NoOpOnQueuedRow verifies Enter, with focus
+// on the work queue, is a no-op on a row that hasn't reached a
+// Transcript-bearing state yet (PickQueued) — never opens a pane with
+// nothing to show (issue #845).
+func TestTea_EnterKey_OnFocusedQueue_NoOpOnQueuedRow(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "picks [focus]")
+
+	sendKey(tm, "enter")
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.DrillIn != nil {
+		t.Errorf("DrillIn = %+v, want nil — Enter on a queued row must not open a transcript pane", fm.m.DrillIn)
+	}
+}
+
+// TestTea_DrillInKey_OpensTranscriptPane verifies Enter, focused on the work
+// queue, opens a full-screen transcript pane for the highlighted running
+// pick, replacing the backlog (issue #786; retargeted to focused-queue Enter
+// by issue #845, which retires the old "d"/backlog-Enter drill-in binding).
 func TestTea_DrillInKey_OpensTranscriptPane(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -224,11 +316,15 @@ func TestTea_DrillInKey_OpensTranscriptPane(t *testing.T) {
 		t.Fatal(err)
 	}
 	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
 
-	sendKey(tm, "d")
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "picks [focus]")
+
+	sendKey(tm, "enter")
 	waitForOutput(t, tm, "transcript #42", "[implementor] hi")
 
 	sendKey(tm, "x")
@@ -254,11 +350,15 @@ func TestTea_DrillInToggleKey_SwapsRenderedAndRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
 
-	sendKey(tm, "d")
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "picks [focus]")
+
+	sendKey(tm, "enter")
 	waitForOutput(t, tm, "[implementor] hi")
 
 	sendKey(tm, "t")
@@ -290,11 +390,15 @@ func TestTea_DrillInScrollKeys_PageThroughTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
 
-	sendKey(tm, "d")
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "picks [focus]")
+
+	sendKey(tm, "enter")
 	waitForOutput(t, tm, "line-00")
 
 	sendKey(tm, "pgdown")
@@ -313,14 +417,23 @@ func TestTea_DrillInScrollKeys_PageThroughTranscript(t *testing.T) {
 // TestTea_DrillInKey_NoDriver_ShowsGracefulMessage verifies drilling in
 // during a launch-less session (no Driver configured) surfaces a readable
 // error in the pane instead of panicking on a nil Driver (issue #786 AC4).
+// Picks is seeded directly (rather than via the "p"/Enter pick path) since a
+// nil Launcher can never promote a pick to PickRunning through the normal
+// flow — isolating the no-Driver render path from how the row got there.
 func TestTea_DrillInKey_NoDriver_ShowsGracefulMessage(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 24))
+	tm0 := newTeaModel(f, t.TempDir(), nil)
+	tm0.m.Picks = append(tm0.m.Picks, Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, tm0, teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
 
-	sendKey(tm, "d")
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "picks [focus]")
+
+	sendKey(tm, "enter")
 	waitForOutput(t, tm, "transcript #42", "drill-in failed")
 
 	sendKey(tm, "x")
@@ -534,6 +647,43 @@ func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
 	// #844) and Bubble Tea never redraws an unchanged line, so it wouldn't
 	// reappear in this second WaitFor's freshly-read bytes.
 	waitForOutput(t, tm, "  #42", "fix the thing")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_EnterKey_OnFocusedBacklog_PicksHighlighted verifies Enter, with
+// focus on the backlog (the default), Picks the highlighted issue exactly
+// like "p" does — the context-sensitive Enter routing (issue #845).
+func TestTea_EnterKey_OnFocusedBacklog_PicksHighlighted(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "#42", "fix the thing")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_EnterKey_OnFocusedBacklog_FailedPromotion_ShowsDissolvedRow
+// verifies a raced/closed/relabeled promotion via Enter still surfaces as a
+// dissolved row with its reason, same as the "p" key path (issue #845).
+func TestTea_EnterKey_OnFocusedBacklog_FailedPromotion_ShowsDissolvedRow(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	f.TransitionStateErr = errBoom
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "dissolved")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
