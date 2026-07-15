@@ -74,8 +74,9 @@ type Model struct {
 	// rendered.
 	preEditFilter string
 	// Width and Height are the terminal's current size, set by the tea
-	// layer's translation of Bubble Tea's WindowSizeMsg (issue #842). Zero
-	// until the first size event; no region reads them yet.
+	// layer's translation of Bubble Tea's WindowSizeMsg (issue #842).
+	// Update's unconditional clamp floors both at minTerminalDimension
+	// before the first size event arrives; no region reads them yet.
 	Width, Height int
 }
 
