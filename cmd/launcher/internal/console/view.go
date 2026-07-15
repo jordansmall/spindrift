@@ -9,12 +9,15 @@ import (
 // full-width header (banner, status line, stale/dogfood alerts), the
 // two-column body (queueable backlog on the left, state-tagged work queue on
 // the right — issue #844, ADR 0025), and any refresh error. An open drill-in
-// (m.DrillIn != nil) replaces the backlog/queue rendering entirely with the
-// transcript view — the operator is looking at one Dispatch's work, not the
-// list.
+// (m.DrillIn != nil) renders the Transcript per its effective pane mode
+// (issue #846, ADR 0025): docked (a third column beside the still-visible
+// backlog/queue), floating (an overlay atop the two-column body), or
+// fullscreen (replacing the backlog/queue rendering entirely) — the terminal
+// falls back to fullscreen regardless of the stored mode when it's too
+// narrow for three columns.
 func View(m Model) string {
 	if m.DrillIn != nil {
-		return renderDrillIn(*m.DrillIn)
+		return renderDrillInPane(m)
 	}
 	if m.ShowHelp {
 		return renderHelp()
@@ -250,6 +253,8 @@ func renderHelp() string {
 		"  t           toggle rendered <-> raw JSONL (while drilled in)",
 		"  x / esc     close the transcript pane (while drilled in)",
 		"  j/k, pgup/pgdown  scroll the transcript (while drilled in)",
+		"  m           cycle the transcript pane docked/floating/fullscreen",
+		"              (while drilled in)",
 		"  r           refresh the backlog",
 		"  p           pick the highlighted issue (launch button)",
 		"  u           unpick the highlighted queued pick",
@@ -262,6 +267,123 @@ func renderHelp() string {
 		"  ?           toggle this help",
 		"",
 	}, "\n")
+}
+
+// minThreeColumnWidth is the terminal width below which a docked or floating
+// Transcript pane can't fit alongside the two-column body — effectivePaneMode
+// falls back to PaneFullscreen regardless of the operator's selected mode
+// (issue #846, ADR 0025 AC4).
+const minThreeColumnWidth = 90
+
+// transcriptColumnFraction is the docked Transcript column's share of the
+// terminal width — smaller than either body column, since docking exists to
+// keep the queue visible while reading, not to dominate the layout (issue
+// #846, ADR 0025).
+const transcriptColumnFraction = 2.0 / 5.0
+
+// effectivePaneMode derives the pane mode View actually renders with: m's
+// stored PaneMode, unless the terminal is too narrow for three columns, in
+// which case it's PaneFullscreen regardless of the stored value — a pure,
+// per-render derivation, never mutating Model (issue #846, ADR 0025 AC4).
+func effectivePaneMode(m Model) TranscriptPaneMode {
+	if m.Width < minThreeColumnWidth {
+		return PaneFullscreen
+	}
+	return m.PaneMode
+}
+
+// renderDrillInPane renders the open DrillIn per its effective pane mode —
+// docked, floating, or fullscreen (issue #846, ADR 0025).
+func renderDrillInPane(m Model) string {
+	switch effectivePaneMode(m) {
+	case PaneDocked:
+		return renderHeader(m) + renderDockedBody(m)
+	case PaneFloating:
+		return renderHeader(m) + renderFloatingBody(m)
+	default:
+		return renderDrillIn(*m.DrillIn)
+	}
+}
+
+// renderDockedBody renders the backlog, work-queue, and Transcript columns
+// side by side — the docked pane mode's three-column body (issue #846, ADR
+// 0025). The Transcript column takes transcriptColumnFraction of m.Width;
+// the remainder splits between backlog and queue exactly as renderBody does
+// for the two-column body.
+func renderDockedBody(m Model) string {
+	backlog := renderBacklogColumn(m)
+	queue := renderQueueColumn(m)
+	transcript := renderTranscriptColumn(*m.DrillIn)
+
+	transcriptWidth := int(float64(m.Width) * transcriptColumnFraction)
+	bodyWidth := m.Width - transcriptWidth
+
+	leftWidth := maxLineWidth(backlog)
+	if maxLeft := int(float64(bodyWidth) * leftColumnFraction); leftWidth > maxLeft {
+		leftWidth = maxLeft
+	}
+	queueWidth := bodyWidth - leftWidth
+
+	body := joinColumns(backlog, queue, leftWidth, queueWidth)
+	return joinColumns(body, transcript, bodyWidth, transcriptWidth)
+}
+
+// renderFloatingBody renders the two-column body with the Transcript
+// overlaid atop its right side, for as many leading rows as the Transcript
+// content needs — the floating pane mode (issue #846, ADR 0025). Rows past
+// the overlay's height render the plain two-column body untouched, unlike
+// renderDockedBody's every-row column split.
+func renderFloatingBody(m Model) string {
+	body := renderBody(m)
+	transcript := renderTranscriptColumn(*m.DrillIn)
+	floatWidth := int(float64(m.Width) * transcriptColumnFraction)
+	return overlay(body, transcript, m.Width-floatWidth, floatWidth)
+}
+
+// overlay writes pane's lines over the right-most paneWidth runes of body's
+// leading lines, one per pane line, leaving any body line beyond len(pane's
+// lines) untouched — a fixed-footprint overlay rather than a full column
+// join (issue #846, ADR 0025).
+func overlay(body, pane string, leftWidth, paneWidth int) string {
+	bodyLines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	paneLines := strings.Split(strings.TrimRight(pane, "\n"), "\n")
+	for i, pl := range paneLines {
+		if i >= len(bodyLines) {
+			break
+		}
+		bodyLines[i] = clip(bodyLines[i], leftWidth, true) + clip(pl, paneWidth, true)
+	}
+	return strings.Join(bodyLines, "\n") + "\n"
+}
+
+// renderTranscriptColumn renders d as a labeled column: a header naming the
+// pick and current form, then its loaded content from Offset onward — the
+// same content renderDrillIn shows fullscreen, reused for the docked and
+// floating pane modes (issue #846, ADR 0025).
+func renderTranscriptColumn(d DrillInState) string {
+	var b strings.Builder
+	if d.ShowRaw {
+		fmt.Fprintf(&b, "transcript #%s (raw):\n", d.Number)
+	} else {
+		fmt.Fprintf(&b, "transcript #%s:\n", d.Number)
+	}
+	if d.Err != nil {
+		fmt.Fprintf(&b, "drill-in failed: %s\n", d.Err)
+		return b.String()
+	}
+
+	content := d.Rendered
+	if d.ShowRaw {
+		content = d.Raw
+	}
+	lines := strings.Split(content, "\n")
+	offset := d.Offset
+	if offset > len(lines) {
+		offset = len(lines)
+	}
+	b.WriteString(strings.Join(lines[offset:], "\n"))
+	b.WriteString("\n")
+	return b.String()
 }
 
 // renderDrillIn renders one Dispatch's transcript view: a header naming the

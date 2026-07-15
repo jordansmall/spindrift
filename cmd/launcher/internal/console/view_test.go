@@ -299,6 +299,20 @@ func TestView_ShowHelp_ListsNewKeybindings(t *testing.T) {
 	}
 }
 
+// TestView_ShowHelp_ListsPaneModeKey verifies the help overlay lists "m",
+// the pane-mode cycle key added by issue #846 (ADR 0025), naming all three
+// modes so the operator can discover the cycle without reading the source.
+func TestView_ShowHelp_ListsPaneModeKey(t *testing.T) {
+	m := Update(NewModel(), HelpToggleMsg{})
+
+	out := View(m)
+	for _, want := range []string{"docked", "floating", "fullscreen"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("View() = %q, want it to mention pane mode %q", out, want)
+		}
+	}
+}
+
 // TestView_DrillInOpen_RendersTranscriptInsteadOfBacklog verifies an open
 // drill-in replaces the backlog/queue rendering with the transcript, the
 // rendered form by default, plus a hint for the toggle/close keystrokes —
@@ -515,4 +529,99 @@ func TestView_QueueCursor_MarksHighlightedRow(t *testing.T) {
 		}
 	}
 	t.Errorf("View() = %q, want row #2 marked with the cursor", out)
+}
+
+// TestView_DrillInDocked_KeepsBacklogAndQueueVisible verifies the default
+// PaneDocked mode renders the Transcript as a third column while the
+// backlog and work-queue columns stay visible on a terminal wide enough for
+// three columns (issue #846, ADR 0025).
+func TestView_DrillInDocked_KeepsBacklogAndQueueVisible(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
+	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
+
+	out := View(m)
+	if !strings.Contains(out, "backlog issue") {
+		t.Errorf("View() = %q, want the backlog still visible while docked", out)
+	}
+	if !strings.Contains(out, "queued pick") {
+		t.Errorf("View() = %q, want the work queue still visible while docked", out)
+	}
+	if !strings.Contains(out, "[implementor] hi") {
+		t.Errorf("View() = %q, want the transcript content visible while docked", out)
+	}
+}
+
+// TestView_DrillInNarrowTerminal_FallsBackToFullscreen verifies a terminal
+// too narrow for three columns renders the Transcript fullscreen regardless
+// of the operator's selected PaneMode — never leaving unreadable, wrapped
+// columns (issue #846, ADR 0025 AC4).
+func TestView_DrillInNarrowTerminal_FallsBackToFullscreen(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 60, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
+	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
+
+	out := View(m)
+	if strings.Contains(out, "backlog issue") {
+		t.Errorf("View() = %q, want the backlog hidden — too narrow for three columns", out)
+	}
+	if strings.Contains(out, "queued pick") {
+		t.Errorf("View() = %q, want the work queue hidden — too narrow for three columns", out)
+	}
+	if !strings.Contains(out, "[implementor] hi") {
+		t.Errorf("View() = %q, want the transcript content visible fullscreen", out)
+	}
+}
+
+// TestView_DrillInFloating_OverlaysTranscriptOnTwoColumnBody verifies
+// PaneFloating renders the Transcript as an overlay atop the two-column
+// body — the backlog and queue labels stay present (dimly, on the left) and
+// the transcript content becomes visible, distinct from the docked mode's
+// permanent three-way column split (issue #846, ADR 0025).
+func TestView_DrillInFloating_OverlaysTranscriptOnTwoColumnBody(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
+	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
+	m = Update(m, PaneModeCycleMsg{})
+	if m.PaneMode != PaneFloating {
+		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
+	}
+
+	out := View(m)
+	if !strings.Contains(out, "backlog") {
+		t.Errorf("View() = %q, want the backlog column label still present under the floating pane", out)
+	}
+	if !strings.Contains(out, "[implementor] hi") {
+		t.Errorf("View() = %q, want the transcript content visible in the floating overlay", out)
+	}
+}
+
+// TestView_DrillInFullscreen_TakesWholeBodyEvenWhenWide verifies an
+// explicitly-selected PaneFullscreen hides the backlog/queue even on a
+// terminal wide enough for three columns — fullscreen is a selectable mode,
+// not just the narrow-terminal fallback (issue #846, ADR 0025).
+func TestView_DrillInFullscreen_TakesWholeBodyEvenWhenWide(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
+	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
+	m = Update(m, PaneModeCycleMsg{}) // docked -> floating
+	m = Update(m, PaneModeCycleMsg{}) // floating -> fullscreen
+	if m.PaneMode != PaneFullscreen {
+		t.Fatalf("PaneMode = %v, want PaneFullscreen after two cycles", m.PaneMode)
+	}
+
+	out := View(m)
+	if strings.Contains(out, "backlog issue") {
+		t.Errorf("View() = %q, want the backlog hidden in fullscreen mode", out)
+	}
+	if strings.Contains(out, "queued pick") {
+		t.Errorf("View() = %q, want the work queue hidden in fullscreen mode", out)
+	}
+	if !strings.Contains(out, "[implementor] hi") {
+		t.Errorf("View() = %q, want the transcript content visible fullscreen", out)
+	}
 }
