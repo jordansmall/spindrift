@@ -38,6 +38,10 @@ type Launcher struct {
 	// falls back to "always fresh, not applicable", matching drain's old
 	// hardcoded stub.
 	Fresh waves.FreshnessChecker
+	// RebuildFn actually rebuilds and reloads the image — production wires
+	// it to the operator's confirm key; nil (every pre-#652 call site, and
+	// any test not exercising Rebuild) makes Rebuild a no-op.
+	RebuildFn func() error
 
 	mu        sync.Mutex
 	launching bool
@@ -299,6 +303,49 @@ func (l *Launcher) freshnessChecker() waves.FreshnessChecker {
 		l.mu.Unlock()
 		return applicable, fresh, msg
 	}
+}
+
+// Rebuild runs RebuildFn in the background — the operator's confirm key
+// (issue #652 AC3) — so the session stays alive and responsive with
+// Rebuilding surfaced on the banner while it runs. A rebuild already in
+// flight makes a second call a no-op. On success it clears the stale gate
+// and resumes draining (tryLaunch), so any pick held at PickQueued through
+// the stale window launches without being re-picked; on failure it leaves
+// the gate held and records the error for StaleStatus to surface. A nil
+// RebuildFn (no production wiring, or a test not exercising Rebuild) is a
+// no-op.
+func (l *Launcher) Rebuild(tracker forge.IssueTracker, pwd string) {
+	if l.RebuildFn == nil {
+		return
+	}
+	l.mu.Lock()
+	if l.rebuilding {
+		l.mu.Unlock()
+		return
+	}
+	l.rebuilding = true
+	l.mu.Unlock()
+	l.signalRefresh()
+
+	l.wg.Add(1)
+	go func() {
+		defer l.wg.Done()
+		err := l.RebuildFn()
+
+		l.mu.Lock()
+		l.rebuilding = false
+		l.rebuildErr = err
+		if err == nil {
+			l.stale = false
+			l.staleMessage = ""
+		}
+		l.mu.Unlock()
+		l.signalRefresh()
+
+		if err == nil {
+			l.tryLaunch(tracker, pwd)
+		}
+	}()
 }
 
 // StaleStatus returns the launcher's live image-freshness/rebuild state —
