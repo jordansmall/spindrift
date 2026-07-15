@@ -101,7 +101,7 @@ func (d *Dispatch) Close() {
 // runner.ErrAlreadyRunning without rotating, creating, or otherwise
 // disturbing it (issue #562).
 func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir string) error {
-	name := "agent-issue-" + d.number
+	name := boxName(d.number)
 	if d.runner.IsRunning(name) {
 		return runner.ErrAlreadyRunning
 	}
