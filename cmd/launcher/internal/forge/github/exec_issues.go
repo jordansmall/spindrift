@@ -188,10 +188,12 @@ func (e *execClient) nativeDepsOf(num string) ([]string, error) {
 		return nil, fmt.Errorf("gh api dependencies/blocked_by %s: %w", num, err)
 	}
 	var deps []string
+	seen := map[string]bool{}
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line != "" {
+		if line != "" && !seen[line] {
+			seen[line] = true
 			deps = append(deps, line)
 		}
 	}
