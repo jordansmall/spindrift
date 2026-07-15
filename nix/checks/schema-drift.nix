@@ -17,7 +17,7 @@ in
     let
       driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
       generated = pkgs.writeText "drivernames_gen.go.generated" (
-        renderers.renderDriverNamesGo driverRegistry
+        renderers.renderDriverNamesGo driverRegistry.entries
       );
     in
     pkgs.runCommand "driver-names-gen"

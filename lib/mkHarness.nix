@@ -219,8 +219,8 @@ let
   # wiring, and outcome extraction — baked into the image below.
   driverRegistry = import ./drivers/default.nix { inherit lib; };
   driverEntry =
-    driverRegistry.${driver}
-      or (throw "mkHarness: unknown driver '${driver}'; known drivers: ${lib.concatStringsSep ", " (lib.attrNames driverRegistry)}");
+    driverRegistry.entries.${driver}
+      or (throw "mkHarness: unknown driver '${driver}'; known drivers: ${lib.concatStringsSep ", " (lib.attrNames driverRegistry.entries)}");
 
   # flakeOption entries are the Consumer-tunable subset.
   flakeOptionEntries = lib.filterAttrs (_: e: e.flakeOption or false) schema;
@@ -243,33 +243,11 @@ let
     filerModel = mergedDefaults.filerModel or "";
   };
 
-  # The Driver's registry-rendered function definitions, shared between the
-  # image preamble and the bats harness file (issue #433) so neither can drift
-  # from the other.
-  driverFunctionDefs =
-    "_driver_extract_outcome() {\n"
-    + driverEntry.outcomeExtractFnBody
-    + "}\n"
-    + "_driver_session_flags() {\n"
-    + driverEntry.sessionFlagsFnBody
-    + "}\n";
-
-  # The Driver's in-box half, rendered into agent/entrypoint.sh's
-  # ${DRIVER_*:-<default>} vars and the Driver function definitions
-  # (ADR 0009). /home/agent is the image's fixed HOME (see passwdFile
-  # below), so the skills dir is baked as an absolute path rather than
-  # depending on $HOME at run time.
-  driverPreamble =
-    "DRIVER_BIN="
-    + lib.escapeShellArg driverEntry.bin
-    + "\n"
-    + "DRIVER_FLAGS_COMMON="
-    + lib.escapeShellArg driverEntry.flagsCommon
-    + "\n"
-    + "DRIVER_SKILLS_DIR="
-    + lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
-    + "\n"
-    + driverFunctionDefs;
+  # The Driver's in-box half, rendered by the registry (issue #624) into
+  # agent/entrypoint.sh's DRIVER_* vars and function definitions (ADR 0009),
+  # shared between the image preamble and the bats harness file (issue #433)
+  # so neither can drift from the other.
+  driverPreamble = driverRegistry.renderPreamble driverEntry;
 
   # The Conditional fragment registry (issue #622, CONTEXT.md), rendered into
   # agent/entrypoint.sh's single fragment loop input and `_subst`
@@ -392,11 +370,12 @@ let
   # for the same drift-proof reason (issue #640).
   researchOutcomeContractFile = hostPkgs.writeText "research-outcome-contract.md" researchOutcomeContract;
 
-  # The Driver's function definitions as a host store-path file.  The bats
-  # harness prepends this before exec-ing the entrypoint (issue #433) so tests
-  # exercise the same registry-rendered bodies that mkHarness bakes into the
-  # image — not any hand-copied duplicates in the entrypoint itself.
-  driverFunctionsFile = hostPkgs.writeText "driver-functions.sh" driverFunctionDefs;
+  # The Driver's registry-rendered preamble (DRIVER_* vars and function
+  # definitions) as a host store-path file. The bats harness prepends this
+  # before exec-ing the entrypoint (issue #433) so tests exercise the exact
+  # same registry-rendered bytes that mkHarness bakes into the image (issue
+  # #624) — not any hand-copied duplicates or entrypoint fallback literals.
+  driverFunctionsFile = hostPkgs.writeText "driver-functions.sh" driverPreamble;
 
   # The Conditional fragment registry as a host store-path file (issue #622,
   # mirrors driverFunctionsFile above). The bats harness prepends this before

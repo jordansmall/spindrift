@@ -34,7 +34,7 @@ let
   boxEnvFixture = renderers.renderSetBoxEnvFixture schema;
   templateSettingsBlock = renderers.renderTemplateSettingsBlock schema;
   driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
-  driverNamesFile = renderers.renderDriverNamesGo driverRegistry;
+  driverNamesFile = renderers.renderDriverNamesGo driverRegistry.entries;
   inherit (pkgs.lib) escapeShellArg;
 in
 pkgs.writeShellApplication {
