@@ -374,6 +374,7 @@ Type a command and press enter:
 | `f <text>` / `filter <text>` | narrow the list to issues with a label containing `<text>` |
 | `f` / `filter` (no text) | clear the filter, restoring the full list |
 | `p <num>` / `pick <num>` | Pick issue `<num>` — the launch button |
+| `pa` / `pick-all-ready` | Pick every issue currently `Dispatchable` — the bulk launch button |
 | `u <num>` / `unpick <num>` | Unpick a queued-but-unlaunched pick |
 | `d <num>` / `drill <num>` | Drill in: open `<num>`'s rendered transcript |
 | `t` / `toggle` | toggle the open transcript between rendered and raw |
@@ -388,13 +389,22 @@ and the two are safe to run side by side (claims are atomic label swaps).
 **Pick** is the launch button. An unlabeled issue is promoted through the
 normal `Dispatchable` transition first — recorded durably on the tracker —
 then queued; an already-`Dispatchable` issue queues directly. The pick
-launches through the same continuous engine the headless loops use, single
-slot: its queue row tracks `queued` → `claiming` → `running` → `settled`.
-Queued-but-unlaunched picks hold at `Dispatchable` on the tracker, never
-`InProgress` — the claim to `InProgress` only happens when the pick's turn
-to launch actually arrives. If that claim races (another loop, the issue
-closed, a relabel), the pick dissolves and its row shows why, instead of
-launching a Box for a stale listing.
+launches through the same continuous engine the headless loops use, up to
+`MAX_PARALLEL` slots at once (the same knob `run`'s wave dispatch honors):
+its queue row tracks `queued` → `claiming` → `running` → `settled`, and as
+each running pick settles, the next queued pick fills the slot it freed —
+the session's queue drains continuously without re-invocation. Queued-but-
+unlaunched picks hold at `Dispatchable` on the tracker, never `InProgress` —
+the claim to `InProgress` only happens when the pick's turn to launch
+actually arrives. If that claim races (another loop, the issue closed, a
+relabel), the pick dissolves and its row shows why, instead of launching a
+Box for a stale listing.
+
+**Pick all ready** (`pa`) picks exactly the issues currently `Dispatchable`
+on the tracker, in one snapshot query — an explicit action, never standing
+discovery: an issue that becomes `Dispatchable` after `pa` returns is not
+picked until the operator asks again. Each issue queues through the same
+Pick path a single `p <num>` uses.
 
 **Unpick** removes a queued-but-unlaunched pick from the session with zero
 Issue Tracker calls — it only ever un-does the in-session queue entry, never
@@ -403,6 +413,19 @@ the durable promotion a pick already recorded.
 Every pick defaults to a `work` Dispatch; the record carries a kind field so
 research picks can arrive later as a UI gesture rather than a remodel — only
 `work` is exposed today.
+
+A running pick's queue row also shows its latest heartbeat — phase, turn
+count, last tool — reusing the same heartbeat parser the live dispatch's own
+terminal output already uses, replayed against the pick's on-disk log rather
+than a second parser. It updates on every render, since it is a local log
+read with no Issue Tracker call behind it.
+
+**Backlog freshness** without spending the shared rate-limit window: `r`
+still re-queries on demand, plus the backlog auto-refreshes whenever the
+session itself writes to the tracker — a claim, a settle, or a promotion —
+and a slow background poll re-queries on a fixed cadence (60-120s) even on an
+otherwise idle session. Nothing refreshes faster than that poll; only the
+session's own writes and the operator's own `r` trigger a refresh in between.
 
 **Drill-in** (`d <num>`) opens `<num>`'s rendered transcript: assistant turns
 and tool calls, readable, spanning the whole Dispatch — initial run, every fix
