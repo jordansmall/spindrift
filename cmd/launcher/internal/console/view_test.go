@@ -455,3 +455,22 @@ func TestView_TwoColumn_Queue_RowsTaggedWithBracketedState(t *testing.T) {
 		t.Errorf("View() = %q, want the running row's heartbeat", out)
 	}
 }
+
+// TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth verifies a joined
+// row never exceeds m.Width — a long backlog title/labels paired with a
+// verbose held badge must truncate rather than push the line past the
+// terminal's edge and wrap into an unreadable mess (issue #844 AC6).
+func TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Title: "a very long backlog title that would otherwise blow out the left column", Labels: []string{"ready-for-agent", "needs-review"}},
+	}})
+	m.Picks = []Pick{{Number: "42", Title: "a pick with a fairly long title too", State: PickHeld, BlockedBy: "#41 (native), #43 (body)"}}
+
+	out := View(m)
+	for _, l := range strings.Split(out, "\n") {
+		if n := len([]rune(l)); n > m.Width {
+			t.Errorf("View() line %q has %d runes, want it clamped to Width (%d)", l, n, m.Width)
+		}
+	}
+}
