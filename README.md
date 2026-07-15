@@ -232,10 +232,12 @@ An issue's blockers gate its dispatch until each one reaches
 `agent-complete`. For the `github` and `jira` trackers, blockers resolve from
 the tracker's **native dependency relationships first** (GitHub's
 issue-dependencies API, Jira's "is blocked by" issue links) — native wins
-whenever it's non-empty. Body-text refs (`depends on #N` / `blocked by #N`,
-inline or a `## Blocked by` list) are a fallback used only when the native
-lookup is empty or unavailable, and only `github` and `local` support that
-fallback — see [Issue Tracker backends](docs/reference.md#issue-tracker-backends).
+whenever it's non-empty. For `github`, body-text refs (`depends on #N` /
+`blocked by #N`, inline or a `## Blocked by` list) are a fallback used only
+when the native lookup is empty or unavailable. `local` has no native
+dependency concept, so it resolves blockers from body-text refs only, not as
+a fallback — see [Issue Tracker
+backends](docs/reference.md#issue-tracker-backends).
 
 Every place a blocker ref is shown to an operator — the `preview` command's
 blocker annotations, a selective dispatch's blocked-skip notices, and the
