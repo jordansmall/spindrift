@@ -1095,6 +1095,21 @@ func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
 			t.Errorf("label %q: docs description = %q, want %q (doctor default)", name, description, want.description)
 		}
 	}
+
+	seen := map[string]int{}
+	for _, m := range matches {
+		seen[m[1]]++
+	}
+	for name := range triageLabelMeta {
+		switch seen[name] {
+		case 0:
+			t.Errorf("docs/reference.md is missing a `gh label create` line for %q", name)
+		case 1:
+			// exactly once, as expected
+		default:
+			t.Errorf("docs/reference.md has %d `gh label create` lines for %q, want exactly 1", seen[name], name)
+		}
+	}
 }
 
 func contains(ss []string, s string) bool {
