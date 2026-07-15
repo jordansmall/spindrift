@@ -6,21 +6,21 @@ import (
 	"testing"
 )
 
-// captureStdout runs fn with os.Stdout redirected to a pipe and returns
+// captureStderr runs fn with os.Stderr redirected to a pipe and returns
 // everything written to it.
-func captureStdout(t *testing.T, fn func()) string {
+func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
-	orig := os.Stdout
+	orig := os.Stderr
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	os.Stdout = w
+	os.Stderr = w
 
 	fn()
 
 	w.Close()
-	os.Stdout = orig
+	os.Stderr = orig
 
 	var buf strings.Builder
 	tmp := make([]byte, 4096)
@@ -42,7 +42,7 @@ func captureStdout(t *testing.T, fn func()) string {
 func TestWarnPageMayTruncateBacklog_AtLimitWarns(t *testing.T) {
 	for _, source := range []string{"gh issue list", "jira search"} {
 		t.Run(source, func(t *testing.T) {
-			out := captureStdout(t, func() {
+			out := captureStderr(t, func() {
 				WarnPageMayTruncateBacklog(source, ResultPageLimit)
 			})
 			if !strings.Contains(out, source) || !strings.Contains(out, "backlog may be larger") {
@@ -55,7 +55,7 @@ func TestWarnPageMayTruncateBacklog_AtLimitWarns(t *testing.T) {
 // TestWarnPageMayTruncateBacklog_UnderLimitSilent verifies the warning is
 // silent when a page comes back under ResultPageLimit.
 func TestWarnPageMayTruncateBacklog_UnderLimitSilent(t *testing.T) {
-	out := captureStdout(t, func() {
+	out := captureStderr(t, func() {
 		WarnPageMayTruncateBacklog("gh issue list", ResultPageLimit-1)
 	})
 	if out != "" {
