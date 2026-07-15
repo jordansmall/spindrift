@@ -38,7 +38,7 @@ func DrillIn(drv driver.Driver, pwd, number string) Msg {
 		if err != nil {
 			return DrillInMsg{Number: number, Err: err}
 		}
-		rendered.WriteString(text)
+		rendered.WriteString(SanitizeControlSequences(text))
 
 		bytes, err := os.ReadFile(p.Path)
 		if err != nil {
