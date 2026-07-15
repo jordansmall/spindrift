@@ -462,20 +462,28 @@ let
   # launcher knows: "bwrap" (daemonless) or "oci" (podman/docker).
   runnerKind = if runtime == "bwrap" then "bwrap" else "oci";
 
-  # One renderer used by both the shell and Go preamble families: iterates over
-  # flakeOption schema entries and emits `[export ]VAR="${VAR:-<baked>}"` lines.
-  # A matching env var (or harness.env, sourced by the wrapper) still wins at runtime.
+  # One renderer used by both the entrypoint's Box-side preamble and (below)
+  # the document's `settings` section: iterates over flakeOption schema
+  # entries. renderDefaultsPreamble ({}) still backs entrypointDefaultsPreamble
+  # above — Box env is launcher→Box plumbing, not an operator surface (ADR
+  # 0020) — but the launcher-side `export = true` bash preamble it used to
+  # also back retired with goRunDefaultsPreamble below.
   renderDefaultsPreamble =
     args: preambles.renderDefaultsPreamble (args // { inherit flakeOptionEntries mergedDefaults; });
 
-  # Exported preambles for the Go launcher wrappers. `export` is required so
-  # the exec'd binary inherits each value; plain assignments would be
-  # shell-only. Two vars cover both adapter families:
-  #
-  #   goRunPreamble  — everything `run` needs at sandbox dispatch time.
-  #   goBuildPreamble — everything `build` needs to realize the image/closure.
+  # The Launcher input document's `settings` section (ADR 0020): every
+  # flakeOption knob's resolved value (schema default overridden by the
+  # Consumer flake's settings, i.e. mergedDefaults), keyed by env var name —
+  # the same value/precedence goRunDefaultsPreamble used to bake as
+  # `VAR="${VAR:-<baked>}"` bash, now carried as JSON instead of env.
+  documentSettings = lib.mapAttrs' (
+    key: entry: lib.nameValuePair entry.env (toString mergedDefaults.${key})
+  ) flakeOptionEntries;
 
-  goRunPreamble = preambles.renderGoRunPreamble {
+  # The document's `run`/`build` artifacts sections (ADR 0020): the
+  # nix-computed plumbing (image refs, agent files, driver name, ...) the
+  # pre-#625 goRunPreamble/goBuildPreamble used to export as bash env.
+  runArtifacts = preambles.runArtifacts {
     inherit
       runnerKind
       driverEntry
@@ -489,9 +497,10 @@ let
       nixBuilderImage
       linuxSystem
       ;
+    boxEnvVars = preambles.renderBoxEnvVarsList schema;
   };
 
-  goBuildPreamble = preambles.renderGoBuildPreamble {
+  buildArtifacts = preambles.buildArtifacts {
     inherit
       runnerKind
       agentFilesDrv
@@ -505,12 +514,22 @@ let
       ;
   };
 
-  # Exported run defaults for the Go launcher wrapper.
-  goRunDefaultsPreamble = renderDefaultsPreamble { export = true; };
+  # The rendered documents as host store-path JSON files. The generated
+  # wrapper passes exactly one nix-computed argument, `--input <path>`,
+  # instead of the per-var env exports the pre-#625 preambles emitted.
+  runInputDocumentFile = hostPkgs.writeText "launcher-run-input.json" (
+    preambles.renderInputDocumentJSON {
+      settings = documentSettings;
+      artifacts = runArtifacts;
+    }
+  );
 
-  # BOX_ENV_VARS exported for the Go binary: the list of env vars it must forward
-  # into each container, derived from schema boxEnv=true entries.
-  boxEnvVarsPreamble = preambles.renderBoxEnvVarsPreamble schema;
+  buildInputDocumentFile = hostPkgs.writeText "launcher-build-input.json" (
+    preambles.renderInputDocumentJSON {
+      settings = documentSettings;
+      artifacts = buildArtifacts;
+    }
+  );
 
   # buildGoModule's checkPhase runs `go test` from within its src, so docs/
   # must sit alongside cmd/launcher there too, mirroring the repo layout, for
@@ -556,35 +575,29 @@ let
     (hostPkgs.writeShellApplication {
       name = "build";
       runtimeInputs = [ hostPkgs.coreutils ];
-      text = goBuildPreamble + ''
-        exec ${launcherBin}/bin/launcher build
+      text = ''
+        exec ${launcherBin}/bin/launcher --input ${buildInputDocumentFile} build
       '';
     }).overrideAttrs
       (_: {
         meta.license = lib.licenses.mit;
       });
 
-  # Shared shell body used by both the spindrift CLI and the `run` test fixture.
-  # Bakes nix-computed config into env vars, sources harness.env for runtime
-  # overrides, then execs the Go binary (ADR 0007).
-  runShellBody =
-    goRunPreamble
-    + goRunDefaultsPreamble
-    + boxEnvVarsPreamble
-    + ''
-      # Config + secrets (gitignored), read from $PWD since the harness is a
-      # store path with no working tree. `set -a` overrides the baked defaults.
-      if [ -f "$PWD/harness.env" ]; then
-        set -a
-        # shellcheck disable=SC1091
-        . "$PWD/harness.env"
-        set +a
-      fi
-      # Commit identity: explicit override wins, else inherit the host git config.
-      GIT_USER_NAME="''${GIT_USER_NAME:-$(git config --get user.name 2>/dev/null || true)}"
-      GIT_USER_EMAIL="''${GIT_USER_EMAIL:-$(git config --get user.email 2>/dev/null || true)}"
-      export GIT_USER_NAME GIT_USER_EMAIL
-    '';
+  # Shared shell body used by both the spindrift CLI and the `run` test
+  # fixture: sources harness.env (secrets, gitignored, read from $PWD since
+  # the harness is a store path with no working tree) before execing the Go
+  # binary (ADR 0007). No knob or artifact env export lives here any more —
+  # those flow via the --input document (ADR 0020); GIT_USER_NAME/
+  # GIT_USER_EMAIL's host-git-config fallback moved in-process too
+  # (cmd/launcher gitIdentityField), so the wrapper bakes nothing per-knob.
+  runShellBody = ''
+    if [ -f "$PWD/harness.env" ]; then
+      set -a
+      # shellcheck disable=SC1091
+      . "$PWD/harness.env"
+      set +a
+    fi
+  '';
 
   # Roff man page rendered from the schema so `man spindrift` carries the full
   # flag reference while `spindrift --help` stays concise.
@@ -639,7 +652,7 @@ let
         coreutils
       ];
       text = runShellBody + ''
-        exec ${launcherBin}/bin/launcher "$@"
+        exec ${launcherBin}/bin/launcher --input ${runInputDocumentFile} "$@"
       '';
     }).overrideAttrs
       (_: {
@@ -671,7 +684,7 @@ let
         coreutils
       ];
       text = runShellBody + ''
-        exec ${launcherBin}/bin/launcher dispatch "$@"
+        exec ${launcherBin}/bin/launcher --input ${runInputDocumentFile} dispatch "$@"
       '';
     }).overrideAttrs
       (_: {
@@ -710,6 +723,8 @@ else
       fragmentRegistryFile
       driverExecBin
       driverEntry
+      runInputDocumentFile
+      buildInputDocumentFile
       ;
 
     packages = {

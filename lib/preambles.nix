@@ -83,13 +83,15 @@ rec {
     )
     + "\n";
 
-  # Exported preamble for the Go launcher's `run` wrapper: everything `run`
-  # needs at sandbox dispatch time. `export` is required so the exec'd binary
-  # inherits each value; plain assignments would be shell-only. OCI run also
-  # bakes the build-time vars so EnsureReady can build the image on demand
-  # when it is absent — the workflow is `build` first, but `run` must handle
-  # a missing image gracefully on any machine.
-  renderGoRunPreamble =
+  # The Launcher input document's `artifacts` section for the `run` wrapper
+  # (ADR 0020): everything `run` needs at sandbox dispatch time, as a plain
+  # attrset instead of exported bash — mkHarness.nix renders it to JSON
+  # alongside the `settings` section (renderInputDocumentJSON below). OCI run
+  # also carries the build-time vars so EnsureReady can build the image on
+  # demand when it is absent — the workflow is `build` first, but `run` must
+  # handle a missing image gracefully on any machine. Replaces the pre-#625
+  # renderGoRunPreamble, which exported the same values as bash env.
+  runArtifacts =
     {
       runnerKind,
       driverEntry,
@@ -102,33 +104,43 @@ rec {
       imageDrv,
       nixBuilderImage,
       linuxSystem,
+      boxEnvVars,
     }:
-    if runnerKind == "bwrap" then
-      ''
-        export RUNTIME="bwrap"
-        export DRIVER="${driverEntry.name}"
-        export AGENT_FILES="${agentFilesPath}"
-        export AGENT_ENV="${agentEnvPath}"
-        BAKED_PREFETCH=${escapeShellArg prefetch}
-        export BAKED_PREFETCH
-      ''
-      + renderDriverMountPreamble driverEntry
-    else
-      ''
-        export IMAGE_ARCHIVE="${imagePath}"
-        export IMAGE_TAG="spindrift:${imageHash}"
-        export RUNTIME="${runtime}"
-        export DRIVER="${driverEntry.name}"
-        export IMAGE_DRV="${imageDrv}"
-        export NIX_BUILDER_IMAGE="${nixBuilderImage}"
-        export NIX_VOLUME="spindrift-nix"
-        export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.agent-image"
-      ''
-      + renderDriverMountPreamble driverEntry;
+    (
+      if runnerKind == "bwrap" then
+        {
+          RUNTIME = "bwrap";
+          DRIVER = driverEntry.name;
+          AGENT_FILES = agentFilesPath;
+          AGENT_ENV = agentEnvPath;
+          BAKED_PREFETCH = prefetch;
+        }
+      else
+        {
+          IMAGE_ARCHIVE = imagePath;
+          IMAGE_TAG = "spindrift:${imageHash}";
+          RUNTIME = runtime;
+          DRIVER = driverEntry.name;
+          IMAGE_DRV = imageDrv;
+          NIX_BUILDER_IMAGE = nixBuilderImage;
+          NIX_VOLUME = "spindrift-nix";
+          FLAKE_IMAGE_ATTR = ".#packages.${linuxSystem}.agent-image";
+        }
+    )
+    // {
+      DRIVER_SKILLS_DIR = "/home/agent/${driverEntry.skillsDirRelative}";
+      DRIVER_SESSION_CACHE_DIR =
+        if driverEntry ? sessionCacheDirRelative then
+          "/home/agent/${driverEntry.sessionCacheDirRelative}"
+        else
+          "";
+      BOX_ENV_VARS = boxEnvVars;
+    };
 
-  # Exported preamble for the Go launcher's `build` wrapper: everything
-  # `build` needs to realize the image/closure.
-  renderGoBuildPreamble =
+  # The Launcher input document's `artifacts` section for the `build`
+  # wrapper: everything `build` needs to realize the image/closure. Replaces
+  # the pre-#625 renderGoBuildPreamble.
+  buildArtifacts =
     {
       runnerKind,
       agentFilesDrv,
@@ -141,19 +153,31 @@ rec {
       linuxSystem,
     }:
     if runnerKind == "bwrap" then
-      ''
-        export RUNTIME="bwrap"
-        export AGENT_FILES_DRV="${agentFilesDrv}"
-        export AGENT_ENV_DRV="${agentEnvDrv}"
-      ''
+      {
+        RUNTIME = "bwrap";
+        AGENT_FILES_DRV = agentFilesDrv;
+        AGENT_ENV_DRV = agentEnvDrv;
+      }
     else
-      ''
-        export RUNTIME="${runtime}"
-        export IMAGE_ARCHIVE="${imagePath}"
-        export IMAGE_TAG="spindrift:${imageHash}"
-        export IMAGE_DRV="${imageDrv}"
-        export NIX_BUILDER_IMAGE="${nixBuilderImage}"
-        export NIX_VOLUME="spindrift-nix"
-        export FLAKE_IMAGE_ATTR=".#packages.${linuxSystem}.agent-image"
-      '';
+      {
+        RUNTIME = runtime;
+        IMAGE_ARCHIVE = imagePath;
+        IMAGE_TAG = "spindrift:${imageHash}";
+        IMAGE_DRV = imageDrv;
+        NIX_BUILDER_IMAGE = nixBuilderImage;
+        NIX_VOLUME = "spindrift-nix";
+        FLAKE_IMAGE_ATTR = ".#packages.${linuxSystem}.agent-image";
+      };
+
+  # The Launcher input document (ADR 0020): a JSON object with a `settings`
+  # section (resolved knob values, env-var-name keyed — the Consumer flake's
+  # voice) and an `artifacts` section (nix-computed plumbing, from
+  # runArtifacts/buildArtifacts above). mkHarness.nix writes this to a store
+  # path and the generated wrapper passes it via a single `--input` flag,
+  # instead of the per-var env exports the pre-#625 preambles emitted.
+  renderInputDocumentJSON =
+    { settings, artifacts }:
+    builtins.toJSON {
+      inherit settings artifacts;
+    };
 }

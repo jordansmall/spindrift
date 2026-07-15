@@ -56,8 +56,11 @@ in
 
   # Every env-var string literal in cmd/launcher/main.go must have a
   # matching entry in lib/env-schema.nix, and vice-versa (presence-only;
-  # value-level pinning would be refactor-brittle).  A set of known
-  # nix-baked vars is excluded from the main.go side.
+  # value-level pinning would be refactor-brittle). The document's artifact
+  # keys (lib/renderers.nix documentArtifactKeys — the Launcher input
+  # document's `artifacts` section, ADR 0020) are the schema for what
+  # main.go may read outside lib/env-schema.nix, read via getenvArtifact
+  # instead of os.Getenv/getenv.
   launcher-env-coverage =
     let
       schema = import ../../lib/env-schema.nix;
@@ -68,10 +71,10 @@ in
         subtractLists
         ;
       mainGoSrc = builtins.readFile ../../cmd/launcher/main.go;
-      # Env var names that main.go reads but that are nix-generated
-      # (not user-facing knobs): excluded from the schema-coverage check.
-      # Canonical source: lib/renderers.nix nixBakedEnvVars.
-      nixBaked = renderers.nixBakedEnvVars;
+      # Document artifact keys: nix-computed plumbing main.go reads via
+      # getenvArtifact, not user-facing knobs. Canonical source:
+      # lib/renderers.nix documentArtifactKeys.
+      documentArtifacts = renderers.documentArtifactKeys;
       schemaEnvNames = map (e: e.env) (attrValues schema);
       # Schema knobs forwarded to containers via BOX_ENV_VARS only — the Go
       # binary never reads them directly, so they need no os.Getenv call.
@@ -83,17 +86,17 @@ in
       missingFromGo = filter (name: !pkgs.lib.hasInfix ''"${name}"'' mainGoSrc) (
         subtractLists boxEnvOnly schemaEnvNames
       );
-      # Reverse: extract names from os.Getenv/getenv calls in main.go.
-      parts = builtins.split ''(os\.Getenv|getenv)\("([A-Z_][A-Z0-9_]*)"\)'' mainGoSrc;
+      # Reverse: extract names from os.Getenv/getenv (1-arg) and
+      # getenvArtifact (2-arg) calls in main.go.
+      parts = builtins.split ''(os\.Getenv|getenv|getenvArtifact)\("([A-Z_][A-Z0-9_]*)"[,)]'' mainGoSrc;
       goEnvNames = map (m: builtins.elemAt m 1) (filter builtins.isList parts);
-      extraInGo = subtractLists (schemaEnvNames ++ nixBaked) goEnvNames;
+      extraInGo = subtractLists (schemaEnvNames ++ documentArtifacts) goEnvNames;
     in
     assert pkgs.lib.assertMsg (
       missingFromGo == [ ]
     ) "schema knobs absent from main.go: ${concatStringsSep ", " missingFromGo}";
-    assert pkgs.lib.assertMsg (
-      extraInGo == [ ]
-    ) "main.go reads env vars absent from schema: ${concatStringsSep ", " extraInGo}";
+    assert pkgs.lib.assertMsg (extraInGo == [ ])
+      "main.go reads env vars absent from schema/documentArtifactKeys: ${concatStringsSep ", " extraInGo}";
     pkgs.runCommand "launcher-env-coverage" { } "touch $out";
 
   # tests/helper.bash's set_box_env fixture must export every boxEnv = true

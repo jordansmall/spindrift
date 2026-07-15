@@ -33,8 +33,9 @@ in
     in
     assert assertMsg (hasInfix ''MAX_PARALLEL="''${MAX_PARALLEL:-5}"'' out)
       "renderDefaultsPreamble must emit VAR=\"\${VAR:-<baked>}\" per flakeOption entry";
-    assert assertMsg (!hasInfix "export " out)
-      "renderDefaultsPreamble export=false must not emit `export`";
+    assert assertMsg (
+      !hasInfix "export " out
+    ) "renderDefaultsPreamble export=false must not emit `export`";
     assert assertMsg (hasInfix ''export MAX_PARALLEL="''${MAX_PARALLEL:-5}"'' outExported)
       "renderDefaultsPreamble export=true must prefix each line with `export `";
     pkgs.runCommand "preambles-defaults-shape" { } "touch $out";
@@ -56,8 +57,9 @@ in
         };
       };
     in
-    assert assertMsg (out == "AUTO_FORMAT MODEL")
-      "renderBoxEnvVarsList must space-join only boxEnv=true entries' env names, got: ${out}";
+    assert assertMsg (
+      out == "AUTO_FORMAT MODEL"
+    ) "renderBoxEnvVarsList must space-join only boxEnv=true entries' env names, got: ${out}";
     pkgs.runCommand "preambles-box-env-vars-list" { } "touch $out";
 
   preambles-box-env-vars-preamble =
@@ -96,9 +98,9 @@ in
       "renderDriverMountPreamble must export an empty DRIVER_SESSION_CACHE_DIR when the Driver declares none, got: ${out}";
     pkgs.runCommand "preambles-driver-mount-without-cache" { } "touch $out";
 
-  preambles-go-run-preamble-bwrap =
+  preambles-run-artifacts-bwrap =
     let
-      out = preambles.renderGoRunPreamble {
+      out = preambles.runArtifacts {
         runnerKind = "bwrap";
         driverEntry = {
           name = "claude";
@@ -113,27 +115,38 @@ in
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
         linuxSystem = "x86_64-linux";
+        boxEnvVars = "MODEL BASE_BRANCH";
       };
     in
-    assert assertMsg (hasInfix ''export RUNTIME="bwrap"'' out)
-      "renderGoRunPreamble (bwrap) must export RUNTIME=bwrap, got: ${out}";
-    assert assertMsg (hasInfix ''export DRIVER="claude"'' out)
-      "renderGoRunPreamble (bwrap) must export DRIVER, got: ${out}";
-    assert assertMsg (hasInfix ''export AGENT_FILES="/nix/store/aaa-agent-files"'' out)
-      "renderGoRunPreamble (bwrap) must export AGENT_FILES, got: ${out}";
-    assert assertMsg (hasInfix ''export AGENT_ENV="/nix/store/bbb-agent-env"'' out)
-      "renderGoRunPreamble (bwrap) must export AGENT_ENV, got: ${out}";
-    assert assertMsg (hasInfix "export BAKED_PREFETCH" out)
-      "renderGoRunPreamble (bwrap) must export BAKED_PREFETCH, got: ${out}";
-    assert assertMsg (hasInfix "export DRIVER_SKILLS_DIR=" out)
-      "renderGoRunPreamble (bwrap) must fold in the driver mount preamble, got: ${out}";
-    assert assertMsg (!hasInfix "IMAGE_ARCHIVE" out)
-      "renderGoRunPreamble (bwrap) must not export OCI-only vars, got: ${out}";
-    pkgs.runCommand "preambles-go-run-preamble-bwrap" { } "touch $out";
+    assert assertMsg (
+      out.RUNTIME == "bwrap"
+    ) "runArtifacts (bwrap) must set RUNTIME=bwrap, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.DRIVER == "claude"
+    ) "runArtifacts (bwrap) must set DRIVER, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.AGENT_FILES == "/nix/store/aaa-agent-files"
+    ) "runArtifacts (bwrap) must set AGENT_FILES, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.AGENT_ENV == "/nix/store/bbb-agent-env"
+    ) "runArtifacts (bwrap) must set AGENT_ENV, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out ? BAKED_PREFETCH
+    ) "runArtifacts (bwrap) must set BAKED_PREFETCH, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.DRIVER_SKILLS_DIR == "/home/agent/.claude/skills"
+    ) "runArtifacts (bwrap) must fold in the driver mount targets, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.BOX_ENV_VARS == "MODEL BASE_BRANCH"
+    ) "runArtifacts (bwrap) must set BOX_ENV_VARS, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      !(out ? IMAGE_ARCHIVE)
+    ) "runArtifacts (bwrap) must not set OCI-only keys, got: ${builtins.toJSON out}";
+    pkgs.runCommand "preambles-run-artifacts-bwrap" { } "touch $out";
 
-  preambles-go-run-preamble-oci =
+  preambles-run-artifacts-oci =
     let
-      out = preambles.renderGoRunPreamble {
+      out = preambles.runArtifacts {
         runnerKind = "oci";
         driverEntry = {
           name = "claude";
@@ -148,29 +161,38 @@ in
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
         linuxSystem = "x86_64-linux";
+        boxEnvVars = "MODEL";
       };
     in
-    assert assertMsg (hasInfix ''export IMAGE_ARCHIVE="/nix/store/ccc-image"'' out)
-      "renderGoRunPreamble (oci) must export IMAGE_ARCHIVE, got: ${out}";
-    assert assertMsg (hasInfix ''export IMAGE_TAG="spindrift:deadbeef"'' out)
-      "renderGoRunPreamble (oci) must export IMAGE_TAG, got: ${out}";
-    assert assertMsg (hasInfix ''export RUNTIME="podman"'' out)
-      "renderGoRunPreamble (oci) must export the configured RUNTIME, got: ${out}";
-    assert assertMsg (hasInfix ''export IMAGE_DRV="/nix/store/ddd-image.drv"'' out)
-      "renderGoRunPreamble (oci) must export IMAGE_DRV, got: ${out}";
-    assert assertMsg (hasInfix ''export NIX_BUILDER_IMAGE="docker.io/nixos/nix@sha256:aaaa"'' out)
-      "renderGoRunPreamble (oci) must export NIX_BUILDER_IMAGE, got: ${out}";
-    assert assertMsg (hasInfix ''export FLAKE_IMAGE_ATTR=".#packages.x86_64-linux.agent-image"'' out)
-      "renderGoRunPreamble (oci) must export FLAKE_IMAGE_ATTR, got: ${out}";
-    assert assertMsg (hasInfix "export DRIVER_SKILLS_DIR=" out)
-      "renderGoRunPreamble (oci) must fold in the driver mount preamble, got: ${out}";
-    assert assertMsg (!hasInfix "AGENT_FILES=" out)
-      "renderGoRunPreamble (oci) must not export bwrap-only vars, got: ${out}";
-    pkgs.runCommand "preambles-go-run-preamble-oci" { } "touch $out";
+    assert assertMsg (
+      out.IMAGE_ARCHIVE == "/nix/store/ccc-image"
+    ) "runArtifacts (oci) must set IMAGE_ARCHIVE, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.IMAGE_TAG == "spindrift:deadbeef"
+    ) "runArtifacts (oci) must set IMAGE_TAG, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.RUNTIME == "podman"
+    ) "runArtifacts (oci) must set the configured RUNTIME, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.IMAGE_DRV == "/nix/store/ddd-image.drv"
+    ) "runArtifacts (oci) must set IMAGE_DRV, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.NIX_BUILDER_IMAGE == "docker.io/nixos/nix@sha256:aaaa"
+    ) "runArtifacts (oci) must set NIX_BUILDER_IMAGE, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.FLAKE_IMAGE_ATTR == ".#packages.x86_64-linux.agent-image"
+    ) "runArtifacts (oci) must set FLAKE_IMAGE_ATTR, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.DRIVER_SKILLS_DIR == "/home/agent/.claude/skills"
+    ) "runArtifacts (oci) must fold in the driver mount targets, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      !(out ? AGENT_FILES)
+    ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
+    pkgs.runCommand "preambles-run-artifacts-oci" { } "touch $out";
 
-  preambles-go-build-preamble-bwrap =
+  preambles-build-artifacts-bwrap =
     let
-      out = preambles.renderGoBuildPreamble {
+      out = preambles.buildArtifacts {
         runnerKind = "bwrap";
         agentFilesDrv = "/nix/store/aaa-agent-files.drv";
         agentEnvDrv = "/nix/store/bbb-agent-env.drv";
@@ -182,19 +204,23 @@ in
         linuxSystem = "x86_64-linux";
       };
     in
-    assert assertMsg (hasInfix ''export RUNTIME="bwrap"'' out)
-      "renderGoBuildPreamble (bwrap) must export RUNTIME=bwrap, got: ${out}";
-    assert assertMsg (hasInfix ''export AGENT_FILES_DRV="/nix/store/aaa-agent-files.drv"'' out)
-      "renderGoBuildPreamble (bwrap) must export AGENT_FILES_DRV, got: ${out}";
-    assert assertMsg (hasInfix ''export AGENT_ENV_DRV="/nix/store/bbb-agent-env.drv"'' out)
-      "renderGoBuildPreamble (bwrap) must export AGENT_ENV_DRV, got: ${out}";
-    assert assertMsg (!hasInfix "IMAGE_DRV=" out)
-      "renderGoBuildPreamble (bwrap) must not export OCI-only vars, got: ${out}";
-    pkgs.runCommand "preambles-go-build-preamble-bwrap" { } "touch $out";
+    assert assertMsg (
+      out.RUNTIME == "bwrap"
+    ) "buildArtifacts (bwrap) must set RUNTIME=bwrap, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.AGENT_FILES_DRV == "/nix/store/aaa-agent-files.drv"
+    ) "buildArtifacts (bwrap) must set AGENT_FILES_DRV, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.AGENT_ENV_DRV == "/nix/store/bbb-agent-env.drv"
+    ) "buildArtifacts (bwrap) must set AGENT_ENV_DRV, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      !(out ? IMAGE_DRV)
+    ) "buildArtifacts (bwrap) must not set OCI-only keys, got: ${builtins.toJSON out}";
+    pkgs.runCommand "preambles-build-artifacts-bwrap" { } "touch $out";
 
-  preambles-go-build-preamble-oci =
+  preambles-build-artifacts-oci =
     let
-      out = preambles.renderGoBuildPreamble {
+      out = preambles.buildArtifacts {
         runnerKind = "oci";
         agentFilesDrv = "/nix/store/aaa-agent-files.drv";
         agentEnvDrv = "/nix/store/bbb-agent-env.drv";
@@ -206,17 +232,46 @@ in
         linuxSystem = "x86_64-linux";
       };
     in
-    assert assertMsg (hasInfix ''export RUNTIME="podman"'' out)
-      "renderGoBuildPreamble (oci) must export the configured RUNTIME, got: ${out}";
-    assert assertMsg (hasInfix ''export IMAGE_ARCHIVE="/nix/store/ccc-image"'' out)
-      "renderGoBuildPreamble (oci) must export IMAGE_ARCHIVE, got: ${out}";
-    assert assertMsg (hasInfix ''export IMAGE_TAG="spindrift:deadbeef"'' out)
-      "renderGoBuildPreamble (oci) must export IMAGE_TAG, got: ${out}";
-    assert assertMsg (hasInfix ''export IMAGE_DRV="/nix/store/ddd-image.drv"'' out)
-      "renderGoBuildPreamble (oci) must export IMAGE_DRV, got: ${out}";
-    assert assertMsg (hasInfix ''export FLAKE_IMAGE_ATTR=".#packages.x86_64-linux.agent-image"'' out)
-      "renderGoBuildPreamble (oci) must export FLAKE_IMAGE_ATTR, got: ${out}";
-    assert assertMsg (!hasInfix "AGENT_FILES_DRV=" out)
-      "renderGoBuildPreamble (oci) must not export bwrap-only vars, got: ${out}";
-    pkgs.runCommand "preambles-go-build-preamble-oci" { } "touch $out";
+    assert assertMsg (
+      out.RUNTIME == "podman"
+    ) "buildArtifacts (oci) must set the configured RUNTIME, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.IMAGE_ARCHIVE == "/nix/store/ccc-image"
+    ) "buildArtifacts (oci) must set IMAGE_ARCHIVE, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.IMAGE_TAG == "spindrift:deadbeef"
+    ) "buildArtifacts (oci) must set IMAGE_TAG, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.IMAGE_DRV == "/nix/store/ddd-image.drv"
+    ) "buildArtifacts (oci) must set IMAGE_DRV, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      out.FLAKE_IMAGE_ATTR == ".#packages.x86_64-linux.agent-image"
+    ) "buildArtifacts (oci) must set FLAKE_IMAGE_ATTR, got: ${builtins.toJSON out}";
+    assert assertMsg (
+      !(out ? AGENT_FILES_DRV)
+    ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
+    pkgs.runCommand "preambles-build-artifacts-oci" { } "touch $out";
+
+  # renderInputDocumentJSON must combine settings + artifacts into the
+  # top-level {settings, artifacts} JSON object the Go inputDocument struct
+  # parses (ADR 0020).
+  preambles-render-input-document-json =
+    let
+      out = preambles.renderInputDocumentJSON {
+        settings = {
+          BASE_BRANCH = "develop";
+        };
+        artifacts = {
+          RUNTIME = "podman";
+        };
+      };
+      parsed = builtins.fromJSON out;
+    in
+    assert assertMsg (
+      parsed.settings.BASE_BRANCH == "develop"
+    ) "renderInputDocumentJSON must nest settings under .settings, got: ${out}";
+    assert assertMsg (
+      parsed.artifacts.RUNTIME == "podman"
+    ) "renderInputDocumentJSON must nest artifacts under .artifacts, got: ${out}";
+    pkgs.runCommand "preambles-render-input-document-json" { } "touch $out";
 }

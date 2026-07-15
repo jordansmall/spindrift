@@ -64,13 +64,17 @@ rec {
     "Prompt & skill iteration" = "promptSkillIteration";
   };
 
-  # Env vars main.go reads that are Nix-computed build/eval artifacts, not
-  # user-tunable knobs — they have no lib/env-schema.nix entry (that registry
+  # Keys main.go reads from the Launcher input document's `artifacts` section
+  # (ADR 0020) via getenvArtifact — nix-computed build/run plumbing, not
+  # user-tunable knobs. They have no lib/env-schema.nix entry (that registry
   # is scoped to runtime knobs, per its own header comment) and never gain
   # one when a knob is added, so they live here rather than as a per-entry
-  # schema field. nix/checks/schema-drift.nix's launcher-env-coverage check
-  # excludes these from the schema<->main.go coverage comparison.
-  nixBakedEnvVars = [
+  # schema field. This is the single source both renderInputDocument (what
+  # gets rendered into the document) and nix/checks/schema-drift.nix's
+  # launcher-env-coverage check (what main.go is allowed to read outside the
+  # schema) consult — replacing the pre-#625 nixBakedEnvVars, which was only
+  # an exclusion list for the latter.
+  documentArtifactKeys = [
     "IMAGE_ARCHIVE"
     "IMAGE_TAG"
     "IMAGE_DRV"
@@ -86,6 +90,8 @@ rec {
     "DRIVER"
     "DRIVER_SKILLS_DIR"
     "DRIVER_SESSION_CACHE_DIR"
+    # Manual escape hatch (never nix-rendered into the document; read via
+    # getenvArtifact's env-only fallback), not schema-covered either.
     "IMAGE"
     "BOX_ENV_VARS"
   ];
@@ -160,26 +166,22 @@ rec {
     in
     "${ind}settings = {\n" + concatStrings (map renderSection groupOrder) + "${ind}};\n";
 
-  # templates/default/harness.env.example content.
+  # templates/default/harness.env.example content: secrets only (ADR 0020).
+  # Every other knob flows through the Launcher input document, seeded by
+  # flake `settings` and overridable per-run by an explicit CLI flag; env
+  # (including harness.env) configures nothing but secrets from #625 onward,
+  # so an example file listing non-secret knobs would advertise a channel
+  # that's deprecated the moment an operator uses it.
   renderHarnessEnvExample =
     schema:
     let
-      # Render one entry: required/secret → uncommented; optional → commented.
-      renderEntry =
-        _key: entry:
-        let
-          active = (entry.required or false) || (entry.secret or false);
-          value =
-            if (entry.required or false) && !(entry.secret or false) then
-              entry.placeholder or ""
-            else
-              toString (entry.default or "");
-          prefix = if active then "" else "# ";
-        in
-        "# ${entry.doc}\n${prefix}${entry.env}=${value}\n\n";
+      secretSchema = filterAttrs (_: e: e.secret or false) schema;
+      renderEntry = _key: entry: "# ${entry.doc}\n${entry.env}=\n\n";
     in
-    "# Copy to harness.env (gitignored) and fill in — or export these in your shell.\n\n"
-    + concatStrings (mapAttrsToList renderEntry schema);
+    "# Copy to harness.env (gitignored) and fill in — or export these in your shell.\n"
+    + "# Secrets only: every other knob is set via the Consumer flake's `settings`\n"
+    + "# or an explicit CLI flag (see docs/reference.md and docs/flake-options.md).\n\n"
+    + concatStrings (mapAttrsToList renderEntry secretSchema);
 
   # cmd/launcher/internal/driver/drivernames_gen.go content. driverEntries is
   # the registry's `entries` attrset (name -> Driver entry), not the whole
@@ -208,6 +210,13 @@ rec {
       nonSecretSchema = filterAttrs (_: e: !(e.secret or false)) schema;
       secretSchema = filterAttrs (_: e: (e.secret or false)) schema;
       flagAlias = e: if e ? alias then ", alias: \"${e.alias}\"" else "";
+      # settings.<section>.<knob> attr path for a Consumer-tunable knob, or ""
+      # for a knob with no flake-settings surface (e.g. ISSUE_NUMBER,
+      # SPINDRIFT_PROMPT_DIR) — the provenance warning's second migration
+      # target (ADR 0020), alongside the flag every non-secret knob already
+      # carries.
+      flagSettingsPath =
+        key: e: if e.flakeOption or false then "settings.${groupToAttr.${e.group}}.${key}" else "";
       # Every non-secret knob must declare a group so the full reference groups
       # it under a heading; a missing group is a schema error, not a silent "".
       ungrouped = mapAttrsToList (k: _: k) (filterAttrs (_: e: !(e ? group)) nonSecretSchema);
@@ -217,8 +226,8 @@ rec {
         else
           concatStrings (
             mapAttrsToList (
-              _: e:
-              "\t{env: \"${e.env}\", flag: \"${toKebab e.env}\", group: \"${e.group}\"${flagAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\"},\n"
+              key: e:
+              "\t{env: \"${e.env}\", flag: \"${toKebab e.env}\", group: \"${e.group}\"${flagAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\", settingsPath: \"${flagSettingsPath key e}\"},\n"
             ) nonSecretSchema
           );
       secretRows = concatStrings (
@@ -313,7 +322,10 @@ rec {
     + "Grouped by section (matching `spindrift --help --all`); sections with no\n"
     + "consumer-tunable knobs are omitted.\n"
     + "\n"
-    + "A matching env var wins at runtime: CLI flag > env > flake setting > baked default.\n"
+    + "Precedence at runtime: CLI flag > flake setting (via the Launcher input\n"
+    + "document, ADR 0020) > baked default. A knob env var still wins over the\n"
+    + "flake setting this release, but is deprecated and warns; env configures\n"
+    + "only secrets and internal plumbing going forward.\n"
     + "See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.\n"
     + "\n"
     + concatStrings (map renderSection groupOrder);
@@ -620,9 +632,11 @@ rec {
         .B spindrift
         dispatches one disposable, nix-built container per GitHub issue, runs a
         headless Claude Code agent inside it, and drives each resulting pull request
-        through a merge gate. Every runtime knob is set by flag, environment
-        variable, or baked default, in that precedence order. Non-secret knobs also
-        read from a gitignored
+        through a merge gate. Every runtime knob is set by flag, by the Consumer
+        flake's settings, or by baked default, in that precedence order; a knob
+        env var still wins over the flake setting this release, deprecated and
+        warned on (ADR 0020). Secrets are read from the environment or from a
+        gitignored
         .I harness.env
         in the working directory.
         .SH SUBCOMMANDS
@@ -660,8 +674,10 @@ rec {
         Skip the confirmation prompt when dispatching unlabeled issues. Alias:
         .BR \-\-force .
         .SH OPTIONS
-        Flags take precedence over environment variables, which take precedence over
-        baked defaults.
+        Flags take precedence over the Consumer flake's settings (carried by the
+        Launcher input document, ADR 0020), which take precedence over baked
+        defaults. A knob env var still wins over the flake setting this release,
+        deprecated and warned on; the next release makes it an error.
         ${concatStrings (map groupSection groupOrder)}.SH ENVIRONMENT
         Secret knobs are never exposed as value flags; they are read from the
         environment or from a file via their
