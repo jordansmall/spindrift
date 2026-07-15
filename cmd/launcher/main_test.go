@@ -836,10 +836,12 @@ func TestDispatchConfig_PRForge_WiresOpenPRForIssue(t *testing.T) {
 	}
 }
 
-// TestDispatchConfig_NonPRForge_LeavesOpenPRForIssueNil verifies that a
-// push-only Code Forge (no PR lookup) leaves OpenPRForIssue nil, so a
-// zero-exit rate-limited retry proceeds unguarded rather than erroring.
-func TestDispatchConfig_NonPRForge_LeavesOpenPRForIssueNil(t *testing.T) {
+// TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound verifies
+// that a push-only Code Forge (no PR lookup) still gets a non-nil
+// OpenPRForIssue closure, which always reports found=false via
+// forge.ResolveOpenPR's own PRForge fallback -- so a zero-exit
+// rate-limited retry proceeds unguarded rather than erroring.
+func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
 	c.codeForgeRemoteURL = "https://example.com/repo.git"
@@ -850,8 +852,15 @@ func TestDispatchConfig_NonPRForge_LeavesOpenPRForIssueNil(t *testing.T) {
 
 	cfg := dispatchConfig(c, cf)
 
-	if cfg.OpenPRForIssue != nil {
-		t.Error("want OpenPRForIssue nil for a non-PRForge Code Forge")
+	if cfg.OpenPRForIssue == nil {
+		t.Fatal("want OpenPRForIssue set for a non-PRForge Code Forge")
+	}
+	found, err := cfg.OpenPRForIssue("42")
+	if err != nil {
+		t.Fatalf("OpenPRForIssue: unexpected error: %v", err)
+	}
+	if found {
+		t.Error("want found=false for a non-PRForge Code Forge")
 	}
 }
 
