@@ -69,7 +69,10 @@ from `$PWD` (the same convention) for secrets. Per-issue logs land in `logs/issu
 `--help` and the man page: subcommands (`dispatch`, `research`, `preview`,
 `build`, `recover`, `doctor`) complete as the first word, every flag (including the
 `--issue` alias and the secret `--*-file` flags) completes anywhere after
-it, and a `--*-file` flag's argument completes as a filesystem path. `nix
+it, a `--*-file` flag's argument completes as a filesystem path, and an
+enumerable flag's argument (`--merge-mode`, `--code-forge`,
+`--issue-tracker`, `--overlap-gate`) completes to its fixed set of legal
+values (e.g. `--merge-mode <TAB>` offers `immediate auto manual`). `nix
 develop` puts the completion script on `share/bash-completion/completions`
 under `spindrift`'s store path; source it directly to enable it in your
 shell:
@@ -85,9 +88,10 @@ store path; fish's `vendor_completions.d` convention loads it automatically
 once that directory is on `$fish_complete_path`, or copy/symlink it into
 `~/.config/fish/completions/spindrift.fish`.
 
-It also ships zsh tab-completion with the same coverage, plus a per-flag
-description drawn from the same `doc` string, so `spindrift --<TAB>` shows
-each flag's one-line purpose alongside its name. `nix develop` puts the
+It also ships zsh tab-completion with the same coverage (including value
+completion for enumerable flags), plus a per-flag description drawn from the
+same `doc` string, so `spindrift --<TAB>` shows each flag's one-line purpose
+alongside its name. `nix develop` puts the
 completion function on `share/zsh/site-functions/_spindrift` under
 `spindrift`'s store path; add that directory to `fpath` before `compinit`
 runs to enable it:
