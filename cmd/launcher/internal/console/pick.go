@@ -56,4 +56,10 @@ type Pick struct {
 	Kind   Kind
 	State  PickState
 	Reason string
+	// Heartbeat is the last status line RunningHeartbeat captured for a
+	// PickRunning row — "" until a running Box's log carries at least one
+	// complete heartbeat line, and left stale (not cleared) once a pick
+	// leaves PickRunning, matching every other terminal-state row that keeps
+	// its last-known detail rather than blanking it.
+	Heartbeat string
 }
