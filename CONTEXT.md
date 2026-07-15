@@ -310,6 +310,14 @@ recorded outside the state machine: a terminal line in the Box log and that
 comment. Distinct from Unpick, which retracts a Pick that never launched.
 _Avoid_: kill, cancel, abort.
 
+**Transcript**:
+The Driver-rendered record of a Dispatch's work across its pass logs — the
+content the Console shows when an operator drills into a work-queue row, with a
+raw-JSONL toggle for the byte-exact form. It is a *view* of logs the Dispatch
+already produced, not a separate derived stream; there is no distinct
+heartbeat/event timeline behind it.
+_Avoid_: narrative log, running log, log.
+
 **Outcome line**:
 The machine-readable final line a Box writes to stdout, parsed by the Launcher
 to learn where the deliverable landed and whether the Dispatch is ready for
