@@ -20,6 +20,8 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num, prURL string) {
 		s.verifyMerged(num, prURL)
 	case landingFailed:
 		fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", num, prURL)
+	case landingAbandoned:
+		// Terminate already recorded its own comment and log line.
 	}
 }
 

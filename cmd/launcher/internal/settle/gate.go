@@ -59,6 +59,10 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 			}
 		case landingFailed:
 			fmt.Printf("    #%s  pr=%s  status=failed  !! CI or merge failed\n", num, o.Landing)
+		case landingAbandoned:
+			// Terminate already recorded its own comment and log line; a
+			// usage comment here would be noise on an issue it reclaimed.
+			return
 		}
 		s.postUsageComment(num, d)
 	case "merged":

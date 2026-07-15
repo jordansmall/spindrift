@@ -15,6 +15,10 @@ const (
 	gateRedRetry
 	// gateGreen is confirmed green CI; agent-complete is already swapped.
 	gateGreen
+	// gateAbandoned is the operator's Terminate (ADR 0024, issue #649)
+	// landing while gateToGreen was polling. No label swap is performed —
+	// Terminate already transitioned the issue to Dispatchable itself.
+	gateAbandoned
 )
 
 func (g gateResult) String() string {
@@ -25,6 +29,8 @@ func (g gateResult) String() string {
 		return "red-retry"
 	case gateTerminal:
 		return "terminal"
+	case gateAbandoned:
+		return "abandoned"
 	default:
 		return "unknown"
 	}
@@ -46,6 +52,12 @@ const (
 	// landingMerged is CI green and the PR (or push-only branch) actually
 	// merged. The issue stays at agent-complete.
 	landingMerged
+	// landingAbandoned is the operator's Terminate (ADR 0024, issue #649)
+	// landing somewhere inside selfHeal — CI watch, a fix pass, or the merge
+	// gate. Terminate already did the transition, comment, and log line;
+	// callers must take no further action (no verifyMerged, no usage
+	// comment, no failure print).
+	landingAbandoned
 )
 
 func (l landingResult) String() string {
@@ -56,6 +68,8 @@ func (l landingResult) String() string {
 		return "manual"
 	case landingFailed:
 		return "failed"
+	case landingAbandoned:
+		return "abandoned"
 	default:
 		return "unknown"
 	}
