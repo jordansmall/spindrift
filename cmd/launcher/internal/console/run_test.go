@@ -417,13 +417,7 @@ func TestRun_HeldPick_LaunchesOnBackgroundPollAfterDrainIdles(t *testing.T) {
 
 	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueClosed})
 
-	deadline = time.Now().Add(2 * time.Second)
-	for len(fr.RunCalls) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("RunCalls = %v, want #42 dispatched once its blocker cleared, with no further operator action", fr.RunCalls)
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickSettled})
 
 	if _, err := inW.Write([]byte("q\n")); err != nil {
 		t.Fatal(err)
