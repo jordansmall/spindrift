@@ -865,11 +865,26 @@ func cmdDoctor() int {
 // cmdConsole is the `console` subcommand: the interactive picks-only
 // driving loop (#645, #646). Unlike cmdDoctor, it needs the full
 // runner/dispatch/settle wiring bootstrap provides — a Pick launches a real
-// Dispatch — so it goes through bootstrap like cmdDispatch. lc is wired by
-// bootstrap in production; tests construct it directly with fakes.
+// Dispatch — so it goes through bootstrap like cmdDispatch. Fresh and
+// RebuildFn wire the same freshness.Probe seam runContinuousDispatch uses
+// for the headless exit-4 path into an in-session banner/hold plus a
+// one-key rebuild instead of an exit (issue #652). lc is wired by bootstrap
+// in production; tests construct it directly with fakes.
 func cmdConsole(lc *launchContext) int {
 	defer lc.cleanup()
-	launch := &console.Launcher{CodeForge: lc.codeForge, Factory: lc.factory, Settle: lc.settle, Queue: console.NewQueue(), MaxParallel: lc.config.maxParallel, FailedLabel: lc.config.failedLabel}
+	fresh, rebuild := newConsoleFreshness(lc.config, lc.pwd, runner.NixEvaluator{},
+		func() error { return consoleGitSync(lc.pwd, lc.config.baseBranch) },
+		func() error { return consoleNixBuild(lc.pwd) })
+	launch := &console.Launcher{
+		CodeForge:   lc.codeForge,
+		Factory:     lc.factory,
+		Settle:      lc.settle,
+		Queue:       console.NewQueue(),
+		MaxParallel: lc.config.maxParallel,
+		FailedLabel: lc.config.failedLabel,
+		Fresh:       fresh,
+		RebuildFn:   rebuild,
+	}
 	if err := console.Run(lc.issueTracker, lc.pwd, os.Stdin, os.Stdout, launch); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
