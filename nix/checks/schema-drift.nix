@@ -398,6 +398,7 @@ in
         ;
       nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
       secretEntries = filter (e: e.secret or false) (attrValues schema);
+      choicesKnobs = filter (e: e ? choices) nonSecret;
       subcommands = [
         "dispatch"
         "research"
@@ -418,6 +419,15 @@ in
       # assembled list the renderer emits for the first-word case, so a
       # dropped/renamed/reordered subcommand fails here.
       subcommandLine = concatStringsSep " " subcommands;
+      # A choices-bearing knob must complete to exactly its own value list
+      # (issue #554): pin the exact `compgen -W "..."` string the renderer
+      # emits for that flag, not a per-word substring check, so a value
+      # attached to the wrong flag (or dropped) fails here.
+      choicesChecks = concatMapStrings (
+        e:
+        "grep -qF -- 'compgen -W \"${concatStringsSep " " e.choices}\"' \"$completion\" "
+        + "|| { echo 'bash completion missing choices for --${renderers.toKebab e.env}' >&2; exit 1; }\n"
+      ) choicesKnobs;
     in
     pkgs.runCommand "launcher-bash-completion"
       {
@@ -439,6 +449,7 @@ in
         ${secretChecks}
         grep -qF -- '${subcommandLine}' "$completion" \
           || { echo "bash completion missing subcommand list: ${subcommandLine}" >&2; exit 1; }
+        ${choicesChecks}
         touch $out
       '';
 
@@ -456,6 +467,7 @@ in
         ;
       nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
       secretEntries = filter (e: e.secret or false) (attrValues schema);
+      choicesKnobs = filter (e: e ? choices) nonSecret;
       subcommands = [
         "dispatch"
         "research"
@@ -474,6 +486,13 @@ in
       # token can't appear incidentally in a comment (unlike the bare word),
       # so a plain fixed-string search is enough — no boundary check needed.
       subcommandChecks = concatMapStrings (s: "needF \"-a '${s}'\"\n") subcommands;
+      # Pin the exact `-a '...'` argument list the renderer emits for each
+      # choices-bearing flag (issue #554): an exact quoted token, like the
+      # subcommand check above, so a value attached to the wrong flag (or
+      # dropped) fails here.
+      choicesChecks = concatMapStrings (
+        e: "needF \"-a '${builtins.concatStringsSep " " e.choices}'\"\n"
+      ) choicesKnobs;
     in
     pkgs.runCommand "launcher-fish-completion"
       {
@@ -494,6 +513,7 @@ in
         ${aliasChecks}
         ${secretChecks}
         ${subcommandChecks}
+        ${choicesChecks}
         touch $out
       '';
 
@@ -515,6 +535,7 @@ in
         ;
       nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
       secretEntries = filter (e: e.secret or false) (attrValues schema);
+      choicesKnobs = filter (e: e ? choices) nonSecret;
       subcommands = [
         "dispatch"
         "research"
@@ -527,6 +548,12 @@ in
       aliasChecks = concatMapStrings (e: if e ? alias then "need \"'--${e.alias}:\"\n" else "") nonSecret;
       secretChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}-file:\"\n") secretEntries;
       subcommandChecks = concatMapStrings (s: "need \"'${s}:\"\n") subcommands;
+      # Pin the exact `compadd -- ...` argument list the renderer emits for
+      # each choices-bearing flag (issue #554), not a per-word substring
+      # check, so a value attached to the wrong flag (or dropped) fails here.
+      choicesChecks = concatMapStrings (
+        e: "need 'compadd -- ${builtins.concatStringsSep " " e.choices}'\n"
+      ) choicesKnobs;
     in
     pkgs.runCommand "launcher-zsh-completion"
       {
@@ -543,6 +570,7 @@ in
         ${aliasChecks}
         ${secretChecks}
         ${subcommandChecks}
+        ${choicesChecks}
         touch $out
       '';
 }
