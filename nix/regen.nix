@@ -1,7 +1,7 @@
 # One-shot regenerator for every schema-generated artifact (issue #402):
 # `nix run .#regen` renders templates/default/harness.env.example,
-# cmd/launcher/flagtable_gen.go, cmd/launcher/defaults_gen.go,
-# docs/flake-options.md, cmd/launcher/internal/driver/drivernames_gen.go,
+# cmd/launcher/flagtable_gen.go, docs/flake-options.md,
+# cmd/launcher/internal/driver/drivernames_gen.go,
 # tests/box_env_gen.bash, and the generated section of
 # templates/default/flake.nix's commented-out `settings` example, from their
 # respective Nix sources, and writes them into the working tree. Calls the
@@ -29,7 +29,6 @@ let
   schema = import ../lib/env-schema.nix;
   envExample = renderers.renderHarnessEnvExample schema;
   flagTable = renderers.renderFlagTableGo schema;
-  defaultsTable = renderers.renderDefaultsTableGo schema;
   flakeOptionsDoc = renderers.renderFlakeOptionsDoc schema;
   boxEnvFixture = renderers.renderSetBoxEnvFixture schema;
   templateSettingsBlock = renderers.renderTemplateSettingsBlock schema;
@@ -71,7 +70,6 @@ pkgs.writeShellApplication {
 
     write templates/default/harness.env.example ${escapeShellArg envExample}
     write cmd/launcher/flagtable_gen.go ${escapeShellArg flagTable}
-    write cmd/launcher/defaults_gen.go ${escapeShellArg defaultsTable}
     write docs/flake-options.md ${escapeShellArg flakeOptionsDoc}
     write cmd/launcher/internal/driver/drivernames_gen.go ${escapeShellArg driverNamesFile}
     write tests/box_env_gen.bash ${escapeShellArg boxEnvFixture}
