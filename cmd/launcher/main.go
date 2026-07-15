@@ -884,6 +884,9 @@ func cmdConsole(lc *launchContext) int {
 		FailedLabel: lc.config.failedLabel,
 		Fresh:       fresh,
 		RebuildFn:   rebuild,
+		RecoverFn: func(issueNum string) error {
+			return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle, issueNum)
+		},
 	}
 	if err := console.Run(lc.issueTracker, lc.pwd, os.Stdin, os.Stdout, launch); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
