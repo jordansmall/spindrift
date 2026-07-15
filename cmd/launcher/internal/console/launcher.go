@@ -1,12 +1,15 @@
 package console
 
 import (
+	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 	"spindrift.dev/launcher/internal/waves"
 )
 
@@ -33,6 +36,76 @@ type Launcher struct {
 	// (zero) in every production construction site, so only same-package
 	// tests reach in to shrink it below defaultPollInterval.
 	pollInterval time.Duration
+	// terminated is the shared registry Terminate marks and RunContinuous /
+	// Settle check at their loop checkpoints (ADR 0024, issue #649). Lazily
+	// created by registry() so a bare struct literal (every production and
+	// test call site) needs no constructor.
+	terminated *terminate.Registry
+}
+
+// registry lazily constructs l.terminated and, the first time, wires it into
+// l.Settle when that Settle is a concrete *settle.Settle (a settle.Fake has
+// no loop to check, so the wiring is skipped harmlessly). Both tryLaunch's
+// drain (via waves.Config.Terminated) and Terminate itself share the one
+// Registry this returns.
+func (l *Launcher) registry() *terminate.Registry {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.terminated == nil {
+		l.terminated = terminate.NewRegistry()
+		if s, ok := l.Settle.(*settle.Settle); ok {
+			s.SetTerminated(l.terminated)
+		}
+	}
+	return l.terminated
+}
+
+// Terminate ends num's live Dispatch by hand (ADR 0024, issue #649): reaps
+// any running Box, marks the shared registry so an in-flight settle loop
+// abandons at its next checkpoint instead of continuing, transitions the
+// issue InProgress -> Dispatchable (never Failed — the operator decided,
+// there is nothing to triage), posts an issue comment naming the terminate
+// and linking any dangling branch/PR, appends a terminal line to the Box
+// log, and marks the matching queue pick PickTerminated. Pushed branches and
+// open PRs are left untouched; a later re-pick adopts an abandoned PR
+// through the existing settle adoption path. Best-effort throughout except
+// the reap, whose error is returned so a caller can surface it — every other
+// step (transition, comment, log line) still runs regardless.
+func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
+	l.registry().Mark(num)
+
+	var killErr error
+	if l.Factory != nil {
+		killErr = l.Factory.Kill(num)
+		if killErr != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: kill: %v\n", num, killErr)
+		}
+		if err := l.Factory.AppendTerminalLine(num, "terminated by operator; issue returned to Dispatchable"); err != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: append log line: %v\n", num, err)
+		}
+	}
+
+	danglingNote := "no open branch/PR found"
+	if l.CodeForge != nil {
+		branch := l.CodeForge.AgentBranch(num)
+		if res, err := forge.ResolveOpenPR(l.CodeForge, num); err == nil && res.Found {
+			danglingNote = res.URL
+		} else if branch != "" {
+			danglingNote = fmt.Sprintf("no open PR found; branch=%s", branch)
+		}
+	}
+
+	if err := tracker.TransitionState(num, forge.InProgress, forge.Dispatchable); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: transition to Dispatchable: %v\n", num, err)
+	}
+	comment := fmt.Sprintf("Terminated by operator: reclaimed back to Dispatchable. %s", danglingNote)
+	if err := tracker.Comment(num, comment); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: post comment: %v\n", num, err)
+	}
+
+	l.Queue.setState(num, PickTerminated, "terminated by operator")
+	l.signalRefresh()
+	return killErr
 }
 
 // refreshChan lazily constructs l.refresh, so a bare struct literal (every
@@ -97,7 +170,16 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 	defer l.wg.Done()
 	discover := func() ([]waves.Issue, map[string][]string, error) {
 		defer l.signalRefresh() // a claim attempt is always a tracker write, win or lose
-		return l.Queue.Discover(tracker)
+		issues, edges, err := l.Queue.Discover(tracker)
+		// A successful claim here is a fresh Dispatch starting for issues,
+		// so any earlier Terminate mark for these numbers must not carry
+		// over — otherwise a re-pick's own settle would abandon on its very
+		// first checkpoint instead of running the adoption path normally
+		// (ADR 0024, issue #649).
+		for _, iss := range issues {
+			l.registry().Unmark(iss.Number)
+		}
+		return issues, edges, err
 	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
 	maxParallel := l.MaxParallel
@@ -105,7 +187,7 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		maxParallel = 1
 	}
 	for {
-		_ = waves.RunContinuous(waves.Config{MaxParallel: maxParallel}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue, l.signalRefresh}, discover, fresh)
+		_ = waves.RunContinuous(waves.Config{MaxParallel: maxParallel, Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue, l.signalRefresh}, discover, fresh)
 
 		l.mu.Lock()
 		if !l.Queue.hasQueued() {

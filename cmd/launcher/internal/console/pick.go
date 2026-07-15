@@ -28,6 +28,10 @@ const (
 	// PickDissolved is a pick whose claim failed (raced, closed,
 	// relabeled) — Reason names why. A dissolved pick never launches.
 	PickDissolved
+	// PickTerminated is a pick the operator ended by hand (ADR 0024, issue
+	// #649) — distinct from PickDissolved (a claim that never launched):
+	// this pick ran, and the operator reclaimed it mid-flight.
+	PickTerminated
 )
 
 // String renders s as the word View shows on a queue row.
@@ -43,6 +47,8 @@ func (s PickState) String() string {
 		return "settled"
 	case PickDissolved:
 		return "dissolved"
+	case PickTerminated:
+		return "terminated"
 	default:
 		return "unknown"
 	}
