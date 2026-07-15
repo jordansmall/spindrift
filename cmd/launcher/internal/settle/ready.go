@@ -34,16 +34,20 @@ var errLandingNeverGreen = errors.New("settle: force-pushed head never went gree
 // agent-complete once the landing path settles (issue #757) — merged,
 // auto-merge enqueued, manual hand-off, merge-blocked-with-note, or a merge
 // guard downgrade all count as settled. Until then (rebase-retry,
-// conflict-resolve, post-force-push-wait) the issue stays agent-in-progress,
-// so a merge failure after green leaves the issue agent-complete and is
-// never demoted to agent-failed.
+// conflict-resolve, post-force-push-wait) the issue stays agent-in-progress.
+// A merge failure on a still-green PR (unmet approval, guard, unresolvable
+// pre-rebase conflict) leaves the issue agent-complete, never demoted; but a
+// force-pushed head that never re-confirms green (a failed conflict-resolve
+// dispatch, or a red/timed-out post-force-push re-wait) demotes to
+// agent-failed instead — there is no green PR left at that head (issue #758).
 //
-// Returns landingFailed when CI never reached green (genuine red exhausted
-// or a gate timeout — the issue is swapped to failedLabel). Otherwise CI
-// reached green: landingMerged when immediate mode completed an actual
-// merge, landingManual for every other green outcome (manual/auto mode, a
-// guard hit, or a merge failure — the issue stays at agent-complete with a
-// merge-blocked note).
+// Returns landingFailed when CI never reached green (genuine red exhausted,
+// a gate timeout, or a force-pushed head that never went green — the issue
+// is swapped to failedLabel). Otherwise CI reached green: landingMerged when
+// immediate mode completed an actual merge, landingManual for every other
+// green outcome (manual/auto mode, a guard hit, or a merge failure on a
+// still-green PR — the issue stays at agent-complete with a merge-blocked
+// note).
 //
 // d dispatches fix passes and, when a rebase conflict arises, an
 // agent-assisted conflict resolution -- both subject to dispatch's own
@@ -76,7 +80,7 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
 				}
 				if errors.Is(err, errLandingNeverGreen) {
 					fmt.Printf("    #%s  pr=%s  status=landing-failed  !! %v\n", num, pr, err)
-					s.it.Comment(num, fmt.Sprintf("landing failed: %v — the force-pushed head never reached green CI", err))
+					s.it.Comment(num, fmt.Sprintf("landing failed: %v — no green PR exists at the current head", err))
 					s.transitionState(num, forge.InProgress, forge.Failed)
 					return landingFailed
 				}
