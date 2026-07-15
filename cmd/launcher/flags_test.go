@@ -23,6 +23,45 @@ func TestModelDefault_IsSonnet5(t *testing.T) {
 	t.Fatal("MODEL entry not found in schemaFlags")
 }
 
+// TestExtractInputFlag_Present extracts the document path and strips both
+// tokens from the remaining args.
+func TestExtractInputFlag_Present(t *testing.T) {
+	path, remaining, err := extractInputFlag([]string{"--repo-slug", "o/r", "--input", "/nix/store/x.json", "dispatch"})
+	if err != nil {
+		t.Fatalf("extractInputFlag: %v", err)
+	}
+	if path != "/nix/store/x.json" {
+		t.Errorf("path = %q, want /nix/store/x.json", path)
+	}
+	want := []string{"--repo-slug", "o/r", "dispatch"}
+	if strings.Join(remaining, ",") != strings.Join(want, ",") {
+		t.Errorf("remaining = %v, want %v", remaining, want)
+	}
+}
+
+// TestExtractInputFlag_Absent leaves args untouched and returns an empty path.
+func TestExtractInputFlag_Absent(t *testing.T) {
+	path, remaining, err := extractInputFlag([]string{"dispatch", "42"})
+	if err != nil {
+		t.Fatalf("extractInputFlag: %v", err)
+	}
+	if path != "" {
+		t.Errorf("path = %q, want empty", path)
+	}
+	if strings.Join(remaining, ",") != "dispatch,42" {
+		t.Errorf("remaining = %v, want [dispatch 42]", remaining)
+	}
+}
+
+// TestExtractInputFlag_MissingValue errors instead of silently swallowing a
+// trailing --input.
+func TestExtractInputFlag_MissingValue(t *testing.T) {
+	_, _, err := extractInputFlag([]string{"--input"})
+	if err == nil {
+		t.Fatal("want error for --input with no value")
+	}
+}
+
 // TestParseFlags_SetEnv: a recognized flag is injected into the environment.
 func TestParseFlags_SetEnv(t *testing.T) {
 	t.Setenv("ISSUE_NUMBER", "")

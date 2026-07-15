@@ -1,10 +1,15 @@
 // Package main: spindrift launcher — orchestrates open issues into disposable
-// containers. Config is baked into env vars by the nix wrapper (goRunPreamble,
-// goRunDefaultsPreamble, etc.); harness.env overrides those at runtime. The
-// binary contains no baked store paths of its own beyond what nix injects.
+// containers. Nix-computed config (resolved knob settings and build/run
+// artifacts) reaches the binary as one Launcher input document, passed via
+// --input (ADR 0020); an explicit CLI flag overrides the document, and an
+// ambient knob env var still wins this release but draws a deprecation
+// warning (see warnAmbientKnobEnv). Secrets and BOX_ENV_VARS plumbing stay
+// env-only. The binary contains no baked store paths of its own beyond what
+// nix injects via the document.
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -218,10 +223,19 @@ func atoiNonneg(s string, def int) int {
 	return def
 }
 
-// schemaDefault returns key's baked-in default from the generated
-// schemaDefaults table (cmd/launcher/defaults_gen.go), or "" when the knob
-// has none — the sole source of a schema knob's default value (issue #621).
+// schemaDefault returns key's resolved default: the loaded Launcher input
+// document's settings value (ADR 0020 — schema default overridden by the
+// Consumer flake's settings) when --input loaded one and it carries key,
+// else the generated schemaDefaults table (cmd/launcher/defaults_gen.go), or
+// "" when the knob has none. getenvSchema/atoiSchema/atoiNonnegSchema below
+// consult this, so document precedence applies to every knob they resolve
+// with no other call-site change (issue #625).
 func schemaDefault(key string) string {
+	if loadedDoc != nil {
+		if v, ok := loadedDoc.Settings[key]; ok {
+			return v
+		}
+	}
 	for _, e := range schemaDefaults {
 		if e.env == key {
 			return e.dflt
@@ -255,29 +269,38 @@ func atoiNonnegSchema(key string) int {
 	return atoiNonneg(os.Getenv(key), intSchemaDefault(key))
 }
 
-func loadConfig() config {
-	imageTag := getenv("IMAGE_TAG", "spindrift:latest")
-	image := os.Getenv("IMAGE")
-	if image == "" {
-		image = imageTag
+// gitIdentityField resolves a commit-identity knob (GIT_USER_NAME/
+// GIT_USER_EMAIL) via the normal document/flag/env chain, falling back to
+// the host git config when none of those supply a value — the in-process
+// replacement for the wrapper's former `${VAR:-$(git config ...)}` bash
+// fallback (ADR 0020: the wrapper exports no knob env at all).
+func gitIdentityField(env, gitConfigKey string) string {
+	if v := getenvSchema(env); v != "" {
+		return v
 	}
+	return gitConfigLookup(gitConfigKey)
+}
+
+func loadConfig() config {
+	imageTag := getenvArtifact("IMAGE_TAG", "spindrift:latest")
+	image := getenvArtifact("IMAGE", imageTag)
 	return config{
-		imageArchive:    os.Getenv("IMAGE_ARCHIVE"),
+		imageArchive:    getenvArtifact("IMAGE_ARCHIVE", ""),
 		imageTag:        imageTag,
-		imageDrv:        os.Getenv("IMAGE_DRV"),
-		nixBuilderImage: os.Getenv("NIX_BUILDER_IMAGE"),
-		nixVolume:       getenv("NIX_VOLUME", "spindrift-nix"),
-		flakeImageAttr:  os.Getenv("FLAKE_IMAGE_ATTR"),
-		agentFiles:      os.Getenv("AGENT_FILES"),
-		agentEnv:        os.Getenv("AGENT_ENV"),
-		agentFilesDrv:   os.Getenv("AGENT_FILES_DRV"),
-		agentEnvDrv:     os.Getenv("AGENT_ENV_DRV"),
-		bakedPrefetch:   os.Getenv("BAKED_PREFETCH"),
-		runtime:         os.Getenv("RUNTIME"),
-		driver:          os.Getenv("DRIVER"),
+		imageDrv:        getenvArtifact("IMAGE_DRV", ""),
+		nixBuilderImage: getenvArtifact("NIX_BUILDER_IMAGE", ""),
+		nixVolume:       getenvArtifact("NIX_VOLUME", "spindrift-nix"),
+		flakeImageAttr:  getenvArtifact("FLAKE_IMAGE_ATTR", ""),
+		agentFiles:      getenvArtifact("AGENT_FILES", ""),
+		agentEnv:        getenvArtifact("AGENT_ENV", ""),
+		agentFilesDrv:   getenvArtifact("AGENT_FILES_DRV", ""),
+		agentEnvDrv:     getenvArtifact("AGENT_ENV_DRV", ""),
+		bakedPrefetch:   getenvArtifact("BAKED_PREFETCH", ""),
+		runtime:         getenvArtifact("RUNTIME", ""),
+		driver:          getenvArtifact("DRIVER", ""),
 		image:           image,
 
-		repoSlug:           os.Getenv("REPO_SLUG"),
+		repoSlug:           getenvSchema("REPO_SLUG"),
 		label:              getenvSchema("LABEL"),
 		issueNumber:        os.Getenv("ISSUE_NUMBER"),
 		baseBranch:         getenvSchema("BASE_BRANCH"),
@@ -287,16 +310,16 @@ func loadConfig() config {
 		failedLabel:        getenvSchema("FAILED_LABEL"),
 		completeLabel:      getenvSchema("COMPLETE_LABEL"),
 		maxJobs:            atoiNonnegSchema("MAX_JOBS"),
-		continuousDispatch: os.Getenv("CONTINUOUS_DISPATCH") != "",
+		continuousDispatch: getenvSchema("CONTINUOUS_DISPATCH") != "",
 
 		issueTracker:        getenvSchema("ISSUE_TRACKER"),
 		localIssuesDir:      getenvSchema("LOCAL_ISSUES_DIR"),
-		jiraBaseURL:         os.Getenv("JIRA_BASE_URL"),
-		jiraProjectKey:      os.Getenv("JIRA_PROJECT_KEY"),
-		jiraEmail:           os.Getenv("JIRA_EMAIL"),
+		jiraBaseURL:         getenvSchema("JIRA_BASE_URL"),
+		jiraProjectKey:      getenvSchema("JIRA_PROJECT_KEY"),
+		jiraEmail:           getenvSchema("JIRA_EMAIL"),
 		jiraToken:           os.Getenv("JIRA_TOKEN"),
-		jiraStatusMapping:   os.Getenv("JIRA_STATUS_MAPPING"),
-		jiraIncludeComments: os.Getenv("JIRA_INCLUDE_COMMENTS") != "",
+		jiraStatusMapping:   getenvSchema("JIRA_STATUS_MAPPING"),
+		jiraIncludeComments: getenvSchema("JIRA_INCLUDE_COMMENTS") != "",
 
 		transientRetryMax:    atoiSchema("TRANSIENT_RETRY_MAX"),
 		transientBackoffSecs: atoiSchema("TRANSIENT_BACKOFF_SECS"),
@@ -312,27 +335,27 @@ func loadConfig() config {
 		ghToken:          os.Getenv("GH_TOKEN"),
 		claudeOAuthToken: os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
 		anthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
-		gitUserName:      os.Getenv("GIT_USER_NAME"),
-		gitUserEmail:     os.Getenv("GIT_USER_EMAIL"),
+		gitUserName:      gitIdentityField("GIT_USER_NAME", "user.name"),
+		gitUserEmail:     gitIdentityField("GIT_USER_EMAIL", "user.email"),
 
 		spindriftPromptDir: os.Getenv("SPINDRIFT_PROMPT_DIR"),
 		spindriftSkillsDir: os.Getenv("SPINDRIFT_SKILLS_DIR"),
 
-		driverSkillsDir:       os.Getenv("DRIVER_SKILLS_DIR"),
-		driverSessionCacheDir: os.Getenv("DRIVER_SESSION_CACHE_DIR"),
+		driverSkillsDir:       getenvArtifact("DRIVER_SKILLS_DIR", ""),
+		driverSessionCacheDir: getenvArtifact("DRIVER_SESSION_CACHE_DIR", ""),
 
-		podmanNetwork:   os.Getenv("PODMAN_NETWORK"),
-		bwrapUnshareNet: os.Getenv("BWRAP_UNSHARE_NET") != "",
+		podmanNetwork:   getenvSchema("PODMAN_NETWORK"),
+		bwrapUnshareNet: getenvSchema("BWRAP_UNSHARE_NET") != "",
 		pidsLimit:       getenvSchema("PIDS_LIMIT"),
 		memoryLimit:     getenvSchema("MEMORY_LIMIT"),
 
-		boxEnvVars: os.Getenv("BOX_ENV_VARS"),
+		boxEnvVars: getenvArtifact("BOX_ENV_VARS", ""),
 
 		mergeMode:       getenvSchema("MERGE_MODE"),
 		mergeGuardPaths: getenvSchema("MERGE_GUARD_PATHS"),
 
 		codeForge:          getenvSchema("CODE_FORGE"),
-		codeForgeRemoteURL: os.Getenv("CODE_FORGE_REMOTE_URL"),
+		codeForgeRemoteURL: getenvSchema("CODE_FORGE_REMOTE_URL"),
 	}
 }
 
@@ -504,6 +527,7 @@ func newDriver(c config) driver.Driver {
 func dispatchConfig(c config, cf forge.CodeForge) dispatch.Config {
 	cfg := dispatch.Config{
 		BoxEnvVars:            c.boxEnvVars,
+		ResolveEnv:            resolveBoxEnvVar,
 		Kind:                  c.dispatchKind,
 		TransientRetryMax:     c.transientRetryMax,
 		TransientBackoffSecs:  c.transientBackoffSecs,
@@ -1001,6 +1025,16 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
+	inputPath, argv, err := extractInputFlag(argv)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		return 1
+	}
+	// Snapshot ambient-env deprecation warnings before parseFlags mutates the
+	// environment via os.Setenv, so a flag that also sets the same var never
+	// masks the ambient value the warning reports on (ADR 0020).
+	var ambientWarnings bytes.Buffer
+	warnAmbientKnobEnv(&ambientWarnings)
 	args, err := parseFlags(argv)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
@@ -1012,6 +1046,15 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		printHelp(stdout)
 		return 0
 	}
+	if inputPath != "" {
+		doc, err := loadInputDocument(inputPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s\n", err)
+			return 1
+		}
+		loadedDoc = doc
+	}
+	stderr.Write(ambientWarnings.Bytes())
 	if args[0] == "build" {
 		return cmdBuild()
 	}

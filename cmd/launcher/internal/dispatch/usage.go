@@ -13,7 +13,11 @@ import (
 // ExtractUsage. If no result event is found the body notes that usage is
 // unavailable rather than erroring.
 func (d *Dispatch) UsageReport() string {
-	model := os.Getenv("MODEL")
+	resolve := d.cfg.ResolveEnv
+	if resolve == nil {
+		resolve = os.Getenv
+	}
+	model := resolve("MODEL")
 	if model == "" {
 		model = "unknown"
 	}

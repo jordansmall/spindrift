@@ -14,9 +14,17 @@ import (
 // Config carries the subset of launcher config a Dispatch needs to build a
 // Box's env and drive its retry policy.
 type Config struct {
-	// BoxEnvVars is a space-separated list of env var names forwarded from
-	// the ambient environment into every Box (schema boxEnv=true entries).
+	// BoxEnvVars is a space-separated list of env var names forwarded into
+	// every Box (schema boxEnv=true entries).
 	BoxEnvVars string
+
+	// ResolveEnv resolves one BoxEnvVars name to its forwarded value.
+	// Defaults to os.Getenv when nil (every pre-#625 caller and test).
+	// main.go wires this to the same document/flag/env chain loadConfig()
+	// uses (getenvSchema), so a boxEnv knob's document-baked value still
+	// reaches the Box even when the operator sets it nowhere (ADR 0020: the
+	// wrapper exports no per-var env any more).
+	ResolveEnv func(name string) string
 
 	// TransientRetryMax caps both the hold-cycle count (429 with a known
 	// reset) and the backoff-retry count (other transients) before a
@@ -59,9 +67,13 @@ type Config struct {
 // schema boxEnv=true vars (read from the ambient env by name) with per-issue
 // vars.
 func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary string) map[string]string {
+	resolve := cfg.ResolveEnv
+	if resolve == nil {
+		resolve = os.Getenv
+	}
 	env := make(map[string]string)
 	for _, name := range strings.Fields(cfg.BoxEnvVars) {
-		env[name] = os.Getenv(name)
+		env[name] = resolve(name)
 	}
 	env["ISSUE_NUMBER"] = number
 	env["ISSUE_TITLE"] = title

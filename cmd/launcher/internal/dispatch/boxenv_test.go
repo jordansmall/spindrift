@@ -32,6 +32,27 @@ func TestBuildBoxEnvForwardsSchemaVars(t *testing.T) {
 	}
 }
 
+// TestBuildBoxEnvUsesResolveEnv proves buildBoxEnv resolves each
+// BoxEnvVars name through Config.ResolveEnv when set, instead of a raw
+// os.Getenv — the seam that lets a boxEnv knob's document-baked value (ADR
+// 0020: no per-var env export from the wrapper any more) still reach the
+// Box even when the operator never set it as an ambient env var.
+func TestBuildBoxEnvUsesResolveEnv(t *testing.T) {
+	cfg := Config{
+		BoxEnvVars: "MODEL",
+		ResolveEnv: func(name string) string {
+			if name == "MODEL" {
+				return "from-resolver"
+			}
+			return ""
+		},
+	}
+	env := buildBoxEnv(cfg, "7", "Test issue", 0, "")
+	if env["MODEL"] != "from-resolver" {
+		t.Errorf("MODEL: got %q, want from-resolver", env["MODEL"])
+	}
+}
+
 // TestBuildBoxEnvSetsFixPassAndSummary verifies FIX_PASS and
 // CI_FAILURE_SUMMARY are present when fixPass>0 and summary is non-empty.
 func TestBuildBoxEnvSetsFixPassAndSummary(t *testing.T) {
