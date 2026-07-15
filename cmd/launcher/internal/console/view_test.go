@@ -474,3 +474,45 @@ func TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
 		}
 	}
 }
+
+// TestView_Focus_MarksFocusedColumnVisually verifies the focused column's
+// header carries a visible marker the other column's header doesn't, and
+// that Tab moves the marker — the operator's only cue for which column
+// cursor keys and Enter currently act on (issue #845).
+func TestView_Focus_MarksFocusedColumnVisually(t *testing.T) {
+	m := NewModel()
+
+	backlogFocused := View(m)
+	if !strings.Contains(backlogFocused, "backlog [focus]") {
+		t.Errorf("View() with FocusBacklog = %q, want the backlog header marked focused", backlogFocused)
+	}
+	if strings.Contains(backlogFocused, "picks [focus]") {
+		t.Errorf("View() with FocusBacklog = %q, want the queue header unmarked", backlogFocused)
+	}
+
+	m = Update(m, FocusToggleMsg{})
+	queueFocused := View(m)
+	if !strings.Contains(queueFocused, "picks [focus]") {
+		t.Errorf("View() with FocusQueue = %q, want the queue header marked focused", queueFocused)
+	}
+	if strings.Contains(queueFocused, "backlog [focus]") {
+		t.Errorf("View() with FocusQueue = %q, want the backlog header unmarked", queueFocused)
+	}
+}
+
+// TestView_QueueCursor_MarksHighlightedRow verifies the work-queue column
+// marks the row under QueueCursor the same way the backlog column already
+// marks Cursor's row (issue #845).
+func TestView_QueueCursor_MarksHighlightedRow(t *testing.T) {
+	m := Update(NewModel(), FocusToggleMsg{})
+	m.Picks = []Pick{{Number: "1", State: PickQueued}, {Number: "2", State: PickQueued}}
+	m.QueueCursor = 1
+
+	out := View(m)
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "#2") && strings.HasPrefix(strings.TrimLeft(l, " "), ">") {
+			return
+		}
+	}
+	t.Errorf("View() = %q, want row #2 marked with the cursor", out)
+}
