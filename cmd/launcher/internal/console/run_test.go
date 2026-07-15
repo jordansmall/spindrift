@@ -209,6 +209,160 @@ func TestRun_PickCommand_WithLauncher_LaunchesRealDispatch(t *testing.T) {
 	}
 }
 
+// TestRun_ResizeCommand_RaisesCapLaunchesQueuedPickImmediately verifies
+// issue #653: with MaxParallel=1, a "+" raises the live cap and a second
+// already-queued pick launches right away — not waiting for the first
+// Dispatch to settle or for the background poll.
+func TestRun_ResizeCommand_RaisesCapLaunchesQueuedPickImmediately(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "first", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "43", Title: "second", Labels: []string{"ready-for-agent"}})
+
+	fr := runner.NewFake()
+	release42 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Issue == "42" {
+			<-release42
+		}
+		return nil
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue(), MaxParallel: 1}
+
+	inR, inW := io.Pipe()
+	var out syncBuilder
+	done := make(chan error, 1)
+	go func() { done <- Run(f, dir, inR, &out, launch) }()
+
+	if _, err := inW.Write([]byte("p 42\np 43\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickRunning, "43": PickQueued})
+
+	if launch.Cap() != 1 {
+		t.Fatalf("Cap before \"+\": got %d, want 1", launch.Cap())
+	}
+
+	if _, err := inW.Write([]byte("+\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickRunning, "43": PickSettled})
+
+	if launch.Cap() != 2 {
+		t.Fatalf("Cap after \"+\": got %d, want 2", launch.Cap())
+	}
+
+	close(release42)
+	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickSettled, "43": PickSettled})
+
+	if _, err := inW.Write([]byte("q\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+// TestRun_ResizeCommand_LowersCapNeverTerminatesGatesLaunch verifies issue
+// #653: "-" lowers the live cap without touching either running Dispatch,
+// and a third queued pick launches only once enough of them settle to sink
+// live back under the lowered cap.
+func TestRun_ResizeCommand_LowersCapNeverTerminatesGatesLaunch(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "first", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "43", Title: "second", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "44", Title: "third", Labels: []string{"ready-for-agent"}})
+
+	fr := runner.NewFake()
+	release42 := make(chan struct{})
+	release43 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		switch box.Issue {
+		case "42":
+			<-release42
+		case "43":
+			<-release43
+		}
+		return nil
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue(), MaxParallel: 2}
+
+	inR, inW := io.Pipe()
+	var out syncBuilder
+	done := make(chan error, 1)
+	go func() { done <- Run(f, dir, inR, &out, launch) }()
+
+	if _, err := inW.Write([]byte("p 42\np 43\np 44\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickRunning, "43": PickRunning, "44": PickQueued})
+
+	if _, err := inW.Write([]byte("-\n")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if launch.Cap() != 1 {
+			t.Fatalf("Cap after \"-\": got %d, want 1", launch.Cap())
+		}
+		snap := launch.Queue.Snapshot()
+		for _, p := range snap {
+			if p.Number == "44" && p.State != PickQueued {
+				t.Fatalf("#44 state = %s, want still queued (lowering must not launch over the new cap)", p.State)
+			}
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	close(release42)
+	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickSettled})
+	if snap := launch.Queue.Snapshot(); true {
+		for _, p := range snap {
+			if p.Number == "44" && p.State != PickQueued {
+				t.Fatalf("#44 state = %s right after #42 settled, want still queued (live still == lowered cap)", p.State)
+			}
+			if p.Number == "43" && p.State != PickRunning {
+				t.Fatalf("#43 state = %s, want still running (lowering must never terminate)", p.State)
+			}
+		}
+	}
+
+	close(release43)
+	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickSettled, "43": PickSettled, "44": PickSettled})
+
+	if _, err := inW.Write([]byte("q\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
 // TestRun_WithLauncher_RendersLiveQueueState verifies every render — not
 // just the one right after a pick — reflects the launcher's live Queue
 // state, so a transition that happens entirely in the background (claim,

@@ -148,8 +148,12 @@ func syncQueue(m Model, launch *Launcher, pwd string) Model {
 // "p <num>" to pick an issue, "u <num>" to unpick a queued one,
 // "k"/"kill"/"terminate" <num> to arm a terminate confirm (ADR 0024, issue
 // #649) — the next line is read as its y/N answer instead of a new command,
-// see applyTerminateConfirm. A successful pick also lands on launch.Queue
-// and kicks off a background launch attempt, when launch is non-nil.
+// see applyTerminateConfirm. "+"/"-" raise or lower the session's live
+// parallelism cap by one (issue #653, ADR 0023): raising launches a held or
+// queued pick immediately, lowering only gates future launches — it never
+// terminates a running Dispatch. A successful pick also lands on
+// launch.Queue and kicks off a background launch attempt, when launch is
+// non-nil.
 func applyCommand(m Model, tracker forge.IssueTracker, pwd string, launch *Launcher, line string) Model {
 	if m.PendingTerminate != "" {
 		return applyTerminateConfirm(m, tracker, launch, line)
@@ -199,6 +203,19 @@ func applyCommand(m Model, tracker forge.IssueTracker, pwd string, launch *Launc
 			return m
 		}
 		return Update(m, TerminateRequestedMsg{Number: arg})
+	case "+":
+		if launch == nil {
+			return m
+		}
+		launch.Resize(1)
+		launch.tryLaunch(tracker, pwd)
+		return m
+	case "-":
+		if launch == nil {
+			return m
+		}
+		launch.Resize(-1)
+		return m
 	default:
 		return m
 	}
