@@ -508,6 +508,12 @@ returns to the backlog/queue. Rendering
 is a per-Driver strategy (beside heartbeat parsing and usage extraction) — a
 Driver with no configured strategy, or an issue with no Dispatch logs on disk
 yet, surfaces an error in place of the transcript rather than a blank pane.
+The rendered view strips ANSI/control sequences before it ever reaches the
+terminal, since the underlying log is untrusted model/tool output (#721); the
+raw view intentionally does not, so a Dispatch log carrying crafted escape
+sequences can still move the cursor, clear the screen, or rewrite the
+terminal title when toggled to — treat `t`/`toggle` as a trusted-log-only
+debugging tool, not something to point at an unreviewed transcript.
 
 **Terminate** (`k <num>` / `kill <num>` / `terminate <num>`) ends a live
 Dispatch by hand — ADR 0024 — valid anywhere from claim to verdict: a running
