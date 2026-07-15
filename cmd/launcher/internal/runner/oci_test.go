@@ -566,31 +566,49 @@ func TestReap_RemovesStaleContainer(t *testing.T) {
 	}
 }
 
-// TestKill_ForceRemovesRegardlessOfRunningState verifies Kill's contract is
-// the opposite of Reap's: it issues `rm -f` unconditionally, with no inspect
-// call first, so it reaches a genuinely live container Reap would refuse to
-// touch.
-func TestKill_ForceRemovesRegardlessOfRunningState(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{})
+// TestKill_MissingContainer_ReturnsNilNotError verifies the common
+// settle-phase case (CI watch, merge gate): the initial Box already exited
+// successfully and Run's own reapAfterSuccess already removed it, so there
+// is no container left to kill. Runner.Kill's contract treats that as
+// success, not a failure Terminate would otherwise misreport.
+func TestKill_MissingContainer_ReturnsNilNotError(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 1}) // inspect: no such container
+	a := &ociAdapter{cli: script}
+
+	if err := a.Kill("agent-issue-1"); err != nil {
+		t.Errorf("Kill: got %v, want nil for a missing container", err)
+	}
+	if calls := callCount(t, dir); calls != 1 {
+		t.Errorf("Kill: want 1 call (inspect only, no rm attempted), got %d", calls)
+	}
+}
+
+// TestKill_RemovesExistingContainerRegardlessOfRunningState verifies Kill's
+// contract is the opposite of Reap's for a container that does exist: it
+// issues `rm -f` unconditionally once existence is confirmed, so it reaches
+// a genuinely live container Reap would refuse to touch.
+func TestKill_RemovesExistingContainerRegardlessOfRunningState(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{}, fakeCall{}) // inspect: found; rm -f: ok
 	a := &ociAdapter{cli: script}
 
 	if err := a.Kill("agent-issue-1"); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 
-	if calls := callCount(t, dir); calls != 1 {
-		t.Errorf("Kill: want 1 call (rm -f only, no inspect), got %d", calls)
+	if calls := callCount(t, dir); calls != 2 {
+		t.Errorf("Kill: want 2 calls (inspect then rm -f), got %d", calls)
 	}
-	rm := readCall(t, dir, 0)
+	rm := readCall(t, dir, 1)
 	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "agent-issue-1") {
 		t.Errorf("Kill: want `rm -f agent-issue-1`, got %v", rm)
 	}
 }
 
-// TestKill_SurfacesCLIError verifies a scripted rm failure is returned, not
-// swallowed — Terminate needs to know the reap did not land.
-func TestKill_SurfacesCLIError(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 1})
+// TestKill_RemovalFailureOnExistingContainer_ReturnsError verifies a
+// scripted rm failure against a container confirmed to exist is returned,
+// not swallowed — Terminate needs to know a genuine reap failure happened.
+func TestKill_RemovalFailureOnExistingContainer_ReturnsError(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{}, fakeCall{exit: 1}) // inspect: found; rm -f: fails
 	a := &ociAdapter{cli: script}
 
 	if err := a.Kill("agent-issue-1"); err == nil {

@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -236,7 +237,14 @@ func (a *bwrapAdapter) Kill(name string) error {
 	if proc == nil {
 		return nil
 	}
-	return proc.Kill()
+	// The process can finish (and untrackRunning's deferred delete race
+	// past the read above) between the map lookup and this Kill call --
+	// os.ErrProcessDone means it's already gone, matching the "a miss is
+	// not an error" contract exactly as much as a nil map entry does.
+	if err := proc.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return err
+	}
+	return nil
 }
 
 // IsRunning always reports false for bwrap: sandboxes are unnamed child
