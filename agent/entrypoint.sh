@@ -198,8 +198,9 @@ phase_toolchain_nudge() {
 }
 
 # phase_devshell_probe detects a Nix devShell in the cloned repo. Sets
-# _use_dev_shell and _harness_path, read by phase_prefetch and the Driver
-# invocation in main.
+# _use_dev_shell (read by phase_prefetch and run_driver_in_env's --devshell
+# switch) and _harness_path (read by phase_prefetch only -- run_driver_in_env
+# delegates devShell PATH handling to driver-exec, issue #626).
 phase_devshell_probe() {
   # Detect a Nix devShell in the cloned repo. When found the prefetch hook and
   # Driver run inside `nix develop` so the agent operates in the Target's exact
@@ -493,157 +494,63 @@ phase_prompt_assembly() {
 # $2 (--agents JSON, or "" to omit the flag) and $3 (session mode, forwarded
 # verbatim to the nix-supplied _driver_session_flags — "initial"/"resume" pin
 # or resume the issue's session id; any other value, e.g. "" for the
-# conflict-resolve pass, yields no session flags). Runs inside the Project
-# devShell when phase_devshell_probe found one (_use_dev_shell/_harness_path,
-# read via bash's dynamic scoping like every other phase function), with the
-# same relaunch-once-in-the-baked-env fallback on a devShell launch failure.
-# Surfaces the Driver's SPINDRIFT_OUTCOME line via the nix-supplied
-# _driver_extract_outcome and returns the Driver's exit status. Every temp
-# file and _UPPERCASE shadow export either invocation path marshals state
-# through is local to this function and gone once it returns.
+# conflict-resolve pass, yields no session flags). Delegates to driver-exec
+# (issue #626), the in-box Go unit that owns "run the Driver, optionally
+# inside the Project devShell" as one code path: it takes the prompt/agents/
+# session as file paths (a compiled binary crosses the devShell process
+# boundary with a plain argv, so none of the temp-file/eval marshalling this
+# function used to do is needed here), spawns the Driver directly or via
+# `nix develop --command` when phase_devshell_probe found one
+# (_use_dev_shell, read via bash's dynamic scoping like every other phase
+# function), tees the stream to a log path, filters heartbeats in-process,
+# and returns the Driver's exit status.
 run_driver_in_env() {
   local prompt="$1" agents_json="$2" session_mode="$3"
 
-  local agents_args=()
-  if [ -n "$agents_json" ]; then
-    agents_args=(--agents "$agents_json")
-  fi
   # An unrecognized session_mode (e.g. "" for the conflict-resolve pass, which
   # pins/resumes no session) falls through _driver_session_flags' case with no
-  # output, so _driver_session_args ends up empty — same as before.
-  local _driver_session_args
-  read -ra _driver_session_args <<< "$(_driver_session_flags "$session_mode")"
+  # output, so the session file below ends up empty — same as before.
+  local _driver_session_flags_rendered
+  _driver_session_flags_rendered="$(_driver_session_flags "$session_mode")"
 
-  # Decoupled output channels (#183, superseding the #123 "raw on stdout" note):
-  #
-  #   stdout → launcher captures verbatim into logs/issue-<n>.log (byte-exact,
-  #   unchanged). outcome.Classify scans that log for transient markers
-  #   (rate_limit_error, resetsAt, ...) and greps for SPINDRIFT_OUTCOME; the raw
-  #   events must never be filtered or transformed on this channel.
-  #
-  #   /tmp/heartbeat.log → cleaned coarse status lines written by
-  #   spindrift-heartbeat-filter, which reuses the #182 heartbeat parser. A human
-  #   shelling into the box can run:  tail -f /tmp/heartbeat.log
-  #   For OCI boxes:  podman exec <box> tail -f /tmp/heartbeat.log
-  #
-  # spindrift-heartbeat-filter is a transparent stdin→stdout passthrough; it adds
-  # no bytes to the stream and does not affect PIPESTATUS[0] (claude's exit code).
-  local stream_log _claude_rc_file
-  stream_log="$(mktemp)"
-  _claude_rc_file="$(mktemp)"
-  printf '1' > "$_claude_rc_file"
-
-  # The claude invocation + heartbeat-filter + tee + PIPESTATUS[0] capture used
-  # to be hand-copied between this direct path and the devShell wrapper below
-  # (issue #463) — a flag change had to be applied twice and stay byte-aligned.
-  # Rendered once here instead, under the exact variable names (prompt,
-  # agents_args, _driver_session_args, stream_log, _claude_rc_file) both paths
-  # populate, so the wrapper below can eval the identical text in its own
-  # process after reconstructing those names from the temp files it crosses the
-  # process boundary with.
-  local _DRIVER_PIPELINE
-  _DRIVER_PIPELINE="$(cat <<'PIPELINE_EOF'
-"$DRIVER_BIN" -p "$prompt" \
-  --model "${MODEL:-}" \
-  "${agents_args[@]}" \
-  "${_driver_session_args[@]}" \
-  $DRIVER_FLAGS_COMMON \
-  | spindrift-heartbeat-filter -n "$ISSUE_NUMBER" -f /tmp/heartbeat.log \
-  | tee "$stream_log"
-printf '%s' "${PIPESTATUS[0]}" > "$_claude_rc_file"
-PIPELINE_EOF
-)"
-
-  _run_driver() {
-    # Inner function: run the claude pipeline; write PIPESTATUS[0] to
-    # $_claude_rc_file. Runs either directly or inside the devShell wrapper.
-    set +e
-    # shellcheck disable=SC2086
-    eval "$_DRIVER_PIPELINE"
-    set -e
-  }
-
-  local _nix_rc=0
-  if [ "$_use_dev_shell" = "1" ]; then
-    # Write the prompt to a temp file so the wrapper can read it without
-    # embedding the full text (avoids quoting hazards).
-    local _prompt_file _agents_file _session_file _pipeline_file _driver_wrapper
-    _prompt_file="$(mktemp)"
-    printf '%s' "$prompt" > "$_prompt_file"
-    # Write agents JSON to a temp file so the wrapper can pass it to claude
-    # as a single quoted argument — avoiding word-splitting on spaces in JSON.
-    _agents_file="$(mktemp)"
-    if [ "${#agents_args[@]}" -gt 0 ]; then
-      printf '%s' "${agents_args[1]}" > "$_agents_file"
-    fi
-    # Session pin/resume args (issue #427) cross into the devShell wrapper's own
-    # process the same way: written to a file, rebuilt into an array there — a
-    # bash array cannot cross a process boundary via the environment.
-    _session_file="$(mktemp)"
-    printf '%s' "${_driver_session_args[*]}" > "$_session_file"
-    # The pipeline source itself crosses the same way (issue #463), so the
-    # wrapper evals the exact text _run_driver above evals, not a hand-copied
-    # rendering of it.
-    _pipeline_file="$(mktemp)"
-    printf '%s\n' "$_DRIVER_PIPELINE" > "$_pipeline_file"
-    # Write a wrapper that drives the claude pipeline inside the devShell.
-    # _harness_path is prepended so baked tools (spindrift-heartbeat-filter,
-    # tee, etc.) remain reachable after nix develop rewrites PATH. Variable
-    # names are reconstructed to match _run_driver's above (prompt, agents_args,
-    # _driver_session_args, stream_log, _claude_rc_file) so the evaluated
-    # pipeline text needs no per-context rewriting.
-    _driver_wrapper="$(mktemp --suffix=.sh)"
-    cat > "$_driver_wrapper" << 'DRIVER_WRAPPER_EOF'
-#!/bin/bash
-export PATH="$_HARNESS_PATH:$PATH"
-set +e
-prompt="$(cat "$_PROMPT_FILE")"
-agents_args=()
-if [ -s "$_AGENTS_FILE" ]; then
-  agents_args=("--agents" "$(cat "$_AGENTS_FILE")")
-fi
-read -ra _driver_session_args <<< "$(cat "$_SESSION_FILE")"
-stream_log="$_STREAM_LOG"
-_claude_rc_file="$_CLAUDE_RC_FILE"
-# shellcheck disable=SC2086
-eval "$(cat "$_PIPELINE_FILE")"
-DRIVER_WRAPPER_EOF
-    chmod +x "$_driver_wrapper"
-    # Exported locals: visible to the devShell child process this function
-    # spawns below, but — unlike the plain global exports the two invocation
-    # paths used to share — gone the moment this function returns, so no
-    # shadow state leaks into the rest of the script.
-    local _HARNESS_PATH="$_harness_path" _PROMPT_FILE="$_prompt_file"
-    local _AGENTS_FILE="$_agents_file" _SESSION_FILE="$_session_file"
-    local _STREAM_LOG="$stream_log" _CLAUDE_RC_FILE="$_claude_rc_file"
-    local _PIPELINE_FILE="$_pipeline_file"
-    export _HARNESS_PATH _PROMPT_FILE _AGENTS_FILE _SESSION_FILE
-    export _STREAM_LOG _CLAUDE_RC_FILE _PIPELINE_FILE
-    # MODEL comes from the preamble (not exported by default); export it so the
-    # devShell child process sees the correct resolved value, not an empty string.
-    export MODEL="${MODEL:-}"
-    # DRIVER_BIN and DRIVER_FLAGS_COMMON are plain (unexported) assignments
-    # above; export them so the devShell child process — which reads them from
-    # its own environment, not this script's variables — sees the same values.
-    export DRIVER_BIN
-    export DRIVER_FLAGS_COMMON
-    set +e
-    nix develop ".#${DEV_SHELL_NAME:-default}" --command bash "$_driver_wrapper"
-    _nix_rc=$?
-    set -e
-    rm -f "$_driver_wrapper" "$_prompt_file" "$_agents_file" "$_session_file" "$_pipeline_file"
-    # Launch-failure: nix develop itself failed before claude ran (stream empty).
-    # Relaunch once in the baked env so transient nix failures don't kill the run.
-    if [ "$_nix_rc" -ne 0 ] && [ ! -s "$stream_log" ]; then
-      echo "==> nix develop failed to launch Driver (rc=$_nix_rc, empty stream) — relaunching in baked env"
-      _run_driver
-    fi
-  else
-    _run_driver
+  # The prompt/agents/session data crosses into driver-exec as file paths --
+  # a compiled binary, unlike the devShell wrapper, needs no quoting-hazard
+  # workaround for the prompt or word-splitting-hazard workaround for JSON.
+  local _prompt_file _agents_file _session_file stream_log
+  _prompt_file="$(mktemp)"
+  printf '%s' "$prompt" > "$_prompt_file"
+  _agents_file="$(mktemp)"
+  if [ -n "$agents_json" ]; then
+    printf '%s' "$agents_json" > "$_agents_file"
   fi
-  local claude_rc
-  claude_rc="$(cat "$_claude_rc_file")"
-  rm -f "$_claude_rc_file"
+  _session_file="$(mktemp)"
+  printf '%s' "$_driver_session_flags_rendered" > "$_session_file"
+
+  # stream_log is driver-exec's teed copy of the Driver's raw stdout, read
+  # below by _driver_extract_outcome -- the launcher's own capture of stdout
+  # (logs/issue-<n>.log, byte-exact, unchanged) is separate and untouched.
+  stream_log="$(mktemp)"
+
+  local -a _devshell_flags=()
+  if [ "$_use_dev_shell" = "1" ]; then
+    _devshell_flags=(--devshell --devshell-name "${DEV_SHELL_NAME:-default}")
+  fi
+
+  local claude_rc=0
+  set +e
+  driver-exec \
+    --prompt-file "$_prompt_file" \
+    --agents-file "$_agents_file" \
+    --session-file "$_session_file" \
+    --driver-bin "$DRIVER_BIN" \
+    --driver-flags "$DRIVER_FLAGS_COMMON" \
+    --model "${MODEL:-}" \
+    --issue "$ISSUE_NUMBER" \
+    --log-path "$stream_log" \
+    "${_devshell_flags[@]}"
+  claude_rc=$?
+  set -e
+  rm -f "$_prompt_file" "$_agents_file" "$_session_file"
 
   # The launcher greps '^SPINDRIFT_OUTCOME ' from the container log, but the
   # Driver's raw transcript format buries it (claude wraps it in a stream-json
