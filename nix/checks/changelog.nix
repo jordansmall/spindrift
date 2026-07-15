@@ -16,6 +16,8 @@
         concatMapStringsSep
         hasInfix
         splitString
+        toLower
+        trim
         ;
       # Source of truth for the section map. Order here is the order the
       # headings render in CHANGELOG.md. Nothing is hidden (see VERSIONING.md).
@@ -83,6 +85,7 @@
       # via escapeRegex before building the match.
       changelogLines = splitString "\n" (builtins.readFile ../../CHANGELOG.md);
       missingFromDoc = builtins.filter (s: !hasInfix s.section versioningDoc) sections;
+      isUnreleasedHeading = line: toLower (trim line) == "## [unreleased]";
     in
     assert assertMsg (cfg ? "changelog-sections")
       ".release-please-config.json must declare changelog-sections (canonical map in nix/checks/changelog.nix)";
@@ -92,9 +95,19 @@
       "VERSIONING.md is missing changelog headings: ${
         concatMapStringsSep ", " (s: s.section) missingFromDoc
       }";
+    # Self-test (issue #666): pins isUnreleasedHeading's normalization before
+    # trusting it against the real file below.
+    assert assertMsg (isUnreleasedHeading "## [Unreleased] ")
+      "isUnreleasedHeading must match a heading with trailing whitespace";
+    assert assertMsg (isUnreleasedHeading "## [unreleased]")
+      "isUnreleasedHeading must match case-insensitively";
+    assert assertMsg (isUnreleasedHeading "## [Unreleased]")
+      "isUnreleasedHeading must match the canonical heading";
+    assert assertMsg (!isUnreleasedHeading "### [Unreleased]")
+      "isUnreleasedHeading must not match a section-level heading (### is always a section, not a release, per CHANGELOG.md's convention)";
     # release-please never emits an `[Unreleased]` heading; one appearing in
     # CHANGELOG.md is always a stale, hand-inserted duplicate (issue #614).
-    assert assertMsg (!any (line: line == "## [Unreleased]") changelogLines)
+    assert assertMsg (!any isUnreleasedHeading changelogLines)
       "CHANGELOG.md contains a stale ## [Unreleased] heading; release-please never emits one, remove the hand-inserted block";
     pkgs.runCommand "release-please-changelog" { } "touch $out";
 }
