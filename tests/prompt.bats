@@ -165,6 +165,20 @@ setup() {
   grep -qi 'bound the wait' <<<"$check"
 }
 
+@test "CHECK section (fix-prompt.md) treats a vanished exit marker as a failure, not still-pending" {
+  # issue #726: the bats layer only exercised issue-prompt.md for this
+  # assertion even though the nix-layer sibling check
+  # (mkharness-prompt-check-vanished-marker-is-failure) already covers
+  # fix-prompt.md too. $PROMPT_PATH is the Nix-rendered prompt dir (the
+  # raw template has no CHECK section -- it's injected at build time).
+  local prompt="$PROMPT_PATH/fix-prompt.md"
+  local check
+  check="$(sed -n '/^# CHECK$/,/^# LAND THE CHANGE$/p' "$prompt")"
+  [ -n "$check" ]
+  grep -qi 'vanished' <<<"$check"
+  grep -qi 'exit marker' <<<"$check"
+}
+
 @test "CHECK section tells the agent to git add new files before nix build" {
   # issue #714: nix flakes only evaluate git-tracked files. An agent that
   # creates a new file and runs `nix build` before staging it hits a
