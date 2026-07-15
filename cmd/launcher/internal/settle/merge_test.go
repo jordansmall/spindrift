@@ -382,6 +382,92 @@ func TestMergeImmediate_BlockedByChecksExhausted(t *testing.T) {
 	}
 }
 
+// TestMergeImmediate_StaleBaseTriggersProactiveRebase verifies that a PR the
+// forge reports as behind its base (NeedsUpdate — GitHub's mergeStateStatus
+// BEHIND) is rebased and re-confirmed green *before* mergeImmediate ever
+// calls Merge — even though the PR carries no textual conflict and Merge
+// would otherwise succeed outright. This is the gap that let #670 and #672
+// land a combined compile break on main (issue #936): each was individually
+// green against its own stale base, but neither was ever rebased and
+// re-tested against the other's changes before landing.
+func TestMergeImmediate_StaleBaseTriggersProactiveRebase(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.MergeErrs = []error{nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", testPR, nil)
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if len(fc.RebasedURLs) != 1 {
+		t.Errorf("Rebase called %d times, want 1 (proactive rebase on stale base)", len(fc.RebasedURLs))
+	}
+	if fc.Merged != testPR {
+		t.Errorf("Merge not called after rebase; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// TestMergeImmediate_StaleBaseCombinedBreakBlocksMerge reproduces the #670 /
+// #672 collision itself (issue #936): a PR is green and content-mergeable on
+// its own stale base, but the forge reports it BEHIND. The proactive rebase
+// re-tests it against the (now-merged-sibling-containing) base, and here
+// that combined tree fails CI — exactly the go-vet break the sibling merge
+// introduced. mergeImmediate must surface that failure and never call
+// Merge, rather than landing the still-green-looking PR.
+func TestMergeImmediate_StaleBaseCombinedBreakBlocksMerge(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", testPR, nil)
+
+	if err == nil {
+		t.Fatal("mergeImmediate: want error when the rebased combined tree fails CI, got nil")
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge must not be called when the combined tree never re-confirmed green; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.RebasedURLs) != 1 {
+		t.Errorf("Rebase called %d times, want 1", len(fc.RebasedURLs))
+	}
+}
+
+// TestMergeImmediate_StaleBaseCheckErrorFallsThroughToMerge verifies that a
+// NeedsUpdate query error does not block the landing outright — it is
+// logged and swallowed, and the normal Merge attempt proceeds (surfacing any
+// real problem through its own, already-tested error handling instead).
+func TestMergeImmediate_StaleBaseCheckErrorFallsThroughToMerge(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake()
+	fc.NeedsUpdateErr = errors.New("gh api graphql: rate limited")
+	fc.MergeErrs = []error{nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", testPR, nil)
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("Merge not called after NeedsUpdate error was swallowed; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.RebasedURLs) != 0 {
+		t.Errorf("Rebase called %d times, want 0 (no proactive rebase on a check error)", len(fc.RebasedURLs))
+	}
+}
+
 // TestApplyMergeMode_Immediate verifies that immediate mode calls fc.Merge.
 func TestApplyMergeMode_Immediate(t *testing.T) {
 	c := baseConfig()
