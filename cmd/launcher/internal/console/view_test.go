@@ -197,6 +197,23 @@ func TestView_ShowHelp_ListsBoundKeys(t *testing.T) {
 	}
 }
 
+// TestView_ShowHelp_ListsNewKeybindings verifies the help overlay lists the
+// picks/queue-driving keys wired in issue #785, and no longer claims "k"
+// moves the cursor (it Terminates instead).
+func TestView_ShowHelp_ListsNewKeybindings(t *testing.T) {
+	m := Update(NewModel(), HelpToggleMsg{})
+
+	out := View(m)
+	for _, want := range []string{"p ", "u ", "P ", "k ", "+", "-", "b "} {
+		if !strings.Contains(out, want) {
+			t.Errorf("View() = %q, want it to mention key %q", out, want)
+		}
+	}
+	if strings.Contains(out, "k / up") || strings.Contains(out, "k/up") {
+		t.Errorf("View() = %q, want no mention of \"k\" moving the cursor (it Terminates)", out)
+	}
+}
+
 // TestView_DrillInOpen_RendersTranscriptInsteadOfBacklog verifies an open
 // drill-in replaces the backlog/queue rendering with the transcript, the
 // rendered form by default, plus a hint for the toggle/close keystrokes —
