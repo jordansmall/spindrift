@@ -40,7 +40,8 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, result dispat
 	o := result.Outcome
 	if verdict, ok := forge.ParseVerdict(o.Status); ok {
 		if err := r.it.CompleteVerdict(num, verdict); err != nil {
-			fmt.Fprintf(os.Stderr, "    ?? #%s: could not apply verdict %s: %v\n", num, verdict, err)
+			fmt.Printf("    #%s  landing=%s  status=verdict-apply-failed  !! %v\n", num, o.Landing, err)
+			return
 		}
 		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
 		return
