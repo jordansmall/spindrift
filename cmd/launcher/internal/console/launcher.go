@@ -298,6 +298,17 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		return issues, edges, sources, err
 	}
 	for {
+		// Label, InProgressLabel, and OverlapGate are deliberately left
+		// zero-value (#706). Label==InProgressLabel (both "") makes
+		// claimIssue (waves/engine.go) skip a second Dispatchable->InProgress
+		// transition — Queue.Discover (queue.go, the discover closure above)
+		// already performed that claim itself. OverlapGate=="" leaves the
+		// touch-overlap gate a no-op, because Console picks are
+		// operator-directed, not batch-discovered, so they're exempt from
+		// deferring on another in-progress issue's touched files.
+		// TestRunContinuous_ConsoleConfig_SkipsRedundantClaim and
+		// TestRunContinuous_DivergentLabels_DoubleClaims (launch_test.go)
+		// pin this: diverging Label from InProgressLabel double-claims.
 		err := waves.RunContinuous(waves.Config{Limiter: l.limiter(), Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue, l.signalRefresh, l.registry()}, discover, l.freshnessChecker())
 
 		if errors.Is(err, waves.ErrImageStale) {
