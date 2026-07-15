@@ -25,10 +25,11 @@ const defaultPollInterval = 90 * time.Second
 // then repeatedly read one command per line from in and re-render until the
 // operator quits or in runs out. Between operator commands, it also
 // re-renders on two other triggers: launch signaling a refresh after its own
-// tracker write (a claim, a settle, a promotion, #647 AC4), and a slow fixed
-// background poll (#647 AC5) — both no-ops when launch is nil, since there is
-// then nothing to refresh from besides an explicit "r". It is the only place
-// that touches a real terminal in production; tests drive it with a scripted
+// tracker write (a claim, a settle, a promotion, #647 AC4) — a no-op when
+// launch is nil, since there is then no Queue to write to — and a slow fixed
+// background poll (#647 AC5), which runs regardless of launch, re-querying
+// the backlog even in a launch-less session. It is the only place that
+// touches a real terminal in production; tests drive it with a scripted
 // io.Reader instead. launch is nil for a launch-less session (Pick still
 // promotes and queues, but nothing runs); production wires a real Launcher.
 func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer, launch *Launcher) error {
