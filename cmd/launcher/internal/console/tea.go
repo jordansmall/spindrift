@@ -9,9 +9,7 @@
 package console
 
 import (
-	"fmt"
 	"io"
-	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -205,12 +203,18 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	case "u":
 		t = t.unpickHighlighted()
 	case "k":
-		if num := t.highlightedNumber(); num != "" && t.launch != nil {
+		if num := t.highlightedNumber(); num != "" && t.isLive(num) {
 			t.m = Update(t.m, TerminateRequestedMsg{Number: num})
 		}
 	case "+":
 		if t.launch != nil {
 			t.launch.Resize(1)
+			// Resize's own Grown signal only reaches a drain already
+			// running; a session with no active drain (nothing picked yet,
+			// or the last one already went idle) has no listener to catch
+			// it, so a raise falls back to tryLaunch — a no-op if a drain
+			// is in fact already running.
+			t.launch.tryLaunch(t.tracker, t.pwd)
 		}
 	case "-":
 		if t.launch != nil {
@@ -278,15 +282,33 @@ func (t teaModel) handleTerminateConfirmKey(msg tea.KeyMsg) teaModel {
 	num := t.m.PendingTerminate
 	if s := msg.String(); s == "y" || s == "Y" {
 		if t.launch != nil {
-			if err := t.launch.Terminate(t.tracker, num); err != nil {
-				fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: %v\n", num, err)
-			}
+			// Terminate already logs a reap failure to stderr itself
+			// (launcher.go); writing it again here would both duplicate the
+			// line and risk smearing the alt-screen render mid-frame.
+			t.launch.Terminate(t.tracker, num)
 		}
 		t.m = Update(t.m, TerminateConfirmedMsg{Number: num})
 		return t
 	}
 	t.m = Update(t.m, TerminateCancelledMsg{})
 	return t
+}
+
+// isLive reports whether num has an actual live Dispatch to reclaim — ADR
+// 0024's Terminate is scoped to "claim to verdict", which on the Console's
+// own Queue is exactly PickRunning (set the moment a claim succeeds,
+// cleared only on settle); a plain backlog row that was never picked, or a
+// pick still queued/held/claiming, has nothing to terminate.
+func (t teaModel) isLive(num string) bool {
+	if t.launch == nil {
+		return false
+	}
+	for _, live := range t.launch.LiveIssues() {
+		if live == num {
+			return true
+		}
+	}
+	return false
 }
 
 // highlightedNumber returns the cursor's highlighted issue number, or "" when
