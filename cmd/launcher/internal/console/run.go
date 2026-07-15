@@ -79,6 +79,15 @@ func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer, la
 		case <-refresh:
 			m = doRefresh(m, tracker, pwd, launch)
 		case <-ticker.C:
+			// A held pick's blocker can clear out-of-band — another agent,
+			// a human merge — with no sibling Dispatch in this session left
+			// to settle and trigger Discover's own refill. The poll is the
+			// only remaining re-evaluation trigger once the drain has gone
+			// idle, so nudge it too (a no-op via l.launching when a drain
+			// is already running or nothing is queued/held) (#650).
+			if launch != nil {
+				launch.tryLaunch(tracker, pwd)
+			}
 			m = doRefresh(m, tracker, pwd, launch)
 		}
 		if !m.Quitting {
