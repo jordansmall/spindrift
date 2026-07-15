@@ -58,18 +58,24 @@ let
   # and function definitions (ADR 0009). /home/agent is the image's fixed
   # HOME (see lib/image.nix's passwdFile), so the skills dir is baked as an
   # absolute path rather than depending on $HOME at run time. Each var keeps
-  # the `${VAR:-<baked>}` shape agent/entrypoint.sh's own copy used to
-  # hand-write (issue #624 kills that hand-written copy, not the shape
-  # itself) so a real Box -- where nothing ever sets DRIVER_BIN/
+  # the same override-if-unset behavior agent/entrypoint.sh's own copy used
+  # to hand-write (issue #624 kills that hand-written copy, not the
+  # behavior) so a real Box -- where nothing ever sets DRIVER_BIN/
   # DRIVER_FLAGS_COMMON/DRIVER_SKILLS_DIR in its environment -- always runs
   # the baked value, while a bats fixture can still redirect DRIVER_SKILLS_DIR
-  # at a writable test directory the same way it always could.
+  # at a writable test directory the same way it always could. The baked
+  # value is assigned as its own statement (never spliced inside a bash
+  # `${VAR:-default}`) so lib.escapeShellArg's quoting stays intact for a
+  # future Driver whose bin/flags/path contain shell metacharacters.
   renderPreamble =
     driverEntry:
     ''
-      DRIVER_BIN="''${DRIVER_BIN:-${driverEntry.bin}}"
-      DRIVER_FLAGS_COMMON="''${DRIVER_FLAGS_COMMON:-${driverEntry.flagsCommon}}"
-      DRIVER_SKILLS_DIR="''${DRIVER_SKILLS_DIR:-/home/agent/${driverEntry.skillsDirRelative}}"
+      : "''${DRIVER_BIN:=}"
+      [ -n "''${DRIVER_BIN}" ] || DRIVER_BIN=${lib.escapeShellArg driverEntry.bin}
+      : "''${DRIVER_FLAGS_COMMON:=}"
+      [ -n "''${DRIVER_FLAGS_COMMON}" ] || DRIVER_FLAGS_COMMON=${lib.escapeShellArg driverEntry.flagsCommon}
+      : "''${DRIVER_SKILLS_DIR:=}"
+      [ -n "''${DRIVER_SKILLS_DIR}" ] || DRIVER_SKILLS_DIR=${lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"}
     ''
     + renderFunctions driverEntry;
 in
@@ -78,7 +84,6 @@ in
     entries
     assertShape
     requiredAttrs
-    renderFunctions
     renderPreamble
     ;
 }
