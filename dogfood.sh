@@ -47,12 +47,12 @@ if [ -f harness.env ]; then
 fi
 BASE_BRANCH="${BASE_BRANCH:-main}"      # must match env-schema.nix baseBranch.default
 MAX_PARALLEL="${MAX_PARALLEL:-3}"      # must match env-schema.nix maxParallel.default
-export MAX_JOBS="${MAX_JOBS:-$MAX_PARALLEL}"
+MAX_JOBS="${MAX_JOBS:-$MAX_PARALLEL}"
 # env-schema.nix continuousDispatch.default is off (empty); dogfood overrides
 # it to on so the loop drives slot-refill dispatch instead of one wave and
 # exit (#528). `-` (not `:-`) preserves an operator setting CONTINUOUS_DISPATCH=
 # (empty) in harness.env to opt back out.
-export CONTINUOUS_DISPATCH="${CONTINUOUS_DISPATCH-1}"
+CONTINUOUS_DISPATCH="${CONTINUOUS_DISPATCH-1}"
 : "${REPO_SLUG:?set REPO_SLUG=owner/repo in harness.env}"
 # Selects which Dispatch kind (ADR 0022) the loop drives: "dispatch" (default,
 # work) or "research". Both share the launcher's exit-code contract (2 empty
@@ -153,9 +153,9 @@ echo "==> dogfood: nix run .# -- build"
 nix run .# -- build
 
 while :; do
-  echo "==> dogfood: nix run .# -- $DOGFOOD_KIND"
+  echo "==> dogfood: nix run .# -- $DOGFOOD_KIND --max-jobs $MAX_JOBS --continuous-dispatch $CONTINUOUS_DISPATCH"
   nix_exit=0
-  nix run .# -- "$DOGFOOD_KIND" || nix_exit=$?
+  nix run .# -- "$DOGFOOD_KIND" --max-jobs "$MAX_JOBS" --continuous-dispatch "$CONTINUOUS_DISPATCH" || nix_exit=$?
 
   if [ "$nix_exit" -eq 2 ]; then
     echo "==> dogfood: queue empty — done after $iteration iteration(s)."
