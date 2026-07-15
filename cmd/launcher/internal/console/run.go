@@ -38,6 +38,7 @@ func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer, la
 	m = Update(m, DogfoodNotice(pwd))
 	m = Update(m, Refresh(tracker))
 	m = syncQueue(m, launch, pwd)
+	m = syncStale(m, launch)
 	fmt.Fprint(out, View(m))
 
 	scanner := bufio.NewScanner(in)
@@ -92,6 +93,7 @@ func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer, la
 		}
 		if !m.Quitting {
 			m = syncQueue(m, launch, pwd)
+			m = syncStale(m, launch)
 			fmt.Fprint(out, View(m))
 		}
 	}
@@ -147,6 +149,19 @@ func syncQueue(m Model, launch *Launcher, pwd string) Model {
 	return Update(m, CapMsg{Cap: launch.Cap(), Live: launch.Live()})
 }
 
+// syncStale installs launch's live image-freshness/rebuild state onto m, so
+// every render — not just the one right after a command — reflects a
+// stale verdict a background drain saw, or a rebuild's progress/outcome,
+// exactly as syncQueue does for the picks queue (issue #652). A nil launch
+// leaves m untouched.
+func syncStale(m Model, launch *Launcher) Model {
+	if launch == nil {
+		return m
+	}
+	stale, msg, rebuilding, rebuildErr := launch.StaleStatus()
+	return Update(m, StaleStatusMsg{Stale: stale, Message: msg, Rebuilding: rebuilding, RebuildErr: rebuildErr})
+}
+
 // applyCommand parses one line of operator input into a Msg and applies it.
 // Recognized commands: "q"/"quit" to exit, "r"/"refresh" to re-query the
 // tracker, "f" (bare) to clear the label filter, "f <text>" to set it,
@@ -156,7 +171,8 @@ func syncQueue(m Model, launch *Launcher, pwd string) Model {
 // see applyTerminateConfirm. "+"/"-" raise or lower the session's live
 // parallelism cap by one (issue #653, ADR 0023): raising launches a held or
 // queued pick immediately, lowering only gates future launches — it never
-// terminates a running Dispatch. A successful pick also lands on
+// terminates a running Dispatch. "b"/"build"/"rebuild" fires an in-session
+// image rebuild (issue #652). A successful pick also lands on
 // launch.Queue and kicks off a background launch attempt, when launch is
 // non-nil.
 func applyCommand(m Model, tracker forge.IssueTracker, pwd string, launch *Launcher, line string) Model {
@@ -220,6 +236,11 @@ func applyCommand(m Model, tracker forge.IssueTracker, pwd string, launch *Launc
 			return m
 		}
 		launch.Resize(-1)
+		return m
+	case "b", "build", "rebuild":
+		if launch != nil {
+			launch.Rebuild(tracker, pwd)
+		}
 		return m
 	default:
 		return m
