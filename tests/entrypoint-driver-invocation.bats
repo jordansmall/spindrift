@@ -112,3 +112,13 @@ FAKE
   [[ "$output" != *"/nix/store is writable"* ]]
 }
 
+# issue #624: DRIVER_BIN/DRIVER_FLAGS_COMMON/DRIVER_SKILLS_DIR are baked by
+# the nix-rendered Driver preamble, never hand-copied fallback literals. If
+# that preamble never ran, the Box must die with a clear message instead of
+# silently impersonating the claude Driver.
+@test "entrypoint fails fast naming DRIVER_BIN when the Driver preamble never ran" {
+  run env -u DRIVER_BIN -u DRIVER_FLAGS_COMMON -u DRIVER_SKILLS_DIR bash "$ENTRYPOINT_SRC"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"DRIVER_BIN"* ]]
+}
+
