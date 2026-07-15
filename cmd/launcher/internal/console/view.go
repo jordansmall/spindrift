@@ -29,6 +29,9 @@ func View(m Model) string {
 	if m.Err != nil {
 		fmt.Fprintf(&b, "refresh failed: %s\n", m.Err)
 	}
+	if m.Cap > 0 {
+		fmt.Fprintf(&b, "cap: %d/%d\n", m.Live, m.Cap)
+	}
 	if len(m.Picks) > 0 {
 		b.WriteString("picks:\n")
 		for _, p := range m.Picks {
