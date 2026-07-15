@@ -29,3 +29,19 @@ func ResolveOpenPR(cf CodeForge, num string) (PRForIssue, error) {
 	}
 	return PRForIssue{Found: true, URL: got.URL, IsDraft: got.IsDraft}, nil
 }
+
+// ResolveOpenPRFiles resolves num's open PR and returns the paths it
+// changes, absorbing the PRForge assertion so callers don't need their own
+// after ResolveOpenPR already made one. Mirrors ResolveOpenPR's absent
+// policy: a push-only Code Forge and "no open PR yet" both resolve to (nil,
+// nil); a found PR's ListPRFiles failure propagates as a non-nil error.
+func ResolveOpenPRFiles(cf CodeForge, num string) ([]string, error) {
+	res, err := ResolveOpenPR(cf, num)
+	if err != nil || !res.Found {
+		return nil, err
+	}
+	// res.Found is only true when cf implements PRForge (ResolveOpenPR's own
+	// contract), so this assertion always succeeds here.
+	pr := cf.(PRForge)
+	return pr.ListPRFiles(res.URL)
+}
