@@ -160,11 +160,14 @@ func refList(nums []string, sources map[string]forge.DepSource) string {
 // or PickHeld — closing the window between Discover's readiness snapshot
 // and its actual tracker claim so a concurrent Unpick (Remove) always wins:
 // a pick removed in that window is never claimed, matching Unpick's "zero
-// Issue Tracker calls, never launches" guarantee (#650).
+// Issue Tracker calls, never launches" guarantee (#650). Scans back-to-front
+// like setState, so a duplicate number (a terminated row left behind by
+// ADR-0024's Terminate, plus a fresh re-pick) targets the newest row, not
+// the stale terminal one.
 func (q *Queue) tryMarkClaiming(num string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for i := range q.picks {
+	for i := len(q.picks) - 1; i >= 0; i-- {
 		if q.picks[i].Number == num {
 			if q.picks[i].State != PickQueued && q.picks[i].State != PickHeld {
 				return false
