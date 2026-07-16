@@ -14,6 +14,7 @@
         assertMsg
         any
         concatMapStringsSep
+        concatStringsSep
         hasInfix
         splitString
         toLower
@@ -85,7 +86,12 @@
       # via escapeRegex before building the match.
       changelogLines = splitString "\n" (builtins.readFile ../../CHANGELOG.md);
       missingFromDoc = builtins.filter (s: !hasInfix s.section versioningDoc) sections;
-      isUnreleasedHeading = line: toLower (trim line) == "## [unreleased]";
+      # Collapses runs of internal spaces/tabs to a single space so
+      # "##  [Unreleased]" and "##\t[Unreleased]" compare equal to the
+      # canonical heading below (trim alone only strips the ends).
+      collapseWs =
+        s: concatStringsSep " " (builtins.filter builtins.isString (builtins.split "[ \t]+" s));
+      isUnreleasedHeading = line: toLower (collapseWs (trim line)) == "## [unreleased]";
     in
     assert assertMsg (cfg ? "changelog-sections")
       ".release-please-config.json must declare changelog-sections (canonical map in nix/checks/changelog.nix)";
@@ -108,6 +114,10 @@
       "isUnreleasedHeading must match the canonical heading";
     assert assertMsg (!isUnreleasedHeading "### [Unreleased]")
       "isUnreleasedHeading must not match a section-level heading (### is always a section, not a release, per CHANGELOG.md's convention)";
+    assert assertMsg (isUnreleasedHeading "##  [Unreleased]")
+      "isUnreleasedHeading must match a heading with doubled internal whitespace";
+    assert assertMsg (isUnreleasedHeading "##\t[Unreleased]")
+      "isUnreleasedHeading must match a heading with a tab in place of a space";
     # release-please never emits an `[Unreleased]` heading; one appearing in
     # CHANGELOG.md is always a stale, hand-inserted duplicate (issue #614).
     assert assertMsg (!any isUnreleasedHeading changelogLines)
