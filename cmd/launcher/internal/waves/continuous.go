@@ -158,7 +158,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			defer d.Close()
 			result := d.Run()
 			switch {
-			case cfg.Terminated.Marked(iss.Number):
+			case cfg.Terminated.Marked(iss.Number, iss.Generation):
 				// Terminate (ADR 0024, issue #649) already reaped this Box,
 				// transitioned the issue back to Dispatchable, and recorded
 				// its own comment/log line -- neither a Failed transition
@@ -167,10 +167,10 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			case !result.Success:
 				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.Number, iss.Number)
 				transitionState(it, iss.Number, forge.InProgress, forge.Failed)
-				s.Fail(iss.Number, result)
+				s.Fail(iss.Number, iss.Generation, result)
 			default:
 				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.Number, iss.Number)
-				s.Settle(d, iss.Number, result)
+				s.Settle(d, iss.Number, iss.Generation, result)
 			}
 			limiter.Release()
 			mu.Lock()

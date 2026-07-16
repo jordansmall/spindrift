@@ -54,6 +54,15 @@ const (
 type Issue struct {
 	Number string
 	Title  string
+
+	// Generation is the terminate.Registry generation this issue's claim was
+	// launched under (terminate.Registry.Begin, issue #743) — nil-Registry
+	// callers (every headless dispatch path) leave it at its zero value,
+	// which Registry.Marked never matches. Console's discover closure sets
+	// it on every freshly claimed issue so the Settle call this dispatch
+	// eventually makes checks termination against its own incarnation, not
+	// whichever one last happened to hold the issue number.
+	Generation uint64
 }
 
 // Input is what a caller supplies to NewPlan: the batch to dispatch and the
