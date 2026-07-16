@@ -418,7 +418,7 @@ Type a command and press enter:
 | `p <num>` / `pick <num>` | Pick issue `<num>` — the launch button |
 | `pa` / `pick-all-ready` | Pick every issue currently `Dispatchable` — the bulk launch button |
 | `u <num>` / `unpick <num>` | Unpick a queued-but-unlaunched pick |
-| `d <num>` / `drill <num>` | Drill in: open `<num>`'s rendered transcript |
+| `enter` (queue focus) | Drill in: open the highlighted pick's rendered transcript |
 | `t` / `toggle` | toggle the open transcript between rendered and raw |
 | `x` / `close` | close the transcript view, back to the backlog/queue |
 | `k <num>` / `kill <num>` / `terminate <num>` | ask to Terminate `<num>`'s live Dispatch — prompts `y`/`N` to confirm |
@@ -498,7 +498,7 @@ and a slow background poll re-queries on a fixed cadence (60-120s) even on an
 otherwise idle session. Nothing refreshes faster than that poll; only the
 session's own writes and the operator's own `r` trigger a refresh in between.
 
-**Drill-in** (`d <num>`) opens `<num>`'s rendered transcript: assistant turns
+**Drill-in** (Enter) opens the highlighted pick's rendered transcript: assistant turns
 and tool calls, readable, spanning the whole Dispatch — initial run, every fix
 pass, and conflict-resolve — concatenated in order with a `=== pass: ... ===`
 boundary between them, since the Dispatch (claim to verdict) is the domain
