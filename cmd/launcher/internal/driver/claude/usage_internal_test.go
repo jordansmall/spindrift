@@ -4,8 +4,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -25,7 +27,14 @@ func TestExtractUsage_BreakdownByRoleError(t *testing.T) {
 	}
 	defer func() { breakdownByRole = orig }()
 
-	report, err := ExtractUsage(path)
+	var report usage.Report
+	var err error
+	stderr := testutil.CaptureStderr(t, func() {
+		report, err = ExtractUsage(path)
+	})
+	if !strings.Contains(stderr, path) || !strings.Contains(stderr, "simulated I/O error") {
+		t.Errorf("stderr = %q, want it to mention the log path and the error", stderr)
+	}
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
