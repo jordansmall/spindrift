@@ -152,8 +152,10 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 	if len(workMissing) > 0 {
 		return fmt.Errorf("one or more triage labels are still missing after creation")
 	}
-	if len(researchMissing) == 0 {
-		fmt.Fprintln(w, "ok: all triage labels present")
+	if len(researchMissing) > 0 {
+		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022) — does not fail this check\n", len(researchMissing))
+		return nil
 	}
+	fmt.Fprintln(w, "ok: all triage and research labels present")
 	return nil
 }
