@@ -5,8 +5,9 @@ import (
 	"os/exec"
 )
 
-// ValidateRuntime checks that runtime ("podman", "docker", or "bwrap") names
-// a binary available on PATH, guarding the same Config.Runtime field NewOCI
+// ValidateRuntime checks that runtime ("podman", "docker", "rancher", or
+// "bwrap") names a binary available on PATH — via runtimeCLI for "rancher",
+// which maps to "nerdctl" — guarding the same Config.Runtime field NewOCI
 // and the adapter-selection switch consume.
 func ValidateRuntime(runtime string) error {
 	if runtime == "" {

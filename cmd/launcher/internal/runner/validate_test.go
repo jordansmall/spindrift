@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -30,11 +31,18 @@ func TestValidateRuntime_OnPath(t *testing.T) {
 }
 
 // TestValidateRuntime_RancherLooksUpNerdctl verifies ValidateRuntime("rancher")
-// looks up "nerdctl" on PATH (not the literal string "rancher") and, when
-// absent, reports a Rancher-Desktop/containerd-mode-flavored error naming
-// nerdctl (issue #1274).
+// looks up "nerdctl" on PATH (not the literal string "rancher"): when nerdctl
+// is absent it reports a Rancher-Desktop/containerd-mode-flavored error
+// naming nerdctl; when present (some hosts ship it) it succeeds like any
+// other on-PATH runtime (issue #1274).
 func TestValidateRuntime_RancherLooksUpNerdctl(t *testing.T) {
 	err := ValidateRuntime("rancher")
+	if _, lookErr := exec.LookPath("nerdctl"); lookErr == nil {
+		if err != nil {
+			t.Errorf("ValidateRuntime(\"rancher\") = %v, want nil (nerdctl on PATH)", err)
+		}
+		return
+	}
 	if err == nil {
 		t.Fatal("ValidateRuntime(\"rancher\") should error when nerdctl is absent from PATH")
 	}
