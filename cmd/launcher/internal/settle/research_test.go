@@ -8,6 +8,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // researchLabels/researchVerdictLabels mirror ADR 0022's fixed research
@@ -99,7 +100,7 @@ func TestResearchSettle_CompleteVerdictError(t *testing.T) {
 	}
 
 	s := NewResearchSettle(fc)
-	out := captureStdout(t, func() {
+	out := testutil.CaptureStdout(t, func() {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
 
