@@ -96,7 +96,10 @@
         concatMapStringsSep ", " (s: s.section) missingFromDoc
       }";
     # Self-test (issue #666): pins isUnreleasedHeading's normalization before
-    # trusting it against the real file below.
+    # trusting it against the real file below. Deliberately excludes
+    # section-level (###) headings: per CHANGELOG.md's convention (see
+    # VERSIONING.md#what-lands-in-the-changelog), ## is always a release
+    # heading and ### is always a section heading, never a release.
     assert assertMsg (isUnreleasedHeading "## [Unreleased] ")
       "isUnreleasedHeading must match a heading with trailing whitespace";
     assert assertMsg (isUnreleasedHeading "## [unreleased]")

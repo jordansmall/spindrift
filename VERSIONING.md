@@ -78,6 +78,11 @@ record, not a curated highlight reel. This is independent of version bumping:
 which type triggers a MINOR vs PATCH bump is governed by the [pre-1.0
 policy](#pre-10-policy) above, not by where the commit appears here.
 
+Heading levels distinguish releases from sections: `##` always marks a
+release (`## [0.4.2](...)`), `###` always marks one of the sections above
+(`### Features`, `### Bug Fixes`, ...). A `###` heading is never a release,
+even one that happens to read `[Unreleased]`.
+
 The map, and the requirement that each heading is documented in this table, are
 pinned by the `release-please-changelog` flake check (`nix/checks.nix`) — edit
 the map in one place and the check fails until the config and this table agree.
