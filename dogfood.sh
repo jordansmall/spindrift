@@ -47,6 +47,12 @@ if [ -f harness.env ]; then
 fi
 BASE_BRANCH="${BASE_BRANCH:-main}"      # must match env-schema.nix baseBranch.default
 MAX_PARALLEL="${MAX_PARALLEL:-3}"      # must match env-schema.nix maxParallel.default
+case "$MAX_PARALLEL" in
+  '' | *[!0-9]*)
+    echo "!! MAX_PARALLEL must be a positive integer, got: $MAX_PARALLEL" >&2
+    exit 1
+    ;;
+esac
 MAX_JOBS="${MAX_JOBS:-$MAX_PARALLEL}"
 # env-schema.nix continuousDispatch.default is off (empty); dogfood overrides
 # it to on so the loop drives slot-refill dispatch instead of one wave and

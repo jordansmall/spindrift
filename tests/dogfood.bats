@@ -213,3 +213,11 @@ setup() {
   [[ "$output" == *"MEMORY_LIMIT=5g"* ]]
 }
 
+@test "dogfood aborts with a clear message when MAX_PARALLEL is non-numeric" {
+  run env BASE_BRANCH=main MAX_PARALLEL=garbage bash "$WORK/dogfood.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"MAX_PARALLEL"* ]]
+  [[ "$output" != *"unbound variable"* ]]
+  [[ "$output" != *"arithmetic syntax error"* ]]
+}
+
