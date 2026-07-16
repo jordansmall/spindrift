@@ -549,18 +549,23 @@ func positionLabel(offset, itemBudget, total int) string {
 	return fmt.Sprintf(" (%d-%d of %d)", offset+1, offset+shown, total)
 }
 
-// focusedPageSize returns the number of item rows one page jump (pgup/
-// pgdown) moves the focused body column's viewport by — its live item
-// budget, the same figure View renders with, so a page jump always covers
-// exactly one screenful and stays correct across a terminal resize instead
-// of a value fixed at startup (issue #1037 AC1/AC2). Unlike the drill-in
-// transcript's fixed drillInPageSize, this is recomputed on every keypress.
+// focusedPageSize returns the number of rows one page jump (pgup/pgdown)
+// moves the focused body column's viewport by — the row count actually
+// rendered at its current offset (windowedRowCount, the same figure
+// positionLabel and writeWindowedRows use), not the raw item budget. A
+// truncated window holds one row back for the "N more below" affordance, so
+// paging by the raw budget would overshoot by one and skip the row right
+// past the fold; paging by what's actually on screen lands exactly on the
+// first row the operator hasn't seen yet, and stays correct across a
+// terminal resize instead of a value fixed at startup (issue #1037 AC1/AC2).
+// Unlike the drill-in transcript's fixed drillInPageSize, this is
+// recomputed on every keypress.
 func focusedPageSize(m Model) int {
 	backlogBudget, queueBudget := bodyColumnBudgets(m)
 	if m.Focus == FocusQueue {
-		return columnItemBudget(queueBudget)
+		return windowedRowCount(len(m.Picks)-m.QueueOffset, columnItemBudget(queueBudget))
 	}
-	return columnItemBudget(backlogBudget)
+	return windowedRowCount(len(m.Visible())-m.BacklogOffset, columnItemBudget(backlogBudget))
 }
 
 // columnItemBudget converts a column's row budget (label line included, as
