@@ -441,10 +441,23 @@ in
       bashOut = renderers.renderBashCompletion syntheticSchema;
       zshOut = renderers.renderZshCompletion syntheticSchema;
     in
-    assert assertMsg (hasInfix "--aliased-choice|--ac)" bashOut)
-      "renderBashCompletion's choicesFlagBranch must match both the canonical flag name and the --ac alias in one case arm, got: ${bashOut}";
-    assert assertMsg (hasInfix "--aliased-choice|--ac)" zshOut)
-      "renderZshCompletion's choicesFlagBranch must match both the canonical flag name and the --ac alias in one case arm, got: ${zshOut}";
+    assert assertMsg
+      (hasInfix ''
+        --aliased-choice|--ac)
+          # shellcheck disable=SC2207 # COMPREPLY split-on-space is the standard completion idiom; mapfile needs bash 4+
+          COMPREPLY=($(compgen -W "one two" -- "$cur"))
+          return 0
+          ;;
+      '' bashOut)
+      "renderBashCompletion's choicesFlagBranch must complete both the canonical flag name and the --ac alias to the choices list in one case arm, got: ${bashOut}";
+    assert assertMsg
+      (hasInfix ''
+        --aliased-choice|--ac)
+          compadd -- one two
+          return
+          ;;
+      '' zshOut)
+      "renderZshCompletion's choicesFlagBranch must complete both the canonical flag name and the --ac alias to the choices list in one case arm, got: ${zshOut}";
     pkgs.runCommand "renderer-choices-alias-shape" { } "touch $out";
 
   # The generated bash completion script must totally cover the schema and the
