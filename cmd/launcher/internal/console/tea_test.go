@@ -843,6 +843,25 @@ func TestTea_WithLauncher_RendersHeldPickWithBlockedByBadge(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
+// TestTea_WithLauncher_RendersBlockerDespiteLongTitle verifies a held pick's
+// "held by #N" badge reaches the rendered output through the tea layer even
+// paired with a realistically long title on an 80-column terminal — the
+// queue row previously put Title before BlockedBy, so clip()'s tail
+// truncation dropped the blocker badge first (issue #858).
+func TestTea_WithLauncher_RendersBlockerDespiteLongTitle(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the launcher retry backoff for the dispatch workflow", State: forge.IssueOpen})
+
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the launcher retry backoff for the dispatch workflow", State: PickHeld, BlockedBy: "#41 (native)"})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "held", "held by #41 (native)")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
 // TestTea_StaleStatus_RendersBanner verifies the tea layer's per-render sync
 // installs the launcher's live stale verdict onto the view, exactly as
 // syncQueue does for the picks queue — the operator sees the banner without
