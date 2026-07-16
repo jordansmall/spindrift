@@ -33,6 +33,9 @@
     src = builtins.readFile "${matt-skills}/skills/engineering/tdd/SKILL.md";
   }
   {
+    # Upstream SKILL.md references `/setup-matt-pocock-skills`, a skill this
+    # repo does not bake — dangling as-is (issue #816), same accepted
+    # tradeoff as code-review below.
     name = "to-tickets";
     src = builtins.readFile "${matt-skills}/skills/engineering/to-tickets/SKILL.md";
   }
@@ -41,6 +44,11 @@
     src = builtins.readFile "${jordan-skills}/commit/SKILL.md";
   }
   {
+    # Upstream SKILL.md references `/setup-matt-pocock-skills` and
+    # `docs/agents/issue-tracker.md`, neither baked/shipped here. Left
+    # dangling on purpose, matching the to-tickets precedent above: #787
+    # punted the trim-vs-keep call to the implementer, who kept it verbatim;
+    # no incident from to-tickets carrying the same dangling ref (#816).
     name = "code-review";
     src = builtins.readFile "${matt-skills}/skills/engineering/code-review/SKILL.md";
   }
