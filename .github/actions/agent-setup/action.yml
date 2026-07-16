@@ -1,10 +1,13 @@
 name: Agent setup
 description: >-
   Shared dispatch/recover prologue: checkout, claim the issue, install Nix,
-  build the agent image, and export the env values every spindrift subcommand
-  reads (bot identity included). Both agent-dispatch.yml and
-  agent-recover.yml call this so the claim/install/build steps and the git
-  bot identity literal exist exactly once.
+  build the agent image, export the plumbing env (RUNTIME + secrets) every
+  spindrift subcommand reads, and resolve the bot git identity. Knob values
+  (repo, base branch, bot identity) are surfaced as step outputs so callers
+  pass them to spindrift as --flags rather than ambient env (ADR 0020: knob
+  env overrides are deprecated). Both agent-dispatch.yml and agent-recover.yml
+  call this so the claim/install/build steps and the git bot identity literal
+  exist exactly once.
 
 inputs:
   gh-token:
@@ -17,10 +20,7 @@ inputs:
     description: Issue number to claim
     required: true
   repo:
-    description: owner/repo slug, exported as REPO_SLUG
-    required: true
-  base-branch:
-    description: Default branch, exported as BASE_BRANCH
+    description: owner/repo slug for the claim step's gh calls
     required: true
   claim-add-label:
     description: Label to add when claiming the issue
@@ -37,9 +37,21 @@ inputs:
   git-user-email:
     description: >-
       Bot git user.email. Empty falls back to the default baked into this
-      action's "Export shared env" step, the sole definition of that literal.
+      action's "Resolve bot identity" step, the sole definition of that literal.
     required: false
     default: ""
+
+outputs:
+  git-user-name:
+    description: >-
+      Resolved bot git user.name (the git-user-name input, or the baked
+      default). Callers pass it to spindrift as --git-user-name.
+    value: ${{ steps.identity.outputs.git-user-name }}
+  git-user-email:
+    description: >-
+      Resolved bot git user.email (the git-user-email input, or the baked
+      default). Callers pass it to spindrift as --git-user-email.
+    value: ${{ steps.identity.outputs.git-user-email }}
 
 runs:
   using: composite
@@ -48,21 +60,28 @@ runs:
     # before this `uses: ./.github/actions/agent-setup` step runs, since
     # GitHub resolves and loads this action.yml from the checked-out tree.
 
-    # $GITHUB_ENV persists across the rest of the job, including steps back
-    # in the calling workflow, so this is the single place these values (and
-    # the bot identity literal) are defined. Exported before the build step
-    # below: spindrift's build() reads RUNTIME directly and fails if it's
-    # unset.
+    # $GITHUB_ENV persists across the rest of the job. Only RUNTIME (a nix
+    # plumbing artifact, not a knob) and the secrets live here — knob values
+    # (repo, base branch, bot identity) are surfaced as outputs below and
+    # passed as --flags, since ambient knob env now draws a deprecation
+    # warning (ADR 0020). Exported before the build step below: spindrift's
+    # build() reads RUNTIME directly and fails if it's unset.
     - name: Export shared env
       shell: bash
       run: |
         echo "RUNTIME=docker" >> "$GITHUB_ENV"
-        echo "REPO_SLUG=${{ inputs.repo }}" >> "$GITHUB_ENV"
-        echo "BASE_BRANCH=${{ inputs.base-branch }}" >> "$GITHUB_ENV"
         echo "GH_TOKEN=${{ inputs.gh-token }}" >> "$GITHUB_ENV"
         echo "CLAUDE_CODE_OAUTH_TOKEN=${{ inputs.claude-oauth-token }}" >> "$GITHUB_ENV"
-        echo "GIT_USER_NAME=${{ inputs.git-user-name || 'spindrift-agent' }}" >> "$GITHUB_ENV"
-        echo "GIT_USER_EMAIL=${{ inputs.git-user-email || 'spindrift-agent@users.noreply.github.com' }}" >> "$GITHUB_ENV"
+
+    # Resolve the bot identity once — the sole definition of the default
+    # literal — and expose it as outputs the calling workflow splices into its
+    # `nix run . -- <cmd> --git-user-name … --git-user-email …` invocation.
+    - name: Resolve bot identity
+      id: identity
+      shell: bash
+      run: |
+        echo "git-user-name=${{ inputs.git-user-name || 'spindrift-agent' }}" >> "$GITHUB_OUTPUT"
+        echo "git-user-email=${{ inputs.git-user-email || 'spindrift-agent@users.noreply.github.com' }}" >> "$GITHUB_OUTPUT"
 
     # Claim up front, before nix install and the ~2m40s build, so ownership
     # is atomic and visible the instant the runner has the repo. Targets

@@ -30,9 +30,6 @@ jobs:
     if: github.event.label.name == 'agent-research'
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    env:
-      ISSUE_NUMBER: ${{ github.event.issue.number }}
-      MAX_JOBS: "1"
     steps:
       # Checkout must precede the local composite step below: GitHub resolves
       # ./.github/actions/agent-setup from the checked-out tree.
@@ -40,8 +37,8 @@ jobs:
 
       # Claim (agent-research -> agent-research-in-progress, up front so
       # ownership is atomic before the build), Install Nix, and build — plus
-      # the shared env block (RUNTIME, REPO_SLUG, BASE_BRANCH, tokens, bot
-      # identity) written to $GITHUB_ENV for every step below.
+      # the plumbing env (RUNTIME + tokens) written to $GITHUB_ENV and the bot
+      # identity surfaced as step outputs for the research flags below.
       #
       # Token: the research GitHub App (SPINDRIFT_AGENT_RESEARCH_APP_*), when
       # configured, is granted Issues RW + Contents R + Metadata R — the token
@@ -64,13 +61,13 @@ jobs:
           private-key: ${{ secrets.SPINDRIFT_AGENT_RESEARCH_APP_PRIVATE_KEY }}
 
       - name: Agent setup
+        id: setup
         uses: ./.github/actions/agent-setup
         with:
           gh-token: ${{ steps.app-token.outputs.token || secrets.SPINDRIFT_GH_TOKEN }}
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           issue-number: ${{ github.event.issue.number }}
           repo: ${{ github.repository }}
-          base-branch: ${{ github.event.repository.default_branch }}
           claim-add-label: agent-research-in-progress
           # Strip only the research-family labels (ADR 0022): the claim never
           # touches ready-for-agent/agent-in-progress/agent-complete/
@@ -85,7 +82,14 @@ jobs:
           git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
 
       - name: Research the labeled issue
-        run: nix run . -- research
+        run: |
+          nix run . -- research \
+            --issue-number "${{ github.event.issue.number }}" \
+            --max-jobs 1 \
+            --repo-slug "${{ github.repository }}" \
+            --base-branch "${{ github.event.repository.default_branch }}" \
+            --git-user-name "${{ steps.setup.outputs.git-user-name }}" \
+            --git-user-email "${{ steps.setup.outputs.git-user-email }}"
 
       - name: Upload run logs
         if: always()

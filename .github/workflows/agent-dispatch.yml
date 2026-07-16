@@ -25,15 +25,6 @@ jobs:
     if: github.event.label.name == 'agent-trigger'
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    env:
-      # The claim step (inside agent-setup) swaps the issue onto
-      # agent-in-progress before the build, so the launcher targets it by
-      # number rather than a label query. LABEL still names the in-progress
-      # label so dispatchWave skips the redundant re-claim of an already-claimed
-      # issue.
-      ISSUE_NUMBER: ${{ github.event.issue.number }}
-      LABEL: agent-in-progress
-      MAX_JOBS: "1"
     steps:
       # Checkout must precede the local composite step below: GitHub resolves
       # ./.github/actions/agent-setup from the checked-out tree.
@@ -41,9 +32,9 @@ jobs:
 
       # Claim (agent-trigger -> agent-in-progress, up front so ownership is
       # atomic before the ~2m40s build), Install Nix, and build — plus the
-      # shared env block (RUNTIME, REPO_SLUG, BASE_BRANCH, tokens, bot
-      # identity) written to $GITHUB_ENV for every step below. Auth is the
-      # worker GitHub App (SPINDRIFT_AGENT_WORKER_APP_*), granted Issues RW,
+      # plumbing env (RUNTIME + tokens) written to $GITHUB_ENV and the bot
+      # identity surfaced as step outputs for the dispatch flags below. Auth is
+      # the worker GitHub App (SPINDRIFT_AGENT_WORKER_APP_*), granted Issues RW,
       # Contents RW, Pull requests RW, Workflows RW, Checks R, Commit statuses
       # R, Metadata R — the default GITHUB_TOKEN is not enough (the launcher
       # merges PRs). Minting the App below yields a short-lived installation
@@ -58,13 +49,13 @@ jobs:
           private-key: ${{ secrets.SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY }}
 
       - name: Agent setup
+        id: setup
         uses: ./.github/actions/agent-setup
         with:
           gh-token: ${{ steps.app-token.outputs.token }}
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           issue-number: ${{ github.event.issue.number }}
           repo: ${{ github.repository }}
-          base-branch: ${{ github.event.repository.default_branch }}
           claim-add-label: agent-in-progress
           # Strip every other lifecycle label, not just the trigger and
           # ready-for-agent: a re-triggered issue may still carry a stale
@@ -75,8 +66,20 @@ jobs:
           git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
           git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
 
+      # The claim step (inside agent-setup) already swapped the issue onto
+      # agent-in-progress, so --issue-number targets it by number rather than a
+      # label query; --label still names the in-progress label so dispatchWave
+      # skips the redundant re-claim of an already-claimed issue.
       - name: Dispatch the labeled issue
-        run: nix run . -- dispatch
+        run: |
+          nix run . -- dispatch \
+            --issue-number "${{ github.event.issue.number }}" \
+            --label agent-in-progress \
+            --max-jobs 1 \
+            --repo-slug "${{ github.repository }}" \
+            --base-branch "${{ github.event.repository.default_branch }}" \
+            --git-user-name "${{ steps.setup.outputs.git-user-name }}" \
+            --git-user-email "${{ steps.setup.outputs.git-user-email }}"
 
       # The launcher parses the two blocker formats and, when this claimed issue
       # is blocked by an unmet dependency, drops logs/blocked.txt naming the

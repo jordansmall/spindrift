@@ -36,10 +36,11 @@ jobs:
       # ./.github/actions/agent-setup from the checked-out tree.
       - uses: actions/checkout@v4
 
-      # Claim, Install Nix, and build — plus the shared env block (RUNTIME,
-      # REPO_SLUG, BASE_BRANCH, tokens, bot identity) written to $GITHUB_ENV
-      # for every step below. The claim normalises onto agent-in-progress up
-      # front so recover's terminal swaps (which read from agent-in-progress)
+      # Claim, Install Nix, and build — plus the plumbing env (RUNTIME +
+      # tokens) written to $GITHUB_ENV and the bot identity surfaced as step
+      # outputs for the recover flags below. The claim normalises onto
+      # agent-in-progress up front so recover's terminal swaps (which read from
+      # agent-in-progress)
       # have the state they expect: it strips every other lifecycle label so
       # the issue lands cleanly on agent-in-progress regardless of prior
       # state. Removing agent-recover self-clears the trigger (no re-fire);
@@ -62,13 +63,13 @@ jobs:
           private-key: ${{ secrets.SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY }}
 
       - name: Agent setup
+        id: setup
         uses: ./.github/actions/agent-setup
         with:
           gh-token: ${{ steps.app-token.outputs.token }}
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           issue-number: ${{ github.event.issue.number }}
           repo: ${{ github.repository }}
-          base-branch: ${{ github.event.repository.default_branch }}
           claim-add-label: agent-in-progress
           claim-remove-labels: agent-recover agent-failed agent-complete ready-for-agent agent-trigger
           git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
@@ -81,7 +82,12 @@ jobs:
       # already swapped, so the park step below stays dormant.
       - name: Recover the issue
         id: recover
-        run: nix run . -- recover "${{ github.event.issue.number }}"
+        run: |
+          nix run . -- recover "${{ github.event.issue.number }}" \
+            --repo-slug "${{ github.repository }}" \
+            --base-branch "${{ github.event.repository.default_branch }}" \
+            --git-user-name "${{ steps.setup.outputs.git-user-name }}" \
+            --git-user-email "${{ steps.setup.outputs.git-user-email }}"
 
       # Only fires when recover itself couldn't adopt (guarded on the step
       # outcome so a failed build/install does NOT mislabel the issue). Park to
