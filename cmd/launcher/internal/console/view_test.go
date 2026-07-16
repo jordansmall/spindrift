@@ -98,6 +98,17 @@ func TestView_Header_Banner_ShownWhenTallCollapsedWhenShort(t *testing.T) {
 	}
 }
 
+// TestBannerHeight_MatchesRenderedRowCount pins bannerHeight to the banner's
+// actual rendered row count (the two "===" border rows plus the "spindrift"
+// name row) rather than a raw newline count that also includes the leading
+// blank line TrimPrefix strips before rendering (issue #852).
+func TestBannerHeight_MatchesRenderedRowCount(t *testing.T) {
+	const wantRows = 3
+	if bannerHeight != wantRows {
+		t.Errorf("bannerHeight = %d, want %d (the banner's rendered row count)", bannerHeight, wantRows)
+	}
+}
+
 // TestView_Header_AlertsRenderBeforeEphemeralPrompts verifies the
 // stale-image and competing-dogfood alert lines render as part of the
 // header — grouped with the status line, ahead of ephemeral operator
