@@ -110,7 +110,7 @@ func dispatchStateName(state forge.DispatchState) string {
 func PickAllReady(tracker forge.IssueTracker) []Msg {
 	issues, err := tracker.ListIssues(forge.Dispatchable)
 	if err != nil {
-		return nil
+		return []Msg{PickFailedMsg{Title: "pick all ready", Reason: err.Error()}}
 	}
 	msgs := make([]Msg, len(issues))
 	for i, iss := range issues {

@@ -153,6 +153,24 @@ func TestPickAllReady_ReturnsOneMsgPerCurrentlyDispatchableIssue(t *testing.T) {
 	}
 }
 
+// TestPickAllReady_ListIssuesErr_ReturnsFailedMsg verifies a ListIssues
+// failure surfaces to the operator as a PickFailedMsg instead of a silently
+// dropped nil — the asymmetry with PickIssue's error handling (#728).
+func TestPickAllReady_ListIssuesErr_ReturnsFailedMsg(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.ListIssuesErr = errBoom
+
+	msgs := PickAllReady(f)
+
+	if len(msgs) != 1 {
+		t.Fatalf("PickAllReady() = %+v, want 1 msg", msgs)
+	}
+	failed, ok := msgs[0].(PickFailedMsg)
+	if !ok || failed.Reason != errBoom.Error() {
+		t.Errorf("msgs[0] = %+v, want PickFailedMsg with reason %q", msgs[0], errBoom.Error())
+	}
+}
+
 func hasLabel(iss forge.Issue, label string) bool {
 	for _, l := range iss.Labels {
 		if l == label {
