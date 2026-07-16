@@ -613,6 +613,9 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 	if gotSources["2"]["3"] != forge.DepSourceBody {
 		t.Errorf("sources[2][3]: got %v, want DepSourceBody (#2's blocker on #3 is body-parsed)", gotSources["2"]["3"])
 	}
+	if len(gotSources) != 1 || len(gotSources["2"]) != 1 {
+		t.Errorf("sources: got %v, want exactly {2: {3: DepSourceBody}}", gotSources)
+	}
 
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
 		t.Fatalf("RunCalls: got %v, want exactly issue 1 (#2 stays held on its unmet body-parsed blocker)", fr.RunCalls)
