@@ -326,7 +326,7 @@ func TestMergeImmediate_BlockedByChecks(t *testing.T) {
 	if !strings.Contains(out, "landing="+testPR) {
 		t.Errorf("console output must print landing=%s, not the stale pr= label; got: %q", testPR, out)
 	}
-	if strings.Contains(out, "pr=") {
+	if stalePRLabel.MatchString(out) {
 		t.Errorf("console output must not use the stale pr= label; got: %q", out)
 	}
 }

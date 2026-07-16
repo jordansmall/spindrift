@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -9,6 +10,11 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/testutil"
 )
+
+// stalePRLabel matches a genuine stale pr= field (issue #892) without
+// tripping on a benign substring like expr= or repr= inside free-text
+// note/error interpolations.
+var stalePRLabel = regexp.MustCompile(`\bpr=`)
 
 // TestSettle_PostsUsageComment_Blocked verifies that Settle posts d's usage
 // report as a comment when the outcome is "blocked".
@@ -53,7 +59,7 @@ func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
 	result := dispatch.Result{
 		Success:      true,
 		OutcomeFound: true,
-		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing; expr=1 mismatch"},
 	}
 
 	s := New(baseConfig(), fc, fc)
@@ -64,7 +70,7 @@ func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
 	if !strings.Contains(out, "landing="+prURL) {
 		t.Errorf("console output must print landing=%s; got: %q", prURL, out)
 	}
-	if strings.Contains(out, "pr=") {
+	if stalePRLabel.MatchString(out) {
 		t.Errorf("console output must not use the stale pr= label; got: %q", out)
 	}
 }
