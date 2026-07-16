@@ -52,9 +52,12 @@ Research never opens a PR, watches CI, or merges — it posts one comment and
 stops. `spindrift doctor` does not manage these labels (they're a fixed
 vocabulary, not a configurable knob); create them manually — see [Create the
 research labels](docs/reference.md#create-the-research-labels-on-the-target-repo).
-The workflow accepts an optional `SPINDRIFT_RESEARCH_GH_TOKEN` least-privilege
-PAT (Issues RW, Contents R, Metadata R), falling back to the main
-`SPINDRIFT_GH_TOKEN` when unset — see [Research
+The workflow authenticates with an optional least-privilege research GitHub App
+(Issues RW, Contents R, Metadata R) — set the
+`SPINDRIFT_AGENT_RESEARCH_APP_ID` / `SPINDRIFT_AGENT_RESEARCH_APP_PRIVATE_KEY`
+repository secrets and `agent-research.yml` mints a short-lived installation
+token per run, falling back to the main `SPINDRIFT_GH_TOKEN` when the App is
+unset — see [Research
 token](docs/reference.md#research-token-least-privilege-optional). To drive
 research through the dogfood loop instead of a one-off `spindrift research`,
 run `dogfood.sh` with `DOGFOOD_KIND=research`.

@@ -1040,9 +1040,15 @@ issues on the host.
 
 ### Research token (least-privilege, optional)
 
-The research dispatch kind (ADR 0022) takes a second, separately scoped
-fine-grained PAT — set the `SPINDRIFT_RESEARCH_GH_TOKEN` repository secret and
-`agent-research.yml` picks it up automatically:
+The research dispatch kind (ADR 0022) authenticates with a second, separately
+scoped **GitHub App**, kept disjoint from the work App (a distinct App, or a
+distinct installation) so the advise-only scope can never widen to the work
+scope. Provision the App with the three permissions below, install it on the
+Target repo, and store its App ID and private key as the
+`SPINDRIFT_AGENT_RESEARCH_APP_ID` / `SPINDRIFT_AGENT_RESEARCH_APP_PRIVATE_KEY`
+repository secrets; `agent-research.yml` mints a short-lived installation token
+from them per run (via `actions/create-github-app-token`) and hands it to the
+shared `agent-setup` seam:
 
 | permission        | level     | why                                       |
 | ----------------- | --------- | ------------------------------------------ |
@@ -1053,15 +1059,19 @@ fine-grained PAT — set the `SPINDRIFT_RESEARCH_GH_TOKEN` repository secret and
 This is the enforcement boundary that makes advise-only real: with Contents
 read-only, a fully injection-steered researcher cannot push a branch, open a
 PR, or merge, regardless of what the prompt tells it to do — the blast radius
-collapses to a bad comment a human reads anyway.
+collapses to a bad comment a human reads anyway. The installation token is
+short-lived (expires ~1h after minting) and draws on the research
+installation's own rate-limit bucket, isolated from the work App and any
+personal PAT.
 
-`SPINDRIFT_RESEARCH_GH_TOKEN` is optional. Leave it unset and
-`agent-research.yml` falls back to the same `SPINDRIFT_GH_TOKEN` the work
-dispatch uses (Contents/Pull requests/Issues RW + Metadata R, above) — research
-still works, but gives up the read-only guarantee: a compromised researcher
-could push to a branch or open a PR with the broader token, even though
-nothing in the research flow asks it to. Configure the dedicated token when
-the blast radius matters more than one extra repo secret to manage.
+The research App is optional. Leave `SPINDRIFT_AGENT_RESEARCH_APP_ID` unset and
+`agent-research.yml` skips the mint step and falls back to the
+`SPINDRIFT_GH_TOKEN` PAT (Contents/Pull requests/Issues RW + Metadata R, above)
+— research still works, but gives up the read-only guarantee: a compromised
+researcher could push to a branch or open a PR with the broader token, even
+though nothing in the research flow asks it to. Configure the dedicated App
+when the blast radius matters more than one extra pair of repo secrets to
+manage.
 
 ### Threat model
 
