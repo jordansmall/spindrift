@@ -112,13 +112,17 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	outstanding := 0
 	closed := false
 
-	var refill func()
-	refill = func() {
+	// refill reports whether it launched a Box, so a caller filling more
+	// than one freed slot from a single trigger (the grow listener below)
+	// can loop it until a call finally does nothing, rather than assuming
+	// one trigger is worth exactly one launch.
+	var refill func() bool
+	refill = func() bool {
 		if stale || closed {
-			return
+			return false
 		}
 		if !limiter.TryAcquire() {
-			return
+			return false
 		}
 		launched := false
 		defer func() {
@@ -130,23 +134,23 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 		if applicable && !isFresh {
 			stale = true
 			fmt.Printf("==> %s\n", msg)
-			return
+			return false
 		}
 		issues, edges, sources, err := discover()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "continuous: re-discover: %v\n", err)
-			return
+			return false
 		}
 		if len(edges) > 0 {
 			if node, cycle := detectCycle(edges, issueNums(issues)); cycle {
 				fmt.Fprintf(os.Stderr, "==> ERROR: dependency cycle detected (issue #%s is in the cycle); skipping this refill\n", node)
-				return
+				return false
 			}
 		}
 		checkOverlap := waveOverlapCheck(cfg, it, cf)
 		iss, ok := nextReady(cfg, it, cf, checkOverlap, issues, edges, sources, claimed)
 		if !ok {
-			return
+			return false
 		}
 		dispatchedAny = true
 		claimed[iss.Number] = true
@@ -181,6 +185,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			}
 			mu.Unlock()
 		}()
+		return true
 	}
 
 	// growDone stops the grow listener once this call is finished; done
@@ -197,8 +202,16 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 				// A Console "+" mid-drain (ADR 0023, issue #653): the
 				// operator's raise should launch a held pick right away, not
 				// wait for an unrelated Box to settle or a background poll.
+				// Loop rather than a single refill() call: Resize's grow
+				// channel is buffer-1 and non-blocking, so a burst of rapid
+				// raises can coalesce into one delivered signal even though
+				// the cap (updated synchronously by every Resize call before
+				// it ever touches the channel) already reflects all of them
+				// (issue #766) — draining until a call does nothing catches
+				// every slot the raise actually freed instead of just one.
 				mu.Lock()
-				refill()
+				for refill() {
+				}
 				mu.Unlock()
 			case <-growDone:
 				return
