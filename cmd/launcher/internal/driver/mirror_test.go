@@ -15,11 +15,11 @@ import (
 //
 // Known gap: the slice literals below are hand-written, not derived by
 // reflection or codegen from the actual const blocks, so this test only
-// catches drift among values already listed here — a rename, a value edit,
-// or a count mismatch. A brand-new constant added to only one package still
-// passes silently until a developer also adds it to both literals below. A
-// future codegen or compile-time check that enumerates the const blocks
-// directly would close this gap.
+// catches drift among values already listed here — a string-value edit or
+// a count mismatch. A brand-new constant added to only one package still
+// passes silently until a developer notices and adds an entry for it to
+// both literals below. A future codegen or compile-time check that
+// enumerates the const blocks directly would close this gap.
 func TestClassReasonEnumsMirror(t *testing.T) {
 	driverClasses := []string{string(Transient), string(Terminal)}
 	claudeClasses := []string{string(claude.Transient), string(claude.Terminal)}
