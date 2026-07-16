@@ -151,6 +151,36 @@ func (l *Launcher) Resize(delta int) {
 // no loop to check, so the wiring is skipped harmlessly). Both tryLaunch's
 // drain (via waves.Config.Terminated) and Terminate itself share the one
 // Registry this returns.
+//
+// Re-pick vs. abandoned-settle race (issue #743, found reviewing #649): a
+// plain per-number "terminated" bool cannot tell "my own stale mark from a
+// dead incarnation" apart from "a still-live settle goroutine hasn't
+// checked yet". Terminate marks num terminated (below); discover's own
+// claim of a re-pick used to unconditionally clear that same mark so its
+// fresh settle wasn't instantly abandoned (ADR 0024, issue #649) — but if
+// that unmark landed in the window between Terminate's mark and the old,
+// still-in-flight settle goroutine's next checkpoint (settle/ready.go's
+// CI-watch/merge-gate loops poll only once per MergePollInterval tick),
+// the mark vanished before the old goroutine ever observed it. It then
+// proceeded as if never terminated, and queueSettler's post-settle
+// setState (settler.go) landed on the re-pick's own row — Queue.setState
+// scans back-to-front and stops at the newest match on number, so a stale
+// write from the old incarnation corrupted the new one's queue state
+// instead of the discarded old row it was meant for.
+//
+// The fix: terminate.Registry now keys termination on a per-number
+// generation counter instead of a bool. Begin (called once, at claim time,
+// for every freshly dispatched issue including a re-pick) starts a new
+// generation without touching any earlier one's mark; Mark records the
+// *current* generation as terminated; Marked reports whether one specific
+// generation was marked, not merely whether the number ever was. Every
+// checkpoint a dispatch makes — waves/continuous.go's post-Run() check,
+// settle's internal CI-watch/merge-gate loops, and queueSettler's
+// post-settle check — carries the generation it was launched under
+// (waves.Issue.Generation, threaded through the whole Settle/Fail call) and
+// checks against that generation specifically. A re-pick's Begin can no
+// longer erase a live settle's own mark: the two incarnations now hold
+// distinct identities that never collide.
 func (l *Launcher) registry() *terminate.Registry {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -291,9 +321,16 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		// so any earlier Terminate mark for these numbers must not carry
 		// over — otherwise a re-pick's own settle would abandon on its very
 		// first checkpoint instead of running the adoption path normally
-		// (ADR 0024, issue #649).
-		for _, iss := range issues {
-			l.registry().Unmark(iss.Number)
+		// (ADR 0024, issue #649). Begin starts a new registry generation for
+		// each rather than blindly clearing the old one (the pre-#743
+		// Unmark did, unconditionally) — an in-flight settle goroutine from
+		// the terminated incarnation, still holding the generation it was
+		// launched under, keeps seeing itself as terminated no matter how
+		// many later re-picks start and clear their own fresh generations in
+		// the meantime. See the race this closes, documented on registry()
+		// below.
+		for i, iss := range issues {
+			issues[i].Generation = l.registry().Begin(iss.Number)
 		}
 		return issues, edges, sources, err
 	}

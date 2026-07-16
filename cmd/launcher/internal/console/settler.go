@@ -29,10 +29,14 @@ type queueSettler struct {
 }
 
 // Settle delegates to the wrapped Settler, then — unless num was terminated
-// while this settle was in flight — marks num settled and notifies.
-func (qs queueSettler) Settle(d dispatch.Dispatcher, num string, result dispatch.Result) {
-	qs.Settler.Settle(d, num, result)
-	if qs.terminated.Marked(num) {
+// while this settle was in flight — marks num settled and notifies. gen is
+// the terminate.Registry generation (waves.Issue.Generation, issue #743)
+// this settle's own dispatch was launched under, so the check below can
+// never be fooled by a re-pick's later generation clearing the mark out from
+// under a stale, still-in-flight settle for an earlier one.
+func (qs queueSettler) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
+	qs.Settler.Settle(d, num, gen, result)
+	if qs.terminated.Marked(num, gen) {
 		return
 	}
 	qs.q.setState(num, PickSettled, "")
@@ -44,10 +48,10 @@ func (qs queueSettler) Settle(d dispatch.Dispatcher, num string, result dispatch
 // Fail delegates to the wrapped Settler, then — unless num was terminated
 // while this Box was in flight — marks num failed and notifies, so a Box
 // that ran and exited non-zero reaches a terminal queue row instead of
-// stranding at PickRunning (issue #705).
-func (qs queueSettler) Fail(num string, result dispatch.Result) {
-	qs.Settler.Fail(num, result)
-	if qs.terminated.Marked(num) {
+// stranding at PickRunning (issue #705). gen is as in Settle.
+func (qs queueSettler) Fail(num string, gen uint64, result dispatch.Result) {
+	qs.Settler.Fail(num, gen, result)
+	if qs.terminated.Marked(num, gen) {
 		return
 	}
 	qs.q.setState(num, PickFailed, "box exited non-zero")
