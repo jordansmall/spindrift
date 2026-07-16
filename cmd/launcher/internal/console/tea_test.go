@@ -1046,7 +1046,11 @@ func TestTea_PickKey_FollowedByA_ClearsPendingIndicator(t *testing.T) {
 	waitForOutput(t, tm, "p_")
 
 	sendKey(tm, "a")
-	waitForOutput(t, tm, "  #42")
+	// "settled 1" guards the same live-dispatch quit-confirm race
+	// TestTea_PickKey_PromotesAndQueuesHighlighted hits (issue #822):
+	// without it, "q" can race the still-live pick and hang until
+	// teatest's timeout instead of exiting.
+	waitForOutput(t, tm, "  #42", "settled 1")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
@@ -1070,7 +1074,9 @@ func TestTea_PickKey_Timeout_ClearsPendingIndicator(t *testing.T) {
 
 	sendKey(tm, "p")
 	waitForOutput(t, tm, "p_")
-	waitForOutput(t, tm, "  #42") // timeout fires unassisted, resolving to a single pick
+	// timeout fires unassisted, resolving to a single pick; "settled 1"
+	// guards the same live-dispatch quit-confirm race (issue #822).
+	waitForOutput(t, tm, "  #42", "settled 1")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
