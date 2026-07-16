@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
@@ -26,16 +27,81 @@ func RunningHeartbeat(drv driver.Driver, pwd, number string) string {
 	if len(passes) == 0 {
 		return ""
 	}
-	data, err := os.ReadFile(passes[len(passes)-1].Path)
+	line, _ := parseHeartbeat(drv, passes[len(passes)-1].Path, number)
+	return line
+}
+
+// parseHeartbeat reads path and replays it through drv's heartbeat parser,
+// returning the last line it emitted plus the os.FileInfo the read saw — the
+// stat HeartbeatCache pins to detect whether a later call can skip this same
+// work. ok is false when the file can't be read or written through drv's
+// parser (the same "no heartbeat yet" cases RunningHeartbeat has always
+// returned "" for).
+func parseHeartbeat(drv driver.Driver, path, number string) (line string, ok bool) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	var buf bytes.Buffer
 	w := drv.NewHeartbeatWriter(io.Discard, number, &buf)
 	if _, err := w.Write(data); err != nil {
+		return "", false
+	}
+	return lastLine(buf.String()), true
+}
+
+// heartbeatCacheEntry pins the stat HeartbeatCache last saw for one pick's
+// latest pass log, plus the line that stat's read parsed to.
+type heartbeatCacheEntry struct {
+	path    string
+	size    int64
+	modTime time.Time
+	line    string
+}
+
+// HeartbeatCache remembers each running pick's last-parsed heartbeat line,
+// keyed by pick number. syncQueue calls RunningHeartbeat on every tea.Msg —
+// every keypress, poll tick, and refresh signal, not just a fixed render
+// cadence — so most calls see the exact same on-disk log as last time. A
+// stat (size + mtime) that matches the cached entry skips the ReadFile and
+// re-parse entirely and returns the cached line (issue #731); a changed stat
+// still pays the full reparse, same as the uncached RunningHeartbeat always
+// has.
+type HeartbeatCache struct {
+	entries map[string]heartbeatCacheEntry
+}
+
+// NewHeartbeatCache returns an empty cache ready to use.
+func NewHeartbeatCache() *HeartbeatCache {
+	return &HeartbeatCache{entries: make(map[string]heartbeatCacheEntry)}
+}
+
+// RunningHeartbeat is HeartbeatCache's cached counterpart to the
+// package-level RunningHeartbeat: same inputs and return, but a repeat call
+// for number whose latest pass log's path/size/mtime match what was cached
+// last time skips the ReadFile+reparse and returns the cached line.
+func (c *HeartbeatCache) RunningHeartbeat(drv driver.Driver, pwd, number string) string {
+	if drv == nil {
 		return ""
 	}
-	return lastLine(buf.String())
+	passes := dispatch.LogPaths(pwd, number)
+	if len(passes) == 0 {
+		return ""
+	}
+	path := passes[len(passes)-1].Path
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	if cached, ok := c.entries[number]; ok && cached.path == path && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
+		return cached.line
+	}
+	line, ok := parseHeartbeat(drv, path, number)
+	if !ok {
+		return ""
+	}
+	c.entries[number] = heartbeatCacheEntry{path: path, size: info.Size(), modTime: info.ModTime(), line: line}
+	return line
 }
 
 // lastLine returns the last non-empty line of s, or "" when s carries none.
