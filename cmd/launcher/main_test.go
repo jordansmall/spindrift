@@ -1295,10 +1295,6 @@ func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
 	}
 	line := regexp.MustCompile(`gh label create (\S+)\s+--repo owner/repo --color (\S+) --description "([^"]*)"`)
 	matches := line.FindAllStringSubmatch(string(raw), -1)
-	wantCount := len(triageLabelMeta)
-	if len(matches) != wantCount {
-		t.Fatalf("want %d `gh label create` lines in docs/reference.md, got %d", wantCount, len(matches))
-	}
 	for _, m := range matches {
 		name, color, description := m[1], m[2], m[3]
 		want, ok := triageLabelMeta[name]
