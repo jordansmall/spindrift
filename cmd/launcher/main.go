@@ -1008,7 +1008,15 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 	}
+	// Snapshot ambient-env deprecation warnings before parseFlags mutates the
+	// environment via os.Setenv, so a flag that also sets the same var never
+	// masks the ambient value the warning reports on (ADR 0020). Snapshotted
+	// ahead of the help/bare-invocation early returns below so both still
+	// surface the warning instead of silently dropping it (issue #814).
+	var ambientWarnings bytes.Buffer
+	warnAmbientKnobEnv(&ambientWarnings)
 	if help {
+		stderr.Write(ambientWarnings.Bytes())
 		if helpAll {
 			printHelpFull(stdout)
 		} else {
@@ -1021,11 +1029,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
-	// Snapshot ambient-env deprecation warnings before parseFlags mutates the
-	// environment via os.Setenv, so a flag that also sets the same var never
-	// masks the ambient value the warning reports on (ADR 0020).
-	var ambientWarnings bytes.Buffer
-	warnAmbientKnobEnv(&ambientWarnings)
 	args, err := parseFlags(argv)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
@@ -1034,6 +1037,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		// Bare `spindrift`: print help rather than silently dispatching
 		// (issue #555). `dispatch` remains the sole way to drain the queue.
+		stderr.Write(ambientWarnings.Bytes())
 		printHelp(stdout)
 		return 0
 	}

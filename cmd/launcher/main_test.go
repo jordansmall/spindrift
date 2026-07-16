@@ -19,6 +19,10 @@ import (
 // (no subcommand) prints the concise help to stdout and exits 0, instead of
 // falling through to the dispatch default (issue #555).
 func TestMainRun_NoArgs_PrintsHelpAndDoesNotDispatch(t *testing.T) {
+	orig := schemaFlags
+	t.Cleanup(func() { schemaFlags = orig })
+	schemaFlags = []flagEntry{}
+
 	var stdout, stderr bytes.Buffer
 	code := mainRun(nil, &stdout, &stderr)
 	if code != 0 {
@@ -124,6 +128,53 @@ func TestMainRun_AmbientKnobEnv_WarnsAndStillHonored(t *testing.T) {
 	c := loadConfig()
 	if c.maxJobs != 5 {
 		t.Errorf("maxJobs = %d, want 5 (ambient env still honored)", c.maxJobs)
+	}
+}
+
+// TestMainRun_NoArgs_AmbientKnobEnv_WarnsBeforeHelp verifies a bare
+// `spindrift` still surfaces the ADR 0020 provenance warning when an ambient
+// knob env var is set, instead of silently dropping it because the
+// len(args)==0 branch (issue #555) returns before the flush (issue #814).
+func TestMainRun_NoArgs_AmbientKnobEnv_WarnsBeforeHelp(t *testing.T) {
+	t.Setenv("MAX_JOBS", "5")
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun(nil, &stdout, &stderr)
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+	if !strings.Contains(stdout.String(), "Usage: spindrift [flags] <subcommand>") {
+		t.Errorf("stdout missing help usage line, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "MAX_JOBS=5 set in environment") {
+		t.Errorf("stderr = %q, want a MAX_JOBS provenance warning", stderr.String())
+	}
+}
+
+// TestMainRun_HelpFlag_AmbientKnobEnv_WarnsBeforeHelp verifies `--help`
+// (and `--help --all`) still surface the ADR 0020 provenance warning when an
+// ambient knob env var is set, instead of the help branch's early return
+// (main.go, before warnAmbientKnobEnv is even called) silently dropping it
+// (issue #814).
+func TestMainRun_HelpFlag_AmbientKnobEnv_WarnsBeforeHelp(t *testing.T) {
+	t.Setenv("MAX_JOBS", "5")
+
+	cases := [][]string{
+		{"--help"},
+		{"--help", "--all"},
+	}
+	for _, argv := range cases {
+		var stdout, stderr bytes.Buffer
+		code := mainRun(argv, &stdout, &stderr)
+		if code != 0 {
+			t.Errorf("mainRun(%v) code = %d, want 0", argv, code)
+		}
+		if !strings.Contains(stdout.String(), "Usage: spindrift [flags] <subcommand>") {
+			t.Errorf("mainRun(%v) stdout missing help usage line, got:\n%s", argv, stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "MAX_JOBS=5 set in environment") {
+			t.Errorf("mainRun(%v) stderr = %q, want a MAX_JOBS provenance warning", argv, stderr.String())
+		}
 	}
 }
 
