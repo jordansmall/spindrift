@@ -18,11 +18,11 @@ func TestFake_RecordsCalls(t *testing.T) {
 	d := dispatch.NewFake()
 	result := dispatch.Result{Success: true}
 
-	f.Settle(d, "1", result)
-	f.SettleAdopted(d, "2", testPR)
+	f.Settle(d, "1", 7, result)
+	f.SettleAdopted(d, "2", 0, testPR)
 
-	if len(f.SettleCalls) != 1 || f.SettleCalls[0].Num != "1" {
-		t.Errorf("SettleCalls = %+v, want one call for num=1", f.SettleCalls)
+	if len(f.SettleCalls) != 1 || f.SettleCalls[0].Num != "1" || f.SettleCalls[0].Gen != 7 {
+		t.Errorf("SettleCalls = %+v, want one call for num=1, gen=7", f.SettleCalls)
 	}
 	if len(f.SettleAdoptedCalls) != 1 || f.SettleAdoptedCalls[0].Num != "2" || f.SettleAdoptedCalls[0].PRURL != testPR {
 		t.Errorf("SettleAdoptedCalls = %+v, want one call for num=2, pr=%s", f.SettleAdoptedCalls, testPR)

@@ -210,7 +210,7 @@ func TestMergeImmediate(t *testing.T) {
 			}
 
 			s := New(c, fc, fc)
-			err := s.mergeImmediate("1", testPR, d)
+			err := s.mergeImmediate("1", 0, testPR, d)
 
 			if (err != nil) != tc.wantErr {
 				t.Errorf("mergeImmediate err=%v, wantErr=%v", err, tc.wantErr)
@@ -249,7 +249,7 @@ func TestMergeImmediate_RewaitsAfterForcePush(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := New(c, fc, fc)
 
-	err := s.mergeImmediate("1", testPR, nil)
+	err := s.mergeImmediate("1", 0, testPR, nil)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error when CI never reaches green after force-push, got nil")
@@ -274,7 +274,7 @@ func TestMergeImmediate_RewaitGreenMergesWithoutFurtherRebase(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := New(c, fc, fc)
 
-	err := s.mergeImmediate("1", testPR, nil)
+	err := s.mergeImmediate("1", 0, testPR, nil)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -300,7 +300,7 @@ func TestMergeImmediate_RewaitGenuineRedNotTreatedAsConflict(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := New(c, fc, fc)
 
-	err := s.mergeImmediate("1", testPR, nil)
+	err := s.mergeImmediate("1", 0, testPR, nil)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error when re-wait confirms genuine CI red, got nil")
@@ -332,7 +332,7 @@ func TestMergeImmediate_BlockedByChecks(t *testing.T) {
 
 	var err error
 	out := captureStdout(t, func() {
-		err = s.mergeImmediate("1", testPR, df)
+		err = s.mergeImmediate("1", 0, testPR, df)
 	})
 
 	if err != nil {
@@ -372,7 +372,7 @@ func TestMergeImmediate_BlockedByChecksExhausted(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 
 	s := New(c, fc, fc)
-	err := s.mergeImmediate("1", testPR, nil)
+	err := s.mergeImmediate("1", 0, testPR, nil)
 
 	if !errors.Is(err, forge.ErrMergeBlockedByChecks) {
 		t.Fatalf("want ErrMergeBlockedByChecks, got: %v", err)
@@ -400,7 +400,7 @@ func TestMergeImmediate_StaleBaseTriggersProactiveRebase(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := New(c, fc, fc)
 
-	err := s.mergeImmediate("1", testPR, nil)
+	err := s.mergeImmediate("1", 0, testPR, nil)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -429,7 +429,7 @@ func TestMergeImmediate_StaleBaseCombinedBreakBlocksMerge(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := New(c, fc, fc)
 
-	err := s.mergeImmediate("1", testPR, nil)
+	err := s.mergeImmediate("1", 0, testPR, nil)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error when the rebased combined tree fails CI, got nil")
@@ -455,7 +455,7 @@ func TestMergeImmediate_StaleBaseCheckErrorFallsThroughToMerge(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := New(c, fc, fc)
 
-	err := s.mergeImmediate("1", testPR, nil)
+	err := s.mergeImmediate("1", 0, testPR, nil)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -477,7 +477,7 @@ func TestApplyMergeMode_Immediate(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := New(c, fc, fc)
 
-	err := s.applyMergeMode("1", testPR, nil)
+	err := s.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
 		t.Errorf("applyMergeMode immediate: unexpected error: %v", err)
 	}
@@ -494,7 +494,7 @@ func TestApplyMergeMode_Manual(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := New(c, fc, fc)
 
-	err := s.applyMergeMode("1", testPR, nil)
+	err := s.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
 		t.Errorf("applyMergeMode manual: unexpected error: %v", err)
 	}
@@ -512,7 +512,7 @@ func TestApplyMergeMode_Auto_EnqueuesAutoMerge(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := New(c, fc, fc)
 
-	err := s.applyMergeMode("1", testPR, nil)
+	err := s.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
 		t.Errorf("applyMergeMode auto: unexpected error: %v", err)
 	}
@@ -536,7 +536,7 @@ func TestApplyMergeMode_Auto_PushOnlyForgeReturnsError(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := New(c, fc, fc.AsPushOnly())
 
-	err := s.applyMergeMode("1", testPR, nil)
+	err := s.applyMergeMode("1", 0, testPR, nil)
 	if err == nil {
 		t.Fatal("applyMergeMode auto on a push-only forge: want error, got nil")
 	}
@@ -553,7 +553,7 @@ func TestApplyMergeMode_Auto_EnqueueFailureFallsBack(t *testing.T) {
 	fc.EnqueueAutoMergeErr = fmt.Errorf("gh pr merge --auto: permission denied")
 	s := New(c, fc, fc)
 
-	err := s.applyMergeMode("1", testPR, nil)
+	err := s.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
 		t.Errorf("auto mode enqueue failure must not propagate error; got: %v", err)
 	}

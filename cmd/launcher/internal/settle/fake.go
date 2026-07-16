@@ -9,17 +9,20 @@ import (
 // SettleCall records one Settle invocation.
 type SettleCall struct {
 	Num    string
+	Gen    uint64
 	Result dispatch.Result
 }
 
 // SettleAdoptedCall records one SettleAdopted invocation.
 type SettleAdoptedCall struct {
 	Num, PRURL string
+	Gen        uint64
 }
 
 // FailCall records one Fail invocation.
 type FailCall struct {
 	Num    string
+	Gen    uint64
 	Result dispatch.Result
 }
 
@@ -46,22 +49,22 @@ func NewFake() *Fake {
 }
 
 // Settle records the call.
-func (f *Fake) Settle(d dispatch.Dispatcher, num string, result dispatch.Result) {
+func (f *Fake) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.SettleCalls = append(f.SettleCalls, SettleCall{Num: num, Result: result})
+	f.SettleCalls = append(f.SettleCalls, SettleCall{Num: num, Gen: gen, Result: result})
 }
 
 // SettleAdopted records the call.
-func (f *Fake) SettleAdopted(d dispatch.Dispatcher, num, prURL string) {
+func (f *Fake) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.SettleAdoptedCalls = append(f.SettleAdoptedCalls, SettleAdoptedCall{Num: num, PRURL: prURL})
+	f.SettleAdoptedCalls = append(f.SettleAdoptedCalls, SettleAdoptedCall{Num: num, PRURL: prURL, Gen: gen})
 }
 
 // Fail records the call.
-func (f *Fake) Fail(num string, result dispatch.Result) {
+func (f *Fake) Fail(num string, gen uint64, result dispatch.Result) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.FailCalls = append(f.FailCalls, FailCall{Num: num, Result: result})
+	f.FailCalls = append(f.FailCalls, FailCall{Num: num, Gen: gen, Result: result})
 }

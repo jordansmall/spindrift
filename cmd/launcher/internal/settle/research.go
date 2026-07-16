@@ -32,7 +32,7 @@ func NewResearchSettle(it forge.IssueTracker) *ResearchSettle {
 // Box produced no usable verdict, so num is transitioned to Failed
 // (agent-research-failed) instead — crash-retry and verdict-review stay
 // separate human queues.
-func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, result dispatch.Result) {
+func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
 	if !result.OutcomeFound {
 		r.fail(num, "no verdict outcome line")
 		return
@@ -61,11 +61,11 @@ func (r *ResearchSettle) fail(num, note string) {
 // SettleAdopted is unreachable in practice: research never opens a PR, so
 // there is no already-discovered PR to adopt. Present only to satisfy the
 // Settler interface.
-func (r *ResearchSettle) SettleAdopted(d dispatch.Dispatcher, num, prURL string) {
+func (r *ResearchSettle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
 }
 
 // Fail is unreachable in practice: RunContinuous's Box-failure branch calls
 // it, but research dispatch runs through its own one-shot entry point, not
 // RunContinuous. Present only to satisfy the Settler interface.
-func (r *ResearchSettle) Fail(num string, result dispatch.Result) {
+func (r *ResearchSettle) Fail(num string, gen uint64, result dispatch.Result) {
 }

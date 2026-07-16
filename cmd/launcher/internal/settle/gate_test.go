@@ -121,7 +121,7 @@ func TestGateToGreen(t *testing.T) {
 			}
 			s := New(c, fc, fc)
 
-			got := s.gateToGreen("1", testPR)
+			got := s.gateToGreen("1", 0, testPR)
 
 			if got != tc.want {
 				t.Errorf("gateToGreen = %v, want %v", got, tc.want)

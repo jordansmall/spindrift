@@ -23,7 +23,7 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	fc.MergeErr = errors.New("required review missing")
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (CI green, merge failed)", landing)
 	}
@@ -50,7 +50,7 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{"src/main.go", ".github/workflows/ci.yml"})
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (merge guard hit)", landing)
 	}
@@ -86,7 +86,7 @@ func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual for a guard-hit auto-mode PR", landing)
 	}
@@ -110,7 +110,7 @@ func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{"src/main.go"})
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v, want landingMerged for a non-guarded green PR", landing)
 	}
@@ -136,7 +136,7 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (guard check errored)", landing)
 	}
@@ -172,7 +172,7 @@ func TestSelfHeal_ConflictResolveFailure_EndsFailed(t *testing.T) {
 	d := dispatch.NewFake()
 	d.ResolveConflictErr = errors.New("conflict-resolve box exited 1")
 
-	landing := s.selfHeal(d, "1", testPR)
+	landing := s.selfHeal(d, "1", 0, testPR)
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed (conflict-resolve dispatch failed)", landing)
@@ -237,7 +237,7 @@ func TestSelfHeal_RewaitAfterForcePush_NeverGreen_EndsFailed(t *testing.T) {
 			d := dispatch.NewFake()
 			d.ResolveConflictErr = tc.resolveErr
 
-			landing := s.selfHeal(d, "1", testPR)
+			landing := s.selfHeal(d, "1", 0, testPR)
 
 			if landing != landingFailed {
 				t.Errorf("selfHeal = %v, want landingFailed (force-pushed head never went green)", landing)
@@ -270,7 +270,7 @@ func TestSelfHeal_UnresolvableConflictNoForcePush_KeepsComplete(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := New(c, fc, fc)
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", testPR)
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
 
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (unresolvable conflict, no force-push attempted)", landing)
@@ -328,7 +328,7 @@ func TestSelfHeal_LabelStaysInProgressThroughConflictResolve(t *testing.T) {
 	s := New(c, fc, fc)
 	d := &labelSnapshotDispatcher{Fake: dispatch.NewFake(), fc: fc, num: "1"}
 
-	landing := s.selfHeal(d, "1", testPR)
+	landing := s.selfHeal(d, "1", 0, testPR)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged", landing)
@@ -380,7 +380,7 @@ func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 			branch := "agent/issue-1"
 			s := New(c, fc, fc.AsPushOnly())
 
-			landing := s.selfHeal(dispatch.NewFake(), "1", branch)
+			landing := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
 
 			if landing != tc.wantLanding {
 				t.Errorf("selfHeal = %v, want %v", landing, tc.wantLanding)
@@ -413,7 +413,7 @@ func TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed(t *testing.T) {
 	branch := "agent/issue-1"
 	s := New(c, fc, fc.AsPushOnly())
 
-	landing := s.selfHeal(dispatch.NewFake(), "1", branch)
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
 
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual when the push fails", landing)

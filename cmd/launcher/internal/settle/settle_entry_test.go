@@ -27,7 +27,7 @@ func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 	}
 
 	s := New(baseConfig(), fc, fc)
-	s.Settle(d, issNum, result)
+	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CommentCalls) != 1 {
 		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
@@ -57,7 +57,7 @@ func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
 
 	s := New(baseConfig(), fc, fc)
 	out := captureStdout(t, func() {
-		s.Settle(d, issNum, result)
+		s.Settle(d, issNum, 0, result)
 	})
 
 	if !strings.Contains(out, "landing="+prURL) {
@@ -87,7 +87,7 @@ func TestSettle_UsageMissing_NoCrash(t *testing.T) {
 	}
 
 	s := New(baseConfig(), fc, fc)
-	s.Settle(d, issNum, result)
+	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CommentCalls) != 1 {
 		t.Fatalf("want 1 comment posted even without usage data, got %d", len(fc.CommentCalls))
@@ -117,7 +117,7 @@ func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 
 	c := baseConfig()
 	s := New(c, fc, fc)
-	s.Settle(d, issNum, result)
+	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CommentCalls) != 1 {
 		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
@@ -135,7 +135,7 @@ func TestSettle_MalformedOutcome_NoPanic(t *testing.T) {
 	result := dispatch.Result{ParseErr: errFake}
 
 	s := New(baseConfig(), fc, fc)
-	s.Settle(dispatch.NewFake(), "9", result)
+	s.Settle(dispatch.NewFake(), "9", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
 		t.Errorf("malformed outcome must not post a usage comment; got %+v", fc.CommentCalls)
@@ -165,7 +165,7 @@ func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 	}
 
 	s := New(baseConfig(), fc, fc.AsPushOnly())
-	s.Settle(d, "1", result)
+	s.Settle(d, "1", 0, result)
 
 	iss, _ := fc.Issue("1")
 	if containsLabel(iss.Labels, "agent-failed") {
@@ -186,7 +186,7 @@ func TestSettle_NoOutcome_AdoptsDiscoveredPR(t *testing.T) {
 
 	c := baseConfig()
 	s := New(c, fc, fc)
-	s.Settle(dispatch.NewFake(), "3", dispatch.Result{Success: true})
+	s.Settle(dispatch.NewFake(), "3", 0, dispatch.Result{Success: true})
 
 	if fc.Merged != testPR {
 		t.Errorf("expected the discovered PR to be merged; fc.Merged=%q", fc.Merged)
@@ -201,7 +201,7 @@ func TestSettle_NoOutcome_NoPRFound(t *testing.T) {
 
 	c := baseConfig()
 	s := New(c, fc, fc)
-	s.Settle(dispatch.NewFake(), "4", dispatch.Result{Success: true})
+	s.Settle(dispatch.NewFake(), "4", 0, dispatch.Result{Success: true})
 
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("no-PR case must not trigger label churn; got %v", fc.TransitionStateCalls)
@@ -222,7 +222,7 @@ func TestSettle_NoOutcome_DraftPRBlocked(t *testing.T) {
 
 	c := baseConfig()
 	s := New(c, fc, fc)
-	s.Settle(dispatch.NewFake(), "5", dispatch.Result{Success: true})
+	s.Settle(dispatch.NewFake(), "5", 0, dispatch.Result{Success: true})
 
 	if fc.Merged != "" {
 		t.Errorf("draft PR must not be merged; fc.Merged=%q", fc.Merged)

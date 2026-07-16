@@ -21,7 +21,7 @@ func TestSettleAdopted_ConsoleUsesLandingLabel(t *testing.T) {
 	s := New(c, fc, fc)
 
 	out := captureStdout(t, func() {
-		s.SettleAdopted(dispatch.NewFake(), "77", testPR)
+		s.SettleAdopted(dispatch.NewFake(), "77", 0, testPR)
 	})
 
 	if !strings.Contains(out, "landing="+testPR) {
@@ -46,7 +46,7 @@ func TestSettleAdopted_ImmediateMergeFailureStaysComplete(t *testing.T) {
 	fc.MergeErr = errors.New("required review missing")
 	s := New(c, fc, fc)
 
-	s.SettleAdopted(dispatch.NewFake(), "1", testPR)
+	s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR)
 
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, "agent-complete") {
@@ -70,7 +70,7 @@ func TestSettleAdopted_ManualModeStaysComplete(t *testing.T) {
 			fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 			s := New(c, fc, fc)
 
-			s.SettleAdopted(dispatch.NewFake(), "1", testPR)
+			s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR)
 
 			iss, _ := fc.Issue("1")
 			if !containsLabel(iss.Labels, "agent-complete") {
@@ -93,7 +93,7 @@ func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
 	s := New(c, fc, fc)
 
-	s.SettleAdopted(dispatch.NewFake(), "77", testPR)
+	s.SettleAdopted(dispatch.NewFake(), "77", 0, testPR)
 
 	if fc.Merged != "" {
 		t.Errorf("expected no merge on red CI; fc.Merged=%q", fc.Merged)
@@ -119,7 +119,7 @@ func TestSettleAdopted_PushOnlyForgeSkipsVerify(t *testing.T) {
 	c := baseConfig()
 	s := New(c, fc, fc.AsPushOnly())
 
-	s.SettleAdopted(dispatch.NewFake(), "1", branch)
+	s.SettleAdopted(dispatch.NewFake(), "1", 0, branch)
 
 	iss, _ := fc.Issue("1")
 	if containsLabel(iss.Labels, "agent-failed") {
@@ -137,7 +137,7 @@ func TestSettleAdopted_GreenMergesAndCompletes(t *testing.T) {
 	s := New(c, fc, fc)
 
 	d := dispatch.NewFake()
-	s.SettleAdopted(d, "77", testPR)
+	s.SettleAdopted(d, "77", 0, testPR)
 
 	if fc.Merged != testPR {
 		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
