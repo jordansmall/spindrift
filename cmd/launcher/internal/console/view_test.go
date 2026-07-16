@@ -540,7 +540,7 @@ func TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
 // that Tab moves the marker — the operator's only cue for which column
 // cursor keys and Enter currently act on (issue #845).
 func TestView_Focus_MarksFocusedColumnVisually(t *testing.T) {
-	m := NewModel()
+	m := Update(NewModel(), SizeChangedMsg{Height: 24})
 
 	backlogFocused := View(m)
 	if !strings.Contains(backlogFocused, "backlog [focus]") {
@@ -757,6 +757,42 @@ func TestView_LongBacklog_WithRefreshError_HeaderStaysPinned(t *testing.T) {
 	}
 	if !strings.Contains(out, "running 0/0") {
 		t.Errorf("View() = %q, want the header status line present", out)
+	}
+}
+
+// TestView_ExtremelyShortTerminal_NeverExceedsHeight verifies a terminal too
+// short even for a labeled empty column never renders more lines than
+// Height, in both the wide (side-by-side) and narrow (stacked) layouts — a
+// column's label line is part of the body budget too, not an unconditional
+// floor on top of it (issue #1035 AC1/AC2 review finding).
+func TestView_ExtremelyShortTerminal_NeverExceedsHeight(t *testing.T) {
+	issues := make([]forge.Issue, 20)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	picks := make([]Pick, 20)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
+	}
+
+	for _, tc := range []struct {
+		width, height int
+	}{
+		{width: 80, height: 1},
+		{width: 80, height: 2},
+		{width: 40, height: 1},
+		{width: 40, height: 2},
+		{width: 40, height: 3},
+	} {
+		m := Update(NewModel(), SizeChangedMsg{Width: tc.width, Height: tc.height})
+		m = Update(m, IssuesLoadedMsg{Issues: issues})
+		m.Picks = picks
+
+		out := View(m)
+		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+		if len(lines) > tc.height {
+			t.Errorf("width=%d height=%d: View() rendered %d lines, want at most %d", tc.width, tc.height, len(lines), tc.height)
+		}
 	}
 }
 
