@@ -24,17 +24,26 @@ func View(m Model) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(renderHeader(m))
+	header := renderHeader(m)
+	b.WriteString(header)
+	promptLines := 0
 	if m.FilterEditing {
 		fmt.Fprintf(&b, "/%s  [enter] apply · [esc] cancel\n", m.Filter)
+		promptLines++
 	}
 	if m.PendingTerminate != "" {
 		fmt.Fprintf(&b, "terminate #%s? [y/N]\n", m.PendingTerminate)
+		promptLines++
 	}
 	if m.PendingQuit {
 		b.WriteString("quit with live Dispatches: drain (d, default) / terminate-all (t) / stay (s)?\n")
+		promptLines++
 	}
-	b.WriteString(renderBody(m))
+	budget := m.Height - strings.Count(header, "\n") - promptLines
+	if budget < 0 {
+		budget = 0
+	}
+	b.WriteString(renderBody(m, budget))
 	if m.Err != nil {
 		fmt.Fprintf(&b, "refresh failed: %s\n", m.Err)
 	}
@@ -53,6 +62,13 @@ const minTwoColumnWidth = 60
 // row than the backlog, so it gets the larger share of a wide terminal.
 const leftColumnFraction = 2.0 / 5.0
 
+// unboundedBudget is a row budget large enough that windowRows never
+// truncates — passed by the docked and floating drill-in panes (issue #846,
+// ADR 0025), which predate per-render body windowing and keep their
+// existing unwindowed behavior (issue #1035 is scoped to the plain
+// two-column body only).
+const unboundedBudget = 1 << 30
+
 // renderBody renders the backlog and work-queue columns side by side,
 // sized from m.Width — the two-column body under the header (issue #844,
 // ADR 0025). Backlog keeps its label filter and cursor; the queue lists
@@ -61,10 +77,13 @@ const leftColumnFraction = 2.0 / 5.0
 // leftColumnFraction of m.Width; both columns clip any line that still
 // overflows its share, so a joined row never exceeds m.Width regardless of
 // how long a title, label list, or blocker badge runs (issue #844 AC6).
-// Below minTwoColumnWidth the columns stack instead of splitting.
-func renderBody(m Model) string {
-	backlog := renderBacklogColumn(m)
-	queue := renderQueueColumn(m)
+// Below minTwoColumnWidth the columns stack instead of splitting. budget is
+// the row count left after the header and any prompt lines — both columns
+// window their rows to it so neither can push the header off-screen (issue
+// #1035).
+func renderBody(m Model, budget int) string {
+	backlog := renderBacklogColumn(m, budget)
+	queue := renderQueueColumn(m, budget)
 	if m.Width < minTwoColumnWidth {
 		return backlog + "\n" + queue
 	}
@@ -89,52 +108,63 @@ func maxLineWidth(s string) int {
 }
 
 // renderBacklogColumn renders the queueable backlog: one line per visible
-// issue (number, title, labels), with the cursor row marked — unchanged from
-// the prior flat rendering, just under its own column label.
-func renderBacklogColumn(m Model) string {
+// issue (number, title, labels), with the cursor row marked, under its own
+// column label — windowed to budget rows (including the label) so a long
+// backlog can't push the header off-screen; a truncated list ends with a
+// lightweight "N more below" affordance instead of just stopping (issue
+// #1035).
+func renderBacklogColumn(m Model, budget int) string {
 	var b strings.Builder
 	if m.Focus == FocusBacklog {
 		b.WriteString("backlog [focus]:\n")
 	} else {
 		b.WriteString("backlog:\n")
 	}
+	rows := make([]string, 0, len(m.Visible()))
 	for i, iss := range m.Visible() {
 		marker := " "
 		if m.Focus == FocusBacklog && i == m.Cursor {
 			marker = ">"
 		}
-		fmt.Fprintf(&b, "%s #%s  %s  [%s]\n", marker, iss.Number, iss.Title, strings.Join(iss.Labels, ", "))
+		rows = append(rows, fmt.Sprintf("%s #%s  %s  [%s]\n", marker, iss.Number, iss.Title, strings.Join(iss.Labels, ", ")))
 	}
+	writeWindowedRows(&b, rows, budget-1)
 	return b.String()
 }
 
 // renderQueueColumn renders the work queue: one pick-ordered line per Pick,
 // tagged with its PickState — a held row names its blocker, a running row
-// carries its heartbeat.
-func renderQueueColumn(m Model) string {
+// carries its heartbeat. Windowed to budget rows (including the label) the
+// same way renderBacklogColumn is, so a long picks queue can't push the
+// header off-screen either (issue #1035).
+func renderQueueColumn(m Model, budget int) string {
 	var b strings.Builder
 	if m.Focus == FocusQueue {
 		b.WriteString("picks [focus]:\n")
 	} else {
 		b.WriteString("picks:\n")
 	}
+	rows := make([]string, 0, len(m.Picks))
 	for i, p := range m.Picks {
 		marker := " "
 		if m.Focus == FocusQueue && i == m.QueueCursor {
 			marker = ">"
 		}
-		fmt.Fprintf(&b, "%s #%s  [%s]  %s", marker, p.Number, p.State, p.Title)
+		var row strings.Builder
+		fmt.Fprintf(&row, "%s #%s  [%s]  %s", marker, p.Number, p.State, p.Title)
 		if p.BlockedBy != "" {
-			fmt.Fprintf(&b, "  (held by %s)", p.BlockedBy)
+			fmt.Fprintf(&row, "  (held by %s)", p.BlockedBy)
 		}
 		if p.Reason != "" {
-			fmt.Fprintf(&b, "  (%s)", p.Reason)
+			fmt.Fprintf(&row, "  (%s)", p.Reason)
 		}
 		if p.Heartbeat != "" {
-			fmt.Fprintf(&b, "  %s", p.Heartbeat)
+			fmt.Fprintf(&row, "  %s", p.Heartbeat)
 		}
-		b.WriteString("\n")
+		row.WriteString("\n")
+		rows = append(rows, row.String())
 	}
+	writeWindowedRows(&b, rows, budget-1)
 	return b.String()
 }
 
@@ -311,8 +341,8 @@ func renderDrillInPane(m Model) string {
 // the remainder splits between backlog and queue exactly as renderBody does
 // for the two-column body.
 func renderDockedBody(m Model) string {
-	backlog := renderBacklogColumn(m)
-	queue := renderQueueColumn(m)
+	backlog := renderBacklogColumn(m, unboundedBudget)
+	queue := renderQueueColumn(m, unboundedBudget)
 	transcript := renderTranscriptColumn(*m.DrillIn, m.Height)
 
 	transcriptWidth := int(float64(m.Width) * transcriptColumnFraction)
@@ -334,7 +364,7 @@ func renderDockedBody(m Model) string {
 // the overlay's height render the plain two-column body untouched, unlike
 // renderDockedBody's every-row column split.
 func renderFloatingBody(m Model) string {
-	body := renderBody(m)
+	body := renderBody(m, unboundedBudget)
 	transcript := renderTranscriptColumn(*m.DrillIn, m.Height)
 	floatWidth := int(float64(m.Width) * transcriptColumnFraction)
 	return overlay(body, transcript, m.Width-floatWidth, floatWidth)
@@ -354,6 +384,35 @@ func overlay(body, pane string, leftWidth, paneWidth int) string {
 		bodyLines[i] = clip(bodyLines[i], leftWidth, true) + clip(pl, paneWidth, true)
 	}
 	return strings.Join(bodyLines, "\n") + "\n"
+}
+
+// writeWindowedRows writes rows to b, offset 0, clipped to budget rows — the
+// backlog/picks columns' body-windowing counterpart to windowLines' offset
+// slicing (issue #1035; scrolling the body itself, i.e. a non-zero offset,
+// is a later ticket). When rows overflows budget, one row is held back for a
+// trailing "N more below" affordance line instead of just truncating
+// silently, so the operator knows the list is clipped rather than complete.
+// A non-positive budget writes nothing.
+func writeWindowedRows(b *strings.Builder, rows []string, budget int) {
+	if budget < 0 {
+		budget = 0
+	}
+	if len(rows) <= budget {
+		for _, r := range rows {
+			b.WriteString(r)
+		}
+		return
+	}
+	visible := budget - 1
+	if visible < 0 {
+		visible = 0
+	}
+	for _, r := range rows[:visible] {
+		b.WriteString(r)
+	}
+	if budget > 0 {
+		fmt.Fprintf(b, "… %d more below\n", len(rows)-visible)
+	}
 }
 
 // windowLines returns d.Lines[offset:end], where end stops budget lines past

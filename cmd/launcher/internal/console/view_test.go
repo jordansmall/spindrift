@@ -1,6 +1,7 @@
 package console
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 // each visible issue's number, title, and labels — the backlog line the
 // operator reads to decide what to pick in a later issue.
 func TestView_ListsVisibleIssuesWithNumberTitleLabels(t *testing.T) {
-	m := NewModel()
+	m := Update(NewModel(), SizeChangedMsg{Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
 		{Number: "12", Title: "Fix the thing", Labels: []string{"ready-for-agent", "bug"}},
 	}})
@@ -141,7 +142,7 @@ func TestView_Header_LaunchLessSession_RendersCleanly(t *testing.T) {
 // row's number, title, and state — a dissolved row also carries its reason
 // — so the operator can see the queue without a separate command (#646).
 func TestView_ListsPicksWithNumberTitleState(t *testing.T) {
-	m := NewModel()
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m.Picks = []Pick{
 		{Number: "42", Title: "fix the thing", State: PickQueued},
 		{Number: "7", Title: "raced pick", State: PickDissolved, Reason: "issue is closed"},
@@ -159,7 +160,7 @@ func TestView_ListsPicksWithNumberTitleState(t *testing.T) {
 // latest heartbeat line alongside number/title/state, so the overview is
 // scannable without drilling in (#647 AC2).
 func TestView_RunningPick_ShowsHeartbeat(t *testing.T) {
-	m := NewModel()
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m.Picks = []Pick{
 		{Number: "42", Title: "fix the thing", State: PickRunning, Heartbeat: "#42 [edit] \xc2\xb7 7 turns"},
 	}
@@ -228,7 +229,7 @@ func TestView_RefreshError_Surfaced(t *testing.T) {
 // visually marked so the operator can see which issue j/down or the up
 // arrow will act on (issue #784).
 func TestView_Cursor_MarksHighlightedRow(t *testing.T) {
-	m := NewModel()
+	m := Update(NewModel(), SizeChangedMsg{Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
 	m = Update(m, CursorMoveMsg{Delta: 1})
 
@@ -468,7 +469,7 @@ func TestView_TwoColumn_Body_StacksOnNarrowTerminal(t *testing.T) {
 // blocker and a running row also carrying its heartbeat (issue #844 AC3/
 // AC4, ADR 0025).
 func TestView_TwoColumn_Queue_RowsTaggedWithBracketedState(t *testing.T) {
-	m := NewModel()
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m.Picks = []Pick{
 		{Number: "1", Title: "queued one", State: PickQueued},
 		{Number: "2", Title: "blocked one", State: PickHeld, BlockedBy: "#41 (native)"},
@@ -538,6 +539,7 @@ func TestView_Focus_MarksFocusedColumnVisually(t *testing.T) {
 // marks Cursor's row (issue #845).
 func TestView_QueueCursor_MarksHighlightedRow(t *testing.T) {
 	m := Update(NewModel(), FocusToggleMsg{})
+	m = Update(m, SizeChangedMsg{Height: 24})
 	m.Picks = []Pick{{Number: "1", State: PickQueued}, {Number: "2", State: PickQueued}}
 	m.QueueCursor = 1
 
@@ -642,5 +644,118 @@ func TestView_DrillInFullscreen_TakesWholeBodyEvenWhenWide(t *testing.T) {
 	}
 	if !strings.Contains(out, "[implementor] hi") {
 		t.Errorf("View() = %q, want the transcript content visible fullscreen", out)
+	}
+}
+
+// TestView_LongBacklog_HeaderStaysPinned verifies the header's status line
+// stays visible, and the backlog column stops short of the last loaded
+// issue, when the backlog has more rows than the terminal has height for —
+// the header must never scroll off the top (issue #1035 AC1/AC2).
+func TestView_LongBacklog_HeaderStaysPinned(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	issues := make([]forge.Issue, 50)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+	out := View(m)
+	if !strings.Contains(out, "running 0/0") {
+		t.Errorf("View() = %q, want the header status line present even with a long backlog", out)
+	}
+	if strings.Contains(out, "issue 49") {
+		t.Errorf("View() = %q, want the last issue clipped past the viewport height", out)
+	}
+}
+
+// TestView_LongBacklog_ShowsMoreBelowAffordance verifies a truncated backlog
+// column ends with an "N more below" line naming how many rows were clipped,
+// so the operator knows the list is incomplete rather than reading a short
+// backlog as the whole one (issue #1035 AC4).
+func TestView_LongBacklog_ShowsMoreBelowAffordance(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	issues := make([]forge.Issue, 50)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+	out := View(m)
+	if !strings.Contains(out, "more below") {
+		t.Errorf("View() = %q, want a \"more below\" affordance line", out)
+	}
+}
+
+// TestView_LongPicksQueue_HeaderStaysPinnedAndShowsMoreBelow verifies the
+// picks column is height-budgeted the same way the backlog column is — a
+// long work queue can't push the header off-screen either, and it gets its
+// own truncation affordance (issue #1035 AC1/AC2/AC4).
+func TestView_LongPicksQueue_HeaderStaysPinnedAndShowsMoreBelow(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	picks := make([]Pick, 50)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
+	}
+	m.Picks = picks
+
+	out := View(m)
+	if !strings.Contains(out, "running 0/0") {
+		t.Errorf("View() = %q, want the header status line present even with a long picks queue", out)
+	}
+	if strings.Contains(out, "pick 49") {
+		t.Errorf("View() = %q, want the last pick clipped past the viewport height", out)
+	}
+	if !strings.Contains(out, "more below") {
+		t.Errorf("View() = %q, want a \"more below\" affordance line", out)
+	}
+}
+
+// TestView_HeaderHeight_AdaptsToAlertLines verifies the body's row budget
+// shrinks as alert lines (stale/rebuilding/dogfood) are added to the header,
+// so a longer header always leaves proportionally less room for the body
+// instead of a stale, hardcoded header-height assumption (issue #1035 AC3).
+func TestView_HeaderHeight_AdaptsToAlertLines(t *testing.T) {
+	issues := make([]forge.Issue, 20)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+
+	plain := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 12})
+	plain = Update(plain, IssuesLoadedMsg{Issues: issues})
+	plainOut := View(plain)
+	plainRows := strings.Count(plainOut, "issue ")
+
+	withAlert := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 12})
+	withAlert = Update(withAlert, IssuesLoadedMsg{Issues: issues})
+	withAlert = Update(withAlert, StaleStatusMsg{Stale: true, Message: "rebuild needed"})
+	withAlertOut := View(withAlert)
+	withAlertRows := strings.Count(withAlertOut, "issue ")
+
+	if withAlertRows >= plainRows {
+		t.Errorf("visible issue rows with a stale alert = %d, want fewer than without one (%d) — the extra header line should shrink the body budget", withAlertRows, plainRows)
+	}
+}
+
+// TestView_HeaderHeight_BannerCollapse_StillBudgetsBody verifies the body
+// windowing still leaves the header (status line) visible and clips the
+// backlog on a terminal too short for the banner — the collapsed-banner
+// header height, not the tall one, must drive the budget (issue #1035 AC3).
+func TestView_HeaderHeight_BannerCollapse_StillBudgetsBody(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 3})
+	issues := make([]forge.Issue, 20)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+	out := View(m)
+	if strings.Contains(out, "spindrift") {
+		t.Errorf("View() = %q, want the banner collapsed on a short terminal", out)
+	}
+	if !strings.Contains(out, "running 0/0") {
+		t.Errorf("View() = %q, want the status line present", out)
+	}
+	if strings.Contains(out, "issue 19") {
+		t.Errorf("View() = %q, want the backlog clipped to the short viewport", out)
 	}
 }
