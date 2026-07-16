@@ -218,7 +218,9 @@ func renderQueueColumn(m Model, budget int) string {
 // column width — left is padded out to leftWidth so the right column lines
 // up in a consistent gutter, right is truncated if it overflows rightWidth —
 // so a joined row never exceeds leftWidth+rightWidth regardless of how long
-// either side's content runs (issue #844 AC6).
+// either side's content runs (issue #844 AC6). The joined line is then
+// right-trimmed, since a backlog-only row (right empty) would otherwise
+// carry the left column's padding as trailing whitespace (issue #861).
 func joinColumns(left, right string, leftWidth, rightWidth int) string {
 	leftLines := strings.Split(strings.TrimRight(left, "\n"), "\n")
 	rightLines := strings.Split(strings.TrimRight(right, "\n"), "\n")
