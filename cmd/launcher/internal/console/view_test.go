@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mattn/go-runewidth"
+
 	"spindrift.dev/launcher/internal/forge"
 )
 
