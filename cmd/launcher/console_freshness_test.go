@@ -26,13 +26,13 @@ func TestNewConsoleFreshnessChecker_RebuildThenCheck_ReportsFreshAtSameTip(t *te
 	probe := func() freshness.Result { probeCalls++; return stale }
 
 	buildCalls := 0
-	fresh, rebuild := newConsoleFreshnessChecker("main", probe, func() error { return nil }, func() error { buildCalls++; return nil })
+	fresh, rebuild := newConsoleFreshnessChecker("main", probe, func() error { return nil }, func() (string, error) { buildCalls++; return "", nil })
 
 	if applicable, isFresh, msg := fresh(); !applicable || isFresh {
 		t.Fatalf("initial check: applicable=%v fresh=%v msg=%q, want stale", applicable, isFresh, msg)
 	}
 
-	if err := rebuild(); err != nil {
+	if _, err := rebuild(); err != nil {
 		t.Fatalf("rebuild: %v", err)
 	}
 	if buildCalls != 1 {
@@ -56,8 +56,8 @@ func TestNewConsoleFreshnessChecker_OriginAdvancesAfterRebuild_StaleAgain(t *tes
 	res := freshness.Result{Applicable: true, Fresh: false, Rev: "abc123", Message: "rebuild needed"}
 	probe := func() freshness.Result { return res }
 
-	fresh, rebuild := newConsoleFreshnessChecker("main", probe, func() error { return nil }, func() error { return nil })
-	if err := rebuild(); err != nil {
+	fresh, rebuild := newConsoleFreshnessChecker("main", probe, func() error { return nil }, func() (string, error) { return "", nil })
+	if _, err := rebuild(); err != nil {
 		t.Fatalf("rebuild: %v", err)
 	}
 	if _, isFresh, _ := fresh(); !isFresh {
@@ -81,7 +81,7 @@ func TestNewConsoleFreshnessChecker_AlreadyFresh_PassesThroughUnchanged(t *testi
 	res := freshness.Result{Applicable: true, Fresh: true, Rev: "abc123", Message: "fresh"}
 	probe := func() freshness.Result { return res }
 
-	fresh, _ := newConsoleFreshnessChecker("main", probe, func() error { return nil }, func() error { return nil })
+	fresh, _ := newConsoleFreshnessChecker("main", probe, func() error { return nil }, func() (string, error) { return "", nil })
 
 	applicable, isFresh, msg := fresh()
 	if !applicable || !isFresh || msg != "fresh" {
@@ -100,11 +100,11 @@ func TestNewConsoleFreshnessChecker_RebuildPropagatesPullAndBuildErrors(t *testi
 		return freshness.Result{Applicable: true, Fresh: false, Rev: "abc123"}
 	}
 
-	_, rebuild := newConsoleFreshnessChecker("main", probe, func() error { return errBoomFreshness }, func() error {
+	_, rebuild := newConsoleFreshnessChecker("main", probe, func() error { return errBoomFreshness }, func() (string, error) {
 		t.Fatal("build called after pull failed")
-		return nil
+		return "", nil
 	})
-	if err := rebuild(); err != errBoomFreshness {
+	if _, err := rebuild(); err != errBoomFreshness {
 		t.Errorf("rebuild() = %v, want the pull error", err)
 	}
 	if probeCalls != 0 {

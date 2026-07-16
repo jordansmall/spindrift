@@ -23,8 +23,11 @@ import (
 // treating a stale verdict at that exact rev as fresh — a real rebuild is
 // still required whenever the base branch advances past it. pull and build
 // are injected so tests can substitute fakes instead of shelling out to
-// git/nix; production wiring is consoleGitSync and consoleNixBuild.
-func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull func() error, build func() error) (waves.FreshnessChecker, func() error) {
+// git/nix; production wiring is consoleGitSync and consoleNixBuild. build
+// returns its captured nix output (issue #765) alongside its error, so a
+// background rebuild never writes directly to the Console's own
+// stdout/stderr.
+func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull func() error, build func() (string, error)) (waves.FreshnessChecker, func() (string, error)) {
 	probe := func() freshness.Result {
 		return freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
 	}
@@ -36,7 +39,7 @@ func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull fu
 // scripted freshness.Result values instead of a real git/nix round-trip —
 // freshness.Probe's own git plumbing is exercised by internal/freshness's
 // own tests. See newConsoleFreshness for the production wiring.
-func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result, pull func() error, build func() error) (waves.FreshnessChecker, func() error) {
+func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result, pull func() error, build func() (string, error)) (waves.FreshnessChecker, func() (string, error)) {
 	var mu sync.Mutex
 	var builtRev string
 
@@ -51,18 +54,19 @@ func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result
 		return res.Applicable, res.Fresh, res.Message
 	}
 
-	rebuild := func() error {
+	rebuild := func() (string, error) {
 		if err := pull(); err != nil {
-			return err
+			return "", err
 		}
-		if err := build(); err != nil {
-			return err
+		output, err := build()
+		if err != nil {
+			return output, err
 		}
 		res := probe()
 		mu.Lock()
 		builtRev = res.Rev
 		mu.Unlock()
-		return nil
+		return output, nil
 	}
 
 	return fresh, rebuild
@@ -92,9 +96,11 @@ func runGit(pwd string, args ...string) error {
 // consoleNixBuild re-realizes the image from pwd's now-updated tree via
 // runner.RunNixBuild — not a call into this process's own build(), whose
 // IMAGE_DRV/IMAGE_TAG are fixed at process start and would not pick up
-// anything consoleGitSync just pulled. Streamed to stdout/stderr so the
-// operator sees the same build progress dogfood.sh prints — "progress
-// surfaced" without the Console needing its own meter.
-func consoleNixBuild(pwd string) error {
+// anything consoleGitSync just pulled. Output is captured and returned
+// rather than streamed to stdout/stderr (issue #765): a live Bubble Tea
+// alt-screen program owns those fds while a background rebuild runs, and a
+// direct writer would corrupt its renders. The captured text is retrievable
+// through Launcher.StaleStatus once the rebuild completes.
+func consoleNixBuild(pwd string) (string, error) {
 	return runner.RunNixBuild(pwd)
 }

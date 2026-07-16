@@ -53,6 +53,11 @@ type Model struct {
 	// RebuildErr is the last rebuild's failure, if any — "" on success or
 	// when no rebuild has run yet.
 	RebuildErr string
+	// RebuildOutput is the last rebuild's captured nix output (issue #765)
+	// — stdout/stderr merged, in build order — never streamed to the
+	// Console's own stdout/stderr while the rebuild ran. "" when no rebuild
+	// has run yet.
+	RebuildOutput string
 	// PendingQuit is whether a quit confirm is armed, awaiting the
 	// operator's drain/terminate-all/stay answer — only when live
 	// Dispatches exist at quit time (issue #651, ADR 0023).
@@ -251,6 +256,7 @@ func Update(m Model, msg Msg) Model {
 		m.StaleMessage = msg.Message
 		m.Rebuilding = msg.Rebuilding
 		m.RebuildErr = msg.RebuildErr
+		m.RebuildOutput = msg.RebuildOutput
 	case CursorMoveMsg:
 		if m.Focus == FocusQueue {
 			m.QueueCursor += msg.Delta
