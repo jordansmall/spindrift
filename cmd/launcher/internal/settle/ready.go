@@ -410,8 +410,12 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string) error {
 // re-entered for it.
 func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
 	fmt.Printf("    #%s  landing=%s  status=post-force-push-wait\n", num, pr)
-	if s.gateToGreen(num, gen, pr) != gateGreen {
+	switch s.gateToGreen(num, gen, pr) {
+	case gateGreen:
+		return nil
+	case gateAbandoned:
+		return errAbandoned
+	default:
 		return fmt.Errorf("%w: CI did not reach green after force-push on %s", errLandingNeverGreen, pr)
 	}
-	return nil
 }
