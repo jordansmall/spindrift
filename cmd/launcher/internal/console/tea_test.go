@@ -806,11 +806,10 @@ func TestTea_WithLauncher_RendersLiveQueueState(t *testing.T) {
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	// A realistic 3-label backlog issue widens the backlog column to its
-	// leftColumnFraction cap on an 80-col terminal, which in turn narrows the
-	// queue column enough that the Reason badge clips mid-word ("issue is
-	// closed" -> "issue is cl…", view.go's clip) — accepted and asserted
-	// here rather than masked by a label-free fixture (issue #857).
-	waitForOutput(t, tm, "dissolved", "issue is cl…")
+	// leftColumnFraction cap on an 80-col terminal, which narrows the queue
+	// column — but the Reason badge now sits ahead of Title in the row
+	// (issue #858), so it renders in full and Title clips instead.
+	waitForOutput(t, tm, "dissolved", "issue is closed")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
@@ -833,11 +832,10 @@ func TestTea_WithLauncher_RendersHeldPickWithBlockedByBadge(t *testing.T) {
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	// As in TestTea_WithLauncher_RendersLiveQueueState, a realistic 2-label
-	// backlog issue narrows the queue column enough that the "held by" badge
-	// clips mid-word ("held by #41 (native)" -> "held by #41 (nat…") —
-	// accepted and asserted rather than masked by a label-free fixture
-	// (issue #857).
-	waitForOutput(t, tm, "held", "held by #41 (nat…")
+	// backlog issue narrows the queue column — but the "held by" badge now
+	// sits ahead of Title in the row (issue #858), so it renders in full
+	// and Title clips instead.
+	waitForOutput(t, tm, "held", "held by #41 (native)")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
