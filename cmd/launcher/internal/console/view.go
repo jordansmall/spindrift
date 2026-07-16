@@ -292,10 +292,17 @@ const banner = `
 ========================================
 `
 
-// bannerHeight is the banner's row count (including its leading blank line)
-// — the header collapses the banner away once Height drops below it, so the
-// banner never pushes the backlog/queue off-screen on a short terminal.
-var bannerHeight = strings.Count(banner, "\n")
+// bannerHeight is the banner's rendered row count — the three lines left
+// after renderHeader's TrimPrefix strips the leading blank line above. It is
+// not the number of newlines in the raw banner literal (that count is one
+// higher, for the blank line).
+var bannerHeight = strings.Count(strings.TrimPrefix(banner, "\n"), "\n")
+
+// bannerCollapseMargin is one extra row of headroom required, on top of
+// bannerHeight, before the header shows the banner — so the collapse never
+// leaves the banner crowding the backlog/queue against the terminal's last
+// line on a borderline-tall terminal.
+const bannerCollapseMargin = 1
 
 // renderHeader renders the Console's full-width header: the fixed banner
 // (when the terminal is tall enough to afford it), the status line
@@ -320,7 +327,7 @@ func renderHeader(m Model) string {
 	}
 
 	var b strings.Builder
-	if m.Height >= bannerHeight {
+	if m.Height >= bannerHeight+bannerCollapseMargin {
 		b.WriteString(strings.TrimPrefix(banner, "\n"))
 	}
 	// The status line always renders, even in a launch-less session where
