@@ -92,6 +92,11 @@ runs:
     # claim/merge failure downstream. `gh api rate_limit` does not itself draw
     # down the core quota, so the preflight is free. GH_TOKEN comes from the
     # env export above.
+    #
+    # The remaining/limit/reset triple is also appended to $GITHUB_STEP_SUMMARY
+    # so it renders on the run's overview page at a glance — a step's display
+    # name can't be set dynamically, so the job summary is the only surface
+    # that shows the numbers without expanding this step's log.
     - name: Rate-limit smoke test
       shell: bash
       env:
@@ -101,9 +106,15 @@ runs:
       run: |
         core=$(gh api rate_limit --jq '.resources.core | "\(.remaining) \(.limit) \(.reset)"')
         read -r remaining limit reset <<<"$core"
+        reset_utc=$(date -u -d "@$reset" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$reset")
         printf 'GitHub core rate limit: %s/%s remaining (resets %s UTC)\n' \
-          "$remaining" "$limit" \
-          "$(date -u -d "@$reset" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$reset")"
+          "$remaining" "$limit" "$reset_utc"
+        low=""
+        [ "$remaining" -lt "$MIN_CORE_REMAINING" ] && low=" — ⛔ below the ${MIN_CORE_REMAINING} floor, aborting before build"
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          printf '### Rate-limit smoke test\n\nGitHub core API: **%s/%s** requests remaining (resets %s UTC)%s.\n' \
+            "$remaining" "$limit" "$reset_utc" "$low" >> "$GITHUB_STEP_SUMMARY"
+        fi
         if [ "$remaining" -lt "$MIN_CORE_REMAINING" ]; then
           echo "::error::GitHub core rate limit critically low (${remaining} < ${MIN_CORE_REMAINING}); aborting before build. Re-trigger after the window resets." >&2
           exit 1
