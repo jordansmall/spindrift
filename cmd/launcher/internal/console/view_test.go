@@ -463,6 +463,31 @@ func TestView_TwoColumn_Body_StacksOnNarrowTerminal(t *testing.T) {
 	}
 }
 
+// TestView_NarrowTerminal_LongBacklog_HeaderStaysPinned verifies the
+// header's status line stays visible on a narrow (stacked-layout) terminal
+// too — the stacked backlog and picks columns must split the body's row
+// budget between them, not each claim it in full, or their combined height
+// still pushes the header off-screen (issue #1035 AC1/AC2 review finding).
+func TestView_NarrowTerminal_LongBacklog_HeaderStaysPinned(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 10})
+	issues := make([]forge.Issue, 20)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+	picks := make([]Pick, 20)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
+	}
+	m.Picks = picks
+
+	out := View(m)
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) > m.Height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — the header must stay pinned", len(lines), m.Height)
+	}
+}
+
 // TestView_TwoColumn_Queue_RowsTaggedWithBracketedState verifies each
 // work-queue row carries its PickState as a bracketed tag — running, held,
 // queued distinguishable at a glance — with a held row also naming its

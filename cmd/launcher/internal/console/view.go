@@ -80,13 +80,24 @@ const unboundedBudget = 1 << 30
 // Below minTwoColumnWidth the columns stack instead of splitting. budget is
 // the row count left after the header and any prompt lines — both columns
 // window their rows to it so neither can push the header off-screen (issue
-// #1035).
+// #1035). Side by side, each column gets the full budget since they share
+// output lines; stacked, they'd each independently fit within budget but
+// together overflow it, so the stacked case splits budget between them
+// instead.
 func renderBody(m Model, budget int) string {
+	if m.Width < minTwoColumnWidth {
+		// The "\n" joining the two stacked blocks is itself a blank
+		// separator row — budget it like any other body row, or the
+		// stack's true height runs one over the columns' own totals.
+		contentBudget := budget - 1
+		if contentBudget < 0 {
+			contentBudget = 0
+		}
+		half := contentBudget / 2
+		return renderBacklogColumn(m, half) + "\n" + renderQueueColumn(m, contentBudget-half)
+	}
 	backlog := renderBacklogColumn(m, budget)
 	queue := renderQueueColumn(m, budget)
-	if m.Width < minTwoColumnWidth {
-		return backlog + "\n" + queue
-	}
 	leftWidth := maxLineWidth(backlog)
 	if maxLeft := int(float64(m.Width) * leftColumnFraction); leftWidth > maxLeft {
 		leftWidth = maxLeft
