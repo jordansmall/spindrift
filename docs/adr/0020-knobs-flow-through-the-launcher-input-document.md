@@ -23,9 +23,24 @@ wrapper passes its store path via one flag:
 exec launcher --input /nix/store/…-launcher-input.json "$@"
 ```
 
-The Go struct mirroring the document is nix-generated from the schema, under
-the same golden-diff guard as `flagtable_gen.go`, so the two sides cannot
-drift.
+The Go struct mirroring the document (`inputDocument`, `cmd/launcher/inputdoc.go`)
+is hand-written: two generic `map[string]string` fields, `Settings` and
+`Artifacts`, keyed by env var name — matching the existing
+`schemaDefaults`/`schemaFlags` table-not-struct pattern rather than a
+per-knob struct. (Amended by issue #813: this ADR originally claimed the
+struct was nix-generated from the schema under the same golden-diff guard as
+`flagtable_gen.go`; that never shipped. Drift protection here is narrower
+than a generated struct would give: `nix/checks/equivalence.nix`'s
+`mkharness-defaults` check hand-picks specific keys — `LABEL`, `BASE_BRANCH`,
+`MAX_PARALLEL`, `BRANCH_PREFIX`, `IN_PROGRESS_LABEL`, `FAILED_LABEL`,
+`SCOUT_MODEL`, `REVIEW_MODEL`, `COMPLETE_LABEL`, `RUNTIME`, `AGENT_FILES`,
+`AGENT_ENV`, and the `_DRV`/`IMAGE_ARCHIVE` artifact variants — and asserts
+their rendered values by grep, not every `flakeOption` knob the schema
+defines. A newly added knob reaches the document with no automatic
+value-for-value assertion until someone extends that check by hand. Whether
+to broaden `equivalence.nix`'s coverage or derive it from the schema is left
+open; see issue #810 for the related `documentArtifacts` coverage gap in
+`nix/checks/schema-drift.nix`.)
 
 ## Motivation
 

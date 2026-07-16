@@ -14,6 +14,11 @@ import (
 // settings), keyed by env var name; artifacts holds the nix-computed
 // plumbing values (image refs, agent files, driver name, ...) that
 // goRunPreamble/goBuildPreamble used to export as env before this issue.
+// Hand-written, not nix-generated (ADR 0020 said otherwise until issue
+// #813 corrected it): two generic maps here mirror the existing
+// schemaDefaults/schemaFlags table pattern rather than a per-knob struct.
+// nix/checks/equivalence.nix's mkharness-defaults check is the drift gate —
+// it hand-picks specific keys to assert by grep, not every flakeOption knob.
 type inputDocument struct {
 	Settings  map[string]string `json:"settings"`
 	Artifacts map[string]string `json:"artifacts"`
