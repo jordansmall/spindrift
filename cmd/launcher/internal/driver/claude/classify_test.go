@@ -135,6 +135,21 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// The claude CLI's normal terminal type:"result" line echoes the
+		// preceding assistant turn's text into its "result" field on an
+		// ordinary (non-error) completion. If that text quoted a transient
+		// marker in genuine prose, the echo must not be scanned as a fresh
+		// signal (issue #818).
+		name: "Terminal_SelfPoisoning_ServerErrorMarkerEchoedInResultLine",
+		lines: []string{
+			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Fixing the server_error guard now."}]}}`,
+			`{"type":"result","is_error":false,"result":"Fixing the server_error guard now.","stop_reason":"end_turn"}`,
+		},
+		wantClass:   claude.Terminal,
+		wantReason:  claude.TaskFailed,
+		wantResetAt: nil,
+	},
+	{
 		name: "Network_ConnectionRefused",
 		lines: []string{
 			`dial tcp: connection refused`,
