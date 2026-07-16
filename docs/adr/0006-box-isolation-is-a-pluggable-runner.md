@@ -44,6 +44,14 @@ closure but skips the image/`load` step, and the entrypoint must not assume an
 OCI filesystem layout — it already clones into a work dir and reads a mounted
 prompt, both of which bwrap supplies as bind mounts.
 
+`runtime = "rancher"` (issue #1274) adds a third OCI CLI name — Rancher
+Desktop's containerd mode, driven via `nerdctl` — and is the first runtime
+value where the knob value differs from the binary it execs (podman and
+docker were value == binary). The `rancher → nerdctl` alias lives in exactly
+one place in the runner package, consumed by both OCI adapter construction
+and runtime validation; `runnerKind` is unchanged, since anything other than
+`bwrap` already collapses to the `oci` family.
+
 ## Isolation trade-off
 
 The bwrap runner is genuinely isolated for the normal threat model: separate

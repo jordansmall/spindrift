@@ -81,7 +81,11 @@ reporting).
 
 **Box**:
 The disposable per-issue podman container — the isolation boundary that makes
-`--dangerously-skip-permissions` safe.
+`--dangerously-skip-permissions` safe. The `runtime` knob picks the OCI CLI
+that drives it: `podman`/`docker` name the binary directly; `rancher` is an
+operator-facing alias for Rancher Desktop's containerd mode and is the first
+value that differs from the binary it execs (`nerdctl`) — the one alias lives
+in the runner package, shared by adapter construction and validation.
 _Avoid_: sandbox, runner, worker.
 
 **Harness plumbing**:
