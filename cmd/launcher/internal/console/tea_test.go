@@ -398,6 +398,8 @@ func TestTea_EnterKey_OnFocusedQueue_DrillsRunningPick(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+	sendKey(tm, "d")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
@@ -460,6 +462,8 @@ func TestTea_DrillInKey_OpensTranscriptPane(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+	sendKey(tm, "d")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
@@ -560,6 +564,8 @@ func TestTea_DrillInToggleKey_SwapsRenderedAndRaw(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+	sendKey(tm, "d")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
@@ -596,6 +602,8 @@ func TestTea_PaneModeKey_CyclesDockedFloatingFullscreen(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+	sendKey(tm, "d")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 
 	fm := tm.FinalModel(t).(teaModel)
@@ -644,6 +652,8 @@ func TestTea_DrillInScrollKeys_PageThroughTranscript(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+	sendKey(tm, "d")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
@@ -1421,7 +1431,12 @@ func TestTea_TerminateKey_ConfirmThenOther_Declines(t *testing.T) {
 	sendKey(tm, "n")
 	waitForOutput(t, tm, "fix the thing") // confirm prompt gone, backlog/queue view back
 
+	// The Dispatch is still live after declining, so "q" now arms the
+	// quit confirm (issue #822) instead of exiting immediately — drain to
+	// finish the test.
 	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+	sendKey(tm, "d")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 
 	if len(fr.KillCalls) != 0 {
@@ -1542,6 +1557,142 @@ func TestTea_Update_ReusesHeartbeatCacheAcrossCalls(t *testing.T) {
 	if got != first1 {
 		t.Errorf("second Update heartbeat = %q, want cached %q (unchanged stat must skip reparse)", got, first1)
 	}
+}
+
+// TestTea_QuitKey_WithLiveDispatch_ArmsPendingQuitConfirm verifies "q" with a
+// live Dispatch running arms the drain/terminate-all/stay confirm instead of
+// exiting immediately (issue #651, ADR 0023, issue #822).
+func TestTea_QuitKey_WithLiveDispatch_ArmsPendingQuitConfirm(t *testing.T) {
+	launch, fc, _, _ := newTermTestLauncher(t)
+
+	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches", "drain", "terminate-all", "stay")
+
+	sendKey(tm, "s")
+	waitForOutput(t, tm, "fix the thing") // confirm prompt gone, backlog/queue view back
+
+	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+	sendKey(tm, "d")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_QuitKey_TerminateAll_ReapsEveryLiveDispatch verifies "t" at the
+// quit confirm terminates every live Dispatch before exiting (issue #651,
+// ADR 0023, issue #822).
+func TestTea_QuitKey_TerminateAll_ReapsEveryLiveDispatch(t *testing.T) {
+	launch, fc, fr, _ := newTermTestLauncher(t)
+
+	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+
+	sendKey(tm, "t")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	if len(fr.KillCalls) != 1 || fr.KillCalls[0] != "agent-issue-42" {
+		t.Errorf("KillCalls = %v, want exactly one kill of agent-issue-42", fr.KillCalls)
+	}
+}
+
+// TestTea_QuitKey_Stay_DeclinesAndKeepsRunning verifies "s" at the quit
+// confirm cancels the quit, touching no live Dispatch and leaving the
+// session running (issue #651, ADR 0023, issue #822).
+func TestTea_QuitKey_Stay_DeclinesAndKeepsRunning(t *testing.T) {
+	launch, fc, fr, _ := newTermTestLauncher(t)
+
+	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+
+	sendKey(tm, "s")
+	waitForOutput(t, tm, "fix the thing") // confirm prompt gone, backlog/queue view back
+
+	// Still live after staying — drain to finish the test cleanly.
+	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+	sendKey(tm, "d")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	if len(fr.KillCalls) != 0 {
+		t.Errorf("KillCalls = %v, want none after staying", fr.KillCalls)
+	}
+	snap := launch.Queue.Snapshot()
+	if len(snap) != 1 || snap[0].State != PickRunning {
+		t.Errorf("queue pick = %+v, want still PickRunning after staying", snap)
+	}
+}
+
+// TestTea_QuitKey_NoLiveDispatch_ExitsImmediately verifies "q" with no live
+// Dispatch skips the confirm entirely and exits in one keystroke, matching
+// the pre-#822 behaviour for a session with nothing running (issue #651).
+func TestTea_QuitKey_NoLiveDispatch_ExitsImmediately(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_Init_RecoversOrphanedIssuesOnStartup verifies a sandbox still
+// running from a prior crashed session gets adopted through RecoverFn at
+// startup, without blocking the initial render (issue #651, issue #822).
+func TestTea_Init_RecoversOrphanedIssuesOnStartup(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	recovered := make(chan string, 1)
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		Queue:     NewQueue(),
+		RecoverFn: func(num string) error {
+			recovered <- num
+			return nil
+		},
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	select {
+	case num := <-recovered:
+		if num != "42" {
+			t.Errorf("RecoverFn called with %q, want 42", num)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RecoverFn never called for orphaned issue 42")
+	}
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
 // heartbeatFor returns m's Heartbeat field for the pick numbered number, or

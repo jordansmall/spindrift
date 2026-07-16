@@ -121,7 +121,7 @@ func pickChordTick() tea.Cmd {
 func (t teaModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{refreshCmd(t.tracker), pollTick(t.pollInterval)}
 	if t.launch != nil {
-		cmds = append(cmds, waitRefreshSignal(t.launch, t.done))
+		cmds = append(cmds, waitRefreshSignal(t.launch, t.done), orphanRecoveryCmd(t.launch))
 	}
 	return tea.Batch(cmds...)
 }
@@ -199,6 +199,9 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	if t.m.PendingTerminate != "" {
 		return t.handleTerminateConfirmKey(msg), nil
 	}
+	if t.m.PendingQuit {
+		return t.handleQuitConfirmKey(msg), nil
+	}
 	if t.pendingPick {
 		t.pendingPick = false
 		switch s := msg.String(); s {
@@ -242,7 +245,11 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	case "r":
 		return t, refreshCmd(t.tracker)
 	case "q", "ctrl+c":
-		t.m = Update(t.m, QuitMsg{})
+		if t.launch != nil && len(t.launch.LiveIssues()) > 0 {
+			t.m = Update(t.m, QuitRequestedMsg{})
+		} else {
+			t.m = Update(t.m, QuitMsg{})
+		}
 	case "?":
 		t.m = Update(t.m, HelpToggleMsg{})
 	case "p":
@@ -379,6 +386,29 @@ func (t teaModel) handleTerminateConfirmKey(msg tea.KeyMsg) teaModel {
 		t.m = Update(t.m, QuitMsg{})
 	default:
 		t.m = Update(t.m, TerminateCancelledMsg{})
+	}
+	return t
+}
+
+// handleQuitConfirmKey routes one keypress while PendingQuit is armed: "d"/
+// enter drains — quits without touching any live Dispatch, which settles on
+// its own — "t" terminates every live Dispatch first, then quits; "s" (or
+// anything else) stays, declining the quit (issue #651, ADR 0023, issue
+// #822). Unlike handleTerminateConfirmKey, quit is already the pending
+// action here, so there is no separate "q"/"ctrl+c" quit-escape case.
+func (t teaModel) handleQuitConfirmKey(msg tea.KeyMsg) teaModel {
+	switch s := msg.String(); s {
+	case "d", "enter":
+		t.m = Update(t.m, QuitMsg{})
+	case "t":
+		if t.launch != nil {
+			for _, num := range t.launch.LiveIssues() {
+				t.launch.TerminateAsync(t.tracker, num)
+			}
+		}
+		t.m = Update(t.m, QuitMsg{})
+	default:
+		t.m = Update(t.m, QuitCancelledMsg{})
 	}
 	return t
 }
@@ -603,6 +633,31 @@ func driverOf(launch *Launcher) driver.Driver {
 		return nil
 	}
 	return launch.Factory.Driver()
+}
+
+// orphanRecoveryCmd adopts every issue OrphanedIssues reports through
+// launch's RecoverFn in the background at startup — a crash or dropped SSH
+// from a prior session left these sandboxes running with no live goroutine
+// in this fresh process to account for them (issue #651, issue #822). Errors
+// from either call are swallowed: there is no Model field or confirm prompt
+// to surface them through, and a failed adopt just leaves that issue for the
+// operator to notice and Pick again like any other orphaned Dispatch. nil
+// (no Cmd) when launch or RecoverFn is nil, matching waitRefreshSignal's
+// nil-launch convention.
+func orphanRecoveryCmd(launch *Launcher) tea.Cmd {
+	if launch == nil || launch.RecoverFn == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		nums, err := launch.OrphanedIssues()
+		if err != nil {
+			return nil
+		}
+		for _, num := range nums {
+			_ = launch.RecoverFn(num)
+		}
+		return nil
+	}
 }
 
 // waitRefreshSignal blocks on launch's refresh channel in the background,
