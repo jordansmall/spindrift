@@ -198,8 +198,10 @@ func (j *jiraClient) DepsOf(num string) ([]forge.Dependency, error) {
 		return nil, fmt.Errorf("jira: issue %s: unexpected status %d", num, status)
 	}
 	var deps []string
+	seen := map[string]bool{}
 	for _, link := range payload.Fields.IssueLinks {
-		if link.Type.Inward == jiraBlockedByLink && link.InwardIssue != nil {
+		if link.Type.Inward == jiraBlockedByLink && link.InwardIssue != nil && !seen[link.InwardIssue.Key] {
+			seen[link.InwardIssue.Key] = true
 			deps = append(deps, link.InwardIssue.Key)
 		}
 	}
