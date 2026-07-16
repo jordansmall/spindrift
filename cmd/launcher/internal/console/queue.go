@@ -121,7 +121,9 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			continue
 		}
 		q.setState(pick.Number, PickRunning, "")
-		return []waves.Issue{{Number: pick.Number, Title: pick.Title}}, map[string][]string{}, waves.Sources{}, nil
+		// nil, not the zero-value maps: matches the no-launchable-candidate
+		// fallback below, and main.go's sibling Discoverer (#903).
+		return []waves.Issue{{Number: pick.Number, Title: pick.Title}}, nil, nil, nil
 	}
 	return nil, nil, nil, nil
 }

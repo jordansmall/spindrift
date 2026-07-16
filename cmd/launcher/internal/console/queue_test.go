@@ -21,6 +21,40 @@ func TestQueue_Discover_EmptyQueue_ReturnsNoIssues(t *testing.T) {
 	}
 }
 
+// TestQueue_Discover_SourcesNilAcrossPaths verifies the claim-success path
+// and the no-launchable-candidate fallback path return the same nil-ness
+// for sources (and edges), so a caller can't observe a spurious empty-vs-nil
+// distinction between the two (#903).
+func TestQueue_Discover_SourcesNilAcrossPaths(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+
+	empty := NewQueue()
+	_, emptyEdges, emptySources, err := empty.Discover(f, f, "")
+	if err != nil {
+		t.Fatalf("Discover (empty queue): %v", err)
+	}
+	if emptySources != nil {
+		t.Errorf("empty queue sources = %#v, want nil", emptySources)
+	}
+	if emptyEdges != nil {
+		t.Errorf("empty queue edges = %#v, want nil", emptyEdges)
+	}
+
+	claimed := NewQueue()
+	claimed.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+	_, claimedEdges, claimedSources, err := claimed.Discover(f, f, "")
+	if err != nil {
+		t.Fatalf("Discover (claim success): %v", err)
+	}
+	if claimedSources != nil {
+		t.Errorf("claim-success sources = %#v, want nil", claimedSources)
+	}
+	if claimedEdges != nil {
+		t.Errorf("claim-success edges = %#v, want nil", claimedEdges)
+	}
+}
+
 // TestQueue_Empty reports whether the queue has any pick still eligible to
 // launch (PickQueued or PickHeld) — the predicate tryLaunch (launcher.go)
 // gates its drain spawn on (#754). A held pick counts as non-empty: its
