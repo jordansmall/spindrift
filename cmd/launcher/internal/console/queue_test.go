@@ -43,9 +43,12 @@ func TestQueue_Discover_SourcesNilAcrossPaths(t *testing.T) {
 	claimed := NewQueue()
 	claimed.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
-	_, claimedEdges, claimedSources, err := claimed.Discover(f, f, "")
+	claimedIssues, claimedEdges, claimedSources, err := claimed.Discover(f, f, "")
 	if err != nil {
 		t.Fatalf("Discover (claim success): %v", err)
+	}
+	if len(claimedIssues) != 1 {
+		t.Fatalf("claim-success issues = %v, want one claimed issue", claimedIssues)
 	}
 	if claimedSources != nil {
 		t.Errorf("claim-success sources = %#v, want nil", claimedSources)
