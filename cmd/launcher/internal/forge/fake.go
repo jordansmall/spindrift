@@ -136,6 +136,9 @@ type Fake struct {
 	// an unconfigured config.branchPrefix; set explicitly to exercise a real
 	// prefix (e.g. "agent/issue-").
 	BranchPrefix string
+
+	// ListIssuesErr, if non-nil, is returned by every ListIssues call.
+	ListIssuesErr error
 }
 
 // NewFake returns an empty Fake client. labels configures the
@@ -269,6 +272,9 @@ func (f *Fake) ListPRFiles(url string) ([]string, error) {
 func (f *Fake) ListIssues(state DispatchState) ([]Issue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.ListIssuesErr != nil {
+		return nil, f.ListIssuesErr
+	}
 	label := f.labels.Label(state)
 	var out []Issue
 	for _, iss := range f.issues {
