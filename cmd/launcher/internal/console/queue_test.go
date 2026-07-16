@@ -21,6 +21,35 @@ func TestQueue_Discover_EmptyQueue_ReturnsNoIssues(t *testing.T) {
 	}
 }
 
+// TestQueue_Empty reports whether the queue has any pick still eligible to
+// launch (PickQueued or PickHeld) — the predicate tryLaunch (launcher.go)
+// gates its drain spawn on (#754). A held pick counts as non-empty: its
+// blocker may have cleared out-of-band, so it still needs a launch attempt
+// (#650), unlike hasQueued which only reports PickQueued.
+func TestQueue_Empty(t *testing.T) {
+	tests := []struct {
+		name  string
+		picks []Pick
+		want  bool
+	}{
+		{name: "no picks", picks: nil, want: true},
+		{name: "queued pick", picks: []Pick{{Number: "42", State: PickQueued}}, want: false},
+		{name: "held pick", picks: []Pick{{Number: "42", State: PickHeld}}, want: false},
+		{name: "only settled pick", picks: []Pick{{Number: "42", State: PickSettled}}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := NewQueue()
+			for _, p := range tt.picks {
+				q.Add(p)
+			}
+			if got := q.Empty(); got != tt.want {
+				t.Errorf("Empty() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestQueue_Discover_ClaimsAndReturnsFrontQueuedPick verifies Discover
 // performs the atomic Dispatchable->InProgress claim on the front-most
 // queued pick, marks it running, and returns it as a single-issue batch —
