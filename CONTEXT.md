@@ -64,11 +64,14 @@ boundary (issue #626).
 _Avoid_: runner (that is the Box isolation seam), wrapper, shim.
 
 **Filer**:
-The opt-in subagent role (beside the scout and reviewer) that turns the final
-approving review's non-blocking findings into issues on the Issue Tracker — one
-issue per finding, merging only findings that are the same change, after a
-dedup search over previously filed findings in any state (a closed finding is a
-human triage decision, never refiled). Its issues carry the
+The opt-in subagent role (beside the scout and reviewer) that turns into issues
+on the Issue Tracker the non-blocking findings the work loop escalated for a
+human — not the whole Non-blocking section: cheap, in-scope findings are fixed
+inline in the same effort, and only design trade-offs, out-of-scope work, or
+too-large changes reach the Filer. One issue per surviving finding, merging
+only findings that are the same change, after a dedup search over previously
+filed findings in any state (a closed finding is a human triage decision, never
+refiled). Its issues carry the
 `agent-review-finding` label and are never dispatchable by its own hand — a
 human promotes them, preserving the rule that a human is the launch button.
 Filing is best-effort: a Filer failure never blocks the PR or alters the
