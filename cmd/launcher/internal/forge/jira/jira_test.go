@@ -333,6 +333,38 @@ func TestJiraClient_DepsOf_NativeLinks(t *testing.T) {
 	}
 }
 
+// TestJiraClient_DepsOf_DuplicateLinksDeduped verifies DepsOf dedupes
+// repeated "is blocked by" issuelinks pointing at the same inward issue,
+// mirroring the guard already fixed in the GitHub adapter's nativeDepsOf.
+func TestJiraClient_DepsOf_DuplicateLinksDeduped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"key": "PROJ-11",
+			"fields": {
+				"summary": "s", "description": "",
+				"status": {"name": "To Do"}, "labels": [],
+				"issuelinks": [
+					{"type": {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+					 "inwardIssue": {"key": "PROJ-3"}},
+					{"type": {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+					 "inwardIssue": {"key": "PROJ-3"}}
+				]
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	deps, err := jc.DepsOf("PROJ-11")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	if len(deps) != 1 || deps[0] != (forge.Dependency{ID: "PROJ-3", Source: forge.DepSourceNative}) {
+		t.Errorf("DepsOf = %v, want [PROJ-3 (native)] deduped", deps)
+	}
+}
+
 // TestJiraClient_TransitionState_MappedStatus verifies TransitionState finds
 // and performs the workflow transition matching the configured status
 // mapping, and cleans up any stale from-state fallback label (e.g. an issue
