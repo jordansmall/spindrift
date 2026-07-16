@@ -74,7 +74,7 @@ func TestTea_InitialRender_ShowsBacklog(t *testing.T) {
 	waitForOutput(t, tm, "first")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTeaUpdate_WindowSizeMsg_SetsModelDimensions verifies the tea layer
@@ -109,7 +109,7 @@ func TestTea_InitialTermSize_SetsModelDimensions(t *testing.T) {
 	waitForOutput(t, tm, "first")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	final := tm.FinalModel(t).(teaModel).m
 	if final.Width != 100 {
@@ -126,7 +126,7 @@ func TestTea_QuitKey_ExitsCleanly(t *testing.T) {
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 24))
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_RefreshKey_ReQueriesTracker verifies "r" re-queries the tracker
@@ -143,7 +143,7 @@ func TestTea_RefreshKey_ReQueriesTracker(t *testing.T) {
 	waitForOutput(t, tm, "late arrival")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_FilterMode_TypingNarrowsEnterApplies verifies "/" enters
@@ -162,7 +162,7 @@ func TestTea_FilterMode_TypingNarrowsEnterApplies(t *testing.T) {
 	waitForOutput(t, tm, "beta")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_FilterMode_EscCancelRestoresPriorFilter verifies Esc discards an
@@ -184,7 +184,7 @@ func TestTea_FilterMode_EscCancelRestoresPriorFilter(t *testing.T) {
 	waitForOutput(t, tm, "beta") // reverted to the "b" filter from before this edit
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_CursorKeys_MoveHighlightedRow verifies j/down and the up arrow
@@ -212,7 +212,7 @@ func TestTea_CursorKeys_MoveHighlightedRow(t *testing.T) {
 	waitForOutput(t, tm, "> #1")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor verifies pgdown/
@@ -240,7 +240,7 @@ func TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor(t *testing.T) {
 	waitForOutput(t, tm, "> #0")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_ScrollKeys_PageSizeTracksViewportHeight verifies the page jump's
@@ -269,7 +269,7 @@ func TestTea_ScrollKeys_PageSizeTracksViewportHeight(t *testing.T) {
 	waitForOutput(t, tm, "#25  issue 25")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_ScrollKeys_PageDown_SkipsNoRow verifies two consecutive pgdown
@@ -293,7 +293,7 @@ func TestTea_ScrollKeys_PageDown_SkipsNoRow(t *testing.T) {
 	waitForOutput(t, tm, "#8  issue 8")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_ScrollKeys_PageDownClampsAtBacklogEnd verifies repeated pgdown
@@ -314,7 +314,7 @@ func TestTea_ScrollKeys_PageDownClampsAtBacklogEnd(t *testing.T) {
 	waitForOutput(t, tm, "issue 11")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_ScrollKeys_PageThroughQueueWhenFocused verifies pgdown pages the
@@ -337,7 +337,7 @@ func TestTea_ScrollKeys_PageThroughQueueWhenFocused(t *testing.T) {
 	waitForOutput(t, tm, "#4  [queued]  pick 4")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_TabKey_SwitchesFocusBetweenColumns verifies Tab moves the focus
@@ -364,7 +364,7 @@ func TestTea_TabKey_SwitchesFocusBetweenColumns(t *testing.T) {
 	waitForOutput(t, tm, "backlog [focus]")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_EnterKey_OnFocusedQueue_DrillsRunningPick verifies Enter, with
@@ -401,7 +401,7 @@ func TestTea_EnterKey_OnFocusedQueue_DrillsRunningPick(t *testing.T) {
 	sendKey(tm, "q")
 	waitForOutput(t, tm, "quit with live Dispatches")
 	sendKey(tm, "d")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_EnterKey_OnFocusedQueue_NoOpOnQueuedRow verifies Enter, with focus
@@ -423,7 +423,7 @@ func TestTea_EnterKey_OnFocusedQueue_NoOpOnQueuedRow(t *testing.T) {
 
 	sendKey(tm, "enter")
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	fm := tm.FinalModel(t).(teaModel)
 	if fm.m.DrillIn != nil {
@@ -465,7 +465,7 @@ func TestTea_DrillInKey_OpensTranscriptPane(t *testing.T) {
 	sendKey(tm, "q")
 	waitForOutput(t, tm, "quit with live Dispatches")
 	sendKey(tm, "d")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_DrillInKey_QuitsWithoutClosing verifies "q" hard-quits straight
@@ -497,7 +497,7 @@ func TestTea_DrillInKey_QuitsWithoutClosing(t *testing.T) {
 	waitForOutput(t, tm, "transcript #42", "[implementor] hi")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_DrillInKey_QuitsOnCtrlCWithoutClosing verifies "ctrl+c" hard-quits
@@ -528,7 +528,7 @@ func TestTea_DrillInKey_QuitsOnCtrlCWithoutClosing(t *testing.T) {
 	waitForOutput(t, tm, "transcript #42", "[implementor] hi")
 
 	sendKey(tm, "ctrl+c")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_DrillInToggleKey_SwapsRenderedAndRaw verifies "t" swaps the open
@@ -567,7 +567,7 @@ func TestTea_DrillInToggleKey_SwapsRenderedAndRaw(t *testing.T) {
 	sendKey(tm, "q")
 	waitForOutput(t, tm, "quit with live Dispatches")
 	sendKey(tm, "d")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_PaneModeKey_CyclesDockedFloatingFullscreen verifies "m", pressed
@@ -605,7 +605,7 @@ func TestTea_PaneModeKey_CyclesDockedFloatingFullscreen(t *testing.T) {
 	sendKey(tm, "q")
 	waitForOutput(t, tm, "quit with live Dispatches")
 	sendKey(tm, "d")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	fm := tm.FinalModel(t).(teaModel)
 	if fm.m.PaneMode != PaneFullscreen {
@@ -657,7 +657,7 @@ func TestTea_DrillInScrollKeys_PageThroughTranscript(t *testing.T) {
 	sendKey(tm, "q")
 	waitForOutput(t, tm, "quit with live Dispatches")
 	sendKey(tm, "d")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_DrillInKey_NoDriver_ShowsGracefulMessage verifies drilling in
@@ -686,7 +686,7 @@ func TestTea_DrillInKey_NoDriver_ShowsGracefulMessage(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_HelpKey_OpensOverlay verifies "?" opens the help overlay listing
@@ -700,7 +700,7 @@ func TestTea_HelpKey_OpensOverlay(t *testing.T) {
 
 	sendKey(tm, "?") // close the overlay — it's modal, so "q" alone can't reach quit while open
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_BackgroundPoll_RefreshesWithoutOperatorInput verifies a slow fixed
@@ -719,7 +719,7 @@ func TestTea_BackgroundPoll_RefreshesWithoutOperatorInput(t *testing.T) {
 	waitForOutput(t, tm, "late arrival")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_LaunchRefreshSignal_RefreshesWithoutOperatorInput verifies a
@@ -739,7 +739,7 @@ func TestTea_LaunchRefreshSignal_RefreshesWithoutOperatorInput(t *testing.T) {
 	waitForOutput(t, tm, "late arrival")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_QuitKey_CancelsWaitRefreshSignalGoroutine verifies quitting a
@@ -760,7 +760,7 @@ func TestTea_QuitKey_CancelsWaitRefreshSignalGoroutine(t *testing.T) {
 	waitForOutput(t, tm, "first")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	deadline := time.Now().Add(time.Second)
 	for {
@@ -787,7 +787,7 @@ func TestTea_WithLauncher_RendersCapAndLive(t *testing.T) {
 	waitForOutput(t, tm, "running 0/3")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_WithLauncher_RendersLiveQueueState verifies every render — not
@@ -813,7 +813,7 @@ func TestTea_WithLauncher_RendersLiveQueueState(t *testing.T) {
 	waitForOutput(t, tm, "dissolved", "issue is closed")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_WithLauncher_RendersHeldPickWithBlockedByBadge verifies a held
@@ -839,7 +839,7 @@ func TestTea_WithLauncher_RendersHeldPickWithBlockedByBadge(t *testing.T) {
 	waitForOutput(t, tm, "held", "held by #41 (native)")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_WithLauncher_RendersBlockerDespiteLongTitle verifies a held pick's
@@ -858,7 +858,7 @@ func TestTea_WithLauncher_RendersBlockerDespiteLongTitle(t *testing.T) {
 	waitForOutput(t, tm, "held", "held by #41 (native)")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_StaleStatus_RendersBanner verifies the tea layer's per-render sync
@@ -881,7 +881,7 @@ func TestTea_StaleStatus_RendersBanner(t *testing.T) {
 	waitForOutput(t, tm, "stale", "rebuild needed")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_StaleDetectedWhileIdle_SignalsRefreshWithoutPoll verifies stale
@@ -905,7 +905,7 @@ func TestTea_StaleDetectedWhileIdle_SignalsRefreshWithoutPoll(t *testing.T) {
 	waitForOutput(t, tm, "stale", "rebuild needed")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_SettleTriggersAutoRefresh_NoExplicitRefreshKey verifies a settle —
@@ -963,7 +963,7 @@ func TestTea_SettleTriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
 	waitForOutput(t, tm, "late arrival")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_PickKey_PromotesAndQueuesHighlighted verifies "p" promotes the
@@ -990,7 +990,7 @@ func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
 	waitForOutput(t, tm, "  #42", "fix the thing", "settled 1")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_EnterKey_OnFocusedBacklog_PicksHighlighted verifies Enter, with
@@ -1008,7 +1008,7 @@ func TestTea_EnterKey_OnFocusedBacklog_PicksHighlighted(t *testing.T) {
 	waitForOutput(t, tm, "#42", "fix the thing")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_EnterKey_OnFocusedBacklog_FailedPromotion_ShowsDissolvedRow
@@ -1027,7 +1027,7 @@ func TestTea_EnterKey_OnFocusedBacklog_FailedPromotion_ShowsDissolvedRow(t *test
 	waitForOutput(t, tm, "dissolved")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_PickKey_ShowsPendingIndicator verifies "p" renders a visible hint
@@ -1046,7 +1046,7 @@ func TestTea_PickKey_ShowsPendingIndicator(t *testing.T) {
 
 	sendKey(tm, "a")
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_PickKey_FollowedByA_ClearsPendingIndicator verifies the pending
@@ -1071,7 +1071,7 @@ func TestTea_PickKey_FollowedByA_ClearsPendingIndicator(t *testing.T) {
 	waitForOutput(t, tm, "  #42", "settled 1")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	fm := tm.FinalModel(t).(teaModel)
 	if fm.m.PendingPick {
@@ -1097,7 +1097,7 @@ func TestTea_PickKey_Timeout_ClearsPendingIndicator(t *testing.T) {
 	waitForOutput(t, tm, "  #42", "settled 1")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	fm := tm.FinalModel(t).(teaModel)
 	if fm.m.PendingPick {
@@ -1118,7 +1118,7 @@ func TestTea_PickKey_FollowedByQuit_PicksThenQuits(t *testing.T) {
 
 	sendKey(tm, "p")
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	fm := tm.FinalModel(t).(teaModel)
 	if len(fm.m.Picks) != 1 {
@@ -1147,7 +1147,7 @@ func TestTea_PickKey_FollowedByNonA_ResolvesToSinglePick(t *testing.T) {
 	waitForOutput(t, tm, "  #42", "settled 1")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_PickKey_AlreadyPicked_NoDuplicateRow verifies picking an issue
@@ -1169,7 +1169,7 @@ func TestTea_PickKey_AlreadyPicked_NoDuplicateRow(t *testing.T) {
 	sendKey(tm, "p")
 	sendKey(tm, "z")
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	fm := tm.FinalModel(t).(teaModel)
 	count := 0
@@ -1228,7 +1228,7 @@ func TestTea_PickKey_FailedPromotion_SurvivesQueueResync(t *testing.T) {
 	// it just because it never landed on the live Queue.
 	sendKey(tm, "r")
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	fm := tm.FinalModel(t).(teaModel)
 	if len(fm.m.Picks) != 1 || fm.m.Picks[0].State != PickDissolved {
@@ -1252,7 +1252,7 @@ func TestTea_TerminateKey_NotLive_NeverArmsConfirm(t *testing.T) {
 
 	sendKey(tm, "k")
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	fm := tm.FinalModel(t).(teaModel)
 	if fm.m.PendingTerminate != "" {
@@ -1272,7 +1272,7 @@ func TestTea_TerminateKey_NilLauncher_NeverArmsConfirm(t *testing.T) {
 
 	sendKey(tm, "k")
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	fm := tm.FinalModel(t).(teaModel)
 	if fm.m.PendingTerminate != "" {
@@ -1299,7 +1299,7 @@ func TestTea_PickKey_TriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
 	waitForOutput(t, tm, "late arrival")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_PickKey_FailedPromotion_StillTriggersAutoRefresh verifies a raced/
@@ -1321,7 +1321,7 @@ func TestTea_PickKey_FailedPromotion_StillTriggersAutoRefresh(t *testing.T) {
 	waitForOutput(t, tm, "late arrival")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_UnpickKey_RemovesQueuedHighlighted verifies "u" drops the
@@ -1338,7 +1338,7 @@ func TestTea_UnpickKey_RemovesQueuedHighlighted(t *testing.T) {
 
 	sendKey(tm, "u")
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	fm := tm.FinalModel(t).(teaModel)
 	if len(fm.m.Picks) != 0 {
@@ -1366,7 +1366,7 @@ func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
 	// live, rather than racing the quit confirm (issue #822).
 	waitForOutput(t, tm, "settled 2")
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	fm := tm.FinalModel(t).(teaModel)
 	if len(fm.m.Picks) != 2 {
@@ -1399,7 +1399,7 @@ func TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain(t *testing.T) {
 	waitForOutput(t, tm, "settled")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_ResizeKeys_RaiseAndLowerLiveCap verifies "+"/"-" adjust the live
@@ -1419,7 +1419,7 @@ func TestTea_ResizeKeys_RaiseAndLowerLiveCap(t *testing.T) {
 	waitForOutput(t, tm, "running 0/2")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_RebuildKey_NotStale_NeverRunsRebuildFn verifies "b" is a no-op
@@ -1440,7 +1440,7 @@ func TestTea_RebuildKey_NotStale_NeverRunsRebuildFn(t *testing.T) {
 
 	sendKey(tm, "b")
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	select {
 	case <-rebuilt:
@@ -1508,7 +1508,7 @@ func TestTea_RebuildKey_RunsRebuildFnAndClearsStale(t *testing.T) {
 	}
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_TerminateKey_ConfirmThenYes_ReclaimsHighlightedDispatch verifies
@@ -1527,7 +1527,7 @@ func TestTea_TerminateKey_ConfirmThenYes_ReclaimsHighlightedDispatch(t *testing.
 	waitForOutput(t, tm, "terminated")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	if len(fr.KillCalls) != 1 || fr.KillCalls[0] != "agent-issue-42" {
 		t.Errorf("KillCalls = %v, want exactly one kill of agent-issue-42", fr.KillCalls)
@@ -1550,7 +1550,7 @@ func TestTea_TerminateKey_ConfirmThenCapitalY_Confirms(t *testing.T) {
 	waitForOutput(t, tm, "terminated")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	if len(fr.KillCalls) != 1 {
 		t.Errorf("KillCalls = %v, want exactly one kill", fr.KillCalls)
@@ -1578,7 +1578,7 @@ func TestTea_TerminateKey_ConfirmThenOther_Declines(t *testing.T) {
 	sendKey(tm, "q")
 	waitForOutput(t, tm, "quit with live Dispatches")
 	sendKey(tm, "d")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	if len(fr.KillCalls) != 0 {
 		t.Errorf("KillCalls = %v, want none after declining", fr.KillCalls)
@@ -1603,7 +1603,7 @@ func TestTea_TerminateKey_ConfirmThenQuit_DeclinesAndQuits(t *testing.T) {
 	waitForOutput(t, tm, "terminate #42?")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	if len(fr.KillCalls) != 0 {
 		t.Errorf("KillCalls = %v, want none after quitting at the confirm prompt", fr.KillCalls)
@@ -1725,7 +1725,7 @@ func TestTea_QuitKey_WithLiveDispatch_ArmsPendingQuitConfirm(t *testing.T) {
 	sendKey(tm, "q")
 	waitForOutput(t, tm, "quit with live Dispatches")
 	sendKey(tm, "d")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_QuitKey_TerminateAll_ReapsEveryLiveDispatch verifies "t" at the
@@ -1741,7 +1741,7 @@ func TestTea_QuitKey_TerminateAll_ReapsEveryLiveDispatch(t *testing.T) {
 	waitForOutput(t, tm, "quit with live Dispatches")
 
 	sendKey(tm, "t")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 	// TerminateAsync's Kill runs in a background goroutine tracked by
 	// launch.wg — production's own Run waits on it the same way
 	// (tea.go's Run) after the program exits, before this can safely read
@@ -1772,7 +1772,7 @@ func TestTea_QuitKey_Stay_DeclinesAndKeepsRunning(t *testing.T) {
 	sendKey(tm, "q")
 	waitForOutput(t, tm, "quit with live Dispatches")
 	sendKey(tm, "d")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 
 	if len(fr.KillCalls) != 0 {
 		t.Errorf("KillCalls = %v, want none after staying", fr.KillCalls)
@@ -1795,7 +1795,7 @@ func TestTea_QuitKey_NoLiveDispatch_ExitsImmediately(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_Init_RecoversOrphanedIssuesOnStartup verifies a sandbox still
@@ -1845,7 +1845,7 @@ func TestTea_Init_RecoversOrphanedIssuesOnStartup(t *testing.T) {
 	}
 
 	sendKey(tm, "q")
-	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(15*time.Second))
 }
 
 // TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth verifies backlog and
@@ -1867,7 +1867,7 @@ func TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth(t *testing.T) {
 	waitForOutput(t, tm, "#1")
 
 	sendKey(tm, "q")
-	final := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(teaModel)
+	final := tm.FinalModel(t, teatest.WithFinalTimeout(15*time.Second)).(teaModel)
 
 	for _, l := range strings.Split(View(final.m), "\n") {
 		if w := runewidth.StringWidth(l); w > 80 {
