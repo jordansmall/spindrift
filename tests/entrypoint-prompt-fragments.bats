@@ -191,7 +191,7 @@ SKILL
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","Agent"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  jq -e '.reviewer.prompt' "$CLAUDE_AGENTS_FILE" | grep -qF 'Use the `/code-review` skill'
+  jq -e '.reviewer.prompt' "$CLAUDE_AGENTS_FILE" | grep -qF 'Run the `/code-review` skill FIRST'
 }
 
 # issue #788: the fallback -- no code-review skill baked -- must still end in
@@ -203,7 +203,7 @@ SKILL
   [ "$status" -eq 0 ]
   local rendered
   rendered="$(jq -r '.reviewer.prompt' "$CLAUDE_AGENTS_FILE")"
-  ! grep -qF 'Use the `/code-review` skill' <<<"$rendered"
+  ! grep -qF 'Run the `/code-review` skill FIRST' <<<"$rendered"
   grep -qF 'VERDICT: APPROVE | BLOCK' <<<"$rendered"
 }
 
