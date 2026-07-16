@@ -1330,6 +1330,25 @@ func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
 	}
 }
 
+// TestReferenceDocSystemRowDoesNotDuplicateIntro guards against the `system`
+// option table row restating the auto-supplied/passed-through mechanism
+// already explained by the intro paragraph above the option table (#880) —
+// commit 5a5993f (#660) added that intro paragraph but left the table row's
+// existing prose intact, so the same two facts ended up asserted twice.
+func TestReferenceDocSystemRowDoesNotDuplicateIntro(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "reference.md"))
+	if err != nil {
+		t.Fatalf("read docs/reference.md: %v", err)
+	}
+	row := regexp.MustCompile("(?m)^\\| `system`.*$").FindString(string(raw))
+	if row == "" {
+		t.Fatalf("docs/reference.md is missing the `system` option table row")
+	}
+	if strings.Contains(row, "flake-parts passes its own") {
+		t.Errorf("system table row restates the flake-parts pass-through mechanism already covered by the intro paragraph above the table; row: %s", row)
+	}
+}
+
 // TestTriageLabelMeta_ColorsAreDistinct guards against two label tiers
 // visually colliding in the GitHub label UI by reusing the same hex color
 // (#801) — TestReferenceDocLabelSnippetMatchesTriageDefaults checks

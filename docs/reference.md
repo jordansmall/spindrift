@@ -78,7 +78,7 @@ would.
 | option      | scope          | type                        | default            | meaning                                                              |
 | ----------- | -------------- | --------------------------- | ------------------ | -------------------------------------------------------------------- |
 | `nixpkgs`   | shared         | flake input                 | your `nixpkgs`     | locked nixpkgs the image and host commands build from                |
-| `system`    | **auto-supplied** | string                   | perSystem's system | your host system; mapped to its Linux twin for the image; not a declared `perSystem.spindrift.*` option — flake-parts passes its own `system` argument straight through (`lib/flakeModule.nix`) |
+| `system`    | **auto-supplied** | string                   | perSystem's system | your host system; mapped to its Linux twin for the image; auto-supplied, see the note above (`lib/flakeModule.nix`) |
 | `overlays`  | shared         | list                        | `[]`               | overlays applied to the instantiated nixpkgs                         |
 | `config`    | shared         | attrs                       | `{ allowUnfree = true; }` | nixpkgs config attrs                                          |
 | `packages`  | shared         | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
