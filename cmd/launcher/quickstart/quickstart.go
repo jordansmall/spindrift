@@ -1,0 +1,186 @@
+// Command quickstart is the pre-CLI Quickstart wizard (ADR 0027): `nix run
+// github:jordansmall/spindrift#quickstart`. It runs before the `spindrift`
+// binary exists — `runtime`/`driver` are flake.nix options it authors, not
+// launcher env knobs — so it lives as its own binary under the launcher
+// module rather than a `spindrift` subcommand.
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+)
+
+// Environment abstracts host detection (available container runtimes, git
+// identity, ambient tokens, repoSlug guess) so runQuickstart is testable
+// without touching the real host. Detection itself lands in a later ticket
+// (ADR 0027); this seam exists now so runQuickstart's signature does not
+// change when it does.
+type Environment interface {
+	LookPath(file string) (string, error)
+}
+
+// CommandRunner abstracts the two subprocesses Quickstart eventually shells
+// out to (`claude setup-token`, `nix develop --command spindrift build`), so
+// runQuickstart is testable without a real shell-out. Unused until a later
+// ticket wires the finish-line steps (ADR 0027).
+type CommandRunner interface {
+	Run(name string, args ...string) error
+}
+
+// runQuickstart drives the wizard end-to-end: it takes injected I/O, a
+// target directory to write the scaffold into, and the Environment/
+// CommandRunner seams (mirrors runDoctor's testability). Interactive-only
+// for v1: a non-TTY stdin (interactive == false) is a fatal error directing
+// scripted setups to write flake.nix/harness.env directly instead.
+func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Writer, stdin io.Reader, interactive, force bool) error {
+	if !interactive {
+		return fmt.Errorf("quickstart requires an interactive terminal — for scripted setups, write flake.nix and harness.env directly (see docs/flake-options.md)")
+	}
+
+	targets := []string{"flake.nix", "harness.env"}
+	var clobbered []string
+	for _, name := range targets {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			clobbered = append(clobbered, name)
+		}
+	}
+	if len(clobbered) > 0 && !force {
+		return fmt.Errorf("refusing to overwrite existing %s — rerun with --force to back each up to *.bak and regenerate", clobbered)
+	}
+	for _, name := range clobbered {
+		path := filepath.Join(dir, name)
+		if err := os.Rename(path, path+".bak"); err != nil {
+			return fmt.Errorf("back up %s: %w", name, err)
+		}
+		fmt.Fprintf(w, "backed up: %s -> %s.bak\n", name, name)
+	}
+
+	scanner := bufio.NewScanner(stdin)
+	prompt := func(label string) string {
+		fmt.Fprintf(w, "%s: ", label)
+		scanner.Scan()
+		return scanner.Text()
+	}
+
+	repoSlug := prompt("Repo slug (owner/repo)")
+	runtime := prompt("Runtime [podman/docker/bwrap]")
+	gitUserName := prompt("Git user name")
+	gitUserEmail := prompt("Git user email")
+	ghToken := prompt("GitHub token (GH_TOKEN)")
+	claudeOAuthToken := prompt("Claude Code OAuth token (CLAUDE_CODE_OAUTH_TOKEN), leave blank to use an API key instead")
+	anthropicAPIKey := ""
+	if claudeOAuthToken == "" {
+		anthropicAPIKey = prompt("Anthropic API key (ANTHROPIC_API_KEY)")
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte(renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail)), 0o644); err != nil {
+		return fmt.Errorf("write flake.nix: %w", err)
+	}
+	fmt.Fprintln(w, "wrote: flake.nix")
+
+	if err := os.WriteFile(filepath.Join(dir, "harness.env"), []byte(renderHarnessEnv(ghToken, claudeOAuthToken, anthropicAPIKey)), 0o600); err != nil {
+		return fmt.Errorf("write harness.env: %w", err)
+	}
+	fmt.Fprintln(w, "wrote: harness.env")
+
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(quickstartGitignore), 0o644); err != nil {
+		return fmt.Errorf("write .gitignore: %w", err)
+	}
+	fmt.Fprintln(w, "wrote: .gitignore")
+
+	if err := os.WriteFile(filepath.Join(dir, ".envrc"), []byte(quickstartEnvrc), 0o644); err != nil {
+		return fmt.Errorf("write .envrc: %w", err)
+	}
+	fmt.Fprintln(w, "wrote: .envrc")
+
+	return nil
+}
+
+// quickstartGitignore protects the secrets-only harness.env file quickstart
+// writes, plus the usual nix build/log noise (templates/default/.gitignore
+// is the fuller reference; this is the minimal subset the github/happy path
+// needs).
+const quickstartGitignore = `# nix build output
+result
+result-*
+
+# per-run agent logs
+logs/
+
+# local config + secrets — never commit this
+harness.env
+
+# direnv
+.direnv/
+
+# OS
+.DS_Store
+`
+
+const quickstartEnvrc = "use flake\n"
+
+// renderFlakeNix generates a minimal Consumer flake.nix carrying only the
+// options the wizard collected, with a comment pointing at the full
+// reference (docs/flake-options.md) for everything else (ADR 0027). No
+// prompts/ directory is scaffolded — the harness defaults every prompt.
+func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string) string {
+	return fmt.Sprintf(`{
+  description = "A spindrift consumer — headless Claude Code agents in nix-built, disposable containers, one per GitHub issue";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    spindrift.url = "github:jordansmall/spindrift";
+  };
+
+  outputs =
+    inputs@{
+      flake-parts,
+      spindrift,
+      ...
+    }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [
+        "aarch64-darwin"
+        "aarch64-linux"
+        "x86_64-linux"
+      ];
+
+      imports = [ spindrift.flakeModules.default ];
+
+      perSystem =
+        { config, pkgs, ... }:
+        {
+          # Generated by quickstart with only the chosen options. Full
+          # reference: docs/flake-options.md
+          spindrift = {
+            runtime = %q;
+            settings.repository.repoSlug = %q;
+            settings.repository.gitUserName = %q;
+            settings.repository.gitUserEmail = %q;
+          };
+
+          devShells.default = pkgs.mkShell {
+            packages = [ config.packages.spindrift ];
+          };
+        };
+    };
+}
+`, runtime, repoSlug, gitUserName, gitUserEmail)
+}
+
+// renderHarnessEnv writes only the secrets the wizard actually collected:
+// GH_TOKEN plus whichever Claude credential the operator chose (OAuth token
+// or API key, never both).
+func renderHarnessEnv(ghToken, claudeOAuthToken, anthropicAPIKey string) string {
+	out := fmt.Sprintf("GH_TOKEN=%s\n", ghToken)
+	if claudeOAuthToken != "" {
+		out += fmt.Sprintf("CLAUDE_CODE_OAUTH_TOKEN=%s\n", claudeOAuthToken)
+	} else {
+		out += fmt.Sprintf("ANTHROPIC_API_KEY=%s\n", anthropicAPIKey)
+	}
+	return out
+}
