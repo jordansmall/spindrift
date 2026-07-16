@@ -204,6 +204,10 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		t.m = Update(t.m, CursorMoveMsg{Delta: 1})
 	case "up":
 		t.m = Update(t.m, CursorMoveMsg{Delta: -1})
+	case "pgdown":
+		t.m = Update(t.m, ScrollMsg{Delta: drillInPageSize})
+	case "pgup":
+		t.m = Update(t.m, ScrollMsg{Delta: -drillInPageSize})
 	case "/":
 		t.m = Update(t.m, FilterEditStartMsg{})
 	case "enter":
