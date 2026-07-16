@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // testLabels is the conventional lifecycle-label set, mirrored from
@@ -135,7 +136,7 @@ func TestExecClient_DepsOf_NativeErrorSurfacesStderr(t *testing.T) {
 esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	out := captureStderr(t, func() {
+	out := testutil.CaptureStderr(t, func() {
 		if _, err := c.DepsOf("10"); err != nil {
 			t.Fatalf("DepsOf: %v", err)
 		}
@@ -143,36 +144,6 @@ esac`)
 	if !strings.Contains(out, "HTTP 404: Not Found") {
 		t.Fatalf("fallback warning must contain gh's stderr; got: %q", out)
 	}
-}
-
-// captureStderr runs fn with os.Stderr redirected to a pipe and returns
-// everything written to it.
-func captureStderr(t *testing.T, fn func()) string {
-	t.Helper()
-	orig := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stderr = w
-
-	fn()
-
-	w.Close()
-	os.Stderr = orig
-
-	var buf strings.Builder
-	tmp := make([]byte, 4096)
-	for {
-		n, err := r.Read(tmp)
-		if n > 0 {
-			buf.Write(tmp[:n])
-		}
-		if err != nil {
-			break
-		}
-	}
-	return buf.String()
 }
 
 // TestExecClient_DepsOf_WarnsOnStderr verifies that when the native
@@ -189,7 +160,7 @@ func TestExecClient_DepsOf_WarnsOnStderr(t *testing.T) {
 esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	out := captureStderr(t, func() {
+	out := testutil.CaptureStderr(t, func() {
 		if _, err := c.DepsOf("10"); err != nil {
 			t.Fatalf("DepsOf: %v", err)
 		}

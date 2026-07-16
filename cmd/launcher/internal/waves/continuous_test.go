@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/terminate"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // TestRunContinuous_RefillsFreedSlotWhileOthersRunning verifies the core
@@ -662,7 +663,7 @@ func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 
 	var err error
 	resultCh := make(chan error, 1)
-	errOut := captureStderr(t, func() {
+	errOut := testutil.CaptureStderr(t, func() {
 		resultCh <- RunContinuous(c, fc, fc, dir, f, s, discover, fresh)
 	})
 

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // writeFakeNix writes a fake `nix` on PATH (via t.Setenv) that logs its own
@@ -48,26 +50,6 @@ func writeFakeDriver(t *testing.T, dir, name, body string) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-// captureStderr swaps os.Stderr for a pipe for the duration of fn, so a test
-// can assert on what runOnce's hardcoded cmd.Stderr = os.Stderr wrote.
-func captureStderr(t *testing.T, fn func()) string {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	orig := os.Stderr
-	os.Stderr = w
-	fn()
-	os.Stderr = orig
-	w.Close()
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatal(err)
-	}
-	return buf.String()
 }
 
 // TestRunDirectModePropagatesExitCode verifies driver-exec returns the
@@ -265,7 +247,7 @@ func TestRunDoesNotRelaunchWhenDevshellStreamIsNonEmpty(t *testing.T) {
 	}
 	var stdout bytes.Buffer
 	var rc int
-	stderr := captureStderr(t, func() {
+	stderr := testutil.CaptureStderr(t, func() {
 		var runErr error
 		rc, runErr = run(cfg, &stdout)
 		if runErr != nil {
@@ -299,7 +281,7 @@ func TestRunLogsObservabilityEventOnRelaunch(t *testing.T) {
 		issue:        "7",
 	}
 	var stdout bytes.Buffer
-	stderr := captureStderr(t, func() {
+	stderr := testutil.CaptureStderr(t, func() {
 		if _, err := run(cfg, &stdout); err != nil {
 			t.Fatalf("run: %v", err)
 		}
