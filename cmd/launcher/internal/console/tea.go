@@ -248,7 +248,8 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 			// running; a session with no active drain (nothing picked yet,
 			// or the last one already went idle) has no listener to catch
 			// it, so a raise falls back to tryLaunch — a no-op if a drain
-			// is in fact already running.
+			// is in fact already running, or if nothing is queued/held to
+			// launch into the freed slot (#754).
 			t.launch.tryLaunch(t.tracker, t.pwd)
 		}
 	case "-":

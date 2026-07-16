@@ -80,6 +80,85 @@ func TestLauncher_Wait_BlocksUntilBackgroundDrainFinishes(t *testing.T) {
 	}
 }
 
+// TestLauncher_TryLaunch_SkipsWhenQueueEmpty verifies tryLaunch never spawns
+// a drain goroutine when Queue has nothing queued or held (#754) — the
+// background poll tick (tea.go pollTickMsg) fires this every interval
+// regardless of queue state, so an empty queue must be a real no-op rather
+// than a wasted RunContinuous pass.
+func TestLauncher_TryLaunch_SkipsWhenQueueEmpty(t *testing.T) {
+	launch := &Launcher{Queue: NewQueue()}
+	launch.tryLaunch(nil, "")
+
+	if launch.launching {
+		t.Fatal("tryLaunch set launching=true with an empty queue")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		launch.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Wait blocked — a drain goroutine was spawned despite an empty queue")
+	}
+}
+
+// TestLauncher_TryLaunch_HeldPickLaunchesAfterBlockerClearsOutOfBand
+// verifies a background-poll-driven tryLaunch call (tea.go's pollTickMsg
+// case, which fires every interval regardless of queue state) still
+// re-evaluates and launches a held pick whose blocker cleared out-of-band —
+// another agent or a human merge, with no sibling Dispatch in this session
+// to trigger RunContinuous's own refill-on-completion (#650). #754's
+// queue-empty skip in tryLaunch must gate on PickHeld as well as PickQueued
+// (Queue.Empty, not hasQueued) or this regresses — restores the coverage
+// the pre-Bubble-Tea-rewrite TestRun_HeldPick_LaunchesOnBackgroundPollAfterDrainIdles
+// carried.
+func TestLauncher_TryLaunch_HeldPickLaunchesAfterBlockerClearsOutOfBand(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen})
+	f.NativeDeps = map[string][]string{"42": {"41"}}
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch.tryLaunch(f, dir)
+	launch.Wait()
+
+	if got := launch.Queue.Snapshot()[0].State; got != PickHeld {
+		t.Fatalf("pick state = %v, want PickHeld (blocked on #41)", got)
+	}
+
+	// Blocker clears out-of-band: no Add, no operator action.
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueClosed})
+
+	// Stands in for the background poll tick (tea.go pollTickMsg) firing on
+	// its own interval — the only thing left to re-evaluate a held pick
+	// once its blocker clears with nothing else driving a fresh drain.
+	launch.tryLaunch(f, dir)
+	launch.Wait()
+
+	if got := launch.Queue.Snapshot()[0].State; got != PickRunning && got != PickSettled {
+		t.Fatalf("pick state = %v, want it to have launched (Running or Settled)", got)
+	}
+}
+
 // TestLauncher_TryLaunch_BoxFailureReachesPickFailed verifies that a Box
 // which runs and exits non-zero moves its queue row to the terminal
 // PickFailed state instead of stranding it at PickRunning — the gap issue
