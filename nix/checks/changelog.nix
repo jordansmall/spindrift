@@ -101,10 +101,11 @@
       "VERSIONING.md is missing changelog headings: ${
         concatMapStringsSep ", " (s: s.section) missingFromDoc
       }";
-    # Self-test (issue #666): pins isUnreleasedHeading's normalization before
-    # trusting it against the real file below. Deliberately excludes
-    # section-level (###) headings: per CHANGELOG.md's convention (see
-    # VERSIONING.md#what-lands-in-the-changelog), ## is always a release
+    # Self-test (issue #666, extended #897): pins isUnreleasedHeading's
+    # normalization — case, surrounding whitespace, and internal whitespace
+    # runs — before trusting it against the real file below. Deliberately
+    # excludes section-level (###) headings: per CHANGELOG.md's convention
+    # (see VERSIONING.md#what-lands-in-the-changelog), ## is always a release
     # heading and ### is always a section heading, never a release.
     assert assertMsg (isUnreleasedHeading "## [Unreleased] ")
       "isUnreleasedHeading must match a heading with trailing whitespace";
@@ -118,6 +119,9 @@
       "isUnreleasedHeading must match a heading with doubled internal whitespace";
     assert assertMsg (isUnreleasedHeading "##\t[Unreleased]")
       "isUnreleasedHeading must match a heading with a tab in place of a space";
+    assert assertMsg (
+      !isUnreleasedHeading "##  [1.0.0]"
+    ) "isUnreleasedHeading must not match a versioned heading even with doubled internal whitespace";
     # release-please never emits an `[Unreleased]` heading; one appearing in
     # CHANGELOG.md is always a stale, hand-inserted duplicate (issue #614).
     assert assertMsg (!any isUnreleasedHeading changelogLines)
