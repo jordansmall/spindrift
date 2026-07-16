@@ -30,6 +30,13 @@ rec {
   # every renderer and check that prints or greps for a flag name.
   toKebab = env: toLower (builtins.replaceStrings [ "_" ] [ "-" ] env);
 
+  # Schema entry -> the case-arm flag patterns for a choices knob: its
+  # canonical --<kebab> name, plus --<alias> when present (issue #874).
+  # Shared by renderBashCompletion/renderZshCompletion's choicesFlagBranch,
+  # since bash/zsh `case` patterns are the same `|`-joined syntax.
+  choicesFlagPatterns =
+    e: [ "--${toKebab e.env}" ] ++ (if e ? alias then [ "--${e.alias}" ] else [ ]);
+
   # Schema entry -> the type token the flag table and man page print.
   flagKind = e: if builtins.isInt (e.default or null) then "int" else "string";
 
@@ -326,19 +333,13 @@ rec {
             case "$prev" in
             ${
               concatStrings (
-                map (
-                  e:
-                  let
-                    patterns = [ "--${toKebab e.env}" ] ++ (if e ? alias then [ "--${e.alias}" ] else [ ]);
-                  in
-                  ''
-                    ${builtins.concatStringsSep "|" patterns})
-                      # shellcheck disable=SC2207 # COMPREPLY split-on-space is the standard completion idiom; mapfile needs bash 4+
-                      COMPREPLY=($(compgen -W "${builtins.concatStringsSep " " e.choices}" -- "$cur"))
-                      return 0
-                      ;;
-                  ''
-                ) choicesKnobs
+                map (e: ''
+                  ${builtins.concatStringsSep "|" (choicesFlagPatterns e)})
+                    # shellcheck disable=SC2207 # COMPREPLY split-on-space is the standard completion idiom; mapfile needs bash 4+
+                    COMPREPLY=($(compgen -W "${builtins.concatStringsSep " " e.choices}" -- "$cur"))
+                    return 0
+                    ;;
+                '') choicesKnobs
               )
             }esac
 
@@ -540,18 +541,12 @@ rec {
             case "$prev" in
             ${
               concatStrings (
-                map (
-                  e:
-                  let
-                    patterns = [ "--${toKebab e.env}" ] ++ (if e ? alias then [ "--${e.alias}" ] else [ ]);
-                  in
-                  ''
-                    ${builtins.concatStringsSep "|" patterns})
-                      compadd -- ${builtins.concatStringsSep " " e.choices}
-                      return
-                      ;;
-                  ''
-                ) choicesKnobs
+                map (e: ''
+                  ${builtins.concatStringsSep "|" (choicesFlagPatterns e)})
+                    compadd -- ${builtins.concatStringsSep " " e.choices}
+                    return
+                    ;;
+                '') choicesKnobs
               )
             }esac
 
