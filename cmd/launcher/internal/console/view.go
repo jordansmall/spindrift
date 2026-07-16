@@ -154,7 +154,7 @@ func renderBacklogColumn(m Model, budget int) string {
 		}
 		rows = append(rows, fmt.Sprintf("%s #%s  %s  [%s]\n", marker, iss.Number, iss.Title, strings.Join(iss.Labels, ", ")))
 	}
-	writeWindowedRows(&b, rows, budget-1)
+	writeWindowedRows(&b, rows, m.BacklogOffset, budget-1)
 	return b.String()
 }
 
@@ -193,7 +193,7 @@ func renderQueueColumn(m Model, budget int) string {
 		row.WriteString("\n")
 		rows = append(rows, row.String())
 	}
-	writeWindowedRows(&b, rows, budget-1)
+	writeWindowedRows(&b, rows, m.QueueOffset, budget-1)
 	return b.String()
 }
 
@@ -302,6 +302,8 @@ func renderHelp() string {
 		"help",
 		"  j / down    move cursor down",
 		"  up          move cursor up",
+		"  pgup/pgdown  scroll the backlog/queue viewport without moving the",
+		"              cursor (whichever column has focus)",
 		"  tab         switch focus between the backlog and work-queue columns",
 		"  /           filter by label substring",
 		"  enter       apply filter (while filter-editing); otherwise: pick the",
@@ -415,19 +417,27 @@ func overlay(body, pane string, leftWidth, paneWidth int) string {
 	return strings.Join(bodyLines, "\n") + "\n"
 }
 
-// writeWindowedRows writes rows to b, offset 0, clipped to budget rows — the
+// writeWindowedRows writes rows[offset:], clipped to budget rows — the
 // backlog/picks columns' body-windowing counterpart to windowLines' offset
-// slicing (issue #1035; scrolling the body itself, i.e. a non-zero offset,
-// is a later ticket). When rows overflows budget, one row is held back for a
+// slicing (issue #1035, scrolled per offset since issue #1036). When more
+// rows remain past offset than budget allows, one row is held back for a
 // trailing "N more below" affordance line instead of just truncating
 // silently, so the operator knows the list is clipped rather than complete.
-// A non-positive budget writes nothing.
-func writeWindowedRows(b *strings.Builder, rows []string, budget int) {
+// A non-positive budget writes nothing; an offset past the end of rows is
+// treated as the end (nothing left to show).
+func writeWindowedRows(b *strings.Builder, rows []string, offset, budget int) {
 	if budget < 0 {
 		budget = 0
 	}
-	if len(rows) <= budget {
-		for _, r := range rows {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(rows) {
+		offset = len(rows)
+	}
+	remaining := rows[offset:]
+	if len(remaining) <= budget {
+		for _, r := range remaining {
 			b.WriteString(r)
 		}
 		return
@@ -436,12 +446,122 @@ func writeWindowedRows(b *strings.Builder, rows []string, budget int) {
 	if visible < 0 {
 		visible = 0
 	}
-	for _, r := range rows[:visible] {
+	for _, r := range remaining[:visible] {
 		b.WriteString(r)
 	}
 	if budget > 0 {
-		fmt.Fprintf(b, "… %d more below\n", len(rows)-visible)
+		fmt.Fprintf(b, "… %d more below\n", len(remaining)-visible)
 	}
+}
+
+// windowedRowCount returns how many of remaining rows writeWindowedRows
+// actually renders as content for a given budget — remaining itself when it
+// all fits, or one less than budget (the row held back for the "N more
+// below" affordance) when it doesn't. Update reuses this to compute the
+// focused column's viewport capacity at a given offset, so
+// cursor-follows-viewport (issue #1036) advances/rewinds the offset exactly
+// when the rendered window is about to stop showing the cursor's row.
+func windowedRowCount(remaining, budget int) int {
+	if budget < 0 {
+		budget = 0
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+	if remaining <= budget {
+		return remaining
+	}
+	n := budget - 1
+	if n < 0 {
+		n = 0
+	}
+	return n
+}
+
+// bodyBudget returns the row budget left for the two-column body after the
+// header and any active prompt/error lines — the same figure View computes
+// before calling renderBody (issue #1035). Update reuses it so
+// cursor-follows-viewport (issue #1036) scrolls against the exact window
+// View is about to render, rather than a second, potentially-diverging
+// calculation.
+func bodyBudget(m Model) int {
+	header := renderHeader(m)
+	reservedLines := 0
+	if m.FilterEditing {
+		reservedLines++
+	}
+	if m.PendingTerminate != "" {
+		reservedLines++
+	}
+	if m.PendingQuit {
+		reservedLines++
+	}
+	if m.Err != nil {
+		reservedLines++
+	}
+	budget := m.Height - strings.Count(header, "\n") - reservedLines
+	if budget < 0 {
+		budget = 0
+	}
+	return budget
+}
+
+// bodyColumnBudgets returns the row budget renderBody gives the backlog and
+// queue columns for m's current Width/Height and prompt state — mirroring
+// renderBody's own split exactly (a stacked terminal below
+// minTwoColumnWidth halves the shared budget between the two columns; a
+// side-by-side terminal gives each column the full budget, since they share
+// output lines). Update reuses this so cursor-follows-viewport (issue
+// #1036) computes each column's viewport against the same budget View
+// renders with.
+func bodyColumnBudgets(m Model) (backlog, queue int) {
+	budget := bodyBudget(m)
+	if budget <= 0 {
+		return 0, 0
+	}
+	if m.Width < minTwoColumnWidth {
+		contentBudget := budget - 1
+		if contentBudget < 0 {
+			contentBudget = 0
+		}
+		half := contentBudget / 2
+		return half, contentBudget - half
+	}
+	return budget, budget
+}
+
+// columnItemBudget converts a column's row budget (label line included, as
+// bodyColumnBudgets returns it) into the row budget available for its item
+// rows alone — the same "-1 for the label" renderBacklogColumn and
+// renderQueueColumn apply before calling writeWindowedRows. A non-positive
+// column budget yields zero items, matching those functions' own
+// budget<=0-renders-nothing early return.
+func columnItemBudget(columnBudget int) int {
+	if columnBudget <= 0 {
+		return 0
+	}
+	return columnBudget - 1
+}
+
+// followViewport returns offset adjusted so cursor stays within the window
+// writeWindowedRows would render at itemBudget rows — rewinding one row at a
+// time while cursor sits above offset, advancing one row at a time while
+// cursor sits past the last row windowedRowCount would actually show,
+// exactly the "moving the cursor down past the bottom visible row advances
+// the offset by one... moving up past the top row rewinds it" behavior
+// issue #1036 AC1 asks for. total bounds the advance so the loop always
+// terminates even if itemBudget is non-positive (nothing visible).
+func followViewport(offset, cursor, total, itemBudget int) int {
+	for cursor < offset {
+		offset--
+	}
+	for offset < total {
+		if cursor < offset+windowedRowCount(total-offset, itemBudget) {
+			break
+		}
+		offset++
+	}
+	return offset
 }
 
 // windowLines returns d.Lines[offset:end], where end stops budget lines past

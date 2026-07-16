@@ -132,6 +132,17 @@ type DrillInScrollMsg struct {
 
 func (DrillInScrollMsg) isConsoleMsg() {}
 
+// ScrollMsg is the tea layer's signal that the operator pressed a line-scroll
+// key while the backlog/queue body is showing (no drill-in open) — Delta is
+// the number of rows to move (positive scrolls down/later, negative scrolls
+// up/earlier). It moves BacklogOffset or QueueOffset depending on Focus,
+// clamped the same way DrillInScrollMsg clamps DrillIn.Offset (issue #1036).
+type ScrollMsg struct {
+	Delta int
+}
+
+func (ScrollMsg) isConsoleMsg() {}
+
 // TerminateRequestedMsg is the run loop's signal that the operator typed
 // "k"/"kill"/"terminate" <num> — arms a pending confirm (ADR 0024, issue
 // #649) rather than acting immediately.
