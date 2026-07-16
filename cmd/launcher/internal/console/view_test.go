@@ -1560,3 +1560,16 @@ func TestSplitLeftWidth_UsesBacklogWidthUnderFractionCap(t *testing.T) {
 		t.Errorf("splitLeftWidth(%q, %d) = %d, want %d (backlog's own width)", backlog, width, got, want)
 	}
 }
+
+// TestFollowViewport_NonPositiveBudget_ClampsOffsetBelowTotal verifies
+// followViewport never returns offset == total: when itemBudget <= 0,
+// windowedRowCount always returns 0, so the advance loop's break condition
+// cursor < offset+0 never fires once offset >= cursor, and the loop's old
+// `for offset < total` bound let it climb one past the last valid index
+// (issue #1054).
+func TestFollowViewport_NonPositiveBudget_ClampsOffsetBelowTotal(t *testing.T) {
+	got := followViewport(0, 4, 5, 0)
+	if got >= 5 {
+		t.Errorf("followViewport(0, 4, 5, 0) = %d, want < 5 (total)", got)
+	}
+}

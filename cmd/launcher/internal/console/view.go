@@ -703,13 +703,15 @@ func columnItemBudget(columnBudget int) int {
 // cursor sits past the last row windowedRowCount would actually show,
 // exactly the "moving the cursor down past the bottom visible row advances
 // the offset by one... moving up past the top row rewinds it" behavior
-// issue #1036 AC1 asks for. total bounds the advance so the loop always
-// terminates even if itemBudget is non-positive (nothing visible).
+// issue #1036 AC1 asks for. The result always stays in [0, total): the
+// advance loop stops at total-1 rather than total so a non-positive
+// itemBudget (windowedRowCount always 0, so the break condition never
+// fires) can't push offset one past the last valid index (issue #1054).
 func followViewport(offset, cursor, total, itemBudget int) int {
 	for cursor < offset {
 		offset--
 	}
-	for offset < total {
+	for offset < total-1 {
 		if cursor < offset+windowedRowCount(total-offset, itemBudget) {
 			break
 		}
