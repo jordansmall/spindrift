@@ -1295,8 +1295,10 @@ func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
 	}
 	line := regexp.MustCompile(`gh label create (\S+)\s+--repo owner/repo --color (\S+) --description "([^"]*)"`)
 	matches := line.FindAllStringSubmatch(string(raw), -1)
+	seen := map[string]int{}
 	for _, m := range matches {
 		name, color, description := m[1], m[2], m[3]
+		seen[name]++
 		want, ok := triageLabelMeta[name]
 		if !ok {
 			t.Errorf("docs/reference.md snippet creates unknown label %q", name)
@@ -1310,10 +1312,6 @@ func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
 		}
 	}
 
-	seen := map[string]int{}
-	for _, m := range matches {
-		seen[m[1]]++
-	}
 	for name := range triageLabelMeta {
 		switch seen[name] {
 		case 0:
