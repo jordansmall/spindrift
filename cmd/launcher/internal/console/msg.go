@@ -188,6 +188,8 @@ type StaleStatusMsg struct {
 	Message    string
 	Rebuilding bool
 	RebuildErr string
+	// RebuildOutput is the last rebuild's captured nix output (issue #765).
+	RebuildOutput string
 }
 
 func (StaleStatusMsg) isConsoleMsg() {}

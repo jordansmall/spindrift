@@ -40,8 +40,11 @@ type Launcher struct {
 	Fresh waves.FreshnessChecker
 	// RebuildFn actually rebuilds and reloads the image — production wires
 	// it to the operator's confirm key; nil (every pre-#652 call site, and
-	// any test not exercising Rebuild) makes Rebuild a no-op.
-	RebuildFn func() error
+	// any test not exercising Rebuild) makes Rebuild a no-op. It returns the
+	// rebuild's captured nix output (issue #765) alongside the error, so a
+	// background rebuild never writes directly to the Console's own
+	// stdout/stderr.
+	RebuildFn func() (string, error)
 	// RecoverFn adopts an orphaned issue's abandoned PR through the
 	// existing settle adoption path (recoverByNumber) — Console startup
 	// orphan recovery (issue #651). Wired by cmdConsole in main.go, since
@@ -61,6 +64,12 @@ type Launcher struct {
 	staleMessage string
 	rebuilding   bool
 	rebuildErr   error
+	// rebuildOutput is the last rebuild's captured nix output (issue #765) —
+	// stdout/stderr merged, in build order — set on every RebuildFn
+	// completion regardless of outcome so an operator can retrieve it
+	// through StaleStatus without RunNixBuild ever writing to the Console's
+	// own stdout/stderr.
+	rebuildOutput string
 	// pollInterval overrides Run's default background poll cadence — unset
 	// (zero) in every production construction site, so only same-package
 	// tests reach in to shrink it below defaultPollInterval.
@@ -474,11 +483,12 @@ func (l *Launcher) Rebuild(tracker forge.IssueTracker, pwd string) {
 	l.wg.Add(1)
 	go func() {
 		defer l.wg.Done()
-		err := l.RebuildFn()
+		output, err := l.RebuildFn()
 
 		l.mu.Lock()
 		l.rebuilding = false
 		l.rebuildErr = err
+		l.rebuildOutput = output
 		if err == nil {
 			l.stale = false
 			l.staleMessage = ""
@@ -494,13 +504,16 @@ func (l *Launcher) Rebuild(tracker forge.IssueTracker, pwd string) {
 
 // StaleStatus returns the launcher's live image-freshness/rebuild state —
 // the console's per-render sync source for the stale banner (issue #652).
-func (l *Launcher) StaleStatus() (stale bool, message string, rebuilding bool, rebuildErr string) {
+// rebuildOutput is the last rebuild's captured nix output (issue #765),
+// retrievable here instead of ever being streamed to the Console's own
+// stdout/stderr.
+func (l *Launcher) StaleStatus() (stale bool, message string, rebuilding bool, rebuildErr string, rebuildOutput string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.rebuildErr != nil {
 		rebuildErr = l.rebuildErr.Error()
 	}
-	return l.stale, l.staleMessage, l.rebuilding, rebuildErr
+	return l.stale, l.staleMessage, l.rebuilding, rebuildErr, l.rebuildOutput
 }
 
 // Wait blocks until any in-flight background drain finishes — Run calls it

@@ -889,7 +889,7 @@ func cmdConsole(lc *launchContext) int {
 	defer lc.cleanup()
 	fresh, rebuild := newConsoleFreshness(lc.config, lc.pwd, runner.NixEvaluator{},
 		func() error { return consoleGitSync(lc.pwd, lc.config.baseBranch) },
-		func() error { return consoleNixBuild(lc.pwd) })
+		func() (string, error) { return consoleNixBuild(lc.pwd) })
 	launch := &console.Launcher{
 		CodeForge:   lc.codeForge,
 		Factory:     lc.factory,
