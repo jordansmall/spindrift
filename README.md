@@ -539,14 +539,21 @@ and holds every new launch — a queued pick stays at `queued` instead of
 claiming. A Box already running rides out the stale window on its original
 image untouched; staleness only gates a slot *refill*, never an in-flight
 Dispatch. `b`/`build`/`rebuild` fires the rebuild without leaving the
-session or needing a confirm (it's non-destructive): it pulls the base
-branch and re-realizes the image in the background while the session stays
-responsive, with `==> rebuilding image...` shown until it finishes. A
-successful rebuild clears the banner and resumes every held pick exactly
-where it queued — no re-pick needed. A failed rebuild prints
-`!! rebuild failed: <reason>` and leaves launches held, so the operator can
-retry `b` once the underlying problem (a merge conflict on pull, a broken
-derivation) is fixed.
+session or needing a confirm: it checks out the base branch, pulls it, and
+re-realizes the image in the background while the session stays responsive,
+with `==> rebuilding image...` shown until it finishes. That checkout runs on
+the operator's own working directory (issue #769) — it refuses to run at
+all when the directory is on some other branch with uncommitted changes,
+since a plain `git checkout` only blocks on a *conflicting* file and would
+otherwise carry a non-conflicting uncommitted change onto the base branch in
+total silence. Outside that case (already on the base branch, or any branch
+with a clean tree) the checkout is a safe no-op or a plain branch switch, so
+it proceeds. A successful rebuild clears the banner and resumes every held
+pick exactly where it queued — no re-pick needed. A failed rebuild —
+including a refused checkout — prints `!! rebuild failed: <reason>` and
+leaves launches held, so the operator can retry `b` once the underlying
+problem (uncommitted changes on the wrong branch, a merge conflict on pull,
+a broken derivation) is fixed.
 
 **Quit** (`q`/`quit`, issue #651): with no live Dispatches, quit exits
 immediately — no dialog. With one or more live Dispatches, it instead offers

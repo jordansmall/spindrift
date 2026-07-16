@@ -569,6 +569,10 @@ let
     modRoot = "cmd/launcher";
     vendorHash = "sha256-pz95WwGNc065UWJspokZ4heMGKWh8Bsi+5O+UmCAtqA=";
     subPackages = [ "." ]; # build only the launcher; driver-exec is in-box only
+    # consoleGitSync's precondition tests (issue #769) shell out to a real
+    # git repo, so checkPhase's `go test .` needs git on PATH — the same
+    # reason nix/checks/go.nix's launcher-go-test check carries pkgs.git.
+    nativeBuildInputs = [ hostPkgs.git ];
     ldflags = [
       "-X main.version=${spindriftVersion}"
       "-X main.revision=${revision}"
