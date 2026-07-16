@@ -131,6 +131,14 @@
             program = "${import ./nix/regen.nix { inherit pkgs; }}/bin/regen";
           };
 
+          # `nix run github:jordansmall/spindrift#quickstart` (ADR 0027):
+          # the pre-CLI interactive scaffolder. Standalone from the
+          # Consumer-facing lib/mkHarness.nix pipeline — see nix/quickstart.nix.
+          apps.quickstart = {
+            type = "app";
+            program = "${import ./nix/quickstart.nix { inherit pkgs; }}/bin/quickstart";
+          };
+
           # For hacking ON the harness itself (host-side).
           # spindrift CLI is included so `nix develop` → `spindrift dispatch` works.
           devShells.default = pkgs.mkShell {
