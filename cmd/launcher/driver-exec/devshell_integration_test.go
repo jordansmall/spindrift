@@ -104,7 +104,9 @@ func TestRunDevshellRealNixKeepsHarnessToolsReachable(t *testing.T) {
         [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ] f;
     in {
       devShells = forAllSystems (system: {
-        default = nixpkgs.legacyPackages.${system}.mkShellNoCC { };
+        default = nixpkgs.legacyPackages.${system}.mkShellNoCC {
+          shellHook = "export SPINDRIFT_TEST_DEVSHELL_MARKER=798";
+        };
       });
     };
 }
@@ -116,7 +118,13 @@ func TestRunDevshellRealNixKeepsHarnessToolsReachable(t *testing.T) {
 	runIn(t, dir, "git", "init", "-q")
 	runIn(t, dir, "git", "add", "-A")
 
+	// The shellHook marker distinguishes an actual devShell entry from
+	// run()'s relaunch-on-launch-failure fallback (run.go:59), which reruns
+	// the Driver directly (no devShell, no marker) if the wrap never
+	// produces output — without this check, a broken throwaway devShell
+	// would silently degrade to the direct case and still pass.
 	bin := writeFakeDriver(t, dir, "fake-driver", `set -e
+[ "$SPINDRIFT_TEST_DEVSHELL_MARKER" = "798" ] || { echo "devshell not entered"; exit 1; }
 command -v git >/dev/null || { echo "git not on PATH"; exit 1; }
 command -v gh >/dev/null || { echo "gh not on PATH"; exit 1; }
 echo harness-tools-reachable
