@@ -178,7 +178,12 @@ func renderBacklogColumn(m Model, budget int) string {
 		if m.Focus == FocusBacklog && i == m.Cursor {
 			marker = ">"
 		}
-		rows = append(rows, fmt.Sprintf("%s #%s  %s  [%s]\n", marker, iss.Number, iss.Title, strings.Join(iss.Labels, ", ")))
+		title := SanitizeControlSequences(iss.Title)
+		labels := make([]string, len(iss.Labels))
+		for j, l := range iss.Labels {
+			labels[j] = SanitizeControlSequences(l)
+		}
+		rows = append(rows, fmt.Sprintf("%s #%s  %s  [%s]\n", marker, iss.Number, title, strings.Join(labels, ", ")))
 	}
 	writeWindowedRows(&b, rows, m.BacklogOffset, columnItemBudget(budget))
 	return b.String()
@@ -213,6 +218,8 @@ func renderQueueColumn(m Model, budget int) string {
 		if m.Focus == FocusQueue && i == m.QueueCursor {
 			marker = ">"
 		}
+		title := SanitizeControlSequences(p.Title)
+		reason := SanitizeControlSequences(p.Reason)
 		var row strings.Builder
 		fmt.Fprintf(&row, "%s #%s  [%s]", marker, p.Number, p.State)
 		if p.BlockedBy != "" {
@@ -221,13 +228,13 @@ func renderQueueColumn(m Model, budget int) string {
 		// A held pick's Reason ("blocker #N failed") names the same blocker
 		// BlockedBy already does — skip it so a failed blocker isn't named
 		// twice on one row (issue #755).
-		if p.Reason != "" && !(p.BlockedBy != "" && strings.HasPrefix(p.Reason, "blocker ")) {
-			fmt.Fprintf(&row, "  (%s)", p.Reason)
+		if reason != "" && !(p.BlockedBy != "" && strings.HasPrefix(reason, "blocker ")) {
+			fmt.Fprintf(&row, "  (%s)", reason)
 		}
 		if p.Heartbeat != "" {
 			fmt.Fprintf(&row, "  %s", p.Heartbeat)
 		}
-		fmt.Fprintf(&row, "  %s", p.Title)
+		fmt.Fprintf(&row, "  %s", title)
 		row.WriteString("\n")
 		rows = append(rows, row.String())
 	}
