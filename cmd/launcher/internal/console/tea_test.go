@@ -1226,6 +1226,10 @@ func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
 
 	sendKey(tm, "p")
 	sendKey(tm, "a")
+	// Both picks race the fake Dispatch to completion behind the default
+	// cap of 1; wait for both to settle so "q" always lands with nothing
+	// live, rather than racing the quit confirm (issue #822).
+	waitForOutput(t, tm, "settled 2")
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 
