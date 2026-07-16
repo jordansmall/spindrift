@@ -192,11 +192,6 @@ func renderQueueColumn(m Model, budget int) string {
 		if m.Focus == FocusQueue && i == m.QueueCursor {
 			marker = ">"
 		}
-		// BlockedBy/Reason/Heartbeat come before Title: clip() truncates
-		// from the tail, and this is the operator-relevant signal for
-		// pick/unpick decisions — it must survive truncation even when the
-		// title is long, whereas the title can afford to give way (issue
-		// #858).
 		var row strings.Builder
 		fmt.Fprintf(&row, "%s #%s  [%s]", marker, p.Number, p.State)
 		if p.BlockedBy != "" {
