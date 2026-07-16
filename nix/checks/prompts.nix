@@ -189,8 +189,8 @@ in
   # generalizes WATCH CI's rule to the CHECK phase's own blocking gates
   # (`nix build .#checks-inbox`, test suites). Written once in
   # issue-prompt.md's CHECK section and inherited by fix-prompt.md through
-  # the CHECK block injection above. Both greps are scoped to the CHECK
-  # section itself (not the whole file) -- WATCH CI carries the same
+  # the CHECK block injection above. Both greps are scoped to issue-prompt's
+  # CHECK section itself (not the whole file) -- WATCH CI carries the same
   # "never background it" phrase further down, so an unscoped grep would
   # keep passing even if the #592 CHECK paragraph were deleted. Fix-prompt
   # side is covered by mkharness-prompt-fix-check-no-drift's byte-for-byte
