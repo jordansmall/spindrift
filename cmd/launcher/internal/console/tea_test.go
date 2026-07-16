@@ -13,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	teatest "github.com/charmbracelet/x/exp/teatest"
+	"github.com/mattn/go-runewidth"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
@@ -1845,6 +1846,34 @@ func TestTea_Init_RecoversOrphanedIssuesOnStartup(t *testing.T) {
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth verifies backlog and
+// queue titles full of wide CJK characters render within the terminal's
+// actual display width through the full Bubble Tea render path, not just
+// rune count — a rune-count-only clip truncates by counting runes instead of
+// columns, so a mostly-wide-character row can survive truncation still
+// twice as wide as the column budget it was meant to enforce (issue #859
+// AC4/AC6). Both columns carry a wide title so a fix that only tightens one
+// side can't hide behind the other's slack.
+func TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth(t *testing.T) {
+	f := forge.NewFake()
+	wideTitle := strings.Repeat("中", 40) // 40 runes / 80 display columns
+	f.SetIssue(forge.Issue{Number: "1", Title: wideTitle, State: forge.IssueOpen})
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch.Queue.Add(Pick{Number: "2", Title: strings.Repeat("文", 40), State: PickQueued})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "#1")
+
+	sendKey(tm, "q")
+	final := tm.FinalModel(t, teatest.WithFinalTimeout(2*time.Second)).(teaModel)
+
+	for _, l := range strings.Split(View(final.m), "\n") {
+		if w := runewidth.StringWidth(l); w > 80 {
+			t.Errorf("View() line %q has display width %d, want it clamped to Width (80)", l, w)
+		}
+	}
 }
 
 // heartbeatFor returns m's Heartbeat field for the pick numbered number, or
