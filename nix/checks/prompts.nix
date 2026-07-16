@@ -93,10 +93,26 @@ in
   # grep would still pass if the real outcome line regressed to `pr=` while
   # some unrelated prose in the slice happened to mention "landing="
   # (issue #886).
+  #
+  # A single `grep -q` only proves *at least one* SPINDRIFT_OUTCOME example
+  # line kept `landing=` -- a partial regression, where only one of several
+  # example lines reverts to `pr=`, still passes because the surviving lines
+  # mask it. Require every SPINDRIFT_OUTCOME line to carry `landing=`: count
+  # the lines missing it and fail the build if that count isn't zero (issue
+  # #887). A bare `! pipeline` won't do here -- `set -e` explicitly exempts
+  # negated commands, so a failing assertion silently wouldn't stop the build.
   mkharness-prompt-outcome-contract-has-landing-token =
     pkgs.runCommand "mkharness-prompt-outcome-contract-has-landing-token" { }
       ''
+        # Floor guard: catches the degenerate case where every SPINDRIFT_OUTCOME
+        # line -- and thus landing= itself -- vanishes from the contract, which
+        # the per-line count below would otherwise wave through as 0 missing.
         grep -qE 'SPINDRIFT_OUTCOME.*landing=' ${batsHarness.outcomeContractFile}
+        missing=$(grep 'SPINDRIFT_OUTCOME' ${batsHarness.outcomeContractFile} | grep -vc 'landing=' || true)
+        [ "$missing" -eq 0 ] || {
+          echo "expected every SPINDRIFT_OUTCOME line to carry landing=, $missing did not" >&2
+          exit 1
+        }
         touch $out
       '';
 
@@ -279,11 +295,18 @@ in
 
   # Same gap as mkharness-prompt-outcome-contract-has-landing-token, for the
   # research kind's own contract (issue #654), including the same
-  # SPINDRIFT_OUTCOME anchoring fix (issue #886).
+  # SPINDRIFT_OUTCOME anchoring fix (issue #886) and the partial-revert
+  # strengthening (issue #887).
   mkharness-prompt-research-outcome-contract-has-landing-token =
     pkgs.runCommand "mkharness-prompt-research-outcome-contract-has-landing-token" { }
       ''
+        # Floor guard, same reasoning as the issue-side check above.
         grep -qE 'SPINDRIFT_OUTCOME.*landing=' ${batsHarness.researchOutcomeContractFile}
+        missing=$(grep 'SPINDRIFT_OUTCOME' ${batsHarness.researchOutcomeContractFile} | grep -vc 'landing=' || true)
+        [ "$missing" -eq 0 ] || {
+          echo "expected every SPINDRIFT_OUTCOME line to carry landing=, $missing did not" >&2
+          exit 1
+        }
         touch $out
       '';
 
