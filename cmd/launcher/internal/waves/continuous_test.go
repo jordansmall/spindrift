@@ -587,6 +587,7 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
+	var gotSources Sources
 	discover := func() ([]Issue, map[string][]string, Sources, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
@@ -600,12 +601,17 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		gotSources = sources
 		return out, edges, sources, nil
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	if err := RunContinuous(c, fc, fc, dir, f, s, discover, fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
+	}
+
+	if gotSources["2"]["3"] != forge.DepSourceBody {
+		t.Errorf("sources[2][3]: got %v, want DepSourceBody (#2's blocker on #3 is body-parsed)", gotSources["2"]["3"])
 	}
 
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
