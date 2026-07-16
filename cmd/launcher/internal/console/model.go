@@ -87,6 +87,17 @@ type Model struct {
 	// column's own cursor, independent of Cursor (the backlog column's) and
 	// clamped into [0, len(Picks)-1] the same way (issue #845).
 	QueueCursor int
+	// BacklogOffset is the backlog column's scroll offset — the index of its
+	// first rendered row, clamped into [0, len(Visible())-1] the same way
+	// DrillIn.Offset is (issue #1036). CursorMoveMsg keeps it advancing with
+	// Cursor so the highlighted row never scrolls off; ScrollMsg moves it
+	// directly. Independent of QueueOffset so Tab preserves each column's
+	// scroll position across a focus toggle.
+	BacklogOffset int
+	// QueueOffset is the work-queue column's scroll offset — QueueCursor's
+	// analogue of BacklogOffset, clamped into [0, len(Picks)-1] (issue
+	// #1036).
+	QueueOffset int
 	// PaneMode is the operator-selected layout for an open DrillIn's
 	// Transcript — docked (the zero value), floating, or fullscreen — cycled
 	// by a key and derived down to fullscreen at View time on a terminal too
@@ -220,6 +231,12 @@ func Update(m Model, msg Msg) Model {
 		if m.DrillIn != nil {
 			m.DrillIn.Offset += msg.Delta
 		}
+	case ScrollMsg:
+		if m.Focus == FocusQueue {
+			m.QueueOffset += msg.Delta
+		} else {
+			m.BacklogOffset += msg.Delta
+		}
 	case TerminateRequestedMsg:
 		m.PendingTerminate = msg.Number
 	case TerminateConfirmedMsg:
@@ -267,6 +284,16 @@ func Update(m Model, msg Msg) Model {
 	m.Cursor = clampCursor(m.Cursor, len(m.Visible()))
 	m.QueueCursor = clampCursor(m.QueueCursor, len(m.Picks))
 	clampDrillInOffset(m.DrillIn)
+	m.BacklogOffset = clampCursor(m.BacklogOffset, len(m.Visible()))
+	m.QueueOffset = clampCursor(m.QueueOffset, len(m.Picks))
+	if _, ok := msg.(CursorMoveMsg); ok {
+		backlogBudget, queueBudget := bodyColumnBudgets(m)
+		if m.Focus == FocusQueue {
+			m.QueueOffset = followViewport(m.QueueOffset, m.QueueCursor, len(m.Picks), columnItemBudget(queueBudget))
+		} else {
+			m.BacklogOffset = followViewport(m.BacklogOffset, m.Cursor, len(m.Visible()), columnItemBudget(backlogBudget))
+		}
+	}
 	m.Width = clampSize(m.Width)
 	m.Height = clampSize(m.Height)
 	return m

@@ -315,6 +315,19 @@ func TestView_ShowHelp_ListsPaneModeKey(t *testing.T) {
 	}
 }
 
+// TestView_ShowHelp_ListsBodyScrollKeys verifies the help overlay lists
+// pgup/pgdown as the backlog/queue viewport's own line-scroll keys,
+// distinct from the drill-in transcript's identically-named scroll keys
+// (issue #1036 AC — help overlay documents the new scroll keys).
+func TestView_ShowHelp_ListsBodyScrollKeys(t *testing.T) {
+	m := Update(NewModel(), HelpToggleMsg{})
+
+	out := View(m)
+	if !strings.Contains(out, "pgup/pgdown  scroll the backlog/queue") {
+		t.Errorf("View() = %q, want it to mention the backlog/queue scroll keys", out)
+	}
+}
+
 // TestView_DrillInOpen_RendersTranscriptInsteadOfBacklog verifies an open
 // drill-in replaces the backlog/queue rendering with the transcript, the
 // rendered form by default, plus a hint for the toggle/close keystrokes —
@@ -733,6 +746,47 @@ func TestView_LongPicksQueue_HeaderStaysPinnedAndShowsMoreBelow(t *testing.T) {
 	}
 	if !strings.Contains(out, "more below") {
 		t.Errorf("View() = %q, want a \"more below\" affordance line", out)
+	}
+}
+
+// TestView_ScrolledBacklog_ReachesLastRow verifies scrolling the backlog
+// column all the way (BacklogOffset clamped to its maximum) surfaces the
+// last loaded issue — every row in the (filtered) backlog is reachable by
+// scrolling, not just the leading window (issue #1036 AC3).
+func TestView_ScrolledBacklog_ReachesLastRow(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	issues := make([]forge.Issue, 50)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+	m = Update(m, ScrollMsg{Delta: 1000})
+
+	out := View(m)
+	if !strings.Contains(out, "issue 49") {
+		t.Errorf("View() = %q, want the last issue reachable once scrolled all the way down", out)
+	}
+}
+
+// TestView_ScrolledQueue_ReachesLastRow verifies the same reachability for
+// the picks column once it has focus and is scrolled all the way — issue
+// #1036 AC3 covers both columns, since Tab already toggles focus between
+// them.
+func TestView_ScrolledQueue_ReachesLastRow(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	m = Update(m, FocusToggleMsg{})
+	picks := make([]Pick, 50)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
+	}
+	m.Picks = picks
+
+	m = Update(m, ScrollMsg{Delta: 1000})
+
+	out := View(m)
+	if !strings.Contains(out, "pick 49") {
+		t.Errorf("View() = %q, want the last pick reachable once scrolled all the way down", out)
 	}
 }
 
