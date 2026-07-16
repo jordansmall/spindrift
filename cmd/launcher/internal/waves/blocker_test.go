@@ -237,3 +237,22 @@ func TestBlockerReady_ClosedIssueFallback(t *testing.T) {
 		t.Error("blockerReady: want true for closed issue with no PR, got false")
 	}
 }
+
+// --- BlockerStatus tests ---
+
+func TestBlockerStatus_ClosedAndFailed(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake()
+	// #11: closed with no PR — BlockerReady's fallback treats it as ready,
+	// but it also carries the Failed label, which must never be satisfiable.
+	fc.SetIssue(forge.Issue{Number: "11", State: "CLOSED", Labels: []string{c.FailedLabel}})
+	edges := map[string][]string{"10": {"11"}}
+
+	ready, failed, _ := BlockerStatus(c, fc, fc, "10", edges)
+	if ready {
+		t.Error("BlockerStatus: want ready=false for closed+failed blocker, got true")
+	}
+	if !reflect.DeepEqual(failed, []string{"11"}) {
+		t.Errorf("BlockerStatus: want failed=[11], got %v", failed)
+	}
+}
