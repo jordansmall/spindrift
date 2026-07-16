@@ -336,6 +336,15 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			if errors.Is(rbErr, forge.ErrMergeConflict) && d != nil {
 				fmt.Printf("    #%s  landing=%s  status=conflict-resolve\n", num, pr)
 				if crErr := d.ResolveConflict(pr); crErr != nil {
+					// Audited (issue #831): crErr traces through
+					// dispatch.Dispatch.ResolveConflict -> runOnce
+					// (dispatch/box.go) -> runner.Runner.Run. Both the OCI
+					// and bwrap adapters wire the Box's stdout/stderr to the
+					// log file, not to the returned error, so crErr is only
+					// ever *exec.ExitError or a start failure (missing
+					// binary, mkdtemp/file error) — never Box-internal
+					// output. Safe to surface verbatim in the issue comment
+					// posted from this error at ready.go's selfHeal.
 					fmt.Printf("    #%s  landing=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
 					return fmt.Errorf("%w: conflict-resolve dispatch failed: %v", errLandingNeverGreen, crErr)
 				}
