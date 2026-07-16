@@ -323,11 +323,19 @@ func (l *Launcher) Refreshes() <-chan struct{} {
 
 // tryLaunch starts draining Queue through waves.RunContinuous, up to
 // MaxParallel slots (1 when unset), in the background, unless a drain is
-// already running —
+// already running or Queue has nothing left to launch (#754) —
 // RunContinuous's own refill-on-completion picks up any pick Add()ed to
 // Queue while that drain is in flight, so a second concurrent invocation is
-// never needed, only a fresh one once the queue has gone idle.
+// never needed, only a fresh one once the queue has gone idle. The
+// background poll tick (tea.go pollTickMsg) calls this every interval
+// regardless of queue state specifically to re-evaluate a held pick whose
+// blocker cleared out-of-band (#650), so the empty check must cover
+// PickHeld as well as PickQueued (Queue.Empty(), not just hasQueued).
 func (l *Launcher) tryLaunch(tracker forge.IssueTracker, pwd string) {
+	if l.Queue.Empty() {
+		return
+	}
+
 	l.mu.Lock()
 	if l.launching {
 		l.mu.Unlock()
