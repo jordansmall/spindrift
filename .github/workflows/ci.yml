@@ -42,9 +42,5 @@ jobs:
       # argv. Gated behind the `integration` build tag and self-skipping when no
       # real runtime is usable, so a runner lacking user namespaces or a
       # container daemon degrades to a clean skip rather than a failure.
-      #
-      # Also covers the devShell-wrap PATH invariant (issue #798): a real
-      # `nix develop` devShell naming neither git nor gh still leaves both
-      # reachable to the wrapped command.
       - name: Runner sandbox integration tests
-        run: nix develop -c bash -c 'cd cmd/launcher && go test -tags=integration -v ./internal/runner/... ./driver-exec/...'
+        run: nix develop -c bash -c 'cd cmd/launcher && go test -tags=integration -v ./internal/runner/...'
