@@ -18,6 +18,14 @@
 #                        boxEnv knob with no default (tests/box_env_gen.bash)
 #   required     bool    runtime-required (no sensible default; validate() aborts)
 #   secret       bool    never a flakeOption; shown as an empty placeholder in example
+#   choices      list    nonSecret knobs only (nix/checks/schema-drift.nix's
+#                        schema-choices rejects it on a secret knob): non-empty
+#                        list of strings driving shell completion; a knob's
+#                        default (if any) must be a member of it. Secret knobs
+#                        get only a --*-file path flag, never a value-taking
+#                        one, so lib/renderers.nix's completion renderers never
+#                        look at choices on a secret knob — declaring it there
+#                        would pass no validation surface and render nowhere.
 #   doc          string  one-line description rendered into harness.env.example
 #   flakeOption  bool    consumer-tunable via the flakeModule declarative surface
 #   boxEnv       bool    forwarded from the launcher host into the Box container
