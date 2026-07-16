@@ -211,6 +211,50 @@ func TestQueue_Discover_UnpickDuringClaimCheck_NeverLaunches(t *testing.T) {
 	}
 }
 
+// TestQueue_Discover_HoldsPickOnDepsOfFailure verifies a pick whose DepsOf
+// call fails holds at PickHeld with a reason distinguishing it from a real
+// open blocker, rather than launching on a transient tracker hiccup (rate
+// limit, timeout, flaky API call) — #752.
+func TestQueue_Discover_HoldsPickOnDepsOfFailure(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+
+	issues, _, _, err := q.Discover(failDepsOf{Fake: f, num: "42"}, f, "")
+
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Errorf("issues = %+v, want none — a DepsOf failure must hold, not launch", issues)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none — a DepsOf failure must never claim", f.TransitionStateCalls)
+	}
+	snap := q.Snapshot()[0]
+	if snap.State != PickHeld {
+		t.Errorf("state = %v, want held", snap.State)
+	}
+	if !strings.Contains(snap.Reason, "retry") {
+		t.Errorf("Reason = %q, want it to explain the pick will be retried", snap.Reason)
+	}
+}
+
+// failDepsOf wraps a *forge.Fake so DepsOf errors for num, simulating a
+// transient tracker failure.
+type failDepsOf struct {
+	*forge.Fake
+	num string
+}
+
+func (r failDepsOf) DepsOf(num string) ([]forge.Dependency, error) {
+	if num == r.num {
+		return nil, errBoom
+	}
+	return r.Fake.DepsOf(num)
+}
+
 // removeOnDepsOf wraps a *forge.Fake so its first DepsOf call for num
 // synchronously Removes that pick from q — simulating an operator's Unpick
 // landing in Discover's window between reading a pick as a candidate and
