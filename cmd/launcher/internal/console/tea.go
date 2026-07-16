@@ -341,9 +341,13 @@ func openDrillInCmd(launch *Launcher, pwd, number string) tea.Cmd {
 // armed: "y" confirms — firing Launcher.TerminateAsync before applying
 // TerminateConfirmedMsg, so the blocking tracker I/O runs off the Update
 // path (issue #745) — anything else declines (ADR 0024, issue #649/#785).
+// "q"/"ctrl+c" additionally still quit: the universal quit keystroke must
+// never be swallowed by the confirm prompt, mirroring the pendingPick chord
+// precedent above (issue #748).
 func (t teaModel) handleTerminateConfirmKey(msg tea.KeyMsg) teaModel {
 	num := t.m.PendingTerminate
-	if s := msg.String(); s == "y" || s == "Y" {
+	switch s := msg.String(); s {
+	case "y", "Y":
 		if t.launch != nil {
 			// Terminate already logs a reap failure to stderr itself
 			// (launcher.go); writing it again here would both duplicate the
@@ -351,9 +355,12 @@ func (t teaModel) handleTerminateConfirmKey(msg tea.KeyMsg) teaModel {
 			t.launch.TerminateAsync(t.tracker, num)
 		}
 		t.m = Update(t.m, TerminateConfirmedMsg{Number: num})
-		return t
+	case "q", "ctrl+c":
+		t.m = Update(t.m, TerminateCancelledMsg{})
+		t.m = Update(t.m, QuitMsg{})
+	default:
+		t.m = Update(t.m, TerminateCancelledMsg{})
 	}
-	t.m = Update(t.m, TerminateCancelledMsg{})
 	return t
 }
 
