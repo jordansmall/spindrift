@@ -37,3 +37,33 @@ func CaptureStderr(t *testing.T, fn func()) string {
 	}
 	return buf.String()
 }
+
+// CaptureStdout runs fn with os.Stdout redirected to a pipe and returns
+// everything written to it.
+func CaptureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	fn()
+
+	w.Close()
+
+	var buf strings.Builder
+	tmp := make([]byte, 4096)
+	for {
+		n, err := r.Read(tmp)
+		if n > 0 {
+			buf.Write(tmp[:n])
+		}
+		if err != nil {
+			break
+		}
+	}
+	return buf.String()
+}
