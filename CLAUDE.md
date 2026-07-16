@@ -161,6 +161,14 @@ is available (e.g. a Box built without the self-test knobs, or the bwrap
 runner, which keeps its store read-only), fall back to `nil diagnostics` and
 say so.
 
+The repo's Go version floor is whatever `cmd/launcher/go.mod`'s `go`
+directive says (currently 1.24.0). There is no separate Nix-level Go
+version pin to keep in sync — every Nix expression that needs Go pulls
+`pkgs.go`/`p.go` from the single `nixpkgs` flake input, so the floor is
+sourced transitively through `flake.lock`. Bumping the `go.mod` directive
+only requires re-verifying that the locked `nixpkgs` input's `go.version`
+still meets the new floor.
+
 ## Shell edits
 
 Before finishing any task that touches `*.sh` or `*.bash` files, run
