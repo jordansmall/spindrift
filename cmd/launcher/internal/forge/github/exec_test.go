@@ -146,6 +146,31 @@ esac`)
 	}
 }
 
+// TestExecClient_DepsOf_NativeErrorEmptyStderrNoTrailingColon verifies that
+// when the native dependencies API call fails without writing to stderr, the
+// fallback warning has no dangling "exit status 1: " trailing colon-space.
+func TestExecClient_DepsOf_NativeErrorEmptyStderrNoTrailingColon(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*dependencies/blocked_by*)
+	exit 1
+	;;
+*"issue view"*)
+	printf '{"number":10,"title":"t","body":"blocked by #9","state":"OPEN","labels":[]}'
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	out := testutil.CaptureStderr(t, func() {
+		if _, err := c.DepsOf("10"); err != nil {
+			t.Fatalf("DepsOf: %v", err)
+		}
+	})
+	if strings.Contains(out, ": )") {
+		t.Fatalf("fallback warning must not have a dangling colon-space before empty stderr; got: %q", out)
+	}
+}
+
+
 // TestExecClient_DepsOf_WarnsOnStderr verifies that when the native
 // dependencies lookup fails, DepsOf's fallback warning goes to stderr, not
 // stdout, so it doesn't interfere with programmatic stdout consumers.

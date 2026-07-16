@@ -207,7 +207,10 @@ func (e *execClient) nativeDepsOf(num string) ([]string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("gh api dependencies/blocked_by %s: %w: %s", num, err, strings.TrimSpace(stderr.String()))
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return nil, fmt.Errorf("gh api dependencies/blocked_by %s: %w: %s", num, err, msg)
+		}
+		return nil, fmt.Errorf("gh api dependencies/blocked_by %s: %w", num, err)
 	}
 	var deps []string
 	seen := map[string]bool{}
