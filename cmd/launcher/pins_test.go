@@ -53,6 +53,7 @@ func TestNoRunnerExecOutsidePackage(t *testing.T) {
 		`exec.Command("nix"`,
 		`exec.Command("podman"`,
 		`exec.Command("docker"`,
+		`exec.Command("nerdctl"`,
 	}
 	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
