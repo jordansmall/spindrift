@@ -24,6 +24,30 @@ let
       badDefault = filter (e: (e ? default) && !(builtins.elem e.default e.choices)) withChoices;
       badSecret = filter (e: e.secret or false) withChoices;
     };
+
+  # Throws via schemaChoiceIssues on a bad schema, else returns it unchanged.
+  # Shared so schema-secret-choices-guard exercises this exact assertion path
+  # (not just schemaChoiceIssues in isolation) — dropping the badSecret assert
+  # here would make that guard fail too, not stay silently green.
+  assertSchemaChoicesOk =
+    schema:
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep;
+      issues = schemaChoiceIssues schema;
+    in
+    assert assertMsg (issues.badShape == [ ])
+      "lib/env-schema.nix: choices must be a non-empty list of strings for: ${
+        concatStringsSep ", " (map (e: e.env) issues.badShape)
+      }";
+    assert assertMsg (issues.badDefault == [ ])
+      "lib/env-schema.nix: default is not a member of choices for: ${
+        concatStringsSep ", " (map (e: e.env) issues.badDefault)
+      }";
+    assert assertMsg (issues.badSecret == [ ])
+      "lib/env-schema.nix: choices is not supported on secret knobs — renderers only ever honor choices on nonSecret knobs (secrets get a --*-file flag, never a value-taking one): ${
+        concatStringsSep ", " (map (e: e.env) issues.badSecret)
+      }";
+    schema;
 in
 {
   # cmd/launcher/internal/driver/drivernames_gen.go must match the key list
@@ -127,22 +151,9 @@ in
   # what `spindrift --merge-mode <TAB>` etc. offer.
   schema-choices =
     let
-      schema = import ../../lib/env-schema.nix;
-      inherit (pkgs.lib) assertMsg concatStringsSep;
-      issues = schemaChoiceIssues schema;
+      schema = assertSchemaChoicesOk (import ../../lib/env-schema.nix);
+      inherit (pkgs.lib) assertMsg;
     in
-    assert assertMsg (issues.badShape == [ ])
-      "lib/env-schema.nix: choices must be a non-empty list of strings for: ${
-        concatStringsSep ", " (map (e: e.env) issues.badShape)
-      }";
-    assert assertMsg (issues.badDefault == [ ])
-      "lib/env-schema.nix: default is not a member of choices for: ${
-        concatStringsSep ", " (map (e: e.env) issues.badDefault)
-      }";
-    assert assertMsg (issues.badSecret == [ ])
-      "lib/env-schema.nix: choices is not supported on secret knobs — renderers only ever honor choices on nonSecret knobs (secrets get a --*-file flag, never a value-taking one): ${
-        concatStringsSep ", " (map (e: e.env) issues.badSecret)
-      }";
     assert assertMsg (
       schema.mergeMode.choices or [ ] == [
         "immediate"
@@ -174,12 +185,14 @@ in
   # Regression guard (issue #872): lib/renderers.nix's bash/fish/zsh
   # completion renderers always scope `choices` to nonSecret knobs (a secret
   # gets only a `--*-file` path flag, never a value-taking one), but
-  # schema-choices above validated `choices` shape/default on every knob,
-  # secret or not. A `choices` field on a secret knob would therefore pass
-  # validation yet never render anywhere — a silent no-op. Exercises
-  # schemaChoiceIssues.badSecret against the real schema with one secret
-  # knob's `choices` injected, so this test fails independently of whether
-  # any real secret knob currently declares choices.
+  # schema-choices above used to validate `choices` shape/default on every
+  # knob, secret or not. A `choices` field on a secret knob would therefore
+  # pass validation yet never render anywhere — a silent no-op. Runs
+  # assertSchemaChoicesOk — the exact function schema-choices calls — against
+  # the real schema with one secret knob's `choices` injected, via tryEval so
+  # this fails independently of whether any real secret knob currently
+  # declares choices, and would also fail if the badSecret assert were ever
+  # dropped from assertSchemaChoicesOk (not just from schemaChoiceIssues).
   schema-secret-choices-guard =
     let
       schema = import ../../lib/env-schema.nix;
@@ -193,12 +206,10 @@ in
           default = "a";
         };
       };
-      issues = schemaChoiceIssues badSchema;
+      result = builtins.tryEval (assertSchemaChoicesOk badSchema);
     in
-    assert assertMsg (map (e: e.env) issues.badSecret == [ "JIRA_TOKEN" ])
-      "schema-secret-choices-guard: expected the injected secret+choices fixture (jiraToken) to be flagged by schemaChoiceIssues.badSecret, got: ${
-        toString (map (e: e.env) issues.badSecret)
-      }";
+    assert assertMsg (!result.success)
+      "schema-secret-choices-guard: expected assertSchemaChoicesOk to reject the injected secret+choices fixture (jiraToken), but it evaluated successfully";
     pkgs.runCommand "schema-secret-choices-guard" { } "touch $out";
 
   # tests/helper.bash's set_box_env fixture must export every boxEnv = true
