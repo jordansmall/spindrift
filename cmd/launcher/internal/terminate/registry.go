@@ -26,15 +26,20 @@ import "sync"
 // holding the generation it was launched under (from waves.Issue.Generation)
 // keeps seeing itself as terminated regardless of how many later
 // generations have started and cleared their own state since.
+//
+// dead records every generation ever marked, not just the most recent —
+// a second Terminate (the re-pick itself gets terminated too) must not
+// forget an earlier generation's own mark, however unlikely a still-live
+// goroutine from that earlier incarnation is to still be around.
 type Registry struct {
 	mu   sync.Mutex
 	gen  map[string]uint64
-	dead map[string]uint64
+	dead map[string]map[uint64]bool
 }
 
 // NewRegistry returns an empty Registry.
 func NewRegistry() *Registry {
-	return &Registry{gen: map[string]uint64{}, dead: map[string]uint64{}}
+	return &Registry{gen: map[string]uint64{}, dead: map[string]map[uint64]bool{}}
 }
 
 // Begin starts a fresh generation for num — called once, at claim time, for
@@ -61,7 +66,10 @@ func (r *Registry) Mark(num string) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.dead[num] = r.gen[num]
+	if r.dead[num] == nil {
+		r.dead[num] = map[uint64]bool{}
+	}
+	r.dead[num][r.gen[num]] = true
 }
 
 // Marked reports whether num was terminated at generation gen specifically —
@@ -72,6 +80,5 @@ func (r *Registry) Marked(num string, gen uint64) bool {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	deadGen, ok := r.dead[num]
-	return ok && deadGen == gen
+	return r.dead[num][gen]
 }
