@@ -19,9 +19,7 @@ import (
 // (no subcommand) prints the concise help to stdout and exits 0, instead of
 // falling through to the dispatch default (issue #555).
 func TestMainRun_NoArgs_PrintsHelpAndDoesNotDispatch(t *testing.T) {
-	orig := schemaFlags
-	t.Cleanup(func() { schemaFlags = orig })
-	schemaFlags = []flagEntry{}
+	withSchemaFlags(t, []flagEntry{})
 
 	var stdout, stderr bytes.Buffer
 	code := mainRun(nil, &stdout, &stderr)
@@ -435,9 +433,7 @@ func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("LABEL") })
 	os.Unsetenv("LABEL")
 
-	orig := schemaFlags
-	t.Cleanup(func() { schemaFlags = orig })
-	schemaFlags = []flagEntry{{env: "LABEL", dflt: "custom-default-from-table"}}
+	withSchemaFlags(t, []flagEntry{{env: "LABEL", dflt: "custom-default-from-table"}})
 
 	c := loadConfig()
 	if c.label != "custom-default-from-table" {
@@ -457,12 +453,10 @@ func TestLoadConfig_SpindriftDirsDefaultComesFromSchemaTable(t *testing.T) {
 	os.Unsetenv("SPINDRIFT_PROMPT_DIR")
 	os.Unsetenv("SPINDRIFT_SKILLS_DIR")
 
-	orig := schemaFlags
-	t.Cleanup(func() { schemaFlags = orig })
-	schemaFlags = []flagEntry{
+	withSchemaFlags(t, []flagEntry{
 		{env: "SPINDRIFT_PROMPT_DIR", dflt: "custom-prompt-default"},
 		{env: "SPINDRIFT_SKILLS_DIR", dflt: "custom-skills-default"},
-	}
+	})
 
 	c := loadConfig()
 	if c.spindriftPromptDir != "custom-prompt-default" {
@@ -477,8 +471,7 @@ func TestLoadConfig_SpindriftDirsDefaultComesFromSchemaTable(t *testing.T) {
 // default parses, a non-numeric one falls back to 0, and an absent key falls
 // back to 0 too (issue #672).
 func TestIntSchemaDefault(t *testing.T) {
-	orig := schemaFlags
-	t.Cleanup(func() { schemaFlags = orig })
+	withSchemaFlags(t, nil)
 
 	cases := []struct {
 		name string
@@ -507,9 +500,7 @@ func TestIntSchemaDefault(t *testing.T) {
 func TestAtoiSchema(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("SOME_KEY") })
 
-	orig := schemaFlags
-	t.Cleanup(func() { schemaFlags = orig })
-	schemaFlags = []flagEntry{{env: "SOME_KEY", dflt: "10"}}
+	withSchemaFlags(t, []flagEntry{{env: "SOME_KEY", dflt: "10"}})
 
 	cases := []struct {
 		env  string
@@ -535,9 +526,7 @@ func TestAtoiSchema(t *testing.T) {
 func TestAtoiNonnegSchema(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("SOME_KEY") })
 
-	orig := schemaFlags
-	t.Cleanup(func() { schemaFlags = orig })
-	schemaFlags = []flagEntry{{env: "SOME_KEY", dflt: "0"}}
+	withSchemaFlags(t, []flagEntry{{env: "SOME_KEY", dflt: "0"}})
 
 	cases := []struct {
 		env  string

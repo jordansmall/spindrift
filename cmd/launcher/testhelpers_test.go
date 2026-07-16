@@ -39,6 +39,34 @@ func baseConfig() config {
 	}
 }
 
+// withSchemaFlags installs flags as the package-level schemaFlags table for
+// the duration of t, restoring the ambient table via t.Cleanup. Callers that
+// reassign schemaFlags again within t (e.g. per-subcase) restore to the same
+// pre-call value once t finishes.
+func withSchemaFlags(t *testing.T, flags []flagEntry) {
+	t.Helper()
+	orig := schemaFlags
+	t.Cleanup(func() { schemaFlags = orig })
+	schemaFlags = flags
+}
+
+// TestWithSchemaFlags_SwapsAndRestores proves withSchemaFlags installs the
+// given table for the caller and restores the ambient schemaFlags once the
+// subtest that used it completes (issue #906).
+func TestWithSchemaFlags_SwapsAndRestores(t *testing.T) {
+	ambient := schemaFlags
+	t.Run("swap", func(t *testing.T) {
+		withSchemaFlags(t, []flagEntry{{env: "PROBE_KEY", dflt: "probe-value"}})
+		if len(schemaFlags) != 1 || schemaFlags[0].env != "PROBE_KEY" {
+			t.Fatalf("schemaFlags = %+v, want single PROBE_KEY entry", schemaFlags)
+		}
+	})
+	got := schemaFlags
+	if len(got) != len(ambient) {
+		t.Fatalf("schemaFlags not restored after subtest: got %+v, want %+v", got, ambient)
+	}
+}
+
 // tempLogDir creates a temp dir with a logs/ subdirectory.
 func tempLogDir(t *testing.T) string {
 	t.Helper()
