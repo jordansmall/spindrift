@@ -426,7 +426,9 @@ func TestMaxJobsEdgeCases(t *testing.T) {
 // the former separate schemaDefaults table into it) rather than a hand-written
 // literal: swapping the table's entry changes what an unset LABEL resolves to.
 func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
-	t.Cleanup(func() { os.Unsetenv("LABEL") })
+	// Force LABEL absent for the test but restore its pre-test value
+	// (including "was unset") on cleanup.
+	t.Setenv("LABEL", "")
 	os.Unsetenv("LABEL")
 
 	patched := append([]flagEntry(nil), schemaFlags...)
@@ -449,11 +451,11 @@ func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 // schemaFlags table (issue #812) rather than raw os.Getenv, matching every
 // other flakeOption-adjacent knob in loadConfig().
 func TestLoadConfig_SpindriftDirsDefaultComesFromSchemaTable(t *testing.T) {
-	t.Cleanup(func() {
-		os.Unsetenv("SPINDRIFT_PROMPT_DIR")
-		os.Unsetenv("SPINDRIFT_SKILLS_DIR")
-	})
+	// Force each key absent for the test but restore its pre-test value
+	// (including "was unset") on cleanup.
+	t.Setenv("SPINDRIFT_PROMPT_DIR", "")
 	os.Unsetenv("SPINDRIFT_PROMPT_DIR")
+	t.Setenv("SPINDRIFT_SKILLS_DIR", "")
 	os.Unsetenv("SPINDRIFT_SKILLS_DIR")
 
 	withSchemaFlags(t, []flagEntry{
@@ -589,8 +591,9 @@ func TestGitIdentityField_ExplicitValueSkipsGitConfig(t *testing.T) {
 // backs a knob ahead of the generated schemaFlags table when neither an
 // explicit flag nor ambient env supplies one.
 func TestLoadConfig_DocumentSettingBeatsSchemaDefault(t *testing.T) {
-	t.Cleanup(func() { os.Unsetenv("BASE_BRANCH"); loadedDoc = nil })
+	t.Setenv("BASE_BRANCH", "")
 	os.Unsetenv("BASE_BRANCH")
+	t.Cleanup(func() { loadedDoc = nil })
 
 	loadedDoc = &inputDocument{Settings: map[string]string{"BASE_BRANCH": "from-document"}}
 
@@ -622,6 +625,8 @@ func TestLoadConfig_EnvBeatsDocument(t *testing.T) {
 // retired goRunPreamble/goBuildPreamble env exports (ADR 0020).
 func TestLoadConfig_ArtifactsFromDocument(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
+	// Force each key absent for the test but restore its pre-test value
+	// (including "was unset") on cleanup.
 	for _, k := range []string{"IMAGE_ARCHIVE", "RUNTIME", "DRIVER", "BOX_ENV_VARS"} {
 		t.Setenv(k, "")
 		os.Unsetenv(k)
