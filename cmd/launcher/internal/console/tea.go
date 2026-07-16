@@ -279,10 +279,15 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 
 // handleDrillInKey routes one keypress while the drill-in transcript pane is
 // open: "t" toggles rendered/raw, "x"/Esc closes back to the backlog, the
-// scroll keys page through the loaded content (issue #786), and "m" cycles
-// the pane's layout docked -> floating -> fullscreen (issue #846, ADR 0025).
+// scroll keys page through the loaded content (issue #786), "m" cycles the
+// pane's layout docked -> floating -> fullscreen (issue #846, ADR 0025), and
+// "q"/"ctrl+c" hard-quit — the universal quit keystroke must never be
+// swallowed by the drill-in pane, matching the pendingPick precedent in
+// handleKey (issue #826).
 func (t teaModel) handleDrillInKey(msg tea.KeyMsg) Model {
 	switch msg.String() {
+	case "q", "ctrl+c":
+		return Update(t.m, QuitMsg{})
 	case "t":
 		return Update(t.m, DrillInToggleMsg{})
 	case "x", "esc":
