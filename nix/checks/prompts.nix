@@ -209,8 +209,8 @@ in
       ''
         grep -qi 'git add' ${checkSectionSlices}/issue-check.txt
         grep -qi 'git add' ${checkSectionSlices}/fix-check.txt
-        grep -qi 'tracked' ${checkSectionSlices}/issue-check.txt
-        grep -qi 'tracked' ${checkSectionSlices}/fix-check.txt
+        grep -qi 'tracked by' ${checkSectionSlices}/issue-check.txt
+        grep -qi 'tracked by' ${checkSectionSlices}/fix-check.txt
         touch $out
       '';
 
