@@ -1139,7 +1139,11 @@ func TestTea_PickKey_FollowedByNonA_ResolvesToSinglePick(t *testing.T) {
 
 	sendKey(tm, "p")
 	sendKey(tm, "z") // not "a" — resolves to a single pick right away
-	waitForOutput(t, tm, "  #42")
+	// "settled 1" guards the same live-dispatch quit-confirm race the other
+	// launch-backed pick tests guard against (issue #822): without it, "q"
+	// can race the still-live pick and hang until teatest's timeout instead
+	// of exiting.
+	waitForOutput(t, tm, "  #42", "settled 1")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
