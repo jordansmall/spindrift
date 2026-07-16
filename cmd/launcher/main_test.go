@@ -433,7 +433,13 @@ func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("LABEL") })
 	os.Unsetenv("LABEL")
 
-	withSchemaFlags(t, []flagEntry{{env: "LABEL", dflt: "custom-default-from-table"}})
+	patched := append([]flagEntry(nil), schemaFlags...)
+	for i := range patched {
+		if patched[i].env == "LABEL" {
+			patched[i].dflt = "custom-default-from-table"
+		}
+	}
+	withSchemaFlags(t, patched)
 
 	c := loadConfig()
 	if c.label != "custom-default-from-table" {
