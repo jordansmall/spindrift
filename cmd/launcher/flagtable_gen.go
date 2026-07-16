@@ -56,6 +56,8 @@ var schemaFlags = []flagEntry{
 // secretKnobs lists secret knobs that have no value flag.
 // Callers must supply these via the environment or via --<fileFlag> path flag.
 var secretKnobs = []secretKnob{
+	{env: "SPINDRIFT_AGENT_WORKER_APP_ID", doc: "GitHub App ID whose installation token the launcher re-mints for long runs; pair with SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY (issue #1027). Unset disables token refresh", fileFlag: "spindrift-agent-worker-app-id-file"},
+	{env: "SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY", doc: "PEM private key for SPINDRIFT_AGENT_WORKER_APP_ID; stays on the launcher host (never forwarded into a Box) and is used only to re-mint installation tokens", fileFlag: "spindrift-agent-worker-app-private-key-file"},
 	{env: "ANTHROPIC_API_KEY", doc: "Anthropic API key; set this or CLAUDE_CODE_OAUTH_TOKEN", fileFlag: "anthropic-api-key-file"},
 	{env: "CLAUDE_CODE_OAUTH_TOKEN", doc: "Claude Code OAuth token (run 'claude setup-token'); set this or ANTHROPIC_API_KEY", fileFlag: "claude-code-oauth-token-file"},
 	{env: "GH_TOKEN", doc: "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW", fileFlag: "gh-token-file"},

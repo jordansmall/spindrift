@@ -48,8 +48,10 @@ jobs:
       # R, Metadata R — the default GITHUB_TOKEN is not enough (the launcher
       # merges PRs). Minting the App below yields a short-lived installation
       # token on a per-installation rate-limit bucket, isolated from any
-      # personal PAT. The token expires ~1h after minting; long Boxes need
-      # refresh handled separately (see the long-run token issue).
+      # personal PAT. The token expires ~1h after minting; the launcher
+      # re-mints it before each expiry from the App creds passed to the
+      # dispatch step below, so a Box that outlives the initial token still
+      # merges cleanly (issue #1027).
       - name: Mint worker App token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -75,7 +77,15 @@ jobs:
           git-user-name: ${{ vars.AGENT_GIT_USER_NAME }}
           git-user-email: ${{ vars.AGENT_GIT_USER_EMAIL }}
 
+      # The App creds are handed to the launcher host (not into any Box —
+      # they are boxEnv=false secrets) so it re-mints the installation token
+      # before each ~1h expiry and republishes GH_TOKEN, keeping a long run's
+      # terminal gh operations (merge, label, comment) alive (issue #1027).
+      # The private key never leaves the runner.
       - name: Dispatch the labeled issue
+        env:
+          SPINDRIFT_AGENT_WORKER_APP_ID: ${{ secrets.SPINDRIFT_AGENT_WORKER_APP_ID }}
+          SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY: ${{ secrets.SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY }}
         run: nix run . -- dispatch
 
       # The launcher parses the two blocker formats and, when this claimed issue

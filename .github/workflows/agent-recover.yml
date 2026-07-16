@@ -52,8 +52,10 @@ jobs:
       # the default GITHUB_TOKEN is not enough (the launcher merges PRs).
       # Minting the App below yields a short-lived installation token on a
       # per-installation rate-limit bucket, isolated from any personal PAT.
-      # The token expires ~1h after minting; long Boxes need refresh handled
-      # separately (see the long-run token issue).
+      # The token expires ~1h after minting; the launcher re-mints it before
+      # each expiry from the App creds passed to the recover step below, so a
+      # recover run that outlives the initial token still merges cleanly
+      # (issue #1027).
       - name: Mint worker App token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -79,8 +81,15 @@ jobs:
       # leaves labels untouched. Every path where a PR exists (green->complete,
       # red-exhausted->failed, merge-blocked->complete) exits 0 with the label
       # already swapped, so the park step below stays dormant.
+      # App creds go to the launcher host (not into any Box — boxEnv=false
+      # secrets) so it re-mints the installation token before each ~1h expiry
+      # and keeps GH_TOKEN alive for a long recover's merge/label/comment
+      # (issue #1027). The private key never leaves the runner.
       - name: Recover the issue
         id: recover
+        env:
+          SPINDRIFT_AGENT_WORKER_APP_ID: ${{ secrets.SPINDRIFT_AGENT_WORKER_APP_ID }}
+          SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY: ${{ secrets.SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY }}
         run: nix run . -- recover "${{ github.event.issue.number }}"
 
       # Only fires when recover itself couldn't adopt (guarded on the step

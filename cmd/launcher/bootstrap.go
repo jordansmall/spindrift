@@ -51,6 +51,12 @@ func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 		return nil, err
 	}
 
+	// Start GH_TOKEN refresh (issue #1027) right after validate, before any
+	// gh call, so a run that outlives the workflow-minted token still
+	// merges/labels/comments cleanly. No-op without App creds. cancel is
+	// folded into cleanup below.
+	stopRefresh := startTokenRefresh(c)
+
 	rc := runnerConfig(c)
 	var r runner.Runner
 	if c.runtime == "bwrap" {
@@ -60,9 +66,11 @@ func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 	}
 	if ensureReady {
 		if err := r.EnsureReady(); err != nil {
+			stopRefresh()
 			return nil, err
 		}
 	} else if err := r.IsReady(); err != nil {
+		stopRefresh()
 		return nil, err
 	}
 
@@ -79,6 +87,6 @@ func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 		codeForge:    cf,
 		factory:      f,
 		settle:       s,
-		cleanup:      f.Cleanup,
+		cleanup:      func() { stopRefresh(); f.Cleanup() },
 	}, nil
 }

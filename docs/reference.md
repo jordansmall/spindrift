@@ -1038,6 +1038,34 @@ issues on the host.
 | Metadata          | Read           | mandatory baseline, auto-selected            |
 | Workflows         | Read and write | **off by default** — grant only when an issue edits `.github/workflows/*`; agent branches run in-repo so `pull_request` events carry repository secrets; with this permission an injected agent can rewrite CI or exfiltrate those secrets |
 
+### App-token lifetime on long runs
+
+The dispatch and recover workflows can authenticate as a **GitHub App** instead
+of the fine-grained PAT: `actions/create-github-app-token` mints a short-lived
+installation token per run (its own per-installation rate-limit bucket, isolated
+from any personal PAT). That token **expires ~1 hour after it is minted**, and a
+Box that works its issue for longer than that would otherwise fail the terminal
+GitHub operations that run *after* the Box exits — CI poll, `gh pr merge`, label
+swap, final comment — with a `401`.
+
+The launcher keeps the token alive for the whole run. When both
+`SPINDRIFT_AGENT_WORKER_APP_ID` and `SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY` are
+present in its environment, it mints a fresh installation token on startup and a
+background refresher re-mints ~10 minutes before each expiry, republishing
+`GH_TOKEN` in place. Every `gh` call reads `GH_TOKEN` from the ambient
+environment, so the merge/label/comment (and every later Box launch) transparently
+pick up the current token — no run outlives its credential.
+
+The App **private key stays on the runner**: these two knobs are `boxEnv = false`
+secrets, so the launcher reads them on the host but never forwards them into a
+Box container — only the short-lived installation token ever reaches a Box. Pass
+them into the `Dispatch`/`Recover` step's `env:` from the same repo secrets that
+feed the mint step (see `agent-dispatch.yml` / `agent-recover.yml`). Both are
+optional: unset, the launcher leaves `GH_TOKEN` as whatever was minted or set at
+start, so the fine-grained-PAT path and short (<1h) runs are unaffected. A
+misconfigured App (key won't parse, or the initial mint fails) logs a warning and
+leaves the ambient token in place rather than aborting the run.
+
 ### Research token (least-privilege, optional)
 
 The research dispatch kind (ADR 0022) takes a second, separately scoped

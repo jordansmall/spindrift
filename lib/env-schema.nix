@@ -265,6 +265,25 @@
     doc = "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW";
     boxEnv = true;
   };
+  # GitHub App credentials for keeping GH_TOKEN alive across a long run (issue
+  # #1027). When both are set, the launcher re-mints a short-lived installation
+  # token before each ~1h expiry and republishes GH_TOKEN, so a Box that
+  # outlives the initially-minted token still merges/labels/comments cleanly.
+  # Optional: unset leaves GH_TOKEN whatever it was at start (the fine-grained
+  # PAT or the workflow-minted token). boxEnv = false keeps the private key on
+  # the launcher host — it is never forwarded into a Box.
+  agentWorkerAppID = {
+    env = "SPINDRIFT_AGENT_WORKER_APP_ID";
+    secret = true;
+    doc = "GitHub App ID whose installation token the launcher re-mints for long runs; pair with SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY (issue #1027). Unset disables token refresh";
+    boxEnv = false;
+  };
+  agentWorkerAppPrivateKey = {
+    env = "SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY";
+    secret = true;
+    doc = "PEM private key for SPINDRIFT_AGENT_WORKER_APP_ID; stays on the launcher host (never forwarded into a Box) and is used only to re-mint installation tokens";
+    boxEnv = false;
+  };
   claudeOAuthToken = {
     env = "CLAUDE_CODE_OAUTH_TOKEN";
     secret = true;

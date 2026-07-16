@@ -115,6 +115,11 @@ type config struct {
 	gitUserName      string
 	gitUserEmail     string
 
+	// GitHub App creds for long-run GH_TOKEN refresh (issue #1027); both
+	// empty disables refresh.
+	agentWorkerAppID         string
+	agentWorkerAppPrivateKey string
+
 	// Optional prompt override
 	spindriftPromptDir string
 	// Optional skills override
@@ -335,8 +340,11 @@ func loadConfig() config {
 		ghToken:          os.Getenv("GH_TOKEN"),
 		claudeOAuthToken: os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
 		anthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
-		gitUserName:      gitIdentityField("GIT_USER_NAME", "user.name"),
-		gitUserEmail:     gitIdentityField("GIT_USER_EMAIL", "user.email"),
+
+		agentWorkerAppID:         os.Getenv("SPINDRIFT_AGENT_WORKER_APP_ID"),
+		agentWorkerAppPrivateKey: os.Getenv("SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY"),
+		gitUserName:              gitIdentityField("GIT_USER_NAME", "user.name"),
+		gitUserEmail:             gitIdentityField("GIT_USER_EMAIL", "user.email"),
 
 		spindriftPromptDir: os.Getenv("SPINDRIFT_PROMPT_DIR"),
 		spindriftSkillsDir: os.Getenv("SPINDRIFT_SKILLS_DIR"),
