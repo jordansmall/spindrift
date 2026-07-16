@@ -664,7 +664,7 @@ func positionLabel(offset, itemBudget, total int) string {
 // past the fold; paging by what's actually on screen lands exactly on the
 // first row the operator hasn't seen yet, and stays correct across a
 // terminal resize instead of a value fixed at startup (issue #1037 AC1/AC2).
-// Unlike the drill-in transcript's fixed drillInPageSize, this is
+// Unlike the drill-in transcript's fixed drillInPageScrollDelta, this is
 // recomputed on every keypress.
 func focusedPageSize(m Model) int {
 	backlogBudget, queueBudget := bodyColumnBudgets(m)

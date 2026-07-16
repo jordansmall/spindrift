@@ -28,11 +28,11 @@ import (
 // to never spend the rate-limit window the session's Agents share (#647 AC5).
 const defaultPollInterval = 90 * time.Second
 
-// drillInPageSize is how many lines pgup/pgdown move the drill-in
+// drillInPageScrollDelta is how many lines pgup/pgdown move the drill-in
 // transcript's scroll offset — j/k and the arrows move one line at a time
 // (issue #786). Fixed, unlike the backlog/queue page jump (focusedPageSize),
 // which derives from the live viewport height instead (issue #1037).
-const drillInPageSize = 10
+const drillInPageScrollDelta = 10
 
 // teaModel is the Bubble Tea adapter around the pure Model: it carries the
 // I/O seams (tracker, pwd, launch) Update itself never touches, and
@@ -310,9 +310,9 @@ func (t teaModel) handleDrillInKey(msg tea.KeyMsg) Model {
 	case "k", "up":
 		return Update(t.m, DrillInScrollMsg{Delta: -1})
 	case "pgdown":
-		return Update(t.m, DrillInScrollMsg{Delta: drillInPageSize})
+		return Update(t.m, DrillInScrollMsg{Delta: drillInPageScrollDelta})
 	case "pgup":
-		return Update(t.m, DrillInScrollMsg{Delta: -drillInPageSize})
+		return Update(t.m, DrillInScrollMsg{Delta: -drillInPageScrollDelta})
 	case "m":
 		return Update(t.m, PaneModeCycleMsg{})
 	}
