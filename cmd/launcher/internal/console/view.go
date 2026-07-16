@@ -186,7 +186,10 @@ func renderQueueColumn(m Model, budget int) string {
 		if p.BlockedBy != "" {
 			fmt.Fprintf(&row, "  (held by %s)", p.BlockedBy)
 		}
-		if p.Reason != "" {
+		// A held pick's Reason ("blocker #N failed") names the same blocker
+		// BlockedBy already does — skip it so a failed blocker isn't named
+		// twice on one row (issue #755).
+		if p.Reason != "" && !(p.BlockedBy != "" && strings.HasPrefix(p.Reason, "blocker ")) {
 			fmt.Fprintf(&row, "  (%s)", p.Reason)
 		}
 		if p.Heartbeat != "" {

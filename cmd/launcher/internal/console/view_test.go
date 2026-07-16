@@ -529,6 +529,26 @@ func TestView_TwoColumn_Queue_RowsTaggedWithBracketedState(t *testing.T) {
 	}
 }
 
+// TestView_TwoColumn_Queue_HeldRowSuppressesRedundantFailedBlockerReason
+// verifies a held pick whose Reason merely restates the blocker BlockedBy
+// already names renders only the "held by" badge, not both — a held pick
+// with a failed blocker previously named the same blocker twice on one row
+// (issue #755).
+func TestView_TwoColumn_Queue_HeldRowSuppressesRedundantFailedBlockerReason(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
+	m.Picks = []Pick{
+		{Number: "42", Title: "held one", State: PickHeld, BlockedBy: "#41 (native)", Reason: "blocker #41 (native) failed"},
+	}
+
+	out := View(m)
+	if !strings.Contains(out, "held by #41 (native)") {
+		t.Errorf("View() = %q, want the held row's blocker badge", out)
+	}
+	if strings.Contains(out, "(blocker #41 (native) failed)") {
+		t.Errorf("View() = %q, want the redundant failed-blocker reason suppressed", out)
+	}
+}
+
 // TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth verifies a joined
 // row never exceeds m.Width — a long backlog title/labels paired with a
 // verbose held badge must truncate rather than push the line past the
