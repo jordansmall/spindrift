@@ -1,6 +1,7 @@
 package console
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -154,6 +155,32 @@ func TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel(t *testing.T) {
 	}
 	if !containsString(iss.Labels, "ready-for-agent") {
 		t.Errorf("labels = %v, want ready-for-agent present", iss.Labels)
+	}
+}
+
+// TestLauncher_Terminate_PropagatesKillError verifies a non-nil
+// Factory.Kill error surfaces from Terminate's return unmasked, while every
+// other best-effort step (transition, comment, PickTerminated) still runs
+// regardless (issue #749).
+func TestLauncher_Terminate_PropagatesKillError(t *testing.T) {
+	launch, fc, fr, _ := newTermTestLauncher(t)
+	fr.KillErr = errors.New("boom: kill failed")
+
+	err := launch.Terminate(fc, "42")
+	if !errors.Is(err, fr.KillErr) {
+		t.Fatalf("Terminate err = %v, want %v", err, fr.KillErr)
+	}
+
+	if len(fc.TransitionStateCalls) != 2 {
+		t.Errorf("TransitionStateCalls: want 2 despite kill error, got %+v", fc.TransitionStateCalls)
+	}
+	if len(fc.CommentCalls) != 1 {
+		t.Errorf("CommentCalls: want 1 despite kill error, got %+v", fc.CommentCalls)
+	}
+
+	snap := launch.Queue.Snapshot()
+	if len(snap) != 1 || snap[0].State != PickTerminated {
+		t.Errorf("queue pick = %+v, want PickTerminated despite kill error", snap)
 	}
 }
 
