@@ -344,20 +344,22 @@ func TestFormatHeartbeatShape(t *testing.T) {
 		issue    string
 		turns    int
 		lastTool string
+		role     string
 		phase    string
 		wantSubs []string
 	}{
-		{"42", 15, "Edit(main.go)", "edit", []string{"#42", "[edit]", "15 turn", "Edit(main.go)"}},
-		{"1", 1, "Bash(ls)", "explore", []string{"#1", "[explore]", "1 turn", "Bash(ls)"}},
-		{"7", 0, "", "explore", []string{"#7", "[explore]"}},
-		{"3", 3, "", "test", []string{"#3", "[test]", "3 turn"}},
+		{"42", 15, "Edit(main.go)", "implementor", "edit", []string{"#42", "[edit]", "15 turn", "Edit(main.go)"}},
+		{"1", 1, "Bash(ls)", "implementor", "explore", []string{"#1", "[explore]", "1 turn", "Bash(ls)"}},
+		{"7", 0, "", "implementor", "explore", []string{"#7", "[explore]"}},
+		{"3", 3, "", "implementor", "test", []string{"#3", "[test]", "3 turn"}},
+		{"9", 3, "", "scout", "plan", []string{"#9", "scout", "[plan]", "3 turn"}},
 	}
 	for _, tc := range cases {
-		got := claude.FormatHeartbeat(tc.issue, tc.turns, tc.lastTool, tc.phase)
+		got := claude.FormatHeartbeat(tc.issue, tc.turns, tc.lastTool, tc.role, tc.phase)
 		for _, sub := range tc.wantSubs {
 			if !strings.Contains(got, sub) {
-				t.Errorf("FormatHeartbeat(%q,%d,%q,%q) = %q, missing %q",
-					tc.issue, tc.turns, tc.lastTool, tc.phase, got, sub)
+				t.Errorf("FormatHeartbeat(%q,%d,%q,%q,%q) = %q, missing %q",
+					tc.issue, tc.turns, tc.lastTool, tc.role, tc.phase, got, sub)
 			}
 		}
 	}
@@ -426,21 +428,23 @@ func TestWriterNarrationText(t *testing.T) {
 func TestFormatCountLineShape(t *testing.T) {
 	cases := []struct {
 		issue    string
+		role     string
 		phase    string
 		counts   map[string]int
 		wantSubs []string
 	}{
-		{"228", "explore", map[string]int{"read": 9, "grep": 5, "subagent": 1}, []string{"#228", "[explore]", "9 reads", "5 greps", "1 subagent"}},
-		{"42", "edit", map[string]int{"edit": 3}, []string{"#42", "[edit]", "3 edits"}},
-		{"1", "", map[string]int{"read": 1}, []string{"#1", "1 read"}},
-		{"5", "explore", map[string]int{"grep": 2, "read": 1}, []string{"#5", "1 read", "2 greps"}},
+		{"228", "implementor", "explore", map[string]int{"read": 9, "grep": 5, "subagent": 1}, []string{"#228", "[explore]", "9 reads", "5 greps", "1 subagent"}},
+		{"42", "implementor", "edit", map[string]int{"edit": 3}, []string{"#42", "[edit]", "3 edits"}},
+		{"1", "implementor", "", map[string]int{"read": 1}, []string{"#1", "1 read"}},
+		{"5", "implementor", "explore", map[string]int{"grep": 2, "read": 1}, []string{"#5", "1 read", "2 greps"}},
+		{"9", "scout", "explore", map[string]int{"read": 1}, []string{"#9", "scout", "[explore]", "1 read"}},
 	}
 	for _, tc := range cases {
-		got := claude.FormatCountLine(tc.issue, tc.phase, tc.counts)
+		got := claude.FormatCountLine(tc.issue, tc.role, tc.phase, tc.counts)
 		for _, sub := range tc.wantSubs {
 			if !strings.Contains(got, sub) {
-				t.Errorf("FormatCountLine(%q,%q,%v) = %q, missing %q",
-					tc.issue, tc.phase, tc.counts, got, sub)
+				t.Errorf("FormatCountLine(%q,%q,%q,%v) = %q, missing %q",
+					tc.issue, tc.role, tc.phase, tc.counts, got, sub)
 			}
 		}
 	}
@@ -640,6 +644,33 @@ func TestWriterSwitchHeader(t *testing.T) {
 			t.Errorf("implementor header must appear exactly once, got %d: %q", n, out)
 		}
 	})
+}
+
+// TestWriterResultLineNamesActingRole verifies that when a result event
+// fires while a subagent is still the acting role (the log ends mid-scout,
+// no narration or tool call ever hands control back to the implementor),
+// the trailing turns line names the scout — not the implementor's rolePhase,
+// which was never set (#732).
+func TestWriterResultLineNamesActingRole(t *testing.T) {
+	var status bytes.Buffer
+	w := claude.New(&bytes.Buffer{}, "9", &status)
+
+	implTask := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","id":"tu_s1","input":{"subagent_type":"scout"}}]}}` + "\n"
+	subRead := `{"type":"assistant","parent_tool_use_id":"tu_s1","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n"
+	resultEv := `{"type":"result","num_turns":3}` + "\n"
+	fmt.Fprint(w, implTask)
+	fmt.Fprint(w, subRead)
+	fmt.Fprint(w, resultEv)
+
+	out := status.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, "scout") {
+		t.Errorf("trailing turns line must name the acting role \"scout\", got: %q", last)
+	}
+	if !strings.Contains(last, "3 turn") {
+		t.Errorf("trailing turns line missing turn count: %q", last)
+	}
 }
 
 // TestModelFamily verifies model ID shortening to family labels.
