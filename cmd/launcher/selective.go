@@ -36,7 +36,7 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	}
 
 	// Build blocker graph and evict dependents with unmet external blockers.
-	edges, sources, err := waves.BuildEdges(it, toWaveIssues(issues))
+	edges, sources, _, err := waves.BuildEdges(it, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}

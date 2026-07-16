@@ -27,15 +27,20 @@ type Sources map[string]map[string]forge.DepSource
 // BuildEdges returns the dependency graph for the given batch of issues by
 // calling the IssueTracker's DepsOf for each, plus the source each blocker
 // ref was resolved from. Non-fatal per-issue errors are skipped, matching
-// the original best-effort behaviour. Callers pass the edges result as
+// the original best-effort behaviour, but named in the returned failed set
+// so a caller can tell a transient DepsOf failure apart from a confirmed
+// zero-blocker issue (#752) — the two look identical in edges alone, since
+// both simply omit the issue's key. Callers pass the edges result as
 // Input.Edges and the sources result as Input.Sources to NewPlan.
-func BuildEdges(it forge.IssueTracker, issues []Issue) (map[string][]string, Sources, error) {
+func BuildEdges(it forge.IssueTracker, issues []Issue) (map[string][]string, Sources, map[string]bool, error) {
 	edges := map[string][]string{}
 	sources := Sources{}
+	failed := map[string]bool{}
 	for _, iss := range issues {
 		deps, err := it.DepsOf(iss.Number)
 		if err != nil {
 			// Non-fatal: skip issues whose data cannot be fetched.
+			failed[iss.Number] = true
 			continue
 		}
 		if len(deps) == 0 {
@@ -50,7 +55,7 @@ func BuildEdges(it forge.IssueTracker, issues []Issue) (map[string][]string, Sou
 		edges[iss.Number] = ids
 		sources[iss.Number] = srcs
 	}
-	return edges, sources, nil
+	return edges, sources, failed, nil
 }
 
 // detectCycle runs Kahn's algorithm on the in-batch portion of the dependency
