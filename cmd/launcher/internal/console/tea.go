@@ -54,6 +54,13 @@ type teaModel struct {
 	// #731) — a pointer so it survives Update's value-receiver copies of
 	// teaModel across the session's whole lifetime.
 	heartbeats *HeartbeatCache
+	// done is closed exactly once, at the Quitting choke point below, to
+	// unblock waitRefreshSignal's goroutine — bubbletea can't cancel a Cmd
+	// goroutine itself (issue #823), so the closure has to select on this
+	// instead of blocking on Launcher.Refreshes() forever. A chan is a
+	// reference type, so every value-receiver copy of teaModel still shares
+	// the one instance newTeaModel created.
+	done chan struct{}
 }
 
 // newTeaModel builds the tea layer's starting state: the dogfood-competition
@@ -68,7 +75,7 @@ func newTeaModel(tracker forge.IssueTracker, pwd string, launch *Launcher) teaMo
 	if launch != nil && launch.pollInterval > 0 {
 		interval = launch.pollInterval
 	}
-	return teaModel{m: m, tracker: tracker, pwd: pwd, launch: launch, pollInterval: interval, heartbeats: NewHeartbeatCache()}
+	return teaModel{m: m, tracker: tracker, pwd: pwd, launch: launch, pollInterval: interval, heartbeats: NewHeartbeatCache(), done: make(chan struct{})}
 }
 
 // Run drives the console's full-screen Bubble Tea program to completion —
@@ -114,7 +121,7 @@ func pickChordTick() tea.Cmd {
 func (t teaModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{refreshCmd(t.tracker), pollTick(t.pollInterval)}
 	if t.launch != nil {
-		cmds = append(cmds, waitRefreshSignal(t.launch))
+		cmds = append(cmds, waitRefreshSignal(t.launch, t.done))
 	}
 	return tea.Batch(cmds...)
 }
@@ -140,7 +147,7 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmd = tea.Batch(refreshCmd(t.tracker), pollTick(t.pollInterval))
 	case refreshSignalMsg:
-		cmd = tea.Batch(refreshCmd(t.tracker), waitRefreshSignal(t.launch))
+		cmd = tea.Batch(refreshCmd(t.tracker), waitRefreshSignal(t.launch, t.done))
 	case pickChordTimeoutMsg:
 		if t.pendingPick {
 			t.pendingPick = false
@@ -151,6 +158,12 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	t.m = syncQueue(t.m, t.launch, t.pwd, t.heartbeats)
 	t.m = syncStale(t.m, t.launch)
 	if t.m.Quitting {
+		select {
+		case <-t.done:
+			// already closed by an earlier Update call on this program
+		default:
+			close(t.done)
+		}
 		return t, tea.Quit
 	}
 	return t, cmd
@@ -590,13 +603,21 @@ func driverOf(launch *Launcher) driver.Driver {
 // waitRefreshSignal blocks on launch's refresh channel in the background,
 // translating one arrival into a refreshSignalMsg — nil (no Cmd) when launch
 // is nil, since there is then no Queue whose writes could ever signal one.
-func waitRefreshSignal(launch *Launcher) tea.Cmd {
+// It also selects on done, closed by Update's Quitting choke point, since
+// bubbletea has no way to cancel a Cmd goroutine itself once spawned (issue
+// #823) — without this, a session that quits before ever signaling a
+// refresh leaks this goroutine parked on <-ch for the process's lifetime.
+func waitRefreshSignal(launch *Launcher, done <-chan struct{}) tea.Cmd {
 	if launch == nil {
 		return nil
 	}
 	ch := launch.Refreshes()
 	return func() tea.Msg {
-		<-ch
-		return refreshSignalMsg{}
+		select {
+		case <-ch:
+			return refreshSignalMsg{}
+		case <-done:
+			return nil
+		}
 	}
 }
