@@ -117,3 +117,27 @@ func TestGitForcePush_TransientFailureIsRetryable(t *testing.T) {
 		t.Fatalf("want forge.ErrTransientPushFailure, got: %v", err)
 	}
 }
+
+// TestWrapForcePushError_RedactsCredentialsFromStderr verifies that
+// wrapForcePushError never echoes a credential embedded in git's stderr
+// into the returned error. Exercised directly against a crafted stderr
+// string rather than a real subprocess: modern git already anonymizes URLs
+// in its own connect/access diagnostics, which would make a subprocess-level
+// test pass regardless of whether our own formatting redacts — this proves
+// the code path itself redacts, independent of that git-version behavior.
+// git's stderr for a credential-bearing remote CAN echo the full URL for
+// other failure shapes (e.g. server-side auth rejection messages), and this
+// error flows unmodified into a public GitHub issue comment
+// (settle.mergeImmediate).
+func TestWrapForcePushError_RedactsCredentialsFromStderr(t *testing.T) {
+	const secret = "sometoken123"
+	stderr := "fatal: unable to access 'https://oauth2:" + secret + "@git.example.com/org/repo.git/': The requested URL returned error: 403"
+
+	err := wrapForcePushError(errors.New("exit status 128"), stderr)
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("wrapForcePushError leaks embedded credential: %v", err)
+	}
+}
