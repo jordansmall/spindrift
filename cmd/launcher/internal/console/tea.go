@@ -338,10 +338,9 @@ func openDrillInCmd(launch *Launcher, pwd, number string) tea.Cmd {
 }
 
 // handleTerminateConfirmKey routes one keypress while PendingTerminate is
-// armed: "y" confirms — calling Launcher.Terminate before applying
-// TerminateConfirmedMsg, matching TerminateConfirmedMsg's own doc ("the run
-// loop has already called Launcher.Terminate by the time this reaches
-// Update") — anything else declines (ADR 0024, issue #649/#785).
+// armed: "y" confirms — firing Launcher.TerminateAsync before applying
+// TerminateConfirmedMsg, so the blocking tracker I/O runs off the Update
+// path (issue #745) — anything else declines (ADR 0024, issue #649/#785).
 func (t teaModel) handleTerminateConfirmKey(msg tea.KeyMsg) teaModel {
 	num := t.m.PendingTerminate
 	if s := msg.String(); s == "y" || s == "Y" {
@@ -349,7 +348,7 @@ func (t teaModel) handleTerminateConfirmKey(msg tea.KeyMsg) teaModel {
 			// Terminate already logs a reap failure to stderr itself
 			// (launcher.go); writing it again here would both duplicate the
 			// line and risk smearing the alt-screen render mid-frame.
-			t.launch.Terminate(t.tracker, num)
+			t.launch.TerminateAsync(t.tracker, num)
 		}
 		t.m = Update(t.m, TerminateConfirmedMsg{Number: num})
 		return t

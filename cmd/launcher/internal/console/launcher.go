@@ -70,6 +70,12 @@ type Launcher struct {
 	// created by registry() so a bare struct literal (every production and
 	// test call site) needs no constructor.
 	terminated *terminate.Registry
+	// terminating tracks issue numbers with a TerminateAsync goroutine still
+	// in flight, guarding against a second confirm firing a duplicate
+	// Terminate for the same issue (issue #745): the queue pick stays
+	// PickRunning — and so isLive keeps reporting it live — for the whole
+	// async call, not just Terminate's old synchronous window.
+	terminating map[string]bool
 	// cap is the session's live, resizable parallelism cap (ADR 0023, issue
 	// #653) — one Limiter shared across every drain() this Launcher runs,
 	// so a Console "+"/"-" takes effect on the RunContinuous call already
@@ -252,6 +258,37 @@ func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 	l.Queue.setState(num, PickTerminated, "terminated by operator")
 	l.signalRefresh()
 	return killErr
+}
+
+// TerminateAsync runs Terminate for num in the background (issue #745),
+// mirroring tryLaunch/Rebuild's pattern so the operator's confirm key
+// returns immediately instead of blocking the Update loop on tracker I/O.
+// num already in flight makes a second call a no-op: the queue pick stays
+// PickRunning until Terminate itself sets PickTerminated at the very end, so
+// isLive keeps reporting num live for the whole call, not just its old
+// synchronous window — a second confirm on the same row would otherwise
+// race a duplicate Kill/Comment/TransitionState.
+func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) {
+	l.mu.Lock()
+	if l.terminating == nil {
+		l.terminating = make(map[string]bool)
+	}
+	if l.terminating[num] {
+		l.mu.Unlock()
+		return
+	}
+	l.terminating[num] = true
+	l.wg.Add(1)
+	l.mu.Unlock()
+
+	go func() {
+		defer l.wg.Done()
+		l.Terminate(tracker, num)
+
+		l.mu.Lock()
+		delete(l.terminating, num)
+		l.mu.Unlock()
+	}()
 }
 
 // refreshChan lazily constructs l.refresh, so a bare struct literal (every
