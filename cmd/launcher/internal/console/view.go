@@ -92,6 +92,9 @@ const unboundedBudget = 1 << 30
 // together overflow it, so the stacked case splits budget between them
 // instead.
 func renderBody(m Model, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
 	if m.Width < minTwoColumnWidth {
 		// The "\n" joining the two stacked blocks is itself a blank
 		// separator row — budget it like any other body row, or the
@@ -129,9 +132,14 @@ func maxLineWidth(s string) int {
 // issue (number, title, labels), with the cursor row marked, under its own
 // column label — windowed to budget rows (including the label) so a long
 // backlog can't push the header off-screen; a truncated list ends with a
-// lightweight "N more below" affordance instead of just stopping (issue
-// #1035).
+// lightweight "N more below" affordance instead of just stopping. The label
+// is itself budgeted, not a floor on top of it — a non-positive budget
+// renders nothing at all, so an extremely short terminal can't have the
+// label alone push the header off-screen (issue #1035).
 func renderBacklogColumn(m Model, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
 	var b strings.Builder
 	if m.Focus == FocusBacklog {
 		b.WriteString("backlog [focus]:\n")
@@ -156,6 +164,9 @@ func renderBacklogColumn(m Model, budget int) string {
 // same way renderBacklogColumn is, so a long picks queue can't push the
 // header off-screen either (issue #1035).
 func renderQueueColumn(m Model, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
 	var b strings.Builder
 	if m.Focus == FocusQueue {
 		b.WriteString("picks [focus]:\n")
