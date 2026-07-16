@@ -29,7 +29,7 @@ func TestNewConsoleFreshnessChecker_RebuildThenCheck_ReportsFreshAtSameTip(t *te
 	probe := func() freshness.Result { probeCalls++; return stale }
 
 	buildCalls := 0
-	fresh, rebuild := newConsoleFreshnessChecker("main", probe, func() error { return nil }, func() (string, error) { buildCalls++; return "", nil })
+	fresh, rebuild := newConsoleFreshnessChecker("main", probe, func() (string, error) { return rev, nil }, func() (string, error) { buildCalls++; return "", nil })
 
 	if applicable, isFresh, msg := fresh(); !applicable || isFresh {
 		t.Fatalf("initial check: applicable=%v fresh=%v msg=%q, want stale", applicable, isFresh, msg)
@@ -41,8 +41,8 @@ func TestNewConsoleFreshnessChecker_RebuildThenCheck_ReportsFreshAtSameTip(t *te
 	if buildCalls != 1 {
 		t.Fatalf("buildCalls = %d, want 1", buildCalls)
 	}
-	if probeCalls != 2 {
-		t.Fatalf("probeCalls = %d, want 2 (one for the initial check, one for rebuild's own re-probe)", probeCalls)
+	if probeCalls != 1 {
+		t.Fatalf("probeCalls = %d, want 1 (the initial check only — rebuild now derives builtRev from pull's return value, not its own re-probe)", probeCalls)
 	}
 
 	if applicable, isFresh, msg := fresh(); !applicable || !isFresh {
@@ -59,7 +59,7 @@ func TestNewConsoleFreshnessChecker_OriginAdvancesAfterRebuild_StaleAgain(t *tes
 	res := freshness.Result{Applicable: true, Fresh: false, Rev: "abc123", Message: "rebuild needed"}
 	probe := func() freshness.Result { return res }
 
-	fresh, rebuild := newConsoleFreshnessChecker("main", probe, func() error { return nil }, func() (string, error) { return "", nil })
+	fresh, rebuild := newConsoleFreshnessChecker("main", probe, func() (string, error) { return "abc123", nil }, func() (string, error) { return "", nil })
 	if _, err := rebuild(); err != nil {
 		t.Fatalf("rebuild: %v", err)
 	}
@@ -84,11 +84,40 @@ func TestNewConsoleFreshnessChecker_AlreadyFresh_PassesThroughUnchanged(t *testi
 	res := freshness.Result{Applicable: true, Fresh: true, Rev: "abc123", Message: "fresh"}
 	probe := func() freshness.Result { return res }
 
-	fresh, _ := newConsoleFreshnessChecker("main", probe, func() error { return nil }, func() (string, error) { return "", nil })
+	fresh, _ := newConsoleFreshnessChecker("main", probe, func() (string, error) { return "abc123", nil }, func() (string, error) { return "", nil })
 
 	applicable, isFresh, msg := fresh()
 	if !applicable || !isFresh || msg != "fresh" {
 		t.Errorf("fresh() = (%v, %v, %q), want the probe's own fresh result unchanged", applicable, isFresh, msg)
+	}
+}
+
+// TestNewConsoleFreshnessChecker_OriginAdvancesDuringRebuild_BuiltRevIsPulledRev
+// verifies the TOCTOU fix (issue #767): builtRev must be the rev pull()
+// actually checked out (and build() actually built), not whatever rev a
+// post-build probe() happens to see. probe() re-fetches origin
+// independently on every call, so if origin advances while build() is
+// running, a rebuild() that derived builtRev from its own trailing probe()
+// call would cache the advanced rev — one nobody ever built — and the next
+// fresh() would false-positive at that rev.
+func TestNewConsoleFreshnessChecker_OriginAdvancesDuringRebuild_BuiltRevIsPulledRev(t *testing.T) {
+	const pulledRev = "abc123"   // what pull() checked out and build() built
+	const advancedRev = "def456" // origin's tip by the time probe() next runs
+
+	pull := func() (string, error) { return pulledRev, nil }
+	build := func() (string, error) { return "", nil }
+	probe := func() freshness.Result {
+		return freshness.Result{Applicable: true, Fresh: false, Rev: advancedRev, Message: "rebuild needed"}
+	}
+
+	fresh, rebuild := newConsoleFreshnessChecker("main", probe, pull, build)
+
+	if _, err := rebuild(); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+
+	if applicable, isFresh, msg := fresh(); applicable && isFresh {
+		t.Errorf("fresh() = (applicable=%v, isFresh=%v, msg=%q), want stale: builtRev must be the pulled rev %q, not the advanced rev %q the checker never built", applicable, isFresh, msg, pulledRev, advancedRev)
 	}
 }
 
@@ -103,7 +132,7 @@ func TestNewConsoleFreshnessChecker_RebuildPropagatesPullAndBuildErrors(t *testi
 		return freshness.Result{Applicable: true, Fresh: false, Rev: "abc123"}
 	}
 
-	_, rebuild := newConsoleFreshnessChecker("main", probe, func() error { return errBoomFreshness }, func() (string, error) {
+	_, rebuild := newConsoleFreshnessChecker("main", probe, func() (string, error) { return "", errBoomFreshness }, func() (string, error) {
 		t.Fatal("build called after pull failed")
 		return "", nil
 	})
@@ -127,7 +156,7 @@ func TestConsoleGitSync_DirtyOffBranch_RefusesCheckout(t *testing.T) {
 	gitRun(t, pwd, "checkout", "-b", "feature")
 	gitWriteFile(t, filepath.Join(pwd, "flake.nix"), "{ dirty = true; }\n")
 
-	if err := consoleGitSync(pwd, "main"); err == nil {
+	if _, err := consoleGitSync(pwd, "main"); err == nil {
 		t.Fatal("consoleGitSync() = nil, want an error refusing the checkout")
 	}
 
@@ -150,7 +179,7 @@ func TestConsoleGitSync_DirtyOnBaseBranch_StillSyncs(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
 	gitWriteFile(t, filepath.Join(pwd, "scratch.txt"), "untracked\n")
 
-	if err := consoleGitSync(pwd, "main"); err != nil {
+	if _, err := consoleGitSync(pwd, "main"); err != nil {
 		t.Fatalf("consoleGitSync() = %v, want nil for a dirty tree already on baseBranch", err)
 	}
 }
