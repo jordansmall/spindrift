@@ -52,12 +52,12 @@ var errLandingNeverGreen = errors.New("settle: force-pushed head never went gree
 // d dispatches fix passes and, when a rebase conflict arises, an
 // agent-assisted conflict resolution -- both subject to dispatch's own
 // in-session transient retry (issue #441).
-func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
+func (s *Settle) selfHeal(d dispatch.Dispatcher, num string, gen uint64, pr string) landingResult {
 	if s.pr == nil {
-		return s.landPushOnly(num, pr)
+		return s.landPushOnly(num, gen, pr)
 	}
 	for attempt := 0; ; attempt++ {
-		switch s.gateToGreen(num, pr) {
+		switch s.gateToGreen(num, gen, pr) {
 		case gateAbandoned:
 			return landingAbandoned
 		case gateGreen:
@@ -74,7 +74,7 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
 				s.transitionState(num, forge.InProgress, forge.Complete)
 				return landingManual
 			}
-			if err := s.applyMergeMode(num, pr, d); err != nil {
+			if err := s.applyMergeMode(num, gen, pr, d); err != nil {
 				if errors.Is(err, errAbandoned) {
 					return landingAbandoned
 				}
@@ -131,9 +131,9 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num, pr string) landingResult {
 // A merge failure leaves the issue Complete with a merge-blocked note,
 // matching the github adapter's post-green contract (ADR 0012) — it is never
 // demoted to Failed.
-func (s *Settle) landPushOnly(num, branch string) landingResult {
+func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResult {
 	s.transitionState(num, forge.InProgress, forge.Complete)
-	if err := s.applyMergeMode(num, branch, nil); err != nil {
+	if err := s.applyMergeMode(num, gen, branch, nil); err != nil {
 		fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
 		s.it.Comment(num, fmt.Sprintf("merge blocked after push: %v", err))
 		return landingManual
@@ -157,7 +157,7 @@ func (s *Settle) landPushOnly(num, branch string) landingResult {
 //     dispatch a fix box.
 //   - gateTerminal  — non-retriable outcome (timeout, API error). Caller
 //     must swap to failedLabel.
-func (s *Settle) gateToGreen(num, pr string) gateResult {
+func (s *Settle) gateToGreen(num string, gen uint64, pr string) gateResult {
 	pollIv := s.cfg.MergePollInterval
 	deadline := s.cfg.MergePollTimeout
 	// actualIv is used for elapsed tracking; floor to 1 so we don't
@@ -170,7 +170,7 @@ func (s *Settle) gateToGreen(num, pr string) gateResult {
 	elapsed := 0
 
 	for {
-		if s.terminated(num) {
+		if s.terminated(num, gen) {
 			return gateAbandoned
 		}
 		state, stateErr := s.pr.CheckState(pr)
@@ -239,10 +239,10 @@ func (s *Settle) mergeGuardHit(pr string) ([]string, error) {
 // d, when non-nil, resolves rebase conflicts (via d.ResolveConflict) that
 // arise while mergeImmediate retries. When nil, a rebase conflict is
 // immediately non-retriable.
-func (s *Settle) applyMergeMode(num, pr string, d dispatch.Dispatcher) error {
+func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
 	switch s.cfg.MergeMode {
 	case "immediate":
-		return s.mergeImmediate(num, pr, d)
+		return s.mergeImmediate(num, gen, pr, d)
 	case "auto":
 		if s.pr == nil {
 			return fmt.Errorf("MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)")
@@ -273,7 +273,7 @@ func (s *Settle) applyMergeMode(num, pr string, d dispatch.Dispatcher) error {
 // A Rebase force-push failure that forge.ErrTransientPushFailure wraps (an
 // infra or network fault, not a genuine stale-lease rejection) is retried up
 // to MaxRebaseAttempts times before it's treated as terminal.
-func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
+func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
 	rebaseAttempts := 0
 	pushRetries := 0
 	checksBlockedAttempts := 0
@@ -284,11 +284,11 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 	// independent concerns, and charging one against the other's budget
 	// would let a stale-base retry exhaust the conflict path's allowance
 	// before a real conflict ever arises (or vice versa).
-	if err := s.preflightStaleBase(num, pr); err != nil {
+	if err := s.preflightStaleBase(num, gen, pr); err != nil {
 		return err
 	}
 	for {
-		if s.terminated(num) {
+		if s.terminated(num, gen) {
 			return errAbandoned
 		}
 		err := s.cf.Merge(pr)
@@ -339,7 +339,7 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 					fmt.Printf("    #%s  landing=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
 					return fmt.Errorf("%w: conflict-resolve dispatch failed: %v", errLandingNeverGreen, crErr)
 				}
-				if rwErr := s.rewaitAfterForcePush(num, pr); rwErr != nil {
+				if rwErr := s.rewaitAfterForcePush(num, gen, pr); rwErr != nil {
 					return rwErr
 				}
 				skipRebase = true
@@ -352,7 +352,7 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 		// Rebase succeeded: the force-push reset the PR's required checks, so
 		// the next merge attempt must wait for the new head to go green
 		// rather than retrying against checks the push itself just reset.
-		if rwErr := s.rewaitAfterForcePush(num, pr); rwErr != nil {
+		if rwErr := s.rewaitAfterForcePush(num, gen, pr); rwErr != nil {
 			return rwErr
 		}
 	}
@@ -376,7 +376,7 @@ func (s *Settle) mergeImmediate(num, pr string, d dispatch.Dispatcher) error {
 // already-tested error handling. Only a rebase that force-pushes but never
 // re-confirms green is a hard failure here, matching rewaitAfterForcePush's
 // contract elsewhere in this file.
-func (s *Settle) preflightStaleBase(num, pr string) error {
+func (s *Settle) preflightStaleBase(num string, gen uint64, pr string) error {
 	if s.pr == nil {
 		return nil
 	}
@@ -399,7 +399,7 @@ func (s *Settle) preflightStaleBase(num, pr string) error {
 		fmt.Printf("    #%s  landing=%s  status=stale-base-rebase-failed  !! %v\n", num, pr, rbErr)
 		return nil
 	}
-	return s.rewaitAfterForcePush(num, pr)
+	return s.rewaitAfterForcePush(num, gen, pr)
 }
 
 // rewaitAfterForcePush blocks for CI to reach green on the PR's current head
@@ -408,9 +408,9 @@ func (s *Settle) preflightStaleBase(num, pr string) error {
 // that ends in genuine CI failure or a timeout returns an error distinct from
 // forge.ErrMergeConflict — the caller's conflict-retry path is never
 // re-entered for it.
-func (s *Settle) rewaitAfterForcePush(num, pr string) error {
+func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
 	fmt.Printf("    #%s  landing=%s  status=post-force-push-wait\n", num, pr)
-	if s.gateToGreen(num, pr) != gateGreen {
+	if s.gateToGreen(num, gen, pr) != gateGreen {
 		return fmt.Errorf("%w: CI did not reach green after force-push on %s", errLandingNeverGreen, pr)
 	}
 	return nil

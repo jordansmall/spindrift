@@ -14,7 +14,7 @@ import (
 // needed, then posting the usage comment. Called immediately after a Box
 // exits so each issue reaches CompleteLabel or its failed label independently
 // of its wave siblings.
-func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Result) {
+func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
 	if result.ParseErr != nil {
 		fmt.Printf("    #%s  status=malformed  note=unparseable outcome line\n", num)
 		return
@@ -39,7 +39,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 			fmt.Printf("    #%s  landing=%s  status=blocked  note=draft PR on %s; no outcome line\n", num, res.URL, branch)
 			return
 		}
-		s.SettleAdopted(d, num, res.URL)
+		s.SettleAdopted(d, num, gen, res.URL)
 		return
 	}
 
@@ -49,7 +49,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, result dispatch.Resul
 		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
 		s.postUsageComment(num, d)
 	case "ready":
-		switch s.selfHeal(d, num, o.Landing) {
+		switch s.selfHeal(d, num, gen, o.Landing) {
 		case landingMerged:
 			// verifyMerged reads PR state, which a push-only Code Forge
 			// does not have — landPushOnly's own cf.Merge success already

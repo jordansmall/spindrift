@@ -12,10 +12,10 @@ import (
 // already-discovered open non-draft PR for num. Prints "status=adopted"
 // before running the gate. Called by the reconcile/recover entry points and
 // by Settle itself when a Box exits with no outcome line.
-func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num, prURL string) {
+func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
 	branch := s.cf.AgentBranch(num)
 	fmt.Printf("    #%s  landing=%s  status=adopted  note=no outcome line; PR discovered on %s\n", num, prURL, branch)
-	switch s.selfHeal(d, num, prURL) {
+	switch s.selfHeal(d, num, gen, prURL) {
 	case landingMerged:
 		// verifyMerged reads PR state, which a push-only Code Forge does not
 		// have (mirrors Settle's own "ready"/"merged" guards in gate.go).

@@ -25,7 +25,7 @@ func TestGateToGreen_TerminatedAbandonsWithoutTransition(t *testing.T) {
 	s.SetTerminated(reg)
 	reg.Mark("1")
 
-	got := s.gateToGreen("1", testPR)
+	got := s.gateToGreen("1", 0, testPR)
 
 	if got != gateAbandoned {
 		t.Errorf("gateToGreen = %v, want gateAbandoned", got)
@@ -49,7 +49,7 @@ func TestMergeImmediate_TerminatedStopsRebaseRetry(t *testing.T) {
 	s.SetTerminated(reg)
 	reg.Mark("1")
 
-	err := s.mergeImmediate("1", testPR, dispatch.NewFake())
+	err := s.mergeImmediate("1", 0, testPR, dispatch.NewFake())
 
 	if !errors.Is(err, errAbandoned) {
 		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
@@ -97,13 +97,43 @@ func TestSelfHeal_TerminatedDuringFixPass_StopsRetryLoop(t *testing.T) {
 	s.SetTerminated(reg)
 	d := terminatingDispatcher{Fake: dispatch.NewFake(), reg: reg, num: "1"}
 
-	landing := s.selfHeal(d, "1", testPR)
+	landing := s.selfHeal(d, "1", 0, testPR)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
 	}
 	if len(d.FixCalls) != 1 {
 		t.Errorf("want exactly 1 fix call (termination stops the retry loop), got %d: %+v", len(d.FixCalls), d.FixCalls)
+	}
+}
+
+// TestGateToGreen_RepickDoesNotClearAnAbandonedSettlesMark reproduces the
+// issue #743 race directly at the settle seam: an old, still-in-flight
+// settle goroutine (holding the generation its dispatch was launched under)
+// must keep seeing itself as terminated even after a re-pick has begun a
+// fresh generation for the same issue number — the old blind Unmark would
+// have erased the mark out from under it here; Begin must not.
+func TestGateToGreen_RepickDoesNotClearAnAbandonedSettlesMark(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	s := New(c, fc, fc)
+	reg := terminate.NewRegistry()
+	s.SetTerminated(reg)
+
+	oldGen := reg.Begin("1") // the original dispatch's own claim
+	reg.Mark("1")            // Terminate marks that generation dead
+	newGen := reg.Begin("1") // a re-pick's discover claims a fresh incarnation, mid-race
+
+	if got := s.gateToGreen("1", oldGen, testPR); got != gateAbandoned {
+		t.Errorf("gateToGreen(oldGen) = %v, want gateAbandoned — a re-pick must not erase an in-flight settle's own mark", got)
+	}
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionState must not be called for the abandoned generation; got %+v", fc.TransitionStateCalls)
+	}
+	if reg.Marked("1", newGen) {
+		t.Error("Marked(1, newGen) = true, want false — the re-pick's own fresh generation was never terminated")
 	}
 }
 
@@ -122,7 +152,7 @@ func TestSettle_AbandonedSkipsUsageComment(t *testing.T) {
 	reg.Mark("1")
 
 	d := dispatch.NewFake()
-	s.Settle(d, "1", dispatch.Result{
+	s.Settle(d, "1", 0, dispatch.Result{
 		Success:      true,
 		OutcomeFound: true,
 		Outcome:      outcome.Outcome{Issue: "1", Landing: testPR, Status: "ready", Note: "ok"},

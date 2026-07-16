@@ -35,7 +35,7 @@ func TestResearchSettle_Recommend(t *testing.T) {
 	}
 
 	s := NewResearchSettle(fc)
-	s.Settle(dispatch.NewFake(), "42", result)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 1 {
 		t.Fatalf("want 1 CompleteVerdict call, got %d", len(fc.CompleteVerdictCalls))
@@ -61,7 +61,7 @@ func TestResearchSettle_Reject(t *testing.T) {
 	}
 
 	s := NewResearchSettle(fc)
-	s.Settle(dispatch.NewFake(), "7", result)
+	s.Settle(dispatch.NewFake(), "7", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 1 || fc.CompleteVerdictCalls[0].Verdict != forge.Reject {
 		t.Fatalf("want 1 CompleteVerdict(Reject) call, got %+v", fc.CompleteVerdictCalls)
@@ -79,7 +79,7 @@ func TestResearchSettle_Unclear(t *testing.T) {
 	}
 
 	s := NewResearchSettle(fc)
-	s.Settle(dispatch.NewFake(), "8", result)
+	s.Settle(dispatch.NewFake(), "8", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 1 || fc.CompleteVerdictCalls[0].Verdict != forge.Unclear {
 		t.Fatalf("want 1 CompleteVerdict(Unclear) call, got %+v", fc.CompleteVerdictCalls)
@@ -100,7 +100,7 @@ func TestResearchSettle_CompleteVerdictError(t *testing.T) {
 
 	s := NewResearchSettle(fc)
 	out := captureStdout(t, func() {
-		s.Settle(dispatch.NewFake(), "42", result)
+		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
 
 	if strings.Contains(out, "status=recommend") {
@@ -120,7 +120,7 @@ func TestResearchSettle_Blocked(t *testing.T) {
 	}
 
 	s := NewResearchSettle(fc)
-	s.Settle(dispatch.NewFake(), "9", result)
+	s.Settle(dispatch.NewFake(), "9", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 0 {
 		t.Errorf("blocked must not apply a verdict label; got %+v", fc.CompleteVerdictCalls)
@@ -142,7 +142,7 @@ func TestResearchSettle_MissingOutcome(t *testing.T) {
 	result := dispatch.Result{Success: true}
 
 	s := NewResearchSettle(fc)
-	s.Settle(dispatch.NewFake(), "11", result)
+	s.Settle(dispatch.NewFake(), "11", 0, result)
 
 	if len(fc.TransitionStateCalls) != 1 {
 		t.Fatalf("want 1 TransitionState call, got %d", len(fc.TransitionStateCalls))
