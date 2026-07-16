@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -9,6 +10,11 @@ import (
 )
 
 const testReconcilePR = "https://github.com/owner/repo/pull/77"
+
+// stalePRLabel matches a genuine stale pr= field (issue #892) without
+// tripping on a benign substring like expr= or repr= inside free-text
+// note/error interpolations.
+var stalePRLabel = regexp.MustCompile(`\bpr=`)
 
 // reconcileConfig returns a config suitable for reconcile tests.
 func reconcileConfig() config {
@@ -83,7 +89,7 @@ func TestRecoverByNumber_DraftPRSkipped(t *testing.T) {
 	if !strings.Contains(out, "landing="+testReconcilePR) {
 		t.Errorf("console output must print landing=%s; got: %q", testReconcilePR, out)
 	}
-	if strings.Contains(out, "pr=") {
+	if stalePRLabel.MatchString(out) {
 		t.Errorf("console output must not use the stale pr= label; got: %q", out)
 	}
 }
