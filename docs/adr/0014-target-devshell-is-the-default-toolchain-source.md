@@ -68,6 +68,26 @@ for the unknowing, ignorable by everyone else.
 `nixInBox = true` is a prerequisite for this whole path — the devShell can only
 be entered inside the box if `nix` is present there (ADR 0008).
 
+## Harness tools stay reachable inside the devShell
+
+The agent's own subprocess calls (`git`, `gh`, `jq`, …) still need to work once
+`nix develop` has rewritten PATH to the Target's devShell — the devShell-first
+intent above is about the Target's *toolchain*, not about the harness's own
+plumbing. `driver-exec`'s `buildCmd` (issue #626) only re-resolves the Driver
+binary itself before entering the devShell; it does not re-export or prepend
+any other harness tool the way the entrypoint's former `_harness_path` dance
+did. This works only because of two facts holding together: `lib/image.nix`
+bakes `git`/`gh`/`jq`/`driver-exec` into a `buildEnv` linked at the image's
+`/bin`, with the container's `PATH` initialized to exactly that; and `nix
+develop` (default, non-`--pure`) *prepends* the devShell's own paths onto the
+existing PATH rather than replacing it, so `/bin` survives at the tail
+regardless of what the Target's devShell adds. A Target `shellHook` that
+overwrites PATH outright (`export PATH=foo` instead of `export
+PATH=foo:$PATH`) would break this — unusual devShell hygiene, but possible.
+`cmd/launcher/driver-exec`'s `integration`-tagged test builds a real minimal
+devShell naming neither tool and asserts both stay resolvable, so this
+invariant is checked rather than assumed (issue #798).
+
 ## Scope
 
 The image is assumed unique per repo (Consumer == Target). One image serving
