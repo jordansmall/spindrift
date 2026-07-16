@@ -238,8 +238,7 @@ whenever it's non-empty. For `github`, body-text refs (`depends on #N` /
 `blocked by #N`, inline or a `## Blocked by` list) are a fallback used only
 when the native lookup is empty or unavailable. `local` has no native
 dependency concept, so it resolves blockers from body-text refs only, not as
-a fallback — see [Issue Tracker
-backends](docs/reference.md#issue-tracker-backends).
+a fallback — see [Issue Tracker backends](docs/reference.md#issue-tracker-backends).
 
 Every place a blocker ref is shown to an operator — the `preview` command's
 blocker annotations, a selective dispatch's blocked-skip notices, and the
