@@ -126,10 +126,12 @@ func (t teaModel) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// Update is the tea layer's whole adapter surface: it translates tea.KeyMsg
-// and the two async signals into console Msg values already handled by the
-// pure Update, then re-syncs the launcher's live Queue/stale state onto the
-// Model exactly as the pre-#784 Run loop did on every render.
+// Update is the tea layer's whole adapter surface: it translates every
+// Bubble Tea message (key presses, resizes) and internal signal (backlog and
+// drill-in loads, poll ticks, refresh signals, pick-chord timeouts) into
+// console Msg values already handled by the pure Update, then re-syncs the
+// launcher's live Queue/stale state onto the Model exactly as the pre-#784
+// Run loop did on every render.
 func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
