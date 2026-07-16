@@ -408,7 +408,7 @@ rec {
       # A flag carrying `choices` (issue #554) restricts its argument to that
       # value list (-x: require a value, no file completion) instead of the
       # plain flag-only completion below. No schema entry pairs `alias` with
-      # `choices`, so this only ever applies to the primary flag.
+      # `choices`, so only knobCompletions (the primary flag) uses it.
       choicesArgs = e: " -x -a '${builtins.concatStringsSep " " e.choices}'";
       flagArgs = e: if e ? choices then choicesArgs e else "";
       knobCompletions = builtins.concatStringsSep "\n" (
