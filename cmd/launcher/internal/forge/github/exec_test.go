@@ -148,7 +148,7 @@ esac`)
 
 // TestExecClient_DepsOf_NativeErrorEmptyStderrNoTrailingColon verifies that
 // when the native dependencies API call fails without writing to stderr, the
-// fallback warning has no dangling "exit status 1: " trailing colon-space.
+// error has no dangling "exit status 1: " trailing colon-space.
 func TestExecClient_DepsOf_NativeErrorEmptyStderrNoTrailingColon(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *dependencies/blocked_by*)
@@ -160,16 +160,14 @@ func TestExecClient_DepsOf_NativeErrorEmptyStderrNoTrailingColon(t *testing.T) {
 esac`)
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	out := testutil.CaptureStderr(t, func() {
-		if _, err := c.DepsOf("10"); err != nil {
-			t.Fatalf("DepsOf: %v", err)
-		}
-	})
-	if strings.Contains(out, ": )") {
-		t.Fatalf("fallback warning must not have a dangling colon-space before empty stderr; got: %q", out)
+	_, err := c.nativeDepsOf("10")
+	if err == nil {
+		t.Fatal("nativeDepsOf: want error, got nil")
+	}
+	if strings.HasSuffix(err.Error(), ": ") {
+		t.Fatalf("nativeDepsOf error must not have a trailing colon-space; got: %q", err.Error())
 	}
 }
-
 
 // TestExecClient_DepsOf_WarnsOnStderr verifies that when the native
 // dependencies lookup fails, DepsOf's fallback warning goes to stderr, not
