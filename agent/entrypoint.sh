@@ -616,7 +616,11 @@ main() {
   phase_prefetch
   phase_prompt_assembly
 
-  echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
+  if [ "${DISPATCH_KIND:-work}" = "research" ]; then
+    echo "==> claude researching issue #$ISSUE_NUMBER"
+  else
+    echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
+  fi
   local claude_rc=0
   run_driver_in_env "$prompt" "$agents_json" "$_driver_session_mode" || claude_rc=$?
 
