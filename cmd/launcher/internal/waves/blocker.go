@@ -186,12 +186,18 @@ func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edge
 // hold a pick rather than the headless engine's own cascade-to-Failed
 // (nextReady's hasFailedInBatchBlocker, which moves the dependent issue
 // itself to Failed). ready is true when every declared blocker is satisfied
-// (BlockerReady); unready names every blocker not yet satisfied, in edge
-// order; failed is unready's subset that carries cfg.FailedLabel — never
-// satisfiable on its own.
+// (BlockerReady) and none carries cfg.FailedLabel; unready names every
+// blocker not yet satisfied, in edge order. failed scans all of edges[num]
+// (mirroring hasFailedInBatchBlocker), not just unready — a blocker can be
+// closed (so BlockerReady's fallback calls it satisfied) and still carry
+// cfg.FailedLabel, which must never be satisfiable regardless of readiness.
+// failed is reported separately from unready rather than folded into it:
+// unready drives the console's BlockedBy badge and failed drives Reason
+// (queue.go's setHeld), and collapsing the two would reintroduce the
+// redundant rendering #755 removes.
 func BlockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string) (ready bool, failed, unready []string) {
 	unready = unreadyBlockers(it, cf, num, edges)
-	for _, dep := range unready {
+	for _, dep := range edges[num] {
 		fi, err := it.Issue(dep)
 		if err != nil {
 			continue
@@ -200,5 +206,5 @@ func BlockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, num st
 			failed = append(failed, dep)
 		}
 	}
-	return len(unready) == 0, failed, unready
+	return len(unready) == 0 && len(failed) == 0, failed, unready
 }
