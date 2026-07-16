@@ -30,17 +30,28 @@ func GitForcePush(dir string) error {
 	cmd := exec.Command("git", "-C", dir, "push", "--force-with-lease")
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		s := strings.TrimSpace(stderr.String())
-		suffix := ""
-		if s != "" {
-			suffix = ": " + s
-		}
-		if isStalePushRejection(s) {
-			return fmt.Errorf("git push --force-with-lease: %w%s", err, suffix)
-		}
-		return fmt.Errorf("git push --force-with-lease: %w%s: %w", err, suffix, forge.ErrTransientPushFailure)
+		return wrapForcePushError(err, stderr.String())
 	}
 	return nil
+}
+
+// wrapForcePushError builds GitForcePush's returned error from the push
+// subprocess's failure and raw stderr. Stale-lease classification runs on
+// the raw stderr (isStalePushRejection needs git's exact rejection markers),
+// but the stderr embedded in the error message is redacted first — a
+// credential-bearing CODE_FORGE_REMOTE_URL can appear in git's own
+// diagnostics, and this error flows unmodified into a public GitHub issue
+// comment (settle.mergeImmediate).
+func wrapForcePushError(err error, stderr string) error {
+	s := strings.TrimSpace(stderr)
+	suffix := ""
+	if s != "" {
+		suffix = ": " + forge.RedactURLCredentials(s)
+	}
+	if isStalePushRejection(s) {
+		return fmt.Errorf("git push --force-with-lease: %w%s", err, suffix)
+	}
+	return fmt.Errorf("git push --force-with-lease: %w%s: %w", err, suffix, forge.ErrTransientPushFailure)
 }
 
 // isStalePushRejection returns true when git's stderr indicates a genuine
