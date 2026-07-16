@@ -751,7 +751,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	}
 	d := f.New(iss.number, iss.title)
 	defer d.Close()
-	s.SettleAdopted(d, iss.number, res.URL)
+	s.SettleAdopted(d, iss.number, 0, res.URL)
 	return nil
 }
 

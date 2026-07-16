@@ -82,7 +82,7 @@ func dispatchWave(cfg Config, it forge.IssueTracker, f *dispatch.Factory, s sett
 				transitionState(it, iss.Number, forge.InProgress, forge.Failed)
 			default:
 				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.Number, iss.Number)
-				s.Settle(d, iss.Number, result)
+				s.Settle(d, iss.Number, iss.Generation, result)
 			}
 		}()
 	}
