@@ -790,6 +790,55 @@ func TestView_ScrolledQueue_ReachesLastRow(t *testing.T) {
 	}
 }
 
+// TestView_BacklogColumn_ShowsPositionIndicator verifies the backlog column
+// label carries a compact "X-Y of N" position indicator reflecting the
+// visible row range and total, so the operator can see where they are in a
+// long backlog without counting rows (issue #1037 AC3).
+func TestView_BacklogColumn_ShowsPositionIndicator(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	issues := make([]forge.Issue, 50)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+	out := View(m)
+	if !strings.Contains(out, "backlog [focus] (1-4 of 50):") {
+		t.Errorf("View() = %q, want the backlog label to show \"(1-4 of 50)\"", out)
+	}
+
+	m = Update(m, ScrollMsg{Delta: 5})
+	out = View(m)
+	if !strings.Contains(out, "backlog [focus] (6-9 of 50):") {
+		t.Errorf("View() = %q, want the backlog label to show \"(6-9 of 50)\" after scrolling", out)
+	}
+}
+
+// TestView_QueueColumn_ShowsPositionIndicator verifies the picks column
+// label carries the same position indicator as the backlog column, and that
+// it is absent when the queue is empty rather than reading "(1-0 of 0)"
+// (issue #1037 AC3/AC4).
+func TestView_QueueColumn_ShowsPositionIndicator(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	m = Update(m, FocusToggleMsg{})
+	picks := make([]Pick, 50)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
+	}
+	m.Picks = picks
+
+	out := View(m)
+	if !strings.Contains(out, "picks [focus] (1-4 of 50):") {
+		t.Errorf("View() = %q, want the picks label to show \"(1-4 of 50)\"", out)
+	}
+
+	empty := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	out = View(empty)
+	if !strings.Contains(out, "picks:") || strings.Contains(out, "picks (") {
+		t.Errorf("View() = %q, want the picks label with no position indicator when empty", out)
+	}
+}
+
 // TestView_LongBacklog_WithRefreshError_HeaderStaysPinned verifies the
 // trailing "refresh failed" line is budgeted the same way prompt lines are —
 // a long backlog plus a refresh error must not together push the header off

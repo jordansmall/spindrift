@@ -212,7 +212,12 @@ func TestTea_CursorKeys_MoveHighlightedRow(t *testing.T) {
 
 // TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor verifies pgdown/
 // pgup move the focused backlog column's viewport directly, independent of
-// the cursor, revealing and restoring rows past the fold (issue #1036 AC2).
+// the cursor, revealing and restoring rows past the fold, by a full page —
+// one viewport-height worth of rows, derived from the live viewport rather
+// than a fixed constant (issue #1036 AC2, issue #1037 AC1/AC2). At Width 80/
+// Height 10 the backlog column's item budget is 5 rows (verified empirically
+// against bodyColumnBudgets/columnItemBudget), so one pgdown lands the
+// viewport on row 5.
 func TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor(t *testing.T) {
 	f := forge.NewFake()
 	for i := 0; i < 50; i++ {
@@ -223,10 +228,83 @@ func TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor(t *testing.T) {
 	waitForOutput(t, tm, "> #0")
 
 	sendKey(tm, "pgdown")
-	waitForOutput(t, tm, "#10  issue 10")
+	waitForOutput(t, tm, "#5  issue 5")
 
 	sendKey(tm, "pgup")
 	waitForOutput(t, tm, "> #0")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_ScrollKeys_PageSizeTracksViewportHeight verifies the page jump's
+// size tracks the current viewport height rather than a value fixed at
+// startup: the same pgdown that lands on row 5 at Height 10 lands on a later
+// row once the terminal is taller and the backlog column can fit more rows
+// per screen, so paging stays a full page after a resize (issue #1037 AC2).
+func TestTea_ScrollKeys_PageSizeTracksViewportHeight(t *testing.T) {
+	f := forge.NewFake()
+	for i := 0; i < 50; i++ {
+		f.SetIssue(forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i), State: forge.IssueOpen})
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10))
+	waitForOutput(t, tm, "> #0")
+
+	tm.Send(tea.WindowSizeMsg{Width: 80, Height: 20})
+	waitForOutput(t, tm, "> #0")
+
+	// A page size still fixed at the Height-10 item budget (5) would land on
+	// row 5; still fixed at the pre-#1037 constant (10) would land on row 10
+	// and its window would run out at row 23. Row 25 is visible only once the
+	// page jump uses the taller terminal's own item budget (15, landing the
+	// viewport at offset 15, rows 15-28).
+	sendKey(tm, "pgdown")
+	waitForOutput(t, tm, "#25  issue 25")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_ScrollKeys_PageDownClampsAtBacklogEnd verifies repeated pgdown
+// presses stop advancing once the viewport reaches the end of the backlog
+// instead of scrolling past it, surfacing the last row (issue #1037 AC1).
+func TestTea_ScrollKeys_PageDownClampsAtBacklogEnd(t *testing.T) {
+	f := forge.NewFake()
+	for i := 0; i < 12; i++ {
+		f.SetIssue(forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i), State: forge.IssueOpen})
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10))
+	waitForOutput(t, tm, "> #0")
+
+	for i := 0; i < 10; i++ {
+		sendKey(tm, "pgdown")
+	}
+	waitForOutput(t, tm, "issue 11")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_ScrollKeys_PageThroughQueueWhenFocused verifies pgdown pages the
+// work-queue column's viewport instead of the backlog's once Tab has moved
+// focus there — paging works for whichever body column is focused (issue
+// #1037 AC4).
+func TestTea_ScrollKeys_PageThroughQueueWhenFocused(t *testing.T) {
+	f := forge.NewFake()
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	for i := 0; i < 50; i++ {
+		launch.Queue.Add(Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued})
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 10))
+	waitForOutput(t, tm, "pick 0")
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "picks [focus]")
+
+	sendKey(tm, "pgdown")
+	waitForOutput(t, tm, "#5  [queued]  pick 5")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
@@ -706,9 +784,9 @@ func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
 
 	sendKey(tm, "p")
 	// "  #42" (queue row's two-space indent) proves the pick landed on the
-	// work-queue column — the "picks:" label itself is static now (issue
-	// #844) and Bubble Tea never redraws an unchanged line, so it wouldn't
-	// reappear in this second WaitFor's freshly-read bytes.
+	// work-queue column — asserting on the row itself rather than the
+	// "picks:" label, whose position indicator (issue #1037) now varies with
+	// the queue's row count instead of staying fixed text.
 	waitForOutput(t, tm, "  #42", "fix the thing")
 
 	sendKey(tm, "q")
@@ -954,7 +1032,7 @@ func TestTea_UnpickKey_RemovesQueuedHighlighted(t *testing.T) {
 	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "picks:", "queued")
+	waitForOutput(t, tm, "picks (1-1 of 1):", "queued")
 
 	sendKey(tm, "u")
 	sendKey(tm, "q")
