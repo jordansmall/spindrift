@@ -59,7 +59,8 @@
   # Non-secret run config baked into the `run` command as its built-in defaults;
   # a matching env var still wins at runtime, so one build can be re-pointed.
   defaults ? { },
-  # Container runtime the launcher commands drive: "podman" (default) or "docker".
+  # Container runtime the launcher commands drive: "podman" (default), "docker",
+  # or "rancher" (Rancher Desktop containerd mode; invokes nerdctl).
   runtime ? "podman",
   # The agent CLI Driver (ADR 0009): a build-time choice selecting one entry
   # from the lib/drivers/ registry, baked into the image (in-box half) and
