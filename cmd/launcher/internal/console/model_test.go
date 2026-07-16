@@ -380,6 +380,23 @@ func TestUpdate_DrillInScrollMsg_ClampsToViewportHeight(t *testing.T) {
 	}
 }
 
+// TestUpdate_DrillInScrollMsg_ShortTranscriptStaysAtTop verifies a pgdown
+// past the end of a transcript shorter than the fullscreen viewport lands
+// Offset at 0, not len(Lines)-1 — content that already fits the viewport in
+// full at Offset 0 must never get pushed to a higher Offset that shows only
+// its last line over an otherwise-blank pane (issue #829).
+func TestUpdate_DrillInScrollMsg_ShortTranscriptStaysAtTop(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
+
+	m = Update(m, DrillInScrollMsg{Delta: 1000})
+
+	if m.DrillIn.Offset != 0 {
+		t.Errorf("Offset = %d, want 0 (content already fits the viewport)", m.DrillIn.Offset)
+	}
+}
+
 // TestUpdate_DrillInScrollMsg_NoOpWhenNoDrillInOpen verifies scrolling with
 // no transcript open does not panic or fabricate a DrillIn state.
 func TestUpdate_DrillInScrollMsg_NoOpWhenNoDrillInOpen(t *testing.T) {
