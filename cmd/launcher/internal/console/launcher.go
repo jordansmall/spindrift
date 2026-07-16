@@ -148,8 +148,7 @@ func (l *Launcher) OrphanedIssues() ([]string, error) {
 // count sinks under the new cap on its own (ADR 0023) -- Terminate remains
 // the only way a running Dispatch dies by hand.
 func (l *Launcher) Resize(delta int) {
-	lim := l.limiter()
-	lim.Resize(lim.Cap() + delta)
+	l.limiter().ResizeDelta(delta)
 }
 
 // registry lazily constructs l.terminated and, the first time, wires it into
