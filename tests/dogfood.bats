@@ -8,10 +8,12 @@
 
 load helper
 
-# Replaces the fake nix with one that exits $1 on `nix run .# -- dispatch` calls and
-# exits 0 on all other nix calls (build, etc.).
+# Replaces the fake nix with one that exits $1 on `nix run .# -- $2` calls
+# (dispatch kind, defaulting to "dispatch") and exits 0 on all other nix
+# calls (build, etc.).
 _install_exit_code_nix() {
   local code="$1"
+  local kind="${2:-dispatch}"
   local shebang
   shebang="$(head -n1 "$FAKE_BIN/nix")"
   {
@@ -19,7 +21,7 @@ _install_exit_code_nix() {
     cat <<EOF
 : "\${NIX_LOG:?NIX_LOG must point at a log file}"
 printf '%s\n' "\$*" >>"\$NIX_LOG"
-if printf '%s ' "\$@" | grep -q -- '-- dispatch'; then
+if printf '%s ' "\$@" | grep -q -- '-- $kind'; then
   exit $code
 fi
 exit 0
@@ -151,21 +153,7 @@ setup() {
 }
 
 @test "DOGFOOD_KIND=research runs research instead of dispatch" {
-  local shebang
-  shebang="$(head -n1 "$FAKE_BIN/nix")"
-  {
-    printf '%s\n' "$shebang"
-    cat <<EOF
-: "\${NIX_LOG:?NIX_LOG must point at a log file}"
-printf '%s\n' "\$*" >>"\$NIX_LOG"
-if printf '%s ' "\$@" | grep -q -- '-- research'; then
-  exit 2
-fi
-exit 0
-EOF
-  } >"$FAKE_BIN/nix.tmp"
-  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
-  chmod +x "$FAKE_BIN/nix"
+  _install_exit_code_nix 2 research
 
   run timeout 15 env BASE_BRANCH=main DOGFOOD_KIND=research bash "$WORK/dogfood.sh"
   [ "$status" -eq 0 ]
