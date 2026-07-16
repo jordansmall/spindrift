@@ -374,3 +374,50 @@ func TestLauncher_Rebuild_MarksRebuildingWhileInFlight(t *testing.T) {
 		t.Error("Rebuilding = true after RebuildFn returned, want false")
 	}
 }
+
+// TestLauncher_Rebuild_Retry_ClearsPriorErrorImmediately verifies a retry's
+// Rebuild call clears the previous attempt's rebuildErr as soon as the
+// launch guard passes, not only once the retry's own RebuildFn returns —
+// otherwise StaleStatus briefly reports rebuilding=true alongside the stale
+// error from the prior failed attempt (issue #760).
+func TestLauncher_Rebuild_Retry_ClearsPriorErrorImmediately(t *testing.T) {
+	release := make(chan struct{})
+	var calls atomic.Int32
+	launch := &Launcher{
+		Queue: NewQueue(),
+		Fresh: func() (bool, bool, string) { return true, false, "rebuild needed" },
+		RebuildFn: func() error {
+			if calls.Add(1) == 1 {
+				return errBoom
+			}
+			<-release
+			return nil
+		},
+	}
+
+	launch.Rebuild(nil, "")
+	launch.Wait()
+	if _, _, _, rebuildErr := launch.StaleStatus(); rebuildErr != errBoom.Error() {
+		t.Fatalf("rebuildErr after first attempt = %q, want %q", rebuildErr, errBoom.Error())
+	}
+
+	launch.Rebuild(nil, "")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, _, rebuilding, _ := launch.StaleStatus(); rebuilding {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("retry's Rebuilding never observed true")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if _, _, rebuilding, rebuildErr := launch.StaleStatus(); !rebuilding || rebuildErr != "" {
+		t.Errorf("StaleStatus mid-retry = rebuilding:%v rebuildErr:%q, want rebuilding:true rebuildErr:\"\"", rebuilding, rebuildErr)
+	}
+
+	close(release)
+	launch.Wait()
+}
