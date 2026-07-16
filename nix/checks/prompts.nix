@@ -87,11 +87,16 @@ in
   # *same-source* contract slice -- it never asserts the slice says the right
   # thing. A source regression from `landing=` back to the pre-#638 `pr=`
   # grammar would still pass that diff, since both sides would drift
-  # together. Pin the literal token directly (issue #654).
+  # together. Pin the literal token directly (issue #654). Anchor the token
+  # to the SPINDRIFT_OUTCOME line itself (not `^`, since the CODE_FORGE=git
+  # example line is indented inside a fenced code block) -- an unanchored
+  # grep would still pass if the real outcome line regressed to `pr=` while
+  # some unrelated prose in the slice happened to mention "landing="
+  # (issue #886).
   mkharness-prompt-outcome-contract-has-landing-token =
     pkgs.runCommand "mkharness-prompt-outcome-contract-has-landing-token" { }
       ''
-        grep -q 'landing=' ${batsHarness.outcomeContractFile}
+        grep -qE 'SPINDRIFT_OUTCOME.*landing=' ${batsHarness.outcomeContractFile}
         touch $out
       '';
 
@@ -273,11 +278,12 @@ in
       '';
 
   # Same gap as mkharness-prompt-outcome-contract-has-landing-token, for the
-  # research kind's own contract (issue #654).
+  # research kind's own contract (issue #654), including the same
+  # SPINDRIFT_OUTCOME anchoring fix (issue #886).
   mkharness-prompt-research-outcome-contract-has-landing-token =
     pkgs.runCommand "mkharness-prompt-research-outcome-contract-has-landing-token" { }
       ''
-        grep -q 'landing=' ${batsHarness.researchOutcomeContractFile}
+        grep -qE 'SPINDRIFT_OUTCOME.*landing=' ${batsHarness.researchOutcomeContractFile}
         touch $out
       '';
 
