@@ -440,16 +440,27 @@ func (t teaModel) highlightedNumber() string {
 	return visible[t.m.Cursor].Number
 }
 
-// alreadyActive reports whether num already has a non-terminal row on
-// Model.Picks (queued, held, claiming, or running) — Queue's row-scan
-// helpers (setState, tryMarkClaiming) both assume at most one non-terminal
-// row per issue number, scanning back-to-front for "the" live row; landing
-// a second one for a number that's still active leaves the older row stuck
-// forever and can hang the drain loop (issue #785 review). A terminal row
-// (settled, dissolved, terminated, failed) never blocks a fresh pick —
-// that's the legitimate re-pick/adopt path ADR 0024 describes.
+// alreadyActive reports whether num already has a non-terminal row (queued,
+// held, claiming, or running) — Queue's row-scan helpers (setState,
+// tryMarkClaiming) both assume at most one non-terminal row per issue
+// number, scanning back-to-front for "the" live row; landing a second one
+// for a number that's still active leaves the older row stuck forever and
+// can hang the drain loop (issue #785 review). A terminal row (settled,
+// dissolved, terminated, failed) never blocks a fresh pick — that's the
+// legitimate re-pick/adopt path ADR 0024 describes.
+//
+// When a launch is live, this reads t.launch.Queue.Snapshot() directly —
+// mirroring isLive's own live read a few lines up — rather than Model.Picks,
+// which is only refreshed once per Update via syncQueue and so can still show
+// a row's pre-drain state for the rest of that same keypress's handling
+// (issue #837). A nil launch has no live Queue to read, so it falls back to
+// Model.Picks, matching the pre-#785 no-launch Console path.
 func (t teaModel) alreadyActive(num string) bool {
-	for _, p := range t.m.Picks {
+	picks := t.m.Picks
+	if t.launch != nil {
+		picks = t.launch.Queue.Snapshot()
+	}
+	for _, p := range picks {
 		if p.Number != num {
 			continue
 		}

@@ -1071,6 +1071,29 @@ func TestTea_PickKey_AlreadyPicked_NoDuplicateRow(t *testing.T) {
 	}
 }
 
+// TestTea_AlreadyActive_ReadsLiveQueueSnapshot verifies alreadyActive
+// consults the launcher's live Queue, not the last-synced Model.Picks, when
+// a launch is present — a background drain can settle a row on Queue
+// between two Update calls, and until the next syncQueue catches up,
+// Model.Picks still shows the old non-terminal state (issue #837).
+func TestTea_AlreadyActive_ReadsLiveQueueSnapshot(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	tm := newTeaModel(f, t.TempDir(), launch)
+
+	// Stale Model.Picks still shows #42 as running (as of the last sync)...
+	tm.m.Picks = append(tm.m.Picks, Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	// ...but the live Queue has since settled it in the background, with no
+	// intervening syncQueue to refresh Model.Picks.
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickSettled})
+
+	if tm.alreadyActive("42") {
+		t.Errorf("alreadyActive(%q) = true, want false — live Queue shows settled, only the stale Model.Picks snapshot shows running", "42")
+	}
+}
+
 // TestTea_PickKey_FailedPromotion_SurvivesQueueResync verifies a raced/
 // closed/relabeled promotion's dissolved row stays on screen — the launcher's
 // own per-render Queue resync (syncQueue) must not silently wipe it just
