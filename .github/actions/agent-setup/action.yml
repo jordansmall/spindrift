@@ -64,6 +64,32 @@ runs:
         echo "GIT_USER_NAME=${{ inputs.git-user-name || 'spindrift-agent' }}" >> "$GITHUB_ENV"
         echo "GIT_USER_EMAIL=${{ inputs.git-user-email || 'spindrift-agent@users.noreply.github.com' }}" >> "$GITHUB_ENV"
 
+    # Rate-limit smoke test: before the claim write below and the ~2m40s Nix
+    # build, confirm the minted token authenticates and its GitHub API bucket
+    # has headroom. The launcher makes many GitHub calls per run — label edits,
+    # PR create, check polls, rebase-merge — so a near-exhausted bucket dies
+    # mid-run *after* the build is already spent; failing here aborts cheaply
+    # and hands the operator a clean "rate limit" reason instead of a confusing
+    # claim/merge failure downstream. `gh api rate_limit` does not itself draw
+    # down the core quota, so the preflight is free. GH_TOKEN comes from the
+    # env export above.
+    - name: Rate-limit smoke test
+      shell: bash
+      env:
+        # Floor below which starting a run risks mid-run exhaustion — the
+        # label edits, PR create, check polls, and merge all draw this bucket.
+        MIN_CORE_REMAINING: "100"
+      run: |
+        core=$(gh api rate_limit --jq '.resources.core | "\(.remaining) \(.limit) \(.reset)"')
+        read -r remaining limit reset <<<"$core"
+        printf 'GitHub core rate limit: %s/%s remaining (resets %s UTC)\n' \
+          "$remaining" "$limit" \
+          "$(date -u -d "@$reset" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$reset")"
+        if [ "$remaining" -lt "$MIN_CORE_REMAINING" ]; then
+          echo "::error::GitHub core rate limit critically low (${remaining} < ${MIN_CORE_REMAINING}); aborting before build. Re-trigger after the window resets." >&2
+          exit 1
+        fi
+
     # Claim up front, before nix install and the ~2m40s build, so ownership
     # is atomic and visible the instant the runner has the repo. Targets
     # only the triggering issue: never scans or strips labels across other

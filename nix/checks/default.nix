@@ -32,6 +32,7 @@ let
     // (import ./prompts.nix common)
     // (import ./schema-drift.nix common)
     // (import ./dispatch-labels.nix common)
+    // (import ./agent-workflow-smoke.nix common)
     // (import ./changelog.nix common)
     // (import ./go.nix common);
 
