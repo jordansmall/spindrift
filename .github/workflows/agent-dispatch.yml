@@ -42,14 +42,25 @@ jobs:
       # Claim (agent-trigger -> agent-in-progress, up front so ownership is
       # atomic before the ~2m40s build), Install Nix, and build — plus the
       # shared env block (RUNTIME, REPO_SLUG, BASE_BRANCH, tokens, bot
-      # identity) written to $GITHUB_ENV for every step below. The
-      # SPINDRIFT_GH_TOKEN secret is a fine-grained PAT scoped to this repo:
-      # Issues RW, Contents RW, Pull requests RW, Metadata R — the default
-      # GITHUB_TOKEN is not enough (the launcher merges PRs).
+      # identity) written to $GITHUB_ENV for every step below. Auth is the
+      # worker GitHub App (SPINDRIFT_AGENT_WORKER_APP_*), granted Issues RW,
+      # Contents RW, Pull requests RW, Workflows RW, Checks R, Commit statuses
+      # R, Metadata R — the default GITHUB_TOKEN is not enough (the launcher
+      # merges PRs). Minting the App below yields a short-lived installation
+      # token on a per-installation rate-limit bucket, isolated from any
+      # personal PAT. The token expires ~1h after minting; long Boxes need
+      # refresh handled separately (see the long-run token issue).
+      - name: Mint worker App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.SPINDRIFT_AGENT_WORKER_APP_ID }}
+          private-key: ${{ secrets.SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY }}
+
       - name: Agent setup
         uses: ./.github/actions/agent-setup
         with:
-          gh-token: ${{ secrets.SPINDRIFT_GH_TOKEN }}
+          gh-token: ${{ steps.app-token.outputs.token }}
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           issue-number: ${{ github.event.issue.number }}
           repo: ${{ github.repository }}
