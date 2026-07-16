@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 const testReconcilePR = "https://github.com/owner/repo/pull/77"
@@ -64,7 +65,7 @@ func TestRecoverByNumber_DraftPRSkipped(t *testing.T) {
 
 	dir := tempLogDir(t)
 	var err error
-	out := captureStdout(t, func() {
+	out := testutil.CaptureStdout(t, func() {
 		err = recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, fc), "42")
 	})
 
