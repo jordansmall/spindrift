@@ -1,6 +1,7 @@
 package console
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -732,6 +733,30 @@ func TestView_LongPicksQueue_HeaderStaysPinnedAndShowsMoreBelow(t *testing.T) {
 	}
 	if !strings.Contains(out, "more below") {
 		t.Errorf("View() = %q, want a \"more below\" affordance line", out)
+	}
+}
+
+// TestView_LongBacklog_WithRefreshError_HeaderStaysPinned verifies the
+// trailing "refresh failed" line is budgeted the same way prompt lines are —
+// a long backlog plus a refresh error must not together push the header off
+// the top, or push the body's own budget past what actually renders (issue
+// #1035 AC1/AC2 review finding).
+func TestView_LongBacklog_WithRefreshError_HeaderStaysPinned(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	issues := make([]forge.Issue, 20)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+	m = Update(m, IssuesLoadedMsg{Err: errors.New("boom")})
+
+	out := View(m)
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) > m.Height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — a refresh error must not push the header off", len(lines), m.Height)
+	}
+	if !strings.Contains(out, "running 0/0") {
+		t.Errorf("View() = %q, want the header status line present", out)
 	}
 }
 

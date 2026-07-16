@@ -26,20 +26,27 @@ func View(m Model) string {
 	var b strings.Builder
 	header := renderHeader(m)
 	b.WriteString(header)
-	promptLines := 0
+	reservedLines := 0
 	if m.FilterEditing {
 		fmt.Fprintf(&b, "/%s  [enter] apply · [esc] cancel\n", m.Filter)
-		promptLines++
+		reservedLines++
 	}
 	if m.PendingTerminate != "" {
 		fmt.Fprintf(&b, "terminate #%s? [y/N]\n", m.PendingTerminate)
-		promptLines++
+		reservedLines++
 	}
 	if m.PendingQuit {
 		b.WriteString("quit with live Dispatches: drain (d, default) / terminate-all (t) / stay (s)?\n")
-		promptLines++
+		reservedLines++
 	}
-	budget := m.Height - strings.Count(header, "\n") - promptLines
+	if m.Err != nil {
+		// The refresh-error line renders after the body (below), but must
+		// still be subtracted from budget up front or a long list plus an
+		// error together overflow Height by one line (issue #1035 review
+		// finding).
+		reservedLines++
+	}
+	budget := m.Height - strings.Count(header, "\n") - reservedLines
 	if budget < 0 {
 		budget = 0
 	}
@@ -62,7 +69,7 @@ const minTwoColumnWidth = 60
 // row than the backlog, so it gets the larger share of a wide terminal.
 const leftColumnFraction = 2.0 / 5.0
 
-// unboundedBudget is a row budget large enough that windowRows never
+// unboundedBudget is a row budget large enough that writeWindowedRows never
 // truncates — passed by the docked and floating drill-in panes (issue #846,
 // ADR 0025), which predate per-render body windowing and keep their
 // existing unwindowed behavior (issue #1035 is scoped to the plain
