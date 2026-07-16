@@ -606,7 +606,9 @@ func TestTea_PaneModeKey_CyclesDockedFloatingFullscreen(t *testing.T) {
 
 // TestTea_DrillInScrollKeys_PageThroughTranscript verifies pgdown/pgup move
 // the drill-in pane's scroll offset, hiding and restoring the leading lines
-// (issue #786).
+// (issue #786). The transcript has to outrun the 24-row test terminal's
+// fullscreen budget, or clampDrillInOffset's viewport cap (issue #829) pins
+// Offset at 0 as a real no-op and pgdown never produces a fresh frame.
 func TestTea_DrillInScrollKeys_PageThroughTranscript(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -616,7 +618,7 @@ func TestTea_DrillInScrollKeys_PageThroughTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	var lines strings.Builder
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 50; i++ {
 		fmt.Fprintf(&lines, `{"type":"assistant","message":{"content":[{"type":"text","text":"line-%02d"}]}}`+"\n", i)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(lines.String()), 0o644); err != nil {

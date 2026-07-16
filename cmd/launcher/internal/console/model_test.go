@@ -3,6 +3,7 @@ package console
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -354,6 +355,28 @@ func TestUpdate_DrillInScrollMsg_MovesOffset(t *testing.T) {
 	m = Update(m, DrillInScrollMsg{Delta: 100})
 	if m.DrillIn.Offset != 4 {
 		t.Errorf("Offset = %d, want 4 (clamped to the last line)", m.DrillIn.Offset)
+	}
+}
+
+// TestUpdate_DrillInScrollMsg_ClampsToViewportHeight verifies a pgdown past
+// the end of a transcript longer than the fullscreen viewport lands Offset
+// at the last full page, not len(Lines)-1 — a large Delta must never leave
+// the pane showing a single line with the rest of the viewport blank
+// (issue #829).
+func TestUpdate_DrillInScrollMsg_ClampsToViewportHeight(t *testing.T) {
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
+	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+
+	m = Update(m, DrillInScrollMsg{Delta: 1000})
+
+	want := 100 - (20 - 2) // last page fills the 18-line fullscreen budget
+	if m.DrillIn.Offset != want {
+		t.Errorf("Offset = %d, want %d (last page fills viewport)", m.DrillIn.Offset, want)
 	}
 }
 
