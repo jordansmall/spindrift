@@ -113,6 +113,15 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 	return nil, nil, nil, nil
 }
 
+// Empty reports whether the queue has no pick left to launch — none at
+// PickQueued or PickHeld. tryLaunch (launcher.go) gates its drain spawn on
+// this: unlike hasQueued, a held pick counts as non-empty, since its
+// blocker may have cleared out-of-band and it still needs a launch attempt
+// on the next call (#650).
+func (q *Queue) Empty() bool {
+	return len(q.claimable()) == 0
+}
+
 // claimable returns a snapshot, in queue order, of every pick still
 // eligible to launch — queued or already held (re-evaluated every refill).
 func (q *Queue) claimable() []Pick {
