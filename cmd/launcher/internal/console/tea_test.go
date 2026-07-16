@@ -963,8 +963,13 @@ func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
 	// "  #42" (queue row's two-space indent) proves the pick landed on the
 	// work-queue column — asserting on the row itself rather than the
 	// "picks:" label, whose position indicator (issue #1037) now varies with
-	// the queue's row count instead of staying fixed text.
-	waitForOutput(t, tm, "  #42", "fix the thing")
+	// the queue's row count instead of staying fixed text. "settled 1" in
+	// the same wait proves the fake Dispatch has also finished — otherwise
+	// "q" can race the still-live pick and land on the quit confirm (issue
+	// #822) instead of exiting, hanging until teatest's timeout (same race
+	// TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue already guards
+	// against).
+	waitForOutput(t, tm, "  #42", "fix the thing", "settled 1")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
