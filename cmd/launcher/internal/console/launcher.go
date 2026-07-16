@@ -342,8 +342,9 @@ func (l *Launcher) tryLaunch(tracker forge.IssueTracker, pwd string) {
 
 // drain runs waves.RunContinuous to completion, then — still holding
 // l.mu — checks Queue for a pick that landed too late for that run's last
-// discover() to see (RunContinuous returns as soon as its wg count hits
-// zero, with no listener for a subsequent Add). Finding one re-drains
+// discover() to see (RunContinuous returns as soon as its outstanding count
+// of in-flight Boxes drops to zero and the idle cond wakes it, with no
+// listener for a subsequent increment). Finding one re-drains
 // immediately instead of clearing l.launching, so a concurrent tryLaunch
 // call racing this same window can never observe l.launching==true with
 // nothing left to pick it up — either this loop sees the new pick, or its
