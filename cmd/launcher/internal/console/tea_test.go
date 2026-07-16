@@ -1529,7 +1529,14 @@ func newTestLauncher(t *testing.T, cf forge.CodeForge) *Launcher {
 		t.Fatalf("dispatch.NewFactory: %v", err)
 	}
 	t.Cleanup(factory.Cleanup)
-	return &Launcher{CodeForge: cf, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	launch := &Launcher{CodeForge: cf, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	// Cleanup runs LIFO, so this drains any in-flight background dispatch
+	// before factory.Cleanup releases its resources — an un-joined drain
+	// goroutine otherwise keeps running (and printing) after the test that
+	// spawned it returns, stealing scheduler time from whatever teatest-based
+	// test runs next and risking its own tight WithDuration deadline.
+	t.Cleanup(launch.Wait)
+	return launch
 }
 
 // TestTea_Update_ReusesHeartbeatCacheAcrossCalls verifies the tea layer's
