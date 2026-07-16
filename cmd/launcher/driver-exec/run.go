@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -57,6 +58,7 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 	// devShell failure doesn't kill the run; a genuine task failure (which
 	// always writes something to the stream) is left to propagate untouched.
 	if cfg.devshell && rc != 0 && logFileEmpty(cfg.logPath) {
+		fmt.Fprintf(os.Stderr, "==> nix develop failed to launch Driver (rc=%d, empty stream) — relaunching in baked env\n", rc)
 		direct := cfg
 		direct.devshell = false
 		rc, err = runOnce(direct, w)

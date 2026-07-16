@@ -50,6 +50,26 @@ func writeFakeDriver(t *testing.T, dir, name, body string) string {
 	return path
 }
 
+// captureStderr swaps os.Stderr for a pipe for the duration of fn, so a test
+// can assert on what runOnce's hardcoded cmd.Stderr = os.Stderr wrote.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	fn()
+	os.Stderr = orig
+	w.Close()
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
 // TestRunDirectModePropagatesExitCode verifies driver-exec returns the
 // Driver's own exit code unchanged when run directly (no devShell), the
 // simplest of the pipeline's invariants to preserve (issue #626).
@@ -244,11 +264,47 @@ func TestRunDoesNotRelaunchWhenDevshellStreamIsNonEmpty(t *testing.T) {
 		issue:        "7",
 	}
 	var stdout bytes.Buffer
-	rc, err := run(cfg, &stdout)
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
+	var rc int
+	stderr := captureStderr(t, func() {
+		var runErr error
+		rc, runErr = run(cfg, &stdout)
+		if runErr != nil {
+			t.Fatalf("run: %v", runErr)
+		}
+	})
 	if rc != 3 {
 		t.Errorf("exit code = %d, want 3 (the devShell run's own exit code, no relaunch)", rc)
+	}
+	if strings.Contains(stderr, "relaunching in baked env") {
+		t.Errorf("stderr = %q, want no relaunch observability line for a genuine task failure", stderr)
+	}
+}
+
+// TestRunLogsObservabilityEventOnRelaunch verifies driver-exec restores the
+// observability line dropped in the bash->Go port (issue #797): when the
+// relaunch-on-empty-stream branch fires, it must log to stderr (the same
+// channel runOnce wires the Driver's own cmd.Stderr to) so operators tailing
+// the Box log see why the Driver output changed.
+func TestRunLogsObservabilityEventOnRelaunch(t *testing.T) {
+	dir := t.TempDir()
+	bin := writeFakeDriver(t, dir, "fake-driver", `printf '{"type":"result"}\n'`+"\nexit 0\n")
+	writeFakeNixLaunchFail(t, dir)
+
+	cfg := execConfig{
+		driverBin:    bin,
+		devshell:     true,
+		devshellName: "default",
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		issue:        "7",
+	}
+	var stdout bytes.Buffer
+	stderr := captureStderr(t, func() {
+		if _, err := run(cfg, &stdout); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "relaunching in baked env") {
+		t.Errorf("stderr = %q, want a relaunch observability line", stderr)
 	}
 }
