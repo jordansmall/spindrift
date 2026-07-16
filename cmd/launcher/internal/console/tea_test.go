@@ -212,12 +212,13 @@ func TestTea_CursorKeys_MoveHighlightedRow(t *testing.T) {
 
 // TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor verifies pgdown/
 // pgup move the focused backlog column's viewport directly, independent of
-// the cursor, revealing and restoring rows past the fold, by a full page —
-// one viewport-height worth of rows, derived from the live viewport rather
-// than a fixed constant (issue #1036 AC2, issue #1037 AC1/AC2). At Width 80/
-// Height 10 the backlog column's item budget is 5 rows (verified empirically
-// against bodyColumnBudgets/columnItemBudget), so one pgdown lands the
-// viewport on row 5.
+// the cursor, revealing and restoring rows past the fold, by exactly one
+// screenful of rendered rows — derived from the live viewport rather than a
+// fixed constant (issue #1036 AC2, issue #1037 AC1/AC2). At Width 80/Height
+// 10 the backlog column's item budget is 5, but only 4 of those rows render
+// as content at offset 0 (the 5th is held back for the "N more below" line),
+// so one pgdown must land the viewport on row 4 — landing on row 5 would
+// silently skip row 4, the exact row right past the fold.
 func TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor(t *testing.T) {
 	f := forge.NewFake()
 	for i := 0; i < 50; i++ {
@@ -228,7 +229,7 @@ func TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor(t *testing.T) {
 	waitForOutput(t, tm, "> #0")
 
 	sendKey(tm, "pgdown")
-	waitForOutput(t, tm, "#5  issue 5")
+	waitForOutput(t, tm, "#4  issue 4")
 
 	sendKey(tm, "pgup")
 	waitForOutput(t, tm, "> #0")
@@ -254,13 +255,37 @@ func TestTea_ScrollKeys_PageSizeTracksViewportHeight(t *testing.T) {
 	tm.Send(tea.WindowSizeMsg{Width: 80, Height: 20})
 	waitForOutput(t, tm, "> #0")
 
-	// A page size still fixed at the Height-10 item budget (5) would land on
-	// row 5; still fixed at the pre-#1037 constant (10) would land on row 10
-	// and its window would run out at row 23. Row 25 is visible only once the
-	// page jump uses the taller terminal's own item budget (15, landing the
-	// viewport at offset 15, rows 15-28).
+	// A page size still stuck on the Height-10 window (landing around row 4)
+	// or the pre-#1037 fixed constant (10, landing its window at rows 10-23)
+	// would never surface row 25. It's visible only once the page jump uses
+	// the taller terminal's own item budget, landing the viewport around
+	// offset 14 (rows 14-27).
 	sendKey(tm, "pgdown")
 	waitForOutput(t, tm, "#25  issue 25")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_ScrollKeys_PageDown_SkipsNoRow verifies two consecutive pgdown
+// presses expose every row in between — a page size computed from the raw
+// item budget instead of the rendered content-row count would overshoot the
+// "N more below" line held back at each truncated screen and silently skip
+// the row right past the fold on every page boundary (issue #1037 AC1).
+func TestTea_ScrollKeys_PageDown_SkipsNoRow(t *testing.T) {
+	f := forge.NewFake()
+	for i := 0; i < 50; i++ {
+		f.SetIssue(forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i), State: forge.IssueOpen})
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10))
+	waitForOutput(t, tm, "> #0")
+
+	sendKey(tm, "pgdown")
+	waitForOutput(t, tm, "#4  issue 4")
+
+	sendKey(tm, "pgdown")
+	waitForOutput(t, tm, "#8  issue 8")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
@@ -304,7 +329,7 @@ func TestTea_ScrollKeys_PageThroughQueueWhenFocused(t *testing.T) {
 	waitForOutput(t, tm, "picks [focus]")
 
 	sendKey(tm, "pgdown")
-	waitForOutput(t, tm, "#5  [queued]  pick 5")
+	waitForOutput(t, tm, "#4  [queued]  pick 4")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
