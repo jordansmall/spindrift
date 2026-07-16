@@ -728,6 +728,11 @@ func TestTea_StaleStatus_RendersBanner(t *testing.T) {
 	f := forge.NewFake()
 	launch := newTestLauncher(t, f)
 	launch.Fresh = func() (bool, bool, string) { return true, false, "rebuild needed" }
+	// A queued pick is what actually hits the stale gate in production
+	// (Rebuild's own doc comment: "any pick held ... through the stale
+	// window") — tryLaunch is a real no-op on an empty queue post-#754, so
+	// an empty-queue call here would never reach freshnessChecker at all.
+	launch.Queue.Add(Pick{Number: "1", Title: "placeholder", State: PickQueued})
 	launch.tryLaunch(f, t.TempDir())
 	launch.Wait()
 
@@ -1172,7 +1177,10 @@ func TestTea_RebuildKey_NotStale_NeverRunsRebuildFn(t *testing.T) {
 // in-session rebuild (issue #652 AC3, issue #785): RebuildFn runs and, on
 // success, the stale gate clears.
 func TestTea_RebuildKey_RunsRebuildFnAndClearsStale(t *testing.T) {
-	f := forge.NewFake()
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "1", Title: "placeholder", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "2", State: forge.IssueOpen})
+	f.NativeDeps = map[string][]string{"1": {"2"}}
 	rebuilt := make(chan struct{})
 	var stale atomic.Bool
 	stale.Store(true)
@@ -1191,6 +1199,14 @@ func TestTea_RebuildKey_RunsRebuildFnAndClearsStale(t *testing.T) {
 			return nil
 		},
 	}
+	// A queued pick is what actually hits the stale gate in production
+	// (Rebuild's own doc comment: "any pick held ... through the stale
+	// window") — tryLaunch is a real no-op on an empty queue post-#754, so
+	// an empty-queue call here would never reach freshnessChecker at all.
+	// It carries an open blocker so the post-rebuild re-drain (Rebuild
+	// calls tryLaunch again on success) holds it instead of actually
+	// launching a Box — this Launcher has no Factory to run one.
+	launch.Queue.Add(Pick{Number: "1", Title: "placeholder", State: PickQueued})
 	launch.tryLaunch(f, t.TempDir())
 	launch.Wait()
 
