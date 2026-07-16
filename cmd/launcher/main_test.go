@@ -437,6 +437,7 @@ func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 	for i := range patched {
 		if patched[i].env == "LABEL" {
 			patched[i].dflt = "custom-default-from-table"
+			break
 		}
 	}
 	withSchemaFlags(t, patched)
