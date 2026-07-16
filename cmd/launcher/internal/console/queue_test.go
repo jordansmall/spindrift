@@ -182,6 +182,9 @@ func TestQueue_Discover_FailedBlockerSurfacedPickStaysHeld(t *testing.T) {
 	if !strings.Contains(snap.Reason, "#41") || !strings.Contains(snap.Reason, "failed") {
 		t.Errorf("Reason = %q, want it to name #41 as a failed blocker", snap.Reason)
 	}
+	if !strings.Contains(snap.BlockedBy, "#41") {
+		t.Errorf("BlockedBy = %q, want it to also name #41 — View, not setHeld, is responsible for deduplicating the two (issue #755)", snap.BlockedBy)
+	}
 }
 
 // TestQueue_Discover_UnpickDuringClaimCheck_NeverLaunches verifies an Unpick
