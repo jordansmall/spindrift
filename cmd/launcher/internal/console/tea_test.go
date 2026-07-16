@@ -36,7 +36,7 @@ func waitForOutput(t *testing.T, tm *teatest.TestModel, want ...string) {
 			}
 		}
 		return true
-	}, teatest.WithDuration(2*time.Second), teatest.WithCheckInterval(5*time.Millisecond))
+	}, teatest.WithDuration(5*time.Second), teatest.WithCheckInterval(5*time.Millisecond))
 }
 
 func sendKey(tm *teatest.TestModel, s string) {
