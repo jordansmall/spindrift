@@ -533,6 +533,23 @@ func TestView_TwoColumn_Body_StacksOnNarrowTerminal(t *testing.T) {
 	}
 }
 
+// TestSplitStackedBudget_MatchesBodyColumnBudgets verifies bodyColumnBudgets
+// computes its stacked-mode split by calling the same splitStackedBudget
+// helper renderBody uses, rather than a second copy of the clamp-and-halve
+// arithmetic — the two must never be able to diverge (issue #1052).
+func TestSplitStackedBudget_MatchesBodyColumnBudgets(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
+	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
+
+	wantBacklog, wantQueue := splitStackedBudget(bodyBudget(m))
+	gotBacklog, gotQueue := bodyColumnBudgets(m)
+	if gotBacklog != wantBacklog || gotQueue != wantQueue {
+		t.Errorf("bodyColumnBudgets(m) = (%d, %d), want splitStackedBudget(bodyBudget(m)) = (%d, %d)",
+			gotBacklog, gotQueue, wantBacklog, wantQueue)
+	}
+}
+
 // TestView_NarrowTerminal_LongBacklog_HeaderStaysPinned verifies the
 // header's status line stays visible on a narrow (stacked-layout) terminal
 // too — the stacked backlog and picks columns must split the body's row
