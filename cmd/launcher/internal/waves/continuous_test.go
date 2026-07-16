@@ -486,7 +486,7 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		edges, sources, err := BuildEdges(fc, out)
+		edges, sources, _, err := BuildEdges(fc, out)
 		if err != nil {
 			return nil, nil, nil, err
 		}

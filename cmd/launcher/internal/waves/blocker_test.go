@@ -16,7 +16,7 @@ func TestBuildEdges_MultipleIssuesWithBlockers(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "3", Body: ""})
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
-	got, _, err := BuildEdges(fc, issues)
+	got, _, _, err := BuildEdges(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -35,7 +35,7 @@ func TestBuildEdges_NoBlockersOmitted(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "2", Body: ""})
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}}
-	got, _, err := BuildEdges(fc, issues)
+	got, _, _, err := BuildEdges(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -55,7 +55,7 @@ func TestBuildEdges_DepsOfErrorNonFatal(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "3", Body: "## Blocked by\n- #1"})
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
-	got, _, err := BuildEdges(fc, issues)
+	got, _, failed, err := BuildEdges(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -65,6 +65,9 @@ func TestBuildEdges_DepsOfErrorNonFatal(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
+	}
+	if !failed["2"] {
+		t.Errorf("failed = %v, want it to name issue 2 (its DepsOf call errored)", failed)
 	}
 }
 
@@ -81,7 +84,7 @@ func TestBuildEdges_MixedNativeAndBodySources(t *testing.T) {
 	fc.NativeDeps = map[string][]string{"1": {"3"}}
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
-	_, sources, err := BuildEdges(fc, issues)
+	_, sources, _, err := BuildEdges(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
