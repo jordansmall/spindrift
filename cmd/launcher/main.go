@@ -338,8 +338,8 @@ func loadConfig() config {
 		gitUserName:      gitIdentityField("GIT_USER_NAME", "user.name"),
 		gitUserEmail:     gitIdentityField("GIT_USER_EMAIL", "user.email"),
 
-		spindriftPromptDir: os.Getenv("SPINDRIFT_PROMPT_DIR"),
-		spindriftSkillsDir: os.Getenv("SPINDRIFT_SKILLS_DIR"),
+		spindriftPromptDir: getenvSchema("SPINDRIFT_PROMPT_DIR"),
+		spindriftSkillsDir: getenvSchema("SPINDRIFT_SKILLS_DIR"),
 
 		driverSkillsDir:       getenvArtifact("DRIVER_SKILLS_DIR", ""),
 		driverSessionCacheDir: getenvArtifact("DRIVER_SESSION_CACHE_DIR", ""),

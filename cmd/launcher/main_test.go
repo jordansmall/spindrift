@@ -394,6 +394,34 @@ func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_SpindriftDirsDefaultComesFromSchemaTable proves loadConfig()
+// sources spindriftPromptDir/spindriftSkillsDir defaults from the generated
+// schemaFlags table (issue #812) rather than raw os.Getenv, matching every
+// other flakeOption-adjacent knob in loadConfig().
+func TestLoadConfig_SpindriftDirsDefaultComesFromSchemaTable(t *testing.T) {
+	t.Cleanup(func() {
+		os.Unsetenv("SPINDRIFT_PROMPT_DIR")
+		os.Unsetenv("SPINDRIFT_SKILLS_DIR")
+	})
+	os.Unsetenv("SPINDRIFT_PROMPT_DIR")
+	os.Unsetenv("SPINDRIFT_SKILLS_DIR")
+
+	orig := schemaFlags
+	t.Cleanup(func() { schemaFlags = orig })
+	schemaFlags = []flagEntry{
+		{env: "SPINDRIFT_PROMPT_DIR", dflt: "custom-prompt-default"},
+		{env: "SPINDRIFT_SKILLS_DIR", dflt: "custom-skills-default"},
+	}
+
+	c := loadConfig()
+	if c.spindriftPromptDir != "custom-prompt-default" {
+		t.Errorf("spindriftPromptDir should come from schemaFlags table, got %q", c.spindriftPromptDir)
+	}
+	if c.spindriftSkillsDir != "custom-skills-default" {
+		t.Errorf("spindriftSkillsDir should come from schemaFlags table, got %q", c.spindriftSkillsDir)
+	}
+}
+
 // TestIntSchemaDefault covers intSchemaDefault directly: a numeric schema
 // default parses, a non-numeric one falls back to 0, and an absent key falls
 // back to 0 too (issue #672).
