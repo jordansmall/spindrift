@@ -43,6 +43,25 @@ setup() {
   [ "$output" = "agent/issue-7" ]
 }
 
+# --- research kind's log line does not claim to implement (issue #734) -----
+# A research dispatch never cuts, checks out, or pushes a branch, so its log
+# line must not say "implementing ... on $BRANCH".
+
+@test "research kind logs researching, not implementing, and names no branch" {
+  export DISPATCH_KIND="research"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "==> claude researching issue #7" <<<"$output"
+  ! grep -q "claude implementing issue" <<<"$output"
+  ! grep -q "on agent/issue-7" <<<"$output"
+}
+
+@test "DISPATCH_KIND unset (work) still logs implementing on the branch" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "==> claude implementing issue #7 on agent/issue-7" <<<"$output"
+}
+
 # --- research outcome-contract injection/idempotency (issue #640) ----------
 # Mirrors tests/entrypoint-outcome-contract.bats, for the research kind's own
 # outcome contract instead of the work "# LAND THE CHANGE" one.
