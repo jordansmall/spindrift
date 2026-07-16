@@ -1138,7 +1138,7 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 		}
 	}
 	out := buf.String()
-	if !strings.Contains(out, "ok: all triage labels present") {
+	if !strings.Contains(out, "ok: all triage and research labels present") {
 		t.Errorf("want success message after creation, got:\n%s", out)
 	}
 }
@@ -1173,6 +1173,35 @@ func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 		if call.Description == "" {
 			t.Errorf("research label %q should have a description", call.Name)
 		}
+	}
+}
+
+// TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory verifies that when a
+// create run's re-verify still finds research labels missing (e.g. eventual
+// consistency on the forge side), doctor prints a non-fatal advisory summary
+// instead of silently returning nil — mirroring the work tier's explicit
+// "still missing after creation" message but never failing the check (#800).
+func TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	f.Labels = work // all work labels present, all six research labels missing
+	f.LabelsSeq = [][]string{
+		work,
+		work, // re-verify: research labels still missing despite CreateLabel "succeeding"
+	}
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader("y\n"), true)
+	if err != nil {
+		t.Fatalf("research labels still missing after creation must not fail doctor, got: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "advisory: 6 research label(s) still missing after creation") {
+		t.Errorf("want advisory summary after incomplete research creation, got:\n%s", out)
+	}
+	if strings.Contains(out, "ok: all triage and research labels present") {
+		t.Errorf("must not print success message when research labels are still missing, got:\n%s", out)
 	}
 }
 
