@@ -35,6 +35,39 @@ func TestGateToGreen_TerminatedAbandonsWithoutTransition(t *testing.T) {
 	}
 }
 
+// TestMergeImmediate_TerminatedDuringRewaitAfterStaleBasePreflight is the
+// preflightStaleBase counterpart to
+// TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase: termination
+// lands between the proactive stale-base rebase and rewaitAfterForcePush's
+// CI poll (ready.go:402, added by fda1a20), and must report errAbandoned —
+// never reaching mergeImmediate's own Merge call.
+func TestMergeImmediate_TerminatedDuringRewaitAfterStaleBasePreflight(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetNeedsUpdate(testPR, true)
+	reg := terminate.NewRegistry()
+	tf := terminatingForge{Fake: fc, reg: reg, num: "1"}
+	s := New(c, tf, tf)
+	s.SetTerminated(reg)
+
+	err := s.mergeImmediate("1", 0, testPR, nil)
+
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
+	}
+	if errors.Is(err, errLandingNeverGreen) {
+		t.Errorf("mergeImmediate err = %v, must not also match errLandingNeverGreen", err)
+	}
+	if len(fc.RebasedURLs) != 1 {
+		t.Errorf("Rebase called %d times, want 1 (proactive stale-base rebase)", len(fc.RebasedURLs))
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge must not be called after termination; fc.Merged=%q", fc.Merged)
+	}
+}
+
 // TestMergeImmediate_TerminatedStopsRebaseRetry verifies a termination marked
 // before mergeImmediate's first attempt stops it from ever calling Merge or
 // Rebase — the merge-gate phase of "abandons the settle wherever it stands."
@@ -59,6 +92,103 @@ func TestMergeImmediate_TerminatedStopsRebaseRetry(t *testing.T) {
 	}
 	if len(fc.RebasedURLs) != 0 {
 		t.Errorf("Rebase must not be called after termination; got %v", fc.RebasedURLs)
+	}
+}
+
+// terminatingForge wraps a forge.Fake so its Rebase call marks num
+// terminated after returning — simulating Terminate reaping the settle
+// goroutine while a force-push is in flight, mirroring terminatingDispatcher
+// below but for the code-forge seam.
+type terminatingForge struct {
+	*forge.Fake
+	reg *terminate.Registry
+	num string
+}
+
+func (f terminatingForge) Rebase(url string) error {
+	err := f.Fake.Rebase(url)
+	f.reg.Mark(f.num)
+	return err
+}
+
+// TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase verifies a
+// termination landing between a successful rebase force-push and
+// rewaitAfterForcePush's CI poll is reported as errAbandoned, not wrapped
+// into errLandingNeverGreen — the gap issue #805 closes. Without the fix,
+// gateToGreen's own gateAbandoned result gets collapsed into a generic
+// "never went green" error, which selfHeal then mis-routes to
+// landingFailed/agent-failed instead of landingAbandoned.
+func TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 5
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.MergeErrs = []error{forge.ErrMergeConflict}
+	reg := terminate.NewRegistry()
+	tf := terminatingForge{Fake: fc, reg: reg, num: "1"}
+	s := New(c, tf, tf)
+	s.SetTerminated(reg)
+
+	err := s.mergeImmediate("1", 0, testPR, dispatch.NewFake())
+
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
+	}
+	if errors.Is(err, errLandingNeverGreen) {
+		t.Errorf("mergeImmediate err = %v, must not also match errLandingNeverGreen", err)
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge must not be called again after termination; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// terminatingConflictResolver wraps a dispatch.Fake so its ResolveConflict
+// call marks num terminated after returning — simulating Terminate reaping
+// the settle goroutine right after a successful agent-assisted conflict
+// resolve, before the post-force-push CI re-wait runs.
+type terminatingConflictResolver struct {
+	*dispatch.Fake
+	reg *terminate.Registry
+	num string
+}
+
+func (d terminatingConflictResolver) ResolveConflict(pr string) error {
+	err := d.Fake.ResolveConflict(pr)
+	d.reg.Mark(d.num)
+	return err
+}
+
+// TestMergeImmediate_TerminatedDuringRewaitAfterConflictResolve is the
+// conflict-resolve counterpart to
+// TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase: termination
+// lands between a successful agent conflict-resolve and
+// rewaitAfterForcePush's CI poll (ready.go:342), and must report
+// errAbandoned rather than errLandingNeverGreen.
+func TestMergeImmediate_TerminatedDuringRewaitAfterConflictResolve(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 5
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.MergeErrs = []error{forge.ErrMergeConflict}
+	fc.RebaseErr = forge.ErrMergeConflict
+	reg := terminate.NewRegistry()
+	s := New(c, fc, fc)
+	s.SetTerminated(reg)
+	d := terminatingConflictResolver{Fake: dispatch.NewFake(), reg: reg, num: "1"}
+
+	err := s.mergeImmediate("1", 0, testPR, d)
+
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
+	}
+	if errors.Is(err, errLandingNeverGreen) {
+		t.Errorf("mergeImmediate err = %v, must not also match errLandingNeverGreen", err)
+	}
+	if len(d.ResolveConflictCalls) != 1 {
+		t.Errorf("want exactly 1 ResolveConflict call, got %d", len(d.ResolveConflictCalls))
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge must not be called again after termination; fc.Merged=%q", fc.Merged)
 	}
 }
 
@@ -104,6 +234,37 @@ func TestSelfHeal_TerminatedDuringFixPass_StopsRetryLoop(t *testing.T) {
 	}
 	if len(d.FixCalls) != 1 {
 		t.Errorf("want exactly 1 fix call (termination stops the retry loop), got %d: %+v", len(d.FixCalls), d.FixCalls)
+	}
+}
+
+// TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned verifies
+// selfHeal's end-to-end handling of a termination landing during the
+// post-force-push re-wait: it must report landingAbandoned, not
+// landingFailed, and take none of landingFailed's side effects (no
+// agent-failed transition, no "landing failed" comment) — the
+// "no further action, Terminate already handled it" contract (result.go:56-61).
+func TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 5
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.MergeErrs = []error{forge.ErrMergeConflict}
+	reg := terminate.NewRegistry()
+	tf := terminatingForge{Fake: fc, reg: reg, num: "1"}
+	s := New(c, tf, tf)
+	s.SetTerminated(reg)
+
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+
+	if landing != landingAbandoned {
+		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	}
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionState must not be called after termination; got %+v", fc.TransitionStateCalls)
+	}
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("Comment must not be called after termination; got %+v", fc.CommentCalls)
 	}
 }
 
