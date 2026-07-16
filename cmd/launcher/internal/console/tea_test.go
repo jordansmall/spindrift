@@ -1321,3 +1321,72 @@ func newTestLauncher(t *testing.T, cf forge.CodeForge) *Launcher {
 	t.Cleanup(factory.Cleanup)
 	return &Launcher{CodeForge: cf, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
 }
+
+// TestTea_Update_ReusesHeartbeatCacheAcrossCalls verifies the tea layer's
+// heartbeat cache survives across repeated Update calls on the same session
+// (issue #731) — not just within one syncQueue call — by proving a second
+// Update, given an on-disk log rewritten to different content but pinned
+// back to the same size/mtime, still reports the first call's line rather
+// than a reparse of the new content. teaModel.Update takes a value receiver,
+// so this also proves the cache lives behind a pointer field rather than
+// being silently reallocated (and thus reset) on every copy.
+func TestTea_Update_ReusesHeartbeatCacheAcrossCalls(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "logs", "issue-42.log")
+	first := `{"type":"result","num_turns":17,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := newTeaModel(f, dir, launch)
+	model, _ := tm.Update(struct{}{})
+	tm = model.(teaModel)
+	first1 := heartbeatFor(t, tm.m, "42")
+	if want := "17 turn"; !strings.Contains(first1, want) {
+		t.Fatalf("first Update heartbeat = %q, want it to contain %q", first1, want)
+	}
+
+	second := `{"type":"result","num_turns":99,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	if len(second) != len(first) {
+		t.Fatalf("test setup: second log must be same length as first, got %d want %d", len(second), len(first))
+	}
+	if err := os.WriteFile(path, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+
+	model, _ = tm.Update(struct{}{})
+	tm = model.(teaModel)
+	got := heartbeatFor(t, tm.m, "42")
+	if got != first1 {
+		t.Errorf("second Update heartbeat = %q, want cached %q (unchanged stat must skip reparse)", got, first1)
+	}
+}
+
+// heartbeatFor returns m's Heartbeat field for the pick numbered number, or
+// fails the test if no such pick is present.
+func heartbeatFor(t *testing.T, m Model, number string) string {
+	t.Helper()
+	for _, p := range m.Picks {
+		if p.Number == number {
+			return p.Heartbeat
+		}
+	}
+	t.Fatalf("no pick %q in Picks %+v", number, m.Picks)
+	return ""
+}
