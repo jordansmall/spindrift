@@ -572,6 +572,28 @@ func TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
 	}
 }
 
+// TestView_TwoColumn_Body_BacklogOnlyRowsHaveNoTrailingWhitespace verifies a
+// backlog row with no corresponding work-queue row renders without trailing
+// spaces — joinColumns previously padded the left column out to leftWidth
+// even when the right column had nothing on that row, leaking padding onto
+// the end of the line (issue #861).
+func TestView_TwoColumn_Body_BacklogOnlyRowsHaveNoTrailingWhitespace(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Title: "short"},
+		{Number: "2", Title: "a mid length backlog title"},
+		{Number: "3", Title: "another backlog issue"},
+	}})
+	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
+
+	out := View(m)
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasSuffix(l, " ") {
+			t.Errorf("View() line %q has trailing whitespace, want none", l)
+		}
+	}
+}
+
 // TestView_TwoColumn_Queue_BlockerVisibleDespiteLongTitle verifies a held
 // row's blocker badge survives clipping even when paired with a long title —
 // the queue row previously put BlockedBy/Reason/Heartbeat after Title, so
