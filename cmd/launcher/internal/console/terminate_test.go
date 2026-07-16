@@ -264,7 +264,7 @@ func TestLauncher_Terminate_MarksRegistry(t *testing.T) {
 		t.Fatalf("Terminate: %v", err)
 	}
 
-	if !launch.registry().Marked("42") {
+	if !launch.registry().Marked("42", 0) {
 		t.Error("registry: want #42 marked terminated")
 	}
 }
