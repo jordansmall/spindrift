@@ -23,11 +23,13 @@ import (
 // treating a stale verdict at that exact rev as fresh — a real rebuild is
 // still required whenever the base branch advances past it. pull and build
 // are injected so tests can substitute fakes instead of shelling out to
-// git/nix; production wiring is consoleGitSync and consoleNixBuild. build
-// returns its captured nix output (issue #765) alongside its error, so a
-// background rebuild never writes directly to the Console's own
+// git/nix; production wiring is consoleGitSync and consoleNixBuild. pull
+// returns the rev it landed on (issue #767) so rebuild can cache it as
+// builtRev directly, rather than re-deriving it from a post-build probe.
+// build returns its captured nix output (issue #765) alongside its error, so
+// a background rebuild never writes directly to the Console's own
 // stdout/stderr.
-func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull func() error, build func() (string, error)) (waves.FreshnessChecker, func() (string, error)) {
+func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull func() (string, error), build func() (string, error)) (waves.FreshnessChecker, func() (string, error)) {
 	probe := func() freshness.Result {
 		return freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
 	}
@@ -39,7 +41,7 @@ func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull fu
 // scripted freshness.Result values instead of a real git/nix round-trip —
 // freshness.Probe's own git plumbing is exercised by internal/freshness's
 // own tests. See newConsoleFreshness for the production wiring.
-func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result, pull func() error, build func() (string, error)) (waves.FreshnessChecker, func() (string, error)) {
+func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result, pull func() (string, error), build func() (string, error)) (waves.FreshnessChecker, func() (string, error)) {
 	var mu sync.Mutex
 	var builtRev string
 
@@ -55,16 +57,16 @@ func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result
 	}
 
 	rebuild := func() (string, error) {
-		if err := pull(); err != nil {
+		pulledRev, err := pull()
+		if err != nil {
 			return "", err
 		}
 		output, err := build()
 		if err != nil {
 			return output, err
 		}
-		res := probe()
 		mu.Lock()
-		builtRev = res.Rev
+		builtRev = pulledRev
 		mu.Unlock()
 		return output, nil
 	}
@@ -80,15 +82,33 @@ func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result
 // that would overwrite a *conflicting* file, so a non-conflicting dirty
 // change would otherwise ride along onto baseBranch in total silence —
 // already on baseBranch, or a clean tree on any branch, are both safe
-// because there's nothing for the checkout to carry across silently.
-func consoleGitSync(pwd, baseBranch string) error {
+// because there's nothing for the checkout to carry across silently. It
+// returns the rev pwd landed on so the caller can record exactly what
+// build() is about to build, rather than re-deriving it from a probe that
+// may see origin advance mid-build (issue #767).
+func consoleGitSync(pwd, baseBranch string) (string, error) {
 	if err := checkCheckoutSafe(pwd, baseBranch); err != nil {
-		return err
+		return "", err
 	}
 	if err := runGit(pwd, "checkout", baseBranch); err != nil {
-		return err
+		return "", err
 	}
-	return runGit(pwd, "pull", "--ff-only")
+	if err := runGit(pwd, "pull", "--ff-only"); err != nil {
+		return "", err
+	}
+	return headRev(pwd)
+}
+
+// headRev returns the rev pwd's working tree is currently checked out at.
+func headRev(pwd string) (string, error) {
+	cmd := exec.Command("git", "-C", pwd, "rev-parse", "HEAD")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse HEAD: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // checkCheckoutSafe refuses a checkout when pwd is on a branch other than
