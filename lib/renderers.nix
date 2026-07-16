@@ -217,6 +217,11 @@ rec {
     + "// schemaFlags is the flag table derived from lib/env-schema.nix.\n"
     + "// Secret knobs are excluded from schemaFlags; see secretKnobs below.\n"
     + "// Run `nix flake check` after editing lib/env-schema.nix to regenerate.\n"
+    + "//\n"
+    + "// schemaFlags[].dflt is also the schema-level runtime defaults source,\n"
+    + "// consumed as a fallback by schemaDefault() in cmd/launcher/main.go\n"
+    + "// (ADR 0020 lets a loaded input document override it); the separate\n"
+    + "// defaults table was consolidated away in issue #670.\n"
     + "var schemaFlags = []flagEntry{\n"
     + rows
     + "}\n"

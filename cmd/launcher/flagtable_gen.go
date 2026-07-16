@@ -4,6 +4,11 @@ package main
 // schemaFlags is the flag table derived from lib/env-schema.nix.
 // Secret knobs are excluded from schemaFlags; see secretKnobs below.
 // Run `nix flake check` after editing lib/env-schema.nix to regenerate.
+//
+// schemaFlags[].dflt is also the schema-level runtime defaults source,
+// consumed as a fallback by schemaDefault() in cmd/launcher/main.go
+// (ADR 0020 lets a loaded input document override it); the separate
+// defaults table was consolidated away in issue #670.
 var schemaFlags = []flagEntry{
 	{env: "AUTO_FORMAT", flag: "auto-format", group: "Prompt & skill iteration", kind: "string", doc: "when non-empty, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found", dflt: "", settingsPath: "settings.promptSkillIteration.autoFormat"},
 	{env: "AUTO_LINT", flag: "auto-lint", group: "Prompt & skill iteration", kind: "string", doc: "when non-empty, the implementor auto-detects and runs the project's linter on changed files before each commit, applying auto-fix then resolving remaining findings; skips silently when no linter is found", dflt: "", settingsPath: "settings.promptSkillIteration.autoLint"},
