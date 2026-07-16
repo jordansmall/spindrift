@@ -210,6 +210,28 @@ func TestTea_CursorKeys_MoveHighlightedRow(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
+// TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor verifies pgdown/
+// pgup move the focused backlog column's viewport directly, independent of
+// the cursor, revealing and restoring rows past the fold (issue #1036 AC2).
+func TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor(t *testing.T) {
+	f := forge.NewFake()
+	for i := 0; i < 50; i++ {
+		f.SetIssue(forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i), State: forge.IssueOpen})
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10))
+	waitForOutput(t, tm, "> #0")
+
+	sendKey(tm, "pgdown")
+	waitForOutput(t, tm, "#10  issue 10")
+
+	sendKey(tm, "pgup")
+	waitForOutput(t, tm, "> #0")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
 // TestTea_TabKey_SwitchesFocusBetweenColumns verifies Tab moves the focus
 // marker from the backlog column to the work-queue column and back, and that
 // cursor keys move the newly focused column's cursor — the two-column focus
