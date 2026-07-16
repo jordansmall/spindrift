@@ -191,13 +191,27 @@ setup() {
   check="$(sed -n '/^# CHECK$/,/^# REVIEW$/p' "$prompt")"
   [ -n "$check" ]
   grep -qi 'git add' <<<"$check"
-  grep -qi 'tracked' <<<"$check"
+  grep -qi 'tracked by' <<<"$check"
   local add_line flake_line
   add_line="$(grep -n -i 'git add' <<<"$check" | head -1 | cut -d: -f1)"
   flake_line="$(grep -n 'flake.nix' <<<"$check" | head -1 | cut -d: -f1)"
   [ -n "$add_line" ]
   [ -n "$flake_line" ]
   [ "$add_line" -lt "$flake_line" ]
+}
+
+@test "tracked-by pin rejects a decoy that keeps 'tracked' but drops the target phrase" {
+  # issue #782: a bare 'tracked' pin false-passes if the "is not tracked by
+  # Git" sentence is rewritten away, because "git-tracked files" earlier in
+  # the same section still contains the word "tracked".
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  local check
+  check="$(sed -n '/^# CHECK$/,/^# REVIEW$/p' "$prompt")"
+  [ -n "$check" ]
+  local decoy
+  decoy="$(sed 's/is not tracked by Git/failed for an unrelated reason/' <<<"$check")"
+  ! grep -qi 'tracked by' <<<"$decoy"
 }
 
 @test "prompt branches CODE_FORGE=git to a push-only outcome, no PR/CI" {
