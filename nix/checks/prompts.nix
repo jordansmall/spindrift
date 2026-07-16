@@ -17,8 +17,6 @@ let
     mkdir -p $out
     awk '/^# CHECK$/{f=1} /^# REVIEW$/{exit} f' \
       ${batsHarness.promptDir}/issue-prompt.md > $out/issue-check.txt
-    awk '/^# CHECK$/{f=1} /^# LAND THE CHANGE$/{exit} f' \
-      ${batsHarness.promptDir}/fix-prompt.md > $out/fix-check.txt
   '';
 in
 {
