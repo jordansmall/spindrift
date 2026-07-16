@@ -152,6 +152,10 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 	if len(workMissing) > 0 {
 		return fmt.Errorf("one or more triage labels are still missing after creation")
 	}
+	// Work labels are fatal (handled above) and research labels are
+	// advisory (ADR 0022), so the two tiers get separate wrap-up lines
+	// here: an advisory note if research is still short after creation,
+	// or a single success line naming both tiers once neither is.
 	if len(researchMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022) — does not fail this check\n", len(researchMissing))
 		return nil
