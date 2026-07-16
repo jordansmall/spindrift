@@ -370,9 +370,11 @@ func TestView_DrillInShowRaw_RendersRawInsteadOfRendered(t *testing.T) {
 
 // TestView_DrillInOffset_HidesLinesBeforeOffset verifies scrolling (a
 // non-zero Offset) drops the leading lines from the rendered pane instead of
-// always showing the transcript's start (issue #786).
+// always showing the transcript's start (issue #786). Height is small enough
+// that the transcript outruns the viewport budget, or the viewport clamp
+// (issue #829) would pin Offset at 0 since the whole thing already fits.
 func TestView_DrillInOffset_HidesLinesBeforeOffset(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Height: 4})
 	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3"})
 	m = Update(m, DrillInScrollMsg{Delta: 2})
 
