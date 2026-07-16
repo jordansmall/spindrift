@@ -141,11 +141,12 @@ func renderBacklogColumn(m Model, budget int) string {
 		return ""
 	}
 	var b strings.Builder
+	label := "backlog"
 	if m.Focus == FocusBacklog {
-		b.WriteString("backlog [focus]:\n")
-	} else {
-		b.WriteString("backlog:\n")
+		label += " [focus]"
 	}
+	label += positionLabel(m.BacklogOffset, columnItemBudget(budget), len(m.Visible()))
+	fmt.Fprintf(&b, "%s:\n", label)
 	rows := make([]string, 0, len(m.Visible()))
 	for i, iss := range m.Visible() {
 		marker := " "
@@ -154,7 +155,7 @@ func renderBacklogColumn(m Model, budget int) string {
 		}
 		rows = append(rows, fmt.Sprintf("%s #%s  %s  [%s]\n", marker, iss.Number, iss.Title, strings.Join(iss.Labels, ", ")))
 	}
-	writeWindowedRows(&b, rows, m.BacklogOffset, budget-1)
+	writeWindowedRows(&b, rows, m.BacklogOffset, columnItemBudget(budget))
 	return b.String()
 }
 
@@ -168,11 +169,12 @@ func renderQueueColumn(m Model, budget int) string {
 		return ""
 	}
 	var b strings.Builder
+	label := "picks"
 	if m.Focus == FocusQueue {
-		b.WriteString("picks [focus]:\n")
-	} else {
-		b.WriteString("picks:\n")
+		label += " [focus]"
 	}
+	label += positionLabel(m.QueueOffset, columnItemBudget(budget), len(m.Picks))
+	fmt.Fprintf(&b, "%s:\n", label)
 	rows := make([]string, 0, len(m.Picks))
 	for i, p := range m.Picks {
 		marker := " "
@@ -193,7 +195,7 @@ func renderQueueColumn(m Model, budget int) string {
 		row.WriteString("\n")
 		rows = append(rows, row.String())
 	}
-	writeWindowedRows(&b, rows, m.QueueOffset, budget-1)
+	writeWindowedRows(&b, rows, m.QueueOffset, columnItemBudget(budget))
 	return b.String()
 }
 
@@ -528,6 +530,37 @@ func bodyColumnBudgets(m Model) (backlog, queue int) {
 		return half, contentBudget - half
 	}
 	return budget, budget
+}
+
+// positionLabel returns a compact " (X-Y of N)" position indicator for a
+// column's label, describing the rows writeWindowedRows actually renders at
+// offset within itemBudget of total — or "" when there is nothing to show a
+// range for (an empty list, or a budget too small to render any row), so a
+// column that renders no rows doesn't grow a misleading "(1-0 of 0)" label
+// (issue #1037 AC3).
+func positionLabel(offset, itemBudget, total int) string {
+	if total == 0 {
+		return ""
+	}
+	shown := windowedRowCount(total-offset, itemBudget)
+	if shown <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d-%d of %d)", offset+1, offset+shown, total)
+}
+
+// focusedPageSize returns the number of item rows one page jump (pgup/
+// pgdown) moves the focused body column's viewport by — its live item
+// budget, the same figure View renders with, so a page jump always covers
+// exactly one screenful and stays correct across a terminal resize instead
+// of a value fixed at startup (issue #1037 AC1/AC2). Unlike the drill-in
+// transcript's fixed drillInPageSize, this is recomputed on every keypress.
+func focusedPageSize(m Model) int {
+	backlogBudget, queueBudget := bodyColumnBudgets(m)
+	if m.Focus == FocusQueue {
+		return columnItemBudget(queueBudget)
+	}
+	return columnItemBudget(backlogBudget)
 }
 
 // columnItemBudget converts a column's row budget (label line included, as
