@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mattn/go-runewidth"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -566,8 +567,8 @@ func TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
 
 	out := View(m)
 	for _, l := range strings.Split(out, "\n") {
-		if n := len([]rune(l)); n > m.Width {
-			t.Errorf("View() line %q has %d runes, want it clamped to Width (%d)", l, n, m.Width)
+		if w := runewidth.StringWidth(l); w > m.Width {
+			t.Errorf("View() line %q has display width %d, want it clamped to Width (%d)", l, w, m.Width)
 		}
 	}
 }
@@ -1013,5 +1014,21 @@ func TestView_HeaderHeight_BannerCollapse_StillBudgetsBody(t *testing.T) {
 	}
 	if strings.Contains(out, "issue 19") {
 		t.Errorf("View() = %q, want the backlog clipped to the short viewport", out)
+	}
+}
+
+// TestClip_WideCharacters_MeasuresDisplayWidthNotRuneCount verifies clip
+// measures visual display width, not rune count, when deciding whether to
+// truncate or pad — a CJK string can be well under a rune-count budget while
+// its display width (2 columns per wide rune) already overflows the
+// terminal (issue #859).
+func TestClip_WideCharacters_MeasuresDisplayWidthNotRuneCount(t *testing.T) {
+	s := "中文标题超长测试文字" // 10 runes, 20 display columns
+	got := clip(s, 10, false)
+	if got == s {
+		t.Errorf("clip(%q, 10, false) = %q, want truncated — 10 runes is 20 display columns, over the width-10 budget", s, got)
+	}
+	if w := runewidth.StringWidth(got); w > 10 {
+		t.Errorf("clip(%q, 10, false) = %q with display width %d, want at most 10", s, got, w)
 	}
 }
