@@ -13,7 +13,7 @@ let
     skillsBwrapHarness
     ;
 in
-{
+rec {
   shellcheck =
     pkgs.runCommand "shellcheck"
       {
@@ -82,6 +82,9 @@ in
         # shares with issue-prompt.md (issue #455).
         COMMS_CONTRACT_FILE = batsHarness.commsContractFile;
         CHECK_CONTRACT_FILE = batsHarness.checkContractFile;
+        # Same reason, for the research dispatch kind's own outcome contract
+        # (issue #640, exported here to close the parity gap from #735).
+        RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.researchOutcomeContractFile;
         # The Driver's registry-rendered function definitions; helper.bash
         # prepends this before exec-ing the entrypoint so the bats suite
         # exercises the same bodies the image bakes in (issue #433).
@@ -116,4 +119,16 @@ in
         bats --print-output-on-failure tests/
         touch $out
       '';
+
+  # Regression guard (issue #735): the `bats` derivation must export
+  # RESEARCH_OUTCOME_CONTRACT_FILE like its OUTCOME_CONTRACT_FILE/
+  # COMMS_CONTRACT_FILE/CHECK_CONTRACT_FILE siblings above, or the suite
+  # silently falls back to tests/helper.bash's hand-written fixture instead
+  # of the canonical nix-baked contract. Mirrors default.nix's
+  # checks-inbox-excludes-image-checks pattern -- eval-only, no image build.
+  bats-research-outcome-contract-exported =
+    assert pkgs.lib.assertMsg
+      ((bats.RESEARCH_OUTCOME_CONTRACT_FILE or null) == batsHarness.researchOutcomeContractFile)
+      "the `bats` derivation must export RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.researchOutcomeContractFile";
+    pkgs.runCommand "bats-research-outcome-contract-exported" { } "touch $out";
 }
