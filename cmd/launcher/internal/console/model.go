@@ -76,7 +76,8 @@ type Model struct {
 	// Width and Height are the terminal's current size, set by the tea
 	// layer's translation of Bubble Tea's WindowSizeMsg (issue #842).
 	// Update's unconditional clamp floors both at minTerminalDimension
-	// before the first size event arrives; no region reads them yet.
+	// before the first size event arrives. View derives the header height
+	// and the body's row budget from Height on every render (issue #1035).
 	Width, Height int
 	// Focus is which body column the cursor keys and context-Enter act on —
 	// Tab toggles it (issue #845). FocusBacklog, the zero value, matches the
