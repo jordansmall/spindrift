@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,7 +26,7 @@ func TestRunNixBuild_InvokesNixRunBuildInPwd(t *testing.T) {
 	}
 
 	pwd := t.TempDir()
-	if err := RunNixBuild(pwd); err != nil {
+	if _, err := RunNixBuild(pwd); err != nil {
 		t.Fatalf("RunNixBuild: %v", err)
 	}
 
@@ -59,11 +60,56 @@ func TestRunNixBuild_ScriptedFailure_SurfacesStderr(t *testing.T) {
 		return exec.Command(script, args...)
 	}
 
-	err := RunNixBuild(t.TempDir())
+	_, err := RunNixBuild(t.TempDir())
 	if err == nil {
 		t.Fatal("expected an error from a scripted build failure, got nil")
 	}
 	if got := err.Error(); !strings.Contains(got, "boom: derivation failed") {
 		t.Errorf("error = %q, want it to include the scripted stderr", got)
+	}
+}
+
+// TestRunNixBuild_CapturesOutput_NeverTouchesRealStdout verifies a
+// background Console rebuild (issue #765) never writes nix's build output
+// to the process's real os.Stdout — a live Bubble Tea alt-screen program
+// owns that fd, and a concurrent direct writer would corrupt the display —
+// and instead returns the captured text to the caller.
+func TestRunNixBuild_CapturesOutput_NeverTouchesRealStdout(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-nix")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'building foo'\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = origStdout })
+
+	output, err := RunNixBuild(t.TempDir())
+
+	os.Stdout = origStdout
+	w.Close()
+	if err != nil {
+		t.Fatalf("RunNixBuild: %v", err)
+	}
+
+	var real bytes.Buffer
+	if _, err := real.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
+	if real.Len() != 0 {
+		t.Errorf("real os.Stdout received %q, want nothing written to it", real.String())
+	}
+	if !strings.Contains(output, "building foo") {
+		t.Errorf("captured output = %q, want it to include the scripted stdout", output)
 	}
 }
