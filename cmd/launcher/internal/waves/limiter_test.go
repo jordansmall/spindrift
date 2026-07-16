@@ -104,6 +104,30 @@ func TestLimiter_ResizeDownNeverRevokesLiveSlots(t *testing.T) {
 	}
 }
 
+// TestLimiter_ResizeDeltaAppliesRelativeToCurrentCap verifies that
+// ResizeDelta computes the new cap from the current cap plus delta under a
+// single lock acquisition, clamps to a floor of 1, and still signals Grown
+// on a raise like Resize does.
+func TestLimiter_ResizeDeltaAppliesRelativeToCurrentCap(t *testing.T) {
+	l := NewLimiter(2)
+
+	l.ResizeDelta(1)
+	if got := l.Cap(); got != 3 {
+		t.Fatalf("Cap after ResizeDelta(1): got %d, want 3", got)
+	}
+
+	l.ResizeDelta(-5)
+	if got := l.Cap(); got != 1 {
+		t.Fatalf("Cap after ResizeDelta(-5): got %d, want 1 (clamped floor)", got)
+	}
+
+	select {
+	case <-l.Grown():
+	default:
+		t.Fatal("Grown: want a signal from the earlier raise, got none")
+	}
+}
+
 // TestLimiter_AcquireBlocksUntilReleased verifies that a blocking Acquire at
 // cap waits for a concurrent Release rather than returning immediately —
 // the drop-in replacement for dispatchWave's buffered-channel semaphore.

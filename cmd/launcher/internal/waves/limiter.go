@@ -101,6 +101,29 @@ func (l *Limiter) Resize(newCap int) {
 	}
 }
 
+// ResizeDelta adjusts the cap by delta relative to its current value,
+// clamped to at least 1, as a single lock-guarded read-modify-write —
+// unlike calling Cap() then Resize(), which reads and writes under separate
+// lock acquisitions and leaves a window for a concurrent Resize to land in
+// between. Signals Grown on a raise just like Resize.
+func (l *Limiter) ResizeDelta(delta int) {
+	l.mu.Lock()
+	newCap := l.cap + delta
+	if newCap < 1 {
+		newCap = 1
+	}
+	grew := newCap > l.cap
+	l.cap = newCap
+	l.mu.Unlock()
+	if grew {
+		l.cond.Broadcast()
+		select {
+		case l.grow <- struct{}{}:
+		default:
+		}
+	}
+}
+
 // Grown signals (coalesced) every time Resize raises the cap.
 func (l *Limiter) Grown() <-chan struct{} {
 	return l.grow
