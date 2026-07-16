@@ -165,9 +165,16 @@ func renderBacklogColumn(m Model, budget int) string {
 
 // renderQueueColumn renders the work queue: one pick-ordered line per Pick,
 // tagged with its PickState — a held row names its blocker, a running row
-// carries its heartbeat. Windowed to budget rows (including the label) the
-// same way renderBacklogColumn is, so a long picks queue can't push the
-// header off-screen either (issue #1035).
+// carries its heartbeat. BlockedBy/Reason/Heartbeat are placed before Title
+// in each row, not after: joinColumns clips an overlong row from the tail,
+// so whatever comes last gives way first. The blocker/heartbeat is the
+// signal an operator needs for pick/unpick decisions and the queue column
+// already gets the majority share of m.Width (leftColumnFraction caps the
+// backlog, not the queue) — but even a majority share truncates that signal
+// away on realistic terminal widths if Title sits in front of it (issue
+// #858). Windowed to budget rows (including the label) the same way
+// renderBacklogColumn is, so a long picks queue can't push the header
+// off-screen either (issue #1035).
 func renderQueueColumn(m Model, budget int) string {
 	if budget <= 0 {
 		return ""
@@ -185,8 +192,13 @@ func renderQueueColumn(m Model, budget int) string {
 		if m.Focus == FocusQueue && i == m.QueueCursor {
 			marker = ">"
 		}
+		// BlockedBy/Reason/Heartbeat come before Title: clip() truncates
+		// from the tail, and this is the operator-relevant signal for
+		// pick/unpick decisions — it must survive truncation even when the
+		// title is long, whereas the title can afford to give way (issue
+		// #858).
 		var row strings.Builder
-		fmt.Fprintf(&row, "%s #%s  [%s]  %s", marker, p.Number, p.State, p.Title)
+		fmt.Fprintf(&row, "%s #%s  [%s]", marker, p.Number, p.State)
 		if p.BlockedBy != "" {
 			fmt.Fprintf(&row, "  (held by %s)", p.BlockedBy)
 		}
@@ -199,6 +211,7 @@ func renderQueueColumn(m Model, budget int) string {
 		if p.Heartbeat != "" {
 			fmt.Fprintf(&row, "  %s", p.Heartbeat)
 		}
+		fmt.Fprintf(&row, "  %s", p.Title)
 		row.WriteString("\n")
 		rows = append(rows, row.String())
 	}
