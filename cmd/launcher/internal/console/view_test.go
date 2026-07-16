@@ -1066,3 +1066,47 @@ func TestClip_WideCharacters_MeasuresDisplayWidthNotRuneCount(t *testing.T) {
 		t.Errorf("clip(%q, 10, false) = %q with display width %d, want at most 10", s, got, w)
 	}
 }
+
+// TestView_Backlog_SanitizesTitleAndLabelControlSequences verifies a backlog title
+// carrying CSI/OSC escape sequences renders with the escapes stripped and
+// the surrounding text intact — a tracker title is untrusted input, and
+// Bubble Tea does not filter arbitrary control sequences before writing to
+// the operator's terminal (issue #862).
+func TestView_Backlog_SanitizesTitleAndLabelControlSequences(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Title: "evil\x1b[2Jtitle\x1b]0;pwned\x07here", Labels: []string{"evil\x1b[2Jlabel"}},
+	}})
+
+	out := View(m)
+	if strings.Contains(out, "\x1b") {
+		t.Errorf("View() = %q, want no raw escape bytes in backlog title", out)
+	}
+	if !strings.Contains(out, "eviltitlehere") {
+		t.Errorf("View() = %q, want the surrounding title text intact after stripping escapes", out)
+	}
+	if !strings.Contains(out, "evillabel") {
+		t.Errorf("View() = %q, want the surrounding label text intact after stripping escapes", out)
+	}
+}
+
+// TestView_Queue_SanitizesTitleAndReasonControlSequences verifies a pick's
+// Title and Reason — both tracker/dispatch-derived free text — render with
+// CSI/OSC escape sequences stripped and surrounding text intact (issue #862).
+func TestView_Queue_SanitizesTitleAndReasonControlSequences(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
+	m.Picks = []Pick{
+		{Number: "42", Title: "evil\x1b[2Jtitle", State: PickHeld, Reason: "bad\x1b]0;pwned\x07reason"},
+	}
+
+	out := View(m)
+	if strings.Contains(out, "\x1b") {
+		t.Errorf("View() = %q, want no raw escape bytes in queue row", out)
+	}
+	if !strings.Contains(out, "eviltitle") {
+		t.Errorf("View() = %q, want the surrounding title text intact after stripping escapes", out)
+	}
+	if !strings.Contains(out, "badreason") {
+		t.Errorf("View() = %q, want the surrounding reason text intact after stripping escapes", out)
+	}
+}
