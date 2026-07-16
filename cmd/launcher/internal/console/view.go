@@ -621,13 +621,12 @@ func bodyBudget(m Model) int {
 }
 
 // bodyColumnBudgets returns the row budget renderBody gives the backlog and
-// queue columns for m's current Width/Height and prompt state — mirroring
-// renderBody's own split exactly (a stacked terminal below
-// minTwoColumnWidth halves the shared budget between the two columns; a
-// side-by-side terminal gives each column the full budget, since they share
-// output lines). Update reuses this so cursor-follows-viewport (issue
-// #1036) computes each column's viewport against the same budget View
-// renders with.
+// queue columns for m's current Width/Height and prompt state — the
+// stacked-mode split is shared with renderBody via splitStackedBudget, so
+// the two can never diverge (issue #1052); a side-by-side terminal gives
+// each column the full budget, since they share output lines. Update
+// reuses this so cursor-follows-viewport (issue #1036) computes each
+// column's viewport against the same budget View renders with.
 func bodyColumnBudgets(m Model) (backlog, queue int) {
 	budget := bodyBudget(m)
 	if budget <= 0 {

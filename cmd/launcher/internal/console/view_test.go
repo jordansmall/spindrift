@@ -550,6 +550,45 @@ func TestSplitStackedBudget_MatchesBodyColumnBudgets(t *testing.T) {
 	}
 }
 
+// TestSplitStackedBudget_MatchesRenderBody verifies renderBody's actual
+// stacked-mode rendering — not just bodyColumnBudgets — spends exactly the
+// budgets bodyColumnBudgets reports, by overflowing both columns (so each
+// renders its full budget's worth of lines, windowed with a "more below"
+// row) and counting the rendered lines on each side of the stack (issue
+// #1052).
+func TestSplitStackedBudget_MatchesRenderBody(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 24})
+	issues := make([]forge.Issue, 100)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+	picks := make([]Pick, 100)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
+	}
+	m.Picks = picks
+
+	wantBacklog, wantQueue := bodyColumnBudgets(m)
+	out := renderBody(m, bodyBudget(m))
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	sep := -1
+	for i, l := range lines {
+		if l == "" {
+			sep = i
+			break
+		}
+	}
+	if sep < 0 {
+		t.Fatalf("renderBody(m) = %q, want a blank line separating the stacked columns", out)
+	}
+	gotBacklog, gotQueue := sep, len(lines)-sep-1
+	if gotBacklog != wantBacklog || gotQueue != wantQueue {
+		t.Errorf("renderBody(m) rendered (%d, %d) lines, want bodyColumnBudgets(m) = (%d, %d)",
+			gotBacklog, gotQueue, wantBacklog, wantQueue)
+	}
+}
+
 // TestView_NarrowTerminal_LongBacklog_HeaderStaysPinned verifies the
 // header's status line stays visible on a narrow (stacked-layout) terminal
 // too — the stacked backlog and picks columns must split the body's row
