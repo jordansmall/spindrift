@@ -1292,6 +1292,31 @@ func TestTea_TerminateKey_ConfirmThenOther_Declines(t *testing.T) {
 	}
 }
 
+// TestTea_TerminateKey_ConfirmThenQuit_DeclinesAndQuits verifies the
+// universal quit keystroke at the confirm prompt is not swallowed by the
+// pending terminate: "q" declines the terminate (same as any other
+// non-"y" key) and still exits the program in one keystroke (issue #748).
+func TestTea_TerminateKey_ConfirmThenQuit_DeclinesAndQuits(t *testing.T) {
+	launch, fc, fr, _ := newTermTestLauncher(t)
+
+	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "k")
+	waitForOutput(t, tm, "terminate #42?")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	if len(fr.KillCalls) != 0 {
+		t.Errorf("KillCalls = %v, want none after quitting at the confirm prompt", fr.KillCalls)
+	}
+	snap := launch.Queue.Snapshot()
+	if len(snap) != 1 || snap[0].State != PickRunning {
+		t.Errorf("queue pick = %+v, want still PickRunning after quitting at the confirm prompt", snap)
+	}
+}
+
 // newAlphaBetaFake returns a Fake tracker with two open issues, "alpha"
 // labeled "a" and "beta" labeled "b" — shared fixture for filter tests.
 func newAlphaBetaFake() *forge.Fake {
