@@ -364,6 +364,36 @@ in
       "renderZshCompletion must not use _arguments' '*::state:->state' catch-all — issue #552 review found it swallows post-subcommand words with no matching case arm, got: ${out}";
     pkgs.runCommand "renderer-zsh-completion-shape" { } "touch $out";
 
+  # Pure-eval pin (issue #874): a knob carrying both `alias` and `choices`
+  # must complete its value list for *either* flag form. No real schema knob
+  # combines the two today (only issueNumber has an alias; none of the four
+  # choices knobs do), so this exercises a hand-built synthetic schema rather
+  # than lib/env-schema.nix — deliberately isolated from production schema
+  # per the issue's research verdict, to avoid coupling test fixture data to
+  # runtime schema.
+  renderer-choices-alias-shape =
+    let
+      inherit (pkgs.lib) assertMsg hasInfix;
+      syntheticSchema = {
+        aliasedChoice = {
+          env = "ALIASED_CHOICE";
+          doc = "test-only knob carrying both alias and choices";
+          alias = "ac";
+          choices = [
+            "one"
+            "two"
+          ];
+        };
+      };
+      bashOut = renderers.renderBashCompletion syntheticSchema;
+      zshOut = renderers.renderZshCompletion syntheticSchema;
+    in
+    assert assertMsg (hasInfix "--aliased-choice|--ac)" bashOut)
+      "renderBashCompletion's choicesFlagBranch must match both the canonical flag name and the --ac alias in one case arm, got: ${bashOut}";
+    assert assertMsg (hasInfix "--aliased-choice|--ac)" zshOut)
+      "renderZshCompletion's choicesFlagBranch must match both the canonical flag name and the --ac alias in one case arm, got: ${zshOut}";
+    pkgs.runCommand "renderer-choices-alias-shape" { } "touch $out";
+
   # The generated bash completion script must totally cover the schema and the
   # launcher's hardcoded subcommand set: every non-secret flag, the --issue
   # alias, every secret --*-file flag, and all six subcommands. A new knob or
