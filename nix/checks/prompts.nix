@@ -194,14 +194,14 @@ in
   # the CHECK block injection above. Both greps are scoped to the CHECK
   # section itself (not the whole file) -- WATCH CI carries the same
   # "never background it" phrase further down, so an unscoped grep would
-  # keep passing even if the #592 CHECK paragraph were deleted.
+  # keep passing even if the #592 CHECK paragraph were deleted. Fix-prompt
+  # side is covered by mkharness-prompt-fix-check-no-drift's byte-for-byte
+  # diff, not re-pinned here (issue #1009).
   mkharness-prompt-check-never-background =
     pkgs.runCommand "mkharness-prompt-check-never-background" { }
       ''
         grep -q 'never background it' ${checkSectionSlices}/issue-check.txt
-        grep -q 'never background it' ${checkSectionSlices}/fix-check.txt
         grep -q 'SPINDRIFT_OUTCOME' ${checkSectionSlices}/issue-check.txt
-        grep -q 'SPINDRIFT_OUTCOME' ${checkSectionSlices}/fix-check.txt
         touch $out
       '';
 
@@ -224,14 +224,13 @@ in
   # creates a new file and runs `nix build` before staging it hits a
   # spurious "not tracked by Git" failure and burns a checks cycle. Same
   # CHECK-section scoping as the never-background/vanished-marker checks
-  # above.
+  # above. Fix-prompt side is covered by mkharness-prompt-fix-check-no-drift's
+  # byte-for-byte diff, not re-pinned here (issue #1009).
   mkharness-prompt-check-git-add-before-nix-build =
     pkgs.runCommand "mkharness-prompt-check-git-add-before-nix-build" { }
       ''
         grep -qi 'git add' ${checkSectionSlices}/issue-check.txt
-        grep -qi 'git add' ${checkSectionSlices}/fix-check.txt
         grep -qi 'tracked by' ${checkSectionSlices}/issue-check.txt
-        grep -qi 'tracked by' ${checkSectionSlices}/fix-check.txt
         touch $out
       '';
 
