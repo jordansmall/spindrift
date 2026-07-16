@@ -3,8 +3,6 @@ package runner
 import (
 	"bytes"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 )
 
@@ -17,17 +15,19 @@ import (
 // new nix invocation re-evaluates the flake from pwd's current tree. This
 // is what the Console's in-session rebuild (issue #652) needs; headless
 // dispatch never calls it; that path just exits 4 and lets the outer
-// driving loop (dogfood.sh, CI) re-invoke fresh. Output streams to
-// stdout/stderr so the operator sees the same build progress dogfood.sh
-// prints.
-func RunNixBuild(pwd string) error {
+// driving loop (dogfood.sh, CI) re-invoke fresh. Output is captured and
+// returned rather than streamed to the real stdout/stderr (issue #765): the
+// Console's background rebuild runs concurrently with a live Bubble Tea
+// alt-screen program that owns those fds, and a direct writer would
+// interleave with (and corrupt) its renders.
+func RunNixBuild(pwd string) (string, error) {
 	cmd := execCommand("nix", "run", ".#", "--", "build")
 	cmd.Dir = pwd
-	cmd.Stdout = os.Stdout
-	var stderr bytes.Buffer
-	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("nix run .# -- build: %w: %s", err, strings.TrimSpace(stderr.String()))
+		return output.String(), fmt.Errorf("nix run .# -- build: %w: %s", err, strings.TrimSpace(output.String()))
 	}
-	return nil
+	return output.String(), nil
 }
