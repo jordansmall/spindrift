@@ -572,6 +572,10 @@ func TestSplitStackedBudget_MatchesRenderBody(t *testing.T) {
 	wantBacklog, wantQueue := bodyColumnBudgets(m)
 	out := renderBody(m, bodyBudget(m))
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	// The first blank line is the stacked separator, not column content —
+	// safe only because both columns are overflowing here, so every one of
+	// their rendered rows (title/label or windowed "more below" text) is
+	// non-blank.
 	sep := -1
 	for i, l := range lines {
 		if l == "" {
