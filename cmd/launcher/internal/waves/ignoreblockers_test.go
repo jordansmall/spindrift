@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // TestDrainMaxJobs_IgnoreBlockers_DispatchesDespiteUnmetBlocker verifies that
@@ -96,7 +97,7 @@ func TestDrainMaxJobs_Selective_RerunHint_UsesConfigVerb(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	out := captureStdout(t, func() {
+	out := testutil.CaptureStdout(t, func() {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "10", Title: "first"},
 			{Number: "15", Title: "second"},

@@ -713,7 +713,7 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	var err error
-	out := captureStdout(t, func() {
+	out := testutil.CaptureStdout(t, func() {
 		err = RunContinuous(c, fc, fc, dir, f, s, discover, fresh)
 	})
 	if err != nil {

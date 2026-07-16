@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // TestTouchSetsOverlap_LiteralPathHit verifies touchSetsOverlap reports an
@@ -164,7 +165,7 @@ func TestWaveOverlapCheck_TouchesOfErrorFallsBackToPRFilesOnly(t *testing.T) {
 	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
 	fc.SetPRFiles("https://github.com/owner/repo/pull/20", []string{"internal/pkgx/foo.go"})
 
-	out := captureStdout(t, func() {
+	out := testutil.CaptureStdout(t, func() {
 		checkOverlap := waveOverlapCheck(c, fc, fc)
 		collider, held := checkOverlap("10")
 		if !held || collider != "20" {
