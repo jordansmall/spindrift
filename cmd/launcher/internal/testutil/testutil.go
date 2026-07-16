@@ -18,11 +18,11 @@ func CaptureStderr(t *testing.T, fn func()) string {
 		t.Fatalf("os.Pipe: %v", err)
 	}
 	os.Stderr = w
+	defer func() { os.Stderr = orig }()
 
 	fn()
 
 	w.Close()
-	os.Stderr = orig
 
 	var buf strings.Builder
 	tmp := make([]byte, 4096)
