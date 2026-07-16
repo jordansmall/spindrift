@@ -169,6 +169,20 @@ type TerminateCancelledMsg struct{}
 
 func (TerminateCancelledMsg) isConsoleMsg() {}
 
+// PickPendingMsg is the tea layer's signal that "p" armed the "pa" leader
+// window — renders a visible hint so the operator knows the keystroke landed
+// while it waits out the trailing "a" (issue #835).
+type PickPendingMsg struct{}
+
+func (PickPendingMsg) isConsoleMsg() {}
+
+// PickResolvedMsg is the tea layer's signal that a pending pick chord
+// resolved — either "a" arrived, the 200ms leader window timed out, or any
+// other key resolved it to a single-issue pick (issue #835).
+type PickResolvedMsg struct{}
+
+func (PickResolvedMsg) isConsoleMsg() {}
+
 // CapMsg carries the session's live parallelism cap and current live count
 // (issue #653) — Run's per-render sync, the same pattern QueueSnapshotMsg
 // uses, since both live entirely on the background Launcher rather than

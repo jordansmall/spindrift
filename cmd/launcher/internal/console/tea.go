@@ -43,11 +43,6 @@ type teaModel struct {
 	pwd          string
 	launch       *Launcher
 	pollInterval time.Duration
-	// pendingPick is whether "p" is waiting on the "pa" leader window (issue
-	// #785 AC1) — tea-layer-only input-buffering state, not part of Model,
-	// since it has no rendering of its own (unlike PendingTerminate/
-	// PendingQuit, which arm a visible confirm prompt).
-	pendingPick bool
 	// heartbeats caches each running pick's last-parsed heartbeat line so
 	// syncQueue's per-Update refresh (line ~145) skips the ReadFile+reparse
 	// when a pick's latest pass log is unchanged since the last call (issue
@@ -151,8 +146,8 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshSignalMsg:
 		cmd = tea.Batch(refreshCmd(t.tracker), waitRefreshSignal(t.launch, t.done))
 	case pickChordTimeoutMsg:
-		if t.pendingPick {
-			t.pendingPick = false
+		if t.m.PendingPick {
+			t.m = Update(t.m, PickResolvedMsg{})
 			t = t.pickHighlighted()
 		}
 	}
@@ -204,8 +199,8 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	if t.m.PendingQuit {
 		return t.handleQuitConfirmKey(msg), nil
 	}
-	if t.pendingPick {
-		t.pendingPick = false
+	if t.m.PendingPick {
+		t.m = Update(t.m, PickResolvedMsg{})
 		switch s := msg.String(); s {
 		case "a":
 			return t.pickAllReady(), nil
@@ -255,7 +250,7 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	case "?":
 		t.m = Update(t.m, HelpToggleMsg{})
 	case "p":
-		t.pendingPick = true
+		t.m = Update(t.m, PickPendingMsg{})
 		return t, pickChordTick()
 	case "u":
 		t = t.unpickHighlighted()
@@ -291,7 +286,7 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 // scroll keys page through the loaded content (issue #786), "m" cycles the
 // pane's layout docked -> floating -> fullscreen (issue #846, ADR 0025), and
 // "q"/"ctrl+c" hard-quit — the universal quit keystroke must never be
-// swallowed by the drill-in pane, matching the pendingPick precedent in
+// swallowed by the drill-in pane, matching the PendingPick precedent in
 // handleKey (issue #826).
 func (t teaModel) handleDrillInKey(msg tea.KeyMsg) Model {
 	switch msg.String() {
@@ -370,7 +365,7 @@ func openDrillInCmd(launch *Launcher, pwd, number string) tea.Cmd {
 // TerminateConfirmedMsg, so the blocking tracker I/O runs off the Update
 // path (issue #745) — anything else declines (ADR 0024, issue #649/#785).
 // "q"/"ctrl+c" additionally still quit: the universal quit keystroke must
-// never be swallowed by the confirm prompt, mirroring the pendingPick chord
+// never be swallowed by the confirm prompt, mirroring the PendingPick chord
 // precedent above (issue #748).
 func (t teaModel) handleTerminateConfirmKey(msg tea.KeyMsg) teaModel {
 	num := t.m.PendingTerminate
