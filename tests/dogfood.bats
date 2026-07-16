@@ -144,7 +144,7 @@ setup() {
 }
 
 @test "dogfood runs dispatch by default" {
-  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  run timeout 15 env BASE_BRANCH=main bash "$WORK/dogfood.sh"
   [ "$status" -eq 0 ]
   grep -q -- '-- dispatch' "$NIX_LOG"
   ! grep -q -- '-- research' "$NIX_LOG"
