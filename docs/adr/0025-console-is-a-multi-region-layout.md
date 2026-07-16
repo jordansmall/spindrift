@@ -17,7 +17,7 @@ splitting, and every status count already lives in `Picks`/`Cap`/`Live`.
 
 Concretely:
 
-- **Header**: a persistent figlet "spindrift" banner and a one-line status —
+- **Header**: a persistent hardcoded "spindrift" wordmark banner and a one-line status —
   `running L/Cap · waiting N · held N · settled N`, all derived from existing
   state. Stale-image and competing-dogfood warnings render here as alert lines.
   On a terminal too short to afford the banner rows, the header degrades to the
