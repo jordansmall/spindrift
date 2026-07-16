@@ -464,6 +464,7 @@ func (l *Launcher) Rebuild(tracker forge.IssueTracker, pwd string) {
 		return
 	}
 	l.rebuilding = true
+	l.rebuildErr = nil
 	l.mu.Unlock()
 	l.signalRefresh()
 
