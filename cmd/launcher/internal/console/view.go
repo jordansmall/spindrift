@@ -108,7 +108,9 @@ func renderBody(m Model, budget int) string {
 			contentBudget = 0
 		}
 		half := contentBudget / 2
-		return renderBacklogColumn(m, half) + "\n" + renderQueueColumn(m, contentBudget-half)
+		backlog := clipLines(renderBacklogColumn(m, half), m.Width)
+		queue := clipLines(renderQueueColumn(m, contentBudget-half), m.Width)
+		return backlog + "\n" + queue
 	}
 	backlog := renderBacklogColumn(m, budget)
 	queue := renderQueueColumn(m, budget)
@@ -118,6 +120,23 @@ func renderBody(m Model, budget int) string {
 	}
 	rightWidth := m.Width - leftWidth
 	return joinColumns(backlog, queue, leftWidth, rightWidth)
+}
+
+// clipLines clips each of s's lines to width, unpadded (issue #860) — the
+// stacked body's counterpart to joinColumns' per-line clip(), needed because
+// the stacked path has no column to pad against. A trailing newline on s is
+// preserved so the caller can keep joining blocks with "\n" as before.
+func clipLines(s string, width int) string {
+	trailingNewline := strings.HasSuffix(s, "\n")
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = clip(l, width, false)
+	}
+	out := strings.Join(lines, "\n")
+	if trailingNewline {
+		out += "\n"
+	}
+	return out
 }
 
 // maxLineWidth returns the rune length of s's longest line, ignoring a

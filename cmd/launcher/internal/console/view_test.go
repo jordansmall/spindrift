@@ -615,6 +615,28 @@ func TestView_TwoColumn_Queue_BlockerVisibleDespiteLongTitle(t *testing.T) {
 	}
 }
 
+// TestView_NarrowTerminal_Body_LinesNeverExceedTerminalWidth verifies the
+// stacked (narrow-terminal) body clips each line to Width the same way the
+// two-column body does — a long backlog or picks row must not blow out
+// past the terminal on the narrow path either (issue #860, issue #844 AC6).
+// Exercises renderBody directly (as the docked/floating drill-in panes do,
+// view.go:407) rather than the full View(), since the header and banner are
+// fixed-width and out of this issue's scope.
+func TestView_NarrowTerminal_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Title: "a very long backlog title that would otherwise blow out a narrow terminal", Labels: []string{"ready-for-agent", "needs-review"}},
+	}})
+	m.Picks = []Pick{{Number: "42", Title: "a pick with a fairly long title too", State: PickHeld, BlockedBy: "#41 (native), #43 (body)"}}
+
+	out := renderBody(m, unboundedBudget)
+	for _, l := range strings.Split(out, "\n") {
+		if n := len([]rune(l)); n > m.Width {
+			t.Errorf("renderBody() line %q has %d runes, want it clamped to Width (%d)", l, n, m.Width)
+		}
+	}
+}
+
 // TestView_Focus_MarksFocusedColumnVisually verifies the focused column's
 // header carries a visible marker the other column's header doesn't, and
 // that Tab moves the marker — the operator's only cue for which column
