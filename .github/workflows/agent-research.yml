@@ -43,20 +43,30 @@ jobs:
       # the shared env block (RUNTIME, REPO_SLUG, BASE_BRANCH, tokens, bot
       # identity) written to $GITHUB_ENV for every step below.
       #
-      # Token: SPINDRIFT_RESEARCH_GH_TOKEN, when set, is a fine-grained PAT
-      # scoped Issues RW + Contents R + Metadata R — the token is the
-      # enforcement boundary that makes advise-only real, since Contents
+      # Token: the research GitHub App (SPINDRIFT_AGENT_RESEARCH_APP_*), when
+      # configured, is granted Issues RW + Contents R + Metadata R — the token
+      # is the enforcement boundary that makes advise-only real, since Contents
       # read-only means even a fully injection-steered researcher cannot push
-      # code, open a PR, or merge. Unset falls back to SPINDRIFT_GH_TOKEN (the
-      # dispatch/recover PAT, scoped Issues/Contents/Pull requests RW +
-      # Metadata R) — research still can't merge without a PR to merge, but
-      # loses the read-only guarantee: a compromised researcher could push to
-      # a branch or open a PR with the broader token. Configure the dedicated
-      # token for the tightest blast radius.
+      # code, open a PR, or merge. When the research App is unset the mint step
+      # is skipped and auth falls back to SPINDRIFT_GH_TOKEN (the dispatch PAT,
+      # scoped Issues/Contents/Pull requests RW + Metadata R) — research still
+      # can't merge without a PR to merge, but loses the read-only guarantee: a
+      # compromised researcher could push to a branch or open a PR with the
+      # broader token. Configure the dedicated App for the tightest blast
+      # radius. (Fail-closed instead of this PAT fallback is the open call in
+      # the research-token issue.)
+      - name: Mint research App token
+        id: app-token
+        if: ${{ secrets.SPINDRIFT_AGENT_RESEARCH_APP_ID != '' }}
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.SPINDRIFT_AGENT_RESEARCH_APP_ID }}
+          private-key: ${{ secrets.SPINDRIFT_AGENT_RESEARCH_APP_PRIVATE_KEY }}
+
       - name: Agent setup
         uses: ./.github/actions/agent-setup
         with:
-          gh-token: ${{ secrets.SPINDRIFT_RESEARCH_GH_TOKEN || secrets.SPINDRIFT_GH_TOKEN }}
+          gh-token: ${{ steps.app-token.outputs.token || secrets.SPINDRIFT_GH_TOKEN }}
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           issue-number: ${{ github.event.issue.number }}
           repo: ${{ github.repository }}
