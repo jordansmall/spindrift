@@ -62,19 +62,6 @@ in
     ) "renderBoxEnvVarsList must space-join only boxEnv=true entries' env names, got: ${out}";
     pkgs.runCommand "preambles-box-env-vars-list" { } "touch $out";
 
-  preambles-box-env-vars-preamble =
-    let
-      out = preambles.renderBoxEnvVarsPreamble {
-        model = {
-          env = "MODEL";
-          boxEnv = true;
-        };
-      };
-    in
-    assert assertMsg (hasInfix ''export BOX_ENV_VARS="MODEL"'' out)
-      "renderBoxEnvVarsPreamble must wrap the box-env list in export BOX_ENV_VARS=\"...\", got: ${out}";
-    pkgs.runCommand "preambles-box-env-vars-preamble" { } "touch $out";
-
   preambles-driver-mount-with-cache =
     let
       out = preambles.renderDriverMountPreamble {

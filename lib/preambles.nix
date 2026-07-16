@@ -25,7 +25,7 @@ let
     else
       string;
 in
-rec {
+{
   # One renderer used by both the shell and Go preamble families: iterates
   # over flakeOption schema entries and emits `[export ]VAR="${VAR:-<baked>}"`
   # lines. A matching env var (or harness.env, sourced by the wrapper) still
@@ -58,11 +58,6 @@ rec {
     builtins.concatStringsSep " " (
       map (e: e.env) (builtins.filter (e: e.boxEnv or false) (builtins.attrValues schema))
     );
-
-  # BOX_ENV_VARS exported for the Go binary.
-  renderBoxEnvVarsPreamble = schema: ''
-    export BOX_ENV_VARS="${renderBoxEnvVarsList schema}"
-  '';
 
   # The Driver's in-box mount targets (ADR 0009), exported for the Go
   # launcher's runner adapters (cmd/launcher/internal/runner) so they mount
