@@ -1024,6 +1024,13 @@ parent: some-upstream-slug
 
 ### GitHub token permissions
 
+The `agent-dispatch.yml` and `agent-recover.yml` workflows now authenticate via
+a short-lived **GitHub App installation token** (see [GitHub App installation
+token](#github-app-installation-token-recommended) below) rather than this PAT.
+The permission table here is still the canonical list of scopes the agent needs
+— the App is granted the same set — and the fine-grained PAT remains in use for
+the host-side `spindrift dispatch` CLI and as the research fallback.
+
 Use a **fine-grained personal access token** with access to **only the Target
 repository**. That scoping is what bounds `--dangerously-skip-permissions`: even
 if an agent misbehaves, the token can touch nothing but that one repo. The same
@@ -1037,6 +1044,42 @@ issues on the host.
 | Issues            | Read and write | read the issue; write to swap the dispatch labels (`agent-in-progress`/`agent-complete`/`agent-failed`) and post the per-issue usage/cost comment |
 | Metadata          | Read           | mandatory baseline, auto-selected            |
 | Workflows         | Read and write | **off by default** — grant only when an issue edits `.github/workflows/*`; agent branches run in-repo so `pull_request` events carry repository secrets; with this permission an injected agent can rewrite CI or exfiltrate those secrets |
+
+### GitHub App installation token (recommended)
+
+`agent-dispatch.yml` and `agent-recover.yml` do not read `SPINDRIFT_GH_TOKEN`.
+Each run instead mints a short-lived **GitHub App installation token** with
+`actions/create-github-app-token`, feeding the same `gh-token` input the
+composite `agent-setup` action already consumed. Nothing downstream changed —
+the whole token seam is `gh` reading `GH_TOKEN` from the environment, so this
+is a source-only swap at the mint step.
+
+Provision a **worker App** installed on **only the Target repository**, granting
+the same scopes the PAT table above lists (Contents RW, Pull requests RW, Issues
+RW, Workflows RW — off by default, Checks R, Commit statuses R, Metadata R), and
+store its credentials as two repository secrets:
+
+| secret                                     | value                              |
+| ------------------------------------------ | ---------------------------------- |
+| `SPINDRIFT_AGENT_WORKER_APP_ID`            | the App's numeric App ID           |
+| `SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY`   | a generated private key (PEM body) |
+
+Why an App instead of the PAT: every App installation gets its **own rate-limit
+bucket**, isolated from every personal PAT on the account. The
+dispatch / CI-polling / merge burst that was tripping GitHub's 403 / secondary
+rate limits now draws on that dedicated bucket. Confirm from a run with `gh api
+rate_limit` — the calls should draw down the installation's quota, not the
+user's. The single-repo installation is still what bounds
+`--dangerously-skip-permissions`: like the PAT, the App can touch nothing but
+the one repo it is installed on.
+
+> **Known limitation — token lifetime.** An installation token expires **~1h
+> after minting**, and that same token is what the launcher forwards into the
+> Box and uses at `gh pr merge`. A run that exceeds ~1h will fail at merge until
+> in-Box token refresh / late-minting lands (issue #1027). The App path is
+> therefore safe for the short issues dispatch handles today, but not yet for
+> long runs — keep `SPINDRIFT_GH_TOKEN` provisioned as the fallback until #1027
+> ships.
 
 ### Research token (least-privilege, optional)
 
