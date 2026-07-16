@@ -54,6 +54,8 @@ func sendKey(tm *teatest.TestModel, s string) {
 		tm.Send(tea.KeyMsg{Type: tea.KeyPgDown})
 	case "tab":
 		tm.Send(tea.KeyMsg{Type: tea.KeyTab})
+	case "ctrl+c":
+		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	default:
 		tm.Type(s)
 	}
@@ -456,6 +458,69 @@ func TestTea_DrillInKey_OpensTranscriptPane(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_DrillInKey_QuitsWithoutClosing verifies "q" hard-quits straight
+// out of an open drill-in pane, without requiring "x" first — the drill-in
+// guard in handleKey must not swallow the universal quit keystroke (issue
+// #826).
+func TestTea_DrillInKey_QuitsWithoutClosing(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "picks [focus]")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "transcript #42", "[implementor] hi")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_DrillInKey_QuitsOnCtrlCWithoutClosing verifies "ctrl+c" hard-quits
+// straight out of an open drill-in pane, without requiring "x" first — same
+// universal-quit carve-out as "q" (issue #826).
+func TestTea_DrillInKey_QuitsOnCtrlCWithoutClosing(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "picks [focus]")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "transcript #42", "[implementor] hi")
+
+	sendKey(tm, "ctrl+c")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
