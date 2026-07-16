@@ -90,10 +90,7 @@ func (q *Queue) Snapshot() []Pick {
 // still have moved one or more picks onto PickHeld.
 func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string) ([]waves.Issue, map[string][]string, waves.Sources, error) {
 	for _, pick := range q.claimable() {
-		edges, sources, err := waves.BuildEdges(tracker, []waves.Issue{{Number: pick.Number, Title: pick.Title}})
-		if err != nil {
-			continue
-		}
+		edges, sources, _ := waves.BuildEdges(tracker, []waves.Issue{{Number: pick.Number, Title: pick.Title}})
 		ready, failed, unready := waves.BlockerStatus(waves.Config{FailedLabel: failedLabel}, tracker, cf, pick.Number, edges)
 		if !ready {
 			q.setHeld(pick.Number, unready, failed, sources[pick.Number])
