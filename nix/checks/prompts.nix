@@ -8,6 +8,18 @@ let
     researchPromptHarness
     batsHarness
     ;
+
+  # The rendered CHECK section, sliced once here rather than three times
+  # across the never-background/vanished-marker/git-add checks below (issue
+  # #781) -- a marker rename only needs updating in one place, and the three
+  # checks below just grep the shared output.
+  checkSectionSlices = pkgs.runCommand "check-section-slices" { } ''
+    mkdir -p $out
+    awk '/^# CHECK$/{f=1} /^# REVIEW$/{exit} f' \
+      ${batsHarness.promptDir}/issue-prompt.md > $out/issue-check.txt
+    awk '/^# CHECK$/{f=1} /^# LAND THE CHANGE$/{exit} f' \
+      ${batsHarness.promptDir}/fix-prompt.md > $out/fix-check.txt
+  '';
 in
 {
   # The configured `prompt` is rendered to a store-path directory and,
@@ -165,14 +177,10 @@ in
   mkharness-prompt-check-never-background =
     pkgs.runCommand "mkharness-prompt-check-never-background" { }
       ''
-        awk '/^# CHECK$/{f=1} /^# REVIEW$/{exit} f' \
-          ${batsHarness.promptDir}/issue-prompt.md > issue-check.txt
-        awk '/^# CHECK$/{f=1} /^# LAND THE CHANGE$/{exit} f' \
-          ${batsHarness.promptDir}/fix-prompt.md > fix-check.txt
-        grep -q 'never background it' issue-check.txt
-        grep -q 'never background it' fix-check.txt
-        grep -q 'SPINDRIFT_OUTCOME' issue-check.txt
-        grep -q 'SPINDRIFT_OUTCOME' fix-check.txt
+        grep -q 'never background it' ${checkSectionSlices}/issue-check.txt
+        grep -q 'never background it' ${checkSectionSlices}/fix-check.txt
+        grep -q 'SPINDRIFT_OUTCOME' ${checkSectionSlices}/issue-check.txt
+        grep -q 'SPINDRIFT_OUTCOME' ${checkSectionSlices}/fix-check.txt
         touch $out
       '';
 
@@ -186,10 +194,8 @@ in
   mkharness-prompt-check-vanished-marker-is-failure =
     pkgs.runCommand "mkharness-prompt-check-vanished-marker-is-failure" { }
       ''
-        awk '/^# CHECK$/{f=1} /^# REVIEW$/{exit} f' \
-          ${batsHarness.promptDir}/issue-prompt.md > issue-check.txt
-        grep -qi 'vanished' issue-check.txt
-        grep -qi 'exit marker' issue-check.txt
+        grep -qi 'vanished' ${checkSectionSlices}/issue-check.txt
+        grep -qi 'exit marker' ${checkSectionSlices}/issue-check.txt
         touch $out
       '';
 
@@ -201,14 +207,10 @@ in
   mkharness-prompt-check-git-add-before-nix-build =
     pkgs.runCommand "mkharness-prompt-check-git-add-before-nix-build" { }
       ''
-        awk '/^# CHECK$/{f=1} /^# REVIEW$/{exit} f' \
-          ${batsHarness.promptDir}/issue-prompt.md > issue-check.txt
-        awk '/^# CHECK$/{f=1} /^# LAND THE CHANGE$/{exit} f' \
-          ${batsHarness.promptDir}/fix-prompt.md > fix-check.txt
-        grep -qi 'git add' issue-check.txt
-        grep -qi 'git add' fix-check.txt
-        grep -qi 'tracked' issue-check.txt
-        grep -qi 'tracked' fix-check.txt
+        grep -qi 'git add' ${checkSectionSlices}/issue-check.txt
+        grep -qi 'git add' ${checkSectionSlices}/fix-check.txt
+        grep -qi 'tracked' ${checkSectionSlices}/issue-check.txt
+        grep -qi 'tracked' ${checkSectionSlices}/fix-check.txt
         touch $out
       '';
 
@@ -343,6 +345,26 @@ in
         grep -q -- '--state open' ${../../templates/default/prompts/filer-prompt.md}
         ! grep -q -- '--label agent-review-finding --state all' \
           ${../../templates/default/prompts/filer-prompt.md}
+        touch $out
+      '';
+
+  # Grep pin (issue #781 acceptance criteria): the CHECK-section awk slice
+  # used by the never-background/vanished-marker/git-add checks above must
+  # be defined once, not copy-pasted -- a marker rename applied to one copy
+  # and forgotten in the others would leave those checks silently reading
+  # stale content.
+  prompts-nix-check-section-awk-defined-once =
+    pkgs.runCommand "prompts-nix-check-section-awk-defined-once" { }
+      ''
+        # Split so this line's own source text never contains the
+        # contiguous target pattern -- else this check would count itself.
+        half1='/^# CHECK$/{f=1}'
+        half2=' /^# REVIEW$/{exit} f'
+        count=$(grep -cF "$half1$half2" ${./prompts.nix})
+        [ "$count" -le 1 ] || {
+          echo "expected the CHECK-section awk slice defined at most once in prompts.nix, got $count" >&2
+          exit 1
+        }
         touch $out
       '';
 
