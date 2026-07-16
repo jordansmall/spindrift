@@ -62,6 +62,11 @@ type Model struct {
 	// operator's drain/terminate-all/stay answer — only when live
 	// Dispatches exist at quit time (issue #651, ADR 0023).
 	PendingQuit bool
+	// PendingPick is whether "p" is waiting on the "pa" leader window,
+	// awaiting a trailing "a" (pick-all-ready) before the 200ms
+	// pickChordTimeout resolves it to a single-issue pick instead — rendered
+	// as a visible hint so the wait isn't silent (issue #835).
+	PendingPick bool
 	// Cursor indexes the highlighted row in Visible() — the tea layer's j/
 	// down and up/arrow navigation target (issue #784; "k" moved to
 	// Terminate in #785). Always clamped into [0, len(Visible())-1], 0 when
@@ -196,6 +201,10 @@ func Update(m Model, msg Msg) Model {
 		m.PendingQuit = true
 	case QuitCancelledMsg:
 		m.PendingQuit = false
+	case PickPendingMsg:
+		m.PendingPick = true
+	case PickResolvedMsg:
+		m.PendingPick = false
 	case QuitMsg:
 		m.PendingQuit = false
 		m.Quitting = true

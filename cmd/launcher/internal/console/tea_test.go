@@ -1007,6 +1007,75 @@ func TestTea_EnterKey_OnFocusedBacklog_FailedPromotion_ShowsDissolvedRow(t *test
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
+// TestTea_PickKey_ShowsPendingIndicator verifies "p" renders a visible hint
+// immediately, before the trailing "a" arrives or the 200ms leader window
+// times out — the pending pick chord was previously silent (issue #835).
+func TestTea_PickKey_ShowsPendingIndicator(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "p")
+	waitForOutput(t, tm, "p_")
+
+	sendKey(tm, "a")
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
+// TestTea_PickKey_FollowedByA_ClearsPendingIndicator verifies the pending
+// pick indicator armed by "p" clears once the trailing "a" resolves the
+// chord (issue #835).
+func TestTea_PickKey_FollowedByA_ClearsPendingIndicator(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "p")
+	waitForOutput(t, tm, "p_")
+
+	sendKey(tm, "a")
+	waitForOutput(t, tm, "  #42")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.PendingPick {
+		t.Errorf("PendingPick = true after \"a\" resolved the chord, want false")
+	}
+}
+
+// TestTea_PickKey_Timeout_ClearsPendingIndicator verifies the pending pick
+// indicator armed by a lone "p" clears once the 200ms leader window times
+// out and resolves to a single-issue pick (issue #835).
+func TestTea_PickKey_Timeout_ClearsPendingIndicator(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "p")
+	waitForOutput(t, tm, "p_")
+	waitForOutput(t, tm, "  #42") // timeout fires unassisted, resolving to a single pick
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.PendingPick {
+		t.Errorf("PendingPick = true after timeout resolved the chord, want false")
+	}
+}
+
 // TestTea_PickKey_FollowedByQuit_PicksThenQuits verifies "p" followed by
 // "q" still exits the program — the pending "pa" chord resolves the pick
 // (same as any non-"a" key) but must not swallow the universal quit

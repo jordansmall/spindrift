@@ -39,6 +39,10 @@ func View(m Model) string {
 		b.WriteString("quit with live Dispatches: drain (d, default) / terminate-all (t) / stay (s)?\n")
 		reservedLines++
 	}
+	if m.PendingPick {
+		b.WriteString("p_\n")
+		reservedLines++
+	}
 	if m.Err != nil {
 		// The refresh-error line renders after the body (below), but must
 		// still be subtracted from budget up front or a long list plus an
