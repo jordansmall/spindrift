@@ -51,6 +51,28 @@ func TestRegistry_BeginDoesNotClearAnOlderGenerationsMark(t *testing.T) {
 	}
 }
 
+// TestRegistry_SecondTerminateDoesNotErasePriorGenerationsMark verifies that
+// terminating a re-pick (a second Mark, against a later generation) does not
+// forget an earlier generation's own mark — a still-live settle goroutine
+// from that earlier, already-terminated incarnation (however unlikely, e.g.
+// stuck in a long CI-watch poll) must keep seeing itself as terminated even
+// after a second, unrelated Terminate lands on the number's current
+// generation (issue #743 review finding).
+func TestRegistry_SecondTerminateDoesNotErasePriorGenerationsMark(t *testing.T) {
+	r := NewRegistry()
+	gen1 := r.Begin("42")
+	r.Mark("42") // first Terminate, against gen1
+	gen2 := r.Begin("42")
+	r.Mark("42") // a second Terminate, against gen2 (the re-pick)
+
+	if !r.Marked("42", gen1) {
+		t.Error("Marked(42, gen1) = false, want true — a second Terminate must not erase the first generation's mark")
+	}
+	if !r.Marked("42", gen2) {
+		t.Error("Marked(42, gen2) = false, want true after the second Mark")
+	}
+}
+
 // TestRegistry_NilIsInert verifies that every method is safe to call on a
 // nil *Registry and always reports "not terminated" — the headless dispatch
 // path constructs no Registry at all.
