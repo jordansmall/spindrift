@@ -3,6 +3,8 @@ package console
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // View renders m as the text the run loop writes to the terminal: the
@@ -242,19 +244,20 @@ func joinColumns(left, right string, leftWidth, rightWidth int) string {
 	return b.String()
 }
 
-// clip fits s into width runes: truncated with a trailing ellipsis if s runs
-// over, space-padded out to width if pad is true and s is shorter, left
-// as-is if pad is false and s already fits.
+// clip fits s into width display columns (not runes — a wide CJK rune is 2
+// columns, issue #859): truncated with a trailing ellipsis if s runs over,
+// space-padded out to width if pad is true and s is shorter, left as-is if
+// pad is false and s already fits.
 func clip(s string, width int, pad bool) string {
-	r := []rune(s)
+	w := runewidth.StringWidth(s)
 	switch {
-	case len(r) > width:
+	case w > width:
 		if width <= 1 {
-			return string(r[:width])
+			return runewidth.Truncate(s, width, "")
 		}
-		return string(r[:width-1]) + "…"
+		return runewidth.Truncate(s, width-1, "") + "…"
 	case pad:
-		return s + strings.Repeat(" ", width-len(r))
+		return s + strings.Repeat(" ", width-w)
 	default:
 		return s
 	}
