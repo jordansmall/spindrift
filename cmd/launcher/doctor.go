@@ -30,8 +30,8 @@ var triageLabelMeta = map[string]labelMeta{
 
 	"agent-research":             {description: "Apply to fire a research dispatch", color: "fbca04"},
 	"agent-research-in-progress": {description: "A Box is reviewing this issue", color: "bfd4f2"},
-	"agent-research-recommend":   {description: "Relevant and enriched — promote it", color: "0e8a16"},
-	"agent-research-reject":      {description: "False positive, not worth it, or a duplicate — close it", color: "d93f0b"},
+	"agent-research-recommend":   {description: "Relevant and enriched — promote it", color: "2cbe4e"},
+	"agent-research-reject":      {description: "False positive, not worth it, or a duplicate — close it", color: "e11d21"},
 	"agent-research-unclear":     {description: "Needs a human answer — answer, then re-apply agent-research", color: "d4c5f9"},
 	"agent-research-failed":      {description: "Box crashed or produced no verdict; needs human triage", color: "b60205"},
 }

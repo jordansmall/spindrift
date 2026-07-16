@@ -940,8 +940,8 @@ for deployments that don't use research yet). To create them manually:
 ```sh
 gh label create agent-research             --repo owner/repo --color fbca04 --description "Apply to fire a research dispatch"
 gh label create agent-research-in-progress --repo owner/repo --color bfd4f2 --description "A Box is reviewing this issue"
-gh label create agent-research-recommend   --repo owner/repo --color 0e8a16 --description "Relevant and enriched — promote it"
-gh label create agent-research-reject      --repo owner/repo --color d93f0b --description "False positive, not worth it, or a duplicate — close it"
+gh label create agent-research-recommend   --repo owner/repo --color 2cbe4e --description "Relevant and enriched — promote it"
+gh label create agent-research-reject      --repo owner/repo --color e11d21 --description "False positive, not worth it, or a duplicate — close it"
 gh label create agent-research-unclear     --repo owner/repo --color d4c5f9 --description "Needs a human answer — answer, then re-apply agent-research"
 gh label create agent-research-failed      --repo owner/repo --color b60205 --description "Box crashed or produced no verdict; needs human triage"
 ```
