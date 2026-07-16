@@ -75,7 +75,12 @@ func (q *Queue) Snapshot() []Pick {
 // waves.BlockerStatus — the same machinery headless waves use, no second
 // parser) are not all satisfied holds at PickHeld with BlockedBy naming
 // them, and Discover moves on to the next candidate rather than launching
-// it, so an earlier held pick never stalls a later ready one. A ready
+// it, so an earlier held pick never stalls a later ready one. A pick whose
+// DepsOf call itself failed (transient tracker hiccup — rate limit, timeout,
+// flaky API call) holds too, with a reason distinguishing it from a real
+// open blocker, rather than launching: BuildEdges' best-effort skip makes a
+// failed lookup indistinguishable from "confirmed zero blockers" unless
+// Discover checks the failed set explicitly (#752). A ready
 // pick's atomic Dispatchable->InProgress claim, once it races (another
 // loop, a closed issue, a relabel), dissolves that pick with the reason and
 // Discover moves on too, so a stale queue can only produce a failed claim,
@@ -90,7 +95,15 @@ func (q *Queue) Snapshot() []Pick {
 // still have moved one or more picks onto PickHeld.
 func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string) ([]waves.Issue, map[string][]string, waves.Sources, error) {
 	for _, pick := range q.claimable() {
-		edges, sources, _ := waves.BuildEdges(tracker, []waves.Issue{{Number: pick.Number, Title: pick.Title}})
+		edges, sources, depsOfFailed, _ := waves.BuildEdges(tracker, []waves.Issue{{Number: pick.Number, Title: pick.Title}})
+		if depsOfFailed[pick.Number] {
+			// A transient DepsOf failure looks identical to "confirmed zero
+			// blockers" in edges alone — hold rather than launch, since a
+			// genuinely-blocked pick must never claim on a tracker hiccup
+			// (#752).
+			q.setState(pick.Number, PickHeld, "blocker check failed, will retry")
+			continue
+		}
 		ready, failed, unready := waves.BlockerStatus(waves.Config{FailedLabel: failedLabel}, tracker, cf, pick.Number, edges)
 		if !ready {
 			q.setHeld(pick.Number, unready, failed, sources[pick.Number])
