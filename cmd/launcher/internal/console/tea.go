@@ -48,6 +48,12 @@ type teaModel struct {
 	// since it has no rendering of its own (unlike PendingTerminate/
 	// PendingQuit, which arm a visible confirm prompt).
 	pendingPick bool
+	// heartbeats caches each running pick's last-parsed heartbeat line so
+	// syncQueue's per-Update refresh (line ~145) skips the ReadFile+reparse
+	// when a pick's latest pass log is unchanged since the last call (issue
+	// #731) — a pointer so it survives Update's value-receiver copies of
+	// teaModel across the session's whole lifetime.
+	heartbeats *HeartbeatCache
 }
 
 // newTeaModel builds the tea layer's starting state: the dogfood-competition
@@ -62,7 +68,7 @@ func newTeaModel(tracker forge.IssueTracker, pwd string, launch *Launcher) teaMo
 	if launch != nil && launch.pollInterval > 0 {
 		interval = launch.pollInterval
 	}
-	return teaModel{m: m, tracker: tracker, pwd: pwd, launch: launch, pollInterval: interval}
+	return teaModel{m: m, tracker: tracker, pwd: pwd, launch: launch, pollInterval: interval, heartbeats: NewHeartbeatCache()}
 }
 
 // Run drives the console's full-screen Bubble Tea program to completion —
@@ -142,7 +148,7 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	t.m = syncQueue(t.m, t.launch, t.pwd)
+	t.m = syncQueue(t.m, t.launch, t.pwd, t.heartbeats)
 	t.m = syncStale(t.m, t.launch)
 	if t.m.Quitting {
 		return t, tea.Quit
@@ -527,11 +533,15 @@ func pollTick(d time.Duration) tea.Cmd {
 // row's Heartbeat is also refreshed from its on-disk log on the way in
 // (#647 AC2) — a plain local read, unlike the backlog refresh, so it is not
 // gated behind the write/poll-triggered cadence the tracker's rate limit
-// forces on Refresh. It also installs the session's current live
+// forces on Refresh. heartbeats caches that refresh per pick number, so a
+// call whose latest pass log is unchanged since last time skips the
+// ReadFile+reparse entirely (issue #731) — syncQueue runs on every tea.Msg,
+// not just a render tick, so most calls see the same on-disk bytes as last
+// time. It also installs the session's current live
 // parallelism cap and live count (issue #653), read straight off the
 // Launcher's Limiter — no Msg carries a resize, so this per-render pull is
 // the only path that keeps them current. A nil launch leaves m untouched.
-func syncQueue(m Model, launch *Launcher, pwd string) Model {
+func syncQueue(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache) Model {
 	if launch == nil {
 		return m
 	}
@@ -539,7 +549,7 @@ func syncQueue(m Model, launch *Launcher, pwd string) Model {
 	if drv := driverOf(launch); drv != nil {
 		for i := range picks {
 			if picks[i].State == PickRunning {
-				picks[i].Heartbeat = RunningHeartbeat(drv, pwd, picks[i].Number)
+				picks[i].Heartbeat = heartbeats.RunningHeartbeat(drv, pwd, picks[i].Number)
 			}
 		}
 	}
