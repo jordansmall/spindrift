@@ -69,11 +69,12 @@ rec {
   # user-tunable knobs. They have no lib/env-schema.nix entry (that registry
   # is scoped to runtime knobs, per its own header comment) and never gain
   # one when a knob is added, so they live here rather than as a per-entry
-  # schema field. This is the single source both renderInputDocument (what
-  # gets rendered into the document) and nix/checks/schema-drift.nix's
-  # launcher-env-coverage check (what main.go is allowed to read outside the
-  # schema) consult — replacing the pre-#625 nixBakedEnvVars, which was only
-  # an exclusion list for the latter.
+  # schema field. This list does not drive what actually gets rendered into
+  # the document (runArtifacts/buildArtifacts in lib/mkHarness.nix build that
+  # independently); its only consumer is nix/checks/schema-drift.nix's
+  # launcher-env-coverage check, which uses it as the allow-list for what
+  # main.go may read outside the schema — replacing the pre-#625
+  # nixBakedEnvVars, which served that same exclusion-list role.
   documentArtifactKeys = [
     "IMAGE_ARCHIVE"
     "IMAGE_TAG"
