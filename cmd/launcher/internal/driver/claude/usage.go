@@ -3,6 +3,7 @@ package claude
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 
@@ -165,6 +166,7 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 	// aggregate totals already parsed above — see issue #674.
 	roles, err := breakdownByRole(logPath)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: breakdown by role failed for %s: %v\n", logPath, err)
 		roles = nil
 	}
 	return usage.Report{Usage: u, Found: true, Roles: roles}, nil
