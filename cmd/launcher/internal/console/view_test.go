@@ -100,7 +100,9 @@ func TestView_Header_Banner_ShownWhenTallCollapsedWhenShort(t *testing.T) {
 // stale-image and competing-dogfood alert lines render as part of the
 // header — grouped with the status line, ahead of ephemeral operator
 // prompts like an in-progress filter edit — rather than interleaved with
-// them (issue #843, ADR 0025).
+// them (issue #843, ADR 0025). Rebuilding/RebuildErr are the other two
+// header alerts and share this same grouping; they're covered separately by
+// TestView_Rebuilding_ShowsProgress and TestView_RebuildErr_Surfaced below.
 func TestView_Header_AlertsRenderBeforeEphemeralPrompts(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{Stale: true, Message: "rebuild needed"})
