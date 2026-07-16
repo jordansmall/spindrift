@@ -19,7 +19,9 @@ Concretely:
 
 - **Header**: a persistent hardcoded "spindrift" wordmark banner and a one-line status —
   `running L/Cap · waiting N · held N · settled N`, all derived from existing
-  state. Stale-image and competing-dogfood warnings render here as alert lines.
+  state. Stale-image, rebuilding-in-progress, rebuild-failed, and
+  competing-dogfood warnings render here as alert lines, in that fixed
+  order, one per line, any subset co-occurring.
   On a terminal too short to afford the banner rows, the header degrades to the
   status line alone.
 - **Two-column body**: the backlog (queueable issues) on the left keeps its

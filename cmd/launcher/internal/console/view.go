@@ -263,10 +263,13 @@ var bannerHeight = strings.Count(banner, "\n")
 
 // renderHeader renders the Console's full-width header: the fixed banner
 // (when the terminal is tall enough to afford it), the status line
-// (running/cap, waiting, held, settled), and the stale-image/competing-
-// dogfood alert lines. Status counts are derived from Cap, Live, and the
-// Picks slice's PickState tags rather than a new stored counter (issue
-// #843, ADR 0025).
+// (running/cap, waiting, held, settled), and the stale-image,
+// rebuilding-in-progress, rebuild-failed, and competing-dogfood alert
+// lines. The four alerts render in that fixed order with no priority or
+// dismissal logic — any subset can be true at once, and each renders
+// unconditionally on its own line. Status counts are derived from Cap,
+// Live, and the Picks slice's PickState tags rather than a new stored
+// counter (issue #843, ADR 0025).
 func renderHeader(m Model) string {
 	var waiting, held, settled int
 	for _, p := range m.Picks {
