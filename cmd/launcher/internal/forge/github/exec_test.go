@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -240,8 +241,8 @@ esac`)
 		t.Fatalf("DepsOf: %v", err)
 	}
 	want := []forge.Dependency{{ID: "3", Source: forge.DepSourceNative}, {ID: "5", Source: forge.DepSourceNative}}
-	if len(deps) != 2 || deps[0] != want[0] || deps[1] != want[1] {
-		t.Fatalf("want %v, got %v", want, deps)
+	if !reflect.DeepEqual(deps, want) {
+		t.Fatalf("DepsOf = %v, want %v", deps, want)
 	}
 }
 
