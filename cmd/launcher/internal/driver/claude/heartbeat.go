@@ -110,7 +110,7 @@ func (w *Writer) parseLine(line string) {
 							w.ensureHeader()
 							fmt.Fprintln(w.out, narLine)
 							if w.hasCurrCounts() {
-								fmt.Fprintln(w.out, FormatCountLine(w.issue, phase, w.currCounts()))
+								fmt.Fprintln(w.out, FormatCountLine(w.issue, w.currentRole, phase, w.currCounts()))
 								clearCounts(w.currCounts())
 							}
 						}
@@ -127,7 +127,7 @@ func (w *Writer) parseLine(line string) {
 					if phase != currPhase {
 						if w.hasCurrCounts() {
 							w.ensureHeader()
-							fmt.Fprintln(w.out, FormatCountLine(w.issue, currPhase, w.currCounts()))
+							fmt.Fprintln(w.out, FormatCountLine(w.issue, w.currentRole, currPhase, w.currCounts()))
 							clearCounts(w.currCounts())
 						}
 						w.rolePhase[w.currentRole] = phase
@@ -152,11 +152,11 @@ func (w *Writer) parseLine(line string) {
 func (w *Writer) emit() {
 	if w.hasCurrCounts() {
 		w.ensureHeader()
-		fmt.Fprintln(w.out, FormatCountLine(w.issue, w.rolePhase[w.currentRole], w.currCounts()))
+		fmt.Fprintln(w.out, FormatCountLine(w.issue, w.currentRole, w.rolePhase[w.currentRole], w.currCounts()))
 		clearCounts(w.currCounts())
 	}
 	if w.turns > 0 {
-		fmt.Fprintln(w.out, FormatHeartbeat(w.issue, w.turns, "", w.rolePhase["implementor"]))
+		fmt.Fprintln(w.out, FormatHeartbeat(w.issue, w.turns, "", w.currentRole, w.rolePhase[w.currentRole]))
 	}
 }
 
@@ -186,7 +186,7 @@ func (w *Writer) flushCounts(role string) {
 		w.lastHeader = role
 		w.lastHeaderModel = w.currentModel
 	}
-	fmt.Fprintln(w.out, FormatCountLine(w.issue, w.rolePhase[role], counts))
+	fmt.Fprintln(w.out, FormatCountLine(w.issue, role, w.rolePhase[role], counts))
 	clearCounts(counts)
 }
 

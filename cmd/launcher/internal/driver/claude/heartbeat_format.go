@@ -26,11 +26,17 @@ func FormatRoleHeader(issue, role, model string) string {
 	return prefix + strings.Repeat("\xe2\x94\x80", trail)
 }
 
-// FormatHeartbeat returns a coarse status line for one running issue.
+// FormatHeartbeat returns a coarse status line for one running issue. When
+// role is non-empty and not the implementor, it is named right after the
+// issue tag so the line is never mistaken for implementor output.
 // Example: "#42 [edit] · 15 turns · Edit(main.go)"
-func FormatHeartbeat(issue string, turns int, lastTool, phase string) string {
+// Example: "#42 scout [plan] · 3 turns"
+func FormatHeartbeat(issue string, turns int, lastTool, role, phase string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s", issue)
+	if role != "" && role != ImplementorRole {
+		fmt.Fprintf(&sb, " %s", role)
+	}
 	if phase != "" {
 		fmt.Fprintf(&sb, " [%s]", phase)
 	}
@@ -48,10 +54,16 @@ func FormatHeartbeat(issue string, turns int, lastTool, phase string) string {
 }
 
 // FormatCountLine returns a count summary line for accumulated tool calls.
+// When role is non-empty and not the implementor, it is named right after
+// the issue tag so the line is never mistaken for implementor output.
 // Example: "#42 [explore] · 3 reads, 2 greps"
-func FormatCountLine(issue, phase string, counts map[string]int) string {
+// Example: "#42 scout [explore] · 1 read"
+func FormatCountLine(issue, role, phase string, counts map[string]int) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s", issue)
+	if role != "" && role != ImplementorRole {
+		fmt.Fprintf(&sb, " %s", role)
+	}
 	if phase != "" {
 		fmt.Fprintf(&sb, " [%s]", phase)
 	}
