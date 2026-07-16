@@ -237,6 +237,115 @@ func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
 	}
 }
 
+// TestRunContinuous_RapidResizeLaunchesAllHeldPicks verifies issue #766:
+// two Resize calls fired back-to-back (no yield in between, so the
+// buffer-1 grow channel coalesces them into a single delivered signal)
+// still launch every held pick the raised cap now allows — not just one,
+// with the rest stranded until an unrelated Release.
+func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+	limiter := NewLimiter(1)
+	c.Limiter = limiter
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	release1 := make(chan struct{})
+	release2 := make(chan struct{})
+	release3 := make(chan struct{})
+	started2 := make(chan struct{})
+	started3 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		switch box.Issue {
+		case "1":
+			<-release1
+		case "2":
+			close(started2)
+			<-release2
+		case "3":
+			close(started3)
+			<-release3
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discover := func() ([]Issue, map[string][]string, Sources, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return out, map[string][]string{}, nil, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	resultCh := make(chan error, 1)
+	go func() { resultCh <- RunContinuous(c, fc, fc, dir, f, s, discover, fresh) }()
+
+	select {
+	case <-started2:
+		t.Fatal("issue #2 started before the cap was ever raised above 1")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Simulate two '+' presses landing faster than the grow listener can
+	// drain the buffer-1 channel: raise the cap to what back-to-back
+	// Resize(2), Resize(3) calls would leave it at, but only deliver the
+	// single coalesced signal Resize's own non-blocking send would
+	// actually manage to enqueue. Racing two real Resize calls against the
+	// listener goroutine can't force the drop deterministically (the
+	// runtime tends to hand off to a parked receiver on send), so this
+	// reproduces the drop directly via the package-internal fields instead.
+	limiter.mu.Lock()
+	limiter.cap = 3
+	limiter.mu.Unlock()
+	limiter.cond.Broadcast()
+	select {
+	case limiter.grow <- struct{}{}:
+	default:
+	}
+
+	select {
+	case <-started2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("issue #2 was never dispatched after rapid Resize(2), Resize(3)")
+	}
+	select {
+	case <-started3:
+	case <-time.After(2 * time.Second):
+		t.Fatal("issue #3 was never dispatched after rapid Resize(2), Resize(3) — a coalesced grow signal must still launch every held pick the new cap allows")
+	}
+
+	close(release1)
+	close(release2)
+	close(release3)
+
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatalf("RunContinuous: got %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return after all issues were released")
+	}
+
+	if len(fr.RunCalls) != 3 {
+		t.Fatalf("RunCalls: got %d, want 3", len(fr.RunCalls))
+	}
+}
+
 // TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches verifies issue
 // #653: lowering a live Limiter's cap below the current live count kills
 // nothing already running, and a third ready issue is held back — not
