@@ -319,8 +319,8 @@ and on shortfall prints the machine RAM, the required RAM, and a fix
 `MEMORY_LIMIT`) before exiting 1 — no box is dispatched. It's a no-op with
 adequate machine RAM, and skips cleanly when there's no active podman
 machine (native Linux, or a non-podman runtime). With the defaults
-(`MEMORY_LIMIT=5g`, `MAX_PARALLEL=3`) a podman machine needs at least
-16384MiB (16GiB) RAM.
+(`MEMORY_LIMIT=5g`, `MAX_PARALLEL=3`) the computed minimum is 15872MiB;
+round up to a clean `podman machine set --memory 16384` (16GiB) in practice.
 
 `dogfood.sh` drives spindrift building itself, with `CONTINUOUS_DISPATCH=1`
 on by default (#528): instead of draining one bounded batch and returning,
