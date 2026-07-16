@@ -20,6 +20,10 @@ in
       };
       result = builtins.tryEval (driverRegistry.assertShape "incomplete" incomplete);
     in
+    # tryEval exposes only success/failure, never the thrown message text, so
+    # this can assert throw/no-throw but not that the message names the
+    # Driver and missing attribute (see drivers-assert-shape-succeeds below
+    # for the complementary positive-shape case).
     assert assertMsg (
       !result.success
     ) "assertShape must throw when a Driver entry is missing a required attribute";
@@ -46,4 +50,23 @@ in
     assert assertMsg (hasInfix "_driver_session_flags() {\necho stub-session" out)
       "renderPreamble must fold in the Driver entry's sessionFlagsFnBody, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-shape" { } "touch $out";
+
+  drivers-assert-shape-succeeds =
+    let
+      complete = {
+        name = "stub";
+        package = pkgs: pkgs.hello;
+        bin = "stub-cli";
+        flagsCommon = "--stub-flag --two";
+        skillsDirRelative = ".stub/skills";
+        outcomeExtractFnBody = "echo stub-outcome\n";
+        sessionFlagsFnBody = "echo stub-session\n";
+        agentsJsonTemplate = "{}";
+      };
+      result = builtins.tryEval (driverRegistry.assertShape "stub" complete);
+    in
+    assert assertMsg (
+      result.success
+    ) "assertShape must not throw when a Driver entry has every required attribute";
+    pkgs.runCommand "drivers-assert-shape-succeeds" { } "touch $out";
 }
