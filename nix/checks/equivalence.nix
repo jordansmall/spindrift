@@ -128,6 +128,9 @@ in
   # `run`/`build` Launcher input documents (ADR 0020; eval-only, no Linux
   # builder) — the wrapper command text itself carries no per-knob values
   # any more, only a single --input flag pointing at the document below.
+  # This is the drift gate for the hand-written inputDocument Go struct
+  # (ADR 0020, cmd/launcher/inputdoc.go): these greps hand-pick specific
+  # keys, so a new flakeOption knob is not automatically asserted here.
   mkharness-defaults = pkgs.runCommand "mkharness-defaults" { } ''
     runDoc=${customHarness.runInputDocumentFile}
     ! grep -q -- '@label@' "$runDoc"
