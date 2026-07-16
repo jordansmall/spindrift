@@ -1568,8 +1568,18 @@ func TestSplitLeftWidth_UsesBacklogWidthUnderFractionCap(t *testing.T) {
 // `for offset < total` bound let it climb one past the last valid index
 // (issue #1054).
 func TestFollowViewport_NonPositiveBudget_ClampsOffsetBelowTotal(t *testing.T) {
-	got := followViewport(0, 4, 5, 0)
-	if got >= 5 {
-		t.Errorf("followViewport(0, 4, 5, 0) = %d, want < 5 (total)", got)
+	if got, want := followViewport(0, 4, 5, 0), 4; got != want {
+		t.Errorf("followViewport(0, 4, 5, 0) = %d, want %d (total-1, not total)", got, want)
+	}
+}
+
+// TestFollowViewport_PositiveBudget_AdvancesToExactSameOffsetAsBefore
+// guards the total-1 advance bound against regressing the itemBudget > 0
+// path: the break condition fires well before offset reaches total-1, so
+// tightening the loop bound from total to total-1 must not change the
+// result here (issue #1054).
+func TestFollowViewport_PositiveBudget_AdvancesToExactSameOffsetAsBefore(t *testing.T) {
+	if got, want := followViewport(0, 4, 5, 2), 3; got != want {
+		t.Errorf("followViewport(0, 4, 5, 2) = %d, want %d", got, want)
 	}
 }
