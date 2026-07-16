@@ -1596,6 +1596,11 @@ func TestTea_QuitKey_TerminateAll_ReapsEveryLiveDispatch(t *testing.T) {
 
 	sendKey(tm, "t")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+	// TerminateAsync's Kill runs in a background goroutine tracked by
+	// launch.wg — production's own Run waits on it the same way
+	// (tea.go's Run) after the program exits, before this can safely read
+	// fr.KillCalls.
+	launch.Wait()
 
 	if len(fr.KillCalls) != 1 || fr.KillCalls[0] != "agent-issue-42" {
 		t.Errorf("KillCalls = %v, want exactly one kill of agent-issue-42", fr.KillCalls)
