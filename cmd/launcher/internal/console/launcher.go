@@ -443,6 +443,7 @@ func (l *Launcher) freshnessChecker() waves.FreshnessChecker {
 		l.stale = applicable && !fresh
 		l.staleMessage = msg
 		l.mu.Unlock()
+		l.signalRefresh()
 		return applicable, fresh, msg
 	}
 }
