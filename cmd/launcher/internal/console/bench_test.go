@@ -130,3 +130,18 @@ func BenchmarkHeartbeatCache_CacheHit_LargeLog(b *testing.B) {
 		_ = cache.RunningHeartbeat(drv, pwd, "9")
 	}
 }
+
+// BenchmarkTryLaunch_EmptyQueue exercises the background poll tick's idle
+// case (tea.go pollTickMsg, every interval regardless of queue state)
+// against an empty Queue — the drain-goroutine-plus-RunContinuous-pass
+// waste #754 closes. Post-fix this is a Queue.Empty() check and return, no
+// goroutine spawn, no allocation.
+func BenchmarkTryLaunch_EmptyQueue(b *testing.B) {
+	launch := &Launcher{Queue: NewQueue()}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		launch.tryLaunch(nil, "")
+	}
+}
