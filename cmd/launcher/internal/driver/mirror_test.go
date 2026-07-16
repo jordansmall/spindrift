@@ -31,14 +31,14 @@ func assertSameSet(t *testing.T, label string, a, b []string) {
 	for _, v := range b {
 		bSet[v] = true
 	}
+	aSet := make(map[string]bool, len(a))
+	for _, v := range a {
+		aSet[v] = true
+	}
 	for _, v := range a {
 		if !bSet[v] {
 			t.Errorf("%s: driver value %q has no matching claude value", label, v)
 		}
-	}
-	aSet := make(map[string]bool, len(a))
-	for _, v := range a {
-		aSet[v] = true
 	}
 	for _, v := range b {
 		if !aSet[v] {
