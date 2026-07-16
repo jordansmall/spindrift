@@ -27,13 +27,13 @@ func assertSameSet(t *testing.T, label string, a, b []string) {
 	if len(a) != len(b) {
 		t.Fatalf("%s: driver has %d values, claude has %d: %v vs %v", label, len(a), len(b), a, b)
 	}
-	bSet := make(map[string]bool, len(b))
-	for _, v := range b {
-		bSet[v] = true
-	}
 	aSet := make(map[string]bool, len(a))
 	for _, v := range a {
 		aSet[v] = true
+	}
+	bSet := make(map[string]bool, len(b))
+	for _, v := range b {
+		bSet[v] = true
 	}
 	for _, v := range a {
 		if !bSet[v] {
