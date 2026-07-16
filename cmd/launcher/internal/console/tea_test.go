@@ -743,6 +743,30 @@ func TestTea_StaleStatus_RendersBanner(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
+// TestTea_StaleDetectedWhileIdle_SignalsRefreshWithoutPoll verifies stale
+// detection itself wakes an already-idling Program — not the next poll tick
+// (90s) or a coincidental Msg. TestTea_StaleStatus_RendersBanner above drives
+// staleness through Wait() before the tea model even exists, masking this
+// exact gap; this test detects staleness only after the Program is running
+// idle, with pollInterval set far longer than the test's wait window so a
+// poll tick could never be the cause (issue #762).
+func TestTea_StaleDetectedWhileIdle_SignalsRefreshWithoutPoll(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+	launch.pollInterval = time.Hour
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "first")
+
+	launch.Fresh = func() (bool, bool, string) { return true, false, "rebuild needed" }
+	launch.freshnessChecker()()
+	waitForOutput(t, tm, "stale", "rebuild needed")
+
+	sendKey(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
+}
+
 // TestTea_SettleTriggersAutoRefresh_NoExplicitRefreshKey verifies a settle —
 // the session's own tracker write — fires a backlog refresh on its own, so
 // an issue added to the tracker while a Box is running appears on a render
