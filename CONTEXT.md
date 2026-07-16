@@ -284,6 +284,22 @@ the headless driving loops (dogfood, CI), not a replacement for them.
 _Avoid_: TUI (names the rendering, not the role), dashboard (it drives, not
 merely displays), monitor.
 
+**Quickstart**:
+The pre-CLI interactive scaffolder — a nix app (`nix run
+…#quickstart`, `apps.quickstart`), not a Harness subcommand — that takes an
+operator from zero to a validated, buildable Consumer flake in one command. It
+runs *before* the `spindrift` binary exists (which is why it cannot be a
+subcommand: `runtime`/`driver` are baked into the wrapper the binary is built
+from, and the fields it sets live in `flake.nix`, not env). A TTY-only wizard
+that detects what it can (container runtime by `podman → docker → bwrap`, host
+git identity, repoSlug from `git remote`, an ambient token) and asks only the
+irreducible rest, then writes a minimal generated `flake.nix` + secrets-only
+`harness.env` + `.gitignore` + `.envrc` (no `prompts/` — the Harness defaults
+every prompt), and finishes through `spindrift doctor` and `spindrift build`
+(ADR 0027). Refuses to clobber an existing flake without `--force`.
+_Avoid_: init, wizard (names the UI, not the role), bootstrap (the launcher's
+internal launch-context wiring).
+
 **Pick**:
 The operator's act of selecting an issue into the running session's queue for
 dispatch. Picking an issue that is not yet `Dispatchable` promotes it through
