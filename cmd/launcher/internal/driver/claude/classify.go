@@ -194,6 +194,13 @@ type agentContentEvent struct {
 	} `json:"message"`
 }
 
+// syntheticModelSentinel is the claude CLI's message.model value for its
+// synthetic terminator event on a mid-stream API error (issue #815). This is
+// a runtime contract with the CLI, not a spindrift constant — if a future CLI
+// version changes it, isAgentContentEvent's guard below silently stops
+// matching (issue #820).
+const syntheticModelSentinel = "<synthetic>"
+
 // isAgentContentEvent reports whether chunk is a stream-json line carrying
 // agent-authored content — an assistant message (prose, or a file-edit tool
 // call's input) or a user message (tool_result content, per the Claude API's
@@ -204,16 +211,16 @@ type agentContentEvent struct {
 // error output) or that parse with any other type ("error", "system",
 // "result", or none) are left to the normal scan.
 //
-// The one exception: an assistant-typed event with message.model:"<synthetic>"
-// and a top-level "error" field is not agent-authored — it's the claude CLI's
-// own synthetic terminator for a mid-stream API error (issue #815) — so it is
-// left to the normal scan too.
+// The one exception: an assistant-typed event with message.model set to
+// syntheticModelSentinel and a top-level "error" field is not agent-authored
+// — it's the claude CLI's own synthetic terminator for a mid-stream API
+// error (issue #815) — so it is left to the normal scan too.
 func isAgentContentEvent(chunk string) bool {
 	var ev agentContentEvent
 	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
 		return false
 	}
-	if ev.Type == "assistant" && ev.Message.Model == "<synthetic>" && ev.Error != "" {
+	if ev.Type == "assistant" && ev.Message.Model == syntheticModelSentinel && ev.Error != "" {
 		return false
 	}
 	return ev.Type == "assistant" || ev.Type == "user"
