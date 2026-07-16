@@ -7,6 +7,23 @@
 let
   inherit (fixtures) harness;
   renderers = import ../../lib/renderers.nix;
+
+  # Shared by schema-choices and schema-secret-choices-guard (issue #872) so
+  # the guard predicate is defined exactly once and can be exercised against
+  # a synthetic/injected schema in a test, not only the real one.
+  schemaChoiceIssues =
+    schema:
+    let
+      inherit (pkgs.lib) filter;
+      withChoices = filter (e: e ? choices) (builtins.attrValues schema);
+    in
+    {
+      badShape = filter (
+        e: !(builtins.isList e.choices) || e.choices == [ ] || !(builtins.all builtins.isString e.choices)
+      ) withChoices;
+      badDefault = filter (e: (e ? default) && !(builtins.elem e.default e.choices)) withChoices;
+      badSecret = filter (e: e.secret or false) withChoices;
+    };
 in
 {
   # cmd/launcher/internal/driver/drivernames_gen.go must match the key list
@@ -111,25 +128,20 @@ in
   schema-choices =
     let
       schema = import ../../lib/env-schema.nix;
-      inherit (pkgs.lib)
-        attrValues
-        assertMsg
-        concatStringsSep
-        filter
-        ;
-      withChoices = filter (e: e ? choices) (attrValues schema);
-      badShape = filter (
-        e: !(builtins.isList e.choices) || e.choices == [ ] || !(builtins.all builtins.isString e.choices)
-      ) withChoices;
-      badDefault = filter (e: (e ? default) && !(builtins.elem e.default e.choices)) withChoices;
+      inherit (pkgs.lib) assertMsg concatStringsSep;
+      issues = schemaChoiceIssues schema;
     in
-    assert assertMsg (badShape == [ ])
+    assert assertMsg (issues.badShape == [ ])
       "lib/env-schema.nix: choices must be a non-empty list of strings for: ${
-        concatStringsSep ", " (map (e: e.env) badShape)
+        concatStringsSep ", " (map (e: e.env) issues.badShape)
       }";
-    assert assertMsg (badDefault == [ ])
+    assert assertMsg (issues.badDefault == [ ])
       "lib/env-schema.nix: default is not a member of choices for: ${
-        concatStringsSep ", " (map (e: e.env) badDefault)
+        concatStringsSep ", " (map (e: e.env) issues.badDefault)
+      }";
+    assert assertMsg (issues.badSecret == [ ])
+      "lib/env-schema.nix: choices is not supported on secret knobs — renderers only ever honor choices on nonSecret knobs (secrets get a --*-file flag, never a value-taking one): ${
+        concatStringsSep ", " (map (e: e.env) issues.badSecret)
       }";
     assert assertMsg (
       schema.mergeMode.choices or [ ] == [
@@ -158,6 +170,36 @@ in
       ]
     ) "lib/env-schema.nix: overlapGate.choices must be [ defer off ]";
     pkgs.runCommand "schema-choices" { } "touch $out";
+
+  # Regression guard (issue #872): lib/renderers.nix's bash/fish/zsh
+  # completion renderers always scope `choices` to nonSecret knobs (a secret
+  # gets only a `--*-file` path flag, never a value-taking one), but
+  # schema-choices above validated `choices` shape/default on every knob,
+  # secret or not. A `choices` field on a secret knob would therefore pass
+  # validation yet never render anywhere — a silent no-op. Exercises
+  # schemaChoiceIssues.badSecret against the real schema with one secret
+  # knob's `choices` injected, so this test fails independently of whether
+  # any real secret knob currently declares choices.
+  schema-secret-choices-guard =
+    let
+      schema = import ../../lib/env-schema.nix;
+      inherit (pkgs.lib) assertMsg;
+      badSchema = schema // {
+        jiraToken = schema.jiraToken // {
+          choices = [
+            "a"
+            "b"
+          ];
+          default = "a";
+        };
+      };
+      issues = schemaChoiceIssues badSchema;
+    in
+    assert assertMsg (map (e: e.env) issues.badSecret == [ "JIRA_TOKEN" ])
+      "schema-secret-choices-guard: expected the injected secret+choices fixture (jiraToken) to be flagged by schemaChoiceIssues.badSecret, got: ${
+        toString (map (e: e.env) issues.badSecret)
+      }";
+    pkgs.runCommand "schema-secret-choices-guard" { } "touch $out";
 
   # tests/helper.bash's set_box_env fixture must export every boxEnv = true
   # schema knob, so the entrypoint-*.bats suites exercise the same defaults the nix
