@@ -11,6 +11,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // countingForge wraps a *forge.Fake and counts InProgress transitions
@@ -180,7 +181,7 @@ func TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) 
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	out := captureStdout(t, func() {
+	out := testutil.CaptureStdout(t, func() {
 		dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}})
 	})
 

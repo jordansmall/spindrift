@@ -9,37 +9,8 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/testutil"
 )
-
-// captureStdout runs fn with os.Stdout redirected to a pipe and returns
-// everything written to it.
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-	orig := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stdout = w
-
-	fn()
-
-	w.Close()
-	os.Stdout = orig
-
-	var buf strings.Builder
-	tmp := make([]byte, 4096)
-	for {
-		n, rerr := r.Read(tmp)
-		if n > 0 {
-			buf.Write(tmp[:n])
-		}
-		if rerr != nil {
-			break
-		}
-	}
-	return buf.String()
-}
 
 // TestDrainMaxJobs_SkipsBlockedDispatchesNext verifies that when MAX_JOBS=1
 // the oldest blocked issue is skipped and the next unblocked issue is dispatched.
@@ -223,7 +194,7 @@ func TestDrainMaxJobs_PrintsRemainingCountAfterCapNotFalselyBlocked(t *testing.T
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	out := captureStdout(t, func() {
+	out := testutil.CaptureStdout(t, func() {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "first"},
 			{Number: "2", Title: "second"},
@@ -298,7 +269,7 @@ func TestDrainMaxJobs_PrintsRemainingCountAfterPartialWave(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	out := captureStdout(t, func() {
+	out := testutil.CaptureStdout(t, func() {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "unblocked"},
 			{Number: "2", Title: "dependent"},
@@ -371,7 +342,7 @@ func TestDrainMaxJobs_Selective_PartialWave_PrintsRemainingAndRerunCommand(t *te
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	out := captureStdout(t, func() {
+	out := testutil.CaptureStdout(t, func() {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "12", Title: "blocker"},
 			{Number: "15", Title: "dependent"},
@@ -430,7 +401,7 @@ func TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint(t *testing.T) {
 	s := newSettle(fc, fc)
 
 	var runErr error
-	out := captureStdout(t, func() {
+	out := testutil.CaptureStdout(t, func() {
 		runErr = drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "10", Title: "candidate"},
 		}, map[string][]string{}, nil, OriginSelective)
