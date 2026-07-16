@@ -796,7 +796,7 @@ func TestTea_WithLauncher_RendersCapAndLive(t *testing.T) {
 // screen (#646 AC4, AC6).
 func TestTea_WithLauncher_RendersLiveQueueState(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent", "agent-in-progress", "priority-p1"}})
 
 	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
 	// Simulate a state transition that happened entirely on the background
@@ -805,7 +805,12 @@ func TestTea_WithLauncher_RendersLiveQueueState(t *testing.T) {
 	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickDissolved, Reason: "issue is closed"})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "dissolved", "issue is closed")
+	// A realistic 3-label backlog issue widens the backlog column to its
+	// leftColumnFraction cap on an 80-col terminal, which in turn narrows the
+	// queue column enough that the Reason badge clips mid-word ("issue is
+	// closed" -> "issue is cl…", view.go's clip) — accepted and asserted
+	// here rather than masked by a label-free fixture (issue #857).
+	waitForOutput(t, tm, "dissolved", "issue is cl…")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
@@ -817,7 +822,7 @@ func TestTea_WithLauncher_RendersLiveQueueState(t *testing.T) {
 // "queue rows show ... blocked (with a held by #N badge)").
 func TestTea_WithLauncher_RendersHeldPickWithBlockedByBadge(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent", "priority-p1"}})
 
 	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
 	// A held pick's badge is set entirely by Queue.Discover's blocker check
@@ -827,7 +832,12 @@ func TestTea_WithLauncher_RendersHeldPickWithBlockedByBadge(t *testing.T) {
 	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickHeld, BlockedBy: "#41 (native)"})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "held", "held by #41 (native)")
+	// As in TestTea_WithLauncher_RendersLiveQueueState, a realistic 2-label
+	// backlog issue narrows the queue column enough that the "held by" badge
+	// clips mid-word ("held by #41 (native)" -> "held by #41 (nat…") —
+	// accepted and asserted rather than masked by a label-free fixture
+	// (issue #857).
+	waitForOutput(t, tm, "held", "held by #41 (nat…")
 
 	sendKey(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
