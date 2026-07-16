@@ -1,5 +1,7 @@
-Use the `/code-review` skill to run its two-axis (Standards + Spec) analysis;
-it is authoritative and supersedes the inline review below. Reconcile its
-findings into the contract below: Spec failures and hard Standards
-violations go under `## Blocking`; smells, nits, and suggestions go under
-`## Non-blocking`. Still emit the `VERDICT: APPROVE | BLOCK` line.
+Run the `/code-review` skill FIRST and treat its two-axis (Standards + Spec)
+verdict as authoritative — it supersedes the inline rubric below, which is only
+the fallback for when the skill errors or is unavailable. Reconcile its
+findings into the contract below: Spec failures, correctness or security bugs,
+hard Standards violations, and any missing or inadequate test coverage go under
+`## Blocking`; smells, nits, and suggestions go under `## Non-blocking`. Still
+emit the `VERDICT: APPROVE | BLOCK` line.

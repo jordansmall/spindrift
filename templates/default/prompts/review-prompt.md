@@ -45,10 +45,13 @@ names, swallowed errors, magic values, comments that lie, and anything that will
 rot. Nits count — surface them, don't sit on them.
 
 Severity, so the fix loop converges:
-- **Blocking** — spec violations, correctness bugs, security issues, missing
-  required tests, standards violations that break the build or documented rules.
+- **Blocking** — spec violations, correctness bugs, security issues, missing or
+  inadequate tests for the new logic (untested new logic blocks on its own),
+  standards violations that break the build or documented rules.
 - **Non-blocking** — smells, nits, style, and suggestions. Surface every one;
-  they land in the PR body, they don't gate the merge.
+  they don't gate the merge. The work loop resolves the cheap, in-scope ones in
+  place and escalates only what needs a human — so do not sit on a nit, but do
+  not dress a one-line fix up as a blocking finding either.
 
 Output — final message exactly this shape (max ~40 lines):
 

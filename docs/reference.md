@@ -870,16 +870,25 @@ downgrading every stale PR to manual.
 
 #### Filer
 
-An opt-in subagent, alongside the scout and reviewer, that turns the final
-approving review's Non-blocking findings into tracked issues instead of
-leaving them in the PR body. Off by default; setting `FILER_MODEL` (empty by
-default, recommended `claude-haiku-4-5-20251001`) is the opt-in — an unset
-`FILER_MODEL` means zero behavior change and zero prompt residue in the
-rendered issue prompt.
+An opt-in subagent, alongside the scout and reviewer, that turns the
+non-blocking findings a review surfaces into tracked issues — but only the
+ones the work loop escalated for a human, not the whole Non-blocking section.
+Off by default; setting `FILER_MODEL` (empty by default, recommended
+`claude-haiku-4-5-20251001`) is the opt-in — an unset `FILER_MODEL` means zero
+behavior change and zero prompt residue in the rendered issue prompt.
+
+The work loop triages Non-blocking findings before the filer ever runs: it
+fixes inline, in the same effort, every finding whose fix is cheap and in
+scope (nits, smells, dead code, doc updates for a surface the diff already
+touches), and escalates only what genuinely needs a human — a design
+trade-off, out-of-scope work, or a change too large to fold in. This keeps
+the filer from turning every nit into churn: one issue closed should not spawn
+five more. Missing or inadequate tests are Blocking, not filer fodder — they
+are fixed in the current work, never deferred to an issue.
 
 When enabled, after the final `APPROVE` verdict and before opening the PR,
-the main agent delegates the verdict's Non-blocking section to the filer.
-The filer:
+the main agent delegates only those escalated findings to the filer. The
+filer:
 
 - ensures the `agent-review-finding` label exists on the Target repo
   (idempotent — it creates the label itself; this label is separate from the
@@ -907,8 +916,8 @@ rule that gates every other issue. The PR body then lists the filed issue
 URLs instead of the raw findings.
 
 Filing is strictly best-effort: a filer failure or timeout never blocks the
-PR or changes the outcome line — the main agent falls back to pasting the raw
-Non-blocking findings into the PR body, exactly as when the filer is off.
+PR or changes the outcome line — the main agent falls back to pasting the
+escalated findings into the PR body, exactly as when the filer is off.
 
 Override the filer's system prompt the same way as `scoutPrompt`/
 `reviewPrompt`: the `filerPrompt` `mkHarness` argument (image rebuild), or
