@@ -86,6 +86,22 @@ const leftColumnFraction = 2.0 / 5.0
 // two-column body only).
 const unboundedBudget = 1 << 30
 
+// splitStackedBudget splits budget between the stacked backlog and queue
+// columns: one row goes to the blank separator between them (the "\n"
+// joining the two stacked blocks in renderBody is itself a row, budgeted
+// like any other body row, or the stack's true height runs one over the
+// columns' own totals), and the rest splits as evenly as possible. Shared
+// by renderBody and bodyColumnBudgets so their stacked-mode split can never
+// diverge (issue #1052).
+func splitStackedBudget(budget int) (backlog, queue int) {
+	contentBudget := budget - 1
+	if contentBudget < 0 {
+		contentBudget = 0
+	}
+	half := contentBudget / 2
+	return half, contentBudget - half
+}
+
 // renderBody renders the backlog and work-queue columns side by side,
 // sized from m.Width — the two-column body under the header (issue #844,
 // ADR 0025). Backlog keeps its label filter and cursor; the queue lists
@@ -106,16 +122,9 @@ func renderBody(m Model, budget int) string {
 		return ""
 	}
 	if m.Width < minTwoColumnWidth {
-		// The "\n" joining the two stacked blocks is itself a blank
-		// separator row — budget it like any other body row, or the
-		// stack's true height runs one over the columns' own totals.
-		contentBudget := budget - 1
-		if contentBudget < 0 {
-			contentBudget = 0
-		}
-		half := contentBudget / 2
-		backlog := clipLines(renderBacklogColumn(m, half), m.Width)
-		queue := clipLines(renderQueueColumn(m, contentBudget-half), m.Width)
+		backlogBudget, queueBudget := splitStackedBudget(budget)
+		backlog := clipLines(renderBacklogColumn(m, backlogBudget), m.Width)
+		queue := clipLines(renderQueueColumn(m, queueBudget), m.Width)
 		return backlog + "\n" + queue
 	}
 	backlog := renderBacklogColumn(m, budget)
@@ -625,12 +634,7 @@ func bodyColumnBudgets(m Model) (backlog, queue int) {
 		return 0, 0
 	}
 	if m.Width < minTwoColumnWidth {
-		contentBudget := budget - 1
-		if contentBudget < 0 {
-			contentBudget = 0
-		}
-		half := contentBudget / 2
-		return half, contentBudget - half
+		return splitStackedBudget(budget)
 	}
 	return budget, budget
 }
