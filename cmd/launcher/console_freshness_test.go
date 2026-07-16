@@ -2,6 +2,9 @@ package main
 
 import (
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"spindrift.dev/launcher/internal/freshness"
@@ -110,4 +113,82 @@ func TestNewConsoleFreshnessChecker_RebuildPropagatesPullAndBuildErrors(t *testi
 	if probeCalls != 0 {
 		t.Errorf("probeCalls = %d, want 0 when pull fails before any probe", probeCalls)
 	}
+}
+
+// TestConsoleGitSync_DirtyOffBranch_RefusesCheckout verifies that when pwd is
+// on a branch other than baseBranch and has uncommitted changes,
+// consoleGitSync refuses the checkout instead of silently carrying those
+// changes onto baseBranch (issue #769) — the exact "unexpected branch
+// switch" the README's "non-destructive" claim glossed over: git itself
+// only blocks a checkout that would overwrite a *conflicting* file, so a
+// non-conflicting dirty change rides along in silence.
+func TestConsoleGitSync_DirtyOffBranch_RefusesCheckout(t *testing.T) {
+	pwd := newConsoleGitRepo(t, "main")
+	gitRun(t, pwd, "checkout", "-b", "feature")
+	gitWriteFile(t, filepath.Join(pwd, "flake.nix"), "{ dirty = true; }\n")
+
+	if err := consoleGitSync(pwd, "main"); err == nil {
+		t.Fatal("consoleGitSync() = nil, want an error refusing the checkout")
+	}
+
+	branch, err := gitOutput(pwd, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		t.Fatalf("gitOutput: %v", err)
+	}
+	if branch != "feature" {
+		t.Errorf("branch = %q after refused checkout, want to stay on %q", branch, "feature")
+	}
+}
+
+// TestConsoleGitSync_DirtyOnBaseBranch_StillSyncs verifies that a dirty tree
+// already on baseBranch is not blocked — checking out the branch pwd is
+// already on carries nothing across, so the precondition in
+// TestConsoleGitSync_DirtyOffBranch_RefusesCheckout must key off "off
+// baseBranch AND dirty", not "dirty" alone, or every routine rebuild with
+// scratch files present would wrongly refuse to sync.
+func TestConsoleGitSync_DirtyOnBaseBranch_StillSyncs(t *testing.T) {
+	pwd := newConsoleGitRepo(t, "main")
+	gitWriteFile(t, filepath.Join(pwd, "scratch.txt"), "untracked\n")
+
+	if err := consoleGitSync(pwd, "main"); err != nil {
+		t.Fatalf("consoleGitSync() = %v, want nil for a dirty tree already on baseBranch", err)
+	}
+}
+
+// gitRun runs git in dir, failing the test on error.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+}
+
+func gitWriteFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// newConsoleGitRepo sets up a bare "origin" repo with a single commit on
+// baseBranch and a local clone of it, matching the shape the launcher's own
+// pwd has in production: a checkout with an "origin" remote.
+func newConsoleGitRepo(t *testing.T, baseBranch string) string {
+	t.Helper()
+	dir := t.TempDir()
+	bare := filepath.Join(dir, "origin.git")
+	clone := filepath.Join(dir, "clone")
+
+	gitRun(t, "", "init", "--bare", bare)
+	gitRun(t, "", "clone", bare, clone)
+	gitRun(t, clone, "checkout", "-B", baseBranch)
+	gitRun(t, clone, "config", "user.email", "test@example.com")
+	gitRun(t, clone, "config", "user.name", "Test")
+	gitWriteFile(t, filepath.Join(clone, "flake.nix"), "{ }\n")
+	gitRun(t, clone, "add", "flake.nix")
+	gitRun(t, clone, "commit", "-m", "base")
+	gitRun(t, clone, "push", "-u", "origin", baseBranch)
+
+	return clone
 }

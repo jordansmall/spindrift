@@ -74,12 +74,41 @@ func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result
 
 // consoleGitSync resets pwd to baseBranch and fast-forwards it from origin
 // — the same two-step pull dogfood.sh performs before every rebuild, since
-// `nix run .# -- build` reads from $PWD, not a fetched ref.
+// `nix run .# -- build` reads from $PWD, not a fetched ref. It refuses the
+// checkout outright when pwd is on some other branch with uncommitted
+// changes (issue #769): git's own conflict check only blocks a checkout
+// that would overwrite a *conflicting* file, so a non-conflicting dirty
+// change would otherwise ride along onto baseBranch in total silence —
+// already on baseBranch, or a clean tree on any branch, are both safe
+// because there's nothing for the checkout to carry across silently.
 func consoleGitSync(pwd, baseBranch string) error {
+	if err := checkCheckoutSafe(pwd, baseBranch); err != nil {
+		return err
+	}
 	if err := runGit(pwd, "checkout", baseBranch); err != nil {
 		return err
 	}
 	return runGit(pwd, "pull", "--ff-only")
+}
+
+// checkCheckoutSafe refuses a checkout when pwd is on a branch other than
+// baseBranch and has uncommitted changes — see consoleGitSync.
+func checkCheckoutSafe(pwd, baseBranch string) error {
+	branch, err := gitOutput(pwd, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return err
+	}
+	if branch == baseBranch {
+		return nil
+	}
+	status, err := gitOutput(pwd, "status", "--porcelain")
+	if err != nil {
+		return err
+	}
+	if status != "" {
+		return fmt.Errorf("refusing to checkout %s: %s has uncommitted changes on %s", baseBranch, pwd, branch)
+	}
+	return nil
 }
 
 // runGit runs `git -C pwd args...`, surfacing git's own stderr on failure.
@@ -91,6 +120,19 @@ func runGit(pwd string, args ...string) error {
 		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
+}
+
+// gitOutput runs `git -C pwd args...` and returns its trimmed stdout,
+// surfacing git's own stderr on failure.
+func gitOutput(pwd string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", pwd}, args...)...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(stdout.String()), nil
 }
 
 // consoleNixBuild re-realizes the image from pwd's now-updated tree via
