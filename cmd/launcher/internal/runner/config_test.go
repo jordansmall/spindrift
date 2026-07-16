@@ -72,6 +72,20 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 	}
 }
 
+// TestNewOCI_RancherAliasesToNerdctl verifies runtime = "rancher" drives the
+// OCI adapter's CLI binary as "nerdctl" — the first runtime value that
+// differs from the binary it invokes (issue #1274).
+func TestNewOCI_RancherAliasesToNerdctl(t *testing.T) {
+	r := NewOCI(Config{Runtime: "rancher"}, "/pwd")
+	a, ok := r.(*ociAdapter)
+	if !ok {
+		t.Fatalf("NewOCI did not return *ociAdapter")
+	}
+	if a.cli != "nerdctl" {
+		t.Errorf("cli = %q, want %q", a.cli, "nerdctl")
+	}
+}
+
 // TestNewBwrap_UsesConfigFields verifies NewBwrap builds its adapter fields
 // from Config instead of a positional-argument list.
 func TestNewBwrap_UsesConfigFields(t *testing.T) {
