@@ -289,7 +289,7 @@ func Update(m Model, msg Msg) Model {
 	}
 	m.Cursor = clampCursor(m.Cursor, len(m.Visible()))
 	m.QueueCursor = clampCursor(m.QueueCursor, len(m.Picks))
-	clampDrillInOffset(m.DrillIn)
+	clampDrillInOffset(m.DrillIn, m.Height)
 	m.BacklogOffset = clampCursor(m.BacklogOffset, len(m.Visible()))
 	m.QueueOffset = clampCursor(m.QueueOffset, len(m.Picks))
 	if _, ok := msg.(CursorMoveMsg); ok {
@@ -321,17 +321,28 @@ func clampCursor(cursor, n int) int {
 	return cursor
 }
 
-// clampDrillInOffset pulls d.Offset into [0, lines-1] — the drill-in
-// analogue of clampCursor, so a scroll commanded past either end of the
-// active form (Rendered, or Raw while ShowRaw) never leaves an Offset
-// renderDrillIn can't slice with, and a raw/rendered toggle whose other form
-// has fewer lines still lands somewhere valid (issue #786). A nil d is a
-// no-op — Update calls this unconditionally, matching the cursor clamp.
-func clampDrillInOffset(d *DrillInState) {
+// clampDrillInOffset pulls d.Offset into [0, lines-1], further capped so the
+// last page fills the fullscreen viewport instead of leaving it mostly blank
+// (issue #829) — the drill-in analogue of clampCursor, so a scroll commanded
+// past either end of the active form (Rendered, or Raw while ShowRaw) never
+// leaves an Offset renderDrillIn can't slice with, and a raw/rendered toggle
+// whose other form has fewer lines still lands somewhere valid (issue #786).
+// A nil d is a no-op — Update calls this unconditionally, matching the
+// cursor clamp. height too small to fit a page (budget <= 0) falls back to
+// the plain last-line cap rather than pushing Offset past it.
+func clampDrillInOffset(d *DrillInState, height int) {
 	if d == nil {
 		return
 	}
 	maxOffset := len(d.Lines) - 1
+	if budget := height - headerFooterLines; budget > 0 {
+		if pageMax := len(d.Lines) - budget; pageMax >= 0 && pageMax < maxOffset {
+			maxOffset = pageMax
+		}
+	}
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
 	switch {
 	case d.Offset < 0:
 		d.Offset = 0

@@ -647,6 +647,12 @@ func renderTranscriptColumn(d DrillInState, height int) string {
 	return b.String()
 }
 
+// headerFooterLines is the fullscreen drill-in chrome budget (header +
+// keystroke-hint footer) that both renderDrillIn and clampDrillInOffset
+// subtract from height — shared so the clamp's last-page cap always matches
+// what renderDrillIn actually has room to show (issue #829).
+const headerFooterLines = 2
+
 // renderDrillIn renders one Dispatch's transcript view: a header naming the
 // pick and current mode, as much of the loaded content (rendered by default,
 // raw when ShowRaw) as height allows, and a keystroke hint. Err renders in
@@ -664,7 +670,6 @@ func renderDrillIn(d DrillInState, height int) string {
 		return b.String()
 	}
 
-	const headerFooterLines = 2
 	visible := strings.Join(windowLines(d, height-headerFooterLines), "\n")
 	b.WriteString(visible)
 	if visible != "" && !strings.HasSuffix(visible, "\n") {
