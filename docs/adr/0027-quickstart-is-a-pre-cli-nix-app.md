@@ -72,3 +72,8 @@ remaining step.
   Quick start, alongside (not replacing) `nix flake init -t` for users who
   prefer to hand-edit.
 - Glossary term **Quickstart** lands in CONTEXT.md with this decision.
+- Deferred: `runtime = "rancher"` (issue #1274) is not yet in the detection
+  chain above. When quickstart/doctor runtime detection lands, the chain
+  becomes `podman → docker → nerdctl(⇒ rancher) → bwrap` — nerdctl probed
+  after docker, since Rancher Desktop's dockerd mode already satisfies the
+  `docker` branch and only containerd mode needs the nerdctl/rancher branch.
