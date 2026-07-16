@@ -252,6 +252,38 @@ in
     ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-build-artifacts-oci" { } "touch $out";
 
+  # documentArtifactKeys must be derived from what runArtifacts/buildArtifacts
+  # actually emit across both runnerKind branches (issue #810), not a
+  # hand-maintained list that can silently drift from them. Pins the exact
+  # union so a key added/renamed/dropped in either renderer forces a
+  # conscious update here instead of passing unnoticed.
+  preambles-document-artifact-keys =
+    let
+      out = preambles.documentArtifactKeys;
+      expected = [
+        "AGENT_ENV"
+        "AGENT_ENV_DRV"
+        "AGENT_FILES"
+        "AGENT_FILES_DRV"
+        "BAKED_PREFETCH"
+        "BOX_ENV_VARS"
+        "DRIVER"
+        "DRIVER_SESSION_CACHE_DIR"
+        "DRIVER_SKILLS_DIR"
+        "FLAKE_IMAGE_ATTR"
+        "IMAGE"
+        "IMAGE_ARCHIVE"
+        "IMAGE_DRV"
+        "IMAGE_TAG"
+        "NIX_BUILDER_IMAGE"
+        "NIX_VOLUME"
+        "RUNTIME"
+      ];
+    in
+    assert assertMsg (out == expected)
+      "documentArtifactKeys must be the sorted union of runArtifacts/buildArtifacts output keys (both runnerKinds) plus the manual IMAGE escape hatch, got: ${builtins.toJSON out}";
+    pkgs.runCommand "preambles-document-artifact-keys" { } "touch $out";
+
   # renderInputDocumentJSON must combine settings + artifacts into the
   # top-level {settings, artifacts} JSON object the Go inputDocument struct
   # parses (ADR 0020).
