@@ -611,11 +611,10 @@ func followViewport(offset, cursor, total, itemBudget int) int {
 // joins only what the viewport can show instead of the whole tail from
 // Offset to the end of a (potentially multi-MB) transcript (issue #722). A
 // non-positive budget yields an empty window rather than a negative slice.
+// d.Offset is assumed already in [0, len(d.Lines)-1] — Update clamps it via
+// clampDrillInOffset before any render call reaches here.
 func windowLines(d DrillInState, budget int) []string {
 	offset := d.Offset
-	if offset > len(d.Lines) {
-		offset = len(d.Lines)
-	}
 	end := offset + budget
 	if end < offset {
 		end = offset
