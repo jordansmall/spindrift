@@ -25,7 +25,7 @@ let
     else
       string;
 in
-{
+rec {
   # One renderer used by both the shell and Go preamble families: iterates
   # over flakeOption schema entries and emits `[export ]VAR="${VAR:-<baked>}"`
   # lines. A matching env var (or harness.env, sourced by the wrapper) still
