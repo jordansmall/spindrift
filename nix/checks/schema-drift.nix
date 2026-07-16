@@ -57,13 +57,15 @@ in
   # Every env-var string literal in cmd/launcher/main.go must have a
   # matching entry in lib/env-schema.nix, and vice-versa (presence-only;
   # value-level pinning would be refactor-brittle). The document's artifact
-  # keys (lib/renderers.nix documentArtifactKeys — the Launcher input
-  # document's `artifacts` section, ADR 0020) are the schema for what
-  # main.go may read outside lib/env-schema.nix, read via getenvArtifact
-  # instead of os.Getenv/getenv.
+  # keys (lib/preambles.nix documentArtifactKeys — derived from what
+  # runArtifacts/buildArtifacts actually render into the Launcher input
+  # document's `artifacts` section, ADR 0020, issue #810) are the schema for
+  # what main.go may read outside lib/env-schema.nix, read via
+  # getenvArtifact instead of os.Getenv/getenv.
   launcher-env-coverage =
     let
       schema = import ../../lib/env-schema.nix;
+      preambles = import ../../lib/preambles.nix;
       inherit (pkgs.lib)
         attrValues
         concatStringsSep
@@ -72,9 +74,9 @@ in
         ;
       mainGoSrc = builtins.readFile ../../cmd/launcher/main.go;
       # Document artifact keys: nix-computed plumbing main.go reads via
-      # getenvArtifact, not user-facing knobs. Canonical source:
-      # lib/renderers.nix documentArtifactKeys.
-      documentArtifacts = renderers.documentArtifactKeys;
+      # getenvArtifact, not user-facing knobs. Derived from
+      # lib/preambles.nix documentArtifactKeys, not hand-maintained here.
+      documentArtifacts = preambles.documentArtifactKeys;
       schemaEnvNames = map (e: e.env) (attrValues schema);
       # Schema knobs forwarded to containers via BOX_ENV_VARS only — the Go
       # binary never reads them directly, so they need no os.Getenv call.

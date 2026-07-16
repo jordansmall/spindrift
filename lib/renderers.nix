@@ -64,39 +64,6 @@ rec {
     "Prompt & skill iteration" = "promptSkillIteration";
   };
 
-  # Keys main.go reads from the Launcher input document's `artifacts` section
-  # (ADR 0020) via getenvArtifact — nix-computed build/run plumbing, not
-  # user-tunable knobs. They have no lib/env-schema.nix entry (that registry
-  # is scoped to runtime knobs, per its own header comment) and never gain
-  # one when a knob is added, so they live here rather than as a per-entry
-  # schema field. This list does not drive what actually gets rendered into
-  # the document (runArtifacts/buildArtifacts in lib/mkHarness.nix build that
-  # independently); its only consumer is nix/checks/schema-drift.nix's
-  # launcher-env-coverage check, which uses it as the allow-list for what
-  # main.go may read outside the schema — replacing the pre-#625
-  # nixBakedEnvVars, which served that same exclusion-list role.
-  documentArtifactKeys = [
-    "IMAGE_ARCHIVE"
-    "IMAGE_TAG"
-    "IMAGE_DRV"
-    "NIX_BUILDER_IMAGE"
-    "NIX_VOLUME"
-    "FLAKE_IMAGE_ATTR"
-    "AGENT_FILES"
-    "AGENT_ENV"
-    "AGENT_FILES_DRV"
-    "AGENT_ENV_DRV"
-    "BAKED_PREFETCH"
-    "RUNTIME"
-    "DRIVER"
-    "DRIVER_SKILLS_DIR"
-    "DRIVER_SESSION_CACHE_DIR"
-    # Manual escape hatch (never nix-rendered into the document; read via
-    # getenvArtifact's env-only fallback), not schema-covered either.
-    "IMAGE"
-    "BOX_ENV_VARS"
-  ];
-
   # tests/box_env_gen.bash content: a set_box_env bash function exporting
   # every boxEnv = true schema knob at its schema default, or its placeholder
   # when it has no default, so the entrypoint-*.bats suites exercise the same

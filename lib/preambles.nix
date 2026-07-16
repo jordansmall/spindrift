@@ -11,6 +11,7 @@
 let
   concatStrings = builtins.concatStringsSep "";
   mapAttrsToList = f: attrs: map (n: f n attrs.${n}) (builtins.attrNames attrs);
+  unique = builtins.foldl' (acc: x: if builtins.elem x acc then acc else acc ++ [ x ]) [ ];
   # Matches `lib.escapeShellArg` byte for byte without depending on pkgs.lib:
   # a string of only shell-safe characters passes through unquoted; anything
   # else gets single-quote-wrapped, with embedded `'` escaped as `'\''`.
@@ -168,6 +169,60 @@ rec {
         NIX_VOLUME = "spindrift-nix";
         FLAKE_IMAGE_ATTR = ".#packages.${linuxSystem}.agent-image";
       };
+
+  # Every artifact key runArtifacts/buildArtifacts can emit, across both
+  # runnerKind branches, unioned and sorted — the allowed-artifact-keys set
+  # nix/checks/schema-drift.nix's launcher-env-coverage check derives from
+  # what actually gets rendered, instead of hand-maintaining a parallel list
+  # that can silently drift from it (issue #810). Called with placeholder
+  # args at eval time: only each function's output *keys* matter here, not
+  # the values. IMAGE is the one exception: a manual escape hatch read via
+  # getenvArtifact's env-only fallback, never emitted by either function, so
+  # it's added explicitly rather than derived.
+  documentArtifactKeys =
+    let
+      dummyDriverEntry = {
+        name = "dummy";
+        skillsDirRelative = "dummy";
+        sessionCacheDirRelative = "dummy";
+      };
+      dummyRunArtifacts = runnerKind: runArtifacts {
+        inherit runnerKind;
+        driverEntry = dummyDriverEntry;
+        agentFilesPath = "dummy";
+        agentEnvPath = "dummy";
+        prefetch = "dummy";
+        imagePath = "dummy";
+        imageHash = "dummy";
+        runtime = "dummy";
+        imageDrv = "dummy";
+        nixBuilderImage = "dummy";
+        linuxSystem = "dummy";
+        boxEnvVars = "dummy";
+      };
+      dummyBuildArtifacts = runnerKind: buildArtifacts {
+        inherit runnerKind;
+        agentFilesDrv = "dummy";
+        agentEnvDrv = "dummy";
+        runtime = "dummy";
+        imagePath = "dummy";
+        imageHash = "dummy";
+        imageDrv = "dummy";
+        nixBuilderImage = "dummy";
+        linuxSystem = "dummy";
+      };
+      allKeys =
+        builtins.concatMap (runnerKind: builtins.attrNames (dummyRunArtifacts runnerKind)) [
+          "bwrap"
+          "oci"
+        ]
+        ++ builtins.concatMap (runnerKind: builtins.attrNames (dummyBuildArtifacts runnerKind)) [
+          "bwrap"
+          "oci"
+        ]
+        ++ [ "IMAGE" ];
+    in
+    builtins.sort builtins.lessThan (unique allKeys);
 
   # The Launcher input document (ADR 0020): a JSON object with a `settings`
   # section (resolved knob values, env-var-name keyed — the Consumer flake's
