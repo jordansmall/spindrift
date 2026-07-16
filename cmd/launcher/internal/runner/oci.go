@@ -35,12 +35,24 @@ type ociAdapter struct {
 	memoryLimit           string // --memory value; empty disables the flag
 }
 
+// runtimeCLI maps a Config.Runtime value to the CLI binary it invokes.
+// Every runtime is its own binary name except "rancher", the operator-facing
+// alias for Rancher Desktop's containerd mode, which invokes nerdctl — the
+// one place the runtime knob value differs from the binary name. Both NewOCI
+// and ValidateRuntime consume this so the alias lives in exactly one spot.
+func runtimeCLI(runtime string) string {
+	if runtime == "rancher" {
+		return "nerdctl"
+	}
+	return runtime
+}
+
 // NewOCI constructs an OCI adapter from cfg. pwd is the working directory
 // (used for the container-fallback path) — a genuine per-invocation runtime
 // dependency passed separately from cfg.
 func NewOCI(cfg Config, pwd string) Runner {
 	return &ociAdapter{
-		cli:                   cfg.Runtime,
+		cli:                   runtimeCLI(cfg.Runtime),
 		image:                 cfg.Image,
 		imageArchive:          cfg.ImageArchive,
 		imageDrv:              cfg.ImageDrv,

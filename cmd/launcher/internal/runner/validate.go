@@ -12,8 +12,12 @@ func ValidateRuntime(runtime string) error {
 	if runtime == "" {
 		return fmt.Errorf("RUNTIME is not set")
 	}
-	if _, err := exec.LookPath(runtime); err != nil {
-		return fmt.Errorf("%s not found on PATH.", runtime)
+	cli := runtimeCLI(runtime)
+	if _, err := exec.LookPath(cli); err != nil {
+		if runtime == "rancher" {
+			return fmt.Errorf("nerdctl not found on PATH — is Rancher Desktop running in containerd mode?")
+		}
+		return fmt.Errorf("%s not found on PATH.", cli)
 	}
 	return nil
 }
