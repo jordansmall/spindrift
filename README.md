@@ -533,8 +533,8 @@ renders once on open and there is currently no keystroke that refreshes it in
 place — a running Dispatch's growing log is not live-tailed. Close (`x`/Esc)
 and reopen (Enter) to reload with fresh content. `t`/`toggle` switches to the
 raw byte-exact log for debugging the harness itself, and back; `x`/`close`
-returns to the backlog/queue. Rendering
-is a per-Driver strategy (beside heartbeat parsing and usage extraction) — a
+returns to the backlog/queue. Rendering is a per-Driver strategy (beside
+heartbeat parsing and usage extraction) — a
 Driver with no configured strategy, or an issue with no Dispatch logs on disk
 yet, surfaces an error in place of the transcript rather than a blank pane.
 The rendered view strips ANSI/control sequences before it ever reaches the
