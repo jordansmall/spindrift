@@ -229,6 +229,25 @@ func TestGitClient_Merge_SetsCommitIdentityOnTempClone(t *testing.T) {
 	}
 }
 
+// TestGitClient_Merge_CloneFailureDoesNotLeakCredentials verifies that a
+// clone failure against a credential-bearing remote URL (the
+// oauth2:<token>@host form CODE_FORGE_REMOTE_URL uses for hosts without a
+// credential helper, docs/reference.md) never echoes the credential back
+// into the returned error — that error flows unmodified into a public
+// GitHub issue comment (settle.mergeImmediate).
+func TestGitClient_Merge_CloneFailureDoesNotLeakCredentials(t *testing.T) {
+	const secret = "sometoken123"
+	g := NewGitClient("https://oauth2:"+secret+"@127.0.0.1:1/does-not-exist.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
+
+	err := g.Merge("agent/issue-1")
+	if err == nil {
+		t.Fatal("Merge against unreachable credential-bearing remote: want error, got nil")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("Merge error leaks embedded credential: %v", err)
+	}
+}
+
 // TestGitClient_Probe verifies Probe succeeds against a reachable remote and
 // fails against an unreachable one.
 func TestGitClient_Probe(t *testing.T) {
@@ -242,5 +261,22 @@ func TestGitClient_Probe(t *testing.T) {
 	bad := NewGitClient(filepath.Join(t.TempDir(), "does-not-exist.git"), "main", "Test Bot", "bot@example.com", "agent/issue-")
 	if _, err := bad.Probe(); err == nil {
 		t.Error("Probe on unreachable remote: want error, got nil")
+	}
+}
+
+// TestGitClient_Probe_DoesNotLeakCredentials verifies that Probe's error
+// against a credential-bearing remote URL never echoes the credential back
+// — Probe's error can reach `doctor` output, and any error text derived
+// from remoteURL must stay redacted the same way Merge/Rebase's do.
+func TestGitClient_Probe_DoesNotLeakCredentials(t *testing.T) {
+	const secret = "sometoken123"
+	g := NewGitClient("https://oauth2:"+secret+"@127.0.0.1:1/does-not-exist.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
+
+	_, err := g.Probe()
+	if err == nil {
+		t.Fatal("Probe against unreachable credential-bearing remote: want error, got nil")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("Probe error leaks embedded credential: %v", err)
 	}
 }

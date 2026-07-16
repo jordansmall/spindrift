@@ -69,7 +69,7 @@ func cloneToTemp(remoteURL, prefix string) (dir string, gitIn func(args ...strin
 	cleanup = func() { os.RemoveAll(dir) }
 	if err := exec.Command("git", "clone", remoteURL, dir).Run(); err != nil {
 		cleanup()
-		return "", nil, nil, fmt.Errorf("git clone %s: %w", remoteURL, err)
+		return "", nil, nil, fmt.Errorf("git clone %s: %w", forge.RedactURLCredentials(remoteURL), err)
 	}
 	gitIn = func(args ...string) *exec.Cmd {
 		return exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -160,7 +160,7 @@ func (g *gitClient) Rebase(branch string) error {
 // Probe checks that the configured remote is reachable.
 func (g *gitClient) Probe() (string, error) {
 	if err := exec.Command("git", "ls-remote", g.remoteURL).Run(); err != nil {
-		return "", fmt.Errorf("%w: %s", forge.ErrRepoNotFound, g.remoteURL)
+		return "", fmt.Errorf("%w: %s", forge.ErrRepoNotFound, forge.RedactURLCredentials(g.remoteURL))
 	}
 	return g.remoteURL, nil
 }
