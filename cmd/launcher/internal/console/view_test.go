@@ -572,6 +572,27 @@ func TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
 	}
 }
 
+// TestView_TwoColumn_Queue_BlockerVisibleDespiteLongTitle verifies a held
+// row's blocker badge survives clipping even when paired with a long title —
+// the queue row previously put BlockedBy/Reason/Heartbeat after Title, so
+// clip()'s tail truncation dropped the operator-relevant blocker text first
+// on realistic 80-column terminals (issue #858).
+func TestView_TwoColumn_Queue_BlockerVisibleDespiteLongTitle(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "123", Title: "fix(console): reassess leftColumnFraction for queue layout", Labels: []string{"ready-for-agent", "needs-review"}},
+		{Number: "124", Title: "fix(console): measure display width in clip for wide runes", Labels: []string{"ready-for-agent"}},
+	}})
+	m.Picks = []Pick{
+		{Number: "42", Title: "fix the launcher retry backoff for the dispatch workflow", State: PickHeld, BlockedBy: "#41 (native)", Reason: "issue is closed"},
+	}
+
+	out := View(m)
+	if !strings.Contains(out, "held by #41 (native)") {
+		t.Errorf("View() = %q, want the held row's blocker badge visible despite a long title", out)
+	}
+}
+
 // TestView_Focus_MarksFocusedColumnVisually verifies the focused column's
 // header carries a visible marker the other column's header doesn't, and
 // that Tab moves the marker — the operator's only cue for which column
