@@ -315,6 +315,8 @@ rec {
       # A flag carrying `choices` (issue #554) completes to that value list
       # as its argument instead of falling through to the flag-name/file
       # branches below; one case arm per flag since each has its own list.
+      # An `alias` (issue #874) matches in the same arm — bash `case`
+      # supports `|`-separated patterns, mirroring fileFlagBranch above.
       choicesKnobs = builtins.filter (e: e ? choices) nonSecret;
       choicesFlagBranch =
         if choicesKnobs == [ ] then
@@ -324,13 +326,19 @@ rec {
             case "$prev" in
             ${
               concatStrings (
-                map (e: ''
-                  --${toKebab e.env})
-                    # shellcheck disable=SC2207 # COMPREPLY split-on-space is the standard completion idiom; mapfile needs bash 4+
-                    COMPREPLY=($(compgen -W "${builtins.concatStringsSep " " e.choices}" -- "$cur"))
-                    return 0
-                    ;;
-                '') choicesKnobs
+                map (
+                  e:
+                  let
+                    patterns = [ "--${toKebab e.env}" ] ++ (if e ? alias then [ "--${e.alias}" ] else [ ]);
+                  in
+                  ''
+                    ${builtins.concatStringsSep "|" patterns})
+                      # shellcheck disable=SC2207 # COMPREPLY split-on-space is the standard completion idiom; mapfile needs bash 4+
+                      COMPREPLY=($(compgen -W "${builtins.concatStringsSep " " e.choices}" -- "$cur"))
+                      return 0
+                      ;;
+                  ''
+                ) choicesKnobs
               )
             }esac
 
@@ -521,7 +529,8 @@ rec {
       # A flag carrying `choices` (issue #554) completes to that value list
       # as its argument instead of falling through to the flag/file branches
       # below; one case arm per flag since each has its own list. Mirrors
-      # renderBashCompletion's choicesFlagBranch.
+      # renderBashCompletion's choicesFlagBranch, including its `alias`
+      # (issue #874) handling.
       choicesKnobs = builtins.filter (e: e ? choices) nonSecret;
       choicesFlagBranch =
         if choicesKnobs == [ ] then
@@ -531,12 +540,18 @@ rec {
             case "$prev" in
             ${
               concatStrings (
-                map (e: ''
-                  --${toKebab e.env})
-                    compadd -- ${builtins.concatStringsSep " " e.choices}
-                    return
-                    ;;
-                '') choicesKnobs
+                map (
+                  e:
+                  let
+                    patterns = [ "--${toKebab e.env}" ] ++ (if e ? alias then [ "--${e.alias}" ] else [ ]);
+                  in
+                  ''
+                    ${builtins.concatStringsSep "|" patterns})
+                      compadd -- ${builtins.concatStringsSep " " e.choices}
+                      return
+                      ;;
+                  ''
+                ) choicesKnobs
               )
             }esac
 
