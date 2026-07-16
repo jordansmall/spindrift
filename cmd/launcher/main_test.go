@@ -378,8 +378,6 @@ body
 // would deadlock the semaphore: 0, negative, and non-numeric all fall back to
 // the compiled default (3).
 func TestMaxParallelEdgeCases(t *testing.T) {
-	t.Cleanup(func() { os.Unsetenv("MAX_PARALLEL") })
-
 	cases := []struct {
 		env  string
 		want int
@@ -393,7 +391,7 @@ func TestMaxParallelEdgeCases(t *testing.T) {
 		{"10", 10}, // larger valid value → use as-is
 	}
 	for _, tc := range cases {
-		os.Setenv("MAX_PARALLEL", tc.env)
+		t.Setenv("MAX_PARALLEL", tc.env)
 		c := loadConfig()
 		if c.maxParallel != tc.want {
 			t.Errorf("MAX_PARALLEL=%q: got %d, want %d", tc.env, c.maxParallel, tc.want)
@@ -404,8 +402,6 @@ func TestMaxParallelEdgeCases(t *testing.T) {
 // TestMaxJobsEdgeCases covers the atoiNonneg() fallback: zero is valid
 // (meaning unlimited), negatives fall back to default (0).
 func TestMaxJobsEdgeCases(t *testing.T) {
-	t.Cleanup(func() { os.Unsetenv("MAX_JOBS") })
-
 	cases := []struct {
 		env  string
 		want int
@@ -417,7 +413,7 @@ func TestMaxJobsEdgeCases(t *testing.T) {
 		{"5", 5},   // valid positive → use as-is
 	}
 	for _, tc := range cases {
-		os.Setenv("MAX_JOBS", tc.env)
+		t.Setenv("MAX_JOBS", tc.env)
 		c := loadConfig()
 		if c.maxJobs != tc.want {
 			t.Errorf("MAX_JOBS=%q: got %d, want %d", tc.env, c.maxJobs, tc.want)
@@ -507,8 +503,6 @@ func TestIntSchemaDefault(t *testing.T) {
 // over the schema default; zero, negative, non-numeric, and unset env all
 // fall back to the schema default (issue #672).
 func TestAtoiSchema(t *testing.T) {
-	t.Cleanup(func() { os.Unsetenv("SOME_KEY") })
-
 	withSchemaFlags(t, []flagEntry{{env: "SOME_KEY", dflt: "10"}})
 
 	cases := []struct {
@@ -522,7 +516,7 @@ func TestAtoiSchema(t *testing.T) {
 		{"", 10},
 	}
 	for _, tc := range cases {
-		os.Setenv("SOME_KEY", tc.env)
+		t.Setenv("SOME_KEY", tc.env)
 		if got := atoiSchema("SOME_KEY"); got != tc.want {
 			t.Errorf("SOME_KEY=%q: atoiSchema(SOME_KEY) = %d, want %d", tc.env, got, tc.want)
 		}
@@ -533,8 +527,6 @@ func TestAtoiSchema(t *testing.T) {
 // values win over the schema default; negative, non-numeric, and unset env
 // all fall back to the schema default (issue #672).
 func TestAtoiNonnegSchema(t *testing.T) {
-	t.Cleanup(func() { os.Unsetenv("SOME_KEY") })
-
 	withSchemaFlags(t, []flagEntry{{env: "SOME_KEY", dflt: "0"}})
 
 	cases := []struct {
@@ -548,7 +540,7 @@ func TestAtoiNonnegSchema(t *testing.T) {
 		{"", 0},
 	}
 	for _, tc := range cases {
-		os.Setenv("SOME_KEY", tc.env)
+		t.Setenv("SOME_KEY", tc.env)
 		if got := atoiNonnegSchema("SOME_KEY"); got != tc.want {
 			t.Errorf("SOME_KEY=%q: atoiNonnegSchema(SOME_KEY) = %d, want %d", tc.env, got, tc.want)
 		}
@@ -613,10 +605,10 @@ func TestLoadConfig_DocumentSettingBeatsSchemaDefault(t *testing.T) {
 // ambient knob env var still wins this release, just with a deprecation
 // warning printed elsewhere) still overrides the document's settings value.
 func TestLoadConfig_EnvBeatsDocument(t *testing.T) {
-	t.Cleanup(func() { os.Unsetenv("BASE_BRANCH"); loadedDoc = nil })
+	t.Cleanup(func() { loadedDoc = nil })
 
 	loadedDoc = &inputDocument{Settings: map[string]string{"BASE_BRANCH": "from-document"}}
-	os.Setenv("BASE_BRANCH", "from-env")
+	t.Setenv("BASE_BRANCH", "from-env")
 
 	c := loadConfig()
 	if c.baseBranch != "from-env" {
@@ -631,6 +623,7 @@ func TestLoadConfig_EnvBeatsDocument(t *testing.T) {
 func TestLoadConfig_ArtifactsFromDocument(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	for _, k := range []string{"IMAGE_ARCHIVE", "RUNTIME", "DRIVER", "BOX_ENV_VARS"} {
+		t.Setenv(k, "")
 		os.Unsetenv(k)
 	}
 
