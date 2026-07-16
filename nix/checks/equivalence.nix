@@ -17,6 +17,7 @@ let
     leanHarness
     customHarness
     dockerHarness
+    rancherHarness
     bwrapHarness
     skillsHarness
     minimalDirect
@@ -147,9 +148,12 @@ in
     # Default COMPLETE_LABEL baked into a default harness.
     grep -q '"COMPLETE_LABEL":"agent-complete"' ${harness.runInputDocumentFile}
 
-    # Default runtime is podman; the docker harness bakes docker.
+    # Default runtime is podman; the docker/rancher harnesses bake their own
+    # runtime value verbatim (rancher is a knob value, not a binary name —
+    # the nerdctl alias lives in the Go runner package, not here).
     grep -q '"RUNTIME":"podman"' ${harness.runInputDocumentFile}
     grep -q '"RUNTIME":"docker"' ${dockerHarness.runInputDocumentFile}
+    grep -q '"RUNTIME":"rancher"' ${rancherHarness.runInputDocumentFile}
 
     # bwrap harness bakes bwrap runtime and agent store paths; no OCI store paths.
     grep -q '"RUNTIME":"bwrap"' ${bwrapHarness.runInputDocumentFile}

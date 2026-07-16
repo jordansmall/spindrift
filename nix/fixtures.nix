@@ -171,6 +171,16 @@ let
     packages = p: [ p.hello ];
   };
 
+  # The Rancher Desktop (containerd mode) fixture, mirroring dockerHarness:
+  # proves the "rancher" runtime knob bakes as its own OCI-family value even
+  # though it invokes nerdctl, not a "rancher" binary (issue #1274).
+  rancherHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    overlays = [ ghFakeOverlay ];
+    runtime = "rancher";
+    packages = p: [ p.hello ];
+  };
+
   # The daemonless bubblewrap runner fixture (issue #54): exercises the
   # bwrap build/run path through the bats suite.
   bwrapHarness = import ../lib/mkHarness.nix {
@@ -323,6 +333,7 @@ in
     filerOnlyHarness
     customHarness
     dockerHarness
+    rancherHarness
     bwrapHarness
     noRuntimeHarness
     promptHarness

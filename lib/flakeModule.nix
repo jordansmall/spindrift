@@ -153,11 +153,12 @@ in
           types.enum [
             "podman"
             "docker"
+            "rancher"
             "bwrap"
           ]
         );
         default = null;
-        description = "Runner the launcher commands drive: OCI runtimes (podman/docker) or the daemonless bubblewrap runner (bwrap, Linux-only).";
+        description = "Runner the launcher commands drive: OCI runtimes (podman/docker/rancher, the last an alias for Rancher Desktop's nerdctl) or the daemonless bubblewrap runner (bwrap, Linux-only).";
       };
 
       driver = mkOption {
