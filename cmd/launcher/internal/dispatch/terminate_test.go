@@ -66,6 +66,27 @@ func TestFactory_OrphanedIssues_ParsesDeterministicBoxNames(t *testing.T) {
 	}
 }
 
+// TestFactory_OrphanedIssues_SkipsNonNumericSuffix verifies OrphanedIssues
+// filters out a sandbox name that matches the "agent-issue-" prefix but
+// carries a non-numeric suffix, rather than feeding a malformed issue
+// number to a caller like recoverByNumber (issue #793).
+func TestFactory_OrphanedIssues_SkipsNonNumericSuffix(t *testing.T) {
+	r := runner.NewFake()
+	r.RunningNames = []string{"agent-issue-42", "agent-issue-foo"}
+	f, err := NewFactory(Config{}, tempLogDir(t), r, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+
+	got, err := f.OrphanedIssues()
+	if err != nil {
+		t.Fatalf("OrphanedIssues: %v", err)
+	}
+	if len(got) != 1 || got[0] != "42" {
+		t.Errorf("OrphanedIssues = %v, want [42]", got)
+	}
+}
+
 // TestFactory_AppendTerminalLine_AppendsToMostRecentPassLog verifies the
 // note lands on the last pass LogPaths reports (a fix pass here), not the
 // initial run's log -- the terminal line belongs on whichever log a live

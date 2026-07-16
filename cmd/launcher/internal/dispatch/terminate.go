@@ -3,6 +3,7 @@ package dispatch
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -31,7 +32,8 @@ func (f *Factory) Kill(number string) error {
 // currently reports running, parsed from the deterministic boxName scheme —
 // Console startup orphan detection (issue #651): a crash or dropped SSH
 // leaves these running with no live goroutine in a fresh process to account
-// for them. A name that doesn't match the scheme is silently skipped.
+// for them. A name that doesn't match the scheme, or whose suffix isn't a
+// valid issue number, is silently skipped (issue #793).
 func (f *Factory) OrphanedIssues() ([]string, error) {
 	names, err := f.runner.ListRunning()
 	if err != nil {
@@ -39,9 +41,14 @@ func (f *Factory) OrphanedIssues() ([]string, error) {
 	}
 	var nums []string
 	for _, name := range names {
-		if num, ok := strings.CutPrefix(name, boxNamePrefix); ok {
-			nums = append(nums, num)
+		num, ok := strings.CutPrefix(name, boxNamePrefix)
+		if !ok {
+			continue
 		}
+		if _, err := strconv.Atoi(num); err != nil {
+			continue
+		}
+		nums = append(nums, num)
 	}
 	return nums, nil
 }
