@@ -150,6 +150,27 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// Real-world ordering: a genuine assistant turn (real model) quotes
+		// "server_error" verbatim in its own prose, then the claude CLI
+		// injects its synthetic mid-stream terminator right after. The #579
+		// guard resets sr when the genuine turn is scanned, but that reset is
+		// immaterial here — the terminator line carries its own top-level
+		// "error":"server_error" field, which matchTransient re-matches on
+		// that very next line, independent of the earlier reset (issue #815).
+		// Locks in the invariant against a future isAgentContentEvent/scanLog
+		// change that widens the reset window and swallows the terminator's
+		// own marker too.
+		name: "Transient_GenuineAssistantContent_ThenSyntheticServerErrorTerminator",
+		lines: []string{
+			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Investigating the server_error transient pattern before writing the fix"}]}}`,
+			`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Server error mid-response. The response above may be incomplete."}],"stop_reason":"stop_sequence"},"error":"server_error"}`,
+			`{"type":"result","is_error":true,"result":"API Error: Server error mid-response","stop_reason":"stop_sequence","terminal_reason":"completed"}`,
+		},
+		wantClass:   claude.Transient,
+		wantReason:  claude.Overloaded,
+		wantResetAt: nil,
+	},
+	{
 		name: "Network_ConnectionRefused",
 		lines: []string{
 			`dial tcp: connection refused`,
