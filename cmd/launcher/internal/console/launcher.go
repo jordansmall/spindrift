@@ -321,8 +321,10 @@ func (l *Launcher) Refreshes() <-chan struct{} {
 	return l.refreshChan()
 }
 
-// tryLaunch starts draining Queue through waves.RunContinuous, up to
-// MaxParallel slots (1 when unset), in the background, unless a drain is
+// tryLaunch starts draining Queue through waves.RunContinuous, up to the
+// live cap l.limiter() holds (ADR 0023, issue #653) — MaxParallel only sets
+// that cap's starting value (1 when unset); Resize can move it up or down
+// for the life of the session — in the background, unless a drain is
 // already running or Queue has nothing left to launch (#754) —
 // RunContinuous's own refill-on-completion picks up any pick Add()ed to
 // Queue while that drain is in flight, so a second concurrent invocation is
