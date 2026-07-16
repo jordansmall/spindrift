@@ -131,8 +131,16 @@ func Classify(logPath string) (Classification, error) {
 // agent-content line, which fails the whole-chunk JSON parse in
 // isAgentContentEvent and so falls through to the normal scan (known gap,
 // issue #579 review).
+//
+// A type:"result" line immediately following genuine agent content also
+// gets special treatment: the claude CLI echoes the preceding assistant
+// turn's text into that line's "result" field on an ordinary completion, so
+// if the genuine content quoted a transient marker, the echo is recognized
+// and not scanned as a fresh signal (issue #818).
 func scanLog(logPath string) (scanResult, error) {
 	var sr scanResult
+	var echoReason Reason
+	var echoPending bool
 	err := logscan.ForEachLine(logPath, logscan.ChunkOversized, func(chunk string) {
 		if isAgentContentEvent(chunk) {
 			// The agent's own tool_result / assistant-text / file-edit
@@ -142,7 +150,20 @@ func scanLog(logPath string) (scanResult, error) {
 			// past it — so drop it and look for a later, genuine cause
 			// (issue #579).
 			sr = scanResult{}
+			// Remember whether this genuine content itself quoted a marker,
+			// so a type:"result" line right after it that echoes the same
+			// marker is recognized as that same echo, not a fresh signal
+			// (issue #818).
+			echoReason, echoPending = matchTransient(chunk)
 			return
+		}
+		if echoPending {
+			echoPending = false
+			if resultText, ok := resultEventText(chunk); ok {
+				if reason, matched := matchTransient(resultText); matched && reason == echoReason {
+					return
+				}
+			}
 		}
 		if !sr.found {
 			if reason, ok := matchTransient(chunk); ok {
@@ -196,6 +217,28 @@ func isAgentContentEvent(chunk string) bool {
 		return false
 	}
 	return ev.Type == "assistant" || ev.Type == "user"
+}
+
+// resultEventEnvelope is the minimal envelope for identifying a Claude Code
+// stream-json type:"result" line and extracting its echoed result text — the
+// terminal line's "result" field mirrors the immediately preceding assistant
+// turn's text on an ordinary (non-error) completion.
+type resultEventEnvelope struct {
+	Type   string `json:"type"`
+	Result string `json:"result"`
+}
+
+// resultEventText reports whether chunk is a stream-json type:"result" line
+// and, if so, returns its "result" field text.
+func resultEventText(chunk string) (string, bool) {
+	var ev resultEventEnvelope
+	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
+		return "", false
+	}
+	if ev.Type != "result" {
+		return "", false
+	}
+	return ev.Result, true
 }
 
 // matchTransient checks whether line contains a known transient marker.
