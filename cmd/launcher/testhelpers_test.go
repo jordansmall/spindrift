@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -62,7 +63,7 @@ func TestWithSchemaFlags_SwapsAndRestores(t *testing.T) {
 		}
 	})
 	got := schemaFlags
-	if len(got) != len(ambient) {
+	if !reflect.DeepEqual(got, ambient) {
 		t.Fatalf("schemaFlags not restored after subtest: got %+v, want %+v", got, ambient)
 	}
 }

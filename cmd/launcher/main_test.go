@@ -471,6 +471,8 @@ func TestLoadConfig_SpindriftDirsDefaultComesFromSchemaTable(t *testing.T) {
 // default parses, a non-numeric one falls back to 0, and an absent key falls
 // back to 0 too (issue #672).
 func TestIntSchemaDefault(t *testing.T) {
+	// nil is a placeholder: every case below reassigns schemaFlags before
+	// reading it, so the initial value here is never observed.
 	withSchemaFlags(t, nil)
 
 	cases := []struct {
