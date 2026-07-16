@@ -153,9 +153,10 @@ type TerminateRequestedMsg struct {
 func (TerminateRequestedMsg) isConsoleMsg() {}
 
 // TerminateConfirmedMsg is the run loop's signal that the operator confirmed
-// a pending terminate with "y"/"yes". The run loop has already called
-// Launcher.Terminate by the time this reaches Update; Update only clears the
-// pending confirm.
+// a pending terminate with "y"/"yes". The run loop has already fired
+// Launcher.TerminateAsync (issue #745) by the time this reaches Update, but
+// that call only starts the background Terminate — it may still be in
+// flight; Update only clears the pending confirm.
 type TerminateConfirmedMsg struct {
 	Number string
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +14,22 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 )
+
+// blockingCommentTracker wraps a forge.IssueTracker and blocks every Comment
+// call on unblock — TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes'
+// way of proving TerminateAsync's goroutine, not its caller, waits on the
+// network I/O.
+type blockingCommentTracker struct {
+	forge.IssueTracker
+	unblock    chan struct{}
+	commentHit int32
+}
+
+func (b *blockingCommentTracker) Comment(num, body string) error {
+	atomic.AddInt32(&b.commentHit, 1)
+	<-b.unblock
+	return b.IssueTracker.Comment(num, body)
+}
 
 // newTermTestLauncher builds a Launcher wired to fakes plus a real Factory/Settle
 // over a temp log dir, and returns the tracker Terminate should act on plus
@@ -251,6 +268,70 @@ func TestLauncher_TerminateThenRepick_AdoptsAbandonedPR(t *testing.T) {
 
 	if fc.Merged != "https://github.com/owner/repo/pull/7" {
 		t.Errorf("Merged = %q, want the adopted PR merged (adoption path ran to completion, not abandoned)", fc.Merged)
+	}
+}
+
+// TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes verifies
+// TerminateAsync backgrounds Terminate's blocking tracker I/O (issue #745):
+// the call returns immediately even while the tracker's Comment call is
+// still blocked, and the queue pick only reaches PickTerminated once that
+// blocked call is allowed to finish.
+func TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes(t *testing.T) {
+	launch, fc, _, _ := newTermTestLauncher(t)
+	bt := &blockingCommentTracker{IssueTracker: fc, unblock: make(chan struct{})}
+
+	returned := make(chan struct{})
+	go func() {
+		launch.TerminateAsync(bt, "42")
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("TerminateAsync never returned while Comment was blocked")
+	}
+
+	snap := launch.Queue.Snapshot()
+	if len(snap) != 1 || snap[0].State != PickRunning {
+		t.Fatalf("queue pick = %+v, want still PickRunning before Comment unblocks", snap)
+	}
+
+	close(bt.unblock)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		snap := launch.Queue.Snapshot()
+		if len(snap) == 1 && snap[0].State == PickTerminated {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("queue pick never reached PickTerminated: %+v", snap)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestLauncher_TerminateAsync_DuplicateWhileInFlight_IsNoOp verifies a
+// second TerminateAsync call for the same issue, fired while the first is
+// still blocked on tracker I/O, does not fire a second Kill/Comment for it
+// (issue #745) — the race a second "y" confirm on the same row hits while
+// isLive still reports the pick PickRunning.
+func TestLauncher_TerminateAsync_DuplicateWhileInFlight_IsNoOp(t *testing.T) {
+	launch, fc, fr, _ := newTermTestLauncher(t)
+	bt := &blockingCommentTracker{IssueTracker: fc, unblock: make(chan struct{})}
+
+	launch.TerminateAsync(bt, "42")
+	launch.TerminateAsync(bt, "42") // duplicate while the first is still blocked
+
+	close(bt.unblock)
+	launch.Wait()
+
+	if got := atomic.LoadInt32(&bt.commentHit); got != 1 {
+		t.Errorf("Comment calls = %d, want exactly 1", got)
+	}
+	if len(fr.KillCalls) != 1 {
+		t.Errorf("KillCalls = %v, want exactly one kill", fr.KillCalls)
 	}
 }
 
