@@ -3,43 +3,13 @@ package settle
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/testutil"
 )
-
-// captureStdout runs fn with os.Stdout redirected to a pipe and returns
-// everything written to it.
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-	orig := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stdout = w
-
-	fn()
-
-	w.Close()
-	os.Stdout = orig
-
-	var buf strings.Builder
-	tmp := make([]byte, 4096)
-	for {
-		n, rerr := r.Read(tmp)
-		if n > 0 {
-			buf.Write(tmp[:n])
-		}
-		if rerr != nil {
-			break
-		}
-	}
-	return buf.String()
-}
 
 // TestMergeImmediate verifies the rebase-retry and conflict-resolve behaviors
 // that run inside applyMergeMode for the immediate merge mode. Conflict
@@ -331,7 +301,7 @@ func TestMergeImmediate_BlockedByChecks(t *testing.T) {
 	s := New(c, fc, fc)
 
 	var err error
-	out := captureStdout(t, func() {
+	out := testutil.CaptureStdout(t, func() {
 		err = s.mergeImmediate("1", 0, testPR, df)
 	})
 

@@ -7,6 +7,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // TestSettleAdopted_ConsoleUsesLandingLabel verifies that SettleAdopted's
@@ -20,7 +21,7 @@ func TestSettleAdopted_ConsoleUsesLandingLabel(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := New(c, fc, fc)
 
-	out := captureStdout(t, func() {
+	out := testutil.CaptureStdout(t, func() {
 		s.SettleAdopted(dispatch.NewFake(), "77", 0, testPR)
 	})
 

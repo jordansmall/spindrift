@@ -7,6 +7,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // TestSettle_PostsUsageComment_Blocked verifies that Settle posts d's usage
@@ -56,7 +57,7 @@ func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
 	}
 
 	s := New(baseConfig(), fc, fc)
-	out := captureStdout(t, func() {
+	out := testutil.CaptureStdout(t, func() {
 		s.Settle(d, issNum, 0, result)
 	})
 
