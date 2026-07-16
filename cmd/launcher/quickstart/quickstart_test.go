@@ -199,3 +199,28 @@ func TestRunQuickstart_BlankClaudeOAuthToken_PromptsForAPIKey(t *testing.T) {
 		t.Errorf("expected no non-empty CLAUDE_CODE_OAUTH_TOKEN line, got:\n%s", harnessEnv)
 	}
 }
+
+func TestRunQuickstart_GitUserNameWithNixSpecialChars_IsEscaped(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		`Ada "Countess" ${evil}`, // git user name with a Nix string terminator and interpolation
+		"ada@example.com",
+		"ghp_faketoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, fakeEnvironment{}, fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), `Ada \"Countess\" \${evil}`) {
+		t.Errorf("expected the git user name to be Nix-escaped, got:\n%s", flakeNix)
+	}
+}
