@@ -34,8 +34,8 @@ func TestRef(t *testing.T) {
 		want   string
 	}{
 		{"native", "42", forge.DepSourceNative, "#42 (native)"},
-		{"body", "42", forge.DepSourceBody, "#42 (body)"},
-		{"unknown", "42", forge.DepSourceUnknown, "#42 (unknown)"},
+		{"body", "43", forge.DepSourceBody, "#43 (body)"},
+		{"unknown", "44", forge.DepSourceUnknown, "#44 (unknown)"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
