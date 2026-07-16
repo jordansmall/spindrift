@@ -1222,6 +1222,22 @@ func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
 	}
 }
 
+// TestTriageLabelMeta_ColorsAreDistinct guards against two label tiers
+// visually colliding in the GitHub label UI by reusing the same hex color
+// (#801) — TestReferenceDocLabelSnippetMatchesTriageDefaults checks
+// docs/code parity per name but never asserts uniqueness across the map.
+func TestTriageLabelMeta_ColorsAreDistinct(t *testing.T) {
+	byColor := map[string][]string{}
+	for name, meta := range triageLabelMeta {
+		byColor[meta.color] = append(byColor[meta.color], name)
+	}
+	for color, names := range byColor {
+		if len(names) > 1 {
+			t.Errorf("color %q reused by %d labels %v, want distinct colors", color, len(names), names)
+		}
+	}
+}
+
 func contains(ss []string, s string) bool {
 	for _, v := range ss {
 		if v == s {
