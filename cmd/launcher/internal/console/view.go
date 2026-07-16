@@ -235,7 +235,7 @@ func joinColumns(left, right string, leftWidth, rightWidth int) string {
 		if i < len(rightLines) {
 			r = rightLines[i]
 		}
-		fmt.Fprintf(&b, "%s%s\n", clip(l, leftWidth, true), clip(r, rightWidth, false))
+		fmt.Fprintf(&b, "%s\n", strings.TrimRight(clip(l, leftWidth, true)+clip(r, rightWidth, false), " "))
 	}
 	return b.String()
 }
