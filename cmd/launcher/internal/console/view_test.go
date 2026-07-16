@@ -15,7 +15,7 @@ import (
 // each visible issue's number, title, and labels — the backlog line the
 // operator reads to decide what to pick in a later issue.
 func TestView_ListsVisibleIssuesWithNumberTitleLabels(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
 		{Number: "12", Title: "Fix the thing", Labels: []string{"ready-for-agent", "bug"}},
 	}})
@@ -234,7 +234,7 @@ func TestView_RefreshError_Surfaced(t *testing.T) {
 // visually marked so the operator can see which issue j/down or the up
 // arrow will act on (issue #784).
 func TestView_Cursor_MarksHighlightedRow(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
 	m = Update(m, CursorMoveMsg{Delta: 1})
 
@@ -644,7 +644,7 @@ func TestView_NarrowTerminal_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
 // that Tab moves the marker — the operator's only cue for which column
 // cursor keys and Enter currently act on (issue #845).
 func TestView_Focus_MarksFocusedColumnVisually(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 
 	backlogFocused := View(m)
 	if !strings.Contains(backlogFocused, "backlog [focus]") {
@@ -669,7 +669,7 @@ func TestView_Focus_MarksFocusedColumnVisually(t *testing.T) {
 // marks Cursor's row (issue #845).
 func TestView_QueueCursor_MarksHighlightedRow(t *testing.T) {
 	m := Update(NewModel(), FocusToggleMsg{})
-	m = Update(m, SizeChangedMsg{Height: 24})
+	m = Update(m, SizeChangedMsg{Width: 80, Height: 24})
 	m.Picks = []Pick{{Number: "1", State: PickQueued}, {Number: "2", State: PickQueued}}
 	m.QueueCursor = 1
 
