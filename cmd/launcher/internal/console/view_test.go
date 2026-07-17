@@ -817,6 +817,56 @@ func TestView_DrillInDocked_KeepsBacklogAndQueueVisible(t *testing.T) {
 	}
 }
 
+// TestView_DrillInDocked_BacklogOffset_RendersOffsetRows verifies the docked
+// pane's backlog column honors a scrolled BacklogOffset — BacklogOffset is a
+// shared Model field, not per-pane, so the docked pane's backlog column
+// renders the same window the main view would (issue #1055).
+func TestView_DrillInDocked_BacklogOffset_RendersOffsetRows(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
+	issues := make([]forge.Issue, 50)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
+
+	m = Update(m, ScrollMsg{Delta: 5})
+
+	out := View(m)
+	if strings.Contains(out, "issue 0") {
+		t.Errorf("View() = %q, want issue 0 scrolled out of the docked backlog column", out)
+	}
+	if !strings.Contains(out, "issue 49") {
+		t.Errorf("View() = %q, want the last issue reachable in the docked backlog column", out)
+	}
+}
+
+// TestView_DrillInDocked_QueueOffset_RendersOffsetRows verifies the docked
+// pane's queue column honors a scrolled QueueOffset — QueueOffset is a
+// shared Model field, not per-pane, so the docked pane's queue column
+// renders the same window the main view would (issue #1055).
+func TestView_DrillInDocked_QueueOffset_RendersOffsetRows(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
+	m = Update(m, FocusToggleMsg{})
+	picks := make([]Pick, 50)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
+	}
+	m.Picks = picks
+	m = Update(m, DrillInMsg{Number: "0", Rendered: "[implementor] hi"})
+
+	m = Update(m, ScrollMsg{Delta: 5})
+
+	out := View(m)
+	if strings.Contains(out, "pick 0") {
+		t.Errorf("View() = %q, want pick 0 scrolled out of the docked queue column", out)
+	}
+	if !strings.Contains(out, "pick 49") {
+		t.Errorf("View() = %q, want the last pick reachable in the docked queue column", out)
+	}
+}
+
 // TestView_DrillInDocked_TranscriptRespectsHeaderHeight verifies the docked
 // pane's total output never exceeds m.Height even when renderHeader grows
 // past its one-line minimum — a stale-image alert stacks a second header
@@ -950,6 +1000,47 @@ func TestView_DrillInFloating_OverlaysTranscriptOnTwoColumnBody(t *testing.T) {
 	}
 	if !strings.Contains(out, "[t] toggle raw · [x] close") {
 		t.Errorf("View() = %q, want the keystroke hint visible in the floating overlay", out)
+	}
+}
+
+// TestView_DrillInFloating_Offsets_RenderOffsetRows verifies the floating
+// pane's underlying two-column body honors scrolled BacklogOffset and
+// QueueOffset — both are shared Model fields, not per-pane, so the floating
+// pane's body renders the same window the main view would (issue #1055).
+func TestView_DrillInFloating_Offsets_RenderOffsetRows(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
+	issues := make([]forge.Issue, 50)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+	picks := make([]Pick, 50)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
+	}
+	m.Picks = picks
+	m = Update(m, DrillInMsg{Number: "0", Rendered: "[implementor] hi"})
+	m = Update(m, PaneModeCycleMsg{})
+	if m.PaneMode != PaneFloating {
+		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
+	}
+
+	m = Update(m, ScrollMsg{Delta: 5})
+	m = Update(m, FocusToggleMsg{})
+	m = Update(m, ScrollMsg{Delta: 5})
+
+	out := View(m)
+	if strings.Contains(out, "issue 0") {
+		t.Errorf("View() = %q, want issue 0 scrolled out of the floating pane's backlog column", out)
+	}
+	if strings.Contains(out, "pick 0") {
+		t.Errorf("View() = %q, want pick 0 scrolled out of the floating pane's queue column", out)
+	}
+	if !strings.Contains(out, "issue 49") {
+		t.Errorf("View() = %q, want the last issue reachable in the floating pane's backlog column", out)
+	}
+	if !strings.Contains(out, "pick 49") {
+		t.Errorf("View() = %q, want the last pick reachable in the floating pane's queue column", out)
 	}
 }
 
