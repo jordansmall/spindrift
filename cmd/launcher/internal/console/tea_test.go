@@ -1434,6 +1434,11 @@ func TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain(t *testing.T) {
 	// signal.
 
 	tm := newTeaModel(f, t.TempDir(), launch)
+	// tryLaunch runs synchronously inside the "+" case, not via the
+	// returned Cmd, so discarding both return values here still exercises
+	// it — a future move of that call into the Cmd would leave the pick
+	// stranded at PickQueued below and this test would go red, not pass
+	// silently.
 	tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("+")})
 
 	// launch.Wait() joins the drain goroutine the fallback tryLaunch call
