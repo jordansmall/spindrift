@@ -57,11 +57,11 @@ func TestView_CapAndLive_Shown(t *testing.T) {
 	}
 }
 
-// TestView_Header_StatusLine_ShowsRunningWaitingHeldSettled verifies the
-// header's status line reports running/cap, waiting, held, and settled
-// counts derived from Cap/Live and the Picks slice's PickState tags — no new
-// stored counters (issue #843, ADR 0025).
-func TestView_Header_StatusLine_ShowsRunningWaitingHeldSettled(t *testing.T) {
+// TestView_Header_StatusLine_ShowsRunningWaitingHeldSettledFailed verifies
+// the header's status line reports running/cap, waiting, held, settled, and
+// failed counts derived from Cap/Live and the Picks slice's PickState tags —
+// no new stored counters (issue #843, ADR 0025).
+func TestView_Header_StatusLine_ShowsRunningWaitingHeldSettledFailed(t *testing.T) {
 	m := NewModel()
 	m = Update(m, CapMsg{Cap: 3, Live: 1})
 	m.Picks = []Pick{
