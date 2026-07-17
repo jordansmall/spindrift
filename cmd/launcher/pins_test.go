@@ -23,6 +23,17 @@ func TestNoGhExecOutsideForge(t *testing.T) {
 			}
 			return nil
 		}
+		// Skip quickstart: it runs before nix develop, so no forge client
+		// exists yet — its Environment seam shells to `gh api -i`/`gh auth
+		// token` directly to read token scopes and the gh CLI fallback
+		// (issue #1047), same as ADR 0027 already carves out for the
+		// pre-CLI wizard.
+		if strings.HasPrefix(filepath.ToSlash(path), "quickstart") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if info.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
