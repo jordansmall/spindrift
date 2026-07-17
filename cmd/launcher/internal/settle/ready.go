@@ -273,11 +273,19 @@ func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Di
 // A Rebase force-push failure that forge.ErrTransientPushFailure wraps (an
 // infra or network fault, not a genuine stale-lease rejection) is retried up
 // to MaxRebaseAttempts times before it's treated as terminal.
+//
+// The termination check ahead of preflightStaleBase (issue #943) is
+// deliberately duplicated by the loop's own first-iteration check below
+// rather than relied on alone: preflightStaleBase itself force-pushes, so a
+// terminated issue must never reach it, not just never reach Merge.
 func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
 	rebaseAttempts := 0
 	pushRetries := 0
 	checksBlockedAttempts := 0
 	skipRebase := false
+	if s.terminated(num, gen) {
+		return errAbandoned
+	}
 	// preflightStaleBase gets its own attempt budget rather than sharing
 	// rebaseAttempts/pushRetries with the reactive conflict-retry loop
 	// below: a stale-base rebase and a conflict-triggered rebase are
