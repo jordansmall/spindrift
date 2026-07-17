@@ -372,7 +372,7 @@ func (f *Fake) CompleteVerdict(num string, verdict Verdict) error {
 		return nil // best-effort
 	}
 	remove := f.labels.Label(InProgress)
-	if !slices.Contains(iss.Labels, remove) {
+	if remove != "" && !slices.Contains(iss.Labels, remove) {
 		return fmt.Errorf("issue %s: expected %q label, issue has %v", num, remove, iss.Labels)
 	}
 	add := f.VerdictLabels.Label(verdict)
