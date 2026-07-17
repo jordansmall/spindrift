@@ -15,8 +15,8 @@ import (
 // returning the last line it emitted plus the os.FileInfo the read saw — the
 // stat HeartbeatCache pins to detect whether a later call can skip this same
 // work. ok is false when the file can't be read or written through drv's
-// parser (the same "no heartbeat yet" cases RunningHeartbeat has always
-// returned "" for).
+// parser (the same "no heartbeat yet" cases HeartbeatCache.RunningHeartbeat
+// returns "" for).
 func parseHeartbeat(drv driver.Driver, path, number string) (line string, ok bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -45,14 +45,14 @@ type heartbeatCacheEntry struct {
 // cadence — so most calls see the exact same on-disk log as last time. A
 // stat (size + mtime) that matches the cached entry skips the ReadFile and
 // re-parse entirely and returns the cached line (issue #731); a changed stat
-// still pays the full reparse, same as the uncached RunningHeartbeat always
-// has. This assumes the log at path is append-only: dispatch.LogPaths always
-// points at the one pass log a single dispatch.runOnce writes (os.Create once,
-// then append-only for the life of the pass), so identical (size, mtime)
-// implies identical content. That's not true of os.Stat in general — some
-// filesystems only resolve mtime to the second, so an in-place rewrite that
-// lands on the same byte count within that window would keep both fields
-// identical and get served stale from cache.
+// still pays the full reparse. This assumes the log at path is append-only:
+// dispatch.LogPaths always points at the one pass log a single
+// dispatch.runOnce writes (os.Create once, then append-only for the life of
+// the pass), so identical (size, mtime) implies identical content. That's
+// not true of os.Stat in general — some filesystems only resolve mtime to
+// the second, so an in-place rewrite that lands on the same byte count
+// within that window would keep both fields identical and get served stale
+// from cache.
 type HeartbeatCache struct {
 	entries map[string]heartbeatCacheEntry
 }
