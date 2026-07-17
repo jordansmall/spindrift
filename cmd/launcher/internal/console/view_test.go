@@ -1150,21 +1150,71 @@ func TestView_Queue_SanitizesTitleAndReasonControlSequences(t *testing.T) {
 	}
 }
 
-// TestSplitLeftWidth_ConsistentAcrossBodyAndDockedBody verifies renderBody
-// and renderDockedBody compute the same left-column width for the same
-// effective body width and backlog content — both now delegate to the one
-// splitLeftWidth helper instead of each re-deriving the leftColumnFraction
-// clamp, so a future change to the clamp can't drift out of sync between the
-// two layouts (issue #1001 AC3/AC4).
-func TestSplitLeftWidth_ConsistentAcrossBodyAndDockedBody(t *testing.T) {
+// TestSplitLeftWidth_ClampsToLeftColumnFraction verifies splitLeftWidth caps
+// its result at leftColumnFraction of width when the backlog's own longest
+// line runs past that share (issue #1001).
+func TestSplitLeftWidth_ClampsToLeftColumnFraction(t *testing.T) {
 	backlog := "a very long backlog line that would blow past the fraction cap"
 	width := 40
 
-	got := splitLeftWidth(width, backlog)
+	got := splitLeftWidth(backlog, width)
 	want := int(float64(width) * leftColumnFraction)
 	if got != want {
-		t.Errorf("splitLeftWidth(%d, %q) = %d, want %d (clamped to leftColumnFraction)", width, backlog, got, want)
+		t.Errorf("splitLeftWidth(%q, %d) = %d, want %d (clamped to leftColumnFraction)", backlog, width, got, want)
 	}
+}
+
+// TestView_BodyAndDockedBody_AgreeOnLeftColumnWidth verifies renderBody and
+// renderDockedBody place the work-queue column at the same offset for the
+// same effective body width and backlog content — i.e. the two layouts
+// actually stay in sync, not just the extracted helper in isolation.
+// renderDockedBody carves its body width down from m.Width by the
+// Transcript column's share first (bodyWidth = m.Width - transcriptWidth),
+// so the docked model here uses a wider m.Width chosen so its bodyWidth
+// equals the plain body's m.Width exactly. The backlog title is long enough
+// to force the leftColumnFraction clamp in both, so the test would catch a
+// future edit that re-derives the clamp in only one of the two callers
+// (issue #1001 AC3/AC4).
+func TestView_BodyAndDockedBody_AgreeOnLeftColumnWidth(t *testing.T) {
+	const bodyWidth = 60    // leftColumnFraction clamp: int(60 * 2/5) = 24
+	const dockedWidth = 100 // transcriptWidth = int(100*2/5) = 40, bodyWidth = 60
+
+	issues := []forge.Issue{{Number: "1", Title: "a very long backlog title that blows past the fraction cap"}}
+	picks := []Pick{{Number: "42", Title: "QUEUEMARK", State: PickQueued}}
+
+	mBody := Update(NewModel(), SizeChangedMsg{Width: bodyWidth, Height: 24})
+	mBody = Update(mBody, IssuesLoadedMsg{Issues: issues})
+	mBody.Picks = picks
+
+	mDocked := Update(NewModel(), SizeChangedMsg{Width: dockedWidth, Height: 24})
+	mDocked = Update(mDocked, IssuesLoadedMsg{Issues: issues})
+	mDocked.Picks = picks
+	mDocked = Update(mDocked, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
+
+	bodyOut := renderBody(mBody, unboundedBudget)
+	dockedOut := renderDockedBody(mDocked)
+
+	bodyLine := lineContaining(t, bodyOut, "QUEUEMARK")
+	dockedLine := lineContaining(t, dockedOut, "QUEUEMARK")
+
+	bodyOffset := strings.Index(bodyLine, "QUEUEMARK")
+	dockedOffset := strings.Index(dockedLine, "QUEUEMARK")
+	if bodyOffset != dockedOffset {
+		t.Errorf("queue column starts at rune %d in renderBody but %d in renderDockedBody, want equal (same leftWidth)", bodyOffset, dockedOffset)
+	}
+}
+
+// lineContaining returns the first line of s containing substr, failing the
+// test if no line matches.
+func lineContaining(t *testing.T, s, substr string) string {
+	t.Helper()
+	for _, l := range strings.Split(s, "\n") {
+		if strings.Contains(l, substr) {
+			return l
+		}
+	}
+	t.Fatalf("no line in %q contains %q", s, substr)
+	return ""
 }
 
 // TestSplitLeftWidth_UsesBacklogWidthUnderFractionCap verifies splitLeftWidth
@@ -1175,9 +1225,9 @@ func TestSplitLeftWidth_UsesBacklogWidthUnderFractionCap(t *testing.T) {
 	backlog := "short"
 	width := 80
 
-	got := splitLeftWidth(width, backlog)
+	got := splitLeftWidth(backlog, width)
 	want := maxLineWidth(backlog)
 	if got != want {
-		t.Errorf("splitLeftWidth(%d, %q) = %d, want %d (backlog's own width)", width, backlog, got, want)
+		t.Errorf("splitLeftWidth(%q, %d) = %d, want %d (backlog's own width)", backlog, width, got, want)
 	}
 }

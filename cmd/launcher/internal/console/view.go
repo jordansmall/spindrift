@@ -116,7 +116,7 @@ func renderBody(m Model, budget int) string {
 	}
 	backlog := renderBacklogColumn(m, budget)
 	queue := renderQueueColumn(m, budget)
-	leftWidth := splitLeftWidth(m.Width, backlog)
+	leftWidth := splitLeftWidth(backlog, m.Width)
 	rightWidth := m.Width - leftWidth
 	return joinColumns(backlog, queue, leftWidth, rightWidth)
 }
@@ -155,7 +155,7 @@ func maxLineWidth(s string) int {
 // leftColumnFraction of width — the split renderBody and renderDockedBody
 // both need, factored out so the two layouts can't drift out of sync (issue
 // #1001).
-func splitLeftWidth(width int, backlog string) int {
+func splitLeftWidth(backlog string, width int) int {
 	leftWidth := maxLineWidth(backlog)
 	if maxLeft := int(float64(width) * leftColumnFraction); leftWidth > maxLeft {
 		leftWidth = maxLeft
@@ -455,7 +455,7 @@ func renderDockedBody(m Model) string {
 	transcriptWidth := int(float64(m.Width) * transcriptColumnFraction)
 	bodyWidth := m.Width - transcriptWidth
 
-	leftWidth := splitLeftWidth(bodyWidth, backlog)
+	leftWidth := splitLeftWidth(backlog, bodyWidth)
 	queueWidth := bodyWidth - leftWidth
 
 	body := joinColumns(backlog, queue, leftWidth, queueWidth)
