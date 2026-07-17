@@ -9,23 +9,6 @@ import (
 	"spindrift.dev/launcher/internal/driver/claude"
 )
 
-// writeClassifyLog writes lines to a temp log and returns the path.
-func writeClassifyLog(t *testing.T, lines ...string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "classify.log")
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	for _, l := range lines {
-		if _, err := f.WriteString(l + "\n"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return path
-}
-
 var classifyTests = []struct {
 	name        string
 	lines       []string
@@ -412,7 +395,7 @@ func TestClassify(t *testing.T) {
 			if tc.name == "Terminal_NoLog" {
 				logPath = filepath.Join(t.TempDir(), "nonexistent.log")
 			} else {
-				logPath = writeClassifyLog(t, tc.lines...)
+				logPath = claude.WriteLog(t, tc.lines...)
 			}
 
 			c, err := claude.Classify(logPath)
