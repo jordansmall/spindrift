@@ -171,7 +171,7 @@ setup() {
 
 @test "dogfood pulls, rebuilds, and re-invokes under DOGFOOD_KIND=research" {
   _install_sequence_exit_nix 4 2 research
-  run env BASE_BRANCH=main DOGFOOD_KIND=research timeout 15 bash "$WORK/dogfood.sh"
+  run timeout 15 env BASE_BRANCH=main DOGFOOD_KIND=research bash "$WORK/dogfood.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"image stale"* ]]
   [ "$(grep -c -- '-- research' "$NIX_LOG")" -eq 2 ]
