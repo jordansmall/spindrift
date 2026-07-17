@@ -109,6 +109,9 @@ func TestParseGitHubRepoSlug(t *testing.T) {
 		"https://github.com/jordansmall/spindrift":       "jordansmall/spindrift",
 		"git@gitlab.com:jordansmall/spindrift.git":       "",
 		"git@github.com-work:jordansmall/spindrift.git":  "",
+		"git@notgithub.com:jordansmall/spindrift.git":    "",
+		"https://mygithub.com/jordansmall/spindrift.git": "",
+		"https://github.com/jordansmall/spindrift/":      "jordansmall/spindrift",
 		"": "",
 	}
 	for remote, want := range cases {

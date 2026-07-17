@@ -103,11 +103,6 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Write
 	}
 
 	scanner := bufio.NewScanner(stdin)
-	prompt := func(label string) string {
-		fmt.Fprintf(w, "%s: ", label)
-		scanner.Scan()
-		return scanner.Text()
-	}
 	promptDefault := func(label, def string) string {
 		if def != "" {
 			fmt.Fprintf(w, "%s [%s]: ", label, def)
@@ -120,6 +115,7 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Write
 		}
 		return def
 	}
+	prompt := func(label string) string { return promptDefault(label, "") }
 
 	repoSlug := promptDefault("Repo slug (owner/repo)", env.GitRemoteRepoSlug())
 	runtime := promptDefault("Runtime (podman/docker/bwrap)", detectedRuntime)
