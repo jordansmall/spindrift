@@ -9,6 +9,24 @@ let
     batsHarness
     ;
 
+  # lib/fragments.nix is the gate registry's source of truth (issue #959):
+  # derive the fragment-gate-parity gate lists from it instead of a
+  # hand-maintained bash `for gate in ...` list that silently drifts when a
+  # row is added (issue #959, following the registry #622 -> parity #689).
+  fragmentRows = import ../../lib/fragments.nix;
+  allGates = map (row: row.gate) fragmentRows;
+  # The registry carries no field marking a row computed vs. knob-gated (see
+  # lib/fragments.nix:8-15's prose split), so name the knob-gated trio here
+  # rather than add a field just for this check. Only computedGates gets the
+  # entrypoint.sh assertion below -- a knob-gated gate names a launcher env
+  # var directly and is never declared via `local` in entrypoint.sh.
+  knobGates = [
+    "AUTO_FORMAT"
+    "AUTO_LINT"
+    "CI_FAILURE_SUMMARY"
+  ];
+  computedGates = builtins.filter (g: !(builtins.elem g knobGates)) allGates;
+
   # The rendered CHECK section, sliced once here rather than three times
   # across the never-background/vanished-marker/git-add checks below (issue
   # #781) -- a marker rename only needs updating in one place, and the three
@@ -352,9 +370,18 @@ in
   # drift-guard shape as outcome-contract-marker-parity in nix/checks/image.nix,
   # grep-based and eval-only so it belongs in checks-inbox, not the
   # image-realizing checks.
+  #
+  # The gate list is derived from the registry (allGates/computedGates above)
+  # rather than hand-copied, so a new row is covered automatically (issue
+  # #959; a hand-copied list had silently missed 3 of 9 rows). Every gate
+  # gets the fragments.nix assertion; only computed gates get the
+  # entrypoint.sh assertion, since the knob-gated trio is never declared via
+  # `local` there by design (see the knobGates comment above).
   fragment-gate-parity = pkgs.runCommand "fragment-gate-parity" { } ''
-    for gate in SKILLS_FOUND CAVEMAN_BAKED TDD_BAKED COMMIT_BAKED CODE_REVIEW_BAKED FILER_ENABLED; do
+    for gate in ${pkgs.lib.concatStringsSep " " allGates}; do
       grep -qF "gate = \"$gate\";" ${../../lib/fragments.nix}
+    done
+    for gate in ${pkgs.lib.concatStringsSep " " computedGates}; do
       grep -qF "local $gate=" ${../../agent/entrypoint.sh}
     done
     touch $out
