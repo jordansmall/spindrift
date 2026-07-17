@@ -76,6 +76,29 @@ func TestOverlapsInProgress_NoDeclaredTouches(t *testing.T) {
 	}
 }
 
+// TestOverlapsInProgress_CandidateTouchesOfErrorReturnsNoCollision verifies a
+// failed it.TouchesOf fetch for the candidate itself (not an in-progress
+// entry) is treated as "no declared touches" — fail-open, no collision — and,
+// unlike the in-progress-loop side, prints no diagnostic: this call runs once
+// per candidate examined per wave/drain tick, not once per wave snapshot, so
+// a print here would repeat every tick for the same still-failing candidate.
+func TestOverlapsInProgress_CandidateTouchesOfErrorReturnsNoCollision(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
+	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- lib/env-schema.nix", State: "OPEN", Labels: []string{"agent-in-progress"}})
+	fc.TouchesOfErr = map[string]error{"10": fmt.Errorf("boom")}
+
+	inProgress, _ := fc.ListIssues(forge.InProgress)
+	out := testutil.CaptureStdout(t, func() {
+		if _, held := overlapsInProgress(fc, "10", declaredOnly(fc, inProgress)); held {
+			t.Error("expected no hold: candidate TouchesOf fetch failed")
+		}
+	})
+	if out != "" {
+		t.Errorf("expected no diagnostic for a candidate-side TouchesOf error, got %q", out)
+	}
+}
+
 // TestOverlapsInProgress_CollidesViaOpenPRChangedFiles verifies that a
 // candidate colliding with an in-progress issue's *actual* PR-changed files —
 // not declared in that issue's ## Touches — is still held, per the v2
