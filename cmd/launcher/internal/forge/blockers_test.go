@@ -66,6 +66,7 @@ func TestExtractBulletContent(t *testing.T) {
 		{"  * baz  ", "baz"},
 		{"\t- foo", "foo"},
 		{"-\tbar", "bar"},
+		{"\t*\tqux", "qux"},
 	}
 	for _, c := range cases {
 		if got := forge.ExtractBulletContent(c.line); got != c.want {
