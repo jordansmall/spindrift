@@ -12,7 +12,24 @@ var (
 	anyHeading      = regexp.MustCompile(`^#+`)
 	bulletItem      = regexp.MustCompile(`^[ \t]*[-*][ \t]*`)
 	refListPrefix   = regexp.MustCompile(`^(?:#[0-9]+|[,/]|\s+|\band\b)+`)
+	fenceDelimiter  = regexp.MustCompile("^(```+|~~~+)")
+	inlineCodeSpan  = regexp.MustCompile("`[^`]*`")
 )
+
+// IsFenceDelimiter reports whether line opens or closes a fenced code block
+// (triple-backtick or tilde fence). Indented (4-space) code blocks are not
+// recognised — out of scope for the code-awareness ParseBlockerRefs and
+// ParseTouchPaths apply.
+func IsFenceDelimiter(line string) bool {
+	return fenceDelimiter.MatchString(line)
+}
+
+// StripInlineCode blanks out single-backtick inline code spans in line, so
+// a trigger phrase or ref quoted inside `...` isn't mistaken for a real
+// declaration.
+func StripInlineCode(line string) string {
+	return inlineCodeSpan.ReplaceAllString(line, "")
+}
 
 // IsBlockedByHeader reports whether line is a "## Blocked by" section header.
 // The local adapter's parseLocalBlockers calls this to reuse the same
@@ -67,8 +84,18 @@ func ParseBlockerRefs(body string) []string {
 	}
 
 	inSection := false
+	inFence := false
 	for _, rawLine := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
 		line := strings.TrimRight(rawLine, "\r")
+
+		if IsFenceDelimiter(line) {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		line = StripInlineCode(line)
 
 		if IsBlockedByHeader(line) {
 			inSection = true

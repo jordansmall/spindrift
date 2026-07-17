@@ -427,6 +427,55 @@ func TestParseBlockerRefs_SeeAlsoDoesNotBleed(t *testing.T) {
 	}
 }
 
+func TestParseBlockerRefs_IgnoresTriggerInFencedBlock(t *testing.T) {
+	body := "```\nblocked by #99\n```"
+	if refs := forge.ParseBlockerRefs(body); len(refs) != 0 {
+		t.Errorf("expected [], got %v", refs)
+	}
+}
+
+func TestParseBlockerRefs_IgnoresHeaderSectionInFencedBlock(t *testing.T) {
+	body := "```\n## Blocked by\n- #1\n```\n## Blocked by\n- #2"
+	refs := forge.ParseBlockerRefs(body)
+	if len(refs) != 1 || refs[0] != "2" {
+		t.Errorf("expected [2] only, got %v", refs)
+	}
+}
+
+func TestParseBlockerRefs_IgnoresTriggerInTildeFencedBlock(t *testing.T) {
+	body := "~~~\nblocked by #99\n~~~"
+	if refs := forge.ParseBlockerRefs(body); len(refs) != 0 {
+		t.Errorf("expected [], got %v", refs)
+	}
+}
+
+func TestParseBlockerRefs_IgnoresTriggerInInlineCodeSpan(t *testing.T) {
+	body := "This quotes `blocked by #99` mid-sentence, but depends on #12 is real."
+	refs := forge.ParseBlockerRefs(body)
+	if len(refs) != 1 || refs[0] != "12" {
+		t.Errorf("expected [12] only, got %v", refs)
+	}
+}
+
+func TestParseBlockerRefs_MultipleInlineSpansOnOneLine(t *testing.T) {
+	body := "depends on #12, not `blocked by #98` nor `blocked by #97`, see also #99"
+	refs := forge.ParseBlockerRefs(body)
+	if len(refs) != 1 || refs[0] != "12" {
+		t.Errorf("expected [12] only, got %v", refs)
+	}
+}
+
+// TestParseBlockerRefs_Issue847FencedExampleDoesNotWedge reconstructs the
+// #847 leak: a real "## Blocked by" section reads None, but a fenced
+// example of the dispatch log format quotes "blocked by #N" lines that the
+// inline keyword matcher used to capture as real refs.
+func TestParseBlockerRefs_Issue847FencedExampleDoesNotWedge(t *testing.T) {
+	body := "## Blocked by\nNone\n\nExample dispatch log:\n```\n~~ #12 blocked by #13; skipping\n~~ #12 blocked by #14; skipping\n```\n"
+	if refs := forge.ParseBlockerRefs(body); len(refs) != 0 {
+		t.Errorf("expected [], got %v", refs)
+	}
+}
+
 // containsLabel is a test helper (not imported from main package).
 func containsLabel(labels []string, target string) bool {
 	for _, l := range labels {
