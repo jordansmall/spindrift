@@ -23,3 +23,18 @@ func TestSanitizeControlSequences_PreservesNewlineAndTab(t *testing.T) {
 		t.Errorf("SanitizeControlSequences(%q) = %q, want unchanged", in, got)
 	}
 }
+
+// TestSanitizeControlSequences_RawC1SurvivesAsReplacementChar verifies a
+// raw invalid C1 byte (0x9b, 0x9d) decodes as U+FFFD, which is outside
+// the 0x80-0x9f range check, so it survives sanitization rather than
+// being stripped (#1019) — documented, harmless behavior, not a strip
+// bug.
+func TestSanitizeControlSequences_RawC1SurvivesAsReplacementChar(t *testing.T) {
+	for _, raw := range []byte{0x9b, 0x9d} {
+		in := string([]byte{'a', raw, 'b'})
+		want := "a�b"
+		if got := SanitizeControlSequences(in); got != want {
+			t.Errorf("SanitizeControlSequences(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
