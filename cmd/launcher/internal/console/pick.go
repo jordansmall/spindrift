@@ -40,9 +40,10 @@ const (
 	// this pick ran, and the operator reclaimed it mid-flight.
 	PickTerminated
 	// PickFailed is a pick whose Box ran and exited non-zero (issue #705) —
-	// distinct from PickDissolved (a claim that never launched) and
-	// PickTerminated (the operator ended a still-running pick by hand):
-	// this pick ran to completion on its own and failed.
+	// distinct from PickDissolved (a claim that never launched, see
+	// PickDissolvedMsg in msg.go) and PickTerminated (the operator ended a
+	// still-running pick by hand): this pick ran to completion on its own
+	// and failed.
 	PickFailed
 )
 

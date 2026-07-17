@@ -33,23 +33,23 @@ func TestPickIssue_PromotesAndReturnsQueuedMsg(t *testing.T) {
 	}
 }
 
-// TestPickIssue_TransitionErr_ReturnsFailedMsg verifies a promotion that
+// TestPickIssue_TransitionErr_ReturnsDissolvedMsg verifies a promotion that
 // races (issue closed, relabeled, or claimed by another loop) surfaces as
-// PickFailedMsg with the tracker's error as the reason, rather than a
+// PickDissolvedMsg with the tracker's error as the reason, rather than a
 // silently-queued pick the tracker never actually recorded.
-func TestPickIssue_TransitionErr_ReturnsFailedMsg(t *testing.T) {
+func TestPickIssue_TransitionErr_ReturnsDissolvedMsg(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing"})
 	f.TransitionStateErr = errBoom
 
 	msg := PickIssue(f, "42", "fix the thing", KindWork)
 
-	failed, ok := msg.(PickFailedMsg)
+	failed, ok := msg.(PickDissolvedMsg)
 	if !ok {
-		t.Fatalf("PickIssue() = %T, want PickFailedMsg", msg)
+		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
 	}
 	if failed.Number != "42" || failed.Reason == "" {
-		t.Errorf("PickFailedMsg = %+v, want #42 with a reason", failed)
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", failed)
 	}
 }
 
@@ -71,22 +71,22 @@ func TestPickIssue_LeavesIssueDispatchable_NeverInProgress(t *testing.T) {
 	}
 }
 
-// TestPickIssue_AlreadyInProgress_ReturnsFailedMsg_NoTransition verifies a
+// TestPickIssue_AlreadyInProgress_ReturnsDissolvedMsg_NoTransition verifies a
 // pick on an issue already claimed by a live Box is rejected outright —
 // never relabeled Dispatchable on top of its existing InProgress label,
 // which would let a second Box's claim succeed for the same issue (#707).
-func TestPickIssue_AlreadyInProgress_ReturnsFailedMsg_NoTransition(t *testing.T) {
+func TestPickIssue_AlreadyInProgress_ReturnsDissolvedMsg_NoTransition(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
 
 	msg := PickIssue(f, "42", "fix the thing", KindWork)
 
-	failed, ok := msg.(PickFailedMsg)
+	failed, ok := msg.(PickDissolvedMsg)
 	if !ok {
-		t.Fatalf("PickIssue() = %T, want PickFailedMsg", msg)
+		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
 	}
 	if failed.Number != "42" || failed.Reason == "" {
-		t.Errorf("PickFailedMsg = %+v, want #42 with a reason", failed)
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", failed)
 	}
 	if len(f.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionStateCalls = %+v, want none — an InProgress issue must never be relabeled", f.TransitionStateCalls)
@@ -100,21 +100,21 @@ func TestPickIssue_AlreadyInProgress_ReturnsFailedMsg_NoTransition(t *testing.T)
 	}
 }
 
-// TestPickIssue_AlreadyComplete_ReturnsFailedMsg_NoTransition mirrors
-// TestPickIssue_AlreadyInProgress_ReturnsFailedMsg_NoTransition for the other
+// TestPickIssue_AlreadyComplete_ReturnsDissolvedMsg_NoTransition mirrors
+// TestPickIssue_AlreadyInProgress_ReturnsDissolvedMsg_NoTransition for the other
 // terminal state a stray pick must never relabel out of (#707).
-func TestPickIssue_AlreadyComplete_ReturnsFailedMsg_NoTransition(t *testing.T) {
+func TestPickIssue_AlreadyComplete_ReturnsDissolvedMsg_NoTransition(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", Complete: "agent-complete"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-complete"}})
 
 	msg := PickIssue(f, "42", "fix the thing", KindWork)
 
-	failed, ok := msg.(PickFailedMsg)
+	failed, ok := msg.(PickDissolvedMsg)
 	if !ok {
-		t.Fatalf("PickIssue() = %T, want PickFailedMsg", msg)
+		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
 	}
 	if failed.Number != "42" || failed.Reason == "" {
-		t.Errorf("PickFailedMsg = %+v, want #42 with a reason", failed)
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", failed)
 	}
 	if len(f.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionStateCalls = %+v, want none — a Complete issue must never be relabeled", f.TransitionStateCalls)
@@ -153,10 +153,10 @@ func TestPickAllReady_ReturnsOneMsgPerCurrentlyDispatchableIssue(t *testing.T) {
 	}
 }
 
-// TestPickAllReady_ListIssuesErr_ReturnsFailedMsg verifies a ListIssues
-// failure surfaces to the operator as a PickFailedMsg instead of a silently
+// TestPickAllReady_ListIssuesErr_ReturnsDissolvedMsg verifies a ListIssues
+// failure surfaces to the operator as a PickDissolvedMsg instead of a silently
 // dropped nil — the asymmetry with PickIssue's error handling (#728).
-func TestPickAllReady_ListIssuesErr_ReturnsFailedMsg(t *testing.T) {
+func TestPickAllReady_ListIssuesErr_ReturnsDissolvedMsg(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.ListIssuesErr = errBoom
 
@@ -165,9 +165,9 @@ func TestPickAllReady_ListIssuesErr_ReturnsFailedMsg(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("PickAllReady() = %+v, want 1 msg", msgs)
 	}
-	failed, ok := msgs[0].(PickFailedMsg)
+	failed, ok := msgs[0].(PickDissolvedMsg)
 	if !ok || failed.Reason != errBoom.Error() {
-		t.Errorf("msgs[0] = %+v, want PickFailedMsg with reason %q", msgs[0], errBoom.Error())
+		t.Errorf("msgs[0] = %+v, want PickDissolvedMsg with reason %q", msgs[0], errBoom.Error())
 	}
 }
 
