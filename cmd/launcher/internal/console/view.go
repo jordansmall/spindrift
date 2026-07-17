@@ -477,15 +477,24 @@ func renderFloatingBody(m Model) string {
 // overlay writes pane's lines over the right-most paneWidth runes of body's
 // leading lines, one per pane line, leaving any body line beyond len(pane's
 // lines) untouched — a fixed-footprint overlay rather than a full column
-// join (issue #846, ADR 0025).
+// join (issue #846, ADR 0025). When pane has more lines than body (a short
+// backlog/queue under a taller transcript pane), the extra pane lines are
+// appended as new rows with a blank left side rather than dropped — the
+// pane's keystroke-hint footer must always reach the screen (issue #1002).
 func overlay(body, pane string, leftWidth, paneWidth int) string {
 	bodyLines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 	paneLines := strings.Split(strings.TrimRight(pane, "\n"), "\n")
 	for i, pl := range paneLines {
-		if i >= len(bodyLines) {
-			break
+		left := ""
+		if i < len(bodyLines) {
+			left = bodyLines[i]
 		}
-		bodyLines[i] = clip(bodyLines[i], leftWidth, true) + clip(pl, paneWidth, true)
+		line := clip(left, leftWidth, true) + clip(pl, paneWidth, true)
+		if i < len(bodyLines) {
+			bodyLines[i] = line
+		} else {
+			bodyLines = append(bodyLines, line)
+		}
 	}
 	return strings.Join(bodyLines, "\n") + "\n"
 }
@@ -696,7 +705,9 @@ func windowLines(d DrillInState, budget int) []string {
 // pick and current form, as much of its loaded content from Offset onward as
 // height allows, and a keystroke hint — the same content and footer
 // renderDrillIn shows fullscreen, reused for the docked and floating pane
-// modes (issue #846, ADR 0025; hint added #1002).
+// modes (issue #846, ADR 0025; hint added #1002). The content+footer body
+// below is currently duplicated with renderDrillIn; #1000 tracks extracting
+// a shared helper.
 func renderTranscriptColumn(d DrillInState, height int) string {
 	var b strings.Builder
 	if d.ShowRaw {
@@ -718,10 +729,11 @@ func renderTranscriptColumn(d DrillInState, height int) string {
 	return b.String()
 }
 
-// headerFooterLines is the fullscreen drill-in chrome budget (header +
-// keystroke-hint footer) that both renderDrillIn and clampDrillInOffset
-// subtract from height — shared so the clamp's last-page cap always matches
-// what renderDrillIn actually has room to show (issue #829).
+// headerFooterLines is the drill-in chrome budget (header + keystroke-hint
+// footer) that renderDrillIn, renderTranscriptColumn, and clampDrillInOffset
+// all subtract from height — shared so the clamp's last-page cap always
+// matches what the renderers actually have room to show (issue #829,
+// #1002).
 const headerFooterLines = 2
 
 // renderDrillIn renders one Dispatch's transcript view: a header naming the
