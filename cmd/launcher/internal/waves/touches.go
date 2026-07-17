@@ -82,6 +82,15 @@ func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) fun
 // issue's number. A candidate with no declared touches never collides —
 // issues with no ## Touches section are dispatched exactly as today, per the
 // OVERLAP_GATE acceptance criteria.
+//
+// A failed candidate-side it.TouchesOf fetch is folded into that same no-
+// collision path — fail-open, matching v1's declared-only behavior and
+// keeping OVERLAP_GATE advisory rather than blocking dispatch on a fetch
+// error. Unlike waveOverlapCheck's in-progress-loop fetch (which prints a
+// diagnostic on failure, fetched once per wave/drain snapshot), this fetch
+// runs once per candidate examined per wave/drain tick — printing here would
+// repeat every tick for the same still-failing candidate, so the error is
+// swallowed silently rather than logged.
 func overlapsInProgress(it forge.IssueTracker, num string, inProgress []inProgressTouches) (string, bool) {
 	touches, err := it.TouchesOf(num)
 	if err != nil || len(touches) == 0 {
