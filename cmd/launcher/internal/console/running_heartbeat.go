@@ -69,8 +69,10 @@ type heartbeatCacheEntry struct {
 // has. This assumes the log at path is append-only: dispatch.LogPaths always
 // points at the one pass log a single dispatch.runOnce writes (os.Create once,
 // then append-only for the life of the pass), so identical (size, mtime)
-// implies identical content. An in-place rewrite that happened to preserve
-// both would be served stale from cache.
+// implies identical content. That's not true of os.Stat in general — some
+// filesystems only resolve mtime to the second, so an in-place rewrite that
+// lands on the same byte count within that window would keep both fields
+// identical and get served stale from cache.
 type HeartbeatCache struct {
 	entries map[string]heartbeatCacheEntry
 }
