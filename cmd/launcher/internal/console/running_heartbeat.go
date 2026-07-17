@@ -66,7 +66,11 @@ type heartbeatCacheEntry struct {
 // stat (size + mtime) that matches the cached entry skips the ReadFile and
 // re-parse entirely and returns the cached line (issue #731); a changed stat
 // still pays the full reparse, same as the uncached RunningHeartbeat always
-// has.
+// has. This assumes the log at path is append-only: dispatch.LogPaths always
+// points at the one pass log a single dispatch.runOnce writes (os.Create once,
+// then append-only for the life of the pass), so identical (size, mtime)
+// implies identical content. An in-place rewrite that happened to preserve
+// both would be served stale from cache.
 type HeartbeatCache struct {
 	entries map[string]heartbeatCacheEntry
 }
@@ -93,6 +97,8 @@ func (c *HeartbeatCache) RunningHeartbeat(drv driver.Driver, pwd, number string)
 	if err != nil {
 		return ""
 	}
+	// (path, size, modTime) match implies same content only because the log
+	// is append-only (see HeartbeatCache doc comment above).
 	if cached, ok := c.entries[number]; ok && cached.path == path && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
 		return cached.line
 	}
