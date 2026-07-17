@@ -348,11 +348,8 @@ esac
 		t.Fatalf("call-00.txt (gh issue view) not written: %v", err)
 	}
 	argv := string(raw)
-	if !strings.Contains(argv, "--json\nlabels") {
-		t.Errorf("argv = %q, want labels-only --json call", argv)
-	}
-	if strings.Contains(argv, "title") || strings.Contains(argv, "body") || strings.Contains(argv, "state") {
-		t.Errorf("argv = %q, must not request title/body/state fields", argv)
+	if !strings.HasSuffix(argv, "--json\nlabels\n") {
+		t.Errorf("argv = %q, want labels-only --json call as the final args", argv)
 	}
 }
 
@@ -377,8 +374,8 @@ esac
 		t.Fatalf("call-00.txt (gh issue view) not written: %v", err)
 	}
 	viewArgv := string(viewRaw)
-	if !strings.Contains(viewArgv, "--json\nlabels") {
-		t.Errorf("view argv = %q, want labels-only --json call", viewArgv)
+	if !strings.HasSuffix(viewArgv, "--json\nlabels\n") {
+		t.Errorf("view argv = %q, want labels-only --json call as the final args", viewArgv)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(dir, "call-01.txt"))
