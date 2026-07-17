@@ -471,6 +471,61 @@ func TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge(t *testing.T) {
 	}
 }
 
+// TestMergeImmediate_StaleBaseNonTransientRebaseFailureBlocksMerge verifies
+// that a non-transient Rebase error (not forge.ErrTransientPushFailure) short
+// circuits the push-retry loop entirely — a single Rebase call, no retries —
+// and still blocks the merge the same way the retries-exhausted case does.
+func TestMergeImmediate_StaleBaseNonTransientRebaseFailureBlocksMerge(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 2
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	fc.RebaseErr = forge.ErrMergeConflict
+	fc.MergeErrs = []error{nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, nil)
+
+	if err == nil {
+		t.Fatal("mergeImmediate: want error when the stale-base rebase fails non-transiently, got nil")
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge must not be called after the stale-base rebase failed; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.RebasedURLs) != 1 {
+		t.Errorf("Rebase called %d times, want 1 (non-transient error must not enter the push-retry loop)", len(fc.RebasedURLs))
+	}
+}
+
+// TestMergeImmediate_StaleBaseSkippedWhenRebaseDisabled verifies that
+// MaxRebaseAttempts=0 disables the stale-base preflight outright — even when
+// the forge reports the PR behind its base, Rebase is never called and
+// mergeImmediate falls straight through to the normal Merge attempt. Unlike
+// the existing MaxRebaseAttempts=0 self-heal cases, this one sets
+// NeedsUpdate=true so the !stale short circuit can't hide the disjunct.
+func TestMergeImmediate_StaleBaseSkippedWhenRebaseDisabled(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 0
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	fc.MergeErrs = []error{nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, nil)
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if len(fc.RebasedURLs) != 0 {
+		t.Errorf("Rebase called %d times, want 0 (MaxRebaseAttempts=0 disables the preflight)", len(fc.RebasedURLs))
+	}
+	if fc.Merged != testPR {
+		t.Errorf("Merge not called after the disabled preflight fell through; fc.Merged=%q", fc.Merged)
+	}
+}
+
 // TestApplyMergeMode_Immediate verifies that immediate mode calls fc.Merge.
 func TestApplyMergeMode_Immediate(t *testing.T) {
 	c := baseConfig()
