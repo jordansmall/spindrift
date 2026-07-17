@@ -98,6 +98,8 @@ setup() {
   source "$FRAGMENT_REGISTRY_FILE"
   local row fragment
   for row in "${_FRAGMENT_ROWS[@]}"; do
+    # Row shape is "gate|fragment.md|var" -- middle field, already carries
+    # the .md suffix.
     fragment="${row#*|}"
     fragment="${fragment%%|*}"
     [ -f "$PROMPTS_DIR/fragments/$fragment" ]
