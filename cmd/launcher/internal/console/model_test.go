@@ -516,6 +516,10 @@ func TestUpdate_CursorMoveMsg_BacklogOffsetFollowsCursor(t *testing.T) {
 			t.Fatalf("after %d up-moves: BacklogOffset = %d, want 2 (cursor %d still on screen)", step, m.BacklogOffset, m.Cursor)
 		}
 	}
+	// The 2 here (and the 1s below) count how many times the window has
+	// crossed a boundary, not a row position derived from visibleRows — they
+	// hold regardless of geometry, unlike the visibleRows-derived values
+	// above.
 	if m.Cursor != 2 {
 		t.Fatalf("Cursor = %d, want 2", m.Cursor)
 	}
@@ -536,7 +540,10 @@ func TestUpdate_CursorMoveMsg_BacklogOffsetFollowsCursor(t *testing.T) {
 // TestUpdate_CursorMoveMsg_QueueOffsetFollowsCursorWhenQueueFocused verifies
 // the work-queue column's viewport follows QueueCursor the same way the
 // backlog column's follows Cursor — cursor-follows-viewport covers whichever
-// column Tab has focused (issue #1036 AC1/AC3).
+// column Tab has focused (issue #1036 AC1/AC3). visibleRows is derived the
+// same way as TestUpdate_CursorMoveMsg_BacklogOffsetFollowsCursor's, from
+// the queue side of bodyColumnBudgets rather than the backlog side (issue
+// #1056).
 func TestUpdate_CursorMoveMsg_QueueOffsetFollowsCursorWhenQueueFocused(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	m = Update(m, FocusToggleMsg{})
