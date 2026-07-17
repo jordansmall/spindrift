@@ -389,6 +389,15 @@ esac
 	if !strings.Contains(argv, "--remove-label\nagent-in-progress") {
 		t.Errorf("argv = %q, want --remove-label agent-in-progress", argv)
 	}
+
+	// Exactly one edit call: view (call-00.txt) + edit (call-01.txt), no more.
+	calls, err := filepath.Glob(filepath.Join(dir, "call-*.txt"))
+	if err != nil {
+		t.Fatalf("glob call files: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Errorf("gh call count = %d, want 2 (view + exactly one edit)", len(calls))
+	}
 }
 
 // TestProbe_PositionalSlug verifies that Probe passes the slug as a positional
