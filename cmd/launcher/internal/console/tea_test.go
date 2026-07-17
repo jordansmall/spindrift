@@ -30,12 +30,18 @@ import (
 // full `nix flake check` on a 4-core box, where the go-test derivation races
 // heavy image builds and the Bubble Tea event loop is CPU-starved. One
 // generous budget in a single place replaces the per-site literals that were
-// bumped piecemeal (2s -> 5s -> 15s -> 30s across several commits); a tight
-// bound here only ever flakes, it never catches a real defect — a hung
+// bumped piecemeal (2s -> 5s -> 15s -> 30s -> 60s across several commits); a
+// tight bound here only ever flakes, it never catches a real defect — a hung
 // program still fails, just later. When a specific test hangs regardless of
 // this bound, the fix is a deterministic wait on real state, not a bigger
-// number: see the "settled" guards on the launch-backed pick tests.
-const teatestTimeout = 30 * time.Second
+// number: see the "settled" guards on the launch-backed pick tests. 30s
+// still wasn't enough for TestTea_ResizeKey_Raise_LaunchesQueuedPickWith-
+// NoActiveDrain, which passes in 0.04s locally every time (plain, -race,
+// GOMAXPROCS=1, and under artificial CPU load) with no lost-wakeup found in
+// the drain/refresh-signal path on inspection — CI's `nix flake check` runs
+// launcher-go-test alongside the image-build checks this comment already
+// names, so more headroom is the next lever, not a code fix.
+const teatestTimeout = 60 * time.Second
 
 // waitForOutput blocks until tm's output contains every one of want, failing
 // the test if it never does within teatestTimeout. tm.Output() drains as
