@@ -60,8 +60,8 @@ func TestClaudeDriverClassifyTransientDelegatesToClaudeClassify(t *testing.T) {
 
 // TestClaudeDriverExtractUsage verifies the claude Driver's fourth method
 // extracts the aggregate result-event usage and the per-role breakdown from
-// a Box log in one report, replacing the former usage.LastInLog +
-// usage.BreakdownByRole two-call dance at the dispatch call site.
+// a Box log in one report, replacing the former claude.lastInLog +
+// claude.breakdownByRole two-call dance at the dispatch call site.
 func TestClaudeDriverExtractUsage(t *testing.T) {
 	d, err := New("claude")
 	if err != nil {
