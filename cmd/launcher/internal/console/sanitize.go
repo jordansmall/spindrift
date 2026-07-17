@@ -63,7 +63,13 @@ func SanitizeControlSequences(s string) string {
 				}
 			}
 		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
-			i += size // drop remaining C0/C1 control characters
+			// drop remaining C0/C1 control characters. A raw invalid C1
+			// byte (e.g. 0x9b or 0x9d) decodes via utf8.DecodeRuneInString
+			// as U+FFFD, which is > 0x9f and so misses this range check and
+			// survives to the default branch below. Harmless: no
+			// terminal reads U+FFFD as a CSI/C1 introducer — don't
+			// misdiagnose this as a strip bug (#1019).
+			i += size
 		default:
 			b.WriteRune(r)
 			i += size
