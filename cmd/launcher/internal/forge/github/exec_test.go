@@ -342,6 +342,18 @@ esac
 			t.Fatalf("CompleteVerdict must not shell out to gh issue edit when InProgress is missing; found %s", e.Name())
 		}
 	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatalf("call-00.txt (gh issue view) not written: %v", err)
+	}
+	argv := string(raw)
+	if !strings.Contains(argv, "--json\nlabels") {
+		t.Errorf("argv = %q, want labels-only --json call", argv)
+	}
+	if strings.Contains(argv, "title") || strings.Contains(argv, "body") || strings.Contains(argv, "state") {
+		t.Errorf("argv = %q, must not request title/body/state fields", argv)
+	}
 }
 
 // TestExecClient_CompleteVerdict_InProgressPresentEditsIssue verifies the
@@ -358,6 +370,15 @@ esac
 	c := NewExecClient("owner/repo", testLabels, "agent/issue-", forge.ResearchVerdictLabels())
 	if err := c.CompleteVerdict("10", forge.Recommend); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	viewRaw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatalf("call-00.txt (gh issue view) not written: %v", err)
+	}
+	viewArgv := string(viewRaw)
+	if !strings.Contains(viewArgv, "--json\nlabels") {
+		t.Errorf("view argv = %q, want labels-only --json call", viewArgv)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(dir, "call-01.txt"))

@@ -138,6 +138,33 @@ func (e *execClient) TransitionState(num string, from, to forge.DispatchState) e
 	return nil
 }
 
+// issueLabels fetches only the label set for issue num, skipping the
+// title/body/state fields Issue also fetches — CompleteVerdict's InProgress
+// precondition check needs nothing else.
+func (e *execClient) issueLabels(num string) ([]string, error) {
+	cmd := exec.Command("gh", "issue", "view", num,
+		"--repo", e.repo,
+		"--json", "labels",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh issue view %s: %w", num, err)
+	}
+	var raw struct {
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, fmt.Errorf("parse issue %s: %w", num, err)
+	}
+	labels := make([]string, len(raw.Labels))
+	for i, l := range raw.Labels {
+		labels[i] = l.Name
+	}
+	return labels, nil
+}
+
 // CompleteVerdict swaps the InProgress label for verdict's terminal label on
 // issue num, emitting exactly one --add-label and one --remove-label —
 // TransitionState's contract, with the to-label resolved from verdictLabels
@@ -157,12 +184,12 @@ func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 
 	remove := e.labels.Label(forge.InProgress)
 	if remove != "" {
-		iss, err := e.Issue(num)
+		labels, err := e.issueLabels(num)
 		if err != nil {
 			return fmt.Errorf("gh issue edit %s: %w", num, err)
 		}
-		if !slices.Contains(iss.Labels, remove) {
-			return fmt.Errorf("gh issue edit %s: expected %q label, issue has %v", num, remove, iss.Labels)
+		if !slices.Contains(labels, remove) {
+			return fmt.Errorf("gh issue edit %s: expected %q label, issue has %v", num, remove, labels)
 		}
 	}
 
