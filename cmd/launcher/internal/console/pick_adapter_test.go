@@ -181,8 +181,14 @@ func TestPickAllReady_MakesExactlyOneListIssuesCall(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
 	f.SetIssue(forge.Issue{Number: "43", Title: "also ready", Labels: []string{"ready-for-agent"}})
 
-	PickAllReady(f)
+	msgs := PickAllReady(f)
 
+	if len(msgs) != 2 || msgs[0] == nil || msgs[1] == nil {
+		t.Fatalf("PickAllReady() = %+v, want 2 msgs (both issues still picked, not just skipped)", msgs)
+	}
+	if len(f.TransitionStateCalls) != 2 {
+		t.Errorf("TransitionStateCalls = %+v, want 2 (both issues still promoted)", f.TransitionStateCalls)
+	}
 	if len(f.ListIssuesCalls) != 1 {
 		t.Errorf("ListIssuesCalls = %+v, want exactly 1 (the Dispatchable snapshot, no redundant per-issue re-verification)", f.ListIssuesCalls)
 	}
