@@ -115,6 +115,33 @@ func TestResearchSettle_CompleteVerdictError(t *testing.T) {
 	}
 }
 
+// TestResearchSettle_CompleteVerdictError_MissingInProgress verifies the
+// same verdict-apply-failed handling on the realistic error path — an issue
+// that has already been double-settled and lost its InProgress label —
+// rather than only via an injected CompleteVerdictErr (#967).
+func TestResearchSettle_CompleteVerdictError_MissingInProgress(t *testing.T) {
+	fc := forge.NewFake(researchLabels)
+	fc.VerdictLabels = researchVerdictLabels
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-recommend"}})
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+	}
+
+	s := NewResearchSettle(fc)
+	out := testutil.CaptureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), "42", 0, result)
+	})
+
+	if strings.Contains(out, "status=recommend") {
+		t.Errorf("stdout must not contain a success-style status line on CompleteVerdict error, got %q", out)
+	}
+	if !strings.Contains(out, "status=verdict-apply-failed") {
+		t.Errorf("stdout must contain the error-branch marker, got %q", out)
+	}
+}
+
 // TestResearchSettle_Blocked verifies a "blocked" outcome status transitions
 // InProgress -> Failed (agent-research-failed) rather than applying a
 // verdict label.
