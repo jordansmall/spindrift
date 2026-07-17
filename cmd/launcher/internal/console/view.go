@@ -60,7 +60,7 @@ func View(m Model) string {
 	if budget < 0 {
 		budget = 0
 	}
-	b.WriteString(renderBody(m, budget))
+	b.WriteString(renderBody(m, &budget))
 	if m.Err != nil {
 		fmt.Fprintf(&b, "refresh failed: %s\n", m.Err)
 	}
@@ -78,13 +78,6 @@ const minTwoColumnWidth = 60
 // work queue (state tag, blocker, heartbeat) tends to carry more text per
 // row than the backlog, so it gets the larger share of a wide terminal.
 const leftColumnFraction = 2.0 / 5.0
-
-// unboundedBudget is a row budget large enough that writeWindowedRows never
-// truncates — passed by the docked and floating drill-in panes (issue #846,
-// ADR 0025), which predate per-render body windowing and keep their
-// existing unwindowed behavior (issue #1035 is scoped to the plain
-// two-column body only).
-const unboundedBudget = 1 << 30
 
 // splitStackedBudget splits budget between the stacked backlog and queue
 // columns: one row goes to the blank separator between them (the "\n"
@@ -116,13 +109,22 @@ func splitStackedBudget(budget int) (backlog, queue int) {
 // #1035). Side by side, each column gets the full budget since they share
 // output lines; stacked, they'd each independently fit within budget but
 // together overflow it, so the stacked case splits budget between them
-// instead.
-func renderBody(m Model, budget int) string {
-	if budget <= 0 {
+// instead. A nil budget means unbounded — no windowing at all — for the
+// docked and floating drill-in panes (issue #846, ADR 0025), which predate
+// per-render body windowing and keep their existing unwindowed behavior
+// (issue #1035 is scoped to the plain two-column body only; issue #1039
+// replaced an earlier magic-constant sentinel with this nil semantics).
+func renderBody(m Model, budget *int) string {
+	if budget != nil && *budget <= 0 {
 		return ""
 	}
 	if m.Width < minTwoColumnWidth {
-		backlogBudget, queueBudget := splitStackedBudget(budget)
+		if budget == nil {
+			backlog := clipLines(renderBacklogColumn(m, nil), m.Width)
+			queue := clipLines(renderQueueColumn(m, nil), m.Width)
+			return backlog + "\n" + queue
+		}
+		backlogBudget, queueBudget := splitStackedBudget(*budget)
 		if backlogBudget == 0 && queueBudget == 0 && (len(m.Visible()) > 0 || len(m.Picks) > 0) {
 			// A budget this tight leaves no row for either column, so
 			// renderBacklogColumn/renderQueueColumn would both early-return
@@ -136,8 +138,8 @@ func renderBody(m Model, budget int) string {
 			// narrow terminal (m.Width==0) can't overflow it either.
 			return clipLines("…\n", m.Width)
 		}
-		backlog := clipLines(renderBacklogColumn(m, backlogBudget), m.Width)
-		queue := clipLines(renderQueueColumn(m, queueBudget), m.Width)
+		backlog := clipLines(renderBacklogColumn(m, &backlogBudget), m.Width)
+		queue := clipLines(renderQueueColumn(m, &queueBudget), m.Width)
 		return backlog + "\n" + queue
 	}
 	backlog := renderBacklogColumn(m, budget)
@@ -196,14 +198,19 @@ func splitLeftWidth(backlog string, width int) int {
 // lightweight "N more below" affordance instead of just stopping. The label
 // is itself budgeted, not a floor on top of it — a non-positive budget
 // renders nothing at all, so an extremely short terminal can't have the
-// label alone push the header off-screen (issue #1035).
-func renderBacklogColumn(m Model, budget int) string {
+// label alone push the header off-screen (issue #1035). A nil budget means
+// unbounded — every row renders, unwindowed (issue #1039).
+func renderBacklogColumn(m Model, budget *int) string {
+	if budget != nil && *budget <= 0 {
+		return ""
+	}
 	label := "backlog"
 	if m.Focus == FocusBacklog {
 		label += " [focus]"
 	}
-	label += positionLabel(m.BacklogOffset, budget, len(m.Visible()))
-	rows := make([]string, 0, len(m.Visible()))
+	total := len(m.Visible())
+	label += positionLabel(m.BacklogOffset, budget, total)
+	rows := make([]string, 0, total)
 	for i, iss := range m.Visible() {
 		marker := " "
 		if m.Focus == FocusBacklog && i == m.Cursor {
@@ -216,7 +223,13 @@ func renderBacklogColumn(m Model, budget int) string {
 		}
 		rows = append(rows, fmt.Sprintf("%s #%s  %s  [%s]\n", marker, iss.Number, title, strings.Join(labels, ", ")))
 	}
-	return writeColumn(label, rows, m.BacklogOffset, budget)
+	if budget == nil {
+		var b strings.Builder
+		fmt.Fprintf(&b, "%s:\n", label)
+		writeWindowedRows(&b, rows, m.BacklogOffset, nil)
+		return b.String()
+	}
+	return writeColumn(label, rows, m.BacklogOffset, *budget)
 }
 
 // renderQueueColumn renders the work queue: one pick-ordered line per Pick,
@@ -230,14 +243,19 @@ func renderBacklogColumn(m Model, budget int) string {
 // away on realistic terminal widths if Title sits in front of it (issue
 // #858). Windowed to budget rows (including the label) the same way
 // renderBacklogColumn is, so a long picks queue can't push the header
-// off-screen either (issue #1035).
-func renderQueueColumn(m Model, budget int) string {
+// off-screen either (issue #1035). A nil budget means unbounded — every row
+// renders, unwindowed (issue #1039).
+func renderQueueColumn(m Model, budget *int) string {
+	if budget != nil && *budget <= 0 {
+		return ""
+	}
 	label := "picks"
 	if m.Focus == FocusQueue {
 		label += " [focus]"
 	}
-	label += positionLabel(m.QueueOffset, budget, len(m.Picks))
-	rows := make([]string, 0, len(m.Picks))
+	total := len(m.Picks)
+	label += positionLabel(m.QueueOffset, budget, total)
+	rows := make([]string, 0, total)
 	for i, p := range m.Picks {
 		marker := " "
 		if m.Focus == FocusQueue && i == m.QueueCursor {
@@ -263,7 +281,13 @@ func renderQueueColumn(m Model, budget int) string {
 		row.WriteString("\n")
 		rows = append(rows, row.String())
 	}
-	return writeColumn(label, rows, m.QueueOffset, budget)
+	if budget == nil {
+		var b strings.Builder
+		fmt.Fprintf(&b, "%s:\n", label)
+		writeWindowedRows(&b, rows, m.QueueOffset, nil)
+		return b.String()
+	}
+	return writeColumn(label, rows, m.QueueOffset, *budget)
 }
 
 // joinColumns zips left and right line by line, clipping each side to its
@@ -488,8 +512,8 @@ func renderDrillInPane(m Model) string {
 // intentional, not a bug: reaching the end of a long backlog while drilled
 // in is more useful than always resetting to row 0 (issue #1055).
 func renderDockedBody(m Model, transcriptHeight int) string {
-	backlog := renderBacklogColumn(m, unboundedBudget)
-	queue := renderQueueColumn(m, unboundedBudget)
+	backlog := renderBacklogColumn(m, nil)
+	queue := renderQueueColumn(m, nil)
 	transcript := renderTranscriptColumn(*m.DrillIn, transcriptHeight)
 
 	transcriptWidth := int(float64(m.Width) * transcriptColumnFraction)
@@ -515,7 +539,7 @@ func renderDockedBody(m Model, transcriptHeight int) string {
 // Model fields, not per-pane, so the body underneath the floating overlay
 // always scrolls in sync with the main view (issue #1055).
 func renderFloatingBody(m Model, transcriptHeight int) string {
-	body := renderBody(m, unboundedBudget)
+	body := renderBody(m, nil)
 	transcript := renderTranscriptColumn(*m.DrillIn, transcriptHeight)
 	floatWidth := int(float64(m.Width) * transcriptColumnFraction)
 	return overlay(body, transcript, m.Width-floatWidth, floatWidth)
@@ -553,8 +577,10 @@ func overlay(body, pane string, leftWidth, paneWidth int) string {
 // trailing "N more below" affordance line instead of just truncating
 // silently, so the operator knows the list is clipped rather than complete.
 // A non-positive budget writes nothing; an offset past the end of rows is
-// treated as the end (nothing left to show).
-func writeWindowedRows(b *strings.Builder, rows []string, offset, budget int) {
+// treated as the end (nothing left to show). A nil budget means unbounded —
+// every row from offset writes, with no "more below" affordance (issue
+// #1039).
+func writeWindowedRows(b *strings.Builder, rows []string, offset int, budget *int) {
 	if offset < 0 {
 		offset = 0
 	}
@@ -562,20 +588,30 @@ func writeWindowedRows(b *strings.Builder, rows []string, offset, budget int) {
 		offset = len(rows)
 	}
 	remaining := rows[offset:]
-	if len(remaining) <= budget {
+	if budget == nil {
 		for _, r := range remaining {
 			b.WriteString(r)
 		}
 		return
 	}
-	visible := budget - 1
+	bud := *budget
+	if bud < 0 {
+		bud = 0
+	}
+	if len(remaining) <= bud {
+		for _, r := range remaining {
+			b.WriteString(r)
+		}
+		return
+	}
+	visible := bud - 1
 	if visible < 0 {
 		visible = 0
 	}
 	for _, r := range remaining[:visible] {
 		b.WriteString(r)
 	}
-	if budget > 0 {
+	if bud > 0 {
 		fmt.Fprintf(b, "… %d more below\n", len(remaining)-visible)
 	}
 }
@@ -592,7 +628,8 @@ func writeColumn(label string, rows []string, offset, budget int) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s:\n", label)
-	writeWindowedRows(&b, rows, offset, columnItemBudget(budget))
+	itemBudget := columnItemBudget(budget)
+	writeWindowedRows(&b, rows, offset, &itemBudget)
 	return b.String()
 }
 
@@ -682,12 +719,19 @@ func focusedBudget(m Model) int {
 // offset within columnBudget of total — or "" when there is nothing to show
 // a range for (an empty list, or a budget too small to render any row), so a
 // column that renders no rows doesn't grow a misleading "(1-0 of 0)" label
-// (issue #1037 AC3).
-func positionLabel(offset, columnBudget, total int) string {
+// (issue #1037 AC3). A nil columnBudget means unbounded — every row from
+// offset is shown, matching writeWindowedRows' own nil handling (issue
+// #1039).
+func positionLabel(offset int, columnBudget *int, total int) string {
 	if total == 0 {
 		return ""
 	}
-	shown := visibleItemCount(offset, columnBudget, total)
+	var shown int
+	if columnBudget == nil {
+		shown = total - offset
+	} else {
+		shown = visibleItemCount(offset, *columnBudget, total)
+	}
 	if shown <= 0 {
 		return ""
 	}

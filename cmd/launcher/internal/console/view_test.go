@@ -584,7 +584,8 @@ func TestSplitStackedBudget_MatchesRenderBody(t *testing.T) {
 	m.Picks = picks
 
 	wantBacklog, wantQueue := bodyColumnBudgets(m)
-	out := renderBody(m, bodyBudget(m))
+	budget := bodyBudget(m)
+	out := renderBody(m, &budget)
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	// The first blank line is the stacked separator, not column content —
 	// safe only because both columns are overflowing here, so every one of
@@ -755,11 +756,32 @@ func TestView_NarrowTerminal_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
 	}})
 	m.Picks = []Pick{{Number: "42", Title: "a pick with a fairly long title too", State: PickHeld, BlockedBy: "#41 (native), #43 (body)"}}
 
-	out := renderBody(m, unboundedBudget)
+	out := renderBody(m, nil)
 	for _, l := range strings.Split(out, "\n") {
 		if n := len([]rune(l)); n > m.Width {
 			t.Errorf("renderBody() line %q has %d runes, want it clamped to Width (%d)", l, n, m.Width)
 		}
+	}
+}
+
+// TestRenderBacklogColumn_NilBudgetNeverTruncates verifies a nil budget
+// renders every backlog row with no "more below" affordance, regardless of
+// row count — the nil-means-unbounded semantics that replaced the
+// unboundedBudget magic-constant sentinel (issue #1039).
+func TestRenderBacklogColumn_NilBudgetNeverTruncates(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	issues := make([]forge.Issue, 500)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+	out := renderBacklogColumn(m, nil)
+	if !strings.Contains(out, "issue 499") {
+		t.Errorf("renderBacklogColumn(m, nil) = %q, want the last of 500 rows present, unwindowed", out)
+	}
+	if strings.Contains(out, "more below") {
+		t.Errorf("renderBacklogColumn(m, nil) = %q, want no truncation affordance for a nil budget", out)
 	}
 }
 
@@ -1624,7 +1646,7 @@ func TestView_BodyAndDockedBody_AgreeOnLeftColumnWidth(t *testing.T) {
 	mDocked.Picks = picks
 	mDocked = Update(mDocked, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
 
-	bodyOut := renderBody(mBody, unboundedBudget)
+	bodyOut := renderBody(mBody, nil)
 	dockedOut := renderDockedBody(mDocked, 0)
 
 	bodyLine := lineContaining(t, bodyOut, "QUEUEMARK")
