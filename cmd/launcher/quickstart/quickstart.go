@@ -88,6 +88,11 @@ var defaultDispatchLabels = forge.DispatchLabels{
 	Failed:       "agent-failed",
 }
 
+// spindriftBuildArgs is the subprocess the finish line shells out to build
+// the Consumer's first image (ADR 0027) — shared with tests so the command
+// can't drift out of sync between the call site and its assertions.
+var spindriftBuildArgs = []string{"nix", "develop", "--command", "spindrift", "build"}
+
 // ForgeBuilder constructs the real IssueTracker/CodeForge from the wizard's
 // collected repoSlug, GitHub token, and Issue Tracker settings, so the
 // finish line's doctor validation (ADR 0027) runs in-process against the
@@ -125,7 +130,7 @@ func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken str
 // Interactive-only for v1: a non-TTY stdin (interactive == false) is a fatal
 // error directing scripted setups to write flake.nix/harness.env directly
 // instead.
-func runQuickstart(dir string, env Environment, runner CommandRunner, buildForge ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
+func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuilder ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
 	if !interactive {
 		return fmt.Errorf("quickstart requires an interactive terminal — for scripted setups, write flake.nix and harness.env directly (see docs/flake-options.md)")
 	}
@@ -248,7 +253,7 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, buildForge
 	if err := os.Setenv("GH_TOKEN", ghToken); err != nil {
 		return fmt.Errorf("set GH_TOKEN: %w", err)
 	}
-	it, cf := buildForge(repoSlug, tracker, ghToken, jiraToken)
+	it, cf := forgeBuilder(repoSlug, tracker, ghToken, jiraToken)
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    tracker.issueTracker,
 		Label:           defaultDispatchLabels.Dispatchable,
@@ -260,7 +265,7 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, buildForge
 	}
 
 	fmt.Fprintln(w, "==> the first image build can take a while — building now")
-	if err := runner.Run("nix", "develop", "--command", "spindrift", "build"); err != nil {
+	if err := runner.Run(spindriftBuildArgs[0], spindriftBuildArgs[1:]...); err != nil {
 		return fmt.Errorf("spindrift build: %w", err)
 	}
 
