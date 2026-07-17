@@ -293,10 +293,13 @@ func TestView_ShowHelp_ListsBoundKeys(t *testing.T) {
 	if strings.Contains(out, "should not show") {
 		t.Errorf("View() = %q, want the backlog hidden while help is open", out)
 	}
-	for _, want := range []string{"j", "k", "/", "enter", "esc", "r", "q", "?", "d", "t", "x", "pgup", "pgdown"} {
+	for _, want := range []string{"j", "k", "/", "enter", "esc", "r", "q", "?", "tab", "t", "x", "pgup", "pgdown"} {
 		if !strings.Contains(strings.ToLower(out), want) {
 			t.Errorf("View() = %q, want it to mention key %q", out, want)
 		}
+	}
+	if strings.Contains(strings.ToLower(out), "d / enter") || strings.Contains(strings.ToLower(out), "d/enter") {
+		t.Errorf("View() = %q, want no mention of the retired \"d\" drill-in binding", out)
 	}
 }
 
