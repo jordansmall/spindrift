@@ -383,9 +383,9 @@ phase_prompt_assembly() {
     done
   fi
 
-  # One-liners setting the computed gates the caveman-default, tdd-default,
-  # commit-default, code-review-default, and file-issues registry rows name:
-  # each per-skill gate is
+  # One-liners setting the computed gates the caveman-default,
+  # tdd-default, commit-default, code-review-default, and
+  # file-issues registry rows name: each per-skill gate is
   # the specific skill actually baked at DRIVER_SKILLS_DIR/<name>/SKILL.md, so
   # the prompt step directing the agent to that skill renders only when it is
   # present (issue #487); and the filer opt-in provisioned in
