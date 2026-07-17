@@ -216,6 +216,18 @@ SKILL
   grep -qF 'VERDICT: APPROVE | BLOCK' <<<"$rendered"
 }
 
+# issue #993: CODE_REVIEW_STEP's deferral claims to "supersede" the inline
+# rubric, but the inline four dimensions always render below it regardless of
+# the gate -- reviewers need review-prompt.md to say the overlap is
+# intentional (skill findings reconcile into the same contract) rather than
+# leaving "supersedes" looking like the dimensions get removed.
+@test "reviewer prompt explains the code-review rubric overlap is intentional" {
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","Agent"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  jq -e '.reviewer.prompt' "$CLAUDE_AGENTS_FILE" | grep -qF 'not a replacement for it'
+}
+
 # issue #626: driver-exec absorbed the direct-path/devShell-wrapper dual
 # pipeline text (issue #463) entirely -- entrypoint.sh now calls driver-exec
 # exactly once, direct and devShell invocation are the same call path, and

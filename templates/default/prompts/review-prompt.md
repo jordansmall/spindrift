@@ -19,6 +19,11 @@ Inputs:
   git diff origin/${BASE_BRANCH}...HEAD           # the change
   git log origin/${BASE_BRANCH}..HEAD --oneline   # commit messages
 
+These four dimensions are the always-on rubric: when the `/code-review`
+skill is baked and defers to it above, its two-axis verdict is reconciled
+into this Blocking/Non-blocking contract, not a replacement for it — every
+dimension below still applies regardless.
+
 Hunt every dimension. Do not stop at the first finding:
 
 **SPEC** — Does the diff do exactly what issue #${ISSUE_NUMBER} asked, nothing
