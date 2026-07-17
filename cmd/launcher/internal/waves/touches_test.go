@@ -78,10 +78,8 @@ func TestOverlapsInProgress_NoDeclaredTouches(t *testing.T) {
 
 // TestOverlapsInProgress_CandidateTouchesOfErrorReturnsNoCollision verifies a
 // failed it.TouchesOf fetch for the candidate itself (not an in-progress
-// entry) is treated as "no declared touches" — fail-open, no collision — and,
-// unlike the in-progress-loop side, prints no diagnostic: this call runs once
-// per candidate examined per wave/drain tick, not once per wave snapshot, so
-// a print here would repeat every tick for the same still-failing candidate.
+// entry) is treated as "no declared touches" — fail-open, no collision — and
+// prints no diagnostic, per overlapsInProgress's doc comment.
 func TestOverlapsInProgress_CandidateTouchesOfErrorReturnsNoCollision(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
