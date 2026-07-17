@@ -12,7 +12,8 @@ import (
 // transient classification proceeds to retry rather than short-circuiting.
 func noOpenPR(string) (bool, error) { return false, nil }
 
-// retryConfig returns a Config with retry knobs set explicitly.
+// retryConfig returns a Config with retry knobs and a default
+// OpenPRForIssue set explicitly.
 func retryConfig(max, backoffSecs, holdJitter int) Config {
 	return Config{
 		TransientRetryMax:    max,
