@@ -1674,15 +1674,15 @@ func TestFollowViewport_PositiveBudget_AdvancesToExactSameOffsetAsBefore(t *test
 	}
 }
 
-// TestVisibleItemCount_MatchesWindowedRowCountOfColumnItemBudget verifies
+// TestVisibleItemCount_TruncatedWindow_HoldsBackOneRowForMoreBelow verifies
 // visibleItemCount folds columnItemBudget's "-1 for the label" into
 // windowedRowCount's remaining/budget shape, the composition positionLabel
 // and focusedPageSize each repeated before this helper existed (issue
-// #1061). A truncated window (offset 0, total 50, columnBudget 5) holds one
-// row back for the "N more below" affordance the same way
-// windowedRowCount(50, columnItemBudget(5)) would.
-func TestVisibleItemCount_MatchesWindowedRowCountOfColumnItemBudget(t *testing.T) {
-	if got, want := visibleItemCount(0, 5, 50), windowedRowCount(50, columnItemBudget(5)); got != want {
-		t.Errorf("visibleItemCount(0, 5, 50) = %d, want %d (windowedRowCount(50, columnItemBudget(5)))", got, want)
+// #1061). columnBudget 5 leaves an item budget of 4 (columnItemBudget's -1
+// for the label); with 50 remaining rows that doesn't fit, windowedRowCount
+// holds one more back for the "N more below" affordance, so 3 rows show.
+func TestVisibleItemCount_TruncatedWindow_HoldsBackOneRowForMoreBelow(t *testing.T) {
+	if got, want := visibleItemCount(0, 5, 50), 3; got != want {
+		t.Errorf("visibleItemCount(0, 5, 50) = %d, want %d", got, want)
 	}
 }
