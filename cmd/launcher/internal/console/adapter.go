@@ -97,7 +97,9 @@ func transitionToDispatchable(tracker forge.IssueTracker, num, title string, kin
 // mean "not in this state," so a truncated page would let it wrongly declare
 // num safe to pick. A page that hit the cap and still doesn't contain num is
 // therefore treated as inconclusive and reported as an error rather than a
-// false "not in state."
+// false "not in state." This is deliberately conservative: an exactly-100
+// state with num genuinely absent also errors here, blocking a valid pick
+// rather than risk a double-box on a truly truncated one.
 func issueInState(tracker forge.IssueTracker, num string, state forge.DispatchState) (bool, error) {
 	issues, err := tracker.ListIssues(state)
 	if err != nil {
