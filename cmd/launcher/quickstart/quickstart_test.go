@@ -1289,3 +1289,82 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 		}
 	}
 }
+
+// capturingForgeBuilder wraps fakeForgeBuilder, additionally recording the
+// repoSlug/tracker/tokens runQuickstart passed to it — so a test can assert
+// the finish line threads the wizard's collected Issue Tracker settings
+// through to forge construction, for trackers other than github.
+type capturingForgeBuilder struct {
+	repoSlug           string
+	tracker            trackerSettings
+	ghToken, jiraToken string
+}
+
+func (c *capturingForgeBuilder) build(f *forge.Fake) ForgeBuilder {
+	return func(repoSlug string, tracker trackerSettings, ghToken, jiraToken string) (forge.IssueTracker, forge.CodeForge) {
+		c.repoSlug, c.tracker, c.ghToken, c.jiraToken = repoSlug, tracker, ghToken, jiraToken
+		return f, f
+	}
+}
+
+func TestRunQuickstart_FinishLine_JiraTracker_ValidatesWithCollectedSettings(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",      // repoSlug
+		"podman",                     // runtime
+		"Ada Lovelace",               // git user name
+		"ada@example.com",            // git user email
+		"jira",                       // Issue Tracker
+		"https://acme.atlassian.net", // Jira base URL
+		"ENG",                        // Jira project key
+		"ada@acme.com",               // Jira account email
+		"ghp_faketoken",              // GH_TOKEN
+		"jira-faketoken",             // JIRA_TOKEN
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+	runner := &fakeCommandRunner{}
+	c := &capturingForgeBuilder{}
+
+	if err := runQuickstart(dir, env, runner, c.build(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if c.repoSlug != "jordansmall/spindrift" || c.jiraToken != "jira-faketoken" || c.ghToken != "ghp_faketoken" {
+		t.Errorf("expected finish line to build the forge from the collected repoSlug/tokens, got repoSlug=%q ghToken=%q jiraToken=%q", c.repoSlug, c.ghToken, c.jiraToken)
+	}
+	if c.tracker.issueTracker != "jira" || c.tracker.jiraBaseURL != "https://acme.atlassian.net" || c.tracker.jiraProjectKey != "ENG" {
+		t.Errorf("expected finish line to build the forge from the collected jira settings, got %+v", c.tracker)
+	}
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != "nix develop --command spindrift build" {
+		t.Errorf("expected the finish-line spindrift build call, got: %v", runner.calls)
+	}
+}
+
+func TestRunQuickstart_FinishLine_LocalTracker_ValidatesWithCollectedSettings(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift", // repoSlug
+		"podman",                // runtime
+		"Ada Lovelace",          // git user name
+		"ada@example.com",       // git user email
+		"local",                 // Issue Tracker
+		"issues",                // local issues directory
+		"ghp_faketoken",         // GH_TOKEN
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+	runner := &fakeCommandRunner{}
+	c := &capturingForgeBuilder{}
+
+	if err := runQuickstart(dir, env, runner, c.build(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if c.tracker.issueTracker != "local" || c.tracker.localIssuesDir != "issues" {
+		t.Errorf("expected finish line to build the forge from the collected local settings, got %+v", c.tracker)
+	}
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != "nix develop --command spindrift build" {
+		t.Errorf("expected the finish-line spindrift build call, got: %v", runner.calls)
+	}
+}

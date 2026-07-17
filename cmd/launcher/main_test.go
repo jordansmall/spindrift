@@ -1207,7 +1207,7 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 	if !contains(names, "agent-failed") || !contains(names, "agent-complete") {
 		t.Errorf("want agent-failed and agent-complete created, got %v", names)
 	}
-	// Verify default colors are from triageLabelMeta
+	// Verify default colors are from doctor.TriageLabelMeta
 	for _, call := range f.CreateLabelCalls {
 		if call.Color == "" || call.Color == "ededed" {
 			t.Errorf("label %q should use a named color, got %q", call.Name, call.Color)

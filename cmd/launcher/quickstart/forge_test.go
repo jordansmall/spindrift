@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -29,8 +30,11 @@ func TestBuildForge_LocalTracker_ProbeCreatesIssuesDir(t *testing.T) {
 	if repo != want {
 		t.Errorf("Probe() = %q, want %q", repo, want)
 	}
-	if _, statErr := filepath.Glob(dir); statErr != nil {
+	info, statErr := os.Stat(dir)
+	if statErr != nil {
 		t.Errorf("expected the local issues dir to exist after Probe, stat error: %v", statErr)
+	} else if !info.IsDir() {
+		t.Errorf("expected %q to be a directory", dir)
 	}
 }
 
