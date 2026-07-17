@@ -19,6 +19,9 @@ Steps:
        --description "Filed from a non-blocking review finding" 2>/dev/null || true
 
 2. Dedup — a finding must not already be tracked, or already dismissed:
+   Note: broadened to all open issues by design, trading recall for a known
+   over-suppression risk — a loose subject-line match could suppress a
+   genuinely distinct finding. Monitor during dogfooding/production.
    - Search ALL open issues, regardless of label — an open issue describing
      the same problem means it's already tracked, whether human-filed,
      `ready-for-agent`, filed via `/to-tickets`, or from a prior Filer run:
