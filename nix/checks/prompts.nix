@@ -25,7 +25,11 @@ let
     "AUTO_LINT"
     "CI_FAILURE_SUMMARY"
   ];
-  computedGates = builtins.filter (g: !(builtins.elem g knobGates)) allGates;
+  computedGates =
+    assert pkgs.lib.assertMsg (pkgs.lib.all (g: builtins.elem g allGates)
+      knobGates
+    ) "nix/checks/prompts.nix: knobGates names a gate lib/fragments.nix's registry no longer has";
+    builtins.filter (g: !(builtins.elem g knobGates)) allGates;
 
   # The rendered CHECK section, sliced once here rather than three times
   # across the never-background/vanished-marker/git-add checks below (issue
