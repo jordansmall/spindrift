@@ -44,6 +44,7 @@ func TestGateToGreen_TerminatedAbandonsWithoutTransition(t *testing.T) {
 func TestMergeImmediate_TerminatedDuringRewaitAfterStaleBasePreflight(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
+	c.PreflightStaleBase = true
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetNeedsUpdate(testPR, true)
@@ -105,6 +106,7 @@ func TestMergeImmediate_TerminatedStopsRebaseRetry(t *testing.T) {
 func TestMergeImmediate_TerminatedBeforeStaleBasePreflightSkipsRebase(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
+	c.PreflightStaleBase = true
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetNeedsUpdate(testPR, true)

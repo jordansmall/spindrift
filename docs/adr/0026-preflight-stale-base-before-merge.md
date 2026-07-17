@@ -1,5 +1,9 @@
 # Preflight a stale base before merging, instead of gating on branch settings
 
+> **Amended by [ADR 0028](0028-stale-base-preflight-is-opt-in.md):** the
+> preflight described here is now opt-in via `PREFLIGHT_STALE_BASE` and **off
+> by default**. The mechanism below is unchanged; only its default changed.
+
 ## Context
 
 #670 and #672 merged roughly 90 seconds apart. `f8d9e9b` (#670) deleted the

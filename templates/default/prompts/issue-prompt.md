@@ -97,8 +97,11 @@ Prefer several small focused commits over one big one — commit each logical
 unit (domain change, then wiring, then tests) so each stands alone. Add a body
 only when the change isn't self-evident.
 
-**Before each push**, rebase onto the latest base so the branch is never pushed
-from a stale base (a stale base can produce phantom diffs that trip push
+**Always rebase onto the latest base immediately before every push** — never
+push from a stale base. This keeps the branch's tested tree current with any
+siblings that landed while you worked: the launcher merges a green PR as-is and
+does not re-rebase it for you, so a fresh base at push time is the branch's
+freshness guarantee (a stale base also produces phantom diffs that trip push
 guards):
 
 ```

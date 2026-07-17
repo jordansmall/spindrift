@@ -108,6 +108,12 @@ type config struct {
 	maxFixAttempts    int
 	maxRebaseAttempts int
 
+	// preflightStaleBase opts into ADR 0026's proactive stale-base rebase:
+	// a green PR that is behind its base (no textual conflict) is rebased and
+	// re-greened before merging. Off by default — a green-but-behind PR
+	// merges as-is (ADR 0028).
+	preflightStaleBase bool
+
 	// Secrets / identity
 	ghToken          string
 	claudeOAuthToken string
@@ -327,10 +333,11 @@ func loadConfig() config {
 
 		overlapGate: getenvSchema("OVERLAP_GATE"),
 
-		mergePollInterval: atoiNonnegSchema("MERGE_POLL_INTERVAL"),
-		mergePollTimeout:  atoiNonnegSchema("MERGE_POLL_TIMEOUT"),
-		maxFixAttempts:    atoiNonnegSchema("MAX_FIX_ATTEMPTS"),
-		maxRebaseAttempts: atoiNonnegSchema("MAX_REBASE_ATTEMPTS"),
+		mergePollInterval:  atoiNonnegSchema("MERGE_POLL_INTERVAL"),
+		mergePollTimeout:   atoiNonnegSchema("MERGE_POLL_TIMEOUT"),
+		maxFixAttempts:     atoiNonnegSchema("MAX_FIX_ATTEMPTS"),
+		maxRebaseAttempts:  atoiNonnegSchema("MAX_REBASE_ATTEMPTS"),
+		preflightStaleBase: getenvSchema("PREFLIGHT_STALE_BASE") != "",
 
 		ghToken:          os.Getenv("GH_TOKEN"),
 		claudeOAuthToken: os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
@@ -556,13 +563,14 @@ func newDispatchFactory(c config, pwd string, r runner.Runner, cf forge.CodeForg
 // settleConfig builds the subset of config a settle.Settle needs.
 func settleConfig(c config) settle.Config {
 	return settle.Config{
-		MergeMode:         c.mergeMode,
-		MergeGuardPaths:   c.mergeGuardPaths,
-		CompleteLabel:     c.completeLabel,
-		MergePollInterval: c.mergePollInterval,
-		MergePollTimeout:  c.mergePollTimeout,
-		MaxFixAttempts:    c.maxFixAttempts,
-		MaxRebaseAttempts: c.maxRebaseAttempts,
+		MergeMode:          c.mergeMode,
+		MergeGuardPaths:    c.mergeGuardPaths,
+		CompleteLabel:      c.completeLabel,
+		MergePollInterval:  c.mergePollInterval,
+		MergePollTimeout:   c.mergePollTimeout,
+		MaxFixAttempts:     c.maxFixAttempts,
+		MaxRebaseAttempts:  c.maxRebaseAttempts,
+		PreflightStaleBase: c.preflightStaleBase,
 	}
 }
 

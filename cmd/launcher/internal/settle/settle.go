@@ -32,6 +32,12 @@ type Config struct {
 	MergePollTimeout  int
 	MaxFixAttempts    int
 	MaxRebaseAttempts int
+
+	// PreflightStaleBase opts into ADR 0026's proactive stale-base rebase:
+	// when true, mergeImmediate rebases a green PR that is behind its base
+	// (no textual conflict) and re-waits for CI before merging. When false
+	// (the default), a green-but-behind PR merges as-is (ADR 0028).
+	PreflightStaleBase bool
 }
 
 // Settler is the seam callers depend on so tests can inject a Fake instead of

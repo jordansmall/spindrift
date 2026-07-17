@@ -344,6 +344,14 @@
     flakeOption = true;
     boxEnv = false;
   };
+  preflightStaleBase = {
+    env = "PREFLIGHT_STALE_BASE";
+    group = "Self-healing & retries";
+    default = false;
+    doc = "when non-empty, the launcher proactively rebases a green PR that is behind its base (no textual conflict) before merging and re-waits for CI on the rebased tree, drawing on MAX_REBASE_ATTEMPTS for its budget (ADR 0026). Off by default: a green-but-behind PR merges as-is, relying on its green CI as the landing gate — this trades the rare cross-PR semantic break ADR 0026 guarded against (two individually-green PRs that break combined) for the throughput of parallel landings that never wait on an extra rebase+CI cycle";
+    flakeOption = true;
+    boxEnv = false;
+  };
   maxJobs = {
     env = "MAX_JOBS";
     group = "Concurrency & dependency waves";
