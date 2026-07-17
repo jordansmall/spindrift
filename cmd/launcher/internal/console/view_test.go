@@ -822,6 +822,28 @@ func TestView_DrillInDocked_TranscriptRespectsCollapsedHeader(t *testing.T) {
 	}
 }
 
+// TestView_DrillInFloating_TranscriptRespectsCollapsedHeader mirrors
+// TestView_DrillInDocked_TranscriptRespectsCollapsedHeader for the floating
+// pane's distinct render path (issue #1014).
+func TestView_DrillInFloating_TranscriptRespectsCollapsedHeader(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 3})
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("transcript line %d", i)
+	}
+	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+	m = Update(m, PaneModeCycleMsg{})
+	if m.PaneMode != PaneFloating {
+		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
+	}
+
+	out := View(m)
+	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(got) > m.Height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — the collapsed single-line header must be budgeted too", len(got), m.Height)
+	}
+}
+
 // TestView_DrillInNarrowTerminal_FallsBackToFullscreen verifies a terminal
 // too narrow for three columns renders the Transcript fullscreen regardless
 // of the operator's selected PaneMode — never leaving unreadable, wrapped

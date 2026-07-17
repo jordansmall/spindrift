@@ -453,10 +453,10 @@ func renderDrillInPane(m Model) string {
 	switch effectivePaneMode(m) {
 	case PaneDocked:
 		header := renderHeader(m)
-		return header + renderDockedBody(m, strings.Count(header, "\n"))
+		return header + renderDockedBody(m, m.Height-strings.Count(header, "\n"))
 	case PaneFloating:
 		header := renderHeader(m)
-		return header + renderFloatingBody(m, strings.Count(header, "\n"))
+		return header + renderFloatingBody(m, m.Height-strings.Count(header, "\n"))
 	default:
 		return renderDrillIn(*m.DrillIn, m.Height)
 	}
@@ -466,14 +466,12 @@ func renderDrillInPane(m Model) string {
 // side by side — the docked pane mode's three-column body (issue #846, ADR
 // 0025). The Transcript column takes transcriptColumnFraction of m.Width;
 // the remainder splits between backlog and queue exactly as renderBody does
-// for the two-column body. headerHeight is the outer renderHeader(m)'s
-// rendered line count — renderDrillInPane prepends that header on top of
-// this body, so the Transcript column's budget must subtract it too, not
-// just its own internal chrome (issue #1014).
-func renderDockedBody(m Model, headerHeight int) string {
+// for the two-column body. transcriptHeight is the Transcript column's
+// height budget — see the transcriptHeight function (issue #1014).
+func renderDockedBody(m Model, transcriptHeight int) string {
 	backlog := renderBacklogColumn(m, unboundedBudget)
 	queue := renderQueueColumn(m, unboundedBudget)
-	transcript := renderTranscriptColumn(*m.DrillIn, m.Height-headerHeight)
+	transcript := renderTranscriptColumn(*m.DrillIn, transcriptHeight)
 
 	transcriptWidth := int(float64(m.Width) * transcriptColumnFraction)
 	bodyWidth := m.Width - transcriptWidth
@@ -489,12 +487,12 @@ func renderDockedBody(m Model, headerHeight int) string {
 // overlaid atop its right side, for as many leading rows as the Transcript
 // content needs — the floating pane mode (issue #846, ADR 0025). Rows past
 // the overlay's height render the plain two-column body untouched, unlike
-// renderDockedBody's every-row column split. headerHeight is the outer
-// renderHeader(m)'s rendered line count — see renderDockedBody (issue
-// #1014).
-func renderFloatingBody(m Model, headerHeight int) string {
+// renderDockedBody's every-row column split. transcriptHeight is the
+// Transcript column's height budget — see the transcriptHeight function
+// (issue #1014).
+func renderFloatingBody(m Model, transcriptHeight int) string {
 	body := renderBody(m, unboundedBudget)
-	transcript := renderTranscriptColumn(*m.DrillIn, m.Height-headerHeight)
+	transcript := renderTranscriptColumn(*m.DrillIn, transcriptHeight)
 	floatWidth := int(float64(m.Width) * transcriptColumnFraction)
 	return overlay(body, transcript, m.Width-floatWidth, floatWidth)
 }
