@@ -64,13 +64,11 @@ func (r *ResearchSettle) fail(num, note string) {
 func (r *ResearchSettle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
 }
 
-// Fail is a no-op today because research dispatch normally runs through its
-// own one-shot entry point, not RunContinuous — but it is reachable, not
-// hypothetically so: running research under CONTINUOUS_DISPATCH (e.g.
-// dogfood.sh DOGFOOD_KIND=research) threads this Settler into RunContinuous,
-// whose Box-failure branch calls Fail on any Box exit. The empty body is
-// still correct in that case: the caller already transitions the tracker to
-// Failed before calling Fail, so there is nothing left for Fail to do. Do
-// not skip calling Fail on the assumption it can never run.
+// Fail is a no-op today, but it is reachable: under CONTINUOUS_DISPATCH
+// (e.g. dogfood.sh DOGFOOD_KIND=research), this Settler runs inside
+// RunContinuous, whose Box-failure branch calls Fail on any Box exit. The
+// empty body stays correct there too — the caller already transitions the
+// tracker to Failed first — but don't skip calling Fail on the assumption
+// it can't run.
 func (r *ResearchSettle) Fail(num string, gen uint64, result dispatch.Result) {
 }
