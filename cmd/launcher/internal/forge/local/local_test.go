@@ -398,7 +398,7 @@ func TestLocalTracker_DepsOf_NoBlockedBySection(t *testing.T) {
 // dispatch-state marker is included in the returned Issue's Labels, matching
 // the GitHub adapter's behavior (a GitHub issue's Labels always include
 // whichever label represents its current dispatch state). main.go's
-// cross-backend blocker logic (hasFailedInBatchBlocker) checks
+// cross-backend blocker logic (BlockerStatus) checks
 // containsLabel(fi.Labels, c.failedLabel) generically across adapters, so the
 // state marker must appear in Labels even though the frontmatter keeps state
 // and labels as separate fields on disk.

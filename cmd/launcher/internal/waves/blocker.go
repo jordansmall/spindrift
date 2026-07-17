@@ -144,30 +144,10 @@ func BlockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string) bool {
 	return false
 }
 
-// issueIsReady returns true when all of num's declared blockers are ready.
-func issueIsReady(it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string) bool {
-	return len(unreadyBlockers(it, cf, num, edges)) == 0
-}
-
 // containsLabel reports whether labels contains target.
 func containsLabel(labels []string, target string) bool {
 	for _, l := range labels {
 		if l == target {
-			return true
-		}
-	}
-	return false
-}
-
-// hasFailedInBatchBlocker returns true when any of num's in-batch declared
-// blockers carry failedLabel, meaning the dependent can never proceed.
-func hasFailedInBatchBlocker(cfg Config, it forge.IssueTracker, num string, edges map[string][]string) bool {
-	for _, dep := range edges[num] {
-		fi, err := it.Issue(dep)
-		if err != nil {
-			continue
-		}
-		if containsLabel(fi.Labels, cfg.FailedLabel) {
 			return true
 		}
 	}
@@ -188,14 +168,14 @@ func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edge
 
 // BlockerStatus reports num's blocker readiness against edges without
 // transitioning any tracker state — the seam the Console (#650) reuses to
-// hold a pick rather than the headless engine's own cascade-to-Failed
-// (nextReady's hasFailedInBatchBlocker, which moves the dependent issue
-// itself to Failed). ready is true when every declared blocker is satisfied
+// hold a pick rather than the headless engine's own cascade-to-Failed (which
+// moves the dependent issue itself to Failed when a blocker's failed set is
+// non-empty). ready is true when every declared blocker is satisfied
 // (BlockerReady) and none carries cfg.FailedLabel; unready names every
-// blocker not yet satisfied, in edge order. failed scans all of edges[num]
-// (mirroring hasFailedInBatchBlocker), not just unready — a blocker can be
-// closed (so BlockerReady's fallback calls it satisfied) and still carry
-// cfg.FailedLabel, which must never be satisfiable regardless of readiness.
+// blocker not yet satisfied, in edge order. failed scans all of edges[num],
+// not just unready — a blocker can be closed (so BlockerReady's fallback
+// calls it satisfied) and still carry cfg.FailedLabel, which must never be
+// satisfiable regardless of readiness.
 // failed is reported separately from unready rather than folded into it:
 // unready drives the console's BlockedBy badge and failed drives Reason
 // (queue.go's setHeld), and collapsing the two would reintroduce the

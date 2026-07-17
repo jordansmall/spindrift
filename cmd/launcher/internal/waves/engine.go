@@ -141,9 +141,17 @@ func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd str
 	failedBlockersByIssue := map[string][]string{}
 outer:
 	for _, iss := range issues {
+		// The failed scan only matters for the cascade-fail case below
+		// (origin != OriginClaimed), so OriginClaimed skips it and fetches
+		// only what unreadyBlockers needs -- matching the fetch profile the
+		// two-helper-function version had before this reused BlockerStatus.
 		var failed, unready []string
-		if !cfg.IgnoreBlockers {
+		switch {
+		case cfg.IgnoreBlockers:
+		case origin != OriginClaimed:
 			_, failed, unready = BlockerStatus(cfg, it, cf, iss.Number, edges)
+		default:
+			unready = unreadyBlockers(it, cf, iss.Number, edges)
 		}
 		switch {
 		// Cascade-fail only in the multi-issue drain path (origin !=
