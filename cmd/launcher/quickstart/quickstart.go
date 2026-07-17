@@ -121,6 +121,20 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Write
 	runtime := promptDefault("Runtime (podman/docker/bwrap)", detectedRuntime)
 	gitUserName := promptDefault("Git user name", env.GitConfig("user.name"))
 	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
+
+	tracker := trackerSettings{issueTracker: prompt("Issue Tracker [github/jira/local]")}
+	switch tracker.issueTracker {
+	case "jira":
+		tracker.jiraBaseURL = prompt("Jira base URL")
+		tracker.jiraProjectKey = prompt("Jira project key")
+		tracker.jiraEmail = prompt("Jira account email (optional)")
+	case "local":
+		tracker.localIssuesDir = prompt("Local issues directory [.spindrift/issues]")
+		if tracker.localIssuesDir == "" {
+			tracker.localIssuesDir = ".spindrift/issues"
+		}
+	}
+
 	ghToken, err := acquireGHToken(env, w, prompt)
 	if err != nil {
 		return err
@@ -148,18 +162,26 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Write
 	} else {
 		anthropicAPIKey = prompt("Anthropic API key (ANTHROPIC_API_KEY)")
 	}
+	jiraToken := ""
+	if tracker.issueTracker == "jira" {
+		jiraToken = prompt("Jira API token (JIRA_TOKEN)")
+	}
 
-	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte(renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte(renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail, tracker)), 0o644); err != nil {
 		return fmt.Errorf("write flake.nix: %w", err)
 	}
 	fmt.Fprintln(w, "wrote: flake.nix")
 
-	if err := os.WriteFile(filepath.Join(dir, "harness.env"), []byte(renderHarnessEnv(ghToken, claudeOAuthToken, anthropicAPIKey)), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "harness.env"), []byte(renderHarnessEnv(ghToken, claudeOAuthToken, anthropicAPIKey, jiraToken)), 0o600); err != nil {
 		return fmt.Errorf("write harness.env: %w", err)
 	}
 	fmt.Fprintln(w, "wrote: harness.env")
 
-	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(quickstartGitignore), 0o644); err != nil {
+	gitignore := quickstartGitignore
+	if tracker.issueTracker == "local" {
+		gitignore += fmt.Sprintf("\n# private local issue files — never commit these\n%s/\n", strings.TrimSuffix(tracker.localIssuesDir, "/"))
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0o644); err != nil {
 		return fmt.Errorf("write .gitignore: %w", err)
 	}
 	fmt.Fprintln(w, "wrote: .gitignore")
@@ -287,11 +309,35 @@ harness.env
 
 const quickstartEnvrc = "use flake\n"
 
+// trackerSettings holds the fields collected for whichever Issue Tracker the
+// operator chose (ADR 0013): github needs none beyond repoSlug, jira adds
+// its base URL/project key/optional email, local adds an issues directory.
+type trackerSettings struct {
+	issueTracker   string
+	jiraBaseURL    string
+	jiraProjectKey string
+	jiraEmail      string
+	localIssuesDir string
+}
+
 // renderFlakeNix generates a minimal Consumer flake.nix carrying only the
 // options the wizard collected, with a comment pointing at the full
 // reference (docs/flake-options.md) for everything else (ADR 0027). No
 // prompts/ directory is scaffolded — the harness defaults every prompt.
-func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string) string {
+func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker trackerSettings) string {
+	var trackerLines strings.Builder
+	fmt.Fprintf(&trackerLines, "            settings.issueDiscovery.issueTracker = \"%s\";\n", nixEscape(tracker.issueTracker))
+	switch tracker.issueTracker {
+	case "jira":
+		fmt.Fprintf(&trackerLines, "            settings.repository.jiraBaseURL = \"%s\";\n", nixEscape(tracker.jiraBaseURL))
+		fmt.Fprintf(&trackerLines, "            settings.repository.jiraProjectKey = \"%s\";\n", nixEscape(tracker.jiraProjectKey))
+		if tracker.jiraEmail != "" {
+			fmt.Fprintf(&trackerLines, "            settings.repository.jiraEmail = \"%s\";\n", nixEscape(tracker.jiraEmail))
+		}
+	case "local":
+		fmt.Fprintf(&trackerLines, "            settings.issueDiscovery.localIssuesDir = \"%s\";\n", nixEscape(tracker.localIssuesDir))
+	}
+
 	return fmt.Sprintf(`{
   description = "A spindrift consumer — headless Claude Code agents in nix-built, disposable containers, one per GitHub issue";
 
@@ -326,7 +372,7 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string) string 
             settings.repository.repoSlug = "%s";
             settings.repository.gitUserName = "%s";
             settings.repository.gitUserEmail = "%s";
-          };
+%s          };
 
           devShells.default = pkgs.mkShell {
             packages = [ config.packages.spindrift ];
@@ -334,7 +380,7 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string) string 
         };
     };
 }
-`, nixEscape(runtime), nixEscape(repoSlug), nixEscape(gitUserName), nixEscape(gitUserEmail))
+`, nixEscape(runtime), nixEscape(repoSlug), nixEscape(gitUserName), nixEscape(gitUserEmail), trackerLines.String())
 }
 
 // nixEscape escapes a string for embedding in a Nix double-quoted string
@@ -352,14 +398,17 @@ func nixEscape(s string) string {
 }
 
 // renderHarnessEnv writes only the secrets the wizard actually collected:
-// GH_TOKEN plus whichever Claude credential the operator chose (OAuth token
-// or API key, never both).
-func renderHarnessEnv(ghToken, claudeOAuthToken, anthropicAPIKey string) string {
+// GH_TOKEN, whichever Claude credential the operator chose (OAuth token or
+// API key, never both), and JIRA_TOKEN when the jira tracker was chosen.
+func renderHarnessEnv(ghToken, claudeOAuthToken, anthropicAPIKey, jiraToken string) string {
 	out := fmt.Sprintf("GH_TOKEN=%s\n", ghToken)
 	if claudeOAuthToken != "" {
 		out += fmt.Sprintf("CLAUDE_CODE_OAUTH_TOKEN=%s\n", claudeOAuthToken)
 	} else {
 		out += fmt.Sprintf("ANTHROPIC_API_KEY=%s\n", anthropicAPIKey)
+	}
+	if jiraToken != "" {
+		out += fmt.Sprintf("JIRA_TOKEN=%s\n", jiraToken)
 	}
 	return out
 }

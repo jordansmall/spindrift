@@ -368,6 +368,7 @@ func TestRunQuickstart_HappyPath_WritesFiles(t *testing.T) {
 		"podman",                // runtime
 		"Ada Lovelace",          // git user name
 		"ada@example.com",       // git user email
+		"github",                // Issue Tracker
 		"ghp_faketoken",         // GH_TOKEN
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
@@ -427,6 +428,182 @@ func TestRunQuickstart_HappyPath_WritesFiles(t *testing.T) {
 	}
 }
 
+func TestRunQuickstart_GithubTracker_WritesIssueTrackerSetting(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift", // repoSlug
+		"podman",                // runtime
+		"Ada Lovelace",          // git user name
+		"ada@example.com",       // git user email
+		"github",                // Issue Tracker
+		"ghp_faketoken",         // GH_TOKEN
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
+	if err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), `settings.issueDiscovery.issueTracker = "github"`) {
+		t.Errorf("expected flake.nix to set settings.issueDiscovery.issueTracker to github, got:\n%s", flakeNix)
+	}
+}
+
+func TestRunQuickstart_JiraTracker_WritesJiraSettingsAndToken(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",      // repoSlug
+		"podman",                     // runtime
+		"Ada Lovelace",               // git user name
+		"ada@example.com",            // git user email
+		"jira",                       // Issue Tracker
+		"https://acme.atlassian.net", // Jira base URL
+		"ENG",                        // Jira project key
+		"ada@acme.com",               // Jira account email (optional)
+		"ghp_faketoken",              // GH_TOKEN
+		"jira-faketoken",             // JIRA_TOKEN
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
+	if err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	for _, want := range []string{
+		`settings.issueDiscovery.issueTracker = "jira"`,
+		`settings.repository.jiraBaseURL = "https://acme.atlassian.net"`,
+		`settings.repository.jiraProjectKey = "ENG"`,
+		`settings.repository.jiraEmail = "ada@acme.com"`,
+	} {
+		if !strings.Contains(string(flakeNix), want) {
+			t.Errorf("expected flake.nix to contain %q, got:\n%s", want, flakeNix)
+		}
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "JIRA_TOKEN=jira-faketoken") {
+		t.Errorf("expected harness.env to contain the Jira token, got:\n%s", harnessEnv)
+	}
+}
+
+func TestRunQuickstart_JiraTracker_BlankEmailOmitsJiraEmailSetting(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",      // repoSlug
+		"podman",                     // runtime
+		"Ada Lovelace",               // git user name
+		"ada@example.com",            // git user email
+		"jira",                       // Issue Tracker
+		"https://acme.atlassian.net", // Jira base URL
+		"ENG",                        // Jira project key
+		"",                           // Jira account email (blank — optional)
+		"ghp_faketoken",              // GH_TOKEN
+		"jira-faketoken",             // JIRA_TOKEN
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
+	if err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if strings.Contains(string(flakeNix), "jiraEmail") {
+		t.Errorf("expected no jiraEmail setting when the operator left it blank, got:\n%s", flakeNix)
+	}
+}
+
+func TestRunQuickstart_LocalTracker_WritesIssuesDirAndGitignore(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift", // repoSlug
+		"podman",                // runtime
+		"Ada Lovelace",          // git user name
+		"ada@example.com",       // git user email
+		"local",                 // Issue Tracker
+		"issues",                // local issues directory
+		"ghp_faketoken",         // GH_TOKEN
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
+	if err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), `settings.issueDiscovery.localIssuesDir = "issues"`) {
+		t.Errorf("expected flake.nix to set settings.issueDiscovery.localIssuesDir, got:\n%s", flakeNix)
+	}
+
+	gitignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if !strings.Contains(string(gitignore), "issues/") {
+		t.Errorf("expected .gitignore to protect the local issues directory, got:\n%s", gitignore)
+	}
+}
+
+func TestRunQuickstart_LocalTracker_BlankDirDefaultsToDotSpindriftIssues(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift", // repoSlug
+		"podman",                // runtime
+		"Ada Lovelace",          // git user name
+		"ada@example.com",       // git user email
+		"local",                 // Issue Tracker
+		"",                      // local issues directory (blank — take default)
+		"ghp_faketoken",         // GH_TOKEN
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
+	if err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), `settings.issueDiscovery.localIssuesDir = ".spindrift/issues"`) {
+		t.Errorf("expected flake.nix to default localIssuesDir to .spindrift/issues, got:\n%s", flakeNix)
+	}
+
+	gitignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if !strings.Contains(string(gitignore), ".spindrift/issues/") {
+		t.Errorf("expected .gitignore to protect the default local issues directory, got:\n%s", gitignore)
+	}
+}
+
 func TestRunQuickstart_AmbientGHToken_SkipsPrompt(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -435,6 +612,7 @@ func TestRunQuickstart_AmbientGHToken_SkipsPrompt(t *testing.T) {
 		"podman",                // runtime
 		"Ada Lovelace",          // git user name
 		"ada@example.com",       // git user email
+		"github",                // Issue Tracker
 		// no GH_TOKEN line — ambient GH_TOKEN must be reused without a prompt
 		"claude-oauth-faketoken", // CLAUDE_CODE_OAUTH_TOKEN
 	}, "\n") + "\n")
@@ -464,6 +642,7 @@ func TestRunQuickstart_FineGrainedToken_PrintsRequiredPermissions(t *testing.T) 
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github",                      // Issue Tracker
 		"github_pat_finegrainedtoken", // fine-grained PAT — cannot be introspected
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
@@ -495,6 +674,7 @@ func TestRunQuickstart_ClassicTokenNarrowScope_AcceptedWithoutGate(t *testing.T)
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github", // Issue Tracker
 		"ghp_narrowtoken",
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
@@ -527,6 +707,7 @@ func TestRunQuickstart_ClassicTokenBroadScope_AcceptWritesToken(t *testing.T) {
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github", // Issue Tracker
 		"ghp_broadtoken",
 		"ACCEPT", // literal acceptance of the over-broad-scope warning
 		"claude-oauth-faketoken",
@@ -558,6 +739,7 @@ func TestRunQuickstart_ClassicTokenBroadScope_DeclineAbortsWithoutWriting(t *tes
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github", // Issue Tracker
 		"ghp_broadtoken",
 		"no", // declines the ACCEPT gate
 	}, "\n") + "\n")
@@ -581,6 +763,7 @@ func TestRunQuickstart_NoAmbientToken_PrintsGuidedPATInstructions(t *testing.T) 
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github",          // Issue Tracker
 		"ghp_narrowtoken", // pasted directly, no ambient GH_TOKEN
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
@@ -606,7 +789,8 @@ func TestRunQuickstart_BlankTokenInput_FallsBackToGHAuthToken(t *testing.T) {
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
-		"", // blank GitHub token — falls back to `gh auth token`
+		"github", // Issue Tracker
+		"",       // blank GitHub token — falls back to `gh auth token`
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
@@ -636,7 +820,8 @@ func TestRunQuickstart_GHAuthTokenFallbackFails_AbortsWithoutWriting(t *testing.
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
-		"", // blank GitHub token — falls back to `gh auth token`, which fails below
+		"github", // Issue Tracker
+		"",       // blank GitHub token — falls back to `gh auth token`, which fails below
 	}, "\n") + "\n")
 
 	env := fakeEnvironment{ghAuthTokenErr: errors.New("gh: not logged in"), runtimes: map[string]bool{"podman": true}}
@@ -658,6 +843,7 @@ func TestRunQuickstart_TokenScopesReadError_AbortsWithoutWriting(t *testing.T) {
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github", // Issue Tracker
 		"ghp_broadtoken",
 	}, "\n") + "\n")
 
@@ -680,6 +866,7 @@ func TestRunQuickstart_UnknownTokenPrefix_AcceptedWithoutAudit(t *testing.T) {
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github",                // Issue Tracker
 		"ghs_installationtoken", // app-installation token — neither fine-grained nor classic/OAuth
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
@@ -709,6 +896,7 @@ func TestRunQuickstart_AmbientTokenBroadScope_StillRequiresACCEPT(t *testing.T) 
 		"podman",                // runtime
 		"Ada Lovelace",          // git user name
 		"ada@example.com",       // git user email
+		"github",                // Issue Tracker
 		// no GH_TOKEN line — reused from the ambient env below
 		"ACCEPT", // literal acceptance of the over-broad-scope warning
 		"claude-oauth-faketoken",
@@ -744,7 +932,8 @@ func TestRunQuickstart_GHAuthTokenEmpty_AbortsWithoutWriting(t *testing.T) {
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
-		"", // blank GitHub token — falls back to `gh auth token`, which returns ""
+		"github", // Issue Tracker
+		"",       // blank GitHub token — falls back to `gh auth token`, which returns ""
 	}, "\n") + "\n")
 
 	env := fakeEnvironment{ghAuthToken: "", runtimes: map[string]bool{"podman": true}}
@@ -772,6 +961,7 @@ func TestRunQuickstart_Force_BacksUpExistingFiles(t *testing.T) {
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github", // Issue Tracker
 		"ghp_faketoken",
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
@@ -813,6 +1003,7 @@ func TestRunQuickstart_DeclineSetupToken_PromptsForAPIKey(t *testing.T) {
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github", // Issue Tracker
 		"ghp_faketoken",
 		"n",                   // decline claude setup-token
 		"sk-ant-faketokenkey", // ANTHROPIC_API_KEY
@@ -846,6 +1037,7 @@ func TestRunQuickstart_AcceptSetupToken_EmptyPaste_Errors(t *testing.T) {
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github", // Issue Tracker
 		"ghp_faketoken",
 		"y", // accept claude setup-token
 		"",  // empty paste
@@ -873,6 +1065,7 @@ func TestRunQuickstart_AcceptSetupToken_RunsItAndPastesToken(t *testing.T) {
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github", // Issue Tracker
 		"ghp_faketoken",
 		"y",                        // accept claude setup-token
 		"printed-oauth-token-1234", // pasted from claude setup-token's output
@@ -904,6 +1097,7 @@ func TestRunQuickstart_GitUserNameWithNixSpecialChars_IsEscaped(t *testing.T) {
 		"podman",
 		`Ada "Countess" ${evil}`, // git user name with a Nix string terminator and interpolation
 		"ada@example.com",
+		"github", // Issue Tracker
 		"ghp_faketoken",
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
@@ -929,6 +1123,7 @@ func TestRunQuickstart_AmbientClaudeOAuthToken_ReusedWithoutPrompt(t *testing.T)
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github", // Issue Tracker
 		"ghp_faketoken",
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "ambient-oauth-token"}, runtimes: map[string]bool{"podman": true}}
@@ -961,6 +1156,7 @@ func TestRunQuickstart_BothAmbientCredentials_OAuthTokenTakesPrecedence(t *testi
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github", // Issue Tracker
 		"ghp_faketoken",
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{
@@ -993,6 +1189,7 @@ func TestRunQuickstart_AmbientAnthropicAPIKey_ReusedWithoutPrompt(t *testing.T) 
 		"podman",
 		"Ada Lovelace",
 		"ada@example.com",
+		"github", // Issue Tracker
 		"ghp_faketoken",
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"ANTHROPIC_API_KEY": "ambient-api-key"}, runtimes: map[string]bool{"podman": true}}
