@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -45,14 +46,18 @@ type FreshnessChecker func() (applicable, fresh bool, message string)
 // dispatch never uses (issue #662).
 func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, sources Sources, claimed map[string]bool) (Issue, bool) {
 	for _, iss := range issues {
+		var failed, unready []string
+		if !claimed[iss.Number] {
+			_, failed, unready = BlockerStatus(cfg, it, cf, iss.Number, edges)
+		}
 		switch {
 		case claimed[iss.Number]:
 			fmt.Printf("    ~~ #%s already claimed this run; stale re-discovery, skipping\n", iss.Number)
-		case hasFailedInBatchBlocker(cfg, it, iss.Number, edges):
-			fmt.Printf("    !! #%s  status=blocker-failed  note=a dependency failed; skipping\n", iss.Number)
+		case len(failed) > 0:
+			fmt.Printf("    !! #%s  status=blocker-failed  note=#%s failed; skipping\n", iss.Number, strings.Join(failed, ", #"))
 			transitionState(it, iss.Number, forge.Dispatchable, forge.Failed)
-		case !issueIsReady(it, cf, iss.Number, edges):
-			fmt.Printf("    ~~ #%s blocked (a blocker is not '%s'); skipping\n", iss.Number, cfg.CompleteLabel)
+		case len(unready) > 0:
+			fmt.Printf("    ~~ #%s blocked by #%s; skipping\n", iss.Number, strings.Join(unready, ", #"))
 		default:
 			if collider, overlapped := checkOverlap(iss.Number); overlapped {
 				fmt.Printf("    ~~ #%s touches overlap in-progress #%s; deferring\n", iss.Number, collider)
