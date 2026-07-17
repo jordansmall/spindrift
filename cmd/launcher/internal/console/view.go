@@ -490,6 +490,12 @@ func renderDrillInPane(m Model) string {
 // the remainder splits between backlog and queue exactly as renderBody does
 // for the two-column body. transcriptHeight is the Transcript column's
 // height budget — see the transcriptHeight function (issue #1014).
+//
+// BacklogOffset and QueueOffset are shared Model fields, not per-pane state,
+// so the docked pane's backlog and queue columns always render the same
+// scroll window as the main view — the two can never diverge. This is
+// intentional, not a bug: reaching the end of a long backlog while drilled
+// in is more useful than always resetting to row 0 (issue #1055).
 func renderDockedBody(m Model, transcriptHeight int) string {
 	backlog := renderBacklogColumn(m, unboundedBudget)
 	queue := renderQueueColumn(m, unboundedBudget)
@@ -512,6 +518,11 @@ func renderDockedBody(m Model, transcriptHeight int) string {
 // renderDockedBody's every-row column split. transcriptHeight is the
 // Transcript column's height budget — see the transcriptHeight function
 // (issue #1014).
+//
+// The underlying renderBody call is subject to the same shared-offset
+// behavior documented on renderDockedBody: BacklogOffset/QueueOffset are
+// Model fields, not per-pane, so the body underneath the floating overlay
+// always scrolls in sync with the main view (issue #1055).
 func renderFloatingBody(m Model, transcriptHeight int) string {
 	body := renderBody(m, unboundedBudget)
 	transcript := renderTranscriptColumn(*m.DrillIn, transcriptHeight)
