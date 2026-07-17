@@ -390,8 +390,9 @@ func TestView_ShowHelp_ContrastsDrillInFixedPage(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
-	if !strings.Contains(out, "fixed 10") {
-		t.Errorf("View() = %q, want it to describe the drill-in page jump as fixed at 10 lines", out)
+	want := fmt.Sprintf("fixed at %d lines", drillInPageScrollDelta)
+	if !strings.Contains(out, want) {
+		t.Errorf("View() = %q, want it to contain %q", out, want)
 	}
 }
 
