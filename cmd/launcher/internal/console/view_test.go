@@ -69,10 +69,11 @@ func TestView_Header_StatusLine_ShowsRunningWaitingHeldSettled(t *testing.T) {
 		{Number: "2", State: PickHeld},
 		{Number: "3", State: PickSettled},
 		{Number: "4", State: PickSettled},
+		{Number: "5", State: PickFailed},
 	}
 
 	out := View(m)
-	want := "running 1/3 · waiting 1 · held 1 · settled 2"
+	want := "running 1/3 · waiting 1 · held 1 · settled 2 · failed 1"
 	if !strings.Contains(out, want) {
 		t.Errorf("View() = %q, want it to contain status line %q", out, want)
 	}
