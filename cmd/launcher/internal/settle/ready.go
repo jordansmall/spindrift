@@ -384,12 +384,17 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 // or a clean merge if the staleness turns out to be harmless) through its
 // own, already-tested error handling.
 //
-// A Rebase failure that persists past its push-retry budget is different:
-// staleness is confirmed and the corrective action itself failed, so it is
-// returned as a hard, merge-blocking error (issue #940) rather than falling
-// through to Merge on a base known to be stale and never re-validated. This
-// matches rewaitAfterForcePush's contract elsewhere in this file: only the
-// rebase-succeeded-but-never-reconfirmed-green path shares that treatment.
+// A Rebase failure — including one that persists past its push-retry
+// budget — is different: staleness is confirmed and the corrective action
+// itself failed, so it is returned as a hard, merge-blocking error (issue
+// #940) rather than falling through to Merge on a base known to be stale
+// and never re-validated. Unlike the reactive conflict-retry loop below,
+// this preflight has no dispatch.Dispatcher in scope, so it cannot attempt
+// ResolveConflict on an ErrMergeConflict rebase result the way that loop
+// can — any Rebase error here is terminal. rewaitAfterForcePush's own
+// contract (a rebase that force-pushes but never re-confirms green) is
+// likewise a hard failure, for the same reason: staleness confirmed, fix
+// attempted, fix unconfirmed.
 func (s *Settle) preflightStaleBase(num string, gen uint64, pr string) error {
 	if s.pr == nil {
 		return nil
