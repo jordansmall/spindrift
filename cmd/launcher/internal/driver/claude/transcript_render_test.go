@@ -69,6 +69,24 @@ func TestRenderTranscript_ToolResult_TruncatesOnRuneBoundary(t *testing.T) {
 	}
 }
 
+func TestRenderTranscript_ToolResult_TruncatesOnRuneBoundary_FourByteRune(t *testing.T) {
+	long := strings.Repeat("a", 196) + strings.Repeat("🎉", 6)
+	line := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"` + long + `"}]}}`
+	path := claude.WriteLog(t, line)
+
+	got, err := claude.RenderTranscript(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("RenderTranscript produced invalid UTF-8: %q", got)
+	}
+	want := "[implementor]   -> " + strings.Repeat("a", 196) + "🎉...\n"
+	if got != want {
+		t.Errorf("RenderTranscript = %q, want %q", got, want)
+	}
+}
+
 func TestRenderTranscript_ToolResultError_PrefixesError(t *testing.T) {
 	line := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"file not found","is_error":true}]}}`
 	path := claude.WriteLog(t, line)
