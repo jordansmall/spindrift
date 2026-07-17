@@ -313,7 +313,7 @@ const bannerCollapseMargin = 1
 
 // renderHeader renders the Console's full-width header: the fixed banner
 // (when the terminal is tall enough to afford it), the status line
-// (running/cap, waiting, held, settled), and the stale-image,
+// (running/cap, waiting, held, settled, failed), and the stale-image,
 // rebuilding-in-progress, rebuild-failed, and competing-dogfood alert
 // lines. The four alerts render in that fixed order with no priority or
 // dismissal logic — any subset can be true at once, and each renders
@@ -321,7 +321,7 @@ const bannerCollapseMargin = 1
 // Live, and the Picks slice's PickState tags rather than a new stored
 // counter (issue #843, ADR 0025).
 func renderHeader(m Model) string {
-	var waiting, held, settled int
+	var waiting, held, settled, failed int
 	for _, p := range m.Picks {
 		switch p.State {
 		case PickQueued:
@@ -330,6 +330,8 @@ func renderHeader(m Model) string {
 			held++
 		case PickSettled:
 			settled++
+		case PickFailed:
+			failed++
 		}
 	}
 
@@ -342,7 +344,7 @@ func renderHeader(m Model) string {
 	// replaced, which was gated on Cap > 0 (issue #653, removed by #843).
 	// Session-at-a-glance context is meant to be visible unconditionally,
 	// not to disappear when the queue happens to be empty (issue #843 AC5).
-	fmt.Fprintf(&b, "running %d/%d · waiting %d · held %d · settled %d\n", m.Live, m.Cap, waiting, held, settled)
+	fmt.Fprintf(&b, "running %d/%d · waiting %d · held %d · settled %d · failed %d\n", m.Live, m.Cap, waiting, held, settled, failed)
 	if m.Stale {
 		fmt.Fprintf(&b, "!! image stale: %s — new launches held; press [b] to rebuild\n", m.StaleMessage)
 	}
