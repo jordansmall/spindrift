@@ -464,6 +464,33 @@ func TestTea_EnterKey_OnFocusedQueue_NoOpOnQueuedRow(t *testing.T) {
 	}
 }
 
+// TestHasTranscript_PerState verifies hasTranscript against every PickState:
+// true for running/settled/terminated/failed (each left logs on disk from a
+// Box that ran or is running), false for queued/claiming/held/dissolved
+// (never launched) — issue #845, PickFailed's inclusion per issue #992.
+func TestHasTranscript_PerState(t *testing.T) {
+	tests := []struct {
+		state PickState
+		want  bool
+	}{
+		{PickQueued, false},
+		{PickClaiming, false},
+		{PickRunning, true},
+		{PickHeld, false},
+		{PickSettled, true},
+		{PickDissolved, false},
+		{PickTerminated, true},
+		{PickFailed, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.state.String(), func(t *testing.T) {
+			if got := hasTranscript(tt.state); got != tt.want {
+				t.Errorf("hasTranscript(%s) = %v, want %v", tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestTea_DrillInKey_OpensTranscriptPane verifies Enter, focused on the work
 // queue, opens a full-screen transcript pane for the highlighted running
 // pick, replacing the backlog (issue #786; retargeted to focused-queue Enter
