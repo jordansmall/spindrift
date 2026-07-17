@@ -686,10 +686,11 @@ func focusedPageSize(m Model) int {
 
 // columnItemBudget converts a column's row budget (label line included, as
 // bodyColumnBudgets returns it) into the row budget available for its item
-// rows alone — the same "-1 for the label" renderBacklogColumn and
-// renderQueueColumn apply before calling writeWindowedRows. A non-positive
-// column budget yields zero items, matching those functions' own
-// budget<=0-renders-nothing early return.
+// rows alone — the "-1 for the label" that renderBacklogColumn and
+// renderQueueColumn get by calling columnItemBudget(budget) directly before
+// passing the result to writeWindowedRows. A non-positive column budget
+// yields zero items, matching those functions' own budget<=0-renders-nothing
+// early return.
 func columnItemBudget(columnBudget int) int {
 	if columnBudget <= 0 {
 		return 0
