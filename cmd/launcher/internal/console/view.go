@@ -540,9 +540,6 @@ func overlay(body, pane string, leftWidth, paneWidth int) string {
 // A non-positive budget writes nothing; an offset past the end of rows is
 // treated as the end (nothing left to show).
 func writeWindowedRows(b *strings.Builder, rows []string, offset, budget int) {
-	if budget < 0 {
-		budget = 0
-	}
 	if offset < 0 {
 		offset = 0
 	}
