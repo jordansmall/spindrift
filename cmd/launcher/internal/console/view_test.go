@@ -310,7 +310,10 @@ func TestView_ShowHelp_ListsTabKey(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
-	if !strings.Contains(out, "tab         switch focus between the backlog and work-queue columns") {
+	if !strings.Contains(out, "\n  tab ") {
+		t.Errorf("View() = %q, want a \"tab\" key entry", out)
+	}
+	if !strings.Contains(out, "switch focus between the backlog and work-queue columns") {
 		t.Errorf("View() = %q, want it to describe the \"tab\" focus-switch binding", out)
 	}
 }
@@ -324,7 +327,7 @@ func TestView_ShowHelp_DescribesContextSensitiveEnter(t *testing.T) {
 
 	out := View(m)
 	for _, want := range []string{
-		"pick the",
+		"otherwise: pick the",
 		"highlighted backlog row",
 		"drill into the",
 		"highlighted pick's transcript",
