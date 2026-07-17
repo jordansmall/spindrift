@@ -206,7 +206,7 @@ func renderBacklogColumn(m Model, budget int) string {
 	if m.Focus == FocusBacklog {
 		label += " [focus]"
 	}
-	label += positionLabel(m.BacklogOffset, columnItemBudget(budget), len(m.Visible()))
+	label += positionLabel(m.BacklogOffset, budget, len(m.Visible()))
 	fmt.Fprintf(&b, "%s:\n", label)
 	rows := make([]string, 0, len(m.Visible()))
 	for i, iss := range m.Visible() {
@@ -246,7 +246,7 @@ func renderQueueColumn(m Model, budget int) string {
 	if m.Focus == FocusQueue {
 		label += " [focus]"
 	}
-	label += positionLabel(m.QueueOffset, columnItemBudget(budget), len(m.Picks))
+	label += positionLabel(m.QueueOffset, budget, len(m.Picks))
 	fmt.Fprintf(&b, "%s:\n", label)
 	rows := make([]string, 0, len(m.Picks))
 	for i, p := range m.Picks {
@@ -661,15 +661,15 @@ func bodyColumnBudgets(m Model) (backlog, queue int) {
 
 // positionLabel returns a compact " (X-Y of N)" position indicator for a
 // column's label, describing the rows writeWindowedRows actually renders at
-// offset within itemBudget of total — or "" when there is nothing to show a
-// range for (an empty list, or a budget too small to render any row), so a
+// offset within columnBudget of total — or "" when there is nothing to show
+// a range for (an empty list, or a budget too small to render any row), so a
 // column that renders no rows doesn't grow a misleading "(1-0 of 0)" label
 // (issue #1037 AC3).
-func positionLabel(offset, itemBudget, total int) string {
+func positionLabel(offset, columnBudget, total int) string {
 	if total == 0 {
 		return ""
 	}
-	shown := windowedRowCount(total-offset, itemBudget)
+	shown := visibleItemCount(offset, columnBudget, total)
 	if shown <= 0 {
 		return ""
 	}
@@ -690,9 +690,9 @@ func positionLabel(offset, itemBudget, total int) string {
 func focusedPageSize(m Model) int {
 	backlogBudget, queueBudget := bodyColumnBudgets(m)
 	if m.Focus == FocusQueue {
-		return windowedRowCount(len(m.Picks)-m.QueueOffset, columnItemBudget(queueBudget))
+		return visibleItemCount(m.QueueOffset, queueBudget, len(m.Picks))
 	}
-	return windowedRowCount(len(m.Visible())-m.BacklogOffset, columnItemBudget(backlogBudget))
+	return visibleItemCount(m.BacklogOffset, backlogBudget, len(m.Visible()))
 }
 
 // columnItemBudget converts a column's row budget (label line included, as
@@ -707,6 +707,16 @@ func columnItemBudget(columnBudget int) int {
 		return 0
 	}
 	return columnBudget - 1
+}
+
+// visibleItemCount returns how many of a column's item rows are actually
+// visible at offset within columnBudget of total — windowedRowCount's
+// remaining/budget shape with columnItemBudget's "-1 for the label" folded
+// in, so positionLabel and focusedPageSize don't each repeat the
+// windowedRowCount(total-offset, columnItemBudget(budget)) composition
+// (issue #1061).
+func visibleItemCount(offset, columnBudget, total int) int {
+	return windowedRowCount(total-offset, columnItemBudget(columnBudget))
 }
 
 // followViewport returns offset adjusted so cursor stays within the window

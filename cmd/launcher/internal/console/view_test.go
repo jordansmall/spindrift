@@ -1673,3 +1673,16 @@ func TestFollowViewport_PositiveBudget_AdvancesToExactSameOffsetAsBefore(t *test
 		t.Errorf("followViewport(0, 4, 5, 2) = %d, want %d", got, want)
 	}
 }
+
+// TestVisibleItemCount_MatchesWindowedRowCountOfColumnItemBudget verifies
+// visibleItemCount folds columnItemBudget's "-1 for the label" into
+// windowedRowCount's remaining/budget shape, the composition positionLabel
+// and focusedPageSize each repeated before this helper existed (issue
+// #1061). A truncated window (offset 0, total 50, columnBudget 5) holds one
+// row back for the "N more below" affordance the same way
+// windowedRowCount(50, columnItemBudget(5)) would.
+func TestVisibleItemCount_MatchesWindowedRowCountOfColumnItemBudget(t *testing.T) {
+	if got, want := visibleItemCount(0, 5, 50), windowedRowCount(50, columnItemBudget(5)); got != want {
+		t.Errorf("visibleItemCount(0, 5, 50) = %d, want %d (windowedRowCount(50, columnItemBudget(5)))", got, want)
+	}
+}
