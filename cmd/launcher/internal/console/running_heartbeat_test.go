@@ -29,7 +29,7 @@ func TestRunningHeartbeat_ReplaysLatestPassLog_ReturnsLastEmittedLine(t *testing
 		t.Fatalf("driver.New: %v", err)
 	}
 
-	got := RunningHeartbeat(drv, dir, "9")
+	got := NewHeartbeatCache().RunningHeartbeat(drv, dir, "9")
 
 	if got == "" {
 		t.Fatal("RunningHeartbeat() = \"\", want a non-empty heartbeat line")
@@ -64,7 +64,7 @@ func TestRunningHeartbeat_RoleSwitchMidLog_ReturnsRoleContext(t *testing.T) {
 		t.Fatalf("driver.New: %v", err)
 	}
 
-	got := RunningHeartbeat(drv, dir, "9")
+	got := NewHeartbeatCache().RunningHeartbeat(drv, dir, "9")
 
 	if !strings.Contains(got, "scout") {
 		t.Errorf("RunningHeartbeat() = %q, want it to name the acting role \"scout\"", got)
@@ -98,7 +98,7 @@ func TestRunningHeartbeat_LogEndsOnScoutCountLine_ReturnsRoleContext(t *testing.
 		t.Fatalf("driver.New: %v", err)
 	}
 
-	got := RunningHeartbeat(drv, dir, "9")
+	got := NewHeartbeatCache().RunningHeartbeat(drv, dir, "9")
 
 	if !strings.Contains(got, "scout") {
 		t.Errorf("RunningHeartbeat() = %q, want it to name the acting role \"scout\"", got)
@@ -114,7 +114,7 @@ func TestRunningHeartbeat_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
 		t.Fatalf("driver.New: %v", err)
 	}
 
-	if got := RunningHeartbeat(drv, t.TempDir(), "9"); got != "" {
+	if got := NewHeartbeatCache().RunningHeartbeat(drv, t.TempDir(), "9"); got != "" {
 		t.Errorf("RunningHeartbeat() = %q, want empty with no log on disk", got)
 	}
 }

@@ -11,26 +11,6 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 )
 
-// RunningHeartbeat returns the live status line a running pick's queue row
-// shows: it replays the on-disk log of number's most recent Dispatch pass
-// (the initial run, or its latest fix/conflict-resolve pass) through drv's
-// own heartbeat parser — the exact machinery the live dispatch's stdout
-// heartbeat already uses (#647 AC2), not a new one — and returns the last
-// line it emitted. Returns "" when drv is nil (a launch-less session, or a
-// Launcher built without a Factory), no log exists on disk yet (claimed but
-// not yet launched), or the log carries no complete heartbeat line yet.
-func RunningHeartbeat(drv driver.Driver, pwd, number string) string {
-	if drv == nil {
-		return ""
-	}
-	passes := dispatch.LogPaths(pwd, number)
-	if len(passes) == 0 {
-		return ""
-	}
-	line, _ := parseHeartbeat(drv, passes[len(passes)-1].Path, number)
-	return line
-}
-
 // parseHeartbeat reads path and replays it through drv's heartbeat parser,
 // returning the last line it emitted plus the os.FileInfo the read saw — the
 // stat HeartbeatCache pins to detect whether a later call can skip this same
@@ -82,10 +62,16 @@ func NewHeartbeatCache() *HeartbeatCache {
 	return &HeartbeatCache{entries: make(map[string]heartbeatCacheEntry)}
 }
 
-// RunningHeartbeat is HeartbeatCache's cached counterpart to the
-// package-level RunningHeartbeat: same inputs and return, but a repeat call
-// for number whose latest pass log's path/size/mtime match what was cached
-// last time skips the ReadFile+reparse and returns the cached line.
+// RunningHeartbeat returns the live status line a running pick's queue row
+// shows: it replays the on-disk log of number's most recent Dispatch pass
+// (the initial run, or its latest fix/conflict-resolve pass) through drv's
+// own heartbeat parser — the exact machinery the live dispatch's stdout
+// heartbeat already uses (#647 AC2) — and returns the last line it emitted.
+// Returns "" when drv is nil (a launch-less session, or a Launcher built
+// without a Factory), no log exists on disk yet (claimed but not yet
+// launched), or the log carries no complete heartbeat line yet. A repeat
+// call for number whose latest pass log's path/size/mtime match what was
+// cached last time skips the ReadFile+reparse and returns the cached line.
 func (c *HeartbeatCache) RunningHeartbeat(drv driver.Driver, pwd, number string) string {
 	if drv == nil {
 		return ""
