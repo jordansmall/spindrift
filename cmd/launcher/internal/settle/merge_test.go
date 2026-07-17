@@ -363,6 +363,7 @@ func TestMergeImmediate_BlockedByChecksExhausted(t *testing.T) {
 func TestMergeImmediate_StaleBaseTriggersProactiveRebase(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
+	c.PreflightStaleBase = true
 	fc := forge.NewFake()
 	fc.SetNeedsUpdate(testPR, true)
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -393,6 +394,7 @@ func TestMergeImmediate_StaleBaseTriggersProactiveRebase(t *testing.T) {
 func TestMergeImmediate_StaleBaseCombinedBreakBlocksMerge(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
+	c.PreflightStaleBase = true
 	fc := forge.NewFake()
 	fc.SetNeedsUpdate(testPR, true)
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
@@ -419,6 +421,7 @@ func TestMergeImmediate_StaleBaseCombinedBreakBlocksMerge(t *testing.T) {
 func TestMergeImmediate_StaleBaseCheckErrorFallsThroughToMerge(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
+	c.PreflightStaleBase = true
 	fc := forge.NewFake()
 	fc.NeedsUpdateErr = errors.New("gh api graphql: rate limited")
 	fc.MergeErrs = []error{nil}
@@ -447,6 +450,7 @@ func TestMergeImmediate_StaleBaseCheckErrorFallsThroughToMerge(t *testing.T) {
 func TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 2
+	c.PreflightStaleBase = true
 	fc := forge.NewFake()
 	fc.SetNeedsUpdate(testPR, true)
 	// preflightStaleBase makes 1 initial Rebase call plus up to
@@ -478,6 +482,7 @@ func TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge(t *testing.T) {
 func TestMergeImmediate_StaleBaseNonTransientRebaseFailureBlocksMerge(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 2
+	c.PreflightStaleBase = true
 	fc := forge.NewFake()
 	fc.SetNeedsUpdate(testPR, true)
 	fc.RebaseErr = forge.ErrMergeConflict
@@ -499,14 +504,15 @@ func TestMergeImmediate_StaleBaseNonTransientRebaseFailureBlocksMerge(t *testing
 }
 
 // TestMergeImmediate_StaleBaseSkippedWhenRebaseDisabled verifies that
-// MaxRebaseAttempts=0 disables the stale-base preflight outright — even when
-// the forge reports the PR behind its base, Rebase is never called and
-// mergeImmediate falls straight through to the normal Merge attempt. Unlike
-// the existing MaxRebaseAttempts=0 self-heal cases, this one sets
-// NeedsUpdate=true so the !stale short circuit can't hide the disjunct.
+// MaxRebaseAttempts=0 disables the stale-base preflight outright even with the
+// PreflightStaleBase flag on — the forge reports the PR behind its base, yet
+// Rebase is never called and mergeImmediate falls straight through to the
+// normal Merge attempt. NeedsUpdate=true so the !stale short circuit can't
+// hide the MaxRebaseAttempts disjunct.
 func TestMergeImmediate_StaleBaseSkippedWhenRebaseDisabled(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 0
+	c.PreflightStaleBase = true
 	fc := forge.NewFake()
 	fc.SetNeedsUpdate(testPR, true)
 	fc.MergeErrs = []error{nil}
@@ -523,6 +529,37 @@ func TestMergeImmediate_StaleBaseSkippedWhenRebaseDisabled(t *testing.T) {
 	}
 	if fc.Merged != testPR {
 		t.Errorf("Merge not called after the disabled preflight fell through; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// TestMergeImmediate_StaleBaseSkippedWhenPreflightOff verifies the default
+// (ADR 0027): with PreflightStaleBase off, a green PR that is behind its base
+// merges as-is. NeedsUpdate is never even queried (no wasted compare-API
+// round-trip) and Rebase is never called, even though MaxRebaseAttempts would
+// otherwise allow it — only a genuine conflict on the Merge attempt triggers a
+// rebase, and there is none here.
+func TestMergeImmediate_StaleBaseSkippedWhenPreflightOff(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	// c.PreflightStaleBase left false (the default).
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	// A NeedsUpdate call would fault here; the preflight must not make one.
+	fc.NeedsUpdateErr = errors.New("NeedsUpdate must not be called when the preflight is off")
+	fc.MergeErrs = []error{nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, nil)
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if len(fc.RebasedURLs) != 0 {
+		t.Errorf("Rebase called %d times, want 0 (preflight off merges a stale-but-green PR as-is)", len(fc.RebasedURLs))
+	}
+	if fc.Merged != testPR {
+		t.Errorf("Merge not called; fc.Merged=%q", fc.Merged)
 	}
 }
 

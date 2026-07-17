@@ -67,6 +67,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `settings.selfHealing.holdJitterSecs` | `HOLD_JITTER_SECS` | `5` | jitter seconds added to 429 hold duration to spread re-dispatch |
 | `settings.selfHealing.maxFixAttempts` | `MAX_FIX_ATTEMPTS` | `3` | fix-agent passes when CI is genuinely red before marking agent-failed; 0 disables self-healing |
 | `settings.selfHealing.maxRebaseAttempts` | `MAX_REBASE_ATTEMPTS` | `3` | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries |
+| `settings.selfHealing.preflightStaleBase` | `PREFLIGHT_STALE_BASE` | `` | when non-empty, the launcher proactively rebases a green PR that is behind its base (no textual conflict) before merging and re-waits for CI on the rebased tree, drawing on MAX_REBASE_ATTEMPTS for its budget (ADR 0026). Off by default: a green-but-behind PR merges as-is, relying on its green CI as the landing gate — this trades the rare cross-PR semantic break ADR 0026 guarded against (two individually-green PRs that break combined) for the throughput of parallel landings that never wait on an extra rebase+CI cycle |
 | `settings.selfHealing.transientBackoffSecs` | `TRANSIENT_BACKOFF_SECS` | `30` | base backoff seconds per retry for 529/overloaded and network transients |
 | `settings.selfHealing.transientRetryMax` | `TRANSIENT_RETRY_MAX` | `3` | max retries for transient exits (529/network backoff; consecutive 429 holds) |
 

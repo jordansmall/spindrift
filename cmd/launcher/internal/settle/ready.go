@@ -379,7 +379,16 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 // branch is behind its base (NeedsUpdate — issue #936) — even though the PR
 // shows no textual conflict and CI is already green on its current head. A
 // green PR can still be stale: main may have advanced past a just-merged
-// sibling whose changes the PR's tested tree never saw. It reuses the same
+// sibling whose changes the PR's tested tree never saw.
+//
+// It is opt-in via PreflightStaleBase (ADR 0028): off by default, a
+// green-but-behind PR merges as-is, and this returns immediately without even
+// querying NeedsUpdate — no wasted compare-API round-trip and no extra
+// rebase+CI cycle on the near-constant "behind main because a sibling landed
+// first" case. Turn it on to restore ADR 0026's behavior where a stale base
+// is treated as a conflict requiring rebase-and-re-green before merge.
+//
+// When enabled it reuses the same
 // Rebase/rewaitAfterForcePush path the reactive conflict-retry loop below
 // uses, but with its own single-attempt-plus-push-retry budget — not the
 // loop's rebaseAttempts/pushRetries counters — since a stale-base rebase and
@@ -404,7 +413,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 // likewise a hard failure, for the same reason: staleness confirmed, fix
 // attempted, fix unconfirmed.
 func (s *Settle) preflightStaleBase(num string, gen uint64, pr string) error {
-	if s.pr == nil {
+	if s.pr == nil || !s.cfg.PreflightStaleBase {
 		return nil
 	}
 	stale, err := s.pr.NeedsUpdate(pr)

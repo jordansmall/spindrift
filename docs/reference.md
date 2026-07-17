@@ -500,7 +500,8 @@ the authoritative list.
 | `MAX_JOBS`             | `0`     | `concurrency`      | caps the wave size (`0` = uncapped) |
 | `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the image-freshness probe before every launch; exits with a new documented code when the probe finds the loaded image stale (see the [exit-code table](../README.md#dogfood-loop)) |
 | `MAX_FIX_ATTEMPTS`     | `3`     | `selfHealing`      | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
-| `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts after a sibling merge, or is merely stale (behind base, no conflict) — see [Stale-base preflight](#stale-base-preflight) (`0` disables both) |
+| `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge (`0` disables rebase retries); also caps the opt-in [Stale-base preflight](#stale-base-preflight)'s rebase budget |
+| `PREFLIGHT_STALE_BASE` | `` (off) | `selfHealing`    | opt-in: proactively rebase a green-but-behind PR (no conflict) and re-green it before merging — see [Stale-base preflight](#stale-base-preflight); off by default merges a green-but-behind PR as-is |
 | `MERGE_POLL_INTERVAL`  | `30`    | `branches`         | seconds between CI-status polls in the merge gate      |
 | `MERGE_POLL_TIMEOUT`   | `1800`  | `branches`         | seconds to wait for CI green before abandoning the merge |
 | `OVERLAP_GATE`         | `defer` | `concurrency`      | declared `## Touches` overlap policy: `defer` (hold a Dispatchable issue whose declared touch-set intersects an in-progress issue's, retrying once the collider completes) or `off` (disable the check — see [Declared touch-set overlap](#declared-touch-set-overlap)) |
@@ -601,9 +602,10 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
            │          failure, so the box skips SCOUT, re-implementation,
            │          and blind rediscovery and goes straight to check/fix/
            │          commit/push), then re-gate
-           ├─ stale base, no conflict (immediate) → preflight-rebase and
-           │                                        re-wait for green before
-           │                                        the first merge attempt
+           ├─ stale base, no conflict (immediate) → merge as-is by default;
+           │                                        only when PREFLIGHT_STALE_BASE
+           │                                        is on, preflight-rebase and
+           │                                        re-wait for green first
            │                                        (up to MAX_REBASE_ATTEMPTS)
            ├─ merge conflict (immediate) → rebase the PR (up to MAX_REBASE_ATTEMPTS)
            └─ post an aggregate usage/cost comment to the issue
@@ -845,28 +847,36 @@ symbol `a463411`'s concurrently-merged tests still referenced, and no check
 ever compiled the two together before `launcher-go-vet` failed on `main`
 (issue #936).
 
-Under `MERGE_MODE=immediate`, before the first `Merge` attempt, the launcher
-compares the PR's branch against its base via GitHub's REST compare API
-(`behind_by`) — a plain git-ancestry count between two refs, not GitHub's
-GraphQL `mergeStateStatus` field, which only reports `BEHIND` when branch
-protection requires branches to be up to date before merging (a setting
-this project's fine-grained PAT cannot even read, let alone rely on being
-enabled). A `behind_by > 0` hit **proactively rebases the branch and
-re-waits for CI to confirm green on the rebased tree** (its own attempt
-budget off `MAX_REBASE_ATTEMPTS`, independent of the reactive
-conflict-retry loop's counters) before merging — so a PR whose rebase no
-longer compiles against a freshly-merged sibling is blocked at that point
-instead of landing on the strength of its stale green result. A query error
-is logged and swallowed rather than blocking the merge; the ordinary
-`Merge` call surfaces any real problem through its already-tested error
-handling.
+This preflight is **opt-in via `PREFLIGHT_STALE_BASE`, off by default** (ADR
+0028). By default a green-but-behind PR merges as-is — the launcher does not
+rebase it, and does not even run the `behind_by` check — trading the rare
+cross-PR semantic break above for the throughput of parallel landings that
+never pay an extra rebase + CI cycle. The freshness burden instead sits with
+the implementor Box, which rebases onto the latest base immediately before
+every push. Turn the knob on for deployments that prefer to pay the tax.
+
+When `PREFLIGHT_STALE_BASE` is set, then under `MERGE_MODE=immediate`, before
+the first `Merge` attempt, the launcher compares the PR's branch against its
+base via GitHub's REST compare API (`behind_by`) — a plain git-ancestry count
+between two refs, not GitHub's GraphQL `mergeStateStatus` field, which only
+reports `BEHIND` when branch protection requires branches to be up to date
+before merging (a setting this project's fine-grained PAT cannot even read, let
+alone rely on being enabled). A `behind_by > 0` hit **proactively rebases the
+branch and re-waits for CI to confirm green on the rebased tree** (its own
+attempt budget off `MAX_REBASE_ATTEMPTS`, independent of the reactive
+conflict-retry loop's counters) before merging — so a PR whose rebase no longer
+compiles against a freshly-merged sibling is blocked at that point instead of
+landing on the strength of its stale green result. A query error is logged and
+swallowed rather than blocking the merge; the ordinary `Merge` call surfaces
+any real problem through its already-tested error handling.
 
 This is a launcher-side sanity check, not an adversary-proof gate, and it
 exists only on the `github` Code Forge merge path for the same reason the
 merge guard does — see [ADR
 0026](adr/0026-preflight-stale-base-before-merge.md) for the root-cause
 writeup and the trade-off against gating GitHub branch protection or
-downgrading every stale PR to manual.
+downgrading every stale PR to manual, and [ADR
+0028](adr/0028-stale-base-preflight-is-opt-in.md) for why it is now opt-in.
 
 #### Filer
 
