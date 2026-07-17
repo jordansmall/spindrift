@@ -99,8 +99,13 @@ func parseGitHubRepoSlug(remoteURL string) string {
 		return ""
 	}
 	rest := s[i+len(marker):]
-	rest = strings.TrimPrefix(rest, ":")
-	rest = strings.TrimPrefix(rest, "/")
+	// The character right after "github.com" must be the scp-like ":" or a
+	// "/" (ssh:// or https://) — anything else means this was a substring
+	// match on a different host, e.g. an SSH alias "github.com-work".
+	if rest == "" || (rest[0] != ':' && rest[0] != '/') {
+		return ""
+	}
+	rest = rest[1:]
 	if rest == "" || strings.Count(rest, "/") != 1 {
 		return ""
 	}
