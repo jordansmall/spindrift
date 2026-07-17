@@ -467,6 +467,52 @@ func TestUpdate_ScrollMsg_MovesQueueOffsetWhenQueueFocused(t *testing.T) {
 	}
 }
 
+// TestUpdate_ScrollMsg_BacklogOffsetScrollsPastEndWhenContentFitsOnScreen
+// verifies pgdown's behavior when the whole backlog already fits within one
+// screen (issue #1060): the offset still advances to the last row instead of
+// no-op'ing, scrolling the earlier, already-fully-visible rows off screen.
+func TestUpdate_ScrollMsg_BacklogOffsetScrollsPastEndWhenContentFitsOnScreen(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	issues := make([]forge.Issue, 3)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+	delta := focusedPageSize(m)
+	if delta != len(issues) {
+		t.Fatalf("focusedPageSize = %d, want %d (test setup: all issues must fit within one screen)", delta, len(issues))
+	}
+
+	m = Update(m, ScrollMsg{Delta: delta})
+	if m.BacklogOffset != len(issues)-1 {
+		t.Errorf("BacklogOffset = %d, want %d (pgdown scrolls to the last row even though every row already fit on screen)", m.BacklogOffset, len(issues)-1)
+	}
+}
+
+// TestUpdate_ScrollMsg_QueueOffsetScrollsPastEndWhenContentFitsOnScreen
+// mirrors TestUpdate_ScrollMsg_BacklogOffsetScrollsPastEndWhenContentFitsOnScreen
+// for the picks queue column (issue #1060).
+func TestUpdate_ScrollMsg_QueueOffsetScrollsPastEndWhenContentFitsOnScreen(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, FocusToggleMsg{})
+	picks := make([]Pick, 3)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
+	}
+	m.Picks = picks
+
+	delta := focusedPageSize(m)
+	if delta != len(picks) {
+		t.Fatalf("focusedPageSize = %d, want %d (test setup: all picks must fit within one screen)", delta, len(picks))
+	}
+
+	m = Update(m, ScrollMsg{Delta: delta})
+	if m.QueueOffset != len(picks)-1 {
+		t.Errorf("QueueOffset = %d, want %d (pgdown scrolls to the last row even though every pick already fit on screen)", m.QueueOffset, len(picks)-1)
+	}
+}
+
 // TestUpdate_CursorMoveMsg_BacklogOffsetFollowsCursor verifies the backlog
 // viewport advances/rewinds by one as the cursor crosses its bottom/top
 // visible row, keeping the highlighted row always on screen (issue #1036

@@ -276,6 +276,73 @@ func TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_ScrollKeys_PgdownScrollsBacklogOffScreenWhenContentFits verifies
+// the rendered effect of pgdown when the whole backlog already fits within
+// one screen (issue #1060): the top, already-fully-visible row disappears
+// from the rendered column instead of the press no-op'ing — offset-only
+// assertions (TestUpdate_ScrollMsg_BacklogOffsetScrollsPastEndWhenContentFitsOnScreen
+// in model_test.go) don't by themselves prove a row silently drops off the
+// rendered window.
+func TestTea_ScrollKeys_PgdownScrollsBacklogOffScreenWhenContentFits(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	issues := make([]forge.Issue, 3)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+	tm := teaModel{m: m}
+
+	before := tm.View()
+	if !strings.Contains(before, "> #0") || !strings.Contains(before, "#1") || !strings.Contains(before, "#2") {
+		t.Fatalf("test setup: before pgdown, all 3 issues must be visible, got %q", before)
+	}
+	if strings.Contains(before, "more below") {
+		t.Fatalf("test setup: before pgdown, backlog must already fully fit on screen, got %q", before)
+	}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyPgDown})
+
+	after := tm.View()
+	if strings.Contains(after, "#0") {
+		t.Errorf("after pgdown, backlog still shows issue #0, want it scrolled off screen: %q", after)
+	}
+	if !strings.Contains(after, "#2") {
+		t.Errorf("after pgdown, backlog no longer shows issue #2, want it still visible: %q", after)
+	}
+}
+
+// TestTea_ScrollKeys_PgdownScrollsQueueOffScreenWhenContentFits mirrors
+// TestTea_ScrollKeys_PgdownScrollsBacklogOffScreenWhenContentFits for the
+// picks queue column (issue #1060).
+func TestTea_ScrollKeys_PgdownScrollsQueueOffScreenWhenContentFits(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, FocusToggleMsg{})
+	picks := make([]Pick, 3)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
+	}
+	m.Picks = picks
+	tm := teaModel{m: m}
+
+	before := tm.View()
+	if !strings.Contains(before, "> #0") || !strings.Contains(before, "#1") || !strings.Contains(before, "#2") {
+		t.Fatalf("test setup: before pgdown, all 3 picks must be visible, got %q", before)
+	}
+	if strings.Contains(before, "more below") {
+		t.Fatalf("test setup: before pgdown, queue must already fully fit on screen, got %q", before)
+	}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyPgDown})
+
+	after := tm.View()
+	if strings.Contains(after, "#0") {
+		t.Errorf("after pgdown, queue still shows pick #0, want it scrolled off screen: %q", after)
+	}
+	if !strings.Contains(after, "#2") {
+		t.Errorf("after pgdown, queue no longer shows pick #2, want it still visible: %q", after)
+	}
+}
+
 // TestTea_ScrollKeys_PageSizeTracksViewportHeight verifies the page jump's
 // size tracks the current viewport height rather than a value fixed at
 // startup: the same pgdown that lands on row 5 at Height 10 lands on a later
