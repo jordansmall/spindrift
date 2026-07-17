@@ -1700,3 +1700,28 @@ func TestVisibleItemCount_TruncatedWindow_HoldsBackOneRowForMoreBelow(t *testing
 		t.Errorf("visibleItemCount(0, 5, 50) = %d, want %d", got, want)
 	}
 }
+
+// TestFocusedBudget_ReturnsBacklogBudgetWhenBacklogFocused verifies
+// focusedBudget returns bodyColumnBudgets' backlog half while the backlog
+// column has focus (issue #1062).
+func TestFocusedBudget_ReturnsBacklogBudgetWhenBacklogFocused(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 10})
+
+	backlogBudget, _ := bodyColumnBudgets(m)
+	if got := focusedBudget(m); got != backlogBudget {
+		t.Errorf("focusedBudget = %d, want %d (backlog half)", got, backlogBudget)
+	}
+}
+
+// TestFocusedBudget_ReturnsQueueBudgetWhenQueueFocused verifies focusedBudget
+// returns bodyColumnBudgets' queue half instead once Tab has moved focus to
+// the work-queue column (issue #1062).
+func TestFocusedBudget_ReturnsQueueBudgetWhenQueueFocused(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 10})
+	m = Update(m, FocusToggleMsg{})
+
+	_, queueBudget := bodyColumnBudgets(m)
+	if got := focusedBudget(m); got != queueBudget {
+		t.Errorf("focusedBudget = %d, want %d (queue half)", got, queueBudget)
+	}
+}

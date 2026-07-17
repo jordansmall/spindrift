@@ -151,6 +151,37 @@ const (
 	FocusQueue
 )
 
+// focusedCursor returns a pointer to the focused column's cursor field —
+// &m.QueueCursor while the work queue has focus, &m.Cursor (the backlog's)
+// otherwise — so a caller mutates the right twin without re-testing Focus
+// itself (issue #1062).
+func focusedCursor(m *Model) *int {
+	if m.Focus == FocusQueue {
+		return &m.QueueCursor
+	}
+	return &m.Cursor
+}
+
+// focusedOffset returns a pointer to the focused column's scroll offset —
+// &m.QueueOffset while the work queue has focus, &m.BacklogOffset (the
+// backlog's) otherwise (issue #1062).
+func focusedOffset(m *Model) *int {
+	if m.Focus == FocusQueue {
+		return &m.QueueOffset
+	}
+	return &m.BacklogOffset
+}
+
+// focusedTotal returns the focused column's underlying row count —
+// len(m.Picks) for the work queue, len(m.Visible()) for the backlog (issue
+// #1062).
+func focusedTotal(m Model) int {
+	if m.Focus == FocusQueue {
+		return len(m.Picks)
+	}
+	return len(m.Visible())
+}
+
 // DrillInState is one Dispatch's loaded transcript: both the Driver-rendered
 // form and the byte-exact raw form, loaded together so ShowRaw toggles with
 // no further I/O.
@@ -274,11 +305,7 @@ func Update(m Model, msg Msg) Model {
 		// column whose content already fits on screen still scrolls to the
 		// last row instead of no-op'ing, hiding the earlier, already-visible
 		// rows (issue #1060; a viewport-aware fix, if wanted, is #1053).
-		if m.Focus == FocusQueue {
-			m.QueueOffset += msg.Delta
-		} else {
-			m.BacklogOffset += msg.Delta
-		}
+		*focusedOffset(&m) += msg.Delta
 	case TerminateRequestedMsg:
 		m.PendingTerminate = msg.Number
 	case TerminateConfirmedMsg:
@@ -295,11 +322,7 @@ func Update(m Model, msg Msg) Model {
 		m.RebuildErr = msg.RebuildErr
 		m.RebuildOutput = msg.RebuildOutput
 	case CursorMoveMsg:
-		if m.Focus == FocusQueue {
-			m.QueueCursor += msg.Delta
-		} else {
-			m.Cursor += msg.Delta
-		}
+		*focusedCursor(&m) += msg.Delta
 	case HelpToggleMsg:
 		m.ShowHelp = !m.ShowHelp
 	case FilterEditStartMsg:
@@ -332,12 +355,8 @@ func Update(m Model, msg Msg) Model {
 	m.BacklogOffset = clampCursor(m.BacklogOffset, len(m.Visible()))
 	m.QueueOffset = clampCursor(m.QueueOffset, len(m.Picks))
 	if _, ok := msg.(CursorMoveMsg); ok {
-		backlogBudget, queueBudget := bodyColumnBudgets(m)
-		if m.Focus == FocusQueue {
-			m.QueueOffset = followViewport(m.QueueOffset, m.QueueCursor, len(m.Picks), columnItemBudget(queueBudget))
-		} else {
-			m.BacklogOffset = followViewport(m.BacklogOffset, m.Cursor, len(m.Visible()), columnItemBudget(backlogBudget))
-		}
+		offset := focusedOffset(&m)
+		*offset = followViewport(*offset, *focusedCursor(&m), focusedTotal(m), columnItemBudget(focusedBudget(m)))
 	}
 	m.Width = clampSize(m.Width)
 	m.Height = clampSize(m.Height)

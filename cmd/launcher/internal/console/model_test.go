@@ -842,3 +842,88 @@ func TestUpdate_PaneModeCycleMsg_NoOpWhenNoDrillInOpen(t *testing.T) {
 		t.Errorf("PaneMode = %v, want PaneDocked (unchanged, no drill-in open)", m.PaneMode)
 	}
 }
+
+// TestFocusedCursor_ReturnsBacklogCursorWhenBacklogFocused verifies
+// focusedCursor points at Model.Cursor when the backlog column has focus —
+// the zero-value Focus, matching FocusBacklog (issue #1062).
+func TestFocusedCursor_ReturnsBacklogCursorWhenBacklogFocused(t *testing.T) {
+	m := NewModel()
+	m.Cursor = 3
+	m.QueueCursor = 7
+
+	got := focusedCursor(&m)
+	if got != &m.Cursor {
+		t.Errorf("focusedCursor = &%d, want &m.Cursor (%d)", *got, m.Cursor)
+	}
+}
+
+// TestFocusedCursor_ReturnsQueueCursorWhenQueueFocused verifies focusedCursor
+// points at Model.QueueCursor instead once Tab has moved focus to the
+// work-queue column (issue #1062).
+func TestFocusedCursor_ReturnsQueueCursorWhenQueueFocused(t *testing.T) {
+	m := NewModel()
+	m.Focus = FocusQueue
+	m.Cursor = 3
+	m.QueueCursor = 7
+
+	got := focusedCursor(&m)
+	if got != &m.QueueCursor {
+		t.Errorf("focusedCursor = &%d, want &m.QueueCursor (%d)", *got, m.QueueCursor)
+	}
+}
+
+// TestFocusedOffset_ReturnsBacklogOffsetWhenBacklogFocused verifies
+// focusedOffset points at Model.BacklogOffset when the backlog column has
+// focus (issue #1062).
+func TestFocusedOffset_ReturnsBacklogOffsetWhenBacklogFocused(t *testing.T) {
+	m := NewModel()
+	m.BacklogOffset = 3
+	m.QueueOffset = 7
+
+	got := focusedOffset(&m)
+	if got != &m.BacklogOffset {
+		t.Errorf("focusedOffset = &%d, want &m.BacklogOffset (%d)", *got, m.BacklogOffset)
+	}
+}
+
+// TestFocusedOffset_ReturnsQueueOffsetWhenQueueFocused verifies focusedOffset
+// points at Model.QueueOffset instead once Tab has moved focus to the
+// work-queue column (issue #1062).
+func TestFocusedOffset_ReturnsQueueOffsetWhenQueueFocused(t *testing.T) {
+	m := NewModel()
+	m.Focus = FocusQueue
+	m.BacklogOffset = 3
+	m.QueueOffset = 7
+
+	got := focusedOffset(&m)
+	if got != &m.QueueOffset {
+		t.Errorf("focusedOffset = &%d, want &m.QueueOffset (%d)", *got, m.QueueOffset)
+	}
+}
+
+// TestFocusedTotal_ReturnsVisibleCountWhenBacklogFocused verifies
+// focusedTotal returns len(m.Visible()) while the backlog column has focus
+// (issue #1062).
+func TestFocusedTotal_ReturnsVisibleCountWhenBacklogFocused(t *testing.T) {
+	m := NewModel()
+	m.All = []forge.Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
+	m.Picks = []Pick{{Number: "9", State: PickQueued}}
+
+	if got, want := focusedTotal(m), 3; got != want {
+		t.Errorf("focusedTotal = %d, want %d (len(Visible()))", got, want)
+	}
+}
+
+// TestFocusedTotal_ReturnsPicksCountWhenQueueFocused verifies focusedTotal
+// returns len(m.Picks) instead once Tab has moved focus to the work-queue
+// column (issue #1062).
+func TestFocusedTotal_ReturnsPicksCountWhenQueueFocused(t *testing.T) {
+	m := NewModel()
+	m.Focus = FocusQueue
+	m.All = []forge.Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
+	m.Picks = []Pick{{Number: "9", State: PickQueued}}
+
+	if got, want := focusedTotal(m), 1; got != want {
+		t.Errorf("focusedTotal = %d, want %d (len(Picks))", got, want)
+	}
+}
