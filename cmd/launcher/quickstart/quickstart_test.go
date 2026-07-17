@@ -439,7 +439,7 @@ func TestRunQuickstart_AmbientGHToken_SkipsPrompt(t *testing.T) {
 		"claude-oauth-faketoken", // CLAUDE_CODE_OAUTH_TOKEN
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{env: map[string]string{"GH_TOKEN": "ghp_ambienttoken"}}
+	env := fakeEnvironment{env: map[string]string{"GH_TOKEN": "ghp_ambienttoken"}, runtimes: map[string]bool{"podman": true}}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestRunQuickstart_FineGrainedToken_PrintsRequiredPermissions(t *testing.T) 
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, fakeEnvironment{}, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+	if err := runQuickstart(dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -499,7 +499,7 @@ func TestRunQuickstart_ClassicTokenNarrowScope_AcceptedWithoutGate(t *testing.T)
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{tokenScopes: []string{"read:user"}}
+	env := fakeEnvironment{tokenScopes: []string{"read:user"}, runtimes: map[string]bool{"podman": true}}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -532,7 +532,7 @@ func TestRunQuickstart_ClassicTokenBroadScope_AcceptWritesToken(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{tokenScopes: []string{"repo", "gist"}}
+	env := fakeEnvironment{tokenScopes: []string{"repo", "gist"}, runtimes: map[string]bool{"podman": true}}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -562,7 +562,7 @@ func TestRunQuickstart_ClassicTokenBroadScope_DeclineAbortsWithoutWriting(t *tes
 		"no", // declines the ACCEPT gate
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{tokenScopes: []string{"repo"}}
+	env := fakeEnvironment{tokenScopes: []string{"repo"}, runtimes: map[string]bool{"podman": true}}
 	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected declining the ACCEPT gate to abort, got nil error")
@@ -585,7 +585,7 @@ func TestRunQuickstart_NoAmbientToken_PrintsGuidedPATInstructions(t *testing.T) 
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{tokenScopes: []string{"read:user"}}
+	env := fakeEnvironment{tokenScopes: []string{"read:user"}, runtimes: map[string]bool{"podman": true}}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -610,7 +610,7 @@ func TestRunQuickstart_BlankTokenInput_FallsBackToGHAuthToken(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{ghAuthToken: "gho_fallbacktoken", tokenScopes: []string{"read:user"}}
+	env := fakeEnvironment{ghAuthToken: "gho_fallbacktoken", tokenScopes: []string{"read:user"}, runtimes: map[string]bool{"podman": true}}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -639,7 +639,7 @@ func TestRunQuickstart_GHAuthTokenFallbackFails_AbortsWithoutWriting(t *testing.
 		"", // blank GitHub token — falls back to `gh auth token`, which fails below
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{ghAuthTokenErr: errors.New("gh: not logged in")}
+	env := fakeEnvironment{ghAuthTokenErr: errors.New("gh: not logged in"), runtimes: map[string]bool{"podman": true}}
 	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected a failed gh auth token fallback to abort, got nil error")
@@ -661,7 +661,7 @@ func TestRunQuickstart_TokenScopesReadError_AbortsWithoutWriting(t *testing.T) {
 		"ghp_broadtoken",
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{tokenScopesErr: errors.New("gh api -i user: exit status 1")}
+	env := fakeEnvironment{tokenScopesErr: errors.New("gh api -i user: exit status 1"), runtimes: map[string]bool{"podman": true}}
 	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected a failed scope read to abort, got nil error")
@@ -684,7 +684,7 @@ func TestRunQuickstart_UnknownTokenPrefix_AcceptedWithoutAudit(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, fakeEnvironment{}, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+	if err := runQuickstart(dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -717,6 +717,7 @@ func TestRunQuickstart_AmbientTokenBroadScope_StillRequiresACCEPT(t *testing.T) 
 	env := fakeEnvironment{
 		env:         map[string]string{"GH_TOKEN": "ghp_ambientbroadtoken"},
 		tokenScopes: []string{"repo"},
+		runtimes:    map[string]bool{"podman": true},
 	}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
@@ -746,7 +747,7 @@ func TestRunQuickstart_GHAuthTokenEmpty_AbortsWithoutWriting(t *testing.T) {
 		"", // blank GitHub token — falls back to `gh auth token`, which returns ""
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{ghAuthToken: ""}
+	env := fakeEnvironment{ghAuthToken: "", runtimes: map[string]bool{"podman": true}}
 	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected an empty gh auth token result to abort, got nil error")
