@@ -785,6 +785,25 @@ func TestRenderBacklogColumn_NilBudgetNeverTruncates(t *testing.T) {
 	}
 }
 
+// TestRenderQueueColumn_NilBudgetNeverTruncates is renderBacklogColumn's nil
+// budget test, mirrored for the queue column (issue #1039).
+func TestRenderQueueColumn_NilBudgetNeverTruncates(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	picks := make([]Pick, 500)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
+	}
+	m.Picks = picks
+
+	out := renderQueueColumn(m, nil)
+	if !strings.Contains(out, "pick 499") {
+		t.Errorf("renderQueueColumn(m, nil) = %q, want the last of 500 rows present, unwindowed", out)
+	}
+	if strings.Contains(out, "more below") {
+		t.Errorf("renderQueueColumn(m, nil) = %q, want no truncation affordance for a nil budget", out)
+	}
+}
+
 // TestView_Focus_MarksFocusedColumnVisually verifies the focused column's
 // header carries a visible marker the other column's header doesn't, and
 // that Tab moves the marker — the operator's only cue for which column
