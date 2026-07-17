@@ -482,7 +482,7 @@ func TestTea_EnterKey_OnFocusedQueue_ShowsNoticeOnQueuedRow(t *testing.T) {
 	waitForOutput(t, tm, "picks [focus]")
 
 	sendKey(tm, "enter")
-	waitForOutput(t, tm, "no transcript yet")
+	waitForOutput(t, tm, "no transcript to show")
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
@@ -505,7 +505,7 @@ func TestTea_EnterKey_OnFocusedQueue_NoticeClearsOnNextKey(t *testing.T) {
 	waitForOutput(t, tm, "picks [focus]")
 
 	sendKey(tm, "enter")
-	waitForOutput(t, tm, "no transcript yet")
+	waitForOutput(t, tm, "no transcript to show")
 
 	sendKey(tm, "j")
 	sendKey(tm, "q")
