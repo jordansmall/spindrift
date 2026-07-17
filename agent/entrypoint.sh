@@ -284,6 +284,13 @@ _subst() {
   env "${_assign[@]}" envsubst "$_vars" <"$f"
 }
 
+# _is_research_kind reports (via exit status) whether this dispatch is the
+# advise-only research kind (ADR 0022, issue #640) rather than work/fix; the
+# default is work, so an unset DISPATCH_KIND is never mistaken for research.
+_is_research_kind() {
+  [ "${DISPATCH_KIND:-work}" = "research" ]
+}
+
 # A SPINDRIFT_PROMPT_DIR mount replaces the whole prompt dir, so a rendered
 # prompt that dropped a shared block (issue #419, extended to COMMS/CHECK by
 # #455) never gets the build-time injection; append the canonical block here,
@@ -442,7 +449,7 @@ phase_prompt_assembly() {
   # red on an already-open PR, ADR: selfHeal/runFix in cmd/launcher). A warm fix
   # pass already has the branch checked out and prior work in place, so it runs
   # a dedicated fix-prompt instead of the cold issue-prompt a fresh run uses.
-  if [ "${DISPATCH_KIND:-work}" = "research" ]; then
+  if _is_research_kind; then
     prompt="$(_subst "${PROMPTS_DIR}/research-prompt.md")"
     _driver_session_mode="initial"
   elif [ -n "${FIX_PASS:-}" ] && [ "${FIX_PASS}" -gt 0 ]; then
@@ -456,7 +463,7 @@ phase_prompt_assembly() {
   # fix-prompt.md's fix-specific-preamble-only default) ends up with them in
   # the same order the issue prompt carries them. The research prompt carries
   # none of these work-only blocks -- it gets its own outcome contract instead.
-  if [ "${DISPATCH_KIND:-work}" = "research" ]; then
+  if _is_research_kind; then
     _inject_shared_block "$RESEARCH_OUTCOME_CONTRACT_MARKER" "$RESEARCH_OUTCOME_CONTRACT_FILE"
   else
     _inject_shared_block "$COMMS_CONTRACT_MARKER" "$COMMS_CONTRACT_FILE"
@@ -581,7 +588,7 @@ emit_outcome_backstop() {
   echo "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop"
   # A research dispatch never cuts a branch (ADR 0022) -- there is nothing to
   # push best-effort, and no landing reference beyond "none".
-  if [ "${DISPATCH_KIND:-work}" = "research" ]; then
+  if _is_research_kind; then
     echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=none status=blocked note=${note}"
     return
   fi
@@ -607,7 +614,7 @@ main() {
   clone_repo
   # A research dispatch (ADR 0022, issue #640) explores the fresh clone but
   # never lands code: no branch to cut, adopt, or rebase.
-  if [ "${DISPATCH_KIND:-work}" != "research" ]; then
+  if ! _is_research_kind; then
     phase_branch_recovery
     phase_prework_rebase
   fi
@@ -616,7 +623,7 @@ main() {
   phase_prefetch
   phase_prompt_assembly
 
-  if [ "${DISPATCH_KIND:-work}" = "research" ]; then
+  if _is_research_kind; then
     echo "==> claude researching issue #$ISSUE_NUMBER"
   else
     echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
