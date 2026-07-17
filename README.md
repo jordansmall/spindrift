@@ -40,7 +40,15 @@ Run headless [Claude Code](https://claude.com/claude-code) agents in
 
 ## Quick start
 
-Scaffold a Consumer flake from the bundled template:
+Try the CLI with no clone and no dev shell — `nix run` builds it from this
+flake's own pinned toolchain and runs it:
+
+```sh
+nix run github:jordansmall/spindrift -- --help
+nix run github:jordansmall/spindrift -- --version
+```
+
+Then scaffold a Consumer flake from the bundled template:
 
 ```sh
 mkdir my-agents && cd my-agents
@@ -57,10 +65,28 @@ a commented `settings.repository.repoSlug` you uncomment and fill in), a
 $EDITOR flake.nix                        # set settings.repository.repoSlug; tune toolchain/packages
 $EDITOR prompts/issue-prompt.md          # tune the agent's workflow
 cp harness.env.example harness.env       # fill in GH_TOKEN, Claude auth (secrets only)
+
+nix run github:jordansmall/spindrift -- build      # realize the image, then load it  (slow first time)
+nix run github:jordansmall/spindrift -- dispatch   # one container per ready-for-agent issue
+nix run github:jordansmall/spindrift -- research   # advise-only: one container per agent-research issue
+```
+
+Every verb is a `nix run github:jordansmall/spindrift -- <verb>` away: the
+binary comes from this flake, while the Consumer flake, `harness.env`, and
+per-issue `logs/` are read from `$PWD`. No dev shell required — and because the
+unpinned `github:` ref tracks `main`, each `nix run` picks up the latest merged
+launcher (past nix's ~1h fetch cache, or force it with `--refresh`). Pin
+spindrift in your own `flake.lock` instead (see [Adding spindrift to your
+flake](#adding-spindrift-to-your-flake)) when you want a fixed, reproducible
+version rather than the tip of `main`.
+
+Prefer a persistent shell with `spindrift` on `PATH` (plus tab-completion and
+the `dogfood-stop` alias)? `nix develop` puts it there:
+
+```sh
 nix develop                              # enter the dev shell — puts spindrift on PATH
-spindrift build                          # realize the image, then load it  (slow first time)
-spindrift dispatch                       # launch one container per ready-for-agent issue
-spindrift research                       # advise-only: launch one container per agent-research issue
+spindrift build                          # the same verbs, now as a bare command
+spindrift dispatch
 ```
 
 Run commands **from your Consumer flake's directory**: `spindrift build` reads the
