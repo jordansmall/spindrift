@@ -177,6 +177,7 @@ setup() {
   [ -n "$check" ]
   grep -qi 'vanished' <<<"$check"
   grep -qi 'exit marker' <<<"$check"
+  grep -qi 'bound the wait' <<<"$check"
 }
 
 @test "CHECK section tells the agent to git add new files before nix build" {
