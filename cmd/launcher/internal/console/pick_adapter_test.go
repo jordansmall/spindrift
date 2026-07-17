@@ -2,6 +2,7 @@ package console
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -214,8 +215,8 @@ func TestPickIssue_InProgressListAtPageLimit_TargetMissing_FailsSafe(t *testing.
 	if !ok {
 		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
 	}
-	if dissolved.Number != "42" || dissolved.Reason == "" {
-		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", dissolved)
+	if dissolved.Number != "42" || !strings.Contains(dissolved.Reason, "truncated") {
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with a truncation reason", dissolved)
 	}
 	if len(f.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionStateCalls = %+v, want none — a page-limited list must never allow a pick through", f.TransitionStateCalls)
@@ -239,8 +240,8 @@ func TestPickIssue_CompleteListAtPageLimit_TargetMissing_FailsSafe(t *testing.T)
 	if !ok {
 		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
 	}
-	if dissolved.Number != "42" || dissolved.Reason == "" {
-		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", dissolved)
+	if dissolved.Number != "42" || !strings.Contains(dissolved.Reason, "truncated") {
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with a truncation reason", dissolved)
 	}
 	if len(f.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionStateCalls = %+v, want none — a page-limited list must never allow a pick through", f.TransitionStateCalls)
