@@ -1,6 +1,7 @@
 package console
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -293,6 +294,133 @@ func setupForgeQueueFactory(t *testing.T) (f *forge.Fake, dir string, factory *d
 	fresh = func() (bool, bool, string) { return false, true, "" }
 
 	return f, dir, factory, qs, discover, fresh
+}
+
+// TestQueue_Discover_AlreadyInProgressPick_NeverLaunches drives PickIssue's
+// rejection of an already-InProgress issue all the way through
+// teaModel.landPick's message wiring and Queue.Discover/RunContinuous,
+// proving the "only one box launches" guarantee (#707) end to end rather
+// than through PickIssue's own return value and TransitionStateCalls proxy
+// alone (pick_adapter_test.go's
+// TestPickIssue_AlreadyInProgress_ReturnsDissolvedMsg_NoTransition). A
+// PickIssue-rejected issue lands PickDissolved, never PickQueued/PickHeld,
+// so claimable() (queue.go) structurally excludes it from Discover's claim
+// step — there is no state-check inside Discover itself for this case; this
+// test proves the wiring around it, not a branch that doesn't exist (#985).
+func TestQueue_Discover_AlreadyInProgressPick_NeverLaunches(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
+
+	q := NewQueue()
+	launch := &Launcher{Queue: q}
+
+	msg := PickIssue(f, "42", "fix the thing", KindWork)
+	if _, ok := msg.(PickDissolvedMsg); !ok {
+		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
+	}
+	teaModel{launch: launch}.landPick(msg)
+
+	if got := q.Snapshot(); len(got) != 1 || got[0].State != PickDissolved {
+		t.Fatalf("queue snapshot = %+v, want one PickDissolved row", got)
+	}
+
+	fr := runner.NewFake()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	inner := settle.NewFake()
+	qs := queueSettler{Settler: inner, q: q}
+
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) { return q.Discover(f, f, "") }
+	fresh := func() (bool, bool, string) { return false, true, "" }
+
+	// The dissolved pick's issue is still open on the tracker but
+	// claimable() (queue.go) excludes it, so RunContinuous finds nothing to
+	// dispatch and returns ErrOpenNoneDispatchable rather than nil — the
+	// same "open issues exist but none are dispatchable" signal any other
+	// all-blocked batch produces (waves/continuous.go), not a launch error.
+	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, f, f, dir, factory, qs, discover, fresh)
+	if !errors.Is(err, waves.ErrOpenNoneDispatchable) {
+		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
+	}
+
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls = %+v, want none — a dissolved pick must never launch", fr.RunCalls)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none — Discover must never claim a dissolved pick", f.TransitionStateCalls)
+	}
+	if got := q.Snapshot()[0].State; got != PickDissolved {
+		t.Errorf("pick state = %v, want dissolved (never claimed)", got)
+	}
+}
+
+// TestQueue_Discover_AlreadyCompletePick_NeverLaunches mirrors
+// TestQueue_Discover_AlreadyInProgressPick_NeverLaunches for the other
+// terminal state a stray pick must never relabel out of (#707, #985).
+func TestQueue_Discover_AlreadyCompletePick_NeverLaunches(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", Complete: "agent-complete"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-complete"}})
+
+	q := NewQueue()
+	launch := &Launcher{Queue: q}
+
+	msg := PickIssue(f, "42", "fix the thing", KindWork)
+	if _, ok := msg.(PickDissolvedMsg); !ok {
+		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
+	}
+	teaModel{launch: launch}.landPick(msg)
+
+	if got := q.Snapshot(); len(got) != 1 || got[0].State != PickDissolved {
+		t.Fatalf("queue snapshot = %+v, want one PickDissolved row", got)
+	}
+
+	fr := runner.NewFake()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	inner := settle.NewFake()
+	qs := queueSettler{Settler: inner, q: q}
+
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) { return q.Discover(f, f, "") }
+	fresh := func() (bool, bool, string) { return false, true, "" }
+
+	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, f, f, dir, factory, qs, discover, fresh)
+	if !errors.Is(err, waves.ErrOpenNoneDispatchable) {
+		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
+	}
+
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls = %+v, want none — a dissolved pick must never launch", fr.RunCalls)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none — Discover must never claim a dissolved pick", f.TransitionStateCalls)
+	}
+	if got := q.Snapshot()[0].State; got != PickDissolved {
+		t.Errorf("pick state = %v, want dissolved (never claimed)", got)
+	}
 }
 
 // waitForPickStates polls q until every numbered pick in want holds the
