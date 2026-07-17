@@ -166,7 +166,13 @@ type DrillInState struct {
 	// "\n". Update recomputes it only when the content or ShowRaw changes
 	// (DrillInMsg, DrillInToggleMsg), so clampDrillInOffset and the render
 	// functions never re-split the full transcript on every keystroke (issue
-	// #722).
+	// #722). Measured on a 10MB+ transcript
+	// (BenchmarkUpdate_DrillInScroll_LargeTranscript, issue #1016): a scroll
+	// keystroke went from 1.59ms/op, 2.5MB/op, 1 alloc/op (pre-cache,
+	// re-splitting the transcript every call) to 51.5ns/op, 0B/op, 0
+	// allocs/op (cached). Reproduce with `go test ./internal/console/...
+	// -run '^$' -bench BenchmarkUpdate_DrillInScroll -benchmem` from
+	// cmd/launcher.
 	Lines []string
 }
 
