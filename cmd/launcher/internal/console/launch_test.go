@@ -80,37 +80,12 @@ func TestRunContinuous_DrainsScriptedQueue_LaunchesOneDispatchEndToEnd(t *testin
 // Queue.Discover (queue.go) already performed that transition when it
 // claimed the pick. Only one TransitionState call should ever happen.
 func TestRunContinuous_ConsoleConfig_SkipsRedundantClaim(t *testing.T) {
-	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
-
-	q := NewQueue()
-	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
-
-	fr := runner.NewFake()
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	drv, err := driver.New("")
-	if err != nil {
-		t.Fatalf("driver.New: %v", err)
-	}
-	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
-	if err != nil {
-		t.Fatalf("dispatch.NewFactory: %v", err)
-	}
-	t.Cleanup(factory.Cleanup)
-
-	inner := settle.NewFake()
-	qs := queueSettler{Settler: inner, q: q}
-
-	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) { return q.Discover(f, f, "") }
-	fresh := func() (bool, bool, string) { return false, true, "" }
+	f, dir, factory, qs, discover, fresh := setupForgeQueueFactory(t)
 
 	// Same zero-value Label/InProgressLabel/OverlapGate as launcher.go's
 	// own waves.Config construction — MaxParallel stands in for the
 	// Limiter that field would otherwise build internally.
-	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, f, f, dir, factory, qs, discover, fresh)
+	err := waves.RunContinuous(waves.Config{MaxParallel: 1}, f, f, dir, factory, qs, discover, fresh)
 	if err != nil {
 		t.Fatalf("RunContinuous: %v", err)
 	}
@@ -127,34 +102,9 @@ func TestRunContinuous_ConsoleConfig_SkipsRedundantClaim(t *testing.T) {
 // second Dispatchable->InProgress transition. This is why the Console's
 // drain-path Config must keep the two equal (both left zero-value).
 func TestRunContinuous_DivergentLabels_DoubleClaims(t *testing.T) {
-	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+	f, dir, factory, qs, discover, fresh := setupForgeQueueFactory(t)
 
-	q := NewQueue()
-	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
-
-	fr := runner.NewFake()
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	drv, err := driver.New("")
-	if err != nil {
-		t.Fatalf("driver.New: %v", err)
-	}
-	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
-	if err != nil {
-		t.Fatalf("dispatch.NewFactory: %v", err)
-	}
-	t.Cleanup(factory.Cleanup)
-
-	inner := settle.NewFake()
-	qs := queueSettler{Settler: inner, q: q}
-
-	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) { return q.Discover(f, f, "") }
-	fresh := func() (bool, bool, string) { return false, true, "" }
-
-	err = waves.RunContinuous(waves.Config{MaxParallel: 1, Label: "ready-for-agent", InProgressLabel: "agent-in-progress"}, f, f, dir, factory, qs, discover, fresh)
+	err := waves.RunContinuous(waves.Config{MaxParallel: 1, Label: "ready-for-agent", InProgressLabel: "agent-in-progress"}, f, f, dir, factory, qs, discover, fresh)
 	if err != nil {
 		t.Fatalf("RunContinuous: %v", err)
 	}
@@ -305,6 +255,44 @@ func TestQueue_Discover_HeldPickLaunchesOnceBlockerClears(t *testing.T) {
 	if got["41"] != PickSettled || got["42"] != PickSettled {
 		t.Errorf("pick states = %+v, want both settled", got)
 	}
+}
+
+// setupForgeQueueFactory wires the fake forge, a single-pick queue, and a
+// dispatch factory shared by TestRunContinuous_ConsoleConfig_SkipsRedundantClaim
+// and TestRunContinuous_DivergentLabels_DoubleClaims (#706, #980): both drive
+// waves.RunContinuous over the same queued #42 pick and differ only in the
+// waves.Config they pass and the assertion on f.TransitionStateCalls.
+func setupForgeQueueFactory(t *testing.T) (f *forge.Fake, dir string, factory *dispatch.Factory, qs queueSettler, discover func() ([]waves.Issue, map[string][]string, waves.Sources, error), fresh func() (bool, bool, string)) {
+	t.Helper()
+
+	f = forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+
+	fr := runner.NewFake()
+	dir = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err = dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	inner := settle.NewFake()
+	qs = queueSettler{Settler: inner, q: q}
+
+	discover = func() ([]waves.Issue, map[string][]string, waves.Sources, error) { return q.Discover(f, f, "") }
+	fresh = func() (bool, bool, string) { return false, true, "" }
+
+	return f, dir, factory, qs, discover, fresh
 }
 
 // waitForPickStates polls q until every numbered pick in want holds the
