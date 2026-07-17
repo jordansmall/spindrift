@@ -212,8 +212,8 @@ func TestTea_FilterMode_EscCancelRestoresPriorFilter(t *testing.T) {
 
 // TestTea_CursorKeys_MoveHighlightedRow verifies j/down and the up arrow
 // move the cursor marker across the visible backlog (issue #784). "k" is
-// bound to Terminate (ADR 0024, issue #785), not cursor-up — only the arrow
-// key drives upward movement.
+// bound to Terminate (ADR 0024, issue #785), not cursor-up, so "i" is the
+// single-letter cursor-up partner for "j" instead (issue #838).
 func TestTea_CursorKeys_MoveHighlightedRow(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
@@ -231,7 +231,7 @@ func TestTea_CursorKeys_MoveHighlightedRow(t *testing.T) {
 	sendKey(tm, "down")
 	waitForOutput(t, tm, "> #2")
 
-	sendKey(tm, "up")
+	sendKey(tm, "i")
 	waitForOutput(t, tm, "> #1")
 
 	sendKey(tm, "q")

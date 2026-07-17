@@ -364,7 +364,7 @@ func renderHelp() string {
 	return strings.Join([]string{
 		"help",
 		"  j / down    move cursor down",
-		"  up          move cursor up",
+		"  i / up      move cursor up",
 		"  pgup/pgdown  scroll the backlog/queue viewport without moving the",
 		"              cursor (whichever column has focus)",
 		"  tab         switch focus between the backlog and work-queue columns",
