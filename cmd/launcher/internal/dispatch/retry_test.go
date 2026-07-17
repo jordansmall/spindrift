@@ -8,13 +8,17 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
+// noOpenPR is the default OpenPRForIssue: no PR exists yet, so a zero-exit
+// transient classification proceeds to retry rather than short-circuiting.
+func noOpenPR(string) (bool, error) { return false, nil }
+
 // retryConfig returns a Config with retry knobs set explicitly.
 func retryConfig(max, backoffSecs, holdJitter int) Config {
 	return Config{
 		TransientRetryMax:    max,
 		TransientBackoffSecs: backoffSecs,
 		HoldJitterSecs:       holdJitter,
-		OpenPRForIssue:       func(string) (bool, error) { return false, nil },
+		OpenPRForIssue:       noOpenPR,
 	}
 }
 

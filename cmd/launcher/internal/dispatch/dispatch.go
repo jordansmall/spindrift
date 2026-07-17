@@ -56,10 +56,11 @@ type Config struct {
 	// issue's agent branch. Consulted before a zero-exit, no-outcome box is
 	// held-and-retried on a transient classification (issue #565), so a box
 	// whose work already landed a PR is never re-run -- the same guard
-	// settle's status=missing path applies. Nil when the Code Forge has no
-	// PR lookup (push-only git remote); a zero-exit transient retry then
-	// proceeds unguarded, matching settle's own PRForge-unavailable
-	// fallback.
+	// settle's status=missing path applies. Always set by the sole
+	// production constructor (dispatchConfig); a push-only Code Forge with
+	// no PR lookup is handled inside that closure (ResolveOpenPR resolves
+	// to Found: false there), not by leaving this field nil -- callers may
+	// rely on it being non-nil.
 	OpenPRForIssue func(number string) (bool, error)
 }
 
