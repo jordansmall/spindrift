@@ -449,6 +449,9 @@ func TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge(t *testing.T) {
 	c.MaxRebaseAttempts = 2
 	fc := forge.NewFake()
 	fc.SetNeedsUpdate(testPR, true)
+	// preflightStaleBase makes 1 initial Rebase call plus up to
+	// MaxRebaseAttempts push-retries — 3 calls total for MaxRebaseAttempts=2
+	// above. Every one must return the transient error to exhaust the budget.
 	fc.RebaseErrs = []error{
 		forge.ErrTransientPushFailure,
 		forge.ErrTransientPushFailure,
