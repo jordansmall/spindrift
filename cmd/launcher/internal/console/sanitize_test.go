@@ -14,6 +14,18 @@ func TestSanitizeControlSequences_StripsOSCAndKeepsUTF8(t *testing.T) {
 	}
 }
 
+// TestSanitizeControlSequences_LeaksNonCSIOSCBodyButStripsESC documents the
+// deliberate scope noted at sanitize.go's ESC case (#1018): a DCS
+// introducer's body and terminator framing leak as visible text, but every
+// raw ESC byte is still stripped so no sequence reaches the terminal.
+func TestSanitizeControlSequences_LeaksNonCSIOSCBodyButStripsESC(t *testing.T) {
+	in := "before\x1bPmalicious\x1b\\after"
+	want := "beforePmalicious\\after"
+	if got := SanitizeControlSequences(in); got != want {
+		t.Errorf("SanitizeControlSequences(%q) = %q, want %q", in, got, want)
+	}
+}
+
 // TestSanitizeControlSequences_PreservesNewlineAndTab verifies structural
 // whitespace survives sanitization even though it is technically a C0
 // control character, so rendered transcript formatting is unaffected.
