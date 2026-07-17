@@ -86,6 +86,9 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Write
 			return fmt.Errorf("run claude setup-token: %w", err)
 		}
 		claudeOAuthToken = prompt("Paste the CLAUDE_CODE_OAUTH_TOKEN printed by claude setup-token")
+		if claudeOAuthToken == "" {
+			return fmt.Errorf("claude setup-token: no token pasted")
+		}
 	} else {
 		anthropicAPIKey = prompt("Anthropic API key (ANTHROPIC_API_KEY)")
 	}

@@ -216,6 +216,33 @@ func TestRunQuickstart_DeclineSetupToken_PromptsForAPIKey(t *testing.T) {
 	}
 }
 
+func TestRunQuickstart_AcceptSetupToken_EmptyPaste_Errors(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+		"y", // accept claude setup-token
+		"",  // empty paste
+	}, "\n") + "\n")
+	runner := &fakeCommandRunner{}
+
+	err := runQuickstart(dir, fakeEnvironment{}, runner, &out, stdin, true, false)
+	if err == nil {
+		t.Fatal("expected an error for an empty pasted token, got nil")
+	}
+	if !strings.Contains(err.Error(), "setup-token") {
+		t.Errorf("expected error to mention setup-token, got: %q", err.Error())
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "harness.env")); !os.IsNotExist(statErr) {
+		t.Errorf("expected no harness.env to be written, stat error: %v", statErr)
+	}
+}
+
 func TestRunQuickstart_AcceptSetupToken_RunsItAndPastesToken(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -301,6 +328,38 @@ func TestRunQuickstart_AmbientClaudeOAuthToken_ReusedWithoutPrompt(t *testing.T)
 	}
 	if len(runner.calls) != 0 {
 		t.Errorf("expected no subprocess calls when an ambient token is reused, got: %v", runner.calls)
+	}
+}
+
+func TestRunQuickstart_BothAmbientCredentials_OAuthTokenTakesPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{
+		"CLAUDE_CODE_OAUTH_TOKEN": "ambient-oauth-token",
+		"ANTHROPIC_API_KEY":       "ambient-api-key",
+	}}
+	runner := &fakeCommandRunner{}
+
+	if err := runQuickstart(dir, env, runner, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "CLAUDE_CODE_OAUTH_TOKEN=ambient-oauth-token") {
+		t.Errorf("expected harness.env to reuse the ambient CLAUDE_CODE_OAUTH_TOKEN, got:\n%s", harnessEnv)
+	}
+	if strings.Contains(string(harnessEnv), "ambient-api-key") {
+		t.Errorf("expected the ambient ANTHROPIC_API_KEY to be ignored when an OAuth token is present, got:\n%s", harnessEnv)
 	}
 }
 
