@@ -176,3 +176,26 @@ func TestWaveOverlapCheck_TouchesOfErrorFallsBackToPRFilesOnly(t *testing.T) {
 		t.Errorf("expected a diagnostic naming issue #20's failed TouchesOf fetch, got %q", out)
 	}
 }
+
+// TestWaveOverlapCheck_TouchesOfErrorNoOpenPRDoesNotClaimFallback verifies
+// that when it.TouchesOf fails for an in-progress issue with no open PR yet,
+// the diagnostic does not claim a PR-files fallback that doesn't exist —
+// there is no PR to fall back to, so the entry ends up with an empty
+// touch-set instead.
+func TestWaveOverlapCheck_TouchesOfErrorNoOpenPRDoesNotClaimFallback(t *testing.T) {
+	c := baseConfig()
+	c.OverlapGate = "defer"
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- internal/pkgx/foo.go", Labels: []string{"ready-for-agent"}})
+	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- docs/reference.md", State: "OPEN", Labels: []string{"agent-in-progress"}})
+	fc.TouchesOfErr = map[string]error{"20": fmt.Errorf("boom")}
+	// deliberately no fc.SetPR("agent/issue-20", ...) — #20 has no open PR
+
+	out := testutil.CaptureStdout(t, func() {
+		waveOverlapCheck(c, fc, fc)
+	})
+	if strings.Contains(out, "falling back to its open PR's changed files") {
+		t.Errorf("diagnostic falsely claims a PR-files fallback with no open PR: %q", out)
+	}
+}
