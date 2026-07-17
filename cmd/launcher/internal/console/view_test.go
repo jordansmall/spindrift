@@ -1149,3 +1149,35 @@ func TestView_Queue_SanitizesTitleAndReasonControlSequences(t *testing.T) {
 		t.Errorf("View() = %q, want the surrounding reason text intact after stripping escapes", out)
 	}
 }
+
+// TestSplitLeftWidth_ConsistentAcrossBodyAndDockedBody verifies renderBody
+// and renderDockedBody compute the same left-column width for the same
+// effective body width and backlog content — both now delegate to the one
+// splitLeftWidth helper instead of each re-deriving the leftColumnFraction
+// clamp, so a future change to the clamp can't drift out of sync between the
+// two layouts (issue #1001 AC3/AC4).
+func TestSplitLeftWidth_ConsistentAcrossBodyAndDockedBody(t *testing.T) {
+	backlog := "a very long backlog line that would blow past the fraction cap"
+	width := 40
+
+	got := splitLeftWidth(width, backlog)
+	want := int(float64(width) * leftColumnFraction)
+	if got != want {
+		t.Errorf("splitLeftWidth(%d, %q) = %d, want %d (clamped to leftColumnFraction)", width, backlog, got, want)
+	}
+}
+
+// TestSplitLeftWidth_UsesBacklogWidthUnderFractionCap verifies splitLeftWidth
+// returns the backlog's own longest-line width, not the fraction cap, when
+// the backlog is narrower than its fraction share — the fraction is a
+// ceiling, not a fixed column width (issue #1001).
+func TestSplitLeftWidth_UsesBacklogWidthUnderFractionCap(t *testing.T) {
+	backlog := "short"
+	width := 80
+
+	got := splitLeftWidth(width, backlog)
+	want := maxLineWidth(backlog)
+	if got != want {
+		t.Errorf("splitLeftWidth(%d, %q) = %d, want %d (backlog's own width)", width, backlog, got, want)
+	}
+}
