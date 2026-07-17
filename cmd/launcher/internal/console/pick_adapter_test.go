@@ -222,6 +222,53 @@ func TestPickIssue_InProgressListAtPageLimit_TargetMissing_FailsSafe(t *testing.
 	}
 }
 
+// TestPickIssue_CompleteListAtPageLimit_TargetMissing_FailsSafe mirrors
+// TestPickIssue_InProgressListAtPageLimit_TargetMissing_FailsSafe for the
+// Complete check issueInState runs second — a page-limited Complete list
+// must fail safe exactly like a page-limited InProgress one.
+func TestPickIssue_CompleteListAtPageLimit_TargetMissing_FailsSafe(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", Complete: "agent-complete"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing"})
+	for i := 0; i < forge.ResultPageLimit; i++ {
+		f.SetIssue(forge.Issue{Number: strconv.Itoa(1000 + i), Title: "other", Labels: []string{"agent-complete"}})
+	}
+
+	msg := PickIssue(f, "42", "fix the thing", KindWork)
+
+	dissolved, ok := msg.(PickDissolvedMsg)
+	if !ok {
+		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
+	}
+	if dissolved.Number != "42" || dissolved.Reason == "" {
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", dissolved)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none — a page-limited list must never allow a pick through", f.TransitionStateCalls)
+	}
+}
+
+// TestPickIssue_TargetFoundWithinFullPage_ReturnsDissolvedMsg verifies a full
+// page never shadows num when it IS on that page — the fail-safe error only
+// fires on a miss, so a match found within a page at the cap still reports
+// InProgress correctly, same as a match on a small page.
+func TestPickIssue_TargetFoundWithinFullPage_ReturnsDissolvedMsg(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
+	for i := 0; i < forge.ResultPageLimit-1; i++ {
+		f.SetIssue(forge.Issue{Number: strconv.Itoa(1000 + i), Title: "other", Labels: []string{"agent-in-progress"}})
+	}
+
+	msg := PickIssue(f, "42", "fix the thing", KindWork)
+
+	dissolved, ok := msg.(PickDissolvedMsg)
+	if !ok {
+		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg — num is on the full page and already InProgress", msg)
+	}
+	if dissolved.Number != "42" || dissolved.Reason == "" {
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", dissolved)
+	}
+}
+
 func hasLabel(iss forge.Issue, label string) bool {
 	for _, l := range iss.Labels {
 		if l == label {
