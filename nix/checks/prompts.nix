@@ -448,11 +448,16 @@ in
   # also treat closed `agent-research-reject` issues -- a research pass's
   # deliberate false-positive/not-worth-doing/duplicate verdict -- as
   # suppressing matches, the same triage-decision class as a closed
-  # `agent-review-finding`.
+  # `agent-review-finding`. Anchored to the full `--label ... --state closed`
+  # search command, not the bare label token -- a bare-token match would
+  # still pass if the closed-dedup search line lost the label while an
+  # unrelated prose mention of `agent-research-reject` survived elsewhere in
+  # the file (issue #922), the same class of regression #921 guards against
+  # for the sibling `--state open` check above.
   filer-prompt-dedup-names-research-reject =
     pkgs.runCommand "filer-prompt-dedup-names-research-reject" { }
       ''
-        grep -q 'agent-research-reject' ${../../templates/default/prompts/filer-prompt.md}
+        grep -q -- '--label agent-research-reject --state closed' ${../../templates/default/prompts/filer-prompt.md}
         touch $out
       '';
 }
