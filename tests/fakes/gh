@@ -65,15 +65,26 @@ EOF
             printf '%s\n' "${!bodyvar:-}"
             ;;
           labels)
+            # execClient.issueLabels() expects a JSON object, matching the
+            # "labels" field of the combined number,title,body,state,labels
+            # response below — not the plain-text lines this used to print.
             cur=""
             if [ -f "$GH_STATE" ]; then
               while IFS=$'\t' read -r k v; do
                 [ "$k" = "$num" ] && cur="$v"
               done < "$GH_STATE"
             fi
-            [ -n "$cur" ] && printf '%s\n' "$cur"
             labelsvar="FAKE_GH_ISSUE_LABELS_${num}"
-            [ -n "${!labelsvar:-}" ] && printf '%s\n' "${!labelsvar:-}"
+            extra_label="${!labelsvar:-}"
+            labels_json="[]"
+            if [ -n "$cur" ] && [ -n "$extra_label" ]; then
+              labels_json=$(jq -cn '[{"name":$a},{"name":$b}]' --arg a "$cur" --arg b "$extra_label")
+            elif [ -n "$cur" ]; then
+              labels_json=$(jq -cn '[{"name":$a}]' --arg a "$cur")
+            elif [ -n "$extra_label" ]; then
+              labels_json=$(jq -cn '[{"name":$a}]' --arg a "$extra_label")
+            fi
+            jq -cn --argjson labels "$labels_json" '{"labels":$labels}'
             ;;
           state)
             # FAKE_GH_ISSUE_STATE_N overrides; default is OPEN.
