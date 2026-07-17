@@ -31,11 +31,19 @@ EOF
   chmod +x "$FAKE_BIN/nix"
 }
 
-# Replaces the fake nix with one that exits each of $@ in order on successive
-# `nix run .# -- dispatch` calls (running past the list re-exits the last
-# code); exits 0 on all other nix calls.
+# Replaces the fake nix with one that exits each exit-code arg in order on
+# successive `nix run .# -- $kind` calls (running past the list re-exits the
+# last code); exits 0 on all other nix calls. $kind defaults to "dispatch";
+# pass it as a trailing non-numeric arg to override, e.g.
+# `_install_sequence_exit_nix 4 2 research`.
 _install_sequence_exit_nix() {
-  local codes=("$@")
+  local args=("$@")
+  local kind="dispatch"
+  if [ "${#args[@]}" -gt 0 ] && [[ ! "${args[-1]}" =~ ^-?[0-9]+$ ]]; then
+    kind="${args[-1]}"
+    unset 'args[-1]'
+  fi
+  local codes=("${args[@]}")
   local counter="$BATS_TEST_TMPDIR/dispatch-call-count"
   echo 0 >"$counter"
   local shebang
@@ -45,7 +53,7 @@ _install_sequence_exit_nix() {
     cat <<EOF
 : "\${NIX_LOG:?NIX_LOG must point at a log file}"
 printf '%s\n' "\$*" >>"\$NIX_LOG"
-if printf '%s ' "\$@" | grep -q -- '-- dispatch'; then
+if printf '%s ' "\$@" | grep -q -- '-- $kind'; then
   codes=(${codes[*]})
   n=\$(cat "$counter")
   last=\$(( \${#codes[@]} - 1 ))
@@ -159,6 +167,14 @@ setup() {
   [ "$status" -eq 0 ]
   grep -q -- '-- research' "$NIX_LOG"
   ! grep -q -- '-- dispatch' "$NIX_LOG"
+}
+
+@test "dogfood pulls, rebuilds, and re-invokes under DOGFOOD_KIND=research" {
+  _install_sequence_exit_nix 4 2 research
+  run env BASE_BRANCH=main DOGFOOD_KIND=research timeout 15 bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"image stale"* ]]
+  [ "$(grep -c -- '-- research' "$NIX_LOG")" -eq 2 ]
 }
 
 @test "dogfood aborts when podman machine RAM is below MEMORY_LIMIT" {
