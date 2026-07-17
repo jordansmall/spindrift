@@ -21,6 +21,7 @@ import (
 // change when it does.
 type Environment interface {
 	LookPath(file string) (string, error)
+	LookupEnv(key string) (string, bool)
 }
 
 // CommandRunner abstracts the two subprocesses Quickstart eventually shells
@@ -71,9 +72,21 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Write
 	gitUserName := prompt("Git user name")
 	gitUserEmail := prompt("Git user email")
 	ghToken := prompt("GitHub token (GH_TOKEN)")
-	claudeOAuthToken := prompt("Claude Code OAuth token (CLAUDE_CODE_OAUTH_TOKEN), leave blank to use an API key instead")
+
+	claudeOAuthToken := ""
 	anthropicAPIKey := ""
-	if claudeOAuthToken == "" {
+	if v, ok := env.LookupEnv("CLAUDE_CODE_OAUTH_TOKEN"); ok && v != "" {
+		claudeOAuthToken = v
+		fmt.Fprintln(w, "reusing ambient CLAUDE_CODE_OAUTH_TOKEN")
+	} else if v, ok := env.LookupEnv("ANTHROPIC_API_KEY"); ok && v != "" {
+		anthropicAPIKey = v
+		fmt.Fprintln(w, "reusing ambient ANTHROPIC_API_KEY")
+	} else if strings.ToLower(strings.TrimSpace(prompt("No ambient Claude credential found. Run `claude setup-token` now (browser OAuth)? [y/N]"))) == "y" {
+		if err := runner.Run("claude", "setup-token"); err != nil {
+			return fmt.Errorf("run claude setup-token: %w", err)
+		}
+		claudeOAuthToken = prompt("Paste the CLAUDE_CODE_OAUTH_TOKEN printed by claude setup-token")
+	} else {
 		anthropicAPIKey = prompt("Anthropic API key (ANTHROPIC_API_KEY)")
 	}
 

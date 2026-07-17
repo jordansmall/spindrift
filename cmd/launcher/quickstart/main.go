@@ -7,19 +7,22 @@ import (
 	"os/exec"
 )
 
-// hostEnvironment is the real Environment: host PATH lookups. Unused by
-// runQuickstart until host detection lands (ADR 0027); wired here so the
-// seam is ready.
+// hostEnvironment is the real Environment: host PATH lookups and ambient env
+// var reads. LookPath is unused by runQuickstart until host detection lands
+// (ADR 0027); wired here so the seam is ready.
 type hostEnvironment struct{}
 
 func (hostEnvironment) LookPath(file string) (string, error) {
 	return exec.LookPath(file)
 }
 
+func (hostEnvironment) LookupEnv(key string) (string, bool) {
+	return os.LookupEnv(key)
+}
+
 // hostCommandRunner is the real CommandRunner: runs the named command with
-// the process's own stdio. Unused by runQuickstart until the finish-line
-// steps (`claude setup-token`, `spindrift build`) land (ADR 0027); wired
-// here so the seam is ready.
+// the process's own stdio. Used for the `claude setup-token` finish-line
+// step; `spindrift build` wiring is still unbuilt (ADR 0027).
 type hostCommandRunner struct{}
 
 func (hostCommandRunner) Run(name string, args ...string) error {
