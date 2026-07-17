@@ -828,8 +828,7 @@ func TestView_DrillInDocked_BacklogOffset_RendersOffsetRows(t *testing.T) {
 		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
 	}
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
-	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
+	m = Update(m, DrillInMsg{Number: "0", Rendered: "[implementor] hi"})
 
 	m = Update(m, ScrollMsg{Delta: 5})
 
