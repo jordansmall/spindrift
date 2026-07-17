@@ -109,8 +109,8 @@ func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 
 // TestSettleAdopted_PushOnlyForgeSkipsVerify verifies that SettleAdopted's
 // landingMerged case guards the verifyMerged call against a push-only
-// forge's nil s.pr (issue #697), mirroring Settle's own "ready"/"merged"
-// guards in gate.go.
+// forge's nil s.pr (issue #697), mirroring gate.go's "ready" case guard
+// (silent skip, no logging when s.pr is nil).
 func TestSettleAdopted_PushOnlyForgeSkipsVerify(t *testing.T) {
 	const branch = "agent/issue-1"
 
