@@ -371,14 +371,19 @@ in
   # so both pins stay green while the dedup silently narrows back to only
   # `agent-review-finding`-labeled issues (issue #921). Extract the line
   # carrying `--state open` and count how many of its occurrences also carry
-  # `--label` -- must be zero. `[ "$bad" -eq 0 ] || exit 1`, not a bare `!
-  # pipeline`, since `set -e` exempts negated commands (issue #887).
+  # `--label` -- must be zero. All assertions below use the explicit
+  # `[ "$n" -eq 0 ] || exit 1` shape, not a bare `! pipeline`, since `set -e`
+  # exempts negated commands (issue #887).
   filer-prompt-dedup-searches-all-open-issues =
     pkgs.runCommand "filer-prompt-dedup-searches-all-open-issues" { }
       ''
         grep -q -- '--state open' ${../../templates/default/prompts/filer-prompt.md}
-        ! grep -q -- '--label agent-review-finding --state all' \
-          ${../../templates/default/prompts/filer-prompt.md}
+        old=$(grep -c -- '--label agent-review-finding --state all' \
+          ${../../templates/default/prompts/filer-prompt.md} || true)
+        [ "$old" -eq 0 ] || {
+          echo "expected the old --label agent-review-finding --state all query gone, found $old occurrence(s)" >&2
+          exit 1
+        }
         bad=$(grep -- '--state open' ${../../templates/default/prompts/filer-prompt.md} \
           | grep -c -- '--label' || true)
         [ "$bad" -eq 0 ] || {
