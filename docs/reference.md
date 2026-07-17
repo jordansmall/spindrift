@@ -855,6 +855,19 @@ never pay an extra rebase + CI cycle. The freshness burden instead sits with
 the implementor Box, which rebases onto the latest base immediately before
 every push. Turn the knob on for deployments that prefer to pay the tax.
 
+> **⚠️ With the preflight on, expect thrashing under high parallelism.** Every
+> landing advances `main`, which leaves the other in-flight PRs behind, so each
+> one that reaches green gets rebased and re-runs CI — and may be behind *again*
+> by the time that CI finishes, triggering yet another rebase. Under enough
+> concurrent landings this degrades into near-constant rebase + re-CI churn
+> that burns CI minutes and tokens and starves throughput. The durable fix is a
+> **merge queue** (GitHub's, or an external one), which serializes and batches
+> the "test against the current tip, then land" step so each combined tree is
+> built once instead of repeatedly. This is the main reason the preflight is
+> off by default: if you run many issues in parallel and cannot put a merge
+> queue in front of the branch, leave it off and rely on the worker's pre-push
+> rebase, accepting the residual cross-PR-break risk.
+
 When `PREFLIGHT_STALE_BASE` is set, then under `MERGE_MODE=immediate`, before
 the first `Merge` attempt, the launcher compares the PR's branch against its
 base via GitHub's REST compare API (`behind_by`) — a plain git-ancestry count
