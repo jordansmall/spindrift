@@ -107,8 +107,11 @@ func TestResearchSettle_CompleteVerdictError(t *testing.T) {
 	if strings.Contains(out, "status=recommend") {
 		t.Errorf("stdout must not contain a success-style status line on CompleteVerdict error, got %q", out)
 	}
-	if !strings.Contains(out, "status=verdict-apply-failed") || !strings.Contains(out, "label API down") {
-		t.Errorf("stdout must contain the error-branch line, got %q", out)
+	if !strings.Contains(out, "status=verdict-apply-failed") {
+		t.Errorf("stdout must contain the error-branch marker, got %q", out)
+	}
+	if !strings.Contains(out, "label API down") {
+		t.Errorf("stdout must contain the underlying error text, got %q", out)
 	}
 }
 
