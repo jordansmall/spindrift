@@ -106,7 +106,9 @@ func issueInState(tracker forge.IssueTracker, num string, state forge.DispatchSt
 // rejects on, so this deliberately doesn't cover the full enum. The default
 // is a real fallback, not dead code: forge.Failed is itself a terminal
 // state a future caller could legitimately pass, and returning "" there
-// would silently truncate the operator-facing message instead.
+// would silently truncate the operator-facing message instead. Callers own
+// the "already X" framing, so only pass states that read correctly as a
+// terminal state in that sentence — Dispatchable/Untriaged don't qualify.
 func dispatchStateName(state forge.DispatchState) string {
 	switch state {
 	case forge.InProgress:
