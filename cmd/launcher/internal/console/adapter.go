@@ -34,7 +34,7 @@ func DogfoodNotice(pwd string) Msg {
 		return DogfoodNoticeMsg{Live: false}
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil {
+	if err != nil || pid <= 0 {
 		return DogfoodNoticeMsg{Live: false}
 	}
 	return DogfoodNoticeMsg{Live: syscall.Kill(pid, 0) == nil}

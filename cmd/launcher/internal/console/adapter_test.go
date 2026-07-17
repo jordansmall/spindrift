@@ -102,6 +102,37 @@ func TestDogfoodNotice_MalformedPidReportsNotLive(t *testing.T) {
 	}
 }
 
+// TestDogfoodNotice_ZeroPidReportsNotLive verifies a pid-file containing "0"
+// reports Live false rather than true — pid 0 targets the caller's own
+// process group, so an unguarded kill(0, 0) always succeeds from inside the
+// Box regardless of whether any dogfood.sh session is actually running.
+func TestDogfoodNotice_ZeroPidReportsNotLive(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, ".dogfood.pid"), []byte("0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); msg.Live {
+		t.Error("Live = true with a pid-file containing \"0\", want false")
+	}
+}
+
+// TestDogfoodNotice_NegativePidReportsNotLive verifies a pid-file containing
+// "-1" reports Live false rather than true — pid -1 is a broadcast probe
+// that succeeds if the caller has permission to signal any process at all,
+// so an unguarded kill(-1, 0) is a false positive independent of whether any
+// dogfood.sh session is running.
+func TestDogfoodNotice_NegativePidReportsNotLive(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, ".dogfood.pid"), []byte("-1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); msg.Live {
+		t.Error("Live = true with a pid-file containing \"-1\", want false")
+	}
+}
+
 // errTracker wraps a forge.IssueTracker so ListOpenIssues always errors,
 // while every other method still delegates to the embedded tracker.
 type errTracker struct {
