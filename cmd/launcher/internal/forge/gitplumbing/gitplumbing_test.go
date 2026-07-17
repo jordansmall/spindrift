@@ -27,6 +27,11 @@ func TestIsMergeConflict_IgnoresUnrelatedError(t *testing.T) {
 // stale-lease rejection — the branch moved since the last fetch, so the
 // rebase really is out of date — is NOT classified as transient: retrying it
 // would be pointless, so callers must treat it as terminal.
+//
+// This also subsumes the former TestGitForcePush_CapturesStderr (previously
+// in cmd/launcher/internal/forge/github/exec_test.go, removed in b1d0489 /
+// #684): the stderr-substring assertion below is that test's check, merged
+// into this one alongside the non-transient classification.
 func TestGitForcePush_StaleLeaseIsNotTransient(t *testing.T) {
 	dir := t.TempDir()
 	bare := filepath.Join(dir, "origin.git")
