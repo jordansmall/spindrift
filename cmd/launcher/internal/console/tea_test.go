@@ -36,7 +36,7 @@ import (
 // this bound, the fix is a deterministic wait on real state, not a bigger
 // number: see the "settled" guards on the launch-backed pick tests, and
 // TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain, which dropped
-// teatest entirely for a direct Update call plus launch.Wait() after this
+// teatest entirely for a direct handleKey call plus launch.Wait() after this
 // same bound (walked 2s -> 5s -> 15s -> 30s -> 60s) still flaked under CI's
 // `nix flake check` racing the image-build checks (issue #1327).
 const teatestTimeout = 60 * time.Second
@@ -1441,8 +1441,9 @@ func TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain(t *testing.T) {
 	// under a stopwatch (issue #1327) — no teatest, no wall-clock timeout.
 	launch.Wait()
 
-	if !launch.Queue.Empty() {
-		t.Errorf("Queue.Empty() = false after Wait(), want the queued pick drained (fallback tryLaunch never ran)")
+	snap := launch.Queue.Snapshot()
+	if len(snap) != 1 || snap[0].State != PickSettled {
+		t.Errorf("Queue.Snapshot() = %+v, want #42 at PickSettled (fallback tryLaunch never ran)", snap)
 	}
 }
 
