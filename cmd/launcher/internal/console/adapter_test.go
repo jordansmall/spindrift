@@ -78,7 +78,7 @@ func TestDogfoodNotice_PresentVsAbsent(t *testing.T) {
 func TestDogfoodNotice_StalePidReportsNotLive(t *testing.T) {
 	dir := t.TempDir()
 
-	const deadPid = 99999
+	const deadPid = 99999 // arbitrary — isProcessAlive is stubbed, never a real pid
 	orig := isProcessAlive
 	isProcessAlive = func(pid int) bool {
 		if pid != deadPid {
