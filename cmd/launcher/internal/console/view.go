@@ -686,9 +686,10 @@ func windowLines(d DrillInState, budget int) []string {
 }
 
 // renderTranscriptColumn renders d as a labeled column: a header naming the
-// pick and current form, then as much of its loaded content from Offset
-// onward as height allows — the same content renderDrillIn shows fullscreen,
-// reused for the docked and floating pane modes (issue #846, ADR 0025).
+// pick and current form, as much of its loaded content from Offset onward as
+// height allows, and a keystroke hint — the same content and footer
+// renderDrillIn shows fullscreen, reused for the docked and floating pane
+// modes (issue #846, ADR 0025; hint added #1002).
 func renderTranscriptColumn(d DrillInState, height int) string {
 	var b strings.Builder
 	if d.ShowRaw {
@@ -701,9 +702,12 @@ func renderTranscriptColumn(d DrillInState, height int) string {
 		return b.String()
 	}
 
-	const headerLines = 1
-	b.WriteString(strings.Join(windowLines(d, height-headerLines), "\n"))
-	b.WriteString("\n")
+	visible := strings.Join(windowLines(d, height-headerFooterLines), "\n")
+	b.WriteString(visible)
+	if visible != "" && !strings.HasSuffix(visible, "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("[t] toggle raw · [x] close\n")
 	return b.String()
 }
 

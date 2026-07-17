@@ -752,6 +752,9 @@ func TestView_DrillInDocked_KeepsBacklogAndQueueVisible(t *testing.T) {
 	if !strings.Contains(out, "[implementor] hi") {
 		t.Errorf("View() = %q, want the transcript content visible while docked", out)
 	}
+	if !strings.Contains(out, "[t] toggle raw · [x] close") {
+		t.Errorf("View() = %q, want the keystroke hint visible while docked", out)
+	}
 }
 
 // TestView_DrillInNarrowTerminal_FallsBackToFullscreen verifies a terminal
@@ -783,7 +786,10 @@ func TestView_DrillInNarrowTerminal_FallsBackToFullscreen(t *testing.T) {
 // permanent three-way column split (issue #846, ADR 0025).
 func TestView_DrillInFloating_OverlaysTranscriptOnTwoColumnBody(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Title: "backlog issue"},
+		{Number: "2", Title: "second backlog issue"},
+	}})
 	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
 	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
 	m = Update(m, PaneModeCycleMsg{})
@@ -797,6 +803,9 @@ func TestView_DrillInFloating_OverlaysTranscriptOnTwoColumnBody(t *testing.T) {
 	}
 	if !strings.Contains(out, "[implementor] hi") {
 		t.Errorf("View() = %q, want the transcript content visible in the floating overlay", out)
+	}
+	if !strings.Contains(out, "[t] toggle raw · [x] close") {
+		t.Errorf("View() = %q, want the keystroke hint visible in the floating overlay", out)
 	}
 }
 
