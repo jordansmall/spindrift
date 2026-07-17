@@ -51,13 +51,11 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
 			if result.Classification.Class != driver.Transient {
 				return result
 			}
-			if d.cfg.OpenPRForIssue != nil {
-				if exists, prErr := d.cfg.OpenPRForIssue(d.number); prErr == nil && exists {
-					// The box's work already landed a PR; re-dispatching
-					// would duplicate it. Pass the Result through unchanged
-					// so settle's own PR lookup routes it (issue #565).
-					return result
-				}
+			if exists, prErr := d.cfg.OpenPRForIssue(d.number); prErr == nil && exists {
+				// The box's work already landed a PR; re-dispatching
+				// would duplicate it. Pass the Result through unchanged
+				// so settle's own PR lookup routes it (issue #565).
+				return result
 			}
 			cls = result.Classification
 		} else {
