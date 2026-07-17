@@ -225,7 +225,7 @@ SKILL
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","Agent"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  jq -e '.reviewer.prompt' "$CLAUDE_AGENTS_FILE" | grep -qF 'not a replacement for it'
+  jq -e '.reviewer.prompt' "$CLAUDE_AGENTS_FILE" | grep -qF 'rather than replacing these dimensions'
 }
 
 # issue #626: driver-exec absorbed the direct-path/devShell-wrapper dual

@@ -19,10 +19,10 @@ Inputs:
   git diff origin/${BASE_BRANCH}...HEAD           # the change
   git log origin/${BASE_BRANCH}..HEAD --oneline   # commit messages
 
-These four dimensions are the always-on rubric: when the `/code-review`
-skill is baked and defers to it above, its two-axis verdict is reconciled
-into this Blocking/Non-blocking contract, not a replacement for it — every
-dimension below still applies regardless.
+These four dimensions render below regardless of whether the `/code-review`
+skill is baked, and hunting all four is still required either way: when the
+deferral above fires, the skill's two-axis verdict is reconciled into this
+Blocking/Non-blocking contract rather than replacing these dimensions.
 
 Hunt every dimension. Do not stop at the first finding:
 
