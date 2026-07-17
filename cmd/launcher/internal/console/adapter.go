@@ -1,6 +1,7 @@
 package console
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -88,6 +89,15 @@ func transitionToDispatchable(tracker forge.IssueTracker, num, title string, kin
 // each IssueTracker adapter resolves state via its own native mechanism
 // (GitHub/local/fake labels, Jira workflow status), so this asks the tracker
 // rather than re-deriving state from a raw Issue.Labels comparison.
+//
+// ListIssues caps a single page at forge.ResultPageLimit (#986): a backlog
+// larger than that silently drops the tail rather than erroring. Elsewhere
+// (backlog listing) that's fine — an operator just reruns to drain the rest.
+// Here it isn't: PickIssue's double-box guard (#707) trusts "not found" to
+// mean "not in this state," so a truncated page would let it wrongly declare
+// num safe to pick. A page that hit the cap and still doesn't contain num is
+// therefore treated as inconclusive and reported as an error rather than a
+// false "not in state."
 func issueInState(tracker forge.IssueTracker, num string, state forge.DispatchState) (bool, error) {
 	issues, err := tracker.ListIssues(state)
 	if err != nil {
@@ -97,6 +107,9 @@ func issueInState(tracker forge.IssueTracker, num string, state forge.DispatchSt
 		if iss.Number == num {
 			return true, nil
 		}
+	}
+	if len(issues) >= forge.ResultPageLimit {
+		return false, fmt.Errorf("issue #%s not found among %d %s issues — list may be truncated at the page limit, refusing to assume it's not", num, len(issues), dispatchStateName(state))
 	}
 	return false, nil
 }

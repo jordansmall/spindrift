@@ -1,6 +1,7 @@
 package console
 
 import (
+	"strconv"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -193,6 +194,33 @@ func TestPickAllReady_MakesExactlyOneListIssuesCall(t *testing.T) {
 	}
 	if len(f.ListIssuesCalls) != 1 {
 		t.Errorf("ListIssuesCalls = %+v, want exactly 1 (the Dispatchable snapshot, no redundant per-issue re-verification)", f.ListIssuesCalls)
+	}
+}
+
+// TestPickIssue_InProgressListAtPageLimit_TargetMissing_FailsSafe verifies
+// that when the InProgress list issueInState consults hits ResultPageLimit
+// and num isn't in the page, PickIssue fails safe (dissolves the pick)
+// instead of concluding num isn't InProgress and re-opening the #707
+// double-box hole — a real ListIssues page cap could be hiding num beyond
+// the boundary.
+func TestPickIssue_InProgressListAtPageLimit_TargetMissing_FailsSafe(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing"})
+	for i := 0; i < forge.ResultPageLimit; i++ {
+		f.SetIssue(forge.Issue{Number: strconv.Itoa(1000 + i), Title: "other", Labels: []string{"agent-in-progress"}})
+	}
+
+	msg := PickIssue(f, "42", "fix the thing", KindWork)
+
+	dissolved, ok := msg.(PickDissolvedMsg)
+	if !ok {
+		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
+	}
+	if dissolved.Number != "42" || dissolved.Reason == "" {
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", dissolved)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none — a page-limited list must never allow a pick through", f.TransitionStateCalls)
 	}
 }
 
