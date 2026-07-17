@@ -786,10 +786,7 @@ func TestView_DrillInNarrowTerminal_FallsBackToFullscreen(t *testing.T) {
 // permanent three-way column split (issue #846, ADR 0025).
 func TestView_DrillInFloating_OverlaysTranscriptOnTwoColumnBody(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
-		{Number: "1", Title: "backlog issue"},
-		{Number: "2", Title: "second backlog issue"},
-	}})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
 	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
 	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
 	m = Update(m, PaneModeCycleMsg{})
