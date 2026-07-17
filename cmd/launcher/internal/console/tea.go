@@ -338,8 +338,8 @@ func (t teaModel) highlightedPick() (Pick, bool) {
 // have a Box that ran (or is running) and left logs on disk; queued,
 // claiming, held, and dissolved never launched, so Enter is a no-op on those
 // rows (issue #845). PickFailed's inclusion deliberately extends past #845's
-// literal AC text, which predates PickFailed's introduction in #705 by about
-// 40 minutes on the same day — confirmed correct, not an oversight, by #992.
+// literal AC text, which predates PickFailed's introduction in #705 —
+// confirmed correct, not an oversight, by #992.
 func hasTranscript(state PickState) bool {
 	switch state {
 	case PickRunning, PickSettled, PickTerminated, PickFailed:
