@@ -15,9 +15,17 @@ type fakeEnvironment struct {
 	tokenScopesErr error
 	ghAuthToken    string
 	ghAuthTokenErr error
+	runtimes       map[string]bool
+	gitConfig      map[string]string
+	repoSlug       string
 }
 
-func (f fakeEnvironment) LookPath(file string) (string, error) { return "", os.ErrNotExist }
+func (f fakeEnvironment) LookPath(file string) (string, error) {
+	if f.runtimes[file] {
+		return "/usr/bin/" + file, nil
+	}
+	return "", os.ErrNotExist
+}
 
 func (f fakeEnvironment) Getenv(key string) string { return f.env[key] }
 
@@ -26,6 +34,247 @@ func (f fakeEnvironment) TokenScopes(token string) ([]string, error) {
 }
 
 func (f fakeEnvironment) GHAuthToken() (string, error) { return f.ghAuthToken, f.ghAuthTokenErr }
+
+func (f fakeEnvironment) GitConfig(key string) string { return f.gitConfig[key] }
+
+func (f fakeEnvironment) GitRemoteRepoSlug() string { return f.repoSlug }
+
+func withPodman() fakeEnvironment {
+	return fakeEnvironment{runtimes: map[string]bool{"podman": true}}
+}
+
+func TestRunQuickstart_RepoSlugDetected_ShownAsDefault_AcceptedWithEnter(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, repoSlug: "jordansmall/spindrift"}
+	stdin := strings.NewReader(strings.Join([]string{
+		"",
+		"",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Repo slug (owner/repo) [jordansmall/spindrift]") {
+		t.Errorf("expected transcript to offer the detected repoSlug as a default, got:\n%s", out.String())
+	}
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), "jordansmall/spindrift") {
+		t.Errorf("expected flake.nix to carry the detected repoSlug, got:\n%s", flakeNix)
+	}
+}
+
+func TestRunQuickstart_RepoSlugDetected_CanBeOverridden(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, repoSlug: "jordansmall/spindrift"}
+	stdin := strings.NewReader(strings.Join([]string{
+		"someoneelse/other-repo",
+		"",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), `settings.repository.repoSlug = "someoneelse/other-repo"`) {
+		t.Errorf("expected flake.nix to carry the overridden repoSlug, got:\n%s", flakeNix)
+	}
+	if strings.Contains(string(flakeNix), `settings.repository.repoSlug = "jordansmall/spindrift"`) {
+		t.Errorf("expected the detected repoSlug default to be overridden, got:\n%s", flakeNix)
+	}
+}
+
+func TestParseGitHubRepoSlug(t *testing.T) {
+	cases := map[string]string{
+		"git@github.com:jordansmall/spindrift.git":       "jordansmall/spindrift",
+		"ssh://git@github.com/jordansmall/spindrift.git": "jordansmall/spindrift",
+		"https://github.com/jordansmall/spindrift.git":   "jordansmall/spindrift",
+		"https://github.com/jordansmall/spindrift":       "jordansmall/spindrift",
+		"git@gitlab.com:jordansmall/spindrift.git":       "",
+		"": "",
+	}
+	for remote, want := range cases {
+		if got := parseGitHubRepoSlug(remote); got != want {
+			t.Errorf("parseGitHubRepoSlug(%q) = %q, want %q", remote, got, want)
+		}
+	}
+}
+
+func TestRunQuickstart_GitIdentityDetected_ShownAsDefault_AcceptedWithEnter(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{
+		runtimes:  map[string]bool{"podman": true},
+		gitConfig: map[string]string{"user.name": "Ada Lovelace", "user.email": "ada@example.com"},
+	}
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"",
+		"",
+		"",
+		"ghp_faketoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Git user name [Ada Lovelace]") || !strings.Contains(out.String(), "Git user email [ada@example.com]") {
+		t.Errorf("expected transcript to offer detected git identity as defaults, got:\n%s", out.String())
+	}
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	for _, want := range []string{"Ada Lovelace", "ada@example.com"} {
+		if !strings.Contains(string(flakeNix), want) {
+			t.Errorf("expected flake.nix to carry the detected git identity %q, got:\n%s", want, flakeNix)
+		}
+	}
+}
+
+func TestRunQuickstart_GitIdentityDetected_CanBeOverridden(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{
+		runtimes:  map[string]bool{"podman": true},
+		gitConfig: map[string]string{"user.name": "Ada Lovelace", "user.email": "ada@example.com"},
+	}
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"",
+		"Grace Hopper",
+		"grace@example.com",
+		"ghp_faketoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), "Grace Hopper") || !strings.Contains(string(flakeNix), "grace@example.com") {
+		t.Errorf("expected flake.nix to carry the overridden git identity, got:\n%s", flakeNix)
+	}
+	if strings.Contains(string(flakeNix), "Ada Lovelace") {
+		t.Errorf("expected the detected git identity default to be overridden, got:\n%s", flakeNix)
+	}
+}
+
+func TestRunQuickstart_RuntimeDefault_FallsBackToDockerThenBwrap(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{runtimes: map[string]bool{"docker": true, "bwrap": true}}
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Runtime [docker]") {
+		t.Errorf("expected transcript to offer docker as the runtime default when podman is absent, got:\n%s", out.String())
+	}
+}
+
+func TestRunQuickstart_RuntimeDefault_BwrapWhenOnlyOneAvailable(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{runtimes: map[string]bool{"bwrap": true}}
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Runtime [bwrap]") {
+		t.Errorf("expected transcript to offer bwrap as the runtime default when nothing else is available, got:\n%s", out.String())
+	}
+}
+
+func TestRunQuickstart_NoRuntimeDetected_ReturnsActionableError(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{}
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, strings.NewReader(""), true, false)
+	if err == nil {
+		t.Fatal("expected an error when no supported runtime is detected, got nil")
+	}
+	for _, want := range []string{"podman", "docker", "bwrap"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected error to name %q, got: %q", want, err.Error())
+		}
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "flake.nix")); !os.IsNotExist(statErr) {
+		t.Errorf("expected no flake.nix to be written, stat error: %v", statErr)
+	}
+}
+
+func TestRunQuickstart_RuntimeDefault_PrefersPodmanOverDockerAndBwrap(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{runtimes: map[string]bool{"podman": true, "docker": true, "bwrap": true}}
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Runtime [podman]") {
+		t.Errorf("expected transcript to offer podman as the runtime default, got:\n%s", out.String())
+	}
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), `runtime = "podman"`) {
+		t.Errorf("expected flake.nix to default runtime to podman, got:\n%s", flakeNix)
+	}
+}
 
 func (f fakeEnvironment) LookupEnv(key string) (string, bool) {
 	v, ok := f.env[key]
@@ -92,7 +341,7 @@ func TestRunQuickstart_HappyPath_WritesFiles(t *testing.T) {
 		"ada@example.com",       // git user email
 		"ghp_faketoken",         // GH_TOKEN
 	}, "\n") + "\n")
-	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}}
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
 	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
 	if err != nil {
@@ -495,7 +744,7 @@ func TestRunQuickstart_Force_BacksUpExistingFiles(t *testing.T) {
 		"ada@example.com",
 		"ghp_faketoken",
 	}, "\n") + "\n")
-	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}}
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, true); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
@@ -540,7 +789,7 @@ func TestRunQuickstart_DeclineSetupToken_PromptsForAPIKey(t *testing.T) {
 	}, "\n") + "\n")
 	runner := &fakeCommandRunner{}
 
-	if err := runQuickstart(dir, fakeEnvironment{}, runner, &out, stdin, true, false); err != nil {
+	if err := runQuickstart(dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, runner, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -573,7 +822,7 @@ func TestRunQuickstart_AcceptSetupToken_EmptyPaste_Errors(t *testing.T) {
 	}, "\n") + "\n")
 	runner := &fakeCommandRunner{}
 
-	err := runQuickstart(dir, fakeEnvironment{}, runner, &out, stdin, true, false)
+	err := runQuickstart(dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, runner, &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected an error for an empty pasted token, got nil")
 	}
@@ -600,7 +849,7 @@ func TestRunQuickstart_AcceptSetupToken_RunsItAndPastesToken(t *testing.T) {
 	}, "\n") + "\n")
 	runner := &fakeCommandRunner{}
 
-	if err := runQuickstart(dir, fakeEnvironment{}, runner, &out, stdin, true, false); err != nil {
+	if err := runQuickstart(dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, runner, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -627,7 +876,7 @@ func TestRunQuickstart_GitUserNameWithNixSpecialChars_IsEscaped(t *testing.T) {
 		"ada@example.com",
 		"ghp_faketoken",
 	}, "\n") + "\n")
-	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}}
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
@@ -652,7 +901,7 @@ func TestRunQuickstart_AmbientClaudeOAuthToken_ReusedWithoutPrompt(t *testing.T)
 		"ada@example.com",
 		"ghp_faketoken",
 	}, "\n") + "\n")
-	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "ambient-oauth-token"}}
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "ambient-oauth-token"}, runtimes: map[string]bool{"podman": true}}
 	runner := &fakeCommandRunner{}
 
 	if err := runQuickstart(dir, env, runner, &out, stdin, true, false); err != nil {
@@ -687,7 +936,7 @@ func TestRunQuickstart_BothAmbientCredentials_OAuthTokenTakesPrecedence(t *testi
 	env := fakeEnvironment{env: map[string]string{
 		"CLAUDE_CODE_OAUTH_TOKEN": "ambient-oauth-token",
 		"ANTHROPIC_API_KEY":       "ambient-api-key",
-	}}
+	}, runtimes: map[string]bool{"podman": true}}
 	runner := &fakeCommandRunner{}
 
 	if err := runQuickstart(dir, env, runner, &out, stdin, true, false); err != nil {
@@ -716,7 +965,7 @@ func TestRunQuickstart_AmbientAnthropicAPIKey_ReusedWithoutPrompt(t *testing.T) 
 		"ada@example.com",
 		"ghp_faketoken",
 	}, "\n") + "\n")
-	env := fakeEnvironment{env: map[string]string{"ANTHROPIC_API_KEY": "ambient-api-key"}}
+	env := fakeEnvironment{env: map[string]string{"ANTHROPIC_API_KEY": "ambient-api-key"}, runtimes: map[string]bool{"podman": true}}
 	runner := &fakeCommandRunner{}
 
 	if err := runQuickstart(dir, env, runner, &out, stdin, true, false); err != nil {
