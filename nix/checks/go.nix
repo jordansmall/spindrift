@@ -168,8 +168,15 @@ in
             # console already imports most guarded packages, so a reverse
             # import forms a cycle — go list fails outright instead of
             # listing console as a dependency. Treat that failure itself
-            # as the violation signal.
-            echo "go list failed for internal/$pkg — likely an import cycle through internal/console, which violates ADR 0023's one-way dependency:" >&2
+            # as the violation signal. But go list -deps also fails for
+            # reasons unrelated to console (an unresolvable import, a
+            # malformed package clause in a dependency), so only blame
+            # console when the toolchain actually reports a cycle.
+            if echo "$deps" | grep -q 'import cycle'; then
+              echo "go list failed for internal/$pkg — likely an import cycle through internal/console, which violates ADR 0023's one-way dependency:" >&2
+            else
+              echo "go list failed for internal/$pkg for a reason unrelated to a console cycle (see stderr below) — not necessarily an ADR 0023 violation:" >&2
+            fi
             echo "$deps" >&2
             exit 1
           fi
