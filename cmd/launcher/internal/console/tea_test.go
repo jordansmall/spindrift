@@ -231,6 +231,12 @@ func TestTea_CursorKeys_MoveHighlightedRow(t *testing.T) {
 	sendKey(tm, "down")
 	waitForOutput(t, tm, "> #2")
 
+	sendKey(tm, "up")
+	waitForOutput(t, tm, "> #1")
+
+	sendKey(tm, "j")
+	waitForOutput(t, tm, "> #2")
+
 	sendKey(tm, "i")
 	waitForOutput(t, tm, "> #1")
 
