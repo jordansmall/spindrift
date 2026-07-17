@@ -18,7 +18,8 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 	switch s.selfHeal(d, num, gen, prURL) {
 	case landingMerged:
 		// verifyMerged reads PR state, which a push-only Code Forge does not
-		// have (mirrors Settle's own "ready"/"merged" guards in gate.go).
+		// have (mirrors gate.go's "ready" case guard: silent skip, no
+		// logging when s.pr is nil).
 		if s.pr != nil {
 			s.verifyMerged(num, prURL)
 		}

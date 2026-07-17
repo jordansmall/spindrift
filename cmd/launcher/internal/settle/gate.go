@@ -66,8 +66,9 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		}
 		s.postUsageComment(num, d)
 	case "merged":
-		// verifyMerged reads PR state, which a push-only Code Forge does not
-		// have (mirrors the "ready" case's same guard above).
+		// verifyMerged reads PR state, which a push-only Code Forge does
+		// not have — unlike the "ready" case above, this branch logs a
+		// status line via the else when s.pr is nil.
 		if s.pr != nil {
 			s.verifyMerged(num, o.Landing)
 		} else {
