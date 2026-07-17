@@ -1309,6 +1309,48 @@ func TestView_ExtremelyShortTerminal_NeverExceedsHeight(t *testing.T) {
 	}
 }
 
+// TestView_StackedBudgetOne_ShowsElisionAffordance verifies a stacked body
+// with only one row of budget shows an elision marker instead of a bare
+// blank separator line — a budget of 1 collapses both the backlog and queue
+// columns to nothing, so without a marker the render is a blank line with no
+// indication that content exists but isn't shown (issue #1041).
+func TestView_StackedBudgetOne_ShowsElisionAffordance(t *testing.T) {
+	issues := make([]forge.Issue, 20)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	picks := make([]Pick, 20)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
+	}
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 2})
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+	m.Picks = picks
+
+	out := View(m)
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) > m.Height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d)", len(lines), m.Height)
+	}
+	if !strings.Contains(out, "…") {
+		t.Errorf("View() = %q, want an elision affordance rather than a bare blank line", out)
+	}
+}
+
+// TestView_StackedBudgetOne_EmptyBacklogAndQueue_NoElisionAffordance verifies
+// the budget=1 elision marker only appears when there's something to elide —
+// a genuinely empty backlog and queue at the same tight budget keeps the
+// bare blank line rather than falsely claiming hidden content (issue #1041).
+func TestView_StackedBudgetOne_EmptyBacklogAndQueue_NoElisionAffordance(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 2})
+
+	out := View(m)
+	if strings.Contains(out, "…") {
+		t.Errorf("View() = %q, want no elision affordance when backlog and queue are both empty", out)
+	}
+}
+
 // TestView_HeaderHeight_AdaptsToAlertLines verifies the body's row budget
 // shrinks as alert lines (stale/rebuilding/dogfood) are added to the header,
 // so a longer header always leaves proportionally less room for the body
