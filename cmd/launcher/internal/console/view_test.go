@@ -1338,6 +1338,21 @@ func TestView_StackedBudgetOne_ShowsElisionAffordance(t *testing.T) {
 	}
 }
 
+// TestView_StackedBudgetOne_PicksOnly_ShowsElisionAffordance verifies the
+// budget=1 elision marker fires off picks alone, with an empty backlog — the
+// marker's guard is an OR of both columns' lengths, so a lopsided disjunct
+// (only one side populated) needs its own case or an accidental swap to AND
+// would still pass the empty/both-populated tests alone (issue #1041).
+func TestView_StackedBudgetOne_PicksOnly_ShowsElisionAffordance(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 2})
+	m.Picks = []Pick{{Number: "1", Title: "pick 1", State: PickQueued}}
+
+	out := View(m)
+	if !strings.Contains(out, "…") {
+		t.Errorf("View() = %q, want an elision affordance when the queue alone is non-empty", out)
+	}
+}
+
 // TestView_StackedBudgetOne_EmptyBacklogAndQueue_NoElisionAffordance verifies
 // the budget=1 elision marker only appears when there's something to elide —
 // a genuinely empty backlog and queue at the same tight budget keeps the
