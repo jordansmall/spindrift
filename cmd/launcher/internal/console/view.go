@@ -198,16 +198,11 @@ func splitLeftWidth(backlog string, width int) int {
 // renders nothing at all, so an extremely short terminal can't have the
 // label alone push the header off-screen (issue #1035).
 func renderBacklogColumn(m Model, budget int) string {
-	if budget <= 0 {
-		return ""
-	}
-	var b strings.Builder
 	label := "backlog"
 	if m.Focus == FocusBacklog {
 		label += " [focus]"
 	}
 	label += positionLabel(m.BacklogOffset, budget, len(m.Visible()))
-	fmt.Fprintf(&b, "%s:\n", label)
 	rows := make([]string, 0, len(m.Visible()))
 	for i, iss := range m.Visible() {
 		marker := " "
@@ -221,8 +216,7 @@ func renderBacklogColumn(m Model, budget int) string {
 		}
 		rows = append(rows, fmt.Sprintf("%s #%s  %s  [%s]\n", marker, iss.Number, title, strings.Join(labels, ", ")))
 	}
-	writeWindowedRows(&b, rows, m.BacklogOffset, columnItemBudget(budget))
-	return b.String()
+	return writeColumn(label, rows, m.BacklogOffset, budget)
 }
 
 // renderQueueColumn renders the work queue: one pick-ordered line per Pick,
@@ -238,16 +232,11 @@ func renderBacklogColumn(m Model, budget int) string {
 // renderBacklogColumn is, so a long picks queue can't push the header
 // off-screen either (issue #1035).
 func renderQueueColumn(m Model, budget int) string {
-	if budget <= 0 {
-		return ""
-	}
-	var b strings.Builder
 	label := "picks"
 	if m.Focus == FocusQueue {
 		label += " [focus]"
 	}
 	label += positionLabel(m.QueueOffset, budget, len(m.Picks))
-	fmt.Fprintf(&b, "%s:\n", label)
 	rows := make([]string, 0, len(m.Picks))
 	for i, p := range m.Picks {
 		marker := " "
@@ -274,8 +263,7 @@ func renderQueueColumn(m Model, budget int) string {
 		row.WriteString("\n")
 		rows = append(rows, row.String())
 	}
-	writeWindowedRows(&b, rows, m.QueueOffset, columnItemBudget(budget))
-	return b.String()
+	return writeColumn(label, rows, m.QueueOffset, budget)
 }
 
 // joinColumns zips left and right line by line, clipping each side to its
@@ -590,6 +578,22 @@ func writeWindowedRows(b *strings.Builder, rows []string, offset, budget int) {
 	if budget > 0 {
 		fmt.Fprintf(b, "… %d more below\n", len(remaining)-visible)
 	}
+}
+
+// writeColumn renders a body column's label line followed by rows windowed
+// to budget-1 (the label costs one row) — the guard/label/window plumbing
+// renderBacklogColumn and renderQueueColumn shared inline before extraction
+// (issue #1040). A non-positive budget renders nothing at all, matching
+// their own budget<=0 early return (issue #1035); the row-building loops
+// themselves stay in each caller since they differ per column.
+func writeColumn(label string, rows []string, offset, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s:\n", label)
+	writeWindowedRows(&b, rows, offset, columnItemBudget(budget))
+	return b.String()
 }
 
 // windowedRowCount returns how many of remaining rows writeWindowedRows
