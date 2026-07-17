@@ -198,4 +198,7 @@ func TestWaveOverlapCheck_TouchesOfErrorNoOpenPRDoesNotClaimFallback(t *testing.
 	if strings.Contains(out, "falling back to its open PR's changed files") {
 		t.Errorf("diagnostic falsely claims a PR-files fallback with no open PR: %q", out)
 	}
+	if !strings.Contains(out, "no PR-changed-files available to fall back to") {
+		t.Errorf("expected a diagnostic naming the no-fallback case, got %q", out)
+	}
 }

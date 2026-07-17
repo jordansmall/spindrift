@@ -65,7 +65,7 @@ func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) fun
 			if len(prFiles) > 0 {
 				fmt.Printf("    .. failed to fetch #%s's declared touches (%v); falling back to its open PR's changed files only\n", fi.Number, err)
 			} else {
-				fmt.Printf("    .. failed to fetch #%s's declared touches (%v); no open PR to fall back to, treating as no touches\n", fi.Number, err)
+				fmt.Printf("    .. failed to fetch #%s's declared touches (%v); no PR-changed-files available to fall back to, treating as no touches\n", fi.Number, err)
 			}
 		}
 		touches = append(touches, prFiles...)
