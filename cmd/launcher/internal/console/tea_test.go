@@ -279,10 +279,9 @@ func TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor(t *testing.T) {
 // TestTea_ScrollKeys_PgdownScrollsBacklogOffScreenWhenContentFits verifies
 // the rendered effect of pgdown when the whole backlog already fits within
 // one screen (issue #1060): the top, already-fully-visible row disappears
-// from the rendered column instead of the press no-op'ing — offset-only
-// assertions (TestUpdate_ScrollMsg_BacklogOffsetScrollsPastEndWhenContentFitsOnScreen
-// in model_test.go) don't by themselves prove a row silently drops off the
-// rendered window.
+// from the rendered column instead of the press no-op'ing — the model
+// package's own offset-only scroll tests don't by themselves prove a row
+// silently drops off the rendered window.
 func TestTea_ScrollKeys_PgdownScrollsBacklogOffScreenWhenContentFits(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	issues := make([]forge.Issue, 3)

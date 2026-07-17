@@ -269,10 +269,11 @@ func Update(m Model, msg Msg) Model {
 	case ScrollMsg:
 		// Adds Delta unconditionally, then clampCursor below still clamps
 		// into [0, len-1] by total row count alone — not by how many rows
-		// the viewport can actually show. So a pgdown on a column whose
-		// content already fits on screen still scrolls to the last row
-		// instead of no-op'ing, hiding the earlier, already-visible rows
-		// (issue #1060; the viewport-aware fix, if wanted, is #1053).
+		// the viewport can actually show. This is current, undocumented
+		// behavior rather than a deliberate design choice: a pgdown on a
+		// column whose content already fits on screen still scrolls to the
+		// last row instead of no-op'ing, hiding the earlier, already-visible
+		// rows (issue #1060; a viewport-aware fix, if wanted, is #1053).
 		if m.Focus == FocusQueue {
 			m.QueueOffset += msg.Delta
 		} else {
