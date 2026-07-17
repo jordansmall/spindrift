@@ -377,8 +377,21 @@ func TestView_ShowHelp_ListsBodyScrollKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
-	if !strings.Contains(out, "pgup/pgdown  scroll the backlog/queue") {
-		t.Errorf("View() = %q, want it to mention the backlog/queue scroll keys", out)
+	if !strings.Contains(out, "pgup/pgdown  jump a full page of the backlog/queue's live rendered") {
+		t.Errorf("View() = %q, want it to mention the dynamic backlog/queue page jump", out)
+	}
+}
+
+// TestView_ShowHelp_ContrastsDrillInFixedPage verifies the help overlay's
+// drill-in transcript pgup/pgdown line calls out that its page jump is a
+// fixed size, unlike the backlog/queue's live-viewport-derived one — the two
+// keys share a name but not a page size (issue #1059).
+func TestView_ShowHelp_ContrastsDrillInFixedPage(t *testing.T) {
+	m := Update(NewModel(), HelpToggleMsg{})
+
+	out := View(m)
+	if !strings.Contains(out, "fixed 10") {
+		t.Errorf("View() = %q, want it to describe the drill-in page jump as fixed at 10 lines", out)
 	}
 }
 
