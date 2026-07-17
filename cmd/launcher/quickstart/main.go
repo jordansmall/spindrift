@@ -8,9 +8,8 @@ import (
 	"strings"
 )
 
-// hostEnvironment is the real Environment: host PATH lookups and ambient env
-// var reads. LookPath is unused by runQuickstart until host detection lands
-// (ADR 0027); wired here so the seam is ready.
+// hostEnvironment is the real Environment: host PATH lookups, ambient env
+// var reads, host git config, and the git remote repoSlug guess (ADR 0027).
 type hostEnvironment struct{}
 
 func (hostEnvironment) LookPath(file string) (string, error) {
@@ -64,6 +63,48 @@ func (hostEnvironment) GHAuthToken() (string, error) {
 		return "", fmt.Errorf("gh auth token: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// GitConfig reads a host git config key (e.g. "user.name"), returning "" if
+// unset or git is unavailable — the caller treats "" as no default offered.
+func (hostEnvironment) GitConfig(key string) string {
+	out, err := exec.Command("git", "config", "--get", key).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// GitRemoteRepoSlug guesses "owner/repo" from the "origin" remote when the
+// wizard runs inside a clone, returning "" if there is no remote or it
+// isn't a github.com URL.
+func (hostEnvironment) GitRemoteRepoSlug() string {
+	out, err := exec.Command("git", "remote", "get-url", "origin").Output()
+	if err != nil {
+		return ""
+	}
+	return parseGitHubRepoSlug(strings.TrimSpace(string(out)))
+}
+
+// parseGitHubRepoSlug extracts "owner/repo" from a github.com remote URL in
+// any of its common forms — scp-like ssh (git@github.com:owner/repo.git),
+// ssh:// (ssh://git@github.com/owner/repo.git), or https
+// (https://github.com/owner/repo.git) — stripping a trailing ".git". Returns
+// "" for anything else (a non-github.com remote, or no remote at all).
+func parseGitHubRepoSlug(remoteURL string) string {
+	s := strings.TrimSuffix(remoteURL, ".git")
+	const marker = "github.com"
+	i := strings.Index(s, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := s[i+len(marker):]
+	rest = strings.TrimPrefix(rest, ":")
+	rest = strings.TrimPrefix(rest, "/")
+	if rest == "" || strings.Count(rest, "/") != 1 {
+		return ""
+	}
+	return rest
 }
 
 // hostCommandRunner is the real CommandRunner: runs the named command with

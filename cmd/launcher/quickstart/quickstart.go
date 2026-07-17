@@ -38,6 +38,26 @@ type Environment interface {
 	// auth token`) — the fallback offered to an operator who declines to
 	// paste a fine-grained PAT.
 	GHAuthToken() (string, error)
+
+	GitConfig(key string) string
+	GitRemoteRepoSlug() string
+}
+
+// runtimePrecedence is the order Quickstart probes for an available
+// container runtime (ADR 0027): podman first, then docker, then the
+// daemonless bwrap fallback. nerdctl/rancher is deferred (issue #1274).
+var runtimePrecedence = []string{"podman", "docker", "bwrap"}
+
+// detectRuntime returns the first runtime in runtimePrecedence found on
+// PATH, or an actionable error naming all three when none is available —
+// Quickstart cannot proceed without one (ADR 0027).
+func detectRuntime(env Environment) (string, error) {
+	for _, rt := range runtimePrecedence {
+		if _, err := env.LookPath(rt); err == nil {
+			return rt, nil
+		}
+	}
+	return "", fmt.Errorf("no supported container runtime found on PATH — install one of: podman, docker, bwrap")
 }
 
 // CommandRunner abstracts the two subprocesses Quickstart eventually shells
@@ -76,17 +96,34 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Write
 		fmt.Fprintf(w, "backed up: %s -> %s.bak\n", name, name)
 	}
 
+	detectedRuntime, err := detectRuntime(env)
+	if err != nil {
+		return err
+	}
+
 	scanner := bufio.NewScanner(stdin)
 	prompt := func(label string) string {
 		fmt.Fprintf(w, "%s: ", label)
 		scanner.Scan()
 		return scanner.Text()
 	}
+	promptDefault := func(label, def string) string {
+		if def != "" {
+			fmt.Fprintf(w, "%s [%s]: ", label, def)
+		} else {
+			fmt.Fprintf(w, "%s: ", label)
+		}
+		scanner.Scan()
+		if v := scanner.Text(); v != "" {
+			return v
+		}
+		return def
+	}
 
-	repoSlug := prompt("Repo slug (owner/repo)")
-	runtime := prompt("Runtime [podman/docker/bwrap]")
-	gitUserName := prompt("Git user name")
-	gitUserEmail := prompt("Git user email")
+	repoSlug := promptDefault("Repo slug (owner/repo)", env.GitRemoteRepoSlug())
+	runtime := promptDefault("Runtime", detectedRuntime)
+	gitUserName := promptDefault("Git user name", env.GitConfig("user.name"))
+	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
 	ghToken, err := acquireGHToken(env, w, prompt)
 	if err != nil {
 		return err
