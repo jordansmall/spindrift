@@ -144,7 +144,7 @@ func main() {
 	stat, statErr := os.Stdin.Stat()
 	interactive := statErr == nil && (stat.Mode()&os.ModeCharDevice) != 0
 
-	if err := runQuickstart(dir, hostEnvironment{}, hostCommandRunner{}, os.Stdout, os.Stdin, interactive, *force); err != nil {
+	if err := runQuickstart(dir, hostEnvironment{}, hostCommandRunner{}, buildForge, os.Stdout, os.Stdin, interactive, *force); err != nil {
 		fmt.Fprintf(os.Stderr, "quickstart: %s\n", err)
 		os.Exit(1)
 	}
