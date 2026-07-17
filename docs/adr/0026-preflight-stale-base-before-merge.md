@@ -109,3 +109,12 @@ combined tree) instead of just relocating it to a human.
   `internal/settle/merge_test.go`): a `NeedsUpdate`-true PR whose rebased
   tree then fails CI is blocked from merging, rather than landing on the
   strength of its stale green result.
+- Two distinct preflight failures are handled differently, and deliberately
+  so (issue #940). A `NeedsUpdate` *query* error leaves staleness merely
+  unknown, so it is logged and swallowed — the normal `Merge` attempt
+  surfaces any real problem through its own, already-tested error handling.
+  A `Rebase` failure that persists past its push-retry budget is not the
+  same case: staleness is confirmed and the corrective rebase itself failed,
+  so `preflightStaleBase` returns that error and blocks the merge outright
+  rather than falling through to `Merge` on a base known to be stale and
+  never re-validated (`TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge`).
