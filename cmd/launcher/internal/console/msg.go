@@ -68,14 +68,16 @@ type PickQueuedMsg struct {
 
 func (PickQueuedMsg) isConsoleMsg() {}
 
-// PickFailedMsg carries a pick whose promotion failed — the Pick adapter's
+// PickDissolvedMsg carries a pick whose promotion failed — the Pick adapter's
 // error result. The issue never queues; Update instead lands it already
-// dissolved so the operator sees why.
-type PickFailedMsg struct {
+// dissolved (PickDissolved) so the operator sees why. Distinct from
+// PickFailed (pick.go), the state a pick that ran and exited non-zero lands
+// in — a PickDissolvedMsg promotion never launched a Box at all.
+type PickDissolvedMsg struct {
 	Number, Title, Reason string
 }
 
-func (PickFailedMsg) isConsoleMsg() {}
+func (PickDissolvedMsg) isConsoleMsg() {}
 
 // QueueSnapshotMsg carries the launcher's live Queue state into the pure
 // core — Run's per-render sync, since claim/run/settle/dissolve transitions

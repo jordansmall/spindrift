@@ -64,14 +64,14 @@ func PickIssue(tracker forge.IssueTracker, num, title string, kind Kind) Msg {
 	for _, state := range []forge.DispatchState{forge.InProgress, forge.Complete} {
 		active, err := issueInState(tracker, num, state)
 		if err != nil {
-			return PickFailedMsg{Number: num, Title: title, Reason: err.Error()}
+			return PickDissolvedMsg{Number: num, Title: title, Reason: err.Error()}
 		}
 		if active {
-			return PickFailedMsg{Number: num, Title: title, Reason: "issue #" + num + " is already " + dispatchStateName(state)}
+			return PickDissolvedMsg{Number: num, Title: title, Reason: "issue #" + num + " is already " + dispatchStateName(state)}
 		}
 	}
 	if err := tracker.TransitionState(num, forge.Untriaged, forge.Dispatchable); err != nil {
-		return PickFailedMsg{Number: num, Title: title, Reason: err.Error()}
+		return PickDissolvedMsg{Number: num, Title: title, Reason: err.Error()}
 	}
 	return PickQueuedMsg{Number: num, Title: title, Kind: kind}
 }
@@ -93,7 +93,7 @@ func issueInState(tracker forge.IssueTracker, num string, state forge.DispatchSt
 	return false, nil
 }
 
-// dispatchStateName renders state for a PickFailedMsg's operator-facing
+// dispatchStateName renders state for a PickDissolvedMsg's operator-facing
 // reason — InProgress and Complete are the only states PickIssue ever
 // rejects on, so this deliberately doesn't cover the full enum.
 func dispatchStateName(state forge.DispatchState) string {
@@ -117,7 +117,7 @@ func dispatchStateName(state forge.DispatchState) string {
 func PickAllReady(tracker forge.IssueTracker) []Msg {
 	issues, err := tracker.ListIssues(forge.Dispatchable)
 	if err != nil {
-		return []Msg{PickFailedMsg{Title: "pick all ready", Reason: err.Error()}}
+		return []Msg{PickDissolvedMsg{Title: "pick all ready", Reason: err.Error()}}
 	}
 	msgs := make([]Msg, len(issues))
 	for i, iss := range issues {

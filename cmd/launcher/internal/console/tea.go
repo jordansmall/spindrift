@@ -546,7 +546,7 @@ func (t teaModel) landPick(msg Msg) {
 	switch msg := msg.(type) {
 	case PickQueuedMsg:
 		t.launch.Queue.Add(Pick{Number: msg.Number, Title: msg.Title, Kind: msg.Kind, State: PickQueued})
-	case PickFailedMsg:
+	case PickDissolvedMsg:
 		t.launch.Queue.Add(Pick{Number: msg.Number, Title: msg.Title, State: PickDissolved, Reason: msg.Reason})
 	default:
 		return
