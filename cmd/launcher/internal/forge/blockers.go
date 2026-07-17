@@ -17,16 +17,28 @@ var (
 // IsBlockedByHeader reports whether line is a "## Blocked by" section header.
 // The local adapter's parseLocalBlockers calls this to reuse the same
 // section-parsing grammar for slug-based (rather than "#N") blocker refs.
+//
+// Unlike IsAnyHeading and IsBulletItem below, this trims leading/trailing
+// whitespace off line before matching, so an indented "  ## Blocked by"
+// still opens a section. IsAnyHeading and IsBulletItem match the raw line
+// and do not trim, so an indented heading (e.g. "  ## Other") will NOT
+// close a section opened this way. This asymmetry is preserved from the
+// pre-#680 behavior, not accidental; the same trim/no-trim split repeats
+// for the "Touches" header in touches.go.
 func IsBlockedByHeader(line string) bool {
 	return blockedByHeader.MatchString(strings.TrimSpace(line))
 }
 
 // IsAnyHeading reports whether line is a markdown heading of any level.
+// Matches the raw line without trimming; see IsBlockedByHeader's doc
+// comment for the trim/no-trim asymmetry this implies.
 func IsAnyHeading(line string) bool {
 	return anyHeading.MatchString(line)
 }
 
 // IsBulletItem reports whether line is a "-" or "*" bullet list item.
+// Matches the raw line without trimming; see IsBlockedByHeader's doc
+// comment for the trim/no-trim asymmetry this implies.
 func IsBulletItem(line string) bool {
 	return bulletItem.MatchString(line)
 }
