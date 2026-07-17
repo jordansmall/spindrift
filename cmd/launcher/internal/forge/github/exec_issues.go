@@ -177,7 +177,9 @@ func (e *execClient) issueLabels(num string) ([]string, error) {
 // place alongside the verdict label instead of erroring. This is a
 // check-then-edit, not an atomic compare-and-swap — another process could
 // still flip the label between the read below and the edit, so it narrows
-// the double-dispatch window without closing it.
+// the double-dispatch window without closing it. The mismatch error renders
+// labels comma-joined, matching local.go and view.go, rather than Go's
+// bracketed %v slice form.
 func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 	add := e.verdictLabels.Label(verdict)
 	if add == "" {
@@ -191,7 +193,7 @@ func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 			return err
 		}
 		if !slices.Contains(labels, remove) {
-			return fmt.Errorf("gh issue edit %s: expected %q label, issue has %v", num, remove, labels)
+			return fmt.Errorf("gh issue edit %s: expected %q label, issue has [%s]", num, remove, strings.Join(labels, ", "))
 		}
 	}
 
