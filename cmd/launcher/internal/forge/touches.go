@@ -27,8 +27,9 @@ func ParseTouchPaths(body string) []string {
 	for _, rawLine := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
 		line := strings.TrimRight(rawLine, "\r")
 
-		// Trims before matching, unlike IsAnyHeading/IsBulletItem below —
-		// same trim/no-trim split as IsBlockedByHeader in blockers.go.
+		// Trims before matching, unlike IsAnyHeading below (IsBulletItem's
+		// own regex tolerates leading whitespace) — same trim/no-trim
+		// split as IsBlockedByHeader in blockers.go.
 		if touchesHeader.MatchString(strings.TrimSpace(line)) {
 			inSection = true
 			continue
