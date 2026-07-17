@@ -470,10 +470,11 @@ func TestUpdate_ScrollMsg_MovesQueueOffsetWhenQueueFocused(t *testing.T) {
 // TestUpdate_CursorMoveMsg_BacklogOffsetFollowsCursor verifies the backlog
 // viewport advances/rewinds by one as the cursor crosses its bottom/top
 // visible row, keeping the highlighted row always on screen (issue #1036
-// AC1). At Width 80 / Height 10 the backlog column shows 4 rows per screen
-// (verified empirically: rows 0-3 visible, "46 more below" for a 50-issue
-// backlog) — this test drives the cursor across two screens' worth of rows
-// and back to exercise both directions.
+// AC1). visibleRows is derived from the same bodyColumnBudgets /
+// columnItemBudget / windowedRowCount composition renderBody uses (issue
+// #1056), so a future geometry change doesn't require re-deriving a
+// hand-computed constant — this test drives the cursor across two screens'
+// worth of rows and back to exercise both directions.
 func TestUpdate_CursorMoveMsg_BacklogOffsetFollowsCursor(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 50)
@@ -482,31 +483,34 @@ func TestUpdate_CursorMoveMsg_BacklogOffsetFollowsCursor(t *testing.T) {
 	}
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
-	// Rows 0-3 are visible at offset 0; moving down within that window must
-	// not scroll.
-	for step := 1; step <= 3; step++ {
+	backlogBudget, _ := bodyColumnBudgets(m)
+	visibleRows := windowedRowCount(len(issues), columnItemBudget(backlogBudget))
+
+	// Rows 0..visibleRows-1 are visible at offset 0; moving down within that
+	// window must not scroll.
+	for step := 1; step <= visibleRows-1; step++ {
 		m = Update(m, CursorMoveMsg{Delta: 1})
 		if m.BacklogOffset != 0 {
 			t.Fatalf("after %d down-moves: BacklogOffset = %d, want 0 (cursor %d still on screen)", step, m.BacklogOffset, m.Cursor)
 		}
 	}
 
-	// Cursor now at row 3 (last visible row); one more down-move pushes it
-	// past the bottom, advancing the offset by exactly one.
+	// Cursor now at the last visible row; one more down-move pushes it past
+	// the bottom, advancing the offset by exactly one.
 	m = Update(m, CursorMoveMsg{Delta: 1})
-	if m.Cursor != 4 || m.BacklogOffset != 1 {
-		t.Fatalf("Cursor = %d, BacklogOffset = %d, want Cursor 4, BacklogOffset 1 (scrolled to keep the cursor visible)", m.Cursor, m.BacklogOffset)
+	if m.Cursor != visibleRows || m.BacklogOffset != 1 {
+		t.Fatalf("Cursor = %d, BacklogOffset = %d, want Cursor %d, BacklogOffset 1 (scrolled to keep the cursor visible)", m.Cursor, m.BacklogOffset, visibleRows)
 	}
 
 	m = Update(m, CursorMoveMsg{Delta: 1})
-	if m.Cursor != 5 || m.BacklogOffset != 2 {
-		t.Fatalf("Cursor = %d, BacklogOffset = %d, want Cursor 5, BacklogOffset 2 (offset advances one more)", m.Cursor, m.BacklogOffset)
+	if m.Cursor != visibleRows+1 || m.BacklogOffset != 2 {
+		t.Fatalf("Cursor = %d, BacklogOffset = %d, want Cursor %d, BacklogOffset 2 (offset advances one more)", m.Cursor, m.BacklogOffset, visibleRows+1)
 	}
 
 	// Moving back up: the offset must not rewind while the cursor is still
-	// within the current window (rows 2-5 at offset 2), including its own
-	// top row (row 2).
-	for step := 1; step <= 3; step++ {
+	// within the current window (offset 2, visibleRows rows tall), including
+	// its own top row.
+	for step := 1; step <= visibleRows-1; step++ {
 		m = Update(m, CursorMoveMsg{Delta: -1})
 		if m.BacklogOffset != 2 {
 			t.Fatalf("after %d up-moves: BacklogOffset = %d, want 2 (cursor %d still on screen)", step, m.BacklogOffset, m.Cursor)
@@ -542,7 +546,10 @@ func TestUpdate_CursorMoveMsg_QueueOffsetFollowsCursorWhenQueueFocused(t *testin
 	}
 	m.Picks = picks
 
-	for step := 1; step <= 3; step++ {
+	_, queueBudget := bodyColumnBudgets(m)
+	visibleRows := windowedRowCount(len(picks), columnItemBudget(queueBudget))
+
+	for step := 1; step <= visibleRows-1; step++ {
 		m = Update(m, CursorMoveMsg{Delta: 1})
 		if m.QueueOffset != 0 {
 			t.Fatalf("after %d down-moves: QueueOffset = %d, want 0 (cursor %d still on screen)", step, m.QueueOffset, m.QueueCursor)
@@ -550,8 +557,8 @@ func TestUpdate_CursorMoveMsg_QueueOffsetFollowsCursorWhenQueueFocused(t *testin
 	}
 
 	m = Update(m, CursorMoveMsg{Delta: 1})
-	if m.QueueCursor != 4 || m.QueueOffset != 1 {
-		t.Fatalf("QueueCursor = %d, QueueOffset = %d, want QueueCursor 4, QueueOffset 1 (scrolled to keep the cursor visible)", m.QueueCursor, m.QueueOffset)
+	if m.QueueCursor != visibleRows || m.QueueOffset != 1 {
+		t.Fatalf("QueueCursor = %d, QueueOffset = %d, want QueueCursor %d, QueueOffset 1 (scrolled to keep the cursor visible)", m.QueueCursor, m.QueueOffset, visibleRows)
 	}
 	if m.BacklogOffset != 0 {
 		t.Errorf("BacklogOffset = %d, want 0 (queue focused, backlog untouched)", m.BacklogOffset)
