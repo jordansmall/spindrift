@@ -692,14 +692,17 @@ func followViewport(offset, cursor, total, itemBudget int) int {
 // Offset to the end of a (potentially multi-MB) transcript (issue #722). A
 // non-positive budget yields an empty window rather than a negative slice.
 // d.Offset is assumed already in [0, len(d.Lines)-1] — Update clamps it via
-// clampDrillInOffset before any render call reaches here. Measured on a
-// 10MB+ transcript at Offset 0, Height 24
-// (BenchmarkView_DrillInFullscreen_LargeTranscript, issue #1016): a View
-// call went from 3.88ms/op, 21.0MB/op, 7 allocs/op (Lines cached but
-// unwindowed — joining offset-to-end every call) to 1.6µs/op, 3.39KB/op, 5
-// allocs/op (windowed). Reproduce with `go test ./internal/console/... -run
-// '^$' -bench BenchmarkView_DrillInFullscreen -benchmem` from
-// cmd/launcher.
+// clampDrillInOffset before any render call reaches here. As recorded when
+// this windowing landed, a View call against a 10MB+ transcript at Offset
+// 0, Height 24 (BenchmarkView_DrillInFullscreen_LargeTranscript, issue
+// #1016) went from 3.88ms/op, 21.0MB/op, 7 allocs/op — the state right
+// after the Lines cache above landed but before this windowing, still
+// joining offset-to-end every call, itself down from 4.47ms/op, 23.5MB/op,
+// 9 allocs/op pre-cache — to 1.6µs/op, 3.39KB/op, 5 allocs/op (windowed).
+// The alloc counts are the invariant; absolute ns/op and B/op vary by
+// machine, Go version, and allocator behavior. Reproduce with `go test
+// ./internal/console/... -run '^$' -bench BenchmarkView_DrillInFullscreen
+// -benchmem` from cmd/launcher.
 func windowLines(d DrillInState, budget int) []string {
 	offset := d.Offset
 	end := offset + budget
