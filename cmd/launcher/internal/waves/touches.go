@@ -60,10 +60,15 @@ func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) fun
 		// best-effort behaviour, but is printed so operators can see the
 		// gap rather than have it degrade silently.
 		touches, err := it.TouchesOf(fi.Number)
+		prFiles := prTouchesOf(cf, fi.Number)
 		if err != nil {
-			fmt.Printf("    .. failed to fetch #%s's declared touches (%v); falling back to its open PR's changed files only\n", fi.Number, err)
+			if len(prFiles) > 0 {
+				fmt.Printf("    .. failed to fetch #%s's declared touches (%v); falling back to its open PR's changed files only\n", fi.Number, err)
+			} else {
+				fmt.Printf("    .. failed to fetch #%s's declared touches (%v); no open PR to fall back to, treating as no touches\n", fi.Number, err)
+			}
 		}
-		touches = append(touches, prTouchesOf(cf, fi.Number)...)
+		touches = append(touches, prFiles...)
 		entries[i] = inProgressTouches{number: fi.Number, touches: touches}
 	}
 	return func(num string) (string, bool) {
