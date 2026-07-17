@@ -17,6 +17,8 @@ let
     extraClosuresHarness
     harness
     ;
+  fragmentRows = import ../../lib/fragments.nix;
+  fragmentBasenames = map (row: pkgs.lib.removeSuffix ".md" row.fragment) fragmentRows;
 in
 {
   # The baked entrypoint must carry a store-path shebang, not the
@@ -161,9 +163,12 @@ in
   # /agent/prompts/fragments -- inside the overridable prompt surface, unlike
   # the contracts above -- so a SPINDRIFT_PROMPT_DIR override that wants a
   # knob-gated step present must supply its own fragment, exactly like it
-  # already must supply filer-prompt.md.
+  # already must supply filer-prompt.md. fragmentBasenames is derived from
+  # lib/fragments.nix rather than hardcoded (issue #957), so a new registry
+  # row can't silently drop out of image coverage (same fix as #956's bats
+  # mirror of this test).
   fragments-baked-into-image = pkgs.runCommand "fragments-baked-into-image" { } ''
-    for f in skill-preamble caveman-default file-issues auto-format auto-lint ci-failure; do
+    for f in ${pkgs.lib.concatStringsSep " " fragmentBasenames}; do
       diff ${../../templates/default/prompts/fragments}/"$f".md \
         ${batsHarness.agentFiles}/agent/prompts/fragments/"$f".md
     done
