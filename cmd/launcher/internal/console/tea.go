@@ -223,7 +223,7 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		t.m = Update(t.m, FocusToggleMsg{})
 	case "j", "down":
 		t.m = Update(t.m, CursorMoveMsg{Delta: 1})
-	case "up":
+	case "i", "up":
 		t.m = Update(t.m, CursorMoveMsg{Delta: -1})
 	case "pgdown":
 		t.m = Update(t.m, ScrollMsg{Delta: focusedPageSize(t.m)})
