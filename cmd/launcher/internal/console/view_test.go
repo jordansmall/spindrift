@@ -757,6 +757,27 @@ func TestView_DrillInDocked_KeepsBacklogAndQueueVisible(t *testing.T) {
 	}
 }
 
+// TestView_DrillInDocked_TranscriptRespectsHeaderHeight verifies the docked
+// pane's total output never exceeds m.Height even when renderHeader grows
+// past its one-line minimum — a stale-image alert stacks a second header
+// line on top of the status line, and renderTranscriptColumn's budget must
+// account for it instead of assuming a single-line header (issue #1014).
+func TestView_DrillInDocked_TranscriptRespectsHeaderHeight(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
+	m = Update(m, StaleStatusMsg{Stale: true, Message: "rebuild needed"})
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("transcript line %d", i)
+	}
+	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+
+	out := View(m)
+	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(got) > m.Height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — the multi-line header must be budgeted out of the transcript column", len(got), m.Height)
+	}
+}
+
 // TestView_DrillInNarrowTerminal_FallsBackToFullscreen verifies a terminal
 // too narrow for three columns renders the Transcript fullscreen regardless
 // of the operator's selected PaneMode — never leaving unreadable, wrapped
@@ -850,7 +871,7 @@ func TestView_DrillInFloating_ToggleRaw_ShowsRawHeader(t *testing.T) {
 // (a non-zero Offset) drops the leading lines through renderTranscriptColumn
 // — the docked pane mode's render path (issue #1004).
 func TestView_DrillInDocked_Scroll_HidesLinesBeforeOffset(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 4})
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 8})
 	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3"})
 	m = Update(m, DrillInScrollMsg{Delta: 2})
 
@@ -867,7 +888,7 @@ func TestView_DrillInDocked_Scroll_HidesLinesBeforeOffset(t *testing.T) {
 // also works in the floating pane mode, through the same
 // renderTranscriptColumn path as docked (issue #1004).
 func TestView_DrillInFloating_Scroll_HidesLinesBeforeOffset(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 4})
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 8})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
 		{Number: "1", Title: "backlog issue 1"},
 		{Number: "2", Title: "backlog issue 2"},
@@ -1317,7 +1338,7 @@ func TestView_BodyAndDockedBody_AgreeOnLeftColumnWidth(t *testing.T) {
 	mDocked = Update(mDocked, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
 
 	bodyOut := renderBody(mBody, unboundedBudget)
-	dockedOut := renderDockedBody(mDocked)
+	dockedOut := renderDockedBody(mDocked, 0)
 
 	bodyLine := lineContaining(t, bodyOut, "QUEUEMARK")
 	dockedLine := lineContaining(t, dockedOut, "QUEUEMARK")
