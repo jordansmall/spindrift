@@ -378,13 +378,18 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 // a conflict-triggered rebase are independent concerns; sharing a budget
 // would let one exhaust the other's allowance before it ever gets to run.
 //
-// A NeedsUpdate query error or a Rebase failure is logged and swallowed
-// rather than returned: the caller's normal Merge attempt will surface the
-// same underlying problem (a genuine conflict, blocked checks, or a clean
-// merge if the staleness turns out to be harmless) through its own,
-// already-tested error handling. Only a rebase that force-pushes but never
-// re-confirms green is a hard failure here, matching rewaitAfterForcePush's
-// contract elsewhere in this file.
+// A NeedsUpdate query error is logged and swallowed rather than returned:
+// staleness is merely unknown, and the caller's normal Merge attempt will
+// surface the same underlying problem (a genuine conflict, blocked checks,
+// or a clean merge if the staleness turns out to be harmless) through its
+// own, already-tested error handling.
+//
+// A Rebase failure that persists past its push-retry budget is different:
+// staleness is confirmed and the corrective action itself failed, so it is
+// returned as a hard, merge-blocking error (issue #940) rather than falling
+// through to Merge on a base known to be stale and never re-validated. This
+// matches rewaitAfterForcePush's contract elsewhere in this file: only the
+// rebase-succeeded-but-never-reconfirmed-green path shares that treatment.
 func (s *Settle) preflightStaleBase(num string, gen uint64, pr string) error {
 	if s.pr == nil {
 		return nil
@@ -406,7 +411,7 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string) error {
 	}
 	if rbErr != nil {
 		fmt.Printf("    #%s  landing=%s  status=stale-base-rebase-failed  !! %v\n", num, pr, rbErr)
-		return nil
+		return rbErr
 	}
 	return s.rewaitAfterForcePush(num, gen, pr)
 }
