@@ -1725,3 +1725,27 @@ func TestFocusedBudget_ReturnsQueueBudgetWhenQueueFocused(t *testing.T) {
 		t.Errorf("focusedBudget = %d, want %d (queue half)", got, queueBudget)
 	}
 }
+
+// TestWriteColumn_NonPositiveBudgetRendersNothing verifies writeColumn, the
+// helper renderBacklogColumn and renderQueueColumn share, reproduces their
+// budget<=0-renders-nothing guard (issue #1035) regardless of label or rows
+// content — the guard lives in the shared helper now (issue #1040), not
+// duplicated per caller.
+func TestWriteColumn_NonPositiveBudgetRendersNothing(t *testing.T) {
+	got := writeColumn("backlog", []string{"row1\n"}, 0, 0)
+	if got != "" {
+		t.Errorf("writeColumn() with budget 0 = %q, want empty", got)
+	}
+}
+
+// TestWriteColumn_RendersLabelAndWindowedRows verifies writeColumn writes
+// the label line followed by rows windowed to budget-1 (the label costs one
+// row), matching the convention renderBacklogColumn/renderQueueColumn
+// applied inline before extraction.
+func TestWriteColumn_RendersLabelAndWindowedRows(t *testing.T) {
+	got := writeColumn("backlog [focus]", []string{"row1\n", "row2\n"}, 0, 3)
+	want := "backlog [focus]:\nrow1\nrow2\n"
+	if got != want {
+		t.Errorf("writeColumn() = %q, want %q", got, want)
+	}
+}
