@@ -303,11 +303,11 @@ func TestTea_ScrollKeys_PgdownScrollsBacklogOffScreenWhenContentFits(t *testing.
 	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyPgDown})
 
 	after := tm.View()
-	if strings.Contains(after, "#0") {
-		t.Errorf("after pgdown, backlog still shows issue #0, want it scrolled off screen: %q", after)
+	if strings.Contains(after, "#0") || strings.Contains(after, "#1") {
+		t.Errorf("after pgdown, backlog still shows issue #0 or #1, want both scrolled off screen: %q", after)
 	}
-	if !strings.Contains(after, "#2") {
-		t.Errorf("after pgdown, backlog no longer shows issue #2, want it still visible: %q", after)
+	if !strings.Contains(after, "(3-3 of 3)") || !strings.Contains(after, "#2") {
+		t.Errorf("after pgdown, backlog want offset landed on the last row (3-3 of 3) showing only issue #2: %q", after)
 	}
 }
 
@@ -335,11 +335,11 @@ func TestTea_ScrollKeys_PgdownScrollsQueueOffScreenWhenContentFits(t *testing.T)
 	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyPgDown})
 
 	after := tm.View()
-	if strings.Contains(after, "#0") {
-		t.Errorf("after pgdown, queue still shows pick #0, want it scrolled off screen: %q", after)
+	if strings.Contains(after, "#0") || strings.Contains(after, "#1") {
+		t.Errorf("after pgdown, queue still shows pick #0 or #1, want both scrolled off screen: %q", after)
 	}
-	if !strings.Contains(after, "#2") {
-		t.Errorf("after pgdown, queue no longer shows pick #2, want it still visible: %q", after)
+	if !strings.Contains(after, "(3-3 of 3)") || !strings.Contains(after, "#2") {
+		t.Errorf("after pgdown, queue want offset landed on the last row (3-3 of 3) showing only pick #2: %q", after)
 	}
 }
 
