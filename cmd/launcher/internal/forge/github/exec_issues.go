@@ -188,7 +188,7 @@ func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 	if remove != "" {
 		labels, err := e.issueLabels(num)
 		if err != nil {
-			return fmt.Errorf("gh issue edit %s: %w", num, err)
+			return err
 		}
 		if !slices.Contains(labels, remove) {
 			return fmt.Errorf("gh issue edit %s: expected %q label, issue has %v", num, remove, labels)
