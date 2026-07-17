@@ -95,6 +95,37 @@ func TestMergeImmediate_TerminatedStopsRebaseRetry(t *testing.T) {
 	}
 }
 
+// TestMergeImmediate_TerminatedBeforeStaleBasePreflightSkipsRebase verifies a
+// termination marked before mergeImmediate is even called stops
+// preflightStaleBase from issuing its proactive rebase at all (issue #943) —
+// not merely from retrying after one already force-pushed. Before the fix,
+// mergeImmediate called preflightStaleBase ahead of its own first
+// s.terminated check, so a terminated issue with a stale base still got one
+// branch-mutating rebase pushed.
+func TestMergeImmediate_TerminatedBeforeStaleBasePreflightSkipsRebase(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetNeedsUpdate(testPR, true)
+	s := New(c, fc, fc)
+	reg := terminate.NewRegistry()
+	s.SetTerminated(reg)
+	reg.Mark("1")
+
+	err := s.mergeImmediate("1", 0, testPR, nil)
+
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
+	}
+	if len(fc.RebasedURLs) != 0 {
+		t.Errorf("Rebase must not be called after termination; got %v", fc.RebasedURLs)
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge must not be called after termination; fc.Merged=%q", fc.Merged)
+	}
+}
+
 // terminatingForge wraps a forge.Fake so its Rebase call marks num
 // terminated after returning — simulating Terminate reaping the settle
 // goroutine while a force-push is in flight, mirroring terminatingDispatcher
