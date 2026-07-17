@@ -22,6 +22,22 @@ import (
 type Environment interface {
 	LookPath(file string) (string, error)
 	LookupEnv(key string) (string, bool)
+
+	// Getenv returns the value of the named environment variable, or "" if
+	// unset — used to detect an ambient GH_TOKEN so quickstart can reuse it
+	// without prompting.
+	Getenv(key string) string
+
+	// TokenScopes reads the X-OAuth-Scopes header GitHub returns for a
+	// classic or OAuth token (ghp_/gho_ prefix). Fine-grained PATs
+	// (github_pat_) have no equivalent introspection endpoint, so this is
+	// only ever called for the classic/OAuth audit branch.
+	TokenScopes(token string) ([]string, error)
+
+	// GHAuthToken returns the host gh CLI's own authenticated token (`gh
+	// auth token`) — the fallback offered to an operator who declines to
+	// paste a fine-grained PAT.
+	GHAuthToken() (string, error)
 }
 
 // CommandRunner abstracts the two subprocesses Quickstart eventually shells
@@ -71,7 +87,13 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Write
 	runtime := prompt("Runtime [podman/docker/bwrap]")
 	gitUserName := prompt("Git user name")
 	gitUserEmail := prompt("Git user email")
-	ghToken := prompt("GitHub token (GH_TOKEN)")
+	ghToken, err := acquireGHToken(env, w, prompt)
+	if err != nil {
+		return err
+	}
+	if err := auditGHToken(ghToken, env, w, prompt); err != nil {
+		return err
+	}
 
 	claudeOAuthToken := ""
 	anthropicAPIKey := ""
@@ -114,6 +136,93 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Write
 	fmt.Fprintln(w, "wrote: .envrc")
 
 	return nil
+}
+
+// acquireGHToken reuses an ambient GH_TOKEN without prompting; otherwise it
+// guides the operator toward minting a fine-grained single-repo PAT, with a
+// `gh auth token` fallback for an operator in a hurry (labeled with a
+// broad-scope warning, since the gh CLI's own OAuth token is typically
+// repo-wide).
+func acquireGHToken(env Environment, w io.Writer, prompt func(string) string) (string, error) {
+	if token := env.Getenv("GH_TOKEN"); token != "" {
+		return token, nil
+	}
+	fmt.Fprintln(w, "No ambient GH_TOKEN found.")
+	fmt.Fprint(w, "Create a fine-grained personal access token scoped to only this repo, with:\n"+requiredGHPermissions)
+	token := prompt("GitHub token (paste a fine-grained PAT, or leave blank to fall back to `gh auth token` — broader scope warning)")
+	if token != "" {
+		return token, nil
+	}
+	fmt.Fprintln(w, "WARNING: gh auth token typically returns a repo-wide OAuth token, broader than the single-repo scope quickstart recommends.")
+	token, err := env.GHAuthToken()
+	if err != nil {
+		return "", fmt.Errorf("gh auth token: %w", err)
+	}
+	return token, nil
+}
+
+// requiredGHPermissions are the four permissions a token must carry on the
+// single target repo — printed for a fine-grained PAT (github_pat_ prefix),
+// which GitHub exposes no endpoint to introspect (ADR 0027).
+const requiredGHPermissions = `  Issues: Read and write
+  Contents: Read and write
+  Pull requests: Read and write
+  Metadata: Read
+`
+
+// auditGHToken checks a GitHub token for least privilege, asymmetrically by
+// token prefix: a fine-grained PAT (github_pat_) cannot be introspected, so
+// its required permissions are printed for the operator to double-check and
+// it is accepted without a gate.
+func auditGHToken(token string, env Environment, w io.Writer, prompt func(string) string) error {
+	if strings.HasPrefix(token, "github_pat_") {
+		fmt.Fprintln(w, "fine-grained PAT detected — GitHub exposes no endpoint to introspect it.")
+		fmt.Fprint(w, "It should carry only these permissions, on the single target repo:\n"+requiredGHPermissions)
+		return nil
+	}
+	if strings.HasPrefix(token, "ghp_") || strings.HasPrefix(token, "gho_") {
+		scopes, err := env.TokenScopes(token)
+		if err != nil {
+			return fmt.Errorf("read token scopes: %w", err)
+		}
+		fmt.Fprintf(w, "token scopes: %s\n", strings.Join(scopes, ", "))
+		excess := excessGHScopes(scopes)
+		if len(excess) == 0 {
+			fmt.Fprintln(w, "ok: scopes are least-privilege")
+			return nil
+		}
+		fmt.Fprintf(w, "WARNING: token grants broader-than-needed scope(s): %s\n", strings.Join(excess, ", "))
+		fmt.Fprintln(w, "quickstart only needs single-repo Issues/Contents/Pull requests RW + Metadata R — mint a fine-grained PAT instead for least privilege.")
+		answer := prompt("Type ACCEPT to continue with this over-broad token, anything else aborts")
+		if answer != "ACCEPT" {
+			return fmt.Errorf("aborted: GitHub token grants broader access than needed (%s) — mint a fine-grained single-repo PAT instead", strings.Join(excess, ", "))
+		}
+		return nil
+	}
+	return nil
+}
+
+// broadGHScopes are classic/OAuth scopes that grant access wider than the
+// single-repo least privilege quickstart wants: repo-wide (not just the one
+// target repo) or org/admin level.
+var broadGHScopes = map[string]bool{
+	"repo":             true,
+	"admin:org":        true,
+	"write:org":        true,
+	"read:org":         true,
+	"admin:enterprise": true,
+}
+
+// excessGHScopes returns the scopes from a classic/OAuth token's grant that
+// exceed what quickstart needs, in the caller's order.
+func excessGHScopes(scopes []string) []string {
+	var excess []string
+	for _, s := range scopes {
+		if broadGHScopes[s] || strings.HasPrefix(s, "admin:") {
+			excess = append(excess, s)
+		}
+	}
+	return excess
 }
 
 // quickstartGitignore protects the secrets-only harness.env file quickstart

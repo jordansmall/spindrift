@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,10 +10,22 @@ import (
 )
 
 type fakeEnvironment struct {
-	env map[string]string
+	env            map[string]string
+	tokenScopes    []string
+	tokenScopesErr error
+	ghAuthToken    string
+	ghAuthTokenErr error
 }
 
-func (fakeEnvironment) LookPath(file string) (string, error) { return "", os.ErrNotExist }
+func (f fakeEnvironment) LookPath(file string) (string, error) { return "", os.ErrNotExist }
+
+func (f fakeEnvironment) Getenv(key string) string { return f.env[key] }
+
+func (f fakeEnvironment) TokenScopes(token string) ([]string, error) {
+	return f.tokenScopes, f.tokenScopesErr
+}
+
+func (f fakeEnvironment) GHAuthToken() (string, error) { return f.ghAuthToken, f.ghAuthTokenErr }
 
 func (f fakeEnvironment) LookupEnv(key string) (string, bool) {
 	v, ok := f.env[key]
@@ -133,6 +146,251 @@ func TestRunQuickstart_HappyPath_WritesFiles(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("expected transcript to mention %q, got:\n%s", want, out.String())
 		}
+	}
+}
+
+func TestRunQuickstart_AmbientGHToken_SkipsPrompt(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift", // repoSlug
+		"podman",                // runtime
+		"Ada Lovelace",          // git user name
+		"ada@example.com",       // git user email
+		// no GH_TOKEN line — ambient GH_TOKEN must be reused without a prompt
+		"claude-oauth-faketoken", // CLAUDE_CODE_OAUTH_TOKEN
+	}, "\n") + "\n")
+
+	env := fakeEnvironment{env: map[string]string{"GH_TOKEN": "ghp_ambienttoken"}}
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "GH_TOKEN=ghp_ambienttoken") {
+		t.Errorf("expected harness.env to reuse the ambient GH_TOKEN, got:\n%s", harnessEnv)
+	}
+	if strings.Contains(out.String(), "GitHub token") {
+		t.Errorf("expected no GitHub token prompt when GH_TOKEN is ambient, got transcript:\n%s", out.String())
+	}
+}
+
+func TestRunQuickstart_FineGrainedToken_PrintsRequiredPermissions(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"github_pat_finegrainedtoken", // fine-grained PAT — cannot be introspected
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, fakeEnvironment{}, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	for _, want := range []string{"Issues", "Contents", "Pull requests", "Metadata"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("expected transcript to print the required permission %q, got:\n%s", want, out.String())
+		}
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "GH_TOKEN=github_pat_finegrainedtoken") {
+		t.Errorf("expected harness.env to accept the fine-grained token without a gate, got:\n%s", harnessEnv)
+	}
+}
+
+func TestRunQuickstart_ClassicTokenNarrowScope_AcceptedWithoutGate(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_narrowtoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	env := fakeEnvironment{tokenScopes: []string{"read:user"}}
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "GH_TOKEN=ghp_narrowtoken") {
+		t.Errorf("expected harness.env to accept the narrow-scope classic token, got:\n%s", harnessEnv)
+	}
+	if strings.Contains(out.String(), "ACCEPT") {
+		t.Errorf("expected no ACCEPT gate for a narrow-scope classic token, got transcript:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "read:user") {
+		t.Errorf("expected transcript to confirm the token's scopes (sourced from the Environment seam), got:\n%s", out.String())
+	}
+}
+
+func TestRunQuickstart_ClassicTokenBroadScope_AcceptWritesToken(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_broadtoken",
+		"ACCEPT", // literal acceptance of the over-broad-scope warning
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	env := fakeEnvironment{tokenScopes: []string{"repo", "gist"}}
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "repo") {
+		t.Errorf("expected transcript to name the excess %q scope, got:\n%s", "repo", out.String())
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "GH_TOKEN=ghp_broadtoken") {
+		t.Errorf("expected harness.env to write the token after an explicit ACCEPT, got:\n%s", harnessEnv)
+	}
+}
+
+func TestRunQuickstart_ClassicTokenBroadScope_DeclineAbortsWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_broadtoken",
+		"no", // declines the ACCEPT gate
+	}, "\n") + "\n")
+
+	env := fakeEnvironment{tokenScopes: []string{"repo"}}
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
+	if err == nil {
+		t.Fatal("expected declining the ACCEPT gate to abort, got nil error")
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "harness.env")); !os.IsNotExist(statErr) {
+		t.Errorf("expected no harness.env to be written when the ACCEPT gate is declined, stat error: %v", statErr)
+	}
+}
+
+func TestRunQuickstart_NoAmbientToken_PrintsGuidedPATInstructions(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_narrowtoken", // pasted directly, no ambient GH_TOKEN
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	env := fakeEnvironment{tokenScopes: []string{"read:user"}}
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "fine-grained") {
+		t.Errorf("expected transcript to guide the operator toward a fine-grained PAT when no ambient token is set, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "gh auth token") {
+		t.Errorf("expected transcript to mention the gh auth token fallback, got:\n%s", out.String())
+	}
+}
+
+func TestRunQuickstart_BlankTokenInput_FallsBackToGHAuthToken(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"", // blank GitHub token — falls back to `gh auth token`
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	env := fakeEnvironment{ghAuthToken: "gho_fallbacktoken", tokenScopes: []string{"read:user"}}
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "WARNING") {
+		t.Errorf("expected transcript to warn about the gh auth token's broader scope, got:\n%s", out.String())
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "GH_TOKEN=gho_fallbacktoken") {
+		t.Errorf("expected harness.env to contain the gh auth token fallback, got:\n%s", harnessEnv)
+	}
+}
+
+func TestRunQuickstart_GHAuthTokenFallbackFails_AbortsWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"", // blank GitHub token — falls back to `gh auth token`, which fails below
+	}, "\n") + "\n")
+
+	env := fakeEnvironment{ghAuthTokenErr: errors.New("gh: not logged in")}
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
+	if err == nil {
+		t.Fatal("expected a failed gh auth token fallback to abort, got nil error")
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "harness.env")); !os.IsNotExist(statErr) {
+		t.Errorf("expected no harness.env to be written when the gh auth token fallback fails, stat error: %v", statErr)
+	}
+}
+
+func TestRunQuickstart_TokenScopesReadError_AbortsWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_broadtoken",
+	}, "\n") + "\n")
+
+	env := fakeEnvironment{tokenScopesErr: errors.New("gh api -i user: exit status 1")}
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
+	if err == nil {
+		t.Fatal("expected a failed scope read to abort, got nil error")
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "harness.env")); !os.IsNotExist(statErr) {
+		t.Errorf("expected no harness.env to be written when the scope read fails, stat error: %v", statErr)
 	}
 }
 
