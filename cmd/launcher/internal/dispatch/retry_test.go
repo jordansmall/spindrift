@@ -14,6 +14,7 @@ func retryConfig(max, backoffSecs, holdJitter int) Config {
 		TransientRetryMax:    max,
 		TransientBackoffSecs: backoffSecs,
 		HoldJitterSecs:       holdJitter,
+		OpenPRForIssue:       func(string) (bool, error) { return false, nil },
 	}
 }
 
