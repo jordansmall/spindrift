@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -205,7 +206,7 @@ func TestLauncher_LiveIssues_ExcludesPickFailed(t *testing.T) {
 
 	got := launch.LiveIssues()
 	want := []string{"41"}
-	if len(got) != len(want) || got[0] != want[0] {
+	if !slices.Equal(got, want) {
 		t.Fatalf("LiveIssues() = %v, want %v", got, want)
 	}
 }
