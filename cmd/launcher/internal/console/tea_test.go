@@ -34,13 +34,11 @@ import (
 // tight bound here only ever flakes, it never catches a real defect — a hung
 // program still fails, just later. When a specific test hangs regardless of
 // this bound, the fix is a deterministic wait on real state, not a bigger
-// number: see the "settled" guards on the launch-backed pick tests. 30s
-// still wasn't enough for TestTea_ResizeKey_Raise_LaunchesQueuedPickWith-
-// NoActiveDrain, which passes in 0.04s locally every time (plain, -race,
-// GOMAXPROCS=1, and under artificial CPU load) with no lost-wakeup found in
-// the drain/refresh-signal path on inspection — CI's `nix flake check` runs
-// launcher-go-test alongside the image-build checks this comment already
-// names, so more headroom is the next lever, not a code fix.
+// number: see the "settled" guards on the launch-backed pick tests, and
+// TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain, which dropped
+// teatest entirely for a direct Update call plus launch.Wait() after this
+// same bound (walked 2s -> 5s -> 15s -> 30s -> 60s) still flaked under CI's
+// `nix flake check` racing the image-build checks (issue #1327).
 const teatestTimeout = 60 * time.Second
 
 // waitForOutput blocks until tm's output contains every one of want, failing
@@ -1435,14 +1433,17 @@ func TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain(t *testing.T) {
 	// No tryLaunch call yet — no drain is active to observe Resize's Grown
 	// signal.
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
+	tm := newTeaModel(f, t.TempDir(), launch)
+	tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("+")})
 
-	sendKey(tm, "+")
-	waitForOutput(t, tm, "settled")
+	// launch.Wait() joins the drain goroutine the fallback tryLaunch call
+	// spawns, so this blocks on the real launch instead of a rendered frame
+	// under a stopwatch (issue #1327) — no teatest, no wall-clock timeout.
+	launch.Wait()
 
-	sendKey(tm, "q")
-	waitFinished(t, tm)
+	if !launch.Queue.Empty() {
+		t.Errorf("Queue.Empty() = false after Wait(), want the queued pick drained (fallback tryLaunch never ran)")
+	}
 }
 
 // TestTea_ResizeKeys_RaiseAndLowerLiveCap verifies "+"/"-" adjust the live
