@@ -1,6 +1,7 @@
 package forge_test
 
 import (
+	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -179,7 +180,7 @@ func TestFake_CompleteVerdict_SwapsInProgressForVerdictLabel(t *testing.T) {
 func TestFake_CompleteVerdict_MissingInProgressErrors(t *testing.T) {
 	f := forge.NewFake(researchLabels)
 	f.VerdictLabels = researchVerdictLabels
-	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-recommend"}})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"unrelated-label"}})
 
 	if err := f.CompleteVerdict("42", forge.Recommend); err == nil {
 		t.Fatal("want error when issue lacks InProgress label, got nil")
@@ -189,11 +190,26 @@ func TestFake_CompleteVerdict_MissingInProgressErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if !containsLabel(iss.Labels, "agent-research-recommend") {
-		t.Error("want agent-research-recommend label untouched, missing")
+	if want := []string{"unrelated-label"}; !slices.Equal(iss.Labels, want) {
+		t.Errorf("want labels untouched at %v, got %v (verdict label must not be appended on error)", want, iss.Labels)
 	}
 	if len(f.CompleteVerdictCalls) != 1 {
 		t.Fatalf("want 1 CompleteVerdictCall recorded even on error, got %d", len(f.CompleteVerdictCalls))
+	}
+}
+
+// TestFake_CompleteVerdict_UnconfiguredInProgressSkipsCheck verifies that
+// when InProgress has no configured label (DispatchLabels zero value),
+// CompleteVerdict skips the precondition check entirely — mirroring exec's
+// `if remove != ""` guard (github/exec_issues.go) — rather than always
+// erroring because no label can ever satisfy the check.
+func TestFake_CompleteVerdict_UnconfiguredInProgressSkipsCheck(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{})
+	f.VerdictLabels = researchVerdictLabels
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"unrelated-label"}})
+
+	if err := f.CompleteVerdict("42", forge.Recommend); err != nil {
+		t.Fatalf("CompleteVerdict: %v", err)
 	}
 }
 
