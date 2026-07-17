@@ -23,11 +23,23 @@ func SanitizeControlSequences(s string) string {
 		case r == '\n' || r == '\t':
 			b.WriteRune(r)
 			i += size
-		case r == 0x1b: // ESC: skip CSI (ESC [ ... final) and OSC (ESC ] ... BEL or ST) sequences
+		case r == 0x1b:
 			i += size
 			if i >= len(s) {
 				continue
 			}
+			// Only CSI ('[') and OSC (']') introducers get a body-aware
+			// skip below. Other ESC introducers (DCS "ESC P", APC "ESC _",
+			// PM "ESC ^", RIS "ESC c", ...) fall through this switch with
+			// no case matched, so only the ESC byte just consumed above is
+			// dropped — their body and terminator bytes are plain text to
+			// this loop and get copied through by the default rune-copy
+			// branch below. That's deliberate, not a gap: every raw ESC
+			// byte is still stripped, so no sequence can reach the
+			// terminal, but an unrecognized introducer's body renders as
+			// visible garbage instead of vanishing. Parsing DCS/APC/PM/RIS
+			// bodies to strip them too isn't worth the complexity for a
+			// cosmetic-only tradeoff (#1018).
 			switch s[i] {
 			case '[':
 				i++
