@@ -194,6 +194,22 @@ func TestLauncher_TryLaunch_BoxFailureReachesPickFailed(t *testing.T) {
 	}
 }
 
+// TestLauncher_LiveIssues_ExcludesPickFailed verifies LiveIssues filters out
+// a PickFailed row rather than only ever seeing PickRunning rows in
+// practice (issue #974) — the exclusion was true by construction but had no
+// test asserting it directly.
+func TestLauncher_LiveIssues_ExcludesPickFailed(t *testing.T) {
+	launch := &Launcher{Queue: NewQueue()}
+	launch.Queue.Add(Pick{Number: "41", Title: "running one", State: PickRunning})
+	launch.Queue.Add(Pick{Number: "42", Title: "failed one", State: PickFailed})
+
+	got := launch.LiveIssues()
+	want := []string{"41"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("LiveIssues() = %v, want %v", got, want)
+	}
+}
+
 // TestLauncher_TryLaunch_RacingAddNeverStrands stress-tests the lost-wakeup
 // window between a drain's last (empty) discover() and l.launching clearing:
 // a second pick is Add()ed and tryLaunch is called from a separate goroutine
