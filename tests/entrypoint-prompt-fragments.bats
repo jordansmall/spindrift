@@ -28,7 +28,9 @@ setup() {
     local assign="${case%%|*}" marker="${case#*|}"
 
     # A fresh WORK_DIR per invocation -- entrypoint.sh clones into it, and
-    # this test execs the entrypoint six times (off/on for three knobs), so
+    # this test execs the entrypoint six times (off/on for three gated
+    # cases -- AUTO_FORMAT and AUTO_LINT are knobs, FILER_ENABLED is
+    # computed-gated), so
     # reusing one dir across invocations would collide on the second clone.
     i=$((i + 1))
     export WORK_DIR="$BATS_TEST_TMPDIR/work-$i-off"
