@@ -364,13 +364,27 @@ in
   # search open issues beyond the `agent-review-finding` label -- a
   # regression back to the old `--label agent-review-finding --state all`
   # query would silently stop catching human-filed/ready-for-agent/
-  # /to-tickets duplicates.
+  # /to-tickets duplicates. Neither pin above catches a *narrower* regression:
+  # re-adding a `--label` flag to the `--state open` line itself (e.g.
+  # `--label agent-review-finding --state open`) still contains the literal
+  # substring `--state open` and never matches the old `--state all` string,
+  # so both pins stay green while the dedup silently narrows back to only
+  # `agent-review-finding`-labeled issues (issue #921). Extract the line
+  # carrying `--state open` and count how many of its occurrences also carry
+  # `--label` -- must be zero. `[ "$bad" -eq 0 ] || exit 1`, not a bare `!
+  # pipeline`, since `set -e` exempts negated commands (issue #887).
   filer-prompt-dedup-searches-all-open-issues =
     pkgs.runCommand "filer-prompt-dedup-searches-all-open-issues" { }
       ''
         grep -q -- '--state open' ${../../templates/default/prompts/filer-prompt.md}
         ! grep -q -- '--label agent-review-finding --state all' \
           ${../../templates/default/prompts/filer-prompt.md}
+        bad=$(grep -- '--state open' ${../../templates/default/prompts/filer-prompt.md} \
+          | grep -c -- '--label' || true)
+        [ "$bad" -eq 0 ] || {
+          echo "expected the --state open dedup search to carry no --label flag, $bad line(s) did" >&2
+          exit 1
+        }
         touch $out
       '';
 
