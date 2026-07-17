@@ -45,6 +45,10 @@ func View(m Model) string {
 		b.WriteString("p_\n")
 		reservedLines++
 	}
+	if m.QueueEnterNotice != "" {
+		fmt.Fprintf(&b, "%s\n", m.QueueEnterNotice)
+		reservedLines++
+	}
 	if m.Err != nil {
 		// The refresh-error line renders after the body (below), but must
 		// still be subtracted from budget up front or a long list plus an

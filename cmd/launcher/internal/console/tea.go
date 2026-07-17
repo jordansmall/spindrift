@@ -218,6 +218,9 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 			return t.pickHighlighted(), nil
 		}
 	}
+	if t.m.QueueEnterNotice != "" {
+		t.m = Update(t.m, QueueEnterNoticeClearedMsg{})
+	}
 	switch msg.String() {
 	case "tab":
 		t.m = Update(t.m, FocusToggleMsg{})
@@ -236,8 +239,11 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		t.m = Update(t.m, FilterEditStartMsg{})
 	case "enter":
 		if t.m.Focus == FocusQueue {
-			if p, ok := t.highlightedPick(); ok && hasTranscript(p.State) {
-				return t, openDrillInCmd(t.launch, t.pwd, p.Number)
+			if p, ok := t.highlightedPick(); ok {
+				if hasTranscript(p.State) {
+					return t, openDrillInCmd(t.launch, t.pwd, p.Number)
+				}
+				t.m = Update(t.m, QueueEnterNoticedMsg{})
 			}
 			return t, nil
 		}

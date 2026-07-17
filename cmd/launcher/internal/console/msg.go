@@ -185,6 +185,21 @@ type PickResolvedMsg struct{}
 
 func (PickResolvedMsg) isConsoleMsg() {}
 
+// QueueEnterNoticedMsg is the tea layer's signal that Enter, focused on the
+// work queue, was a no-op on a row lacking a Transcript — renders a
+// human-readable notice so the keystroke's outcome isn't silent (issue
+// #998).
+type QueueEnterNoticedMsg struct{}
+
+func (QueueEnterNoticedMsg) isConsoleMsg() {}
+
+// QueueEnterNoticeClearedMsg is the tea layer's signal that the operator's
+// next keypress after a QueueEnterNoticedMsg arrived — clears the notice
+// (issue #998).
+type QueueEnterNoticeClearedMsg struct{}
+
+func (QueueEnterNoticeClearedMsg) isConsoleMsg() {}
+
 // CapMsg carries the session's live parallelism cap and current live count
 // (issue #653) — Run's per-render sync, the same pattern QueueSnapshotMsg
 // uses, since both live entirely on the background Launcher rather than
