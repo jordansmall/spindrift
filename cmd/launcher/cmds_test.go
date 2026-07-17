@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 )
 
@@ -91,5 +94,39 @@ func TestCmdDispatch_RunsCleanupOnEveryExit(t *testing.T) {
 	}
 	if !called {
 		t.Error("cmdDispatch did not run lc.cleanup()")
+	}
+}
+
+// TestCmdConsole_RunsCleanupOnEveryExit asserts cmdConsole runs the launch
+// context's cleanup hook, and actually reaches console.Run (not just
+// bootstrap routing) -- a scripted "q" keypress on stdin quits the real
+// Bubble Tea program immediately since the fake launchContext's Queue starts
+// empty (tea.go's "q" case sends QuitMsg directly when LiveIssues() is
+// empty).
+func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake()
+	dir := tempLogDir(t)
+	called := false
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, runner.NewFake()),
+		settle:       settle.NewFake(),
+		cleanup:      func() { called = true },
+	}
+
+	stdin := strings.NewReader("q")
+	var stdout bytes.Buffer
+
+	got := cmdConsole(lc, stdin, &stdout)
+
+	if got != 0 {
+		t.Errorf("cmdConsole(lc, ...) = %d, want 0", got)
+	}
+	if !called {
+		t.Error("cmdConsole did not run lc.cleanup()")
 	}
 }

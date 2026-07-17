@@ -884,8 +884,11 @@ func cmdDoctor() int {
 // RebuildFn wire the same freshness.Probe seam runContinuousDispatch uses
 // for the headless exit-4 path into an in-session banner/hold plus a
 // one-key rebuild instead of an exit (issue #652). lc is wired by bootstrap
-// in production; tests construct it directly with fakes.
-func cmdConsole(lc *launchContext) int {
+// in production; tests construct it directly with fakes. stdin/stdout are
+// threaded explicitly (mirroring cmdDoctor/runDoctor's io.Reader/io.Writer
+// split) rather than reading os.Stdin/os.Stdout directly, so a test can drive
+// the real Bubble Tea program with a scripted reader instead of a live TTY.
+func cmdConsole(lc *launchContext, stdin io.Reader, stdout io.Writer) int {
 	defer lc.cleanup()
 	fresh, rebuild := newConsoleFreshness(lc.config, lc.pwd, runner.NixEvaluator{},
 		func() (string, error) { return consoleGitSync(lc.pwd, lc.config.baseBranch) },
@@ -903,7 +906,7 @@ func cmdConsole(lc *launchContext) int {
 			return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle, issueNum)
 		},
 	}
-	if err := console.Run(lc.issueTracker, lc.pwd, os.Stdin, os.Stdout, launch); err != nil {
+	if err := console.Run(lc.issueTracker, lc.pwd, stdin, stdout, launch); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
 	}
@@ -1062,7 +1065,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
 		}
-		return cmdConsole(lc)
+		return cmdConsole(lc, os.Stdin, os.Stdout)
 	}
 	if args[0] == "recover" {
 		if len(args) < 2 {
