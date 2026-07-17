@@ -258,20 +258,7 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	case "u":
 		t = t.unpickHighlighted()
 	case "k":
-		// Resolve against whichever row is actually drawn with ">" (view.go):
-		// QueueCursor while the queue has focus, backlog Cursor otherwise —
-		// they move independently (model.go's CursorMoveMsg branch), so a
-		// stale backlog Cursor must never be the target while it's hidden
-		// (issue #997).
-		var num string
-		if t.m.Focus == FocusQueue {
-			if p, ok := t.highlightedPick(); ok {
-				num = p.Number
-			}
-		} else {
-			num = t.highlightedNumber()
-		}
-		if num != "" && t.isLive(num) {
+		if num := t.terminateTarget(); num != "" && t.isLive(num) {
 			t.m = Update(t.m, TerminateRequestedMsg{Number: num})
 		}
 	case "+":
@@ -453,6 +440,22 @@ func (t teaModel) highlightedNumber() string {
 		return ""
 	}
 	return visible[t.m.Cursor].Number
+}
+
+// terminateTarget resolves the issue number "k" should act on: whichever row
+// is actually drawn with ">" (view.go) — QueueCursor's pick while the queue
+// has focus, the backlog Cursor's issue otherwise. The two cursors move
+// independently (model.go's CursorMoveMsg branch), so a stale backlog Cursor
+// must never be the target while it's hidden behind queue focus (issue
+// #997).
+func (t teaModel) terminateTarget() string {
+	if t.m.Focus == FocusQueue {
+		if p, ok := t.highlightedPick(); ok {
+			return p.Number
+		}
+		return ""
+	}
+	return t.highlightedNumber()
 }
 
 // alreadyActive reports whether num already has a non-terminal row (queued,
