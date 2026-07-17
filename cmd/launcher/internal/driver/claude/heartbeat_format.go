@@ -5,7 +5,57 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
+
+// sanitizeRole strips C0/C1 control characters, ANSI CSI/OSC escape
+// sequences, and newlines/tabs from role before it is interpolated into a
+// heartbeat line. role is agent-controlled (it traces back to the Task
+// tool's subagent_type input) and a heartbeat row has no legitimate
+// embedded newline or escape sequence — unlike the transcript pane, every
+// heartbeat line must stay single-line, so nothing here is preserved.
+func sanitizeRole(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		switch {
+		case r == 0x1b:
+			i += size
+			if i >= len(s) {
+				continue
+			}
+			switch s[i] {
+			case '[':
+				i++
+				for i < len(s) && !(s[i] >= 0x40 && s[i] <= 0x7e) {
+					i++
+				}
+				if i < len(s) {
+					i++
+				}
+			case ']':
+				i++
+				for i < len(s) && s[i] != 0x07 {
+					if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
+						i += 2
+						break
+					}
+					i++
+				}
+				if i < len(s) && s[i] == 0x07 {
+					i++
+				}
+			}
+		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
+			i += size
+		default:
+			b.WriteRune(r)
+			i += size
+		}
+	}
+	return b.String()
+}
 
 // FormatRoleHeader returns a switch-header line for the acting role.
 // When model is non-empty, appends "· <model>" after the role.
@@ -14,9 +64,9 @@ import (
 func FormatRoleHeader(issue, role, model string) string {
 	const targetWidth = 36
 	const minTrail = 4
-	label := role
+	label := sanitizeRole(role)
 	if model != "" {
-		label = role + " \xc2\xb7 " + model
+		label = label + " \xc2\xb7 " + model
 	}
 	prefix := "#" + issue + " \xe2\x94\x80\xe2\x94\x80 " + label + " "
 	trail := targetWidth - len([]rune(prefix))
@@ -35,7 +85,7 @@ func FormatHeartbeat(issue string, turns int, lastTool, role, phase string) stri
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s", issue)
 	if role != "" && role != ImplementorRole {
-		fmt.Fprintf(&sb, " %s", role)
+		fmt.Fprintf(&sb, " %s", sanitizeRole(role))
 	}
 	if phase != "" {
 		fmt.Fprintf(&sb, " [%s]", phase)
@@ -62,7 +112,7 @@ func FormatCountLine(issue, role, phase string, counts map[string]int) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s", issue)
 	if role != "" && role != ImplementorRole {
-		fmt.Fprintf(&sb, " %s", role)
+		fmt.Fprintf(&sb, " %s", sanitizeRole(role))
 	}
 	if phase != "" {
 		fmt.Fprintf(&sb, " [%s]", phase)
