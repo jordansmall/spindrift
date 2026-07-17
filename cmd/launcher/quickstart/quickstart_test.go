@@ -8,19 +8,31 @@ import (
 	"testing"
 )
 
-type fakeEnvironment struct{}
+type fakeEnvironment struct {
+	env map[string]string
+}
 
 func (fakeEnvironment) LookPath(file string) (string, error) { return "", os.ErrNotExist }
 
-type fakeCommandRunner struct{}
+func (f fakeEnvironment) LookupEnv(key string) (string, bool) {
+	v, ok := f.env[key]
+	return v, ok
+}
 
-func (fakeCommandRunner) Run(name string, args ...string) error { return nil }
+type fakeCommandRunner struct {
+	calls [][]string
+}
+
+func (f *fakeCommandRunner) Run(name string, args ...string) error {
+	f.calls = append(f.calls, append([]string{name}, args...))
+	return nil
+}
 
 func TestRunQuickstart_NonTTY_ExitsWithError(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 
-	err := runQuickstart(dir, fakeEnvironment{}, fakeCommandRunner{}, &out, strings.NewReader(""), false, false)
+	err := runQuickstart(dir, fakeEnvironment{}, &fakeCommandRunner{}, &out, strings.NewReader(""), false, false)
 	if err == nil {
 		t.Fatal("expected an error for non-TTY stdin, got nil")
 	}
@@ -40,7 +52,7 @@ func TestRunQuickstart_ExistingFlakeNix_RefusesWithoutForce(t *testing.T) {
 	}
 	var out bytes.Buffer
 
-	err := runQuickstart(dir, fakeEnvironment{}, fakeCommandRunner{}, &out, strings.NewReader(""), true, false)
+	err := runQuickstart(dir, fakeEnvironment{}, &fakeCommandRunner{}, &out, strings.NewReader(""), true, false)
 	if err == nil {
 		t.Fatal("expected an error refusing to clobber an existing flake.nix, got nil")
 	}
@@ -61,15 +73,15 @@ func TestRunQuickstart_HappyPath_WritesFiles(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
-		"jordansmall/spindrift",  // repoSlug
-		"podman",                 // runtime
-		"Ada Lovelace",           // git user name
-		"ada@example.com",        // git user email
-		"ghp_faketoken",          // GH_TOKEN
-		"claude-oauth-faketoken", // CLAUDE_CODE_OAUTH_TOKEN
+		"jordansmall/spindrift", // repoSlug
+		"podman",                // runtime
+		"Ada Lovelace",          // git user name
+		"ada@example.com",       // git user email
+		"ghp_faketoken",         // GH_TOKEN
 	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}}
 
-	err := runQuickstart(dir, fakeEnvironment{}, fakeCommandRunner{}, &out, stdin, true, false)
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
 	if err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -139,10 +151,10 @@ func TestRunQuickstart_Force_BacksUpExistingFiles(t *testing.T) {
 		"Ada Lovelace",
 		"ada@example.com",
 		"ghp_faketoken",
-		"claude-oauth-faketoken",
 	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}}
 
-	if err := runQuickstart(dir, fakeEnvironment{}, fakeCommandRunner{}, &out, stdin, true, true); err != nil {
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, true); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -171,7 +183,7 @@ func TestRunQuickstart_Force_BacksUpExistingFiles(t *testing.T) {
 	}
 }
 
-func TestRunQuickstart_BlankClaudeOAuthToken_PromptsForAPIKey(t *testing.T) {
+func TestRunQuickstart_DeclineSetupToken_PromptsForAPIKey(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
@@ -180,11 +192,12 @@ func TestRunQuickstart_BlankClaudeOAuthToken_PromptsForAPIKey(t *testing.T) {
 		"Ada Lovelace",
 		"ada@example.com",
 		"ghp_faketoken",
-		"",                    // blank CLAUDE_CODE_OAUTH_TOKEN
+		"n",                   // decline claude setup-token
 		"sk-ant-faketokenkey", // ANTHROPIC_API_KEY
 	}, "\n") + "\n")
+	runner := &fakeCommandRunner{}
 
-	if err := runQuickstart(dir, fakeEnvironment{}, fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+	if err := runQuickstart(dir, fakeEnvironment{}, runner, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -198,6 +211,40 @@ func TestRunQuickstart_BlankClaudeOAuthToken_PromptsForAPIKey(t *testing.T) {
 	if strings.Contains(string(harnessEnv), "CLAUDE_CODE_OAUTH_TOKEN=") && !strings.Contains(string(harnessEnv), "CLAUDE_CODE_OAUTH_TOKEN=\n") {
 		t.Errorf("expected no non-empty CLAUDE_CODE_OAUTH_TOKEN line, got:\n%s", harnessEnv)
 	}
+	if len(runner.calls) != 0 {
+		t.Errorf("expected no subprocess calls when setup-token is declined, got: %v", runner.calls)
+	}
+}
+
+func TestRunQuickstart_AcceptSetupToken_RunsItAndPastesToken(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+		"y",                        // accept claude setup-token
+		"printed-oauth-token-1234", // pasted from claude setup-token's output
+	}, "\n") + "\n")
+	runner := &fakeCommandRunner{}
+
+	if err := runQuickstart(dir, fakeEnvironment{}, runner, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != "claude setup-token" {
+		t.Errorf("expected a single `claude setup-token` subprocess call, got: %v", runner.calls)
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "CLAUDE_CODE_OAUTH_TOKEN=printed-oauth-token-1234") {
+		t.Errorf("expected harness.env to contain the pasted OAuth token, got:\n%s", harnessEnv)
+	}
 }
 
 func TestRunQuickstart_GitUserNameWithNixSpecialChars_IsEscaped(t *testing.T) {
@@ -209,10 +256,10 @@ func TestRunQuickstart_GitUserNameWithNixSpecialChars_IsEscaped(t *testing.T) {
 		`Ada "Countess" ${evil}`, // git user name with a Nix string terminator and interpolation
 		"ada@example.com",
 		"ghp_faketoken",
-		"claude-oauth-faketoken",
 	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}}
 
-	if err := runQuickstart(dir, fakeEnvironment{}, fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -222,5 +269,69 @@ func TestRunQuickstart_GitUserNameWithNixSpecialChars_IsEscaped(t *testing.T) {
 	}
 	if !strings.Contains(string(flakeNix), `Ada \"Countess\" \${evil}`) {
 		t.Errorf("expected the git user name to be Nix-escaped, got:\n%s", flakeNix)
+	}
+}
+
+func TestRunQuickstart_AmbientClaudeOAuthToken_ReusedWithoutPrompt(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "ambient-oauth-token"}}
+	runner := &fakeCommandRunner{}
+
+	if err := runQuickstart(dir, env, runner, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "CLAUDE_CODE_OAUTH_TOKEN=ambient-oauth-token") {
+		t.Errorf("expected harness.env to reuse the ambient CLAUDE_CODE_OAUTH_TOKEN, got:\n%s", harnessEnv)
+	}
+	if !strings.Contains(out.String(), "reusing ambient CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Errorf("expected transcript to note the ambient token was reused, got:\n%s", out.String())
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("expected no subprocess calls when an ambient token is reused, got: %v", runner.calls)
+	}
+}
+
+func TestRunQuickstart_AmbientAnthropicAPIKey_ReusedWithoutPrompt(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"ANTHROPIC_API_KEY": "ambient-api-key"}}
+	runner := &fakeCommandRunner{}
+
+	if err := runQuickstart(dir, env, runner, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "ANTHROPIC_API_KEY=ambient-api-key") {
+		t.Errorf("expected harness.env to reuse the ambient ANTHROPIC_API_KEY, got:\n%s", harnessEnv)
+	}
+	if !strings.Contains(out.String(), "reusing ambient ANTHROPIC_API_KEY") {
+		t.Errorf("expected transcript to note the ambient key was reused, got:\n%s", out.String())
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("expected no subprocess calls when an ambient key is reused, got: %v", runner.calls)
 	}
 }
