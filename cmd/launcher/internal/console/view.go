@@ -132,7 +132,9 @@ func renderBody(m Model, budget int) string {
 			// the operator knows content exists but doesn't fit (issue
 			// #1041) — only when there's something to elide, since a
 			// genuinely empty backlog/queue has nothing hidden to flag.
-			return "…\n"
+			// Clipped like the other stacked rows so a pathologically
+			// narrow terminal (m.Width==0) can't overflow it either.
+			return clipLines("…\n", m.Width)
 		}
 		backlog := clipLines(renderBacklogColumn(m, backlogBudget), m.Width)
 		queue := clipLines(renderQueueColumn(m, queueBudget), m.Width)
