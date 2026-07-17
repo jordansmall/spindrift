@@ -44,12 +44,12 @@ func TestPickIssue_TransitionErr_ReturnsDissolvedMsg(t *testing.T) {
 
 	msg := PickIssue(f, "42", "fix the thing", KindWork)
 
-	failed, ok := msg.(PickDissolvedMsg)
+	dissolved, ok := msg.(PickDissolvedMsg)
 	if !ok {
 		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
 	}
-	if failed.Number != "42" || failed.Reason == "" {
-		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", failed)
+	if dissolved.Number != "42" || dissolved.Reason == "" {
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", dissolved)
 	}
 }
 
@@ -81,12 +81,12 @@ func TestPickIssue_AlreadyInProgress_ReturnsDissolvedMsg_NoTransition(t *testing
 
 	msg := PickIssue(f, "42", "fix the thing", KindWork)
 
-	failed, ok := msg.(PickDissolvedMsg)
+	dissolved, ok := msg.(PickDissolvedMsg)
 	if !ok {
 		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
 	}
-	if failed.Number != "42" || failed.Reason == "" {
-		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", failed)
+	if dissolved.Number != "42" || dissolved.Reason == "" {
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", dissolved)
 	}
 	if len(f.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionStateCalls = %+v, want none — an InProgress issue must never be relabeled", f.TransitionStateCalls)
@@ -109,12 +109,12 @@ func TestPickIssue_AlreadyComplete_ReturnsDissolvedMsg_NoTransition(t *testing.T
 
 	msg := PickIssue(f, "42", "fix the thing", KindWork)
 
-	failed, ok := msg.(PickDissolvedMsg)
+	dissolved, ok := msg.(PickDissolvedMsg)
 	if !ok {
 		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
 	}
-	if failed.Number != "42" || failed.Reason == "" {
-		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", failed)
+	if dissolved.Number != "42" || dissolved.Reason == "" {
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", dissolved)
 	}
 	if len(f.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionStateCalls = %+v, want none — a Complete issue must never be relabeled", f.TransitionStateCalls)
@@ -165,8 +165,8 @@ func TestPickAllReady_ListIssuesErr_ReturnsDissolvedMsg(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("PickAllReady() = %+v, want 1 msg", msgs)
 	}
-	failed, ok := msgs[0].(PickDissolvedMsg)
-	if !ok || failed.Reason != errBoom.Error() {
+	dissolved, ok := msgs[0].(PickDissolvedMsg)
+	if !ok || dissolved.Reason != errBoom.Error() {
 		t.Errorf("msgs[0] = %+v, want PickDissolvedMsg with reason %q", msgs[0], errBoom.Error())
 	}
 }
