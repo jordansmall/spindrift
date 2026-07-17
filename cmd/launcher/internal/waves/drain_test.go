@@ -418,6 +418,80 @@ func TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint(t *testing.T) {
 	}
 }
 
+// TestDrainMaxJobs_BlockedLineNamesBlockers verifies that the blocked-skip
+// line names the specific unready blocker issue number(s), comma-joined,
+// rather than the generic "a blocker is not 'agent-complete'" message.
+func TestDrainMaxJobs_BlockedLineNamesBlockers(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 2
+	c.MaxJobs = 1
+
+	fc := forge.NewFake()
+	// Issue #1 is blocked by both #3 and #4 (open, no complete label).
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
+	fc.SetIssue(forge.Issue{Number: "4", State: "OPEN"})
+
+	fr := runner.NewFake()
+
+	edges := map[string][]string{"1": {"3", "4"}}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	out := testutil.CaptureStdout(t, func() {
+		err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+			{Number: "1", Title: "blocked issue"},
+		}, edges, nil, OriginDiscovered)
+		if !errors.Is(err, ErrOpenNoneDispatchable) {
+			t.Fatalf("drainMaxJobs: got %v, want ErrOpenNoneDispatchable", err)
+		}
+	})
+
+	if !strings.Contains(out, "~~ #1 blocked by #3, #4; skipping") {
+		t.Errorf("output must name the unready blockers; got:\n%s", out)
+	}
+}
+
+// TestDrainMaxJobs_FailedBlockerLineNamesBlockers verifies that the
+// failed-blocker skip line names the specific failed blocker issue
+// number(s), comma-joined, rather than the generic "a dependency failed"
+// message.
+func TestDrainMaxJobs_FailedBlockerLineNamesBlockers(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 2
+	c.MaxJobs = 2
+
+	fc := forge.NewFake(dispatchLabels(c))
+	// Issue #1 is blocked by both #3 and #4, which have already failed.
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}})
+	fc.SetIssue(forge.Issue{Number: "4", Labels: []string{c.FailedLabel}})
+
+	fr := runner.NewFake()
+
+	edges := map[string][]string{"1": {"3", "4"}}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	out := testutil.CaptureStdout(t, func() {
+		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+			{Number: "1", Title: "dependent"},
+		}, edges, nil, OriginDiscovered); err != nil {
+			t.Fatalf("drainMaxJobs: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "!! #1  status=blocker-failed  note=#3, #4 failed; skipping") {
+		t.Errorf("output must name the failed blockers; got:\n%s", out)
+	}
+}
+
 // TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource verifies that the
 // blocked-claim marker drainMaxJobs writes for the OriginClaimed path
 // carries the same source annotation (native relationship vs body-text
