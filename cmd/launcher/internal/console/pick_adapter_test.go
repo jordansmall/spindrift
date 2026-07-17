@@ -171,6 +171,23 @@ func TestPickAllReady_ListIssuesErr_ReturnsDissolvedMsg(t *testing.T) {
 	}
 }
 
+// TestPickAllReady_MakesExactlyOneListIssuesCall verifies the bulk pick skips
+// PickIssue's per-issue terminal-state re-verification — every issue in the
+// loop already came from the Dispatchable snapshot, so InProgress/Complete
+// are guaranteed false (#707's mutual-exclusivity contract) and re-checking
+// them wastes 2 ListIssues round-trips per issue for nothing (#987).
+func TestPickAllReady_MakesExactlyOneListIssuesCall(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "43", Title: "also ready", Labels: []string{"ready-for-agent"}})
+
+	PickAllReady(f)
+
+	if len(f.ListIssuesCalls) != 1 {
+		t.Errorf("ListIssuesCalls = %+v, want exactly 1 (the Dispatchable snapshot, no redundant per-issue re-verification)", f.ListIssuesCalls)
+	}
+}
+
 func hasLabel(iss forge.Issue, label string) bool {
 	for _, l := range iss.Labels {
 		if l == label {

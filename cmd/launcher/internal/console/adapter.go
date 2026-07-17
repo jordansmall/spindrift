@@ -70,6 +70,14 @@ func PickIssue(tracker forge.IssueTracker, num, title string, kind Kind) Msg {
 			return PickDissolvedMsg{Number: num, Title: title, Reason: "issue #" + num + " is already " + dispatchStateName(state)}
 		}
 	}
+	return transitionToDispatchable(tracker, num, title, kind)
+}
+
+// transitionToDispatchable is PickIssue's promotion step alone, split out so
+// PickAllReady can drive it directly without re-paying PickIssue's
+// terminal-state checks (#987) — the two ListIssues round-trips those checks
+// cost are wasted work when the caller already knows num is Dispatchable.
+func transitionToDispatchable(tracker forge.IssueTracker, num, title string, kind Kind) Msg {
 	if err := tracker.TransitionState(num, forge.Untriaged, forge.Dispatchable); err != nil {
 		return PickDissolvedMsg{Number: num, Title: title, Reason: err.Error()}
 	}
@@ -111,9 +119,23 @@ func dispatchStateName(state forge.DispatchState) string {
 // and picks each one — the "pick all ready" bulk gesture (#647 AC3). It is
 // an explicit action on one snapshot of the tracker's Dispatchable set, never
 // standing discovery: an issue that becomes Dispatchable after this call
-// returns is not picked until the operator asks again. Each issue picks
-// through the same PickIssue adapter a single "p <num>" uses, so an
-// already-Dispatchable issue's promotion is the same idempotent relabel.
+// returns is not picked until the operator asks again.
+//
+// Unlike a single "p <num>" pick, the loop below drives
+// transitionToDispatchable directly instead of going through PickIssue: every
+// issue here was just read off the Dispatchable list, and dispatch-state
+// labels are mutually exclusive (#707), so PickIssue's InProgress/Complete
+// checks are guaranteed false for all of them — re-querying ListIssues twice
+// per issue to reconfirm a fact already known wastes 2N network round-trips
+// on top of the one ListIssues(Dispatchable) call above (#987). This
+// reopens a narrow TOCTOU window — an issue that transitions to InProgress or
+// Complete after the snapshot above but before its turn in this loop (e.g. a
+// concurrent pick from another operator or automation) is relabeled
+// Dispatchable anyway — accepted here because the bulk "pick everything
+// ready right now" gesture is inherently a point-in-time batch, not a
+// standing guarantee, and the window is the same single-snapshot race
+// PickAllReady already accepts against issues becoming Dispatchable after it
+// returns.
 func PickAllReady(tracker forge.IssueTracker) []Msg {
 	issues, err := tracker.ListIssues(forge.Dispatchable)
 	if err != nil {
@@ -121,7 +143,7 @@ func PickAllReady(tracker forge.IssueTracker) []Msg {
 	}
 	msgs := make([]Msg, len(issues))
 	for i, iss := range issues {
-		msgs[i] = PickIssue(tracker, iss.Number, iss.Title, KindWork)
+		msgs[i] = transitionToDispatchable(tracker, iss.Number, iss.Title, KindWork)
 	}
 	return msgs
 }
