@@ -435,6 +435,11 @@ func TestTea_EnterKey_OnFocusedQueue_DrillsRunningPick(t *testing.T) {
 	waitForOutput(t, tm, "quit with live Dispatches")
 	sendKey(tm, "d")
 	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.QueueEnterNotice != "" {
+		t.Errorf("QueueEnterNotice = %q after drilling into a transcript, want \"\"", fm.m.QueueEnterNotice)
+	}
 }
 
 // TestTea_EnterKey_OnFocusedQueue_NoOpOnQueuedRow verifies Enter, with focus
