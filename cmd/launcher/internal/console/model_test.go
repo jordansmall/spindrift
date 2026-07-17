@@ -624,6 +624,41 @@ func TestUpdate_DrillInMsg_RefreshSameNumber_PreservesShowRaw(t *testing.T) {
 	}
 }
 
+// TestUpdate_DrillInMsg_NewNumber_ResetsPaneMode verifies a DrillInMsg for a
+// different Number resets PaneMode to PaneDocked even after the operator
+// cycled the previous drill-in to PaneFullscreen (issue #999, #846 AC1).
+func TestUpdate_DrillInMsg_NewNumber_ResetsPaneMode(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "first"})
+	m = Update(m, PaneModeCycleMsg{})
+	m = Update(m, PaneModeCycleMsg{})
+	if m.PaneMode != PaneFullscreen {
+		t.Fatalf("PaneMode = %v, want PaneFullscreen before the new drill-in", m.PaneMode)
+	}
+
+	m = Update(m, DrillInMsg{Number: "43", Rendered: "other"})
+	if m.PaneMode != PaneDocked {
+		t.Errorf("PaneMode = %v, want PaneDocked reset on a new Number", m.PaneMode)
+	}
+}
+
+// TestUpdate_DrillInMsg_RefreshSameNumber_PreservesPaneMode verifies a
+// second DrillInMsg for the same pick (a refresh while live-tailing) leaves
+// PaneMode untouched instead of resetting it to PaneDocked (issue #999).
+func TestUpdate_DrillInMsg_RefreshSameNumber_PreservesPaneMode(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "first"})
+	m = Update(m, PaneModeCycleMsg{})
+	if m.PaneMode != PaneFloating {
+		t.Fatalf("PaneMode = %v, want PaneFloating before the refresh", m.PaneMode)
+	}
+
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "second (grew)"})
+	if m.PaneMode != PaneFloating {
+		t.Errorf("PaneMode = %v, want PaneFloating preserved on same-Number refresh", m.PaneMode)
+	}
+}
+
 // TestUpdate_SizeChangedMsg_AppliesWidthHeight verifies a SizeChangedMsg
 // lands its Width/Height straight onto Model (issue #842).
 func TestUpdate_SizeChangedMsg_AppliesWidthHeight(t *testing.T) {

@@ -224,6 +224,10 @@ func Update(m Model, msg Msg) Model {
 		if m.DrillIn != nil && m.DrillIn.Number == msg.Number {
 			showRaw = m.DrillIn.ShowRaw
 			offset = m.DrillIn.Offset
+		} else {
+			// New pick: reset the layout to docked, matching #846 AC1
+			// (issue #999).
+			m.PaneMode = PaneDocked
 		}
 		content := msg.Rendered
 		if showRaw {
