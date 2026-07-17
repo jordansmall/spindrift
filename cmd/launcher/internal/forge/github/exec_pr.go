@@ -141,7 +141,7 @@ func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 // built from the bare headRefName/baseRefName GitHub returns, with no
 // owner:branch form, so the compare call only finds a head that lives in
 // this same repo — true for this project's own agent/issue-N branches
-// (docs/reference.md: "Agent PR branches live in-repo, not forks"; this
+// (docs/reference.md: "Agent PR branches live in-repo (not forks)"; this
 // project requires a single-repo PAT). A fork-sourced head would 404 here
 // instead of resolving. That 404 is not specially handled: it comes back as
 // an ordinary error, which the caller (preflightStaleBase in
