@@ -300,6 +300,38 @@ func TestView_ShowHelp_ListsBoundKeys(t *testing.T) {
 	}
 }
 
+// TestView_ShowHelp_ListsTabKey verifies the help overlay explicitly
+// describes the "tab" focus-switch binding, not just a substring match
+// that any word containing "t" would vacuously satisfy (issue #995).
+func TestView_ShowHelp_ListsTabKey(t *testing.T) {
+	m := Update(NewModel(), HelpToggleMsg{})
+
+	out := View(m)
+	if !strings.Contains(out, "tab         switch focus between the backlog and work-queue columns") {
+		t.Errorf("View() = %q, want it to describe the \"tab\" focus-switch binding", out)
+	}
+}
+
+// TestView_ShowHelp_DescribesContextSensitiveEnter verifies the help
+// overlay's "enter" entry documents both context-sensitive behaviors —
+// picking the highlighted backlog row and drilling into a queued pick's
+// transcript — not just the bare word "enter" (issue #995).
+func TestView_ShowHelp_DescribesContextSensitiveEnter(t *testing.T) {
+	m := Update(NewModel(), HelpToggleMsg{})
+
+	out := View(m)
+	for _, want := range []string{
+		"pick the",
+		"highlighted backlog row",
+		"drill into the",
+		"highlighted pick's transcript",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("View() = %q, want it to describe context-sensitive enter behavior %q", out, want)
+		}
+	}
+}
+
 // TestView_ShowHelp_ListsNewKeybindings verifies the help overlay lists the
 // picks/queue-driving keys wired in issue #785, and no longer claims "k"
 // moves the cursor (it Terminates instead).
