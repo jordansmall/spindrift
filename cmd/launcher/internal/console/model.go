@@ -212,7 +212,7 @@ func Update(m Model, msg Msg) Model {
 	case PickResolvedMsg:
 		m.PendingPick = false
 	case QueueEnterNoticedMsg:
-		m.QueueEnterNotice = "no transcript yet"
+		m.QueueEnterNotice = "no transcript to show"
 	case QueueEnterNoticeClearedMsg:
 		m.QueueEnterNotice = ""
 	case QuitMsg:
