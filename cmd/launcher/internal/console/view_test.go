@@ -1174,7 +1174,10 @@ func TestSplitLeftWidth_ClampsToLeftColumnFraction(t *testing.T) {
 // equals the plain body's m.Width exactly. The backlog title is long enough
 // to force the leftColumnFraction clamp in both, so the test would catch a
 // future edit that re-derives the clamp in only one of the two callers
-// (issue #1001 AC3/AC4).
+// (issue #1001 AC3/AC4). Fixture text is ASCII-only, so the byte offset
+// strings.Index returns equals both the rune count and the display-column
+// position — this isn't a general wide-rune column-offset proof, just a
+// same-input comparison between the two callers.
 func TestView_BodyAndDockedBody_AgreeOnLeftColumnWidth(t *testing.T) {
 	const bodyWidth = 60    // leftColumnFraction clamp: int(60 * 2/5) = 24
 	const dockedWidth = 100 // transcriptWidth = int(100*2/5) = 40, bodyWidth = 60
@@ -1200,7 +1203,7 @@ func TestView_BodyAndDockedBody_AgreeOnLeftColumnWidth(t *testing.T) {
 	bodyOffset := strings.Index(bodyLine, "QUEUEMARK")
 	dockedOffset := strings.Index(dockedLine, "QUEUEMARK")
 	if bodyOffset != dockedOffset {
-		t.Errorf("queue column starts at rune %d in renderBody but %d in renderDockedBody, want equal (same leftWidth)", bodyOffset, dockedOffset)
+		t.Errorf("queue column starts at byte %d in renderBody but %d in renderDockedBody, want equal (same leftWidth)", bodyOffset, dockedOffset)
 	}
 }
 
