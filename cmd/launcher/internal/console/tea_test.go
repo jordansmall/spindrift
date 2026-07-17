@@ -1634,6 +1634,42 @@ func TestTea_TerminateKey_ConfirmThenCapitalY_Confirms(t *testing.T) {
 	}
 }
 
+// TestTea_TerminateKey_QueueFocused_TargetsQueueHighlighted verifies "k"
+// resolves the queue's own highlighted row (QueueCursor) while the queue has
+// focus, not the backlog's stale Cursor — the two only move independently
+// (model.go's CursorMoveMsg branch), so a queue-focused "down" leaves the
+// backlog Cursor sitting on #42 while the operator is looking at #43
+// highlighted in the queue column (view.go only draws ">" for the focused
+// pane). Confirming must target what's on screen, not the invisible backlog
+// row (issue #997).
+func TestTea_TerminateKey_QueueFocused_TargetsQueueHighlighted(t *testing.T) {
+	launch, fc, fr, _ := newTermTestLauncher(t)
+	fc.SetIssue(forge.Issue{Number: "43", Title: "also running", Labels: []string{"agent-in-progress"}})
+	launch.Queue.Add(Pick{Number: "43", Title: "also running", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "also running")
+
+	sendKey(tm, "tab")  // focus queue; QueueCursor stays at 0 (#42)
+	sendKey(tm, "down") // QueueCursor -> 1 (#43); backlog Cursor untouched at 0 (#42)
+	sendKey(tm, "k")
+	waitForOutput(t, tm, "terminate #43?", "y/N")
+
+	sendKey(tm, "y")
+	waitForOutput(t, tm, "terminated")
+
+	// #42 is still PickRunning (only #43 was targeted), so "q" arms the
+	// live-Dispatch quit confirm (issue #822) rather than exiting outright.
+	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+	sendKey(tm, "d")
+	waitFinished(t, tm)
+
+	if len(fr.KillCalls) != 1 || fr.KillCalls[0] != "agent-issue-43" {
+		t.Errorf("KillCalls = %v, want exactly one kill of agent-issue-43", fr.KillCalls)
+	}
+}
+
 // TestTea_TerminateKey_ConfirmThenOther_Declines verifies any key other than
 // "y" at the confirm prompt declines the terminate — the running Dispatch is
 // left untouched (ADR 0024, issue #785).
