@@ -259,7 +259,7 @@ func TestRunQuickstart_NoRuntimeDetected_ForceDoesNotBackUpExistingFiles(t *test
 	var out bytes.Buffer
 	env := fakeEnvironment{}
 
-	err := runQuickstart(dir, env, fakeCommandRunner{}, &out, strings.NewReader(""), true, true)
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, strings.NewReader(""), true, true)
 	if err == nil {
 		t.Fatal("expected an error when no supported runtime is detected, got nil")
 	}
