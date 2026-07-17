@@ -370,11 +370,9 @@ func TestFormatHeartbeatShape(t *testing.T) {
 // single-line heartbeat row.
 func TestFormatHeartbeatSanitizesRole(t *testing.T) {
 	got := claude.FormatHeartbeat("42", 3, "Edit", "scout\x1b[2J\nfake-row", "edit")
-	if strings.ContainsAny(got, "\n\x1b") {
-		t.Errorf("FormatHeartbeat role not sanitized, got %q", got)
-	}
-	if !strings.Contains(got, "scout") {
-		t.Errorf("FormatHeartbeat dropped legitimate role text, got %q", got)
+	want := "#42 scoutfake-row [edit] \xc2\xb7 3 turns \xc2\xb7 Edit"
+	if got != want {
+		t.Errorf("FormatHeartbeat role not sanitized, got %q, want %q", got, want)
 	}
 }
 
@@ -468,11 +466,9 @@ func TestFormatCountLineShape(t *testing.T) {
 // single-line count-line row.
 func TestFormatCountLineSanitizesRole(t *testing.T) {
 	got := claude.FormatCountLine("42", "scout\x1b]0;pwn\x07\nfake-row", "explore", map[string]int{"read": 1})
-	if strings.ContainsAny(got, "\n\x1b") {
-		t.Errorf("FormatCountLine role not sanitized, got %q", got)
-	}
-	if !strings.Contains(got, "scout") {
-		t.Errorf("FormatCountLine dropped legitimate role text, got %q", got)
+	want := "#42 scoutfake-row [explore] \xc2\xb7 1 read"
+	if got != want {
+		t.Errorf("FormatCountLine role not sanitized, got %q, want %q", got, want)
 	}
 }
 
@@ -829,14 +825,9 @@ func TestFormatRoleHeaderModel(t *testing.T) {
 // on the sanitized (not raw) role length.
 func TestFormatRoleHeaderSanitizesRole(t *testing.T) {
 	got := claude.FormatRoleHeader("42", "scout\x1b[2J\nfake-row", "")
-	if strings.ContainsAny(got, "\n\x1b") {
-		t.Errorf("FormatRoleHeader role not sanitized, got %q", got)
-	}
-	if !strings.Contains(got, "scout") {
-		t.Errorf("FormatRoleHeader dropped legitimate role text, got %q", got)
-	}
-	if !strings.Contains(got, "\xe2\x94\x80") {
-		t.Errorf("FormatRoleHeader missing trailing rule, got %q", got)
+	want := "#42 \xe2\x94\x80\xe2\x94\x80 scoutfake-row " + strings.Repeat("\xe2\x94\x80", 15)
+	if got != want {
+		t.Errorf("FormatRoleHeader role not sanitized, got %q, want %q", got, want)
 	}
 }
 
