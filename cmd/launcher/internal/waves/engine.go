@@ -138,8 +138,13 @@ func printSelectiveRerunHint(cfg Config, held []Issue) {
 func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, sources Sources, origin Origin) error {
 	checkOverlap := waveOverlapCheck(cfg, it, cf)
 	var selected, blockerFailed []Issue
+	failedBlockersByIssue := map[string][]string{}
 outer:
 	for _, iss := range issues {
+		var failed, unready []string
+		if !cfg.IgnoreBlockers {
+			_, failed, unready = BlockerStatus(cfg, it, cf, iss.Number, edges)
+		}
 		switch {
 		// Cascade-fail only in the multi-issue drain path (origin !=
 		// OriginClaimed). The claimed single-issue path swaps the issue onto
@@ -147,10 +152,11 @@ outer:
 		// top of in-progress, leaving the issue double-labeled. That path
 		// has its own blocked-marker signaling via the writeBlockedMarker
 		// call below.
-		case !cfg.IgnoreBlockers && origin != OriginClaimed && hasFailedInBatchBlocker(cfg, it, iss.Number, edges):
+		case origin != OriginClaimed && len(failed) > 0:
 			blockerFailed = append(blockerFailed, iss)
-		case !cfg.IgnoreBlockers && !issueIsReady(it, cf, iss.Number, edges):
-			fmt.Printf("    ~~ #%s blocked (a blocker is not '%s'); skipping\n", iss.Number, cfg.CompleteLabel)
+			failedBlockersByIssue[iss.Number] = failed
+		case len(unready) > 0:
+			fmt.Printf("    ~~ #%s blocked by #%s; skipping\n", iss.Number, strings.Join(unready, ", #"))
 		default:
 			if collider, overlapped := checkOverlap(iss.Number); overlapped {
 				fmt.Printf("    ~~ #%s touches overlap in-progress #%s; deferring\n", iss.Number, collider)
@@ -163,7 +169,7 @@ outer:
 		}
 	}
 	for _, iss := range blockerFailed {
-		fmt.Printf("    !! #%s  status=blocker-failed  note=a dependency failed; skipping\n", iss.Number)
+		fmt.Printf("    !! #%s  status=blocker-failed  note=#%s failed; skipping\n", iss.Number, strings.Join(failedBlockersByIssue[iss.Number], ", #"))
 		transitionState(it, iss.Number, forge.Dispatchable, forge.Failed)
 	}
 	if len(selected) == 0 {
