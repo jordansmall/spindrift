@@ -438,6 +438,36 @@ func TestMergeImmediate_StaleBaseCheckErrorFallsThroughToMerge(t *testing.T) {
 	}
 }
 
+// TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge verifies that a
+// persistent Rebase failure during the stale-base preflight (issue #940) is
+// fatal to the landing — unlike a NeedsUpdate query error (staleness merely
+// unknown), a Rebase failure here means staleness is confirmed and the
+// corrective action itself failed, so mergeImmediate must not fall through
+// to Merge on an unrevalidated stale base.
+func TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 2
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	fc.RebaseErrs = []error{
+		forge.ErrTransientPushFailure,
+		forge.ErrTransientPushFailure,
+		forge.ErrTransientPushFailure,
+	}
+	fc.MergeErrs = []error{nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, nil)
+
+	if err == nil {
+		t.Fatal("mergeImmediate: want error when the stale-base rebase never recovers, got nil")
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge must not be called after the stale-base rebase failed; fc.Merged=%q", fc.Merged)
+	}
+}
+
 // TestApplyMergeMode_Immediate verifies that immediate mode calls fc.Merge.
 func TestApplyMergeMode_Immediate(t *testing.T) {
 	c := baseConfig()
