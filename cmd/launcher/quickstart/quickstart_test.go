@@ -394,6 +394,91 @@ func TestRunQuickstart_TokenScopesReadError_AbortsWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestRunQuickstart_UnknownTokenPrefix_AcceptedWithoutAudit(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghs_installationtoken", // app-installation token — neither fine-grained nor classic/OAuth
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, fakeEnvironment{}, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if strings.Contains(out.String(), "ACCEPT") || strings.Contains(out.String(), "WARNING") {
+		t.Errorf("expected no audit gate for an unrecognized token prefix, got transcript:\n%s", out.String())
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "GH_TOKEN=ghs_installationtoken") {
+		t.Errorf("expected harness.env to accept the unrecognized-prefix token, got:\n%s", harnessEnv)
+	}
+}
+
+func TestRunQuickstart_AmbientTokenBroadScope_StillRequiresACCEPT(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift", // repoSlug
+		"podman",                // runtime
+		"Ada Lovelace",          // git user name
+		"ada@example.com",       // git user email
+		// no GH_TOKEN line — reused from the ambient env below
+		"ACCEPT", // literal acceptance of the over-broad-scope warning
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	env := fakeEnvironment{
+		env:         map[string]string{"GH_TOKEN": "ghp_ambientbroadtoken"},
+		tokenScopes: []string{"repo"},
+	}
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "WARNING") {
+		t.Errorf("expected the least-privilege audit to still run on a reused ambient token, got transcript:\n%s", out.String())
+	}
+
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if !strings.Contains(string(harnessEnv), "GH_TOKEN=ghp_ambientbroadtoken") {
+		t.Errorf("expected harness.env to write the ambient token after an explicit ACCEPT, got:\n%s", harnessEnv)
+	}
+}
+
+func TestRunQuickstart_GHAuthTokenEmpty_AbortsWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"", // blank GitHub token — falls back to `gh auth token`, which returns ""
+	}, "\n") + "\n")
+
+	env := fakeEnvironment{ghAuthToken: ""}
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, &out, stdin, true, false)
+	if err == nil {
+		t.Fatal("expected an empty gh auth token result to abort, got nil error")
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "harness.env")); !os.IsNotExist(statErr) {
+		t.Errorf("expected no harness.env to be written when gh auth token returns nothing, stat error: %v", statErr)
+	}
+}
+
 func TestRunQuickstart_Force_BacksUpExistingFiles(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("old flake"), 0o644); err != nil {

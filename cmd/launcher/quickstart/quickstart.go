@@ -156,7 +156,10 @@ func acquireGHToken(env Environment, w io.Writer, prompt func(string) string) (s
 	fmt.Fprintln(w, "WARNING: gh auth token typically returns a repo-wide OAuth token, broader than the single-repo scope quickstart recommends.")
 	token, err := env.GHAuthToken()
 	if err != nil {
-		return "", fmt.Errorf("gh auth token: %w", err)
+		return "", err
+	}
+	if token == "" {
+		return "", fmt.Errorf("gh auth token returned no token — run `gh auth login` and retry")
 	}
 	return token, nil
 }
@@ -199,18 +202,20 @@ func auditGHToken(token string, env Environment, w io.Writer, prompt func(string
 		}
 		return nil
 	}
+	// Any other prefix (e.g. ghs_ app-installation tokens) is neither a
+	// fine-grained PAT nor a classic/OAuth token, so there is nothing to
+	// audit — accept as-is.
 	return nil
 }
 
 // broadGHScopes are classic/OAuth scopes that grant access wider than the
 // single-repo least privilege quickstart wants: repo-wide (not just the one
-// target repo) or org/admin level.
+// target repo) or org level. Any admin:* scope is caught separately by the
+// prefix check in excessGHScopes.
 var broadGHScopes = map[string]bool{
-	"repo":             true,
-	"admin:org":        true,
-	"write:org":        true,
-	"read:org":         true,
-	"admin:enterprise": true,
+	"repo":      true,
+	"write:org": true,
+	"read:org":  true,
 }
 
 // excessGHScopes returns the scopes from a classic/OAuth token's grant that
