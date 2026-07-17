@@ -14,6 +14,21 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
+// ghLabel is the label shape gh issue view/list emit under --json labels.
+// Shared across ListOpenIssues, Issue, and issueLabels so the field tag
+// lives in one place.
+type ghLabel struct {
+	Name string `json:"name"`
+}
+
+func labelNames(labels []ghLabel) []string {
+	names := make([]string, len(labels))
+	for i, l := range labels {
+		names[i] = l.Name
+	}
+	return names
+}
+
 func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 	label := e.labels.Label(state)
 	cmd := exec.Command("gh", "issue", "list",
@@ -63,22 +78,20 @@ func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
 		return nil, fmt.Errorf("gh issue list: %w", err)
 	}
 	var raw []struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-		Labels []struct {
-			Name string `json:"name"`
-		} `json:"labels"`
+		Number int       `json:"number"`
+		Title  string    `json:"title"`
+		Labels []ghLabel `json:"labels"`
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return nil, fmt.Errorf("parse gh issue list: %w", err)
 	}
 	issues := make([]forge.Issue, len(raw))
 	for i, r := range raw {
-		iss := forge.Issue{Number: strconv.Itoa(r.Number), Title: r.Title}
-		for _, l := range r.Labels {
-			iss.Labels = append(iss.Labels, l.Name)
+		issues[i] = forge.Issue{
+			Number: strconv.Itoa(r.Number),
+			Title:  r.Title,
+			Labels: labelNames(r.Labels),
 		}
-		issues[i] = iss
 	}
 	sort.Slice(issues, func(i, j int) bool {
 		ni, _ := strconv.Atoi(issues[i].Number)
@@ -99,27 +112,22 @@ func (e *execClient) Issue(num string) (forge.Issue, error) {
 		return forge.Issue{}, fmt.Errorf("gh issue view %s: %w", num, err)
 	}
 	var raw struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-		Body   string `json:"body"`
-		State  string `json:"state"`
-		Labels []struct {
-			Name string `json:"name"`
-		} `json:"labels"`
+		Number int       `json:"number"`
+		Title  string    `json:"title"`
+		Body   string    `json:"body"`
+		State  string    `json:"state"`
+		Labels []ghLabel `json:"labels"`
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return forge.Issue{}, fmt.Errorf("parse issue %s: %w", num, err)
 	}
-	iss := forge.Issue{
+	return forge.Issue{
 		Number: strconv.Itoa(raw.Number),
 		Title:  raw.Title,
 		Body:   raw.Body,
 		State:  forge.IssueState(raw.State),
-	}
-	for _, l := range raw.Labels {
-		iss.Labels = append(iss.Labels, l.Name)
-	}
-	return iss, nil
+		Labels: labelNames(raw.Labels),
+	}, nil
 }
 
 // TransitionState swaps the from-state label for the to-state label on issue
@@ -151,18 +159,12 @@ func (e *execClient) issueLabels(num string) ([]string, error) {
 		return nil, fmt.Errorf("gh issue view %s: %w", num, err)
 	}
 	var raw struct {
-		Labels []struct {
-			Name string `json:"name"`
-		} `json:"labels"`
+		Labels []ghLabel `json:"labels"`
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return nil, fmt.Errorf("parse issue %s: %w", num, err)
 	}
-	labels := make([]string, len(raw.Labels))
-	for i, l := range raw.Labels {
-		labels[i] = l.Name
-	}
-	return labels, nil
+	return labelNames(raw.Labels), nil
 }
 
 // CompleteVerdict swaps the InProgress label for verdict's terminal label on
