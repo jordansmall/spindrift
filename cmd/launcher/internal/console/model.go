@@ -154,7 +154,9 @@ const (
 // focusedCursor returns a pointer to the focused column's cursor field —
 // &m.QueueCursor while the work queue has focus, &m.Cursor (the backlog's)
 // otherwise — so a caller mutates the right twin without re-testing Focus
-// itself (issue #1062).
+// itself (issue #1062). Takes *Model, unlike focusedTotal/focusedBudget
+// below, because a caller needs to write through it; those two only ever
+// read, so they stay on the cheaper value receiver.
 func focusedCursor(m *Model) *int {
 	if m.Focus == FocusQueue {
 		return &m.QueueCursor
