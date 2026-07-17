@@ -101,8 +101,8 @@ func TestCmdDispatch_RunsCleanupOnEveryExit(t *testing.T) {
 // context's cleanup hook, and actually reaches console.Run (not just
 // bootstrap routing) -- a scripted "q" keypress on stdin quits the real
 // Bubble Tea program immediately since the fake launchContext's Queue starts
-// empty (tea.go's "q" case sends QuitMsg directly when LiveIssues() is
-// empty).
+// empty (tea.go's "q" case sends QuitMsg directly unless launch != nil and
+// LiveIssues() is non-empty).
 func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
@@ -113,9 +113,12 @@ func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
 		pwd:          dir,
 		issueTracker: fc,
 		codeForge:    fc,
-		factory:      testFactory(t, dir, runner.NewFake()),
-		settle:       settle.NewFake(),
-		cleanup:      func() { called = true },
+		// runner.NewFake(), not nil like the sibling tests: Init's
+		// orphanRecoveryCmd calls Factory.OrphanedIssues -> f.runner.ListRunning
+		// unconditionally on startup, which panics on a nil runner.
+		factory: testFactory(t, dir, runner.NewFake()),
+		settle:  settle.NewFake(),
+		cleanup: func() { called = true },
 	}
 
 	stdin := strings.NewReader("q")
