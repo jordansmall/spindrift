@@ -50,3 +50,19 @@ func TestParseTouchPaths_NoDuplicates(t *testing.T) {
 		t.Errorf("expected [cmd/launcher/*.go] (deduplicated), got %v", paths)
 	}
 }
+
+func TestParseTouchPaths_IgnoresSectionInFencedBlock(t *testing.T) {
+	body := "```\n## Touches\n- cmd/launcher/*.go\n```\n## Touches\n- lib/env-schema.nix"
+	paths := forge.ParseTouchPaths(body)
+	if len(paths) != 1 || paths[0] != "lib/env-schema.nix" {
+		t.Errorf("expected [lib/env-schema.nix] only, got %v", paths)
+	}
+}
+
+func TestParseTouchPaths_IgnoresPathQuotedInInlineSpan(t *testing.T) {
+	body := "## Touches\n- `cmd/launcher/*.go`\n- lib/env-schema.nix"
+	paths := forge.ParseTouchPaths(body)
+	if len(paths) != 1 || paths[0] != "lib/env-schema.nix" {
+		t.Errorf("expected [lib/env-schema.nix] only, got %v", paths)
+	}
+}

@@ -24,8 +24,18 @@ func ParseTouchPaths(body string) []string {
 	}
 
 	inSection := false
+	inFence := false
 	for _, rawLine := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
 		line := strings.TrimRight(rawLine, "\r")
+
+		if IsFenceDelimiter(line) {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		line = StripInlineCode(line)
 
 		// Trims before matching, unlike IsAnyHeading below (IsBulletItem's
 		// own regex tolerates leading whitespace) — same trim/no-trim
