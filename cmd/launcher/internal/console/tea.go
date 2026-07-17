@@ -224,6 +224,9 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	case "j", "down":
 		t.m = Update(t.m, CursorMoveMsg{Delta: 1})
 	case "i", "up":
+		// "i" is not vim's cursor-up key (that's "k", taken by Terminate
+		// below); it sits directly above "k" on the keyboard instead
+		// (issue #838).
 		t.m = Update(t.m, CursorMoveMsg{Delta: -1})
 	case "pgdown":
 		t.m = Update(t.m, ScrollMsg{Delta: focusedPageSize(t.m)})
