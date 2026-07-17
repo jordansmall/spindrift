@@ -8,25 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-func writeLog(t *testing.T, lines ...string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "test.log")
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	for _, l := range lines {
-		if _, err := f.WriteString(l + "\n"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return path
-}
-
 func TestLastInLog_FullResultEvent(t *testing.T) {
 	line := `{"type":"result","num_turns":7,"total_cost_usd":0.1234,"duration_ms":5000,"duration_api_ms":3000,"usage":{"input_tokens":800,"output_tokens":200,"cache_read_input_tokens":150,"cache_creation_input_tokens":50}}`
-	path := writeLog(t, "some output", line)
+	path := WriteLog(t, "some output", line)
 
 	u, found, err := lastInLog(path)
 	if err != nil {
@@ -64,7 +48,7 @@ func TestLastInLog_FullResultEvent(t *testing.T) {
 func TestLastInLog_TakesLast(t *testing.T) {
 	first := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":100,"usage":{"input_tokens":10,"output_tokens":5}}`
 	last := `{"type":"result","num_turns":9,"total_cost_usd":0.99,"duration_ms":9000,"usage":{"input_tokens":900,"output_tokens":90}}`
-	path := writeLog(t, first, "some other output", last)
+	path := WriteLog(t, first, "some other output", last)
 
 	u, found, err := lastInLog(path)
 	if err != nil {
@@ -80,7 +64,7 @@ func TestLastInLog_TakesLast(t *testing.T) {
 
 func TestLastInLog_NoCacheFields(t *testing.T) {
 	line := `{"type":"result","num_turns":3,"total_cost_usd":0.05,"duration_ms":2000,"usage":{"input_tokens":100,"output_tokens":40}}`
-	path := writeLog(t, line)
+	path := WriteLog(t, line)
 
 	u, found, err := lastInLog(path)
 	if err != nil {
@@ -98,7 +82,7 @@ func TestLastInLog_NoCacheFields(t *testing.T) {
 }
 
 func TestLastInLog_NotFound(t *testing.T) {
-	path := writeLog(t, "some output", "no result event here")
+	path := WriteLog(t, "some output", "no result event here")
 	_, found, err := lastInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -119,7 +103,7 @@ func TestLastInLog_FileNotFound(t *testing.T) {
 }
 
 func TestLastInLog_MalformedJSON(t *testing.T) {
-	path := writeLog(t, `{"type":"result","num_turns":INVALID}`)
+	path := WriteLog(t, `{"type":"result","num_turns":INVALID}`)
 	_, found, err := lastInLog(path)
 	if err != nil {
 		t.Fatalf("unexpected error for malformed JSON: %v", err)
@@ -142,7 +126,7 @@ func TestBreakdownByRole_ScoutAndReviewer(t *testing.T) {
 	// Final main agent message (no parent)
 	implMain3 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":50,"output_tokens":20}}}`
 
-	path := writeLog(t, implMain1, scoutMsg1, scoutMsg2, implMain2, reviewerMsg1, implMain3)
+	path := WriteLog(t, implMain1, scoutMsg1, scoutMsg2, implMain2, reviewerMsg1, implMain3)
 
 	breakdown, err := breakdownByRole(path)
 	if err != nil {
@@ -183,7 +167,7 @@ func TestBreakdownByRole_Filer(t *testing.T) {
 	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_filer","name":"Task","input":{"subagent_type":"filer","prompt":"file non-blocking findings"}}],"usage":{"input_tokens":80,"output_tokens":30}}}`
 	filerMsg1 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":220,"output_tokens":90}},"parent_tool_use_id":"toolu_filer"}`
 
-	path := writeLog(t, implMain1, filerMsg1)
+	path := WriteLog(t, implMain1, filerMsg1)
 
 	breakdown, err := breakdownByRole(path)
 	if err != nil {
@@ -216,7 +200,7 @@ func TestBreakdownByRole_ReviewerReinvoked(t *testing.T) {
 	implMain2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_rev2","name":"Task","input":{"subagent_type":"reviewer","prompt":"re-review"}}],"usage":{"input_tokens":50,"output_tokens":20}}}`
 	reviewerMsg2 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":150,"output_tokens":60}},"parent_tool_use_id":"toolu_rev2"}`
 
-	path := writeLog(t, implMain1, reviewerMsg1, implMain2, reviewerMsg2)
+	path := WriteLog(t, implMain1, reviewerMsg1, implMain2, reviewerMsg2)
 
 	breakdown, err := breakdownByRole(path)
 	if err != nil {
@@ -242,7 +226,7 @@ func TestBreakdownByRole_NoSubagents(t *testing.T) {
 	implMsg1 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":100,"output_tokens":50}}}`
 	implMsg2 := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":200,"output_tokens":80}}}`
 
-	path := writeLog(t, implMsg1, implMsg2)
+	path := WriteLog(t, implMsg1, implMsg2)
 
 	breakdown, err := breakdownByRole(path)
 	if err != nil {
