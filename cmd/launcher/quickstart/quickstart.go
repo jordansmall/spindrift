@@ -12,6 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/github"
+	"spindrift.dev/launcher/internal/forge/jira"
+	"spindrift.dev/launcher/internal/forge/local"
 )
 
 // Environment abstracts host detection (available container runtimes, git
@@ -60,20 +66,66 @@ func detectRuntime(env Environment) (string, error) {
 	return "", fmt.Errorf("no supported container runtime found on PATH — install one of: podman, docker, bwrap")
 }
 
-// CommandRunner abstracts the two subprocesses Quickstart eventually shells
-// out to (`claude setup-token`, `nix develop --command spindrift build`), so
-// runQuickstart is testable without a real shell-out. Unused until a later
-// ticket wires the finish-line steps (ADR 0027).
+// CommandRunner abstracts the two subprocesses Quickstart shells out to
+// (`claude setup-token`, `nix develop --command spindrift build`), so
+// runQuickstart is testable without a real shell-out.
 type CommandRunner interface {
 	Run(name string, args ...string) error
 }
 
+// defaultBranchPrefix matches the launcher's own BRANCH_PREFIX default
+// (flagtable_gen.go) — Quickstart doesn't prompt for it.
+const defaultBranchPrefix = "agent/issue-"
+
+// defaultDispatchLabels are the four triage labels Quickstart's generated
+// flake relies on implicitly (the launcher's own LABEL/IN_PROGRESS_LABEL/
+// FAILED_LABEL/COMPLETE_LABEL defaults) — the wizard never prompts for
+// custom label names.
+var defaultDispatchLabels = forge.DispatchLabels{
+	Dispatchable: "ready-for-agent",
+	InProgress:   "agent-in-progress",
+	Complete:     "agent-complete",
+	Failed:       "agent-failed",
+}
+
+// ForgeBuilder constructs the real IssueTracker/CodeForge from the wizard's
+// collected repoSlug, GitHub token, and Issue Tracker settings, so the
+// finish line's doctor validation (ADR 0027) runs in-process against the
+// real forge — no `spindrift doctor` subprocess, since the `spindrift`
+// binary doesn't exist yet at Quickstart's pre-CLI stage. Injected so tests
+// substitute a forge.Fake instead of shelling out to gh/Jira for real.
+type ForgeBuilder func(repoSlug string, tracker trackerSettings, ghToken, jiraToken string) (forge.IssueTracker, forge.CodeForge)
+
+// buildForge is the production ForgeBuilder. The Code Forge is always
+// github (ADR 0027: Quickstart never prompts for it); the Issue Tracker
+// varies by the operator's choice. github.NewExecClient shells out to the
+// gh CLI, which reads GH_TOKEN from the process environment — runQuickstart
+// exports the collected token before calling this.
+func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken string) (forge.IssueTracker, forge.CodeForge) {
+	cf := github.NewExecClient(repoSlug, defaultDispatchLabels, defaultBranchPrefix)
+	switch tracker.issueTracker {
+	case "jira":
+		return jira.NewJiraClient(jira.JiraConfig{
+			BaseURL:    tracker.jiraBaseURL,
+			ProjectKey: tracker.jiraProjectKey,
+			Email:      tracker.jiraEmail,
+			Token:      jiraToken,
+			Labels:     defaultDispatchLabels,
+		}), cf
+	case "local":
+		return local.NewLocalTracker(tracker.localIssuesDir, defaultDispatchLabels), cf
+	default:
+		return cf, cf
+	}
+}
+
 // runQuickstart drives the wizard end-to-end: it takes injected I/O, a
 // target directory to write the scaffold into, and the Environment/
-// CommandRunner seams (mirrors runDoctor's testability). Interactive-only
-// for v1: a non-TTY stdin (interactive == false) is a fatal error directing
-// scripted setups to write flake.nix/harness.env directly instead.
-func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Writer, stdin io.Reader, interactive, force bool) error {
+// CommandRunner/ForgeBuilder seams (mirrors runDoctor's testability).
+// Interactive-only for v1: a non-TTY stdin (interactive == false) is a fatal
+// error directing scripted setups to write flake.nix/harness.env directly
+// instead.
+func runQuickstart(dir string, env Environment, runner CommandRunner, buildForge ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
 	if !interactive {
 		return fmt.Errorf("quickstart requires an interactive terminal — for scripted setups, write flake.nix and harness.env directly (see docs/flake-options.md)")
 	}
@@ -190,6 +242,34 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Write
 		return fmt.Errorf("write .envrc: %w", err)
 	}
 	fmt.Fprintln(w, "wrote: .envrc")
+
+	// The gh CLI (used by the github Code Forge, and by the github Issue
+	// Tracker branch) reads auth from GH_TOKEN in the process environment.
+	if err := os.Setenv("GH_TOKEN", ghToken); err != nil {
+		return fmt.Errorf("set GH_TOKEN: %w", err)
+	}
+	it, cf := buildForge(repoSlug, tracker, ghToken, jiraToken)
+	if err := doctor.Run(it, cf, doctor.Config{
+		IssueTracker:    tracker.issueTracker,
+		Label:           defaultDispatchLabels.Dispatchable,
+		InProgressLabel: defaultDispatchLabels.InProgress,
+		FailedLabel:     defaultDispatchLabels.Failed,
+		CompleteLabel:   defaultDispatchLabels.Complete,
+	}, w, scanner, interactive); err != nil {
+		return err
+	}
+
+	fmt.Fprintln(w, "==> the first image build can take a while — building now")
+	if err := runner.Run("nix", "develop", "--command", "spindrift", "build"); err != nil {
+		return fmt.Errorf("spindrift build: %w", err)
+	}
+
+	fmt.Fprintln(w, "\nQuickstart complete. Wrote:")
+	fmt.Fprintln(w, "  flake.nix")
+	fmt.Fprintln(w, "  harness.env")
+	fmt.Fprintln(w, "  .gitignore")
+	fmt.Fprintln(w, "  .envrc")
+	fmt.Fprintln(w, "\nNext: run `spindrift dispatch`.")
 
 	return nil
 }
