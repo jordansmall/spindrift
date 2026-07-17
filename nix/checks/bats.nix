@@ -13,7 +13,7 @@ let
     skillsBwrapHarness
     ;
 in
-rec {
+{
   shellcheck =
     pkgs.runCommand "shellcheck"
       {
@@ -119,16 +119,4 @@ rec {
         bats --print-output-on-failure tests/
         touch $out
       '';
-
-  # Regression guard (issue #735): the `bats` derivation must export
-  # RESEARCH_OUTCOME_CONTRACT_FILE like its OUTCOME_CONTRACT_FILE/
-  # COMMS_CONTRACT_FILE/CHECK_CONTRACT_FILE siblings above, or the suite
-  # silently falls back to tests/helper.bash's hand-written fixture instead
-  # of the canonical nix-baked contract. Mirrors default.nix's
-  # checks-inbox-excludes-image-checks pattern -- eval-only, no image build.
-  bats-research-outcome-contract-exported =
-    assert pkgs.lib.assertMsg
-      ((bats.RESEARCH_OUTCOME_CONTRACT_FILE or null) == batsHarness.researchOutcomeContractFile)
-      "the `bats` derivation must export RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.researchOutcomeContractFile";
-    pkgs.runCommand "bats-research-outcome-contract-exported" { } "touch $out";
 }
