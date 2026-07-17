@@ -319,7 +319,7 @@ func Update(m Model, msg Msg) Model {
 	}
 	m.Cursor = clampCursor(m.Cursor, len(m.Visible()))
 	m.QueueCursor = clampCursor(m.QueueCursor, len(m.Picks))
-	clampDrillInOffset(m.DrillIn, m.Height)
+	clampDrillInOffset(m.DrillIn, transcriptHeight(m))
 	m.BacklogOffset = clampCursor(m.BacklogOffset, len(m.Visible()))
 	m.QueueOffset = clampCursor(m.QueueOffset, len(m.Picks))
 	if _, ok := msg.(CursorMoveMsg); ok {
