@@ -57,6 +57,44 @@ func TestIsBulletItem(t *testing.T) {
 	}
 }
 
+func TestIsFenceDelimiter(t *testing.T) {
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{"```", true},
+		{"```go", true},
+		{"~~~", true},
+		{"~~~~", true},
+		{"``", false},
+		{"~~", false},
+		{"plain text", false},
+		{"- item", false},
+	}
+	for _, c := range cases {
+		if got := forge.IsFenceDelimiter(c.line); got != c.want {
+			t.Errorf("IsFenceDelimiter(%q) = %v, want %v", c.line, got, c.want)
+		}
+	}
+}
+
+func TestStripInlineCode(t *testing.T) {
+	cases := []struct {
+		line string
+		want string
+	}{
+		{"before `code` after", "before  after"},
+		{"`a` and `b`", " and "},
+		{"no backticks here", "no backticks here"},
+		{"unterminated `span", "unterminated `span"},
+	}
+	for _, c := range cases {
+		if got := forge.StripInlineCode(c.line); got != c.want {
+			t.Errorf("StripInlineCode(%q) = %q, want %q", c.line, got, c.want)
+		}
+	}
+}
+
 func TestExtractBulletContent(t *testing.T) {
 	cases := []struct {
 		line string
