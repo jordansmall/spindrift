@@ -1027,7 +1027,7 @@ func TestRunQuickstart_DeclineSetupToken_PromptsForAPIKey(t *testing.T) {
 	if strings.Contains(string(harnessEnv), "CLAUDE_CODE_OAUTH_TOKEN=") && !strings.Contains(string(harnessEnv), "CLAUDE_CODE_OAUTH_TOKEN=\n") {
 		t.Errorf("expected no non-empty CLAUDE_CODE_OAUTH_TOKEN line, got:\n%s", harnessEnv)
 	}
-	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != "nix develop --command spindrift build" {
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != strings.Join(spindriftBuildArgs, " ") {
 		t.Errorf("expected only the finish-line spindrift build call when setup-token is declined, got: %v", runner.calls)
 	}
 }
@@ -1081,7 +1081,7 @@ func TestRunQuickstart_AcceptSetupToken_RunsItAndPastesToken(t *testing.T) {
 
 	if len(runner.calls) != 2 ||
 		strings.Join(runner.calls[0], " ") != "claude setup-token" ||
-		strings.Join(runner.calls[1], " ") != "nix develop --command spindrift build" {
+		strings.Join(runner.calls[1], " ") != strings.Join(spindriftBuildArgs, " ") {
 		t.Errorf("expected `claude setup-token` then the finish-line spindrift build call, got: %v", runner.calls)
 	}
 
@@ -1148,7 +1148,7 @@ func TestRunQuickstart_AmbientClaudeOAuthToken_ReusedWithoutPrompt(t *testing.T)
 	if !strings.Contains(out.String(), "reusing ambient CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Errorf("expected transcript to note the ambient token was reused, got:\n%s", out.String())
 	}
-	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != "nix develop --command spindrift build" {
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != strings.Join(spindriftBuildArgs, " ") {
 		t.Errorf("expected only the finish-line spindrift build call when an ambient token is reused, got: %v", runner.calls)
 	}
 }
@@ -1214,7 +1214,7 @@ func TestRunQuickstart_AmbientAnthropicAPIKey_ReusedWithoutPrompt(t *testing.T) 
 	if !strings.Contains(out.String(), "reusing ambient ANTHROPIC_API_KEY") {
 		t.Errorf("expected transcript to note the ambient key was reused, got:\n%s", out.String())
 	}
-	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != "nix develop --command spindrift build" {
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != strings.Join(spindriftBuildArgs, " ") {
 		t.Errorf("expected only the finish-line spindrift build call when an ambient key is reused, got: %v", runner.calls)
 	}
 }
@@ -1273,7 +1273,7 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 		t.Fatalf("want 3 CreateLabel calls, got %d", len(f.CreateLabelCalls))
 	}
 
-	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != "nix develop --command spindrift build" {
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != strings.Join(spindriftBuildArgs, " ") {
 		t.Errorf("expected a single `nix develop --command spindrift build` subprocess call, got: %v", runner.calls)
 	}
 	if !strings.Contains(out.String(), "first image build") {
@@ -1336,7 +1336,7 @@ func TestRunQuickstart_FinishLine_JiraTracker_ValidatesWithCollectedSettings(t *
 	if c.tracker.issueTracker != "jira" || c.tracker.jiraBaseURL != "https://acme.atlassian.net" || c.tracker.jiraProjectKey != "ENG" {
 		t.Errorf("expected finish line to build the forge from the collected jira settings, got %+v", c.tracker)
 	}
-	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != "nix develop --command spindrift build" {
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != strings.Join(spindriftBuildArgs, " ") {
 		t.Errorf("expected the finish-line spindrift build call, got: %v", runner.calls)
 	}
 }
@@ -1364,7 +1364,7 @@ func TestRunQuickstart_FinishLine_LocalTracker_ValidatesWithCollectedSettings(t 
 	if c.tracker.issueTracker != "local" || c.tracker.localIssuesDir != "issues" {
 		t.Errorf("expected finish line to build the forge from the collected local settings, got %+v", c.tracker)
 	}
-	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != "nix develop --command spindrift build" {
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != strings.Join(spindriftBuildArgs, " ") {
 		t.Errorf("expected the finish-line spindrift build call, got: %v", runner.calls)
 	}
 }
