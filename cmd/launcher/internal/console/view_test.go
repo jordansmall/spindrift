@@ -1749,3 +1749,15 @@ func TestWriteColumn_RendersLabelAndWindowedRows(t *testing.T) {
 		t.Errorf("writeColumn() = %q, want %q", got, want)
 	}
 }
+
+// TestWriteColumn_PassesOffsetThroughToWindowedRows verifies writeColumn
+// forwards its offset argument to writeWindowedRows rather than always
+// windowing from the start of rows — the per-column scroll position
+// (m.BacklogOffset/m.QueueOffset) both callers pass through.
+func TestWriteColumn_PassesOffsetThroughToWindowedRows(t *testing.T) {
+	got := writeColumn("picks", []string{"row1\n", "row2\n", "row3\n"}, 1, 3)
+	want := "picks:\nrow2\nrow3\n"
+	if got != want {
+		t.Errorf("writeColumn() with offset 1 = %q, want %q", got, want)
+	}
+}
