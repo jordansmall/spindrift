@@ -140,6 +140,10 @@ type Fake struct {
 
 	// ListIssuesErr, if non-nil, is returned by every ListIssues call.
 	ListIssuesErr error
+	// ListIssuesCalls records the state argument of every ListIssues
+	// invocation in order — lets a test assert call count directly instead
+	// of inferring it from side effects (#987).
+	ListIssuesCalls []DispatchState
 }
 
 // NewFake returns an empty Fake client. labels configures the
@@ -273,6 +277,7 @@ func (f *Fake) ListPRFiles(url string) ([]string, error) {
 func (f *Fake) ListIssues(state DispatchState) ([]Issue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.ListIssuesCalls = append(f.ListIssuesCalls, state)
 	if f.ListIssuesErr != nil {
 		return nil, f.ListIssuesErr
 	}
