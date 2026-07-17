@@ -800,6 +800,122 @@ func TestView_DrillInFloating_OverlaysTranscriptOnTwoColumnBody(t *testing.T) {
 	}
 }
 
+// TestView_DrillInDocked_ToggleRaw_ShowsRawHeader verifies the rendered/raw
+// toggle works through renderTranscriptColumn — the docked pane mode's
+// render path, distinct from renderDrillIn's fullscreen path (issue #1004).
+func TestView_DrillInDocked_ToggleRaw_ShowsRawHeader(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
+	m = Update(m, DrillInToggleMsg{})
+
+	out := View(m)
+	if strings.Contains(out, "[implementor] hi") {
+		t.Errorf("View() = %q, want the rendered form hidden while ShowRaw", out)
+	}
+	if !strings.Contains(out, `{"type":"assistant"}`) {
+		t.Errorf("View() = %q, want the raw form shown while ShowRaw", out)
+	}
+}
+
+// TestView_DrillInFloating_ToggleRaw_ShowsRawHeader verifies the
+// rendered/raw toggle also works in the floating pane mode, through the
+// same renderTranscriptColumn path as docked (issue #1004).
+func TestView_DrillInFloating_ToggleRaw_ShowsRawHeader(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
+	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
+	m = Update(m, PaneModeCycleMsg{})
+	if m.PaneMode != PaneFloating {
+		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
+	}
+	m = Update(m, DrillInToggleMsg{})
+
+	out := View(m)
+	if strings.Contains(out, "[implementor] hi") {
+		t.Errorf("View() = %q, want the rendered form hidden while ShowRaw", out)
+	}
+	if !strings.Contains(out, `{"type":"assistant"}`) {
+		t.Errorf("View() = %q, want the raw form shown while ShowRaw", out)
+	}
+}
+
+// TestView_DrillInDocked_Scroll_HidesLinesBeforeOffset verifies scrolling
+// (a non-zero Offset) drops the leading lines through renderTranscriptColumn
+// — the docked pane mode's render path (issue #1004).
+func TestView_DrillInDocked_Scroll_HidesLinesBeforeOffset(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 4})
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3"})
+	m = Update(m, DrillInScrollMsg{Delta: 2})
+
+	out := View(m)
+	if strings.Contains(out, "l0") || strings.Contains(out, "l1") {
+		t.Errorf("View() = %q, want lines before the offset hidden", out)
+	}
+	if !strings.Contains(out, "l2") || !strings.Contains(out, "l3") {
+		t.Errorf("View() = %q, want lines from the offset onward", out)
+	}
+}
+
+// TestView_DrillInFloating_Scroll_HidesLinesBeforeOffset verifies scrolling
+// also works in the floating pane mode, through the same
+// renderTranscriptColumn path as docked (issue #1004).
+func TestView_DrillInFloating_Scroll_HidesLinesBeforeOffset(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 4})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Title: "backlog issue 1"},
+		{Number: "2", Title: "backlog issue 2"},
+		{Number: "3", Title: "backlog issue 3"},
+	}})
+	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3"})
+	m = Update(m, PaneModeCycleMsg{})
+	if m.PaneMode != PaneFloating {
+		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
+	}
+	m = Update(m, DrillInScrollMsg{Delta: 2})
+
+	out := View(m)
+	if strings.Contains(out, "l0") || strings.Contains(out, "l1") {
+		t.Errorf("View() = %q, want lines before the offset hidden", out)
+	}
+	if !strings.Contains(out, "l2") || !strings.Contains(out, "l3") {
+		t.Errorf("View() = %q, want lines from the offset onward", out)
+	}
+}
+
+// TestView_DrillInDocked_Err_Surfaced verifies a failed drill-in's error
+// text appears through renderTranscriptColumn — the docked pane mode's
+// render path (issue #1004).
+func TestView_DrillInDocked_Err_Surfaced(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
+	m = Update(m, DrillInMsg{Number: "42", Err: errBoom})
+
+	out := View(m)
+	if !strings.Contains(out, errBoom.Error()) {
+		t.Errorf("View() = %q, want it to contain %q", out, errBoom.Error())
+	}
+}
+
+// TestView_DrillInFloating_Err_Surfaced verifies a failed drill-in's error
+// text also appears in the floating pane mode, through the same
+// renderTranscriptColumn path as docked (issue #1004).
+func TestView_DrillInFloating_Err_Surfaced(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
+	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
+	m = Update(m, DrillInMsg{Number: "42", Err: errBoom})
+	m = Update(m, PaneModeCycleMsg{})
+	if m.PaneMode != PaneFloating {
+		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
+	}
+
+	out := View(m)
+	if !strings.Contains(out, errBoom.Error()) {
+		t.Errorf("View() = %q, want it to contain %q", out, errBoom.Error())
+	}
+}
+
 // TestView_DrillInFullscreen_TakesWholeBodyEvenWhenWide verifies an
 // explicitly-selected PaneFullscreen hides the backlog/queue even on a
 // terminal wide enough for three columns — fullscreen is a selectable mode,
