@@ -25,9 +25,10 @@ func largeTranscript(minBytes int) string {
 // BenchmarkUpdate_DrillInScroll_LargeTranscript exercises the keystroke path
 // (DrillInScrollMsg -> clampDrillInOffset) against a 10MB+ transcript — the
 // work Update does on every scroll keystroke while a drill-in is open
-// (issue #722). Measured: 1.59ms/op, 2.5MB/op, 1 alloc/op before the
-// DrillInState.Lines cache, 51.5ns/op, 0B/op, 0 allocs/op after (issue
-// #1016).
+// (issue #722). Recorded when the DrillInState.Lines cache landed:
+// 1.59ms/op, 2.5MB/op, 1 alloc/op before, 51.5ns/op, 0B/op, 0 allocs/op
+// after (issue #1016) — alloc counts are the invariant; ns/op and B/op
+// vary by machine and Go version.
 func BenchmarkUpdate_DrillInScroll_LargeTranscript(b *testing.B) {
 	content := largeTranscript(10 << 20)
 	m := Update(NewModel(), DrillInMsg{Number: "42", Rendered: content, Raw: content})
@@ -41,10 +42,11 @@ func BenchmarkUpdate_DrillInScroll_LargeTranscript(b *testing.B) {
 
 // BenchmarkView_DrillInFullscreen_LargeTranscript exercises the render path
 // (renderDrillIn) against a 10MB+ transcript on every View call — the other
-// half of the keystroke re-render cycle (issue #722). Measured at Offset 0,
-// Height 24: 3.88ms/op, 21.0MB/op, 7 allocs/op before windowLines capped the
-// join to the viewport, 1.6µs/op, 3.39KB/op, 5 allocs/op after (issue
-// #1016).
+// half of the keystroke re-render cycle (issue #722). Recorded at Offset 0,
+// Height 24 when windowLines landed: 3.88ms/op, 21.0MB/op, 7 allocs/op
+// before it capped the join to the viewport, 1.6µs/op, 3.39KB/op, 5
+// allocs/op after (issue #1016) — alloc counts are the invariant; ns/op
+// and B/op vary by machine and Go version.
 func BenchmarkView_DrillInFullscreen_LargeTranscript(b *testing.B) {
 	content := largeTranscript(10 << 20)
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
