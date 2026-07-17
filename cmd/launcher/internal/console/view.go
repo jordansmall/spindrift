@@ -123,6 +123,17 @@ func renderBody(m Model, budget int) string {
 	}
 	if m.Width < minTwoColumnWidth {
 		backlogBudget, queueBudget := splitStackedBudget(budget)
+		if backlogBudget == 0 && queueBudget == 0 && (len(m.Visible()) > 0 || len(m.Picks) > 0) {
+			// A budget this tight leaves no row for either column, so
+			// renderBacklogColumn/renderQueueColumn would both early-return
+			// "" and the stack's "\n" separator alone would render as a
+			// bare blank line — indistinguishable from an actually empty
+			// backlog and queue. Show a single elision marker instead so
+			// the operator knows content exists but doesn't fit (issue
+			// #1041) — only when there's something to elide, since a
+			// genuinely empty backlog/queue has nothing hidden to flag.
+			return "…\n"
+		}
 		backlog := clipLines(renderBacklogColumn(m, backlogBudget), m.Width)
 		queue := clipLines(renderQueueColumn(m, queueBudget), m.Width)
 		return backlog + "\n" + queue
