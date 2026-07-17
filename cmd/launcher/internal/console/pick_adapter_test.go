@@ -85,8 +85,9 @@ func TestPickIssue_AlreadyInProgress_ReturnsDissolvedMsg_NoTransition(t *testing
 	if !ok {
 		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
 	}
-	if dissolved.Number != "42" || dissolved.Reason == "" {
-		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", dissolved)
+	const wantReason = "issue #42 is already in progress"
+	if dissolved.Number != "42" || dissolved.Reason != wantReason {
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with reason %q", dissolved, wantReason)
 	}
 	if len(f.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionStateCalls = %+v, want none — an InProgress issue must never be relabeled", f.TransitionStateCalls)
@@ -113,8 +114,9 @@ func TestPickIssue_AlreadyComplete_ReturnsDissolvedMsg_NoTransition(t *testing.T
 	if !ok {
 		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
 	}
-	if dissolved.Number != "42" || dissolved.Reason == "" {
-		t.Errorf("PickDissolvedMsg = %+v, want #42 with a reason", dissolved)
+	const wantReason = "issue #42 is already complete"
+	if dissolved.Number != "42" || dissolved.Reason != wantReason {
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with reason %q", dissolved, wantReason)
 	}
 	if len(f.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionStateCalls = %+v, want none — a Complete issue must never be relabeled", f.TransitionStateCalls)
