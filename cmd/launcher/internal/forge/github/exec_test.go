@@ -326,14 +326,20 @@ func TestExecClient_CompleteVerdict_UnconfiguredErrorsWithoutShellingOut(t *test
 func TestExecClient_CompleteVerdict_MissingInProgressErrorsWithoutEditing(t *testing.T) {
 	dir := prependFakeGH(t, `case "$*" in
 *"issue view"*)
-	printf '{"number":10,"title":"t","body":"b","state":"OPEN","labels":[{"name":"agent-research-recommend"}]}\n'
+	printf '{"number":10,"title":"t","body":"b","state":"OPEN","labels":[{"name":"agent-research-recommend"},{"name":"agent-review-finding"}]}\n'
 	;;
 esac
 `)
 
 	c := NewExecClient("owner/repo", testLabels, "agent/issue-", forge.ResearchVerdictLabels())
-	if err := c.CompleteVerdict("10", forge.Recommend); err == nil {
+	err := c.CompleteVerdict("10", forge.Recommend)
+	if err == nil {
 		t.Fatal("want error when issue lacks InProgress label, got nil")
+	}
+
+	const want = `gh issue edit 10: expected "agent-in-progress" label, issue has [agent-research-recommend, agent-review-finding]`
+	if err.Error() != want {
+		t.Errorf("err = %q, want %q", err.Error(), want)
 	}
 
 	entries, _ := os.ReadDir(dir)
