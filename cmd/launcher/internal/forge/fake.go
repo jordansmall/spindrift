@@ -2,6 +2,7 @@ package forge
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -355,7 +356,10 @@ func (f *Fake) TransitionState(num string, from, to DispatchState) error {
 
 // CompleteVerdict swaps the InProgress label for verdict's terminal label on
 // issue num. Best-effort on missing issues (no error), matching
-// TransitionState's contract.
+// TransitionState's contract. Unlike TransitionState, it asserts num
+// currently carries InProgress before editing — mirroring the real
+// adapter's #701 double-dispatch guard — and errors without mutating labels
+// when it's absent.
 func (f *Fake) CompleteVerdict(num string, verdict Verdict) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -367,8 +371,11 @@ func (f *Fake) CompleteVerdict(num string, verdict Verdict) error {
 	if !ok {
 		return nil // best-effort
 	}
-	add := f.VerdictLabels.Label(verdict)
 	remove := f.labels.Label(InProgress)
+	if !slices.Contains(iss.Labels, remove) {
+		return fmt.Errorf("issue %s: expected %q label, issue has %v", num, remove, iss.Labels)
+	}
+	add := f.VerdictLabels.Label(verdict)
 	var next []string
 	for _, l := range iss.Labels {
 		if l != remove {

@@ -176,6 +176,27 @@ func TestFake_CompleteVerdict_SwapsInProgressForVerdictLabel(t *testing.T) {
 	}
 }
 
+func TestFake_CompleteVerdict_MissingInProgressErrors(t *testing.T) {
+	f := forge.NewFake(researchLabels)
+	f.VerdictLabels = researchVerdictLabels
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-recommend"}})
+
+	if err := f.CompleteVerdict("42", forge.Recommend); err == nil {
+		t.Fatal("want error when issue lacks InProgress label, got nil")
+	}
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !containsLabel(iss.Labels, "agent-research-recommend") {
+		t.Error("want agent-research-recommend label untouched, missing")
+	}
+	if len(f.CompleteVerdictCalls) != 1 {
+		t.Fatalf("want 1 CompleteVerdictCall recorded even on error, got %d", len(f.CompleteVerdictCalls))
+	}
+}
+
 // --- ListIssues(DispatchState) tests ---
 
 func TestFake_ListIssues_ByDispatchState(t *testing.T) {
