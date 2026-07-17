@@ -136,6 +136,17 @@ func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 // check gated on it would silently never fire (issue #936). The compare API
 // needs no such setting: it always reports the commit-graph relationship
 // between the two refs.
+//
+// This assumes the PR's head ref resolves inside e.repo: basehead below is
+// built from the bare headRefName/baseRefName GitHub returns, with no
+// owner:branch form, so the compare call only finds a head that lives in
+// this same repo — true for this project's own agent/issue-N branches
+// (docs/reference.md: "Agent PR branches live in-repo, not forks"; this
+// project requires a single-repo PAT). A fork-sourced head would 404 here
+// instead of resolving. That 404 is not specially handled: it comes back as
+// an ordinary error, which the caller (preflightStaleBase in
+// settle/ready.go) already logs and swallows, falling through to its normal
+// Merge attempt.
 func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
 	out, err := exec.Command("gh", "pr", "view", prURL,
 		"--json", "headRefName,baseRefName",
