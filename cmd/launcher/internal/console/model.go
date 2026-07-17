@@ -67,6 +67,12 @@ type Model struct {
 	// pickChordTimeout resolves it to a single-issue pick instead — rendered
 	// as a visible hint so the wait isn't silent (issue #835).
 	PendingPick bool
+	// QueueEnterNotice is a one-shot, human-readable message rendered after
+	// Enter is a no-op on a focused work-queue row lacking a Transcript
+	// (queued/claiming/held/dissolved, per hasTranscript) — empty otherwise.
+	// It clears on the operator's next keypress, mirroring PendingPick's
+	// resolve-on-any-key precedent rather than a timer (issue #998).
+	QueueEnterNotice string
 	// Cursor indexes the highlighted row in Visible() — the tea layer's j/
 	// down and up/arrow navigation target (issue #784; "k" moved to
 	// Terminate in #785). Always clamped into [0, len(Visible())-1], 0 when
@@ -205,6 +211,10 @@ func Update(m Model, msg Msg) Model {
 		m.PendingPick = true
 	case PickResolvedMsg:
 		m.PendingPick = false
+	case QueueEnterNoticedMsg:
+		m.QueueEnterNotice = "no transcript yet"
+	case QueueEnterNoticeClearedMsg:
+		m.QueueEnterNotice = ""
 	case QuitMsg:
 		m.PendingQuit = false
 		m.Quitting = true

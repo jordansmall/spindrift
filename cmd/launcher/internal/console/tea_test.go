@@ -464,6 +464,59 @@ func TestTea_EnterKey_OnFocusedQueue_NoOpOnQueuedRow(t *testing.T) {
 	}
 }
 
+// TestTea_EnterKey_OnFocusedQueue_ShowsNoticeOnQueuedRow verifies Enter, with
+// focus on the work queue, renders a visible notice on a row that hasn't
+// reached a Transcript-bearing state yet (PickQueued) — previously a silent
+// no-op (issue #998).
+func TestTea_EnterKey_OnFocusedQueue_ShowsNoticeOnQueuedRow(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "picks [focus]")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "no transcript yet")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_EnterKey_OnFocusedQueue_NoticeClearsOnNextKey verifies the
+// no-transcript notice armed by Enter clears once the operator's next
+// keypress arrives — a one-shot hint, not a sticky one (issue #998).
+func TestTea_EnterKey_OnFocusedQueue_NoticeClearsOnNextKey(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "tab")
+	waitForOutput(t, tm, "picks [focus]")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "no transcript yet")
+
+	sendKey(tm, "j")
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.QueueEnterNotice != "" {
+		t.Errorf("QueueEnterNotice = %q after next keypress, want \"\"", fm.m.QueueEnterNotice)
+	}
+}
+
 // TestHasTranscript_PerState verifies hasTranscript against every PickState:
 // true for running/settled/terminated/failed (each left logs on disk from a
 // Box that ran or is running), false for queued/claiming/held/dissolved
