@@ -103,7 +103,10 @@ func issueInState(tracker forge.IssueTracker, num string, state forge.DispatchSt
 
 // dispatchStateName renders state for a PickDissolvedMsg's operator-facing
 // reason — InProgress and Complete are the only states PickIssue ever
-// rejects on, so this deliberately doesn't cover the full enum.
+// rejects on, so this deliberately doesn't cover the full enum. The default
+// is a real fallback, not dead code: forge.Failed is itself a terminal
+// state a future caller could legitimately pass, and returning "" there
+// would silently truncate the operator-facing message instead.
 func dispatchStateName(state forge.DispatchState) string {
 	switch state {
 	case forge.InProgress:

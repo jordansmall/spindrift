@@ -141,6 +141,29 @@ func TestDogfoodNotice_NegativePidReportsNotLive(t *testing.T) {
 	}
 }
 
+// TestDispatchStateName_KnownAndUnlisted verifies the two states PickIssue
+// actually rejects on render their specific words, and an unlisted terminal
+// state (forge.Failed) falls back to the generic default rather than an
+// empty string — pinning the fallback as intentional, not dead code (#988).
+func TestDispatchStateName_KnownAndUnlisted(t *testing.T) {
+	tests := []struct {
+		name  string
+		state forge.DispatchState
+		want  string
+	}{
+		{"InProgress", forge.InProgress, "in progress"},
+		{"Complete", forge.Complete, "complete"},
+		{"Failed falls back to default", forge.Failed, "in a terminal state"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := dispatchStateName(tt.state); got != tt.want {
+				t.Errorf("dispatchStateName(%v) = %q, want %q", tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
 // errTracker wraps a forge.IssueTracker so ListOpenIssues always errors,
 // while every other method still delegates to the embedded tracker.
 type errTracker struct {
