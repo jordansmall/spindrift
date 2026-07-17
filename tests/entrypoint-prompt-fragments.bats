@@ -8,14 +8,15 @@ setup() {
 }
 
 # issue #622/#688: this mechanism test walks 3 of the registry's current
-# eight rows (lib/fragments.nix) -- AUTO_FORMAT and AUTO_LINT, both
+# nine rows (lib/fragments.nix) -- AUTO_FORMAT and AUTO_LINT, both
 # knob-gated, plus FILER_ENABLED/file-issues, which is computed-gated --
 # and covers their shared off/on matrix: each row renders its marker
 # heading only when its gate is on, and leaves zero residue when it's off
 # (the conditional-residue mechanism every registry row shares); it used
-# to be six bespoke on/off test pairs. The other five rows are covered
-# elsewhere, not in this file's other tests: skill-preamble/
-# caveman-default/tdd-default/commit-default in
+# to be six bespoke on/off test pairs. CODE_REVIEW_BAKED's on/off gate is
+# covered by its own tests further down this file (issue #788). The other
+# five rows are covered elsewhere, not in this file's other tests:
+# skill-preamble/caveman-default/tdd-default/commit-default in
 # tests/entrypoint-skills.bats, ci-failure's on/off gate in
 # tests/entrypoint-prompt-assembly.bats.
 @test "conditional prompt steps appear only when their knob is on" {
@@ -93,9 +94,13 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
-@test "the six conditional prompt steps ship as fragment files under prompts/fragments" {
-  for f in skill-preamble caveman-default file-issues auto-format auto-lint ci-failure; do
-    [ -f "$PROMPTS_DIR/fragments/$f.md" ]
+@test "every registry row ships as a fragment file under prompts/fragments" {
+  source "$FRAGMENT_REGISTRY_FILE"
+  local row fragment
+  for row in "${_FRAGMENT_ROWS[@]}"; do
+    fragment="${row#*|}"
+    fragment="${fragment%%|*}"
+    [ -f "$PROMPTS_DIR/fragments/$fragment" ]
   done
 }
 
