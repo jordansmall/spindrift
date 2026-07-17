@@ -662,6 +662,17 @@ func bodyColumnBudgets(m Model) (backlog, queue int) {
 	return budget, budget
 }
 
+// focusedBudget returns the focused column's row budget (label line
+// included) — bodyColumnBudgets' queue half while the work queue has focus,
+// its backlog half otherwise (issue #1062).
+func focusedBudget(m Model) int {
+	backlogBudget, queueBudget := bodyColumnBudgets(m)
+	if m.Focus == FocusQueue {
+		return queueBudget
+	}
+	return backlogBudget
+}
+
 // positionLabel returns a compact " (X-Y of N)" position indicator for a
 // column's label, describing the rows writeWindowedRows actually renders at
 // offset within columnBudget of total — or "" when there is nothing to show
@@ -691,11 +702,7 @@ func positionLabel(offset, columnBudget, total int) string {
 // Unlike the drill-in transcript's fixed drillInPageScrollDelta, this is
 // recomputed on every keypress.
 func focusedPageSize(m Model) int {
-	backlogBudget, queueBudget := bodyColumnBudgets(m)
-	if m.Focus == FocusQueue {
-		return visibleItemCount(m.QueueOffset, queueBudget, len(m.Picks))
-	}
-	return visibleItemCount(m.BacklogOffset, backlogBudget, len(m.Visible()))
+	return visibleItemCount(*focusedOffset(&m), focusedBudget(m), focusedTotal(m))
 }
 
 // columnItemBudget converts a column's row budget (label line included, as
