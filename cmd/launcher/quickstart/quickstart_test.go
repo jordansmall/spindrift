@@ -108,6 +108,7 @@ func TestParseGitHubRepoSlug(t *testing.T) {
 		"https://github.com/jordansmall/spindrift.git":   "jordansmall/spindrift",
 		"https://github.com/jordansmall/spindrift":       "jordansmall/spindrift",
 		"git@gitlab.com:jordansmall/spindrift.git":       "",
+		"git@github.com-work:jordansmall/spindrift.git":  "",
 		"": "",
 	}
 	for remote, want := range cases {
@@ -200,7 +201,7 @@ func TestRunQuickstart_RuntimeDefault_FallsBackToDockerThenBwrap(t *testing.T) {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
-	if !strings.Contains(out.String(), "Runtime [docker]") {
+	if !strings.Contains(out.String(), "Runtime (podman/docker/bwrap) [docker]") {
 		t.Errorf("expected transcript to offer docker as the runtime default when podman is absent, got:\n%s", out.String())
 	}
 }
@@ -222,7 +223,7 @@ func TestRunQuickstart_RuntimeDefault_BwrapWhenOnlyOneAvailable(t *testing.T) {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
-	if !strings.Contains(out.String(), "Runtime [bwrap]") {
+	if !strings.Contains(out.String(), "Runtime (podman/docker/bwrap) [bwrap]") {
 		t.Errorf("expected transcript to offer bwrap as the runtime default when nothing else is available, got:\n%s", out.String())
 	}
 }
@@ -247,6 +248,31 @@ func TestRunQuickstart_NoRuntimeDetected_ReturnsActionableError(t *testing.T) {
 	}
 }
 
+func TestRunQuickstart_NoRuntimeDetected_ForceDoesNotBackUpExistingFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("existing"), 0o644); err != nil {
+		t.Fatalf("seed flake.nix: %v", err)
+	}
+	var out bytes.Buffer
+	env := fakeEnvironment{}
+
+	err := runQuickstart(dir, env, fakeCommandRunner{}, &out, strings.NewReader(""), true, true)
+	if err == nil {
+		t.Fatal("expected an error when no supported runtime is detected, got nil")
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "flake.nix.bak")); !os.IsNotExist(statErr) {
+		t.Errorf("expected no flake.nix.bak to be written before the runtime check fails, stat error: %v", statErr)
+	}
+	got, readErr := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if readErr != nil {
+		t.Fatalf("read flake.nix: %v", readErr)
+	}
+	if string(got) != "existing" {
+		t.Errorf("expected existing flake.nix to be left untouched, got: %q", got)
+	}
+}
+
 func TestRunQuickstart_RuntimeDefault_PrefersPodmanOverDockerAndBwrap(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -264,7 +290,7 @@ func TestRunQuickstart_RuntimeDefault_PrefersPodmanOverDockerAndBwrap(t *testing
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
-	if !strings.Contains(out.String(), "Runtime [podman]") {
+	if !strings.Contains(out.String(), "Runtime (podman/docker/bwrap) [podman]") {
 		t.Errorf("expected transcript to offer podman as the runtime default, got:\n%s", out.String())
 	}
 	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))

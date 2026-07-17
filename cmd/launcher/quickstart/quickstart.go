@@ -88,17 +88,18 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Write
 	if len(clobbered) > 0 && !force {
 		return fmt.Errorf("refusing to overwrite existing %s — rerun with --force to back each up to *.bak and regenerate", clobbered)
 	}
+
+	detectedRuntime, err := detectRuntime(env)
+	if err != nil {
+		return err
+	}
+
 	for _, name := range clobbered {
 		path := filepath.Join(dir, name)
 		if err := os.Rename(path, path+".bak"); err != nil {
 			return fmt.Errorf("back up %s: %w", name, err)
 		}
 		fmt.Fprintf(w, "backed up: %s -> %s.bak\n", name, name)
-	}
-
-	detectedRuntime, err := detectRuntime(env)
-	if err != nil {
-		return err
 	}
 
 	scanner := bufio.NewScanner(stdin)
@@ -121,7 +122,7 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, w io.Write
 	}
 
 	repoSlug := promptDefault("Repo slug (owner/repo)", env.GitRemoteRepoSlug())
-	runtime := promptDefault("Runtime", detectedRuntime)
+	runtime := promptDefault("Runtime (podman/docker/bwrap)", detectedRuntime)
 	gitUserName := promptDefault("Git user name", env.GitConfig("user.name"))
 	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
 	ghToken, err := acquireGHToken(env, w, prompt)
