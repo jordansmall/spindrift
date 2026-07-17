@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -1182,7 +1183,7 @@ func TestDoctor_TTY_Decline(t *testing.T) {
 func TestDoctor_TTY_Confirm(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
-	research := researchLabelNames()
+	research := doctor.ResearchLabelNames()
 	// Two work labels missing: agent-failed and agent-complete. Research
 	// labels are all present throughout, so this test stays scoped to work
 	// label creation.
@@ -1226,7 +1227,7 @@ func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	work := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
-	research := researchLabelNames()
+	research := doctor.ResearchLabelNames()
 	f.Labels = work // all work labels present, all six research labels missing
 	f.LabelsSeq = [][]string{
 		work,
@@ -1282,7 +1283,7 @@ func TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory(t *testing.T) {
 
 // TestReferenceDocLabelSnippetMatchesTriageDefaults guards against the docs'
 // manual `gh label create` fallback commands (for consumers who skip
-// `spindrift doctor`) drifting from triageLabelMeta, the single source of
+// `spindrift doctor`) drifting from doctor.TriageLabelMeta, the single source of
 // truth for those defaults — work and research tiers alike (#611, #641, #796).
 func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "reference.md"))
@@ -1295,20 +1296,20 @@ func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
 	for _, m := range matches {
 		name, color, description := m[1], m[2], m[3]
 		seen[name]++
-		want, ok := triageLabelMeta[name]
+		want, ok := doctor.TriageLabelMeta[name]
 		if !ok {
 			t.Errorf("docs/reference.md snippet creates unknown label %q", name)
 			continue
 		}
-		if color != want.color {
-			t.Errorf("label %q: docs color = %q, want %q (doctor default)", name, color, want.color)
+		if color != want.Color {
+			t.Errorf("label %q: docs color = %q, want %q (doctor default)", name, color, want.Color)
 		}
-		if description != want.description {
-			t.Errorf("label %q: docs description = %q, want %q (doctor default)", name, description, want.description)
+		if description != want.Description {
+			t.Errorf("label %q: docs description = %q, want %q (doctor default)", name, description, want.Description)
 		}
 	}
 
-	for name := range triageLabelMeta {
+	for name := range doctor.TriageLabelMeta {
 		switch seen[name] {
 		case 0:
 			t.Errorf("docs/reference.md is missing a `gh label create` line for %q", name)
@@ -1345,8 +1346,8 @@ func TestReferenceDocSystemRowDoesNotDuplicateIntro(t *testing.T) {
 // docs/code parity per name but never asserts uniqueness across the map.
 func TestTriageLabelMeta_ColorsAreDistinct(t *testing.T) {
 	byColor := map[string][]string{}
-	for name, meta := range triageLabelMeta {
-		byColor[meta.color] = append(byColor[meta.color], name)
+	for name, meta := range doctor.TriageLabelMeta {
+		byColor[meta.Color] = append(byColor[meta.Color], name)
 	}
 	for color, names := range byColor {
 		if len(names) > 1 {
