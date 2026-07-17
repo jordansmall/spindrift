@@ -2,7 +2,6 @@ package console
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -71,14 +70,23 @@ func TestDogfoodNotice_PresentVsAbsent(t *testing.T) {
 // TestDogfoodNotice_StalePidReportsNotLive verifies a pid-file left behind by
 // a crashed loop (EXIT trap never fired, #565) reports Live false rather than
 // true on bare file presence — the process it names has already exited.
+//
+// Stubs isProcessAlive rather than spawning and reaping a real process to
+// obtain a "dead" pid: the previous version raced the OS's pid allocator
+// (kernel could theoretically reassign the reaped pid to a new process
+// before the liveness probe ran), a real if rare flakiness source (#952).
 func TestDogfoodNotice_StalePidReportsNotLive(t *testing.T) {
 	dir := t.TempDir()
 
-	cmd := exec.Command("true")
-	if err := cmd.Run(); err != nil {
-		t.Fatal(err)
+	const deadPid = 99999
+	orig := isProcessAlive
+	isProcessAlive = func(pid int) bool {
+		if pid != deadPid {
+			t.Fatalf("isProcessAlive(%d), want %d", pid, deadPid)
+		}
+		return false
 	}
-	deadPid := cmd.Process.Pid
+	t.Cleanup(func() { isProcessAlive = orig })
 
 	if err := os.WriteFile(filepath.Join(dir, ".dogfood.pid"), []byte(strconv.Itoa(deadPid)+"\n"), 0o644); err != nil {
 		t.Fatal(err)

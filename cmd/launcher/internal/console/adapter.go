@@ -22,6 +22,13 @@ func Refresh(tracker forge.IssueTracker) Msg {
 // duration of its run (`echo $$ > .dogfood.pid`, removed by an EXIT trap).
 const dogfoodPidFile = ".dogfood.pid"
 
+// isProcessAlive is DogfoodNotice's liveness probe, a package-level seam so
+// tests can stub a dead pid without racing the OS's pid allocator (#952)
+// instead of spawning and reaping a real process.
+var isProcessAlive = func(pid int) bool {
+	return syscall.Kill(pid, 0) == nil
+}
+
 // DogfoodNotice checks whether pwd holds a pid-file naming a still-running
 // process and wraps the result into a Msg — informational only, never a
 // gate. A stale pid-file left behind by a crashed loop (EXIT trap never
@@ -37,7 +44,7 @@ func DogfoodNotice(pwd string) Msg {
 	if err != nil || pid <= 0 {
 		return DogfoodNoticeMsg{Live: false}
 	}
-	return DogfoodNoticeMsg{Live: syscall.Kill(pid, 0) == nil}
+	return DogfoodNoticeMsg{Live: isProcessAlive(pid)}
 }
 
 // PickIssue promotes num through the Untriaged->Dispatchable transition —
