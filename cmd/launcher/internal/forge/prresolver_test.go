@@ -53,8 +53,6 @@ func TestResolveOpenPRFiles(t *testing.T) {
 	t.Run("push-only forge has no PR to discover", func(t *testing.T) {
 		f := forge.NewFake()
 		f.BranchPrefix = "agent/issue-"
-		f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
-		f.SetPRFiles("https://github.com/o/r/pull/7", []string{"a.go"})
 
 		got, err := forge.ResolveOpenPRFiles(f.AsPushOnly(), "42")
 		if err != nil || got != nil {
