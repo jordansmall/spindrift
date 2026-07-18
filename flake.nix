@@ -70,6 +70,26 @@
         }:
         let
           revision = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
+
+          # Dev-shell `spindrift`: compile from the live working tree on every
+          # invocation, then exec. There is no prebuilt binary on PATH, so a
+          # stale run is impossible by construction — no cache to bust, no
+          # freshness to guess. Go's build cache makes an unchanged rebuild
+          # ~instant and a changed one a real compile, so you always run
+          # current source. cmd/launcher is its own module (cmd/launcher/go.mod),
+          # hence `-C`. Consumer-facing packages.spindrift is untouched.
+          spindrift-dev = pkgs.writeShellScriptBin "spindrift" ''
+            set -euo pipefail
+            root=$(${pkgs.git}/bin/git rev-parse --show-toplevel) || {
+              echo "spindrift(dev): not inside the spindrift repo" >&2
+              exit 1
+            }
+            mkdir -p "$root/.direnv/bin"
+            ${pkgs.go}/bin/go build -C "$root/cmd/launcher" \
+              -o "$root/.direnv/bin/spindrift.bin" . >&2
+            exec "$root/.direnv/bin/spindrift.bin" "$@"
+          '';
+
           dogfoodDefaults = import ./nix/dogfood-defaults.nix;
           dogfoodSkills = import ./nix/dogfood-skills.nix {
             inherit caveman matt-skills jordan-skills;
@@ -140,14 +160,16 @@
           };
 
           # For hacking ON the harness itself (host-side).
-          # spindrift CLI is included so `nix develop` → `spindrift dispatch` works.
+          # `spindrift` is the compile-from-live-tree wrapper (see spindrift-dev
+          # above), not the frozen nix build, so `nix develop` → `spindrift …`
+          # always runs your working tree — never a stale cached binary.
           devShells.default = pkgs.mkShell {
             packages = [
               pkgs.git
               pkgs.gh
               pkgs.jq
               pkgs.go
-              config.packages.spindrift
+              spindrift-dev
             ]
             # bubblewrap only builds on Linux; the runner integration tests
             # (go test -tags=integration ./cmd/launcher/internal/runner/...,
