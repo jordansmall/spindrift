@@ -1745,7 +1745,7 @@ func TestTea_TerminateKey_ConfirmPrompt_HintsQuitKeys(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "k")
-	waitForOutput(t, tm, "terminate #42?", "y/N/q/^C")
+	waitForOutput(t, tm, "terminate #42?", "y/N/q/ctrl+c")
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
