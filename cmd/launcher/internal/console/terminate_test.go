@@ -367,12 +367,13 @@ func TestLauncher_TerminateAsync_DuplicateWhileInFlight_IsNoOp(t *testing.T) {
 // Settle.SetTerminated) notices on its next checkpoint.
 func TestLauncher_Terminate_MarksRegistry(t *testing.T) {
 	launch, fc, _, _ := newTermTestLauncher(t)
+	gen := launch.registry().Begin("42")
 
 	if err := launch.Terminate(fc, "42"); err != nil {
 		t.Fatalf("Terminate: %v", err)
 	}
 
-	if !launch.registry().Marked("42", 0) {
+	if !launch.registry().Marked("42", gen) {
 		t.Error("registry: want #42 marked terminated")
 	}
 }
