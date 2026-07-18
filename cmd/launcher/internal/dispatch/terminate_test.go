@@ -44,88 +44,64 @@ func TestFactory_Kill_PropagatesRunnerError(t *testing.T) {
 	}
 }
 
-// TestFactory_OrphanedIssues_ParsesDeterministicBoxNames verifies
-// OrphanedIssues extracts issue numbers from the runner's currently-running
-// sandbox names, ignoring any name that doesn't match the deterministic
-// "agent-issue-" naming scheme — Console startup orphan detection (issue
-// #651).
-func TestFactory_OrphanedIssues_ParsesDeterministicBoxNames(t *testing.T) {
-	r := runner.NewFake()
-	r.RunningNames = []string{"agent-issue-42", "agent-issue-101", "some-other-container"}
-	f, err := NewFactory(Config{}, tempLogDir(t), r, fakeDriver{}, RealClock())
-	if err != nil {
-		t.Fatalf("NewFactory: %v", err)
+// TestFactory_OrphanedIssues verifies OrphanedIssues extracts issue numbers
+// from the runner's currently-running sandbox names, parsed from the
+// deterministic "agent-issue-" naming scheme (Console startup orphan
+// detection, issue #651), and skips any name whose suffix isn't a valid
+// unsigned issue number: non-numeric (issue #793), signed ("+5", "-42"), or
+// empty (issue #1156) — strconv.Atoi wrongly accepted the signed forms,
+// which is why the parse uses strconv.ParseUint.
+func TestFactory_OrphanedIssues(t *testing.T) {
+	tests := []struct {
+		name    string
+		running []string
+		want    []string
+	}{
+		{
+			name:    "parses deterministic box names",
+			running: []string{"agent-issue-42", "agent-issue-101", "some-other-container"},
+			want:    []string{"42", "101"},
+		},
+		{
+			name:    "skips non-numeric suffix",
+			running: []string{"agent-issue-42", "agent-issue-foo"},
+			want:    []string{"42"},
+		},
+		{
+			name:    "rejects signed suffix",
+			running: []string{"agent-issue-42", "agent-issue-+5", "agent-issue--42"},
+			want:    []string{"42"},
+		},
+		{
+			name:    "skips empty suffix",
+			running: []string{"agent-issue-42", "agent-issue-"},
+			want:    []string{"42"},
+		},
 	}
 
-	got, err := f.OrphanedIssues()
-	if err != nil {
-		t.Fatalf("OrphanedIssues: %v", err)
-	}
-	if len(got) != 2 || got[0] != "42" || got[1] != "101" {
-		t.Errorf("OrphanedIssues = %v, want [42 101]", got)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := runner.NewFake()
+			r.RunningNames = tt.running
+			f, err := NewFactory(Config{}, tempLogDir(t), r, fakeDriver{}, RealClock())
+			if err != nil {
+				t.Fatalf("NewFactory: %v", err)
+			}
 
-// TestFactory_OrphanedIssues_SkipsNonNumericSuffix verifies OrphanedIssues
-// filters out a sandbox name that matches the "agent-issue-" prefix but
-// carries a non-numeric suffix, rather than feeding a malformed issue
-// number to a caller like recoverByNumber (issue #793).
-func TestFactory_OrphanedIssues_SkipsNonNumericSuffix(t *testing.T) {
-	r := runner.NewFake()
-	r.RunningNames = []string{"agent-issue-42", "agent-issue-foo"}
-	f, err := NewFactory(Config{}, tempLogDir(t), r, fakeDriver{}, RealClock())
-	if err != nil {
-		t.Fatalf("NewFactory: %v", err)
-	}
-
-	got, err := f.OrphanedIssues()
-	if err != nil {
-		t.Fatalf("OrphanedIssues: %v", err)
-	}
-	if len(got) != 1 || got[0] != "42" {
-		t.Errorf("OrphanedIssues = %v, want [42]", got)
-	}
-}
-
-// TestFactory_OrphanedIssues_RejectsSignedSuffix verifies OrphanedIssues
-// filters out a sandbox name whose suffix is a signed integer ("+5", "-42")
-// -- strconv.Atoi accepts those forms but they are not valid GitHub issue
-// numbers, so a signed suffix must be skipped the same as a non-numeric one
-// (issue #1156).
-func TestFactory_OrphanedIssues_RejectsSignedSuffix(t *testing.T) {
-	r := runner.NewFake()
-	r.RunningNames = []string{"agent-issue-42", "agent-issue-+5", "agent-issue--42"}
-	f, err := NewFactory(Config{}, tempLogDir(t), r, fakeDriver{}, RealClock())
-	if err != nil {
-		t.Fatalf("NewFactory: %v", err)
-	}
-
-	got, err := f.OrphanedIssues()
-	if err != nil {
-		t.Fatalf("OrphanedIssues: %v", err)
-	}
-	if len(got) != 1 || got[0] != "42" {
-		t.Errorf("OrphanedIssues = %v, want [42]", got)
-	}
-}
-
-// TestFactory_OrphanedIssues_SkipsEmptySuffix verifies OrphanedIssues
-// filters out a sandbox name that is the bare prefix with no suffix at all
-// (issue #1156).
-func TestFactory_OrphanedIssues_SkipsEmptySuffix(t *testing.T) {
-	r := runner.NewFake()
-	r.RunningNames = []string{"agent-issue-42", "agent-issue-"}
-	f, err := NewFactory(Config{}, tempLogDir(t), r, fakeDriver{}, RealClock())
-	if err != nil {
-		t.Fatalf("NewFactory: %v", err)
-	}
-
-	got, err := f.OrphanedIssues()
-	if err != nil {
-		t.Fatalf("OrphanedIssues: %v", err)
-	}
-	if len(got) != 1 || got[0] != "42" {
-		t.Errorf("OrphanedIssues = %v, want [42]", got)
+			got, err := f.OrphanedIssues()
+			if err != nil {
+				t.Fatalf("OrphanedIssues: %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("OrphanedIssues = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("OrphanedIssues = %v, want %v", got, tt.want)
+					break
+				}
+			}
+		})
 	}
 }
 
