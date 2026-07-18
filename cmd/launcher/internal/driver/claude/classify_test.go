@@ -149,6 +149,22 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// Multiple intervening non-content lines (e.g. more than one
+		// heartbeat) must all be skipped transparently -- the pending
+		// echo is only consumed by the type:"result" line itself, no
+		// matter how many non-content lines come first (issue #1197).
+		name: "Terminal_SelfPoisoning_ServerErrorMarkerEchoedAfterMultipleInterveningLines",
+		lines: []string{
+			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Fixing the server_error guard now."}]}}`,
+			`{"type":"system","session_id":"s1"}`,
+			`{"type":"system","session_id":"s1"}`,
+			`{"type":"result","is_error":false,"result":"Fixing the server_error guard now.","stop_reason":"end_turn"}`,
+		},
+		wantClass:   claude.Terminal,
+		wantReason:  claude.TaskFailed,
+		wantResetAt: nil,
+	},
+	{
 		// Real-world ordering: a genuine assistant turn (real model) quotes
 		// "server_error" verbatim in its own prose, then the claude CLI
 		// injects its synthetic mid-stream terminator right after. The #579
