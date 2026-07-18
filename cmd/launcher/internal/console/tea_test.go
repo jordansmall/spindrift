@@ -1429,9 +1429,7 @@ func TestTea_AlreadyActive_ReadsLiveQueueSnapshot(t *testing.T) {
 	// not just fall through to Model.Picks, for each non-terminal state.
 	for _, state := range []PickState{PickQueued, PickHeld, PickClaiming, PickRunning} {
 		t.Run(state.String(), func(t *testing.T) {
-			f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
-			f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
-
+			f := forge.NewFake()
 			launch := &Launcher{CodeForge: f, Queue: NewQueue()}
 			tm := newTeaModel(f, t.TempDir(), launch)
 
