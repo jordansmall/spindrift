@@ -1,0 +1,11 @@
+========================================
+  spindrift
+========================================
+[34mrunning 1/3[0m · [90mwaiting 1[0m · [33mheld 1[0m · [32msettled 1[0m · [31mfailed 1[0m
+[33m⚠ image stale: rebuild needed — new launches held; press [b] to rebuild[0m
+[90mℹ notice: a live dogfood loop (.dogfood.pid) is competing for the same queue[0m
+backlog [focus]:picks (1-4 of 4):
+                  #1  [queued]
+                  #2  [held]
+                  #3  [settled]
+                  #4  [failed]
