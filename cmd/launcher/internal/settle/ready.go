@@ -248,6 +248,13 @@ func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Di
 			return fmt.Errorf("MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)")
 		}
 		if err := s.pr.EnqueueAutoMerge(pr); err != nil {
+			// Audited (issue #1233, extending #831): err traces through
+			// execClient.EnqueueAutoMerge (github/exec_pr.go), which runs
+			// `gh pr merge --auto --rebase --delete-branch` via
+			// exec.Command(...).Run() with no stdout/stderr capture. So err
+			// is only ever *exec.ExitError, a start failure, or the wrapped
+			// message embedding prURL (already public) — never gh's stderr
+			// text. Safe to surface verbatim in the issue comment below.
 			fmt.Printf("    #%s  landing=%s  status=auto-merge-enqueue-failed  !! %v\n", num, pr, err)
 			s.it.Comment(num, fmt.Sprintf("auto-merge enqueue failed: %v — PR is green; approve and merge manually", err))
 			return nil

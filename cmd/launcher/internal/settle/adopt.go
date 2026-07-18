@@ -57,6 +57,13 @@ func (s *Settle) verifyMerged(num, pr string) {
 // postUsageComment posts d's aggregate usage-statistics comment to the
 // issue. Errors posting the comment are logged but do not abort the caller.
 func (s *Settle) postUsageComment(num string, d dispatch.Dispatcher) {
+	// Audited (issue #1233, extending #831): d.UsageReport() (dispatch/usage.go)
+	// never returns an error to its caller — on an ExtractUsage failure it
+	// substitutes a static "Usage data unavailable" string. Its only external
+	// input is the MODEL env var (a model name, not a credential), so there is
+	// no Box-internal output for it to leak. commentErr below is the
+	// forge-comment-post failure itself, not a UsageReport error, and it never
+	// leaves the process (stderr only) — nothing here needs redaction.
 	if commentErr := s.it.Comment(num, d.UsageReport()); commentErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: post usage comment: %v\n", num, commentErr)
 	}
