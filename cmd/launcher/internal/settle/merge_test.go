@@ -479,6 +479,9 @@ func TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge(t *testing.T) {
 // that a non-transient Rebase error (not forge.ErrTransientPushFailure) short
 // circuits the push-retry loop entirely — a single Rebase call, no retries —
 // and still blocks the merge the same way the retries-exhausted case does.
+// Passing a nil dispatcher also makes this the regression coverage for
+// issue #1319's d != nil guard: an ErrMergeConflict with no Dispatcher
+// available must stay terminal, not attempt ResolveConflict.
 func TestMergeImmediate_StaleBaseNonTransientRebaseFailureBlocksMerge(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 2
@@ -500,6 +503,107 @@ func TestMergeImmediate_StaleBaseNonTransientRebaseFailureBlocksMerge(t *testing
 	}
 	if len(fc.RebasedURLs) != 1 {
 		t.Errorf("Rebase called %d times, want 1 (non-transient error must not enter the push-retry loop)", len(fc.RebasedURLs))
+	}
+}
+
+// TestMergeImmediate_StaleBaseConflictResolvesViaDispatcher verifies that a
+// genuine ErrMergeConflict surfaced by the stale-base preflight's rebase (as
+// opposed to ErrTransientPushFailure, which the push-retry loop already
+// handles) falls through to the same ResolveConflict dispatch the reactive
+// conflict-retry loop uses, rather than hard-blocking the merge (issue
+// #1319 — the preflight lost this fallback when #940 made it fatal).
+func TestMergeImmediate_StaleBaseConflictResolvesViaDispatcher(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	c.PreflightStaleBase = true
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	fc.RebaseErr = forge.ErrMergeConflict
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.MergeErrs = []error{nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	df := dispatch.NewFake()
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, df)
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if len(df.ResolveConflictCalls) != 1 {
+		t.Errorf("ResolveConflict called %d times, want 1", len(df.ResolveConflictCalls))
+	}
+	if fc.Merged != testPR {
+		t.Errorf("Merge not called after conflict-resolve; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.RebasedURLs) != 1 {
+		t.Errorf("Rebase called %d times, want 1", len(fc.RebasedURLs))
+	}
+}
+
+// TestMergeImmediate_StaleBaseConflictResolveFailureBlocksMerge verifies
+// that when the stale-base preflight's ResolveConflict dispatch itself
+// fails, the merge is blocked with an errLandingNeverGreen-wrapped error
+// rather than the raw ErrMergeConflict, and Merge is never attempted.
+func TestMergeImmediate_StaleBaseConflictResolveFailureBlocksMerge(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	c.PreflightStaleBase = true
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	fc.RebaseErr = forge.ErrMergeConflict
+	fc.MergeErrs = []error{nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	df := dispatch.NewFake()
+	df.ResolveConflictErr = errors.New("agent could not resolve conflict")
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, df)
+
+	if err == nil {
+		t.Fatal("mergeImmediate: want error when preflight conflict-resolve fails, got nil")
+	}
+	if !errors.Is(err, errLandingNeverGreen) {
+		t.Errorf("mergeImmediate err=%v, want wrapped errLandingNeverGreen", err)
+	}
+	if len(df.ResolveConflictCalls) != 1 {
+		t.Errorf("ResolveConflict called %d times, want 1", len(df.ResolveConflictCalls))
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge must not be called after preflight conflict-resolve failed; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// TestMergeImmediate_StaleBaseConflictResolveRewaitFailsBlocksMerge verifies
+// that when the stale-base preflight's ResolveConflict succeeds but the
+// re-wait for green after its force-push never confirms, the merge is
+// blocked rather than falling through to Merge on an unconfirmed head.
+func TestMergeImmediate_StaleBaseConflictResolveRewaitFailsBlocksMerge(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	c.PreflightStaleBase = true
+	c.MergePollTimeout = 0 // no checks ever register after the force-push
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	fc.RebaseErr = forge.ErrMergeConflict
+	fc.MergeErrs = []error{nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	df := dispatch.NewFake()
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, df)
+
+	if err == nil {
+		t.Fatal("mergeImmediate: want error when the post-resolve re-wait never goes green, got nil")
+	}
+	if errors.Is(err, forge.ErrMergeConflict) {
+		t.Errorf("mergeImmediate err=%v must not be a raw ErrMergeConflict — that would re-enter the reactive conflict-retry path instead of surfacing rewaitAfterForcePush's own failure", err)
+	}
+	if len(df.ResolveConflictCalls) != 1 {
+		t.Errorf("ResolveConflict called %d times, want 1", len(df.ResolveConflictCalls))
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge must not be called when the post-resolve re-wait never confirmed green; fc.Merged=%q", fc.Merged)
 	}
 }
 

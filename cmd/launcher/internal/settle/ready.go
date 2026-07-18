@@ -299,7 +299,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 	// independent concerns, and charging one against the other's budget
 	// would let a stale-base retry exhaust the conflict path's allowance
 	// before a real conflict ever arises (or vice versa).
-	if err := s.preflightStaleBase(num, gen, pr); err != nil {
+	if err := s.preflightStaleBase(num, gen, pr, d); err != nil {
 		return err
 	}
 	for {
@@ -349,19 +349,8 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 				return rbErr
 			}
 			if errors.Is(rbErr, forge.ErrMergeConflict) && d != nil {
-				fmt.Printf("    #%s  landing=%s  status=conflict-resolve\n", num, pr)
-				if crErr := d.ResolveConflict(pr); crErr != nil {
-					// Audited (issue #831): crErr traces through
-					// dispatch.Dispatch.ResolveConflict -> runOnce
-					// (dispatch/box.go) -> runner.Runner.Run. Both the OCI
-					// and bwrap adapters wire the Box's stdout/stderr to the
-					// log file, not to the returned error, so crErr is only
-					// ever *exec.ExitError or a start failure (missing
-					// binary, mkdtemp/file error) — never Box-internal
-					// output. Safe to surface verbatim in the issue comment
-					// posted from this error at ready.go's selfHeal.
-					fmt.Printf("    #%s  landing=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
-					return fmt.Errorf("%w: conflict-resolve dispatch failed: %v", errLandingNeverGreen, crErr)
+				if crErr := s.resolveConflict(num, pr, d); crErr != nil {
+					return crErr
 				}
 				if rwErr := s.rewaitAfterForcePush(num, gen, pr); rwErr != nil {
 					return rwErr
@@ -410,16 +399,16 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 //
 // A Rebase failure — including one that persists past its push-retry
 // budget — is different: staleness is confirmed and the corrective action
-// itself failed, so it is returned as a hard, merge-blocking error (issue
-// #940) rather than falling through to Merge on a base known to be stale
-// and never re-validated. Unlike the reactive conflict-retry loop below,
-// this preflight has no dispatch.Dispatcher in scope, so it cannot attempt
-// ResolveConflict on an ErrMergeConflict rebase result the way that loop
-// can — any Rebase error here is terminal. rewaitAfterForcePush's own
-// contract (a rebase that force-pushes but never re-confirms green) is
+// itself failed. A genuine ErrMergeConflict falls through to the same
+// ResolveConflict dispatch the reactive conflict-retry loop below uses
+// (issue #1319) when a Dispatcher is in scope; any other Rebase error, or a
+// conflict with no Dispatcher available, is returned as a hard,
+// merge-blocking error (issue #940) rather than falling through to Merge on
+// a base known to be stale and never re-validated. rewaitAfterForcePush's
+// own contract (a rebase that force-pushes but never re-confirms green) is
 // likewise a hard failure, for the same reason: staleness confirmed, fix
 // attempted, fix unconfirmed.
-func (s *Settle) preflightStaleBase(num string, gen uint64, pr string) error {
+func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
 	if s.pr == nil || !s.cfg.PreflightStaleBase {
 		return nil
 	}
@@ -439,10 +428,41 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string) error {
 		rbErr = s.cf.Rebase(pr)
 	}
 	if rbErr != nil {
+		if errors.Is(rbErr, forge.ErrMergeConflict) && d != nil {
+			if crErr := s.resolveConflict(num, pr, d); crErr != nil {
+				return crErr
+			}
+			// No skipRebase equivalent needed here (contrast the reactive
+			// loop's post-resolve skipRebase=true): the caller's loop hasn't
+			// started yet, so mergeImmediate's first Merge attempt runs
+			// fresh once rewaitAfterForcePush confirms the resolved head is
+			// green, rather than re-entering a rebase it already did.
+			return s.rewaitAfterForcePush(num, gen, pr)
+		}
 		fmt.Printf("    #%s  landing=%s  status=stale-base-rebase-failed  !! %v\n", num, pr, rbErr)
 		return rbErr
 	}
 	return s.rewaitAfterForcePush(num, gen, pr)
+}
+
+// resolveConflict dispatches a Box to resolve a genuine ErrMergeConflict
+// hit by a force-pushing rebase, shared by preflightStaleBase and
+// mergeImmediate's reactive conflict-retry loop above.
+func (s *Settle) resolveConflict(num, pr string, d dispatch.Dispatcher) error {
+	fmt.Printf("    #%s  landing=%s  status=conflict-resolve\n", num, pr)
+	if crErr := d.ResolveConflict(pr); crErr != nil {
+		// Audited (issue #831): crErr traces through
+		// dispatch.Dispatch.ResolveConflict -> runOnce (dispatch/box.go) ->
+		// runner.Runner.Run. Both the OCI and bwrap adapters wire the
+		// Box's stdout/stderr to the log file, not to the returned error,
+		// so crErr is only ever *exec.ExitError or a start failure (missing
+		// binary, mkdtemp/file error) — never Box-internal output. Safe to
+		// surface verbatim in the issue comment posted from this error at
+		// ready.go's selfHeal.
+		fmt.Printf("    #%s  landing=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
+		return fmt.Errorf("%w: conflict-resolve dispatch failed: %v", errLandingNeverGreen, crErr)
+	}
+	return nil
 }
 
 // rewaitAfterForcePush blocks for CI to reach green on the PR's current head

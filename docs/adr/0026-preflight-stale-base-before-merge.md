@@ -118,7 +118,13 @@ combined tree) instead of just relocating it to a human.
   unknown, so it is logged and swallowed — the normal `Merge` attempt
   surfaces any real problem through its own, already-tested error handling.
   A `Rebase` failure that persists past its push-retry budget is not the
-  same case: staleness is confirmed and the corrective rebase itself failed,
-  so `preflightStaleBase` returns that error and blocks the merge outright
-  rather than falling through to `Merge` on a base known to be stale and
-  never re-validated (`TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge`).
+  same case: staleness is confirmed and the corrective rebase itself failed.
+  A genuine `ErrMergeConflict` falls through to the same
+  `dispatch.Dispatcher.ResolveConflict` the reactive rebase-retry path uses
+  (issue #1319); any other `Rebase` error, or a conflict with no
+  `Dispatcher` available, blocks the merge outright rather than falling
+  through to `Merge` on a base known to be stale and never re-validated
+  (`TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge`,
+  `TestMergeImmediate_StaleBaseConflictResolvesViaDispatcher`,
+  `TestMergeImmediate_StaleBaseConflictResolveFailureBlocksMerge`,
+  `TestMergeImmediate_StaleBaseConflictResolveRewaitFailsBlocksMerge`).
