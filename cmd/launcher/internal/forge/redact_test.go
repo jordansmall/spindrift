@@ -36,6 +36,11 @@ func TestRedactURLCredentials_StripsUserinfo(t *testing.T) {
 			in:   "https://user:p@ssword@host/repo.git",
 			want: "https://host/repo.git",
 		},
+		{
+			name: "path segment with @, no userinfo, unchanged",
+			in:   "https://host/path@ver",
+			want: "https://host/path@ver",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
