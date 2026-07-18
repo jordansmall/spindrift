@@ -288,6 +288,33 @@ func TestHeadRev_ReturnsReposCurrentCommit(t *testing.T) {
 	}
 }
 
+// TestRunGit_ExecutesCommandAndSurfacesError verifies runGit both runs the
+// command it's given (checked independently via git itself) and surfaces
+// git's own stderr in its error on failure — the seam runGit shares with
+// gitOutput once runGit delegates to it (issue #1133).
+func TestRunGit_ExecutesCommandAndSurfacesError(t *testing.T) {
+	pwd := newConsoleGitRepo(t, "main")
+
+	if err := runGit(pwd, "checkout", "-b", "feature"); err != nil {
+		t.Fatalf("runGit(checkout -b feature) = %v", err)
+	}
+	branch, err := exec.Command("git", "-C", pwd, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse --abbrev-ref HEAD: %v", err)
+	}
+	if got := strings.TrimSpace(string(branch)); got != "feature" {
+		t.Errorf("branch after runGit(checkout) = %q, want %q", got, "feature")
+	}
+
+	err = runGit(pwd, "checkout", "does-not-exist")
+	if err == nil {
+		t.Fatal("runGit(checkout does-not-exist) = nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "does-not-exist") {
+		t.Errorf("runGit() error = %q, want it to surface git's stderr mentioning %q", err, "does-not-exist")
+	}
+}
+
 // gitRun runs git in dir, failing the test on error.
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
