@@ -2434,6 +2434,20 @@ func TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth(t *testing.T) {
 	sendKey(tm, "q")
 	final := tm.FinalModel(t, teatest.WithFinalTimeout(teatestTimeout)).(teaModel)
 
+	// #859's AC called for "golden output reflects correct clipping at
+	// visual column boundaries" — read literally that implies a golden-file
+	// snapshot, but this package has no golden-file tooling at all, and
+	// none of its other clip tests use one either (view_test.go's
+	// TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth
+	// and TestClip_WideCharacters_MeasuresDisplayWidthNotRuneCount both use
+	// this same width idiom, just against their own budgets). The
+	// per-line display-width check below, run against real Bubble Tea
+	// render output, IS this package's
+	// established verification for "correct clipping at visual column
+	// boundaries": it fails exactly when a line spills past the column
+	// budget, which is what a golden diff would also catch here, without
+	// requiring fixture upkeep for a rendering surface this volatile
+	// (issue #1260).
 	for _, l := range strings.Split(View(final.m), "\n") {
 		if w := runewidth.StringWidth(l); w > 80 {
 			t.Errorf("View() line %q has display width %d, want it clamped to Width (80)", l, w)
