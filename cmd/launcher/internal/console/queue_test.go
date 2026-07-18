@@ -310,6 +310,39 @@ func TestQueue_Discover_HoldsPickOnDepsOfFailure(t *testing.T) {
 	}
 }
 
+// TestQueue_Discover_HoldsPickOnDepsOfFailureWithRealBlocker verifies the
+// hold fires even when the pick has a real, registered blocker that a
+// healthy DepsOf call would have surfaced — proving the failure path holds
+// because DepsOf errored, not merely because the pick happens to have zero
+// blockers — #1104.
+func TestQueue_Discover_HoldsPickOnDepsOfFailureWithRealBlocker(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen})
+	f.NativeDeps = map[string][]string{"42": {"41"}}
+
+	issues, _, _, err := q.Discover(failDepsOf{Fake: f, num: "42"}, f, "")
+
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Errorf("issues = %+v, want none — DepsOf failure must hold even with a real blocker registered", issues)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none — a DepsOf failure must never claim", f.TransitionStateCalls)
+	}
+	snap := q.Snapshot()[0]
+	if snap.State != PickHeld {
+		t.Errorf("state = %v, want held", snap.State)
+	}
+	if !strings.Contains(snap.Reason, "retry") {
+		t.Errorf("Reason = %q, want it to explain the pick will be retried, not name #41 as an open blocker", snap.Reason)
+	}
+}
+
 // failDepsOf wraps a *forge.Fake so DepsOf errors for num, simulating a
 // transient tracker failure.
 type failDepsOf struct {
