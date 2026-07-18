@@ -1,5 +1,10 @@
 package console
 
+import (
+	"fmt"
+	"time"
+)
+
 // Kind is the dispatch kind a Pick carries. Only KindWork is exposed by the
 // operator-facing commands today; KindResearch exists so the Pick record
 // does not need a remodel when research dispatch ships end-to-end (#646).
@@ -137,6 +142,25 @@ func pickSection(state PickState) Section {
 	}
 }
 
+// formatAge renders d at the coarsest unit that still reads precisely: whole
+// minutes under an hour, hours+minutes under a day, whole days beyond that —
+// so the work Sections' age column stays a handful of characters wide
+// however long a pick has been queued, rather than growing to hh:mm:ss at
+// every scale. Anything under a minute reads "<1m" rather than "0m", so a
+// pick that just queued doesn't look identical to one already stale.
+func formatAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "<1m"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh%dm", int(d/time.Hour), int(d%time.Hour/time.Minute))
+	default:
+		return fmt.Sprintf("%dd", int(d/(24*time.Hour)))
+	}
+}
+
 // Pick is one row of the session's operator queue: an issue the operator
 // has picked, its Dispatch kind, and its current lifecycle state.
 type Pick struct {
@@ -154,4 +178,15 @@ type Pick struct {
 	// leaves PickRunning, matching every other terminal-state row that keeps
 	// its last-known detail rather than blanking it.
 	Heartbeat string
+	// QueuedAt is the wall-clock moment Queue.Add landed this pick — the
+	// source Age formats from. Set by the impure Queue, never by Update, so
+	// a pick a pure Update-only test constructs (no Launcher) carries the
+	// zero time.Time rather than a nondeterministic time.Now() (issue
+	// #1500).
+	QueuedAt time.Time
+	// Age is QueuedAt's rendered age (e.g. "3m", "1h12m", "2d"), precomputed
+	// by syncQueue on every sync the same way Heartbeat is — View stays pure
+	// and never calls time.Now() itself. "" until the first sync populates
+	// it.
+	Age string
 }

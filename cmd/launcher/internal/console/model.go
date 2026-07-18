@@ -32,8 +32,7 @@ type Model struct {
 	// looking at the backlog/queue instead.
 	DrillIn *DrillInState
 	// PendingTerminate is the issue number awaiting an explicit y/N confirm
-	// after "k"/"kill"/"terminate" <num> — empty when no terminate is
-	// pending (ADR 0024, issue #649).
+	// after "X" — empty when no terminate is pending (ADR 0024, issue #649).
 	PendingTerminate string
 	// Cap and Live are the session's live parallelism cap and current live
 	// count (issue #653, ADR 0023) — zero in a launch-less session, since
@@ -92,10 +91,15 @@ type Model struct {
 	// It clears on the operator's next keypress, mirroring PendingPick's
 	// resolve-on-any-key precedent rather than a timer (issue #998).
 	QueueEnterNotice string
-	// Cursor indexes the highlighted row in Visible() — the tea layer's j/
-	// down and up/arrow navigation target (issue #784; "k" moved to
-	// Terminate in #785). Always clamped into [0, len(Visible())-1], 0 when
-	// Visible() is empty.
+	// Cursor indexes the highlighted row within the active Section's own row
+	// list — Visible() for SectionBacklog, sectionPicks(m, ActiveSection) for
+	// a work Section (ADR 0030) — the tea layer's j/down and up/arrow
+	// navigation target (issue #784; "k" moved to Terminate in #785, then to
+	// "X" in #1500). Always clamped into [0, len(rows)-1], 0 when the active
+	// Section is empty. A Section switch resets it to 0 (issue #1500) — AC
+	// only requires clamping per Section, not remembering position across
+	// switches, so this stays the single shared field #784 introduced rather
+	// than growing a cursor per Section.
 	Cursor int
 	// ShowHelp is whether the "?" help overlay is open, listing every key
 	// the tea layer binds (issue #784).
@@ -114,98 +118,17 @@ type Model struct {
 	// before the first size event arrives. View derives the header height
 	// and the body's row budget from Height on every render (issue #1035).
 	Width, Height int
-	// Focus is which body column the cursor keys and context-Enter act on —
-	// Tab toggles it (issue #845). FocusBacklog, the zero value, matches the
-	// pre-#845 Console's backlog-only cursor.
-	Focus FocusedColumn
-	// QueueCursor indexes the highlighted row in Picks — the work-queue
-	// column's own cursor, independent of Cursor (the backlog column's) and
-	// clamped into [0, len(Picks)-1] the same way (issue #845).
-	QueueCursor int
-	// BacklogOffset is the backlog column's scroll offset — the index of its
-	// first rendered row, clamped into [0, len(Visible())-1] the same way
-	// DrillIn.Offset is (issue #1036). CursorMoveMsg keeps it advancing with
-	// Cursor so the highlighted row never scrolls off; ScrollMsg moves it
-	// directly. Independent of QueueOffset so Tab preserves each column's
-	// scroll position across a focus toggle.
-	BacklogOffset int
-	// QueueOffset is the work-queue column's scroll offset — QueueCursor's
-	// analogue of BacklogOffset, clamped into [0, len(Picks)-1] (issue
-	// #1036).
-	QueueOffset int
-	// PaneMode is the operator-selected layout for an open DrillIn's
-	// Transcript — docked (the zero value), floating, or fullscreen — cycled
-	// by a key and derived down to fullscreen at View time on a terminal too
-	// narrow for three columns, regardless of this stored value (issue #846,
-	// ADR 0025).
-	PaneMode TranscriptPaneMode
+	// Offset is the active Section's scroll offset — the index of its first
+	// rendered row, clamped into [0, len(rows)-1] the same way DrillIn.Offset
+	// is (issue #1036). CursorMoveMsg keeps it advancing with Cursor so the
+	// highlighted row never scrolls off; ScrollMsg moves it directly. Reset
+	// to 0 on a Section switch, matching Cursor (issue #1500).
+	Offset int
 	// ActiveSection is which of the five Sections the body renders — the
 	// section-switched list's single-list analogue of the retired
 	// FocusedColumn (ADR 0030). SectionBacklog, the zero value, matches a
 	// fresh Console opening on the pick source.
 	ActiveSection Section
-}
-
-// TranscriptPaneMode is the Transcript pane's layout while a DrillIn is open
-// (issue #846, ADR 0025).
-type TranscriptPaneMode int
-
-const (
-	// PaneDocked is the zero value — the Transcript renders as a third
-	// column beside the backlog and work queue, which stay visible.
-	PaneDocked TranscriptPaneMode = iota
-	// PaneFloating — the Transcript renders as an overlay atop the
-	// two-column body.
-	PaneFloating
-	// PaneFullscreen — the Transcript takes the whole body, as it did before
-	// issue #846.
-	PaneFullscreen
-)
-
-// FocusedColumn is which of the two body columns holds the operator's
-// cursor (issue #845).
-type FocusedColumn int
-
-const (
-	// FocusBacklog is the zero value — cursor keys move Model.Cursor and
-	// Enter Picks the highlighted backlog row.
-	FocusBacklog FocusedColumn = iota
-	// FocusQueue — cursor keys move Model.QueueCursor and Enter drills into
-	// the highlighted pick's Transcript.
-	FocusQueue
-)
-
-// focusedCursor returns a pointer to the focused column's cursor field —
-// &m.QueueCursor while the work queue has focus, &m.Cursor (the backlog's)
-// otherwise — so a caller mutates the right twin without re-testing Focus
-// itself (issue #1062). Takes *Model, unlike focusedTotal/focusedBudget
-// below, because a caller needs to write through it; those two only ever
-// read, so they stay on the cheaper value receiver.
-func focusedCursor(m *Model) *int {
-	if m.Focus == FocusQueue {
-		return &m.QueueCursor
-	}
-	return &m.Cursor
-}
-
-// focusedOffset returns a pointer to the focused column's scroll offset —
-// &m.QueueOffset while the work queue has focus, &m.BacklogOffset (the
-// backlog's) otherwise (issue #1062).
-func focusedOffset(m *Model) *int {
-	if m.Focus == FocusQueue {
-		return &m.QueueOffset
-	}
-	return &m.BacklogOffset
-}
-
-// focusedTotal returns the focused column's underlying row count —
-// len(m.Picks) for the work queue, len(m.Visible()) for the backlog (issue
-// #1062).
-func focusedTotal(m Model) int {
-	if m.Focus == FocusQueue {
-		return len(m.Picks)
-	}
-	return len(m.Visible())
 }
 
 // DrillInState is one Dispatch's loaded transcript: both the Driver-rendered
@@ -256,8 +179,11 @@ func (m Model) Visible() []forge.Issue {
 }
 
 // HasHighlighted reports whether Visible has a row at Cursor for the
-// operator to act on — Cursor is clamped to [0, len(Visible())-1] and to 0
-// when Visible is empty, so this is exactly len(m.Visible()) > 0.
+// operator to act on — the PendingPick hint's gate, since Pick only ever
+// targets a Backlog row (ADR 0030's pick source) regardless of which
+// Section is active when "p" is pressed. Cursor is clamped to [0,
+// len(Visible())-1] and to 0 when Visible is empty, so this is exactly
+// len(m.Visible()) > 0.
 func (m Model) HasHighlighted() bool {
 	return len(m.Visible()) > 0
 }
@@ -305,10 +231,6 @@ func Update(m Model, msg Msg) Model {
 		if m.DrillIn != nil && m.DrillIn.Number == msg.Number {
 			showRaw = m.DrillIn.ShowRaw
 			offset = m.DrillIn.Offset
-		} else {
-			// New pick: reset the layout to docked, matching #846 AC1
-			// (issue #999).
-			m.PaneMode = PaneDocked
 		}
 		content := msg.Rendered
 		if showRaw {
@@ -338,7 +260,7 @@ func Update(m Model, msg Msg) Model {
 		// column whose content already fits on screen still scrolls to the
 		// last row instead of no-op'ing, hiding the earlier, already-visible
 		// rows (issue #1060; a viewport-aware fix, if wanted, is #1053).
-		*focusedOffset(&m) += msg.Delta
+		m.Offset += msg.Delta
 	case TerminateRequestedMsg:
 		m.PendingTerminate = msg.Number
 	case TerminateConfirmedMsg:
@@ -368,7 +290,7 @@ func Update(m Model, msg Msg) Model {
 			m.RebuildOutputOffset += msg.Delta
 		}
 	case CursorMoveMsg:
-		*focusedCursor(&m) += msg.Delta
+		m.Cursor += msg.Delta
 	case HelpToggleMsg:
 		m.ShowHelp = !m.ShowHelp
 	case FilterEditStartMsg:
@@ -382,38 +304,67 @@ func Update(m Model, msg Msg) Model {
 	case SizeChangedMsg:
 		m.Width = msg.Width
 		m.Height = msg.Height
-	case FocusToggleMsg:
-		if m.Focus == FocusBacklog {
-			m.Focus = FocusQueue
-		} else {
-			m.Focus = FocusBacklog
-		}
-	case PaneModeCycleMsg:
-		if m.DrillIn != nil {
-			m.PaneMode = nextPaneMode(m.PaneMode)
-		}
 	case SectionPrevMsg:
-		m.ActiveSection = (m.ActiveSection - 1 + sectionCount) % sectionCount
+		m = switchSection(m, (m.ActiveSection-1+sectionCount)%sectionCount)
 	case SectionNextMsg:
-		m.ActiveSection = (m.ActiveSection + 1) % sectionCount
+		m = switchSection(m, (m.ActiveSection+1)%sectionCount)
 	case SectionJumpMsg:
-		m.ActiveSection = msg.Section
+		m = switchSection(m, msg.Section)
 	}
 	m.Width = clampSize(m.Width)
 	m.Height = clampSize(m.Height)
-	m.Cursor = clampCursor(m.Cursor, len(m.Visible()))
-	m.QueueCursor = clampCursor(m.QueueCursor, len(m.Picks))
+	m.Cursor = clampCursor(m.Cursor, sectionRowCount(m, m.ActiveSection))
 	if m.DrillIn != nil {
-		clampDrillInOffset(m.DrillIn, transcriptHeight(m))
+		clampDrillInOffset(m.DrillIn, m.Height)
 	}
 	clampRebuildOutputOffset(&m)
-	m.BacklogOffset = clampCursor(m.BacklogOffset, len(m.Visible()))
-	m.QueueOffset = clampCursor(m.QueueOffset, len(m.Picks))
+	m.Offset = clampCursor(m.Offset, sectionRowCount(m, m.ActiveSection))
 	if _, ok := msg.(CursorMoveMsg); ok {
-		offset := focusedOffset(&m)
-		*offset = followViewport(*offset, *focusedCursor(&m), focusedTotal(m), columnItemBudget(focusedBudget(m)))
+		m.Offset = followViewport(m.Offset, m.Cursor, sectionRowCount(m, m.ActiveSection), columnItemBudget(bodyBudget(m)))
 	}
 	return m
+}
+
+// switchSection moves m to Section s, resetting Cursor and Offset to 0 when
+// s differs from the currently active Section — a fresh Section starts at
+// its top row rather than carrying over a position that belonged to a
+// different list (issue #1500). Jumping to the Section that's already
+// active is a no-op on Cursor/Offset, so a repeated "1" or an "H"/"L" that
+// wraps back onto the same Section (only possible with a single Section,
+// which sectionCount > 1 rules out today) never resets scroll position for
+// nothing.
+func switchSection(m Model, s Section) Model {
+	if s != m.ActiveSection {
+		m.Cursor = 0
+		m.Offset = 0
+	}
+	m.ActiveSection = s
+	return m
+}
+
+// sectionRowCount returns the row count of Section s's own list — Visible()
+// for SectionBacklog, len(sectionPicks(m, s)) for a work Section — the
+// figure Cursor and Offset clamp against instead of the whole backlog or the
+// whole Picks slice, now that only one Section renders at a time (ADR 0030).
+func sectionRowCount(m Model, s Section) int {
+	if s == SectionBacklog {
+		return len(m.Visible())
+	}
+	return len(sectionPicks(m, s))
+}
+
+// sectionPicks returns m.Picks narrowed to the ones pickSection maps onto s,
+// in pick order — the work Sections' own row list (ADR 0030). Meaningless
+// for SectionBacklog, whose rows are Visible() instead; callers branch on
+// the Section before reaching for either.
+func sectionPicks(m Model, s Section) []Pick {
+	var out []Pick
+	for _, p := range m.Picks {
+		if pickSection(p.State) == s {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // clampCursor pulls cursor into [0, n-1], or 0 when n is zero — the single
@@ -509,20 +460,6 @@ func clampSize(dim int) int {
 		return minTerminalDimension
 	}
 	return dim
-}
-
-// nextPaneMode advances mode one step through the fixed cycle docked ->
-// floating -> fullscreen -> docked — PaneModeCycleMsg's transition table
-// (issue #846).
-func nextPaneMode(mode TranscriptPaneMode) TranscriptPaneMode {
-	switch mode {
-	case PaneDocked:
-		return PaneFloating
-	case PaneFloating:
-		return PaneFullscreen
-	default:
-		return PaneDocked
-	}
 }
 
 // removePick drops the queued or held pick numbered num, if any — Unpick

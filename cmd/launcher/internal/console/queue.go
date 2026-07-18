@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/waves"
@@ -25,10 +26,13 @@ func NewQueue() *Queue {
 	return &Queue{}
 }
 
-// Add appends a queued pick.
+// Add appends a queued pick, stamping QueuedAt to now — the single choke
+// point every pick lands through, so Age (syncQueue) always has a real
+// source moment to format from (issue #1500).
 func (q *Queue) Add(p Pick) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	p.QueuedAt = time.Now()
 	q.picks = append(q.picks, p)
 }
 

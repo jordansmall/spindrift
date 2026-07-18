@@ -146,19 +146,19 @@ type DrillInScrollMsg struct {
 func (DrillInScrollMsg) isConsoleMsg() {}
 
 // ScrollMsg is the tea layer's signal that the operator pressed a line-scroll
-// key while the backlog/queue body is showing (no drill-in open) — Delta is
-// the number of rows to move (positive scrolls down/later, negative scrolls
-// up/earlier). It moves BacklogOffset or QueueOffset depending on Focus,
-// clamped the same way DrillInScrollMsg clamps DrillIn.Offset (issue #1036).
+// key while the body is showing (no drill-in open) — Delta is the number of
+// rows to move (positive scrolls down/later, negative scrolls up/earlier).
+// It moves Model.Offset within the active Section, clamped the same way
+// DrillInScrollMsg clamps DrillIn.Offset (issue #1036, ADR 0030).
 type ScrollMsg struct {
 	Delta int
 }
 
 func (ScrollMsg) isConsoleMsg() {}
 
-// TerminateRequestedMsg is the run loop's signal that the operator typed
-// "k"/"kill"/"terminate" <num> — arms a pending confirm (ADR 0024, issue
-// #649) rather than acting immediately.
+// TerminateRequestedMsg is the run loop's signal that the operator pressed
+// "X" — arms a pending confirm (ADR 0024, issue #649) rather than acting
+// immediately.
 type TerminateRequestedMsg struct {
 	Number string
 }
@@ -300,20 +300,6 @@ func (FilterEditConfirmMsg) isConsoleMsg() {}
 type FilterEditCancelMsg struct{}
 
 func (FilterEditCancelMsg) isConsoleMsg() {}
-
-// FocusToggleMsg is the tea layer's signal that the operator pressed Tab —
-// flips Focus between the backlog and work-queue columns (issue #845).
-type FocusToggleMsg struct{}
-
-func (FocusToggleMsg) isConsoleMsg() {}
-
-// PaneModeCycleMsg is the tea layer's signal that the operator pressed the
-// pane-mode key — advances Model.PaneMode through docked -> floating ->
-// fullscreen -> docked, a no-op when no drill-in is open (issue #846, ADR
-// 0025).
-type PaneModeCycleMsg struct{}
-
-func (PaneModeCycleMsg) isConsoleMsg() {}
 
 // SectionPrevMsg is the tea layer's signal that the operator pressed "H" —
 // switches ActiveSection to the previous Section, wrapping from Backlog to
