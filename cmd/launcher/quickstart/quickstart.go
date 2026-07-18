@@ -67,6 +67,30 @@ func runtimeAlias(binary string) string {
 	return binary
 }
 
+// validateRepoSlug rejects anything but a single-slash "owner/name" shape —
+// the form the generated flake.nix's settings.repository.repoSlug expects.
+func validateRepoSlug(slug string) error {
+	parts := strings.Split(slug, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.ContainsAny(slug, " \t\n\r") {
+		return fmt.Errorf("expected owner/repo, got %q", slug)
+	}
+	return nil
+}
+
+// validRuntimeChoices are the operator-facing runtime values the wizard
+// accepts — the same four named in the "Runtime" prompt label.
+var validRuntimeChoices = []string{"podman", "docker", "rancher", "bwrap"}
+
+// validateRuntimeChoice rejects any value outside validRuntimeChoices.
+func validateRuntimeChoice(runtime string) error {
+	for _, v := range validRuntimeChoices {
+		if runtime == v {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected one of %s, got %q", strings.Join(validRuntimeChoices, ", "), runtime)
+}
+
 // detectRuntime returns the first runtime in runtimePrecedence found on
 // PATH (aliased via runtimeAlias), or an actionable error naming all four
 // when none is available — Quickstart cannot proceed without one (ADR 0027).
@@ -175,19 +199,40 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 	}
 
 	scanner := bufio.NewScanner(stdin)
-	promptDefault := func(label, def string) string {
+	readLine := func(label, def string) (string, bool) {
 		if def != "" {
 			fmt.Fprintf(w, "%s [%s]: ", label, def)
 		} else {
 			fmt.Fprintf(w, "%s: ", label)
 		}
-		scanner.Scan()
-		if v := scanner.Text(); v != "" {
-			return v
+		ok := scanner.Scan()
+		if v := scanner.Text(); ok && v != "" {
+			return v, true
 		}
-		return def
+		return def, ok
+	}
+	promptDefault := func(label, def string) string {
+		v, _ := readLine(label, def)
+		return v
 	}
 	prompt := func(label string) string { return promptDefault(label, "") }
+	// promptValidated re-prompts on an invalid answer. If stdin runs out
+	// (ok == false) while the value is still invalid, there is no more
+	// input to retry with, so it errors out instead of spinning forever
+	// re-reading the same exhausted scanner.
+	promptValidated := func(label, def string, validate func(string) error) (string, error) {
+		for {
+			v, ok := readLine(label, def)
+			if err := validate(v); err != nil {
+				if !ok {
+					return "", fmt.Errorf("%s: %w", label, err)
+				}
+				fmt.Fprintf(w, "invalid input: %v\n", err)
+				continue
+			}
+			return v, nil
+		}
+	}
 	promptMasked := func(label string) string {
 		fmt.Fprintf(w, "%s: ", label)
 		value, masked := readMasked(stdin, scanner)
@@ -197,8 +242,14 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		return value
 	}
 
-	repoSlug := promptDefault("Repo slug (owner/repo)", env.GitRemoteRepoSlug())
-	runtime := promptDefault("Runtime (podman/docker/rancher/bwrap)", detectedRuntime)
+	repoSlug, err := promptValidated("Repo slug (owner/repo)", env.GitRemoteRepoSlug(), validateRepoSlug)
+	if err != nil {
+		return err
+	}
+	runtime, err := promptValidated("Runtime (podman/docker/rancher/bwrap)", detectedRuntime, validateRuntimeChoice)
+	if err != nil {
+		return err
+	}
 	gitUserName := promptDefault("Git user name", env.GitConfig("user.name"))
 	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
 
