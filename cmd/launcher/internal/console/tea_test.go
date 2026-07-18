@@ -31,16 +31,29 @@ import (
 // full `nix flake check` on a 4-core box, where the go-test derivation races
 // heavy image builds and the Bubble Tea event loop is CPU-starved. One
 // generous budget in a single place replaces the per-site literals that were
-// bumped piecemeal (2s -> 5s -> 15s -> 30s -> 60s across several commits); a
-// tight bound here only ever flakes, it never catches a real defect — a hung
-// program still fails, just later. When a specific test hangs regardless of
-// this bound, the fix is a deterministic wait on real state, not a bigger
-// number: see the "settled" guards on the launch-backed pick tests, and
-// TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain, which dropped
-// teatest entirely for a direct handleKey call plus launch.Wait() after this
-// same bound (walked 2s -> 5s -> 15s -> 30s -> 60s) still flaked under CI's
-// `nix flake check` racing the image-build checks (issue #1327).
-const teatestTimeout = 60 * time.Second
+// bumped piecemeal (2s -> 5s -> 15s -> 30s across several commits); a tight
+// bound here only ever flakes, it never catches a real defect — a hung
+// program still fails, just later.
+//
+// That escalation to 30s was chasing the wrong cause: every one of those
+// CI flakes was `WaitFinished` hanging outright on the "quit with live
+// Dispatches" confirm prompt (issue #1277), a real deadlock no timeout could
+// fix, not a slow render under load — a bigger number just delayed the same
+// failure. #1277 fixed it at the source with deterministic "settled" guards
+// on the launch-backed pick tests, and 30s held for the rest of this file
+// afterward. Only one test kept flaking past the fix —
+// TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain, a genuinely
+// heavier CPU-starvation case that pushed the bound to 60s (issue #1327's
+// history) — and #1327 dropped it out of the teatest mechanism entirely for
+// a direct handleKey call plus launch.Wait(), so it no longer answers to
+// this constant at all. With the deadlock fixed and the one CPU-starved
+// outlier gone, nothing left in this file has ever demonstrated a need past
+// 30s; issue #1278 restores that tighter, evidenced bound rather than
+// carrying the 60s headroom the departed test alone required. When a
+// specific test hangs regardless of this bound, the fix is a deterministic
+// wait on real state, not a bigger number — see the "settled" guards on
+// the launch-backed pick tests further down this file.
+const teatestTimeout = 30 * time.Second
 
 // waitForOutput blocks until tm's output contains every one of want, failing
 // the test if it never does within teatestTimeout. tm.Output() drains as
