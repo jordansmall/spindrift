@@ -881,12 +881,25 @@ func windowLines(d DrillInState, budget int) []string {
 // modes (issue #846, ADR 0025; hint added #1002). The content+footer body
 // below is currently duplicated with renderDrillIn; #1000 tracks extracting
 // a shared helper.
+//
+// The label and footer are themselves budgeted against height (issue
+// #1380): at height 1, only the label renders and the footer is dropped —
+// the one case where the #1002 "footer always reaches the screen" invariant
+// doesn't hold, because there isn't room for both lines.
 func renderTranscriptColumn(d DrillInState, height int) string {
+	if height <= 0 {
+		return ""
+	}
+
 	var b strings.Builder
 	if d.ShowRaw {
 		fmt.Fprintf(&b, "transcript #%s (raw):\n", d.Number)
 	} else {
 		fmt.Fprintf(&b, "transcript #%s:\n", d.Number)
+	}
+	const labelLines = 1
+	if height <= headerFooterLines-labelLines {
+		return b.String()
 	}
 	if d.Err != nil {
 		fmt.Fprintf(&b, "drill-in failed: %s\n", d.Err)
