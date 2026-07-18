@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -101,6 +102,49 @@ func TestView_Header_StatusLine_StyledByRole(t *testing.T) {
 	}
 }
 
+// TestView_Header_StaleAlert_StyledWithGlyph verifies the stale-image alert
+// carries the plain-Unicode warning glyph and renders styled by role
+// (ADR 0031), while keeping its existing content.
+func TestView_Header_StaleAlert_StyledWithGlyph(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), StaleStatusMsg{Stale: true, Message: "rebuild needed"})
+	out := View(m)
+
+	if !strings.Contains(out, "⚠") {
+		t.Errorf("View() = %q, want the stale alert to carry the warning glyph", out)
+	}
+	if !strings.Contains(out, "image stale: rebuild needed") {
+		t.Errorf("View() = %q, want the stale alert content preserved", out)
+	}
+	if !strings.Contains(out, "\x1b[") {
+		t.Errorf("View() = %q, want the stale alert styled with an ANSI escape sequence", out)
+	}
+}
+
+// TestView_Header_RebuildingAlert_StyledWithGlyph verifies the
+// rebuilding-in-progress alert carries the plain-Unicode rebuilding glyph
+// and renders styled by role (ADR 0031), while keeping its existing
+// content.
+func TestView_Header_RebuildingAlert_StyledWithGlyph(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), StaleStatusMsg{Rebuilding: true})
+	out := View(m)
+
+	if !strings.Contains(out, "↻") {
+		t.Errorf("View() = %q, want the rebuilding alert to carry the rebuilding glyph", out)
+	}
+	if !strings.Contains(out, "rebuilding image...") {
+		t.Errorf("View() = %q, want the rebuilding alert content preserved", out)
+	}
+	if !strings.Contains(out, "\x1b[") {
+		t.Errorf("View() = %q, want the rebuilding alert styled with an ANSI escape sequence", out)
+	}
+}
+
 // TestView_Header_Banner_ShownWhenTallCollapsedWhenShort verifies the fixed
 // "spindrift" banner renders above the status line when the terminal has
 // room for it, and collapses to the status line alone on a short terminal
@@ -173,10 +217,14 @@ func TestView_Header_AlertsRenderBeforeEphemeralPrompts(t *testing.T) {
 // (issue #843 AC5).
 func TestView_Header_LaunchLessSession_RendersCleanly(t *testing.T) {
 	out := View(NewModel())
-	if !strings.Contains(out, "running 0/0 · waiting 0 · held 0 · settled 0") {
-		t.Errorf("View() = %q, want a clean zero/zero status line", out)
+	// Per-segment, not one contiguous line: per-role styling (ADR 0031)
+	// wraps each segment in its own ANSI escape codes.
+	for _, want := range []string{"running 0/0", "waiting 0", "held 0", "settled 0"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("View() = %q, want a clean status segment %q", out, want)
+		}
 	}
-	for _, unwanted := range []string{"stale", "dogfood", "!!"} {
+	for _, unwanted := range []string{"stale", "dogfood", "!!", "⚠", "↻", "ℹ"} {
 		if strings.Contains(out, unwanted) {
 			t.Errorf("View() = %q, want no stray %q in a launch-less header", out, unwanted)
 		}
@@ -259,10 +307,47 @@ func TestView_RebuildErr_Surfaced(t *testing.T) {
 	}
 }
 
+// TestView_Header_RebuildFailedAlert_StyledWithGlyph verifies the
+// rebuild-failed alert carries the plain-Unicode warning glyph and renders
+// styled by role (ADR 0031), while keeping its existing content.
+func TestView_Header_RebuildFailedAlert_StyledWithGlyph(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), StaleStatusMsg{RebuildErr: "nix build failed"})
+	out := View(m)
+
+	var bannerLine string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "rebuild failed") {
+			bannerLine = line
+			break
+		}
+	}
+	if bannerLine == "" {
+		t.Fatalf("View() = %q, want a rebuild-failed banner line", out)
+	}
+	if !strings.Contains(bannerLine, "⚠") {
+		t.Errorf("rebuild-failed banner line = %q, want the warning glyph", bannerLine)
+	}
+	if !strings.Contains(bannerLine, "nix build failed") {
+		t.Errorf("rebuild-failed banner line = %q, want the error content preserved", bannerLine)
+	}
+	if !strings.Contains(bannerLine, "\x1b[") {
+		t.Errorf("rebuild-failed banner line = %q, want it styled with an ANSI escape sequence", bannerLine)
+	}
+}
+
 // TestView_RebuildErr_Truncated verifies a long, multi-line RebuildErr (the
 // merged nix stdout+stderr RunNixBuild wraps into one error, issue #1131)
 // renders as a single bounded banner line instead of blowing out the header.
 func TestView_RebuildErr_Truncated(t *testing.T) {
+	// Pinned rather than inherited: the rebuild-failed banner is styled
+	// (ADR 0031), and the width bound below must hold whether or not this
+	// process's ambient TERM happens to be color-capable.
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
 	long := strings.Repeat("line of nix build output that is quite long\n", 20)
 	m := Update(NewModel(), StaleStatusMsg{Stale: true, RebuildErr: long})
 	out := View(m)
@@ -280,8 +365,11 @@ func TestView_RebuildErr_Truncated(t *testing.T) {
 	if !strings.HasSuffix(bannerLine, "…") {
 		t.Errorf("banner line = %q, want it truncated with an ellipsis", bannerLine)
 	}
-	prefixWidth := runewidth.StringWidth("!! rebuild failed: ")
-	if n := runewidth.StringWidth(bannerLine); n > bannerErrWidth+prefixWidth {
+	// lipgloss.Width, not runewidth.StringWidth: the banner line's prefix
+	// now carries ANSI color codes (ADR 0031), which runewidth counts as
+	// display width and lipgloss's ANSI-aware measurement does not.
+	prefixWidth := lipgloss.Width(glyphWarning + " rebuild failed: ")
+	if n := lipgloss.Width(bannerLine); n > bannerErrWidth+prefixWidth {
 		t.Errorf("banner line width = %d, want <= %d", n, bannerErrWidth+prefixWidth)
 	}
 	if m.RebuildErr != long {
@@ -842,6 +930,12 @@ func TestView_TwoColumn_Queue_HeldRowSuppressesRedundantFailedBlockerReason(t *t
 // verbose held badge must truncate rather than push the line past the
 // terminal's edge and wrap into an unreadable mess (issue #844 AC6).
 func TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
+	// Pinned to a color-capable terminal: the header is styled (ADR 0031)
+	// and the width check below must hold with those ANSI codes in play,
+	// not just when ambient TERM happens to disable them.
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
 		{Number: "1", Title: "a very long backlog title that would otherwise blow out the left column", Labels: []string{"ready-for-agent", "needs-review"}},
@@ -849,8 +943,11 @@ func TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
 	m.Picks = []Pick{{Number: "42", Title: "a pick with a fairly long title too", State: PickHeld, BlockedBy: "#41 (native), #43 (body)"}}
 
 	out := View(m)
+	// lipgloss.Width, not runewidth.StringWidth: a styled header line
+	// carries ANSI color codes that runewidth counts as display width and
+	// lipgloss's ANSI-aware measurement does not.
 	for _, l := range strings.Split(out, "\n") {
-		if w := runewidth.StringWidth(l); w > m.Width {
+		if w := lipgloss.Width(l); w > m.Width {
 			t.Errorf("View() line %q has display width %d, want it clamped to Width (%d)", l, w, m.Width)
 		}
 	}
@@ -1901,8 +1998,11 @@ func TestView_Backlog_SanitizesTitleAndLabelControlSequences(t *testing.T) {
 	}})
 
 	out := View(m)
-	if strings.Contains(out, "\x1b") {
-		t.Errorf("View() = %q, want no raw escape bytes in backlog title", out)
+	// The header carries legitimate styling escapes of its own (ADR 0031),
+	// so the check below targets the injected payloads specifically rather
+	// than asserting no ESC byte anywhere in the output.
+	if strings.Contains(out, "\x1b[2J") || strings.Contains(out, "\x1b]0;pwned") {
+		t.Errorf("View() = %q, want the injected escape sequences stripped from the backlog title", out)
 	}
 	if !strings.Contains(out, "eviltitlehere") {
 		t.Errorf("View() = %q, want the surrounding title text intact after stripping escapes", out)
@@ -1922,8 +2022,11 @@ func TestView_Queue_SanitizesTitleAndReasonControlSequences(t *testing.T) {
 	}
 
 	out := View(m)
-	if strings.Contains(out, "\x1b") {
-		t.Errorf("View() = %q, want no raw escape bytes in queue row", out)
+	// The header carries legitimate styling escapes of its own (ADR 0031),
+	// so the check below targets the injected payloads specifically rather
+	// than asserting no ESC byte anywhere in the output.
+	if strings.Contains(out, "\x1b[2J") || strings.Contains(out, "\x1b]0;pwned") {
+		t.Errorf("View() = %q, want the injected escape sequences stripped from the queue row", out)
 	}
 	if !strings.Contains(out, "eviltitle") {
 		t.Errorf("View() = %q, want the surrounding title text intact after stripping escapes", out)

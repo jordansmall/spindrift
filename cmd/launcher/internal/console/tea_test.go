@@ -13,8 +13,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	teatest "github.com/charmbracelet/x/exp/teatest"
-	"github.com/mattn/go-runewidth"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
@@ -2495,6 +2495,12 @@ func TestTea_Init_OrphanRecoveryErr_SurfacedInHeader(t *testing.T) {
 // calculation, so a fix that's correct for one can still be wrong for
 // another.
 func TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth(t *testing.T) {
+	// Pinned to a color-capable terminal: the header is styled (ADR 0031)
+	// and the width check below must hold with those ANSI codes in play,
+	// not just when ambient TERM happens to disable them.
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
 	tests := []struct {
 		name         string
 		backlogTitle string
@@ -2566,8 +2572,12 @@ func TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth(t *testing.T) {
 			// here, without requiring fixture upkeep for a rendering
 			// surface this volatile (issue #1260).
 			out := View(final.m)
+			// lipgloss.Width, not runewidth.StringWidth: a styled header
+			// line carries ANSI color codes that runewidth counts as
+			// display width and lipgloss's ANSI-aware measurement does
+			// not.
 			for _, l := range strings.Split(out, "\n") {
-				if w := runewidth.StringWidth(l); w > 80 {
+				if w := lipgloss.Width(l); w > 80 {
 					t.Errorf("View() line %q has display width %d, want it clamped to Width (80)", l, w)
 				}
 			}

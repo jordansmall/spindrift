@@ -439,13 +439,17 @@ func renderHeader(m Model) string {
 		roleStyle(RoleSettled).Render(fmt.Sprintf("settled %d", settled)),
 		roleStyle(RoleFailed).Render(fmt.Sprintf("failed %d", failed)))
 	if m.Stale {
-		fmt.Fprintf(&b, "!! image stale: %s — new launches held; press [b] to rebuild\n", m.StaleMessage)
+		b.WriteString(roleStyle(RoleHeld).Render(fmt.Sprintf("%s image stale: %s — new launches held; press [b] to rebuild", glyphWarning, m.StaleMessage)))
+		b.WriteString("\n")
 	}
 	if m.Rebuilding {
-		b.WriteString("==> rebuilding image...\n")
+		b.WriteString(roleStyle(RoleRunning).Render(glyphRebuilding + " rebuilding image..."))
+		b.WriteString("\n")
 	}
 	if m.RebuildErr != "" {
-		fmt.Fprintf(&b, "!! rebuild failed: %s\n", clipBannerErr(m.RebuildErr, bannerErrWidth))
+		fmt.Fprintf(&b, "%s %s\n",
+			roleStyle(RoleFailed).Render(glyphWarning+" rebuild failed:"),
+			clipBannerErr(m.RebuildErr, bannerErrWidth))
 	}
 	if m.OrphanRecoveryErr != "" {
 		fmt.Fprintf(&b, "!! orphan recovery failed: %s\n", clipBannerErr(m.OrphanRecoveryErr, bannerErrWidth))

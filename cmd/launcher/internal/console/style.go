@@ -60,6 +60,16 @@ func colorProfile() termenv.Profile {
 	return termenv.ANSI
 }
 
+// Plain-Unicode glyphs (no nerd-fonts) tagging the header's alert lines by
+// kind, paired with role coloring (ADR 0031): glyphWarning marks a condition
+// that needs attention (stale image, a failure), glyphRebuilding marks work
+// in progress, and glyphNotice marks an informational notice.
+const (
+	glyphWarning    = "⚠"
+	glyphRebuilding = "↻"
+	glyphNotice     = "ℹ"
+)
+
 // roleStyle returns the lipgloss style for a semantic Role, resolved against
 // the current color profile so it renders styled by role on a color-capable
 // terminal and degrades to plain text under NO_COLOR or a non-color
