@@ -1369,6 +1369,36 @@ func TestTea_PickKey_FollowedByNonA_ResolvesToSinglePick(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_PickKey_FollowedByNonA_ClearsPendingIndicator verifies the pending
+// pick indicator armed by "p" clears once a trailing non-a/q key resolves
+// the chord to a single-issue pick (issue #1238).
+func TestTea_PickKey_FollowedByNonA_ClearsPendingIndicator(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "p")
+	waitForOutput(t, tm, "p_")
+
+	sendKey(tm, "z") // not "a" — resolves to a single pick right away
+	// "settled 1" guards the same live-dispatch quit-confirm race
+	// TestTea_PickKey_PromotesAndQueuesHighlighted hits (issue #822):
+	// without it, "q" can race the still-live pick and hang until
+	// teatest's timeout instead of exiting.
+	waitForOutput(t, tm, "  #42", "settled 1")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.PendingPick {
+		t.Errorf("PendingPick = true after non-a/q key resolved the chord, want false")
+	}
+}
+
 // TestTea_PickKey_AlreadyPicked_NoDuplicateRow verifies picking an issue
 // that already has an active (non-terminal) row never appends a second one
 // — Queue's row-scan helpers (setState, tryMarkClaiming) assume at most one
