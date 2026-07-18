@@ -404,7 +404,11 @@ func TestUpdate_DrillInCloseMsg_ReturnsToBacklog(t *testing.T) {
 // TestUpdate_DrillInScrollMsg_MovesOffset verifies a scroll message moves
 // DrillIn.Offset by Delta, clamped into the loaded content's line bounds so
 // paging past either end leaves the pane showing its first or last line
-// instead of an invalid Offset (issue #786).
+// instead of an invalid Offset (issue #786). No SizeChangedMsg is sent, so
+// Height stays 0 and the final pgdown assertion below exercises the
+// degenerate-height fallback, not the viewport-aware clamp added in #829 —
+// see TestUpdate_DrillInScrollMsg_ClampsToViewportHeight and
+// TestUpdate_DrillInScrollMsg_ShortTranscriptStaysAtTop for that.
 func TestUpdate_DrillInScrollMsg_MovesOffset(t *testing.T) {
 	m := NewModel()
 	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
@@ -424,6 +428,8 @@ func TestUpdate_DrillInScrollMsg_MovesOffset(t *testing.T) {
 		t.Errorf("Offset = %d, want 0 (clamped at the top)", m.DrillIn.Offset)
 	}
 
+	// Height is 0 here (no SizeChangedMsg), so this only hits the
+	// degenerate-height fallback, not the #829 viewport-aware clamp.
 	m = Update(m, DrillInScrollMsg{Delta: 100})
 	if m.DrillIn.Offset != 4 {
 		t.Errorf("Offset = %d, want 4 (clamped to the last line)", m.DrillIn.Offset)
