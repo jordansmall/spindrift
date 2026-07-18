@@ -375,6 +375,8 @@ func Update(m Model, msg Msg) Model {
 			m.PaneMode = nextPaneMode(m.PaneMode)
 		}
 	}
+	m.Width = clampSize(m.Width)
+	m.Height = clampSize(m.Height)
 	m.Cursor = clampCursor(m.Cursor, len(m.Visible()))
 	m.QueueCursor = clampCursor(m.QueueCursor, len(m.Picks))
 	if m.DrillIn != nil {
@@ -387,8 +389,6 @@ func Update(m Model, msg Msg) Model {
 		offset := focusedOffset(&m)
 		*offset = followViewport(*offset, *focusedCursor(&m), focusedTotal(m), columnItemBudget(focusedBudget(m)))
 	}
-	m.Width = clampSize(m.Width)
-	m.Height = clampSize(m.Height)
 	return m
 }
 
