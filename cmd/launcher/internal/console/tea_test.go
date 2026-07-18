@@ -1842,12 +1842,12 @@ func TestTea_TerminateKey_ConfirmThenOther_Declines(t *testing.T) {
 	}
 }
 
-// TestTea_TerminateKey_ConfirmThenQuit_DeclinesAndQuits verifies the
+// TestTea_TerminateKey_ConfirmThenQuit_QuitsOutright verifies the
 // universal quit keystroke at the confirm prompt is not swallowed by the
 // pending terminate: "q" quits outright, without confirming, in one
 // keystroke (issue #748) — the terminate never fires since "y" is never
 // pressed.
-func TestTea_TerminateKey_ConfirmThenQuit_DeclinesAndQuits(t *testing.T) {
+func TestTea_TerminateKey_ConfirmThenQuit_QuitsOutright(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
 
 	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
@@ -1873,16 +1873,24 @@ func TestTea_TerminateKey_ConfirmThenQuit_DeclinesAndQuits(t *testing.T) {
 // TerminateCancelledMsg first — the model is discarded on quit (issue
 // #1096), so PendingTerminate is left set rather than cleared.
 func TestTea_TerminateConfirmKey_Quit_LeavesPendingTerminateSet(t *testing.T) {
-	m := Update(NewModel(), TerminateRequestedMsg{Number: "42"})
-	tm := teaModel{m: m}
-
-	tm = tm.handleTerminateConfirmKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
-
-	if tm.m.PendingTerminate != "42" {
-		t.Errorf("PendingTerminate = %q, want unchanged %q after quitting at the confirm prompt", tm.m.PendingTerminate, "42")
+	keys := []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("q")},
+		{Type: tea.KeyCtrlC},
 	}
-	if !tm.m.Quitting {
-		t.Error("Quitting = false, want true after quitting at the confirm prompt")
+	for _, key := range keys {
+		t.Run(key.String(), func(t *testing.T) {
+			m := Update(NewModel(), TerminateRequestedMsg{Number: "42"})
+			tm := teaModel{m: m}
+
+			tm = tm.handleTerminateConfirmKey(key)
+
+			if tm.m.PendingTerminate != "42" {
+				t.Errorf("PendingTerminate = %q, want unchanged %q after quitting at the confirm prompt", tm.m.PendingTerminate, "42")
+			}
+			if !tm.m.Quitting {
+				t.Error("Quitting = false, want true after quitting at the confirm prompt")
+			}
+		})
 	}
 }
 
