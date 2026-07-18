@@ -102,6 +102,14 @@ terminal output already uses, replayed against the pick's on-disk log. It
 updates on every render, since it is a local log read with no Issue Tracker
 call behind it.
 
+A queue row's field order is conditional, not fixed: title sits right after
+the state tag — the operator's primary identifier for the row — whenever
+that natural order fits the terminal's available width. Only when the
+natural-order row would actually be clipped does it fall back to
+blocker/reason/heartbeat before title, so the operator-critical blocker
+signal survives truncation instead of the title eating the row's budget
+first (issue #1256, following up on issue #858).
+
 ## Drill-in
 
 **Drill-in** (Enter) opens the highlighted pick's rendered transcript:
