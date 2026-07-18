@@ -190,7 +190,7 @@ func TestUpdate_RebuildOutputScrollMsg_NoOpWhenPaneClosed(t *testing.T) {
 
 // TestUpdate_RebuildOutputScrollMsg_MovesOffset verifies a scroll message
 // moves RebuildOutputOffset by Delta, clamped into the captured output's
-// line bounds the same way DrillInScrollMsg clamps DrillIn.Offset.
+// line bounds the same way SidebarScrollMsg clamps Sidebar.Offset.
 func TestUpdate_RebuildOutputScrollMsg_MovesOffset(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildOutput: "l0\nl1\nl2\nl3\nl4"})
@@ -301,193 +301,248 @@ func TestUpdate_DogfoodNoticeMsg_SetsLive(t *testing.T) {
 	}
 }
 
-// TestUpdate_DrillInMsg_OpensTranscriptView verifies a DrillInMsg installs
-// the drill-in's rendered and raw content on Model, so View can render the
-// transcript instead of the backlog — the queue row's drill-in gesture
-// (#648).
-func TestUpdate_DrillInMsg_OpensTranscriptView(t *testing.T) {
+// TestUpdate_SidebarLoadedMsg_OpensSidebar_ActivityDefault verifies a
+// SidebarLoadedMsg installs the loaded Activity feed and Transcript content
+// on Model and focuses the sidebar, with the Activity feed as the default
+// view (not the Transcript) — the queue row's live-tail sidebar gesture
+// (#648, #1501).
+func TestUpdate_SidebarLoadedMsg_OpensSidebar_ActivityDefault(t *testing.T) {
 	m := NewModel()
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi\n", Raw: `{"type":"assistant"}` + "\n"})
+	activity := []ActivityLine{{Text: "#42 · hi"}}
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity, Rendered: "[implementor] hi\n", Raw: `{"type":"assistant"}` + "\n"})
 
-	if m.DrillIn == nil {
-		t.Fatal("DrillIn = nil, want non-nil after DrillInMsg")
+	if m.Sidebar == nil {
+		t.Fatal("Sidebar = nil, want non-nil after SidebarLoadedMsg")
 	}
-	if m.DrillIn.Number != "42" {
-		t.Errorf("DrillIn.Number = %q, want %q", m.DrillIn.Number, "42")
+	if m.Sidebar.Number != "42" {
+		t.Errorf("Sidebar.Number = %q, want %q", m.Sidebar.Number, "42")
 	}
-	if m.DrillIn.Rendered != "[implementor] hi\n" {
-		t.Errorf("DrillIn.Rendered = %q, want the rendered transcript", m.DrillIn.Rendered)
+	if m.Sidebar.ShowTranscript {
+		t.Error("Sidebar.ShowTranscript = true, want false (the Activity feed is the default view)")
 	}
-	if m.DrillIn.ShowRaw {
-		t.Error("DrillIn.ShowRaw = true, want false (rendered is the default view)")
+	if len(m.Sidebar.Lines) != 1 || !strings.Contains(m.Sidebar.Lines[0], "hi") {
+		t.Errorf("Sidebar.Lines = %v, want the formatted Activity feed", m.Sidebar.Lines)
+	}
+	if m.Focus != FocusSidebar {
+		t.Errorf("Focus = %v, want FocusSidebar after opening a new sidebar", m.Focus)
 	}
 }
 
-// TestUpdate_DrillInMsg_CachesLineSplit verifies DrillInMsg pre-splits the
-// active (rendered) form into DrillIn.Lines once, so clampDrillInOffset and
-// the render functions consume the cache instead of each re-splitting the
-// full content on every Update/View call (issue #722).
-func TestUpdate_DrillInMsg_CachesLineSplit(t *testing.T) {
+// TestUpdate_SidebarLoadedMsg_CachesLineSplit verifies SidebarLoadedMsg
+// pre-splits the active (Activity, by default) form into Sidebar.Lines once,
+// so clampSidebarOffset and the render functions consume the cache instead
+// of each re-splitting the full content on every Update/View call (issue
+// #722, inherited from DrillInState.Lines).
+func TestUpdate_SidebarLoadedMsg_CachesLineSplit(t *testing.T) {
 	m := NewModel()
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2", Raw: "r0\nr1"})
+	activity := []ActivityLine{{Text: "l0"}, {Text: "l1"}, {Text: "l2"}}
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity})
 
-	want := []string{"l0", "l1", "l2"}
-	if len(m.DrillIn.Lines) != len(want) {
-		t.Fatalf("Lines = %v, want %v", m.DrillIn.Lines, want)
+	if len(m.Sidebar.Lines) != len(activity) {
+		t.Fatalf("Lines = %v, want %d entries", m.Sidebar.Lines, len(activity))
 	}
-	for i, line := range want {
-		if m.DrillIn.Lines[i] != line {
-			t.Errorf("Lines[%d] = %q, want %q", i, m.DrillIn.Lines[i], line)
+	for i, a := range activity {
+		if !strings.Contains(m.Sidebar.Lines[i], a.Text) {
+			t.Errorf("Lines[%d] = %q, want it to contain %q", i, m.Sidebar.Lines[i], a.Text)
 		}
 	}
 }
 
-// TestUpdate_DrillInToggleMsg_FlipsShowRaw verifies the toggle switches
-// between rendered and raw with no I/O — both forms are already loaded on
-// Model from the DrillInMsg that opened the view.
-func TestUpdate_DrillInToggleMsg_FlipsShowRaw(t *testing.T) {
+// TestUpdate_SidebarToggleMsg_CyclesActivityTranscriptRaw verifies "t"
+// advances the sidebar around its three-step cycle — Activity feed ->
+// Transcript (rendered) -> Transcript (raw) -> Activity feed — so the
+// byte-exact raw form stays reachable without a second key (#1501).
+func TestUpdate_SidebarToggleMsg_CyclesActivityTranscriptRaw(t *testing.T) {
 	m := NewModel()
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "rendered", Raw: "raw"})
+	activity := []ActivityLine{{Text: "activity line"}}
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity, Rendered: "rendered", Raw: "raw"})
 
-	m = Update(m, DrillInToggleMsg{})
-	if !m.DrillIn.ShowRaw {
-		t.Error("ShowRaw = false after one toggle, want true")
+	if m.Sidebar.ShowTranscript {
+		t.Fatal("ShowTranscript = true before any toggle, want false")
 	}
 
-	m = Update(m, DrillInToggleMsg{})
-	if m.DrillIn.ShowRaw {
-		t.Error("ShowRaw = true after two toggles, want false")
+	m = Update(m, SidebarToggleMsg{})
+	if !m.Sidebar.ShowTranscript || m.Sidebar.ShowRaw {
+		t.Errorf("after 1 toggle: ShowTranscript=%v ShowRaw=%v, want true/false (rendered Transcript)", m.Sidebar.ShowTranscript, m.Sidebar.ShowRaw)
+	}
+	if len(m.Sidebar.Lines) != 1 || m.Sidebar.Lines[0] != "rendered" {
+		t.Errorf("Lines = %v, want the rendered Transcript", m.Sidebar.Lines)
+	}
+
+	m = Update(m, SidebarToggleMsg{})
+	if !m.Sidebar.ShowTranscript || !m.Sidebar.ShowRaw {
+		t.Errorf("after 2 toggles: ShowTranscript=%v ShowRaw=%v, want true/true (raw Transcript)", m.Sidebar.ShowTranscript, m.Sidebar.ShowRaw)
+	}
+	if len(m.Sidebar.Lines) != 1 || m.Sidebar.Lines[0] != "raw" {
+		t.Errorf("Lines = %v, want the raw Transcript", m.Sidebar.Lines)
+	}
+
+	m = Update(m, SidebarToggleMsg{})
+	if m.Sidebar.ShowTranscript || m.Sidebar.ShowRaw {
+		t.Errorf("after 3 toggles: ShowTranscript=%v ShowRaw=%v, want false/false (back to Activity)", m.Sidebar.ShowTranscript, m.Sidebar.ShowRaw)
+	}
+	if len(m.Sidebar.Lines) != 1 || !strings.Contains(m.Sidebar.Lines[0], "activity line") {
+		t.Errorf("Lines = %v, want the Activity feed again", m.Sidebar.Lines)
 	}
 }
 
-// TestUpdate_DrillInToggleMsg_RecachesLineSplit verifies toggling ShowRaw
-// recomputes DrillIn.Lines against the newly active form instead of leaving
-// it split against the form that was active before the toggle (issue #722).
-func TestUpdate_DrillInToggleMsg_RecachesLineSplit(t *testing.T) {
+// TestUpdate_SidebarToggleMsg_NoOpWhenNoSidebarOpen verifies toggling with no
+// sidebar open does not panic or fabricate a Sidebar state.
+func TestUpdate_SidebarToggleMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2", Raw: "r0\nr1"})
-
-	m = Update(m, DrillInToggleMsg{})
-
-	want := []string{"r0", "r1"}
-	if len(m.DrillIn.Lines) != len(want) {
-		t.Fatalf("Lines = %v, want %v", m.DrillIn.Lines, want)
-	}
-	for i, line := range want {
-		if m.DrillIn.Lines[i] != line {
-			t.Errorf("Lines[%d] = %q, want %q", i, m.DrillIn.Lines[i], line)
-		}
+	m = Update(m, SidebarToggleMsg{})
+	if m.Sidebar != nil {
+		t.Errorf("Sidebar = %+v, want nil", m.Sidebar)
 	}
 }
 
-// TestUpdate_DrillInToggleMsg_NoOpWhenNoDrillInOpen verifies toggling with
-// no transcript open does not panic or fabricate a DrillIn state.
-func TestUpdate_DrillInToggleMsg_NoOpWhenNoDrillInOpen(t *testing.T) {
+// TestUpdate_SidebarCloseMsg_ReturnsToBacklog verifies close clears the
+// sidebar state and returns focus to the list, so View falls back to
+// rendering the backlog/queue alone.
+func TestUpdate_SidebarCloseMsg_ReturnsToBacklog(t *testing.T) {
 	m := NewModel()
-	m = Update(m, DrillInToggleMsg{})
-	if m.DrillIn != nil {
-		t.Errorf("DrillIn = %+v, want nil", m.DrillIn)
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "rendered"})
+	m = Update(m, SidebarCloseMsg{})
+	if m.Sidebar != nil {
+		t.Errorf("Sidebar = %+v, want nil after close", m.Sidebar)
+	}
+	if m.Focus != FocusList {
+		t.Errorf("Focus = %v, want FocusList after close", m.Focus)
 	}
 }
 
-// TestUpdate_DrillInCloseMsg_ReturnsToBacklog verifies close clears the
-// drill-in state so View falls back to rendering the backlog/queue.
-func TestUpdate_DrillInCloseMsg_ReturnsToBacklog(t *testing.T) {
-	m := NewModel()
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "rendered"})
-	m = Update(m, DrillInCloseMsg{})
-	if m.DrillIn != nil {
-		t.Errorf("DrillIn = %+v, want nil after close", m.DrillIn)
-	}
-}
-
-// TestUpdate_DrillInScrollMsg_MovesOffset verifies a scroll message moves
-// DrillIn.Offset by Delta, clamped into the loaded content's line bounds so
+// TestUpdate_SidebarScrollMsg_MovesOffset verifies a scroll message moves
+// Sidebar.Offset by Delta, clamped into the loaded content's line bounds so
 // paging past either end leaves the pane showing its first or last line
-// instead of an invalid Offset (issue #786). No SizeChangedMsg is sent, so
-// Height stays 0 and the final pgdown assertion below exercises the
+// instead of an invalid Offset (issue #786, inherited). No SizeChangedMsg is
+// sent, so Height stays 0 and the final pgdown assertion below exercises the
 // degenerate-height fallback, not the viewport-aware clamp added in #829 —
-// see TestUpdate_DrillInScrollMsg_ClampsToViewportHeight and
-// TestUpdate_DrillInScrollMsg_ShortTranscriptStaysAtTop for that.
-func TestUpdate_DrillInScrollMsg_MovesOffset(t *testing.T) {
+// see TestUpdate_SidebarScrollMsg_ClampsToViewportHeight and
+// TestUpdate_SidebarScrollMsg_ShortTranscriptStaysAtTop for that. The
+// Transcript (rendered) view is toggled on so Lines matches the plain
+// "l0".."l4" content the old drill-in test exercised.
+func TestUpdate_SidebarScrollMsg_MovesOffset(t *testing.T) {
 	m := NewModel()
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
+	m = Update(m, SidebarToggleMsg{})
 
-	m = Update(m, DrillInScrollMsg{Delta: 2})
-	if m.DrillIn.Offset != 2 {
-		t.Errorf("Offset = %d, want 2", m.DrillIn.Offset)
+	m = Update(m, SidebarScrollMsg{Delta: 2})
+	if m.Sidebar.Offset != 2 {
+		t.Errorf("Offset = %d, want 2", m.Sidebar.Offset)
 	}
 
-	m = Update(m, DrillInScrollMsg{Delta: -1})
-	if m.DrillIn.Offset != 1 {
-		t.Errorf("Offset = %d, want 1", m.DrillIn.Offset)
+	m = Update(m, SidebarScrollMsg{Delta: -1})
+	if m.Sidebar.Offset != 1 {
+		t.Errorf("Offset = %d, want 1", m.Sidebar.Offset)
 	}
 
-	m = Update(m, DrillInScrollMsg{Delta: -100})
-	if m.DrillIn.Offset != 0 {
-		t.Errorf("Offset = %d, want 0 (clamped at the top)", m.DrillIn.Offset)
+	m = Update(m, SidebarScrollMsg{Delta: -100})
+	if m.Sidebar.Offset != 0 {
+		t.Errorf("Offset = %d, want 0 (clamped at the top)", m.Sidebar.Offset)
 	}
 
 	// See the degenerate-height note in the doc comment above.
-	m = Update(m, DrillInScrollMsg{Delta: 100})
-	if m.DrillIn.Offset != 4 {
-		t.Errorf("Offset = %d, want 4 (clamped to the last line)", m.DrillIn.Offset)
+	m = Update(m, SidebarScrollMsg{Delta: 100})
+	if m.Sidebar.Offset != 4 {
+		t.Errorf("Offset = %d, want 4 (clamped to the last line)", m.Sidebar.Offset)
 	}
 }
 
-// TestUpdate_DrillInScrollMsg_ClampsToViewportHeight verifies a pgdown past
+// TestUpdate_SidebarScrollMsg_ClampsToViewportHeight verifies a pgdown past
 // the end of a transcript longer than the fullscreen viewport lands Offset
 // at the last full page, not len(Lines)-1 — a large Delta must never leave
 // the pane showing a single line with the rest of the viewport blank
-// (issue #829).
-func TestUpdate_DrillInScrollMsg_ClampsToViewportHeight(t *testing.T) {
+// (issue #829, inherited).
+func TestUpdate_SidebarScrollMsg_ClampsToViewportHeight(t *testing.T) {
 	lines := make([]string, 100)
 	for i := range lines {
 		lines[i] = fmt.Sprintf("l%d", i)
 	}
 	m := NewModel()
 	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
-	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+	m = Update(m, SidebarToggleMsg{})
 
-	m = Update(m, DrillInScrollMsg{Delta: 1000})
+	m = Update(m, SidebarScrollMsg{Delta: 1000})
 
 	want := 100 - (20 - 2) // last page fills the 18-line fullscreen budget
-	if m.DrillIn.Offset != want {
-		t.Errorf("Offset = %d, want %d (last page fills viewport)", m.DrillIn.Offset, want)
+	if m.Sidebar.Offset != want {
+		t.Errorf("Offset = %d, want %d (last page fills viewport)", m.Sidebar.Offset, want)
 	}
 }
 
-// TestUpdate_DrillInScrollMsg_ShortTranscriptStaysAtTop verifies a pgdown
+// TestUpdate_SidebarScrollMsg_ShortTranscriptStaysAtTop verifies a pgdown
 // past the end of a transcript shorter than the fullscreen viewport lands
 // Offset at 0, not len(Lines)-1 — content that already fits the viewport in
 // full at Offset 0 must never get pushed to a higher Offset that shows only
-// its last line over an otherwise-blank pane (issue #829).
-func TestUpdate_DrillInScrollMsg_ShortTranscriptStaysAtTop(t *testing.T) {
+// its last line over an otherwise-blank pane (issue #829, inherited).
+func TestUpdate_SidebarScrollMsg_ShortTranscriptStaysAtTop(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
+	m = Update(m, SidebarToggleMsg{})
 
-	m = Update(m, DrillInScrollMsg{Delta: 1000})
+	m = Update(m, SidebarScrollMsg{Delta: 1000})
 
-	if m.DrillIn.Offset != 0 {
-		t.Errorf("Offset = %d, want 0 (content already fits the viewport)", m.DrillIn.Offset)
+	if m.Sidebar.Offset != 0 {
+		t.Errorf("Offset = %d, want 0 (content already fits the viewport)", m.Sidebar.Offset)
 	}
 }
 
-// TestUpdate_DrillInScrollMsg_NoOpWhenNoDrillInOpen verifies scrolling with
-// no transcript open does not panic or fabricate a DrillIn state.
-func TestUpdate_DrillInScrollMsg_NoOpWhenNoDrillInOpen(t *testing.T) {
+// TestUpdate_SidebarScrollMsg_NoOpWhenNoSidebarOpen verifies scrolling with
+// no sidebar open does not panic or fabricate a Sidebar state.
+func TestUpdate_SidebarScrollMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
-	m = Update(m, DrillInScrollMsg{Delta: 1})
-	if m.DrillIn != nil {
-		t.Errorf("DrillIn = %+v, want nil", m.DrillIn)
+	m = Update(m, SidebarScrollMsg{Delta: 1})
+	if m.Sidebar != nil {
+		t.Errorf("Sidebar = %+v, want nil", m.Sidebar)
+	}
+}
+
+// TestUpdate_FocusSidebarMsg_MovesFocus verifies "l"/right moves focus to an
+// open sidebar (#1501, ADR 0030).
+func TestUpdate_FocusSidebarMsg_MovesFocus(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42"})
+	m = Update(m, FocusListMsg{}) // opening already focused the sidebar; force it back to the list first
+	m = Update(m, FocusSidebarMsg{})
+	if m.Focus != FocusSidebar {
+		t.Errorf("Focus = %v, want FocusSidebar", m.Focus)
+	}
+}
+
+// TestUpdate_FocusSidebarMsg_NoOpWhenNoSidebarOpen verifies "l"/right does
+// not move focus into a sidebar that isn't open.
+func TestUpdate_FocusSidebarMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
+	m := NewModel()
+	m = Update(m, FocusSidebarMsg{})
+	if m.Focus != FocusList {
+		t.Errorf("Focus = %v, want FocusList (no sidebar to focus)", m.Focus)
+	}
+}
+
+// TestUpdate_FocusListMsg_MovesFocus verifies "h"/left returns focus to the
+// list while a sidebar is open and focused (#1501, ADR 0030).
+func TestUpdate_FocusListMsg_MovesFocus(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42"})
+	if m.Focus != FocusSidebar {
+		t.Fatal("test setup: opening a sidebar must focus it")
+	}
+
+	m = Update(m, FocusListMsg{})
+	if m.Focus != FocusList {
+		t.Errorf("Focus = %v, want FocusList", m.Focus)
+	}
+	if m.Sidebar == nil {
+		t.Error("Sidebar = nil, want it to stay open — moving focus away must not close it")
 	}
 }
 
 // TestUpdate_ScrollMsg_MovesOffset verifies a scroll message moves
 // Model.Offset by Delta while the Backlog Section is active, clamped into
-// the visible list's line bounds the same way DrillInScrollMsg clamps
-// DrillIn.Offset (issue #1036, ADR 0030).
+// the visible list's line bounds the same way SidebarScrollMsg clamps
+// Sidebar.Offset (issue #1036, ADR 0030).
 func TestUpdate_ScrollMsg_MovesOffset(t *testing.T) {
 	m := NewModel()
 	issues := make([]forge.Issue, 5)
@@ -704,20 +759,26 @@ func TestUpdate_StaleStatusMsg_PropagatesCapturedRebuildOutput(t *testing.T) {
 	}
 }
 
-// TestUpdate_DrillInMsg_RefreshSameNumber_PreservesShowRaw verifies a
-// second DrillInMsg for the same pick (a refresh while live-tailing) keeps
-// the operator's raw/rendered toggle instead of resetting to rendered.
-func TestUpdate_DrillInMsg_RefreshSameNumber_PreservesShowRaw(t *testing.T) {
+// TestUpdate_SidebarLoadedMsg_RefreshSameNumber_PreservesToggleState verifies
+// a second SidebarLoadedMsg for the same pick (a refresh while live-tailing)
+// keeps the operator's Activity/Transcript/raw toggle instead of resetting
+// to the Activity feed, and does not re-yank focus away from wherever the
+// operator moved it.
+func TestUpdate_SidebarLoadedMsg_RefreshSameNumber_PreservesToggleState(t *testing.T) {
 	m := NewModel()
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "first"})
-	m = Update(m, DrillInToggleMsg{})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "first"})
+	m = Update(m, SidebarToggleMsg{})
+	m = Update(m, FocusListMsg{})
 
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "second (grew)"})
-	if !m.DrillIn.ShowRaw {
-		t.Error("ShowRaw reset to false on refresh, want it preserved as true")
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "second (grew)"})
+	if !m.Sidebar.ShowTranscript {
+		t.Error("ShowTranscript reset to false on refresh, want it preserved as true")
 	}
-	if m.DrillIn.Rendered != "second (grew)" {
-		t.Errorf("Rendered = %q, want the refreshed content", m.DrillIn.Rendered)
+	if m.Sidebar.TranscriptRendered != "second (grew)" {
+		t.Errorf("TranscriptRendered = %q, want the refreshed content", m.Sidebar.TranscriptRendered)
+	}
+	if m.Focus != FocusList {
+		t.Errorf("Focus = %v, want FocusList preserved (a same-number refresh must not re-yank focus)", m.Focus)
 	}
 }
 

@@ -488,11 +488,12 @@ func TestTea_SectionKeys_HLAndDigitsSwitchSections(t *testing.T) {
 }
 
 // TestTea_EnterKey_OnRunningSection_DrillsRunningPick verifies Enter, on the
-// Running Section, opens the highlighted pick's Transcript when its state is
+// Running Section, opens the highlighted pick's sidebar when its state is
 // PickRunning — the context-sensitive Enter's work-Section drill (issue
-// #845, generalized to ActiveSection by issue #1500).
+// #845, generalized to ActiveSection by issue #1500, then to the sidebar by
+// #1501).
 func TestTea_EnterKey_OnRunningSection_DrillsRunningPick(t *testing.T) {
-	tm := drillInOpen(t)
+	tm := sidebarOpen(t)
 
 	sendKey(tm, "x")
 	waitForOutput(t, tm, "fix the thing")
@@ -530,8 +531,8 @@ func TestTea_EnterKey_OnRunningSection_NoOpOnQueuedRow(t *testing.T) {
 	waitFinished(t, tm)
 
 	fm := tm.FinalModel(t).(teaModel)
-	if fm.m.DrillIn != nil {
-		t.Errorf("DrillIn = %+v, want nil — Enter on a queued row must not open a transcript pane", fm.m.DrillIn)
+	if fm.m.Sidebar != nil {
+		t.Errorf("Sidebar = %+v, want nil — Enter on a queued row must not open the sidebar", fm.m.Sidebar)
 	}
 }
 
@@ -615,11 +616,12 @@ func TestHasTranscript_PerState(t *testing.T) {
 	}
 }
 
-// drillInOpen prepares a fake forge issue #42 with a running pick and a
+// sidebarOpen prepares a fake forge issue #42 with a running pick and a
 // one-line transcript, then drives the launcher through the Running
-// Section/enter to land on an open drill-in transcript pane, ready for a
-// test to assert further keystrokes against.
-func drillInOpen(t *testing.T) *teatest.TestModel {
+// Section/enter to land on an open sidebar (fullscreen, since the 80-column
+// test terminal is narrower than sidebarFits requires), ready for a test to
+// assert further keystrokes against.
+func sidebarOpen(t *testing.T) *teatest.TestModel {
 	t.Helper()
 
 	f := forge.NewFake()
@@ -643,18 +645,19 @@ func drillInOpen(t *testing.T) *teatest.TestModel {
 	waitForOutput(t, tm, "running")
 
 	sendKey(tm, "enter")
-	waitForOutput(t, tm, "transcript #42", "[implementor] hi")
+	waitForOutput(t, tm, "activity #42", "hi")
 
 	return tm
 }
 
-// TestTea_DrillInKey_OpensTranscriptPane verifies Enter, on the Running
-// Section, opens a full-screen transcript pane for the highlighted running
-// pick (issue #786; retargeted to a work-Section Enter by issue #845, which
-// retires the old "d"/backlog-Enter drill-in binding, then generalized from
-// FocusedColumn to ActiveSection by issue #1500).
-func TestTea_DrillInKey_OpensTranscriptPane(t *testing.T) {
-	tm := drillInOpen(t)
+// TestTea_SidebarKey_OpensActivityPane verifies Enter, on the Running
+// Section, opens a full-screen sidebar showing the highlighted running
+// pick's Activity feed by default (issue #786; retargeted to a work-Section
+// Enter by issue #845, generalized from FocusedColumn to ActiveSection by
+// issue #1500, and from a fullscreen-only Transcript drill-in to the
+// Activity-feed-default sidebar by #1501).
+func TestTea_SidebarKey_OpensActivityPane(t *testing.T) {
+	tm := sidebarOpen(t)
 
 	sendKey(tm, "x")
 	waitForOutput(t, tm, "fix the thing")
@@ -665,31 +668,31 @@ func TestTea_DrillInKey_OpensTranscriptPane(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_DrillInKey_QuitsWithoutClosing verifies "q" hard-quits straight
-// out of an open drill-in pane, without requiring "x" first — the drill-in
-// guard in handleKey must not swallow the universal quit keystroke (issue
-// #826).
-func TestTea_DrillInKey_QuitsWithoutClosing(t *testing.T) {
-	tm := drillInOpen(t)
+// TestTea_SidebarKey_QuitsWithoutClosing verifies "q" hard-quits straight
+// out of an open sidebar, without requiring "x" first — the sidebar guard in
+// handleKey must not swallow the universal quit keystroke (issue #826).
+func TestTea_SidebarKey_QuitsWithoutClosing(t *testing.T) {
+	tm := sidebarOpen(t)
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
 }
 
-// TestTea_DrillInKey_QuitsOnCtrlCWithoutClosing verifies "ctrl+c" hard-quits
-// straight out of an open drill-in pane, without requiring "x" first — same
+// TestTea_SidebarKey_QuitsOnCtrlCWithoutClosing verifies "ctrl+c" hard-quits
+// straight out of an open sidebar, without requiring "x" first — same
 // universal-quit carve-out as "q" (issue #826).
-func TestTea_DrillInKey_QuitsOnCtrlCWithoutClosing(t *testing.T) {
-	tm := drillInOpen(t)
+func TestTea_SidebarKey_QuitsOnCtrlCWithoutClosing(t *testing.T) {
+	tm := sidebarOpen(t)
 
 	sendKey(tm, "ctrl+c")
 	waitFinished(t, tm)
 }
 
-// TestTea_DrillInToggleKey_SwapsRenderedAndRaw verifies "t" swaps the open
-// drill-in pane between the rendered transcript and the byte-exact raw JSONL
-// log (issue #786).
-func TestTea_DrillInToggleKey_SwapsRenderedAndRaw(t *testing.T) {
+// TestTea_SidebarToggleKey_CyclesActivityTranscriptRaw verifies "t" advances
+// the open sidebar around its Activity feed -> Transcript (rendered) ->
+// Transcript (raw) -> Activity feed cycle, so the byte-exact raw form stays
+// reachable without a second key (issue #786, extended by #1501).
+func TestTea_SidebarToggleKey_CyclesActivityTranscriptRaw(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
@@ -711,10 +714,16 @@ func TestTea_DrillInToggleKey_SwapsRenderedAndRaw(t *testing.T) {
 	waitForOutput(t, tm, "running")
 
 	sendKey(tm, "enter")
-	waitForOutput(t, tm, "[implementor] hi")
+	waitForOutput(t, tm, "activity #42")
 
 	sendKey(tm, "t")
-	waitForOutput(t, tm, `"type":"assistant"`)
+	waitForOutput(t, tm, "transcript #42", "[implementor] hi")
+
+	sendKey(tm, "t")
+	waitForOutput(t, tm, "(raw)", `"type":"assistant"`)
+
+	sendKey(tm, "t")
+	waitForOutput(t, tm, "activity #42")
 
 	sendKey(tm, "x")
 	waitForOutput(t, tm, "fix the thing")
@@ -725,12 +734,12 @@ func TestTea_DrillInToggleKey_SwapsRenderedAndRaw(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_DrillInScrollKeys_PageThroughTranscript verifies pgdown/pgup move
-// the drill-in pane's scroll offset, hiding and restoring the leading lines
-// (issue #786). The transcript has to outrun the 24-row test terminal's
-// fullscreen budget, or clampDrillInOffset's viewport cap (issue #829) pins
-// Offset at 0 as a real no-op and pgdown never produces a fresh frame.
-func TestTea_DrillInScrollKeys_PageThroughTranscript(t *testing.T) {
+// TestTea_SidebarScrollKeys_PageThroughContent verifies pgdown/pgup move the
+// sidebar's scroll offset, hiding and restoring the leading lines (issue
+// #786). The content has to outrun the 24-row test terminal's fullscreen
+// budget, or clampSidebarOffset's viewport cap (issue #829) pins Offset at 0
+// as a real no-op and pgdown never produces a fresh frame.
+func TestTea_SidebarScrollKeys_PageThroughContent(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
@@ -772,13 +781,13 @@ func TestTea_DrillInScrollKeys_PageThroughTranscript(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_DrillInKey_NoDriver_ShowsGracefulMessage verifies drilling in
-// during a launch-less session (no Driver configured) surfaces a readable
-// error in the pane instead of panicking on a nil Driver (issue #786 AC4).
+// TestTea_SidebarKey_NoDriver_ShowsGracefulMessage verifies opening the
+// sidebar during a launch-less session (no Driver configured) surfaces a
+// readable error instead of panicking on a nil Driver (issue #786 AC4).
 // Picks is seeded directly (rather than via the "p"/Enter pick path) since a
 // nil Launcher can never promote a pick to PickRunning through the normal
 // flow — isolating the no-Driver render path from how the row got there.
-func TestTea_DrillInKey_NoDriver_ShowsGracefulMessage(t *testing.T) {
+func TestTea_SidebarKey_NoDriver_ShowsGracefulMessage(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
@@ -792,7 +801,7 @@ func TestTea_DrillInKey_NoDriver_ShowsGracefulMessage(t *testing.T) {
 	waitForOutput(t, tm, "running")
 
 	sendKey(tm, "enter")
-	waitForOutput(t, tm, "transcript #42", "drill-in failed")
+	waitForOutput(t, tm, "activity #42", "sidebar failed")
 
 	sendKey(tm, "x")
 	waitForOutput(t, tm, "fix the thing")

@@ -121,29 +121,60 @@ type OrphanRecoveryMsg struct {
 
 func (OrphanRecoveryMsg) isConsoleMsg() {}
 
-// DrillInToggleMsg is the run loop's signal that the operator asked to
-// switch between the rendered transcript and the raw byte-exact log — a
-// no-op when no drill-in is open.
-type DrillInToggleMsg struct{}
+// SidebarLoadedMsg carries a Dispatch's loaded sidebar content: its Activity
+// feed (ActivityFeed's derivation) and its whole rendered transcript plus
+// byte-exact raw form (DrillIn's load), fetched together on select so the
+// Activity/Transcript and rendered/raw toggles need no further I/O (#1501).
+// Err is set instead when loading or rendering failed (e.g. no Driver
+// configured, no logs on disk yet).
+type SidebarLoadedMsg struct {
+	Number        string
+	Activity      []ActivityLine
+	Rendered, Raw string
+	Err           error
+}
 
-func (DrillInToggleMsg) isConsoleMsg() {}
+func (SidebarLoadedMsg) isConsoleMsg() {}
 
-// DrillInCloseMsg is the run loop's signal that the operator asked to leave
-// the transcript view and return to the backlog/queue view.
-type DrillInCloseMsg struct{}
+// SidebarToggleMsg is the run loop's signal that the operator pressed "t" —
+// advances the sidebar's content one step around its Activity -> Transcript
+// (rendered) -> Transcript (raw) -> Activity cycle, so a repeated "t" reaches
+// every form the byte-exact raw log included, without a second key (#1501).
+// A no-op when no sidebar is open.
+type SidebarToggleMsg struct{}
 
-func (DrillInCloseMsg) isConsoleMsg() {}
+func (SidebarToggleMsg) isConsoleMsg() {}
 
-// DrillInScrollMsg is the tea layer's signal that the operator pressed a
-// scroll key while the drill-in transcript pane is open — Delta is the
-// number of lines to move (positive scrolls down/later, negative scrolls
-// up/earlier); Update clamps the result into the loaded content's line
-// bounds, a no-op when no drill-in is open (issue #786).
-type DrillInScrollMsg struct {
+// SidebarCloseMsg is the run loop's signal that the operator asked to leave
+// the sidebar and return focus to the list alone (#1501).
+type SidebarCloseMsg struct{}
+
+func (SidebarCloseMsg) isConsoleMsg() {}
+
+// SidebarScrollMsg is the tea layer's signal that the operator pressed a
+// scroll key while the sidebar is focused — Delta is the number of lines to
+// move (positive scrolls down/later, negative scrolls up/earlier); Update
+// clamps the result into the loaded content's line bounds, a no-op when no
+// sidebar is open (#1501).
+type SidebarScrollMsg struct {
 	Delta int
 }
 
-func (DrillInScrollMsg) isConsoleMsg() {}
+func (SidebarScrollMsg) isConsoleMsg() {}
+
+// FocusListMsg is the tea layer's signal that the operator pressed "h"/left —
+// moves keyboard focus to the list, a no-op when it's already there (#1501,
+// ADR 0030).
+type FocusListMsg struct{}
+
+func (FocusListMsg) isConsoleMsg() {}
+
+// FocusSidebarMsg is the tea layer's signal that the operator pressed
+// "l"/right — moves keyboard focus to the sidebar, a no-op when no sidebar
+// is open (#1501, ADR 0030).
+type FocusSidebarMsg struct{}
+
+func (FocusSidebarMsg) isConsoleMsg() {}
 
 // ScrollMsg is the tea layer's signal that the operator pressed a line-scroll
 // key while the body is showing (no drill-in open) — Delta is the number of

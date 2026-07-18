@@ -4,12 +4,12 @@
 // tea.KeyMsg and the two async signals (background poll, launch-refresh)
 // into the same console Msg values Update already handles; tea.Model.View
 // delegates straight to the pure View. Unpick/pick-all-ready/Terminate/
-// Resize/Rebuild act on the cursor's highlighted row (issue #785); DrillIn is
-// wired too (issue #786). Tab moves focus between the backlog and work-queue
-// columns, and Enter is context-sensitive: Pick (via the PickIssue adapter)
-// on a focused backlog row, drill into the Transcript on a focused
-// work-queue row when one exists (issue #845) — the old "d"/backlog-Enter
-// drill binding is retired in favour of this split.
+// Resize/Rebuild act on the cursor's highlighted row (issue #785); the
+// live-tail sidebar is wired too (issue #786, replaced by #1501's docked
+// sidebar). Enter is context-sensitive: Pick (via the PickIssue adapter) on a
+// focused Backlog row, open the highlighted work row's sidebar when it has a
+// Transcript (issue #845) — the old "d"/backlog-Enter drill binding is
+// retired in favour of this split.
 package console
 
 import (
@@ -29,11 +29,11 @@ import (
 // to never spend the rate-limit window the session's Agents share (#647 AC5).
 const defaultPollInterval = 90 * time.Second
 
-// drillInPageScrollDelta is how many lines pgup/pgdown move the drill-in
+// fixedPaneScrollDelta is how many lines pgup/pgdown move the drill-in
 // transcript's scroll offset — j/k and the arrows move one line at a time
 // (issue #786). Fixed, unlike the body's own page jump (sectionPageSize),
 // which derives from the live viewport height instead (issue #1037).
-const drillInPageScrollDelta = 10
+const fixedPaneScrollDelta = 10
 
 // teaModel is the Bubble Tea adapter around the pure Model: it carries the
 // I/O seams (tracker, pwd, launch) Update itself never touches, and
@@ -139,7 +139,7 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.m = Update(t.m, SizeChangedMsg{Width: msg.Width, Height: msg.Height})
 	case IssuesLoadedMsg: // async-load result, not a reactive signal
 		t.m = Update(t.m, msg)
-	case DrillInMsg: // async-load result, not a reactive signal
+	case SidebarLoadedMsg: // async-load result, not a reactive signal
 		t.m = Update(t.m, msg)
 	case OrphanRecoveryMsg:
 		t.m = Update(t.m, msg)
@@ -183,14 +183,17 @@ func (t teaModel) View() string {
 }
 
 // handleKey translates one keypress into a console Msg and applies it,
-// gated by whichever modal state (drill-in pane, help overlay, filter edit)
-// is active — mirroring applyCommand's old PendingTerminate/PendingQuit
-// precedence, now keyed off Model's own modal fields instead of a line
-// parse. An open drill-in takes precedence over everything else: it replaces
-// the whole screen, so help/filter keys don't apply while it's up (#786).
+// gated by whichever modal state (a focused or fullscreen sidebar, help
+// overlay, filter edit) is active — mirroring applyCommand's old
+// PendingTerminate/PendingQuit precedence, now keyed off Model's own modal
+// fields instead of a line parse. An open sidebar takes precedence over
+// everything else whenever it has focus or the terminal is too narrow to
+// dock it beside the list (sidebarFits) — in the fullscreen-fallback case
+// there is no list on screen to route list-only keys to regardless of
+// Model.Focus (ADR 0030, #1501, inherited from #786's drill-in precedence).
 func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
-	if t.m.DrillIn != nil {
-		t.m = t.handleDrillInKey(msg)
+	if t.m.Sidebar != nil && (t.m.Focus == FocusSidebar || !sidebarFits(t.m)) {
+		t.m = t.handleSidebarKey(msg)
 		return t, nil
 	}
 	if t.m.ShowRebuildOutput {
@@ -271,10 +274,16 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		}
 		if p, ok := t.highlightedPick(); ok {
 			if hasTranscript(p.State) {
-				return t, openDrillInCmd(t.launch, t.pwd, p.Number)
+				return t, openSidebarCmd(t.launch, t.pwd, p.Number)
 			}
 			t.m = Update(t.m, QueueEnterNoticedMsg{})
 		}
+	case "l", "right":
+		t.m = Update(t.m, FocusSidebarMsg{})
+	case "h", "left":
+		// Already on the list — nothing to move away from. Present as an
+		// explicit case (rather than falling through to the default no-op)
+		// so the h/l pair reads as one symmetric gesture at the call site.
 	case "r":
 		return t, refreshCmd(t.tracker)
 	case "q", "ctrl+c":
@@ -333,39 +342,45 @@ func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) Model {
 	case "k", "up":
 		return Update(t.m, RebuildOutputScrollMsg{Delta: -1})
 	case "pgdown":
-		return Update(t.m, RebuildOutputScrollMsg{Delta: drillInPageScrollDelta})
+		return Update(t.m, RebuildOutputScrollMsg{Delta: fixedPaneScrollDelta})
 	case "pgup":
-		return Update(t.m, RebuildOutputScrollMsg{Delta: -drillInPageScrollDelta})
+		return Update(t.m, RebuildOutputScrollMsg{Delta: -fixedPaneScrollDelta})
 	}
 	return t.m
 }
 
-// handleDrillInKey routes one keypress while the drill-in transcript pane is
-// open: "t" toggles rendered/raw, "x"/Esc closes back to the body, the
-// scroll keys page through the loaded content (issue #786), and "q"/
-// "ctrl+c" hard-quit — the universal quit keystroke must never be swallowed
-// by the drill-in pane, same principle as the PendingPick chord in handleKey
-// (issue #826) but not the same mechanics: PendingPick resolves the chord
-// (pickHighlighted) before quitting, while drill-in quits directly with no
-// resolve step. The pane always renders fullscreen now that the docked/
-// floating pane-mode cycle has retired (issue #1500, ADR 0030) — the
-// live-tail sidebar that replaces docked mode ships in a later ticket.
-func (t teaModel) handleDrillInKey(msg tea.KeyMsg) Model {
+// handleSidebarKey routes one keypress while the sidebar has focus (or the
+// terminal is too narrow to dock it, forcing fullscreen — handleKey's
+// sidebarFits guard): "t" advances the Activity/Transcript/raw cycle, "h"/
+// left returns focus to the list when the sidebar is docked (a no-op in the
+// fullscreen fallback, which has no list on screen to focus), "x"/Esc closes
+// back to the body, the scroll keys page through the loaded content (issue
+// #786's drill-in precedent), and "q"/"ctrl+c" hard-quit — the universal quit
+// keystroke must never be swallowed by the sidebar, same principle as the
+// PendingPick chord in handleKey (issue #826) but not the same mechanics:
+// PendingPick resolves the chord (pickHighlighted) before quitting, while the
+// sidebar quits directly with no resolve step.
+func (t teaModel) handleSidebarKey(msg tea.KeyMsg) Model {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return Update(t.m, QuitMsg{})
 	case "t":
-		return Update(t.m, DrillInToggleMsg{})
+		return Update(t.m, SidebarToggleMsg{})
+	case "h", "left":
+		if sidebarFits(t.m) {
+			return Update(t.m, FocusListMsg{})
+		}
+		return t.m
 	case "x", "esc":
-		return Update(t.m, DrillInCloseMsg{})
+		return Update(t.m, SidebarCloseMsg{})
 	case "j", "down":
-		return Update(t.m, DrillInScrollMsg{Delta: 1})
+		return Update(t.m, SidebarScrollMsg{Delta: 1})
 	case "k", "up":
-		return Update(t.m, DrillInScrollMsg{Delta: -1})
+		return Update(t.m, SidebarScrollMsg{Delta: -1})
 	case "pgdown":
-		return Update(t.m, DrillInScrollMsg{Delta: drillInPageScrollDelta})
+		return Update(t.m, SidebarScrollMsg{Delta: fixedPaneScrollDelta})
 	case "pgup":
-		return Update(t.m, DrillInScrollMsg{Delta: -drillInPageScrollDelta})
+		return Update(t.m, SidebarScrollMsg{Delta: -fixedPaneScrollDelta})
 	}
 	return t.m
 }
@@ -381,8 +396,8 @@ func (t teaModel) highlightedIssue() (forge.Issue, bool) {
 }
 
 // highlightedPick returns the row under Cursor within whichever work Section
-// is active, or false when that Section is empty — Enter's drill-in target
-// on a work Section (ADR 0030, formerly the focused-queue case of #845).
+// is active, or false when that Section is empty — Enter's sidebar target on
+// a work Section (ADR 0030, formerly the focused-queue case of #845).
 // Meaningless for SectionBacklog, whose rows are issues, not Picks; callers
 // only reach for this once ActiveSection is known to be a work Section.
 func (t teaModel) highlightedPick() (Pick, bool) {
@@ -408,20 +423,25 @@ func hasTranscript(state PickState) bool {
 	return false
 }
 
-// openDrillInCmd loads and renders number's whole transcript in the
-// background. A launch-less session (or a Launcher built without a Factory)
-// has no Driver to render with — that renders as a graceful DrillInMsg error
-// instead of dereferencing a nil Driver (issue #786 AC4). This runs only on
-// open (Enter): handleDrillInKey has no refresh key, so the pane never
-// live-tails a running Dispatch on its own — close (x/Esc) and reopen to
-// reload (issue #719).
-func openDrillInCmd(launch *Launcher, pwd, number string) tea.Cmd {
+// openSidebarCmd loads number's Activity feed and whole rendered transcript
+// in the background, combining ActivityFeed's derivation with DrillIn's
+// transcript load into one SidebarLoadedMsg — the sidebar's default Activity
+// view and its Transcript toggle both need no further I/O once this lands. A
+// launch-less session (or a Launcher built without a Factory) has no Driver
+// to load with — that renders as a graceful SidebarLoadedMsg error instead of
+// dereferencing a nil Driver (issue #786 AC4, inherited). This runs only on
+// open (Enter): handleSidebarKey has no refresh key, so the sidebar never
+// live-tails a running Dispatch on its own yet — close (x/Esc) and reopen to
+// reload (issue #719, inherited; live-tailing ships in #1502).
+func openSidebarCmd(launch *Launcher, pwd, number string) tea.Cmd {
 	return func() tea.Msg {
 		drv := driverOf(launch)
 		if drv == nil {
-			return DrillInMsg{Number: number, Err: fmt.Errorf("no Driver available for this session")}
+			return SidebarLoadedMsg{Number: number, Err: fmt.Errorf("no Driver available for this session")}
 		}
-		return DrillIn(drv, pwd, number)
+		activity := ActivityFeed(drv, pwd, number)
+		dm, _ := DrillIn(drv, pwd, number).(DrillInMsg)
+		return SidebarLoadedMsg{Number: number, Activity: activity, Rendered: dm.Rendered, Raw: dm.Raw, Err: dm.Err}
 	}
 }
 
