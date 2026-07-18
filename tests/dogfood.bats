@@ -267,3 +267,9 @@ setup() {
   [[ "$output" != *"arithmetic syntax error"* ]]
 }
 
+@test "dogfood MAX_PARALLEL validation message says non-negative integer" {
+  run env BASE_BRANCH=main MAX_PARALLEL=garbage bash "$WORK/dogfood.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"non-negative integer"* ]]
+}
+
