@@ -68,5 +68,8 @@ in
     assert assertMsg (
       result.success
     ) "assertShape must not throw when a Driver entry has every required attribute";
+    assert assertMsg (
+      result.value == complete
+    ) "assertShape must return the Driver entry unchanged when it has every required attribute";
     pkgs.runCommand "drivers-assert-shape-succeeds" { } "touch $out";
 }
