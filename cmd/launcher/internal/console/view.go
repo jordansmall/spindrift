@@ -340,6 +340,22 @@ func clip(s string, width int, pad bool) string {
 	}
 }
 
+// rebuildErrBannerWidth bounds the "!! rebuild failed" banner line to a
+// single row's worth of text. RunNixBuild wraps the merged nix stdout+stderr
+// (often many lines) into one error, so printing m.RebuildErr unbounded blew
+// the header banner out to arbitrary length (issue #1131). Fixed rather than
+// tied to m.Width — the other header lines are already unbounded strings,
+// and this budget only needs to be "one reasonable terminal row," not exact.
+const rebuildErrBannerWidth = 200
+
+// clipRebuildErr collapses a rebuild error's embedded newlines (RunNixBuild
+// merges multi-line nix output into one error, issue #1131) to single spaces
+// and clips the result to width, so the header's rebuild-failed line stays
+// one row regardless of how verbose the underlying nix build output was.
+func clipRebuildErr(s string, width int) string {
+	return clip(strings.Join(strings.Fields(s), " "), width, false)
+}
+
 // banner is the Console's fixed wordmark, printed at the top of the header
 // whenever the terminal has room for it (issue #843, ADR 0025). It is
 // hardcoded rather than figlet-rendered — the module carries no figlet
@@ -403,7 +419,7 @@ func renderHeader(m Model) string {
 		b.WriteString("==> rebuilding image...\n")
 	}
 	if m.RebuildErr != "" {
-		fmt.Fprintf(&b, "!! rebuild failed: %s\n", m.RebuildErr)
+		fmt.Fprintf(&b, "!! rebuild failed: %s\n", clipRebuildErr(m.RebuildErr, rebuildErrBannerWidth))
 	}
 	if m.DogfoodLive {
 		b.WriteString("notice: a live dogfood loop (.dogfood.pid) is competing for the same queue\n")
