@@ -32,7 +32,12 @@ Everything from COMMS onward below is the shared contract every box runs on
 
 - One focused commit for the fix, not several — COMMIT's "several small
   commits" guidance below describes a fresh implementation's multiple
-  logical units, which a warm fix rarely has.
+  logical units, which a warm fix rarely has. Unless the fix is a
+  reasonably different change, fold it into the prior-run commit it
+  logically belongs to (`git commit --amend` or an autosquash fixup)
+  rather than adding a follow-up commit; a new commit only when the fix is
+  truly a separate file or scope. The branch already force-pushes, so
+  rewriting its own unmerged history is expected.
 - The PR for this issue is already open (see TASK above) and there is no
   REVIEW step on a fix pass. Where the shared flow below reaches REVIEW,
   OPEN A PULL REQUEST, or IF BLOCKED's "open the PR as a draft" step, skip
