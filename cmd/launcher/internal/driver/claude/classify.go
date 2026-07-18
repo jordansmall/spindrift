@@ -132,11 +132,15 @@ func Classify(logPath string) (Classification, error) {
 // isAgentContentEvent and so falls through to the normal scan (known gap,
 // issue #579 review).
 //
-// A type:"result" line immediately following genuine agent content also
-// gets special treatment: the claude CLI echoes the preceding assistant
-// turn's text into that line's "result" field on an ordinary completion, so
-// if the genuine content quoted a transient marker, the echo is recognized
-// and not scanned as a fresh signal (issue #818).
+// A type:"result" line — whether immediately following genuine agent
+// content or after intervening non-content lines (e.g. type:"system"
+// heartbeats) — also gets special treatment: the claude CLI echoes the
+// preceding assistant turn's text into that line's "result" field on an
+// ordinary completion, so if the genuine content quoted a transient marker,
+// the echo is recognized and not scanned as a fresh signal (issue #818).
+// The pending echo survives any number of intervening non-content lines and
+// is only cleared by the type:"result" line itself or by a second genuine
+// agent-content event (issue #1197).
 func scanLog(logPath string) (scanResult, error) {
 	var sr scanResult
 	var echoReason Reason
@@ -158,8 +162,8 @@ func scanLog(logPath string) (scanResult, error) {
 			return
 		}
 		if echoPending {
-			echoPending = false
 			if resultText, ok := resultEventText(chunk); ok {
+				echoPending = false
 				if reason, matched := matchTransient(resultText); matched && reason == echoReason {
 					return
 				}
