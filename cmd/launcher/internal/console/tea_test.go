@@ -2,6 +2,7 @@ package console
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -2254,6 +2255,78 @@ func TestTea_Init_RecoversOrphanedIssuesOnStartup(t *testing.T) {
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
+}
+
+// TestOrphanRecoveryCmd_OrphanedIssuesErr_ReturnsMsg verifies a failed
+// OrphanedIssues() lookup surfaces through the returned tea.Msg instead of
+// being swallowed silently (issue #1218).
+func TestOrphanRecoveryCmd_OrphanedIssuesErr_ReturnsMsg(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.ListRunningErr = errors.New("boom")
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{
+		Factory:   factory,
+		RecoverFn: func(string) error { return nil },
+	}
+
+	msg := orphanRecoveryCmd(launch)()
+
+	rec, ok := msg.(OrphanRecoveryMsg)
+	if !ok {
+		t.Fatalf("orphanRecoveryCmd()() = %#v (%T), want OrphanRecoveryMsg", msg, msg)
+	}
+	if !strings.Contains(rec.Err, "boom") {
+		t.Errorf("OrphanRecoveryMsg.Err = %q, want it to mention the OrphanedIssues() failure %q", rec.Err, "boom")
+	}
+}
+
+// TestOrphanRecoveryCmd_RecoverFnErr_ReturnsMsg verifies a failed adopt
+// surfaces through the returned tea.Msg, naming the issue number and the
+// underlying error, instead of being swallowed (issue #1218).
+func TestOrphanRecoveryCmd_RecoverFnErr_ReturnsMsg(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{
+		Factory:   factory,
+		RecoverFn: func(string) error { return errors.New("adopt boom") },
+	}
+
+	msg := orphanRecoveryCmd(launch)()
+
+	rec, ok := msg.(OrphanRecoveryMsg)
+	if !ok {
+		t.Fatalf("orphanRecoveryCmd()() = %#v (%T), want OrphanRecoveryMsg", msg, msg)
+	}
+	if !strings.Contains(rec.Err, "42") || !strings.Contains(rec.Err, "adopt boom") {
+		t.Errorf("OrphanRecoveryMsg.Err = %q, want it to name issue 42 and mention %q", rec.Err, "adopt boom")
+	}
 }
 
 // TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth verifies backlog and

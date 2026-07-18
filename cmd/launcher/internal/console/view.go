@@ -381,12 +381,12 @@ const bannerCollapseMargin = 1
 // renderHeader renders the Console's full-width header: the fixed banner
 // (when the terminal is tall enough to afford it), the status line
 // (running/cap, waiting, held, settled, failed), and the stale-image,
-// rebuilding-in-progress, rebuild-failed, branch-switch-notice, and
-// competing-dogfood alert lines. The five alerts render in that fixed order
-// with no priority or dismissal logic — any subset can be true at once, and
-// each renders unconditionally on its own line. Status counts are derived
-// from Cap, Live, and the Picks slice's PickState tags rather than a new
-// stored counter (issue #843, ADR 0025).
+// rebuilding-in-progress, rebuild-failed, orphan-recovery-failed,
+// branch-switch-notice, and competing-dogfood alert lines. The six alerts
+// render in that fixed order with no priority or dismissal logic — any
+// subset can be true at once, and each renders unconditionally on its own
+// line. Status counts are derived from Cap, Live, and the Picks slice's
+// PickState tags rather than a new stored counter (issue #843, ADR 0025).
 func renderHeader(m Model) string {
 	var waiting, held, settled, failed int
 	for _, p := range m.Picks {
@@ -420,6 +420,9 @@ func renderHeader(m Model) string {
 	}
 	if m.RebuildErr != "" {
 		fmt.Fprintf(&b, "!! rebuild failed: %s\n", clipRebuildErr(m.RebuildErr, rebuildErrBannerWidth))
+	}
+	if m.OrphanRecoveryErr != "" {
+		fmt.Fprintf(&b, "!! orphan recovery failed: %s\n", clipRebuildErr(m.OrphanRecoveryErr, rebuildErrBannerWidth))
 	}
 	if m.BranchSwitchNotice != "" {
 		fmt.Fprintf(&b, "notice: %s\n", m.BranchSwitchNotice)
