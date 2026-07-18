@@ -1020,7 +1020,7 @@ func TestTea_WithLauncher_RendersCapAndLive(t *testing.T) {
 // screen (#646 AC4, AC6).
 func TestTea_WithLauncher_RendersLiveQueueState(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent", "agent-in-progress", "priority-p1"}})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent", "priority-p1", "bug"}})
 
 	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
 	// Simulate a state transition that happened entirely on the background
