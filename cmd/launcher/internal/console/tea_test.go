@@ -1423,6 +1423,25 @@ func TestTea_AlreadyActive_ReadsLiveQueueSnapshot(t *testing.T) {
 	if tm.alreadyActive("42") {
 		t.Errorf("alreadyActive(%q) = true, want false — live Queue shows settled, only the stale Model.Picks snapshot shows running", "42")
 	}
+
+	// Positive path: the live Queue shows an active row while Model.Picks
+	// is empty/stale — alreadyActive must read the live Queue.Snapshot(),
+	// not just fall through to Model.Picks, for each non-terminal state.
+	for _, state := range []PickState{PickQueued, PickHeld, PickClaiming, PickRunning} {
+		t.Run(state.String(), func(t *testing.T) {
+			f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+			f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+			launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+			tm := newTeaModel(f, t.TempDir(), launch)
+
+			launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: state})
+
+			if !tm.alreadyActive("42") {
+				t.Errorf("alreadyActive(%q) = false, want true — live Queue shows %v", "42", state)
+			}
+		})
+	}
 }
 
 // TestTea_PickKey_FailedPromotion_SurvivesQueueResync verifies a raced/
