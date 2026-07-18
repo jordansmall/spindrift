@@ -104,6 +104,92 @@ func TestRunQuickstart_RepoSlugDetected_CanBeOverridden(t *testing.T) {
 	}
 }
 
+func TestRunQuickstart_RepoSlugInvalid_RejectedAndReprompted(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := withPodman()
+	stdin := strings.NewReader(strings.Join([]string{
+		"notaslug",
+		"owner/repo",
+		"",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "expected owner/repo") {
+		t.Errorf("expected transcript to name the expected format, got:\n%s", out.String())
+	}
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), `settings.repository.repoSlug = "owner/repo"`) {
+		t.Errorf("expected flake.nix to carry the re-prompted valid repoSlug, got:\n%s", flakeNix)
+	}
+}
+
+func TestRunQuickstart_RepoSlugInvalidAtEOF_ReturnsErrorInsteadOfHanging(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := withPodman()
+	stdin := strings.NewReader("notaslug\n")
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	if err == nil {
+		t.Fatal("expected an error when stdin runs out on invalid input, got nil")
+	}
+	if !strings.Contains(err.Error(), "expected owner/repo") {
+		t.Errorf("expected error to name the expected format, got: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "flake.nix")); statErr == nil {
+		t.Error("expected flake.nix not to be written when input validation fails at EOF")
+	}
+}
+
+func TestRunQuickstart_RuntimeInvalid_RejectedAndReprompted(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := withPodman()
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"nonsense",
+		"docker",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "expected one of podman, docker, rancher, bwrap") {
+		t.Errorf("expected transcript to name the expected format, got:\n%s", out.String())
+	}
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), `runtime = "docker"`) {
+		t.Errorf("expected flake.nix to carry the re-prompted valid runtime, got:\n%s", flakeNix)
+	}
+}
+
+func TestValidateRepoSlug_RejectsWhitespace(t *testing.T) {
+	for _, slug := range []string{" owner/repo", "owner/repo ", "own er/repo", "owner/re po"} {
+		if err := validateRepoSlug(slug); err == nil {
+			t.Errorf("validateRepoSlug(%q) = nil, want error", slug)
+		}
+	}
+}
+
 func TestParseGitHubRepoSlug(t *testing.T) {
 	cases := map[string]string{
 		"git@github.com:jordansmall/spindrift.git":       "jordansmall/spindrift",
