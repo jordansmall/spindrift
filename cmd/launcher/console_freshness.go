@@ -121,7 +121,8 @@ func headRev(pwd string) (string, error) {
 }
 
 // checkCheckoutSafe refuses a checkout when pwd is on a branch other than
-// baseBranch and has uncommitted changes — see consoleGitSync.
+// baseBranch and has a dirty working tree (uncommitted changes or untracked
+// files) — see consoleGitSync.
 func checkCheckoutSafe(pwd, baseBranch string) error {
 	branch, err := gitOutput(pwd, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
