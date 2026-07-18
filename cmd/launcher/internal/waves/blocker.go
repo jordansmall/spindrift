@@ -37,8 +37,8 @@ func BuildEdges(it forge.IssueTracker, issues []Issue) (edges map[string][]strin
 	sources = Sources{}
 	failed = map[string]bool{}
 	for _, iss := range issues {
-		deps, err := it.DepsOf(iss.Number)
-		if err != nil {
+		deps, depsErr := it.DepsOf(iss.Number)
+		if depsErr != nil {
 			// Non-fatal: skip issues whose data cannot be fetched.
 			failed[iss.Number] = true
 			continue
