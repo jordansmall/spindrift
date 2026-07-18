@@ -252,8 +252,9 @@ func TestView_RebuildErr_Truncated(t *testing.T) {
 	if !strings.HasSuffix(bannerLine, "…") {
 		t.Errorf("banner line = %q, want it truncated with an ellipsis", bannerLine)
 	}
-	if n := runewidth.StringWidth(bannerLine); n > rebuildErrBannerWidth+len("!! rebuild failed: ") {
-		t.Errorf("banner line width = %d, want <= %d", n, rebuildErrBannerWidth+len("!! rebuild failed: "))
+	prefixWidth := runewidth.StringWidth("!! rebuild failed: ")
+	if n := runewidth.StringWidth(bannerLine); n > rebuildErrBannerWidth+prefixWidth {
+		t.Errorf("banner line width = %d, want <= %d", n, rebuildErrBannerWidth+prefixWidth)
 	}
 	if m.RebuildErr != long {
 		t.Errorf("m.RebuildErr = %q, want the full untruncated text preserved", m.RebuildErr)
