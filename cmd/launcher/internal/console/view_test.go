@@ -231,18 +231,37 @@ func TestView_Header_LaunchLessSession_RendersCleanly(t *testing.T) {
 	}
 }
 
-// TestView_ListsPicksWithNumberTitleState verifies View renders each queue
-// row's number, title, and state — a dissolved row also carries its reason
-// — so the operator can see the queue without a separate command (#646).
+// TestView_ListsPicksWithNumberTitleState verifies View renders a work
+// Section's rows with number, title, and state — the queue overview the
+// operator reads without a separate command (#646, ADR 0030 moved this from
+// the two-column queue to whichever Section the pick's state maps into).
 func TestView_ListsPicksWithNumberTitleState(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
-	m.Picks = []Pick{
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
 		{Number: "42", Title: "fix the thing", State: PickQueued},
-		{Number: "7", Title: "raced pick", State: PickDissolved, Reason: "issue is closed"},
-	}
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
 	out := View(m)
-	for _, want := range []string{"42", "fix the thing", "queued", "7", "raced pick", "dissolved", "issue is closed"} {
+	for _, want := range []string{"42", "fix the thing", "queued"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("View() = %q, want it to contain %q", out, want)
+		}
+	}
+}
+
+// TestView_DissolvedPick_ShowsReason verifies a dissolved row in the Failed
+// Section also carries its reason, so the operator sees why a pick never
+// launched (#646, ADR 0030's fold of PickDissolved into SectionFailed).
+func TestView_DissolvedPick_ShowsReason(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "7", Title: "raced pick", State: PickDissolved, Reason: "issue is closed"},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionFailed})
+
+	out := View(m)
+	for _, want := range []string{"7", "raced pick", "dissolved", "issue is closed"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("View() = %q, want it to contain %q", out, want)
 		}
@@ -254,9 +273,10 @@ func TestView_ListsPicksWithNumberTitleState(t *testing.T) {
 // scannable without drilling in (#647 AC2).
 func TestView_RunningPick_ShowsHeartbeat(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
-	m.Picks = []Pick{
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
 		{Number: "42", Title: "fix the thing", State: PickRunning, Heartbeat: "#42 [edit] \xc2\xb7 7 turns"},
-	}
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
 	out := View(m)
 	if !strings.Contains(out, "#42 [edit] \xc2\xb7 7 turns") {
@@ -544,8 +564,8 @@ func TestView_ShowHelp_ListsBoundKeys(t *testing.T) {
 	if strings.Contains(out, "should not show") {
 		t.Errorf("View() = %q, want the backlog hidden while help is open", out)
 	}
-	for _, want := range []string{"j", "k", "/", "enter", "esc", "r", "q", "?", "tab", "t", "x", "pgup", "pgdown"} {
-		if !strings.Contains(strings.ToLower(out), want) {
+	for _, want := range []string{"j", "k", "H", "L", "/", "enter", "esc", "r", "q", "?", "t", "x", "pgup", "pgdown"} {
+		if !strings.Contains(strings.ToLower(out), strings.ToLower(want)) {
 			t.Errorf("View() = %q, want it to mention key %q", out, want)
 		}
 	}
@@ -554,34 +574,41 @@ func TestView_ShowHelp_ListsBoundKeys(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_ListsTabKey verifies the help overlay explicitly
-// describes the "tab" focus-switch binding, not just a substring match
-// that any word containing "t" would vacuously satisfy (issue #995).
-func TestView_ShowHelp_ListsTabKey(t *testing.T) {
+// TestView_ShowHelp_ListsSectionKeys verifies the help overlay describes
+// H/L (previous/next Section) and 1-5 (direct jump) — the section-switched
+// list's navigation, replacing the retired "tab" focus-switch binding (ADR
+// 0030, issue #1500).
+func TestView_ShowHelp_ListsSectionKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
-	if !strings.Contains(out, "\n  tab ") {
-		t.Errorf("View() = %q, want a \"tab\" key entry", out)
+	if !strings.Contains(out, "\n  H / L") {
+		t.Errorf("View() = %q, want an \"H / L\" key entry", out)
 	}
-	if !strings.Contains(out, "switch focus between the backlog and work-queue columns") {
-		t.Errorf("View() = %q, want it to describe the \"tab\" focus-switch binding", out)
+	if !strings.Contains(out, "previous / next Section") {
+		t.Errorf("View() = %q, want it to describe the H/L Section-switch binding", out)
+	}
+	if !strings.Contains(out, "\n  1-5") {
+		t.Errorf("View() = %q, want a \"1-5\" key entry", out)
+	}
+	if strings.Contains(out, "switch focus between the backlog and work-queue columns") {
+		t.Errorf("View() = %q, want no mention of the retired tab focus-switch binding", out)
 	}
 }
 
 // TestView_ShowHelp_DescribesContextSensitiveEnter verifies the help
 // overlay's "enter" entry documents both context-sensitive behaviors —
-// picking the highlighted backlog row and drilling into a queued pick's
-// transcript — not just the bare word "enter" (issue #995).
+// picking the highlighted Backlog row and opening a work Section pick's
+// transcript fullscreen — not just the bare word "enter" (issue #995,
+// reworded for ADR 0030's Section-switched body by issue #1500).
 func TestView_ShowHelp_DescribesContextSensitiveEnter(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
 	for _, want := range []string{
-		"otherwise: pick the",
-		"highlighted backlog row",
-		"drill into the",
-		"highlighted pick's transcript",
+		"otherwise: pick",
+		"the highlighted row (Backlog Section)",
+		"highlighted pick's transcript fullscreen",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("View() = %q, want it to describe context-sensitive enter behavior %q", out, want)
@@ -590,19 +617,19 @@ func TestView_ShowHelp_DescribesContextSensitiveEnter(t *testing.T) {
 }
 
 // TestView_ShowHelp_ListsNewKeybindings verifies the help overlay lists the
-// picks/queue-driving keys wired in issue #785, and no longer claims "k"
-// moves the cursor (it Terminates instead).
+// picks/queue-driving keys wired in issue #785, and documents "X" as the
+// Terminate key now that "k" reverted to vim's cursor-up (issue #1500).
 func TestView_ShowHelp_ListsNewKeybindings(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
-	for _, want := range []string{"p ", "u ", "pa ", "k ", "+", "-", "b "} {
+	for _, want := range []string{"p ", "u ", "pa ", "X ", "+", "-", "b "} {
 		if !strings.Contains(out, want) {
 			t.Errorf("View() = %q, want it to mention key %q", out, want)
 		}
 	}
-	if strings.Contains(out, "k / up") || strings.Contains(out, "k/up") {
-		t.Errorf("View() = %q, want no mention of \"k\" moving the cursor (it Terminates)", out)
+	if !strings.Contains(out, "terminate the highlighted live Dispatch") {
+		t.Errorf("View() = %q, want \"X\" documented as Terminate", out)
 	}
 }
 
@@ -620,20 +647,6 @@ func TestView_ShowHelp_ListsRebuildOutputKey(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_ListsPaneModeKey verifies the help overlay lists "m",
-// the pane-mode cycle key added by issue #846 (ADR 0025), naming all three
-// modes so the operator can discover the cycle without reading the source.
-func TestView_ShowHelp_ListsPaneModeKey(t *testing.T) {
-	m := Update(NewModel(), HelpToggleMsg{})
-
-	out := View(m)
-	for _, want := range []string{"docked", "floating", "fullscreen"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("View() = %q, want it to mention pane mode %q", out, want)
-		}
-	}
-}
-
 // TestView_ShowHelp_ListsBodyScrollKeys verifies the help overlay lists
 // pgup/pgdown as the backlog/queue viewport's own line-scroll keys,
 // distinct from the drill-in transcript's identically-named scroll keys
@@ -642,8 +655,8 @@ func TestView_ShowHelp_ListsBodyScrollKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
-	if !strings.Contains(out, "pgup/pgdown  jump a full page of the backlog/queue's live rendered") {
-		t.Errorf("View() = %q, want it to mention the dynamic backlog/queue page jump", out)
+	if !strings.Contains(out, "pgup/pgdown  jump a full page of the active Section's live") {
+		t.Errorf("View() = %q, want it to mention the dynamic Section page jump", out)
 	}
 }
 
@@ -796,191 +809,100 @@ func TestView_DrillInFullscreen_WindowsToViewportHeight(t *testing.T) {
 	}
 }
 
-// TestView_TwoColumn_BacklogColumn_HasLabel verifies the backlog renders
-// under its own "backlog" column label, so the two-column body (issue #844,
-// ADR 0025) reads as two named regions instead of a bare list.
-func TestView_TwoColumn_BacklogColumn_HasLabel(t *testing.T) {
+// TestView_BacklogSection_HasColumnHeader verifies the Backlog Section
+// renders under its own column-header row (issue #844, moved from the
+// two-column body's "backlog" label to ADR 0030's single-Section table by
+// issue #1500).
+func TestView_BacklogSection_HasColumnHeader(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "fix the thing"}}})
 
 	out := View(m)
-	if !strings.Contains(out, "backlog") {
-		t.Errorf("View() = %q, want a labeled backlog column", out)
+	if !strings.Contains(out, "title") {
+		t.Errorf("View() = %q, want the Backlog Section's column-header row", out)
 	}
 }
 
-// TestView_TwoColumn_WorkQueueColumn_HasLabelEvenWhenEmpty verifies the
-// work-queue column renders its label even with no picks yet — a labeled
-// empty column, not one that appears only once something is queued (issue
-// #844, ADR 0025).
-func TestView_TwoColumn_WorkQueueColumn_HasLabelEvenWhenEmpty(t *testing.T) {
+// TestView_WorkSection_RendersEvenWhenEmpty verifies a work Section renders
+// its column-header row even with no picks in it yet — a labeled empty
+// table, not one that appears only once something lands there (issue #844,
+// adapted to ADR 0030's single active Section by issue #1500).
+func TestView_WorkSection_RendersEvenWhenEmpty(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
 	out := View(m)
-	if !strings.Contains(out, "picks:") {
-		t.Errorf("View() = %q, want the work-queue column label even with no picks", out)
+	if !strings.Contains(out, "state") || !strings.Contains(out, "age") {
+		t.Errorf("View() = %q, want the work Section's column-header row even with no picks", out)
 	}
 }
 
-// TestView_TwoColumn_Body_RendersSideBySide verifies the backlog and
-// work-queue columns render side by side on a terminal wide enough for both,
-// so their rows share output lines instead of stacking one above the other
-// (issue #844, ADR 0025).
-func TestView_TwoColumn_Body_RendersSideBySide(t *testing.T) {
+// TestView_Section_RowsTaggedWithState verifies each work Section row
+// carries its PickState as its state cell — running, queued distinguishable
+// at a glance in the Running Section, held naming its blocker in the Held
+// Section (issue #844 AC3/AC4, moved from the two-column queue to
+// Section-partitioned tables by ADR 0030/issue #1500).
+func TestView_Section_RowsTaggedWithState(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
-	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
-
-	out := View(m)
-	for _, l := range strings.Split(out, "\n") {
-		if strings.Contains(l, "backlog issue") && strings.Contains(l, "queued pick") {
-			return
-		}
-	}
-	t.Errorf("View() = %q, want a line carrying both a backlog row and a work-queue row", out)
-}
-
-// TestView_TwoColumn_Body_StacksOnNarrowTerminal verifies the body stacks
-// the backlog above the work queue, rather than splitting them side by
-// side, on a terminal too narrow for two readable columns — degrading
-// gracefully instead of wrapping into an unreadable mess (issue #844, ADR
-// 0025 AC6).
-func TestView_TwoColumn_Body_StacksOnNarrowTerminal(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
-	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
-
-	out := View(m)
-	for _, l := range strings.Split(out, "\n") {
-		if strings.Contains(l, "backlog issue") && strings.Contains(l, "queued pick") {
-			t.Errorf("View() on a narrow terminal = %q, want stacked columns, not a shared line", out)
-		}
-	}
-}
-
-// TestSplitStackedBudget_MatchesBodyColumnBudgets verifies bodyColumnBudgets
-// computes its stacked-mode split by calling the same splitStackedBudget
-// helper renderBody uses, rather than a second copy of the clamp-and-halve
-// arithmetic — the two must never be able to diverge (issue #1052).
-func TestSplitStackedBudget_MatchesBodyColumnBudgets(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
-	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
-
-	wantBacklog, wantQueue := splitStackedBudget(bodyBudget(m))
-	gotBacklog, gotQueue := bodyColumnBudgets(m)
-	if gotBacklog != wantBacklog || gotQueue != wantQueue {
-		t.Errorf("bodyColumnBudgets(m) = (%d, %d), want splitStackedBudget(bodyBudget(m)) = (%d, %d)",
-			gotBacklog, gotQueue, wantBacklog, wantQueue)
-	}
-}
-
-// TestSplitStackedBudget_MatchesRenderBody verifies renderBody's actual
-// stacked-mode rendering — not just bodyColumnBudgets — spends exactly the
-// budgets bodyColumnBudgets reports, by overflowing both columns (so each
-// renders its full budget's worth of lines, windowed with a "more below"
-// row) and counting the rendered lines on each side of the stack (issue
-// #1052).
-func TestSplitStackedBudget_MatchesRenderBody(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 24})
-	issues := make([]forge.Issue, 100)
-	for i := range issues {
-		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
-	}
-	m = Update(m, IssuesLoadedMsg{Issues: issues})
-	picks := make([]Pick, 100)
-	for i := range picks {
-		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
-	}
-	m.Picks = picks
-
-	wantBacklog, wantQueue := bodyColumnBudgets(m)
-	budget := bodyBudget(m)
-	out := renderBody(m, &budget)
-	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	// The first blank line is the stacked separator, not column content —
-	// safe only because both columns are overflowing here, so every one of
-	// their rendered rows (title/label or windowed "more below" text) is
-	// non-blank.
-	sep := -1
-	for i, l := range lines {
-		if l == "" {
-			sep = i
-			break
-		}
-	}
-	if sep < 0 {
-		t.Fatalf("renderBody(m) = %q, want a blank line separating the stacked columns", out)
-	}
-	gotBacklog, gotQueue := sep, len(lines)-sep-1
-	if gotBacklog != wantBacklog || gotQueue != wantQueue {
-		t.Errorf("renderBody(m) rendered (%d, %d) lines, want bodyColumnBudgets(m) = (%d, %d)",
-			gotBacklog, gotQueue, wantBacklog, wantQueue)
-	}
-}
-
-// TestView_NarrowTerminal_LongBacklog_HeaderStaysPinned verifies the
-// header's status line stays visible on a narrow (stacked-layout) terminal
-// too — the stacked backlog and picks columns must split the body's row
-// budget between them, not each claim it in full, or their combined height
-// still pushes the header off-screen (issue #1035 AC1/AC2 review finding).
-func TestView_NarrowTerminal_LongBacklog_HeaderStaysPinned(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 10})
-	issues := make([]forge.Issue, 20)
-	for i := range issues {
-		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
-	}
-	m = Update(m, IssuesLoadedMsg{Issues: issues})
-	picks := make([]Pick, 20)
-	for i := range picks {
-		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
-	}
-	m.Picks = picks
-
-	out := View(m)
-	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(lines) > m.Height {
-		t.Errorf("View() rendered %d lines, want at most Height (%d) — the header must stay pinned", len(lines), m.Height)
-	}
-}
-
-// TestView_TwoColumn_Queue_RowsTaggedWithBracketedState verifies each
-// work-queue row carries its PickState as a bracketed tag — running, held,
-// queued distinguishable at a glance — with a held row also naming its
-// blocker and a running row also carrying its heartbeat (issue #844 AC3/
-// AC4, ADR 0025).
-func TestView_TwoColumn_Queue_RowsTaggedWithBracketedState(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
-	m.Picks = []Pick{
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
 		{Number: "1", Title: "queued one", State: PickQueued},
-		{Number: "2", Title: "blocked one", State: PickHeld, BlockedBy: "#41 (native)"},
 		{Number: "3", Title: "running one", State: PickRunning, Heartbeat: "7 turns"},
-	}
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
 	out := View(m)
-	for _, want := range []string{"[queued]", "[held]", "[running]"} {
+	for _, want := range []string{"queued", "running", "7 turns"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("View() = %q, want bracketed state tag %q", out, want)
+			t.Errorf("View() (Running Section) = %q, want %q", out, want)
 		}
+	}
+}
+
+// TestView_Section_RowsShowAge verifies a work-Section row renders its
+// precomputed Age (syncQueue's formatAge output, same as Heartbeat) in the
+// age column — the column is otherwise only proven present via the header
+// word, not an actual value (issue #1500 review).
+func TestView_Section_RowsShowAge(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "1", Title: "queued one", State: PickQueued, Age: "3m"},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+
+	out := View(m)
+	if !strings.Contains(out, "3m") {
+		t.Errorf("View() (Running Section) = %q, want the row's Age (3m) rendered", out)
+	}
+}
+
+// TestView_HeldSection_ShowsBlocker verifies a held row in the Held Section
+// carries its state and blocker badge.
+func TestView_HeldSection_ShowsBlocker(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "2", Title: "blocked one", State: PickHeld, BlockedBy: "#41 (native)"},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionHeld})
+
+	out := View(m)
+	if !strings.Contains(out, "held") {
+		t.Errorf("View() = %q, want the held state cell", out)
 	}
 	if !strings.Contains(out, "held by #41 (native)") {
 		t.Errorf("View() = %q, want the held row's blocker", out)
 	}
-	if !strings.Contains(out, "7 turns") {
-		t.Errorf("View() = %q, want the running row's heartbeat", out)
-	}
 }
 
-// TestView_TwoColumn_Queue_HeldRowSuppressesRedundantFailedBlockerReason
-// verifies a held pick whose Reason merely restates the blocker BlockedBy
-// already names renders only the "held by" badge, not both — a held pick
-// with a failed blocker previously named the same blocker twice on one row
-// (issue #755).
-func TestView_TwoColumn_Queue_HeldRowSuppressesRedundantFailedBlockerReason(t *testing.T) {
+// TestView_HeldSection_SuppressesRedundantFailedBlockerReason verifies a
+// held pick whose Reason merely restates the blocker BlockedBy already names
+// renders only the "held by" badge, not both — a held pick with a failed
+// blocker previously named the same blocker twice on one row (issue #755).
+func TestView_HeldSection_SuppressesRedundantFailedBlockerReason(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
-	m.Picks = []Pick{
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
 		{Number: "42", Title: "held one", State: PickHeld, BlockedBy: "#41 (native)", Reason: blockerFailedPrefix + "#41 (native) failed"},
-	}
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionHeld})
 
 	out := View(m)
 	if !strings.Contains(out, "held by #41 (native)") {
@@ -991,70 +913,17 @@ func TestView_TwoColumn_Queue_HeldRowSuppressesRedundantFailedBlockerReason(t *t
 	}
 }
 
-// TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth verifies a joined
-// row never exceeds m.Width — a long backlog title/labels paired with a
-// verbose held badge must truncate rather than push the line past the
-// terminal's edge and wrap into an unreadable mess (issue #844 AC6).
-func TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
-	// Pinned to a color-capable terminal: the header is styled (ADR 0031)
-	// and the width check below must hold with those ANSI codes in play,
-	// not just when ambient TERM happens to disable them.
-	t.Setenv("NO_COLOR", "")
-	t.Setenv("TERM", "xterm-256color")
-
+// TestView_HeldSection_BlockerVisibleDespiteLongTitle verifies a held row's
+// blocker badge survives even when paired with a long title — the row's
+// fixed number/title/state/age columns clip the title in place, so the
+// trailing blocker annotation (issue #858) is never pushed off by a long
+// title the way an unbounded natural-order row once could be.
+func TestView_HeldSection_BlockerVisibleDespiteLongTitle(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
-		{Number: "1", Title: "a very long backlog title that would otherwise blow out the left column", Labels: []string{"ready-for-agent", "needs-review"}},
-	}})
-	m.Picks = []Pick{{Number: "42", Title: "a pick with a fairly long title too", State: PickHeld, BlockedBy: "#41 (native), #43 (body)"}}
-
-	out := View(m)
-	// lipgloss.Width, not runewidth.StringWidth: a styled header line
-	// carries ANSI color codes that runewidth counts as display width and
-	// lipgloss's ANSI-aware measurement does not.
-	for _, l := range strings.Split(out, "\n") {
-		if w := lipgloss.Width(l); w > m.Width {
-			t.Errorf("View() line %q has display width %d, want it clamped to Width (%d)", l, w, m.Width)
-		}
-	}
-}
-
-// TestView_TwoColumn_Body_BacklogOnlyRowsHaveNoTrailingWhitespace verifies a
-// backlog row with no corresponding work-queue row renders without trailing
-// spaces — joinColumns previously padded the left column out to leftWidth
-// even when the right column had nothing on that row, leaking padding onto
-// the end of the line (issue #861).
-func TestView_TwoColumn_Body_BacklogOnlyRowsHaveNoTrailingWhitespace(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
-		{Number: "1", Title: "short"},
-		{Number: "2", Title: "a mid length backlog title"},
-		{Number: "3", Title: "another backlog issue"},
-	}})
-	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
-
-	out := View(m)
-	for _, l := range strings.Split(out, "\n") {
-		if strings.HasSuffix(l, " ") {
-			t.Errorf("View() line %q has trailing whitespace, want none", l)
-		}
-	}
-}
-
-// TestView_TwoColumn_Queue_BlockerVisibleDespiteLongTitle verifies a held
-// row's blocker badge survives clipping even when paired with a long title —
-// the queue row previously put BlockedBy/Reason/Heartbeat after Title, so
-// clip()'s tail truncation dropped the operator-relevant blocker text first
-// on realistic 80-column terminals (issue #858).
-func TestView_TwoColumn_Queue_BlockerVisibleDespiteLongTitle(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
-		{Number: "123", Title: "fix(console): reassess leftColumnFraction for queue layout", Labels: []string{"ready-for-agent", "needs-review"}},
-		{Number: "124", Title: "fix(console): measure display width in clip for wide runes", Labels: []string{"ready-for-agent"}},
-	}})
-	m.Picks = []Pick{
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
 		{Number: "42", Title: "fix the launcher retry backoff for the dispatch workflow", State: PickHeld, BlockedBy: "#41 (native)", Reason: "issue is closed"},
-	}
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionHeld})
 
 	out := View(m)
 	if !strings.Contains(out, "held by #41 (native)") {
@@ -1062,97 +931,11 @@ func TestView_TwoColumn_Queue_BlockerVisibleDespiteLongTitle(t *testing.T) {
 	}
 }
 
-// TestView_TwoColumn_Queue_TitleAdjacentToStateWhenNoTruncation verifies a
-// queue row keeps Title immediately after its bracketed state tag when the
-// row's natural order fits the terminal width without clipping — #858's
-// blocker-first reorder should only kick in when truncation would actually
-// drop the blocker, not unconditionally at every width (issue #1256).
-func TestView_TwoColumn_Queue_TitleAdjacentToStateWhenNoTruncation(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 200, Height: 24})
-	m.Picks = []Pick{
-		{Number: "42", Title: "short title", State: PickHeld, BlockedBy: "#41 (native)", Reason: "issue is closed"},
-	}
-
-	out := View(m)
-	want := "[held]  short title  (held by #41 (native))  (issue is closed)"
-	if !strings.Contains(out, want) {
-		t.Errorf("View() = %q, want the contiguous, un-truncated row %q", out, want)
-	}
-	if strings.Contains(out, "…") {
-		t.Errorf("View() = %q, want no ellipsis — nothing should truncate at this width", out)
-	}
-}
-
-// TestRenderQueueColumn_WideRuneTitleFallsBackOnDisplayWidth verifies the
-// natural-vs-fallback decision is measured with runewidth.StringWidth (2
-// cells per CJK rune), not a rune count: a title short enough in rune count
-// to fit rightWidth but too wide on-screen must still fall back to #858's
-// blocker-first order (issue #859, issue #1256).
-func TestRenderQueueColumn_WideRuneTitleFallsBackOnDisplayWidth(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 200, Height: 24})
-	title := strings.Repeat("字", 10) // 10 runes, but 20 display columns
-	m.Picks = []Pick{
-		{Number: "42", Title: title, State: PickHeld, BlockedBy: "#41 (native)"},
-	}
-
-	// rightWidth sits between the natural row's rune count (~49) and its
-	// display width (~59) — a rune-count-based check would wrongly call it
-	// fitting; a display-width check correctly calls it overflowing.
-	out := renderQueueColumn(m, nil, 55)
-	blockedIdx := strings.Index(out, "held by #41 (native)")
-	titleIdx := strings.Index(out, title)
-	if blockedIdx == -1 || titleIdx == -1 {
-		t.Fatalf("renderQueueColumn() = %q, want both blocker and title present", out)
-	}
-	if !(blockedIdx < titleIdx) {
-		t.Errorf("renderQueueColumn() = %q, want blocker-first fallback order since the wide-rune title overflows on display width", out)
-	}
-}
-
-// TestView_NarrowTerminal_Body_LinesNeverExceedTerminalWidth verifies the
-// stacked (narrow-terminal) body clips each line to Width the same way the
-// two-column body does — a long backlog or picks row must not blow out
-// past the terminal on the narrow path either (issue #860, issue #844 AC6).
-// Exercises renderBody directly (as the docked/floating drill-in panes do,
-// view.go:407) rather than the full View(), since the header and banner are
-// fixed-width and out of this issue's scope.
-func TestView_NarrowTerminal_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
-		{Number: "1", Title: "a very long backlog title that would otherwise blow out a narrow terminal", Labels: []string{"ready-for-agent", "needs-review"}},
-	}})
-	m.Picks = []Pick{{Number: "42", Title: "a pick with a fairly long title too", State: PickHeld, BlockedBy: "#41 (native), #43 (body)"}}
-
-	out := renderBody(m, nil)
-	for _, l := range strings.Split(out, "\n") {
-		if n := len([]rune(l)); n > m.Width {
-			t.Errorf("renderBody() line %q has %d runes, want it clamped to Width (%d)", l, n, m.Width)
-		}
-	}
-	if !strings.Contains(out, "#1") {
-		t.Errorf("renderBody() = %q, want the backlog issue number #1 to survive clipping", out)
-	}
-	if !strings.Contains(out, "#42") {
-		t.Errorf("renderBody() = %q, want the pick number #42 to survive clipping", out)
-	}
-	// #1 and #42 sit at the START of their rows, so they survive clipping
-	// even if clip() drops one extra rune off the TAIL. Also assert a
-	// fragment right before each row's "…" — the exact tail clip() keeps —
-	// so a tail-only off-by-one (one rune too many truncated) fails here
-	// instead of slipping past undetected (issue #1522).
-	if !strings.Contains(out, "tit…") {
-		t.Errorf("renderBody() = %q, want the backlog row's tail truncated at exactly Width, not one rune short", out)
-	}
-	if !strings.Contains(out, "#41 (…") {
-		t.Errorf("renderBody() = %q, want the pick row's tail truncated at exactly Width, not one rune short", out)
-	}
-}
-
-// TestRenderBacklogColumn_NilBudgetNeverTruncates verifies a nil budget
-// renders every backlog row with no "more below" affordance, regardless of
+// TestRenderBacklogSection_NilBudgetNeverTruncates verifies a nil budget
+// renders every Backlog row with no "more below" affordance, regardless of
 // row count — the nil-means-unbounded semantics that replaced the
 // unboundedBudget magic-constant sentinel (issue #1039).
-func TestRenderBacklogColumn_NilBudgetNeverTruncates(t *testing.T) {
+func TestRenderBacklogSection_NilBudgetNeverTruncates(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	issues := make([]forge.Issue, 500)
 	for i := range issues {
@@ -1160,288 +943,72 @@ func TestRenderBacklogColumn_NilBudgetNeverTruncates(t *testing.T) {
 	}
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
-	out := renderBacklogColumn(m, nil)
+	out := renderBacklogSection(m, nil)
 	if !strings.Contains(out, "issue 499") {
-		t.Errorf("renderBacklogColumn(m, nil) = %q, want the last of 500 rows present, unwindowed", out)
+		t.Errorf("renderBacklogSection(m, nil) = %q, want the last of 500 rows present, unwindowed", out)
 	}
 	if strings.Contains(out, "more below") {
-		t.Errorf("renderBacklogColumn(m, nil) = %q, want no truncation affordance for a nil budget", out)
+		t.Errorf("renderBacklogSection(m, nil) = %q, want no truncation affordance for a nil budget", out)
 	}
 }
 
-// TestRenderQueueColumn_NilBudgetNeverTruncates is renderBacklogColumn's nil
-// budget test, mirrored for the queue column (issue #1039).
-func TestRenderQueueColumn_NilBudgetNeverTruncates(t *testing.T) {
+// TestRenderWorkSection_NilBudgetNeverTruncates is
+// TestRenderBacklogSection_NilBudgetNeverTruncates mirrored for a work
+// Section (issue #1039).
+func TestRenderWorkSection_NilBudgetNeverTruncates(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	picks := make([]Pick, 500)
 	for i := range picks {
 		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
 	}
-	m.Picks = picks
+	m = Update(m, QueueSnapshotMsg{Picks: picks})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
-	out := renderQueueColumn(m, nil, m.Width)
+	out := renderWorkSection(m, nil)
 	if !strings.Contains(out, "pick 499") {
-		t.Errorf("renderQueueColumn(m, nil, m.Width) = %q, want the last of 500 rows present, unwindowed", out)
+		t.Errorf("renderWorkSection(m, nil) = %q, want the last of 500 rows present, unwindowed", out)
 	}
 	if strings.Contains(out, "more below") {
-		t.Errorf("renderQueueColumn(m, nil, m.Width) = %q, want no truncation affordance for a nil budget", out)
+		t.Errorf("renderWorkSection(m, nil) = %q, want no truncation affordance for a nil budget", out)
 	}
 }
 
-// TestView_Focus_MarksFocusedColumnVisually verifies the focused column's
-// header carries a visible marker the other column's header doesn't, and
-// that Tab moves the marker — the operator's only cue for which column
-// cursor keys and Enter currently act on (issue #845).
-func TestView_Focus_MarksFocusedColumnVisually(t *testing.T) {
+// TestView_SectionTabs_HighlightsActiveSection verifies the Section tabs
+// line renders differently depending on which Section is active — the
+// operator's cue for which Section H/L/1-5 currently target (ADR 0030/0031,
+// issue #1500).
+func TestView_SectionTabs_HighlightsActiveSection(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	backlogActive := renderSectionTabs(m)
 
-	backlogFocused := View(m)
-	if !strings.Contains(backlogFocused, "backlog [focus]") {
-		t.Errorf("View() with FocusBacklog = %q, want the backlog header marked focused", backlogFocused)
-	}
-	if strings.Contains(backlogFocused, "picks [focus]") {
-		t.Errorf("View() with FocusBacklog = %q, want the queue header unmarked", backlogFocused)
-	}
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+	runningActive := renderSectionTabs(m)
 
-	m = Update(m, FocusToggleMsg{})
-	queueFocused := View(m)
-	if !strings.Contains(queueFocused, "picks [focus]") {
-		t.Errorf("View() with FocusQueue = %q, want the queue header marked focused", queueFocused)
-	}
-	if strings.Contains(queueFocused, "backlog [focus]") {
-		t.Errorf("View() with FocusQueue = %q, want the backlog header unmarked", queueFocused)
+	if backlogActive == runningActive {
+		t.Errorf("renderSectionTabs(m) = %q both before and after switching Sections, want the active tab's styling to differ", backlogActive)
 	}
 }
 
-// TestView_QueueCursor_MarksHighlightedRow verifies the work-queue column
-// marks the row under QueueCursor the same way the backlog column already
-// marks Cursor's row (issue #845).
-func TestView_QueueCursor_MarksHighlightedRow(t *testing.T) {
-	m := Update(NewModel(), FocusToggleMsg{})
-	m = Update(m, SizeChangedMsg{Width: 80, Height: 24})
-	m.Picks = []Pick{{Number: "1", State: PickQueued}, {Number: "2", State: PickQueued}}
-	m.QueueCursor = 1
+// TestView_Cursor_MarksHighlightedRowInWorkSection verifies Cursor marks the
+// highlighted row within a work Section the same way it already does in the
+// Backlog Section (issue #845, generalized from FocusedColumn to
+// ActiveSection by issue #1500).
+func TestView_Cursor_MarksHighlightedRowInWorkSection(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{{Number: "1", State: PickQueued}, {Number: "2", State: PickQueued}}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+	m = Update(m, CursorMoveMsg{Delta: 1})
 
 	out := View(m)
 	for _, l := range strings.Split(out, "\n") {
-		if strings.Contains(l, "#2") && strings.HasPrefix(strings.TrimLeft(l, " "), ">") {
+		if strings.Contains(l, "#2") && strings.HasPrefix(l, ">") {
 			return
 		}
 	}
 	t.Errorf("View() = %q, want row #2 marked with the cursor", out)
-}
-
-// TestView_DrillInDocked_KeepsBacklogAndQueueVisible verifies the default
-// PaneDocked mode renders the Transcript as a third column while the
-// backlog and work-queue columns stay visible on a terminal wide enough for
-// three columns (issue #846, ADR 0025).
-func TestView_DrillInDocked_KeepsBacklogAndQueueVisible(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
-	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
-
-	out := View(m)
-	if !strings.Contains(out, "backlog issue") {
-		t.Errorf("View() = %q, want the backlog still visible while docked", out)
-	}
-	if !strings.Contains(out, "queued pick") {
-		t.Errorf("View() = %q, want the work queue still visible while docked", out)
-	}
-	if !strings.Contains(out, "[implementor] hi") {
-		t.Errorf("View() = %q, want the transcript content visible while docked", out)
-	}
-	if !strings.Contains(out, "[t] toggle raw · [x] close") {
-		t.Errorf("View() = %q, want the keystroke hint visible while docked", out)
-	}
-}
-
-// TestView_DrillInDocked_BacklogOffset_RendersOffsetRows verifies the docked
-// pane's backlog column honors a scrolled BacklogOffset — BacklogOffset is a
-// shared Model field, not per-pane, so the docked pane's backlog column
-// renders the same window the main view would (issue #1055). The docked
-// backlog column is now windowed to transcriptHeight (issue #1381), so
-// reaching the last row takes scrolling all the way (as the main view's
-// TestView_ScrolledBacklog_ReachesLastRow does), not just past the first
-// page.
-func TestView_DrillInDocked_BacklogOffset_RendersOffsetRows(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	issues := make([]forge.Issue, 50)
-	for i := range issues {
-		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
-	}
-	m = Update(m, IssuesLoadedMsg{Issues: issues})
-	m = Update(m, DrillInMsg{Number: "0", Rendered: "[implementor] hi"})
-
-	m = Update(m, ScrollMsg{Delta: 1000})
-
-	out := View(m)
-	if strings.Contains(out, "issue 0") {
-		t.Errorf("View() = %q, want issue 0 scrolled out of the docked backlog column", out)
-	}
-	if !strings.Contains(out, "issue 49") {
-		t.Errorf("View() = %q, want the last issue reachable in the docked backlog column", out)
-	}
-}
-
-// TestView_DrillInDocked_QueueOffset_RendersOffsetRows verifies the docked
-// pane's queue column honors a scrolled QueueOffset — QueueOffset is a
-// shared Model field, not per-pane, so the docked pane's queue column
-// renders the same window the main view would (issue #1055). The docked
-// queue column is now windowed to transcriptHeight (issue #1381), so
-// reaching the last row takes scrolling all the way, not just past the
-// first page.
-func TestView_DrillInDocked_QueueOffset_RendersOffsetRows(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	m = Update(m, FocusToggleMsg{})
-	picks := make([]Pick, 50)
-	for i := range picks {
-		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
-	}
-	m.Picks = picks
-	m = Update(m, DrillInMsg{Number: "0", Rendered: "[implementor] hi"})
-
-	m = Update(m, ScrollMsg{Delta: 1000})
-
-	out := View(m)
-	if strings.Contains(out, "pick 0") {
-		t.Errorf("View() = %q, want pick 0 scrolled out of the docked queue column", out)
-	}
-	if !strings.Contains(out, "pick 49") {
-		t.Errorf("View() = %q, want the last pick reachable in the docked queue column", out)
-	}
-}
-
-// TestView_DrillInDocked_TranscriptRespectsHeaderHeight verifies the docked
-// pane's total output never exceeds m.Height even when renderHeader grows
-// past its one-line minimum — a stale-image alert stacks a second header
-// line on top of the status line, and renderTranscriptColumn's budget must
-// account for it instead of assuming a single-line header (issue #1014).
-func TestView_DrillInDocked_TranscriptRespectsHeaderHeight(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	m = Update(m, StaleStatusMsg{Stale: true, Message: "rebuild needed"})
-	lines := make([]string, 100)
-	for i := range lines {
-		lines[i] = fmt.Sprintf("transcript line %d", i)
-	}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
-
-	out := View(m)
-	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(got) > m.Height {
-		t.Errorf("View() rendered %d lines, want at most Height (%d) — the multi-line header must be budgeted out of the transcript column", len(got), m.Height)
-	}
-}
-
-// TestView_DrillInFloating_TranscriptRespectsHeaderHeight verifies the
-// floating pane's total output never exceeds m.Height under the same
-// multi-line-header condition as the docked case — renderFloatingBody
-// shares the same unbudgeted-height bug renderDockedBody had (issue #1014).
-func TestView_DrillInFloating_TranscriptRespectsHeaderHeight(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	m = Update(m, StaleStatusMsg{Stale: true, Message: "rebuild needed"})
-	lines := make([]string, 100)
-	for i := range lines {
-		lines[i] = fmt.Sprintf("transcript line %d", i)
-	}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneFloating {
-		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
-	}
-
-	out := View(m)
-	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(got) > m.Height {
-		t.Errorf("View() rendered %d lines, want at most Height (%d) — the multi-line header must be budgeted out of the transcript column", len(got), m.Height)
-	}
-}
-
-// TestView_DrillInDocked_TranscriptRespectsCollapsedHeader verifies the
-// docked pane's total output never exceeds m.Height when the header
-// collapses to its one-line minimum too (banner hidden, no alerts) — the
-// fix must not assume the header is always the multi-line case (issue
-// #1014).
-func TestView_DrillInDocked_TranscriptRespectsCollapsedHeader(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 3})
-	lines := make([]string, 100)
-	for i := range lines {
-		lines[i] = fmt.Sprintf("transcript line %d", i)
-	}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
-
-	out := View(m)
-	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(got) > m.Height {
-		t.Errorf("View() rendered %d lines, want at most Height (%d) — the collapsed single-line header must be budgeted too", len(got), m.Height)
-	}
-}
-
-// TestView_DrillInFloating_TranscriptRespectsCollapsedHeader mirrors
-// TestView_DrillInDocked_TranscriptRespectsCollapsedHeader for the floating
-// pane's distinct render path (issue #1014).
-func TestView_DrillInFloating_TranscriptRespectsCollapsedHeader(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 3})
-	lines := make([]string, 100)
-	for i := range lines {
-		lines[i] = fmt.Sprintf("transcript line %d", i)
-	}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneFloating {
-		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
-	}
-
-	out := View(m)
-	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(got) > m.Height {
-		t.Errorf("View() rendered %d lines, want at most Height (%d) — the collapsed single-line header must be budgeted too", len(got), m.Height)
-	}
-}
-
-// TestView_DrillInDocked_TranscriptRespectsTinyBudget verifies the docked
-// pane's total output never exceeds m.Height when the outer header's own
-// cost (status line + a stale-image alert, 2 lines) leaves less than
-// headerFooterLines of budget for the transcript column's own label+footer
-// chrome — that 2-line chrome floor isn't itself clamped to the remaining
-// budget (issue #1380).
-func TestView_DrillInDocked_TranscriptRespectsTinyBudget(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 3})
-	m = Update(m, StaleStatusMsg{Stale: true, Message: "rebuild needed"})
-	lines := make([]string, 100)
-	for i := range lines {
-		lines[i] = fmt.Sprintf("transcript line %d", i)
-	}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
-
-	out := View(m)
-	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(got) > m.Height {
-		t.Errorf("View() rendered %d lines, want at most Height (%d) — the transcript column's own header+footer chrome must be budgeted against the remaining height, not assumed to always fit", len(got), m.Height)
-	}
-}
-
-// TestView_DrillInFloating_TranscriptRespectsTinyBudget mirrors
-// TestView_DrillInDocked_TranscriptRespectsTinyBudget for the floating
-// pane's distinct render path (issue #1380).
-func TestView_DrillInFloating_TranscriptRespectsTinyBudget(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 3})
-	m = Update(m, StaleStatusMsg{Stale: true, Message: "rebuild needed"})
-	lines := make([]string, 100)
-	for i := range lines {
-		lines[i] = fmt.Sprintf("transcript line %d", i)
-	}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneFloating {
-		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
-	}
-
-	out := View(m)
-	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(got) > m.Height {
-		t.Errorf("View() rendered %d lines, want at most Height (%d) — the transcript column's own header+footer chrome must be budgeted against the remaining height, not assumed to always fit", len(got), m.Height)
-	}
 }
 
 // TestView_DrillInFullscreen_RespectsTinyBudget verifies the fullscreen
@@ -1502,289 +1069,6 @@ func TestView_DrillInFullscreen_ErrRespectsTinyBudget(t *testing.T) {
 	}
 }
 
-// TestView_DrillInDocked_BacklogRespectsHeight verifies the docked pane's
-// total output never exceeds m.Height when the backlog is long, independent
-// of the transcript's own length — renderDockedBody passed the backlog and
-// queue columns an unbounded budget, so joinColumns' max-of-both-sides let
-// an unbounded backlog dominate and push the docked body past
-// transcriptHeight (issue #1381).
-func TestView_DrillInDocked_BacklogRespectsHeight(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	issues := make([]forge.Issue, 100)
-	for i := range issues {
-		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
-	}
-	m = Update(m, IssuesLoadedMsg{Issues: issues})
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "hello"})
-
-	out := View(m)
-	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(got) > m.Height {
-		t.Errorf("View() rendered %d lines, want at most Height (%d) — the long backlog must be budgeted out of the docked body", len(got), m.Height)
-	}
-}
-
-// TestView_DrillInFloating_BacklogRespectsHeight mirrors
-// TestView_DrillInDocked_BacklogRespectsHeight for the floating pane's
-// distinct render path — renderFloatingBody passed renderBody an unbounded
-// budget, so overlay's leave-extra-body-rows-untouched behavior let an
-// unbounded backlog/queue body grow past transcriptHeight (issue #1381).
-func TestView_DrillInFloating_BacklogRespectsHeight(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	issues := make([]forge.Issue, 100)
-	for i := range issues {
-		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
-	}
-	m = Update(m, IssuesLoadedMsg{Issues: issues})
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "hello"})
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneFloating {
-		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
-	}
-
-	out := View(m)
-	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(got) > m.Height {
-		t.Errorf("View() rendered %d lines, want at most Height (%d) — the long backlog must be budgeted out of the floating body", len(got), m.Height)
-	}
-}
-
-// TestView_DrillInNarrowTerminal_FallsBackToFullscreen verifies a terminal
-// too narrow for three columns renders the Transcript fullscreen regardless
-// of the operator's selected PaneMode — never leaving unreadable, wrapped
-// columns (issue #846, ADR 0025 AC4).
-func TestView_DrillInNarrowTerminal_FallsBackToFullscreen(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 60, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
-	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
-
-	out := View(m)
-	if strings.Contains(out, "backlog issue") {
-		t.Errorf("View() = %q, want the backlog hidden — too narrow for three columns", out)
-	}
-	if strings.Contains(out, "queued pick") {
-		t.Errorf("View() = %q, want the work queue hidden — too narrow for three columns", out)
-	}
-	if !strings.Contains(out, "[implementor] hi") {
-		t.Errorf("View() = %q, want the transcript content visible fullscreen", out)
-	}
-}
-
-// TestView_DrillInFloating_OverlaysTranscriptOnTwoColumnBody verifies
-// PaneFloating renders the Transcript as an overlay atop the two-column
-// body — the backlog and queue labels stay present (dimly, on the left) and
-// the transcript content becomes visible, distinct from the docked mode's
-// permanent three-way column split (issue #846, ADR 0025).
-func TestView_DrillInFloating_OverlaysTranscriptOnTwoColumnBody(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
-	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneFloating {
-		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
-	}
-
-	out := View(m)
-	if !strings.Contains(out, "backlog") {
-		t.Errorf("View() = %q, want the backlog column label still present under the floating pane", out)
-	}
-	if !strings.Contains(out, "[implementor] hi") {
-		t.Errorf("View() = %q, want the transcript content visible in the floating overlay", out)
-	}
-	if !strings.Contains(out, "[t] toggle raw · [x] close") {
-		t.Errorf("View() = %q, want the keystroke hint visible in the floating overlay", out)
-	}
-}
-
-// TestView_DrillInFloating_Offsets_RenderOffsetRows verifies the floating
-// pane's underlying two-column body honors scrolled BacklogOffset and
-// QueueOffset — both are shared Model fields, not per-pane, so the floating
-// pane's body renders the same window the main view would (issue #1055). The
-// floating body is now windowed to transcriptHeight (issue #1381), so
-// reaching the last row takes scrolling all the way, not just past the
-// first page.
-func TestView_DrillInFloating_Offsets_RenderOffsetRows(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	issues := make([]forge.Issue, 50)
-	for i := range issues {
-		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
-	}
-	m = Update(m, IssuesLoadedMsg{Issues: issues})
-	picks := make([]Pick, 50)
-	for i := range picks {
-		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
-	}
-	m.Picks = picks
-	m = Update(m, DrillInMsg{Number: "0", Rendered: "[implementor] hi"})
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneFloating {
-		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
-	}
-
-	m = Update(m, ScrollMsg{Delta: 1000})
-	m = Update(m, FocusToggleMsg{})
-	m = Update(m, ScrollMsg{Delta: 1000})
-
-	out := View(m)
-	if strings.Contains(out, "issue 0") {
-		t.Errorf("View() = %q, want issue 0 scrolled out of the floating pane's backlog column", out)
-	}
-	if strings.Contains(out, "pick 0") {
-		t.Errorf("View() = %q, want pick 0 scrolled out of the floating pane's queue column", out)
-	}
-	if !strings.Contains(out, "issue 49") {
-		t.Errorf("View() = %q, want the last issue reachable in the floating pane's backlog column", out)
-	}
-	if !strings.Contains(out, "pick 49") {
-		t.Errorf("View() = %q, want the last pick reachable in the floating pane's queue column", out)
-	}
-}
-
-// TestView_DrillInDocked_ToggleRaw_ShowsRawHeader verifies the rendered/raw
-// toggle works through renderTranscriptColumn — the docked pane mode's
-// render path, distinct from renderDrillIn's fullscreen path (issue #1004).
-func TestView_DrillInDocked_ToggleRaw_ShowsRawHeader(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
-	m = Update(m, DrillInToggleMsg{})
-
-	out := View(m)
-	if strings.Contains(out, "[implementor] hi") {
-		t.Errorf("View() = %q, want the rendered form hidden while ShowRaw", out)
-	}
-	if !strings.Contains(out, `{"type":"assistant"}`) {
-		t.Errorf("View() = %q, want the raw form shown while ShowRaw", out)
-	}
-}
-
-// TestView_DrillInFloating_ToggleRaw_ShowsRawHeader verifies the
-// rendered/raw toggle also works in the floating pane mode, through the
-// same renderTranscriptColumn path as docked (issue #1004).
-func TestView_DrillInFloating_ToggleRaw_ShowsRawHeader(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
-	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneFloating {
-		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
-	}
-	m = Update(m, DrillInToggleMsg{})
-
-	out := View(m)
-	if strings.Contains(out, "[implementor] hi") {
-		t.Errorf("View() = %q, want the rendered form hidden while ShowRaw", out)
-	}
-	if !strings.Contains(out, `{"type":"assistant"}`) {
-		t.Errorf("View() = %q, want the raw form shown while ShowRaw", out)
-	}
-}
-
-// TestView_DrillInDocked_Scroll_HidesLinesBeforeOffset verifies scrolling
-// (a non-zero Offset) drops the leading lines through renderTranscriptColumn
-// — the docked pane mode's render path (issue #1004).
-func TestView_DrillInDocked_Scroll_HidesLinesBeforeOffset(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 8})
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3"})
-	m = Update(m, DrillInScrollMsg{Delta: 2})
-
-	out := View(m)
-	if strings.Contains(out, "l0") || strings.Contains(out, "l1") {
-		t.Errorf("View() = %q, want lines before the offset hidden", out)
-	}
-	if !strings.Contains(out, "l2") || !strings.Contains(out, "l3") {
-		t.Errorf("View() = %q, want lines from the offset onward", out)
-	}
-}
-
-// TestView_DrillInFloating_Scroll_HidesLinesBeforeOffset verifies scrolling
-// also works in the floating pane mode, through the same
-// renderTranscriptColumn path as docked (issue #1004).
-func TestView_DrillInFloating_Scroll_HidesLinesBeforeOffset(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 8})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
-		{Number: "1", Title: "backlog issue 1"},
-		{Number: "2", Title: "backlog issue 2"},
-		{Number: "3", Title: "backlog issue 3"},
-	}})
-	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3"})
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneFloating {
-		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
-	}
-	m = Update(m, DrillInScrollMsg{Delta: 2})
-
-	out := View(m)
-	if strings.Contains(out, "l0") || strings.Contains(out, "l1") {
-		t.Errorf("View() = %q, want lines before the offset hidden", out)
-	}
-	if !strings.Contains(out, "l2") || !strings.Contains(out, "l3") {
-		t.Errorf("View() = %q, want lines from the offset onward", out)
-	}
-}
-
-// TestView_DrillInDocked_Err_Surfaced verifies a failed drill-in's error
-// text appears through renderTranscriptColumn — the docked pane mode's
-// render path (issue #1004).
-func TestView_DrillInDocked_Err_Surfaced(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	m = Update(m, DrillInMsg{Number: "42", Err: errBoom})
-
-	out := View(m)
-	if !strings.Contains(out, errBoom.Error()) {
-		t.Errorf("View() = %q, want it to contain %q", out, errBoom.Error())
-	}
-}
-
-// TestView_DrillInFloating_Err_Surfaced verifies a failed drill-in's error
-// text also appears in the floating pane mode, through the same
-// renderTranscriptColumn path as docked (issue #1004).
-func TestView_DrillInFloating_Err_Surfaced(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
-	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
-	m = Update(m, DrillInMsg{Number: "42", Err: errBoom})
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneFloating {
-		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
-	}
-
-	out := View(m)
-	if !strings.Contains(out, errBoom.Error()) {
-		t.Errorf("View() = %q, want it to contain %q", out, errBoom.Error())
-	}
-}
-
-// TestView_DrillInFullscreen_TakesWholeBodyEvenWhenWide verifies an
-// explicitly-selected PaneFullscreen hides the backlog/queue even on a
-// terminal wide enough for three columns — fullscreen is a selectable mode,
-// not just the narrow-terminal fallback (issue #846, ADR 0025).
-func TestView_DrillInFullscreen_TakesWholeBodyEvenWhenWide(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "backlog issue"}}})
-	m.Picks = []Pick{{Number: "42", Title: "queued pick", State: PickQueued}}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
-	m = Update(m, PaneModeCycleMsg{}) // docked -> floating
-	m = Update(m, PaneModeCycleMsg{}) // floating -> fullscreen
-	if m.PaneMode != PaneFullscreen {
-		t.Fatalf("PaneMode = %v, want PaneFullscreen after two cycles", m.PaneMode)
-	}
-
-	out := View(m)
-	if strings.Contains(out, "backlog issue") {
-		t.Errorf("View() = %q, want the backlog hidden in fullscreen mode", out)
-	}
-	if strings.Contains(out, "queued pick") {
-		t.Errorf("View() = %q, want the work queue hidden in fullscreen mode", out)
-	}
-	if !strings.Contains(out, "[implementor] hi") {
-		t.Errorf("View() = %q, want the transcript content visible fullscreen", out)
-	}
-}
-
 // TestView_LongBacklog_HeaderStaysPinned verifies the header's status line
 // stays visible, and the backlog column stops short of the last loaded
 // issue, when the backlog has more rows than the terminal has height for —
@@ -1834,7 +1118,8 @@ func TestView_LongPicksQueue_HeaderStaysPinnedAndShowsMoreBelow(t *testing.T) {
 	for i := range picks {
 		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
 	}
-	m.Picks = picks
+	m = Update(m, QueueSnapshotMsg{Picks: picks})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
 	out := View(m)
 	if !strings.Contains(out, "running 0/0") {
@@ -1869,17 +1154,17 @@ func TestView_ScrolledBacklog_ReachesLastRow(t *testing.T) {
 }
 
 // TestView_ScrolledQueue_ReachesLastRow verifies the same reachability for
-// the picks column once it has focus and is scrolled all the way — issue
-// #1036 AC3 covers both columns, since Tab already toggles focus between
-// them.
+// a work Section once it's active and scrolled all the way — issue #1036
+// AC3 covers every Section, generalized from Tab-toggled focus to
+// ActiveSection by issue #1500.
 func TestView_ScrolledQueue_ReachesLastRow(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
-	m = Update(m, FocusToggleMsg{})
 	picks := make([]Pick, 50)
 	for i := range picks {
 		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
 	}
-	m.Picks = picks
+	m = Update(m, QueueSnapshotMsg{Picks: picks})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
 	m = Update(m, ScrollMsg{Delta: 1000})
 
@@ -1889,11 +1174,11 @@ func TestView_ScrolledQueue_ReachesLastRow(t *testing.T) {
 	}
 }
 
-// TestView_BacklogColumn_ShowsPositionIndicator verifies the backlog column
-// label carries a compact "X-Y of N" position indicator reflecting the
-// visible row range and total, so the operator can see where they are in a
-// long backlog without counting rows (issue #1037 AC3).
-func TestView_BacklogColumn_ShowsPositionIndicator(t *testing.T) {
+// TestView_BacklogSection_ShowsPositionIndicator verifies the Backlog
+// Section's column header carries a compact "X-Y of N" position indicator
+// reflecting the visible row range and total, so the operator can see where
+// they are in a long backlog without counting rows (issue #1037 AC3).
+func TestView_BacklogSection_ShowsPositionIndicator(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 50)
 	for i := range issues {
@@ -1902,39 +1187,40 @@ func TestView_BacklogColumn_ShowsPositionIndicator(t *testing.T) {
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
 	out := View(m)
-	if !strings.Contains(out, "backlog [focus] (1-4 of 50):") {
-		t.Errorf("View() = %q, want the backlog label to show \"(1-4 of 50)\"", out)
+	if !strings.Contains(out, "(1-3 of 50)") {
+		t.Errorf("View() = %q, want the Backlog header to show \"(1-3 of 50)\"", out)
 	}
 
 	m = Update(m, ScrollMsg{Delta: 5})
 	out = View(m)
-	if !strings.Contains(out, "backlog [focus] (6-9 of 50):") {
-		t.Errorf("View() = %q, want the backlog label to show \"(6-9 of 50)\" after scrolling", out)
+	if !strings.Contains(out, "(6-8 of 50)") {
+		t.Errorf("View() = %q, want the Backlog header to show \"(6-8 of 50)\" after scrolling", out)
 	}
 }
 
-// TestView_QueueColumn_ShowsPositionIndicator verifies the picks column
-// label carries the same position indicator as the backlog column, and that
-// it is absent when the queue is empty rather than reading "(1-0 of 0)"
-// (issue #1037 AC3/AC4).
-func TestView_QueueColumn_ShowsPositionIndicator(t *testing.T) {
+// TestView_WorkSection_ShowsPositionIndicator verifies a work Section's
+// column header carries the same position indicator as the Backlog Section,
+// and that it is absent when the Section is empty rather than reading
+// "(1-0 of 0)" (issue #1037 AC3/AC4).
+func TestView_WorkSection_ShowsPositionIndicator(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
-	m = Update(m, FocusToggleMsg{})
 	picks := make([]Pick, 50)
 	for i := range picks {
 		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
 	}
-	m.Picks = picks
+	m = Update(m, QueueSnapshotMsg{Picks: picks})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
 	out := View(m)
-	if !strings.Contains(out, "picks [focus] (1-4 of 50):") {
-		t.Errorf("View() = %q, want the picks label to show \"(1-4 of 50)\"", out)
+	if !strings.Contains(out, "(1-3 of 50)") {
+		t.Errorf("View() = %q, want the Running header to show \"(1-3 of 50)\"", out)
 	}
 
 	empty := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	empty = Update(empty, SectionJumpMsg{Section: SectionRunning})
 	out = View(empty)
-	if !strings.Contains(out, "picks:") || strings.Contains(out, "picks (") {
-		t.Errorf("View() = %q, want the picks label with no position indicator when empty", out)
+	if strings.Contains(out, " of 0)") {
+		t.Errorf("View() = %q, want no position indicator for an empty Section", out)
 	}
 }
 
@@ -1995,63 +1281,6 @@ func TestView_ExtremelyShortTerminal_NeverExceedsHeight(t *testing.T) {
 		if len(lines) > tc.height {
 			t.Errorf("width=%d height=%d: View() rendered %d lines, want at most %d", tc.width, tc.height, len(lines), tc.height)
 		}
-	}
-}
-
-// TestView_StackedBudgetOne_ShowsElisionAffordance verifies a stacked body
-// with only one row of budget shows an elision marker instead of a bare
-// blank separator line — a budget of 1 collapses both the backlog and queue
-// columns to nothing, so without a marker the render is a blank line with no
-// indication that content exists but isn't shown (issue #1041).
-func TestView_StackedBudgetOne_ShowsElisionAffordance(t *testing.T) {
-	issues := make([]forge.Issue, 20)
-	for i := range issues {
-		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
-	}
-	picks := make([]Pick, 20)
-	for i := range picks {
-		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
-	}
-
-	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 2})
-	m = Update(m, IssuesLoadedMsg{Issues: issues})
-	m.Picks = picks
-
-	out := View(m)
-	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(lines) > m.Height {
-		t.Errorf("View() rendered %d lines, want at most Height (%d)", len(lines), m.Height)
-	}
-	if !strings.Contains(out, "…") {
-		t.Errorf("View() = %q, want an elision affordance rather than a bare blank line", out)
-	}
-}
-
-// TestView_StackedBudgetOne_PicksOnly_ShowsElisionAffordance verifies the
-// budget=1 elision marker fires off picks alone, with an empty backlog — the
-// marker's guard is an OR of both columns' lengths, so a lopsided disjunct
-// (only one side populated) needs its own case or an accidental swap to AND
-// would still pass the empty/both-populated tests alone (issue #1041).
-func TestView_StackedBudgetOne_PicksOnly_ShowsElisionAffordance(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 2})
-	m.Picks = []Pick{{Number: "1", Title: "pick 1", State: PickQueued}}
-
-	out := View(m)
-	if !strings.Contains(out, "…") {
-		t.Errorf("View() = %q, want an elision affordance when the queue alone is non-empty", out)
-	}
-}
-
-// TestView_StackedBudgetOne_EmptyBacklogAndQueue_NoElisionAffordance verifies
-// the budget=1 elision marker only appears when there's something to elide —
-// a genuinely empty backlog and queue at the same tight budget keeps the
-// bare blank line rather than falsely claiming hidden content (issue #1041).
-func TestView_StackedBudgetOne_EmptyBacklogAndQueue_NoElisionAffordance(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 2})
-
-	out := View(m)
-	if strings.Contains(out, "…") {
-		t.Errorf("View() = %q, want no elision affordance when backlog and queue are both empty", out)
 	}
 }
 
@@ -2157,17 +1386,25 @@ func TestView_Backlog_SanitizesTitleAndLabelControlSequences(t *testing.T) {
 // Title and Reason — both tracker/dispatch-derived free text — render with
 // CSI/OSC escape sequences stripped and surrounding text intact (issue #862).
 func TestView_Queue_SanitizesTitleAndReasonControlSequences(t *testing.T) {
+	// A work-Section row's state cell carries its own legitimate role
+	// styling (ADR 0031) on the same line as the sanitized title/reason —
+	// unlike the Backlog row, which has no per-row styling at all. NO_COLOR
+	// keeps that legitimate styling from ever emitting an escape byte, so
+	// the check below stays an unambiguous test of sanitization alone.
+	t.Setenv("NO_COLOR", "1")
+
 	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
-	m.Picks = []Pick{
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
 		{Number: "42", Title: "evil\x1b[2Jtitle", State: PickHeld, Reason: "bad\x1b]0;pwned\x07reason"},
-	}
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionHeld})
 
 	out := View(m)
-	// The header carries legitimate styling escapes of its own (ADR 0031),
-	// so the check below scopes "no raw ESC byte" to the row rendering the
-	// untrusted title/reason rather than the whole output — anything past
-	// the sanitizer trust boundary in that row is still caught, styled
-	// header lines elsewhere are not a false positive.
+	// The header carries legitimate styling escapes of its own (ADR 0031)
+	// on a color-capable terminal, so the check below scopes "no raw ESC
+	// byte" to the row rendering the untrusted title/reason rather than the
+	// whole output — anything past the sanitizer trust boundary in that row
+	// is still caught.
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "eviltitle") || strings.Contains(line, "badreason") {
 			if strings.Contains(line, "\x1b") {
@@ -2180,92 +1417,6 @@ func TestView_Queue_SanitizesTitleAndReasonControlSequences(t *testing.T) {
 	}
 	if !strings.Contains(out, "badreason") {
 		t.Errorf("View() = %q, want the surrounding reason text intact after stripping escapes", out)
-	}
-}
-
-// TestSplitLeftWidth_ClampsToLeftColumnFraction verifies splitLeftWidth caps
-// its result at leftColumnFraction of width when the backlog's own longest
-// line runs past that share (issue #1001).
-func TestSplitLeftWidth_ClampsToLeftColumnFraction(t *testing.T) {
-	backlog := "a very long backlog line that would blow past the fraction cap"
-	width := 40
-
-	got := splitLeftWidth(backlog, width)
-	want := int(float64(width) * leftColumnFraction)
-	if got != want {
-		t.Errorf("splitLeftWidth(%q, %d) = %d, want %d (clamped to leftColumnFraction)", backlog, width, got, want)
-	}
-}
-
-// TestView_BodyAndDockedBody_AgreeOnLeftColumnWidth verifies renderBody and
-// renderDockedBody place the work-queue column at the same offset for the
-// same effective body width and backlog content — i.e. the two layouts
-// actually stay in sync, not just the extracted helper in isolation.
-// renderDockedBody carves its body width down from m.Width by the
-// Transcript column's share first (bodyWidth = m.Width - transcriptWidth),
-// so the docked model here uses a wider m.Width chosen so its bodyWidth
-// equals the plain body's m.Width exactly. The backlog title is long enough
-// to force the leftColumnFraction clamp in both, so the test would catch a
-// future edit that re-derives the clamp in only one of the two callers
-// (issue #1001 AC3/AC4). Fixture text is ASCII-only, so the byte offset
-// strings.Index returns equals both the rune count and the display-column
-// position — this isn't a general wide-rune column-offset proof, just a
-// same-input comparison between the two callers.
-func TestView_BodyAndDockedBody_AgreeOnLeftColumnWidth(t *testing.T) {
-	const bodyWidth = 60    // leftColumnFraction clamp: int(60 * 2/5) = 24
-	const dockedWidth = 100 // transcriptWidth = int(100*2/5) = 40, bodyWidth = 60
-	const height = 24
-
-	issues := []forge.Issue{{Number: "1", Title: "a very long backlog title that blows past the fraction cap"}}
-	picks := []Pick{{Number: "42", Title: "QUEUEMARK", State: PickQueued}}
-
-	mBody := Update(NewModel(), SizeChangedMsg{Width: bodyWidth, Height: height})
-	mBody = Update(mBody, IssuesLoadedMsg{Issues: issues})
-	mBody.Picks = picks
-
-	mDocked := Update(NewModel(), SizeChangedMsg{Width: dockedWidth, Height: height})
-	mDocked = Update(mDocked, IssuesLoadedMsg{Issues: issues})
-	mDocked.Picks = picks
-	mDocked = Update(mDocked, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
-
-	bodyOut := renderBody(mBody, nil)
-	dockedOut := renderDockedBody(mDocked, height)
-
-	bodyLine := lineContaining(t, bodyOut, "QUEUEMARK")
-	dockedLine := lineContaining(t, dockedOut, "QUEUEMARK")
-
-	bodyOffset := strings.Index(bodyLine, "QUEUEMARK")
-	dockedOffset := strings.Index(dockedLine, "QUEUEMARK")
-	if bodyOffset != dockedOffset {
-		t.Errorf("queue column starts at byte %d in renderBody but %d in renderDockedBody, want equal (same leftWidth)", bodyOffset, dockedOffset)
-	}
-}
-
-// lineContaining returns the first line of s containing substr, failing the
-// test if no line matches.
-func lineContaining(t *testing.T, s, substr string) string {
-	t.Helper()
-	for _, l := range strings.Split(s, "\n") {
-		if strings.Contains(l, substr) {
-			return l
-		}
-	}
-	t.Fatalf("no line in %q contains %q", s, substr)
-	return ""
-}
-
-// TestSplitLeftWidth_UsesBacklogWidthUnderFractionCap verifies splitLeftWidth
-// returns the backlog's own longest-line width, not the fraction cap, when
-// the backlog is narrower than its fraction share — the fraction is a
-// ceiling, not a fixed column width (issue #1001).
-func TestSplitLeftWidth_UsesBacklogWidthUnderFractionCap(t *testing.T) {
-	backlog := "short"
-	width := 80
-
-	got := splitLeftWidth(backlog, width)
-	want := maxLineWidth(backlog)
-	if got != want {
-		t.Errorf("splitLeftWidth(%q, %d) = %d, want %d (backlog's own width)", backlog, width, got, want)
 	}
 }
 
@@ -2305,63 +1456,40 @@ func TestVisibleItemCount_TruncatedWindow_HoldsBackOneRowForMoreBelow(t *testing
 	}
 }
 
-// TestFocusedBudget_ReturnsBacklogBudgetWhenBacklogFocused verifies
-// focusedBudget returns bodyColumnBudgets' backlog half while the backlog
-// column has focus (issue #1062).
-func TestFocusedBudget_ReturnsBacklogBudgetWhenBacklogFocused(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 10})
-
-	backlogBudget, _ := bodyColumnBudgets(m)
-	if got := focusedBudget(m); got != backlogBudget {
-		t.Errorf("focusedBudget = %d, want %d (backlog half)", got, backlogBudget)
-	}
-}
-
-// TestFocusedBudget_ReturnsQueueBudgetWhenQueueFocused verifies focusedBudget
-// returns bodyColumnBudgets' queue half instead once Tab has moved focus to
-// the work-queue column (issue #1062).
-func TestFocusedBudget_ReturnsQueueBudgetWhenQueueFocused(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 10})
-	m = Update(m, FocusToggleMsg{})
-
-	_, queueBudget := bodyColumnBudgets(m)
-	if got := focusedBudget(m); got != queueBudget {
-		t.Errorf("focusedBudget = %d, want %d (queue half)", got, queueBudget)
-	}
-}
-
-// TestWriteColumn_NonPositiveBudgetRendersNothing verifies writeColumn, the
-// helper renderBacklogColumn and renderQueueColumn share, reproduces their
-// budget<=0-renders-nothing guard (issue #1035) regardless of label or rows
-// content — the guard lives in the shared helper now (issue #1040), not
-// duplicated per caller.
-func TestWriteColumn_NonPositiveBudgetRendersNothing(t *testing.T) {
-	got := writeColumn("backlog", []string{"row1\n"}, 0, 0)
+// TestRenderTable_NonPositiveBudgetRendersNothing verifies renderTable, the
+// helper renderBacklogSection and renderWorkSection share, reproduces their
+// budget<=0-renders-nothing guard (issue #1035) regardless of header or rows
+// content — the guard lives in the shared helper (issue #1040, ADR 0030).
+func TestRenderTable_NonPositiveBudgetRendersNothing(t *testing.T) {
+	budget := 0
+	got := renderTable("header\n", []string{"row1\n"}, 0, &budget)
 	if got != "" {
-		t.Errorf("writeColumn() with budget 0 = %q, want empty", got)
+		t.Errorf("renderTable() with budget 0 = %q, want empty", got)
 	}
 }
 
-// TestWriteColumn_RendersLabelAndWindowedRows verifies writeColumn writes
-// the label line followed by rows windowed to budget-1 (the label costs one
-// row), matching the convention renderBacklogColumn/renderQueueColumn
+// TestRenderTable_RendersHeaderAndWindowedRows verifies renderTable writes
+// the header line followed by rows windowed to budget-1 (the header costs
+// one row), matching the convention renderBacklogSection/renderWorkSection
 // applied inline before extraction.
-func TestWriteColumn_RendersLabelAndWindowedRows(t *testing.T) {
-	got := writeColumn("backlog [focus]", []string{"row1\n", "row2\n"}, 0, 3)
-	want := "backlog [focus]:\nrow1\nrow2\n"
+func TestRenderTable_RendersHeaderAndWindowedRows(t *testing.T) {
+	budget := 3
+	got := renderTable("header\n", []string{"row1\n", "row2\n"}, 0, &budget)
+	want := "header\nrow1\nrow2\n"
 	if got != want {
-		t.Errorf("writeColumn() = %q, want %q", got, want)
+		t.Errorf("renderTable() = %q, want %q", got, want)
 	}
 }
 
-// TestWriteColumn_PassesOffsetThroughToWindowedRows verifies writeColumn
+// TestRenderTable_PassesOffsetThroughToWindowedRows verifies renderTable
 // forwards its offset argument to writeWindowedRows rather than always
-// windowing from the start of rows — the per-column scroll position
-// (m.BacklogOffset/m.QueueOffset) both callers pass through.
-func TestWriteColumn_PassesOffsetThroughToWindowedRows(t *testing.T) {
-	got := writeColumn("picks", []string{"row1\n", "row2\n", "row3\n"}, 1, 3)
-	want := "picks:\nrow2\nrow3\n"
+// windowing from the start of rows — the Section's own scroll position
+// (m.Offset) both callers pass through.
+func TestRenderTable_PassesOffsetThroughToWindowedRows(t *testing.T) {
+	budget := 3
+	got := renderTable("header\n", []string{"row1\n", "row2\n", "row3\n"}, 1, &budget)
+	want := "header\nrow2\nrow3\n"
 	if got != want {
-		t.Errorf("writeColumn() with offset 1 = %q, want %q", got, want)
+		t.Errorf("renderTable() with offset 1 = %q, want %q", got, want)
 	}
 }

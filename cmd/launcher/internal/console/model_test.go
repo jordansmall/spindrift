@@ -484,11 +484,11 @@ func TestUpdate_DrillInScrollMsg_NoOpWhenNoDrillInOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_ScrollMsg_MovesBacklogOffset verifies a scroll message moves
-// Model.BacklogOffset by Delta while the backlog is focused, clamped into
+// TestUpdate_ScrollMsg_MovesOffset verifies a scroll message moves
+// Model.Offset by Delta while the Backlog Section is active, clamped into
 // the visible list's line bounds the same way DrillInScrollMsg clamps
-// DrillIn.Offset (issue #1036).
-func TestUpdate_ScrollMsg_MovesBacklogOffset(t *testing.T) {
+// DrillIn.Offset (issue #1036, ADR 0030).
+func TestUpdate_ScrollMsg_MovesOffset(t *testing.T) {
 	m := NewModel()
 	issues := make([]forge.Issue, 5)
 	for i := range issues {
@@ -497,58 +497,52 @@ func TestUpdate_ScrollMsg_MovesBacklogOffset(t *testing.T) {
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
 	m = Update(m, ScrollMsg{Delta: 2})
-	if m.BacklogOffset != 2 {
-		t.Errorf("BacklogOffset = %d, want 2", m.BacklogOffset)
+	if m.Offset != 2 {
+		t.Errorf("Offset = %d, want 2", m.Offset)
 	}
 
 	m = Update(m, ScrollMsg{Delta: -1})
-	if m.BacklogOffset != 1 {
-		t.Errorf("BacklogOffset = %d, want 1", m.BacklogOffset)
+	if m.Offset != 1 {
+		t.Errorf("Offset = %d, want 1", m.Offset)
 	}
 
 	m = Update(m, ScrollMsg{Delta: -100})
-	if m.BacklogOffset != 0 {
-		t.Errorf("BacklogOffset = %d, want 0 (clamped at the top)", m.BacklogOffset)
+	if m.Offset != 0 {
+		t.Errorf("Offset = %d, want 0 (clamped at the top)", m.Offset)
 	}
 
 	m = Update(m, ScrollMsg{Delta: 100})
-	if m.BacklogOffset != 4 {
-		t.Errorf("BacklogOffset = %d, want 4 (clamped to the last row)", m.BacklogOffset)
+	if m.Offset != 4 {
+		t.Errorf("Offset = %d, want 4 (clamped to the last row)", m.Offset)
 	}
 }
 
-// TestUpdate_ScrollMsg_MovesQueueOffsetWhenQueueFocused verifies a scroll
-// message moves Model.QueueOffset instead when the work-queue column has
-// focus, and clamps into range when the picks queue shrinks (issue #1036).
-func TestUpdate_ScrollMsg_MovesQueueOffsetWhenQueueFocused(t *testing.T) {
+// TestUpdate_ScrollMsg_MovesOffsetWithinActiveWorkSection verifies a scroll
+// message moves Model.Offset against whichever work Section is active, not
+// the Backlog — switching Sections resets Offset to 0 (issue #1500), so a
+// scroll sent afterward must move that fresh 0, not a stale Backlog offset
+// (ADR 0030).
+func TestUpdate_ScrollMsg_MovesOffsetWithinActiveWorkSection(t *testing.T) {
 	m := NewModel()
-	m = Update(m, FocusToggleMsg{})
 	picks := make([]Pick, 5)
 	for i := range picks {
 		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
 	}
-	m.Picks = picks
+	m = Update(m, QueueSnapshotMsg{Picks: picks})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
 	m = Update(m, ScrollMsg{Delta: 3})
-	if m.QueueOffset != 3 {
-		t.Errorf("QueueOffset = %d, want 3", m.QueueOffset)
-	}
-	if m.BacklogOffset != 0 {
-		t.Errorf("BacklogOffset = %d, want 0 (queue focused, backlog untouched)", m.BacklogOffset)
-	}
-
-	m.Picks = picks[:1]
-	m = Update(m, ScrollMsg{Delta: 0})
-	if m.QueueOffset != 0 {
-		t.Errorf("QueueOffset = %d, want 0 (clamped after the queue shrank)", m.QueueOffset)
+	if m.Offset != 3 {
+		t.Errorf("Offset = %d, want 3", m.Offset)
 	}
 }
 
-// TestUpdate_ScrollMsg_BacklogOffsetScrollsPastEndWhenContentFitsOnScreen
-// verifies pgdown's behavior when the whole backlog already fits within one
-// screen (issue #1060): the offset still advances to the last row instead of
-// no-op'ing, scrolling the earlier, already-fully-visible rows off screen.
-func TestUpdate_ScrollMsg_BacklogOffsetScrollsPastEndWhenContentFitsOnScreen(t *testing.T) {
+// TestUpdate_ScrollMsg_OffsetScrollsPastEndWhenContentFitsOnScreen verifies
+// pgdown's behavior when the active Section's whole content already fits
+// within one screen (issue #1060): the offset still advances to the last row
+// instead of no-op'ing, scrolling the earlier, already-fully-visible rows
+// off screen.
+func TestUpdate_ScrollMsg_OffsetScrollsPastEndWhenContentFitsOnScreen(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	issues := make([]forge.Issue, 3)
 	for i := range issues {
@@ -556,49 +550,26 @@ func TestUpdate_ScrollMsg_BacklogOffsetScrollsPastEndWhenContentFitsOnScreen(t *
 	}
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
-	delta := focusedPageSize(m)
+	delta := sectionPageSize(m)
 	if delta != len(issues) {
-		t.Fatalf("focusedPageSize = %d, want %d (test setup: all issues must fit within one screen)", delta, len(issues))
+		t.Fatalf("sectionPageSize = %d, want %d (test setup: all issues must fit within one screen)", delta, len(issues))
 	}
 
 	m = Update(m, ScrollMsg{Delta: delta})
-	if m.BacklogOffset != len(issues)-1 {
-		t.Errorf("BacklogOffset = %d, want %d (pgdown scrolls to the last row even though every row already fit on screen)", m.BacklogOffset, len(issues)-1)
+	if m.Offset != len(issues)-1 {
+		t.Errorf("Offset = %d, want %d (pgdown scrolls to the last row even though every row already fit on screen)", m.Offset, len(issues)-1)
 	}
 }
 
-// TestUpdate_ScrollMsg_QueueOffsetScrollsPastEndWhenContentFitsOnScreen
-// mirrors TestUpdate_ScrollMsg_BacklogOffsetScrollsPastEndWhenContentFitsOnScreen
-// for the picks queue column (issue #1060).
-func TestUpdate_ScrollMsg_QueueOffsetScrollsPastEndWhenContentFitsOnScreen(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
-	m = Update(m, FocusToggleMsg{})
-	picks := make([]Pick, 3)
-	for i := range picks {
-		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
-	}
-	m.Picks = picks
-
-	delta := focusedPageSize(m)
-	if delta != len(picks) {
-		t.Fatalf("focusedPageSize = %d, want %d (test setup: all picks must fit within one screen)", delta, len(picks))
-	}
-
-	m = Update(m, ScrollMsg{Delta: delta})
-	if m.QueueOffset != len(picks)-1 {
-		t.Errorf("QueueOffset = %d, want %d (pgdown scrolls to the last row even though every pick already fit on screen)", m.QueueOffset, len(picks)-1)
-	}
-}
-
-// TestUpdate_CursorMoveMsg_BacklogOffsetFollowsCursor verifies the backlog
+// TestUpdate_CursorMoveMsg_OffsetFollowsCursor verifies the active Section's
 // viewport advances/rewinds by one as the cursor crosses its bottom/top
 // visible row, keeping the highlighted row always on screen (issue #1036
-// AC1). visibleRows is derived from the same bodyColumnBudgets /
-// columnItemBudget / windowedRowCount composition renderBody uses (issue
-// #1056), so a future geometry change doesn't require re-deriving a
-// hand-computed constant — this test drives the cursor across two screens'
-// worth of rows and back to exercise both directions.
-func TestUpdate_CursorMoveMsg_BacklogOffsetFollowsCursor(t *testing.T) {
+// AC1). visibleRows is derived from the same bodyBudget / columnItemBudget /
+// windowedRowCount composition renderBody uses (issue #1056), so a future
+// geometry change doesn't require re-deriving a hand-computed constant —
+// this test drives the cursor across two screens' worth of rows and back to
+// exercise both directions.
+func TestUpdate_CursorMoveMsg_OffsetFollowsCursor(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 50)
 	for i := range issues {
@@ -606,28 +577,27 @@ func TestUpdate_CursorMoveMsg_BacklogOffsetFollowsCursor(t *testing.T) {
 	}
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
-	backlogBudget, _ := bodyColumnBudgets(m)
-	visibleRows := windowedRowCount(len(issues), columnItemBudget(backlogBudget))
+	visibleRows := windowedRowCount(len(issues), columnItemBudget(bodyBudget(m)))
 
 	// Rows 0..visibleRows-1 are visible at offset 0; moving down within that
 	// window must not scroll.
 	for step := 1; step <= visibleRows-1; step++ {
 		m = Update(m, CursorMoveMsg{Delta: 1})
-		if m.BacklogOffset != 0 {
-			t.Fatalf("after %d down-moves: BacklogOffset = %d, want 0 (cursor %d still on screen)", step, m.BacklogOffset, m.Cursor)
+		if m.Offset != 0 {
+			t.Fatalf("after %d down-moves: Offset = %d, want 0 (cursor %d still on screen)", step, m.Offset, m.Cursor)
 		}
 	}
 
 	// Cursor now at the last visible row; one more down-move pushes it past
 	// the bottom, advancing the offset by exactly one.
 	m = Update(m, CursorMoveMsg{Delta: 1})
-	if m.Cursor != visibleRows || m.BacklogOffset != 1 {
-		t.Fatalf("Cursor = %d, BacklogOffset = %d, want Cursor %d, BacklogOffset 1 (scrolled to keep the cursor visible)", m.Cursor, m.BacklogOffset, visibleRows)
+	if m.Cursor != visibleRows || m.Offset != 1 {
+		t.Fatalf("Cursor = %d, Offset = %d, want Cursor %d, Offset 1 (scrolled to keep the cursor visible)", m.Cursor, m.Offset, visibleRows)
 	}
 
 	m = Update(m, CursorMoveMsg{Delta: 1})
-	if m.Cursor != visibleRows+1 || m.BacklogOffset != 2 {
-		t.Fatalf("Cursor = %d, BacklogOffset = %d, want Cursor %d, BacklogOffset 2 (offset advances one more)", m.Cursor, m.BacklogOffset, visibleRows+1)
+	if m.Cursor != visibleRows+1 || m.Offset != 2 {
+		t.Fatalf("Cursor = %d, Offset = %d, want Cursor %d, Offset 2 (offset advances one more)", m.Cursor, m.Offset, visibleRows+1)
 	}
 
 	// Moving back up: the offset must not rewind while the cursor is still
@@ -635,8 +605,8 @@ func TestUpdate_CursorMoveMsg_BacklogOffsetFollowsCursor(t *testing.T) {
 	// its own top row.
 	for step := 1; step <= visibleRows-1; step++ {
 		m = Update(m, CursorMoveMsg{Delta: -1})
-		if m.BacklogOffset != 2 {
-			t.Fatalf("after %d up-moves: BacklogOffset = %d, want 2 (cursor %d still on screen)", step, m.BacklogOffset, m.Cursor)
+		if m.Offset != 2 {
+			t.Fatalf("after %d up-moves: Offset = %d, want 2 (cursor %d still on screen)", step, m.Offset, m.Cursor)
 		}
 	}
 	// The 2 here (and the 1s below) count how many times the window has
@@ -650,57 +620,21 @@ func TestUpdate_CursorMoveMsg_BacklogOffsetFollowsCursor(t *testing.T) {
 	// Cursor now at row 2, the window's top row; one more up-move pushes it
 	// above the top, rewinding the offset by exactly one.
 	m = Update(m, CursorMoveMsg{Delta: -1})
-	if m.Cursor != 1 || m.BacklogOffset != 1 {
-		t.Fatalf("Cursor = %d, BacklogOffset = %d, want Cursor 1, BacklogOffset 1 (scrolled up to keep the cursor visible)", m.Cursor, m.BacklogOffset)
+	if m.Cursor != 1 || m.Offset != 1 {
+		t.Fatalf("Cursor = %d, Offset = %d, want Cursor 1, Offset 1 (scrolled up to keep the cursor visible)", m.Cursor, m.Offset)
 	}
 
 	m = Update(m, CursorMoveMsg{Delta: -100})
-	if m.Cursor != 0 || m.BacklogOffset != 0 {
-		t.Fatalf("Cursor = %d, BacklogOffset = %d, want Cursor 0, BacklogOffset 0 (clamped to the top)", m.Cursor, m.BacklogOffset)
+	if m.Cursor != 0 || m.Offset != 0 {
+		t.Fatalf("Cursor = %d, Offset = %d, want Cursor 0, Offset 0 (clamped to the top)", m.Cursor, m.Offset)
 	}
 }
 
-// TestUpdate_CursorMoveMsg_QueueOffsetFollowsCursorWhenQueueFocused verifies
-// the work-queue column's viewport follows QueueCursor the same way the
-// backlog column's follows Cursor — cursor-follows-viewport covers whichever
-// column Tab has focused (issue #1036 AC1/AC3). visibleRows is derived the
-// same way as TestUpdate_CursorMoveMsg_BacklogOffsetFollowsCursor's, from
-// the queue side of bodyColumnBudgets rather than the backlog side (issue
-// #1056).
-func TestUpdate_CursorMoveMsg_QueueOffsetFollowsCursorWhenQueueFocused(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
-	m = Update(m, FocusToggleMsg{})
-	picks := make([]Pick, 50)
-	for i := range picks {
-		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}
-	}
-	m.Picks = picks
-
-	_, queueBudget := bodyColumnBudgets(m)
-	visibleRows := windowedRowCount(len(picks), columnItemBudget(queueBudget))
-
-	for step := 1; step <= visibleRows-1; step++ {
-		m = Update(m, CursorMoveMsg{Delta: 1})
-		if m.QueueOffset != 0 {
-			t.Fatalf("after %d down-moves: QueueOffset = %d, want 0 (cursor %d still on screen)", step, m.QueueOffset, m.QueueCursor)
-		}
-	}
-
-	m = Update(m, CursorMoveMsg{Delta: 1})
-	if m.QueueCursor != visibleRows || m.QueueOffset != 1 {
-		t.Fatalf("QueueCursor = %d, QueueOffset = %d, want QueueCursor %d, QueueOffset 1 (scrolled to keep the cursor visible)", m.QueueCursor, m.QueueOffset, visibleRows)
-	}
-	if m.BacklogOffset != 0 {
-		t.Errorf("BacklogOffset = %d, want 0 (queue focused, backlog untouched)", m.BacklogOffset)
-	}
-}
-
-// TestUpdate_FilterChangedMsg_ClampsBacklogOffsetOnShrink verifies a filter
-// that narrows the backlog pulls a scroll offset now past the shrunken
-// list's end back into range, so a subsequent render never windows past what
-// Visible() actually holds (issue #1036 AC — offset clamped when the list
-// shrinks).
-func TestUpdate_FilterChangedMsg_ClampsBacklogOffsetOnShrink(t *testing.T) {
+// TestUpdate_FilterChangedMsg_ClampsOffsetOnShrink verifies a filter that
+// narrows the backlog pulls a scroll offset now past the shrunken list's end
+// back into range, so a subsequent render never windows past what Visible()
+// actually holds (issue #1036 AC — offset clamped when the list shrinks).
+func TestUpdate_FilterChangedMsg_ClampsOffsetOnShrink(t *testing.T) {
 	m := NewModel()
 	issues := make([]forge.Issue, 10)
 	for i := range issues {
@@ -709,8 +643,8 @@ func TestUpdate_FilterChangedMsg_ClampsBacklogOffsetOnShrink(t *testing.T) {
 	issues[0].Labels = []string{"only-match"}
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 	m = Update(m, ScrollMsg{Delta: 8})
-	if m.BacklogOffset != 8 {
-		t.Fatalf("BacklogOffset = %d, want 8 before filtering", m.BacklogOffset)
+	if m.Offset != 8 {
+		t.Fatalf("Offset = %d, want 8 before filtering", m.Offset)
 	}
 
 	m = Update(m, FilterChangedMsg{Filter: "only-match"})
@@ -718,8 +652,8 @@ func TestUpdate_FilterChangedMsg_ClampsBacklogOffsetOnShrink(t *testing.T) {
 	if len(m.Visible()) != 1 {
 		t.Fatalf("Visible() = %d issues, want 1 after filtering", len(m.Visible()))
 	}
-	if m.BacklogOffset != 0 {
-		t.Errorf("BacklogOffset = %d, want 0 (clamped after the filtered list shrank to 1 row)", m.BacklogOffset)
+	if m.Offset != 0 {
+		t.Errorf("Offset = %d, want 0 (clamped after the filtered list shrank to 1 row)", m.Offset)
 	}
 }
 
@@ -787,41 +721,6 @@ func TestUpdate_DrillInMsg_RefreshSameNumber_PreservesShowRaw(t *testing.T) {
 	}
 }
 
-// TestUpdate_DrillInMsg_NewNumber_ResetsPaneMode verifies a DrillInMsg for a
-// different Number resets PaneMode to PaneDocked even after the operator
-// cycled the previous drill-in to PaneFullscreen (issue #999, #846 AC1).
-func TestUpdate_DrillInMsg_NewNumber_ResetsPaneMode(t *testing.T) {
-	m := NewModel()
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "first"})
-	m = Update(m, PaneModeCycleMsg{})
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneFullscreen {
-		t.Fatalf("PaneMode = %v, want PaneFullscreen before the new drill-in", m.PaneMode)
-	}
-
-	m = Update(m, DrillInMsg{Number: "43", Rendered: "other"})
-	if m.PaneMode != PaneDocked {
-		t.Errorf("PaneMode = %v, want PaneDocked reset on a new Number", m.PaneMode)
-	}
-}
-
-// TestUpdate_DrillInMsg_RefreshSameNumber_PreservesPaneMode verifies a
-// second DrillInMsg for the same pick (a refresh while live-tailing) leaves
-// PaneMode untouched instead of resetting it to PaneDocked (issue #999).
-func TestUpdate_DrillInMsg_RefreshSameNumber_PreservesPaneMode(t *testing.T) {
-	m := NewModel()
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "first"})
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneFloating {
-		t.Fatalf("PaneMode = %v, want PaneFloating before the refresh", m.PaneMode)
-	}
-
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "second (grew)"})
-	if m.PaneMode != PaneFloating {
-		t.Errorf("PaneMode = %v, want PaneFloating preserved on same-Number refresh", m.PaneMode)
-	}
-}
-
 // TestUpdate_SizeChangedMsg_AppliesWidthHeight verifies a SizeChangedMsg
 // lands its Width/Height straight onto Model (issue #842).
 func TestUpdate_SizeChangedMsg_AppliesWidthHeight(t *testing.T) {
@@ -848,185 +747,5 @@ func TestUpdate_SizeChangedMsg_ClampsNonPositive(t *testing.T) {
 	}
 	if m.Height != minTerminalDimension {
 		t.Errorf("Height = %d, want clamped to %d", m.Height, minTerminalDimension)
-	}
-}
-
-// TestUpdate_FocusToggleMsg_SwitchesColumn verifies Tab's message flips
-// Focus between the backlog and work-queue columns, starting on the backlog
-// (the zero value) — the two-column focus split (issue #845).
-func TestUpdate_FocusToggleMsg_SwitchesColumn(t *testing.T) {
-	m := NewModel()
-	if m.Focus != FocusBacklog {
-		t.Errorf("Focus = %v, want FocusBacklog as the zero value", m.Focus)
-	}
-
-	m = Update(m, FocusToggleMsg{})
-	if m.Focus != FocusQueue {
-		t.Errorf("Focus = %v, want FocusQueue after one toggle", m.Focus)
-	}
-
-	m = Update(m, FocusToggleMsg{})
-	if m.Focus != FocusBacklog {
-		t.Errorf("Focus = %v, want FocusBacklog after a second toggle", m.Focus)
-	}
-}
-
-// TestUpdate_CursorMoveMsg_RoutesToFocusedColumnOnly verifies a cursor move
-// while Focus is FocusQueue moves QueueCursor and leaves the backlog's
-// Cursor untouched — each column owns an independent cursor (issue #845).
-func TestUpdate_CursorMoveMsg_RoutesToFocusedColumnOnly(t *testing.T) {
-	m := NewModel()
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
-	m.Picks = []Pick{{Number: "10"}, {Number: "11"}}
-
-	m = Update(m, FocusToggleMsg{})
-	m = Update(m, CursorMoveMsg{Delta: 1})
-
-	if m.QueueCursor != 1 {
-		t.Errorf("QueueCursor = %d, want 1 after one down-move while focused on the queue", m.QueueCursor)
-	}
-	if m.Cursor != 0 {
-		t.Errorf("Cursor = %d, want unchanged at 0 while focused on the queue", m.Cursor)
-	}
-}
-
-// TestUpdate_CursorMoveMsg_QueueCursorClampsToPicksLength verifies the
-// work-queue cursor clamps into [0, len(Picks)-1], mirroring the backlog
-// cursor's own clamp against Visible() (issue #845).
-func TestUpdate_CursorMoveMsg_QueueCursorClampsToPicksLength(t *testing.T) {
-	m := NewModel()
-	m.Picks = []Pick{{Number: "10"}}
-	m = Update(m, FocusToggleMsg{})
-
-	m = Update(m, CursorMoveMsg{Delta: 5})
-	if m.QueueCursor != 0 {
-		t.Errorf("QueueCursor = %d, want clamped at 0 (single-row queue)", m.QueueCursor)
-	}
-
-	m = Update(m, CursorMoveMsg{Delta: -5})
-	if m.QueueCursor != 0 {
-		t.Errorf("QueueCursor = %d, want clamped at 0", m.QueueCursor)
-	}
-}
-
-// TestUpdate_PaneModeCycleMsg_AdvancesDockedFloatingFullscreenDocked verifies
-// the pane-mode key's message steps PaneMode through the fixed cycle
-// docked -> floating -> fullscreen -> docked, only while a drill-in is open
-// (issue #846, ADR 0025).
-func TestUpdate_PaneModeCycleMsg_AdvancesDockedFloatingFullscreenDocked(t *testing.T) {
-	m := NewModel()
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "hi"})
-	if m.PaneMode != PaneDocked {
-		t.Errorf("PaneMode = %v, want PaneDocked as the zero value", m.PaneMode)
-	}
-
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneFloating {
-		t.Errorf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
-	}
-
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneFullscreen {
-		t.Errorf("PaneMode = %v, want PaneFullscreen after two cycles", m.PaneMode)
-	}
-
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneDocked {
-		t.Errorf("PaneMode = %v, want PaneDocked after three cycles (wraps)", m.PaneMode)
-	}
-}
-
-// TestUpdate_PaneModeCycleMsg_NoOpWhenNoDrillInOpen verifies cycling with no
-// transcript open leaves PaneMode untouched (issue #846).
-func TestUpdate_PaneModeCycleMsg_NoOpWhenNoDrillInOpen(t *testing.T) {
-	m := NewModel()
-	m = Update(m, PaneModeCycleMsg{})
-	if m.PaneMode != PaneDocked {
-		t.Errorf("PaneMode = %v, want PaneDocked (unchanged, no drill-in open)", m.PaneMode)
-	}
-}
-
-// TestFocusedCursor_ReturnsBacklogCursorWhenBacklogFocused verifies
-// focusedCursor points at Model.Cursor when the backlog column has focus —
-// the zero-value Focus, matching FocusBacklog (issue #1062).
-func TestFocusedCursor_ReturnsBacklogCursorWhenBacklogFocused(t *testing.T) {
-	m := NewModel()
-	m.Cursor = 3
-	m.QueueCursor = 7
-
-	got := focusedCursor(&m)
-	if got != &m.Cursor {
-		t.Errorf("focusedCursor = &%d, want &m.Cursor (%d)", *got, m.Cursor)
-	}
-}
-
-// TestFocusedCursor_ReturnsQueueCursorWhenQueueFocused verifies focusedCursor
-// points at Model.QueueCursor instead once Tab has moved focus to the
-// work-queue column (issue #1062).
-func TestFocusedCursor_ReturnsQueueCursorWhenQueueFocused(t *testing.T) {
-	m := NewModel()
-	m.Focus = FocusQueue
-	m.Cursor = 3
-	m.QueueCursor = 7
-
-	got := focusedCursor(&m)
-	if got != &m.QueueCursor {
-		t.Errorf("focusedCursor = &%d, want &m.QueueCursor (%d)", *got, m.QueueCursor)
-	}
-}
-
-// TestFocusedOffset_ReturnsBacklogOffsetWhenBacklogFocused verifies
-// focusedOffset points at Model.BacklogOffset when the backlog column has
-// focus (issue #1062).
-func TestFocusedOffset_ReturnsBacklogOffsetWhenBacklogFocused(t *testing.T) {
-	m := NewModel()
-	m.BacklogOffset = 3
-	m.QueueOffset = 7
-
-	got := focusedOffset(&m)
-	if got != &m.BacklogOffset {
-		t.Errorf("focusedOffset = &%d, want &m.BacklogOffset (%d)", *got, m.BacklogOffset)
-	}
-}
-
-// TestFocusedOffset_ReturnsQueueOffsetWhenQueueFocused verifies focusedOffset
-// points at Model.QueueOffset instead once Tab has moved focus to the
-// work-queue column (issue #1062).
-func TestFocusedOffset_ReturnsQueueOffsetWhenQueueFocused(t *testing.T) {
-	m := NewModel()
-	m.Focus = FocusQueue
-	m.BacklogOffset = 3
-	m.QueueOffset = 7
-
-	got := focusedOffset(&m)
-	if got != &m.QueueOffset {
-		t.Errorf("focusedOffset = &%d, want &m.QueueOffset (%d)", *got, m.QueueOffset)
-	}
-}
-
-// TestFocusedTotal_ReturnsVisibleCountWhenBacklogFocused verifies
-// focusedTotal returns len(m.Visible()) while the backlog column has focus
-// (issue #1062).
-func TestFocusedTotal_ReturnsVisibleCountWhenBacklogFocused(t *testing.T) {
-	m := NewModel()
-	m.All = []forge.Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
-	m.Picks = []Pick{{Number: "9", State: PickQueued}}
-
-	if got, want := focusedTotal(m), 3; got != want {
-		t.Errorf("focusedTotal = %d, want %d (len(Visible()))", got, want)
-	}
-}
-
-// TestFocusedTotal_ReturnsPicksCountWhenQueueFocused verifies focusedTotal
-// returns len(m.Picks) instead once Tab has moved focus to the work-queue
-// column (issue #1062).
-func TestFocusedTotal_ReturnsPicksCountWhenQueueFocused(t *testing.T) {
-	m := NewModel()
-	m.Focus = FocusQueue
-	m.All = []forge.Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
-	m.Picks = []Pick{{Number: "9", State: PickQueued}}
-
-	if got, want := focusedTotal(m), 1; got != want {
-		t.Errorf("focusedTotal = %d, want %d (len(Picks))", got, want)
 	}
 }

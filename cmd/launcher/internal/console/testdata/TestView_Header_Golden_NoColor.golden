@@ -4,8 +4,5 @@
 running 1/3 · waiting 1 · held 1 · settled 1 · failed 1
 ⚠ image stale: rebuild needed — new launches held; press [b] to rebuild
 ℹ notice: a live dogfood loop (.dogfood.pid) is competing for the same queue
-backlog [focus]:picks (1-4 of 4):
-                  #1  [queued]
-                  #2  [held]
-                  #3  [settled]
-                  #4  [failed]
+[1] Backlog [2] Running(1) [3] Held(1) [4] Settled(1) [5] Failed(1) [H/L,1-5]
+  #       title                                  labels
