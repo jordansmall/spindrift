@@ -340,19 +340,21 @@ func clip(s string, width int, pad bool) string {
 	}
 }
 
-// rebuildErrBannerWidth bounds the "!! rebuild failed" banner line to a
-// single row's worth of text. RunNixBuild wraps the merged nix stdout+stderr
-// (often many lines) into one error, so printing m.RebuildErr unbounded blew
-// the header banner out to arbitrary length (issue #1131). Fixed rather than
-// tied to m.Width — the other header lines are already unbounded strings,
-// and this budget only needs to be "one reasonable terminal row," not exact.
-const rebuildErrBannerWidth = 200
+// bannerErrWidth bounds a single-line header error banner (rebuild-failed,
+// orphan-recovery-failed) to one row's worth of text. RunNixBuild wraps the
+// merged nix stdout+stderr (often many lines) into one error, so printing
+// m.RebuildErr unbounded blew the header banner out to arbitrary length
+// (issue #1131); the same bound applies to any other error banner sharing
+// the row budget (issue #1218). Fixed rather than tied to m.Width — the
+// other header lines are already unbounded strings, and this budget only
+// needs to be "one reasonable terminal row," not exact.
+const bannerErrWidth = 200
 
-// clipRebuildErr collapses a rebuild error's embedded newlines (RunNixBuild
-// merges multi-line nix output into one error, issue #1131) to single spaces
-// and clips the result to width, so the header's rebuild-failed line stays
-// one row regardless of how verbose the underlying nix build output was.
-func clipRebuildErr(s string, width int) string {
+// clipBannerErr collapses an error's embedded newlines (RunNixBuild merges
+// multi-line nix output into one error, issue #1131) to single spaces and
+// clips the result to width, so a header error banner line stays one row
+// regardless of how verbose the underlying error was.
+func clipBannerErr(s string, width int) string {
 	return clip(strings.Join(strings.Fields(s), " "), width, false)
 }
 
@@ -419,10 +421,10 @@ func renderHeader(m Model) string {
 		b.WriteString("==> rebuilding image...\n")
 	}
 	if m.RebuildErr != "" {
-		fmt.Fprintf(&b, "!! rebuild failed: %s\n", clipRebuildErr(m.RebuildErr, rebuildErrBannerWidth))
+		fmt.Fprintf(&b, "!! rebuild failed: %s\n", clipBannerErr(m.RebuildErr, bannerErrWidth))
 	}
 	if m.OrphanRecoveryErr != "" {
-		fmt.Fprintf(&b, "!! orphan recovery failed: %s\n", clipRebuildErr(m.OrphanRecoveryErr, rebuildErrBannerWidth))
+		fmt.Fprintf(&b, "!! orphan recovery failed: %s\n", clipBannerErr(m.OrphanRecoveryErr, bannerErrWidth))
 	}
 	if m.BranchSwitchNotice != "" {
 		fmt.Fprintf(&b, "notice: %s\n", m.BranchSwitchNotice)
