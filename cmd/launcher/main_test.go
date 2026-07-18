@@ -179,6 +179,63 @@ func TestMainRun_HelpFlag_AmbientKnobEnv_WarnsBeforeHelp(t *testing.T) {
 	}
 }
 
+// TestMainRun_ExtractInputFlagError_AmbientKnobEnv_StillWarns verifies a
+// malformed --input flag (no value) still surfaces the ADR 0020 provenance
+// warning when an ambient knob env var is set, instead of extractInputFlag's
+// error return dropping it silently (issue #1191).
+func TestMainRun_ExtractInputFlagError_AmbientKnobEnv_StillWarns(t *testing.T) {
+	t.Setenv("MAX_JOBS", "5")
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"--input"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("mainRun code = %d, want 1; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "flag --input requires a value") {
+		t.Errorf("stderr = %q, want the extractInputFlag error", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "MAX_JOBS=5 set in environment") {
+		t.Errorf("stderr = %q, want a MAX_JOBS provenance warning", stderr.String())
+	}
+}
+
+// TestMainRun_ParseFlagsError_AmbientKnobEnv_StillWarns verifies an
+// unrecognized flag still surfaces the ADR 0020 provenance warning when an
+// ambient knob env var is set, instead of parseFlags's error return
+// dropping it silently (issue #1191).
+func TestMainRun_ParseFlagsError_AmbientKnobEnv_StillWarns(t *testing.T) {
+	t.Setenv("MAX_JOBS", "5")
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"--not-a-real-flag"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("mainRun code = %d, want 1; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--not-a-real-flag") {
+		t.Errorf("stderr = %q, want the parseFlags error", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "MAX_JOBS=5 set in environment") {
+		t.Errorf("stderr = %q, want a MAX_JOBS provenance warning", stderr.String())
+	}
+}
+
+// TestMainRun_LoadInputDocumentError_AmbientKnobEnv_StillWarns verifies a
+// --input path that fails to load still surfaces the ADR 0020 provenance
+// warning when an ambient knob env var is set, instead of
+// loadInputDocument's error return dropping it silently (issue #1191).
+func TestMainRun_LoadInputDocumentError_AmbientKnobEnv_StillWarns(t *testing.T) {
+	t.Setenv("MAX_JOBS", "5")
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"--input", filepath.Join(t.TempDir(), "missing.json"), "dispatch"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("mainRun code = %d, want 1; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "MAX_JOBS=5 set in environment") {
+		t.Errorf("stderr = %q, want a MAX_JOBS provenance warning", stderr.String())
+	}
+}
+
 // TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument is the
 // verb-level proof of ADR 0020's precedence chain: a --input document
 // resolves REPO_SLUG (no env, no flag set), and an explicit --repo-slug flag
