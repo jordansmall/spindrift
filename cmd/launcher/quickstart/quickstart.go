@@ -50,20 +50,33 @@ type Environment interface {
 }
 
 // runtimePrecedence is the order Quickstart probes for an available
-// container runtime (ADR 0027): podman first, then docker, then the
-// daemonless bwrap fallback. nerdctl/rancher is deferred (issue #1274).
-var runtimePrecedence = []string{"podman", "docker", "bwrap"}
+// container runtime (ADR 0027): podman first, then docker, then nerdctl
+// (Rancher Desktop's containerd mode) after docker — since Rancher Desktop
+// in dockerd mode already surfaces as "docker" and only containerd mode
+// exposes nerdctl — then the daemonless bwrap fallback.
+var runtimePrecedence = []string{"podman", "docker", "nerdctl", "bwrap"}
+
+// runtimeAlias maps a probed binary name to the operator-facing runtime
+// value Quickstart offers/writes. Every binary is its own value except
+// nerdctl, which reports as "rancher" — the same alias runtimeCLI (runner
+// package) maps back to nerdctl when actually invoking the runtime.
+func runtimeAlias(binary string) string {
+	if binary == "nerdctl" {
+		return "rancher"
+	}
+	return binary
+}
 
 // detectRuntime returns the first runtime in runtimePrecedence found on
-// PATH, or an actionable error naming all three when none is available —
-// Quickstart cannot proceed without one (ADR 0027).
+// PATH (aliased via runtimeAlias), or an actionable error naming all four
+// when none is available — Quickstart cannot proceed without one (ADR 0027).
 func detectRuntime(env Environment) (string, error) {
 	for _, rt := range runtimePrecedence {
 		if _, err := env.LookPath(rt); err == nil {
-			return rt, nil
+			return runtimeAlias(rt), nil
 		}
 	}
-	return "", fmt.Errorf("no supported container runtime found on PATH — install one of: podman, docker, bwrap")
+	return "", fmt.Errorf("no supported container runtime found on PATH — install one of: podman, docker, bwrap, or nerdctl (Rancher Desktop containerd mode, offered as runtime = \"rancher\")")
 }
 
 // CommandRunner abstracts the two subprocesses Quickstart shells out to
@@ -175,7 +188,7 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 	prompt := func(label string) string { return promptDefault(label, "") }
 
 	repoSlug := promptDefault("Repo slug (owner/repo)", env.GitRemoteRepoSlug())
-	runtime := promptDefault("Runtime (podman/docker/bwrap)", detectedRuntime)
+	runtime := promptDefault("Runtime (podman/docker/rancher/bwrap)", detectedRuntime)
 	gitUserName := promptDefault("Git user name", env.GitConfig("user.name"))
 	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
 

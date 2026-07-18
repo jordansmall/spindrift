@@ -207,7 +207,7 @@ func TestRunQuickstart_RuntimeDefault_FallsBackToDockerThenBwrap(t *testing.T) {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
-	if !strings.Contains(out.String(), "Runtime (podman/docker/bwrap) [docker]") {
+	if !strings.Contains(out.String(), "Runtime (podman/docker/rancher/bwrap) [docker]") {
 		t.Errorf("expected transcript to offer docker as the runtime default when podman is absent, got:\n%s", out.String())
 	}
 }
@@ -229,8 +229,59 @@ func TestRunQuickstart_RuntimeDefault_BwrapWhenOnlyOneAvailable(t *testing.T) {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
-	if !strings.Contains(out.String(), "Runtime (podman/docker/bwrap) [bwrap]") {
+	if !strings.Contains(out.String(), "Runtime (podman/docker/rancher/bwrap) [bwrap]") {
 		t.Errorf("expected transcript to offer bwrap as the runtime default when nothing else is available, got:\n%s", out.String())
+	}
+}
+
+func TestRunQuickstart_RuntimeDefault_NerdctlDetected_OffersRancher(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{runtimes: map[string]bool{"nerdctl": true, "bwrap": true}}
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Runtime (podman/docker/rancher/bwrap) [rancher]") {
+		t.Errorf("expected transcript to offer rancher as the runtime default when only nerdctl is present, got:\n%s", out.String())
+	}
+	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
+	if err != nil {
+		t.Fatalf("read flake.nix: %v", err)
+	}
+	if !strings.Contains(string(flakeNix), `runtime = "rancher"`) {
+		t.Errorf("expected flake.nix to default runtime to rancher, got:\n%s", flakeNix)
+	}
+}
+
+func TestRunQuickstart_RuntimeDefault_DockerPreferredOverNerdctl(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{runtimes: map[string]bool{"docker": true, "nerdctl": true}}
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+		"claude-oauth-faketoken",
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Runtime (podman/docker/rancher/bwrap) [docker]") {
+		t.Errorf("expected transcript to prefer docker over nerdctl (dockerd-mode Rancher Desktop stays docker), got:\n%s", out.String())
 	}
 }
 
@@ -243,7 +294,7 @@ func TestRunQuickstart_NoRuntimeDetected_ReturnsActionableError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error when no supported runtime is detected, got nil")
 	}
-	for _, want := range []string{"podman", "docker", "bwrap"} {
+	for _, want := range []string{"podman", "docker", "rancher", "bwrap"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("expected error to name %q, got: %q", want, err.Error())
 		}
@@ -296,7 +347,7 @@ func TestRunQuickstart_RuntimeDefault_PrefersPodmanOverDockerAndBwrap(t *testing
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
-	if !strings.Contains(out.String(), "Runtime (podman/docker/bwrap) [podman]") {
+	if !strings.Contains(out.String(), "Runtime (podman/docker/rancher/bwrap) [podman]") {
 		t.Errorf("expected transcript to offer podman as the runtime default, got:\n%s", out.String())
 	}
 	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
