@@ -733,6 +733,11 @@ the Issue Tracker (where issues live) and the Code Forge (where code and CI
 live) are independent axes. `ISSUE_TRACKER` selects the tracker; the Code
 Forge stays `github` regardless (Jira issues, GitHub PRs).
 
+The [Quickstart wizard](../README.md#quick-start) always provisions
+`github`; it never prompts for a tracker. `local` and `jira` are
+experimental and reachable only by hand-editing `ISSUE_TRACKER` in the
+generated `flake.nix`.
+
 - **`github`** (default) — the label lifecycle described above.
 - **`local`** — a private, file-based tracker; see [Local issue
   tracker](#local-issue-tracker-issue_trackerlocal) below.
