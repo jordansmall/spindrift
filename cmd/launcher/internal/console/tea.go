@@ -20,6 +20,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -429,10 +430,17 @@ func hasTranscript(state PickState) bool {
 // view and its Transcript toggle both need no further I/O once this lands. A
 // launch-less session (or a Launcher built without a Factory) has no Driver
 // to load with — that renders as a graceful SidebarLoadedMsg error instead of
-// dereferencing a nil Driver (issue #786 AC4, inherited). This runs only on
-// open (Enter): handleSidebarKey has no refresh key, so the sidebar never
-// live-tails a running Dispatch on its own yet — close (x/Esc) and reopen to
-// reload (issue #719, inherited; live-tailing ships in #1502).
+// dereferencing a nil Driver (issue #786 AC4, inherited). hasTranscript gates
+// Enter on PickRunning already, but a pick can read as Running a moment
+// before its Box's first log write lands on disk — DrillIn treats that as an
+// error ("no logs found"), while ActivityFeed treats it as its own
+// documented graceful-empty case; checking LogPaths once here picks
+// ActivityFeed's contract for the combined message rather than surfacing a
+// spurious failure for a Dispatch that simply hasn't written anything yet.
+// This runs only on open (Enter): handleSidebarKey has no refresh key, so
+// the sidebar never live-tails a running Dispatch on its own yet — close
+// (x/Esc) and reopen to reload (issue #719, inherited; live-tailing ships in
+// #1502).
 func openSidebarCmd(launch *Launcher, pwd, number string) tea.Cmd {
 	return func() tea.Msg {
 		drv := driverOf(launch)
@@ -440,6 +448,10 @@ func openSidebarCmd(launch *Launcher, pwd, number string) tea.Cmd {
 			return SidebarLoadedMsg{Number: number, Err: fmt.Errorf("no Driver available for this session")}
 		}
 		activity := ActivityFeed(drv, pwd, number)
+		if len(dispatch.LogPaths(pwd, number)) == 0 {
+			return SidebarLoadedMsg{Number: number, Activity: activity}
+		}
+		// DrillIn always returns a DrillInMsg; the type assertion can't fail.
 		dm, _ := DrillIn(drv, pwd, number).(DrillInMsg)
 		return SidebarLoadedMsg{Number: number, Activity: activity, Rendered: dm.Rendered, Raw: dm.Raw, Err: dm.Err}
 	}

@@ -471,6 +471,34 @@ func TestUpdate_SidebarScrollMsg_ClampsToViewportHeight(t *testing.T) {
 	}
 }
 
+// TestUpdate_SidebarScrollMsg_DockedClampsToBodyBudgetNotFullHeight verifies
+// a pgdown past the end of a transcript, docked beside the list (wide
+// enough for sidebarFits), lands Offset against bodyBudget(m) — the same
+// row budget renderSidebarDocked actually renders into — rather than the
+// whole terminal Height, which the header/banner/tabs eat into (#1501
+// review finding).
+func TestUpdate_SidebarScrollMsg_DockedClampsToBodyBudgetNotFullHeight(t *testing.T) {
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 20})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+	m = Update(m, SidebarToggleMsg{})
+
+	m = Update(m, SidebarScrollMsg{Delta: 1000})
+
+	budget := bodyBudget(m)
+	if budget >= 20 {
+		t.Fatalf("test setup: bodyBudget(m) = %d, want it under Height (20) — header/tabs must actually eat into the docked budget", budget)
+	}
+	want := 100 - (budget - 2)
+	if m.Sidebar.Offset != want {
+		t.Errorf("Offset = %d, want %d (last page fills the docked body budget, not the full terminal height)", m.Sidebar.Offset, want)
+	}
+}
+
 // TestUpdate_SidebarScrollMsg_ShortTranscriptStaysAtTop verifies a pgdown
 // past the end of a transcript shorter than the fullscreen viewport lands
 // Offset at 0, not len(Lines)-1 — content that already fits the viewport in

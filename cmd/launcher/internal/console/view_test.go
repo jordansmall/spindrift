@@ -842,6 +842,26 @@ func TestView_SidebarOpen_WideTerminal_DocksBesideList(t *testing.T) {
 	}
 }
 
+// TestView_SidebarOpen_ShortContent_DividerDoesNotFillWholeBudget verifies
+// the divider between the docked list and sidebar spans only as many rows
+// as the taller of the two actually rendered, not the whole body budget —
+// one Backlog issue and a one-line Activity feed must not force blank
+// divider rows down to the bottom of a tall terminal (#1501 review finding).
+func TestView_SidebarOpen_ShortContent_DividerDoesNotFillWholeBudget(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "only issue"}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "one line"}}})
+
+	out := View(m)
+	got := strings.Count(out, "\n")
+	// header (banner + status line) + tabs + a couple of content rows —
+	// nowhere near the full Height: 24 budget the pre-fix divider always
+	// forced the joined body up to.
+	if got > 15 {
+		t.Errorf("View() rendered %d lines, want well under Height (24) — the divider must not pad the body out to the full budget for short content", got)
+	}
+}
+
 // TestView_SidebarOpen_NarrowTerminal_FallsBackFullscreen verifies a
 // terminal one column short of sidebarFits' threshold falls back to the
 // fullscreen takeover — the list disappears entirely rather than squeezing
