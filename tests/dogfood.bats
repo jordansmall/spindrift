@@ -251,3 +251,19 @@ setup() {
   grep -q -- '--max-jobs 3' "$NIX_LOG"
 }
 
+@test "dogfood aborts with a clear message when MAX_PARALLEL is a decimal" {
+  run env BASE_BRANCH=main MAX_PARALLEL=3.5 bash "$WORK/dogfood.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"MAX_PARALLEL"* ]]
+  [[ "$output" != *"unbound variable"* ]]
+  [[ "$output" != *"arithmetic syntax error"* ]]
+}
+
+@test "dogfood aborts with a clear message when MAX_PARALLEL is negative" {
+  run env BASE_BRANCH=main MAX_PARALLEL=-1 bash "$WORK/dogfood.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"MAX_PARALLEL"* ]]
+  [[ "$output" != *"unbound variable"* ]]
+  [[ "$output" != *"arithmetic syntax error"* ]]
+}
+
