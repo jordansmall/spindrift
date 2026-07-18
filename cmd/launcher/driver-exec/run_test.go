@@ -215,10 +215,14 @@ func TestRunRelaunchesInBakedEnvOnEmptyStreamLaunchFailure(t *testing.T) {
 		issue:        "7",
 	}
 	var stdout bytes.Buffer
-	rc, err := run(cfg, &stdout)
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
+	var rc int
+	testutil.CaptureStderr(t, func() {
+		var runErr error
+		rc, runErr = run(cfg, &stdout)
+		if runErr != nil {
+			t.Fatalf("run: %v", runErr)
+		}
+	})
 	if rc != 0 {
 		t.Errorf("exit code = %d, want 0 (relaunched direct run's exit code)", rc)
 	}
