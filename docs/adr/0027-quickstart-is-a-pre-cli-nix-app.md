@@ -9,7 +9,7 @@ only for the irreducible rest, targeting under a minute of questions before the
 build.
 
 The instinct is a `spindrift quickstart` subcommand, and it is wrong. The
-fields the wizard most needs to set — `runtime` (podman/docker/bwrap), `driver`,
+fields the wizard most needs to set — `runtime` (podman/docker/rancher/bwrap), `driver`,
 the forge/tracker seams — are `flake.nix` options resolved at nix-eval/image-
 build time, not env knobs the launcher reads. And the `spindrift` binary only
 exists *after* `nix develop` inside a Consumer flake, by which point `runtime`
@@ -30,8 +30,10 @@ with a "write the files directly for scripted setup" message.
 
 The wizard prompts the Issue Tracker (github/jira/local) and lets the Code Forge
 follow as github; `driver` is fixed at `claude` (the only one). Detected values
-(runtime by `podman → docker → bwrap` precedence, git identity from host `git
-config`, repoSlug from `git remote`) appear as inline pre-filled defaults. Git
+(runtime by `podman → docker → nerdctl(⇒ rancher) → bwrap` precedence, git
+identity from host `git config`, repoSlug from `git remote`) appear as inline
+pre-filled defaults. nerdctl is probed after docker since Rancher Desktop's
+dockerd mode already satisfies the `docker` branch. Git
 identity is baked into `settings.repository` rather than left to the runtime
 host-config fallback, so the committed flake reproduces in CI where no host git
 config exists. It finishes by running `spindrift doctor` (probe the forge,
@@ -72,8 +74,7 @@ remaining step.
   Quick start, alongside (not replacing) `nix flake init -t` for users who
   prefer to hand-edit.
 - Glossary term **Quickstart** lands in CONTEXT.md with this decision.
-- Deferred: `runtime = "rancher"` (issue #1274) is not yet in the detection
-  chain above. When quickstart/doctor runtime detection lands, the chain
-  becomes `podman → docker → nerdctl(⇒ rancher) → bwrap` — nerdctl probed
-  after docker, since Rancher Desktop's dockerd mode already satisfies the
-  `docker` branch and only containerd mode needs the nerdctl/rancher branch.
+- `runtime = "rancher"` (issue #1274) is in the detection chain above (issue
+  #1275): nerdctl is probed after docker, since Rancher Desktop's dockerd mode
+  already satisfies the `docker` branch and only containerd mode needs the
+  nerdctl/rancher branch.
