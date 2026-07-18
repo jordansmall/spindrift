@@ -69,13 +69,13 @@ func TestRunNixBuild_ScriptedFailure_SurfacesStderr(t *testing.T) {
 	}
 }
 
-// TestRunNixBuild_CapturesOutput_NeverTouchesRealStdout verifies a
+// TestRunNixBuild_CapturesOutput_NeverTouchesRealStdio verifies a
 // background Console rebuild (issue #765) never writes nix's build output
 // to the process's real os.Stdout or os.Stderr — a live Bubble Tea
 // alt-screen program owns those fds, and a concurrent direct writer would
 // corrupt the display — and instead returns the captured text to the
 // caller.
-func TestRunNixBuild_CapturesOutput_NeverTouchesRealStdout(t *testing.T) {
+func TestRunNixBuild_CapturesOutput_NeverTouchesRealStdio(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fake-nix")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'building foo'\necho 'building foo stderr' >&2\nexit 0\n"), 0o755); err != nil {
