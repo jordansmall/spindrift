@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -371,7 +372,13 @@ func TestDocComments_NoHardcodedLineNumbers(t *testing.T) {
 	}
 
 	re := regexp.MustCompile(`\b\w+\.go:\d+`)
-	if m := re.FindAllString(string(src), -1); m != nil {
-		t.Errorf("doc-comments must reference symbols, not line numbers; found %v", m)
+	var found []string
+	for _, line := range strings.Split(string(src), "\n") {
+		if _, comment, ok := strings.Cut(line, "//"); ok {
+			found = append(found, re.FindAllString(comment, -1)...)
+		}
+	}
+	if found != nil {
+		t.Errorf("doc-comments must reference symbols, not line numbers; found %v", found)
 	}
 }
