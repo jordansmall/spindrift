@@ -33,7 +33,9 @@ func (f *Factory) Kill(number string) error {
 // Console startup orphan detection (issue #651): a crash or dropped SSH
 // leaves these running with no live goroutine in a fresh process to account
 // for them. A name that doesn't match the scheme, or whose suffix isn't a
-// valid issue number, is silently skipped (issue #793).
+// valid unsigned issue number, is silently skipped (issue #793) — GitHub
+// issue numbers are never signed, so a suffix like "+5" or "-42" is rejected
+// same as any other non-numeric suffix (issue #1157).
 func (f *Factory) OrphanedIssues() ([]string, error) {
 	names, err := f.runner.ListRunning()
 	if err != nil {
