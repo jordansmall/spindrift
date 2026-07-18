@@ -170,6 +170,29 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// Stronger canary than the same-marker case above: the genuine
+		// turn quotes "rate_limit_error" while the synthetic terminator
+		// carries "server_error" -- two different transientPatterns
+		// entries mapping to two different Reasons. Unlike the
+		// same-marker case, this outcome is NOT invariant to the #579
+		// guard: if isAgentContentEvent stopped exempting the genuine
+		// turn from the normal scan, its own "rate_limit_error" text
+		// would set sr.found=true with RateLimit, and the terminator's
+		// "server_error" would never be scanned (matchTransient only
+		// runs when !sr.found), so the test would assert RateLimit and
+		// fail. Verified experimentally: disabling isAgentContentEvent's
+		// special-case branch makes this test fail (issue #1199).
+		name: "Transient_GenuineAssistantContent_RateLimitMarker_ThenSyntheticServerErrorTerminator",
+		lines: []string{
+			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Investigating the rate_limit_error transient pattern before writing the fix"}]}}`,
+			`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Server error mid-response. The response above may be incomplete."}],"stop_reason":"stop_sequence"},"error":"server_error"}`,
+			`{"type":"result","is_error":true,"result":"API Error: Server error mid-response","stop_reason":"stop_sequence","terminal_reason":"completed"}`,
+		},
+		wantClass:   claude.Transient,
+		wantReason:  claude.Overloaded,
+		wantResetAt: nil,
+	},
+	{
 		name: "Network_ConnectionRefused",
 		lines: []string{
 			`dial tcp: connection refused`,
