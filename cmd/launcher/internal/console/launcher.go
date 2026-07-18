@@ -279,6 +279,12 @@ func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 // synchronous window — a second confirm on the same row would otherwise
 // race a duplicate Kill/Comment/TransitionState.
 func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) {
+	// Two short critical sections, not one: terminating() takes l.mu itself
+	// to lazily construct the map, then this function re-takes it right
+	// after for the check-and-set below. Splitting them is safe because
+	// every read/write of the map is still mutex-guarded throughout — the
+	// atomicity that matters is the check-and-set itself, not its adjacency
+	// to the lazy-init.
 	inFlight := l.terminating()
 
 	l.mu.Lock()
