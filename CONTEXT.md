@@ -295,6 +295,18 @@ the headless driving loops (dogfood, CI), not a replacement for them.
 _Avoid_: TUI (names the rendering, not the role), dashboard (it drives, not
 merely displays), monitor.
 
+**Section**:
+A named slice of the session's issues the Console shows one at a time — Backlog,
+Running, Held, Settled, or Failed. The Backlog section is the pick source; the
+rest slice the work queue of already-Picked issues by their state.
+_Avoid_: tab (names the widget, not the slice), view, filter (the Backlog's own
+label filter is a separate thing).
+
+**Backlog**:
+The Console section listing queueable issues an operator can Pick — the pick
+source, distinct from the work queue of issues already Picked.
+_Avoid_: inbox, todo, queue (that is the picked work, not the source).
+
 **Quickstart**:
 The pre-CLI interactive scaffolder — a nix app (`nix run
 …#quickstart`, `apps.quickstart`), not a Harness subcommand — that takes an
@@ -354,12 +366,21 @@ gesture. _Avoid_: sync, sweep, cleanup, recover (the operator's explicit
 per-issue adopt-and-merge gesture, a different act).
 
 **Transcript**:
-The Driver-rendered record of a Dispatch's work across its pass logs — the
-content the Console shows when an operator drills into a work-queue row, with a
-raw-JSONL toggle for the byte-exact form. It is a *view* of logs the Dispatch
-already produced, not a separate derived stream; there is no distinct
-heartbeat/event timeline behind it.
+The Driver-rendered record of a Dispatch's work across its pass logs — the full
+content the live-tail sidebar shows on toggle, with a raw-JSONL toggle for the
+byte-exact form. It is a *view* of logs the Dispatch already produced, not a
+separately stored stream: the condensed Activity feed is a second view of the
+same logs, not a distinct timeline behind them.
 _Avoid_: narrative log, running log, log.
+
+**Activity feed**:
+The Console's condensed, timestamped view of a running Dispatch's work — one
+line per Driver step, derived by replaying the Dispatch's pass log through the
+heartbeat parser. It is the live-tail sidebar's default, following the newest
+line until the operator scrolls back; a key toggles it to the full [[Transcript]].
+Like the Transcript, a view of logs the Dispatch already produced, not a
+separately stored stream.
+_Avoid_: heartbeat log, status log, activity log, event stream.
 
 **Outcome line**:
 The machine-readable final line a Box writes to stdout, parsed by the Launcher
