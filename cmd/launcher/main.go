@@ -1002,6 +1002,13 @@ func cmdDispatch(lc *launchContext) int {
 	return runExitCode(lc)
 }
 
+// flushAmbientWarnings writes any snapshotted ambient-env deprecation
+// warnings to stderr. Callers pass the same buffer at each mainRun
+// early-return site that must surface warnings (ADR 0020, issue #814).
+func flushAmbientWarnings(stderr io.Writer, warnings *bytes.Buffer) {
+	stderr.Write(warnings.Bytes())
+}
+
 // mainRun parses argv and dispatches to the selected subcommand, returning
 // the process exit code. It contains no business logic of its own beyond
 // arg parsing and subcommand selection. stdout/stderr are injected so tests
@@ -1027,7 +1034,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	var ambientWarnings bytes.Buffer
 	warnAmbientKnobEnv(&ambientWarnings)
 	if help {
-		stderr.Write(ambientWarnings.Bytes())
+		flushAmbientWarnings(stderr, &ambientWarnings)
 		if helpAll {
 			printHelpFull(stdout)
 		} else {
@@ -1048,7 +1055,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		// Bare `spindrift`: print help rather than silently dispatching
 		// (issue #555). `dispatch` remains the sole way to drain the queue.
-		stderr.Write(ambientWarnings.Bytes())
+		flushAmbientWarnings(stderr, &ambientWarnings)
 		printHelp(stdout)
 		return 0
 	}
@@ -1060,7 +1067,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		}
 		loadedDoc = doc
 	}
-	stderr.Write(ambientWarnings.Bytes())
+	flushAmbientWarnings(stderr, &ambientWarnings)
 	if args[0] == "build" {
 		return cmdBuild()
 	}
