@@ -35,7 +35,9 @@ func (f *Factory) Kill(number string) error {
 // for them. A name that doesn't match the scheme, or whose suffix isn't a
 // valid unsigned issue number, is silently skipped (issue #793) — GitHub
 // issue numbers are never signed, so a suffix like "+5" or "-42" is rejected
-// same as any other non-numeric suffix (issue #1157).
+// same as any other non-numeric suffix (issue #1157). A leading-zero suffix
+// like "007" still parses (real issue numbers never carry one, so this is
+// never exercised) and passes through as the raw string, not canonicalized.
 func (f *Factory) OrphanedIssues() ([]string, error) {
 	names, err := f.runner.ListRunning()
 	if err != nil {
