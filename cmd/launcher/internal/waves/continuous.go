@@ -233,8 +233,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	}()
 
 	mu.Lock()
-	for i := 0; i < limiter.Cap(); i++ {
-		refill()
+	for refill() {
 	}
 	for outstanding > 0 {
 		idle.Wait()
