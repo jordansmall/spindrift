@@ -16,7 +16,7 @@ func TestBuildEdges_MultipleIssuesWithBlockers(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "3", Body: ""})
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
-	got, _, _, err := BuildEdges(fc, issues)
+	got, err := BuildEdges(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -24,8 +24,8 @@ func TestBuildEdges_MultipleIssuesWithBlockers(t *testing.T) {
 		"1": {"2", "3"},
 		"2": {"3"},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
+	if !reflect.DeepEqual(got.Edges, want) {
+		t.Errorf("got %v, want %v", got.Edges, want)
 	}
 }
 
@@ -35,16 +35,16 @@ func TestBuildEdges_NoBlockersOmitted(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "2", Body: ""})
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}}
-	got, _, _, err := BuildEdges(fc, issues)
+	got, err := BuildEdges(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
-	if _, ok := got["2"]; ok {
-		t.Errorf("issue 2 has no blockers, expected no map key, got %v", got["2"])
+	if _, ok := got.Edges["2"]; ok {
+		t.Errorf("issue 2 has no blockers, expected no map key, got %v", got.Edges["2"])
 	}
 	want := map[string][]string{"1": {"2"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
+	if !reflect.DeepEqual(got.Edges, want) {
+		t.Errorf("got %v, want %v", got.Edges, want)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestBuildEdges_DepsOfErrorNonFatal(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "3", Body: "## Blocked by\n- #1"})
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
-	got, _, failed, err := BuildEdges(fc, issues)
+	got, err := BuildEdges(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -63,11 +63,11 @@ func TestBuildEdges_DepsOfErrorNonFatal(t *testing.T) {
 		"1": {"2"},
 		"3": {"1"},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
+	if !reflect.DeepEqual(got.Edges, want) {
+		t.Errorf("got %v, want %v", got.Edges, want)
 	}
-	if !failed["2"] {
-		t.Errorf("failed = %v, want it to name issue 2 (its DepsOf call errored)", failed)
+	if !got.Failed["2"] {
+		t.Errorf("failed = %v, want it to name issue 2 (its DepsOf call errored)", got.Failed)
 	}
 }
 
@@ -84,14 +84,14 @@ func TestBuildEdges_MixedNativeAndBodySources(t *testing.T) {
 	fc.NativeDeps = map[string][]string{"1": {"3"}}
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
-	_, sources, _, err := BuildEdges(fc, issues)
+	result, err := BuildEdges(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
-	if got := sources["1"]["3"]; got != forge.DepSourceNative {
+	if got := result.Sources["1"]["3"]; got != forge.DepSourceNative {
 		t.Errorf("issue 1's blocker 3 source = %v, want native", got)
 	}
-	if got := sources["2"]["3"]; got != forge.DepSourceBody {
+	if got := result.Sources["2"]["3"]; got != forge.DepSourceBody {
 		t.Errorf("issue 2's blocker 3 source = %v, want body", got)
 	}
 }

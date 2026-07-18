@@ -95,8 +95,9 @@ func (q *Queue) Snapshot() []Pick {
 // still have moved one or more picks onto PickHeld.
 func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string) ([]waves.Issue, map[string][]string, waves.Sources, error) {
 	for _, pick := range q.claimable() {
-		edges, sources, depsOfFailed, _ := waves.BuildEdges(tracker, []waves.Issue{{Number: pick.Number, Title: pick.Title}})
-		if depsOfFailed[pick.Number] {
+		result, _ := waves.BuildEdges(tracker, []waves.Issue{{Number: pick.Number, Title: pick.Title}})
+		edges, sources := result.Edges, result.Sources
+		if result.Failed[pick.Number] {
 			// A transient DepsOf failure looks identical to "confirmed zero
 			// blockers" in edges alone — hold rather than launch, since a
 			// genuinely-blocked pick must never claim on a tracker hiccup

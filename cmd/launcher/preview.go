@@ -34,11 +34,11 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Wri
 		fmt.Fprintf(w, "repo: %s  merge-mode: %s\nno open '%s' issues — nothing to dispatch.\n", c.repoSlug, c.mergeMode, c.label)
 		return nil
 	}
-	edges, sources, _, err := waves.BuildEdges(it, toWaveIssues(issues))
+	result, err := waves.BuildEdges(it, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
-	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: edges, Sources: sources})
+	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: result.Edges, Sources: result.Sources})
 	if err != nil {
 		return err
 	}
@@ -62,10 +62,11 @@ func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, w
 	}
 
 	// Parse blocker graph.
-	edges, sources, _, err := waves.BuildEdges(it, toWaveIssues(issues))
+	result, err := waves.BuildEdges(it, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
+	edges, sources := result.Edges, result.Sources
 
 	// Eviction pass (dry-run; no side effects).
 	kept, notices := evictUnmetBlockers(c, it, cf, issues, edges, sources)

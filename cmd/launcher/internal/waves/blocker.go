@@ -24,6 +24,17 @@ import (
 // it is not a reflection of current behaviour.
 type Sources map[string]map[string]forge.DepSource
 
+// BuildResult is the dependency graph BuildEdges resolves for a batch of
+// issues: edges (child -> blockers), the source each blocker ref was
+// resolved from, and the set of issues whose DepsOf call failed. The three
+// are always built and consumed together, never independently, so they
+// travel as one value instead of three positional returns.
+type BuildResult struct {
+	Edges   map[string][]string
+	Sources Sources
+	Failed  map[string]bool
+}
+
 // BuildEdges returns the dependency graph for the given batch of issues by
 // calling the IssueTracker's DepsOf for each, plus the source each blocker
 // ref was resolved from. Non-fatal per-issue errors are skipped, matching
@@ -32,10 +43,10 @@ type Sources map[string]map[string]forge.DepSource
 // zero-blocker issue (#752) — the two look identical in edges alone, since
 // both simply omit the issue's key. Callers pass the edges result as
 // Input.Edges and the sources result as Input.Sources to NewPlan.
-func BuildEdges(it forge.IssueTracker, issues []Issue) (edges map[string][]string, sources Sources, failed map[string]bool, err error) {
-	edges = map[string][]string{}
-	sources = Sources{}
-	failed = map[string]bool{}
+func BuildEdges(it forge.IssueTracker, issues []Issue) (BuildResult, error) {
+	edges := map[string][]string{}
+	sources := Sources{}
+	failed := map[string]bool{}
 	for _, iss := range issues {
 		deps, depsErr := it.DepsOf(iss.Number)
 		if depsErr != nil {
@@ -55,7 +66,7 @@ func BuildEdges(it forge.IssueTracker, issues []Issue) (edges map[string][]strin
 		edges[iss.Number] = ids
 		sources[iss.Number] = srcs
 	}
-	return edges, sources, failed, nil
+	return BuildResult{Edges: edges, Sources: sources, Failed: failed}, nil
 }
 
 // detectCycle runs Kahn's algorithm on the in-batch portion of the dependency
