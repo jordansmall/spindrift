@@ -452,13 +452,17 @@ func renderHeader(m Model) string {
 			clipBannerErr(m.RebuildErr, bannerErrWidth))
 	}
 	if m.OrphanRecoveryErr != "" {
-		fmt.Fprintf(&b, "!! orphan recovery failed: %s\n", clipBannerErr(m.OrphanRecoveryErr, bannerErrWidth))
+		fmt.Fprintf(&b, "%s %s\n",
+			roleStyle(RoleFailed).Render(glyphWarning+" orphan recovery failed:"),
+			clipBannerErr(m.OrphanRecoveryErr, bannerErrWidth))
 	}
 	if m.BranchSwitchNotice != "" {
-		fmt.Fprintf(&b, "notice: %s\n", m.BranchSwitchNotice)
+		b.WriteString(roleStyle(RoleDim).Render(fmt.Sprintf("%s notice: %s", glyphNotice, m.BranchSwitchNotice)))
+		b.WriteString("\n")
 	}
 	if m.DogfoodLive {
-		b.WriteString("notice: a live dogfood loop (.dogfood.pid) is competing for the same queue\n")
+		b.WriteString(roleStyle(RoleDim).Render(glyphNotice + " notice: a live dogfood loop (.dogfood.pid) is competing for the same queue"))
+		b.WriteString("\n")
 	}
 	return b.String()
 }
