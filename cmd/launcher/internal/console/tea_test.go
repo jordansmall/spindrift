@@ -1053,13 +1053,7 @@ func TestTea_StaleStatus_RendersBanner(t *testing.T) {
 	f := forge.NewFake()
 	launch := newTestLauncher(t, f)
 	launch.Fresh = func() (bool, bool, string) { return true, false, "rebuild needed" }
-	// A queued pick is what actually hits the stale gate in production
-	// (Rebuild's own doc comment: "any pick held ... through the stale
-	// window") — tryLaunch is a real no-op on an empty queue post-#754, so
-	// an empty-queue call here would never reach freshnessChecker at all.
-	launch.Queue.Add(Pick{Number: "1", Title: "placeholder", State: PickQueued})
-	launch.tryLaunch(f, t.TempDir())
-	launch.Wait()
+	queueStalePick(t, launch, f)
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "stale", "rebuild needed")
@@ -1676,16 +1670,10 @@ func TestTea_RebuildKey_RunsRebuildFnAndClearsStale(t *testing.T) {
 			return "", nil
 		},
 	}
-	// A queued pick is what actually hits the stale gate in production
-	// (Rebuild's own doc comment: "any pick held ... through the stale
-	// window") — tryLaunch is a real no-op on an empty queue post-#754, so
-	// an empty-queue call here would never reach freshnessChecker at all.
 	// It carries an open blocker so the post-rebuild re-drain (Rebuild
 	// calls tryLaunch again on success) holds it instead of actually
 	// launching a Box — this Launcher has no Factory to run one.
-	launch.Queue.Add(Pick{Number: "1", Title: "placeholder", State: PickQueued})
-	launch.tryLaunch(f, t.TempDir())
-	launch.Wait()
+	queueStalePick(t, launch, f)
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "stale", "rebuild needed")
@@ -1901,6 +1889,18 @@ func newAlphaBetaFake() *forge.Fake {
 	f.SetIssue(forge.Issue{Number: "1", Title: "alpha", State: forge.IssueOpen, Labels: []string{"a"}})
 	f.SetIssue(forge.Issue{Number: "2", Title: "beta", State: forge.IssueOpen, Labels: []string{"b"}})
 	return f
+}
+
+// queueStalePick queues a pick and drains it through tryLaunch — a queued
+// pick is what actually hits the stale gate in production (Rebuild's own doc
+// comment: "any pick held ... through the stale window") — tryLaunch is a
+// real no-op on an empty queue post-#754, so an empty-queue call here would
+// never reach freshnessChecker at all.
+func queueStalePick(t *testing.T, launch *Launcher, f forge.IssueTracker) {
+	t.Helper()
+	launch.Queue.Add(Pick{Number: "1", Title: "placeholder", State: PickQueued})
+	launch.tryLaunch(f, t.TempDir())
+	launch.Wait()
 }
 
 // newTestLauncher builds a Launcher wired to a runner.Fake Box and a
