@@ -28,8 +28,14 @@
 # Termination is driven by the launcher's exit code — no separate gh probe:
 #   exit 0 — dispatched work; loop continues after rebuilding from updated tree.
 #   exit 2 — queue empty (no open issues with the dispatch label); loop exits.
-#   exit 3 — open issues exist but none are dispatchable; loop stops and asks
-#             for human triage (typically a failed blocker needing re-label).
+#   exit 3 — open issues exist but none are dispatchable. The freshness probe
+#             only tracks the box image, so a host-side-only launcher fix
+#             (e.g. to the blocker parser) never trips exit 4 and this loop
+#             would otherwise stay blind to it for the life of the run. So
+#             exit 3 pulls too: if the pull advances HEAD, rebuild and retry
+#             once, the same as exit 4; if HEAD doesn't move, the block is
+#             genuine and the loop stops for human triage (typically a failed
+#             blocker needing re-label).
 #   exit 4 — CONTINUOUS_DISPATCH mode: the image-freshness probe found the
 #             loaded image stale; in-flight Boxes finished, no new ones
 #             launched. Loop pulls, rebuilds, and re-invokes, like exit 0.
@@ -169,8 +175,25 @@ while :; do
   fi
 
   if [ "$nix_exit" -eq 3 ]; then
-    echo "==> dogfood: open issues remain but none are dispatchable — triage needed (a blocked issue may need re-labeling)."
-    break
+    if [ "$stop_requested" -eq 1 ]; then
+      echo "==> dogfood: graceful stop after $iteration iteration(s)."
+      break
+    fi
+
+    head_before="$(git rev-parse HEAD)"
+    echo "==> dogfood: git checkout $BASE_BRANCH && git pull --ff-only"
+    git checkout "$BASE_BRANCH"
+    git pull --ff-only
+
+    if [ "$(git rev-parse HEAD)" = "$head_before" ]; then
+      echo "==> dogfood: open issues remain but none are dispatchable — triage needed (a blocked issue may need re-labeling)."
+      break
+    fi
+
+    echo "==> dogfood: pull advanced HEAD past a prior none-dispatchable exit — rebuilding and retrying once"
+    echo "==> dogfood: nix run .# -- build"
+    nix run .# -- build
+    continue
   fi
 
   if [ "$nix_exit" -eq 4 ]; then

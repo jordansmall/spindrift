@@ -141,6 +141,47 @@ setup() {
   [[ "$output" == *"none are dispatchable"* ]]
 }
 
+@test "dogfood pulls, rebuilds, and retries once when exit 3's pull advances HEAD" {
+  local remote_url
+  remote_url="$(git -C "$WORK" remote get-url origin)"
+  local other="$BATS_TEST_TMPDIR/other"
+  git clone -q "$remote_url" "$other"
+  git -C "$other" config user.name "Other Agent"
+  git -C "$other" config user.email "other@example.com"
+
+  local counter="$BATS_TEST_TMPDIR/dispatch-call-count"
+  echo 0 >"$counter"
+  local shebang
+  shebang="$(head -n1 "$FAKE_BIN/nix")"
+  {
+    printf '%s\n' "$shebang"
+    cat <<EOF
+: "\${NIX_LOG:?NIX_LOG must point at a log file}"
+printf '%s\n' "\$*" >>"\$NIX_LOG"
+if printf '%s ' "\$@" | grep -q -- '-- dispatch'; then
+  n=\$(cat "$counter")
+  echo \$((n + 1)) >"$counter"
+  if [ "\$n" -eq 0 ]; then
+    echo landed >"$other/landed.txt"
+    git -C "$other" add landed.txt
+    git -C "$other" commit -q -m landed
+    git -C "$other" push -q origin HEAD:main
+    exit 3
+  fi
+  exit 2
+fi
+exit 0
+EOF
+  } >"$FAKE_BIN/nix.tmp"
+  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
+  chmod +x "$FAKE_BIN/nix"
+
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- '-- dispatch' "$NIX_LOG")" -eq 2 ]
+  [ -f "$WORK/landed.txt" ]
+}
+
 @test "dogfood passes --max-jobs defaulting to MAX_PARALLEL" {
   run env BASE_BRANCH=main MAX_PARALLEL=5 bash "$WORK/dogfood.sh"
   [ "$status" -eq 0 ]
