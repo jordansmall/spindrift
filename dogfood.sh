@@ -49,7 +49,7 @@ BASE_BRANCH="${BASE_BRANCH:-main}"      # must match env-schema.nix baseBranch.d
 MAX_PARALLEL="${MAX_PARALLEL:-3}"      # must match env-schema.nix maxParallel.default
 case "$MAX_PARALLEL" in
   *[!0-9]* | 0[0-9]*)
-    echo "!! MAX_PARALLEL must be a positive integer, got: $MAX_PARALLEL" >&2
+    echo "!! MAX_PARALLEL must be a non-negative integer, got: $MAX_PARALLEL" >&2
     exit 1
     ;;
 esac
