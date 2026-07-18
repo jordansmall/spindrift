@@ -21,6 +21,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
+| `spindrift console`              | open the interactive Console: browse the Backlog, Pick issues to dispatch, watch and manage live Dispatches — see [`docs/console.md`](console.md) |
 | `spindrift doctor`               | check forge credentials, repository connectivity, and label presence — the four triage labels (fatal if missing) and the six `agent-research*` labels (ADR 0022, advisory only); when run interactively (TTY attached) and labels are missing it offers to create them with default colors and descriptions; in CI (no TTY) it reports missing labels and exits non-zero only if a triage label is missing |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (same content as `man spindrift`)  |
@@ -58,6 +59,57 @@ named `/nix` volume so rebuilds stay incremental. Either way the result is
 `spindrift:latest`, loaded and ready for `spindrift dispatch`. If the host has
 neither a Linux builder nor a container runtime, `spindrift build` exits with
 instructions.
+
+---
+
+## Quickstart
+
+`nix run github:jordansmall/spindrift#quickstart` (`apps.quickstart`) is the
+interactive from-zero scaffolder — a standalone nix app, not a `spindrift`
+subcommand, because it authors the very `flake.nix` the binary is built from
+(ADR 0027). Run it in an empty directory and it takes you to a validated,
+buildable Consumer flake in one command. It is TTY-only; for scripted setups,
+write `flake.nix` and `harness.env` directly (see
+[`flake-options.md`](flake-options.md)).
+
+The wizard:
+
+- **Detects** a container runtime (first found on PATH wins: `podman` →
+  `docker` → `nerdctl`, offered as `runtime = "rancher"` → `bwrap`), host git
+  identity from `git config`, and the repo slug from `git remote get-url
+  origin` — each offered as a pre-filled default you can override.
+- **Asks** for a GitHub token (an ambient `GH_TOKEN` is reused silently;
+  paste a fine-grained PAT, or leave blank to fall back to `gh auth token`)
+  and a Claude credential (an ambient `CLAUDE_CODE_OAUTH_TOKEN` or
+  `ANTHROPIC_API_KEY` is reused; otherwise it offers to run
+  `claude setup-token`, or takes an API key). It never prompts for the Issue
+  Tracker — Quickstart always provisions `github` (issue #1559); the `jira`
+  and `local` backends are reachable only by hand-editing `ISSUE_TRACKER` in
+  the generated `flake.nix` (see [Issue Tracker
+  backends](#issue-tracker-backends)).
+- **Audits** classic/OAuth GitHub tokens (`ghp_`/`gho_`) for over-broad
+  scopes (`repo`, org, admin) and gates them behind typing a literal
+  `ACCEPT`. Fine-grained PATs have no scope-introspection endpoint, so the
+  wizard only probes that they have *enough*, prints the four permissions
+  they should carry (see the
+  [token table](#github-token-permissions)), and trusts creation-time
+  scoping — the `gh auth token` fallback is the case the gate most often
+  bites.
+- **Writes** four files: a minimal generated `flake.nix` carrying only your
+  answers (a comment links [`flake-options.md`](flake-options.md) for every
+  other knob), a secrets-only `harness.env` (mode 0600), a `.gitignore`
+  protecting it, and an `.envrc` (`use flake`). No `prompts/` directory —
+  the harness defaults every prompt.
+- **Finishes** by running the doctor checks (forge connectivity, token
+  validity, labels — offering to create missing ones) and the first
+  `spindrift build`, which can take a while. `spindrift dispatch` is the
+  only remaining step.
+
+It refuses to overwrite an existing `flake.nix` or `harness.env`; rerun with
+`--force` to back each up to `*.bak` and regenerate. Prefer a fully-commented
+scaffold you edit by hand? Use the bundled template instead —
+`nix flake init -t github:jordansmall/spindrift`; see
+[Customizing the template](#customizing-the-template).
 
 ---
 
