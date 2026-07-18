@@ -44,7 +44,7 @@ func View(m Model) string {
 		b.WriteString("quit with live Dispatches: drain (d, default) / terminate-all (t) / stay (s)?\n")
 		reservedLines++
 	}
-	if m.PendingPick {
+	if m.PendingPick && m.HasHighlighted() {
 		b.WriteString("p_\n")
 		reservedLines++
 	}

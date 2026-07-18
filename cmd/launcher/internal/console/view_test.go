@@ -326,6 +326,19 @@ func TestView_Cursor_MarksHighlightedRow(t *testing.T) {
 	}
 }
 
+// TestView_PendingPick_EmptyBacklog_HidesIndicator verifies the "p_" pending
+// pick indicator does not render when the backlog is empty — with no
+// highlighted row, the chord's resolution is a no-op, so showing the
+// indicator would promise a pick that can't happen (issue #1237).
+func TestView_PendingPick_EmptyBacklog_HidesIndicator(t *testing.T) {
+	m := Update(NewModel(), PickPendingMsg{})
+
+	out := View(m)
+	if strings.Contains(out, "p_") {
+		t.Errorf("View() with empty backlog = %q, want no \"p_\" indicator", out)
+	}
+}
+
 // TestView_FilterEditing_ShowsInputLine verifies an in-progress filter edit
 // renders a visible input line with the text typed so far (issue #784).
 func TestView_FilterEditing_ShowsInputLine(t *testing.T) {

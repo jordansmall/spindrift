@@ -250,6 +250,13 @@ func (m Model) Visible() []forge.Issue {
 	return out
 }
 
+// HasHighlighted reports whether Visible has a row at Cursor for the
+// operator to act on — Cursor is clamped to [0, len(Visible())-1] and to 0
+// when Visible is empty, so this is exactly len(m.Visible()) > 0.
+func (m Model) HasHighlighted() bool {
+	return len(m.Visible()) > 0
+}
+
 // Update applies msg to m and returns the resulting Model. It is pure: no
 // I/O, no network — the adapter and the tea layer are the only callers that
 // touch either, translating their results into a Msg before calling Update.
