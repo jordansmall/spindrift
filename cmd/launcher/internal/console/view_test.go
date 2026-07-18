@@ -432,6 +432,29 @@ func TestView_RebuildOutputOpen_RendersOutputInsteadOfBacklog(t *testing.T) {
 	}
 }
 
+// TestView_RebuildOutputOpen_ScrollOffsetWindowsContent verifies scrolling
+// the rebuild-output pane slides the visible window instead of always
+// showing from the top — an off-by-one in the offset/end clamp would either
+// repeat or skip a line at the boundary.
+func TestView_RebuildOutputOpen_ScrollOffsetWindowsContent(t *testing.T) {
+	// Height 4 leaves a 2-line content budget (headerFooterLines), too small
+	// to show all 5 lines at once — so a scroll actually slides the window
+	// instead of clamping straight back to the top like a short transcript
+	// that already fits (mirrored from DrillIn's own clamp, model.go).
+	m := Update(NewModel(), SizeChangedMsg{Height: 4})
+	m = Update(m, StaleStatusMsg{RebuildOutput: "l0\nl1\nl2\nl3\nl4"})
+	m = Update(m, RebuildOutputOpenMsg{})
+	m = Update(m, RebuildOutputScrollMsg{Delta: 2})
+
+	out := View(m)
+	if strings.Contains(out, "l0") || strings.Contains(out, "l1") {
+		t.Errorf("View() = %q, want l0/l1 scrolled above the window", out)
+	}
+	if !strings.Contains(out, "l2") || !strings.Contains(out, "l3") {
+		t.Errorf("View() = %q, want l2/l3 visible after scrolling past l0/l1", out)
+	}
+}
+
 // TestView_DrillInOpen_RendersTranscriptInsteadOfBacklog verifies an open
 // drill-in replaces the backlog/queue rendering with the transcript, the
 // rendered form by default, plus a hint for the toggle/close keystrokes —
