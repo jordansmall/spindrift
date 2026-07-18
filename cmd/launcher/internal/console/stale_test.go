@@ -404,8 +404,10 @@ func TestLauncher_Rebuild_Retry_ClearsPriorErrorImmediately(t *testing.T) {
 	launch.Rebuild(nil, "")
 
 	deadline := time.Now().Add(2 * time.Second)
+	var rebuilding bool
+	var rebuildErr string
 	for {
-		if _, _, rebuilding, _, _ := launch.StaleStatus(); rebuilding {
+		if _, _, rebuilding, rebuildErr, _ = launch.StaleStatus(); rebuilding {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -414,7 +416,7 @@ func TestLauncher_Rebuild_Retry_ClearsPriorErrorImmediately(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	if _, _, rebuilding, rebuildErr, _ := launch.StaleStatus(); !rebuilding || rebuildErr != "" {
+	if !rebuilding || rebuildErr != "" {
 		t.Errorf("StaleStatus mid-retry = rebuilding:%v rebuildErr:%q, want rebuilding:true rebuildErr:\"\"", rebuilding, rebuildErr)
 	}
 
