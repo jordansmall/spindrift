@@ -103,6 +103,12 @@ func TestView_Header_Banner_ShownWhenTallCollapsedWhenShort(t *testing.T) {
 // actual rendered row count (the two "===" border rows plus the "spindrift"
 // name row) rather than a raw newline count that also includes the leading
 // blank line TrimPrefix strips before rendering (issue #852).
+//
+// wantRows stays a literal rather than a strings.Count(...)-derived value:
+// deriving it with bannerHeight's own formula would make this test
+// tautological (formula(banner) == formula(banner), always true even if the
+// formula itself were wrong) — precisely what pinning it here guards against
+// (issue #1242).
 func TestBannerHeight_MatchesRenderedRowCount(t *testing.T) {
 	const wantRows = 3
 	if bannerHeight != wantRows {
