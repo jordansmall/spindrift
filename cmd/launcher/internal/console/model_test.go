@@ -428,8 +428,7 @@ func TestUpdate_DrillInScrollMsg_MovesOffset(t *testing.T) {
 		t.Errorf("Offset = %d, want 0 (clamped at the top)", m.DrillIn.Offset)
 	}
 
-	// Height is 0 here (no SizeChangedMsg), so this only hits the
-	// degenerate-height fallback, not the #829 viewport-aware clamp.
+	// See the degenerate-height note in the doc comment above.
 	m = Update(m, DrillInScrollMsg{Delta: 100})
 	if m.DrillIn.Offset != 4 {
 		t.Errorf("Offset = %d, want 4 (clamped to the last line)", m.DrillIn.Offset)
