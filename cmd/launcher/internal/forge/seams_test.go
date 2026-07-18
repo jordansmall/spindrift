@@ -534,6 +534,82 @@ func TestParseBlockerRefs_Issue847FencedExampleDoesNotWedge(t *testing.T) {
 	}
 }
 
+// TestParseBlockerRefs_SentinelNoneBulletIgnoresInlineRef reconstructs
+// issue #1278's "## Blocked by" body: a "- None" sentinel bullet that
+// mentions a #N ref only as explanatory prose must not yield that ref.
+func TestParseBlockerRefs_SentinelNoneBulletIgnoresInlineRef(t *testing.T) {
+	body := "## Blocked by\n\n- None — can start immediately. Follow-up cleanup to #1277 (merged).\n"
+	if refs := forge.ParseBlockerRefs(body); len(refs) != 0 {
+		t.Errorf("expected [], got %v", refs)
+	}
+}
+
+// TestParseBlockerRefs_SentinelBulletDoesNotSuppressOtherBullets confirms
+// a "- None" sentinel bullet only cancels itself — a genuine blocker
+// declared in another bullet of the same section still surfaces.
+func TestParseBlockerRefs_SentinelBulletDoesNotSuppressOtherBullets(t *testing.T) {
+	body := "## Blocked by\n\n- None\n- #42\n"
+	refs := forge.ParseBlockerRefs(body)
+	if len(refs) != 1 || refs[0] != "42" {
+		t.Errorf("expected [42], got %v", refs)
+	}
+}
+
+// TestParseBlockerRefs_SentinelBulletDoesNotAffectInlineFormat confirms the
+// sentinel check is scoped to the section-bullet path only: an inline
+// "depends on #N" elsewhere in the body still surfaces even when the
+// "## Blocked by" section itself is a sentinel.
+func TestParseBlockerRefs_SentinelBulletDoesNotAffectInlineFormat(t *testing.T) {
+	body := "## Blocked by\n\n- None\n\nUnrelated prose that depends on #99 for context.\n"
+	refs := forge.ParseBlockerRefs(body)
+	if len(refs) != 1 || refs[0] != "99" {
+		t.Errorf("expected [99], got %v", refs)
+	}
+}
+
+// TestParseBlockerRefs_SentinelBulletNA covers the "N/A" spelling of the
+// sentinel, case-insensitively.
+func TestParseBlockerRefs_SentinelBulletNA(t *testing.T) {
+	body := "## Blocked by\n\n- n/a\n"
+	if refs := forge.ParseBlockerRefs(body); len(refs) != 0 {
+		t.Errorf("expected [], got %v", refs)
+	}
+}
+
+// TestParseBlockerRefs_HyphenatedWordIsNotSentinel confirms a bullet that
+// merely starts with the letters "none" hyphen-joined into a longer word
+// (no separating whitespace) is not mistaken for the "None" sentinel —
+// the sentinel's dash-continuation tolerance is for a genuine em-dash or
+// spaced hyphen, not word-internal punctuation.
+func TestParseBlockerRefs_HyphenatedWordIsNotSentinel(t *testing.T) {
+	body := "## Blocked by\n\n- None-existent blocker, see #42\n"
+	refs := forge.ParseBlockerRefs(body)
+	if len(refs) != 1 || refs[0] != "42" {
+		t.Errorf("expected [42], got %v", refs)
+	}
+}
+
+// TestParseBlockerRefs_SentinelBulletIgnoresSameLineInlineKeyword confirms
+// a sentinel bullet suppresses a #N ref even when that ref arrives via an
+// inline trigger phrase ("blocked by #N") on the same line, not just via
+// prose mentioning "#N" directly.
+func TestParseBlockerRefs_SentinelBulletIgnoresSameLineInlineKeyword(t *testing.T) {
+	body := "## Blocked by\n\n- None — blocked by #7\n"
+	if refs := forge.ParseBlockerRefs(body); len(refs) != 0 {
+		t.Errorf("expected [], got %v", refs)
+	}
+}
+
+// TestParseBlockerRefs_SentinelBulletEnDashContinuation confirms the
+// sentinel's dash continuation tolerates an en-dash ("–", U+2013), which
+// authors substitute as often as the em-dash the issue names.
+func TestParseBlockerRefs_SentinelBulletEnDashContinuation(t *testing.T) {
+	body := "## Blocked by\n\n- None – see #5\n"
+	if refs := forge.ParseBlockerRefs(body); len(refs) != 0 {
+		t.Errorf("expected [], got %v", refs)
+	}
+}
+
 // containsLabel is a test helper (not imported from main package).
 func containsLabel(labels []string, target string) bool {
 	for _, l := range labels {
