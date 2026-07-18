@@ -144,6 +144,11 @@ type Fake struct {
 	// invocation in order — lets a test assert call count directly instead
 	// of inferring it from side effects (#987).
 	ListIssuesCalls []DispatchState
+
+	// IssueCalls records the issue number argument of every Issue
+	// invocation in order — lets a test assert call count directly instead
+	// of inferring it from side effects (#1098).
+	IssueCalls []string
 }
 
 // NewFake returns an empty Fake client. labels configures the
@@ -325,6 +330,7 @@ func (f *Fake) ListOpenIssues() ([]Issue, error) {
 func (f *Fake) Issue(num string) (Issue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.IssueCalls = append(f.IssueCalls, num)
 	iss, ok := f.issues[num]
 	if !ok {
 		return Issue{}, fmt.Errorf("issue %s not found", num)

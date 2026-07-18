@@ -259,3 +259,21 @@ func TestBlockerStatus_ClosedAndFailed(t *testing.T) {
 		t.Errorf("BlockerStatus: want failed=[11], got %v", failed)
 	}
 }
+
+// TestBlockerStatus_OneIssueFetchPerBlocker guards against the double-fetch
+// #1098 found: unreadyBlockers' BlockerReady call and the FailedLabel loop
+// each independently called it.Issue(dep) for the same blocker. No PR is
+// registered here, so BlockerReady falls through to it.Issue — the path
+// where the duplicate always fired.
+func TestBlockerStatus_OneIssueFetchPerBlocker(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
+	edges := map[string][]string{"10": {"11"}}
+
+	BlockerStatus(c, fc, fc, "10", edges)
+
+	if len(fc.IssueCalls) != 1 {
+		t.Errorf("IssueCalls = %v, want exactly 1 (no duplicate fetch)", fc.IssueCalls)
+	}
+}
