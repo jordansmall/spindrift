@@ -781,6 +781,27 @@ func TestTea_EnterKey_OnSettledRow_OpensSidebar(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_HandleKey_ArrowKeys_MirrorHAndL verifies the left/right arrow keys
+// move sidebar focus exactly like "h"/"l" — the same case in handleKey's
+// switch, exercised directly here since the two full teatest sequences above
+// already cover "h"/"l" letter-by-letter (#1501, ADR 0030).
+func TestTea_HandleKey_ArrowKeys_MirrorHAndL(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42"})
+	m = Update(m, FocusListMsg{}) // opening already focused the sidebar; start from the list
+	tm := teaModel{m: m}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	if tm.m.Focus != FocusSidebar {
+		t.Errorf("Focus = %v after right arrow, want FocusSidebar", tm.m.Focus)
+	}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if tm.m.Focus != FocusList {
+		t.Errorf("Focus = %v after left arrow, want FocusList", tm.m.Focus)
+	}
+}
+
 // TestTea_SidebarToggleKey_CyclesActivityTranscriptRaw verifies "t" advances
 // the open sidebar around its Activity feed -> Transcript (rendered) ->
 // Transcript (raw) -> Activity feed cycle, so the byte-exact raw form stays
