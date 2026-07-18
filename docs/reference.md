@@ -413,7 +413,9 @@ the box, the entrypoint probes for a devShell:
    the agent operates in the Target's exact pinned environment — tools, env
    vars, and shellHook included. If `nix develop` fails to exec the Driver
    (nix rc ≠ 0 and empty stream), the entrypoint relaunches once in the baked
-   env rather than dying.
+   env rather than dying. That relaunch logs one line to the box's own
+   stderr; it's an in-box observability detail, not itemized here alongside
+   the operator-facing behavior.
 3. If `flake.nix` is absent, `nix` is unavailable, the probe fails, or the
    timeout fires, the box degrades gracefully to the baked toolchain.
 
