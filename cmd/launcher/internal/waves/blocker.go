@@ -32,10 +32,10 @@ type Sources map[string]map[string]forge.DepSource
 // zero-blocker issue (#752) — the two look identical in edges alone, since
 // both simply omit the issue's key. Callers pass the edges result as
 // Input.Edges and the sources result as Input.Sources to NewPlan.
-func BuildEdges(it forge.IssueTracker, issues []Issue) (map[string][]string, Sources, map[string]bool, error) {
-	edges := map[string][]string{}
-	sources := Sources{}
-	failed := map[string]bool{}
+func BuildEdges(it forge.IssueTracker, issues []Issue) (edges map[string][]string, sources Sources, failed map[string]bool, err error) {
+	edges = map[string][]string{}
+	sources = Sources{}
+	failed = map[string]bool{}
 	for _, iss := range issues {
 		deps, err := it.DepsOf(iss.Number)
 		if err != nil {
