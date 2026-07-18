@@ -84,3 +84,66 @@ func collapseActivityLines(s string, t time.Time) []ActivityLine {
 	}
 	return out
 }
+
+// activityEqual reports whether a and b carry the same ordered sequence of
+// lines — Update's SidebarActivityMsg gate for whether a refresh actually
+// changed anything, deliberately not a length-only "grew" check: a Dispatch
+// rolling from a finished pass onto a fresh fix/conflict-resolve pass gets a
+// shorter feed (LogPaths/ActivityFeed key on only the latest pass log), which
+// a "grew" check would miss entirely (issue #1502).
+func activityEqual(a, b []ActivityLine) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Text != b[i].Text || !a[i].Time.Equal(b[i].Time) {
+			return false
+		}
+	}
+	return true
+}
+
+// SidebarActivityCache remembers the open sidebar's last-refreshed Activity
+// feed, keyed by (Number, path, size, modTime) — syncQueue's per-Msg refresh
+// runs on every tea.Msg (issue #1502, ADR 0030's "piggybacking the existing
+// per-Msg sync tick"), so most calls see the exact same on-disk pass log as
+// last time; a stat match skips the ReadFile+reparse and returns the cached
+// feed, mirroring HeartbeatCache's own skip (issue #731). Single-entry
+// rather than a map: only one sidebar can be open at a time, so there is
+// never more than one Dispatch to track.
+type SidebarActivityCache struct {
+	number   string
+	path     string
+	size     int64
+	modTime  time.Time
+	activity []ActivityLine
+}
+
+// NewSidebarActivityCache returns an empty cache ready to use.
+func NewSidebarActivityCache() *SidebarActivityCache {
+	return &SidebarActivityCache{}
+}
+
+// Refresh returns number's current Activity feed — freshly re-derived, or
+// the cached one when its pass log's (path, size, modTime) match what was
+// cached last time — plus ok, false when no log exists yet for number
+// (RunningHeartbeat's own no-log contract) so the caller can skip sending a
+// refresh rather than clobbering an already-loaded feed with an empty one on
+// a claimed-but-not-yet-launched race.
+func (c *SidebarActivityCache) Refresh(drv driver.Driver, pwd, number string) ([]ActivityLine, bool) {
+	passes := dispatch.LogPaths(pwd, number)
+	if len(passes) == 0 {
+		return nil, false
+	}
+	path := passes[len(passes)-1].Path
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, false
+	}
+	if c.number == number && c.path == path && c.size == info.Size() && c.modTime.Equal(info.ModTime()) {
+		return c.activity, true
+	}
+	activity := ActivityFeed(drv, pwd, number)
+	c.number, c.path, c.size, c.modTime, c.activity = number, path, info.Size(), info.ModTime(), activity
+	return activity, true
+}

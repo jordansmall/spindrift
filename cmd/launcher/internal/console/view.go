@@ -57,7 +57,7 @@ func renderColumnDivider(rows int) string {
 // to show both (ADR 0030, #1501) — replacing the interim fullscreen-only
 // drill-in of issue #1500.
 func View(m Model) string {
-	if m.Sidebar != nil && !sidebarFits(m) {
+	if m.Sidebar != nil && (m.SidebarZoom || !sidebarFits(m)) {
 		return renderSidebarFullscreen(*m.Sidebar, m.Height)
 	}
 	if m.ShowRebuildOutput {
@@ -539,7 +539,12 @@ func renderHelp() string {
 		"  x / esc     close the sidebar (while it has focus)",
 		"  j/k, pgup/pgdown  scroll the sidebar (while it has focus); its",
 		fmt.Sprintf("              pgup/pgdown page jump is fixed at %d lines, unlike the", fixedPaneScrollDelta),
-		"              body's live-viewport-derived one above",
+		"              body's live-viewport-derived one above; scrolling up",
+		"              detaches the running Activity feed's live follow",
+		"  G / end     re-attach follow and jump to the sidebar's bottom",
+		"              (while the sidebar has focus)",
+		"  z           toggle the sidebar's fullscreen zoom (while it has",
+		"              focus)",
 		"  r           refresh the backlog",
 		"  p           pick the highlighted Backlog row (launch button)",
 		"  u           unpick the highlighted queued pick",
@@ -796,10 +801,18 @@ func sidebarErr(s SidebarState) error {
 // sidebarLabel renders s's one-line pane header: "activity #N" by default,
 // "transcript #N" once toggled to the Transcript, "(raw)" appended while
 // ShowRaw — the sidebar analogue of renderDrillIn's transcript-only label,
-// extended for the Activity/Transcript toggle (#1501).
+// extended for the Activity/Transcript toggle (#1501). The Activity feed's
+// label also carries a "[follow]"/"[paused]" tag — the operator's only
+// render-level signal for whether the feed is live-tailing or detached after
+// a scroll-up (issue #1502, ADR 0030); the Transcript is a one-shot load
+// with nothing to follow, so the tag is meaningless there.
 func sidebarLabel(s SidebarState) string {
 	if !s.ShowTranscript {
-		return "activity #" + s.Number
+		label := "activity #" + s.Number
+		if s.Follow {
+			return label + " [follow]"
+		}
+		return label + " [paused]"
 	}
 	label := "transcript #" + s.Number
 	if s.ShowRaw {
@@ -844,7 +857,7 @@ func renderSidebarFullscreen(s SidebarState, height int) string {
 	if visible != "" && !strings.HasSuffix(visible, "\n") {
 		b.WriteString("\n")
 	}
-	b.WriteString("[t] cycle activity/transcript · [x] close\n")
+	b.WriteString("[t] cycle activity/transcript · [x] close · [z] zoom\n")
 	return b.String()
 }
 
@@ -884,7 +897,12 @@ func renderSidebarDocked(s SidebarState, width, budget int, focused bool) string
 		b.WriteString(clip(line, width, false))
 		b.WriteString("\n")
 	}
-	b.WriteString(clip("[t] cycle · [h] list · [x] close", width, false))
+	// Deliberately tighter than the fullscreen footer's " · " spacing (and
+	// the rest of the module's own convention, e.g. renderHeader's segment
+	// joins): four hints plus full " · " separators measure 43 columns,
+	// one over sidebarWidth's 42-column budget, so the space after each
+	// "·" is dropped to fit all four without clipping the last one.
+	b.WriteString(clip("[t] cycle ·[h] list ·[x] close ·[z] zoom", width, false))
 	b.WriteString("\n")
 	return b.String()
 }

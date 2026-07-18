@@ -136,6 +136,31 @@ type Model struct {
 	// FocusedColumn (ADR 0030). SectionBacklog, the zero value, matches a
 	// fresh Console opening on the pick source.
 	ActiveSection Section
+	// SidebarPositions retains each Dispatch's live-tail scroll offset and
+	// Follow state across selection changes, keyed by Dispatch number — ADR
+	// 0030's "per-issue scroll and follow state are retained across
+	// selections" (issue #1502). saveSidebarPosition populates it from
+	// whichever Sidebar was open right before SidebarLoadedMsg replaces it
+	// or SidebarCloseMsg clears it; SidebarLoadedMsg consults it for the
+	// Dispatch it's about to open, so a Dispatch selected before starts
+	// again wherever it was left instead of always at the top with Follow
+	// re-armed.
+	SidebarPositions map[string]SidebarPosition
+	// SidebarZoom is whether the operator forced the sidebar to render
+	// fullscreen with "z", regardless of sidebarFits' own width check — the
+	// "deep reading" zoom ADR 0030 calls for, orthogonal to the
+	// narrow-terminal fallback View already applies (issue #1502). Reset to
+	// false on SidebarCloseMsg so a later sidebar open on a wide terminal
+	// starts docked rather than still forced fullscreen from a prior
+	// session.
+	SidebarZoom bool
+}
+
+// SidebarPosition is one Dispatch's retained live-tail position — the
+// SidebarPositions map's value (issue #1502, ADR 0030).
+type SidebarPosition struct {
+	Offset int
+	Follow bool
 }
 
 // Focus names which pane keyboard input drives while a sidebar is open — the
@@ -184,11 +209,17 @@ type SidebarState struct {
 	// Offset is the index of the first visible line in the currently active
 	// form — the scroll position, DrillInState.Offset's sidebar analogue.
 	Offset int
+	// Follow is whether the sidebar auto-scrolls to the newest line as the
+	// Activity feed advances — true by default the moment a feed opens;
+	// scrolling up detaches it so the operator can review frozen history,
+	// and G/End re-attaches it at the bottom (issue #1502, ADR 0030).
+	Follow bool
 	// Lines is the currently active form (Activity formatted one line per
 	// entry, or TranscriptRendered/TranscriptRaw per ShowTranscript/ShowRaw)
 	// pre-split on "\n". Update recomputes it only when the content or the
-	// toggle state changes (SidebarLoadedMsg, SidebarToggleMsg), so
-	// clampSidebarOffset and the render functions never re-split a
+	// toggle state actually changes (SidebarLoadedMsg, SidebarToggleMsg, a
+	// grown SidebarActivityMsg), so clampSidebarOffset and the render
+	// functions never re-split a
 	// multi-megabyte transcript on every keystroke (issue #722's fix,
 	// inherited from DrillInState.Lines — see BenchmarkUpdate_DrillInScroll
 	// for the recorded before/after).
@@ -266,12 +297,16 @@ func Update(m Model, msg Msg) Model {
 	case SidebarLoadedMsg:
 		showTranscript := false
 		showRaw := false
-		offset := 0
 		sameNumber := m.Sidebar != nil && m.Sidebar.Number == msg.Number
 		if sameNumber {
 			showTranscript = m.Sidebar.ShowTranscript
 			showRaw = m.Sidebar.ShowRaw
-			offset = m.Sidebar.Offset
+		}
+		m = saveSidebarPosition(m)
+		pos, retained := m.SidebarPositions[msg.Number]
+		offset, follow := 0, true
+		if retained {
+			offset, follow = pos.Offset, pos.Follow
 		}
 		m.Sidebar = &SidebarState{
 			Number:             msg.Number,
@@ -283,8 +318,23 @@ func Update(m Model, msg Msg) Model {
 			Err:                msg.Err,
 			TranscriptErr:      msg.TranscriptErr,
 			Offset:             offset,
+			Follow:             follow,
 		}
 		m.Sidebar.Lines = sidebarLines(m.Sidebar)
+		if follow {
+			// ADR 0030: the feed "follows the newest line by default" —
+			// true of any opened feed, not only a reopen after a close, so
+			// this applies whether follow came from a retained position or
+			// today's true default. A retained Offset from before a close
+			// would otherwise read as "following" while showing stale,
+			// non-bottom lines if the Dispatch kept working while the
+			// sidebar was shut (review finding on issue #1502). Overshoot;
+			// the clamp below pulls it back to the true last page — for
+			// content that already fits the viewport, that's still 0
+			// (clampSidebarOffset's short-content case), so a short feed's
+			// fresh open looks unchanged from before this fix.
+			m.Sidebar.Offset = len(m.Sidebar.Lines)
+		}
 		if !sameNumber {
 			m.Focus = FocusSidebar
 		}
@@ -300,13 +350,60 @@ func Update(m Model, msg Msg) Model {
 				m.Sidebar.ShowRaw = false
 			}
 			m.Sidebar.Lines = sidebarLines(m.Sidebar)
+			if !m.Sidebar.ShowTranscript && m.Sidebar.Follow {
+				// Cycling back to the Activity feed while still following
+				// must land on today's bottom, not wherever the Transcript
+				// view's own Offset happened to sit — that Offset belongs
+				// to a different form with a different line count, and
+				// leaving it in place would read as "following" while
+				// showing arbitrary, likely non-bottom content.
+				m.Sidebar.Offset = len(m.Sidebar.Lines)
+			}
 		}
+	case SidebarActivityMsg:
+		if m.Sidebar != nil && m.Sidebar.Number == msg.Number {
+			// changed, not "grew": a length-only growth check misses a
+			// Dispatch rolling onto a new pass (LogPaths/ActivityFeed key
+			// on only the latest pass log, so a fresh fix/conflict-resolve
+			// pass's feed can be shorter than the finished pass it follows)
+			// — content equality catches that pass rollover the same as an
+			// ordinary append, while still skipping syncQueue's frequent
+			// no-op refreshes (most calls, between actual writes) that
+			// would otherwise re-snap a Follow-ing operator's manual
+			// downward scroll (pgdown, which moves Offset without
+			// detaching Follow) back to the bottom on every keystroke.
+			changed := !activityEqual(msg.Activity, m.Sidebar.Activity)
+			m.Sidebar.Activity = msg.Activity
+			if changed && !m.Sidebar.ShowTranscript {
+				// The #722 Lines cache exists precisely so a re-split only
+				// happens on an actual content change — recomputing it on
+				// every no-op refresh (most calls, between actual writes)
+				// would re-split against every keystroke/tick while an
+				// Activity sidebar is open on a running Dispatch.
+				m.Sidebar.Lines = sidebarLines(m.Sidebar)
+				if m.Sidebar.Follow {
+					m.Sidebar.Offset = len(m.Sidebar.Lines)
+				}
+			}
+		}
+	case SidebarZoomToggleMsg:
+		m.SidebarZoom = !m.SidebarZoom
 	case SidebarCloseMsg:
+		m = saveSidebarPosition(m)
 		m.Sidebar = nil
 		m.Focus = FocusList
+		m.SidebarZoom = false
 	case SidebarScrollMsg:
 		if m.Sidebar != nil {
 			m.Sidebar.Offset += msg.Delta
+			if msg.Delta < 0 {
+				m.Sidebar.Follow = false
+			}
+		}
+	case SidebarJumpToEndMsg:
+		if m.Sidebar != nil {
+			m.Sidebar.Follow = true
+			m.Sidebar.Offset = len(m.Sidebar.Lines)
 		}
 	case FocusListMsg:
 		m.Focus = FocusList
@@ -377,14 +474,19 @@ func Update(m Model, msg Msg) Model {
 	m.Height = clampSize(m.Height)
 	m.Cursor = clampCursor(m.Cursor, sectionRowCount(m, m.ActiveSection))
 	if m.Sidebar != nil {
-		// Docked (sidebarFits), the sidebar's actual viewport is the same
-		// row budget the list body renders into, not the whole terminal
-		// height — renderSidebarDocked subtracts headerFooterLines from
-		// bodyBudget(m), same as this clamp must, or the "last page fills
-		// the viewport" cap (issue #829) target a taller page than the
-		// docked render actually has room to show (#1501 review finding).
+		// Docked (sidebarFits and not zoomed), the sidebar's actual
+		// viewport is the same row budget the list body renders into, not
+		// the whole terminal height — renderSidebarDocked subtracts
+		// headerFooterLines from bodyBudget(m), same as this clamp must,
+		// or the "last page fills the viewport" cap (issue #829) target a
+		// taller page than the docked render actually has room to show
+		// (#1501 review finding). SidebarZoom forces renderSidebarFullscreen
+		// regardless of sidebarFits (View's own decision, mirrored here),
+		// so it must also use the whole terminal height, not bodyBudget —
+		// otherwise the clamp targets the docked view the operator zoomed
+		// away from (review finding on issue #1502).
 		height := m.Height
-		if sidebarFits(m) {
+		if sidebarFits(m) && !m.SidebarZoom {
 			height = bodyBudget(m)
 		}
 		clampSidebarOffset(m.Sidebar, height)
@@ -453,6 +555,22 @@ func clampCursor(cursor, n int) int {
 		return n - 1
 	}
 	return cursor
+}
+
+// saveSidebarPosition records m.Sidebar's current Offset/Follow into
+// SidebarPositions, keyed by its Number, before SidebarLoadedMsg replaces it
+// or SidebarCloseMsg clears it — the write side of per-Dispatch position
+// retention (issue #1502, ADR 0030). A nil Sidebar is a no-op, matching
+// clampSidebarOffset's own nil convention.
+func saveSidebarPosition(m Model) Model {
+	if m.Sidebar == nil {
+		return m
+	}
+	if m.SidebarPositions == nil {
+		m.SidebarPositions = make(map[string]SidebarPosition)
+	}
+	m.SidebarPositions[m.Sidebar.Number] = SidebarPosition{Offset: m.Sidebar.Offset, Follow: m.Sidebar.Follow}
+	return m
 }
 
 // clampSidebarOffset pulls s.Offset into [0, lines-1], further capped so the
