@@ -387,6 +387,34 @@ func TestView_OrphanRecoveryErr_Surfaced(t *testing.T) {
 	}
 }
 
+// TestView_Header_OrphanRecoveryAlert_StyledWithGlyph verifies the
+// orphan-recovery-failed alert carries the plain-Unicode warning glyph and
+// renders styled by role (ADR 0031), while keeping its existing content.
+func TestView_Header_OrphanRecoveryAlert_StyledWithGlyph(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), OrphanRecoveryMsg{Err: "boom"})
+	out := View(m)
+
+	var bannerLine string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "orphan recovery failed") {
+			bannerLine = line
+			break
+		}
+	}
+	if bannerLine == "" {
+		t.Fatalf("View() = %q, want an orphan-recovery-failed banner line", out)
+	}
+	if !strings.Contains(bannerLine, "⚠") {
+		t.Errorf("orphan-recovery banner line = %q, want the warning glyph", bannerLine)
+	}
+	if !strings.Contains(bannerLine, "\x1b[") {
+		t.Errorf("orphan-recovery banner line = %q, want it styled with an ANSI escape sequence", bannerLine)
+	}
+}
+
 // TestView_BranchSwitchNotice_Surfaced verifies a rebuild's branch-switch
 // notice appears in the rendered header — the silent-switch gap issue #1141
 // closes: an operator whose pwd got moved off a branch during rebuild needs
@@ -401,6 +429,43 @@ func TestView_BranchSwitchNotice_Surfaced(t *testing.T) {
 	out := View(m)
 	if !strings.Contains(out, "switched off-branch tree from feature to main") {
 		t.Errorf("View() = %q, want the branch-switch notice surfaced", out)
+	}
+}
+
+// TestView_Header_BranchSwitchAndDogfoodNotices_StyledWithGlyph verifies the
+// branch-switch and competing-dogfood notice lines carry the plain-Unicode
+// notice glyph and render styled by role (ADR 0031), while keeping their
+// existing content.
+func TestView_Header_BranchSwitchAndDogfoodNotices_StyledWithGlyph(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), StaleStatusMsg{BranchSwitchNotice: "switched off-branch tree from feature to main"})
+	m = Update(m, DogfoodNoticeMsg{Live: true})
+	out := View(m)
+
+	var branchLine, dogfoodLine string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "switched off-branch") {
+			branchLine = line
+		}
+		if strings.Contains(line, "dogfood") {
+			dogfoodLine = line
+		}
+	}
+	if branchLine == "" {
+		t.Fatalf("View() = %q, want a branch-switch notice line", out)
+	}
+	if dogfoodLine == "" {
+		t.Fatalf("View() = %q, want a dogfood notice line", out)
+	}
+	for _, line := range []string{branchLine, dogfoodLine} {
+		if !strings.Contains(line, "ℹ") {
+			t.Errorf("notice line = %q, want the notice glyph", line)
+		}
+		if !strings.Contains(line, "\x1b[") {
+			t.Errorf("notice line = %q, want it styled with an ANSI escape sequence", line)
+		}
 	}
 }
 
