@@ -206,11 +206,8 @@ func TestHeadRevAndProbeRev_SameCommit_IdenticalFormat(t *testing.T) {
 	if res.Rev != head {
 		t.Errorf("Probe Rev = %q, headRev = %q, want identical for the same commit", res.Rev, head)
 	}
-	if len(head) != 40 {
-		t.Errorf("headRev length = %d, want 40 (full SHA-1, no --short)", len(head))
-	}
-	if len(res.Rev) != 40 {
-		t.Errorf("Probe Rev length = %d, want 40 (full SHA-1, no --short)", len(res.Rev))
+	if len(head) != 40 && len(head) != 64 {
+		t.Errorf("headRev length = %d, want 40 (SHA-1) or 64 (SHA-256), no --short", len(head))
 	}
 }
 
