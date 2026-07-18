@@ -123,7 +123,7 @@ func (g *gitClient) Merge(branch string) error {
 		if gitplumbing.IsMergeConflict(out.String()) {
 			return forge.ErrMergeConflict
 		}
-		return fmt.Errorf("git merge %s: %w: %s", branch, err, strings.TrimSpace(out.String()))
+		return fmt.Errorf("git merge %s: %w: %s", branch, err, forge.RedactURLCredentials(strings.TrimSpace(out.String())))
 	}
 	if err := gitIn("push", "origin", "HEAD:"+g.baseBranch).Run(); err != nil {
 		return fmt.Errorf("git push origin HEAD:%s: %w", g.baseBranch, err)
