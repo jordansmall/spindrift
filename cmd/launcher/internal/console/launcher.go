@@ -24,9 +24,10 @@ type Launcher struct {
 	Factory   *dispatch.Factory
 	Settle    settle.Settler
 	Queue     *Queue
-	// MaxParallel caps how many Dispatches run at once. Zero (the default
-	// zero-value struct literal) falls back to 1, matching the pre-#647
-	// single-slot behaviour.
+	// MaxParallel sets the live cap's *starting* value only (1 when unset,
+	// matching the pre-#647 single-slot behaviour) — since #653 (ADR 0023)
+	// the cap actually enforced during a session lives in l.limiter()'s
+	// *waves.Limiter and can move at runtime via Resize/ResizeDelta.
 	MaxParallel int
 	// FailedLabel is the tracker label that marks a blocker issue Failed —
 	// threaded into Queue.Discover's held-pick check (#650) so a failed
