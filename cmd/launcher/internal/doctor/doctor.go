@@ -175,7 +175,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	// here: an advisory note if research is still short after creation,
 	// or a single success line naming both tiers once neither is.
 	if len(researchMissing) > 0 {
-		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022) — does not fail this check\n", len(researchMissing))
+		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022) — does not fail this check: %s\n", len(researchMissing), strings.Join(researchMissing, ", "))
 		return nil
 	}
 	fmt.Fprintln(w, "ok: all triage and research labels present")
