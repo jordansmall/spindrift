@@ -299,8 +299,8 @@ func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) {
 	go func() {
 		defer l.wg.Done()
 		// Return value dropped intentionally: Terminate already logs its own
-		// kill failure to stderr (line 226-228 above) before returning it, so
-		// nothing is lost by not handling it here too. This goroutine is the
+		// kill failure to stderr, via Factory.Kill above, before returning it,
+		// so nothing is lost by not handling it here too. This goroutine is the
 		// sole call site of Terminate since #745 folded the prior synchronous
 		// caller into this async path — there is no second call site left to
 		// stay consistent with (see tea.go's handleTerminateConfirmKey for the
