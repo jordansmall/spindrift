@@ -78,6 +78,65 @@ func (s PickState) String() string {
 	}
 }
 
+// Section is a named slice of the session's issues the Console body shows
+// one at a time (ADR 0030): Backlog is the pick source; the four work
+// Sections slice Picks by PickState via pickSection. Values are contiguous
+// from zero so H/L (prev/next) and 1-5 (direct jump) can index straight into
+// them without a lookup table.
+type Section int
+
+const (
+	SectionBacklog Section = iota
+	SectionRunning
+	SectionHeld
+	SectionSettled
+	SectionFailed
+	// sectionCount is the number of Sections — the modulus H/L wrap by, and
+	// the upper bound 1-5 direct-jump validates against.
+	sectionCount
+)
+
+// String renders s as the word the section tabs show.
+func (s Section) String() string {
+	switch s {
+	case SectionBacklog:
+		return "Backlog"
+	case SectionRunning:
+		return "Running"
+	case SectionHeld:
+		return "Held"
+	case SectionSettled:
+		return "Settled"
+	case SectionFailed:
+		return "Failed"
+	default:
+		return "unknown"
+	}
+}
+
+// pickSection maps a PickState onto the work Section that lists it (ADR
+// 0030's "Running / Held / Settled / Failed slice the work queue by
+// PickState"). There are more PickStates than work Sections, so states
+// without a same-named Section fold into the closest one: PickQueued and
+// PickClaiming are still active in the pipeline, not yet running but not
+// blocked either, so they read as SectionRunning alongside PickRunning
+// itself. PickDissolved (a claim that never launched) and PickTerminated
+// (the operator ended it, ADR 0024) both end a pick without a clean settle,
+// so they join PickFailed in SectionFailed — SectionSettled is reserved for
+// an actual successful completion.
+func pickSection(state PickState) Section {
+	switch state {
+	case PickHeld:
+		return SectionHeld
+	case PickSettled:
+		return SectionSettled
+	case PickDissolved, PickTerminated, PickFailed:
+		return SectionFailed
+	default: // PickQueued, PickClaiming, PickRunning
+		return SectionRunning
+	}
+}
+
 // Pick is one row of the session's operator queue: an issue the operator
 // has picked, its Dispatch kind, and its current lifecycle state.
 type Pick struct {
