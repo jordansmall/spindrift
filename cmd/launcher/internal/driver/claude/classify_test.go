@@ -133,6 +133,22 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// A type:"system" heartbeat line (see heartbeat_test.go) can land
+		// between the genuine assistant turn and the echoing type:"result"
+		// line. It is neither agent content nor the result line, so it
+		// must not consume the pending echo -- the guard must see past it
+		// to the real result line (issue #1197).
+		name: "Terminal_SelfPoisoning_ServerErrorMarkerEchoedAfterInterveningSystemLine",
+		lines: []string{
+			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Fixing the server_error guard now."}]}}`,
+			`{"type":"system","session_id":"s1"}`,
+			`{"type":"result","is_error":false,"result":"Fixing the server_error guard now.","stop_reason":"end_turn"}`,
+		},
+		wantClass:   claude.Terminal,
+		wantReason:  claude.TaskFailed,
+		wantResetAt: nil,
+	},
+	{
 		// Real-world ordering: a genuine assistant turn (real model) quotes
 		// "server_error" verbatim in its own prose, then the claude CLI
 		// injects its synthetic mid-stream terminator right after. The #579
