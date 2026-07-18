@@ -429,7 +429,15 @@ func renderHeader(m Model) string {
 	// Cap > 0) and later removed by issue #843.
 	// Session-at-a-glance context is meant to be visible unconditionally,
 	// not to disappear when the queue happens to be empty (issue #843 AC5).
-	fmt.Fprintf(&b, "running %d/%d · waiting %d · held %d · settled %d · failed %d\n", m.Live, m.Cap, waiting, held, settled, failed)
+	// Each segment is styled by its own semantic role (ADR 0031), so content
+	// survives styling as separate substrings rather than one contiguous
+	// line (issue #1499).
+	fmt.Fprintf(&b, "%s · %s · %s · %s · %s\n",
+		roleStyle(RoleRunning).Render(fmt.Sprintf("running %d/%d", m.Live, m.Cap)),
+		roleStyle(RoleDim).Render(fmt.Sprintf("waiting %d", waiting)),
+		roleStyle(RoleHeld).Render(fmt.Sprintf("held %d", held)),
+		roleStyle(RoleSettled).Render(fmt.Sprintf("settled %d", settled)),
+		roleStyle(RoleFailed).Render(fmt.Sprintf("failed %d", failed)))
 	if m.Stale {
 		fmt.Fprintf(&b, "!! image stale: %s — new launches held; press [b] to rebuild\n", m.StaleMessage)
 	}
