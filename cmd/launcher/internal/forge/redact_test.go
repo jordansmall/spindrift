@@ -31,6 +31,11 @@ func TestRedactURLCredentials_StripsUserinfo(t *testing.T) {
 			in:   "git clone https://git.example.com/org/repo.git: exit status 128",
 			want: "git clone https://git.example.com/org/repo.git: exit status 128",
 		},
+		{
+			name: "literal @ in password",
+			in:   "https://user:p@ssword@host/repo.git",
+			want: "https://host/repo.git",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

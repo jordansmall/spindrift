@@ -2,7 +2,7 @@ package forge
 
 import "regexp"
 
-var credentialInURL = regexp.MustCompile(`://[^/@\s]+@`)
+var credentialInURL = regexp.MustCompile(`://[^/\s]+@`)
 
 // RedactURLCredentials strips any embedded userinfo (user:pass@) from URLs
 // occurring in s, leaving the rest of s untouched. CODE_FORGE_REMOTE_URL
@@ -11,7 +11,9 @@ var credentialInURL = regexp.MustCompile(`://[^/@\s]+@`)
 // helper (docs/reference.md), and git's own error text echoes that URL
 // verbatim on auth/network failures. Those errors flow unmodified into
 // public GitHub issue comments (settle.mergeImmediate) — this must run on
-// every such error before it crosses that trust boundary.
+// every such error before it crosses that trust boundary. The regex is
+// greedy through the last @ before the next / or whitespace, so a literal
+// (un-encoded) @ inside the password is still consumed as part of userinfo.
 func RedactURLCredentials(s string) string {
 	return credentialInURL.ReplaceAllString(s, "://")
 }
