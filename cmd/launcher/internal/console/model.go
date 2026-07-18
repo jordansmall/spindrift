@@ -139,6 +139,11 @@ type Model struct {
 	// narrow for three columns, regardless of this stored value (issue #846,
 	// ADR 0025).
 	PaneMode TranscriptPaneMode
+	// ActiveSection is which of the five Sections the body renders — the
+	// section-switched list's single-list analogue of the retired
+	// FocusedColumn (ADR 0030). SectionBacklog, the zero value, matches a
+	// fresh Console opening on the pick source.
+	ActiveSection Section
 }
 
 // TranscriptPaneMode is the Transcript pane's layout while a DrillIn is open
@@ -387,6 +392,12 @@ func Update(m Model, msg Msg) Model {
 		if m.DrillIn != nil {
 			m.PaneMode = nextPaneMode(m.PaneMode)
 		}
+	case SectionPrevMsg:
+		m.ActiveSection = (m.ActiveSection - 1 + sectionCount) % sectionCount
+	case SectionNextMsg:
+		m.ActiveSection = (m.ActiveSection + 1) % sectionCount
+	case SectionJumpMsg:
+		m.ActiveSection = msg.Section
 	}
 	m.Width = clampSize(m.Width)
 	m.Height = clampSize(m.Height)

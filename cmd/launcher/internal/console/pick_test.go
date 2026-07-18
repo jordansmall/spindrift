@@ -105,3 +105,29 @@ func TestPickSection_PartitionsEveryPickStateIntoOneOfFourWorkSections(t *testin
 		}
 	}
 }
+
+// TestUpdate_SectionNav_NextPrevWrapAndJumpDirect verifies H/L step through
+// the five Sections in their fixed order and wrap at either end, and a
+// direct 1-5 jump lands on the matching Section regardless of where the
+// cursor started (ADR 0030).
+func TestUpdate_SectionNav_NextPrevWrapAndJumpDirect(t *testing.T) {
+	m := NewModel()
+	if m.ActiveSection != SectionBacklog {
+		t.Fatalf("ActiveSection = %v, want SectionBacklog as the zero value", m.ActiveSection)
+	}
+
+	m = Update(m, SectionPrevMsg{})
+	if m.ActiveSection != SectionFailed {
+		t.Errorf("ActiveSection after prev from Backlog = %v, want SectionFailed (wraps backward)", m.ActiveSection)
+	}
+
+	m = Update(m, SectionNextMsg{})
+	if m.ActiveSection != SectionBacklog {
+		t.Errorf("ActiveSection after next from Failed = %v, want SectionBacklog (wraps forward)", m.ActiveSection)
+	}
+
+	m = Update(m, SectionJumpMsg{Section: SectionHeld})
+	if m.ActiveSection != SectionHeld {
+		t.Errorf("ActiveSection after jump = %v, want SectionHeld", m.ActiveSection)
+	}
+}

@@ -315,6 +315,29 @@ type PaneModeCycleMsg struct{}
 
 func (PaneModeCycleMsg) isConsoleMsg() {}
 
+// SectionPrevMsg is the tea layer's signal that the operator pressed "H" —
+// switches ActiveSection to the previous Section, wrapping from Backlog to
+// Failed (ADR 0030).
+type SectionPrevMsg struct{}
+
+func (SectionPrevMsg) isConsoleMsg() {}
+
+// SectionNextMsg is the tea layer's signal that the operator pressed "L" —
+// switches ActiveSection to the next Section, wrapping from Failed to
+// Backlog (ADR 0030).
+type SectionNextMsg struct{}
+
+func (SectionNextMsg) isConsoleMsg() {}
+
+// SectionJumpMsg is the tea layer's signal that the operator pressed a
+// direct Section key ("1"-"5") — switches ActiveSection straight to Section,
+// regardless of which Section is currently active (ADR 0030).
+type SectionJumpMsg struct {
+	Section Section
+}
+
+func (SectionJumpMsg) isConsoleMsg() {}
+
 // SizeChangedMsg carries the terminal's current width/height — the tea
 // layer's translation of Bubble Tea's WindowSizeMsg, sent on every resize
 // including the initial size event (issue #842). Update clamps non-sensical
