@@ -2420,38 +2420,95 @@ func TestTea_Init_OrphanRecoveryErr_SurfacedInHeader(t *testing.T) {
 // columns, so a mostly-wide-character row can survive truncation still
 // twice as wide as the column budget it was meant to enforce (issue #859
 // AC4/AC6). Both columns carry a wide title so a fix that only tightens one
-// side can't hide behind the other's slack.
+// side can't hide behind the other's slack. Table cases extend coverage
+// beyond CJK to emoji, zero-width combining marks, and ANSI-escaped content
+// (issue #1261) — each character type has a different display-width
+// calculation, so a fix that's correct for one can still be wrong for
+// another.
 func TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth(t *testing.T) {
-	f := forge.NewFake()
-	wideTitle := strings.Repeat("中", 40) // 40 runes / 80 display columns
-	f.SetIssue(forge.Issue{Number: "1", Title: wideTitle, State: forge.IssueOpen})
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
-	launch.Queue.Add(Pick{Number: "2", Title: strings.Repeat("文", 40), State: PickQueued})
+	tests := []struct {
+		name         string
+		backlogTitle string
+		queueTitle   string
+	}{
+		{
+			name:         "CJK wide characters",
+			backlogTitle: strings.Repeat("中", 40), // 40 runes / 80 display columns
+			queueTitle:   strings.Repeat("文", 40),
+		},
+		{
+			// U+FE0F is an emoji variation selector: it's zero-width
+			// itself and go-runewidth's current width table already
+			// keeps rocket/sparkles at a constant width with or without
+			// it, so this fixture doesn't prove VS16-conditional width
+			// -- it pins that a title carrying the codepoint still
+			// renders and clips like plain emoji, per AC's "including
+			// emoji variation selectors" requirement.
+			name:         "emoji with variation selector",
+			backlogTitle: strings.Repeat("\U0001F680\ufe0f", 40), // rocket + U+FE0F emoji variation selector
+			queueTitle:   strings.Repeat("\u2728\ufe0f", 40),     // sparkles + U+FE0F emoji variation selector
+		},
+		{
+			name:         "zero-width combining marks",
+			backlogTitle: strings.Repeat("e\u0301", 80), // decomposed e + U+0301 combining acute accent, 80 base+mark pairs / 80 display columns
+			queueTitle:   strings.Repeat("n\u0303", 80), // decomposed n + U+0303 combining tilde
+		},
+		{
+			name:         "ANSI-escaped content",
+			backlogTitle: "\x1b[31m" + strings.Repeat("critical ", 9) + "\x1b[0m", // 9 words x 9 cols = 81 visible columns once SanitizeControlSequences strips the SGR escape
+			queueTitle:   "\x1b[33m" + strings.Repeat("blocked ", 10) + "\x1b[0m", // 10 words x 8 cols = 80 visible columns once SanitizeControlSequences strips the SGR escape
+		},
+		{
+			// realistic issue title: natural English phrasing mixing an
+			// emoji and an accented word, not a synthetic repeat of one
+			// rune, and long enough to force real clipping like the other
+			// cases rather than just smoke-testing render.
+			name:         "realistic issue title with emoji and accent",
+			backlogTitle: "🚀 fix the launcher retry backoff for the café dispatch workflow so it survives transient outages",
+			queueTitle:   "✨ add naïve caching layer for the GitHub API v2 client to cut redundant round trips",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := forge.NewFake()
+			f.SetIssue(forge.Issue{Number: "1", Title: tt.backlogTitle, State: forge.IssueOpen})
+			launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+			launch.Queue.Add(Pick{Number: "2", Title: tt.queueTitle, State: PickQueued})
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "#1")
+			tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+			waitForOutput(t, tm, "#1")
 
-	sendKey(tm, "q")
-	final := tm.FinalModel(t, teatest.WithFinalTimeout(teatestTimeout)).(teaModel)
+			sendKey(tm, "q")
+			final := tm.FinalModel(t, teatest.WithFinalTimeout(teatestTimeout)).(teaModel)
 
-	// #859's AC called for "golden output reflects correct clipping at
-	// visual column boundaries" — read literally that implies a golden-file
-	// snapshot, but this package has no golden-file tooling at all, and
-	// none of its other clip tests use one either (view_test.go's
-	// TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth
-	// and TestClip_WideCharacters_MeasuresDisplayWidthNotRuneCount both use
-	// this same width idiom, just against their own budgets). The
-	// per-line display-width check below, run against real Bubble Tea
-	// render output, IS this package's
-	// established verification for "correct clipping at visual column
-	// boundaries": it fails exactly when a line spills past the column
-	// budget, which is what a golden diff would also catch here, without
-	// requiring fixture upkeep for a rendering surface this volatile
-	// (issue #1260).
-	for _, l := range strings.Split(View(final.m), "\n") {
-		if w := runewidth.StringWidth(l); w > 80 {
-			t.Errorf("View() line %q has display width %d, want it clamped to Width (80)", l, w)
-		}
+			// #859's AC called for "golden output reflects correct clipping
+			// at visual column boundaries" — read literally that implies a
+			// golden-file snapshot, but this package has no golden-file
+			// tooling at all, and none of its other clip tests use one
+			// either (view_test.go's
+			// TestView_TwoColumn_Body_LinesNeverExceedTerminalWidth and
+			// TestClip_WideCharacters_MeasuresDisplayWidthNotRuneCount both
+			// use this same width idiom, just against their own budgets).
+			// The per-line display-width check below, run against real
+			// Bubble Tea render output, IS this package's established
+			// verification for "correct clipping at visual column
+			// boundaries": it fails exactly when a line spills past the
+			// column budget, which is what a golden diff would also catch
+			// here, without requiring fixture upkeep for a rendering
+			// surface this volatile (issue #1260).
+			out := View(final.m)
+			for _, l := range strings.Split(out, "\n") {
+				if w := runewidth.StringWidth(l); w > 80 {
+					t.Errorf("View() line %q has display width %d, want it clamped to Width (80)", l, w)
+				}
+			}
+			if !strings.Contains(out, "#1") {
+				t.Errorf("View() = %q, want the backlog issue number #1 to survive clipping", out)
+			}
+			if !strings.Contains(out, "#2") {
+				t.Errorf("View() = %q, want the queue pick number #2 to survive clipping", out)
+			}
+		})
 	}
 }
 
