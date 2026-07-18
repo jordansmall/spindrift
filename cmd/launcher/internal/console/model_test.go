@@ -152,6 +152,78 @@ func TestUpdate_HelpToggleMsg_FlipsShowHelp(t *testing.T) {
 	}
 }
 
+// TestUpdate_RebuildOutputOpenMsg_OpensPaneWhenOutputPresent verifies "o"
+// opens the rebuild-output pane once a rebuild has captured output — the
+// field's only consumer (issue #1128).
+func TestUpdate_RebuildOutputOpenMsg_OpensPaneWhenOutputPresent(t *testing.T) {
+	m := NewModel()
+	m = Update(m, StaleStatusMsg{RebuildOutput: "building...\ndone"})
+	m = Update(m, RebuildOutputOpenMsg{})
+	if !m.ShowRebuildOutput {
+		t.Error("ShowRebuildOutput = false after open with output present, want true")
+	}
+}
+
+// TestUpdate_RebuildOutputOpenMsg_NoOpWhenOutputEmpty verifies the pane never
+// opens with nothing to show — no rebuild has run yet.
+func TestUpdate_RebuildOutputOpenMsg_NoOpWhenOutputEmpty(t *testing.T) {
+	m := NewModel()
+	m = Update(m, RebuildOutputOpenMsg{})
+	if m.ShowRebuildOutput {
+		t.Error("ShowRebuildOutput = true with no RebuildOutput captured, want false")
+	}
+}
+
+// TestUpdate_RebuildOutputScrollMsg_NoOpWhenPaneClosed verifies scrolling
+// with the pane closed does not move RebuildOutputOffset or open it.
+func TestUpdate_RebuildOutputScrollMsg_NoOpWhenPaneClosed(t *testing.T) {
+	m := NewModel()
+	m = Update(m, StaleStatusMsg{RebuildOutput: "l0\nl1\nl2"})
+	m = Update(m, RebuildOutputScrollMsg{Delta: 1})
+	if m.RebuildOutputOffset != 0 {
+		t.Errorf("RebuildOutputOffset = %d, want 0 while pane closed", m.RebuildOutputOffset)
+	}
+	if m.ShowRebuildOutput {
+		t.Error("ShowRebuildOutput = true, want false — scroll must not open the pane")
+	}
+}
+
+// TestUpdate_RebuildOutputScrollMsg_MovesOffset verifies a scroll message
+// moves RebuildOutputOffset by Delta, clamped into the captured output's
+// line bounds the same way DrillInScrollMsg clamps DrillIn.Offset.
+func TestUpdate_RebuildOutputScrollMsg_MovesOffset(t *testing.T) {
+	m := NewModel()
+	m = Update(m, StaleStatusMsg{RebuildOutput: "l0\nl1\nl2\nl3\nl4"})
+	m = Update(m, RebuildOutputOpenMsg{})
+
+	m = Update(m, RebuildOutputScrollMsg{Delta: 2})
+	if m.RebuildOutputOffset != 2 {
+		t.Errorf("RebuildOutputOffset = %d, want 2", m.RebuildOutputOffset)
+	}
+
+	m = Update(m, RebuildOutputScrollMsg{Delta: -100})
+	if m.RebuildOutputOffset != 0 {
+		t.Errorf("RebuildOutputOffset = %d, want 0 (clamped at the top)", m.RebuildOutputOffset)
+	}
+
+	m = Update(m, RebuildOutputScrollMsg{Delta: 100})
+	if m.RebuildOutputOffset != 4 {
+		t.Errorf("RebuildOutputOffset = %d, want 4 (clamped to the last line)", m.RebuildOutputOffset)
+	}
+}
+
+// TestUpdate_RebuildOutputCloseMsg_ClosesPane verifies close clears
+// ShowRebuildOutput so View falls back to rendering the backlog/queue.
+func TestUpdate_RebuildOutputCloseMsg_ClosesPane(t *testing.T) {
+	m := NewModel()
+	m = Update(m, StaleStatusMsg{RebuildOutput: "l0\nl1"})
+	m = Update(m, RebuildOutputOpenMsg{})
+	m = Update(m, RebuildOutputCloseMsg{})
+	if m.ShowRebuildOutput {
+		t.Error("ShowRebuildOutput = true after close, want false")
+	}
+}
+
 // TestUpdate_FilterEditStartMsg_EntersEditingMode verifies "/" arms
 // FilterEditing so the tea layer routes further keystrokes as filter text
 // instead of navigation (issue #784).

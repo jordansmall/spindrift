@@ -225,6 +225,30 @@ type StaleStatusMsg struct {
 
 func (StaleStatusMsg) isConsoleMsg() {}
 
+// RebuildOutputOpenMsg is the tea layer's signal that the operator pressed
+// "o" — opens the rebuild-output pane, RebuildOutput's only consumer; a
+// no-op while RebuildOutput is "" (no rebuild has captured output yet),
+// issue #1128.
+type RebuildOutputOpenMsg struct{}
+
+func (RebuildOutputOpenMsg) isConsoleMsg() {}
+
+// RebuildOutputCloseMsg is the tea layer's signal that the operator pressed
+// "x"/Esc while the rebuild-output pane is open — closes it, returning to
+// the backlog/queue view (issue #1128).
+type RebuildOutputCloseMsg struct{}
+
+func (RebuildOutputCloseMsg) isConsoleMsg() {}
+
+// RebuildOutputScrollMsg is the tea layer's signal that the operator pressed
+// a scroll key while the rebuild-output pane is open — Delta is the number
+// of lines to move, a no-op while the pane is closed (issue #1128).
+type RebuildOutputScrollMsg struct {
+	Delta int
+}
+
+func (RebuildOutputScrollMsg) isConsoleMsg() {}
+
 // CursorMoveMsg is the tea layer's signal that the operator pressed a
 // navigation key (j/down, or the up arrow — "k" moved to Terminate in
 // #785) — Delta is +1 (down) or -1 (up); Update clamps the result into

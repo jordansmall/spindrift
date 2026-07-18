@@ -58,6 +58,14 @@ type Model struct {
 	// Console's own stdout/stderr while the rebuild ran. "" when no rebuild
 	// has run yet.
 	RebuildOutput string
+	// ShowRebuildOutput is whether the rebuild-output pane is open, showing
+	// RebuildOutput in full — RebuildOutput's only consumer (issue #1128).
+	// Never true while RebuildOutput is "".
+	ShowRebuildOutput bool
+	// RebuildOutputOffset is the rebuild-output pane's scroll position — the
+	// index of its first visible line, the pane's analogue of DrillInState's
+	// Offset (issue #1128).
+	RebuildOutputOffset int
 	// PendingQuit is whether a quit confirm is armed, awaiting the
 	// operator's drain/terminate-all/stay answer — only when live
 	// Dispatches exist at quit time (issue #651, ADR 0023).
@@ -323,6 +331,16 @@ func Update(m Model, msg Msg) Model {
 		m.Rebuilding = msg.Rebuilding
 		m.RebuildErr = msg.RebuildErr
 		m.RebuildOutput = msg.RebuildOutput
+	case RebuildOutputOpenMsg:
+		if m.RebuildOutput != "" {
+			m.ShowRebuildOutput = true
+		}
+	case RebuildOutputCloseMsg:
+		m.ShowRebuildOutput = false
+	case RebuildOutputScrollMsg:
+		if m.ShowRebuildOutput {
+			m.RebuildOutputOffset += msg.Delta
+		}
 	case CursorMoveMsg:
 		*focusedCursor(&m) += msg.Delta
 	case HelpToggleMsg:
@@ -354,6 +372,7 @@ func Update(m Model, msg Msg) Model {
 	if m.DrillIn != nil {
 		clampDrillInOffset(m.DrillIn, transcriptHeight(m))
 	}
+	clampRebuildOutputOffset(&m)
 	m.BacklogOffset = clampCursor(m.BacklogOffset, len(m.Visible()))
 	m.QueueOffset = clampCursor(m.QueueOffset, len(m.Picks))
 	if _, ok := msg.(CursorMoveMsg); ok {
@@ -411,6 +430,34 @@ func clampDrillInOffset(d *DrillInState, height int) {
 		d.Offset = 0
 	case d.Offset > maxOffset:
 		d.Offset = maxOffset
+	}
+}
+
+// clampRebuildOutputOffset pulls m.RebuildOutputOffset into [0, maxOffset],
+// the rebuild-output pane's analogue of clampDrillInOffset — skipped
+// entirely while the pane is closed so a large RebuildOutput never costs a
+// strings.Count on every keystroke it isn't visible for (issue #1128).
+func clampRebuildOutputOffset(m *Model) {
+	if !m.ShowRebuildOutput {
+		return
+	}
+	lines := strings.Count(m.RebuildOutput, "\n") + 1
+	budget := m.Height - headerFooterLines
+	if budget < 0 {
+		budget = 0
+	}
+	maxOffset := lines - 1
+	if pageMax := lines - budget; pageMax < maxOffset {
+		maxOffset = pageMax
+	}
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	switch {
+	case m.RebuildOutputOffset < 0:
+		m.RebuildOutputOffset = 0
+	case m.RebuildOutputOffset > maxOffset:
+		m.RebuildOutputOffset = maxOffset
 	}
 }
 

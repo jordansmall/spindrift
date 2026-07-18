@@ -873,6 +873,63 @@ func TestTea_DrillInKey_NoDriver_ShowsGracefulMessage(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_HandleKey_RebuildOutputKey_OpensPaneWhenOutputPresent verifies "o"
+// opens the rebuild-output pane once a rebuild has captured output (issue
+// #1128).
+func TestTea_HandleKey_RebuildOutputKey_OpensPaneWhenOutputPresent(t *testing.T) {
+	m := Update(NewModel(), StaleStatusMsg{RebuildOutput: "l0\nl1"})
+	tm := teaModel{m: m}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	if !tm.m.ShowRebuildOutput {
+		t.Error("ShowRebuildOutput = false after \"o\" with output present, want true")
+	}
+}
+
+// TestTea_HandleKey_RebuildOutputKey_NoOpWhenOutputEmpty verifies "o" is a
+// no-op with nothing captured yet.
+func TestTea_HandleKey_RebuildOutputKey_NoOpWhenOutputEmpty(t *testing.T) {
+	tm := teaModel{m: NewModel()}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	if tm.m.ShowRebuildOutput {
+		t.Error("ShowRebuildOutput = true with no output captured, want false")
+	}
+}
+
+// TestTea_HandleRebuildOutputKey_ClosesOnXOrEsc verifies "x" and "esc" both
+// close the rebuild-output pane, mirroring the drill-in pane's close keys.
+func TestTea_HandleRebuildOutputKey_ClosesOnXOrEsc(t *testing.T) {
+	for _, key := range []string{"x", "esc"} {
+		m := Update(NewModel(), StaleStatusMsg{RebuildOutput: "l0\nl1"})
+		m = Update(m, RebuildOutputOpenMsg{})
+		tm := teaModel{m: m}
+
+		tm.m = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		if tm.m.ShowRebuildOutput {
+			t.Errorf("key %q: ShowRebuildOutput = true, want false (closed)", key)
+		}
+	}
+}
+
+// TestTea_HandleRebuildOutputKey_ScrollsOnJK verifies "j"/"k" move
+// RebuildOutputOffset while the pane is open.
+func TestTea_HandleRebuildOutputKey_ScrollsOnJK(t *testing.T) {
+	m := Update(NewModel(), StaleStatusMsg{RebuildOutput: "l0\nl1\nl2\nl3\nl4"})
+	m = Update(m, RebuildOutputOpenMsg{})
+	tm := teaModel{m: m}
+
+	tm.m = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if tm.m.RebuildOutputOffset != 1 {
+		t.Errorf("RebuildOutputOffset = %d after \"j\", want 1", tm.m.RebuildOutputOffset)
+	}
+
+	tm.m = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	if tm.m.RebuildOutputOffset != 0 {
+		t.Errorf("RebuildOutputOffset = %d after \"k\", want 0", tm.m.RebuildOutputOffset)
+	}
+}
+
 // TestTea_HelpKey_OpensOverlay verifies "?" opens the help overlay listing
 // the bound keys (issue #784).
 func TestTea_HelpKey_OpensOverlay(t *testing.T) {

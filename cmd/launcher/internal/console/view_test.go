@@ -355,6 +355,20 @@ func TestView_ShowHelp_ListsNewKeybindings(t *testing.T) {
 	}
 }
 
+// TestView_ShowHelp_ListsRebuildOutputKey verifies the help overlay lists
+// "o", the rebuild-output pane's open key added by issue #1128.
+func TestView_ShowHelp_ListsRebuildOutputKey(t *testing.T) {
+	m := Update(NewModel(), HelpToggleMsg{})
+
+	out := View(m)
+	if !strings.Contains(out, "\n  o ") {
+		t.Errorf("View() = %q, want an \"o\" key entry", out)
+	}
+	if !strings.Contains(out, "rebuild output") {
+		t.Errorf("View() = %q, want it to describe the rebuild-output pane", out)
+	}
+}
+
 // TestView_ShowHelp_ListsPaneModeKey verifies the help overlay lists "m",
 // the pane-mode cycle key added by issue #846 (ADR 0025), naming all three
 // modes so the operator can discover the cycle without reading the source.
@@ -393,6 +407,28 @@ func TestView_ShowHelp_ContrastsDrillInFixedPage(t *testing.T) {
 	want := fmt.Sprintf("fixed at %d lines", drillInPageScrollDelta)
 	if !strings.Contains(out, want) {
 		t.Errorf("View() = %q, want it to contain %q", out, want)
+	}
+}
+
+// TestView_RebuildOutputOpen_RendersOutputInsteadOfBacklog verifies an open
+// rebuild-output pane replaces the backlog/queue rendering with the captured
+// nix output, plus a close-key hint — RebuildOutput's only consumer (issue
+// #1128).
+func TestView_RebuildOutputOpen_RendersOutputInsteadOfBacklog(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
+	m = Update(m, StaleStatusMsg{RebuildOutput: "building derivation...\ndone"})
+	m = Update(m, RebuildOutputOpenMsg{})
+
+	out := View(m)
+	if strings.Contains(out, "should not show") {
+		t.Errorf("View() = %q, want the backlog hidden while the rebuild-output pane is open", out)
+	}
+	if !strings.Contains(out, "building derivation...") || !strings.Contains(out, "done") {
+		t.Errorf("View() = %q, want the captured rebuild output shown", out)
+	}
+	if !strings.Contains(out, "close") {
+		t.Errorf("View() = %q, want a close-key hint", out)
 	}
 }
 
