@@ -967,13 +967,27 @@ const headerFooterLines = 2
 // pick and current mode, as much of the loaded content (rendered by default,
 // raw when ShowRaw) as height allows, and a keystroke hint. Err renders in
 // place of content instead of a blank pane.
+//
+// The label, footer, and Err line are themselves budgeted against height
+// (issue #1534, mirroring #1380's renderTranscriptColumn fix): at height 1,
+// only the label renders and the footer or Err line is dropped, whichever
+// would come next.
 func renderDrillIn(d DrillInState, height int) string {
+	if height <= 0 {
+		return ""
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "transcript #%s", d.Number)
 	if d.ShowRaw {
 		b.WriteString(" (raw)")
 	}
 	b.WriteString("\n")
+
+	const labelLines = 1
+	if height <= headerFooterLines-labelLines {
+		return b.String()
+	}
 
 	if d.Err != nil {
 		fmt.Fprintf(&b, "drill-in failed: %s\n", d.Err)

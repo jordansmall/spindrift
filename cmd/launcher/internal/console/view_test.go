@@ -768,7 +768,8 @@ func TestView_DrillInOffset_HidesLinesBeforeOffset(t *testing.T) {
 // TestView_DrillInErr_Surfaced verifies a failed drill-in's error text
 // appears instead of blank content.
 func TestView_DrillInErr_Surfaced(t *testing.T) {
-	m := Update(NewModel(), DrillInMsg{Number: "42", Err: errBoom})
+	m := Update(NewModel(), SizeChangedMsg{Height: 24})
+	m = Update(m, DrillInMsg{Number: "42", Err: errBoom})
 
 	out := View(m)
 	if !strings.Contains(out, errBoom.Error()) {
@@ -1440,6 +1441,64 @@ func TestView_DrillInFloating_TranscriptRespectsTinyBudget(t *testing.T) {
 	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(got) > m.Height {
 		t.Errorf("View() rendered %d lines, want at most Height (%d) — the transcript column's own header+footer chrome must be budgeted against the remaining height, not assumed to always fit", len(got), m.Height)
+	}
+}
+
+// TestView_DrillInFullscreen_RespectsTinyBudget verifies the fullscreen
+// pane's total output never exceeds m.Height at the smallest possible
+// budget — renderDrillIn wrote the header line and then always appended the
+// footer with no height check at all, so at Height: 1 it overflowed to 2
+// lines. Mirrors the docked/floating tiny-budget fix from #1380, applied to
+// renderDrillIn itself (issue #1534).
+func TestView_DrillInFullscreen_RespectsTinyBudget(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Height: 1})
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("transcript line %d", i)
+	}
+	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+
+	out := View(m)
+	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(got) > m.Height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — renderDrillIn's own header+footer chrome must be budgeted against height, not written unconditionally", len(got), m.Height)
+	}
+}
+
+// TestView_DrillInFullscreen_RetainsFooterAtBoundary verifies the label and
+// footer both render, and stay within budget, at Height: 2 — the boundary
+// where label+footer exactly fills the budget, one above the Height: 1 case
+// that drops the footer (issue #1534).
+func TestView_DrillInFullscreen_RetainsFooterAtBoundary(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Height: 2})
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("transcript line %d", i)
+	}
+	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+
+	out := View(m)
+	if !strings.Contains(out, "[t] toggle raw · [x] close") {
+		t.Errorf("View() = %q, want the footer retained at the Height: 2 boundary", out)
+	}
+	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(got) > m.Height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d)", len(got), m.Height)
+	}
+}
+
+// TestView_DrillInFullscreen_ErrRespectsTinyBudget verifies a failed
+// drill-in also respects the tiny-budget guard — the label+error combo is
+// two lines, same as label+footer, so it must be dropped at Height: 1 same
+// as the footer is (issue #1534).
+func TestView_DrillInFullscreen_ErrRespectsTinyBudget(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Height: 1})
+	m = Update(m, DrillInMsg{Number: "42", Err: errBoom})
+
+	out := View(m)
+	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(got) > m.Height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — the error line must be budgeted against height same as the footer", len(got), m.Height)
 	}
 }
 
