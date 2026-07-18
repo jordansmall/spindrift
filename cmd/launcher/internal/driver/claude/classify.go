@@ -199,6 +199,14 @@ type agentContentEvent struct {
 // a runtime contract with the CLI, not a spindrift constant — if a future CLI
 // version changes it, isAgentContentEvent's guard below silently stops
 // matching (issue #820).
+//
+// No official doc documents this literal model-field value (issue #1203). Two
+// adjacent official pages document the surrounding behavior instead: the
+// terminal error text this event carries —
+// https://code.claude.com/docs/en/errors — and the stream-json output format
+// — https://code.claude.com/docs/en/headless — whose distinct system/api_retry
+// event shares the same error-category vocabulary (e.g. "server_error") but is
+// the retry event, not this terminator.
 const syntheticModelSentinel = "<synthetic>"
 
 // isAgentContentEvent reports whether chunk is a stream-json line carrying
