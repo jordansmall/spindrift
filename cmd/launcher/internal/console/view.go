@@ -447,11 +447,16 @@ func renderHeader(m Model) string {
 		b.WriteString("\n")
 	}
 	if m.RebuildErr != "" {
+		// Only the glyph+label is styled, unlike the whole-line styling
+		// above: the clipped error text must keep its trailing "…" as the
+		// line's literal last character, with no styling reset appended
+		// after it, or TestView_RebuildErr_Truncated's suffix check breaks.
 		fmt.Fprintf(&b, "%s %s\n",
 			roleStyle(RoleFailed).Render(glyphWarning+" rebuild failed:"),
 			clipBannerErr(m.RebuildErr, bannerErrWidth))
 	}
 	if m.OrphanRecoveryErr != "" {
+		// Same split as RebuildErr above, same reason.
 		fmt.Fprintf(&b, "%s %s\n",
 			roleStyle(RoleFailed).Render(glyphWarning+" orphan recovery failed:"),
 			clipBannerErr(m.OrphanRecoveryErr, bannerErrWidth))
