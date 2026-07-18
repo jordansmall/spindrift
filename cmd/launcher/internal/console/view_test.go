@@ -668,14 +668,14 @@ func TestView_TwoColumn_Queue_RowsTaggedWithBracketedState(t *testing.T) {
 func TestView_TwoColumn_Queue_HeldRowSuppressesRedundantFailedBlockerReason(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
 	m.Picks = []Pick{
-		{Number: "42", Title: "held one", State: PickHeld, BlockedBy: "#41 (native)", Reason: "blocker #41 (native) failed"},
+		{Number: "42", Title: "held one", State: PickHeld, BlockedBy: "#41 (native)", Reason: blockerFailedPrefix + "#41 (native) failed"},
 	}
 
 	out := View(m)
 	if !strings.Contains(out, "held by #41 (native)") {
 		t.Errorf("View() = %q, want the held row's blocker badge", out)
 	}
-	if strings.Contains(out, "(blocker #41 (native) failed)") {
+	if strings.Contains(out, "("+blockerFailedPrefix+"#41 (native) failed)") {
 		t.Errorf("View() = %q, want the redundant failed-blocker reason suppressed", out)
 	}
 }

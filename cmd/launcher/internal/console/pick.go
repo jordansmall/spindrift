@@ -26,9 +26,9 @@ const (
 	// PickHeld is a pick whose declared blockers are not all satisfied yet —
 	// it stays Dispatchable on the tracker and re-evaluates on every refill,
 	// launching the moment every blocker reaches Complete. BlockedBy names
-	// the still-open blockers; Reason carries a "blocker #N failed" note
-	// when one of them landed Failed, but the pick stays held — the Console
-	// never auto-unpicks (#650).
+	// the still-open blockers; Reason carries a blockerFailedPrefix-prefixed
+	// note when one of them landed Failed, but the pick stays held — the
+	// Console never auto-unpicks (#650).
 	PickHeld
 	// PickSettled is a pick whose Dispatch reached settle.
 	PickSettled
@@ -46,6 +46,13 @@ const (
 	// and failed.
 	PickFailed
 )
+
+// blockerFailedPrefix opens a held pick's Reason when a declared blocker
+// landed Failed (setHeld, queue.go). View's dedup guard (renderQueueColumn,
+// view.go) checks the same constant to recognize and suppress a Reason that
+// only restates BlockedBy — the two must share one source, or a format
+// change in one silently breaks the other's match (issue #1111).
+const blockerFailedPrefix = "blocker "
 
 // String renders s as the word View shows on a queue row.
 func (s PickState) String() string {
