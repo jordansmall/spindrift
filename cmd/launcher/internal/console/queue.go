@@ -168,7 +168,7 @@ func (q *Queue) setHeld(num string, unready, failed []string, sources map[string
 			q.picks[i].BlockedBy = refList(unready, sources)
 			q.picks[i].Reason = ""
 			if len(failed) > 0 {
-				q.picks[i].Reason = fmt.Sprintf("blocker %s failed", refList(failed, sources))
+				q.picks[i].Reason = fmt.Sprintf("%s%s failed", blockerFailedPrefix, refList(failed, sources))
 			}
 			return
 		}

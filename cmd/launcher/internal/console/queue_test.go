@@ -253,6 +253,28 @@ func TestQueue_Discover_FailedBlockerSurfacedPickStaysHeld(t *testing.T) {
 	}
 }
 
+// TestQueue_Discover_FailedBlockerReasonUsesSharedPrefix verifies setHeld
+// builds the failed-blocker Reason from the same blockerFailedPrefix constant
+// View's dedup guard checks against, so a future format change can't drift
+// the two apart silently (issue #1111).
+func TestQueue_Discover_FailedBlockerReasonUsesSharedPrefix(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Failed: "agent-failed"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen, Labels: []string{"agent-failed"}})
+	f.NativeDeps = map[string][]string{"42": {"41"}}
+
+	if _, _, _, err := q.Discover(f, f, "agent-failed"); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	snap := q.Snapshot()[0]
+	if !strings.HasPrefix(snap.Reason, blockerFailedPrefix) {
+		t.Errorf("Reason = %q, want prefix %q", snap.Reason, blockerFailedPrefix)
+	}
+}
+
 // TestQueue_Discover_UnpickDuringClaimCheck_NeverLaunches verifies an Unpick
 // that lands in the window between Discover reading a pick as a candidate
 // and claiming it never lets that claim through — Unpick's "zero Issue
