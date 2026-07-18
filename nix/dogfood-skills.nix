@@ -35,7 +35,7 @@
   {
     # Upstream SKILL.md references `/setup-matt-pocock-skills`, a skill this
     # repo does not bake — dangling as-is (issue #816), same accepted
-    # tradeoff as code-review below.
+    # tradeoff as the code-review entry.
     name = "to-tickets";
     src = builtins.readFile "${matt-skills}/skills/engineering/to-tickets/SKILL.md";
   }
