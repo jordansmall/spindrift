@@ -128,6 +128,35 @@ func TestLimiter_ResizeDeltaAppliesRelativeToCurrentCap(t *testing.T) {
 	}
 }
 
+// TestLimiter_ResizeCoalescesGrowSignalUnderRapidRaises verifies that two
+// back-to-back ResizeDelta raises, called through the real public API with
+// no listener parked on Grown, coalesce into a single buffered signal — the
+// second raise's non-blocking send hits signalGrow's default branch and is
+// dropped (issue #766's coalescing fix; issue #1134 exercises it through
+// ResizeDelta itself instead of mutating Limiter's internal fields).
+func TestLimiter_ResizeCoalescesGrowSignalUnderRapidRaises(t *testing.T) {
+	l := NewLimiter(1)
+
+	l.ResizeDelta(1)
+	l.ResizeDelta(1)
+
+	if got := l.Cap(); got != 3 {
+		t.Fatalf("Cap after two ResizeDelta(1) raises: got %d, want 3", got)
+	}
+
+	select {
+	case <-l.Grown():
+	default:
+		t.Fatal("Grown: want one signal from the two raises, got none")
+	}
+
+	select {
+	case <-l.Grown():
+		t.Fatal("Grown: want no second signal (coalesced), got one")
+	default:
+	}
+}
+
 // TestLimiter_AcquireBlocksUntilReleased verifies that a blocking Acquire at
 // cap waits for a concurrent Release rather than returning immediately —
 // the drop-in replacement for dispatchWave's buffered-channel semaphore.

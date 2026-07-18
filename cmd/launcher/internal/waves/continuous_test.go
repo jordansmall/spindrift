@@ -306,10 +306,16 @@ func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 	// ResizeDelta(1), ResizeDelta(1) calls would leave it at, but only
 	// deliver the single coalesced signal ResizeDelta's own non-blocking
 	// send would actually manage to enqueue. Racing two real ResizeDelta
-	// calls against the listener goroutine can't force the drop
-	// deterministically (the runtime tends to hand off to a parked receiver
-	// on send), so this reproduces the drop directly via the
-	// package-internal fields instead.
+	// calls against this test's already-parked listener goroutine can't
+	// force the drop deterministically — Go hands a buffered-channel send
+	// directly to a parked receiver instead of filling the buffer, so the
+	// first ResizeDelta call here would bypass the buffer entirely and
+	// leave nothing for the second call's non-blocking send to collide
+	// with. This test reproduces the drop directly via the package-internal
+	// fields instead; TestLimiter_ResizeCoalescesGrowSignalUnderRapidRaises
+	// (limiter_test.go) covers the same coalescing mechanism through the
+	// real ResizeDelta API, with no listener parked to intercept the first
+	// send.
 	limiter.mu.Lock()
 	limiter.cap = 3
 	limiter.mu.Unlock()
