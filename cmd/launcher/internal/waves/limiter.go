@@ -124,7 +124,7 @@ func (l *Limiter) ResizeDelta(delta int) {
 	}
 }
 
-// Grown signals (coalesced) every time Resize raises the cap.
+// Grown signals (coalesced) every time Resize or ResizeDelta raises the cap.
 func (l *Limiter) Grown() <-chan struct{} {
 	return l.grow
 }
