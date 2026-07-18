@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/freshness"
@@ -29,13 +30,13 @@ func TestNewConsoleFreshnessChecker_RebuildThenCheck_ReportsFreshAtSameTip(t *te
 	probe := func() freshness.Result { probeCalls++; return stale }
 
 	buildCalls := 0
-	fresh, rebuild := newConsoleFreshnessChecker("main", probe, func() (string, error) { return rev, nil }, func() (string, error) { buildCalls++; return "", nil })
+	fresh, rebuild := newConsoleFreshnessChecker("main", probe, func() (string, string, error) { return rev, "", nil }, func() (string, error) { buildCalls++; return "", nil })
 
 	if applicable, isFresh, msg := fresh(); !applicable || isFresh {
 		t.Fatalf("initial check: applicable=%v fresh=%v msg=%q, want stale", applicable, isFresh, msg)
 	}
 
-	if _, err := rebuild(); err != nil {
+	if _, _, err := rebuild(); err != nil {
 		t.Fatalf("rebuild: %v", err)
 	}
 	if buildCalls != 1 {
@@ -59,8 +60,8 @@ func TestNewConsoleFreshnessChecker_OriginAdvancesAfterRebuild_StaleAgain(t *tes
 	res := freshness.Result{Applicable: true, Fresh: false, Rev: "abc123", Message: "rebuild needed"}
 	probe := func() freshness.Result { return res }
 
-	fresh, rebuild := newConsoleFreshnessChecker("main", probe, func() (string, error) { return "abc123", nil }, func() (string, error) { return "", nil })
-	if _, err := rebuild(); err != nil {
+	fresh, rebuild := newConsoleFreshnessChecker("main", probe, func() (string, string, error) { return "abc123", "", nil }, func() (string, error) { return "", nil })
+	if _, _, err := rebuild(); err != nil {
 		t.Fatalf("rebuild: %v", err)
 	}
 	if _, isFresh, _ := fresh(); !isFresh {
@@ -84,7 +85,7 @@ func TestNewConsoleFreshnessChecker_AlreadyFresh_PassesThroughUnchanged(t *testi
 	res := freshness.Result{Applicable: true, Fresh: true, Rev: "abc123", Message: "fresh"}
 	probe := func() freshness.Result { return res }
 
-	fresh, _ := newConsoleFreshnessChecker("main", probe, func() (string, error) { return "abc123", nil }, func() (string, error) { return "", nil })
+	fresh, _ := newConsoleFreshnessChecker("main", probe, func() (string, string, error) { return "abc123", "", nil }, func() (string, error) { return "", nil })
 
 	applicable, isFresh, msg := fresh()
 	if !applicable || !isFresh || msg != "fresh" {
@@ -104,7 +105,7 @@ func TestNewConsoleFreshnessChecker_OriginAdvancesDuringRebuild_BuiltRevIsPulled
 	const pulledRev = "abc123"   // what pull() checked out and build() built
 	const advancedRev = "def456" // origin's tip by the time probe() next runs
 
-	pull := func() (string, error) { return pulledRev, nil }
+	pull := func() (string, string, error) { return pulledRev, "", nil }
 	build := func() (string, error) { return "", nil }
 	probe := func() freshness.Result {
 		return freshness.Result{Applicable: true, Fresh: false, Rev: advancedRev, Message: "rebuild needed"}
@@ -112,7 +113,7 @@ func TestNewConsoleFreshnessChecker_OriginAdvancesDuringRebuild_BuiltRevIsPulled
 
 	fresh, rebuild := newConsoleFreshnessChecker("main", probe, pull, build)
 
-	if _, err := rebuild(); err != nil {
+	if _, _, err := rebuild(); err != nil {
 		t.Fatalf("rebuild: %v", err)
 	}
 
@@ -132,15 +133,37 @@ func TestNewConsoleFreshnessChecker_RebuildPropagatesPullAndBuildErrors(t *testi
 		return freshness.Result{Applicable: true, Fresh: false, Rev: "abc123"}
 	}
 
-	_, rebuild := newConsoleFreshnessChecker("main", probe, func() (string, error) { return "", errBoomFreshness }, func() (string, error) {
+	_, rebuild := newConsoleFreshnessChecker("main", probe, func() (string, string, error) { return "", "", errBoomFreshness }, func() (string, error) {
 		t.Fatal("build called after pull failed")
 		return "", nil
 	})
-	if _, err := rebuild(); err != errBoomFreshness {
+	if _, _, err := rebuild(); err != errBoomFreshness {
 		t.Errorf("rebuild() = %v, want the pull error", err)
 	}
 	if probeCalls != 0 {
 		t.Errorf("probeCalls = %d, want 0 when pull fails before any probe", probeCalls)
+	}
+}
+
+// TestNewConsoleFreshnessChecker_Rebuild_PropagatesPullNotice verifies
+// rebuild's return threads pull's branch-switch notice through alongside
+// build's output — the seam consoleGitSync's notice (issue #1141) needs to
+// reach the console's rendered status through, without rebuild re-deriving
+// it itself.
+func TestNewConsoleFreshnessChecker_Rebuild_PropagatesPullNotice(t *testing.T) {
+	const wantNotice = "switched off-branch tree from feature to main"
+	probe := func() freshness.Result { return freshness.Result{} }
+	pull := func() (string, string, error) { return "abc123", wantNotice, nil }
+	build := func() (string, error) { return "", nil }
+
+	_, rebuild := newConsoleFreshnessChecker("main", probe, pull, build)
+
+	_, notice, err := rebuild()
+	if err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	if notice != wantNotice {
+		t.Errorf("rebuild() notice = %q, want %q", notice, wantNotice)
 	}
 }
 
@@ -156,7 +179,7 @@ func TestConsoleGitSync_DirtyOffBranch_RefusesCheckout(t *testing.T) {
 	gitRun(t, pwd, "checkout", "-b", "feature")
 	gitWriteFile(t, filepath.Join(pwd, "flake.nix"), "{ dirty = true; }\n")
 
-	if _, err := consoleGitSync(pwd, "main"); err == nil {
+	if _, _, err := consoleGitSync(pwd, "main"); err == nil {
 		t.Fatal("consoleGitSync() = nil, want an error refusing the checkout")
 	}
 
@@ -179,7 +202,7 @@ func TestConsoleGitSync_DirtyOnBaseBranch_StillSyncs(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
 	gitWriteFile(t, filepath.Join(pwd, "scratch.txt"), "untracked\n")
 
-	if _, err := consoleGitSync(pwd, "main"); err != nil {
+	if _, _, err := consoleGitSync(pwd, "main"); err != nil {
 		t.Fatalf("consoleGitSync() = %v, want nil for a dirty tree already on baseBranch", err)
 	}
 }
@@ -208,6 +231,40 @@ func TestHeadRevAndProbeRev_SameCommit_IdenticalFormat(t *testing.T) {
 	}
 	if len(head) != 40 && len(head) != 64 {
 		t.Errorf("headRev length = %d, want 40 (SHA-1) or 64 (SHA-256), no --short", len(head))
+	}
+}
+
+// TestConsoleGitSync_CleanOffBranch_ReturnsSwitchNotice verifies that a
+// clean tree on a branch other than baseBranch gets a notice describing the
+// switch, naming both branches — the silent-switch gap issue #1141 closes:
+// checkCheckoutSafe lets this checkout proceed (nothing dirty to carry
+// across), but until now nothing told the operator their pwd moved off the
+// branch they had checked out.
+func TestConsoleGitSync_CleanOffBranch_ReturnsSwitchNotice(t *testing.T) {
+	pwd := newConsoleGitRepo(t, "main")
+	gitRun(t, pwd, "checkout", "-b", "feature")
+
+	_, notice, err := consoleGitSync(pwd, "main")
+	if err != nil {
+		t.Fatalf("consoleGitSync() = %v, want nil for a clean off-branch tree", err)
+	}
+	if !strings.Contains(notice, "feature") || !strings.Contains(notice, "main") {
+		t.Errorf("notice = %q, want it to name both the old branch %q and baseBranch %q", notice, "feature", "main")
+	}
+}
+
+// TestConsoleGitSync_AlreadyOnBaseBranch_NoSwitchNotice verifies that
+// syncing while already on baseBranch returns no notice — no real switch
+// occurred, so there's nothing to tell the operator.
+func TestConsoleGitSync_AlreadyOnBaseBranch_NoSwitchNotice(t *testing.T) {
+	pwd := newConsoleGitRepo(t, "main")
+
+	_, notice, err := consoleGitSync(pwd, "main")
+	if err != nil {
+		t.Fatalf("consoleGitSync() = %v, want nil", err)
+	}
+	if notice != "" {
+		t.Errorf("notice = %q, want empty when already on baseBranch", notice)
 	}
 }
 

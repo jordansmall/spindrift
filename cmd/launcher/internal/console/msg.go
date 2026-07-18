@@ -221,6 +221,10 @@ type StaleStatusMsg struct {
 	RebuildErr string
 	// RebuildOutput is the last rebuild's captured nix output (issue #765).
 	RebuildOutput string
+	// BranchSwitchNotice is the last rebuild's branch-switch notice, if any
+	// — "" when pwd's checkout didn't move off the branch it was on (issue
+	// #1141).
+	BranchSwitchNotice string
 }
 
 func (StaleStatusMsg) isConsoleMsg() {}

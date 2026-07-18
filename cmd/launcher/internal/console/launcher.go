@@ -43,10 +43,11 @@ type Launcher struct {
 	// RebuildFn actually rebuilds and reloads the image — production wires
 	// it to the operator's confirm key; nil (every pre-#652 call site, and
 	// any test not exercising Rebuild) makes Rebuild a no-op. It returns the
-	// rebuild's captured nix output (issue #765) alongside the error, so a
-	// background rebuild never writes directly to the Console's own
-	// stdout/stderr.
-	RebuildFn func() (string, error)
+	// rebuild's captured nix output (issue #765) and a branch-switch notice
+	// ("" when pwd's checkout didn't move off the branch it was on, issue
+	// #1141) alongside the error, so a background rebuild never writes
+	// directly to the Console's own stdout/stderr.
+	RebuildFn func() (string, string, error)
 	// RecoverFn adopts an orphaned issue's abandoned PR through the
 	// existing settle adoption path (recoverByNumber) — Console startup
 	// orphan recovery (issue #651). Wired by cmdConsole in main.go, since
@@ -79,6 +80,11 @@ type Launcher struct {
 	// overwrites this field unconditionally (see Rebuild below), so no
 	// separate clear-on-success step is needed.
 	rebuildOutput string
+	// branchSwitchNotice is the last rebuild's branch-switch notice, if any
+	// — "" when pwd's checkout didn't move off the branch it was on (issue
+	// #1141). Set on every RebuildFn completion regardless of outcome, same
+	// as rebuildOutput, and read by StaleStatus for the console's banner.
+	branchSwitchNotice string
 	// pollInterval overrides Run's default background poll cadence — unset
 	// (zero) in every production construction site, so only same-package
 	// tests reach in to shrink it below defaultPollInterval.
@@ -526,12 +532,13 @@ func (l *Launcher) Rebuild(tracker forge.IssueTracker, pwd string) {
 	l.wg.Add(1)
 	go func() {
 		defer l.wg.Done()
-		output, err := l.RebuildFn()
+		output, notice, err := l.RebuildFn()
 
 		l.mu.Lock()
 		l.rebuilding = false
 		l.rebuildErr = err
 		l.rebuildOutput = output
+		l.branchSwitchNotice = notice
 		if err == nil {
 			l.stale = false
 			l.staleMessage = ""
@@ -548,15 +555,16 @@ func (l *Launcher) Rebuild(tracker forge.IssueTracker, pwd string) {
 // StaleStatus returns the launcher's live image-freshness/rebuild state —
 // the console's per-render sync source for the stale banner (issue #652).
 // rebuildOutput is the last rebuild's captured nix output (issue #765),
+// branchSwitchNotice is its branch-switch notice (issue #1141), both
 // retrievable here instead of ever being streamed to the Console's own
 // stdout/stderr.
-func (l *Launcher) StaleStatus() (stale bool, message string, rebuilding bool, rebuildErr string, rebuildOutput string) {
+func (l *Launcher) StaleStatus() (stale bool, message string, rebuilding bool, rebuildErr string, rebuildOutput string, branchSwitchNotice string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.rebuildErr != nil {
 		rebuildErr = l.rebuildErr.Error()
 	}
-	return l.stale, l.staleMessage, l.rebuilding, rebuildErr, l.rebuildOutput
+	return l.stale, l.staleMessage, l.rebuilding, rebuildErr, l.rebuildOutput, l.branchSwitchNotice
 }
 
 // Wait blocks until any in-flight background drain finishes — Run calls it

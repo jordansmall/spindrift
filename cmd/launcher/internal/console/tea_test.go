@@ -1682,7 +1682,7 @@ func TestTea_RebuildKey_NotStale_NeverRunsRebuildFn(t *testing.T) {
 	launch := &Launcher{
 		CodeForge: f,
 		Queue:     NewQueue(),
-		RebuildFn: func() (string, error) { rebuilt <- struct{}{}; return "", nil },
+		RebuildFn: func() (string, string, error) { rebuilt <- struct{}{}; return "", "", nil },
 	}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
@@ -1719,10 +1719,10 @@ func TestTea_RebuildKey_RunsRebuildFnAndClearsStale(t *testing.T) {
 			}
 			return true, true, ""
 		},
-		RebuildFn: func() (string, error) {
+		RebuildFn: func() (string, string, error) {
 			stale.Store(false)
 			close(rebuilt)
-			return "", nil
+			return "", "", nil
 		},
 	}
 	// It carries an open blocker so the post-rebuild re-drain (Rebuild
@@ -1742,7 +1742,7 @@ func TestTea_RebuildKey_RunsRebuildFnAndClearsStale(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if stale, _, _, _, _ := launch.StaleStatus(); !stale {
+		if stale, _, _, _, _, _ := launch.StaleStatus(); !stale {
 			break
 		}
 		if time.Now().After(deadline) {

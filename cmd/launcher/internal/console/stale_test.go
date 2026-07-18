@@ -56,7 +56,7 @@ func TestLauncher_TryLaunch_StaleFreshnessChecker_HoldsNewLaunches(t *testing.T)
 		t.Errorf("queue pick = %+v, want it still PickQueued", snap)
 	}
 
-	stale, msg, rebuilding, rebuildErr, _ := launch.StaleStatus()
+	stale, msg, rebuilding, rebuildErr, _, _ := launch.StaleStatus()
 	if !stale {
 		t.Error("StaleStatus stale = false, want true")
 	}
@@ -163,9 +163,9 @@ func TestLauncher_Rebuild_Success_ClearsStaleAndResumesHeldLaunch(t *testing.T) 
 			}
 			return true, true, ""
 		},
-		RebuildFn: func() (string, error) {
+		RebuildFn: func() (string, string, error) {
 			stale.Store(false)
-			return "", nil
+			return "", "", nil
 		},
 	}
 	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
@@ -183,7 +183,7 @@ func TestLauncher_Rebuild_Success_ClearsStaleAndResumesHeldLaunch(t *testing.T) 
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "42" {
 		t.Errorf("RunCalls = %+v, want one Box run for #42 after rebuild", fr.RunCalls)
 	}
-	if stale, _, rebuilding, rebuildErr, _ := launch.StaleStatus(); stale || rebuilding || rebuildErr != "" {
+	if stale, _, rebuilding, rebuildErr, _, _ := launch.StaleStatus(); stale || rebuilding || rebuildErr != "" {
 		t.Errorf("StaleStatus after successful rebuild = stale:%v rebuilding:%v err:%q, want all cleared", stale, rebuilding, rebuildErr)
 	}
 }
@@ -219,14 +219,56 @@ func TestLauncher_Rebuild_Success_PropagatesCapturedOutput(t *testing.T) {
 		Settle:    settle.NewFake(),
 		Queue:     NewQueue(),
 		Fresh:     func() (bool, bool, string) { return true, false, "rebuild needed" },
-		RebuildFn: func() (string, error) { return wantOutput, nil },
+		RebuildFn: func() (string, string, error) { return wantOutput, "", nil },
 	}
 
 	launch.Rebuild(f, dir)
 	launch.Wait()
 
-	if _, _, _, _, rebuildOutput := launch.StaleStatus(); rebuildOutput != wantOutput {
+	if _, _, _, _, rebuildOutput, _ := launch.StaleStatus(); rebuildOutput != wantOutput {
 		t.Errorf("StaleStatus rebuildOutput = %q, want %q", rebuildOutput, wantOutput)
+	}
+}
+
+// TestLauncher_Rebuild_Success_PropagatesBranchSwitchNotice verifies a
+// non-empty RebuildFn notice threads through to StaleStatus's 6th return
+// value — the seam consoleGitSync's off-branch switch notice (issue #1141)
+// needs to reach the console's rendered status through.
+func TestLauncher_Rebuild_Success_PropagatesBranchSwitchNotice(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	const wantNotice = "switched off-branch tree from feature to main"
+
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		Settle:    settle.NewFake(),
+		Queue:     NewQueue(),
+		Fresh:     func() (bool, bool, string) { return true, false, "rebuild needed" },
+		RebuildFn: func() (string, string, error) { return "", wantNotice, nil },
+	}
+
+	launch.Rebuild(f, dir)
+	launch.Wait()
+
+	if _, _, _, _, _, notice := launch.StaleStatus(); notice != wantNotice {
+		t.Errorf("StaleStatus branchSwitchNotice = %q, want %q", notice, wantNotice)
 	}
 }
 
@@ -259,7 +301,7 @@ func TestLauncher_Rebuild_Failure_SurfacesErrorAndKeepsHeld(t *testing.T) {
 		Settle:    settle.NewFake(),
 		Queue:     NewQueue(),
 		Fresh:     func() (bool, bool, string) { return true, false, "rebuild needed" },
-		RebuildFn: func() (string, error) { return "", errBoom },
+		RebuildFn: func() (string, string, error) { return "", "", errBoom },
 	}
 	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	launch.tryLaunch(f, dir)
@@ -270,7 +312,7 @@ func TestLauncher_Rebuild_Failure_SurfacesErrorAndKeepsHeld(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if _, _, _, rebuildErr, _ := launch.StaleStatus(); rebuildErr != "" {
+		if _, _, _, rebuildErr, _, _ := launch.StaleStatus(); rebuildErr != "" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -279,7 +321,7 @@ func TestLauncher_Rebuild_Failure_SurfacesErrorAndKeepsHeld(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	stale, _, rebuilding, rebuildErr, _ := launch.StaleStatus()
+	stale, _, rebuilding, rebuildErr, _, _ := launch.StaleStatus()
 	if !stale {
 		t.Error("stale = false after a failed rebuild, want true (still held)")
 	}
@@ -356,9 +398,9 @@ func TestLauncher_Rebuild_WhileOtherSlotAlreadyLatchedStale_ResumesBothPicks(t *
 			}
 			return true, false, "rebuild needed"
 		},
-		RebuildFn: func() (string, error) {
+		RebuildFn: func() (string, string, error) {
 			forcedFresh.Store(true)
-			return "", nil
+			return "", "", nil
 		},
 	}
 	launch.Queue.Add(Pick{Number: "42", Title: "first", State: PickQueued})
@@ -370,7 +412,7 @@ func TestLauncher_Rebuild_WhileOtherSlotAlreadyLatchedStale_ResumesBothPicks(t *
 	launch.Rebuild(f, dir)
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if _, _, rebuilding, rebuildErr, _ := launch.StaleStatus(); !rebuilding && rebuildErr == "" {
+		if _, _, rebuilding, rebuildErr, _, _ := launch.StaleStatus(); !rebuilding && rebuildErr == "" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -393,14 +435,14 @@ func TestLauncher_Rebuild_MarksRebuildingWhileInFlight(t *testing.T) {
 	launch := &Launcher{
 		Queue:     NewQueue(),
 		Fresh:     func() (bool, bool, string) { return true, false, "rebuild needed" },
-		RebuildFn: func() (string, error) { <-release; return "", nil },
+		RebuildFn: func() (string, string, error) { <-release; return "", "", nil },
 	}
 
 	launch.Rebuild(nil, "")
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if _, _, rebuilding, _, _ := launch.StaleStatus(); rebuilding {
+		if _, _, rebuilding, _, _, _ := launch.StaleStatus(); rebuilding {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -412,7 +454,7 @@ func TestLauncher_Rebuild_MarksRebuildingWhileInFlight(t *testing.T) {
 	close(release)
 	launch.Wait()
 
-	if _, _, rebuilding, _, _ := launch.StaleStatus(); rebuilding {
+	if _, _, rebuilding, _, _, _ := launch.StaleStatus(); rebuilding {
 		t.Error("Rebuilding = true after RebuildFn returned, want false")
 	}
 }
@@ -428,18 +470,18 @@ func TestLauncher_Rebuild_Retry_ClearsPriorErrorImmediately(t *testing.T) {
 	launch := &Launcher{
 		Queue: NewQueue(),
 		Fresh: func() (bool, bool, string) { return true, false, "rebuild needed" },
-		RebuildFn: func() (string, error) {
+		RebuildFn: func() (string, string, error) {
 			if calls.Add(1) == 1 {
-				return "", errBoom
+				return "", "", errBoom
 			}
 			<-release
-			return "", nil
+			return "", "", nil
 		},
 	}
 
 	launch.Rebuild(nil, "")
 	launch.Wait()
-	if _, _, _, rebuildErr, _ := launch.StaleStatus(); rebuildErr != errBoom.Error() {
+	if _, _, _, rebuildErr, _, _ := launch.StaleStatus(); rebuildErr != errBoom.Error() {
 		t.Fatalf("rebuildErr after first attempt = %q, want %q", rebuildErr, errBoom.Error())
 	}
 
@@ -449,7 +491,7 @@ func TestLauncher_Rebuild_Retry_ClearsPriorErrorImmediately(t *testing.T) {
 	var rebuilding bool
 	var rebuildErr string
 	for {
-		if _, _, rebuilding, rebuildErr, _ = launch.StaleStatus(); rebuilding {
+		if _, _, rebuilding, rebuildErr, _, _ = launch.StaleStatus(); rebuilding {
 			break
 		}
 		if time.Now().After(deadline) {
