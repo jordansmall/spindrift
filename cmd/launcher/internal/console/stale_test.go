@@ -188,6 +188,48 @@ func TestLauncher_Rebuild_Success_ClearsStaleAndResumesHeldLaunch(t *testing.T) 
 	}
 }
 
+// TestLauncher_Rebuild_Success_PropagatesCapturedOutput verifies a non-empty
+// RebuildFn output string threads through to StaleStatus's 5th return value
+// — every other Rebuild test in this file returns "", which never exercised
+// this leg of the propagation (issue #1129).
+func TestLauncher_Rebuild_Success_PropagatesCapturedOutput(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	const wantOutput = "nix: building '/nix/store/abc-spindrift-1.2.3.drv'...\n"
+
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		Settle:    settle.NewFake(),
+		Queue:     NewQueue(),
+		Fresh:     func() (bool, bool, string) { return true, false, "rebuild needed" },
+		RebuildFn: func() (string, error) { return wantOutput, nil },
+	}
+
+	launch.Rebuild(f, dir)
+	launch.Wait()
+
+	if _, _, _, _, rebuildOutput := launch.StaleStatus(); rebuildOutput != wantOutput {
+		t.Errorf("StaleStatus rebuildOutput = %q, want %q", rebuildOutput, wantOutput)
+	}
+}
+
 // TestLauncher_Rebuild_Failure_SurfacesErrorAndKeepsHeld verifies a failing
 // RebuildFn surfaces the error through StaleStatus and leaves the queued
 // pick held — a failed rebuild must never silently resume launches (issue

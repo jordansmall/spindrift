@@ -667,6 +667,20 @@ func TestUpdate_StaleStatusMsg_SetsFields(t *testing.T) {
 	}
 }
 
+// TestUpdate_StaleStatusMsg_PropagatesCapturedRebuildOutput verifies a
+// non-empty StaleStatusMsg.RebuildOutput lands on Model.RebuildOutput
+// verbatim — the sibling TestUpdate_StaleStatusMsg_SetsFields only ever
+// threads the zero value, which never exercised this leg (issue #1129).
+func TestUpdate_StaleStatusMsg_PropagatesCapturedRebuildOutput(t *testing.T) {
+	m := NewModel()
+	const wantOutput = "nix: building '/nix/store/abc-spindrift-1.2.3.drv'...\n"
+	m = Update(m, StaleStatusMsg{RebuildOutput: wantOutput})
+
+	if m.RebuildOutput != wantOutput {
+		t.Errorf("RebuildOutput = %q, want %q", m.RebuildOutput, wantOutput)
+	}
+}
+
 // TestUpdate_DrillInMsg_RefreshSameNumber_PreservesShowRaw verifies a
 // second DrillInMsg for the same pick (a refresh while live-tailing) keeps
 // the operator's raw/rendered toggle instead of resetting to rendered.
