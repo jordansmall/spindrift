@@ -160,10 +160,10 @@ func TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel(t *testing.T) {
 
 // TestLauncher_Terminate_PropagatesKillError verifies a non-nil
 // Factory.Kill error surfaces from Terminate's return unmasked, while every
-// other best-effort step (transition, comment, PickTerminated) still runs
-// regardless (issue #749).
+// other best-effort step (transition, comment, AppendTerminalLine,
+// PickTerminated) still runs regardless (issue #749).
 func TestLauncher_Terminate_PropagatesKillError(t *testing.T) {
-	launch, fc, fr, _ := newTermTestLauncher(t)
+	launch, fc, fr, dir := newTermTestLauncher(t)
 	fr.KillErr = errors.New("boom: kill failed")
 
 	err := launch.Terminate(fc, "42")
@@ -176,6 +176,15 @@ func TestLauncher_Terminate_PropagatesKillError(t *testing.T) {
 	}
 	if len(fc.CommentCalls) != 1 {
 		t.Errorf("CommentCalls: want 1 despite kill error, got %+v", fc.CommentCalls)
+	}
+
+	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	got, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "terminate") {
+		t.Errorf("Box log = %q, want it to carry a terminal line despite kill error", got)
 	}
 
 	snap := launch.Queue.Snapshot()
