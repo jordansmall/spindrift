@@ -156,16 +156,17 @@ a confirm: it checks out the base branch, pulls it, and re-realizes the image
 in the background while the session stays responsive, with
 `==> rebuilding image...` shown until it finishes. That checkout runs on the
 operator's own working directory — it refuses to run when the directory is on
-some other branch with uncommitted changes, since a plain `git checkout` only
-blocks on a *conflicting* file and would otherwise carry a non-conflicting
-uncommitted change onto the base branch in silence. Outside that case (already
+some other branch with a dirty working tree (uncommitted changes or untracked
+files), since a plain `git checkout` only blocks on a *conflicting* file and
+would otherwise carry a non-conflicting uncommitted change or untracked file
+onto the base branch in silence. Outside that case (already
 on the base branch, or any branch with a clean tree) the checkout is a safe
 no-op or a plain branch switch, so it proceeds. A successful rebuild clears the
 banner and resumes every held pick exactly where it queued — no re-pick needed.
 A failed rebuild — including a refused checkout — prints
 `!! rebuild failed: <reason>` and leaves launches held, so the operator can
-retry `b` once the underlying problem (uncommitted changes on the wrong branch,
-a merge conflict on pull, a broken derivation) is fixed.
+retry `b` once the underlying problem (a dirty working tree on the wrong
+branch, a merge conflict on pull, a broken derivation) is fixed.
 
 ## Quit
 
