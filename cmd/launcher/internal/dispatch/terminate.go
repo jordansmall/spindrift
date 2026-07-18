@@ -45,7 +45,7 @@ func (f *Factory) OrphanedIssues() ([]string, error) {
 		if !ok {
 			continue
 		}
-		if _, err := strconv.Atoi(num); err != nil {
+		if _, err := strconv.ParseUint(num, 10, 64); err != nil {
 			continue
 		}
 		nums = append(nums, num)

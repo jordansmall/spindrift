@@ -87,6 +87,48 @@ func TestFactory_OrphanedIssues_SkipsNonNumericSuffix(t *testing.T) {
 	}
 }
 
+// TestFactory_OrphanedIssues_RejectsSignedSuffix verifies OrphanedIssues
+// filters out a sandbox name whose suffix is a signed integer ("+5", "-42")
+// -- strconv.Atoi accepts those forms but they are not valid GitHub issue
+// numbers, so a signed suffix must be skipped the same as a non-numeric one
+// (issue #1156).
+func TestFactory_OrphanedIssues_RejectsSignedSuffix(t *testing.T) {
+	r := runner.NewFake()
+	r.RunningNames = []string{"agent-issue-42", "agent-issue-+5", "agent-issue--42"}
+	f, err := NewFactory(Config{}, tempLogDir(t), r, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+
+	got, err := f.OrphanedIssues()
+	if err != nil {
+		t.Fatalf("OrphanedIssues: %v", err)
+	}
+	if len(got) != 1 || got[0] != "42" {
+		t.Errorf("OrphanedIssues = %v, want [42]", got)
+	}
+}
+
+// TestFactory_OrphanedIssues_SkipsEmptySuffix verifies OrphanedIssues
+// filters out a sandbox name that is the bare prefix with no suffix at all
+// (issue #1156).
+func TestFactory_OrphanedIssues_SkipsEmptySuffix(t *testing.T) {
+	r := runner.NewFake()
+	r.RunningNames = []string{"agent-issue-42", "agent-issue-"}
+	f, err := NewFactory(Config{}, tempLogDir(t), r, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+
+	got, err := f.OrphanedIssues()
+	if err != nil {
+		t.Fatalf("OrphanedIssues: %v", err)
+	}
+	if len(got) != 1 || got[0] != "42" {
+		t.Errorf("OrphanedIssues = %v, want [42]", got)
+	}
+}
+
 // TestFactory_AppendTerminalLine_AppendsToMostRecentPassLog verifies the
 // note lands on the last pass LogPaths reports (a fix pass here), not the
 // initial run's log -- the terminal line belongs on whichever log a live
