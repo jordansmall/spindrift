@@ -824,6 +824,42 @@ func TestView_SidebarFullscreen_WindowsToViewportHeight(t *testing.T) {
 	}
 }
 
+// TestView_SidebarOpen_WideTerminal_DocksBesideList verifies a terminal wide
+// enough for sidebarFits shows the sidebar docked beside the still-visible
+// list, rather than the list disappearing behind a fullscreen takeover — the
+// core of ADR 0030's docked layout (#1501).
+func TestView_SidebarOpen_WideTerminal_DocksBesideList(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "still visible"}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
+
+	out := View(m)
+	if !strings.Contains(out, "still visible") {
+		t.Errorf("View() = %q, want the list still visible docked beside the sidebar", out)
+	}
+	if !strings.Contains(out, "activity #42") {
+		t.Errorf("View() = %q, want the docked sidebar's label", out)
+	}
+}
+
+// TestView_SidebarOpen_NarrowTerminal_FallsBackFullscreen verifies a
+// terminal one column short of sidebarFits' threshold falls back to the
+// fullscreen takeover — the list disappears entirely rather than squeezing
+// both columns illegibly (ADR 0030's narrow-terminal degradation, #1501).
+func TestView_SidebarOpen_NarrowTerminal_FallsBackFullscreen(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
+
+	out := View(m)
+	if strings.Contains(out, "should not show") {
+		t.Errorf("View() = %q, want the list hidden behind the fullscreen fallback one column short of sidebarFits", out)
+	}
+	if !strings.Contains(out, "activity #42") {
+		t.Errorf("View() = %q, want the fullscreen sidebar's label", out)
+	}
+}
+
 // TestView_BacklogSection_HasColumnHeader verifies the Backlog Section
 // renders under its own column-header row (issue #844, moved from the
 // two-column body's "backlog" label to ADR 0030's single-Section table by

@@ -17,8 +17,11 @@ const sidebarWidth = 42
 // still be usable beside a docked sidebar — the threshold sidebarFits checks
 // against, below which the sidebar falls back to a fullscreen takeover
 // instead of squeezing both columns illegibly (ADR 0030's narrow-terminal
-// degradation).
-const sidebarMinListWidth = 38
+// degradation). Sized against the wider of the two tables, a work Section's
+// (workFixedWidth + extrasBudget, currently 60), so a docked row's title
+// keeps a legible ~20 columns on every Section, not just the Backlog's
+// narrower one.
+const sidebarMinListWidth = 80
 
 // sidebarFits reports whether m.Width has room for the list column (at
 // least sidebarMinListWidth) plus the docked sidebar (sidebarWidth) plus one
