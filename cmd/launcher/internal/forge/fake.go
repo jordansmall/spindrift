@@ -382,11 +382,14 @@ func (f *Fake) CompleteVerdict(num string, verdict Verdict) error {
 	if !ok {
 		return nil // best-effort
 	}
+	add := f.VerdictLabels.Label(verdict)
+	if add == "" {
+		return fmt.Errorf("issue %s: no label configured for verdict %v", num, verdict)
+	}
 	remove := f.labels.Label(InProgress)
 	if remove != "" && !slices.Contains(iss.Labels, remove) {
 		return fmt.Errorf("issue %s: expected %q label, issue has %v", num, remove, iss.Labels)
 	}
-	add := f.VerdictLabels.Label(verdict)
 	var next []string
 	for _, l := range iss.Labels {
 		if l != remove {

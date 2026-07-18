@@ -213,6 +213,27 @@ func TestFake_CompleteVerdict_UnconfiguredInProgressSkipsCheck(t *testing.T) {
 	}
 }
 
+// TestFake_CompleteVerdict_UnconfiguredVerdictLabelErrors verifies that
+// CompleteVerdict errors rather than appending an empty label when
+// VerdictLabels has no label configured for the requested verdict —
+// mirroring the real adapter's add == "" guard (github/exec_issues.go).
+func TestFake_CompleteVerdict_UnconfiguredVerdictLabelErrors(t *testing.T) {
+	f := forge.NewFake(researchLabels)
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
+
+	if err := f.CompleteVerdict("42", forge.Recommend); err == nil {
+		t.Fatal("want error when verdict has no configured label, got nil")
+	}
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if want := []string{"agent-research-in-progress"}; !slices.Equal(iss.Labels, want) {
+		t.Errorf("want labels untouched at %v, got %v (empty label must not be appended on error)", want, iss.Labels)
+	}
+}
+
 // --- ListIssues(DispatchState) tests ---
 
 func TestFake_ListIssues_ByDispatchState(t *testing.T) {
