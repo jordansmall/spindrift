@@ -1007,7 +1007,7 @@ func TestTea_QuitKey_CancelsWaitRefreshSignalGoroutine(t *testing.T) {
 	for {
 		var buf bytes.Buffer
 		_ = pprof.Lookup("goroutine").WriteTo(&buf, 1)
-		if !strings.Contains(buf.String(), "waitRefreshSignal") {
+		if !strings.Contains(buf.String(), "waitRefreshSignal.func1") {
 			return
 		}
 		if time.Now().After(deadline) {
