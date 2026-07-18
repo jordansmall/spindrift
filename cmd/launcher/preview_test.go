@@ -212,3 +212,32 @@ func TestPreviewIssues_MixedBatchAnnotatesEachSource(t *testing.T) {
 		t.Errorf("output missing body-sourced annotation for #20; got:\n%s", out)
 	}
 }
+
+// TestPreviewIssues_DepsOfCheckFailure_AnnotatesDistinctly verifies that a
+// DepsOf call failure (#752, #1103) is rendered distinctly from both a
+// zero-blocker issue and a blocked-by annotation, instead of being silently
+// dropped as previewIssues did before this fix threaded result.Failed into
+// waves.Input.
+func TestPreviewIssues_DepsOfCheckFailure_AnnotatesDistinctly(t *testing.T) {
+	c := baseConfig()
+	c.repoSlug = "owner/repo"
+	c.label = "ready-for-agent"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "12", Title: "deps-of-failed", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "15", Title: "clean", Labels: []string{c.label}})
+
+	it := failDepsOf{Fake: fc, num: "12"}
+
+	var buf bytes.Buffer
+	if err := previewIssues(c, it, it, &buf, nil, t.TempDir(), nil); err != nil {
+		t.Fatalf("previewIssues: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "#12  deps-of-failed  (blocker check failed; will retry)") {
+		t.Errorf("output missing distinct DepsOf-failure annotation for #12; got:\n%s", out)
+	}
+	if !strings.Contains(out, "#15  clean\n") {
+		t.Errorf("output missing plain line for unaffected #15; got:\n%s", out)
+	}
+}

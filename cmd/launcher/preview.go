@@ -38,7 +38,7 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Wri
 	if err != nil {
 		return err
 	}
-	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: result.Edges, Sources: result.Sources})
+	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: result.Edges, Sources: result.Sources, Failed: result.Failed})
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, w
 	if err != nil {
 		return err
 	}
-	edges, sources := result.Edges, result.Sources
+	edges, sources, failed := result.Edges, result.Sources, result.Failed
 
 	// Eviction pass (dry-run; no side effects).
 	kept, notices := evictUnmetBlockers(c, it, cf, issues, edges, sources)
@@ -79,7 +79,7 @@ func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, w
 		fmt.Fprintf(w, "no issues would be dispatched after eviction\n")
 		return nil
 	}
-	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(kept), Edges: edges, Sources: sources})
+	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(kept), Edges: edges, Sources: sources, Failed: failed})
 	if err != nil {
 		return err
 	}
@@ -94,13 +94,16 @@ func printPlan(w io.Writer, plan waves.Plan) {
 	fmt.Fprintf(w, "%d issue(s) would be dispatched:\n", len(plan.Issues))
 	for _, iss := range plan.Issues {
 		blockers := plan.Edges[iss.Number]
-		if len(blockers) > 0 {
+		switch {
+		case len(blockers) > 0:
 			refs := make([]string, len(blockers))
 			for i, b := range blockers {
 				refs[i] = forge.Ref(b, plan.Sources[iss.Number][b])
 			}
 			fmt.Fprintf(w, "  #%s  %s  (blocked by %s)\n", iss.Number, iss.Title, strings.Join(refs, ", "))
-		} else {
+		case plan.Failed[iss.Number]:
+			fmt.Fprintf(w, "  #%s  %s  (blocker check failed; will retry)\n", iss.Number, iss.Title)
+		default:
 			fmt.Fprintf(w, "  #%s  %s\n", iss.Number, iss.Title)
 		}
 	}
