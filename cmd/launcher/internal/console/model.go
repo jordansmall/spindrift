@@ -60,7 +60,10 @@ type Model struct {
 	RebuildOutput string
 	// ShowRebuildOutput is whether the rebuild-output pane is open, showing
 	// RebuildOutput in full — RebuildOutput's only consumer (issue #1128).
-	// Never true while RebuildOutput is "".
+	// RebuildOutputOpenMsg only ever sets it while RebuildOutput is
+	// non-empty, but a later StaleStatusMsg can still empty RebuildOutput
+	// out from under an already-open pane — the pane just renders blank
+	// rather than closing itself.
 	ShowRebuildOutput bool
 	// RebuildOutputOffset is the rebuild-output pane's scroll position — the
 	// index of its first visible line, the pane's analogue of DrillInState's
