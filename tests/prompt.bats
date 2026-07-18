@@ -215,6 +215,20 @@ setup() {
   ! grep -qi 'tracked by' <<<"$decoy"
 }
 
+@test "tracked-by pin (fix-prompt.md) rejects a decoy that keeps 'tracked' but drops the target phrase" {
+  # issue #1159: the #782 decoy regression test only exercised
+  # issue-prompt.md's CHECK section. Mirror it for the injected
+  # fix-prompt.md CHECK section, same as #726 did for the vanished-marker
+  # assertion above.
+  local prompt="$PROMPT_PATH/fix-prompt.md"
+  local check
+  check="$(sed -n '/^# CHECK$/,/^# LAND THE CHANGE$/p' "$prompt")"
+  [ -n "$check" ]
+  local decoy
+  decoy="$(sed 's/is not tracked by Git/failed for an unrelated reason/' <<<"$check")"
+  ! grep -qi 'tracked by' <<<"$decoy"
+}
+
 @test "prompt branches CODE_FORGE=git to a push-only outcome, no PR/CI" {
   # CODE_FORGE=git (#330) must skip PR creation and CI-watch entirely and
   # emit a branch ref where a PR URL would go.
