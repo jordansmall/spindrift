@@ -50,6 +50,16 @@ func writeBlockedMarker(pwd string, blockers []string, sources map[string]forge.
 	return os.WriteFile(path, []byte(strings.Join(refs, ", ")), 0o644)
 }
 
+// writeDepsOfFailedMarker records that the claimed issue's own DepsOf call
+// failed transiently (#1103) — the OriginClaimed counterpart of
+// writeBlockedMarker for a lookup failure rather than a named blocker, so the
+// workflow's release-the-claim step still fires and interpolates a
+// human-readable reason into its comment.
+func writeDepsOfFailedMarker(pwd string) error {
+	path := filepath.Join(pwd, "logs", blockedMarker)
+	return os.WriteFile(path, []byte("a transient blocker check failure (will retry)"), 0o644)
+}
+
 // dispatchWave dispatches a batch of issues in parallel (up to cfg.MaxParallel
 // at once). Each goroutine claims its issue only after acquiring a Limiter
 // slot so that at most MaxParallel issues are ever in the in-progress state
@@ -135,12 +145,22 @@ func printSelectiveRerunHint(cfg Config, held []Issue) {
 // issue in the batch. Blocked issues are skipped so no slot is wasted on a
 // dependency that hasn't merged yet; they wait for the next invocation. The
 // in-batch dependency graph is assumed already cycle-checked by NewPlan.
-func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, sources Sources, origin Origin) error {
+func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool, origin Origin) error {
 	checkOverlap := waveOverlapCheck(cfg, it, cf)
 	var selected, blockerFailed []Issue
 	failedBlockersByIssue := map[string][]string{}
 outer:
 	for _, iss := range issues {
+		// An issue named in depsOfFailed had its own BuildEdges/DepsOf call
+		// error — a transient tracker hiccup indistinguishable from
+		// "confirmed zero blockers" in edges alone (#752, #1103). Hold it
+		// for a later invocation rather than reading the missing edges
+		// entry as ready, and never cascade-fail it: the failure is the
+		// lookup itself, not a dependency.
+		if !cfg.IgnoreBlockers && depsOfFailed[iss.Number] {
+			fmt.Printf("    ~~ #%s blocker check failed; will retry\n", iss.Number)
+			continue
+		}
 		// The failed scan only matters for the cascade-fail case below
 		// (origin != OriginClaimed), so OriginClaimed skips it and fetches
 		// only what unreadyBlockers needs -- matching the fetch profile the
@@ -188,11 +208,26 @@ outer:
 		if origin == OriginClaimed && len(issues) > 0 {
 			num := issues[0].Number
 			if !cfg.IgnoreBlockers {
-				if blockers := unreadyBlockers(it, cf, num, edges); len(blockers) > 0 {
-					if err := writeBlockedMarker(pwd, blockers, sources[num]); err != nil {
+				switch {
+				case depsOfFailed[num]:
+					// The claimed issue's own DepsOf call failed, so
+					// edges[num] is unreliable rather than a confirmed
+					// zero-blocker result (#1103) -- write the marker
+					// anyway so the release workflow reverts the claim and
+					// a later re-trigger retries, exactly as a real unmet
+					// blocker would, instead of stranding the issue on
+					// in-progress with no signal.
+					if err := writeDepsOfFailedMarker(pwd); err != nil {
 						return err
 					}
-					fmt.Printf("==> #%s blocked; wrote logs/%s for the pipeline to release the claim\n", num, blockedMarker)
+					fmt.Printf("==> #%s blocker check failed; wrote logs/%s for the pipeline to release the claim\n", num, blockedMarker)
+				default:
+					if blockers := unreadyBlockers(it, cf, num, edges); len(blockers) > 0 {
+						if err := writeBlockedMarker(pwd, blockers, sources[num]); err != nil {
+							return err
+						}
+						fmt.Printf("==> #%s blocked; wrote logs/%s for the pipeline to release the claim\n", num, blockedMarker)
+					}
 				}
 			}
 			fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", cfg.Label)
@@ -241,5 +276,5 @@ func Run(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *d
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
 		return err
 	}
-	return drainMaxJobs(cfg, it, cf, pwd, f, s, plan.Issues, plan.Edges, plan.Sources, plan.Origin)
+	return drainMaxJobs(cfg, it, cf, pwd, f, s, plan.Issues, plan.Edges, plan.Sources, plan.Failed, plan.Origin)
 }

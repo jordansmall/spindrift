@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,6 +10,9 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/waves"
 )
+
+// errBoom is a scripted error for tests that simulate a failing forge call.
+var errBoom = errors.New("boom")
 
 // TestSelectiveListDispatch_AllLabeledNoPrompt: when all listed issues carry the
 // ready-for-agent label no confirmation is needed and all are dispatched.
@@ -495,4 +499,63 @@ func TestEvictUnmetBlockers_CascadingEviction(t *testing.T) {
 	if len(notices) < 2 {
 		t.Errorf("notices = %v, want at least 2 (one per evicted issue)", notices)
 	}
+}
+
+// TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched
+// verifies that selective dispatch threads BuildEdges' failed set (#1103)
+// through to the wave engine: an issue whose own DepsOf call errored is held
+// for retry, not dispatched and not cascade-failed, while an unaffected
+// sibling still dispatches normally.
+func TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.maxParallel = 4
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "12", Title: "deps-of-failed", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "15", Title: "clean", Labels: []string{c.label}})
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(c, fc, fc)
+
+	stdin := &bytes.Buffer{}
+	stdout := &bytes.Buffer{}
+
+	it := failDepsOf{Fake: fc, num: "12"}
+	err := selectiveListDispatch(c, it, fc, dir, f, s, []string{"12", "15"}, false, stdin, stdout)
+	if err != nil {
+		t.Fatalf("selectiveListDispatch: %v", err)
+	}
+
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "15" {
+		t.Fatalf("RunCalls: got %v, want exactly issue 15", fr.RunCalls)
+	}
+
+	iss12, err := fc.Issue("12")
+	if err != nil {
+		t.Fatalf("Issue(12): %v", err)
+	}
+	if containsLabel(iss12.Labels, c.failedLabel) {
+		t.Errorf("issue 12 must NOT be cascade-failed on a DepsOf check failure; labels=%v", iss12.Labels)
+	}
+	if containsLabel(iss12.Labels, c.inProgressLabel) {
+		t.Errorf("issue 12 must NOT be claimed on a DepsOf check failure; labels=%v", iss12.Labels)
+	}
+}
+
+// failDepsOf wraps a *forge.Fake so DepsOf errors for num, simulating a
+// transient tracker failure — mirrors console/queue_test.go's helper of the
+// same name.
+type failDepsOf struct {
+	*forge.Fake
+	num string
+}
+
+func (r failDepsOf) DepsOf(num string) ([]forge.Dependency, error) {
+	if num == r.num {
+		return nil, errBoom
+	}
+	return r.Fake.DepsOf(num)
 }

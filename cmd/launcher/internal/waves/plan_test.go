@@ -128,3 +128,23 @@ func TestNewPlan_OriginPropagates(t *testing.T) {
 		}
 	}
 }
+
+// TestNewPlan_FailedPropagates verifies NewPlan carries Input.Failed through
+// to Plan.Failed unchanged — drainMaxJobs (#1103) reads it off the Plan to
+// hold an issue whose own BuildEdges/DepsOf call errored, rather than
+// treating the missing Edges entry as a confirmed zero-blocker issue.
+func TestNewPlan_FailedPropagates(t *testing.T) {
+	cfg := Config{}
+	in := Input{
+		Origin: OriginDiscovered,
+		Issues: []Issue{{Number: "1", Title: "a"}},
+		Failed: map[string]bool{"1": true},
+	}
+	plan, err := NewPlan(cfg, in)
+	if err != nil {
+		t.Fatalf("NewPlan: %v", err)
+	}
+	if !plan.Failed["1"] {
+		t.Errorf("Plan.Failed = %v, want it to carry issue 1", plan.Failed)
+	}
+}

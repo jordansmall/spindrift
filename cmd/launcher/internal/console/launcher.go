@@ -395,7 +395,7 @@ func (l *Launcher) tryLaunch(tracker forge.IssueTracker, pwd string) {
 // starts a fresh drain itself.
 func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 	defer l.wg.Done()
-	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) {
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
 		defer l.signalRefresh() // a claim attempt is always a tracker write, win or lose
 		issues, edges, sources, err := l.Queue.Discover(tracker, l.CodeForge, l.FailedLabel)
 		// A successful claim here is a fresh Dispatch starting for issues,
@@ -413,7 +413,10 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		for i, iss := range issues {
 			issues[i].Generation = l.registry().Begin(iss.Number)
 		}
-		return issues, edges, sources, err
+		// Queue.Discover already resolved this pick's own DepsOf-failure
+		// case internally (held it, rather than returning it) -- nil is
+		// always correct here, never a set nextReady would need to act on.
+		return issues, edges, sources, nil, err
 	}
 	for {
 		// Label, InProgressLabel, and OverlapGate are deliberately left

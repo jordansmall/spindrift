@@ -802,7 +802,7 @@ func run(lc *launchContext) error {
 		return err
 	}
 
-	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: result.Edges, Sources: result.Sources})
+	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: result.Edges, Sources: result.Sources, Failed: result.Failed})
 	if err != nil {
 		return err
 	}
@@ -832,17 +832,17 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return errQueueEmpty
 	}
 
-	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) {
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
 		issues, _, err := discoverIssues(c, it)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		waveIssues := toWaveIssues(issues)
 		result, err := waves.BuildEdges(it, waveIssues)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
-		return waveIssues, result.Edges, result.Sources, nil
+		return waveIssues, result.Edges, result.Sources, result.Failed, nil
 	}
 
 	fresh := func() (bool, bool, string) {

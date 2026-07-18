@@ -40,7 +40,7 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	if err != nil {
 		return err
 	}
-	edges, sources := result.Edges, result.Sources
+	edges, sources, failed := result.Edges, result.Sources, result.Failed
 
 	issues, notices := evictUnmetBlockers(c, it, cf, issues, edges, sources)
 	for _, n := range notices {
@@ -52,7 +52,7 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return nil
 	}
 
-	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(issues), Edges: edges, Sources: sources})
+	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(issues), Edges: edges, Sources: sources, Failed: failed})
 	if err != nil {
 		return err
 	}

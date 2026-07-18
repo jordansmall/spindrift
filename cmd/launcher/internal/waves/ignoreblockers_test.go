@@ -35,7 +35,7 @@ func TestDrainMaxJobs_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T)
 	s := newSettle(fc, fc)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "blocked issue"},
-	}, edges, nil, OriginDiscovered); err != nil {
+	}, edges, nil, nil, OriginDiscovered); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -68,7 +68,7 @@ func TestDrainMaxJobs_IgnoreBlockers_FailedBlockerDoesNotCascade(t *testing.T) {
 	s := newSettle(fc, fc)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "dependent issue"},
-	}, edges, nil, OriginDiscovered); err != nil {
+	}, edges, nil, nil, OriginDiscovered); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -101,7 +101,7 @@ func TestDrainMaxJobs_Selective_RerunHint_UsesConfigVerb(t *testing.T) {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "10", Title: "first"},
 			{Number: "15", Title: "second"},
-		}, nil, nil, OriginSelective); err != nil {
+		}, nil, nil, nil, OriginSelective); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -135,7 +135,7 @@ func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueWritesNoBlockedMarker(t *testin
 	s := newSettle(fc, fc)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
-	}, edges, nil, OriginClaimed); err != nil {
+	}, edges, nil, nil, OriginClaimed); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
