@@ -1052,8 +1052,7 @@ func TestTea_WithLauncher_RendersBlockerDespiteLongTitle(t *testing.T) {
 func TestTea_StaleStatus_RendersBanner(t *testing.T) {
 	f := forge.NewFake()
 	launch := newTestLauncher(t, f)
-	launch.Fresh = func() (bool, bool, string) { return true, false, "rebuild needed" }
-	launch.freshnessChecker()()
+	markStale(launch, "rebuild needed")
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "stale", "rebuild needed")
@@ -1078,8 +1077,7 @@ func TestTea_StaleDetectedWhileIdle_SignalsRefreshWithoutPoll(t *testing.T) {
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "first")
 
-	launch.Fresh = func() (bool, bool, string) { return true, false, "rebuild needed" }
-	launch.freshnessChecker()()
+	markStale(launch, "rebuild needed")
 	waitForOutput(t, tm, "stale", "rebuild needed")
 
 	sendKey(tm, "q")
@@ -1901,6 +1899,14 @@ func queueStalePick(t *testing.T, launch *Launcher, f forge.IssueTracker) {
 	launch.Queue.Add(Pick{Number: "1", Title: "placeholder", State: PickQueued})
 	launch.tryLaunch(f, t.TempDir())
 	launch.Wait()
+}
+
+// markStale sets launch.Fresh to report staleness with msg and runs
+// freshnessChecker() once to apply it synchronously — no queue, no
+// goroutine, no Wait().
+func markStale(launch *Launcher, msg string) {
+	launch.Fresh = func() (bool, bool, string) { return true, false, msg }
+	launch.freshnessChecker()()
 }
 
 // newTestLauncher builds a Launcher wired to a runner.Fake Box and a
