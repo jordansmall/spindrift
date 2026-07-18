@@ -739,6 +739,18 @@ func TestUpdate_StaleStatusMsg_SetsFields(t *testing.T) {
 	}
 }
 
+// TestUpdate_OrphanRecoveryMsg_SetsErr verifies OrphanRecoveryMsg installs
+// its Err onto Model.OrphanRecoveryErr verbatim — the per-render sync View's
+// orphan-recovery banner reads from (issue #1218).
+func TestUpdate_OrphanRecoveryMsg_SetsErr(t *testing.T) {
+	m := NewModel()
+	m = Update(m, OrphanRecoveryMsg{Err: "failed to adopt orphan #42: boom"})
+
+	if m.OrphanRecoveryErr != "failed to adopt orphan #42: boom" {
+		t.Errorf("OrphanRecoveryErr = %q, want %q", m.OrphanRecoveryErr, "failed to adopt orphan #42: boom")
+	}
+}
+
 // TestUpdate_StaleStatusMsg_PropagatesCapturedRebuildOutput verifies a
 // non-empty StaleStatusMsg.RebuildOutput lands on Model.RebuildOutput
 // verbatim — the sibling TestUpdate_StaleStatusMsg_SetsFields only ever

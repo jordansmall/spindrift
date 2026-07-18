@@ -261,6 +261,16 @@ func TestView_RebuildErr_Truncated(t *testing.T) {
 	}
 }
 
+// TestView_OrphanRecoveryErr_Surfaced verifies a startup orphan recovery
+// failure's error text appears in the rendered header (issue #1218).
+func TestView_OrphanRecoveryErr_Surfaced(t *testing.T) {
+	m := Update(NewModel(), OrphanRecoveryMsg{Err: "failed to adopt orphan #42: boom"})
+	out := View(m)
+	if !strings.Contains(out, "failed to adopt orphan #42: boom") {
+		t.Errorf("View() = %q, want the orphan recovery failure surfaced", out)
+	}
+}
+
 // TestView_BranchSwitchNotice_Surfaced verifies a rebuild's branch-switch
 // notice appears in the rendered header — the silent-switch gap issue #1141
 // closes: an operator whose pwd got moved off a branch during rebuild needs

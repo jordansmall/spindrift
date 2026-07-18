@@ -53,6 +53,10 @@ type Model struct {
 	// RebuildErr is the last rebuild's failure, if any — "" on success or
 	// when no rebuild has run yet.
 	RebuildErr string
+	// OrphanRecoveryErr is startup orphan recovery's last failure, if any —
+	// "" when detection and every adopt succeeded, or recovery hasn't run
+	// yet (issue #1218).
+	OrphanRecoveryErr string
 	// RebuildOutput is the last rebuild's captured nix output (issue #765)
 	// — stdout/stderr merged, in build order — never streamed to the
 	// Console's own stdout/stderr while the rebuild ran. "" when no rebuild
@@ -339,6 +343,8 @@ func Update(m Model, msg Msg) Model {
 		m.RebuildErr = msg.RebuildErr
 		m.RebuildOutput = msg.RebuildOutput
 		m.BranchSwitchNotice = msg.BranchSwitchNotice
+	case OrphanRecoveryMsg:
+		m.OrphanRecoveryErr = msg.Err
 	case RebuildOutputOpenMsg:
 		if m.RebuildOutput != "" {
 			m.ShowRebuildOutput = true

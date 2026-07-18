@@ -110,6 +110,17 @@ type DrillInMsg struct {
 
 func (DrillInMsg) isConsoleMsg() {}
 
+// OrphanRecoveryMsg carries startup orphan recovery's failures into the pure
+// core — OrphanedIssues() failing to enumerate orphaned sandboxes, or
+// RecoverFn failing to adopt one of them, previously left the operator with
+// no visible trace of either (issue #1218). Err is "" when recovery found no
+// orphans or adopted every one cleanly.
+type OrphanRecoveryMsg struct {
+	Err string
+}
+
+func (OrphanRecoveryMsg) isConsoleMsg() {}
+
 // DrillInToggleMsg is the run loop's signal that the operator asked to
 // switch between the rendered transcript and the raw byte-exact log — a
 // no-op when no drill-in is open.

@@ -15,6 +15,7 @@ package console
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -712,11 +713,12 @@ func driverOf(launch *Launcher) driver.Driver {
 // launch's RecoverFn in the background at startup — a crash or dropped SSH
 // from a prior session left these sandboxes running with no live goroutine
 // in this fresh process to account for them (issue #651, issue #822). Errors
-// from either call are swallowed: there is no Model field or confirm prompt
-// to surface them through, and a failed adopt just leaves that issue for the
-// operator to notice and Pick again like any other orphaned Dispatch. nil
-// (no Cmd) when launch or RecoverFn is nil, matching waitRefreshSignal's
-// nil-launch convention.
+// from either call surface through the returned OrphanRecoveryMsg — Update
+// threads it onto Model.OrphanRecoveryErr the same way StaleStatusMsg threads
+// RebuildErr — instead of being swallowed (issue #1218); a failed adopt still
+// leaves that issue for the operator to notice and Pick again like any other
+// orphaned Dispatch. nil (no Cmd) when launch or RecoverFn is nil, matching
+// waitRefreshSignal's nil-launch convention.
 func orphanRecoveryCmd(launch *Launcher) tea.Cmd {
 	if launch == nil || launch.RecoverFn == nil {
 		return nil
@@ -724,12 +726,18 @@ func orphanRecoveryCmd(launch *Launcher) tea.Cmd {
 	return func() tea.Msg {
 		nums, err := launch.OrphanedIssues()
 		if err != nil {
+			return OrphanRecoveryMsg{Err: fmt.Sprintf("failed to list orphaned issues: %s", err)}
+		}
+		var failures []string
+		for _, num := range nums {
+			if err := launch.RecoverFn(num); err != nil {
+				failures = append(failures, fmt.Sprintf("failed to adopt orphan #%s: %s", num, err))
+			}
+		}
+		if len(failures) == 0 {
 			return nil
 		}
-		for _, num := range nums {
-			_ = launch.RecoverFn(num)
-		}
-		return nil
+		return OrphanRecoveryMsg{Err: strings.Join(failures, "; ")}
 	}
 }
 
