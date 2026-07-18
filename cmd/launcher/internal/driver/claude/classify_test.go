@@ -154,6 +154,22 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// A genuine is_error:true result line whose "result" text
+		// coincidentally matches the immediately preceding genuine assistant
+		// turn's transient marker must still be scanned as a fresh signal —
+		// the echo-suppression guard (issue #818) only applies to ordinary
+		// (is_error:false) completions, since only those echo the assistant
+		// turn's text verbatim (issue #1196).
+		name: "Transient_GenuineIsErrorResultCoincidentallyMatchesPrecedingMarker",
+		lines: []string{
+			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Investigating the rate_limit_error handling code now."}]}}`,
+			`{"type":"result","is_error":true,"result":"API Error: rate_limit_error occurred","stop_reason":"stop_sequence"}`,
+		},
+		wantClass:   claude.Transient,
+		wantReason:  claude.RateLimit,
+		wantResetAt: nil,
+	},
+	{
 		name: "Network_ConnectionRefused",
 		lines: []string{
 			`dial tcp: connection refused`,

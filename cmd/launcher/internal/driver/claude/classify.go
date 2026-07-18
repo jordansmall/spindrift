@@ -229,20 +229,25 @@ func isAgentContentEvent(chunk string) bool {
 // resultEventEnvelope is the minimal envelope for identifying a Claude Code
 // stream-json type:"result" line and extracting its echoed result text — the
 // terminal line's "result" field mirrors the immediately preceding assistant
-// turn's text on an ordinary (non-error) completion.
+// turn's text on an ordinary (non-error) completion. IsError distinguishes
+// that ordinary-completion echo from a genuine terminating API error, whose
+// "result" text is not an echo and must not be suppressed as one.
 type resultEventEnvelope struct {
-	Type   string `json:"type"`
-	Result string `json:"result"`
+	Type    string `json:"type"`
+	Result  string `json:"result"`
+	IsError bool   `json:"is_error"`
 }
 
 // resultEventText reports whether chunk is a stream-json type:"result" line
-// and, if so, returns its "result" field text.
+// for an ordinary (non-error) completion and, if so, returns its "result"
+// field text. It returns false for a type:"result" line with is_error:true,
+// since that text is a genuine error, not an echo of preceding content.
 func resultEventText(chunk string) (string, bool) {
 	var ev resultEventEnvelope
 	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
 		return "", false
 	}
-	if ev.Type != "result" {
+	if ev.Type != "result" || ev.IsError {
 		return "", false
 	}
 	return ev.Result, true
