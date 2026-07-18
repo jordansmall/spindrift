@@ -300,6 +300,37 @@ func TestPreviewIssues_WithList_ShowsAnnotations(t *testing.T) {
 	}
 }
 
+// TestPreviewIssues_WithList_DepsOfCheckFailure_AnnotatesDistinctly verifies
+// that previewIssues with an explicit issue list — which routes to
+// previewSelectiveList, the second call site sharing this gap with the
+// bare-preview path (#1420) — also threads result.Failed into waves.Input so
+// a DepsOf call failure renders distinctly instead of a plain zero-blocker
+// line.
+func TestPreviewIssues_WithList_DepsOfCheckFailure_AnnotatesDistinctly(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.repoSlug = "owner/repo"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "12", Title: "deps-of-failed", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "15", Title: "clean", Labels: []string{c.label}})
+
+	it := failDepsOf{Fake: fc, num: "12"}
+
+	var buf bytes.Buffer
+	if err := previewIssues(c, it, it, &buf, []string{"12", "15"}, t.TempDir(), nil); err != nil {
+		t.Fatalf("previewIssues: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "#12  deps-of-failed  (blocker check failed; will retry)") {
+		t.Errorf("output missing distinct DepsOf-failure annotation for #12; got:\n%s", out)
+	}
+	if !strings.Contains(out, "#15  clean\n") {
+		t.Errorf("output missing plain line for unaffected #15; got:\n%s", out)
+	}
+}
+
 // TestPreviewIssues_WithList_ShowsEviction: an issue evicted due to unmet
 // external blocker is shown with a notice (not included in would-dispatch list).
 func TestPreviewIssues_WithList_ShowsEviction(t *testing.T) {
