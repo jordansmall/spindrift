@@ -215,9 +215,16 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		case "q", "ctrl+c":
 			// The universal quit keystroke must never be swallowed by the
 			// chord: resolve the pending pick (matching any other non-"a"
-			// key) and then still quit.
+			// key) and then still quit — but the pick just landed may
+			// itself be live now, so gate on LiveIssues() the same way the
+			// main quit handler below does, not an unconditional QuitMsg
+			// (issue #1216).
 			t = t.pickHighlighted()
-			t.m = Update(t.m, QuitMsg{})
+			if t.launch != nil && len(t.launch.LiveIssues()) > 0 {
+				t.m = Update(t.m, QuitRequestedMsg{})
+			} else {
+				t.m = Update(t.m, QuitMsg{})
+			}
 			return t, nil
 		default:
 			// Any other key resolves the chord to a single-issue pick, same

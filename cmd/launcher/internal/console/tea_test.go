@@ -2122,6 +2122,24 @@ func TestTea_QuitKey_NoLiveDispatch_ExitsImmediately(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_PickKeyThenQuit_WithLiveDispatch_ArmsPendingQuitConfirm verifies
+// the pending-pick chord's "q" resolves the pick and then still checks for
+// live Dispatches before quitting, arming the confirm dialog instead of
+// exiting immediately (issue #1216).
+func TestTea_PickKeyThenQuit_WithLiveDispatch_ArmsPendingQuitConfirm(t *testing.T) {
+	launch, fc, _, _ := newTermTestLauncher(t)
+
+	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "p")
+	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches", "drain", "terminate-all", "stay")
+
+	sendKey(tm, "d")
+	waitFinished(t, tm)
+}
+
 // TestTea_Init_RecoversOrphanedIssuesOnStartup verifies a sandbox still
 // running from a prior crashed session gets adopted through RecoverFn at
 // startup, without blocking the initial render (issue #651, issue #822).
