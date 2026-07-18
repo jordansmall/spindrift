@@ -1,7 +1,9 @@
 package console
 
 import (
+	"io"
 	"os"
+	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -70,12 +72,31 @@ const (
 	glyphNotice     = "ℹ"
 )
 
+// renderers caches one lipgloss.Renderer per termenv.Profile, so a header
+// with several styled segments (the status line alone styles five) doesn't
+// allocate and re-detect a renderer per segment per frame. Keyed by profile
+// rather than built once: colorProfile() can change value across a test run
+// (t.Setenv) and, in principle, across a NO_COLOR toggle mid-process, so a
+// single cached instance would go stale where a small per-profile cache
+// does not. The writer passed to NewRenderer is never used for output —
+// SetColorProfile forces the profile from the environment, not from probing
+// an actual terminal — so io.Discard documents that plainly.
+var renderers sync.Map // termenv.Profile -> *lipgloss.Renderer
+
+func rendererFor(p termenv.Profile) *lipgloss.Renderer {
+	if r, ok := renderers.Load(p); ok {
+		return r.(*lipgloss.Renderer)
+	}
+	r := lipgloss.NewRenderer(io.Discard)
+	r.SetColorProfile(p)
+	actual, _ := renderers.LoadOrStore(p, r)
+	return actual.(*lipgloss.Renderer)
+}
+
 // roleStyle returns the lipgloss style for a semantic Role, resolved against
 // the current color profile so it renders styled by role on a color-capable
 // terminal and degrades to plain text under NO_COLOR or a non-color
 // terminal (ADR 0031).
 func roleStyle(r Role) lipgloss.Style {
-	renderer := lipgloss.NewRenderer(os.Stdout)
-	renderer.SetColorProfile(colorProfile())
-	return renderer.NewStyle().Foreground(lipgloss.ANSIColor(ansiSlot(r)))
+	return rendererFor(colorProfile()).NewStyle().Foreground(lipgloss.ANSIColor(ansiSlot(r)))
 }
