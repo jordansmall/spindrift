@@ -570,10 +570,11 @@ let
     modRoot = "cmd/launcher";
     vendorHash = "sha256-pz95WwGNc065UWJspokZ4heMGKWh8Bsi+5O+UmCAtqA=";
     subPackages = [ "." ]; # build only the launcher; driver-exec is in-box only
-    # consoleGitSync's precondition tests (issue #769) shell out to a real
-    # git repo, so checkPhase's `go test .` needs git on PATH — the same
-    # reason nix/checks/go.nix's launcher-go-test check carries pkgs.git.
-    nativeBuildInputs = [ hostPkgs.git ];
+    # go test ./... already runs, vendored and offline, as the
+    # launcher-go-test check (nix/checks/go.nix) against the same source —
+    # running it again here is redundant (issue #1142). hostPkgs.git was
+    # only ever needed for that checkPhase run (issue #769); drop it too.
+    doCheck = false;
     ldflags = [
       "-X main.version=${spindriftVersion}"
       "-X main.revision=${revision}"
