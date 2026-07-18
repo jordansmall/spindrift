@@ -428,7 +428,10 @@ in
   # used by the never-background/vanished-marker/git-add checks above must
   # be defined once, not copy-pasted -- a marker rename applied to one copy
   # and forgotten in the others would leave those checks silently reading
-  # stale content.
+  # stale content. Extended (issue #1154) to also pin the fix-prompt half
+  # of the same slice pattern (`# LAND THE CHANGE` exit instead of
+  # `# REVIEW`), used solely by mkharness-prompt-fix-check-no-drift above --
+  # the original check only ever guarded the issue-prompt half.
   prompts-nix-check-section-awk-defined-once =
     pkgs.runCommand "prompts-nix-check-section-awk-defined-once" { }
       ''
@@ -439,6 +442,13 @@ in
         count=$(grep -cF "$half1$half2" ${./prompts.nix})
         [ "$count" -le 1 ] || {
           echo "expected the CHECK-section awk slice defined at most once in prompts.nix, got $count" >&2
+          exit 1
+        }
+        fix_half1='/^# CHECK$/{f=1}'
+        fix_half2=' /^# LAND THE CHANGE$/{exit} f'
+        fix_count=$(grep -cF "$fix_half1$fix_half2" ${./prompts.nix})
+        [ "$fix_count" -le 1 ] || {
+          echo "expected the fix-prompt CHECK-section awk slice defined at most once in prompts.nix, got $fix_count" >&2
           exit 1
         }
         touch $out
