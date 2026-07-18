@@ -142,11 +142,12 @@ func BenchmarkHeartbeatCache_CacheHit_LargeLog(b *testing.B) {
 // case (tea.go pollTickMsg, every interval regardless of queue state)
 // against an empty Queue — the drain-goroutine-plus-RunContinuous-pass
 // waste #754 closes. Post-fix this is a Queue.Empty() check and return, no
-// goroutine spawn, no allocation. Recorded against 1ff5dff (immediately
-// before the #754 fix, with launch.wg.Wait() added after each tryLaunch
-// call so every iteration pays the drain-goroutine spawn cost instead of
-// hitting the already-launching fast path a tight b.N loop would
-// otherwise mask): ~8000 ns/op, 1080 B/op, 16 allocs/op before, ~8.6
+// goroutine spawn, no allocation. Recorded against 1ff5dff (the last
+// commit before 7fe9c50 wires the Queue.Empty() gate into tryLaunch,
+// with launch.wg.Wait() added after each tryLaunch call so every
+// iteration pays the drain-goroutine spawn cost instead of hitting the
+// already-launching fast path a tight b.N loop would otherwise mask):
+// ~8000 ns/op, 1080 B/op, 16 allocs/op before, ~8.6
 // ns/op, 0 B/op, 0 allocs/op after (issue #1106) — roughly a 930x
 // latency reduction with allocations eliminated entirely; alloc counts
 // are the invariant, ns/op and B/op vary by machine and Go version.
