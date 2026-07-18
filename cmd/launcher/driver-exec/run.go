@@ -58,6 +58,11 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 	// devShell failure doesn't kill the run; a genuine task failure (which
 	// always writes something to the stream) is left to propagate untouched.
 	if cfg.devshell && rc != 0 && logFileEmpty(cfg.logPath) {
+		// Observability line only: an in-box signal for whoever is tailing
+		// the box's own stderr during a live run. It is not part of the
+		// operator-facing relaunch behavior docs/reference.md describes —
+		// left out of that doc intentionally, not by oversight (issue
+		// #1162, following up on #797 AC3).
 		fmt.Fprintf(os.Stderr, "==> nix develop failed to launch Driver (rc=%d, empty stream) — relaunching in baked env\n", rc)
 		direct := cfg
 		direct.devshell = false
