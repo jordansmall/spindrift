@@ -268,6 +268,26 @@ func TestConsoleGitSync_AlreadyOnBaseBranch_NoSwitchNotice(t *testing.T) {
 	}
 }
 
+// TestHeadRev_ReturnsReposCurrentCommit verifies headRev reports the same
+// commit hash git itself reports for pwd's checked-out HEAD — the seam
+// headRev shares with gitOutput once headRev delegates to it (issue #1133).
+func TestHeadRev_ReturnsReposCurrentCommit(t *testing.T) {
+	pwd := newConsoleGitRepo(t, "main")
+
+	want, err := exec.Command("git", "-C", pwd, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+
+	got, err := headRev(pwd)
+	if err != nil {
+		t.Fatalf("headRev() = %v", err)
+	}
+	if got != strings.TrimSpace(string(want)) {
+		t.Errorf("headRev() = %q, want %q", got, strings.TrimSpace(string(want)))
+	}
+}
+
 // gitRun runs git in dir, failing the test on error.
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
