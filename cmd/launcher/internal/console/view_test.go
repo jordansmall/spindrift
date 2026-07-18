@@ -897,6 +897,12 @@ func TestView_NarrowTerminal_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
 			t.Errorf("renderBody() line %q has %d runes, want it clamped to Width (%d)", l, n, m.Width)
 		}
 	}
+	if !strings.Contains(out, "#1") {
+		t.Errorf("renderBody() = %q, want the backlog issue number #1 to survive clipping", out)
+	}
+	if !strings.Contains(out, "#42") {
+		t.Errorf("renderBody() = %q, want the pick number #42 to survive clipping", out)
+	}
 }
 
 // TestRenderBacklogColumn_NilBudgetNeverTruncates verifies a nil budget
