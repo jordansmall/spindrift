@@ -41,8 +41,8 @@ type BuildResult struct {
 // the original best-effort behaviour, but named in the returned failed set
 // so a caller can tell a transient DepsOf failure apart from a confirmed
 // zero-blocker issue (#752) — the two look identical in edges alone, since
-// both simply omit the issue's key. Callers pass the edges result as
-// Input.Edges and the sources result as Input.Sources to NewPlan.
+// both simply omit the issue's key. Callers pass result.Edges as Input.Edges
+// and result.Sources as Input.Sources to NewPlan.
 func BuildEdges(it forge.IssueTracker, issues []Issue) (BuildResult, error) {
 	edges := map[string][]string{}
 	sources := Sources{}

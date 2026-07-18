@@ -801,9 +801,8 @@ func run(lc *launchContext) error {
 	if err != nil {
 		return err
 	}
-	edges, sources := result.Edges, result.Sources
 
-	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: edges, Sources: sources})
+	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: result.Edges, Sources: result.Sources})
 	if err != nil {
 		return err
 	}
