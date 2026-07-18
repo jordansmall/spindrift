@@ -57,10 +57,14 @@ func ActivityFeed(drv driver.Driver, pwd, number string) []ActivityLine {
 }
 
 // collapseActivityLines splits s on newlines, drops a trailing empty line,
-// and collapses any run of consecutive identical lines to their first
-// occurrence -- the heartbeat writer emits one line per parsed event, not
-// per distinct step, so two events that narrate the same text back-to-back
-// would otherwise duplicate the same line in the feed.
+// strips ANSI/control sequences from each line the same way the Transcript
+// render does (narration traces back to untrusted issue/agent text, and the
+// sidebar's fullscreen render joins these lines directly, unlike the table
+// rows' own clip()-based rendering), and collapses any run of consecutive
+// identical lines to their first occurrence -- the heartbeat writer emits
+// one line per parsed event, not per distinct step, so two events that
+// narrate the same text back-to-back would otherwise duplicate the same
+// line in the feed.
 func collapseActivityLines(s string, t time.Time) []ActivityLine {
 	s = strings.TrimRight(s, "\n")
 	if s == "" {
@@ -70,6 +74,7 @@ func collapseActivityLines(s string, t time.Time) []ActivityLine {
 	var last string
 	first := true
 	for _, line := range strings.Split(s, "\n") {
+		line = SanitizeControlSequences(line)
 		if !first && line == last {
 			continue
 		}

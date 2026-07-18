@@ -33,6 +33,22 @@ func sidebarFits(m Model) bool {
 	return m.Width >= sidebarMinListWidth+sidebarWidth+1
 }
 
+// renderColumnDivider renders the one-column vertical rule between the
+// docked list and sidebar — rows lines of a single dim-styled glyph, the
+// literal divider sidebarFits' width budget reserves a column for (ADR
+// 0031's border usage).
+func renderColumnDivider(rows int) string {
+	if rows <= 0 {
+		return ""
+	}
+	glyph := roleStyle(RoleDim).Render("│")
+	lines := make([]string, rows)
+	for i := range lines {
+		lines[i] = glyph
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
 // View renders m as the text the run loop writes to the terminal: the
 // full-width header (banner, status line, stale/dogfood alerts), the Section
 // tabs, the active Section's own aligned table, and any refresh error (ADR
@@ -95,8 +111,9 @@ func View(m Model) string {
 		listModel.Width = m.Width - sidebarWidth - 1
 		listBudget := budget
 		list := renderBody(listModel, &listBudget)
+		divider := renderColumnDivider(budget)
 		sidebar := renderSidebarDocked(*m.Sidebar, sidebarWidth, budget, m.Focus == FocusSidebar)
-		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, list, sidebar))
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, list, divider, sidebar))
 	} else {
 		b.WriteString(renderBody(m, &budget))
 	}

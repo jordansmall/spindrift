@@ -177,10 +177,10 @@ type FocusSidebarMsg struct{}
 func (FocusSidebarMsg) isConsoleMsg() {}
 
 // ScrollMsg is the tea layer's signal that the operator pressed a line-scroll
-// key while the body is showing (no drill-in open) — Delta is the number of
+// key while the body is showing (no sidebar focused) — Delta is the number of
 // rows to move (positive scrolls down/later, negative scrolls up/earlier).
 // It moves Model.Offset within the active Section, clamped the same way
-// DrillInScrollMsg clamps DrillIn.Offset (issue #1036, ADR 0030).
+// SidebarScrollMsg clamps Sidebar.Offset (issue #1036, ADR 0030).
 type ScrollMsg struct {
 	Delta int
 }
