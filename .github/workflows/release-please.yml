@@ -13,7 +13,16 @@ jobs:
     name: Open / update release PR
     runs-on: ubuntu-latest
     steps:
+      - name: Mint release-please App token
+        id: app-token
+        if: ${{ vars.SPINDRIFT_RELEASE_PLEASE_APP_ID != '' }}
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.SPINDRIFT_RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.SPINDRIFT_RELEASE_PLEASE_APP_PRIVATE_KEY }}
+
       - uses: googleapis/release-please-action@v4
         with:
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
