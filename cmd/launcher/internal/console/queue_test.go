@@ -341,6 +341,9 @@ func TestQueue_Discover_HoldsPickOnDepsOfFailureWithRealBlocker(t *testing.T) {
 	if !strings.Contains(snap.Reason, "retry") {
 		t.Errorf("Reason = %q, want it to explain the pick will be retried, not name #41 as an open blocker", snap.Reason)
 	}
+	if strings.Contains(snap.Reason, "41") {
+		t.Errorf("Reason = %q, want no mention of #41 — this hold is about the DepsOf failure, not the blocker", snap.Reason)
+	}
 }
 
 // failDepsOf wraps a *forge.Fake so DepsOf errors for num, simulating a
