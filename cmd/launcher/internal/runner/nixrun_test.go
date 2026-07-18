@@ -71,13 +71,14 @@ func TestRunNixBuild_ScriptedFailure_SurfacesStderr(t *testing.T) {
 
 // TestRunNixBuild_CapturesOutput_NeverTouchesRealStdout verifies a
 // background Console rebuild (issue #765) never writes nix's build output
-// to the process's real os.Stdout — a live Bubble Tea alt-screen program
-// owns that fd, and a concurrent direct writer would corrupt the display —
-// and instead returns the captured text to the caller.
+// to the process's real os.Stdout or os.Stderr — a live Bubble Tea
+// alt-screen program owns those fds, and a concurrent direct writer would
+// corrupt the display — and instead returns the captured text to the
+// caller.
 func TestRunNixBuild_CapturesOutput_NeverTouchesRealStdout(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fake-nix")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'building foo'\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'building foo'\necho 'building foo stderr' >&2\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	orig := execCommand
@@ -86,30 +87,52 @@ func TestRunNixBuild_CapturesOutput_NeverTouchesRealStdout(t *testing.T) {
 		return exec.Command(script, args...)
 	}
 
-	r, w, err := os.Pipe()
+	outR, outW, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	origStdout := os.Stdout
-	os.Stdout = w
+	os.Stdout = outW
 	t.Cleanup(func() { os.Stdout = origStdout })
+
+	errR, errW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = errW
+	t.Cleanup(func() { os.Stderr = origStderr })
 
 	output, err := RunNixBuild(t.TempDir())
 
 	os.Stdout = origStdout
-	w.Close()
+	outW.Close()
+	os.Stderr = origStderr
+	errW.Close()
 	if err != nil {
 		t.Fatalf("RunNixBuild: %v", err)
 	}
 
-	var real bytes.Buffer
-	if _, err := real.ReadFrom(r); err != nil {
+	var realStdout bytes.Buffer
+	if _, err := realStdout.ReadFrom(outR); err != nil {
 		t.Fatal(err)
 	}
-	if real.Len() != 0 {
-		t.Errorf("real os.Stdout received %q, want nothing written to it", real.String())
+	if realStdout.Len() != 0 {
+		t.Errorf("real os.Stdout received %q, want nothing written to it", realStdout.String())
 	}
+
+	var realStderr bytes.Buffer
+	if _, err := realStderr.ReadFrom(errR); err != nil {
+		t.Fatal(err)
+	}
+	if realStderr.Len() != 0 {
+		t.Errorf("real os.Stderr received %q, want nothing written to it", realStderr.String())
+	}
+
 	if !strings.Contains(output, "building foo") {
 		t.Errorf("captured output = %q, want it to include the scripted stdout", output)
+	}
+	if !strings.Contains(output, "building foo stderr") {
+		t.Errorf("captured output = %q, want it to include the scripted stderr", output)
 	}
 }
