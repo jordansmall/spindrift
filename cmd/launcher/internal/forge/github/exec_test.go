@@ -211,8 +211,9 @@ esac`)
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}
-	if len(deps) != 1 || deps[0] != (forge.Dependency{ID: "4", Source: forge.DepSourceNative}) {
-		t.Fatalf("want [4 (native)] (native only, body ignored), got %v", deps)
+	want := []forge.Dependency{{ID: "4", Source: forge.DepSourceNative}}
+	if !reflect.DeepEqual(deps, want) {
+		t.Fatalf("DepsOf = %v, want %v", deps, want)
 	}
 }
 
