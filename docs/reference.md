@@ -450,6 +450,7 @@ warns) but is no longer the primary channel:
 | ------------------------- | ---------------------- | ---------------------------------------- |
 | `REPO_SLUG`               | — (required; baked via `settings.repository.repoSlug`) | target repo, `owner/repo` |
 | `GH_TOKEN`                | — (required)           | GitHub token for `gh` inside containers (secret; env only) |
+| `GH_TOKEN_REFRESH_FILE`   | — (baked via `settings.repository.ghTokenRefreshFile`) | path the launcher polls to keep `GH_TOKEN` current past an installation token's ~1h lifetime — see [GitHub App installation token](#github-app-installation-token-recommended) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — (one auth required)  | from `claude setup-token` (secret; env only) |
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
 | `GIT_USER_NAME`           | host `git config`; baked via `settings.repository.gitUserName` | commit author name (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config)) |

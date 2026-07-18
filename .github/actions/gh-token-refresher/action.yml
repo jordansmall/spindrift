@@ -39,6 +39,10 @@ runs:
         INSTALLATION_ID: ${{ inputs.installation-id }}
         INITIAL_TOKEN: ${{ inputs.initial-token }}
       run: |
+        # Private key and minted tokens are secrets; keep them off-limits to
+        # any other account that can read $RUNNER_TEMP on a shared runner.
+        umask 077
+
         token_file="$RUNNER_TEMP/gh-token-refresh"
         printf '%s' "$INITIAL_TOKEN" > "$token_file"
         echo "GH_TOKEN_REFRESH_FILE=$token_file" >> "$GITHUB_ENV"
@@ -73,15 +77,23 @@ runs:
         # redirected away from the step's pipes (an inherited open fd would
         # otherwise hang the step waiting for this loop to exit), and disown
         # detaches it from the shell that's about to return. A single failed
-        # mint (network blip, transient API error) logs and retries next
-        # cycle rather than ending the refresher for the rest of the job —
-        # `mint_token || …` keeps that failure from tripping this script's
-        # errexit (GitHub Actions runs `run:` under `set -e -o pipefail`).
+        # mint (network blip, transient API error) logs and retries in 5m
+        # rather than waiting out the full 45m cycle — the gap between a
+        # failure and the next attempt must stay well inside the ~1h token
+        # lifetime it's protecting. `mint_token || …` keeps that failure
+        # from tripping this script's errexit (GitHub Actions runs `run:`
+        # under `set -e -o pipefail`).
         (
           trap 'rm -f "$key_file"' EXIT
+          sleep_secs=2700 # 45m: comfortably inside the ~1h installation-token lifetime
           while true; do
-            sleep 2700 # 45m: comfortably inside the ~1h installation-token lifetime
-            mint_token || echo "gh-token-refresher: mint attempt failed, will retry next cycle" >&2
+            sleep "$sleep_secs"
+            if mint_token; then
+              sleep_secs=2700
+            else
+              echo "gh-token-refresher: mint attempt failed, retrying in 5m" >&2
+              sleep_secs=300
+            fi
           done
         ) < /dev/null > "$RUNNER_TEMP/gh-token-refresher.log" 2>&1 &
         disown
