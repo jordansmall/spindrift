@@ -14,6 +14,9 @@ var credentialInURL = regexp.MustCompile(`://[^/\s]+@`)
 // every such error before it crosses that trust boundary. The regex is
 // greedy through the last @ before the next / or whitespace, so a literal
 // (un-encoded) @ inside the password is still consumed as part of userinfo.
+// CODE_FORGE_REMOTE_URL always has a /-delimited path, but if a query
+// string ever preceded the path an @ there would be redacted too — that's
+// fail-safe (over-redacts, never leaks) so it's left unguarded.
 func RedactURLCredentials(s string) string {
 	return credentialInURL.ReplaceAllString(s, "://")
 }
