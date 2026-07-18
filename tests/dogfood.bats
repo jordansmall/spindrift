@@ -245,3 +245,9 @@ setup() {
   [[ "$output" != *"value too great for base"* ]]
 }
 
+@test "dogfood treats empty MAX_PARALLEL same as unset, defaulting to 3" {
+  run env BASE_BRANCH=main MAX_PARALLEL="" bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  grep -q -- '--max-jobs 3' "$NIX_LOG"
+}
+
