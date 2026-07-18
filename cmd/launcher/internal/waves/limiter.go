@@ -113,7 +113,14 @@ func (l *Limiter) signalGrow(grew bool) {
 	}
 }
 
-// Grown signals (coalesced) every time ResizeDelta raises the cap.
+// Grown signals (coalesced, buffered 1) every time ResizeDelta raises the
+// cap. A received signal means only "at least one unit of capacity freed,"
+// never "exactly one": a burst of rapid raises can coalesce into a single
+// delivered signal even though Cap()/Live() already reflect every one of
+// them. A caller must drain until a receive would block (or otherwise
+// re-check Cap()/Live()) rather than treat one signal as license for one
+// refill — see RunContinuous's grow listener (continuous.go) for the drain
+// pattern this contract requires.
 func (l *Limiter) Grown() <-chan struct{} {
 	return l.grow
 }
