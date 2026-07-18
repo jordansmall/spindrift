@@ -1293,8 +1293,19 @@ func TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory(t *testing.T) {
 		t.Fatalf("research labels still missing after creation must not fail doctor, got: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "advisory: 6 research label(s) still missing after creation") {
-		t.Errorf("want advisory summary after incomplete research creation, got:\n%s", out)
+	var advisoryLine string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "advisory: 6 research label(s) still missing after creation") {
+			advisoryLine = line
+		}
+	}
+	if advisoryLine == "" {
+		t.Fatalf("want advisory summary after incomplete research creation, got:\n%s", out)
+	}
+	for _, name := range doctor.ResearchLabelNames() {
+		if !strings.Contains(advisoryLine, name) {
+			t.Errorf("want advisory line to name missing label %q, got:\n%s", name, advisoryLine)
+		}
 	}
 	if strings.Contains(out, "ok: all triage and research labels present") {
 		t.Errorf("must not print success message when research labels are still missing, got:\n%s", out)
