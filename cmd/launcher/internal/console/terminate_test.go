@@ -167,7 +167,7 @@ func TestLauncher_Terminate_PropagatesKillError(t *testing.T) {
 	fr.KillErr = errors.New("boom: kill failed")
 
 	err := launch.Terminate(fc, "42")
-	if !errors.Is(err, fr.KillErr) {
+	if err != fr.KillErr {
 		t.Fatalf("Terminate err = %v, want %v", err, fr.KillErr)
 	}
 
