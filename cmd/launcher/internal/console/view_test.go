@@ -889,14 +889,38 @@ func TestView_TwoColumn_Queue_TitleAdjacentToStateWhenNoTruncation(t *testing.T)
 	}
 
 	out := View(m)
-	stateIdx := strings.Index(out, "[held]")
-	titleIdx := strings.Index(out, "short title")
-	blockedIdx := strings.Index(out, "held by #41 (native)")
-	if stateIdx == -1 || titleIdx == -1 || blockedIdx == -1 {
-		t.Fatalf("View() = %q, want [held], title, and blocker all present", out)
+	want := "[held]  short title  (held by #41 (native))  (issue is closed)"
+	if !strings.Contains(out, want) {
+		t.Errorf("View() = %q, want the contiguous, un-truncated row %q", out, want)
 	}
-	if !(stateIdx < titleIdx && titleIdx < blockedIdx) {
-		t.Errorf("View() = %q, want Title immediately after the state tag and before the blocker when nothing truncates", out)
+	if strings.Contains(out, "…") {
+		t.Errorf("View() = %q, want no ellipsis — nothing should truncate at this width", out)
+	}
+}
+
+// TestRenderQueueColumn_WideRuneTitleFallsBackOnDisplayWidth verifies the
+// natural-vs-fallback decision is measured with runewidth.StringWidth (2
+// cells per CJK rune), not a rune count: a title short enough in rune count
+// to fit rightWidth but too wide on-screen must still fall back to #858's
+// blocker-first order (issue #859, issue #1256).
+func TestRenderQueueColumn_WideRuneTitleFallsBackOnDisplayWidth(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 200, Height: 24})
+	title := strings.Repeat("字", 10) // 10 runes, but 20 display columns
+	m.Picks = []Pick{
+		{Number: "42", Title: title, State: PickHeld, BlockedBy: "#41 (native)"},
+	}
+
+	// rightWidth sits between the natural row's rune count (~49) and its
+	// display width (~59) — a rune-count-based check would wrongly call it
+	// fitting; a display-width check correctly calls it overflowing.
+	out := renderQueueColumn(m, nil, 55)
+	blockedIdx := strings.Index(out, "held by #41 (native)")
+	titleIdx := strings.Index(out, title)
+	if blockedIdx == -1 || titleIdx == -1 {
+		t.Fatalf("renderQueueColumn() = %q, want both blocker and title present", out)
+	}
+	if !(blockedIdx < titleIdx) {
+		t.Errorf("renderQueueColumn() = %q, want blocker-first fallback order since the wide-rune title overflows on display width", out)
 	}
 }
 
