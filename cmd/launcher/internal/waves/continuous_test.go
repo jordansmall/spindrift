@@ -214,12 +214,12 @@ func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	limiter.Resize(2)
+	limiter.ResizeDelta(1)
 
 	select {
 	case <-started2:
 	case <-time.After(2 * time.Second):
-		t.Fatal("issue #2 was never dispatched after Resize(2) — raising the cap must launch immediately")
+		t.Fatal("issue #2 was never dispatched after ResizeDelta(1) — raising the cap must launch immediately")
 	}
 
 	close(release1)
@@ -303,12 +303,13 @@ func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 
 	// Simulate two '+' presses landing faster than the grow listener can
 	// drain the buffer-1 channel: raise the cap to what back-to-back
-	// Resize(2), Resize(3) calls would leave it at, but only deliver the
-	// single coalesced signal Resize's own non-blocking send would
-	// actually manage to enqueue. Racing two real Resize calls against the
-	// listener goroutine can't force the drop deterministically (the
-	// runtime tends to hand off to a parked receiver on send), so this
-	// reproduces the drop directly via the package-internal fields instead.
+	// ResizeDelta(1), ResizeDelta(1) calls would leave it at, but only
+	// deliver the single coalesced signal ResizeDelta's own non-blocking
+	// send would actually manage to enqueue. Racing two real ResizeDelta
+	// calls against the listener goroutine can't force the drop
+	// deterministically (the runtime tends to hand off to a parked receiver
+	// on send), so this reproduces the drop directly via the
+	// package-internal fields instead.
 	limiter.mu.Lock()
 	limiter.cap = 3
 	limiter.mu.Unlock()
@@ -321,12 +322,12 @@ func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 	select {
 	case <-started2:
 	case <-time.After(2 * time.Second):
-		t.Fatal("issue #2 was never dispatched after rapid Resize(2), Resize(3)")
+		t.Fatal("issue #2 was never dispatched after rapid ResizeDelta(1), ResizeDelta(1)")
 	}
 	select {
 	case <-started3:
 	case <-time.After(2 * time.Second):
-		t.Fatal("issue #3 was never dispatched after rapid Resize(2), Resize(3) — a coalesced grow signal must still launch every held pick the new cap allows")
+		t.Fatal("issue #3 was never dispatched after rapid ResizeDelta(1), ResizeDelta(1) — a coalesced grow signal must still launch every held pick the new cap allows")
 	}
 
 	close(release1)
@@ -412,7 +413,7 @@ func TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches(t *testing.T) {
 		}
 	}
 
-	limiter.Resize(1)
+	limiter.ResizeDelta(-1)
 
 	select {
 	case <-started3:

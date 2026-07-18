@@ -59,13 +59,13 @@ func TestLimiter_ResizeUpAllowsMoreAcquires(t *testing.T) {
 		t.Fatal("TryAcquire at cap: want false, got true")
 	}
 
-	l.Resize(2)
+	l.ResizeDelta(1)
 
 	if got := l.Cap(); got != 2 {
 		t.Fatalf("Cap: got %d, want 2", got)
 	}
 	if !l.TryAcquire() {
-		t.Fatal("TryAcquire after Resize(2): want true, got false")
+		t.Fatal("TryAcquire after ResizeDelta(1): want true, got false")
 	}
 }
 
@@ -79,10 +79,10 @@ func TestLimiter_ResizeDownNeverRevokesLiveSlots(t *testing.T) {
 		t.Fatal("both initial TryAcquire calls: want true")
 	}
 
-	l.Resize(1)
+	l.ResizeDelta(-1)
 
 	if got := l.Live(); got != 2 {
-		t.Fatalf("Live after Resize(1) with 2 already claimed: got %d, want 2 (lowering must not revoke live slots)", got)
+		t.Fatalf("Live after ResizeDelta(-1) with 2 already claimed: got %d, want 2 (lowering must not revoke live slots)", got)
 	}
 	if l.TryAcquire() {
 		t.Fatal("TryAcquire over the lowered cap: want false, got true")
