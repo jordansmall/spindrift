@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 )
@@ -23,7 +22,7 @@ import (
 func RunNixBuild(pwd string) (string, error) {
 	cmd := execCommand("nix", "run", ".#", "--", "build")
 	cmd.Dir = pwd
-	var output bytes.Buffer
+	var output boundedWriter
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	if err := cmd.Run(); err != nil {

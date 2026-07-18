@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -134,5 +135,37 @@ func TestRunNixBuild_CapturesOutput_NeverTouchesRealStdio(t *testing.T) {
 	}
 	if !strings.Contains(output, "building foo stderr") {
 		t.Errorf("captured output = %q, want it to include the scripted stderr", output)
+	}
+}
+
+// TestRunNixBuild_CapsOutputSize verifies a verbose build's captured output
+// is bounded rather than retained in full (issue #1130): a cold-store `nix
+// run .# -- build` can emit a multi-MB transcript, and
+// Launcher.rebuildOutput holds whatever RunNixBuild returns until the next
+// rebuild attempt — an unbounded capture here is unbounded retention there.
+// The tail, not the head, must survive: the failure or final status an
+// operator needs is at the end of the log.
+func TestRunNixBuild_CapsOutputSize(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-nix")
+	body := "#!/bin/sh\nyes x | head -c " + strconv.Itoa(rebuildOutputCap*2) + "\necho END-OF-BUILD\nexit 0\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	output, err := RunNixBuild(t.TempDir())
+	if err != nil {
+		t.Fatalf("RunNixBuild: %v", err)
+	}
+	if len(output) > rebuildOutputCap {
+		t.Errorf("len(output) = %d bytes, want <= %d", len(output), rebuildOutputCap)
+	}
+	if !strings.Contains(output, "END-OF-BUILD") {
+		t.Errorf("output = %q, want it to retain the tail (most recent bytes written)", output)
 	}
 }
