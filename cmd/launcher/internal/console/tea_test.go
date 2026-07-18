@@ -1772,6 +1772,9 @@ func TestTea_TerminateKey_ConfirmPrompt_HintsQuitKeys(t *testing.T) {
 	waitForOutput(t, tm, "terminate #42?", "y/N/q/ctrl+c")
 
 	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+
+	sendKey(tm, "d")
 	waitFinished(t, tm)
 }
 
@@ -1866,12 +1869,14 @@ func TestTea_TerminateKey_ConfirmThenOther_Declines(t *testing.T) {
 	}
 }
 
-// TestTea_TerminateKey_ConfirmThenQuit_QuitsOutright verifies the
-// universal quit keystroke at the confirm prompt is not swallowed by the
-// pending terminate: "q" quits outright, without confirming, in one
-// keystroke (issue #748) — the terminate never fires since "y" is never
-// pressed.
-func TestTea_TerminateKey_ConfirmThenQuit_QuitsOutright(t *testing.T) {
+// TestTea_TerminateKey_ConfirmThenQuit_ArmsPendingQuitConfirm verifies the
+// universal quit keystroke at the terminate-confirm prompt is not swallowed
+// by the pending terminate, but also does not quit outright: "q" declines
+// the terminate and arms the same drain/terminate-all/stay confirm the main
+// quit key uses, since a terminate-confirm prompt guarantees a live
+// Dispatch (issue #1215, ADR 0023). Driving "d" (drain) finishes the
+// scenario without killing anything.
+func TestTea_TerminateKey_ConfirmThenQuit_ArmsPendingQuitConfirm(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
 
 	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
@@ -1881,22 +1886,80 @@ func TestTea_TerminateKey_ConfirmThenQuit_QuitsOutright(t *testing.T) {
 	waitForOutput(t, tm, "terminate #42?")
 
 	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches", "drain", "terminate-all", "stay")
+
+	sendKey(tm, "d")
 	waitFinished(t, tm)
 
 	if len(fr.KillCalls) != 0 {
-		t.Errorf("KillCalls = %v, want none after quitting at the confirm prompt", fr.KillCalls)
-	}
-	snap := launch.Queue.Snapshot()
-	if len(snap) != 1 || snap[0].State != PickRunning {
-		t.Errorf("queue pick = %+v, want still PickRunning after quitting at the confirm prompt", snap)
+		t.Errorf("KillCalls = %v, want none after draining at the quit confirm", fr.KillCalls)
 	}
 }
 
-// TestTea_TerminateConfirmKey_Quit_LeavesPendingTerminateSet verifies "q" at
-// the terminate confirm prompt quits without routing through
-// TerminateCancelledMsg first — the model is discarded on quit (issue
-// #1096), so PendingTerminate is left set rather than cleared.
-func TestTea_TerminateConfirmKey_Quit_LeavesPendingTerminateSet(t *testing.T) {
+// TestTea_TerminateKey_ConfirmThenQuit_TerminateAll_ReapsLiveDispatch
+// verifies "t" (terminate-all) works when the quit confirm is reached via
+// the terminate-confirm "q" escape, not just the main quit key (issue
+// #1215).
+func TestTea_TerminateKey_ConfirmThenQuit_TerminateAll_ReapsLiveDispatch(t *testing.T) {
+	launch, fc, fr, _ := newTermTestLauncher(t)
+
+	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "k")
+	waitForOutput(t, tm, "terminate #42?")
+
+	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+
+	sendKey(tm, "t")
+	waitFinished(t, tm)
+	launch.Wait()
+
+	if len(fr.KillCalls) != 1 || fr.KillCalls[0] != "agent-issue-42" {
+		t.Errorf("KillCalls = %v, want exactly one kill of agent-issue-42", fr.KillCalls)
+	}
+}
+
+// TestTea_TerminateKey_ConfirmThenQuit_Stay_KeepsRunning verifies "s" (stay)
+// works when the quit confirm is reached via the terminate-confirm "q"
+// escape, declining the quit and leaving the session running (issue #1215).
+func TestTea_TerminateKey_ConfirmThenQuit_Stay_KeepsRunning(t *testing.T) {
+	launch, fc, fr, _ := newTermTestLauncher(t)
+
+	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "k")
+	waitForOutput(t, tm, "terminate #42?")
+
+	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+
+	sendKey(tm, "s")
+	waitForOutput(t, tm, "fix the thing") // confirm prompt gone, backlog/queue view back
+
+	// Still live after staying — drain to finish the test cleanly.
+	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+	sendKey(tm, "d")
+	waitFinished(t, tm)
+
+	if len(fr.KillCalls) != 0 {
+		t.Errorf("KillCalls = %v, want none after staying", fr.KillCalls)
+	}
+	snap := launch.Queue.Snapshot()
+	if len(snap) != 1 || snap[0].State != PickRunning {
+		t.Errorf("queue pick = %+v, want still PickRunning after staying", snap)
+	}
+}
+
+// TestTea_TerminateConfirmKey_Quit_ClearsPendingTerminateArmsPendingQuit
+// verifies "q"/"ctrl+c" at the terminate confirm prompt declines the
+// terminate (clearing PendingTerminate, so a later keypress cannot loop back
+// into this same handler) and arms the quit confirm instead of quitting
+// directly (issue #1215).
+func TestTea_TerminateConfirmKey_Quit_ClearsPendingTerminateArmsPendingQuit(t *testing.T) {
 	keys := []tea.KeyMsg{
 		{Type: tea.KeyRunes, Runes: []rune("q")},
 		{Type: tea.KeyCtrlC},
@@ -1908,11 +1971,14 @@ func TestTea_TerminateConfirmKey_Quit_LeavesPendingTerminateSet(t *testing.T) {
 
 			tm = tm.handleTerminateConfirmKey(key)
 
-			if tm.m.PendingTerminate != "42" {
-				t.Errorf("PendingTerminate = %q, want unchanged %q after quitting at the confirm prompt", tm.m.PendingTerminate, "42")
+			if tm.m.PendingTerminate != "" {
+				t.Errorf("PendingTerminate = %q, want cleared after declining the terminate to quit", tm.m.PendingTerminate)
 			}
-			if !tm.m.Quitting {
-				t.Error("Quitting = false, want true after quitting at the confirm prompt")
+			if !tm.m.PendingQuit {
+				t.Error("PendingQuit = false, want true after quitting at the terminate confirm prompt")
+			}
+			if tm.m.Quitting {
+				t.Error("Quitting = true, want false — quit confirm armed, not yet decided")
 			}
 		})
 	}
