@@ -330,8 +330,10 @@ func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) Model {
 // scroll keys page through the loaded content (issue #786), "m" cycles the
 // pane's layout docked -> floating -> fullscreen (issue #846, ADR 0025), and
 // "q"/"ctrl+c" hard-quit — the universal quit keystroke must never be
-// swallowed by the drill-in pane, matching the PendingPick precedent in
-// handleKey (issue #826).
+// swallowed by the drill-in pane, same principle as the PendingPick chord in
+// handleKey (issue #826) but not the same mechanics: PendingPick resolves the
+// chord (pickHighlighted) before quitting, while drill-in quits directly with
+// no resolve step.
 func (t teaModel) handleDrillInKey(msg tea.KeyMsg) Model {
 	switch msg.String() {
 	case "q", "ctrl+c":
