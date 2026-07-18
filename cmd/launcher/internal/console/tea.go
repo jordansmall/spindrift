@@ -413,13 +413,16 @@ func openDrillInCmd(launch *Launcher, pwd, number string) tea.Cmd {
 // path (issue #745) — "q"/"ctrl+c" must never be swallowed by the confirm
 // prompt, mirroring the PendingPick chord precedent above (issue #748), but
 // must not quit outright either: a terminate-confirm prompt is only ever
-// reached via isLive, so a live Dispatch is guaranteed, and the operator
-// still deserves the drain/terminate-all/stay choice ADR 0023 promises
-// elsewhere — so "q"/"ctrl+c" declines the terminate (TerminateCancelledMsg,
-// clearing PendingTerminate so the next keypress reaches
-// handleQuitConfirmKey instead of looping back here) and arms the quit
-// confirm (QuitRequestedMsg) rather than quitting directly (issue #1215) —
-// everything else declines the terminate only (ADR 0024, issue #649/#785).
+// armed via isLive, so a live Dispatch was present when it appeared, and the
+// operator still deserves the drain/terminate-all/stay choice ADR 0023
+// promises elsewhere (unconditionally arming that confirm is harmless even
+// on the rare race where the Dispatch settles between the prompt and this
+// keypress — "t" just iterates an empty LiveIssues) — so "q"/"ctrl+c"
+// declines the terminate (TerminateCancelledMsg, clearing PendingTerminate
+// so the next keypress reaches handleQuitConfirmKey instead of looping back
+// here) and arms the quit confirm (QuitRequestedMsg) rather than quitting
+// directly (issue #1215) — everything else declines the terminate only
+// (ADR 0024, issue #649/#785).
 func (t teaModel) handleTerminateConfirmKey(msg tea.KeyMsg) teaModel {
 	num := t.m.PendingTerminate
 	switch s := msg.String(); s {
