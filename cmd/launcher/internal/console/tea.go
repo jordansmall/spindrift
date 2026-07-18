@@ -139,6 +139,8 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.m = Update(t.m, msg)
 	case DrillInMsg:
 		t.m = Update(t.m, msg)
+	case OrphanRecoveryMsg:
+		t.m = Update(t.m, msg)
 	case pollTickMsg:
 		if t.launch != nil {
 			t.launch.tryLaunch(t.tracker, t.pwd)

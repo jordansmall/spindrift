@@ -2245,6 +2245,43 @@ func TestOrphanRecoveryCmd_RecoverFnErr_ReturnsMsg(t *testing.T) {
 	}
 }
 
+// TestTea_Init_OrphanRecoveryErr_SurfacedInHeader verifies a failed adopt at
+// startup reaches the rendered header through the real Bubble Tea event loop
+// — not just the pure Update function in isolation (issue #1218).
+func TestTea_Init_OrphanRecoveryErr_SurfacedInHeader(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		Queue:     NewQueue(),
+		RecoverFn: func(string) error { return errors.New("adopt boom") },
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "orphan recovery failed")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
 // TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth verifies backlog and
 // queue titles full of wide CJK characters render within the terminal's
 // actual display width through the full Bubble Tea render path, not just
