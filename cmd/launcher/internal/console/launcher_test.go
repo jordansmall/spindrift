@@ -111,10 +111,10 @@ func TestLauncher_TryLaunch_SkipsWhenQueueEmpty(t *testing.T) {
 // case, which fires every interval regardless of queue state) still
 // re-evaluates and launches a held pick whose blocker cleared out-of-band —
 // another agent or a human merge, with no sibling Dispatch in this session
-// to trigger RunContinuous's own refill-on-completion (#650). #754's
-// queue-empty skip in tryLaunch must gate on PickHeld as well as PickQueued
-// (Queue.Empty, not hasQueued) or this regresses — restores the coverage
-// the pre-Bubble-Tea-rewrite TestRun_HeldPick_LaunchesOnBackgroundPollAfterDrainIdles
+// to trigger RunContinuous's own refill-on-completion. See Queue.Empty's
+// doc comment (#650) for why #754's queue-empty skip in tryLaunch must
+// gate on PickHeld as well as PickQueued, or this regresses — restores the
+// coverage the pre-Bubble-Tea-rewrite TestRun_HeldPick_LaunchesOnBackgroundPollAfterDrainIdles
 // carried.
 func TestLauncher_TryLaunch_HeldPickLaunchesAfterBlockerClearsOutOfBand(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})

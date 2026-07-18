@@ -364,9 +364,8 @@ func (l *Launcher) Refreshes() <-chan struct{} {
 // Queue while that drain is in flight, so a second concurrent invocation is
 // never needed, only a fresh one once the queue has gone idle. The
 // background poll tick (tea.go pollTickMsg) calls this every interval
-// regardless of queue state specifically to re-evaluate a held pick whose
-// blocker cleared out-of-band (#650), so the empty check must cover
-// PickHeld as well as PickQueued (Queue.Empty(), not just hasQueued).
+// regardless of queue state — see Queue.Empty (#650) for why the gate
+// must cover PickHeld as well as PickQueued.
 func (l *Launcher) tryLaunch(tracker forge.IssueTracker, pwd string) {
 	if l.Queue.Empty() {
 		return

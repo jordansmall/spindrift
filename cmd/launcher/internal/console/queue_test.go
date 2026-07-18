@@ -58,11 +58,11 @@ func TestQueue_Discover_SourcesNilAcrossPaths(t *testing.T) {
 	}
 }
 
-// TestQueue_Empty reports whether the queue has any pick still eligible to
-// launch (PickQueued or PickHeld) — the predicate tryLaunch (launcher.go)
-// gates its drain spawn on (#754). A held pick counts as non-empty: its
-// blocker may have cleared out-of-band, so it still needs a launch attempt
-// (#650), unlike hasQueued which only reports PickQueued.
+// TestQueue_Empty verifies Empty() reports a pick still eligible to launch
+// (PickQueued or PickHeld) — the predicate tryLaunch (launcher.go) gates
+// its drain spawn on (#754). See Queue.Empty's doc comment (#650) for why
+// a held pick counts as non-empty, unlike hasQueued which only reports
+// PickQueued.
 func TestQueue_Empty(t *testing.T) {
 	tests := []struct {
 		name  string
