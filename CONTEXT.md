@@ -153,6 +153,17 @@ _Was_: a `PushOnly()` bool on the combined Code Forge interface, plus six
 stubbed methods on the `git` adapter.
 _Avoid_: PR client, GitHub-only interface.
 
+**Conformance contract**:
+The executable contract for the forge seams: a shared `forgetest` suite that
+every adapter of a seam interface — the shared test Fake included — must pass,
+run hermetically via per-adapter scripted-backend harnesses (stubbed `gh`
+exec, `httptest` Jira, tempdir local tracker) with seeding and fault-injection
+hooks. Replaces fidelity-by-comment in the Fake ("mirroring the real
+adapter's…") with a test failure on drift. Three contracts, landed in order:
+Issue Tracker (#1544), Code Forge (#1545), PRForge (#1546). Decided
+2026-07-18.
+_Avoid_: parity test, integration suite (it is hermetic), mock verification.
+
 **Backend matrix**:
 Issue Tracker and Code Forge are two independent, freely-combinable axes
 (`ISSUE_TRACKER` × `CODE_FORGE`). All cells are permitted — the harness does not
@@ -282,6 +293,18 @@ _Was_: "fan-out" — the launch act and the batch carried two names; unified on
 the batch noun.
 _Avoid_: fan-out, batch, round.
 
+**Readiness**:
+The query seam answering "may this issue dispatch now, and if not, why"
+before anything launches: per-issue blocker status (ready / blocked-by /
+check-failed) with the native-vs-body `Sources` tags carried through. The
+pre-dispatch consumers — the Console's held picks (#650) and `preview`'s
+blocker annotations — use it; the wave engine keeps its own internal gate,
+disabled only by an explicit `PreResolved` contract when a caller has already
+resolved readiness through this seam. Decided 2026-07-18 (#1547), replacing
+the exported blocker primitives and the empty-edges construction.
+_Avoid_: blocker check, gate (that is the engine's internal act), preflight
+(collides with the stale-base preflight).
+
 **Console**:
 The interactive driving loop: a launcher session in which an operator composes
 the running work by Picking issues (promoting them as needed), watches live
@@ -307,6 +330,17 @@ The Console section listing queueable issues an operator can Pick — the pick
 source, distinct from the work queue of issues already Picked.
 _Avoid_: inbox, todo, queue (that is the picked work, not the source).
 
+**Viewport**:
+The Console-internal geometry module owning scroll state for every scrolling
+pane — offset, cursor, cursor-follow, and clamp-on-shrink behind a small
+interface, with height 0 meaning unbounded. Pure geometry: it returns
+visible-slice bounds and hidden-above/below counts, and the view renders the
+affordance strings ("… N more below"), so restyling never touches it. One
+implementation serves the backlog/queue columns, the drill-in pane, and the
+rebuild-output pane. Decided 2026-07-18 (#1540).
+_Avoid_: scroll region, pager, window (that names its output value, not the
+module).
+
 **Quickstart**:
 The pre-CLI interactive scaffolder — a nix app (`nix run
 …#quickstart`, `apps.quickstart`), not a Harness subcommand — that takes an
@@ -322,6 +356,15 @@ every prompt), and finishes through `spindrift doctor` and `spindrift build`
 (ADR 0027). Refuses to clobber an existing flake without `--force`.
 _Avoid_: init, wizard (names the UI, not the role), bootstrap (the launcher's
 internal launch-context wiring).
+
+**Answers**:
+The Quickstart's collected operator decisions — one value (runtime, driver,
+repo slug, git identity, tracker settings, …) produced by the wizard's
+prompt/detect phase and consumed by a pure scaffold render that returns the
+generated files as values, with the injection-guarding nix escaping applied
+on that single seam. The wizard keeps the writes, the clobber/backup policy,
+and the doctor/build finish line. Decided 2026-07-18 (#1548).
+_Avoid_: config (that names the generated files), wizard state, form.
 
 **Pick**:
 The operator's act of selecting an issue into the running session's queue for
