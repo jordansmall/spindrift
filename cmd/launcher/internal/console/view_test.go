@@ -1063,7 +1063,11 @@ func TestView_DrillInDocked_KeepsBacklogAndQueueVisible(t *testing.T) {
 // TestView_DrillInDocked_BacklogOffset_RendersOffsetRows verifies the docked
 // pane's backlog column honors a scrolled BacklogOffset — BacklogOffset is a
 // shared Model field, not per-pane, so the docked pane's backlog column
-// renders the same window the main view would (issue #1055).
+// renders the same window the main view would (issue #1055). The docked
+// backlog column is now windowed to transcriptHeight (issue #1381), so
+// reaching the last row takes scrolling all the way (as the main view's
+// TestView_ScrolledBacklog_ReachesLastRow does), not just past the first
+// page.
 func TestView_DrillInDocked_BacklogOffset_RendersOffsetRows(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
 	issues := make([]forge.Issue, 50)
@@ -1073,7 +1077,7 @@ func TestView_DrillInDocked_BacklogOffset_RendersOffsetRows(t *testing.T) {
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 	m = Update(m, DrillInMsg{Number: "0", Rendered: "[implementor] hi"})
 
-	m = Update(m, ScrollMsg{Delta: 5})
+	m = Update(m, ScrollMsg{Delta: 1000})
 
 	out := View(m)
 	if strings.Contains(out, "issue 0") {
@@ -1087,7 +1091,10 @@ func TestView_DrillInDocked_BacklogOffset_RendersOffsetRows(t *testing.T) {
 // TestView_DrillInDocked_QueueOffset_RendersOffsetRows verifies the docked
 // pane's queue column honors a scrolled QueueOffset — QueueOffset is a
 // shared Model field, not per-pane, so the docked pane's queue column
-// renders the same window the main view would (issue #1055).
+// renders the same window the main view would (issue #1055). The docked
+// queue column is now windowed to transcriptHeight (issue #1381), so
+// reaching the last row takes scrolling all the way, not just past the
+// first page.
 func TestView_DrillInDocked_QueueOffset_RendersOffsetRows(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
 	m = Update(m, FocusToggleMsg{})
@@ -1098,7 +1105,7 @@ func TestView_DrillInDocked_QueueOffset_RendersOffsetRows(t *testing.T) {
 	m.Picks = picks
 	m = Update(m, DrillInMsg{Number: "0", Rendered: "[implementor] hi"})
 
-	m = Update(m, ScrollMsg{Delta: 5})
+	m = Update(m, ScrollMsg{Delta: 1000})
 
 	out := View(m)
 	if strings.Contains(out, "pick 0") {
@@ -1241,6 +1248,53 @@ func TestView_DrillInFloating_TranscriptRespectsTinyBudget(t *testing.T) {
 	}
 }
 
+// TestView_DrillInDocked_BacklogRespectsHeight verifies the docked pane's
+// total output never exceeds m.Height when the backlog is long, independent
+// of the transcript's own length — renderDockedBody passed the backlog and
+// queue columns an unbounded budget, so joinColumns' max-of-both-sides let
+// an unbounded backlog dominate and push the docked body past
+// transcriptHeight (issue #1381).
+func TestView_DrillInDocked_BacklogRespectsHeight(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
+	issues := make([]forge.Issue, 100)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "hello"})
+
+	out := View(m)
+	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(got) > m.Height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — the long backlog must be budgeted out of the docked body", len(got), m.Height)
+	}
+}
+
+// TestView_DrillInFloating_BacklogRespectsHeight mirrors
+// TestView_DrillInDocked_BacklogRespectsHeight for the floating pane's
+// distinct render path — renderFloatingBody passed renderBody an unbounded
+// budget, so overlay's leave-extra-body-rows-untouched behavior let an
+// unbounded backlog/queue body grow past transcriptHeight (issue #1381).
+func TestView_DrillInFloating_BacklogRespectsHeight(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
+	issues := make([]forge.Issue, 100)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+	m = Update(m, DrillInMsg{Number: "42", Rendered: "hello"})
+	m = Update(m, PaneModeCycleMsg{})
+	if m.PaneMode != PaneFloating {
+		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
+	}
+
+	out := View(m)
+	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(got) > m.Height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — the long backlog must be budgeted out of the floating body", len(got), m.Height)
+	}
+}
+
 // TestView_DrillInNarrowTerminal_FallsBackToFullscreen verifies a terminal
 // too narrow for three columns renders the Transcript fullscreen regardless
 // of the operator's selected PaneMode — never leaving unreadable, wrapped
@@ -1293,7 +1347,10 @@ func TestView_DrillInFloating_OverlaysTranscriptOnTwoColumnBody(t *testing.T) {
 // TestView_DrillInFloating_Offsets_RenderOffsetRows verifies the floating
 // pane's underlying two-column body honors scrolled BacklogOffset and
 // QueueOffset — both are shared Model fields, not per-pane, so the floating
-// pane's body renders the same window the main view would (issue #1055).
+// pane's body renders the same window the main view would (issue #1055). The
+// floating body is now windowed to transcriptHeight (issue #1381), so
+// reaching the last row takes scrolling all the way, not just past the
+// first page.
 func TestView_DrillInFloating_Offsets_RenderOffsetRows(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
 	issues := make([]forge.Issue, 50)
@@ -1312,9 +1369,9 @@ func TestView_DrillInFloating_Offsets_RenderOffsetRows(t *testing.T) {
 		t.Fatalf("PaneMode = %v, want PaneFloating after one cycle", m.PaneMode)
 	}
 
-	m = Update(m, ScrollMsg{Delta: 5})
+	m = Update(m, ScrollMsg{Delta: 1000})
 	m = Update(m, FocusToggleMsg{})
-	m = Update(m, ScrollMsg{Delta: 5})
+	m = Update(m, ScrollMsg{Delta: 1000})
 
 	out := View(m)
 	if strings.Contains(out, "issue 0") {
@@ -1885,21 +1942,22 @@ func TestSplitLeftWidth_ClampsToLeftColumnFraction(t *testing.T) {
 func TestView_BodyAndDockedBody_AgreeOnLeftColumnWidth(t *testing.T) {
 	const bodyWidth = 60    // leftColumnFraction clamp: int(60 * 2/5) = 24
 	const dockedWidth = 100 // transcriptWidth = int(100*2/5) = 40, bodyWidth = 60
+	const height = 24
 
 	issues := []forge.Issue{{Number: "1", Title: "a very long backlog title that blows past the fraction cap"}}
 	picks := []Pick{{Number: "42", Title: "QUEUEMARK", State: PickQueued}}
 
-	mBody := Update(NewModel(), SizeChangedMsg{Width: bodyWidth, Height: 24})
+	mBody := Update(NewModel(), SizeChangedMsg{Width: bodyWidth, Height: height})
 	mBody = Update(mBody, IssuesLoadedMsg{Issues: issues})
 	mBody.Picks = picks
 
-	mDocked := Update(NewModel(), SizeChangedMsg{Width: dockedWidth, Height: 24})
+	mDocked := Update(NewModel(), SizeChangedMsg{Width: dockedWidth, Height: height})
 	mDocked = Update(mDocked, IssuesLoadedMsg{Issues: issues})
 	mDocked.Picks = picks
 	mDocked = Update(mDocked, DrillInMsg{Number: "42", Rendered: "[implementor] hi"})
 
 	bodyOut := renderBody(mBody, nil)
-	dockedOut := renderDockedBody(mDocked, 0)
+	dockedOut := renderDockedBody(mDocked, height)
 
 	bodyLine := lineContaining(t, bodyOut, "QUEUEMARK")
 	dockedLine := lineContaining(t, dockedOut, "QUEUEMARK")
