@@ -2,14 +2,23 @@ package git
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/gitplumbing"
 )
+
+// defaultCloneTimeout bounds cloneToTemp's git clone invocation when the
+// caller doesn't override it via WithCloneTimeout. A hung remote (accepts
+// the connection, never completes the handshake) would otherwise block
+// cloneToTemp forever, since git itself applies no timeout of its own.
+const defaultCloneTimeout = 5 * time.Minute
 
 // gitClient is the push-only Code Forge adapter for a plain git remote
 // (self-hosted git, gitea, GitLab-without-MRs, a bare server repo). It has no
@@ -22,6 +31,18 @@ type gitClient struct {
 	userName     string
 	userEmail    string
 	branchPrefix string
+	cloneTimeout time.Duration
+}
+
+// Option configures optional gitClient behavior beyond NewGitClient's
+// required parameters.
+type Option func(*gitClient)
+
+// WithCloneTimeout overrides defaultCloneTimeout, the deadline bounding
+// cloneToTemp's git clone invocation. Mainly for tests exercising timeout
+// behavior against a remote that hangs rather than fails fast.
+func WithCloneTimeout(d time.Duration) Option {
+	return func(g *gitClient) { g.cloneTimeout = d }
 }
 
 // NewGitClient returns a forge.CodeForge backed by a plain git remote URL.
@@ -30,14 +51,19 @@ type gitClient struct {
 // clone (a merge commit needs a committer) instead of depending on ambient
 // host git config, which may be unset on a bare CI runner. branchPrefix is
 // baked into AgentBranch's output.
-func NewGitClient(remoteURL, baseBranch, userName, userEmail, branchPrefix string) forge.CodeForge {
-	return &gitClient{
+func NewGitClient(remoteURL, baseBranch, userName, userEmail, branchPrefix string, opts ...Option) forge.CodeForge {
+	g := &gitClient{
 		remoteURL:    remoteURL,
 		baseBranch:   baseBranch,
 		userName:     userName,
 		userEmail:    userEmail,
 		branchPrefix: branchPrefix,
+		cloneTimeout: defaultCloneTimeout,
 	}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
 }
 
 // AgentBranch returns branchPrefix + num.
@@ -60,15 +86,23 @@ func validateGitRef(ref string) error {
 
 // cloneToTemp clones remoteURL into a fresh temp directory named per prefix
 // and returns a helper that runs git -C <dir> <args...>, plus a cleanup func
-// the caller must defer. Shared scaffold for Merge and Rebase.
-func cloneToTemp(remoteURL, prefix string) (dir string, gitIn func(args ...string) *exec.Cmd, cleanup func(), err error) {
+// the caller must defer. Shared scaffold for Merge and Rebase. The clone is
+// bounded by timeout so a remote that hangs mid-handshake fails instead of
+// blocking cloneToTemp forever.
+func cloneToTemp(remoteURL, prefix string, timeout time.Duration) (dir string, gitIn func(args ...string) *exec.Cmd, cleanup func(), err error) {
 	dir, err = os.MkdirTemp("", prefix)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("mkdtemp: %w", err)
 	}
 	cleanup = func() { os.RemoveAll(dir) }
-	if err := exec.Command("git", "clone", remoteURL, dir).Run(); err != nil {
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "git", "clone", remoteURL, dir).Run(); err != nil {
 		cleanup()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "", nil, nil, fmt.Errorf("git clone %s: timed out after %s: %w", forge.RedactURLCredentials(remoteURL), timeout, ctx.Err())
+		}
 		return "", nil, nil, fmt.Errorf("git clone %s: %w", forge.RedactURLCredentials(remoteURL), err)
 	}
 	gitIn = func(args ...string) *exec.Cmd {
@@ -99,7 +133,7 @@ func (g *gitClient) Merge(branch string) error {
 	if err := validateGitRef(branch); err != nil {
 		return err
 	}
-	_, gitIn, cleanup, err := cloneToTemp(g.remoteURL, "spindrift-git-forge-merge-*")
+	_, gitIn, cleanup, err := cloneToTemp(g.remoteURL, "spindrift-git-forge-merge-*", g.cloneTimeout)
 	if err != nil {
 		return err
 	}
@@ -138,7 +172,7 @@ func (g *gitClient) Rebase(branch string) error {
 	if err := validateGitRef(branch); err != nil {
 		return err
 	}
-	dir, gitIn, cleanup, err := cloneToTemp(g.remoteURL, "spindrift-git-forge-rebase-*")
+	dir, gitIn, cleanup, err := cloneToTemp(g.remoteURL, "spindrift-git-forge-rebase-*", g.cloneTimeout)
 	if err != nil {
 		return err
 	}

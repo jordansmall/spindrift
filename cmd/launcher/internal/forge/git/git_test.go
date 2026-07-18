@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -361,5 +362,95 @@ func TestGitClient_Probe_DoesNotLeakCredentials(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("Probe error leaks embedded credential: %v", err)
+	}
+}
+
+// hangingRemoteURL returns a credential-bearing http URL backed by a
+// listener that accepts every connection but never writes a response,
+// simulating a remote that hangs mid-handshake instead of refusing the
+// connection outright (unlike unreachableRemoteURL, which fails fast).
+func hangingRemoteURL(t *testing.T, secret string) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, conn)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		ln.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			c.Close()
+		}
+	})
+
+	return "http://oauth2:" + secret + "@" + ln.Addr().String() + "/does-not-exist.git"
+}
+
+// TestGitClient_Merge_CloneTimesOutOnHangingRemote verifies that cloneToTemp
+// bounds the git clone invocation with a timeout: against a remote that
+// accepts the connection and then hangs (rather than refusing it, which
+// unreachableRemoteURL already covers), Merge must still return in bounded
+// time with a distinguishable timeout error, not block indefinitely.
+func TestGitClient_Merge_CloneTimesOutOnHangingRemote(t *testing.T) {
+	const secret = "sometoken123"
+	g := NewGitClient(hangingRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-",
+		WithCloneTimeout(200*time.Millisecond))
+
+	start := time.Now()
+	err := g.Merge("agent/issue-1")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Merge against hanging remote: want error, got nil")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("Merge took %s to return, want it bounded by the configured clone timeout", elapsed)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("Merge error = %q, want it to mention timing out", err.Error())
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("Merge error leaks embedded credential: %v", err)
+	}
+}
+
+// TestGitClient_Rebase_CloneTimesOutOnHangingRemote is
+// TestGitClient_Merge_CloneTimesOutOnHangingRemote's counterpart for Rebase,
+// which calls the same cloneToTemp scaffold.
+func TestGitClient_Rebase_CloneTimesOutOnHangingRemote(t *testing.T) {
+	const secret = "sometoken123"
+	g := NewGitClient(hangingRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-",
+		WithCloneTimeout(200*time.Millisecond))
+
+	start := time.Now()
+	err := g.Rebase("agent/issue-1")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Rebase against hanging remote: want error, got nil")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("Rebase took %s to return, want it bounded by the configured clone timeout", elapsed)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("Rebase error = %q, want it to mention timing out", err.Error())
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("Rebase error leaks embedded credential: %v", err)
 	}
 }
