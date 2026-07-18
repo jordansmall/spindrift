@@ -1022,8 +1022,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// Snapshot ambient-env deprecation warnings before parseFlags mutates the
 	// environment via os.Setenv, so a flag that also sets the same var never
 	// masks the ambient value the warning reports on (ADR 0020). Snapshotted
-	// ahead of the help/bare-invocation early returns below so both still
-	// surface the warning instead of silently dropping it (issue #814).
+	// ahead of the help/bare-invocation early returns and the
+	// extractInputFlag/parseFlags/loadInputDocument error returns below so
+	// all of them still surface the warning instead of silently dropping it
+	// (issues #814, #1191).
 	var ambientWarnings bytes.Buffer
 	warnAmbientKnobEnv(&ambientWarnings)
 	if help {
