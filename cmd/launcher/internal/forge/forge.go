@@ -51,6 +51,9 @@ type IssueState string
 const (
 	IssueOpen   IssueState = "OPEN"
 	IssueClosed IssueState = "CLOSED"
+	// IssueMerged is the state gh issue view reports when a blocker ref
+	// resolves to a merged PR rather than an agent-worked issue.
+	IssueMerged IssueState = "MERGED"
 )
 
 // PR is a GitHub pull request as seen by the launcher.
