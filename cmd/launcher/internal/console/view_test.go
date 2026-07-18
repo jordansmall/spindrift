@@ -2064,10 +2064,16 @@ func TestView_Backlog_SanitizesTitleAndLabelControlSequences(t *testing.T) {
 
 	out := View(m)
 	// The header carries legitimate styling escapes of its own (ADR 0031),
-	// so the check below targets the injected payloads specifically rather
-	// than asserting no ESC byte anywhere in the output.
-	if strings.Contains(out, "\x1b[2J") || strings.Contains(out, "\x1b]0;pwned") {
-		t.Errorf("View() = %q, want the injected escape sequences stripped from the backlog title", out)
+	// so the check below scopes "no raw ESC byte" to the row rendering the
+	// untrusted title/label rather than the whole output — anything past
+	// the sanitizer trust boundary in that row is still caught, styled
+	// header lines elsewhere are not a false positive.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "eviltitlehere") || strings.Contains(line, "evillabel") {
+			if strings.Contains(line, "\x1b") {
+				t.Errorf("backlog row = %q, want no raw escape bytes surviving sanitization", line)
+			}
+		}
 	}
 	if !strings.Contains(out, "eviltitlehere") {
 		t.Errorf("View() = %q, want the surrounding title text intact after stripping escapes", out)
@@ -2088,10 +2094,16 @@ func TestView_Queue_SanitizesTitleAndReasonControlSequences(t *testing.T) {
 
 	out := View(m)
 	// The header carries legitimate styling escapes of its own (ADR 0031),
-	// so the check below targets the injected payloads specifically rather
-	// than asserting no ESC byte anywhere in the output.
-	if strings.Contains(out, "\x1b[2J") || strings.Contains(out, "\x1b]0;pwned") {
-		t.Errorf("View() = %q, want the injected escape sequences stripped from the queue row", out)
+	// so the check below scopes "no raw ESC byte" to the row rendering the
+	// untrusted title/reason rather than the whole output — anything past
+	// the sanitizer trust boundary in that row is still caught, styled
+	// header lines elsewhere are not a false positive.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "eviltitle") || strings.Contains(line, "badreason") {
+			if strings.Contains(line, "\x1b") {
+				t.Errorf("queue row = %q, want no raw escape bytes surviving sanitization", line)
+			}
+		}
 	}
 	if !strings.Contains(out, "eviltitle") {
 		t.Errorf("View() = %q, want the surrounding title text intact after stripping escapes", out)
