@@ -125,14 +125,7 @@ func consoleGitSync(pwd, baseBranch string) (string, string, error) {
 // which the res.Rev == builtRev comparison in newConsoleFreshnessChecker
 // relies on.
 func headRev(pwd string) (string, error) {
-	cmd := exec.Command("git", "-C", pwd, "rev-parse", "HEAD")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git rev-parse HEAD: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	return strings.TrimSpace(string(out)), nil
+	return gitOutput(pwd, "rev-parse", "HEAD")
 }
 
 // checkCheckoutSafe refuses a checkout when pwd is on a branch other than
