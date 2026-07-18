@@ -1055,10 +1055,10 @@ func TestTea_WithLauncher_RendersHeldPickWithBlockedByBadge(t *testing.T) {
 	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickHeld, BlockedBy: "#41 (native)"})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	// As in TestTea_WithLauncher_RendersLiveQueueState, a realistic 2-label
-	// backlog issue narrows the queue column — but the "held by" badge now
-	// sits ahead of Title in the row (issue #858), so it renders in full
-	// and Title clips instead.
+	// Same leftColumnFraction/row-order rationale as
+	// TestTea_WithLauncher_RendersLiveQueueState, but with the 2-label
+	// backlog issue above — the "held by" badge sits ahead of Title, so
+	// it renders in full and Title clips instead.
 	waitForOutput(t, tm, "held", "held by #41 (native)")
 
 	sendKey(tm, "q")
