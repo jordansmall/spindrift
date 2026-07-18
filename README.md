@@ -42,7 +42,30 @@ nix run github:jordansmall/spindrift -- --help
 nix run github:jordansmall/spindrift -- --version
 ```
 
-Then scaffold a Consumer flake from the bundled template:
+The fastest path from zero to a dispatching setup is the **Quickstart
+wizard** — an interactive nix app that scaffolds, validates, and builds a
+Consumer flake in one command:
+
+```sh
+mkdir my-agents && cd my-agents
+nix run github:jordansmall/spindrift#quickstart
+```
+
+It detects what it can (container runtime, git identity, repo slug from `git
+remote`, an ambient token) and asks only for the rest — a GitHub token
+(audited for over-broad scopes) and Claude auth. Quickstart always
+provisions **GitHub** as the Issue Tracker; it never asks. The `jira` and
+`local` trackers are experimental and reachable only by hand-editing
+`ISSUE_TRACKER` in the generated `flake.nix` — see [Issue Tracker
+backends](docs/reference.md#issue-tracker-backends). It then writes a
+minimal `flake.nix`, a secrets-only `harness.env`, a `.gitignore` protecting
+it, and an `.envrc`; runs the doctor checks (offering to create missing
+labels); and kicks off the first image build — leaving `spindrift dispatch`
+as the only remaining step. Refuses to clobber an existing flake without
+`--force`.
+
+Prefer a fully-commented scaffold you edit by hand instead? Use the bundled
+template:
 
 ```sh
 mkdir my-agents && cd my-agents
