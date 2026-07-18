@@ -446,12 +446,23 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string) error {
 // re-entered for it.
 func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
 	fmt.Printf("    #%s  landing=%s  status=post-force-push-wait\n", num, pr)
-	switch s.gateToGreen(num, gen, pr) {
+	return rewaitGateResultErr(s.gateToGreen(num, gen, pr), pr)
+}
+
+// rewaitGateResultErr maps a gateToGreen outcome to rewaitAfterForcePush's
+// return value, naming gateTerminal and gateRedRetry explicitly rather than
+// folding them into a catch-all default — so a future gateResult variant
+// must be handled here too, loudly (panic), instead of silently landing on
+// "never green" (issue #1175).
+func rewaitGateResultErr(g gateResult, pr string) error {
+	switch g {
 	case gateGreen:
 		return nil
 	case gateAbandoned:
 		return errAbandoned
-	default:
+	case gateTerminal, gateRedRetry:
 		return fmt.Errorf("%w: CI did not reach green after force-push on %s", errLandingNeverGreen, pr)
+	default:
+		panic(fmt.Sprintf("settle: unhandled gateResult %v", g))
 	}
 }

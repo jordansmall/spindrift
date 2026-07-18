@@ -253,6 +253,54 @@ func TestSelfHeal_RewaitAfterForcePush_NeverGreen_EndsFailed(t *testing.T) {
 	}
 }
 
+// TestRewaitGateResultErr_ExplicitCases verifies rewaitAfterForcePush's
+// gateResult-to-error mapping names gateTerminal and gateRedRetry explicitly
+// rather than folding them into a catch-all default (issue #1175), and that
+// an unhandled gateResult variant panics instead of silently mapping to
+// "never green".
+func TestRewaitGateResultErr_ExplicitCases(t *testing.T) {
+	cases := []struct {
+		name    string
+		g       gateResult
+		wantErr error
+		wantNil bool
+	}{
+		{name: "green", g: gateGreen, wantNil: true},
+		{name: "abandoned", g: gateAbandoned, wantErr: errAbandoned},
+		{name: "terminal", g: gateTerminal, wantErr: errLandingNeverGreen},
+		{name: "red-retry", g: gateRedRetry, wantErr: errLandingNeverGreen},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			err := rewaitGateResultErr(tc.g, testPR)
+			if tc.wantNil {
+				if err != nil {
+					t.Errorf("rewaitGateResultErr(%v) = %v, want nil", tc.g, err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Errorf("rewaitGateResultErr(%v) = %v, want wrapping %v", tc.g, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestRewaitGateResultErr_UnhandledVariantPanics verifies that a gateResult
+// value outside the 4 known variants panics rather than silently mapping to
+// errLandingNeverGreen — the future-proofing issue #1175 asks for: a new
+// gateResult variant must be handled explicitly or the switch is loud about
+// it, never silent.
+func TestRewaitGateResultErr_UnhandledVariantPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("rewaitGateResultErr(unknown variant) did not panic")
+		}
+	}()
+	rewaitGateResultErr(gateResult(99), testPR)
+}
+
 // TestSelfHeal_UnresolvableConflictNoForcePush_KeepsComplete verifies that a
 // rebase conflict which exhausts MaxRebaseAttempts *before ever force-pushing*
 // leaves the issue agent-complete, not agent-failed: the pre-rebase head is
