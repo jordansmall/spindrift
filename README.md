@@ -447,7 +447,7 @@ Type a command and press enter:
 | `enter` (queue focus) | Drill in: open the highlighted pick's rendered transcript |
 | `t` / `toggle` | toggle the open transcript between rendered and raw |
 | `x` / `close` | close the transcript view, back to the backlog/queue |
-| `k <num>` / `kill <num>` / `terminate <num>` | ask to Terminate `<num>`'s live Dispatch — prompts `y`/`N` to confirm |
+| `k <num>` / `kill <num>` / `terminate <num>` | ask to Terminate `<num>`'s live Dispatch — prompts `y`/`N` to confirm, `q`/`ctrl+c` decline and quit |
 | `+` | raise the session's live parallelism cap by one |
 | `-` | lower the session's live parallelism cap by one |
 | `b` / `build` / `rebuild` | rebuild the image in-session when stale — no confirm needed |

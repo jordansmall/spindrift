@@ -1735,6 +1735,22 @@ func TestTea_TerminateKey_ConfirmThenYes_ReclaimsHighlightedDispatch(t *testing.
 	}
 }
 
+// TestTea_TerminateKey_ConfirmPrompt_HintsQuitKeys verifies the live confirm
+// prompt itself hints that q/ctrl+c decline and quit, not just the "?" help
+// overlay — discoverability gap flagged by #748 review (issue #1095).
+func TestTea_TerminateKey_ConfirmPrompt_HintsQuitKeys(t *testing.T) {
+	launch, fc, _, _ := newTermTestLauncher(t)
+
+	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "k")
+	waitForOutput(t, tm, "terminate #42?", "y/N/q/^C")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
 // TestTea_TerminateKey_ConfirmThenCapitalY_Confirms verifies the confirm
 // prompt accepts "Y" as well as "y" — the "[y/N]" prompt reads as
 // case-insensitive to an operator (issue #785 review).
