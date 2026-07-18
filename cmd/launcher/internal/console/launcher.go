@@ -483,6 +483,9 @@ func (l *Launcher) freshnessChecker() waves.FreshnessChecker {
 		l.staleMessage = msg
 		newlyStale := l.stale && !wasStale
 		l.mu.Unlock()
+		// A stale->fresh transition here signals nothing — Rebuild is the
+		// sole path that clears staleness (issue #1124), and it already
+		// signals its own clear, so this closure only needs the other edge.
 		if newlyStale {
 			l.signalRefresh()
 		}
