@@ -122,26 +122,35 @@ func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 // push-only Code Forge (no PRForge) has no PR to discover, so readiness
 // falls straight to the issue-closed check.
 func BlockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string) bool {
+	ready, _ := blockerReady(it, cf, dep)
+	return ready
+}
+
+// blockerReady is BlockerReady's logic, plus the fetched forge.Issue when the
+// readiness check needed one. fi is nil when a merged-PR lookup resolved
+// readiness without ever calling it.Issue, letting BlockerStatus tell "no
+// fetch happened" apart from "fetched and still open" without a second call.
+func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string) (ready bool, fi *forge.Issue) {
 	if pr, ok := cf.(forge.PRForge); ok {
 		branch := cf.AgentBranch(dep)
 		prURL, found, err := pr.PRForBranch(branch)
 		if err == nil && found {
 			state, stateErr := pr.PRState(prURL)
 			if stateErr == nil {
-				return state == forge.PRMerged
+				return state == forge.PRMerged, nil
 			}
-			return false
+			return false, nil
 		}
 	}
-	fi, err := it.Issue(dep)
+	issue, err := it.Issue(dep)
 	if err != nil {
-		return false
+		return false, nil
 	}
-	if fi.State == forge.IssueClosed {
+	if issue.State == forge.IssueClosed {
 		fmt.Printf("    .. blocker #%s is closed (no discoverable PR); treating as satisfied\n", dep)
-		return true
+		return true, &issue
 	}
-	return false
+	return false, &issue
 }
 
 // containsLabel reports whether labels contains target.
@@ -159,7 +168,7 @@ func containsLabel(labels []string, target string) bool {
 func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string) []string {
 	var out []string
 	for _, dep := range edges[num] {
-		if !BlockerReady(it, cf, dep) {
+		if ready, _ := blockerReady(it, cf, dep); !ready {
 			out = append(out, dep)
 		}
 	}
@@ -181,11 +190,17 @@ func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, num string, edge
 // (queue.go's setHeld), and collapsing the two would reintroduce the
 // redundant rendering #755 removes.
 func BlockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, num string, edges map[string][]string) (ready bool, failed, unready []string) {
-	unready = unreadyBlockers(it, cf, num, edges)
 	for _, dep := range edges[num] {
-		fi, err := it.Issue(dep)
-		if err != nil {
-			continue
+		depReady, fi := blockerReady(it, cf, dep)
+		if !depReady {
+			unready = append(unready, dep)
+		}
+		if fi == nil {
+			issue, err := it.Issue(dep)
+			if err != nil {
+				continue
+			}
+			fi = &issue
 		}
 		if containsLabel(fi.Labels, cfg.FailedLabel) {
 			failed = append(failed, dep)
