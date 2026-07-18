@@ -25,8 +25,10 @@ func RunNixBuild(pwd string) (string, error) {
 	var output boundedWriter
 	cmd.Stdout = &output
 	cmd.Stderr = &output
-	if err := cmd.Run(); err != nil {
-		return output.String(), fmt.Errorf("nix run .# -- build: %w: %s", err, strings.TrimSpace(output.String()))
+	err := cmd.Run()
+	captured := output.String()
+	if err != nil {
+		return captured, fmt.Errorf("nix run .# -- build: %w: %s", err, strings.TrimSpace(captured))
 	}
-	return output.String(), nil
+	return captured, nil
 }
