@@ -688,6 +688,99 @@ func TestTea_SidebarKey_QuitsOnCtrlCWithoutClosing(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_FocusKeys_MoveBetweenListAndDockedSidebar verifies "h"/"l" move
+// keyboard focus between the list and a docked sidebar on a terminal wide
+// enough to show both (sidebarFits): "h" moves it to the list, where "j"
+// still moves the row cursor (proving "t" sent right after is a no-op on the
+// list, not a sidebar toggle); "l" then returns focus to the sidebar, where
+// "t" still cycles its content (#1501, ADR 0030). Asserted against the final
+// Model rather than screen-scraped mid-sequence text — teatest's output
+// reader only ever shows a frame that actually changed visible bytes, which
+// an ANSI-stripped (NO_COLOR-profile) focus-only style change need not do.
+func TestTea_FocusKeys_MoveBetweenListAndDockedSidebar(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "43", Title: "second thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch.Queue.Add(Pick{Number: "43", Title: "second thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "2")
+	waitForOutput(t, tm, "running")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "second thing")
+
+	sendKey(tm, "h")
+	sendKey(tm, "j")
+	waitForOutput(t, tm, "> #43")
+
+	sendKey(tm, "t") // no-op: focus is on the list, not the sidebar
+	sendKey(tm, "l")
+	sendKey(tm, "t") // reaches the sidebar now that "l" refocused it
+
+	// "q" hard-quits directly here, with no drain/terminate-all/stay confirm
+	// — Focus ended on the sidebar above, and the sidebar's own "q" always
+	// force-quits regardless of live Dispatches (issue #826's precedent,
+	// inherited from the old drill-in pane).
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.Focus != FocusSidebar {
+		t.Errorf("Focus = %v, want FocusSidebar after \"l\" refocused it", fm.m.Focus)
+	}
+	if fm.m.Cursor != 1 {
+		t.Errorf("Cursor = %d, want 1 — \"j\" must have moved the list cursor while \"h\" had focus there", fm.m.Cursor)
+	}
+	if fm.m.Sidebar == nil || !fm.m.Sidebar.ShowTranscript {
+		t.Error("Sidebar.ShowTranscript = false, want true — the second \"t\" (sent after \"l\" refocused the sidebar) must have cycled it, proving the first \"t\" (sent while list-focused) was a no-op")
+	}
+}
+
+// TestTea_EnterKey_OnSettledRow_OpensSidebar verifies Enter opens the sidebar
+// for a Settled pick — the static case with nothing left to tail, still
+// shown from its final on-disk logs (#1501 AC5).
+func TestTea_EnterKey_OnSettledRow_OpensSidebar(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickSettled})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "4")
+	waitForOutput(t, tm, "settled")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "hi")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
 // TestTea_SidebarToggleKey_CyclesActivityTranscriptRaw verifies "t" advances
 // the open sidebar around its Activity feed -> Transcript (rendered) ->
 // Transcript (raw) -> Activity feed cycle, so the byte-exact raw form stays
