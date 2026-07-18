@@ -899,7 +899,7 @@ func cmdDoctor() int {
 func cmdConsole(lc *launchContext, stdin io.Reader, stdout io.Writer) int {
 	defer lc.cleanup()
 	fresh, rebuild := newConsoleFreshness(lc.config, lc.pwd, runner.NixEvaluator{},
-		func() (string, error) { return consoleGitSync(lc.pwd, lc.config.baseBranch) },
+		func() (string, string, error) { return consoleGitSync(lc.pwd, lc.config.baseBranch) },
 		func() (string, error) { return consoleNixBuild(lc.pwd) })
 	launch := &console.Launcher{
 		CodeForge:   lc.codeForge,

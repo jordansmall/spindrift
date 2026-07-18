@@ -261,6 +261,23 @@ func TestView_RebuildErr_Truncated(t *testing.T) {
 	}
 }
 
+// TestView_BranchSwitchNotice_Surfaced verifies a rebuild's branch-switch
+// notice appears in the rendered header — the silent-switch gap issue #1141
+// closes: an operator whose pwd got moved off a branch during rebuild needs
+// to see it, not discover it cold.
+func TestView_BranchSwitchNotice_Surfaced(t *testing.T) {
+	fresh := View(NewModel())
+	if strings.Contains(fresh, "switched") {
+		t.Errorf("View() with no branch-switch notice = %q, want no mention of a switch", fresh)
+	}
+
+	m := Update(NewModel(), StaleStatusMsg{BranchSwitchNotice: "switched off-branch tree from feature to main"})
+	out := View(m)
+	if !strings.Contains(out, "switched off-branch tree from feature to main") {
+		t.Errorf("View() = %q, want the branch-switch notice surfaced", out)
+	}
+}
+
 // TestView_RefreshError_Surfaced verifies a failed refresh's error text
 // appears in View so the operator sees why the list went stale.
 func TestView_RefreshError_Surfaced(t *testing.T) {

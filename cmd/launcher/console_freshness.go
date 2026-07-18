@@ -25,11 +25,12 @@ import (
 // are injected so tests can substitute fakes instead of shelling out to
 // git/nix; production wiring is consoleGitSync and consoleNixBuild. pull
 // returns the rev it landed on (issue #767) so rebuild can cache it as
-// builtRev directly, rather than re-deriving it from a post-build probe.
-// build returns its captured nix output (issue #765) alongside its error, so
-// a background rebuild never writes directly to the Console's own
-// stdout/stderr.
-func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull func() (string, error), build func() (string, error)) (waves.FreshnessChecker, func() (string, error)) {
+// builtRev directly, rather than re-deriving it from a post-build probe, and
+// a branch-switch notice (issue #1141, "" when no switch occurred) that
+// rebuild passes through unchanged. build returns its captured nix output
+// (issue #765) alongside its error, so a background rebuild never writes
+// directly to the Console's own stdout/stderr.
+func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull func() (string, string, error), build func() (string, error)) (waves.FreshnessChecker, func() (string, string, error)) {
 	probe := func() freshness.Result {
 		return freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
 	}
@@ -41,7 +42,7 @@ func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull fu
 // scripted freshness.Result values instead of a real git/nix round-trip —
 // freshness.Probe's own git plumbing is exercised by internal/freshness's
 // own tests. See newConsoleFreshness for the production wiring.
-func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result, pull func() (string, error), build func() (string, error)) (waves.FreshnessChecker, func() (string, error)) {
+func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result, pull func() (string, string, error), build func() (string, error)) (waves.FreshnessChecker, func() (string, string, error)) {
 	var mu sync.Mutex
 	var builtRev string
 
@@ -61,19 +62,19 @@ func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result
 		return res.Applicable, res.Fresh, res.Message
 	}
 
-	rebuild := func() (string, error) {
-		pulledRev, err := pull()
+	rebuild := func() (string, string, error) {
+		pulledRev, notice, err := pull()
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		output, err := build()
 		if err != nil {
-			return output, err
+			return output, notice, err
 		}
 		mu.Lock()
 		builtRev = pulledRev
 		mu.Unlock()
-		return output, nil
+		return output, notice, nil
 	}
 
 	return fresh, rebuild
@@ -90,18 +91,32 @@ func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result
 // because there's nothing for the checkout to carry across silently. It
 // returns the rev pwd landed on so the caller can record exactly what
 // build() is about to build, rather than re-deriving it from a probe that
-// may see origin advance mid-build (issue #767).
-func consoleGitSync(pwd, baseBranch string) (string, error) {
-	if err := checkCheckoutSafe(pwd, baseBranch); err != nil {
-		return "", err
+// may see origin advance mid-build (issue #767). The second return is a
+// notice naming the branch pwd got switched off of — non-empty only when a
+// clean off-branch tree was moved to baseBranch, so an operator who had pwd
+// checked out to something else finds out rather than discovering it cold
+// (issue #1141); empty when pwd was already on baseBranch, since no switch
+// happened.
+func consoleGitSync(pwd, baseBranch string) (string, string, error) {
+	branch, err := checkCheckoutSafe(pwd, baseBranch)
+	if err != nil {
+		return "", "", err
 	}
 	if err := runGit(pwd, "checkout", baseBranch); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if err := runGit(pwd, "pull", "--ff-only"); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return headRev(pwd)
+	rev, err := headRev(pwd)
+	if err != nil {
+		return "", "", err
+	}
+	var notice string
+	if branch != baseBranch {
+		notice = fmt.Sprintf("switched off-branch tree from %s to %s", branch, baseBranch)
+	}
+	return rev, notice, nil
 }
 
 // headRev returns the rev pwd's working tree is currently checked out at, as
@@ -121,24 +136,25 @@ func headRev(pwd string) (string, error) {
 }
 
 // checkCheckoutSafe refuses a checkout when pwd is on a branch other than
-// baseBranch and has a dirty working tree (uncommitted changes or untracked
-// files) — see consoleGitSync.
-func checkCheckoutSafe(pwd, baseBranch string) error {
+// baseBranch and has uncommitted changes — see consoleGitSync. It returns
+// the branch pwd was on so consoleGitSync can build its switch notice
+// without a second rev-parse round-trip.
+func checkCheckoutSafe(pwd, baseBranch string) (string, error) {
 	branch, err := gitOutput(pwd, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
-		return err
+		return "", err
 	}
 	if branch == baseBranch {
-		return nil
+		return branch, nil
 	}
 	status, err := gitOutput(pwd, "status", "--porcelain")
 	if err != nil {
-		return err
+		return "", err
 	}
 	if status != "" {
-		return fmt.Errorf("refusing to checkout %s: %s has uncommitted changes on %s", baseBranch, pwd, branch)
+		return "", fmt.Errorf("refusing to checkout %s: %s has uncommitted changes on %s", baseBranch, pwd, branch)
 	}
-	return nil
+	return branch, nil
 }
 
 // runGit runs `git -C pwd args...`, surfacing git's own stderr on failure.

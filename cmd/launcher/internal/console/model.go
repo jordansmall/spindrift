@@ -58,6 +58,10 @@ type Model struct {
 	// Console's own stdout/stderr while the rebuild ran. "" when no rebuild
 	// has run yet.
 	RebuildOutput string
+	// BranchSwitchNotice is the last rebuild's branch-switch notice, if any
+	// — "" when pwd's checkout didn't move off the branch it was on (issue
+	// #1141), shown alongside the other rebuild alert lines in the header.
+	BranchSwitchNotice string
 	// ShowRebuildOutput is whether the rebuild-output pane is open, showing
 	// RebuildOutput in full — RebuildOutput's only consumer (issue #1128).
 	// RebuildOutputOpenMsg only ever sets it while RebuildOutput is
@@ -334,6 +338,7 @@ func Update(m Model, msg Msg) Model {
 		m.Rebuilding = msg.Rebuilding
 		m.RebuildErr = msg.RebuildErr
 		m.RebuildOutput = msg.RebuildOutput
+		m.BranchSwitchNotice = msg.BranchSwitchNotice
 	case RebuildOutputOpenMsg:
 		if m.RebuildOutput != "" {
 			m.ShowRebuildOutput = true
