@@ -231,6 +231,35 @@ func TestView_RebuildErr_Surfaced(t *testing.T) {
 	}
 }
 
+// TestView_RebuildErr_Truncated verifies a long, multi-line RebuildErr (the
+// merged nix stdout+stderr RunNixBuild wraps into one error, issue #1131)
+// renders as a single bounded banner line instead of blowing out the header.
+func TestView_RebuildErr_Truncated(t *testing.T) {
+	long := strings.Repeat("line of nix build output that is quite long\n", 20)
+	m := Update(NewModel(), StaleStatusMsg{Stale: true, RebuildErr: long})
+	out := View(m)
+
+	var bannerLine string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "rebuild failed") {
+			bannerLine = line
+			break
+		}
+	}
+	if bannerLine == "" {
+		t.Fatalf("View() = %q, want a rebuild-failed banner line", out)
+	}
+	if !strings.HasSuffix(bannerLine, "…") {
+		t.Errorf("banner line = %q, want it truncated with an ellipsis", bannerLine)
+	}
+	if n := runewidth.StringWidth(bannerLine); n > rebuildErrBannerWidth+len("!! rebuild failed: ") {
+		t.Errorf("banner line width = %d, want <= %d", n, rebuildErrBannerWidth+len("!! rebuild failed: "))
+	}
+	if m.RebuildErr != long {
+		t.Errorf("m.RebuildErr = %q, want the full untruncated text preserved", m.RebuildErr)
+	}
+}
+
 // TestView_RefreshError_Surfaced verifies a failed refresh's error text
 // appears in View so the operator sees why the list went stale.
 func TestView_RefreshError_Surfaced(t *testing.T) {
