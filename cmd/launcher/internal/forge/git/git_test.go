@@ -1,11 +1,14 @@
 package git
 
 import (
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -229,6 +232,42 @@ func TestGitClient_Merge_SetsCommitIdentityOnTempClone(t *testing.T) {
 	}
 }
 
+// unreachableRemoteURL returns a credential-bearing https URL whose port is
+// guaranteed unreachable: an ephemeral port the OS just freed, rather than a
+// hardcoded privileged port (e.g. 127.0.0.1:1) whose bindability depends on
+// process privileges and the host environment.
+func unreachableRemoteURL(t *testing.T, secret string) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+	return "https://oauth2:" + secret + "@" + addr + "/does-not-exist.git"
+}
+
+// TestUnreachableRemoteURL_PointsToClosedPort verifies that the URL returned
+// by unreachableRemoteURL names a port nothing is listening on, so tests
+// relying on it to force a clone/probe failure don't depend on a privileged
+// port (e.g. 127.0.0.1:1) staying unbindable in every environment.
+func TestUnreachableRemoteURL_PointsToClosedPort(t *testing.T) {
+	remote := unreachableRemoteURL(t, "sometoken123")
+
+	u, err := url.Parse(remote)
+	if err != nil {
+		t.Fatalf("url.Parse(%q): %v", remote, err)
+	}
+
+	conn, err := net.DialTimeout("tcp", u.Host, 2*time.Second)
+	if err == nil {
+		conn.Close()
+		t.Fatalf("dial %q: want error (unreachable), got success", u.Host)
+	}
+}
+
 // TestGitClient_Merge_CloneFailureDoesNotLeakCredentials verifies that a
 // clone failure against a credential-bearing remote URL (the
 // oauth2:<token>@host form CODE_FORGE_REMOTE_URL uses for hosts without a
@@ -237,7 +276,7 @@ func TestGitClient_Merge_SetsCommitIdentityOnTempClone(t *testing.T) {
 // GitHub issue comment (settle.mergeImmediate).
 func TestGitClient_Merge_CloneFailureDoesNotLeakCredentials(t *testing.T) {
 	const secret = "sometoken123"
-	g := NewGitClient("https://oauth2:"+secret+"@127.0.0.1:1/does-not-exist.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(unreachableRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-")
 
 	err := g.Merge("agent/issue-1")
 	if err == nil {
@@ -270,7 +309,7 @@ func TestGitClient_Probe(t *testing.T) {
 // from remoteURL must stay redacted the same way Merge/Rebase's do.
 func TestGitClient_Probe_DoesNotLeakCredentials(t *testing.T) {
 	const secret = "sometoken123"
-	g := NewGitClient("https://oauth2:"+secret+"@127.0.0.1:1/does-not-exist.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
+	g := NewGitClient(unreachableRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-")
 
 	_, err := g.Probe()
 	if err == nil {
