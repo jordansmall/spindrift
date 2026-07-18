@@ -251,11 +251,18 @@ func TestBlockerStatus_ClosedAndFailed(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "11", State: "CLOSED", Labels: []string{c.FailedLabel}})
 	edges := map[string][]string{"10": {"11"}}
 
-	ready, failed, _ := BlockerStatus(c, fc, fc, "10", edges)
+	ready, failed, unready := BlockerStatus(c, fc, fc, "10", edges)
 	if ready {
 		t.Error("BlockerStatus: want ready=false for closed+failed blocker, got true")
 	}
 	if !reflect.DeepEqual(failed, []string{"11"}) {
 		t.Errorf("BlockerStatus: want failed=[11], got %v", failed)
+	}
+	// #11 is closed, so BlockerReady's fallback (blocker.go) already calls it
+	// satisfied — it must stay out of unready even though it's also failed,
+	// or the console would redundantly render both BlockedBy and Reason for
+	// the same blocker (the #755 regression the BlockerStatus doc warns about).
+	if len(unready) != 0 {
+		t.Errorf("BlockerStatus: want unready=[] for closed+failed blocker, got %v", unready)
 	}
 }
