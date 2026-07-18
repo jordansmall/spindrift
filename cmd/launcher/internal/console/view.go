@@ -21,6 +21,9 @@ func View(m Model) string {
 	if m.DrillIn != nil {
 		return renderDrillInPane(m)
 	}
+	if m.ShowRebuildOutput {
+		return renderRebuildOutputPane(m)
+	}
 	if m.ShowHelp {
 		return renderHelp()
 	}
@@ -441,6 +444,8 @@ func renderHelp() string {
 		"  +           raise the live parallelism cap",
 		"  -           lower the live parallelism cap",
 		"  b           rebuild the stale image in-session",
+		"  o           open the rebuild output pane (once a rebuild has run);",
+		"              j/k, pgup/pgdown scroll it, x/esc closes",
 		"  q / ctrl+c  quit",
 		"  ?           toggle this help",
 		"",
@@ -887,5 +892,36 @@ func renderDrillIn(d DrillInState, height int) string {
 		b.WriteString("\n")
 	}
 	b.WriteString("[t] toggle raw · [x] close\n")
+	return b.String()
+}
+
+// renderRebuildOutputPane renders the last rebuild's captured nix output
+// full-screen, from RebuildOutputOffset onward, plus a close-key hint —
+// RebuildOutput's only consumer (issue #1128). Unlike the drill-in pane, it
+// has no docked/floating mode: the output is a flat log, not a Dispatch's
+// Transcript worth keeping alongside the backlog/queue.
+func renderRebuildOutputPane(m Model) string {
+	var b strings.Builder
+	b.WriteString("rebuild output:\n")
+
+	budget := m.Height - headerFooterLines
+	if budget < 0 {
+		budget = 0
+	}
+	lines := strings.Split(m.RebuildOutput, "\n")
+	offset := m.RebuildOutputOffset
+	end := offset + budget
+	if end < offset {
+		end = offset
+	}
+	if end > len(lines) {
+		end = len(lines)
+	}
+	visible := strings.Join(lines[offset:end], "\n")
+	b.WriteString(visible)
+	if visible != "" && !strings.HasSuffix(visible, "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("[x] close\n")
 	return b.String()
 }

@@ -184,6 +184,10 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		t.m = t.handleDrillInKey(msg)
 		return t, nil
 	}
+	if t.m.ShowRebuildOutput {
+		t.m = t.handleRebuildOutputKey(msg)
+		return t, nil
+	}
 	if t.m.ShowHelp {
 		if s := msg.String(); s == "?" || s == "esc" {
 			t.m = Update(t.m, HelpToggleMsg{})
@@ -286,8 +290,35 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		if t.launch != nil && t.m.Stale {
 			t.launch.Rebuild(t.tracker, t.pwd)
 		}
+	case "o":
+		if t.m.RebuildOutput != "" {
+			t.m = Update(t.m, RebuildOutputOpenMsg{})
+		}
 	}
 	return t, nil
+}
+
+// handleRebuildOutputKey routes one keypress while the rebuild-output pane
+// is open: "x"/Esc closes back to the backlog, the scroll keys page through
+// the captured output, and "q"/"ctrl+c" hard-quit — the universal quit
+// keystroke must never be swallowed by the pane, matching handleDrillInKey
+// (issue #1128).
+func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) Model {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return Update(t.m, QuitMsg{})
+	case "x", "esc":
+		return Update(t.m, RebuildOutputCloseMsg{})
+	case "j", "down":
+		return Update(t.m, RebuildOutputScrollMsg{Delta: 1})
+	case "k", "up":
+		return Update(t.m, RebuildOutputScrollMsg{Delta: -1})
+	case "pgdown":
+		return Update(t.m, RebuildOutputScrollMsg{Delta: drillInPageScrollDelta})
+	case "pgup":
+		return Update(t.m, RebuildOutputScrollMsg{Delta: -drillInPageScrollDelta})
+	}
+	return t.m
 }
 
 // handleDrillInKey routes one keypress while the drill-in transcript pane is
