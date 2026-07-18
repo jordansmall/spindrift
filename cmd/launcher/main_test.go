@@ -1297,6 +1297,7 @@ func TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory(t *testing.T) {
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, "advisory: 6 research label(s) still missing after creation") {
 			advisoryLine = line
+			break
 		}
 	}
 	if advisoryLine == "" {
