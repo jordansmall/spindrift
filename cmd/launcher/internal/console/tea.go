@@ -220,11 +220,7 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 			// main quit handler below does, not an unconditional QuitMsg
 			// (issue #1216).
 			t = t.pickHighlighted()
-			if t.launch != nil && len(t.launch.LiveIssues()) > 0 {
-				t.m = Update(t.m, QuitRequestedMsg{})
-			} else {
-				t.m = Update(t.m, QuitMsg{})
-			}
+			t.m = Update(t.m, t.quitOrConfirmMsg())
 			return t, nil
 		default:
 			// Any other key resolves the chord to a single-issue pick, same
@@ -266,11 +262,7 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	case "r":
 		return t, refreshCmd(t.tracker)
 	case "q", "ctrl+c":
-		if t.launch != nil && len(t.launch.LiveIssues()) > 0 {
-			t.m = Update(t.m, QuitRequestedMsg{})
-		} else {
-			t.m = Update(t.m, QuitMsg{})
-		}
+		t.m = Update(t.m, t.quitOrConfirmMsg())
 	case "?":
 		t.m = Update(t.m, HelpToggleMsg{})
 	case "p":
@@ -574,6 +566,17 @@ func (t teaModel) unpickHighlighted() teaModel {
 		t.launch.Queue.Remove(num)
 	}
 	return t
+}
+
+// quitOrConfirmMsg picks QuitRequestedMsg over QuitMsg whenever live
+// Dispatches exist, so any "q"/"ctrl+c" quit path — chorded through
+// PendingPick or not — arms the drain/terminate-all/stay confirm instead of
+// exiting outright (issue #1216, ADR 0023).
+func (t teaModel) quitOrConfirmMsg() Msg {
+	if t.launch != nil && len(t.launch.LiveIssues()) > 0 {
+		return QuitRequestedMsg{}
+	}
+	return QuitMsg{}
 }
 
 // pickHighlighted promotes the cursor's highlighted issue through PickIssue
