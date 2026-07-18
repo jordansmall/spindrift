@@ -227,7 +227,11 @@ adapter maps these states to its native mechanism:
   unmapped, or the mapped transition isn't available on the issue's current
   workflow, falls back to swapping a Jira label for that state (mirroring
   `github`'s labels) so the lifecycle always makes progress.
-- `local` — a field in the issue file (frontmatter/directory), rewritten in place.
+- `local` — a `state:` field in the issue file (frontmatter), rewritten in
+  place. Independently, a local issue also carries a native open/closed axis (a
+  `closed:` field, absent = open), the same way a GitHub issue is open/closed
+  independent of its dispatch labels; it is driven not by the launcher's
+  lifecycle but by Reconcile (ADR 0029).
 
 On `github`, `Complete` is swapped once the landing path settles, not at first
 green: `immediate` mode can still do real agent work after green (rebase-retry,
@@ -332,6 +336,22 @@ them so a later re-dispatch can adopt rather than collide. The ending is
 recorded outside the state machine: a terminal line in the Box log and that
 comment. Distinct from Unpick, which retracts a Pick that never launched.
 _Avoid_: kill, cancel, abort.
+
+**Reconcile**:
+The `local`-tracker bookkeeping sweep that makes a local issue's native
+open/closed axis match Code Forge reality — the sole authority that closes a
+local issue (ADR 0029). Observational: it never lands code. Per open issue it
+closes the issue when its recorded landing PR is merged, discovers a PR by
+agent branch when no landing was recorded (a box that died before its outcome
+line), flags one whose PR was closed unmerged, and — only behind a composite
+death signal (no PR/branch, a stale Box log, and an absent container when the
+runtime is reachable) — resets an orphaned `InProgress` to `Dispatchable`,
+supplying the liveness signal #600 required before any such reset. Auto-invoked
+at the end of a `dispatch` run and available standalone (`spindrift reconcile`)
+for the between-runs cases: a runner that died, or a PR in approval limbo. Does
+not itself merge — landing stays with `dispatch` and the explicit `recover`
+gesture. _Avoid_: sync, sweep, cleanup, recover (the operator's explicit
+per-issue adopt-and-merge gesture, a different act).
 
 **Transcript**:
 The Driver-rendered record of a Dispatch's work across its pass logs — the
