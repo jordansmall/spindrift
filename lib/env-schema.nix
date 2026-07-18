@@ -273,6 +273,13 @@
     doc = "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW";
     boxEnv = true;
   };
+  ghTokenRefreshFile = {
+    env = "GH_TOKEN_REFRESH_FILE";
+    group = "Repository & identity";
+    doc = "path to a file the launcher re-reads and swaps into GH_TOKEN whenever its content changes — lets an external minter (e.g. a workflow step re-minting a GitHub App installation token, keeping the App private key in the workflow rather than the launcher) keep the credential fresh across a run that outlives the token's ~1h lifetime (#1027); empty (default) leaves GH_TOKEN static for the whole run";
+    flakeOption = true;
+    boxEnv = false;
+  };
   claudeOAuthToken = {
     env = "CLAUDE_CODE_OAUTH_TOKEN";
     secret = true;
