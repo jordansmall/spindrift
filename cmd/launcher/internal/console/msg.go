@@ -125,13 +125,18 @@ func (OrphanRecoveryMsg) isConsoleMsg() {}
 // feed (ActivityFeed's derivation) and its whole rendered transcript plus
 // byte-exact raw form (DrillIn's load), fetched together on select so the
 // Activity/Transcript and rendered/raw toggles need no further I/O (#1501).
-// Err is set instead when loading or rendering failed (e.g. no Driver
-// configured, no logs on disk yet).
+// Err is set instead of everything above when nothing could load at all
+// (e.g. no Driver configured) — Activity and TranscriptErr are both
+// meaningless then. TranscriptErr is set when only the Transcript's own load
+// failed (DrillIn's error) — Activity still loaded independently and stays
+// showable, since the sidebar's default view never depends on the
+// Transcript's own success.
 type SidebarLoadedMsg struct {
 	Number        string
 	Activity      []ActivityLine
 	Rendered, Raw string
 	Err           error
+	TranscriptErr error
 }
 
 func (SidebarLoadedMsg) isConsoleMsg() {}

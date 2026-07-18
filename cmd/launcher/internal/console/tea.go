@@ -453,7 +453,7 @@ func openSidebarCmd(launch *Launcher, pwd, number string) tea.Cmd {
 		}
 		// DrillIn always returns a DrillInMsg; the type assertion can't fail.
 		dm, _ := DrillIn(drv, pwd, number).(DrillInMsg)
-		return SidebarLoadedMsg{Number: number, Activity: activity, Rendered: dm.Rendered, Raw: dm.Raw, Err: dm.Err}
+		return SidebarLoadedMsg{Number: number, Activity: activity, Rendered: dm.Rendered, Raw: dm.Raw, TranscriptErr: dm.Err}
 	}
 }
 
