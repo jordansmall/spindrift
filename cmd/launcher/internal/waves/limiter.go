@@ -92,13 +92,7 @@ func (l *Limiter) Resize(newCap int) {
 	grew := newCap > l.cap
 	l.cap = newCap
 	l.mu.Unlock()
-	if grew {
-		l.cond.Broadcast()
-		select {
-		case l.grow <- struct{}{}:
-		default:
-		}
-	}
+	l.signalGrow(grew)
 }
 
 // ResizeDelta adjusts the cap by delta relative to its current value,
@@ -115,12 +109,19 @@ func (l *Limiter) ResizeDelta(delta int) {
 	grew := newCap > l.cap
 	l.cap = newCap
 	l.mu.Unlock()
-	if grew {
-		l.cond.Broadcast()
-		select {
-		case l.grow <- struct{}{}:
-		default:
-		}
+	l.signalGrow(grew)
+}
+
+// signalGrow wakes Grown's listener and any Acquire waiters when grew is
+// true. Must be called after releasing l.mu, never while holding it.
+func (l *Limiter) signalGrow(grew bool) {
+	if !grew {
+		return
+	}
+	l.cond.Broadcast()
+	select {
+	case l.grow <- struct{}{}:
+	default:
 	}
 }
 
