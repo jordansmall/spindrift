@@ -69,6 +69,9 @@ var transientPatterns = []struct {
 	{"529 Overloaded", Overloaded},
 	// Claude plain-text error messages.
 	{"Claude Code usage limit reached", RateLimit},
+	{"hit your session limit", RateLimit},
+	{"hit your weekly limit", RateLimit},
+	{"hit your Opus limit", RateLimit},
 	{"Overloaded", Overloaded},
 	// Network-level failures logged by the Go HTTP client or stdlib.
 	{"connection refused", Network},

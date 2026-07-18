@@ -346,6 +346,69 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// Claude Code OAuth/subscription session-limit: plain-text notice
+		// carried in the CLI's synthetic-terminator assistant event (issue
+		// #1539) — distinct wording from the API-key usage_limit_reached form.
+		name: "RateLimit_OAuthSessionLimit_PlainText",
+		lines: []string{
+			`You've hit your session limit · resets 6:30pm (UTC)`,
+		},
+		wantClass:   claude.Transient,
+		wantReason:  claude.RateLimit,
+		wantResetAt: nil,
+	},
+	{
+		// Sibling wording for the weekly-quota variant of the same OAuth notice.
+		name: "RateLimit_OAuthWeeklyLimit_PlainText",
+		lines: []string{
+			`You've hit your weekly limit · resets Mon 12:00am (UTC)`,
+		},
+		wantClass:   claude.Transient,
+		wantReason:  claude.RateLimit,
+		wantResetAt: nil,
+	},
+	{
+		// Sibling wording for the per-model Opus-quota variant of the same
+		// OAuth notice.
+		name: "RateLimit_OAuthOpusLimit_PlainText",
+		lines: []string{
+			`You've hit your Opus limit · resets 6:30pm (UTC)`,
+		},
+		wantClass:   claude.Transient,
+		wantReason:  claude.RateLimit,
+		wantResetAt: nil,
+	},
+	{
+		// Same synthetic-terminator shape as SyntheticTerminator below, but
+		// with no top-level "error" field — isAgentContentEvent then treats
+		// the line as ordinary agent content and clears the candidate, so
+		// this stays Terminal. Documents that #1539's fix depends on the
+		// CLI setting "error" on this event, matching the real captured log.
+		name: "Terminal_OAuthSessionLimit_NoErrorField_Swallowed",
+		lines: []string{
+			`{"type":"assistant","message":{"id":"a2645b97-8af6-46ec-aa20-7cde65f631ea","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You've hit your session limit · resets 6:30pm (UTC)"}]},"session_id":"e89ee32d-c257-468d-c90b-5549c606b8bd","uuid":"1f7d9873-9ac8-4f1a-a7a5-d6ed1a3a6793"}`,
+		},
+		wantClass:   claude.Terminal,
+		wantReason:  claude.TaskFailed,
+		wantResetAt: nil,
+	},
+	{
+		// Real captured log from issue #1539: the CLI's rate_limit_event pair,
+		// the synthetic-terminator assistant notice, and the terminal
+		// is_error:true/429 result line. ResetAt must propagate from the
+		// rate_limit_event's "resetsAt" field.
+		name: "RateLimit_OAuthSessionLimit_SyntheticTerminator",
+		lines: []string{
+			`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1784399400,"rateLimitType":"five_hour","utilization":0.99,"isUsingOverage":false,"surpassedThreshold":0.9},"uuid":"d090b94c-5ef8-4d26-a88d-ac84f5287512","session_id":"e89ee32d-c257-468d-c90b-5549c606b8bd"}`,
+			`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1784399400,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false},"uuid":"1d41b14e-4652-4f9e-8f45-bada98ee0553","session_id":"e89ee32d-c257-468d-c90b-5549c606b8bd"}`,
+			`{"type":"assistant","message":{"id":"a2645b97-8af6-46ec-aa20-7cde65f631ea","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You've hit your session limit · resets 6:30pm (UTC)"}]},"error":"rate_limit","session_id":"e89ee32d-c257-468d-c90b-5549c606b8bd","uuid":"1f7d9873-9ac8-4f1a-a7a5-d6ed1a3a6793"}`,
+			`{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"result":"You've hit your session limit · resets 6:30pm (UTC)","stop_reason":"stop_sequence","session_id":"e89ee32d-c257-468d-c90b-5549c606b8bd","terminal_reason":"api_error","uuid":"b58acae4-f040-47fd-b18d-6a49eabb4b5b"}`,
+		},
+		wantClass:   claude.Transient,
+		wantReason:  claude.RateLimit,
+		wantResetAt: func() *time.Time { t := time.Unix(1784399400, 0).UTC(); return &t }(),
+	},
+	{
 		// Rate-limit markers nested inside an assistant message's own content
 		// (the agent's prose about rate-limit code, or a diff/test fixture it
 		// wrote) must not poison classification — no terminating API error
