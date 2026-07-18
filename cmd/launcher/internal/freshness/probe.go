@@ -122,7 +122,10 @@ func Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evalu
 }
 
 // fetchBaseTip fetches baseBranch from origin at pwd — no checkout, no pull,
-// no working-copy mutation — and returns the fetched commit sha.
+// no working-copy mutation — and returns the fetched commit sha as a full
+// 40-char SHA-1 (64 for SHA-256 repos): no --short/--abbrev flag is passed to
+// `git rev-parse`, so the format matches the launcher's own headRev, which
+// the Console's rebuilt-tip comparison (res.Rev == builtRev) relies on.
 func fetchBaseTip(pwd, baseBranch string) (string, error) {
 	fetch := exec.Command("git", "-C", pwd, "fetch", "origin", baseBranch)
 	var stderr bytes.Buffer
