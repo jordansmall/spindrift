@@ -778,6 +778,21 @@ func windowSidebarLines(s SidebarState, budget int) []string {
 // to show (issue #829, #1002, inherited from the retired drill-in pane).
 const headerFooterLines = 2
 
+// sidebarErr returns the error the current view should surface: s.Err
+// unconditionally (nothing loaded at all, e.g. no Driver), otherwise
+// s.TranscriptErr only while ShowTranscript is true — a Transcript-only
+// load failure must never blank out an independently-loaded, otherwise-good
+// Activity feed (#1501 review finding).
+func sidebarErr(s SidebarState) error {
+	if s.Err != nil {
+		return s.Err
+	}
+	if s.ShowTranscript {
+		return s.TranscriptErr
+	}
+	return nil
+}
+
 // sidebarLabel renders s's one-line pane header: "activity #N" by default,
 // "transcript #N" once toggled to the Transcript, "(raw)" appended while
 // ShowRaw — the sidebar analogue of renderDrillIn's transcript-only label,
@@ -819,8 +834,8 @@ func renderSidebarFullscreen(s SidebarState, height int) string {
 		return b.String()
 	}
 
-	if s.Err != nil {
-		fmt.Fprintf(&b, "sidebar failed: %s\n", s.Err)
+	if err := sidebarErr(s); err != nil {
+		fmt.Fprintf(&b, "sidebar failed: %s\n", err)
 		return b.String()
 	}
 
@@ -860,8 +875,8 @@ func renderSidebarDocked(s SidebarState, width, budget int, focused bool) string
 		return b.String()
 	}
 
-	if s.Err != nil {
-		fmt.Fprintf(&b, "%s\n", clip("sidebar failed: "+s.Err.Error(), width, false))
+	if err := sidebarErr(s); err != nil {
+		fmt.Fprintf(&b, "%s\n", clip("sidebar failed: "+err.Error(), width, false))
 		return b.String()
 	}
 

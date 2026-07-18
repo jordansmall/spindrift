@@ -802,6 +802,30 @@ func TestView_SidebarErr_Surfaced(t *testing.T) {
 	}
 }
 
+// TestView_SidebarTranscriptErr_HiddenBehindActivity verifies a Transcript-
+// only load failure (DrillIn's error, surfaced as TranscriptErr) never blanks
+// out an independently-loaded, otherwise-good Activity feed — the error only
+// shows once the operator actually toggles to the Transcript (#1501 review
+// finding).
+func TestView_SidebarTranscriptErr_HiddenBehindActivity(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}, TranscriptErr: errBoom})
+
+	out := View(m)
+	if strings.Contains(out, errBoom.Error()) {
+		t.Errorf("View() = %q, want the Transcript error hidden while showing the Activity feed", out)
+	}
+	if !strings.Contains(out, "hi") {
+		t.Errorf("View() = %q, want the Activity feed shown", out)
+	}
+
+	m = Update(m, SidebarToggleMsg{})
+	out = View(m)
+	if !strings.Contains(out, errBoom.Error()) {
+		t.Errorf("View() = %q, want the Transcript error shown once toggled to the Transcript", out)
+	}
+}
+
 // TestView_SidebarFullscreen_WindowsToViewportHeight verifies the fullscreen
 // sidebar joins only as many lines as the viewport can show, instead of the
 // whole tail from Offset to the end of a (potentially multi-MB) transcript,

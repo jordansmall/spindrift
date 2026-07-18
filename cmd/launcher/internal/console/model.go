@@ -172,7 +172,15 @@ type SidebarState struct {
 	// ShowRaw is whether the Transcript view shows TranscriptRaw instead of
 	// TranscriptRendered — meaningless while ShowTranscript is false.
 	ShowRaw bool
-	Err     error
+	// Err is set when nothing could load at all (e.g. no Driver configured)
+	// — shown regardless of ShowTranscript, since neither view has anything
+	// to fall back to.
+	Err error
+	// TranscriptErr is set when only the Transcript's own load failed
+	// (DrillIn's error) while Activity loaded independently — shown only
+	// while ShowTranscript is true, so a Transcript-only failure never
+	// blanks out an otherwise-good Activity feed (#1501 review finding).
+	TranscriptErr error
 	// Offset is the index of the first visible line in the currently active
 	// form — the scroll position, DrillInState.Offset's sidebar analogue.
 	Offset int
@@ -273,6 +281,7 @@ func Update(m Model, msg Msg) Model {
 			ShowTranscript:     showTranscript,
 			ShowRaw:            showRaw,
 			Err:                msg.Err,
+			TranscriptErr:      msg.TranscriptErr,
 			Offset:             offset,
 		}
 		m.Sidebar.Lines = sidebarLines(m.Sidebar)
