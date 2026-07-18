@@ -21,12 +21,15 @@ import (
 // main.go's runExitCode).
 var ErrImageStale = errors.New("image stale; rebuild and re-invoke")
 
-// Discoverer re-queries the dispatchable batch, its blocker edges, and the
+// Discoverer re-queries the dispatchable batch, its blocker edges, the
 // source (native relationship vs body-text parsing) each blocker was
-// resolved from. RunContinuous calls it once at startup and again before
+// resolved from, and the set of issues whose own BuildEdges/DepsOf call
+// errored (#752, #1103) — a transient tracker hiccup that looks identical to
+// a confirmed zero-blocker issue in edges alone unless a caller checks
+// failed explicitly. RunContinuous calls it once at startup and again before
 // every slot refill, so a blocker that merges mid-run is picked up without a
 // fresh invocation.
-type Discoverer func() (issues []Issue, edges map[string][]string, sources Sources, err error)
+type Discoverer func() (issues []Issue, edges map[string][]string, sources Sources, failed map[string]bool, err error)
 
 // FreshnessChecker answers whether a refill may launch a new Box.
 // Applicable is false for a runtime with no loaded image to compare
@@ -44,7 +47,7 @@ type FreshnessChecker func() (applicable, fresh bool, message string)
 // nextReady's does not render it: the only current Sources consumer,
 // writeBlockedMarker, fires for OriginClaimed only, a mode continuous
 // dispatch never uses (issue #662).
-func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, sources Sources, claimed map[string]bool) (Issue, bool) {
+func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool, claimed map[string]bool) (Issue, bool) {
 	for _, iss := range issues {
 		var failed, unready []string
 		if !claimed[iss.Number] {
@@ -53,6 +56,11 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 		switch {
 		case claimed[iss.Number]:
 			fmt.Printf("    ~~ #%s already claimed this run; stale re-discovery, skipping\n", iss.Number)
+		case !cfg.IgnoreBlockers && depsOfFailed[iss.Number]:
+			// Own DepsOf call failed (#752, #1103) -- edges[iss.Number] is
+			// unreliable, not a confirmed zero-blocker result. Hold rather
+			// than launch or cascade-fail; the next refill retries.
+			fmt.Printf("    ~~ #%s blocker check failed; will retry\n", iss.Number)
 		case len(failed) > 0:
 			fmt.Printf("    !! #%s  status=blocker-failed  note=#%s failed; skipping\n", iss.Number, strings.Join(failed, ", #"))
 			transitionState(it, iss.Number, forge.Dispatchable, forge.Failed)
@@ -141,7 +149,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			fmt.Printf("==> %s\n", msg)
 			return false
 		}
-		issues, edges, sources, err := discover()
+		issues, edges, sources, failed, err := discover()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "continuous: re-discover: %v\n", err)
 			return false
@@ -153,7 +161,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			}
 		}
 		checkOverlap := waveOverlapCheck(cfg, it, cf)
-		iss, ok := nextReady(cfg, it, cf, checkOverlap, issues, edges, sources, claimed)
+		iss, ok := nextReady(cfg, it, cf, checkOverlap, issues, edges, sources, failed, claimed)
 		if !ok {
 			return false
 		}

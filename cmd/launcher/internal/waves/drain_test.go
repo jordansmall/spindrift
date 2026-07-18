@@ -36,7 +36,7 @@ func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "blocked issue"},
 		{Number: "2", Title: "unblocked issue"},
-	}, edges, nil, OriginDiscovered); err != nil {
+	}, edges, nil, nil, OriginDiscovered); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -82,7 +82,7 @@ func TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext(t *testing.T) {
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "overlapping issue"},
 		{Number: "2", Title: "clean issue"},
-	}, map[string][]string{}, nil, OriginDiscovered); err != nil {
+	}, map[string][]string{}, nil, nil, OriginDiscovered); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -119,7 +119,7 @@ func TestDrainMaxJobs_FailsDependentWhenBlockerFails(t *testing.T) {
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "dependent"},
 		{Number: "2", Title: "unblocked"},
-	}, edges, nil, OriginDiscovered); err != nil {
+	}, edges, nil, nil, OriginDiscovered); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -164,7 +164,7 @@ func TestDrainMaxJobs_MaxJobsCapHonored(t *testing.T) {
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
 		{Number: "3", Title: "third"},
-	}, map[string][]string{}, nil, OriginDiscovered); err != nil {
+	}, map[string][]string{}, nil, nil, OriginDiscovered); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -199,7 +199,7 @@ func TestDrainMaxJobs_PrintsRemainingCountAfterCapNotFalselyBlocked(t *testing.T
 			{Number: "1", Title: "first"},
 			{Number: "2", Title: "second"},
 			{Number: "3", Title: "third"},
-		}, map[string][]string{}, nil, OriginDiscovered); err != nil {
+		}, map[string][]string{}, nil, nil, OriginDiscovered); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -236,7 +236,7 @@ func TestDrainMaxJobs_ZeroMeansUncapped(t *testing.T) {
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
 		{Number: "3", Title: "third"},
-	}, map[string][]string{}, nil, OriginDiscovered); err != nil {
+	}, map[string][]string{}, nil, nil, OriginDiscovered); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -273,7 +273,7 @@ func TestDrainMaxJobs_PrintsRemainingCountAfterPartialWave(t *testing.T) {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "unblocked"},
 			{Number: "2", Title: "dependent"},
-		}, edges, nil, OriginDiscovered); err != nil {
+		}, edges, nil, nil, OriginDiscovered); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -309,7 +309,7 @@ func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 	s := newSettle(fc, fc)
 	err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "blocked issue"},
-	}, edges, nil, OriginDiscovered)
+	}, edges, nil, nil, OriginDiscovered)
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Errorf("drainMaxJobs: got %v, want ErrOpenNoneDispatchable", err)
@@ -346,7 +346,7 @@ func TestDrainMaxJobs_Selective_PartialWave_PrintsRemainingAndRerunCommand(t *te
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "12", Title: "blocker"},
 			{Number: "15", Title: "dependent"},
-		}, edges, nil, OriginSelective); err != nil {
+		}, edges, nil, nil, OriginSelective); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -404,7 +404,7 @@ func TestDrainMaxJobs_Selective_ZeroSelected_ExitsWithRerunHint(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
 		runErr = drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "10", Title: "candidate"},
-		}, map[string][]string{}, nil, OriginSelective)
+		}, map[string][]string{}, nil, nil, OriginSelective)
 	})
 
 	if !errors.Is(runErr, ErrOpenNoneDispatchable) {
@@ -444,7 +444,7 @@ func TestDrainMaxJobs_BlockedLineNamesBlockers(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
 		err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "blocked issue"},
-		}, edges, nil, OriginDiscovered)
+		}, edges, nil, nil, OriginDiscovered)
 		if !errors.Is(err, ErrOpenNoneDispatchable) {
 			t.Fatalf("drainMaxJobs: got %v, want ErrOpenNoneDispatchable", err)
 		}
@@ -482,7 +482,7 @@ func TestDrainMaxJobs_FailedBlockerLineNamesBlockers(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "dependent"},
-		}, edges, nil, OriginDiscovered); err != nil {
+		}, edges, nil, nil, OriginDiscovered); err != nil {
 			t.Fatalf("drainMaxJobs: %v", err)
 		}
 	})
@@ -517,7 +517,7 @@ func TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource(t *testing.T) {
 	s := newSettle(fc, fc)
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
-	}, edges, sources, OriginClaimed); err != nil {
+	}, edges, sources, nil, OriginClaimed); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -556,7 +556,7 @@ func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 	// not ErrOpenNoneDispatchable and not a cascade-fail.
 	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 		{Number: "1", Title: "claimed issue"},
-	}, edges, nil, OriginClaimed); err != nil {
+	}, edges, nil, nil, OriginClaimed); err != nil {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
@@ -570,5 +570,94 @@ func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
+	}
+}
+
+// TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue verifies that an issue named
+// in BuildEdges' failed set (#1103) — its own DepsOf call errored, a
+// transient tracker hiccup indistinguishable from "confirmed zero blockers"
+// in edges alone — is held for a later invocation rather than dispatched or
+// cascade-failed, mirroring the console's Queue.Discover hold (#752).
+func TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 2
+	c.MaxJobs = 2
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+
+	failed := map[string]bool{"1": true}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	out := testutil.CaptureStdout(t, func() {
+		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+			{Number: "1", Title: "deps-of-failed issue"},
+			{Number: "2", Title: "clean issue"},
+		}, map[string][]string{}, nil, failed, OriginDiscovered); err != nil {
+			t.Fatalf("drainMaxJobs: %v", err)
+		}
+	})
+
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "2" {
+		t.Fatalf("RunCalls: got %v, want exactly issue 2", fr.RunCalls)
+	}
+
+	iss1, err := fc.Issue("1")
+	if err != nil {
+		t.Fatalf("Issue(1): %v", err)
+	}
+	if containsLabel(iss1.Labels, c.FailedLabel) {
+		t.Errorf("issue 1 must NOT be cascade-failed on a DepsOf check failure; labels=%v", iss1.Labels)
+	}
+
+	if !strings.Contains(out, "#1") || !strings.Contains(out, "retry") {
+		t.Errorf("output must name #1 and explain it will retry; got:\n%s", out)
+	}
+}
+
+// TestDrainMaxJobs_ClaimedIssue_DepsOfFailedWritesRetryMarker verifies that
+// when the OriginClaimed single-issue path's own DepsOf call failed (#1103),
+// drainMaxJobs writes logs/blocked.txt so the release workflow reverts the
+// claim and retries later, instead of silently doing nothing (edges[num]
+// being empty from the failed lookup must never read as "confirmed zero
+// blockers").
+func TestDrainMaxJobs_ClaimedIssue_DepsOfFailedWritesRetryMarker(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 1
+	c.MaxJobs = 1
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.InProgressLabel}})
+
+	fr := runner.NewFake()
+	failed := map[string]bool{"1": true}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+		{Number: "1", Title: "claimed issue"},
+	}, map[string][]string{}, nil, failed, OriginClaimed); err != nil {
+		t.Fatalf("drainMaxJobs: %v", err)
+	}
+
+	b, err := os.ReadFile(filepath.Join(dir, "logs", blockedMarker))
+	if err != nil {
+		t.Fatalf("reading blocked marker: %v", err)
+	}
+	if !strings.Contains(string(b), "retry") {
+		t.Errorf("blocked marker = %q, want it to explain the claim will retry", string(b))
+	}
+
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0 (must not dispatch on a DepsOf check failure)", len(fr.RunCalls))
 	}
 }

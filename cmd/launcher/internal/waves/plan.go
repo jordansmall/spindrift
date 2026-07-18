@@ -73,6 +73,13 @@ type Input struct {
 	Issues  []Issue
 	Edges   map[string][]string
 	Sources Sources
+
+	// Failed names issues whose own BuildEdges/DepsOf call errored (#752,
+	// #1103) — a transient tracker hiccup that looks identical to a
+	// confirmed zero-blocker issue in Edges alone. NewPlan carries it
+	// through to Plan unchanged so drainMaxJobs can hold these issues for
+	// retry instead of treating the missing Edges entry as "ready".
+	Failed map[string]bool
 }
 
 // Plan is the pure result of validating a batch of issues for dispatch:
@@ -84,6 +91,9 @@ type Plan struct {
 	Issues  []Issue
 	Edges   map[string][]string
 	Sources Sources
+
+	// Failed carries Input.Failed through unchanged; see its doc comment.
+	Failed map[string]bool
 }
 
 // Config carries the subset of launcher config the wave engine needs.
@@ -141,7 +151,7 @@ func NewPlan(cfg Config, in Input) (Plan, error) {
 			return Plan{}, fmt.Errorf("ERROR: dependency cycle detected (issue #%s is in the cycle)", node)
 		}
 	}
-	return Plan{Mode: ModeDrain, Origin: in.Origin, Issues: in.Issues, Edges: in.Edges, Sources: in.Sources}, nil
+	return Plan{Mode: ModeDrain, Origin: in.Origin, Issues: in.Issues, Edges: in.Edges, Sources: in.Sources, Failed: in.Failed}, nil
 }
 
 // issueNums returns the number strings from a slice of issues.

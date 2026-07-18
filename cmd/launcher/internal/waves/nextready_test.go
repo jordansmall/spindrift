@@ -26,7 +26,7 @@ func TestNextReady_FailedBlockerCascadesToFailed(t *testing.T) {
 
 	iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
 		{Number: "1", Title: "dependent"},
-	}, edges, nil, map[string]bool{})
+	}, edges, nil, nil, map[string]bool{})
 
 	if ok {
 		t.Fatalf("nextReady: got (%v, true), want ok=false", iss)
@@ -60,7 +60,7 @@ func TestNextReady_BlockedLineNamesBlockers(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
 		iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
 			{Number: "1", Title: "blocked issue"},
-		}, edges, nil, map[string]bool{})
+		}, edges, nil, nil, map[string]bool{})
 		if ok {
 			t.Fatalf("nextReady: got (%v, true), want ok=false", iss)
 		}
@@ -91,7 +91,7 @@ func TestNextReady_FailedBlockerLineNamesBlockers(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
 		iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
 			{Number: "1", Title: "dependent"},
-		}, edges, nil, map[string]bool{})
+		}, edges, nil, nil, map[string]bool{})
 		if ok {
 			t.Fatalf("nextReady: got (%v, true), want ok=false", iss)
 		}
@@ -130,7 +130,7 @@ func TestNextReady_TouchOverlapDefers(t *testing.T) {
 	iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
 		{Number: "1", Title: "overlapping issue"},
 		{Number: "2", Title: "clean issue"},
-	}, map[string][]string{}, nil, map[string]bool{})
+	}, map[string][]string{}, nil, nil, map[string]bool{})
 
 	if !ok {
 		t.Fatalf("nextReady: got ok=false, want a match")
@@ -164,7 +164,7 @@ func TestNextReady_HappyPath(t *testing.T) {
 	iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
-	}, map[string][]string{}, nil, map[string]bool{})
+	}, map[string][]string{}, nil, nil, map[string]bool{})
 
 	if !ok {
 		t.Fatalf("nextReady: got ok=false, want a match")

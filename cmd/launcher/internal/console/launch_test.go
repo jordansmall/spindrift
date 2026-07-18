@@ -47,7 +47,10 @@ func TestRunContinuous_DrainsScriptedQueue_LaunchesOneDispatchEndToEnd(t *testin
 	inner := settle.NewFake()
 	qs := queueSettler{Settler: inner, q: q}
 
-	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) { return q.Discover(f, f, "") }
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
+		issues, edges, sources, err := q.Discover(f, f, "")
+		return issues, edges, sources, nil, err
+	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
 
 	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, f, f, dir, factory, qs, discover, fresh)
@@ -221,8 +224,9 @@ func TestQueue_Discover_HeldPickLaunchesOnceBlockerClears(t *testing.T) {
 	inner := settle.NewFake()
 	qs := queueSettler{Settler: inner, q: q}
 
-	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) {
-		return q.Discover(f, f, "agent-failed")
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
+		issues, edges, sources, err := q.Discover(f, f, "agent-failed")
+		return issues, edges, sources, nil, err
 	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
 
@@ -263,7 +267,7 @@ func TestQueue_Discover_HeldPickLaunchesOnceBlockerClears(t *testing.T) {
 // and TestRunContinuous_DivergentLabels_DoubleClaims (#706, #980): both drive
 // waves.RunContinuous over the same queued #42 pick and differ only in the
 // waves.Config they pass and the assertion on f.TransitionStateCalls.
-func setupForgeQueueFactory(t *testing.T) (f *forge.Fake, dir string, factory *dispatch.Factory, qs queueSettler, discover func() ([]waves.Issue, map[string][]string, waves.Sources, error), fresh func() (bool, bool, string)) {
+func setupForgeQueueFactory(t *testing.T) (f *forge.Fake, dir string, factory *dispatch.Factory, qs queueSettler, discover func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error), fresh func() (bool, bool, string)) {
 	t.Helper()
 
 	f = forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
@@ -290,7 +294,10 @@ func setupForgeQueueFactory(t *testing.T) (f *forge.Fake, dir string, factory *d
 	inner := settle.NewFake()
 	qs = queueSettler{Settler: inner, q: q}
 
-	discover = func() ([]waves.Issue, map[string][]string, waves.Sources, error) { return q.Discover(f, f, "") }
+	discover = func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
+		issues, edges, sources, err := q.Discover(f, f, "")
+		return issues, edges, sources, nil, err
+	}
 	fresh = func() (bool, bool, string) { return false, true, "" }
 
 	return f, dir, factory, qs, discover, fresh
@@ -342,7 +349,10 @@ func TestQueue_Discover_AlreadyInProgressPick_NeverLaunches(t *testing.T) {
 	inner := settle.NewFake()
 	qs := queueSettler{Settler: inner, q: q}
 
-	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) { return q.Discover(f, f, "") }
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
+		issues, edges, sources, err := q.Discover(f, f, "")
+		return issues, edges, sources, nil, err
+	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
 
 	// The dissolved pick's issue is still open on the tracker but
@@ -404,7 +414,10 @@ func TestQueue_Discover_AlreadyCompletePick_NeverLaunches(t *testing.T) {
 	inner := settle.NewFake()
 	qs := queueSettler{Settler: inner, q: q}
 
-	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, error) { return q.Discover(f, f, "") }
+	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
+		issues, edges, sources, err := q.Discover(f, f, "")
+		return issues, edges, sources, nil, err
+	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
 
 	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, f, f, dir, factory, qs, discover, fresh)

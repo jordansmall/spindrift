@@ -261,3 +261,87 @@ func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T
 		t.Errorf("RunCalls: got %d, want 0 (no Box launches once the probe is stale)", len(fr.RunCalls))
 	}
 }
+
+// TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched verifies that the batch
+// dispatch path (`run`) threads BuildEdges' failed set (#1103) through to the
+// wave engine: an issue whose own DepsOf call errored is held for retry, not
+// dispatched and not cascade-failed, while an unaffected sibling in the same
+// batch still dispatches normally.
+func TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	dir := tempLogDir(t)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
+
+	fr := runner.NewFake()
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: failDepsOf{Fake: fc, num: "1"},
+		codeForge:    fc,
+		factory:      testFactory(t, dir, fr),
+		settle:       settle.NewFake(),
+	}
+
+	if err := run(lc); err != nil {
+		t.Fatalf("run(lc): %v", err)
+	}
+
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "2" {
+		t.Fatalf("RunCalls: got %v, want exactly issue 2", fr.RunCalls)
+	}
+
+	iss1, err := fc.Issue("1")
+	if err != nil {
+		t.Fatalf("Issue(1): %v", err)
+	}
+	if containsLabel(iss1.Labels, c.failedLabel) {
+		t.Errorf("issue 1 must NOT be cascade-failed on a DepsOf check failure; labels=%v", iss1.Labels)
+	}
+}
+
+// TestRunExitCode_ContinuousDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched
+// verifies that CONTINUOUS_DISPATCH's discover closure threads BuildEdges'
+// failed set (#1103) through to nextReady exactly as the batch path does: an
+// issue whose own DepsOf call errored is held for retry rather than
+// dispatched, while an unaffected sibling still dispatches.
+func TestRunExitCode_ContinuousDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.continuousDispatch = true
+	c.maxParallel = 2
+	c.runtime = "bwrap"
+	dir := tempLogDir(t)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
+
+	fr := runner.NewFake()
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: failDepsOf{Fake: fc, num: "1"},
+		codeForge:    fc,
+		factory:      testFactory(t, dir, fr),
+		settle:       settle.NewFake(),
+	}
+
+	if got := runExitCode(lc); got != 0 {
+		t.Errorf("runExitCode(lc) = %d, want 0", got)
+	}
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "2" {
+		t.Fatalf("RunCalls: got %v, want exactly issue 2", fr.RunCalls)
+	}
+
+	iss1, err := fc.Issue("1")
+	if err != nil {
+		t.Fatalf("Issue(1): %v", err)
+	}
+	if containsLabel(iss1.Labels, c.failedLabel) {
+		t.Errorf("issue 1 must NOT be cascade-failed on a DepsOf check failure; labels=%v", iss1.Labels)
+	}
+}
