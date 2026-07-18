@@ -473,6 +473,28 @@ func TestLoadConfig_SpindriftDirsDefaultComesFromSchemaTable(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable proves a set
+// SPINDRIFT_PROMPT_DIR/SPINDRIFT_SKILLS_DIR env var still wins over the
+// schemaFlags table default, completing the precedence coverage the sibling
+// default-only test above leaves unexercised (issue #1180).
+func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable(t *testing.T) {
+	t.Setenv("SPINDRIFT_PROMPT_DIR", "from-env-prompt")
+	t.Setenv("SPINDRIFT_SKILLS_DIR", "from-env-skills")
+
+	withSchemaFlags(t, []flagEntry{
+		{env: "SPINDRIFT_PROMPT_DIR", dflt: "custom-prompt-default"},
+		{env: "SPINDRIFT_SKILLS_DIR", dflt: "custom-skills-default"},
+	})
+
+	c := loadConfig()
+	if c.spindriftPromptDir != "from-env-prompt" {
+		t.Errorf("spindriftPromptDir = %q, want from-env-prompt", c.spindriftPromptDir)
+	}
+	if c.spindriftSkillsDir != "from-env-skills" {
+		t.Errorf("spindriftSkillsDir = %q, want from-env-skills", c.spindriftSkillsDir)
+	}
+}
+
 // TestIntSchemaDefault covers intSchemaDefault directly: a numeric schema
 // default parses, a non-numeric one falls back to 0, and an absent key falls
 // back to 0 too (issue #672).
