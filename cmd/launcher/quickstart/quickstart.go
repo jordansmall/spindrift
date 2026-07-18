@@ -116,9 +116,11 @@ type ForgeBuilder func(repoSlug string, tracker trackerSettings, ghToken, jiraTo
 
 // buildForge is the production ForgeBuilder. The Code Forge is always
 // github (ADR 0027: Quickstart never prompts for it); the Issue Tracker
-// varies by the operator's choice. github.NewExecClient shells out to the
-// gh CLI, which reads GH_TOKEN from the process environment — runQuickstart
-// exports the collected token before calling this.
+// switches on tracker.issueTracker, which the wizard always sets to
+// "github" (issue #1559) — the jira/local cases exist for buildForge's own
+// tests. github.NewExecClient shells out to the gh CLI, which reads
+// GH_TOKEN from the process environment — runQuickstart exports the
+// collected token before calling this.
 func buildForge(repoSlug string, tracker trackerSettings, ghToken, jiraToken string) (forge.IssueTracker, forge.CodeForge) {
 	cf := github.NewExecClient(repoSlug, defaultDispatchLabels, defaultBranchPrefix)
 	switch tracker.issueTracker {
@@ -200,18 +202,11 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 	gitUserName := promptDefault("Git user name", env.GitConfig("user.name"))
 	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
 
-	tracker := trackerSettings{issueTracker: prompt("Issue Tracker [github/jira/local]")}
-	switch tracker.issueTracker {
-	case "jira":
-		tracker.jiraBaseURL = prompt("Jira base URL")
-		tracker.jiraProjectKey = prompt("Jira project key")
-		tracker.jiraEmail = prompt("Jira account email (optional)")
-	case "local":
-		tracker.localIssuesDir = prompt("Local issues directory [.spindrift/issues]")
-		if tracker.localIssuesDir == "" {
-			tracker.localIssuesDir = ".spindrift/issues"
-		}
-	}
+	// Quickstart is GitHub-only (issue #1559): no tracker-selection prompt,
+	// no Jira/local sub-prompts. The Jira/local adapters and runtime
+	// ISSUE_TRACKER validation stay in place for an operator who hand-edits
+	// the generated flake.
+	tracker := trackerSettings{issueTracker: "github"}
 
 	ghToken, err := acquireGHToken(env, w, promptMasked)
 	if err != nil {
@@ -240,26 +235,18 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 	} else {
 		anthropicAPIKey = promptMasked("Anthropic API key (ANTHROPIC_API_KEY)")
 	}
-	jiraToken := ""
-	if tracker.issueTracker == "jira" {
-		jiraToken = promptMasked("Jira API token (JIRA_TOKEN)")
-	}
 
 	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte(renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail, tracker)), 0o644); err != nil {
 		return fmt.Errorf("write flake.nix: %w", err)
 	}
 	fmt.Fprintln(w, "wrote: flake.nix")
 
-	if err := os.WriteFile(filepath.Join(dir, "harness.env"), []byte(renderHarnessEnv(ghToken, claudeOAuthToken, anthropicAPIKey, jiraToken)), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "harness.env"), []byte(renderHarnessEnv(ghToken, claudeOAuthToken, anthropicAPIKey)), 0o600); err != nil {
 		return fmt.Errorf("write harness.env: %w", err)
 	}
 	fmt.Fprintln(w, "wrote: harness.env")
 
-	gitignore := quickstartGitignore
-	if tracker.issueTracker == "local" {
-		gitignore += fmt.Sprintf("\n# private local issue files — never commit these\n%s/\n", strings.TrimSuffix(tracker.localIssuesDir, "/"))
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(quickstartGitignore), 0o644); err != nil {
 		return fmt.Errorf("write .gitignore: %w", err)
 	}
 	fmt.Fprintln(w, "wrote: .gitignore")
@@ -274,7 +261,7 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 	if err := os.Setenv("GH_TOKEN", ghToken); err != nil {
 		return fmt.Errorf("set GH_TOKEN: %w", err)
 	}
-	it, cf := forgeBuilder(repoSlug, tracker, ghToken, jiraToken)
+	it, cf := forgeBuilder(repoSlug, tracker, ghToken, "")
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    tracker.issueTracker,
 		Label:           defaultDispatchLabels.Dispatchable,
@@ -415,9 +402,12 @@ harness.env
 
 const quickstartEnvrc = "use flake\n"
 
-// trackerSettings holds the fields collected for whichever Issue Tracker the
-// operator chose (ADR 0013): github needs none beyond repoSlug, jira adds
+// trackerSettings holds the fields buildForge needs to construct an Issue
+// Tracker adapter (ADR 0013): github needs none beyond repoSlug, jira adds
 // its base URL/project key/optional email, local adds an issues directory.
+// The wizard only ever populates issueTracker: "github" (issue #1559) — the
+// jira/local fields exist for buildForge's own adapter-construction tests
+// (forge_test.go), not any wizard-driven path.
 type trackerSettings struct {
 	issueTracker   string
 	jiraBaseURL    string
@@ -431,18 +421,7 @@ type trackerSettings struct {
 // reference (docs/flake-options.md) for everything else (ADR 0027). No
 // prompts/ directory is scaffolded — the harness defaults every prompt.
 func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker trackerSettings) string {
-	var trackerLines strings.Builder
-	fmt.Fprintf(&trackerLines, "            settings.issueDiscovery.issueTracker = \"%s\";\n", nixEscape(tracker.issueTracker))
-	switch tracker.issueTracker {
-	case "jira":
-		fmt.Fprintf(&trackerLines, "            settings.repository.jiraBaseURL = \"%s\";\n", nixEscape(tracker.jiraBaseURL))
-		fmt.Fprintf(&trackerLines, "            settings.repository.jiraProjectKey = \"%s\";\n", nixEscape(tracker.jiraProjectKey))
-		if tracker.jiraEmail != "" {
-			fmt.Fprintf(&trackerLines, "            settings.repository.jiraEmail = \"%s\";\n", nixEscape(tracker.jiraEmail))
-		}
-	case "local":
-		fmt.Fprintf(&trackerLines, "            settings.issueDiscovery.localIssuesDir = \"%s\";\n", nixEscape(tracker.localIssuesDir))
-	}
+	trackerLine := fmt.Sprintf("            settings.issueDiscovery.issueTracker = \"%s\";\n", nixEscape(tracker.issueTracker))
 
 	return fmt.Sprintf(`{
   description = "A spindrift consumer — headless Claude Code agents in nix-built, disposable containers, one per GitHub issue";
@@ -486,7 +465,7 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker
         };
     };
 }
-`, nixEscape(runtime), nixEscape(repoSlug), nixEscape(gitUserName), nixEscape(gitUserEmail), trackerLines.String())
+`, nixEscape(runtime), nixEscape(repoSlug), nixEscape(gitUserName), nixEscape(gitUserEmail), trackerLine)
 }
 
 // nixEscape escapes a string for embedding in a Nix double-quoted string
@@ -504,17 +483,14 @@ func nixEscape(s string) string {
 }
 
 // renderHarnessEnv writes only the secrets the wizard actually collected:
-// GH_TOKEN, whichever Claude credential the operator chose (OAuth token or
-// API key, never both), and JIRA_TOKEN when the jira tracker was chosen.
-func renderHarnessEnv(ghToken, claudeOAuthToken, anthropicAPIKey, jiraToken string) string {
+// GH_TOKEN, and whichever Claude credential the operator chose (OAuth token
+// or API key, never both).
+func renderHarnessEnv(ghToken, claudeOAuthToken, anthropicAPIKey string) string {
 	out := fmt.Sprintf("GH_TOKEN=%s\n", ghToken)
 	if claudeOAuthToken != "" {
 		out += fmt.Sprintf("CLAUDE_CODE_OAUTH_TOKEN=%s\n", claudeOAuthToken)
 	} else {
 		out += fmt.Sprintf("ANTHROPIC_API_KEY=%s\n", anthropicAPIKey)
-	}
-	if jiraToken != "" {
-		out += fmt.Sprintf("JIRA_TOKEN=%s\n", jiraToken)
 	}
 	return out
 }

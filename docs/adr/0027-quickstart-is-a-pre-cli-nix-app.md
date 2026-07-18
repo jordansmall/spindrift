@@ -28,8 +28,12 @@ none. It refuses to clobber an existing `flake.nix`/`harness.env` unless
 `--force` (backing each up to `*.bak`), and is interactive-only: a non-TTY exits
 with a "write the files directly for scripted setup" message.
 
-The wizard prompts the Issue Tracker (github/jira/local) and lets the Code Forge
-follow as github; `driver` is fixed at `claude` (the only one). Detected values
+The wizard is GitHub-only (issue #1559): it never prompts for the Issue
+Tracker, always writing `issueTracker = "github"` and letting the Code Forge
+follow as github; `driver` is fixed at `claude` (the only one). The Jira and
+local Issue Tracker adapters, and the runtime `ISSUE_TRACKER` validation, stay
+available for an operator who hand-edits the generated flake — the wizard just
+never offers them. Detected values
 (runtime by `podman → docker → nerdctl(⇒ rancher) → bwrap` precedence, git
 identity from host `git config`, repoSlug from `git remote`) appear as inline
 pre-filled defaults. nerdctl is probed after docker since Rancher Desktop's
