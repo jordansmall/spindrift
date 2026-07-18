@@ -16,7 +16,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift dispatch 42 57`       | dispatch exactly these issues, bypassing the label/barrier gates                |
 | `spindrift dispatch --no-build`  | fail fast if the image is absent instead of building it first (split build/run) |
 | `spindrift dispatch --yes`       | skip the confirmation prompt when dispatching unlabeled issues (alias `--force`)|
-| `spindrift research`             | advise-only research dispatch: launch one container per `agent-research` issue, post a verdict comment, apply the terminal label — see [Research dispatch](../README.md#research-dispatch) |
+| `spindrift research`             | advise-only research dispatch: launch one container per `agent-research` issue, post a verdict comment, apply the terminal label — see [Research dispatch](#research-dispatch) |
 | `spindrift research 42 57`       | research exactly these issues, same selective semantics as `dispatch <nums>`    |
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
@@ -498,7 +498,7 @@ the authoritative list.
 | var                    | default | `settings` section | meaning                                                |
 | ---------------------- | ------- | ------------------ | ------------------------------------------------------ |
 | `MAX_JOBS`             | `0`     | `concurrency`      | caps the wave size (`0` = uncapped) |
-| `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the image-freshness probe before every launch; exits with a new documented code when the probe finds the loaded image stale (see the [exit-code table](../README.md#dogfood-loop)) |
+| `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the image-freshness probe before every launch; exits with a new documented code when the probe finds the loaded image stale (see the [exit-code table](#dogfood-loop)) |
 | `MAX_FIX_ATTEMPTS`     | `3`     | `selfHealing`      | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
 | `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge (`0` disables rebase retries); also caps the opt-in [Stale-base preflight](#stale-base-preflight)'s rebase budget |
 | `PREFLIGHT_STALE_BASE` | `` (off) | `selfHealing`    | opt-in: proactively rebase a green-but-behind PR (no conflict) and re-green it before merging — see [Stale-base preflight](#stale-base-preflight); off by default merges a green-but-behind PR as-is |
@@ -784,7 +784,7 @@ Forge stays `github` regardless (Jira issues, GitHub PRs).
   `spindrift doctor`'s `Probe()` check validates Jira auth and reachability
   independently of the GitHub Code Forge probe.
 
-  A [research dispatch](../README.md#research-dispatch)'s verdict terminals
+  A [research dispatch](#research-dispatch)'s verdict terminals
   (`recommend` / `reject` / `unclear`) always ride this same label-fallback
   mechanism — they swap the `agent-research-*` labels, never a Jira workflow
   status. `JIRA_STATUS_MAPPING` has no research-state keys, and none are
@@ -1279,6 +1279,173 @@ the pluggable OCI/bwrap runner ([ADR 0006](adr/0006-box-isolation-is-a-pluggable
 and nix-in-the-box ([ADR 0008](adr/0008-nix-is-a-first-class-default-in-the-box.md)).
 
 ---
+
+## Research dispatch
+
+`spindrift research` (and the selective `research <nums>` form, mirroring
+`dispatch <nums>`) is a second, advise-only Dispatch kind (ADR 0022): each
+container reviews one posted issue from inside a fresh clone of the Target
+repo, then posts a single structured comment carrying a verdict — it never
+edits the issue body, never closes it, and never promotes it to
+`ready-for-agent`. A human always acts on the verdict.
+
+Research shares the launcher's four canonical Dispatch states with `dispatch`,
+but maps them to its own disjoint `github` label family — claiming an issue
+never touches `ready-for-agent`/`agent-in-progress`/`agent-complete`, so an
+issue can legitimately wear both a work label and a research label at once:
+
+| label | meaning |
+|-------|---------|
+| `agent-research` | dual-role: standing state and trigger — apply it to fire a research dispatch |
+| `agent-research-in-progress` | a Box is reviewing the issue |
+| `agent-research-recommend` | relevant and enriched — promote it |
+| `agent-research-reject` | false positive, not worth doing, or a duplicate (named in the comment) — close it |
+| `agent-research-unclear` | relevance needs an answer only a human has — answer, then re-apply `agent-research` |
+| `agent-research-failed` | the Box crashed or produced no verdict — a human triage queue, distinct from `agent-research-reject` (a *successful* "this is a false positive" conclusion is `Complete`, never `Failed`) |
+
+Settle is strictly one-shot: parse the Outcome line, apply exactly one
+terminal label, done — no CI watch, no self-heal fix passes, no merge, since
+research never lands code. Retry is the same gesture as `dispatch`:
+re-applying `agent-research`. Research dispatches also ignore blocker edges
+entirely (enriching an issue is useful *especially* while it waits on a
+blocker) and are homogeneous in kind — `research` and `dispatch` never mix
+issues within one invocation. See the **Dispatch kind** / **Research
+dispatch** glossary entries in [`CONTEXT.md`](../CONTEXT.md) for the full
+vocabulary.
+
+On GitHub, `.github/workflows/agent-research.yml` mirrors `agent-dispatch.yml`:
+applying `agent-research` to an issue fires exactly one research dispatch,
+claiming the issue (only the research-family labels above — a work lifecycle
+label like `ready-for-agent` survives the claim untouched), building, then
+running `spindrift research` against that issue. It serializes per
+`agent-research-<issue-number>`, so re-labeling the same issue queues behind
+itself but a research run on an issue never queues behind (or blocks) a work
+run on the same issue. It takes an optional second least-privilege token — see
+[Research token](#research-token-least-privilege-optional) for the scopes and
+what the fallback gives up. Labels must exist on the Target repo before first
+use — see [Create the research labels](#create-the-research-labels-on-the-target-repo).
+
+## Dogfood loop
+
+`dogfood.sh` drives spindrift building itself, with `CONTINUOUS_DISPATCH=1`
+on by default: instead of draining one bounded batch and returning, the
+launcher runs a long-lived slot-refill loop — as each Box finishes, it
+re-discovers the queue and refills the freed slot immediately, re-applying
+blocker readiness, the Touches overlap gate, and blocker-failed cascade —
+gated by the image-freshness probe before every launch. An operator can still
+set `CONTINUOUS_DISPATCH=` (empty) in `harness.env` to fall back to the older
+one-wave-and-exit shape.
+
+The freshness boundary is no longer every iteration: a refill launches
+straight onto the already-loaded image so long as it's still fresh, and
+`dogfood.sh` only pulls and rebuilds when the launcher reports the image has
+actually gone stale (build is a no-op unless the merged diff changed the
+image hash).
+
+**Parallel by default.** `MAX_JOBS` defaults to `MAX_PARALLEL` (default 3),
+so the slot pool holds that many Boxes at once. Set `MAX_JOBS` explicitly to
+run a larger or unbounded pool.
+
+**Podman machine RAM.** `dogfood.sh` refuses to start against a podman machine
+whose RAM is smaller than `MEMORY_LIMIT` × `MAX_PARALLEL` (plus a fixed 512MiB
+VM overhead): that mismatch lets the VM's own OOM-killer kill an in-box build —
+or, once enough boxes run concurrently, the whole VM — before any single
+container's `--memory` cap ever bites. The check reads `podman machine
+inspect`, compares its `Resources.Memory` (MiB) against the required total,
+and on shortfall prints the machine RAM, the required RAM, and a fix
+(`podman machine set --memory <N>`, lower `MAX_PARALLEL`, or lower
+`MEMORY_LIMIT`) before exiting 1 — no box is dispatched. It's a no-op with
+adequate machine RAM, and skips cleanly when there's no active podman machine
+(native Linux, or a non-podman runtime). With the defaults (`MEMORY_LIMIT=5g`,
+`MAX_PARALLEL=3`) the computed minimum is 15872MiB; round up to a clean
+`podman machine set --memory 16384` (16GiB) in practice.
+
+**Termination.** The loop is driven entirely by the launcher's exit code:
+
+| exit | meaning | loop action |
+|------|---------|-------------|
+| 0    | dispatched work | pull + rebuild, then continue |
+| 2    | queue empty (no open issues with the dispatch label) | exit cleanly |
+| 3    | open issues exist but none are dispatchable | stop and print a triage message — typically a failed blocker needs re-labeling before the queue can drain |
+| 4    | `CONTINUOUS_DISPATCH` mode: the image-freshness probe found the loaded image would be rebuilt against the current base-branch tip; in-flight Boxes finished, no new ones launched | pull + rebuild, then re-invoke — the same boundary exit 0 runs |
+
+Set `CONTINUOUS_DISPATCH=1` to opt into the slot-refill dispatch mode in a
+driving loop other than `dogfood.sh`; see `lib/env-schema.nix`'s
+`continuousDispatch` entry for the full behavior.
+
+**Research.** `dogfood.sh` drives `spindrift dispatch` (the work kind) by
+default; set `DOGFOOD_KIND=research` to drive `spindrift research` instead —
+the same slot-refill loop, `MAX_JOBS`, and exit-code contract apply
+unchanged, since both kinds share `cmdDispatch`'s exit codes (ADR 0022). Kinds
+are homogeneous per invocation (`research` and `dispatch` never mix issues in
+one run) — run `dogfood.sh` twice, once per kind, to drive both queues.
+
+**Baked skills.** The dogfood Box bakes five pinned upstream skills into
+`/home/agent/.claude/skills`, each as a `<name>/SKILL.md` directory — the
+only layout Claude Code discovers, so a flat `<name>.md` file is silently
+ignored — so the in-box agent can invoke them as slash commands:
+
+- [`caveman`](https://github.com/juliusbrussee/caveman) — `/caveman`. The
+  rendered issue-pass and fix-pass prompts direct the agent to default to it
+  for narration and prose, compressing narration ~65% in output tokens
+  without touching code, commands, error messages, or commit messages.
+- [`tdd`](https://github.com/mattpocock/skills) and
+  [`to-tickets`](https://github.com/mattpocock/skills) — `/tdd`,
+  `/to-tickets` (pinned at tag `v1.1.0`). The IMPLEMENT section defers its
+  test-first workflow to `/tdd` when baked.
+- [`commit`](https://github.com/jordansmall/skills) — `/commit`. The COMMIT
+  section defers commit-message formatting to `/commit` when baked.
+- [`code-review`](https://github.com/mattpocock/skills) — `/code-review`
+  (pinned at tag `v1.1.0`, the same upstream as `/tdd`/`/to-tickets`). Reviews
+  a diff along Standards and Spec axes in parallel sub-agents.
+
+Beyond the generic "skills available, prefer them" preamble, each of these
+skills gets a deferral placed at the exact prompt section its inline guidance
+would otherwise duplicate, gated on that skill being baked. The pins are
+non-flake `caveman` / `matt-skills` / `jordan-skills` inputs in `flake.nix`
+(`flake.lock` owns the revs); the baked set lives in `nix/dogfood-skills.nix`.
+See [Contributing](../CONTRIBUTING.md) for how it's wired. To opt out of a
+skill, drop it from the consumer's `skills` list; each per-skill deferral is
+rendered only when that skill's `SKILL.md` is actually present at the baked
+skills path, so a consumer that skips a skill gets prompts with zero residue
+for it.
+
+## Shell completion
+
+`spindrift` ships bash, fish, and zsh tab-completion, generated from the same
+schema as `--help` and the man page: subcommands (`dispatch`, `research`,
+`preview`, `build`, `recover`, `doctor`) complete as the first word, every
+flag (including the `--issue` alias and the secret `--*-file` flags) completes
+anywhere after it, a `--*-file` flag's argument completes as a filesystem path,
+and an enumerable flag's argument (`--merge-mode`, `--code-forge`,
+`--issue-tracker`, `--overlap-gate`) completes to its fixed set of legal values
+(e.g. `--merge-mode <TAB>` offers `immediate auto manual`).
+
+**bash.** `nix develop` puts the completion script on
+`share/bash-completion/completions` under `spindrift`'s store path; source it
+directly to enable it in your shell:
+
+```sh
+source "$(dirname "$(command -v spindrift)")/../share/bash-completion/completions/spindrift"
+```
+
+**fish.** Same coverage as the bash slice plus a one-line description on every
+flag. `nix develop` puts the completion script on
+`share/fish/vendor_completions.d` under `spindrift`'s store path; fish's
+`vendor_completions.d` convention loads it automatically once that directory is
+on `$fish_complete_path`, or copy/symlink it into
+`~/.config/fish/completions/spindrift.fish`.
+
+**zsh.** Same coverage (including value completion for enumerable flags), plus a
+per-flag description drawn from the same `doc` string, so `spindrift --<TAB>`
+shows each flag's one-line purpose alongside its name. `nix develop` puts the
+completion function on `share/zsh/site-functions/_spindrift` under `spindrift`'s
+store path; add that directory to `fpath` before `compinit` runs:
+
+```sh
+fpath=("$(dirname "$(command -v spindrift)")/../share/zsh/site-functions" $fpath)
+autoload -Uz compinit && compinit
+```
 
 ## Unattended runs
 
