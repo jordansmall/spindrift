@@ -410,8 +410,8 @@ func renderHeader(m Model) string {
 	}
 	// The status line always renders, even in a launch-less session where
 	// Live/Cap read zero (`running 0/0`) — unlike the old `cap:` line it
-	// replaced, which was introduced by issue #653 and later removed by
-	// issue #843 when it was gated on Cap > 0.
+	// replaced, which was introduced by issue #653 (which gated it on
+	// Cap > 0) and later removed by issue #843.
 	// Session-at-a-glance context is meant to be visible unconditionally,
 	// not to disappear when the queue happens to be empty (issue #843 AC5).
 	fmt.Fprintf(&b, "running %d/%d · waiting %d · held %d · settled %d · failed %d\n", m.Live, m.Cap, waiting, held, settled, failed)
