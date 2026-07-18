@@ -1357,8 +1357,11 @@ and on shortfall prints the machine RAM, the required RAM, and a fix
 `MEMORY_LIMIT`) before exiting 1 — no box is dispatched. It's a no-op with
 adequate machine RAM, and skips cleanly when there's no active podman machine
 (native Linux, or a non-podman runtime). With the defaults (`MEMORY_LIMIT=5g`,
-`MAX_PARALLEL=3`) the computed minimum is 15872MiB; round up to a clean
-`podman machine set --memory 16384` (16GiB) in practice.
+`MAX_PARALLEL=3`) the computed minimum is 15872MiB, and that's the exact
+`--memory` value the fix-hint prints — copy it verbatim rather than a rounded
+16384 (16GiB): a custom `MEMORY_LIMIT`/`MAX_PARALLEL` computes a different
+minimum than the shipped defaults, so only the fix-hint's own number is
+guaranteed correct for your config.
 
 **Termination.** The loop is driven entirely by the launcher's exit code:
 
