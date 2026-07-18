@@ -1844,8 +1844,9 @@ func TestTea_TerminateKey_ConfirmThenOther_Declines(t *testing.T) {
 
 // TestTea_TerminateKey_ConfirmThenQuit_DeclinesAndQuits verifies the
 // universal quit keystroke at the confirm prompt is not swallowed by the
-// pending terminate: "q" declines the terminate (same as any other
-// non-"y" key) and still exits the program in one keystroke (issue #748).
+// pending terminate: "q" quits outright, without confirming, in one
+// keystroke (issue #748) — the terminate never fires since "y" is never
+// pressed.
 func TestTea_TerminateKey_ConfirmThenQuit_DeclinesAndQuits(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
 
@@ -1864,6 +1865,24 @@ func TestTea_TerminateKey_ConfirmThenQuit_DeclinesAndQuits(t *testing.T) {
 	snap := launch.Queue.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickRunning {
 		t.Errorf("queue pick = %+v, want still PickRunning after quitting at the confirm prompt", snap)
+	}
+}
+
+// TestTea_TerminateConfirmKey_Quit_LeavesPendingTerminateSet verifies "q" at
+// the terminate confirm prompt quits without routing through
+// TerminateCancelledMsg first — the model is discarded on quit (issue
+// #1096), so PendingTerminate is left set rather than cleared.
+func TestTea_TerminateConfirmKey_Quit_LeavesPendingTerminateSet(t *testing.T) {
+	m := Update(NewModel(), TerminateRequestedMsg{Number: "42"})
+	tm := teaModel{m: m}
+
+	tm = tm.handleTerminateConfirmKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+
+	if tm.m.PendingTerminate != "42" {
+		t.Errorf("PendingTerminate = %q, want unchanged %q after quitting at the confirm prompt", tm.m.PendingTerminate, "42")
+	}
+	if !tm.m.Quitting {
+		t.Error("Quitting = false, want true after quitting at the confirm prompt")
 	}
 }
 
