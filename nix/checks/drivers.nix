@@ -5,6 +5,16 @@
 let
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   inherit (pkgs.lib) assertMsg hasInfix;
+  # Shared stub-cli fixture (issue #1144): drivers-render-preamble-shape
+  # consumes it as-is; drivers-assert-shape-succeeds extends it with the
+  # three attrs renderPreamble doesn't read but assertShape requires.
+  stubDriverBase = {
+    bin = "stub-cli";
+    flagsCommon = "--stub-flag --two";
+    skillsDirRelative = ".stub/skills";
+    outcomeExtractFnBody = "echo stub-outcome\n";
+    sessionFlagsFnBody = "echo stub-session\n";
+  };
 in
 {
   drivers-assert-shape-missing-attribute-throws =
@@ -31,13 +41,7 @@ in
 
   drivers-render-preamble-shape =
     let
-      out = driverRegistry.renderPreamble {
-        bin = "stub-cli";
-        flagsCommon = "--stub-flag --two";
-        skillsDirRelative = ".stub/skills";
-        outcomeExtractFnBody = "echo stub-outcome\n";
-        sessionFlagsFnBody = "echo stub-session\n";
-      };
+      out = driverRegistry.renderPreamble stubDriverBase;
     in
     assert assertMsg (hasInfix "DRIVER_BIN=stub-cli" out)
       "renderPreamble must bake DRIVER_BIN from the Driver entry's bin, got: ${out}";
@@ -53,14 +57,9 @@ in
 
   drivers-assert-shape-succeeds =
     let
-      complete = {
+      complete = stubDriverBase // {
         name = "stub";
         package = pkgs: pkgs.hello;
-        bin = "stub-cli";
-        flagsCommon = "--stub-flag --two";
-        skillsDirRelative = ".stub/skills";
-        outcomeExtractFnBody = "echo stub-outcome\n";
-        sessionFlagsFnBody = "echo stub-session\n";
         agentsJsonTemplate = "{}";
       };
       result = builtins.tryEval (driverRegistry.assertShape "stub" complete);
