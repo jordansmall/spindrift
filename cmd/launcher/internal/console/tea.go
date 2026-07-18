@@ -157,11 +157,11 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if t.m.Quitting {
 		select {
 		case <-t.done:
+			// Already closed by an earlier Update call on this program.
 			// This check-then-close is race-free only because bubbletea
 			// invokes Update serially from its single event-loop goroutine
 			// (Program.eventLoop in charmbracelet/bubbletea) — never
-			// concurrently. Already closed by an earlier Update call on
-			// this program.
+			// concurrently.
 		default:
 			close(t.done)
 		}
