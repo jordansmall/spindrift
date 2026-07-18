@@ -983,15 +983,37 @@ func TestTea_LaunchRefreshSignal_RefreshesWithoutOperatorInput(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// waitGoroutine polls the goroutine dump for name, failing the test if its
+// presence doesn't match want within a second. Matches by name rather than a
+// raw runtime.NumGoroutine() diff, since unrelated Cmd goroutines (e.g.
+// pollTick) would conflate with the one under test.
+func waitGoroutine(t *testing.T, name string, want bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		var buf bytes.Buffer
+		_ = pprof.Lookup("goroutine").WriteTo(&buf, 1)
+		if strings.Contains(buf.String(), name) == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			if want {
+				t.Fatalf("%s goroutine never started:\n%s", name, buf.String())
+			}
+			t.Fatalf("%s goroutine leaked after quit:\n%s", name, buf.String())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // TestTea_QuitKey_CancelsWaitRefreshSignalGoroutine verifies quitting a
 // session with a live launch that never signals a refresh doesn't leak the
 // waitRefreshSignal goroutine blocked on Launcher.Refreshes() (issue #823) —
 // bubbletea can't cancel a Cmd goroutine itself (it's parked on <-ch forever
-// by design), so teaModel must cancel it on the way out. Checks the
-// goroutine dump for waitRefreshSignal by name rather than a raw
-// runtime.NumGoroutine() diff, since the unrelated pollTick Cmd (armed with
-// pollInterval: time.Hour so it can't fire mid-test) leaks a goroutine of
-// its own that a raw count would conflate with this one.
+// by design), so teaModel must cancel it on the way out. Two-phase check:
+// confirms the goroutine exists before quit (otherwise a regression that
+// skips arming it would pass vacuously — there'd be nothing to cancel), then
+// confirms it's gone after.
 func TestTea_QuitKey_CancelsWaitRefreshSignalGoroutine(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
@@ -999,22 +1021,11 @@ func TestTea_QuitKey_CancelsWaitRefreshSignalGoroutine(t *testing.T) {
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "first")
+	waitGoroutine(t, "waitRefreshSignal.func1", true)
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
-
-	deadline := time.Now().Add(time.Second)
-	for {
-		var buf bytes.Buffer
-		_ = pprof.Lookup("goroutine").WriteTo(&buf, 1)
-		if !strings.Contains(buf.String(), "waitRefreshSignal.func1") {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("waitRefreshSignal goroutine leaked after quit:\n%s", buf.String())
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitGoroutine(t, "waitRefreshSignal.func1", false)
 }
 
 // TestTea_WithLauncher_RendersCapAndLive verifies the session's live
