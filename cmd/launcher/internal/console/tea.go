@@ -122,11 +122,13 @@ func (t teaModel) Init() tea.Cmd {
 }
 
 // Update is the tea layer's whole adapter surface: it translates every
-// Bubble Tea message (key presses, resizes) and internal signal (backlog and
-// drill-in loads, poll ticks, refresh signals, pick-chord timeouts) into
+// Bubble Tea message (key presses, resizes) and internal signal into
 // console Msg values already handled by the pure Update, then re-syncs the
 // launcher's live Queue/stale state onto the Model exactly as the pre-#784
-// Run loop did on every render.
+// Run loop did on every render. "Internal signal" spans two shapes: results
+// of a completed async load (a backlog refresh, a drill-in fetch), which
+// carry a payload, and reactive notifications, which carry none (poll
+// ticks, refresh signals, pick-chord timeouts).
 func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
@@ -134,9 +136,9 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t, cmd = t.handleKey(msg)
 	case tea.WindowSizeMsg:
 		t.m = Update(t.m, SizeChangedMsg{Width: msg.Width, Height: msg.Height})
-	case IssuesLoadedMsg:
+	case IssuesLoadedMsg: // async-load result, not a reactive signal
 		t.m = Update(t.m, msg)
-	case DrillInMsg:
+	case DrillInMsg: // async-load result, not a reactive signal
 		t.m = Update(t.m, msg)
 	case pollTickMsg:
 		if t.launch != nil {
