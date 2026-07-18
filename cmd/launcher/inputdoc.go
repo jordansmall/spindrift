@@ -15,8 +15,9 @@ import (
 // plumbing values (image refs, agent files, driver name, ...) that
 // goRunPreamble/goBuildPreamble used to export as env before this issue.
 // Hand-written, not nix-generated (ADR 0020 said otherwise until issue
-// #813 corrected it): two generic maps here mirror the existing
-// schemaDefaults/schemaFlags table pattern rather than a per-knob struct.
+// #813 corrected it): two generic maps here mirror the existing schemaFlags
+// table pattern (the former separate schemaDefaults table was consolidated
+// away in issue #670) rather than a per-knob struct.
 // nix/checks/equivalence.nix's mkharness-defaults check is the drift gate —
 // it hand-picks specific keys to assert by grep, not every flakeOption knob.
 type inputDocument struct {
