@@ -1,0 +1,87 @@
+name: GH token refresher
+description: >-
+  Starts a background loop that re-mints a fresh GitHub App installation
+  token every 45 minutes for the rest of the job and writes it to a file,
+  exporting GH_TOKEN_REFRESH_FILE so the launcher (via its
+  --gh-token-refresh-file flag) can poll the file and keep GH_TOKEN current
+  past the ~1h installation-token lifetime (issue #1027). The App private
+  key lives only in this backgrounded process's memory and a runner-temp
+  file removed when the job ends — it never reaches the launcher process
+  or the Box.
+
+inputs:
+  app-id:
+    description: GitHub App ID (numeric)
+    required: true
+  private-key:
+    description: GitHub App private key (PEM)
+    required: true
+  installation-id:
+    description: >-
+      Installation ID to mint tokens for (actions/create-github-app-token's
+      installation-id output)
+    required: true
+  initial-token:
+    description: >-
+      The token already minted for this job's first hour — written as the
+      refresh file's starting value so a launcher reading it before the
+      first re-mint still sees a valid token.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Start GH token refresher
+      shell: bash
+      env:
+        APP_ID: ${{ inputs.app-id }}
+        APP_PRIVATE_KEY: ${{ inputs.private-key }}
+        INSTALLATION_ID: ${{ inputs.installation-id }}
+        INITIAL_TOKEN: ${{ inputs.initial-token }}
+      run: |
+        token_file="$RUNNER_TEMP/gh-token-refresh"
+        printf '%s' "$INITIAL_TOKEN" > "$token_file"
+        echo "GH_TOKEN_REFRESH_FILE=$token_file" >> "$GITHUB_ENV"
+
+        key_file="$RUNNER_TEMP/gh-app-private-key.pem"
+        printf '%s\n' "$APP_PRIVATE_KEY" > "$key_file"
+
+        # Re-mints via the App's own installation-token endpoint (the same
+        # one actions/create-github-app-token calls) rather than that
+        # action, since a composite action step can't be re-invoked from
+        # inside a background loop. JWT signing follows GitHub's documented
+        # recipe: RS256 over base64url(header).base64url(payload), a <=10m
+        # exp, and iss set to the numeric App ID.
+        b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+        mint_token() {
+          now=$(date +%s)
+          header=$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)
+          payload=$(printf '{"iat":%d,"exp":%d,"iss":%s}' "$((now - 60))" "$((now + 540))" "$APP_ID" | b64url)
+          sig=$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -sign "$key_file" | b64url)
+          jwt="$header.$payload.$sig"
+          token=$(curl -sf -X POST \
+            -H "Authorization: Bearer $jwt" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/app/installations/$INSTALLATION_ID/access_tokens" \
+            | jq -er '.token')
+          printf '%s' "$token" > "$token_file.tmp"
+          mv "$token_file.tmp" "$token_file"
+        }
+
+        # Backgrounded past this step's own lifetime: stdin/stdout/stderr are
+        # redirected away from the step's pipes (an inherited open fd would
+        # otherwise hang the step waiting for this loop to exit), and disown
+        # detaches it from the shell that's about to return. A single failed
+        # mint (network blip, transient API error) logs and retries next
+        # cycle rather than ending the refresher for the rest of the job —
+        # `mint_token || …` keeps that failure from tripping this script's
+        # errexit (GitHub Actions runs `run:` under `set -e -o pipefail`).
+        (
+          trap 'rm -f "$key_file"' EXIT
+          while true; do
+            sleep 2700 # 45m: comfortably inside the ~1h installation-token lifetime
+            mint_token || echo "gh-token-refresher: mint attempt failed, will retry next cycle" >&2
+          done
+        ) < /dev/null > "$RUNNER_TEMP/gh-token-refresher.log" 2>&1 &
+        disown

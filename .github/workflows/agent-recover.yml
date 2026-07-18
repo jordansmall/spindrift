@@ -53,14 +53,27 @@ jobs:
       # the default GITHUB_TOKEN is not enough (the launcher merges PRs).
       # Minting the App below yields a short-lived installation token on a
       # per-installation rate-limit bucket, isolated from any personal PAT.
-      # The token expires ~1h after minting; long Boxes need refresh handled
-      # separately (see the long-run token issue).
+      # The token expires ~1h after minting; the refresher step below
+      # re-mints it in the background so a run that outlives that lifetime
+      # doesn't 401 at merge (#1027).
       - name: Mint worker App token
         id: app-token
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ vars.SPINDRIFT_AGENT_WORKER_APP_ID }}
           private-key: ${{ secrets.SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY }}
+
+      # Keeps GH_TOKEN current for the rest of the job: the App private key
+      # stays in this backgrounded loop's memory (never reaching the
+      # launcher or the Box); only the resulting short-lived tokens land on
+      # disk, at the path exported as GH_TOKEN_REFRESH_FILE below.
+      - name: GH token refresher
+        uses: ./.github/actions/gh-token-refresher
+        with:
+          app-id: ${{ vars.SPINDRIFT_AGENT_WORKER_APP_ID }}
+          private-key: ${{ secrets.SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY }}
+          installation-id: ${{ steps.app-token.outputs.installation-id }}
+          initial-token: ${{ steps.app-token.outputs.token }}
 
       - name: Agent setup
         id: setup
@@ -87,7 +100,8 @@ jobs:
             --repo-slug "${{ github.repository }}" \
             --base-branch "${{ github.event.repository.default_branch }}" \
             --git-user-name "${{ steps.setup.outputs.git-user-name }}" \
-            --git-user-email "${{ steps.setup.outputs.git-user-email }}"
+            --git-user-email "${{ steps.setup.outputs.git-user-email }}" \
+            --gh-token-refresh-file "$GH_TOKEN_REFRESH_FILE"
 
       # Only fires when recover itself couldn't adopt (guarded on the step
       # outcome so a failed build/install does NOT mislabel the issue). Park to
