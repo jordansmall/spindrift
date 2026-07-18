@@ -4,19 +4,42 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
+
+// sidebarWidth is the docked live-tail sidebar's fixed column width — wide
+// enough for a "HH:MM:SS  " timestamp prefix plus a realistic Activity
+// status line without wrapping in the common case (ADR 0030).
+const sidebarWidth = 42
+
+// sidebarMinListWidth is the narrowest the list column can render at and
+// still be usable beside a docked sidebar — the threshold sidebarFits checks
+// against, below which the sidebar falls back to a fullscreen takeover
+// instead of squeezing both columns illegibly (ADR 0030's narrow-terminal
+// degradation).
+const sidebarMinListWidth = 38
+
+// sidebarFits reports whether m.Width has room for the list column (at
+// least sidebarMinListWidth) plus the docked sidebar (sidebarWidth) plus one
+// column for the divider between them — the gate View and handleKey both
+// check before choosing the docked layout over the fullscreen fallback, so
+// the two can never disagree about which one is showing (issue #1500's
+// sectionTabsReserved precedent, extended to the sidebar).
+func sidebarFits(m Model) bool {
+	return m.Width >= sidebarMinListWidth+sidebarWidth+1
+}
 
 // View renders m as the text the run loop writes to the terminal: the
 // full-width header (banner, status line, stale/dogfood alerts), the Section
 // tabs, the active Section's own aligned table, and any refresh error (ADR
-// 0030). An open drill-in (m.DrillIn != nil) renders the Transcript
-// fullscreen, replacing everything else — the interim behavior until the
-// live-tail sidebar ships (issue #1500); there is no docked/floating pane
-// mode left to choose between.
+// 0030). An open sidebar (m.Sidebar != nil) docks beside the still-visible
+// list when sidebarFits, or takes over fullscreen on a terminal too narrow
+// to show both (ADR 0030, #1501) — replacing the interim fullscreen-only
+// drill-in of issue #1500.
 func View(m Model) string {
-	if m.DrillIn != nil {
-		return renderDrillIn(*m.DrillIn, m.Height)
+	if m.Sidebar != nil && !sidebarFits(m) {
+		return renderSidebarFullscreen(*m.Sidebar, m.Height)
 	}
 	if m.ShowRebuildOutput {
 		return renderRebuildOutputPane(m)
@@ -64,7 +87,16 @@ func View(m Model) string {
 	if budget < 0 {
 		budget = 0
 	}
-	b.WriteString(renderBody(m, &budget))
+	if m.Sidebar != nil {
+		listModel := m
+		listModel.Width = m.Width - sidebarWidth - 1
+		listBudget := budget
+		list := renderBody(listModel, &listBudget)
+		sidebar := renderSidebarDocked(*m.Sidebar, sidebarWidth, budget, m.Focus == FocusSidebar)
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, list, sidebar))
+	} else {
+		b.WriteString(renderBody(m, &budget))
+	}
 	if m.Err != nil {
 		fmt.Fprintf(&b, "refresh failed: %s\n", m.Err)
 	}
@@ -468,13 +500,16 @@ func renderHelp() string {
 		"  /           filter the Backlog by label substring",
 		"  enter       apply filter (while filter-editing); otherwise: pick",
 		"              the highlighted row (Backlog Section), or open the",
-		"              highlighted pick's transcript fullscreen (a work",
-		"              Section, only when it has run)",
+		"              highlighted pick's live-tail sidebar (a work Section,",
+		"              only when it has run)",
+		"  h/l, left/right  move focus between the list and the sidebar",
+		"              (while a sidebar is open)",
 		"  esc         cancel filter edit",
-		"  t           toggle rendered <-> raw JSONL (while drilled in)",
-		"  x / esc     close the transcript pane (while drilled in)",
-		"  j/k, pgup/pgdown  scroll the transcript (while drilled in); its",
-		fmt.Sprintf("              pgup/pgdown page jump is fixed at %d lines, unlike the", drillInPageScrollDelta),
+		"  t           cycle the sidebar's activity feed -> transcript ->",
+		"              raw JSONL -> activity feed (while the sidebar has focus)",
+		"  x / esc     close the sidebar (while it has focus)",
+		"  j/k, pgup/pgdown  scroll the sidebar (while it has focus); its",
+		fmt.Sprintf("              pgup/pgdown page jump is fixed at %d lines, unlike the", fixedPaneScrollDelta),
 		"              body's live-viewport-derived one above",
 		"  r           refresh the backlog",
 		"  p           pick the highlighted Backlog row (launch button)",
@@ -625,8 +660,8 @@ func positionLabel(offset int, columnBudget *int, total int) string {
 // by what's actually on screen lands exactly on the first row the operator
 // hasn't seen yet, and stays correct across a terminal resize instead of a
 // value fixed at startup (issue #1037 AC1/AC2, ADR 0030). Unlike the
-// drill-in transcript's fixed drillInPageScrollDelta, this is recomputed on
-// every keypress.
+// sidebar/rebuild-output panes' fixed fixedPaneScrollDelta, this is
+// recomputed on every keypress.
 func sectionPageSize(m Model) int {
 	return visibleItemCount(m.Offset, bodyBudget(m), sectionRowCount(m, m.ActiveSection))
 }
@@ -677,60 +712,77 @@ func followViewport(offset, cursor, total, itemBudget int) int {
 	return offset
 }
 
-// windowLines returns d.Lines[offset:end], where end stops budget lines past
-// offset (or at the end of d.Lines, whichever comes first) — so a render
-// joins only what the viewport can show instead of the whole tail from
-// Offset to the end of a (potentially multi-MB) transcript (issue #722). A
-// non-positive budget yields an empty window rather than a negative slice.
-// d.Offset is assumed already in [0, len(d.Lines)-1] — Update clamps it via
-// clampDrillInOffset before any render call reaches here. As recorded when
-// this windowing landed, a View call against a 10MB+ transcript at Offset
-// 0, Height 24 (BenchmarkView_DrillInFullscreen_LargeTranscript, issue
-// #1016) went from 3.88ms/op, 21.0MB/op, 7 allocs/op — the state right
-// after the Lines cache above landed but before this windowing, still
-// joining offset-to-end every call, itself down from 4.47ms/op, 23.5MB/op,
-// 9 allocs/op pre-cache — to 1.6µs/op, 3.39KB/op, 5 allocs/op (windowed).
-// The alloc counts are the invariant; absolute ns/op and B/op vary by
-// machine, Go version, and allocator behavior. Reproduce with `go test
-// ./internal/console/... -run '^$' -bench BenchmarkView_DrillInFullscreen
-// -benchmem` from cmd/launcher.
-func windowLines(d DrillInState, budget int) []string {
-	offset := d.Offset
+// windowSidebarLines returns s.Lines[offset:end], where end stops budget
+// lines past offset (or at the end of s.Lines, whichever comes first) — so a
+// render joins only what the viewport can show instead of the whole tail
+// from Offset to the end of a (potentially multi-MB) transcript (issue #722,
+// inherited from the retired windowLines/DrillInState). A non-positive
+// budget yields an empty window rather than a negative slice. s.Offset is
+// assumed already in [0, len(s.Lines)-1] — Update clamps it via
+// clampSidebarOffset before any render call reaches here. As recorded when
+// this windowing landed against DrillInState, a View call against a 10MB+
+// transcript at Offset 0, Height 24
+// (BenchmarkView_DrillInFullscreen_LargeTranscript, issue #1016) went from
+// 3.88ms/op, 21.0MB/op, 7 allocs/op — the state right after the Lines cache
+// landed but before this windowing, still joining offset-to-end every call,
+// itself down from 4.47ms/op, 23.5MB/op, 9 allocs/op pre-cache — to 1.6µs/op,
+// 3.39KB/op, 5 allocs/op (windowed). The alloc counts are the invariant;
+// absolute ns/op and B/op vary by machine, Go version, and allocator
+// behavior. Reproduce with `go test ./internal/console/... -run '^$' -bench
+// BenchmarkView_DrillInFullscreen -benchmem` from cmd/launcher.
+func windowSidebarLines(s SidebarState, budget int) []string {
+	offset := s.Offset
 	end := offset + budget
 	if end < offset {
 		end = offset
 	}
-	if end > len(d.Lines) {
-		end = len(d.Lines)
+	if end > len(s.Lines) {
+		end = len(s.Lines)
 	}
-	return d.Lines[offset:end]
+	return s.Lines[offset:end]
 }
 
-// headerFooterLines is the drill-in chrome budget (header + keystroke-hint
-// footer) that renderDrillIn and clampDrillInOffset both subtract from
-// height — shared so the clamp's last-page cap always matches what
-// renderDrillIn actually has room to show (issue #829, #1002).
+// headerFooterLines is the sidebar chrome budget (label + keystroke-hint
+// footer) that renderSidebarFullscreen, renderSidebarDocked, and
+// clampSidebarOffset all subtract from height — shared so the clamp's
+// last-page cap always matches what the render functions actually have room
+// to show (issue #829, #1002, inherited from the retired drill-in pane).
 const headerFooterLines = 2
 
-// renderDrillIn renders one Dispatch's transcript view: a header naming the
-// pick and current mode, as much of the loaded content (rendered by default,
-// raw when ShowRaw) as height allows, and a keystroke hint. Err renders in
-// place of content instead of a blank pane.
+// sidebarLabel renders s's one-line pane header: "activity #N" by default,
+// "transcript #N" once toggled to the Transcript, "(raw)" appended while
+// ShowRaw — the sidebar analogue of renderDrillIn's transcript-only label,
+// extended for the Activity/Transcript toggle (#1501).
+func sidebarLabel(s SidebarState) string {
+	if !s.ShowTranscript {
+		return "activity #" + s.Number
+	}
+	label := "transcript #" + s.Number
+	if s.ShowRaw {
+		label += " (raw)"
+	}
+	return label
+}
+
+// renderSidebarFullscreen renders one Dispatch's live-tail sidebar full
+// terminal width and height: the narrow-terminal fallback View reaches for
+// when sidebarFits is false, and the shape the retired drill-in pane always
+// rendered at before #1501 introduced the docked layout. A header naming the
+// pick and current view, as much of the loaded content (the Activity feed by
+// default, the Transcript once toggled) as height allows, and a keystroke
+// hint. Err renders in place of content instead of a blank pane.
 //
 // The label, footer, and Err line are themselves budgeted against height
 // (issue #1534, mirroring #1380's renderTranscriptColumn fix): at height 1,
 // only the label renders and the footer or Err line is dropped, whichever
 // would come next.
-func renderDrillIn(d DrillInState, height int) string {
+func renderSidebarFullscreen(s SidebarState, height int) string {
 	if height <= 0 {
 		return ""
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "transcript #%s", d.Number)
-	if d.ShowRaw {
-		b.WriteString(" (raw)")
-	}
+	b.WriteString(sidebarLabel(s))
 	b.WriteString("\n")
 
 	const labelLines = 1
@@ -738,17 +790,58 @@ func renderDrillIn(d DrillInState, height int) string {
 		return b.String()
 	}
 
-	if d.Err != nil {
-		fmt.Fprintf(&b, "drill-in failed: %s\n", d.Err)
+	if s.Err != nil {
+		fmt.Fprintf(&b, "sidebar failed: %s\n", s.Err)
 		return b.String()
 	}
 
-	visible := strings.Join(windowLines(d, height-headerFooterLines), "\n")
+	visible := strings.Join(windowSidebarLines(s, height-headerFooterLines), "\n")
 	b.WriteString(visible)
 	if visible != "" && !strings.HasSuffix(visible, "\n") {
 		b.WriteString("\n")
 	}
-	b.WriteString("[t] toggle raw · [x] close\n")
+	b.WriteString("[t] cycle activity/transcript · [x] close\n")
+	return b.String()
+}
+
+// renderSidebarDocked renders one Dispatch's live-tail sidebar as a column
+// beside the still-visible list (ADR 0030): the same label/content/footer
+// shape as renderSidebarFullscreen, but clipped to width so an overflowing
+// line can't blow out the column join, and budgeted in rows (header row
+// included) to match renderTable's own row-budget contract so the two
+// columns' row counts agree before lipgloss.JoinHorizontal pads whichever
+// one falls short. focused styles the label with the accent role so the
+// operator can tell which pane keyboard input currently drives (ADR 0031).
+func renderSidebarDocked(s SidebarState, width, budget int, focused bool) string {
+	if budget <= 0 {
+		return ""
+	}
+
+	label := clip(sidebarLabel(s), width, false)
+	role := RoleDim
+	if focused {
+		role = RoleAccent
+	}
+	var b strings.Builder
+	b.WriteString(roleStyle(role).Render(label))
+	b.WriteString("\n")
+
+	const labelLines = 1
+	if budget <= headerFooterLines-labelLines {
+		return b.String()
+	}
+
+	if s.Err != nil {
+		fmt.Fprintf(&b, "%s\n", clip("sidebar failed: "+s.Err.Error(), width, false))
+		return b.String()
+	}
+
+	for _, line := range windowSidebarLines(s, budget-headerFooterLines) {
+		b.WriteString(clip(line, width, false))
+		b.WriteString("\n")
+	}
+	b.WriteString(clip("[t] cycle · [h] list · [x] close", width, false))
+	b.WriteString("\n")
 	return b.String()
 }
 

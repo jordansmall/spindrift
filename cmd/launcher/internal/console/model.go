@@ -28,9 +28,16 @@ type Model struct {
 	DogfoodLive bool
 	// Picks is the session's operator queue, in pick order.
 	Picks []Pick
-	// DrillIn is the open transcript view, if any — nil when the operator is
-	// looking at the backlog/queue instead.
-	DrillIn *DrillInState
+	// Sidebar is the open live-tail sidebar, if any — nil when the operator
+	// is looking at the backlog/queue alone, docked beside the still-visible
+	// list on a wide enough terminal, fullscreen otherwise (ADR 0030,
+	// #1501). Replaces the retired fullscreen-only DrillIn pane (#1500).
+	Sidebar *SidebarState
+	// Focus is which pane keyboard input drives while Sidebar is open — the
+	// list or the sidebar itself, moved with h/l (and left/right). Meaningless
+	// while Sidebar is nil, where every key targets the list as it always has
+	// (ADR 0030, #1501).
+	Focus Focus
 	// PendingTerminate is the issue number awaiting an explicit y/N confirm
 	// after "X" — empty when no terminate is pending (ADR 0024, issue #649).
 	PendingTerminate string
@@ -131,29 +138,52 @@ type Model struct {
 	ActiveSection Section
 }
 
-// DrillInState is one Dispatch's loaded transcript: both the Driver-rendered
-// form and the byte-exact raw form, loaded together so ShowRaw toggles with
-// no further I/O.
-type DrillInState struct {
-	Number        string
-	Rendered, Raw string
-	ShowRaw       bool
-	Err           error
+// Focus names which pane keyboard input drives while a sidebar is open — the
+// section-switched list's single-list body, or the live-tail sidebar beside
+// it (ADR 0030). FocusList, the zero value, matches a fresh Console with no
+// sidebar open.
+type Focus int
+
+const (
+	FocusList Focus = iota
+	FocusSidebar
+)
+
+// SidebarState is one Dispatch's loaded live-tail sidebar content: its
+// condensed Activity feed (ActivityFeed's derivation) and its whole
+// Driver-rendered Transcript plus byte-exact raw form, loaded together so the
+// Activity/Transcript and rendered/raw toggles both need no further I/O
+// (#1501, the sidebar's analogue of the retired DrillInState).
+type SidebarState struct {
+	Number string
+	// Activity is the condensed, timestamped feed ActivityFeed derived from
+	// the Dispatch's most-recent pass log — the sidebar's default view.
+	Activity []ActivityLine
+	// TranscriptRendered and TranscriptRaw are DrillIn's own two forms of the
+	// same Dispatch's whole transcript, shown instead of Activity once
+	// ShowTranscript is set.
+	TranscriptRendered, TranscriptRaw string
+	// ShowTranscript is whether the sidebar shows the Transcript instead of
+	// the Activity feed — "t" advances it, and ShowRaw within it, around a
+	// three-step cycle (Activity -> Transcript rendered -> Transcript raw ->
+	// Activity), preserving the byte-exact raw form's reachability without a
+	// second key (#1501).
+	ShowTranscript bool
+	// ShowRaw is whether the Transcript view shows TranscriptRaw instead of
+	// TranscriptRendered — meaningless while ShowTranscript is false.
+	ShowRaw bool
+	Err     error
 	// Offset is the index of the first visible line in the currently active
-	// form (Rendered, or Raw while ShowRaw) — the scroll position (#786).
+	// form — the scroll position, DrillInState.Offset's sidebar analogue.
 	Offset int
-	// Lines is the active form (Rendered, or Raw while ShowRaw) pre-split on
-	// "\n". Update recomputes it only when the content or ShowRaw changes
-	// (DrillInMsg, DrillInToggleMsg), so clampDrillInOffset and the render
-	// functions never re-split the full transcript on every keystroke (issue
-	// #722). As recorded when #722 landed, a scroll keystroke against a
-	// 10MB+ transcript (BenchmarkUpdate_DrillInScroll_LargeTranscript, issue
-	// #1016) went from 1.59ms/op, 2.5MB/op, 1 alloc/op (pre-cache,
-	// re-splitting the transcript every call) to 51.5ns/op, 0B/op, 0
-	// allocs/op (cached) — the alloc counts are the invariant; absolute
-	// ns/op and B/op vary by machine and Go version. Reproduce with `go
-	// test ./internal/console/... -run '^$' -bench
-	// BenchmarkUpdate_DrillInScroll -benchmem` from cmd/launcher.
+	// Lines is the currently active form (Activity formatted one line per
+	// entry, or TranscriptRendered/TranscriptRaw per ShowTranscript/ShowRaw)
+	// pre-split on "\n". Update recomputes it only when the content or the
+	// toggle state changes (SidebarLoadedMsg, SidebarToggleMsg), so
+	// clampSidebarOffset and the render functions never re-split a
+	// multi-megabyte transcript on every keystroke (issue #722's fix,
+	// inherited from DrillInState.Lines — see BenchmarkUpdate_DrillInScroll
+	// for the recorded before/after).
 	Lines []string
 }
 
@@ -225,32 +255,55 @@ func Update(m Model, msg Msg) Model {
 		m.Picks = removePick(m.Picks, msg.Number)
 	case QueueSnapshotMsg:
 		m.Picks = msg.Picks
-	case DrillInMsg:
+	case SidebarLoadedMsg:
+		showTranscript := false
 		showRaw := false
 		offset := 0
-		if m.DrillIn != nil && m.DrillIn.Number == msg.Number {
-			showRaw = m.DrillIn.ShowRaw
-			offset = m.DrillIn.Offset
+		sameNumber := m.Sidebar != nil && m.Sidebar.Number == msg.Number
+		if sameNumber {
+			showTranscript = m.Sidebar.ShowTranscript
+			showRaw = m.Sidebar.ShowRaw
+			offset = m.Sidebar.Offset
 		}
-		content := msg.Rendered
-		if showRaw {
-			content = msg.Raw
+		m.Sidebar = &SidebarState{
+			Number:             msg.Number,
+			Activity:           msg.Activity,
+			TranscriptRendered: msg.Rendered,
+			TranscriptRaw:      msg.Raw,
+			ShowTranscript:     showTranscript,
+			ShowRaw:            showRaw,
+			Err:                msg.Err,
+			Offset:             offset,
 		}
-		m.DrillIn = &DrillInState{Number: msg.Number, Rendered: msg.Rendered, Raw: msg.Raw, Err: msg.Err, ShowRaw: showRaw, Offset: offset, Lines: strings.Split(content, "\n")}
-	case DrillInToggleMsg:
-		if m.DrillIn != nil {
-			m.DrillIn.ShowRaw = !m.DrillIn.ShowRaw
-			content := m.DrillIn.Rendered
-			if m.DrillIn.ShowRaw {
-				content = m.DrillIn.Raw
+		m.Sidebar.Lines = sidebarLines(m.Sidebar)
+		if !sameNumber {
+			m.Focus = FocusSidebar
+		}
+	case SidebarToggleMsg:
+		if m.Sidebar != nil {
+			switch {
+			case !m.Sidebar.ShowTranscript:
+				m.Sidebar.ShowTranscript = true
+			case !m.Sidebar.ShowRaw:
+				m.Sidebar.ShowRaw = true
+			default:
+				m.Sidebar.ShowTranscript = false
+				m.Sidebar.ShowRaw = false
 			}
-			m.DrillIn.Lines = strings.Split(content, "\n")
+			m.Sidebar.Lines = sidebarLines(m.Sidebar)
 		}
-	case DrillInCloseMsg:
-		m.DrillIn = nil
-	case DrillInScrollMsg:
-		if m.DrillIn != nil {
-			m.DrillIn.Offset += msg.Delta
+	case SidebarCloseMsg:
+		m.Sidebar = nil
+		m.Focus = FocusList
+	case SidebarScrollMsg:
+		if m.Sidebar != nil {
+			m.Sidebar.Offset += msg.Delta
+		}
+	case FocusListMsg:
+		m.Focus = FocusList
+	case FocusSidebarMsg:
+		if m.Sidebar != nil {
+			m.Focus = FocusSidebar
 		}
 	case ScrollMsg:
 		// Adds Delta unconditionally, then clampCursor below still clamps
@@ -314,8 +367,8 @@ func Update(m Model, msg Msg) Model {
 	m.Width = clampSize(m.Width)
 	m.Height = clampSize(m.Height)
 	m.Cursor = clampCursor(m.Cursor, sectionRowCount(m, m.ActiveSection))
-	if m.DrillIn != nil {
-		clampDrillInOffset(m.DrillIn, m.Height)
+	if m.Sidebar != nil {
+		clampSidebarOffset(m.Sidebar, m.Height)
 	}
 	clampRebuildOutputOffset(&m)
 	m.Offset = clampCursor(m.Offset, sectionRowCount(m, m.ActiveSection))
@@ -383,39 +436,68 @@ func clampCursor(cursor, n int) int {
 	return cursor
 }
 
-// clampDrillInOffset pulls d.Offset into [0, lines-1], further capped so the
-// last page fills the fullscreen viewport instead of leaving it mostly blank
-// (issue #829) — the drill-in analogue of clampCursor, so a scroll commanded
-// past either end of the active form (Rendered, or Raw while ShowRaw) never
-// leaves an Offset renderDrillIn can't slice with, and a raw/rendered toggle
-// whose other form has fewer lines still lands somewhere valid (issue #786).
-// A nil d is a no-op — Update calls this unconditionally, matching the
-// cursor clamp. Content that already fits the viewport (budget >=
-// len(Lines), the short-content case) falls all the way back to 0 rather
-// than to the last line. When height is too small to fit a page at all
-// (budget == 0), pageMax never undercuts maxOffset, so an out-of-range
-// Offset instead lands at the last line, len(Lines)-1.
-func clampDrillInOffset(d *DrillInState, height int) {
-	if d == nil {
+// clampSidebarOffset pulls s.Offset into [0, lines-1], further capped so the
+// last page fills the viewport instead of leaving it mostly blank (issue
+// #829's fix, inherited from clampDrillInOffset) — the sidebar analogue of
+// clampCursor, so a scroll commanded past either end of the active form
+// (Activity, or Transcript rendered/raw) never leaves an Offset the render
+// functions can't slice with, and a toggle whose other form has fewer lines
+// still lands somewhere valid (issue #786). A nil s is a no-op — Update calls
+// this unconditionally, matching the cursor clamp. Content that already fits
+// the viewport (budget >= len(Lines), the short-content case) falls all the
+// way back to 0 rather than to the last line. When height is too small to
+// fit a page at all (budget == 0), pageMax never undercuts maxOffset, so an
+// out-of-range Offset instead lands at the last line, len(Lines)-1.
+func clampSidebarOffset(s *SidebarState, height int) {
+	if s == nil {
 		return
 	}
 	budget := height - headerFooterLines
 	if budget < 0 {
 		budget = 0
 	}
-	maxOffset := len(d.Lines) - 1
-	if pageMax := len(d.Lines) - budget; pageMax < maxOffset {
+	maxOffset := len(s.Lines) - 1
+	if pageMax := len(s.Lines) - budget; pageMax < maxOffset {
 		maxOffset = pageMax
 	}
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
 	switch {
-	case d.Offset < 0:
-		d.Offset = 0
-	case d.Offset > maxOffset:
-		d.Offset = maxOffset
+	case s.Offset < 0:
+		s.Offset = 0
+	case s.Offset > maxOffset:
+		s.Offset = maxOffset
 	}
+}
+
+// sidebarLines computes s's currently active form, pre-split on "\n" — the
+// Activity feed formatted one line per entry when ShowTranscript is false,
+// otherwise TranscriptRendered or TranscriptRaw per ShowRaw. Called only when
+// the loaded content or the toggle state changes (SidebarLoadedMsg,
+// SidebarToggleMsg), matching DrillInState.Lines' recompute-on-change caching.
+func sidebarLines(s *SidebarState) []string {
+	if !s.ShowTranscript {
+		lines := make([]string, len(s.Activity))
+		for i, a := range s.Activity {
+			lines[i] = formatActivityLine(a)
+		}
+		return lines
+	}
+	content := s.TranscriptRendered
+	if s.ShowRaw {
+		content = s.TranscriptRaw
+	}
+	return strings.Split(content, "\n")
+}
+
+// formatActivityLine renders one ActivityLine as the sidebar's Activity feed
+// shows it: the pass log's on-disk mtime (the coarsest-but-real timestamp
+// ActivityFeed has to attach, since the raw stream-json carries no per-event
+// timestamp of its own — see ActivityFeed's doc comment) followed by the
+// emitted status text.
+func formatActivityLine(a ActivityLine) string {
+	return a.Time.Format("15:04:05") + "  " + a.Text
 }
 
 // clampRebuildOutputOffset pulls m.RebuildOutputOffset into [0, maxOffset],

@@ -22,35 +22,47 @@ func largeTranscript(minBytes int) string {
 	return b.String()
 }
 
+// openSidebarOnTranscript loads a SidebarLoadedMsg carrying content as both
+// Rendered and Raw, then advances the three-step toggle once so the sidebar
+// shows the Transcript (rendered) rather than its default, empty-in-these-
+// benchmarks Activity feed — these benchmarks measure the large-content
+// scroll/render path DrillInState originally existed for, now the sidebar's
+// Transcript view of the same content.
+func openSidebarOnTranscript(m Model, content string) Model {
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: content, Raw: content})
+	return Update(m, SidebarToggleMsg{})
+}
+
 // BenchmarkUpdate_DrillInScroll_LargeTranscript exercises the keystroke path
-// (DrillInScrollMsg -> clampDrillInOffset) against a 10MB+ transcript — the
-// work Update does on every scroll keystroke while a drill-in is open
-// (issue #722). Recorded when the DrillInState.Lines cache landed:
-// 1.59ms/op, 2.5MB/op, 1 alloc/op before, 51.5ns/op, 0B/op, 0 allocs/op
-// after (issue #1016) — alloc counts are the invariant; ns/op and B/op
-// vary by machine and Go version.
+// (SidebarScrollMsg -> clampSidebarOffset) against a 10MB+ transcript — the
+// work Update does on every scroll keystroke while the sidebar's Transcript
+// view is open (issue #722, inherited from the retired DrillInScrollMsg).
+// Recorded when the DrillInState.Lines cache landed: 1.59ms/op, 2.5MB/op, 1
+// alloc/op before, 51.5ns/op, 0B/op, 0 allocs/op after (issue #1016) — alloc
+// counts are the invariant; ns/op and B/op vary by machine and Go version.
 func BenchmarkUpdate_DrillInScroll_LargeTranscript(b *testing.B) {
 	content := largeTranscript(10 << 20)
-	m := Update(NewModel(), DrillInMsg{Number: "42", Rendered: content, Raw: content})
+	m := openSidebarOnTranscript(NewModel(), content)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		m = Update(m, DrillInScrollMsg{Delta: 1})
+		m = Update(m, SidebarScrollMsg{Delta: 1})
 	}
 }
 
 // BenchmarkView_DrillInFullscreen_LargeTranscript exercises the render path
-// (renderDrillIn) against a 10MB+ transcript on every View call — the other
-// half of the keystroke re-render cycle (issue #722). Recorded at Offset 0,
-// Height 24 when windowLines landed: 3.88ms/op, 21.0MB/op, 7 allocs/op
-// before it capped the join to the viewport, 1.6µs/op, 3.39KB/op, 5
-// allocs/op after (issue #1016) — alloc counts are the invariant; ns/op
-// and B/op vary by machine and Go version.
+// (renderSidebarFullscreen) against a 10MB+ transcript on every View call —
+// the other half of the keystroke re-render cycle (issue #722, inherited
+// from the retired renderDrillIn). Recorded at Offset 0, Height 24 when
+// windowLines landed: 3.88ms/op, 21.0MB/op, 7 allocs/op before it capped the
+// join to the viewport, 1.6µs/op, 3.39KB/op, 5 allocs/op after (issue #1016)
+// — alloc counts are the invariant; ns/op and B/op vary by machine and Go
+// version.
 func BenchmarkView_DrillInFullscreen_LargeTranscript(b *testing.B) {
 	content := largeTranscript(10 << 20)
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
-	m = Update(m, DrillInMsg{Number: "42", Rendered: content, Raw: content})
+	m = openSidebarOnTranscript(m, content)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -61,16 +73,17 @@ func BenchmarkView_DrillInFullscreen_LargeTranscript(b *testing.B) {
 
 // BenchmarkUpdateView_DrillInScroll_LargeTranscript exercises the full
 // keystroke re-render cycle — Update then View — the actual per-keystroke
-// cost while a drill-in is open on a 10MB+ transcript (issue #722).
+// cost while the sidebar's Transcript view is open on a 10MB+ transcript
+// (issue #722).
 func BenchmarkUpdateView_DrillInScroll_LargeTranscript(b *testing.B) {
 	content := largeTranscript(10 << 20)
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
-	m = Update(m, DrillInMsg{Number: "42", Rendered: content, Raw: content})
+	m = openSidebarOnTranscript(m, content)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		m = Update(m, DrillInScrollMsg{Delta: 1})
+		m = Update(m, SidebarScrollMsg{Delta: 1})
 		_ = View(m)
 	}
 }

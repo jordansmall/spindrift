@@ -599,8 +599,9 @@ func TestView_ShowHelp_ListsSectionKeys(t *testing.T) {
 // TestView_ShowHelp_DescribesContextSensitiveEnter verifies the help
 // overlay's "enter" entry documents both context-sensitive behaviors —
 // picking the highlighted Backlog row and opening a work Section pick's
-// transcript fullscreen — not just the bare word "enter" (issue #995,
-// reworded for ADR 0030's Section-switched body by issue #1500).
+// live-tail sidebar — not just the bare word "enter" (issue #995, reworded
+// for ADR 0030's Section-switched body by issue #1500, then for the sidebar
+// by #1501).
 func TestView_ShowHelp_DescribesContextSensitiveEnter(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -608,7 +609,7 @@ func TestView_ShowHelp_DescribesContextSensitiveEnter(t *testing.T) {
 	for _, want := range []string{
 		"otherwise: pick",
 		"the highlighted row (Backlog Section)",
-		"highlighted pick's transcript fullscreen",
+		"highlighted pick's live-tail sidebar",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("View() = %q, want it to describe context-sensitive enter behavior %q", out, want)
@@ -649,7 +650,7 @@ func TestView_ShowHelp_ListsRebuildOutputKey(t *testing.T) {
 
 // TestView_ShowHelp_ListsBodyScrollKeys verifies the help overlay lists
 // pgup/pgdown as the backlog/queue viewport's own line-scroll keys,
-// distinct from the drill-in transcript's identically-named scroll keys
+// distinct from the sidebar's identically-named scroll keys
 // (issue #1036 AC — help overlay documents the new scroll keys).
 func TestView_ShowHelp_ListsBodyScrollKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
@@ -660,15 +661,15 @@ func TestView_ShowHelp_ListsBodyScrollKeys(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_ContrastsDrillInFixedPage verifies the help overlay's
-// drill-in transcript pgup/pgdown line calls out that its page jump is a
-// fixed size, unlike the backlog/queue's live-viewport-derived one — the two
-// keys share a name but not a page size (issue #1059).
-func TestView_ShowHelp_ContrastsDrillInFixedPage(t *testing.T) {
+// TestView_ShowHelp_ContrastsSidebarFixedPage verifies the help overlay's
+// sidebar pgup/pgdown line calls out that its page jump is a fixed size,
+// unlike the backlog/queue's live-viewport-derived one — the two keys share
+// a name but not a page size (issue #1059).
+func TestView_ShowHelp_ContrastsSidebarFixedPage(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
-	want := fmt.Sprintf("fixed at %d lines", drillInPageScrollDelta)
+	want := fmt.Sprintf("fixed at %d lines", fixedPaneScrollDelta)
 	if !strings.Contains(out, want) {
 		t.Errorf("View() = %q, want it to contain %q", out, want)
 	}
@@ -719,55 +720,66 @@ func TestView_RebuildOutputOpen_ScrollOffsetWindowsContent(t *testing.T) {
 	}
 }
 
-// TestView_DrillInOpen_RendersTranscriptInsteadOfBacklog verifies an open
-// drill-in replaces the backlog/queue rendering with the transcript, the
-// rendered form by default, plus a hint for the toggle/close keystrokes —
-// the operator's view of the work, not just liveness (#648).
-func TestView_DrillInOpen_RendersTranscriptInsteadOfBacklog(t *testing.T) {
+// TestView_SidebarOpen_RendersActivityInsteadOfBacklog verifies an open
+// sidebar, on a terminal too narrow to dock it, replaces the backlog/queue
+// rendering with the sidebar's Activity feed — the default view, not the
+// Transcript — the operator's view of the work, not just liveness (#648,
+// #1501).
+func TestView_SidebarOpen_RendersActivityInsteadOfBacklog(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}, Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
 
 	out := View(m)
 	if strings.Contains(out, "should not show") {
-		t.Errorf("View() = %q, want the backlog hidden while drilled in", out)
+		t.Errorf("View() = %q, want the backlog hidden while the sidebar is open", out)
 	}
 	if !strings.Contains(out, "42") {
-		t.Errorf("View() = %q, want the drilled-in issue number", out)
+		t.Errorf("View() = %q, want the sidebar's issue number", out)
 	}
-	if !strings.Contains(out, "[implementor] hi") {
-		t.Errorf("View() = %q, want the rendered transcript", out)
+	if !strings.Contains(out, "hi") {
+		t.Errorf("View() = %q, want the Activity feed", out)
 	}
-	if strings.Contains(out, `{"type":"assistant"}`) {
-		t.Errorf("View() = %q, want the raw form hidden by default", out)
+	if strings.Contains(out, "[implementor] hi") || strings.Contains(out, `{"type":"assistant"}`) {
+		t.Errorf("View() = %q, want the Transcript forms hidden while showing the Activity feed by default", out)
 	}
 }
 
-// TestView_DrillInShowRaw_RendersRawInsteadOfRendered verifies toggling
-// ShowRaw swaps which form View shows.
-func TestView_DrillInShowRaw_RendersRawInsteadOfRendered(t *testing.T) {
+// TestView_SidebarToggle_RendersTranscriptThenRaw verifies advancing the
+// toggle swaps the sidebar from the Activity feed to the rendered Transcript,
+// then to the raw byte-exact form.
+func TestView_SidebarToggle_RendersTranscriptThenRaw(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 24})
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
-	m = Update(m, DrillInToggleMsg{})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}, Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
+	m = Update(m, SidebarToggleMsg{})
 
 	out := View(m)
-	if strings.Contains(out, "[implementor] hi") {
-		t.Errorf("View() = %q, want the rendered form hidden while ShowRaw", out)
+	if !strings.Contains(out, "[implementor] hi") {
+		t.Errorf("View() = %q, want the rendered Transcript shown after one toggle", out)
 	}
+	if strings.Contains(out, `{"type":"assistant"}`) {
+		t.Errorf("View() = %q, want the raw form still hidden after one toggle", out)
+	}
+
+	m = Update(m, SidebarToggleMsg{})
+	out = View(m)
 	if !strings.Contains(out, `{"type":"assistant"}`) {
-		t.Errorf("View() = %q, want the raw form shown while ShowRaw", out)
+		t.Errorf("View() = %q, want the raw form shown after two toggles", out)
 	}
 }
 
-// TestView_DrillInOffset_HidesLinesBeforeOffset verifies scrolling (a
-// non-zero Offset) drops the leading lines from the rendered pane instead of
-// always showing the transcript's start (issue #786). Height is small enough
-// that the transcript outruns the viewport budget, or the viewport clamp
-// (issue #829) would pin Offset at 0 since the whole thing already fits.
-func TestView_DrillInOffset_HidesLinesBeforeOffset(t *testing.T) {
+// TestView_SidebarOffset_HidesLinesBeforeOffset verifies scrolling (a
+// non-zero Offset) drops the leading lines from the sidebar instead of
+// always showing its start (issue #786, inherited). Height is small enough
+// that the content outruns the viewport budget, or the viewport clamp (issue
+// #829) would pin Offset at 0 since the whole thing already fits. The
+// Transcript (rendered) view is toggled on so the content matches the plain
+// "l0".."l3" lines the old drill-in test exercised.
+func TestView_SidebarOffset_HidesLinesBeforeOffset(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 4})
-	m = Update(m, DrillInMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3"})
-	m = Update(m, DrillInScrollMsg{Delta: 2})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3"})
+	m = Update(m, SidebarToggleMsg{})
+	m = Update(m, SidebarScrollMsg{Delta: 2})
 
 	out := View(m)
 	if strings.Contains(out, "l0") || strings.Contains(out, "l1") {
@@ -778,11 +790,11 @@ func TestView_DrillInOffset_HidesLinesBeforeOffset(t *testing.T) {
 	}
 }
 
-// TestView_DrillInErr_Surfaced verifies a failed drill-in's error text
-// appears instead of blank content.
-func TestView_DrillInErr_Surfaced(t *testing.T) {
+// TestView_SidebarErr_Surfaced verifies a sidebar that failed to load
+// surfaces its error text instead of blank content.
+func TestView_SidebarErr_Surfaced(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 24})
-	m = Update(m, DrillInMsg{Number: "42", Err: errBoom})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Err: errBoom})
 
 	out := View(m)
 	if !strings.Contains(out, errBoom.Error()) {
@@ -790,15 +802,18 @@ func TestView_DrillInErr_Surfaced(t *testing.T) {
 	}
 }
 
-// TestView_DrillInFullscreen_WindowsToViewportHeight verifies the fullscreen
-// transcript pane joins only as many lines as the viewport can show, instead
-// of the whole tail from Offset to the end of a (potentially multi-MB)
-// transcript, so scrolling near the top of a huge transcript doesn't
-// re-serialize content nowhere near the screen (issue #722).
-func TestView_DrillInFullscreen_WindowsToViewportHeight(t *testing.T) {
+// TestView_SidebarFullscreen_WindowsToViewportHeight verifies the fullscreen
+// sidebar joins only as many lines as the viewport can show, instead of the
+// whole tail from Offset to the end of a (potentially multi-MB) transcript,
+// so scrolling near the top of a huge transcript doesn't re-serialize
+// content nowhere near the screen (issue #722, inherited). The Transcript
+// (rendered) view is toggled on so the content matches the head/tail markers
+// the old drill-in test exercised.
+func TestView_SidebarFullscreen_WindowsToViewportHeight(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 5})
 	content := "HEAD-MARKER\n" + strings.Repeat("x\n", 100) + "TAIL-MARKER"
-	m = Update(m, DrillInMsg{Number: "42", Rendered: content})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: content})
+	m = Update(m, SidebarToggleMsg{})
 
 	out := View(m)
 	if !strings.Contains(out, "HEAD-MARKER") {
@@ -1011,41 +1026,43 @@ func TestView_Cursor_MarksHighlightedRowInWorkSection(t *testing.T) {
 	t.Errorf("View() = %q, want row #2 marked with the cursor", out)
 }
 
-// TestView_DrillInFullscreen_RespectsTinyBudget verifies the fullscreen
-// pane's total output never exceeds m.Height at the smallest possible
-// budget — renderDrillIn wrote the header line and then always appended the
-// footer with no height check at all, so at Height: 1 it overflowed to 2
-// lines. Mirrors the docked/floating tiny-budget fix from #1380, applied to
-// renderDrillIn itself (issue #1534).
-func TestView_DrillInFullscreen_RespectsTinyBudget(t *testing.T) {
+// TestView_SidebarFullscreen_RespectsTinyBudget verifies the fullscreen
+// sidebar's total output never exceeds m.Height at the smallest possible
+// budget — renderDrillIn (its predecessor) wrote the header line and then
+// always appended the footer with no height check at all, so at Height: 1 it
+// overflowed to 2 lines. Mirrors the docked/floating tiny-budget fix from
+// #1380, applied to renderSidebarFullscreen (issue #1534, inherited).
+func TestView_SidebarFullscreen_RespectsTinyBudget(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 1})
 	lines := make([]string, 100)
 	for i := range lines {
 		lines[i] = fmt.Sprintf("transcript line %d", i)
 	}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+	m = Update(m, SidebarToggleMsg{})
 
 	out := View(m)
 	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(got) > m.Height {
-		t.Errorf("View() rendered %d lines, want at most Height (%d) — renderDrillIn's own header+footer chrome must be budgeted against height, not written unconditionally", len(got), m.Height)
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — renderSidebarFullscreen's own header+footer chrome must be budgeted against height, not written unconditionally", len(got), m.Height)
 	}
 }
 
-// TestView_DrillInFullscreen_RetainsFooterAtBoundary verifies the label and
+// TestView_SidebarFullscreen_RetainsFooterAtBoundary verifies the label and
 // footer both render, and stay within budget, at Height: 2 — the boundary
 // where label+footer exactly fills the budget, one above the Height: 1 case
-// that drops the footer (issue #1534).
-func TestView_DrillInFullscreen_RetainsFooterAtBoundary(t *testing.T) {
+// that drops the footer (issue #1534, inherited).
+func TestView_SidebarFullscreen_RetainsFooterAtBoundary(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 2})
 	lines := make([]string, 100)
 	for i := range lines {
 		lines[i] = fmt.Sprintf("transcript line %d", i)
 	}
-	m = Update(m, DrillInMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+	m = Update(m, SidebarToggleMsg{})
 
 	out := View(m)
-	if !strings.Contains(out, "[t] toggle raw · [x] close") {
+	if !strings.Contains(out, "[t] cycle activity/transcript · [x] close") {
 		t.Errorf("View() = %q, want the footer retained at the Height: 2 boundary", out)
 	}
 	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
@@ -1054,13 +1071,13 @@ func TestView_DrillInFullscreen_RetainsFooterAtBoundary(t *testing.T) {
 	}
 }
 
-// TestView_DrillInFullscreen_ErrRespectsTinyBudget verifies a failed
-// drill-in also respects the tiny-budget guard — the label+error combo is
-// two lines, same as label+footer, so it must be dropped at Height: 1 same
-// as the footer is (issue #1534).
-func TestView_DrillInFullscreen_ErrRespectsTinyBudget(t *testing.T) {
+// TestView_SidebarFullscreen_ErrRespectsTinyBudget verifies a sidebar that
+// failed to load also respects the tiny-budget guard — the label+error combo
+// is two lines, same as label+footer, so it must be dropped at Height: 1
+// same as the footer is (issue #1534, inherited).
+func TestView_SidebarFullscreen_ErrRespectsTinyBudget(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 1})
-	m = Update(m, DrillInMsg{Number: "42", Err: errBoom})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Err: errBoom})
 
 	out := View(m)
 	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
