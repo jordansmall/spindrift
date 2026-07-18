@@ -2015,6 +2015,62 @@ func TestTea_TerminateKey_ConfirmThenQuit_Stay_KeepsRunning(t *testing.T) {
 	}
 }
 
+// TestTea_TerminateKey_ConfirmThenYes_RespondsWhileTrackerCommentBlocks
+// verifies handleTerminateConfirmKey's "y" branch — the Update-path call
+// site itself, driven by a real keypress through teatest, not a bare method
+// call — returns before Launcher.TerminateAsync's backgrounded Terminate
+// call finishes its tracker.Comment I/O (issue #745). A blockingCommentTracker
+// wired under newTeaModel holds Comment open on an unblock channel; while it
+// is still blocked, the confirm prompt must already be gone and the backlog
+// view back (proving Update returned) and the queue pick must still read
+// PickRunning (proving Terminate itself, which only sets PickTerminated
+// after Comment returns, has not reached that line yet) — asserting the
+// Update path never blocked, not just that the terminate eventually
+// completes, which TestTea_TerminateKey_ConfirmThenYes_ReclaimsHighlightedDispatch
+// already covers with a non-blocking tracker (issue #1084).
+func TestTea_TerminateKey_ConfirmThenYes_RespondsWhileTrackerCommentBlocks(t *testing.T) {
+	launch, fc, fr, _ := newTermTestLauncher(t)
+	bt := &blockingCommentTracker{IssueTracker: fc, unblock: make(chan struct{})}
+
+	tm := teatest.NewTestModel(t, newTeaModel(bt, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "k")
+	waitForOutput(t, tm, "terminate #42?", "y/N")
+
+	sendKey(tm, "y")
+	// If handleTerminateConfirmKey ever called Terminate synchronously
+	// instead of TerminateAsync, Update itself would block here on
+	// bt.unblock (still closed below) and this render would never arrive —
+	// waitForOutput would hang until teatestTimeout and fail the test.
+	waitForOutput(t, tm, "fix the thing") // confirm prompt gone, backlog/queue view back
+
+	// The background goroutine's own scheduling isn't ordered against this
+	// render, so poll rather than read commentHit once — a bounded wait
+	// still fails fast if Comment was never reached at all.
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&bt.commentHit) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("Comment was never called on the tracker")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	snap := launch.Queue.Snapshot()
+	if len(snap) != 1 || snap[0].State != PickRunning {
+		t.Fatalf("queue pick = %+v, want still PickRunning while Comment is blocked", snap)
+	}
+
+	close(bt.unblock)
+	waitForOutput(t, tm, "terminated")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	if len(fr.KillCalls) != 1 || fr.KillCalls[0] != "agent-issue-42" {
+		t.Errorf("KillCalls = %v, want exactly one kill of agent-issue-42", fr.KillCalls)
+	}
+}
+
 // TestTea_TerminateConfirmKey_Quit_ClearsPendingTerminateArmsPendingQuit
 // verifies "q"/"ctrl+c" at the terminate confirm prompt declines the
 // terminate (clearing PendingTerminate, so a later keypress cannot loop back
