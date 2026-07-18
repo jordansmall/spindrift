@@ -67,10 +67,17 @@ type Launcher struct {
 	rebuilding   bool
 	rebuildErr   error
 	// rebuildOutput is the last rebuild's captured nix output (issue #765) —
-	// stdout/stderr merged, in build order — set on every RebuildFn
+	// stdout/stderr merged, in build order, bounded to the tail the
+	// runner package's output cap enforces (issue #1130) — set on every
+	// RebuildFn
 	// completion regardless of outcome so an operator can retrieve it
 	// through StaleStatus without RunNixBuild ever writing to the Console's
-	// own stdout/stderr.
+	// own stdout/stderr. A failed rebuild's output is intentionally kept
+	// until the *next* rebuild attempt overwrites it here, rather than
+	// cleared right away — an operator debugging the failure needs it to
+	// stay put after the error banner appears. A successful rebuild already
+	// overwrites this field unconditionally (see Rebuild below), so no
+	// separate clear-on-success step is needed.
 	rebuildOutput string
 	// pollInterval overrides Run's default background poll cadence — unset
 	// (zero) in every production construction site, so only same-package
