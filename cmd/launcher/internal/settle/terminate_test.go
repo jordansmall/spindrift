@@ -2,6 +2,8 @@ package settle
 
 import (
 	"errors"
+	"os"
+	"regexp"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -39,8 +41,8 @@ func TestGateToGreen_TerminatedAbandonsWithoutTransition(t *testing.T) {
 // preflightStaleBase counterpart to
 // TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase: termination
 // lands between the proactive stale-base rebase and rewaitAfterForcePush's
-// CI poll (ready.go:402, added by fda1a20), and must report errAbandoned —
-// never reaching mergeImmediate's own Merge call.
+// CI poll (added by fda1a20, in preflightStaleBase), and must report
+// errAbandoned — never reaching mergeImmediate's own Merge call.
 func TestMergeImmediate_TerminatedDuringRewaitAfterStaleBasePreflight(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -195,8 +197,8 @@ func (d terminatingConflictResolver) ResolveConflict(pr string) error {
 // conflict-resolve counterpart to
 // TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase: termination
 // lands between a successful agent conflict-resolve and
-// rewaitAfterForcePush's CI poll (ready.go:342), and must report
-// errAbandoned rather than errLandingNeverGreen.
+// rewaitAfterForcePush's CI poll (in mergeImmediate's conflict-retry
+// branch), and must report errAbandoned rather than errLandingNeverGreen.
 func TestMergeImmediate_TerminatedDuringRewaitAfterConflictResolve(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 5
@@ -275,7 +277,8 @@ func TestSelfHeal_TerminatedDuringFixPass_StopsRetryLoop(t *testing.T) {
 // post-force-push re-wait: it must report landingAbandoned, not
 // landingFailed, and take none of landingFailed's side effects (no
 // agent-failed transition, no "landing failed" comment) — the
-// "no further action, Terminate already handled it" contract (result.go:56-61).
+// "no further action, Terminate already handled it" contract on
+// landingAbandoned.
 func TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 5
@@ -354,5 +357,21 @@ func TestSettle_AbandonedSkipsUsageComment(t *testing.T) {
 
 	if len(fc.CommentCalls) != 0 {
 		t.Errorf("no comment expected after termination; got %+v", fc.CommentCalls)
+	}
+}
+
+// TestDocComments_NoHardcodedLineNumbers guards against #1174 regressing:
+// doc-comments here once pinned another file's exact line number, which
+// rots the instant that file shifts. Symbol names (function/type/const)
+// are stable across edits; line numbers are not.
+func TestDocComments_NoHardcodedLineNumbers(t *testing.T) {
+	src, err := os.ReadFile("terminate_test.go")
+	if err != nil {
+		t.Fatalf("ReadFile(terminate_test.go) = %v", err)
+	}
+
+	re := regexp.MustCompile(`\b\w+\.go:\d+`)
+	if m := re.FindAllString(string(src), -1); m != nil {
+		t.Errorf("doc-comments must reference symbols, not line numbers; found %v", m)
 	}
 }
