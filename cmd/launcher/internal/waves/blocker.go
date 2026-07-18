@@ -126,7 +126,9 @@ func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 }
 
 // BlockerReady returns true when the blocker's PR is merged, or when the
-// blocker issue is closed with no discoverable PR (human-handled work).
+// blocker resolves (via the issue-fallback path) to an issue that is closed
+// or a PR that is merged, with no discoverable agent branch (human-handled
+// work, or a blocker ref that names a PR number directly).
 // Exported for callers outside the wave engine that need a single-blocker
 // readiness check ahead of a Plan — e.g. the selective `dispatch <nums>`
 // path's external-blocker eviction pass. cf's PR surface is optional: a
@@ -157,8 +159,12 @@ func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string) (ready 
 	if err != nil {
 		return false, nil
 	}
-	if issue.State == forge.IssueClosed {
+	switch issue.State {
+	case forge.IssueClosed:
 		fmt.Printf("    .. blocker #%s is closed (no discoverable PR); treating as satisfied\n", dep)
+		return true, &issue
+	case forge.IssueMerged:
+		fmt.Printf("    .. blocker #%s is a merged PR (no discoverable agent branch); treating as satisfied\n", dep)
 		return true, &issue
 	}
 	return false, &issue

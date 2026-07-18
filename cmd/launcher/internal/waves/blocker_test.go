@@ -241,6 +241,28 @@ func TestBlockerReady_ClosedIssueFallback(t *testing.T) {
 	}
 }
 
+func TestBlockerReady_MergedIssueFallback(t *testing.T) {
+	fc := forge.NewFake()
+	// Blocker ref resolves to a PR number: no agent branch, so it falls
+	// back to it.Issue(ref), which returns MERGED for a merged PR.
+	fc.SetIssue(forge.Issue{Number: "99", State: "MERGED"})
+
+	if !BlockerReady(fc, fc, "99") {
+		t.Error("blockerReady: want true for merged issue fallback, got false")
+	}
+}
+
+func TestBlockerReady_OpenIssueFallback(t *testing.T) {
+	fc := forge.NewFake()
+	// No PR registered, so it falls back to it.Issue(ref), which returns
+	// still-OPEN — must keep blocking.
+	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN"})
+
+	if BlockerReady(fc, fc, "99") {
+		t.Error("blockerReady: want false for open issue fallback, got true")
+	}
+}
+
 // --- BlockerStatus tests ---
 
 func TestBlockerStatus_ClosedAndFailed(t *testing.T) {
