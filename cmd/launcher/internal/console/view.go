@@ -111,8 +111,17 @@ func View(m Model) string {
 		listModel.Width = m.Width - sidebarWidth - 1
 		listBudget := budget
 		list := renderBody(listModel, &listBudget)
-		divider := renderColumnDivider(budget)
 		sidebar := renderSidebarDocked(*m.Sidebar, sidebarWidth, budget, m.Focus == FocusSidebar)
+		// The divider spans the taller of the two columns' actual rendered
+		// rows, not the whole budget — a short list or a short sidebar
+		// (few picks, a brief Activity feed) must not force the other idle
+		// the whole body budget just to fill a divider column (#1501 review
+		// finding).
+		dividerRows := strings.Count(list, "\n")
+		if n := strings.Count(sidebar, "\n"); n > dividerRows {
+			dividerRows = n
+		}
+		divider := renderColumnDivider(dividerRows)
 		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, list, divider, sidebar))
 	} else {
 		b.WriteString(renderBody(m, &budget))

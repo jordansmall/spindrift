@@ -368,7 +368,17 @@ func Update(m Model, msg Msg) Model {
 	m.Height = clampSize(m.Height)
 	m.Cursor = clampCursor(m.Cursor, sectionRowCount(m, m.ActiveSection))
 	if m.Sidebar != nil {
-		clampSidebarOffset(m.Sidebar, m.Height)
+		// Docked (sidebarFits), the sidebar's actual viewport is the same
+		// row budget the list body renders into, not the whole terminal
+		// height — renderSidebarDocked subtracts headerFooterLines from
+		// bodyBudget(m), same as this clamp must, or the "last page fills
+		// the viewport" cap (issue #829) target a taller page than the
+		// docked render actually has room to show (#1501 review finding).
+		height := m.Height
+		if sidebarFits(m) {
+			height = bodyBudget(m)
+		}
+		clampSidebarOffset(m.Sidebar, height)
 	}
 	clampRebuildOutputOffset(&m)
 	m.Offset = clampCursor(m.Offset, sectionRowCount(m, m.ActiveSection))

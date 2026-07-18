@@ -937,6 +937,44 @@ func TestTea_SidebarKey_NoDriver_ShowsGracefulMessage(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_SidebarKey_ClaimedNotYetLaunched_ShowsEmptyActivityNotError
+// verifies a pick that reads PickRunning a moment before its Box's first log
+// write lands on disk opens the sidebar showing an empty Activity feed, not
+// an error — hasTranscript's PickRunning gate can admit this window, and
+// ActivityFeed's own graceful-empty contract must win over DrillIn's "no
+// logs found" for the combined SidebarLoadedMsg (#1501 review finding).
+func TestTea_SidebarKey_ClaimedNotYetLaunched_ShowsEmptyActivityNotError(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	// No log file written for #42 -- the race this test targets.
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "2")
+	waitForOutput(t, tm, "running")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.Sidebar == nil {
+		t.Fatal("Sidebar = nil, want a loaded (empty) sidebar")
+	}
+	if fm.m.Sidebar.Err != nil {
+		t.Errorf("Sidebar.Err = %v, want nil (graceful empty, not a failure)", fm.m.Sidebar.Err)
+	}
+	if len(fm.m.Sidebar.Activity) != 0 {
+		t.Errorf("Sidebar.Activity = %v, want empty", fm.m.Sidebar.Activity)
+	}
+}
+
 // TestTea_HandleKey_RebuildOutputKey_OpensPaneWhenOutputPresent verifies "o"
 // opens the rebuild-output pane once a rebuild has captured output (issue
 // #1128).
