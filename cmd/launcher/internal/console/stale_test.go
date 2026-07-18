@@ -423,3 +423,49 @@ func TestLauncher_Rebuild_Retry_ClearsPriorErrorImmediately(t *testing.T) {
 	close(release)
 	launch.Wait()
 }
+
+// TestLauncher_FreshnessChecker_SignalsOnlyOnFreshToStaleTransition verifies
+// the closure freshnessChecker returns calls signalRefresh only on the
+// fresh->stale edge, not on every verdict (issue #1124): a repeated stale
+// verdict and a fresh verdict must not signal, since Rebuild already signals
+// the stale->fresh clear itself.
+func TestLauncher_FreshnessChecker_SignalsOnlyOnFreshToStaleTransition(t *testing.T) {
+	var fresh bool
+	launch := &Launcher{
+		Fresh: func() (bool, bool, string) { return true, fresh, "" },
+	}
+	checker := launch.freshnessChecker()
+	signals := launch.Refreshes()
+
+	drain := func() bool {
+		select {
+		case <-signals:
+			return true
+		default:
+			return false
+		}
+	}
+
+	fresh = true
+	checker()
+	if drain() {
+		t.Error("fresh verdict signaled, want no signal")
+	}
+
+	fresh = false
+	checker()
+	if !drain() {
+		t.Error("fresh->stale verdict did not signal, want signal")
+	}
+
+	checker()
+	if drain() {
+		t.Error("repeated stale verdict signaled, want no signal")
+	}
+
+	fresh = true
+	checker()
+	if drain() {
+		t.Error("stale->fresh verdict signaled, want no signal (Rebuild's own signal covers this)")
+	}
+}

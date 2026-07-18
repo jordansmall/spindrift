@@ -478,10 +478,14 @@ func (l *Launcher) freshnessChecker() waves.FreshnessChecker {
 	return func() (bool, bool, string) {
 		applicable, fresh, msg := l.Fresh()
 		l.mu.Lock()
+		wasStale := l.stale
 		l.stale = applicable && !fresh
 		l.staleMessage = msg
+		newlyStale := l.stale && !wasStale
 		l.mu.Unlock()
-		l.signalRefresh()
+		if newlyStale {
+			l.signalRefresh()
+		}
 		return applicable, fresh, msg
 	}
 }
