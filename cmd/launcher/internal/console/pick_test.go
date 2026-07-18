@@ -1,6 +1,11 @@
 package console
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"spindrift.dev/launcher/internal/forge"
+)
 
 // TestUpdate_PickQueuedMsg_AppendsPick verifies Update adds a new queued Pick
 // to Model.Picks, defaulted to KindWork — the operator's launch decision
@@ -129,5 +134,69 @@ func TestUpdate_SectionNav_NextPrevWrapAndJumpDirect(t *testing.T) {
 	m = Update(m, SectionJumpMsg{Section: SectionHeld})
 	if m.ActiveSection != SectionHeld {
 		t.Errorf("ActiveSection after jump = %v, want SectionHeld", m.ActiveSection)
+	}
+}
+
+// TestUpdate_CursorMoveMsg_ClampsAgainstActiveSectionTotal verifies the
+// cursor clamps against whichever Section is active, not the backlog —
+// switching to a work Section with fewer rows than the backlog must not
+// leave Cursor pointing past its end (ADR 0030).
+func TestUpdate_CursorMoveMsg_ClampsAgainstActiveSectionTotal(t *testing.T) {
+	m := NewModel()
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{{Number: "9", State: PickHeld}}})
+	m = Update(m, SectionJumpMsg{Section: SectionHeld})
+
+	m = Update(m, CursorMoveMsg{Delta: 5})
+
+	if m.Cursor != 0 {
+		t.Errorf("Cursor = %d, want clamped at 0 (one held pick, index 0 is the only valid row)", m.Cursor)
+	}
+}
+
+// TestUpdate_SectionJumpMsg_ResetsCursorAndOffsetOnChange verifies switching
+// to a different Section resets Cursor and Offset to 0, but jumping to the
+// Section that's already active leaves them where the operator left them.
+func TestUpdate_SectionJumpMsg_ResetsCursorAndOffsetOnChange(t *testing.T) {
+	m := NewModel()
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}})
+	m = Update(m, CursorMoveMsg{Delta: 2})
+	if m.Cursor != 2 {
+		t.Fatalf("Cursor = %d, want 2 before switching Sections", m.Cursor)
+	}
+
+	m = Update(m, SectionJumpMsg{Section: SectionBacklog})
+	if m.Cursor != 2 {
+		t.Errorf("Cursor = %d, want unchanged (jumped to the already-active Section)", m.Cursor)
+	}
+
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+	if m.Cursor != 0 || m.Offset != 0 {
+		t.Errorf("Cursor/Offset = %d/%d, want reset to 0/0 after switching to a different Section", m.Cursor, m.Offset)
+	}
+}
+
+// TestFormatAge_RendersHumanScaleDurations verifies formatAge picks the
+// coarsest unit that still reads precisely at each scale — minutes under an
+// hour, hours+minutes under a day, whole days beyond that — so an aligned
+// age column stays narrow at every scale rather than always showing
+// hh:mm:ss.
+func TestFormatAge_RendersHumanScaleDurations(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "<1m"},
+		{3 * time.Minute, "3m"},
+		{59 * time.Minute, "59m"},
+		{90 * time.Minute, "1h30m"},
+		{23*time.Hour + 59*time.Minute, "23h59m"},
+		{25 * time.Hour, "1d"},
+		{72 * time.Hour, "3d"},
+	}
+	for _, c := range cases {
+		if got := formatAge(c.d); got != c.want {
+			t.Errorf("formatAge(%s) = %q, want %q", c.d, got, c.want)
+		}
 	}
 }
