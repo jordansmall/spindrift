@@ -60,7 +60,11 @@ func TestView_CapAndLive_Shown(t *testing.T) {
 // TestView_Header_StatusLine_ShowsRunningWaitingHeldSettledFailed verifies
 // the header's status line reports running/cap, waiting, held, settled, and
 // failed counts derived from Cap/Live and the Picks slice's PickState tags —
-// no new stored counters (issue #843, ADR 0025).
+// no new stored counters (issue #843, ADR 0025). Each count segment is
+// asserted individually rather than as one contiguous line: per-role styling
+// (ADR 0031) wraps each segment in its own ANSI escape codes, so content
+// survives styling as separate substrings, not as one unbroken string
+// (issue #1499 AC).
 func TestView_Header_StatusLine_ShowsRunningWaitingHeldSettledFailed(t *testing.T) {
 	m := NewModel()
 	m = Update(m, CapMsg{Cap: 3, Live: 1})
@@ -73,9 +77,27 @@ func TestView_Header_StatusLine_ShowsRunningWaitingHeldSettledFailed(t *testing.
 	}
 
 	out := View(m)
-	want := "running 1/3 · waiting 1 · held 1 · settled 2 · failed 1"
-	if !strings.Contains(out, want) {
-		t.Errorf("View() = %q, want it to contain status line %q", out, want)
+	for _, want := range []string{"running 1/3", "waiting 1", "held 1", "settled 2", "failed 1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("View() = %q, want it to contain status segment %q", out, want)
+		}
+	}
+}
+
+// TestView_Header_StatusLine_StyledByRole verifies the status line renders
+// with ANSI color codes on a color-capable terminal — colour applied by
+// semantic role, per ADR 0031 — rather than as bare text.
+func TestView_Header_StatusLine_StyledByRole(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := NewModel()
+	m = Update(m, CapMsg{Cap: 3, Live: 1})
+	m.Picks = []Pick{{Number: "1", State: PickFailed}}
+
+	out := View(m)
+	if !strings.Contains(out, "\x1b[") {
+		t.Errorf("View() = %q, want the status line styled with an ANSI escape sequence", out)
 	}
 }
 
