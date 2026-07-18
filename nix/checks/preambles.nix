@@ -247,6 +247,10 @@ in
   preambles-document-artifact-keys =
     let
       out = preambles.documentArtifactKeys;
+      # Hand-maintained, unlike `out`: lib/preambles.nix:220 sorts the real
+      # keys with builtins.sort, but this pin does not sort itself. Must stay
+      # alphabetical or the assert below fails with a "got: [...]" diff that
+      # doesn't say why. Insert new keys in sorted position.
       expected = [
         "AGENT_ENV"
         "AGENT_ENV_DRV"
