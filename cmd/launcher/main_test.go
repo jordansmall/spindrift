@@ -20,7 +20,9 @@ import (
 // (no subcommand) prints the concise help to stdout and exits 0, instead of
 // falling through to the dispatch default (issue #555).
 func TestMainRun_NoArgs_PrintsHelpAndDoesNotDispatch(t *testing.T) {
-	withSchemaFlags(t, []flagEntry{})
+	t.Setenv("SOME_KEY", "")
+	os.Unsetenv("SOME_KEY")
+	withSchemaFlags(t, []flagEntry{{env: "SOME_KEY", dflt: "10"}})
 
 	var stdout, stderr bytes.Buffer
 	code := mainRun(nil, &stdout, &stderr)
