@@ -77,3 +77,31 @@ func TestUpdate_UnpickMsg_LeavesNonQueuedPickAlone(t *testing.T) {
 		t.Errorf("Picks = %+v, want the running pick left in place", m.Picks)
 	}
 }
+
+// TestPickSection_PartitionsEveryPickStateIntoOneOfFourWorkSections verifies
+// pickSection maps every PickState onto exactly one of the four work
+// Sections (ADR 0030): Queued/Claiming/Running are still active in the
+// pipeline (SectionRunning); Held stays SectionHeld; a clean completion is
+// SectionSettled; anything that ended without settling — Dissolved (never
+// launched), Terminated (operator ended it), Failed (Box exited non-zero) —
+// lands in SectionFailed.
+func TestPickSection_PartitionsEveryPickStateIntoOneOfFourWorkSections(t *testing.T) {
+	cases := []struct {
+		state PickState
+		want  Section
+	}{
+		{PickQueued, SectionRunning},
+		{PickClaiming, SectionRunning},
+		{PickRunning, SectionRunning},
+		{PickHeld, SectionHeld},
+		{PickSettled, SectionSettled},
+		{PickDissolved, SectionFailed},
+		{PickTerminated, SectionFailed},
+		{PickFailed, SectionFailed},
+	}
+	for _, c := range cases {
+		if got := pickSection(c.state); got != c.want {
+			t.Errorf("pickSection(%s) = %v, want %v", c.state, got, c.want)
+		}
+	}
+}
