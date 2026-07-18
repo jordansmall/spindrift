@@ -415,9 +415,11 @@ func clampCursor(cursor, n int) int {
 // leaves an Offset renderDrillIn can't slice with, and a raw/rendered toggle
 // whose other form has fewer lines still lands somewhere valid (issue #786).
 // A nil d is a no-op — Update calls this unconditionally, matching the
-// cursor clamp. Content that already fits the viewport at Offset 0 (either
-// because it's short, or because height is too small to fit a page at all)
-// falls all the way back to 0 rather than to the last line.
+// cursor clamp. Content that already fits the viewport (budget >=
+// len(Lines), the short-content case) falls all the way back to 0 rather
+// than to the last line. When height is too small to fit a page at all
+// (budget == 0), pageMax never undercuts maxOffset, so an out-of-range
+// Offset instead lands at the last line, len(Lines)-1.
 func clampDrillInOffset(d *DrillInState, height int) {
 	if d == nil {
 		return
