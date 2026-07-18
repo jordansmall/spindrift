@@ -152,13 +152,8 @@ func checkCheckoutSafe(pwd, baseBranch string) (string, error) {
 
 // runGit runs `git -C pwd args...`, surfacing git's own stderr on failure.
 func runGit(pwd string, args ...string) error {
-	cmd := exec.Command("git", append([]string{"-C", pwd}, args...)...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-	}
-	return nil
+	_, err := gitOutput(pwd, args...)
+	return err
 }
 
 // gitOutput runs `git -C pwd args...` and returns its trimmed stdout,
