@@ -877,6 +877,29 @@ func TestView_TwoColumn_Queue_BlockerVisibleDespiteLongTitle(t *testing.T) {
 	}
 }
 
+// TestView_TwoColumn_Queue_TitleAdjacentToStateWhenNoTruncation verifies a
+// queue row keeps Title immediately after its bracketed state tag when the
+// row's natural order fits the terminal width without clipping — #858's
+// blocker-first reorder should only kick in when truncation would actually
+// drop the blocker, not unconditionally at every width (issue #1256).
+func TestView_TwoColumn_Queue_TitleAdjacentToStateWhenNoTruncation(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 200, Height: 24})
+	m.Picks = []Pick{
+		{Number: "42", Title: "short title", State: PickHeld, BlockedBy: "#41 (native)", Reason: "issue is closed"},
+	}
+
+	out := View(m)
+	stateIdx := strings.Index(out, "[held]")
+	titleIdx := strings.Index(out, "short title")
+	blockedIdx := strings.Index(out, "held by #41 (native)")
+	if stateIdx == -1 || titleIdx == -1 || blockedIdx == -1 {
+		t.Fatalf("View() = %q, want [held], title, and blocker all present", out)
+	}
+	if !(stateIdx < titleIdx && titleIdx < blockedIdx) {
+		t.Errorf("View() = %q, want Title immediately after the state tag and before the blocker when nothing truncates", out)
+	}
+}
+
 // TestView_NarrowTerminal_Body_LinesNeverExceedTerminalWidth verifies the
 // stacked (narrow-terminal) body clips each line to Width the same way the
 // two-column body does — a long backlog or picks row must not blow out
@@ -936,12 +959,12 @@ func TestRenderQueueColumn_NilBudgetNeverTruncates(t *testing.T) {
 	}
 	m.Picks = picks
 
-	out := renderQueueColumn(m, nil)
+	out := renderQueueColumn(m, nil, m.Width)
 	if !strings.Contains(out, "pick 499") {
-		t.Errorf("renderQueueColumn(m, nil) = %q, want the last of 500 rows present, unwindowed", out)
+		t.Errorf("renderQueueColumn(m, nil, m.Width) = %q, want the last of 500 rows present, unwindowed", out)
 	}
 	if strings.Contains(out, "more below") {
-		t.Errorf("renderQueueColumn(m, nil) = %q, want no truncation affordance for a nil budget", out)
+		t.Errorf("renderQueueColumn(m, nil, m.Width) = %q, want no truncation affordance for a nil budget", out)
 	}
 }
 
