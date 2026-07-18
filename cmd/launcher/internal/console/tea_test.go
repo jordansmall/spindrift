@@ -750,35 +750,48 @@ func TestTea_FocusKeys_MoveBetweenListAndDockedSidebar(t *testing.T) {
 	}
 }
 
-// TestTea_EnterKey_OnSettledRow_OpensSidebar verifies Enter opens the sidebar
-// for a Settled pick — the static case with nothing left to tail, still
-// shown from its final on-disk logs (#1501 AC5).
-func TestTea_EnterKey_OnSettledRow_OpensSidebar(t *testing.T) {
-	f := forge.NewFake()
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
-
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
-		t.Fatal(err)
+// TestTea_EnterKey_OnStaticRow_OpensSidebar verifies Enter opens the sidebar
+// for a Settled, Terminated, or Failed pick — the static case with nothing
+// left to tail, still shown from its final on-disk logs (#1501 AC5).
+func TestTea_EnterKey_OnStaticRow_OpensSidebar(t *testing.T) {
+	tests := []struct {
+		state      PickState
+		sectionKey string
+		stateWord  string
+	}{
+		{PickSettled, "4", "settled"},
+		{PickTerminated, "5", "terminated"},
+		{PickFailed, "5", "failed"},
 	}
-	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
-		t.Fatal(err)
+	for _, tt := range tests {
+		t.Run(tt.state.String(), func(t *testing.T) {
+			f := forge.NewFake()
+			f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+			dir := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+			if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			launch := newTestLauncher(t, f)
+			launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: tt.state})
+
+			tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+			waitForOutput(t, tm, "fix the thing")
+
+			sendKey(tm, tt.sectionKey)
+			waitForOutput(t, tm, tt.stateWord)
+
+			sendKey(tm, "enter")
+			waitForOutput(t, tm, "activity #42", "hi")
+
+			sendKey(tm, "q")
+			waitFinished(t, tm)
+		})
 	}
-	launch := newTestLauncher(t, f)
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickSettled})
-
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "4")
-	waitForOutput(t, tm, "settled")
-
-	sendKey(tm, "enter")
-	waitForOutput(t, tm, "activity #42", "hi")
-
-	sendKey(tm, "q")
-	waitFinished(t, tm)
 }
 
 // TestTea_HandleKey_ArrowKeys_MirrorHAndL verifies the left/right arrow keys
