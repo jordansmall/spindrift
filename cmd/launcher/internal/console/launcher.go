@@ -79,12 +79,14 @@ type Launcher struct {
 	// created by registry() so a bare struct literal (every production and
 	// test call site) needs no constructor.
 	terminated *terminate.Registry
-	// terminating tracks issue numbers with a TerminateAsync goroutine still
-	// in flight, guarding against a second confirm firing a duplicate
+	// terminatingNums tracks issue numbers with a TerminateAsync goroutine
+	// still in flight, guarding against a second confirm firing a duplicate
 	// Terminate for the same issue (issue #745): the queue pick stays
 	// PickRunning — and so isLive keeps reporting it live — for the whole
-	// async call, not just Terminate's old synchronous window.
-	terminating map[string]bool
+	// async call, not just Terminate's old synchronous window. Lazily
+	// created by terminating() so a bare struct literal (every production
+	// and test call site) needs no constructor.
+	terminatingNums map[string]bool
 	// cap is the session's live, resizable parallelism cap (ADR 0023, issue
 	// #653) — one Limiter shared across every drain() this Launcher runs,
 	// so a Console "+"/"-" takes effect on the RunContinuous call already
@@ -277,15 +279,14 @@ func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 // synchronous window — a second confirm on the same row would otherwise
 // race a duplicate Kill/Comment/TransitionState.
 func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) {
+	inFlight := l.terminating()
+
 	l.mu.Lock()
-	if l.terminating == nil {
-		l.terminating = make(map[string]bool)
-	}
-	if l.terminating[num] {
+	if inFlight[num] {
 		l.mu.Unlock()
 		return
 	}
-	l.terminating[num] = true
+	inFlight[num] = true
 	l.wg.Add(1)
 	l.mu.Unlock()
 
@@ -294,9 +295,21 @@ func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) {
 		l.Terminate(tracker, num)
 
 		l.mu.Lock()
-		delete(l.terminating, num)
+		delete(inFlight, num)
 		l.mu.Unlock()
 	}()
+}
+
+// terminating lazily constructs l.terminatingNums, mirroring registry()'s
+// lazy-construction pattern so a bare struct literal (every production and
+// test call site) needs no constructor.
+func (l *Launcher) terminating() map[string]bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.terminatingNums == nil {
+		l.terminatingNums = make(map[string]bool)
+	}
+	return l.terminatingNums
 }
 
 // refreshChan lazily constructs l.refresh, so a bare struct literal (every
