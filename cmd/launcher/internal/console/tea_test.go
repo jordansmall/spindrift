@@ -615,11 +615,13 @@ func TestHasTranscript_PerState(t *testing.T) {
 	}
 }
 
-// TestTea_DrillInKey_OpensTranscriptPane verifies Enter, focused on the work
-// queue, opens a full-screen transcript pane for the highlighted running
-// pick, replacing the backlog (issue #786; retargeted to focused-queue Enter
-// by issue #845, which retires the old "d"/backlog-Enter drill-in binding).
-func TestTea_DrillInKey_OpensTranscriptPane(t *testing.T) {
+// drillInOpen prepares a fake forge issue #42 with a running pick and a
+// one-line transcript, then drives the launcher through tab/enter to land on
+// an open drill-in transcript pane, ready for a test to assert further
+// keystrokes against.
+func drillInOpen(t *testing.T) *teatest.TestModel {
+	t.Helper()
+
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
@@ -642,6 +644,16 @@ func TestTea_DrillInKey_OpensTranscriptPane(t *testing.T) {
 
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "transcript #42", "[implementor] hi")
+
+	return tm
+}
+
+// TestTea_DrillInKey_OpensTranscriptPane verifies Enter, focused on the work
+// queue, opens a full-screen transcript pane for the highlighted running
+// pick, replacing the backlog (issue #786; retargeted to focused-queue Enter
+// by issue #845, which retires the old "d"/backlog-Enter drill-in binding).
+func TestTea_DrillInKey_OpensTranscriptPane(t *testing.T) {
+	tm := drillInOpen(t)
 
 	sendKey(tm, "x")
 	waitForOutput(t, tm, "fix the thing")
@@ -657,28 +669,7 @@ func TestTea_DrillInKey_OpensTranscriptPane(t *testing.T) {
 // guard in handleKey must not swallow the universal quit keystroke (issue
 // #826).
 func TestTea_DrillInKey_QuitsWithoutClosing(t *testing.T) {
-	f := forge.NewFake()
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
-
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	launch := newTestLauncher(t, f)
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
-
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "tab")
-	waitForOutput(t, tm, "picks [focus]")
-
-	sendKey(tm, "enter")
-	waitForOutput(t, tm, "transcript #42", "[implementor] hi")
+	tm := drillInOpen(t)
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
@@ -688,28 +679,7 @@ func TestTea_DrillInKey_QuitsWithoutClosing(t *testing.T) {
 // straight out of an open drill-in pane, without requiring "x" first — same
 // universal-quit carve-out as "q" (issue #826).
 func TestTea_DrillInKey_QuitsOnCtrlCWithoutClosing(t *testing.T) {
-	f := forge.NewFake()
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
-
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	launch := newTestLauncher(t, f)
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
-
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "tab")
-	waitForOutput(t, tm, "picks [focus]")
-
-	sendKey(tm, "enter")
-	waitForOutput(t, tm, "transcript #42", "[implementor] hi")
+	tm := drillInOpen(t)
 
 	sendKey(tm, "ctrl+c")
 	waitFinished(t, tm)
