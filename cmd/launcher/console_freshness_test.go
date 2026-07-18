@@ -184,6 +184,36 @@ func TestConsoleGitSync_DirtyOnBaseBranch_StillSyncs(t *testing.T) {
 	}
 }
 
+// TestHeadRevAndProbeRev_SameCommit_IdenticalFormat verifies headRev and
+// freshness.Probe's Result.Rev — both backed by a plain `git rev-parse` with
+// no --short/--abbrev flag — return identically formatted full SHAs for the
+// same commit, not just equal-looking strings. This is the format guarantee
+// newConsoleFreshnessChecker's res.Rev == builtRev comparison relies on: a
+// future --short added to either call site would silently break that match,
+// and this test would catch it since a shortened Rev wouldn't equal a
+// full-length headRev output.
+func TestHeadRevAndProbeRev_SameCommit_IdenticalFormat(t *testing.T) {
+	pwd := newConsoleGitRepo(t, "main")
+
+	head, err := headRev(pwd)
+	if err != nil {
+		t.Fatalf("headRev: %v", err)
+	}
+
+	eval := &freshness.Fake{OutPath: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-agent-image"}
+	res := freshness.Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", eval)
+
+	if res.Rev != head {
+		t.Errorf("Probe Rev = %q, headRev = %q, want identical for the same commit", res.Rev, head)
+	}
+	if len(head) != 40 {
+		t.Errorf("headRev length = %d, want 40 (full SHA-1, no --short)", len(head))
+	}
+	if len(res.Rev) != 40 {
+		t.Errorf("Probe Rev length = %d, want 40 (full SHA-1, no --short)", len(res.Rev))
+	}
+}
+
 // gitRun runs git in dir, failing the test on error.
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()

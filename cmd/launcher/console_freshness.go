@@ -48,6 +48,11 @@ func newConsoleFreshnessChecker(baseBranch string, probe func() freshness.Result
 	fresh := func() (bool, bool, string) {
 		res := probe()
 		mu.Lock()
+		// res.Rev (from freshness.fetchBaseTip) and builtRev (from headRev via
+		// pull) are both plain, un-abbreviated `git rev-parse` output — full
+		// 40-char SHAs — so this string equality is a safe same-commit check.
+		// Adding --short/--abbrev to either call site would silently break
+		// this match.
 		rebuiltThisTip := res.Rev != "" && res.Rev == builtRev
 		mu.Unlock()
 		if res.Applicable && !res.Fresh && rebuiltThisTip {
@@ -99,7 +104,11 @@ func consoleGitSync(pwd, baseBranch string) (string, error) {
 	return headRev(pwd)
 }
 
-// headRev returns the rev pwd's working tree is currently checked out at.
+// headRev returns the rev pwd's working tree is currently checked out at, as
+// a full 40-char SHA-1 (64 for SHA-256 repos) — no --short/--abbrev flag is
+// passed to `git rev-parse`, so the format matches freshness.fetchBaseTip's,
+// which the res.Rev == builtRev comparison in newConsoleFreshnessChecker
+// relies on.
 func headRev(pwd string) (string, error) {
 	cmd := exec.Command("git", "-C", pwd, "rev-parse", "HEAD")
 	var stderr bytes.Buffer
