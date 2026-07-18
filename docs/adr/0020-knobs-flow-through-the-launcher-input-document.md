@@ -31,12 +31,20 @@ per-knob struct. (Amended by issue #813: this ADR originally claimed the
 struct was nix-generated from the schema under the same golden-diff guard as
 `flagtable_gen.go`; that never shipped. Drift protection here is narrower
 than a generated struct would give: `nix/checks/equivalence.nix`'s
-`mkharness-defaults` check hand-picks specific keys — `LABEL`, `BASE_BRANCH`,
-`MAX_PARALLEL`, `BRANCH_PREFIX`, `IN_PROGRESS_LABEL`, `FAILED_LABEL`,
-`SCOUT_MODEL`, `REVIEW_MODEL`, `COMPLETE_LABEL`, `RUNTIME`, `AGENT_FILES`,
-`AGENT_ENV`, and the `_DRV`/`IMAGE_ARCHIVE` artifact variants — and asserts
-their rendered values by grep, not every `flakeOption` knob the schema
-defines. A newly added knob reaches the document with no automatic
+`mkharness-defaults` check hand-picks specific keys, not every `flakeOption`
+knob the schema defines, and its assertion strength varies by key. `LABEL`,
+`BASE_BRANCH`, `MAX_PARALLEL`, `BRANCH_PREFIX`, `IN_PROGRESS_LABEL`,
+`FAILED_LABEL`, `SCOUT_MODEL`, `REVIEW_MODEL`, `COMPLETE_LABEL`, and `RUNTIME`
+get real value assertions — grepped against the specific string each test
+config sets, e.g. `grep -q '"LABEL":"custom-label"'`. `AGENT_FILES`,
+`AGENT_ENV`, and their `_DRV` build-doc variants are checked for presence
+only — e.g. `grep -q '"AGENT_FILES":'` — with no comparison to an expected
+value, since these are real store paths produced by the build rather than
+literal strings the test controls. `IMAGE_ARCHIVE`/`IMAGE_DRV` get a third
+treatment in the bwrap harness, which bakes no OCI store paths: `IMAGE_ARCHIVE`
+is asserted absent *as a store path* (the key may still be present, empty),
+while `IMAGE_DRV` is asserted fully absent. A newly added knob reaches the
+document with no automatic
 value-for-value assertion until someone extends that check by hand. Whether
 to broaden `equivalence.nix`'s coverage or derive it from the schema is left
 open; see issue #810 for the related `documentArtifacts` coverage gap in
