@@ -132,6 +132,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	}
 	missing := append(append([]string{}, workMissing...), researchMissing...)
 	if len(missing) == 0 {
+		fmt.Fprintln(w, "ok: all triage and research labels present")
 		return nil
 	}
 
