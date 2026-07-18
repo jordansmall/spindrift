@@ -31,7 +31,7 @@ const defaultPollInterval = 90 * time.Second
 
 // drillInPageScrollDelta is how many lines pgup/pgdown move the drill-in
 // transcript's scroll offset — j/k and the arrows move one line at a time
-// (issue #786). Fixed, unlike the backlog/queue page jump (focusedPageSize),
+// (issue #786). Fixed, unlike the body's own page jump (sectionPageSize),
 // which derives from the live viewport height instead (issue #1037).
 const drillInPageScrollDelta = 10
 
@@ -238,32 +238,43 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		t.m = Update(t.m, QueueEnterNoticeClearedMsg{})
 	}
 	switch msg.String() {
-	case "tab":
-		t.m = Update(t.m, FocusToggleMsg{})
 	case "j", "down":
 		t.m = Update(t.m, CursorMoveMsg{Delta: 1})
-	case "i", "up":
-		// "i" is not vim's cursor-up key (that's "k", taken by Terminate
-		// below); it sits directly above "k" on the keyboard instead
-		// (issue #838).
+	case "k", "up":
+		// "k" is vim's cursor-up key, freed by Terminate's move to "X"
+		// (issue #1500); "i"-as-up (#838) is retired now that "k" covers it.
 		t.m = Update(t.m, CursorMoveMsg{Delta: -1})
+	case "H":
+		t.m = Update(t.m, SectionPrevMsg{})
+	case "L":
+		t.m = Update(t.m, SectionNextMsg{})
+	case "1":
+		t.m = Update(t.m, SectionJumpMsg{Section: SectionBacklog})
+	case "2":
+		t.m = Update(t.m, SectionJumpMsg{Section: SectionRunning})
+	case "3":
+		t.m = Update(t.m, SectionJumpMsg{Section: SectionHeld})
+	case "4":
+		t.m = Update(t.m, SectionJumpMsg{Section: SectionSettled})
+	case "5":
+		t.m = Update(t.m, SectionJumpMsg{Section: SectionFailed})
 	case "pgdown":
-		t.m = Update(t.m, ScrollMsg{Delta: focusedPageSize(t.m)})
+		t.m = Update(t.m, ScrollMsg{Delta: sectionPageSize(t.m)})
 	case "pgup":
-		t.m = Update(t.m, ScrollMsg{Delta: -focusedPageSize(t.m)})
+		t.m = Update(t.m, ScrollMsg{Delta: -sectionPageSize(t.m)})
 	case "/":
 		t.m = Update(t.m, FilterEditStartMsg{})
 	case "enter":
-		if t.m.Focus == FocusQueue {
-			if p, ok := t.highlightedPick(); ok {
-				if hasTranscript(p.State) {
-					return t, openDrillInCmd(t.launch, t.pwd, p.Number)
-				}
-				t.m = Update(t.m, QueueEnterNoticedMsg{})
-			}
+		if t.m.ActiveSection == SectionBacklog {
+			t = t.pickHighlighted()
 			return t, nil
 		}
-		t = t.pickHighlighted()
+		if p, ok := t.highlightedPick(); ok {
+			if hasTranscript(p.State) {
+				return t, openDrillInCmd(t.launch, t.pwd, p.Number)
+			}
+			t.m = Update(t.m, QueueEnterNoticedMsg{})
+		}
 	case "r":
 		return t, refreshCmd(t.tracker)
 	case "q", "ctrl+c":
@@ -275,7 +286,7 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		return t, pickChordTick()
 	case "u":
 		t = t.unpickHighlighted()
-	case "k":
+	case "X":
 		if num := t.terminateTarget(); num != "" && t.isLive(num) {
 			t.m = Update(t.m, TerminateRequestedMsg{Number: num})
 		}
@@ -330,14 +341,15 @@ func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) Model {
 }
 
 // handleDrillInKey routes one keypress while the drill-in transcript pane is
-// open: "t" toggles rendered/raw, "x"/Esc closes back to the backlog, the
-// scroll keys page through the loaded content (issue #786), "m" cycles the
-// pane's layout docked -> floating -> fullscreen (issue #846, ADR 0025), and
-// "q"/"ctrl+c" hard-quit — the universal quit keystroke must never be
-// swallowed by the drill-in pane, same principle as the PendingPick chord in
-// handleKey (issue #826) but not the same mechanics: PendingPick resolves the
-// chord (pickHighlighted) before quitting, while drill-in quits directly with
-// no resolve step.
+// open: "t" toggles rendered/raw, "x"/Esc closes back to the body, the
+// scroll keys page through the loaded content (issue #786), and "q"/
+// "ctrl+c" hard-quit — the universal quit keystroke must never be swallowed
+// by the drill-in pane, same principle as the PendingPick chord in handleKey
+// (issue #826) but not the same mechanics: PendingPick resolves the chord
+// (pickHighlighted) before quitting, while drill-in quits directly with no
+// resolve step. The pane always renders fullscreen now that the docked/
+// floating pane-mode cycle has retired (issue #1500, ADR 0030) — the
+// live-tail sidebar that replaces docked mode ships in a later ticket.
 func (t teaModel) handleDrillInKey(msg tea.KeyMsg) Model {
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -354,8 +366,6 @@ func (t teaModel) handleDrillInKey(msg tea.KeyMsg) Model {
 		return Update(t.m, DrillInScrollMsg{Delta: drillInPageScrollDelta})
 	case "pgup":
 		return Update(t.m, DrillInScrollMsg{Delta: -drillInPageScrollDelta})
-	case "m":
-		return Update(t.m, PaneModeCycleMsg{})
 	}
 	return t.m
 }
@@ -370,14 +380,17 @@ func (t teaModel) highlightedIssue() (forge.Issue, bool) {
 	return vis[t.m.Cursor], true
 }
 
-// highlightedPick returns the work-queue row under QueueCursor, or false
-// when Picks is empty — the focused-queue Enter's drill-in target (issue
-// #845).
+// highlightedPick returns the row under Cursor within whichever work Section
+// is active, or false when that Section is empty — Enter's drill-in target
+// on a work Section (ADR 0030, formerly the focused-queue case of #845).
+// Meaningless for SectionBacklog, whose rows are issues, not Picks; callers
+// only reach for this once ActiveSection is known to be a work Section.
 func (t teaModel) highlightedPick() (Pick, bool) {
-	if len(t.m.Picks) == 0 {
+	picks := sectionPicks(t.m, t.m.ActiveSection)
+	if len(picks) == 0 {
 		return Pick{}, false
 	}
-	return t.m.Picks[t.m.QueueCursor], true
+	return picks[t.m.Cursor], true
 }
 
 // hasTranscript reports whether state is a PickState with an actual
@@ -488,29 +501,30 @@ func (t teaModel) isLive(num string) bool {
 	return false
 }
 
-// highlightedNumber returns the cursor's highlighted issue number, or "" when
-// the backlog is empty.
+// highlightedNumber returns the cursor's highlighted issue number in
+// whichever list the active Section shows — Visible() for SectionBacklog,
+// the active work Section's own Picks otherwise — or "" when that list is
+// empty (ADR 0030; formerly backlog-only, before the two-column split
+// retired in #1500).
 func (t teaModel) highlightedNumber() string {
-	visible := t.m.Visible()
-	if len(visible) == 0 {
-		return ""
-	}
-	return visible[t.m.Cursor].Number
-}
-
-// terminateTarget resolves the issue number "k" should act on: whichever row
-// is actually drawn with ">" (view.go) — QueueCursor's pick while the queue
-// has focus, the backlog Cursor's issue otherwise. The two cursors move
-// independently (model.go's CursorMoveMsg branch), so a stale backlog Cursor
-// must never be the target while it's hidden behind queue focus (issue
-// #997).
-func (t teaModel) terminateTarget() string {
-	if t.m.Focus == FocusQueue {
-		if p, ok := t.highlightedPick(); ok {
-			return p.Number
+	if t.m.ActiveSection == SectionBacklog {
+		if iss, ok := t.highlightedIssue(); ok {
+			return iss.Number
 		}
 		return ""
 	}
+	if p, ok := t.highlightedPick(); ok {
+		return p.Number
+	}
+	return ""
+}
+
+// terminateTarget resolves the issue number "X" should act on: whichever row
+// is actually drawn with ">" (view.go) in the active Section — isLive then
+// gates whether that row actually has anything to terminate, so standing on
+// a non-running row (queued, held, settled, ...) is a harmless no-op rather
+// than a separate case here (issue #1500, formerly Focus-gated by #997).
+func (t teaModel) terminateTarget() string {
 	return t.highlightedNumber()
 }
 
@@ -597,8 +611,13 @@ func (t teaModel) quitOrConfirmMsg() Msg {
 // — the keypress translation of ADR 0023's Pick-is-the-launch-button rule. A
 // nil Launcher still promotes and lands the pick on Model.Picks (matching
 // the pre-#785 no-launch Console) but never queues on a live Queue or
-// launches, since there is nothing to launch it.
+// launches, since there is nothing to launch it. A no-op outside
+// SectionBacklog — Cursor indexes a work Section's Picks there, not the
+// backlog, and Backlog is ADR 0030's sole pick source (issue #1500).
 func (t teaModel) pickHighlighted() teaModel {
+	if t.m.ActiveSection != SectionBacklog {
+		return t
+	}
 	visible := t.m.Visible()
 	if len(visible) == 0 {
 		return t
@@ -697,11 +716,13 @@ func syncQueue(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache
 		return m
 	}
 	picks := launch.Queue.Snapshot()
-	if drv := driverOf(launch); drv != nil {
-		for i := range picks {
-			if picks[i].State == PickRunning {
-				picks[i].Heartbeat = heartbeats.RunningHeartbeat(drv, pwd, picks[i].Number)
-			}
+	drv := driverOf(launch)
+	for i := range picks {
+		if drv != nil && picks[i].State == PickRunning {
+			picks[i].Heartbeat = heartbeats.RunningHeartbeat(drv, pwd, picks[i].Number)
+		}
+		if !picks[i].QueuedAt.IsZero() {
+			picks[i].Age = formatAge(time.Since(picks[i].QueuedAt))
 		}
 	}
 	m = Update(m, QueueSnapshotMsg{Picks: picks})
