@@ -34,7 +34,7 @@ func View(m Model) string {
 		reservedLines++
 	}
 	if m.PendingTerminate != "" {
-		fmt.Fprintf(&b, "terminate #%s? [y/N/q/^C]\n", m.PendingTerminate)
+		fmt.Fprintf(&b, "terminate #%s? [y/N/q/ctrl+c]\n", m.PendingTerminate)
 		reservedLines++
 	}
 	if m.PendingQuit {
