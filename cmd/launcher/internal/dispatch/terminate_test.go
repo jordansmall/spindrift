@@ -3,6 +3,7 @@ package dispatch
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -46,43 +47,53 @@ func TestFactory_Kill_PropagatesRunnerError(t *testing.T) {
 
 // TestFactory_OrphanedIssues verifies OrphanedIssues extracts issue numbers
 // from the runner's currently-running sandbox names, parsed from the
-// deterministic "agent-issue-" naming scheme (Console startup orphan
-// detection, issue #651), and skips any name whose suffix isn't a valid
-// unsigned issue number: non-numeric (issue #793), signed ("+5", "-42"), or
-// empty (issue #1156) — strconv.Atoi wrongly accepted the signed forms,
-// which is why the parse uses strconv.ParseUint.
+// deterministic "agent-issue-" naming scheme — Console startup orphan
+// detection (issue #651). Only an unsigned-integer suffix is a valid issue
+// number; every other suffix shape (non-numeric, empty, signed) is silently
+// skipped (issue #793, issue #1157) rather than fed to a caller like
+// recoverByNumber.
 func TestFactory_OrphanedIssues(t *testing.T) {
 	tests := []struct {
-		name    string
-		running []string
-		want    []string
+		name         string
+		runningNames []string
+		want         []string
 	}{
 		{
-			name:    "parses deterministic box names",
-			running: []string{"agent-issue-42", "agent-issue-101", "some-other-container"},
-			want:    []string{"42", "101"},
+			name:         "valid unsigned suffixes",
+			runningNames: []string{"agent-issue-42", "agent-issue-101"},
+			want:         []string{"42", "101"},
 		},
 		{
-			name:    "skips non-numeric suffix",
-			running: []string{"agent-issue-42", "agent-issue-foo"},
-			want:    []string{"42"},
+			name:         "no-prefix-match name is skipped",
+			runningNames: []string{"agent-issue-42", "some-other-container"},
+			want:         []string{"42"},
 		},
 		{
-			name:    "rejects signed suffix",
-			running: []string{"agent-issue-42", "agent-issue-+5", "agent-issue--42"},
-			want:    []string{"42"},
+			name:         "non-numeric suffix is skipped",
+			runningNames: []string{"agent-issue-42", "agent-issue-foo"},
+			want:         []string{"42"},
 		},
 		{
-			name:    "skips empty suffix",
-			running: []string{"agent-issue-42", "agent-issue-"},
-			want:    []string{"42"},
+			name:         "empty suffix is skipped",
+			runningNames: []string{"agent-issue-42", "agent-issue-"},
+			want:         []string{"42"},
+		},
+		{
+			name:         "signed-positive suffix is skipped",
+			runningNames: []string{"agent-issue-42", "agent-issue-+5"},
+			want:         []string{"42"},
+		},
+		{
+			name:         "signed-negative suffix is skipped",
+			runningNames: []string{"agent-issue-42", "agent-issue--42"},
+			want:         []string{"42"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := runner.NewFake()
-			r.RunningNames = tt.running
+			r.RunningNames = tt.runningNames
 			f, err := NewFactory(Config{}, tempLogDir(t), r, fakeDriver{}, RealClock())
 			if err != nil {
 				t.Fatalf("NewFactory: %v", err)
@@ -92,14 +103,8 @@ func TestFactory_OrphanedIssues(t *testing.T) {
 			if err != nil {
 				t.Fatalf("OrphanedIssues: %v", err)
 			}
-			if len(got) != len(tt.want) {
-				t.Fatalf("OrphanedIssues = %v, want %v", got, tt.want)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("OrphanedIssues = %v, want %v", got, tt.want)
-					break
-				}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("OrphanedIssues = %v, want %v", got, tt.want)
 			}
 		})
 	}
