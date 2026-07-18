@@ -130,7 +130,7 @@ func renderBody(m Model, budget *int) string {
 		// immediately, so it's a single-frame flash at worst.
 		if budget == nil {
 			backlog := clipLines(renderBacklogColumn(m, nil), m.Width)
-			queue := clipLines(renderQueueColumn(m, nil), m.Width)
+			queue := clipLines(renderQueueColumn(m, nil, m.Width), m.Width)
 			return backlog + "\n" + queue
 		}
 		backlogBudget, queueBudget := splitStackedBudget(*budget)
@@ -148,13 +148,13 @@ func renderBody(m Model, budget *int) string {
 			return clipLines("…\n", m.Width)
 		}
 		backlog := clipLines(renderBacklogColumn(m, &backlogBudget), m.Width)
-		queue := clipLines(renderQueueColumn(m, &queueBudget), m.Width)
+		queue := clipLines(renderQueueColumn(m, &queueBudget, m.Width), m.Width)
 		return backlog + "\n" + queue
 	}
 	backlog := renderBacklogColumn(m, budget)
-	queue := renderQueueColumn(m, budget)
 	leftWidth := splitLeftWidth(backlog, m.Width)
 	rightWidth := m.Width - leftWidth
+	queue := renderQueueColumn(m, budget, rightWidth)
 	return joinColumns(backlog, queue, leftWidth, rightWidth)
 }
 
@@ -243,18 +243,21 @@ func renderBacklogColumn(m Model, budget *int) string {
 
 // renderQueueColumn renders the work queue: one pick-ordered line per Pick,
 // tagged with its PickState — a held row names its blocker, a running row
-// carries its heartbeat. BlockedBy/Reason/Heartbeat are placed before Title
-// in each row, not after: joinColumns clips an overlong row from the tail,
-// so whatever comes last gives way first. The blocker/heartbeat is the
-// signal an operator needs for pick/unpick decisions and the queue column
-// already gets the majority share of m.Width (leftColumnFraction caps the
-// backlog, not the queue) — but even a majority share truncates that signal
-// away on realistic terminal widths if Title sits in front of it (issue
-// #858). Windowed to budget rows (including the label) the same way
+// carries its heartbeat. Title normally sits right after the state tag —
+// the natural reading order, title first as the operator's primary
+// identifier (issue #1256). Only when that natural-order row would actually
+// exceed rightWidth does the row fall back to #858's blocker-first order:
+// BlockedBy/Reason/Heartbeat before Title, so joinColumns' tail-clip drops
+// Title rather than the blocker signal an operator needs for pick/unpick
+// decisions. rightWidth is the queue column's real character-width budget,
+// measured with the same runewidth.StringWidth primitive clip() uses (issue
+// #859), so a row of wide CJK runes doesn't take the natural order past its
+// share of the terminal by an ASCII rune count that reads shorter than it
+// renders. Windowed to budget rows (including the label) the same way
 // renderBacklogColumn is, so a long picks queue can't push the header
 // off-screen either (issue #1035). A nil budget means unbounded — every row
 // renders, unwindowed (issue #1039).
-func renderQueueColumn(m Model, budget *int) string {
+func renderQueueColumn(m Model, budget *int, rightWidth int) string {
 	if budget != nil && *budget <= 0 {
 		return ""
 	}
@@ -272,23 +275,29 @@ func renderQueueColumn(m Model, budget *int) string {
 		}
 		title := SanitizeControlSequences(p.Title)
 		reason := SanitizeControlSequences(p.Reason)
-		var row strings.Builder
-		fmt.Fprintf(&row, "%s #%s  [%s]", marker, p.Number, p.State)
-		if p.BlockedBy != "" {
-			fmt.Fprintf(&row, "  (held by %s)", p.BlockedBy)
-		}
 		// A held pick's Reason (blockerFailedPrefix + "#N failed") names the
 		// same blocker BlockedBy already does — skip it so a failed blocker
 		// isn't named twice on one row (issue #755).
-		if reason != "" && !(p.BlockedBy != "" && strings.HasPrefix(reason, blockerFailedPrefix)) {
-			fmt.Fprintf(&row, "  (%s)", reason)
+		showReason := reason != "" && !(p.BlockedBy != "" && strings.HasPrefix(reason, blockerFailedPrefix))
+
+		lead := fmt.Sprintf("%s #%s  [%s]", marker, p.Number, p.State)
+		var extras strings.Builder
+		if p.BlockedBy != "" {
+			fmt.Fprintf(&extras, "  (held by %s)", p.BlockedBy)
+		}
+		if showReason {
+			fmt.Fprintf(&extras, "  (%s)", reason)
 		}
 		if p.Heartbeat != "" {
-			fmt.Fprintf(&row, "  %s", p.Heartbeat)
+			fmt.Fprintf(&extras, "  %s", p.Heartbeat)
 		}
-		fmt.Fprintf(&row, "  %s", title)
-		row.WriteString("\n")
-		rows = append(rows, row.String())
+
+		natural := fmt.Sprintf("%s  %s%s", lead, title, extras.String())
+		row := natural
+		if runewidth.StringWidth(natural) > rightWidth {
+			row = fmt.Sprintf("%s%s  %s", lead, extras.String(), title)
+		}
+		rows = append(rows, row+"\n")
 	}
 	if budget == nil {
 		var b strings.Builder
@@ -549,7 +558,6 @@ func renderDrillInPane(m Model) string {
 // in is more useful than always resetting to row 0 (issue #1055).
 func renderDockedBody(m Model, transcriptHeight int) string {
 	backlog := renderBacklogColumn(m, nil)
-	queue := renderQueueColumn(m, nil)
 	transcript := renderTranscriptColumn(*m.DrillIn, transcriptHeight)
 
 	transcriptWidth := int(float64(m.Width) * transcriptColumnFraction)
@@ -558,6 +566,7 @@ func renderDockedBody(m Model, transcriptHeight int) string {
 	leftWidth := splitLeftWidth(backlog, bodyWidth)
 	queueWidth := bodyWidth - leftWidth
 
+	queue := renderQueueColumn(m, nil, queueWidth)
 	body := joinColumns(backlog, queue, leftWidth, queueWidth)
 	return joinColumns(body, transcript, bodyWidth, transcriptWidth)
 }
