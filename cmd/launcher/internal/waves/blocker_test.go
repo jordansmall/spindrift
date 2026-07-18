@@ -284,3 +284,53 @@ func TestBlockerStatus_OneIssueFetchPerBlocker(t *testing.T) {
 		t.Errorf("IssueCalls = %v, want exactly 1 (no duplicate fetch)", fc.IssueCalls)
 	}
 }
+
+// TestBlockerStatus_MergedPRStillChecksFailedLabel covers the fi == nil
+// branch: a merged PR resolves readiness without blockerReady ever calling
+// it.Issue, so the FailedLabel loop's fetch is the only call, not a
+// duplicate — and it must still run so a failed-labeled blocker with a
+// stale merged PR can't slip past the failed check.
+func TestBlockerStatus_MergedPRStillChecksFailedLabel(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake()
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN", Labels: []string{c.FailedLabel}})
+	fc.SetPR("agent/issue-11", forge.PR{URL: "https://github.com/owner/repo/pull/11"})
+	fc.SetPRState("https://github.com/owner/repo/pull/11", forge.PRMerged)
+	edges := map[string][]string{"10": {"11"}}
+
+	ready, failed, unready := BlockerStatus(c, fc, fc, "10", edges)
+
+	if ready {
+		t.Error("BlockerStatus: want ready=false for merged PR with Failed label, got true")
+	}
+	if !reflect.DeepEqual(failed, []string{"11"}) {
+		t.Errorf("BlockerStatus: want failed=[11], got %v", failed)
+	}
+	if len(unready) != 0 {
+		t.Errorf("BlockerStatus: want unready=[] (merged PR is ready), got %v", unready)
+	}
+	if len(fc.IssueCalls) != 1 {
+		t.Errorf("IssueCalls = %v, want exactly 1 (merged-PR path fetches once for FailedLabel)", fc.IssueCalls)
+	}
+}
+
+// TestBlockerStatus_MultipleBlockersOneFetchEach extends the one-fetch
+// invariant across a mixed set of blockers (push-only-style fall-through and
+// merged-PR) so the dedup holds per-dep, not just for a single blocker.
+func TestBlockerStatus_MultipleBlockersOneFetchEach(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake()
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
+	fc.SetIssue(forge.Issue{Number: "12", State: "CLOSED"})
+	fc.SetPR("agent/issue-12", forge.PR{URL: "https://github.com/owner/repo/pull/12"})
+	fc.SetPRState("https://github.com/owner/repo/pull/12", forge.PRMerged)
+	edges := map[string][]string{"10": {"11", "12"}}
+
+	BlockerStatus(c, fc, fc, "10", edges)
+
+	if len(fc.IssueCalls) != 2 {
+		t.Errorf("IssueCalls = %v, want exactly 2 (one per blocker)", fc.IssueCalls)
+	}
+}
