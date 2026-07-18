@@ -444,9 +444,8 @@ in
           echo "expected the CHECK-section awk slice defined at most once in prompts.nix, got $count" >&2
           exit 1
         }
-        fix_half1='/^# CHECK$/{f=1}'
         fix_half2=' /^# LAND THE CHANGE$/{exit} f'
-        fix_count=$(grep -cF "$fix_half1$fix_half2" ${./prompts.nix})
+        fix_count=$(grep -cF "$half1$fix_half2" ${./prompts.nix})
         [ "$fix_count" -le 1 ] || {
           echo "expected the fix-prompt CHECK-section awk slice defined at most once in prompts.nix, got $fix_count" >&2
           exit 1
