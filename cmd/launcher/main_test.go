@@ -495,6 +495,28 @@ func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable_Mixed proves the two knobs
+// resolve independently: setting only SPINDRIFT_PROMPT_DIR still lets
+// SPINDRIFT_SKILLS_DIR fall back to its schema default, and vice versa.
+func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable_Mixed(t *testing.T) {
+	t.Setenv("SPINDRIFT_PROMPT_DIR", "from-env-prompt")
+	t.Setenv("SPINDRIFT_SKILLS_DIR", "")
+	os.Unsetenv("SPINDRIFT_SKILLS_DIR")
+
+	withSchemaFlags(t, []flagEntry{
+		{env: "SPINDRIFT_PROMPT_DIR", dflt: "custom-prompt-default"},
+		{env: "SPINDRIFT_SKILLS_DIR", dflt: "custom-skills-default"},
+	})
+
+	c := loadConfig()
+	if c.spindriftPromptDir != "from-env-prompt" {
+		t.Errorf("spindriftPromptDir = %q, want from-env-prompt", c.spindriftPromptDir)
+	}
+	if c.spindriftSkillsDir != "custom-skills-default" {
+		t.Errorf("spindriftSkillsDir = %q, want custom-skills-default", c.spindriftSkillsDir)
+	}
+}
+
 // TestIntSchemaDefault covers intSchemaDefault directly: a numeric schema
 // default parses, a non-numeric one falls back to 0, and an absent key falls
 // back to 0 too (issue #672).
