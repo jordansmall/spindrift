@@ -14,6 +14,11 @@ var (
 	refListPrefix   = regexp.MustCompile(`^(?:#[0-9]+|[,/]|\s+|\band\b)+`)
 	fenceDelimiter  = regexp.MustCompile("^(```+|~~~+)")
 	inlineCodeSpan  = regexp.MustCompile("`[^`]*`")
+	// sentinelBullet matches "None"/"N/A" optionally followed by a
+	// continuation. Em-dash/en-dash/colon may abut the word directly, but
+	// an ASCII hyphen must be preceded by whitespace so a hyphenated word
+	// like "None-existent" isn't mistaken for "None" plus a dash.
+	sentinelBullet = regexp.MustCompile(`(?i)^(?:none|n/a)(?:\s*[—–:]\s*.*|\s+-\s*.*)?$`)
 )
 
 // IsFenceDelimiter reports whether line opens or closes a fenced code block
@@ -106,6 +111,9 @@ func ParseBlockerRefs(body string) []string {
 		}
 
 		if inSection && IsBulletItem(line) {
+			if sentinelBullet.MatchString(ExtractBulletContent(line)) {
+				continue
+			}
 			for _, m := range issueRef.FindAllStringSubmatch(line, -1) {
 				addRef(m[1])
 			}
