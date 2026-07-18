@@ -159,9 +159,9 @@ operator's own working directory — it refuses to run when the directory is on
 some other branch with a dirty working tree (uncommitted changes or untracked
 files), since a plain `git checkout` only blocks on a *conflicting* file and
 would otherwise carry a non-conflicting uncommitted change or untracked file
-onto the base branch in silence. Outside that case (already
-on the base branch, or any branch with a clean tree) the checkout is a safe
-no-op or a plain branch switch, so it proceeds. A successful rebuild clears the
+onto the base branch in silence. Outside that case (already on the base
+branch, or any branch with a clean tree) the checkout is a safe no-op or a
+plain branch switch, so it proceeds. A successful rebuild clears the
 banner and resumes every held pick exactly where it queued — no re-pick needed.
 A failed rebuild — including a refused checkout — prints
 `!! rebuild failed: <reason>` and leaves launches held, so the operator can
