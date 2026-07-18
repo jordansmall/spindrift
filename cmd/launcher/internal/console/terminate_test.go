@@ -376,3 +376,19 @@ func TestLauncher_Terminate_MarksRegistry(t *testing.T) {
 		t.Error("registry: want #42 marked terminated")
 	}
 }
+
+// TestLauncher_terminating_LazilyConstructsMap verifies terminating() mirrors
+// registry()/limiter()/refreshChan(): a bare struct literal's nil map is
+// lazily constructed on first call, so no constructor is needed at any
+// production or test call site.
+func TestLauncher_terminating_LazilyConstructsMap(t *testing.T) {
+	launch := &Launcher{}
+
+	got := launch.terminating()
+	if got == nil {
+		t.Fatal("terminating() = nil, want non-nil map")
+	}
+	if len(got) != 0 {
+		t.Fatalf("terminating() = %v, want empty map", got)
+	}
+}
