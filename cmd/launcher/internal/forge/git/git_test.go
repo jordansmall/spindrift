@@ -248,6 +248,50 @@ func TestGitClient_Merge_CloneFailureDoesNotLeakCredentials(t *testing.T) {
 	}
 }
 
+// TestGitClient_Merge_HookOutputDoesNotLeakCredentials verifies that a
+// non-conflict merge failure (a pre-commit hook rejecting the merge commit)
+// never echoes credential text embedded in the hook's own output back into
+// the returned error — that error flows unmodified into a public GitHub
+// issue comment (settle.mergeImmediate), same trust boundary as the
+// clone/probe paths above, but exercised via the merge output path at
+// git.go's non-conflict branch.
+func TestGitClient_Merge_HookOutputDoesNotLeakCredentials(t *testing.T) {
+	const secret = "sometoken123"
+	bare := newBareRemoteWithBranches(t)
+
+	// A pre-merge-commit hook installed via init.templateDir so cloneToTemp's
+	// `git clone` picks it up in the fresh temp clone. The hook always
+	// rejects the merge commit and echoes a credential-bearing message to
+	// stderr, which mergeCmd captures into `out` — a stand-in for a real
+	// merge driver or hook leaking a credential-bearing URL.
+	home := t.TempDir()
+	templateDir := filepath.Join(home, "template")
+	hooksDir := filepath.Join(templateDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hookPath := filepath.Join(hooksDir, "pre-merge-commit")
+	gitWriteFile(t, hookPath, "#!/bin/sh\necho 'fatal: unable to access "+
+		"https://oauth2:"+secret+"@git.example.com/org/repo.git/' >&2\nexit 1\n")
+	if err := os.Chmod(hookPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitWriteFile(t, filepath.Join(home, ".gitconfig"), "[init]\n\ttemplateDir = "+templateDir+"\n")
+	t.Setenv("HOME", home)
+
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	err := g.Merge("agent/issue-1")
+	if err == nil {
+		t.Fatal("Merge: want error from failing pre-commit hook, got nil")
+	}
+	if err == forge.ErrMergeConflict {
+		t.Fatal("Merge: want non-conflict hook failure, got forge.ErrMergeConflict")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("Merge error leaks hook output credential: %v", err)
+	}
+}
+
 // TestGitClient_Probe verifies Probe succeeds against a reachable remote and
 // fails against an unreachable one.
 func TestGitClient_Probe(t *testing.T) {
