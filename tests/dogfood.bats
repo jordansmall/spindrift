@@ -237,3 +237,11 @@ setup() {
   [[ "$output" != *"arithmetic syntax error"* ]]
 }
 
+@test "dogfood aborts with a clear message when MAX_PARALLEL has a leading zero" {
+  run env BASE_BRANCH=main MAX_PARALLEL=08 bash "$WORK/dogfood.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"MAX_PARALLEL"* ]]
+  [[ "$output" != *"unbound variable"* ]]
+  [[ "$output" != *"value too great for base"* ]]
+}
+
