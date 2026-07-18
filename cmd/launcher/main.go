@@ -1037,11 +1037,13 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	inputPath, argv, err := extractInputFlag(argv)
 	if err != nil {
+		stderr.Write(ambientWarnings.Bytes())
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
 	args, err := parseFlags(argv)
 	if err != nil {
+		stderr.Write(ambientWarnings.Bytes())
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
@@ -1055,6 +1057,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if inputPath != "" {
 		doc, err := loadInputDocument(inputPath)
 		if err != nil {
+			stderr.Write(ambientWarnings.Bytes())
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
 		}
