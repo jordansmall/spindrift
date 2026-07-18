@@ -122,6 +122,12 @@ func renderBody(m Model, budget *int) string {
 		return ""
 	}
 	if m.Width < minTwoColumnWidth {
+		// At m.Width==0 — the Model zero value NewModel returns, before
+		// Update ever processes a SizeChangedMsg and runs clampSize (model.go)
+		// — clipLines below clips every stacked line to empty via clip's
+		// width<=1 branch, so this pre-init render is all blank lines rather
+		// than unclipped content. Benign: bubbletea sends a real size message
+		// immediately, so it's a single-frame flash at worst.
 		if budget == nil {
 			backlog := clipLines(renderBacklogColumn(m, nil), m.Width)
 			queue := clipLines(renderQueueColumn(m, nil), m.Width)
