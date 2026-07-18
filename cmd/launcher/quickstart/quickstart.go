@@ -186,6 +186,14 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		return def
 	}
 	prompt := func(label string) string { return promptDefault(label, "") }
+	promptMasked := func(label string) string {
+		fmt.Fprintf(w, "%s: ", label)
+		value, masked := readMasked(stdin, scanner)
+		if masked {
+			fmt.Fprintln(w)
+		}
+		return value
+	}
 
 	repoSlug := promptDefault("Repo slug (owner/repo)", env.GitRemoteRepoSlug())
 	runtime := promptDefault("Runtime (podman/docker/rancher/bwrap)", detectedRuntime)
@@ -205,7 +213,7 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		}
 	}
 
-	ghToken, err := acquireGHToken(env, w, prompt)
+	ghToken, err := acquireGHToken(env, w, promptMasked)
 	if err != nil {
 		return err
 	}
@@ -225,16 +233,16 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		if err := runner.Run("claude", "setup-token"); err != nil {
 			return fmt.Errorf("run claude setup-token: %w", err)
 		}
-		claudeOAuthToken = prompt("Paste the CLAUDE_CODE_OAUTH_TOKEN printed by claude setup-token")
+		claudeOAuthToken = promptMasked("Paste the CLAUDE_CODE_OAUTH_TOKEN printed by claude setup-token")
 		if claudeOAuthToken == "" {
 			return fmt.Errorf("claude setup-token: no token pasted")
 		}
 	} else {
-		anthropicAPIKey = prompt("Anthropic API key (ANTHROPIC_API_KEY)")
+		anthropicAPIKey = promptMasked("Anthropic API key (ANTHROPIC_API_KEY)")
 	}
 	jiraToken := ""
 	if tracker.issueTracker == "jira" {
-		jiraToken = prompt("Jira API token (JIRA_TOKEN)")
+		jiraToken = promptMasked("Jira API token (JIRA_TOKEN)")
 	}
 
 	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte(renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail, tracker)), 0o644); err != nil {
@@ -297,13 +305,13 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 // `gh auth token` fallback for an operator in a hurry (labeled with a
 // broad-scope warning, since the gh CLI's own OAuth token is typically
 // repo-wide).
-func acquireGHToken(env Environment, w io.Writer, prompt func(string) string) (string, error) {
+func acquireGHToken(env Environment, w io.Writer, promptMasked func(string) string) (string, error) {
 	if token := env.Getenv("GH_TOKEN"); token != "" {
 		return token, nil
 	}
 	fmt.Fprintln(w, "No ambient GH_TOKEN found.")
 	fmt.Fprint(w, "Create a fine-grained personal access token scoped to only this repo, with:\n"+requiredGHPermissions)
-	token := prompt("GitHub token (paste a fine-grained PAT, or leave blank to fall back to `gh auth token` — broader scope warning)")
+	token := promptMasked("GitHub token (paste a fine-grained PAT, or leave blank to fall back to `gh auth token` — broader scope warning)")
 	if token != "" {
 		return token, nil
 	}
