@@ -5,18 +5,18 @@ import "sync"
 // Limiter is a resizable concurrency bound (issue #653): a mutex-guarded
 // cap/live pair, replacing the fixed per-invocation semaphore dispatchWave
 // and RunContinuous each used to build fresh from cfg.MaxParallel.
-// Headless callers build one and never call Resize, keeping their fixed-cap
-// behaviour unchanged; the Console holds one persistent Limiter across a
-// session and calls Resize as the operator raises or lowers the live cap
-// (ADR 0023).
+// Headless callers build one and never call ResizeDelta, keeping their
+// fixed-cap behaviour unchanged; the Console holds one persistent Limiter
+// across a session and calls ResizeDelta as the operator raises or lowers
+// the live cap (ADR 0023).
 type Limiter struct {
 	mu   sync.Mutex
 	cond *sync.Cond
 	cap  int
 	live int
-	// grow is signaled (coalesced, buffered 1) every time Resize raises the
-	// cap, so a listener blocked waiting for capacity can retry right away
-	// instead of waiting for an unrelated Release.
+	// grow is signaled (coalesced, buffered 1) every time ResizeDelta raises
+	// the cap, so a listener blocked waiting for capacity can retry right
+	// away instead of waiting for an unrelated Release.
 	grow chan struct{}
 }
 
@@ -79,27 +79,15 @@ func (l *Limiter) Cap() int {
 	return l.cap
 }
 
-// Resize changes the cap, clamped to at least 1. Raising it wakes Grown's
+// ResizeDelta adjusts the cap by delta relative to its current value,
+// clamped to at least 1, as a single lock-guarded read-modify-write —
+// unlike a separate read of Cap() followed by a write, which would read and
+// write under separate lock acquisitions and leave a window for a
+// concurrent resize to land in between. Raising the cap wakes Grown's
 // listener so a held pick can launch into the freed capacity right away;
 // lowering it only changes what future TryAcquire calls see — slots already
 // claimed are never revoked, matching ADR 0023's "lowering never terminates
 // anything."
-func (l *Limiter) Resize(newCap int) {
-	if newCap < 1 {
-		newCap = 1
-	}
-	l.mu.Lock()
-	grew := newCap > l.cap
-	l.cap = newCap
-	l.mu.Unlock()
-	l.signalGrow(grew)
-}
-
-// ResizeDelta adjusts the cap by delta relative to its current value,
-// clamped to at least 1, as a single lock-guarded read-modify-write —
-// unlike calling Cap() then Resize(), which reads and writes under separate
-// lock acquisitions and leaves a window for a concurrent Resize to land in
-// between. Signals Grown on a raise just like Resize.
 func (l *Limiter) ResizeDelta(delta int) {
 	l.mu.Lock()
 	newCap := l.cap + delta
@@ -125,7 +113,7 @@ func (l *Limiter) signalGrow(grew bool) {
 	}
 }
 
-// Grown signals (coalesced) every time Resize or ResizeDelta raises the cap.
+// Grown signals (coalesced) every time ResizeDelta raises the cap.
 func (l *Limiter) Grown() <-chan struct{} {
 	return l.grow
 }
