@@ -145,6 +145,22 @@ type SidebarLoadedMsg struct {
 
 func (SidebarLoadedMsg) isConsoleMsg() {}
 
+// SidebarActivityMsg carries the open sidebar's Dispatch's freshly re-derived
+// Activity feed — syncQueue's per-Msg refresh, piggybacking the existing
+// per-Msg sync tick (ADR 0030) and scoped to whichever Dispatch the sidebar
+// has open so I/O stays bounded even with many Dispatches running (issue
+// #1502). A no-op when no sidebar is open or Number no longer matches it —
+// the operator may have switched or closed the sidebar in the same Update
+// batch that produced this message. Only Activity is re-derived; the
+// Transcript stays the one-shot load SidebarLoadedMsg already provides
+// (#1501) — the condensed feed, not the full firehose, is what tails live.
+type SidebarActivityMsg struct {
+	Number   string
+	Activity []ActivityLine
+}
+
+func (SidebarActivityMsg) isConsoleMsg() {}
+
 // SidebarToggleMsg is the run loop's signal that the operator pressed "t" —
 // advances the sidebar's content one step around its Activity -> Transcript
 // (rendered) -> Transcript (raw) -> Activity cycle, so a repeated "t" reaches
@@ -170,6 +186,23 @@ type SidebarScrollMsg struct {
 }
 
 func (SidebarScrollMsg) isConsoleMsg() {}
+
+// SidebarJumpToEndMsg is the tea layer's signal that the operator pressed
+// "G"/"End" while the sidebar has focus — re-attaches Follow and moves
+// Offset to the last line, the way back to live-tailing after a scroll-up
+// detached it (issue #1502, ADR 0030). A no-op when no sidebar is open.
+type SidebarJumpToEndMsg struct{}
+
+func (SidebarJumpToEndMsg) isConsoleMsg() {}
+
+// SidebarZoomToggleMsg is the tea layer's signal that the operator pressed
+// "z" — toggles Model.SidebarZoom, forcing the sidebar to render fullscreen
+// (or releasing that force, falling back to sidebarFits' own width check) for
+// deep reading, independent of the narrow-terminal fallback (issue #1502,
+// ADR 0030).
+type SidebarZoomToggleMsg struct{}
+
+func (SidebarZoomToggleMsg) isConsoleMsg() {}
 
 // FocusListMsg is the tea layer's signal that the operator pressed "h"/left —
 // moves keyboard focus to the list, a no-op when it's already there (#1501,

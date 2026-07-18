@@ -51,6 +51,12 @@ type teaModel struct {
 	// #731) — a pointer so it survives Update's value-receiver copies of
 	// teaModel across the session's whole lifetime.
 	heartbeats *HeartbeatCache
+	// sidebarActivity caches the open sidebar's own last-refreshed Activity
+	// feed, the same skip-when-unchanged optimization as heartbeats — every
+	// tea.Msg re-syncs the selected running Dispatch's feed (issue #1502,
+	// ADR 0030's "piggybacking the existing per-Msg sync tick"), scoped to
+	// that one Dispatch so I/O stays bounded even with many running.
+	sidebarActivity *SidebarActivityCache
 	// done is closed exactly once, at the Quitting choke point below, to
 	// unblock waitRefreshSignal's goroutine — bubbletea can't cancel a Cmd
 	// goroutine itself (issue #823), so the closure has to select on this
@@ -72,7 +78,7 @@ func newTeaModel(tracker forge.IssueTracker, pwd string, launch *Launcher) teaMo
 	if launch != nil && launch.pollInterval > 0 {
 		interval = launch.pollInterval
 	}
-	return teaModel{m: m, tracker: tracker, pwd: pwd, launch: launch, pollInterval: interval, heartbeats: NewHeartbeatCache(), done: make(chan struct{})}
+	return teaModel{m: m, tracker: tracker, pwd: pwd, launch: launch, pollInterval: interval, heartbeats: NewHeartbeatCache(), sidebarActivity: NewSidebarActivityCache(), done: make(chan struct{})}
 }
 
 // Run drives the console's full-screen Bubble Tea program to completion —
@@ -158,7 +164,7 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	t.m = syncQueue(t.m, t.launch, t.pwd, t.heartbeats)
+	t.m = syncQueue(t.m, t.launch, t.pwd, t.heartbeats, t.sidebarActivity)
 	t.m = syncStale(t.m, t.launch)
 	if t.m.Quitting {
 		select {
@@ -193,7 +199,7 @@ func (t teaModel) View() string {
 // there is no list on screen to route list-only keys to regardless of
 // Model.Focus (ADR 0030, #1501, inherited from #786's drill-in precedence).
 func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
-	if t.m.Sidebar != nil && (t.m.Focus == FocusSidebar || !sidebarFits(t.m)) {
+	if t.m.Sidebar != nil && (t.m.Focus == FocusSidebar || !sidebarFits(t.m) || t.m.SidebarZoom) {
 		t.m = t.handleSidebarKey(msg)
 		return t, nil
 	}
@@ -351,12 +357,14 @@ func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) Model {
 }
 
 // handleSidebarKey routes one keypress while the sidebar has focus (or the
-// terminal is too narrow to dock it, forcing fullscreen — handleKey's
-// sidebarFits guard): "t" advances the Activity/Transcript/raw cycle, "h"/
-// left returns focus to the list when the sidebar is docked (a no-op in the
-// fullscreen fallback, which has no list on screen to focus), "x"/Esc closes
-// back to the body, the scroll keys page through the loaded content (issue
-// #786's drill-in precedent), and "q"/"ctrl+c" hard-quit — the universal quit
+// terminal is too narrow to dock it, forcing fullscreen, or the operator
+// zoomed it — handleKey's sidebarFits/SidebarZoom guard): "t" advances the
+// Activity/Transcript/raw cycle, "h"/left returns focus to the list when the
+// sidebar is docked (a no-op in the fullscreen fallback, which has no list
+// on screen to focus), "x"/Esc closes back to the body, the scroll keys page
+// through the loaded content (issue #786's drill-in precedent), "G"/"end"
+// re-attaches Follow and jumps to the bottom, "z" toggles the fullscreen
+// zoom (issue #1502), and "q"/"ctrl+c" hard-quit — the universal quit
 // keystroke must never be swallowed by the sidebar, same principle as the
 // PendingPick chord in handleKey (issue #826) but not the same mechanics:
 // PendingPick resolves the chord (pickHighlighted) before quitting, while the
@@ -368,7 +376,7 @@ func (t teaModel) handleSidebarKey(msg tea.KeyMsg) Model {
 	case "t":
 		return Update(t.m, SidebarToggleMsg{})
 	case "h", "left":
-		if sidebarFits(t.m) {
+		if sidebarFits(t.m) && !t.m.SidebarZoom {
 			return Update(t.m, FocusListMsg{})
 		}
 		return t.m
@@ -382,6 +390,10 @@ func (t teaModel) handleSidebarKey(msg tea.KeyMsg) Model {
 		return Update(t.m, SidebarScrollMsg{Delta: fixedPaneScrollDelta})
 	case "pgup":
 		return Update(t.m, SidebarScrollMsg{Delta: -fixedPaneScrollDelta})
+	case "G", "end":
+		return Update(t.m, SidebarJumpToEndMsg{})
+	case "z":
+		return Update(t.m, SidebarZoomToggleMsg{})
 	}
 	return t.m
 }
@@ -437,10 +449,11 @@ func hasTranscript(state PickState) bool {
 // documented graceful-empty case; checking LogPaths once here picks
 // ActivityFeed's contract for the combined message rather than surfacing a
 // spurious failure for a Dispatch that simply hasn't written anything yet.
-// This runs only on open (Enter): handleSidebarKey has no refresh key, so
-// the sidebar never live-tails a running Dispatch on its own yet — close
-// (x/Esc) and reopen to reload (issue #719, inherited; live-tailing ships in
-// #1502).
+// This runs only on open (Enter) and loads the Transcript once, not live —
+// only the Activity feed advances on its own afterward, via syncQueue's
+// per-Msg SidebarActivityMsg refresh (issue #1502). Reopening (close then
+// Enter again) still re-runs this whole load, picking up any Transcript
+// growth the live Activity feed alone wouldn't (issue #719, inherited).
 func openSidebarCmd(launch *Launcher, pwd, number string) tea.Cmd {
 	return func() tea.Msg {
 		drv := driverOf(launch)
@@ -739,11 +752,16 @@ func pollTick(d time.Duration) tea.Cmd {
 // call whose latest pass log is unchanged since last time skips the
 // ReadFile+reparse entirely (issue #731) — syncQueue runs on every tea.Msg,
 // not just a render tick, so most calls see the same on-disk bytes as last
-// time. It also installs the session's current live
-// parallelism cap and live count (issue #653), read straight off the
-// Launcher's Limiter — no Msg carries a resize, so this per-render pull is
-// the only path that keeps them current. A nil launch leaves m untouched.
-func syncQueue(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache) Model {
+// time. The open sidebar's own Activity feed is refreshed the same way,
+// scoped to whichever Dispatch it has open and only while that Dispatch is
+// still running — ADR 0030's live-tail, piggybacking this same per-Msg sync
+// rather than a dedicated timer, and bounded to one Dispatch's I/O no matter
+// how many others are running (issue #1502). It also installs the session's
+// current live parallelism cap and live count (issue #653), read straight
+// off the Launcher's Limiter — no Msg carries a resize, so this per-render
+// pull is the only path that keeps them current. A nil launch leaves m
+// untouched.
+func syncQueue(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache, sidebarActivity *SidebarActivityCache) Model {
 	if launch == nil {
 		return m
 	}
@@ -758,7 +776,25 @@ func syncQueue(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache
 		}
 	}
 	m = Update(m, QueueSnapshotMsg{Picks: picks})
+	if m.Sidebar != nil && drv != nil && isRunningNumber(picks, m.Sidebar.Number) {
+		if activity, ok := sidebarActivity.Refresh(drv, pwd, m.Sidebar.Number); ok {
+			m = Update(m, SidebarActivityMsg{Number: m.Sidebar.Number, Activity: activity})
+		}
+	}
 	return Update(m, CapMsg{Cap: launch.Cap(), Live: launch.Live()})
+}
+
+// isRunningNumber reports whether picks carries number in PickRunning state
+// — syncQueue's gate on refreshing the open sidebar's Activity feed only
+// while its Dispatch is actually live, since a Settled/Terminated/Failed
+// Dispatch's logs never change again (issue #1502).
+func isRunningNumber(picks []Pick, number string) bool {
+	for _, p := range picks {
+		if p.Number == number {
+			return p.State == PickRunning
+		}
+	}
+	return false
 }
 
 // syncStale installs launch's live image-freshness/rebuild state onto m, so

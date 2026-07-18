@@ -650,6 +650,185 @@ func sidebarOpen(t *testing.T) *teatest.TestModel {
 	return tm
 }
 
+// TestTea_PollTick_AdvancesOpenSidebarActivityFeed verifies the selected
+// running Dispatch's Activity feed advances on its own, with no operator
+// keypress, as its pass log grows across successive poll ticks — the payoff
+// of the whole live-tail sidebar (issue #1502, ADR 0030).
+func TestTea_PollTick_AdvancesOpenSidebarActivityFeed(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.pollInterval = 5 * time.Millisecond
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "2")
+	waitForOutput(t, tm, "running")
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "first update")
+
+	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitForOutput(t, tm, "second update")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_SidebarKey_ScrollUpDetachesFollow_GReattaches verifies the
+// operator-facing follow/detach/re-attach gesture end to end: the freshly
+// opened sidebar shows "[follow]", scrolling up shows "[paused]", and "G"
+// shows "[follow]" again (issue #1502, ADR 0030).
+func TestTea_SidebarKey_ScrollUpDetachesFollow_GReattaches(t *testing.T) {
+	// sidebarOpen's own waitForOutput already drained the frame that first
+	// showed "[follow]" (tm.Output() drains as it's read) — asserting it
+	// again here would block forever waiting for a repeat of bytes already
+	// consumed, so the sequence starts from the first state-changing key
+	// instead (issue #1502).
+	tm := sidebarOpen(t)
+
+	sendKey(tm, "k")
+	waitForOutput(t, tm, "[paused]")
+
+	sendKey(tm, "G")
+	waitForOutput(t, tm, "[follow]")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_Sidebar_RetainsPositionAcrossDispatchSwitch verifies switching the
+// docked sidebar from one running Dispatch to another and back restores the
+// first Dispatch's scroll offset and detached Follow state exactly where the
+// operator left it — hopping between running Dispatches never loses their
+// place (issue #1502, ADR 0030).
+func TestTea_Sidebar_RetainsPositionAcrossDispatchSwitch(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "43", Title: "second thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var lines strings.Builder
+	for i := 0; i < 50; i++ {
+		fmt.Fprintf(&lines, `{"type":"assistant","message":{"content":[{"type":"text","text":"line-%02d"}]}}`+"\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(lines.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-43.log"), []byte(other), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch.Queue.Add(Pick{Number: "43", Title: "second thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "2")
+	waitForOutput(t, tm, "running")
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42")
+
+	sendKey(tm, "pgdown") // moves Offset without detaching Follow
+	sendKey(tm, "k")      // detaches Follow, Offset stays off 0
+	waitForOutput(t, tm, "[paused]")
+
+	sendKey(tm, "h")
+	sendKey(tm, "j")
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #43")
+
+	sendKey(tm, "h")
+	sendKey(tm, "k")
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.Sidebar == nil || fm.m.Sidebar.Number != "42" {
+		t.Fatalf("Sidebar = %+v, want it reopened on #42", fm.m.Sidebar)
+	}
+	if fm.m.Sidebar.Follow {
+		t.Error("Follow = true, want false — retained from before the switch to #43")
+	}
+	if fm.m.Sidebar.Offset == 0 {
+		t.Error("Offset = 0, want the retained non-zero position from before the switch to #43")
+	}
+}
+
+// TestTea_PollTick_DoesNotRefreshSettledSidebar verifies a Settled
+// Dispatch's open sidebar never re-derives its Activity feed on a poll tick,
+// even though its pass log grows on disk afterward — a Settled Dispatch has
+// nothing left to tail (#1501 AC5), and refreshing it anyway would widen the
+// bounded-I/O scope past "the selected Dispatch, while it's actually running"
+// (review finding on issue #1502).
+func TestTea_PollTick_DoesNotRefreshSettledSidebar(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.pollInterval = 5 * time.Millisecond
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickSettled})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "4")
+	waitForOutput(t, tm, "settled")
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "first update")
+
+	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// No waitForOutput for "second update": there is nothing to wait for —
+	// the point is it must never arrive. Sleep past several poll ticks
+	// instead, then assert directly against the Model.
+	time.Sleep(50 * time.Millisecond)
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.Sidebar == nil {
+		t.Fatal("Sidebar = nil, want it still open on #42")
+	}
+	if strings.Contains(fmt.Sprint(fm.m.Sidebar.Activity), "second update") {
+		t.Errorf("Activity = %v, want the growth never to have arrived — a Settled Dispatch's sidebar must never refresh", fm.m.Sidebar.Activity)
+	}
+}
+
 // TestTea_SidebarKey_OpensActivityPane verifies Enter, on the Running
 // Section, opens a full-screen sidebar showing the highlighted running
 // pick's Activity feed by default (issue #786; retargeted to a work-Section
@@ -815,6 +994,70 @@ func TestTea_HandleKey_ArrowKeys_MirrorHAndL(t *testing.T) {
 	}
 }
 
+// TestTea_HandleKey_ZKey_TogglesSidebarZoom verifies "z" forces the sidebar
+// into its fullscreen zoom, and a second "z" releases it back to docked —
+// exercised directly on a terminal wide enough to dock, so the toggle's
+// effect isn't masked by sidebarFits' own narrow-terminal fallback (issue
+// #1502, ADR 0030).
+func TestTea_HandleKey_ZKey_TogglesSidebarZoom(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42"})
+	tm := teaModel{m: m}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")})
+	if !tm.m.SidebarZoom {
+		t.Error("SidebarZoom = false, want true after \"z\"")
+	}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")})
+	if tm.m.SidebarZoom {
+		t.Error("SidebarZoom = true, want false after a second \"z\"")
+	}
+}
+
+// TestTea_HandleKey_ZoomedSidebar_RoutesKeysToSidebarRegardlessOfFocus
+// verifies a zoomed sidebar routes every keypress to the sidebar even while
+// Model.Focus is still FocusList — the same "no list on screen to route
+// list-only keys to" rule handleKey already applies to the narrow-terminal
+// fullscreen fallback (issue #1502, ADR 0030).
+func TestTea_HandleKey_ZoomedSidebar_RoutesKeysToSidebarRegardlessOfFocus(t *testing.T) {
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+	m = Update(m, SidebarToggleMsg{})
+	m = Update(m, FocusListMsg{})
+	m = Update(m, SidebarZoomToggleMsg{})
+	tm := teaModel{m: m}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+
+	if tm.m.Sidebar.Offset != 1 {
+		t.Errorf("Sidebar.Offset = %d, want 1 — \"j\" must have scrolled the zoomed sidebar despite Focus == FocusList", tm.m.Sidebar.Offset)
+	}
+}
+
+// TestTea_HandleKey_HKey_NoOpWhileZoomed verifies "h"/left is a no-op while
+// the sidebar is zoomed, even on a terminal wide enough to dock — zoomed
+// fullscreen has no list on screen to focus, the same rule already applied
+// to the narrow-terminal fallback; moving Focus to FocusList here anyway
+// would desync it from the still-fullscreen render until "z" un-zooms
+// (review finding on issue #1502).
+func TestTea_HandleKey_HKey_NoOpWhileZoomed(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42"})
+	m = Update(m, SidebarZoomToggleMsg{})
+	tm := teaModel{m: m}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+
+	if tm.m.Focus != FocusSidebar {
+		t.Errorf("Focus = %v, want FocusSidebar unchanged — \"h\" must be a no-op while zoomed", tm.m.Focus)
+	}
+}
+
 // TestTea_SidebarToggleKey_CyclesActivityTranscriptRaw verifies "t" advances
 // the open sidebar around its Activity feed -> Transcript (rendered) ->
 // Transcript (raw) -> Activity feed cycle, so the byte-exact raw form stays
@@ -865,7 +1108,12 @@ func TestTea_SidebarToggleKey_CyclesActivityTranscriptRaw(t *testing.T) {
 // sidebar's scroll offset, hiding and restoring the leading lines (issue
 // #786). The content has to outrun the 24-row test terminal's fullscreen
 // budget, or clampSidebarOffset's viewport cap (issue #829) pins Offset at 0
-// as a real no-op and pgdown never produces a fresh frame.
+// as a real no-op and pgdown never produces a fresh frame. A fresh open
+// starts at the bottom while following (ADR 0030, issue #1502) rather than
+// at line-00, so the sequence pages all the way to the top first — three
+// pgups guarantee reaching Offset 0 from a max Offset of 28 (50 lines, a
+// 22-line budget) — before exercising the original pgdown/pgup mechanics
+// from that known point.
 func TestTea_SidebarScrollKeys_PageThroughContent(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -891,6 +1139,11 @@ func TestTea_SidebarScrollKeys_PageThroughContent(t *testing.T) {
 	waitForOutput(t, tm, "running")
 
 	sendKey(tm, "enter")
+	waitForOutput(t, tm, "line-49") // fresh open while following starts at the bottom
+
+	sendKey(tm, "pgup")
+	sendKey(tm, "pgup")
+	sendKey(tm, "pgup") // detaches Follow along the way
 	waitForOutput(t, tm, "line-00")
 
 	sendKey(tm, "pgdown")

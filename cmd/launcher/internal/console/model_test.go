@@ -328,6 +328,41 @@ func TestUpdate_SidebarLoadedMsg_OpensSidebar_ActivityDefault(t *testing.T) {
 	}
 }
 
+// TestUpdate_SidebarLoadedMsg_FollowDefaultsTrueOnOpen verifies a freshly
+// opened sidebar (no retained position for this Dispatch yet) starts with
+// Follow true — live-tailing is the default the moment a feed opens, not an
+// opt-in the operator has to reach for (issue #1502, ADR 0030).
+func TestUpdate_SidebarLoadedMsg_FollowDefaultsTrueOnOpen(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	if !m.Sidebar.Follow {
+		t.Error("Sidebar.Follow = false, want true on a freshly opened sidebar")
+	}
+}
+
+// TestUpdate_SidebarLoadedMsg_FreshOpenWhileFollowing_StartsAtBottom
+// verifies a brand new selection (no retained position at all), still
+// following by default, opens at the bottom of the loaded feed rather than
+// its top — ADR 0030's "follows the newest line by default" describes any
+// opened feed, not only a reopen after a close (review finding on issue
+// #1502).
+func TestUpdate_SidebarLoadedMsg_FreshOpenWhileFollowing_StartsAtBottom(t *testing.T) {
+	activity := make([]ActivityLine, 50)
+	for i := range activity {
+		activity[i] = ActivityLine{Text: fmt.Sprintf("l%d", i)}
+	}
+
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity})
+
+	want := len(m.Sidebar.Lines) - (20 - headerFooterLines) // last page fills the viewport
+	if m.Sidebar.Offset != want {
+		t.Errorf("Offset = %d, want %d (a fresh open while following starts at the bottom)", m.Sidebar.Offset, want)
+	}
+}
+
 // TestUpdate_SidebarLoadedMsg_CachesLineSplit verifies SidebarLoadedMsg
 // pre-splits the active (Activity, by default) form into Sidebar.Lines once,
 // so clampSidebarOffset and the render functions consume the cache instead
@@ -383,6 +418,37 @@ func TestUpdate_SidebarToggleMsg_CyclesActivityTranscriptRaw(t *testing.T) {
 	}
 	if len(m.Sidebar.Lines) != 1 || !strings.Contains(m.Sidebar.Lines[0], "activity line") {
 		t.Errorf("Lines = %v, want the Activity feed again", m.Sidebar.Lines)
+	}
+}
+
+// TestUpdate_SidebarToggleMsg_BackToActivityWhileFollowing_SnapsToBottom
+// verifies cycling the sidebar back to the Activity feed (the third "t") re-
+// snaps Offset to the bottom when Follow is true — the Transcript view's own
+// Offset (wherever that view's own scrolling or clamp left it) must not leak
+// into the Activity view and read as "following" while showing non-bottom
+// content (review finding on issue #1502).
+func TestUpdate_SidebarToggleMsg_BackToActivityWhileFollowing_SnapsToBottom(t *testing.T) {
+	activity := make([]ActivityLine, 50)
+	for i := range activity {
+		activity[i] = ActivityLine{Text: fmt.Sprintf("l%d", i)}
+	}
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity, Rendered: "short transcript"})
+	if !m.Sidebar.Follow {
+		t.Fatal("test setup: Follow must start true")
+	}
+
+	m = Update(m, SidebarToggleMsg{}) // -> Transcript (rendered), Offset clamps to 0 (short content)
+	m = Update(m, SidebarToggleMsg{}) // -> Transcript (raw)
+	m = Update(m, SidebarToggleMsg{}) // -> back to Activity
+
+	if m.Sidebar.ShowTranscript {
+		t.Fatal("test setup: three toggles must land back on the Activity feed")
+	}
+	want := len(m.Sidebar.Lines) - (20 - headerFooterLines) // last page fills the viewport
+	if m.Sidebar.Offset != want {
+		t.Errorf("Offset = %d, want %d (following, snapped back to the Activity feed's own bottom)", m.Sidebar.Offset, want)
 	}
 }
 
@@ -499,6 +565,35 @@ func TestUpdate_SidebarScrollMsg_DockedClampsToBodyBudgetNotFullHeight(t *testin
 	}
 }
 
+// TestUpdate_SidebarScrollMsg_ZoomedClampsToFullHeightNotBodyBudget verifies
+// a pgdown past the end of a transcript, zoomed on a terminal wide enough to
+// dock, lands Offset against the whole terminal Height — the row budget
+// renderSidebarFullscreen actually renders into once SidebarZoom forces it —
+// not bodyBudget(m), which only applies to the docked render the operator
+// zoomed away from (review finding on issue #1502).
+func TestUpdate_SidebarScrollMsg_ZoomedClampsToFullHeightNotBodyBudget(t *testing.T) {
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 20})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+	m = Update(m, SidebarToggleMsg{})
+	m = Update(m, SidebarZoomToggleMsg{})
+
+	m = Update(m, SidebarScrollMsg{Delta: 1000})
+
+	budget := bodyBudget(m)
+	if budget >= 20 {
+		t.Fatalf("test setup: bodyBudget(m) = %d, want it under Height (20) — the docked/zoomed budgets must actually differ to distinguish them", budget)
+	}
+	want := 100 - (20 - headerFooterLines) // last page fills the full terminal height, not the docked budget
+	if m.Sidebar.Offset != want {
+		t.Errorf("Offset = %d, want %d (last page fills the zoomed fullscreen's full height, not the docked body budget)", m.Sidebar.Offset, want)
+	}
+}
+
 // TestUpdate_SidebarScrollMsg_ShortTranscriptStaysAtTop verifies a pgdown
 // past the end of a transcript shorter than the fullscreen viewport lands
 // Offset at 0, not len(Lines)-1 — content that already fits the viewport in
@@ -517,6 +612,40 @@ func TestUpdate_SidebarScrollMsg_ShortTranscriptStaysAtTop(t *testing.T) {
 	}
 }
 
+// TestUpdate_SidebarScrollMsg_ScrollUpDetachesFollow verifies scrolling up
+// (a negative Delta) detaches Follow, so the operator can review frozen
+// history while the Dispatch keeps working without the feed yanking them
+// back to the bottom (issue #1502, ADR 0030).
+func TestUpdate_SidebarScrollMsg_ScrollUpDetachesFollow(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
+	m = Update(m, SidebarToggleMsg{})
+	if !m.Sidebar.Follow {
+		t.Fatal("test setup: Follow must start true")
+	}
+
+	m = Update(m, SidebarScrollMsg{Delta: -1})
+
+	if m.Sidebar.Follow {
+		t.Error("Follow = true, want false after scrolling up")
+	}
+}
+
+// TestUpdate_SidebarScrollMsg_ScrollDownDoesNotDetachFollow verifies
+// scrolling down (a positive Delta) leaves Follow untouched — only scrolling
+// up (reviewing history) detaches it (issue #1502, ADR 0030).
+func TestUpdate_SidebarScrollMsg_ScrollDownDoesNotDetachFollow(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
+	m = Update(m, SidebarToggleMsg{})
+
+	m = Update(m, SidebarScrollMsg{Delta: 1})
+
+	if !m.Sidebar.Follow {
+		t.Error("Follow = false, want true — a downward scroll must not detach it")
+	}
+}
+
 // TestUpdate_SidebarScrollMsg_NoOpWhenNoSidebarOpen verifies scrolling with
 // no sidebar open does not panic or fabricate a Sidebar state.
 func TestUpdate_SidebarScrollMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
@@ -524,6 +653,205 @@ func TestUpdate_SidebarScrollMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m = Update(m, SidebarScrollMsg{Delta: 1})
 	if m.Sidebar != nil {
 		t.Errorf("Sidebar = %+v, want nil", m.Sidebar)
+	}
+}
+
+// TestUpdate_SidebarJumpToEndMsg_ReattachesFollowAndJumpsToBottom verifies
+// G/End re-attaches Follow and moves Offset to the last line, the operator's
+// way back to live-tailing after scrolling up to review history (issue
+// #1502, ADR 0030).
+func TestUpdate_SidebarJumpToEndMsg_ReattachesFollowAndJumpsToBottom(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
+	m = Update(m, SidebarToggleMsg{})
+	m = Update(m, SidebarScrollMsg{Delta: -1}) // detaches Follow
+	if m.Sidebar.Follow {
+		t.Fatal("test setup: Follow must be detached before jumping to end")
+	}
+
+	m = Update(m, SidebarJumpToEndMsg{})
+
+	if !m.Sidebar.Follow {
+		t.Error("Follow = false, want true after G/End")
+	}
+	if m.Sidebar.Offset != 4 {
+		t.Errorf("Offset = %d, want 4 (the last line)", m.Sidebar.Offset)
+	}
+}
+
+// TestUpdate_SidebarJumpToEndMsg_NoOpWhenNoSidebarOpen verifies G/End with no
+// sidebar open does not panic or fabricate a Sidebar state.
+func TestUpdate_SidebarJumpToEndMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarJumpToEndMsg{})
+	if m.Sidebar != nil {
+		t.Errorf("Sidebar = %+v, want nil", m.Sidebar)
+	}
+}
+
+// TestUpdate_SidebarActivityMsg_UpdatesActivityAndLines verifies a
+// SidebarActivityMsg for the open sidebar's own Number installs the
+// refreshed Activity feed and recomputes Lines — syncQueue's per-Msg live
+// advance (issue #1502, ADR 0030).
+func TestUpdate_SidebarActivityMsg_UpdatesActivityAndLines(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "first"}}})
+
+	m = Update(m, SidebarActivityMsg{Number: "42", Activity: []ActivityLine{{Text: "first"}, {Text: "second"}}})
+
+	if len(m.Sidebar.Activity) != 2 {
+		t.Fatalf("Activity = %v, want 2 entries", m.Sidebar.Activity)
+	}
+	if len(m.Sidebar.Lines) != 2 || !strings.Contains(m.Sidebar.Lines[1], "second") {
+		t.Errorf("Lines = %v, want the refreshed Activity feed", m.Sidebar.Lines)
+	}
+}
+
+// TestUpdate_SidebarActivityMsg_FollowSnapsToBottom verifies growth of the
+// Activity feed, while Follow is true, moves Offset to show the newest
+// line — the live-tail default (issue #1502, ADR 0030).
+func TestUpdate_SidebarActivityMsg_FollowSnapsToBottom(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "l0"}}})
+	if !m.Sidebar.Follow {
+		t.Fatal("test setup: Follow must start true")
+	}
+
+	grown := make([]ActivityLine, 100)
+	for i := range grown {
+		grown[i] = ActivityLine{Text: fmt.Sprintf("l%d", i)}
+	}
+	m = Update(m, SidebarActivityMsg{Number: "42", Activity: grown})
+
+	want := len(m.Sidebar.Lines) - (20 - headerFooterLines) // last page fills the viewport (issue #829's convention)
+	if m.Sidebar.Offset != want {
+		t.Errorf("Offset = %d, want %d (the last page, following the growth)", m.Sidebar.Offset, want)
+	}
+}
+
+// TestUpdate_SidebarActivityMsg_PreservesOffsetWhenNotFollowing verifies
+// growth of the Activity feed, while Follow is false (detached by an earlier
+// scroll-up), leaves Offset where the operator left it instead of yanking
+// them back to the bottom (issue #1502, ADR 0030).
+func TestUpdate_SidebarActivityMsg_PreservesOffsetWhenNotFollowing(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "l0"}, {Text: "l1"}, {Text: "l2"}}})
+	m = Update(m, SidebarScrollMsg{Delta: -1}) // detaches Follow
+	wantOffset := m.Sidebar.Offset
+
+	m = Update(m, SidebarActivityMsg{Number: "42", Activity: []ActivityLine{{Text: "l0"}, {Text: "l1"}, {Text: "l2"}, {Text: "l3"}}})
+
+	if m.Sidebar.Offset != wantOffset {
+		t.Errorf("Offset = %d, want %d (untouched while not following)", m.Sidebar.Offset, wantOffset)
+	}
+}
+
+// TestUpdate_SidebarActivityMsg_UnchangedContentPreservesManualOffset
+// verifies a refresh that carries the exact same Activity feed as before
+// (syncQueue's per-Msg re-derive against an unchanged on-disk log — most
+// calls, between actual writes) leaves Offset alone even while Follow is
+// still true — a positive-Delta scroll (pgdown) moves Offset without
+// detaching Follow, and a same-content refresh right afterward must not
+// yank it back to the bottom (issue #1502).
+func TestUpdate_SidebarActivityMsg_UnchangedContentPreservesManualOffset(t *testing.T) {
+	activity := make([]ActivityLine, 50)
+	for i := range activity {
+		activity[i] = ActivityLine{Text: fmt.Sprintf("l%d", i)}
+	}
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity})
+	m = Update(m, SidebarScrollMsg{Delta: 10}) // positive: moves Offset, Follow stays true
+	if !m.Sidebar.Follow {
+		t.Fatal("test setup: Follow must stay true after a downward scroll")
+	}
+	wantOffset := m.Sidebar.Offset
+	if wantOffset == 0 {
+		t.Fatal("test setup: the scroll must have actually moved Offset off 0")
+	}
+
+	m = Update(m, SidebarActivityMsg{Number: "42", Activity: activity}) // same content, no growth
+
+	if m.Sidebar.Offset != wantOffset {
+		t.Errorf("Offset = %d, want %d (unchanged content must not re-snap to the bottom)", m.Sidebar.Offset, wantOffset)
+	}
+}
+
+// TestUpdate_SidebarActivityMsg_PassRolloverUpdatesLinesEvenWhenShorter
+// verifies a refresh whose feed is SHORTER than what's currently shown still
+// updates Lines and (while Follow is true) snaps to the new bottom — a
+// Dispatch rolling from its initial run onto a fix pass gets a fresh,
+// shorter pass log (LogPaths/ActivityFeed key on only the latest pass), so
+// gating the refresh on "grew" alone would leave the sidebar frozen on the
+// finished pass's stale lines while still labeled following (review finding
+// on issue #1502).
+func TestUpdate_SidebarActivityMsg_PassRolloverUpdatesLinesEvenWhenShorter(t *testing.T) {
+	initial := make([]ActivityLine, 20)
+	for i := range initial {
+		initial[i] = ActivityLine{Text: fmt.Sprintf("pass0-l%d", i)}
+	}
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: initial})
+
+	// A fresh fix-pass log starts over — shorter than the finished initial
+	// pass, and with entirely different content.
+	nextPass := []ActivityLine{{Text: "pass1-l0"}}
+	m = Update(m, SidebarActivityMsg{Number: "42", Activity: nextPass})
+
+	if len(m.Sidebar.Lines) != 1 || !strings.Contains(m.Sidebar.Lines[0], "pass1-l0") {
+		t.Errorf("Lines = %v, want the new (shorter) pass's content, not the stale finished pass", m.Sidebar.Lines)
+	}
+	if m.Sidebar.Offset != 0 {
+		t.Errorf("Offset = %d, want 0 (following, snapped to the new pass's own bottom)", m.Sidebar.Offset)
+	}
+}
+
+// TestUpdate_SidebarActivityMsg_NoOpWhenNumberMismatch verifies a
+// SidebarActivityMsg for a Dispatch other than the one the sidebar has open
+// is dropped — a stale in-flight refresh racing a Dispatch switch must never
+// clobber the newly selected Dispatch's feed (issue #1502).
+func TestUpdate_SidebarActivityMsg_NoOpWhenNumberMismatch(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "l0"}}})
+
+	m = Update(m, SidebarActivityMsg{Number: "43", Activity: []ActivityLine{{Text: "l0"}, {Text: "l1"}}})
+
+	if len(m.Sidebar.Activity) != 1 {
+		t.Errorf("Activity = %v, want the original single entry, untouched by a mismatched Number", m.Sidebar.Activity)
+	}
+}
+
+// TestUpdate_SidebarActivityMsg_NoOpWhenNoSidebarOpen verifies a
+// SidebarActivityMsg with no sidebar open does not panic or fabricate a
+// Sidebar state.
+func TestUpdate_SidebarActivityMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarActivityMsg{Number: "42", Activity: []ActivityLine{{Text: "l0"}}})
+	if m.Sidebar != nil {
+		t.Errorf("Sidebar = %+v, want nil", m.Sidebar)
+	}
+}
+
+// TestUpdate_SidebarActivityMsg_DoesNotOverwriteTranscriptLines verifies a
+// SidebarActivityMsg arriving while the sidebar shows the Transcript updates
+// the stored Activity feed (so toggling back to it later reflects the
+// growth) but leaves Lines showing the Transcript untouched — the refresh
+// must never yank the operator's Transcript view back to Activity content
+// (issue #1502).
+func TestUpdate_SidebarActivityMsg_DoesNotOverwriteTranscriptLines(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "l0"}}, Rendered: "transcript line"})
+	m = Update(m, SidebarToggleMsg{}) // switches to the rendered Transcript
+
+	m = Update(m, SidebarActivityMsg{Number: "42", Activity: []ActivityLine{{Text: "l0"}, {Text: "l1"}}})
+
+	if len(m.Sidebar.Lines) != 1 || m.Sidebar.Lines[0] != "transcript line" {
+		t.Errorf("Lines = %v, want the Transcript untouched", m.Sidebar.Lines)
+	}
+	if len(m.Sidebar.Activity) != 2 {
+		t.Errorf("Activity = %v, want the refreshed feed stored even while not shown", m.Sidebar.Activity)
 	}
 }
 
@@ -807,6 +1135,143 @@ func TestUpdate_SidebarLoadedMsg_RefreshSameNumber_PreservesToggleState(t *testi
 	}
 	if m.Focus != FocusList {
 		t.Errorf("Focus = %v, want FocusList preserved (a same-number refresh must not re-yank focus)", m.Focus)
+	}
+}
+
+// TestUpdate_SidebarLoadedMsg_RetainsPositionAcrossDispatchSwitch verifies
+// scrolling and detaching Follow on one Dispatch's sidebar, then switching to
+// another Dispatch and back, restores exactly where the operator left the
+// first one — hopping between running Dispatches never loses their place
+// (issue #1502, ADR 0030).
+func TestUpdate_SidebarLoadedMsg_RetainsPositionAcrossDispatchSwitch(t *testing.T) {
+	activity := make([]ActivityLine, 50)
+	for i := range activity {
+		activity[i] = ActivityLine{Text: fmt.Sprintf("l%d", i)}
+	}
+
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity})
+	m = Update(m, SidebarScrollMsg{Delta: 5})
+	m = Update(m, SidebarScrollMsg{Delta: -1}) // detaches Follow, a few lines up from wherever Follow had it
+	wantOffset, wantFollow := m.Sidebar.Offset, m.Sidebar.Follow
+	if wantFollow {
+		t.Fatal("test setup: Follow must be detached")
+	}
+
+	m = Update(m, SidebarLoadedMsg{Number: "43", Activity: []ActivityLine{{Text: "other dispatch"}}})
+	if m.Sidebar.Number != "43" {
+		t.Fatal("test setup: sidebar must have switched to #43")
+	}
+
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity})
+
+	if m.Sidebar.Offset != wantOffset {
+		t.Errorf("Offset = %d, want %d (retained from before the switch)", m.Sidebar.Offset, wantOffset)
+	}
+	if m.Sidebar.Follow != wantFollow {
+		t.Errorf("Follow = %v, want %v (retained from before the switch)", m.Sidebar.Follow, wantFollow)
+	}
+}
+
+// TestUpdate_SidebarLoadedMsg_ReopenWhileFollowing_SnapsToNewBottom verifies
+// reopening a Dispatch that was closed while still Follow-ing lands at the
+// freshly loaded content's actual bottom, not the stale Offset saved before
+// close — the Dispatch kept working while the sidebar was shut, so "still
+// following" must mean "at today's bottom," not "wherever it happened to be
+// last time" (review finding on issue #1502).
+func TestUpdate_SidebarLoadedMsg_ReopenWhileFollowing_SnapsToNewBottom(t *testing.T) {
+	initial := make([]ActivityLine, 20)
+	for i := range initial {
+		initial[i] = ActivityLine{Text: fmt.Sprintf("l%d", i)}
+	}
+
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: initial})
+	m = Update(m, SidebarScrollMsg{Delta: 5}) // moves Offset without detaching Follow
+	if !m.Sidebar.Follow {
+		t.Fatal("test setup: Follow must stay true after a downward scroll")
+	}
+	staleOffset := m.Sidebar.Offset
+
+	m = Update(m, SidebarCloseMsg{})
+
+	grown := make([]ActivityLine, 60) // the Dispatch kept working while closed
+	for i := range grown {
+		grown[i] = ActivityLine{Text: fmt.Sprintf("l%d", i)}
+	}
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: grown})
+
+	want := len(m.Sidebar.Lines) - (20 - headerFooterLines) // last page fills the viewport
+	if m.Sidebar.Offset != want {
+		t.Errorf("Offset = %d, want %d (the new bottom, not the stale %d saved before close)", m.Sidebar.Offset, want, staleOffset)
+	}
+}
+
+// TestUpdate_SidebarCloseMsg_RetainsPositionForReopen verifies closing the
+// sidebar after scrolling and detaching Follow, then reopening the same
+// Dispatch, restores that position rather than resetting to the top with
+// Follow re-armed (issue #1502, ADR 0030).
+func TestUpdate_SidebarCloseMsg_RetainsPositionForReopen(t *testing.T) {
+	activity := make([]ActivityLine, 50)
+	for i := range activity {
+		activity[i] = ActivityLine{Text: fmt.Sprintf("l%d", i)}
+	}
+
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity})
+	m = Update(m, SidebarScrollMsg{Delta: 5})
+	m = Update(m, SidebarScrollMsg{Delta: -1})
+	wantOffset, wantFollow := m.Sidebar.Offset, m.Sidebar.Follow
+
+	m = Update(m, SidebarCloseMsg{})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity})
+
+	if m.Sidebar.Offset != wantOffset {
+		t.Errorf("Offset = %d, want %d (retained across close/reopen)", m.Sidebar.Offset, wantOffset)
+	}
+	if m.Sidebar.Follow != wantFollow {
+		t.Errorf("Follow = %v, want %v (retained across close/reopen)", m.Sidebar.Follow, wantFollow)
+	}
+}
+
+// TestUpdate_SidebarZoomToggleMsg_TogglesZoom verifies "z" flips
+// Model.SidebarZoom on and back off — the fullscreen zoom toggle for deep
+// reading, independent of the narrow-terminal fallback (issue #1502, ADR
+// 0030).
+func TestUpdate_SidebarZoomToggleMsg_TogglesZoom(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	m = Update(m, SidebarZoomToggleMsg{})
+	if !m.SidebarZoom {
+		t.Error("SidebarZoom = false, want true after one toggle")
+	}
+
+	m = Update(m, SidebarZoomToggleMsg{})
+	if m.SidebarZoom {
+		t.Error("SidebarZoom = true, want false after a second toggle")
+	}
+}
+
+// TestUpdate_SidebarCloseMsg_ResetsZoom verifies closing the sidebar clears
+// SidebarZoom, so reopening a different (or the same) Dispatch on a wide
+// terminal starts docked rather than still forced fullscreen from a prior
+// session (issue #1502).
+func TestUpdate_SidebarCloseMsg_ResetsZoom(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	m = Update(m, SidebarZoomToggleMsg{})
+	if !m.SidebarZoom {
+		t.Fatal("test setup: SidebarZoom must be true")
+	}
+
+	m = Update(m, SidebarCloseMsg{})
+
+	if m.SidebarZoom {
+		t.Error("SidebarZoom = true, want false after closing the sidebar")
 	}
 }
 

@@ -904,6 +904,56 @@ func TestView_SidebarOpen_NarrowTerminal_FallsBackFullscreen(t *testing.T) {
 	}
 }
 
+// TestView_SidebarLabel_ShowsFollowIndicator verifies the sidebar's label
+// names whether the Activity feed is following the newest line or paused
+// after a scroll-up — the operator's only render-level signal for Follow
+// state (issue #1502, ADR 0030).
+func TestView_SidebarLabel_ShowsFollowIndicator(t *testing.T) {
+	m := Update(NewModel(), SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	if !strings.Contains(View(m), "[follow]") {
+		t.Errorf("View() = %q, want the follow indicator while Follow is true", View(m))
+	}
+
+	m = Update(m, SidebarScrollMsg{Delta: -1})
+	if !strings.Contains(View(m), "[paused]") {
+		t.Errorf("View() = %q, want the paused indicator after a scroll-up detaches Follow", View(m))
+	}
+}
+
+// TestView_SidebarFooter_ShowsZoomHint verifies both the docked and
+// fullscreen sidebar footers advertise the "z" zoom key (issue #1502).
+func TestView_SidebarFooter_ShowsZoomHint(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	if !strings.Contains(View(m), "[z] zoom") {
+		t.Errorf("docked View() = %q, want the zoom key hint", View(m))
+	}
+
+	m = Update(m, SidebarZoomToggleMsg{})
+	if !strings.Contains(View(m), "[z] zoom") {
+		t.Errorf("fullscreen View() = %q, want the zoom key hint", View(m))
+	}
+}
+
+// TestView_SidebarZoom_WideTerminal_ForcesFullscreen verifies SidebarZoom
+// forces the fullscreen takeover even on a terminal wide enough to dock —
+// the "deep reading" zoom is an operator choice independent of sidebarFits'
+// own narrow-terminal fallback (issue #1502, ADR 0030).
+func TestView_SidebarZoom_WideTerminal_ForcesFullscreen(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show while zoomed"}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
+	m = Update(m, SidebarZoomToggleMsg{})
+
+	out := View(m)
+	if strings.Contains(out, "should not show while zoomed") {
+		t.Errorf("View() = %q, want the list hidden behind the zoomed fullscreen sidebar", out)
+	}
+	if !strings.Contains(out, "activity #42") {
+		t.Errorf("View() = %q, want the fullscreen sidebar's label", out)
+	}
+}
+
 // TestView_BacklogSection_HasColumnHeader verifies the Backlog Section
 // renders under its own column-header row (issue #844, moved from the
 // two-column body's "backlog" label to ADR 0030's single-Section table by
