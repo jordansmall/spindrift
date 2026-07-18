@@ -1088,6 +1088,26 @@ func TestDoctor_LabelsAllPresent(t *testing.T) {
 	}
 }
 
+// TestDoctor_AllLabelsPresent_PrintsSuccess verifies the early-return path
+// taken when both work and research labels are already present prints an
+// explicit success confirmation, mirroring the post-creation success line
+// (#1170).
+func TestDoctor_AllLabelsPresent_PrintsSuccess(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	research := doctor.ResearchLabelNames()
+	f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, research...)
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "ok: all triage and research labels present") {
+		t.Errorf("want success confirmation, got:\n%s", out)
+	}
+}
+
 func TestDoctor_LabelsSomeMissing(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
