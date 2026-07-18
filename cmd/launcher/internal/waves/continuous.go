@@ -215,14 +215,10 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 				// A Console "+" mid-drain (ADR 0023, issue #653): the
 				// operator's raise should launch a held pick right away, not
 				// wait for an unrelated Box to settle or a background poll.
-				// Loop rather than a single refill() call: Grown's channel
-				// is buffer-1 and non-blocking, so a burst of rapid
-				// ResizeDelta raises can coalesce into one delivered signal
-				// even though the cap (updated synchronously by every
-				// ResizeDelta call before it ever touches the channel)
-				// already reflects all of them (issue #766) — draining
-				// until a call does nothing catches every slot the raise
-				// actually freed instead of just one.
+				// Loop rather than a single refill() call: per Grown's
+				// signal-loss contract, one signal only means "at least one
+				// unit freed" (issue #766) — draining until refill does
+				// nothing catches every slot the raise actually freed.
 				mu.Lock()
 				for refill() {
 				}
