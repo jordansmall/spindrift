@@ -101,7 +101,11 @@ func (UnpickMsg) isConsoleMsg() {}
 // concatenated in order, with pass boundaries marked — plus its byte-exact
 // raw form, loaded together so the raw toggle needs no further I/O. Err is
 // set instead when loading or rendering failed (e.g. no Driver configured,
-// no logs on disk yet).
+// no logs on disk yet). Purely DrillIn's own return payload since #1501 —
+// openSidebarCmd unwraps it internally to build a SidebarLoadedMsg, so it
+// never reaches the tea layer's Update dispatch directly; it still satisfies
+// Msg so DrillIn's signature (and transcript_test.go's assertions against
+// it) can stay unchanged.
 type DrillInMsg struct {
 	Number        string
 	Rendered, Raw string
