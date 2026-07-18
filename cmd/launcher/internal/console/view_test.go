@@ -1134,6 +1134,17 @@ func TestView_NarrowTerminal_Body_LinesNeverExceedTerminalWidth(t *testing.T) {
 	if !strings.Contains(out, "#42") {
 		t.Errorf("renderBody() = %q, want the pick number #42 to survive clipping", out)
 	}
+	// #1 and #42 sit at the START of their rows, so they survive clipping
+	// even if clip() drops one extra rune off the TAIL. Also assert a
+	// fragment right before each row's "…" — the exact tail clip() keeps —
+	// so a tail-only off-by-one (one rune too many truncated) fails here
+	// instead of slipping past undetected (issue #1522).
+	if !strings.Contains(out, "tit…") {
+		t.Errorf("renderBody() = %q, want the backlog row's tail truncated at exactly Width, not one rune short", out)
+	}
+	if !strings.Contains(out, "#41 (…") {
+		t.Errorf("renderBody() = %q, want the pick row's tail truncated at exactly Width, not one rune short", out)
+	}
 }
 
 // TestRenderBacklogColumn_NilBudgetNeverTruncates verifies a nil budget
