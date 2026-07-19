@@ -21,18 +21,25 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	}
 	if !result.OutcomeFound {
 		branch := s.cf.AgentBranch(num)
-		res, prErr := forge.ResolveOpenPR(s.cf, num)
-		if prErr != nil || !res.Found {
-			clsNote := ""
-			if result.ClassifyErr != nil {
-				fmt.Fprintf(os.Stderr, "    ?? #%s: classify: %v\n", num, result.ClassifyErr)
-			} else {
-				clsNote = fmt.Sprintf("  class=%s  reason=%s", result.Classification.Class, result.Classification.Reason)
-				if result.Classification.ResetAt != nil {
-					clsNote += "  resetsAt=" + result.Classification.ResetAt.UTC().Format(time.RFC3339)
-				}
+
+		clsNote := ""
+		if result.ClassifyErr != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: classify: %v\n", num, result.ClassifyErr)
+		} else {
+			clsNote = fmt.Sprintf("  class=%s  reason=%s", result.Classification.Class, result.Classification.Reason)
+			if result.Classification.ResetAt != nil {
+				clsNote += "  resetsAt=" + result.Classification.ResetAt.UTC().Format(time.RFC3339)
 			}
+		}
+
+		res, prErr := forge.ResolveOpenPR(s.cf, num)
+		if prErr != nil {
+			fmt.Printf("    #%s  status=missing%s  note=PR lookup failed: %v\n", num, clsNote, prErr)
+			return
+		}
+		if !res.Found {
 			fmt.Printf("    #%s  status=missing%s  note=no outcome in log\n", num, clsNote)
+			s.transitionState(num, forge.InProgress, forge.Failed)
 			return
 		}
 		if res.IsDraft {
@@ -47,6 +54,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	switch o.Status {
 	case "blocked":
 		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
+		s.transitionState(num, forge.InProgress, forge.Failed)
 		s.postUsageComment(num, d)
 	case "ready":
 		switch s.selfHeal(d, num, gen, o.Landing) {

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/testutil"
@@ -41,6 +42,36 @@ func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 	}
 	if fc.CommentCalls[0].Body != d.UsageReportBody {
 		t.Errorf("comment body: got %q, want %q", fc.CommentCalls[0].Body, d.UsageReportBody)
+	}
+}
+
+// TestSettle_BlockedOutcome_DemotesToFailed verifies that a status=blocked
+// outcome (including the synthetic backstop's) swaps agent-in-progress to
+// agent-failed so the issue lands in the human-triage queue instead of
+// looking in-flight forever (issue #1605, observed on #1542).
+func TestSettle_BlockedOutcome_DemotesToFailed(t *testing.T) {
+	const issNum = "42"
+	const prURL = "https://github.com/owner/repo/pull/99"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+	}
+
+	s := New(baseConfig(), fc, fc)
+	s.Settle(d, issNum, 0, result)
+
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("blocked outcome must demote to agent-failed; got labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("blocked outcome must remove agent-in-progress; got labels=%v", iss.Labels)
 	}
 }
 
@@ -200,18 +231,21 @@ func TestSettle_NoOutcome_AdoptsDiscoveredPR(t *testing.T) {
 	}
 }
 
-// TestSettle_NoOutcome_NoPRFound reports status=missing and takes no action
-// when no outcome line and no open PR exist.
+// TestSettle_NoOutcome_NoPRFound reports status=missing and demotes the
+// issue to agent-failed when no outcome line and no open PR exist — the
+// Driver crashed before ever opening a PR, so there is nothing left to
+// adopt (issue #1605).
 func TestSettle_NoOutcome_NoPRFound(t *testing.T) {
-	fc := forge.NewFake()
+	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "4", Labels: []string{"agent-in-progress"}})
 
 	c := baseConfig()
 	s := New(c, fc, fc)
 	s.Settle(dispatch.NewFake(), "4", 0, dispatch.Result{Success: true})
 
-	if len(fc.TransitionStateCalls) != 0 {
-		t.Errorf("no-PR case must not trigger label churn; got %v", fc.TransitionStateCalls)
+	iss, _ := fc.Issue("4")
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("no-PR case must demote to agent-failed; got labels=%v", iss.Labels)
 	}
 	if len(fc.CommentCalls) != 0 {
 		t.Errorf("no-PR case must not post a usage comment; got %v", fc.CommentCalls)
@@ -236,6 +270,71 @@ func TestSettle_NoOutcome_DraftPRBlocked(t *testing.T) {
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("draft PR must not trigger label churn; got %v", fc.TransitionStateCalls)
+	}
+}
+
+// TestSettle_NoOutcome_PRLookupError_NoLabelChurn verifies that a transient
+// forge lookup failure while resolving the open PR is reported but does not
+// demote the issue: unlike a confirmed absence of a PR, a lookup error
+// leaves genuine doubt about whether a live, mergeable PR exists, and
+// wrongly demoting it would bury a possibly-fine run under agent-failed
+// (issue #1605 review follow-up).
+func TestSettle_NoOutcome_PRLookupError_NoLabelChurn(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "6", Labels: []string{"agent-in-progress"}})
+	fc.OpenPRForBranchErr = errFake
+
+	c := baseConfig()
+	s := New(c, fc, fc)
+	s.Settle(dispatch.NewFake(), "6", 0, dispatch.Result{Success: true})
+
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("PR lookup error must not trigger label churn; got %v", fc.TransitionStateCalls)
+	}
+}
+
+// TestSettle_NoOutcome_PRLookupError_PrintsClassification verifies that a
+// lookup-error console line still carries the log's classification note
+// (class=/reason=), matching the confirmed-no-PR branch's console output —
+// a lookup failure must not silently drop diagnostic detail a human
+// triaging agent-failed would otherwise rely on.
+func TestSettle_NoOutcome_PRLookupError_PrintsClassification(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "6", Labels: []string{"agent-in-progress"}})
+	fc.OpenPRForBranchErr = errFake
+
+	c := baseConfig()
+	s := New(c, fc, fc)
+	result := dispatch.Result{
+		Success:        true,
+		Classification: driver.Classification{Class: driver.Terminal, Reason: driver.TaskFailed},
+	}
+	out := testutil.CaptureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), "6", 0, result)
+	})
+
+	if !strings.Contains(out, "class=terminal") || !strings.Contains(out, "reason=taskFailed") {
+		t.Errorf("console output must carry classification on a lookup error; got: %q", out)
+	}
+}
+
+// TestSettle_GitForge_NoOutcome_DemotesToFailed verifies that the demotion
+// added by issue #1605 also fires on a push-only Code Forge: it has no
+// PRForge surface at all, so ResolveOpenPR always reports not-found for it,
+// and a box that exits with no outcome line has produced nothing landable —
+// the same "no adoptable PR exists" case a github forge hits when no PR was
+// opened.
+func TestSettle_GitForge_NoOutcome_DemotesToFailed(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "8", Labels: []string{"agent-in-progress"}})
+
+	c := baseConfig()
+	s := New(c, fc, fc.AsPushOnly())
+	s.Settle(dispatch.NewFake(), "8", 0, dispatch.Result{Success: true})
+
+	iss, _ := fc.Issue("8")
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("push-only forge no-outcome case must demote to agent-failed; got labels=%v", iss.Labels)
 	}
 }
 
