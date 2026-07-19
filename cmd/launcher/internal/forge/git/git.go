@@ -24,8 +24,11 @@ const defaultCloneTimeout = 5 * time.Minute
 // initial clone (Probe's ls-remote, and Merge/Rebase's checkout, fetch,
 // merge, and push) when the caller doesn't override it via WithOpTimeout.
 // Without it, the same hung-remote failure mode defaultCloneTimeout guards
-// against for cloneToTemp could block these calls forever too.
-const defaultOpTimeout = 5 * time.Minute
+// against for cloneToTemp could block these calls forever too. Shares
+// defaultCloneTimeout's value rather than a separate literal so the two
+// don't silently drift apart; WithOpTimeout/WithCloneTimeout still let a
+// caller diverge them deliberately.
+const defaultOpTimeout = defaultCloneTimeout
 
 // gitClient is the push-only Code Forge adapter for a plain git remote
 // (self-hosted git, gitea, GitLab-without-MRs, a bare server repo). It has no
@@ -55,7 +58,9 @@ func WithCloneTimeout(d time.Duration) Option {
 
 // WithOpTimeout overrides defaultOpTimeout, the deadline bounding each git
 // subprocess gitClient runs after the initial clone (Probe's ls-remote, and
-// Merge/Rebase's checkout, fetch, merge, and push). Mainly for tests
+// Merge/Rebase's checkout, fetch, merge, and push). The deadline applies
+// per subprocess, not to the whole Merge/Rebase call — a sequence of several
+// calls can take a small multiple of it in the worst case. Mainly for tests
 // exercising timeout behavior against a remote that hangs rather than fails
 // fast.
 func WithOpTimeout(d time.Duration) Option {
@@ -218,11 +223,17 @@ func (g *gitClient) Rebase(branch string) error {
 	if err := g.setCommitIdentity(gitIn); err != nil {
 		return err
 	}
-	if err := gitIn(context.Background(), "checkout", branch).Run(); err != nil {
-		return fmt.Errorf("git checkout %s: %w", branch, err)
+	if err := g.runGit(gitIn, "checkout", branch); err != nil {
+		return err
 	}
-	if err := gitIn(context.Background(), "rebase", "origin/"+g.baseBranch).Run(); err != nil {
-		_ = gitIn(context.Background(), "rebase", "--abort").Run()
+
+	ctx, cancel := context.WithTimeout(context.Background(), g.opTimeout)
+	defer cancel()
+	if err := gitIn(ctx, "rebase", "origin/"+g.baseBranch).Run(); err != nil {
+		_ = g.runGit(gitIn, "rebase", "--abort")
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("git rebase origin/%s: timed out after %s: %w", g.baseBranch, g.opTimeout, ctx.Err())
+		}
 		return forge.ErrMergeConflict
 	}
 	return gitplumbing.GitForcePush(dir)
