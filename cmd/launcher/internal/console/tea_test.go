@@ -2985,6 +2985,13 @@ func TestTea_EnterOnOrphanRow_OpensSidebarReadOnly(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "activity #42", "hi")
 
+	// The toggle and close gestures are as much a part of the read-only
+	// drill-in as opening it — AC4 names all three explicitly.
+	sendKey(tm, "t")
+	waitForOutput(t, tm, "transcript #42")
+	sendKey(tm, "x")
+	waitForOutput(t, tm, "fix the thing")
+
 	select {
 	case num := <-recovered:
 		t.Errorf("RecoverFn called with %q, want drill-in to never adopt", num)
@@ -2998,6 +3005,57 @@ func TestTea_EnterOnOrphanRow_OpensSidebarReadOnly(t *testing.T) {
 	if len(final.m.Picks) != 0 {
 		t.Errorf("Picks = %v, want Enter on an orphan row to never queue a pick", final.m.Picks)
 	}
+}
+
+// TestTea_PollTick_AdvancesOpenOrphanSidebarActivityFeed verifies an orphan
+// row's open sidebar advances on its own as its box's on-disk pass log
+// grows, with no operator keypress — the same live-tail payoff a
+// session-launched running Dispatch's sidebar already gets (issue #1502),
+// now extended to a box this session never launched (issue #1621).
+func TestTea_PollTick_AdvancesOpenOrphanSidebarActivityFeed(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	launch.pollInterval = 5 * time.Millisecond
+	t.Cleanup(launch.Wait)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "first update")
+
+	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitForOutput(t, tm, "second update")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
 }
 
 // TestOrphanDetectCmd_ReturnsDetectedNumbers verifies orphanDetectCmd reports

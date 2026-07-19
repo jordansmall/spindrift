@@ -832,7 +832,12 @@ func syncQueue(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache
 		}
 	}
 	m = Update(m, QueueSnapshotMsg{Picks: picks})
-	if m.Sidebar != nil && drv != nil && isRunningNumber(picks, m.Sidebar.Number) {
+	// An orphan-flagged sidebar has no Pick of its own to read a running
+	// state off — isRunningNumber alone would starve it of the same live
+	// tail a session-launched Dispatch gets (issue #1621). Refresh's own
+	// stat-based cache keeps this cheap on every no-op call between actual
+	// log writes (issue #731), same as the Pick-backed case.
+	if m.Sidebar != nil && drv != nil && (isRunningNumber(picks, m.Sidebar.Number) || m.IsOrphan(m.Sidebar.Number)) {
 		if activity, ok := sidebarActivity.Refresh(drv, pwd, m.Sidebar.Number); ok {
 			m = Update(m, SidebarActivityMsg{Number: m.Sidebar.Number, Activity: activity})
 		}
