@@ -60,10 +60,10 @@ func View(m Model) string {
 	if m.Sidebar != nil && (m.SidebarZoom || !sidebarFits(m)) {
 		return renderSidebarFullscreen(*m.Sidebar, m.Height)
 	}
-	if m.ShowRebuildOutput {
+	if m.Mode == ModeRebuildOutput {
 		return renderRebuildOutputPane(m)
 	}
-	if m.ShowHelp {
+	if m.Mode == ModeHelp {
 		return renderHelp()
 	}
 
@@ -75,19 +75,19 @@ func View(m Model) string {
 	if reservedLines > 0 {
 		b.WriteString(renderSectionTabs(m))
 	}
-	if m.FilterEditing {
+	if m.Mode == ModeFilterEdit {
 		fmt.Fprintf(&b, "/%s  [enter] apply · [esc] cancel\n", m.Filter)
 		reservedLines++
 	}
-	if m.PendingTerminate != "" {
-		fmt.Fprintf(&b, "terminate #%s? [y/N/q/ctrl+c]\n", m.PendingTerminate)
+	if m.Mode == ModeTerminateConfirm {
+		fmt.Fprintf(&b, "terminate #%s? [y/N/q/ctrl+c]\n", m.TerminateConfirm.Number)
 		reservedLines++
 	}
-	if m.PendingQuit {
+	if m.Mode == ModeQuitConfirm {
 		b.WriteString("quit with live Dispatches: drain (d, default) / terminate-all (t) / stay (s)?\n")
 		reservedLines++
 	}
-	if m.PendingPick && m.HasHighlighted() {
+	if m.Mode == ModePick && m.HasHighlighted() {
 		b.WriteString("p_\n")
 		reservedLines++
 	}
@@ -638,13 +638,13 @@ func bodyBudget(m Model) int {
 	header := renderHeader(m)
 	headerLines := strings.Count(header, "\n")
 	reservedLines := sectionTabsReserved(m, headerLines)
-	if m.FilterEditing {
+	if m.Mode == ModeFilterEdit {
 		reservedLines++
 	}
-	if m.PendingTerminate != "" {
+	if m.Mode == ModeTerminateConfirm {
 		reservedLines++
 	}
-	if m.PendingQuit {
+	if m.Mode == ModeQuitConfirm {
 		reservedLines++
 	}
 	if m.Err != nil {

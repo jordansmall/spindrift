@@ -12,8 +12,8 @@ func TestUpdate_QuitRequestedMsg_SetsPending(t *testing.T) {
 	m := NewModel()
 	m = Update(m, QuitRequestedMsg{})
 
-	if !m.PendingQuit {
-		t.Errorf("PendingQuit = %v, want true after QuitRequestedMsg", m.PendingQuit)
+	if m.Mode != ModeQuitConfirm {
+		t.Errorf("Mode = %v, want ModeQuitConfirm after QuitRequestedMsg", m.Mode)
 	}
 }
 
@@ -24,19 +24,19 @@ func TestUpdate_QuitCancelledMsg_ClearsPending(t *testing.T) {
 	m = Update(m, QuitRequestedMsg{})
 	m = Update(m, QuitCancelledMsg{})
 
-	if m.PendingQuit {
-		t.Errorf("PendingQuit = %v, want false after cancel", m.PendingQuit)
+	if m.Mode == ModeQuitConfirm {
+		t.Errorf("Mode = %v, want ModeList after cancel", m.Mode)
 	}
 	if m.Quitting {
 		t.Errorf("Quitting = %v, want false after cancel (stay)", m.Quitting)
 	}
 }
 
-// TestView_PendingQuit_ShowsConfirmPrompt verifies the operator sees the
+// TestView_QuitConfirm_ShowsConfirmPrompt verifies the operator sees the
 // drain/terminate-all/stay choice before quitting with live Dispatches.
-func TestView_PendingQuit_ShowsConfirmPrompt(t *testing.T) {
+func TestView_QuitConfirm_ShowsConfirmPrompt(t *testing.T) {
 	m := NewModel()
-	m.PendingQuit = true
+	m.Mode = ModeQuitConfirm
 
 	got := View(m)
 	if !strings.Contains(got, "drain") || !strings.Contains(got, "terminate-all") || !strings.Contains(got, "stay") {

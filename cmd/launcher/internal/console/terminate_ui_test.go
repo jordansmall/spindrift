@@ -12,8 +12,11 @@ func TestUpdate_TerminateRequestedMsg_SetsPending(t *testing.T) {
 	m := NewModel()
 	m = Update(m, TerminateRequestedMsg{Number: "42"})
 
-	if m.PendingTerminate != "42" {
-		t.Errorf("PendingTerminate = %q, want %q", m.PendingTerminate, "42")
+	if m.Mode != ModeTerminateConfirm {
+		t.Errorf("Mode = %v, want ModeTerminateConfirm", m.Mode)
+	}
+	if m.TerminateConfirm.Number != "42" {
+		t.Errorf("TerminateConfirm.Number = %q, want %q", m.TerminateConfirm.Number, "42")
 	}
 }
 
@@ -25,8 +28,8 @@ func TestUpdate_TerminateConfirmedMsg_ClearsPending(t *testing.T) {
 	m = Update(m, TerminateRequestedMsg{Number: "42"})
 	m = Update(m, TerminateConfirmedMsg{Number: "42"})
 
-	if m.PendingTerminate != "" {
-		t.Errorf("PendingTerminate = %q, want empty after confirm", m.PendingTerminate)
+	if m.Mode == ModeTerminateConfirm {
+		t.Errorf("Mode = %v, want ModeList after confirm", m.Mode)
 	}
 }
 
@@ -37,16 +40,17 @@ func TestUpdate_TerminateCancelledMsg_ClearsPending(t *testing.T) {
 	m = Update(m, TerminateRequestedMsg{Number: "42"})
 	m = Update(m, TerminateCancelledMsg{})
 
-	if m.PendingTerminate != "" {
-		t.Errorf("PendingTerminate = %q, want empty after cancel", m.PendingTerminate)
+	if m.Mode == ModeTerminateConfirm {
+		t.Errorf("Mode = %v, want ModeList after cancel", m.Mode)
 	}
 }
 
-// TestView_PendingTerminate_ShowsConfirmPrompt verifies the operator sees an
+// TestView_TerminateConfirm_ShowsConfirmPrompt verifies the operator sees an
 // explicit confirm prompt naming the issue before Terminate acts.
-func TestView_PendingTerminate_ShowsConfirmPrompt(t *testing.T) {
+func TestView_TerminateConfirm_ShowsConfirmPrompt(t *testing.T) {
 	m := NewModel()
-	m.PendingTerminate = "42"
+	m.Mode = ModeTerminateConfirm
+	m.TerminateConfirm = TerminateConfirmState{Number: "42"}
 
 	got := View(m)
 	if !strings.Contains(got, "#42") || !strings.Contains(got, "y/N") {
