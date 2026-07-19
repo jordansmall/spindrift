@@ -126,10 +126,13 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	closed := false
 
 	// refill reports whether it launched a Box, so a caller filling more
-	// than one freed slot from a single trigger (the grow listener below)
-	// can loop it until a call finally does nothing, rather than assuming
-	// one trigger is worth exactly one launch.
+	// than one freed slot from a single trigger (the grow listener below,
+	// or a completing Box) can loop it until a call finally does nothing,
+	// rather than assuming one trigger is worth exactly one launch.
 	var refill func() bool
+	// drainRefill is predeclared here, like refill above, so refill's
+	// completion-handler goroutine can call it before its body is assigned.
+	var drainRefill func()
 	refill = func() bool {
 		if stale || closed {
 			return false
@@ -192,13 +195,27 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			limiter.Release()
 			mu.Lock()
 			outstanding--
-			refill()
+			drainRefill()
 			if outstanding == 0 {
 				idle.Broadcast()
 			}
 			mu.Unlock()
 		}()
 		return true
+	}
+
+	// drainRefill fills every currently-free slot that has ready work,
+	// looping refill until a call finally does nothing rather than assuming
+	// one trigger is worth exactly one launch. All three refill triggers --
+	// bootstrap, the grow listener, and a completing Box -- share this: a
+	// single free slot the moment of the call is not the only thing that
+	// may be fillable, since a slot freed by an earlier transient refill
+	// miss (a not-yet-visible discover result, an unresolved blocker, a
+	// touch-overlap deferral, or a DepsOf hiccup) stays free at the limiter
+	// level until some later refill call successfully claims it (#1587).
+	drainRefill = func() {
+		for refill() {
+		}
 	}
 
 	// growDone stops the grow listener once this call is finished; done
@@ -220,8 +237,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 				// unit freed" (issue #766) — draining until refill does
 				// nothing catches every slot the raise actually freed.
 				mu.Lock()
-				for refill() {
-				}
+				drainRefill()
 				mu.Unlock()
 			case <-growDone:
 				return
@@ -230,8 +246,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	}()
 
 	mu.Lock()
-	for refill() {
-	}
+	drainRefill()
 	for outstanding > 0 {
 		idle.Wait()
 	}
