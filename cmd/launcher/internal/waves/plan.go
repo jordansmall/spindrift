@@ -11,6 +11,7 @@ package waves
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"spindrift.dev/launcher/internal/terminate"
 )
@@ -135,6 +136,12 @@ type Config struct {
 	// so a live "+"/"-" resize takes effect on the RunContinuous call
 	// already in flight, not just the next one.
 	Limiter *Limiter
+
+	// pollInterval overrides RunContinuous's background refill-poll cadence
+	// (issue #1637) — zero (every production construction site) means "use
+	// defaultPollInterval"; only same-package tests shrink it so the poll
+	// test doesn't wait out a real-time interval.
+	pollInterval time.Duration
 }
 
 // NewPlan decides how in.Issues should be dispatched. Every origin —

@@ -1025,3 +1025,106 @@ func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 		t.Fatalf("RunCalls: got %d, want 5", len(fr.RunCalls))
 	}
 }
+
+// TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss verifies #1637: a
+// slot a refill attempt couldn't fill -- because the ready issue wasn't yet
+// visible in discover's result -- gets picked up by a later background poll
+// tick, with no Box ever completing to trigger it. MaxParallel=2 lets #1
+// launch and strands the second slot once bootstrap's terminating refill
+// attempt still finds nothing else ready; #2 then becomes visible while #1
+// is still running, so only the poll ticker -- never a completion event --
+// can be what launches it.
+func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 2
+	c.pollInterval = 10 * time.Millisecond
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+
+	var visMu sync.Mutex
+	visible := []string{"1"}
+	calls := make(chan struct{}, 100)
+	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+		visMu.Lock()
+		nums := append([]string(nil), visible...)
+		visMu.Unlock()
+		out := make([]Issue, len(nums))
+		for i, n := range nums {
+			out[i] = Issue{Number: n, Title: "issue " + n}
+		}
+		calls <- struct{}{}
+		return out, map[string][]string{}, nil, nil, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	fr := runner.NewFake()
+	release1 := make(chan struct{})
+	started2 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		switch box.Issue {
+		case "1":
+			<-release1
+		case "2":
+			close(started2)
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	resultCh := make(chan error, 1)
+	go func() { resultCh <- RunContinuous(c, fc, fc, dir, f, s, discover, fresh) }()
+
+	drain := func(n int) {
+		t.Helper()
+		for i := 0; i < n; i++ {
+			select {
+			case <-calls:
+			case <-time.After(3 * time.Second):
+				t.Fatalf("timed out waiting for discover call %d/%d", i+1, n)
+			}
+		}
+	}
+
+	// Bootstrap drains discover twice: once to launch #1, once more for the
+	// terminating refill() attempt that finds the second slot's only
+	// candidate (#1) already claimed and gives up, stranding the slot. Both
+	// calls happen inside RunContinuous's single initial drainRefill(),
+	// which holds mu for its whole loop -- the poll ticker can't acquire mu
+	// and contribute a call of its own until that loop exits and the main
+	// goroutine reaches idle.Wait(), so these first two calls are
+	// deterministically bootstrap's, never a poll tick's.
+	drain(2)
+
+	// #2 becomes visible now that the slot is already stranded. #1 is still
+	// running (no completion), so only a poll tick can revisit this slot.
+	visMu.Lock()
+	visible = []string{"1", "2"}
+	visMu.Unlock()
+
+	select {
+	case <-started2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("issue #2 was never dispatched by a background poll tick -- refill only fires on completion or a Console cap-raise")
+	}
+
+	close(release1)
+
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatalf("RunContinuous: got %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return after #1 was released")
+	}
+
+	if len(fr.RunCalls) != 2 {
+		t.Fatalf("RunCalls: got %d, want 2", len(fr.RunCalls))
+	}
+}
