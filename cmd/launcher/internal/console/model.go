@@ -462,6 +462,11 @@ func Update(m Model, msg Msg) Model {
 			m.Sidebar.Follow = true
 			m.Sidebar.Offset = len(m.Sidebar.Lines)
 		}
+	case SidebarJumpToBeginningMsg:
+		if m.Sidebar != nil {
+			m.Sidebar.Follow = false
+			m.Sidebar.Offset = 0
+		}
 	case FocusListMsg:
 		m.Focus = FocusList
 	case FocusSidebarMsg:
