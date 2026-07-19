@@ -116,11 +116,15 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	}
 	defer logFile.Close()
 
+	heartbeatOut := d.cfg.HeartbeatOut
+	if heartbeatOut == nil {
+		heartbeatOut = os.Stdout
+	}
 	box := runner.Box{
 		Issue:          d.number,
 		Name:           name,
 		Env:            env,
-		Output:         d.driver.NewHeartbeatWriter(logFile, d.number, os.Stdout),
+		Output:         d.driver.NewHeartbeatWriter(logFile, d.number, heartbeatOut),
 		DriverCacheDir: driverCacheDir,
 	}
 	return d.runner.Run(box)

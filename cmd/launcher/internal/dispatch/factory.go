@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"io"
 	"time"
 
 	"spindrift.dev/launcher/internal/driver"
@@ -73,4 +74,19 @@ func (f *Factory) Cleanup() {
 // logs needs no second Driver-holding type (#648).
 func (f *Factory) Driver() driver.Driver {
 	return f.driver
+}
+
+// SetHeartbeatOut overrides the human-facing heartbeat sink every Dispatch
+// this Factory constructs afterward will use (issue #1583). Must be called
+// before any New(), which copies cfg by value into the returned Dispatch.
+func (f *Factory) SetHeartbeatOut(w io.Writer) {
+	f.cfg.HeartbeatOut = w
+}
+
+// HeartbeatOut returns the heartbeat sink this Factory currently carries --
+// nil unless SetHeartbeatOut was called. A console-entry-point test seam
+// (issue #1583) confirming the wiring reaches the Factory, alongside
+// Driver's existing test-spy role.
+func (f *Factory) HeartbeatOut() io.Writer {
+	return f.cfg.HeartbeatOut
 }

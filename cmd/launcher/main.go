@@ -898,6 +898,13 @@ func cmdDoctor() int {
 // the real Bubble Tea program with a scripted reader instead of a live TTY.
 func cmdConsole(lc *launchContext, stdin io.Reader, stdout io.Writer) int {
 	defer lc.cleanup()
+	// Bubble Tea owns the terminal in alt-screen/raw mode (tea.go's
+	// WithAltScreen); a heartbeat line's bare \n moves the cursor down but
+	// not back to column 0, stairstepping across the screen. The sidebar
+	// activity feed already re-renders the same lines by independently
+	// re-reading the pass log from disk, so the live-terminal echo is both
+	// redundant and corrupting here (issue #1583).
+	lc.factory.SetHeartbeatOut(io.Discard)
 	fresh, rebuild := newConsoleFreshness(lc.config, lc.pwd, runner.NixEvaluator{},
 		func() (string, string, error) { return consoleGitSync(lc.pwd, lc.config.baseBranch) },
 		func() (string, error) { return consoleNixBuild(lc.pwd) })
