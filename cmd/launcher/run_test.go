@@ -295,6 +295,59 @@ func TestRunExitCode_ContinuousDispatch_QueriesTrackerOnceBeforeFirstDispatch(t 
 	}
 }
 
+// TestRunExitCode_ContinuousDispatch_RefillAnnouncesOnlyNewIssue is the
+// end-to-end regression test for #1666, driven through the real
+// runContinuousDispatch/RunContinuous refill loop rather than calling
+// logDiscoveryPoll directly: the bootstrap poll sees only #1 and logs the
+// baseline line; #1's Box adds #2 to the tracker mid-run (simulating an
+// issue that appears between polls) before finishing, so the refill that
+// picks up the freed slot re-discovers and sees #2 for the first time. That
+// refill must log exactly one line naming #2, and must not repeat the
+// baseline "querying open" line for a poll that isn't the first.
+func TestRunExitCode_ContinuousDispatch_RefillAnnouncesOnlyNewIssue(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	c.runtime = "bwrap"
+	dir := tempLogDir(t)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Issue == "1" {
+			fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label}})
+		}
+		return nil
+	}
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, fr),
+		settle:       settle.NewFake(),
+	}
+
+	out := testutil.CaptureStdout(t, func() {
+		if got := runExitCode(lc); got != 0 {
+			t.Errorf("runExitCode(lc) = %d, want 0", got)
+		}
+	})
+
+	// The bootstrap poll's baseline line and the refill's new-issue
+	// announcement share the "==> querying open" prefix by design (both are
+	// discovery-query lines), so distinguish them by the "new:" suffix
+	// rather than by that shared prefix alone.
+	total := strings.Count(out, "==> querying open")
+	named := strings.Count(out, "new: #2")
+	if total != 2 || named != 1 {
+		t.Errorf("got %d \"==> querying open\" line(s) and %d \"new: #2\" line(s), want exactly one baseline line and one line naming #2:\n%s", total, named, out)
+	}
+}
+
 // TestRun_DoesNotAdoptLiveRunnersInProgressIssue is the regression test for
 // #600: a bare agent-in-progress issue with an open non-draft PR is what a
 // live runner's in-flight work looks like from the outside (a second local

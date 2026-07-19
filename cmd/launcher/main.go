@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"spindrift.dev/launcher/internal/console"
 	"spindrift.dev/launcher/internal/dispatch"
@@ -718,15 +719,50 @@ func discoverIssues(c config, it forge.IssueTracker) ([]issue, waves.Origin, err
 		return []issue{{number: fi.Number, title: fi.Title}}, origin, nil
 	}
 	fmt.Printf("==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
+	issues, err := queryOpenIssues(c, it)
+	return issues, origin, err
+}
+
+// queryOpenIssues fetches the dispatchable-labelled batch without printing
+// anything, so a caller that polls repeatedly (runContinuousDispatch's
+// discover closure) can decide for itself whether this poll is worth
+// announcing — see logDiscoveryPoll.
+func queryOpenIssues(c config, it forge.IssueTracker) ([]issue, error) {
 	rawIssues, err := it.ListIssues(forge.Dispatchable)
 	if err != nil {
-		return nil, origin, err
+		return nil, err
 	}
 	var issues []issue
 	for _, fi := range rawIssues {
 		issues = append(issues, issue{number: fi.Number, title: fi.Title})
 	}
-	return issues, origin, nil
+	return issues, nil
+}
+
+// logDiscoveryPoll decides whether a continuous-dispatch refill poll should
+// print the "==> querying open" announcement, then records this poll's issue
+// numbers into seen. The first poll of a run always announces — the #1645
+// invariant that a continuous run's very first discover establishes the
+// baseline exactly once — regardless of what seen already holds. Every later
+// poll stays silent unless it surfaces an issue number not in seen, in which
+// case it announces and names only the newly-seen numbers.
+func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool) {
+	if first {
+		fmt.Printf("==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
+	} else {
+		var newNums []string
+		for _, iss := range issues {
+			if !seen[iss.number] {
+				newNums = append(newNums, iss.number)
+			}
+		}
+		if len(newNums) > 0 {
+			fmt.Printf("==> querying open '%s' issues in %s — new: #%s\n", c.label, c.repoSlug, strings.Join(newNums, ", #"))
+		}
+	}
+	for _, iss := range issues {
+		seen[iss.number] = true
+	}
 }
 
 // recoverByNumber resolves the open non-draft PR for the issue numbered issueNum
@@ -836,17 +872,28 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	firstQuery := true
 	firstQueryEmpty := false
 	var firstQueryErr error
+	// seenIssues carries logDiscoveryPoll's per-run dedupe state (#1666): a
+	// refill poll only announces when it surfaces a number not already in
+	// this set, so a long-running slot-refill loop doesn't repeat the
+	// "querying open" line every cycle once the queue has settled.
+	seenIssues := make(map[string]bool)
 	// firstQuery/firstQueryEmpty/firstQueryErr need no locking of their own:
 	// every discover() call, on every refill, runs under RunContinuous's own
 	// mutex (see its doc comment), so this closure is never invoked
 	// concurrently with itself.
 	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
-		issues, _, err := discoverIssues(c, it)
+		wasFirst := firstQuery
+		issues, err := queryOpenIssues(c, it)
 		if firstQuery {
 			firstQuery = false
 			firstQueryErr = err
 			firstQueryEmpty = err == nil && len(issues) == 0
 		}
+		// A non-first poll that errors passes a nil/empty issues slice here,
+		// so logDiscoveryPoll finds nothing new and stays silent -- this
+		// poll simply never gets announced, unlike the pre-#1666 code that
+		// printed the query line on every poll regardless of outcome.
+		logDiscoveryPoll(c, issues, wasFirst, seenIssues)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}

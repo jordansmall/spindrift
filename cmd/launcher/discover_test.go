@@ -1,9 +1,11 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/waves"
 )
 
@@ -76,5 +78,61 @@ func TestDiscoverIssues_OldestFirst(t *testing.T) {
 		if iss.number != want[i] {
 			t.Errorf("position %d: got #%s, want #%s", i, iss.number, want[i])
 		}
+	}
+}
+
+// logDiscoveryPoll's first call always announces the baseline query — the
+// #1645 invariant a continuous run's very first discover must preserve —
+// regardless of what the seen set already holds.
+func TestLogDiscoveryPoll_First_AlwaysAnnounces(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.repoSlug = "owner/repo"
+	seen := map[string]bool{}
+
+	out := testutil.CaptureStdout(t, func() {
+		logDiscoveryPoll(c, []issue{{number: "1"}}, true, seen)
+	})
+
+	if !strings.Contains(out, "==> querying open 'ready-for-agent' issues in owner/repo") {
+		t.Errorf("got %q, want it to contain the baseline querying-open line", out)
+	}
+}
+
+// A repeated poll that surfaces no issue numbers beyond what's already in
+// seen must stay silent — the steady-state case this issue (#1666) exists
+// to quiet.
+func TestLogDiscoveryPoll_RepeatNoNewIssues_Silent(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.repoSlug = "owner/repo"
+	seen := map[string]bool{"1": true}
+
+	out := testutil.CaptureStdout(t, func() {
+		logDiscoveryPoll(c, []issue{{number: "1"}}, false, seen)
+	})
+
+	if out != "" {
+		t.Errorf("got %q, want no output for a poll with no new issues", out)
+	}
+}
+
+// A poll that surfaces a previously-unseen issue number must announce and
+// name it, so an operator watching the log can tell what changed.
+func TestLogDiscoveryPoll_NewIssueAppears_NamesIt(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.repoSlug = "owner/repo"
+	seen := map[string]bool{"1": true}
+
+	out := testutil.CaptureStdout(t, func() {
+		logDiscoveryPoll(c, []issue{{number: "1"}, {number: "2"}}, false, seen)
+	})
+
+	if !strings.Contains(out, "#2") {
+		t.Errorf("got %q, want it to name newly-seen issue #2", out)
+	}
+	if strings.Contains(out, "#1") {
+		t.Errorf("got %q, want it to not re-name already-seen issue #1", out)
 	}
 }
