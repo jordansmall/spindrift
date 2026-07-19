@@ -389,6 +389,30 @@ func TestView_RunningPick_ShowsHeartbeat(t *testing.T) {
 	}
 }
 
+// TestView_RunningPick_SanitizesHeartbeatControlSequences verifies a running
+// pick's Heartbeat — box-log-derived, untrusted content (issue #1639) — is
+// stripped of control sequences the same way Title/Reason already are,
+// mirroring TestView_Queue_SanitizesTitleAndReasonControlSequences.
+func TestView_RunningPick_SanitizesHeartbeatControlSequences(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "42", Title: "fix the thing", State: PickRunning, Heartbeat: "evil\x1b[2Jbeat"},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+
+	out := View(m)
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "evilbeat") && strings.Contains(line, "\x1b") {
+			t.Errorf("running row = %q, want no raw escape bytes surviving sanitization", line)
+		}
+	}
+	if !strings.Contains(out, "evilbeat") {
+		t.Errorf("View() = %q, want the surrounding heartbeat text intact after stripping escapes", out)
+	}
+}
+
 // TestView_StaleBanner_ShownWhenStaleSilentOtherwise verifies the stale
 // banner (with the probe's message and the rebuild-key hint) renders only
 // while Stale is true — a fresh session shows no mention of it (issue
