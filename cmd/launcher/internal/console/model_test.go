@@ -941,6 +941,94 @@ func TestUpdate_ScrollMsg_MovesOffset(t *testing.T) {
 	}
 }
 
+// TestUpdate_CursorJumpToFirstMsg_ResetsCursorAndOffset verifies "gg" moves
+// the cursor back to the first row and resets the scroll offset to 0, even
+// when both had scrolled well past the top (issue #1628 AC2).
+func TestUpdate_CursorJumpToFirstMsg_ResetsCursorAndOffset(t *testing.T) {
+	m := NewModel()
+	issues := make([]forge.Issue, 5)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+	m = Update(m, CursorMoveMsg{Delta: 4})
+	m = Update(m, ScrollMsg{Delta: 4})
+
+	m = Update(m, CursorJumpToFirstMsg{})
+
+	if m.Cursor != 0 {
+		t.Errorf("Cursor = %d, want 0", m.Cursor)
+	}
+	if m.Offset != 0 {
+		t.Errorf("Offset = %d, want 0", m.Offset)
+	}
+}
+
+// TestUpdate_CursorJumpToLastMsg_MovesCursorAndDragsOffsetIntoView verifies
+// "G" moves the cursor straight to the active Section's last row and drags
+// the scroll offset just far enough to keep it on screen (issue #1628 AC1).
+func TestUpdate_CursorJumpToLastMsg_MovesCursorAndDragsOffsetIntoView(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	issues := make([]forge.Issue, 50)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+	m = Update(m, CursorJumpToLastMsg{})
+
+	if m.Cursor != 49 {
+		t.Errorf("Cursor = %d, want 49 (last row)", m.Cursor)
+	}
+	if m.Offset == 0 {
+		t.Errorf("Offset = 0, want it dragged forward so row 49 is visible")
+	}
+}
+
+// TestUpdate_GPendingMsg_ArmsPendingG verifies a lone "g" arms the pending-g
+// leader on the Model, mirroring PendingPick's own arm/resolve toggle (issue
+// #1628 AC3).
+func TestUpdate_GPendingMsg_ArmsPendingG(t *testing.T) {
+	m := NewModel()
+
+	m = Update(m, GPendingMsg{})
+
+	if !m.PendingG {
+		t.Error("PendingG = false, want true after GPendingMsg")
+	}
+}
+
+// TestUpdate_GResolvedMsg_ClearsPendingG verifies GResolvedMsg — sent when
+// the chord completes, cancels, or times out — clears the pending-g leader
+// (issue #1628 AC4).
+func TestUpdate_GResolvedMsg_ClearsPendingG(t *testing.T) {
+	m := NewModel()
+	m = Update(m, GPendingMsg{})
+
+	m = Update(m, GResolvedMsg{})
+
+	if m.PendingG {
+		t.Error("PendingG = true, want false after GResolvedMsg")
+	}
+}
+
+// TestUpdate_CursorJump_EmptySection_NoOp verifies both "G" and "gg" are
+// no-ops against an empty active Section — neither leaves Cursor/Offset
+// pointing past the (nonexistent) end (issue #1628 AC6).
+func TestUpdate_CursorJump_EmptySection_NoOp(t *testing.T) {
+	m := NewModel()
+
+	m = Update(m, CursorJumpToLastMsg{})
+	if m.Cursor != 0 || m.Offset != 0 {
+		t.Errorf("after G on empty: Cursor = %d, Offset = %d, want 0, 0", m.Cursor, m.Offset)
+	}
+
+	m = Update(m, CursorJumpToFirstMsg{})
+	if m.Cursor != 0 || m.Offset != 0 {
+		t.Errorf("after gg on empty: Cursor = %d, Offset = %d, want 0, 0", m.Cursor, m.Offset)
+	}
+}
+
 // TestUpdate_ScrollMsg_MovesOffsetWithinActiveWorkSection verifies a scroll
 // message moves Model.Offset against whichever work Section is active, not
 // the Backlog — switching Sections resets Offset to 0 (issue #1500), so a

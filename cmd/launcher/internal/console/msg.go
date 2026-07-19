@@ -314,6 +314,20 @@ type PickResolvedMsg struct{}
 
 func (PickResolvedMsg) isConsoleMsg() {}
 
+// GPendingMsg is the tea layer's signal that "g" armed the "gg" leader
+// window — mirrors PickPendingMsg's own arm signal (issue #1628).
+type GPendingMsg struct{}
+
+func (GPendingMsg) isConsoleMsg() {}
+
+// GResolvedMsg is the tea layer's signal that a pending "gg" chord
+// resolved — either a trailing "g" completed it, the leader window timed
+// out, or any other key cancelled it — mirrors PickResolvedMsg's own
+// resolve signal (issue #1628).
+type GResolvedMsg struct{}
+
+func (GResolvedMsg) isConsoleMsg() {}
+
 // QueueEnterNoticedMsg is the tea layer's signal that Enter, focused on the
 // work queue, was a no-op on a row lacking a Transcript — renders a
 // human-readable notice so the keystroke's outcome isn't silent (issue
@@ -410,6 +424,21 @@ func (FilterEditConfirmMsg) isConsoleMsg() {}
 type FilterEditCancelMsg struct{}
 
 func (FilterEditCancelMsg) isConsoleMsg() {}
+
+// CursorJumpToFirstMsg is the tea layer's signal that "gg" completed — moves
+// the cursor to the active Section's first row and resets the scroll offset
+// to 0, unlike CursorMoveMsg's minimal-drag-into-view (issue #1628).
+type CursorJumpToFirstMsg struct{}
+
+func (CursorJumpToFirstMsg) isConsoleMsg() {}
+
+// CursorJumpToLastMsg is the tea layer's signal that "G" was pressed — moves
+// the cursor to the active Section's last row, dragging the scroll offset
+// just far enough to keep it on screen, the same follow behavior
+// CursorMoveMsg uses (issue #1628).
+type CursorJumpToLastMsg struct{}
+
+func (CursorJumpToLastMsg) isConsoleMsg() {}
 
 // SectionPrevMsg is the tea layer's signal that the operator pressed "H" —
 // switches ActiveSection to the previous Section, wrapping from Backlog to
