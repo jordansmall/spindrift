@@ -114,6 +114,19 @@ EOF
 
 # A draft PR is not a done, mergeable result -- the backstop must still
 # synthesize status=blocked exactly as it does when no PR exists at all.
+# The no-work-to-preserve early return (#1606) skips the push, but must not
+# skip the PR check too -- a non-draft PR reachable with zero local commits
+# ahead of base (e.g. this Box resumed a session whose transcript is gone but
+# whose branch/PR another process already advanced) is still a real,
+# mergeable result the backstop must stay silent for.
+@test "no outcome line + no commits + open non-draft PR on branch -> backstop still stays silent" {
+  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_GH_PR_LIST_7='[{"isDraft":false}]'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 0 ]
+}
+
 @test "no outcome line + draft PR on branch -> synthetic blocked, same as no PR" {
   export FAKE_CLAUDE_COMMIT=1
   export FAKE_CLAUDE_NO_OUTCOME=1
