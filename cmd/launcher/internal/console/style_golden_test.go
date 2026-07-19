@@ -20,7 +20,7 @@ func goldenHeaderModel() Model {
 		{Number: "3", State: PickSettled},
 		{Number: "4", State: PickFailed},
 	}
-	m = Update(m, StaleStatusMsg{Stale: true, Message: "rebuild needed"})
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Message: "rebuild needed"}})
 	m = Update(m, DogfoodNoticeMsg{Live: true})
 	return m
 }

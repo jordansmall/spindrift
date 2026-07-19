@@ -416,7 +416,7 @@ func clip(s string, width int, pad bool) string {
 // bannerErrWidth bounds a single-line header error banner (rebuild-failed,
 // orphan-recovery-failed) to one row's worth of text. RunNixBuild wraps the
 // merged nix stdout+stderr (often many lines) into one error, so printing
-// m.RebuildErr unbounded blew the header banner out to arbitrary length
+// m.RebuildStatus.Err unbounded blew the header banner out to arbitrary length
 // (issue #1131); the same bound applies to any other error banner sharing
 // the row budget (issue #1218). Fixed rather than tied to m.Width — the
 // other header lines are already unbounded strings, and this budget only
@@ -496,22 +496,22 @@ func renderHeader(m Model) string {
 		roleStyle(RoleHeld).Render(fmt.Sprintf("held %d", held)),
 		roleStyle(RoleSettled).Render(fmt.Sprintf("settled %d", settled)),
 		roleStyle(RoleFailed).Render(fmt.Sprintf("failed %d", failed)))
-	if m.Stale {
-		b.WriteString(roleStyle(RoleHeld).Render(fmt.Sprintf("%s image stale: %s — new launches held; press [b] to rebuild", glyphWarning, m.StaleMessage)))
+	if m.RebuildStatus.Stale {
+		b.WriteString(roleStyle(RoleHeld).Render(fmt.Sprintf("%s image stale: %s — new launches held; press [b] to rebuild", glyphWarning, m.RebuildStatus.Message)))
 		b.WriteString("\n")
 	}
-	if m.Rebuilding {
+	if m.RebuildStatus.Rebuilding {
 		b.WriteString(roleStyle(RoleRunning).Render(glyphRebuilding + " rebuilding image..."))
 		b.WriteString("\n")
 	}
-	if m.RebuildErr != "" {
+	if m.RebuildStatus.Err != "" {
 		// Only the glyph+label is styled, unlike the whole-line styling
 		// above: the clipped error text must keep its trailing "…" as the
 		// line's literal last character, with no styling reset appended
 		// after it, or TestView_RebuildErr_Truncated's suffix check breaks.
 		fmt.Fprintf(&b, "%s %s\n",
 			roleStyle(RoleFailed).Render(glyphWarning+" rebuild failed:"),
-			clipBannerErr(m.RebuildErr, bannerErrWidth))
+			clipBannerErr(m.RebuildStatus.Err, bannerErrWidth))
 	}
 	if m.OrphanRecoveryErr != "" {
 		// Same split as RebuildErr above, same reason.
@@ -519,8 +519,8 @@ func renderHeader(m Model) string {
 			roleStyle(RoleFailed).Render(glyphWarning+" orphan recovery failed:"),
 			clipBannerErr(m.OrphanRecoveryErr, bannerErrWidth))
 	}
-	if m.BranchSwitchNotice != "" {
-		b.WriteString(roleStyle(RoleDim).Render(fmt.Sprintf("%s notice: %s", glyphNotice, m.BranchSwitchNotice)))
+	if m.RebuildStatus.BranchSwitchNotice != "" {
+		b.WriteString(roleStyle(RoleDim).Render(fmt.Sprintf("%s notice: %s", glyphNotice, m.RebuildStatus.BranchSwitchNotice)))
 		b.WriteString("\n")
 	}
 	if m.DogfoodLive {
@@ -831,7 +831,7 @@ func renderRebuildOutputPane(m Model) string {
 	b.WriteString("rebuild output:\n")
 
 	budget := m.Height - headerFooterLines
-	lines := strings.Split(m.RebuildOutput, "\n")
+	lines := strings.Split(m.RebuildStatus.Output, "\n")
 	var visible string
 	if budget > 0 {
 		vp := Viewport{offset: m.RebuildOutputOffset, total: len(lines)}

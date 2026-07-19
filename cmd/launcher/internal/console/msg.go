@@ -297,18 +297,10 @@ func (CapMsg) isConsoleMsg() {}
 // StaleStatusMsg carries the launcher's live image-freshness/rebuild state
 // into the pure core — Run's per-render sync, alongside QueueSnapshotMsg,
 // since the background drain (not Update) is what learns the probe result
-// and a rebuild's outcome (issue #652).
+// and a rebuild's outcome (issue #652). One RebuildStatus value replaces
+// the six scalar fields this used to carry (issue #1541).
 type StaleStatusMsg struct {
-	Stale      bool
-	Message    string
-	Rebuilding bool
-	RebuildErr string
-	// RebuildOutput is the last rebuild's captured nix output (issue #765).
-	RebuildOutput string
-	// BranchSwitchNotice is the last rebuild's branch-switch notice, if any
-	// — "" when pwd's checkout didn't move off the branch it was on (issue
-	// #1141).
-	BranchSwitchNotice string
+	RebuildStatus RebuildStatus
 }
 
 func (StaleStatusMsg) isConsoleMsg() {}

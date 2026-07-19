@@ -1232,7 +1232,7 @@ func TestTea_SidebarKey_ClaimedNotYetLaunched_ShowsEmptyActivityNotError(t *test
 // opens the rebuild-output pane once a rebuild has captured output (issue
 // #1128).
 func TestTea_HandleKey_RebuildOutputKey_OpensPaneWhenOutputPresent(t *testing.T) {
-	m := Update(NewModel(), StaleStatusMsg{RebuildOutput: "l0\nl1"})
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1"}})
 	tm := teaModel{m: m}
 
 	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
@@ -1256,7 +1256,7 @@ func TestTea_HandleKey_RebuildOutputKey_NoOpWhenOutputEmpty(t *testing.T) {
 // close the rebuild-output pane, mirroring the drill-in pane's close keys.
 func TestTea_HandleRebuildOutputKey_ClosesOnXOrEsc(t *testing.T) {
 	for _, key := range []string{"x", "esc"} {
-		m := Update(NewModel(), StaleStatusMsg{RebuildOutput: "l0\nl1"})
+		m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1"}})
 		m = Update(m, RebuildOutputOpenMsg{})
 		tm := teaModel{m: m}
 
@@ -1270,7 +1270,7 @@ func TestTea_HandleRebuildOutputKey_ClosesOnXOrEsc(t *testing.T) {
 // TestTea_HandleRebuildOutputKey_ScrollsOnJK verifies "j"/"k" move
 // RebuildOutputOffset while the pane is open.
 func TestTea_HandleRebuildOutputKey_ScrollsOnJK(t *testing.T) {
-	m := Update(NewModel(), StaleStatusMsg{RebuildOutput: "l0\nl1\nl2\nl3\nl4"})
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
 	m = Update(m, RebuildOutputOpenMsg{})
 	tm := teaModel{m: m}
 

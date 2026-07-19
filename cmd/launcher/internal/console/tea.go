@@ -322,11 +322,11 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 			t.launch.Resize(-1)
 		}
 	case "b":
-		if t.launch != nil && t.m.Stale {
+		if t.launch != nil && t.m.RebuildStatus.Stale {
 			t.launch.Rebuild(t.tracker, t.pwd)
 		}
 	case "o":
-		if t.m.RebuildOutput != "" {
+		if t.m.RebuildStatus.Output != "" {
 			t.m = Update(t.m, RebuildOutputOpenMsg{})
 		}
 	}
@@ -805,8 +805,7 @@ func syncStale(m Model, launch *Launcher) Model {
 	if launch == nil {
 		return m
 	}
-	status := launch.StaleStatus()
-	return Update(m, StaleStatusMsg{Stale: status.Stale, Message: status.Message, Rebuilding: status.Rebuilding, RebuildErr: status.Err, RebuildOutput: status.Output, BranchSwitchNotice: status.BranchSwitchNotice})
+	return Update(m, StaleStatusMsg{RebuildStatus: launch.StaleStatus()})
 }
 
 // driverOf returns the Driver a Launcher's Factory was constructed with, or

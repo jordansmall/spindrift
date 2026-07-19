@@ -157,7 +157,7 @@ func TestUpdate_HelpToggleMsg_FlipsShowHelp(t *testing.T) {
 // field's only consumer (issue #1128).
 func TestUpdate_RebuildOutputOpenMsg_OpensPaneWhenOutputPresent(t *testing.T) {
 	m := NewModel()
-	m = Update(m, StaleStatusMsg{RebuildOutput: "building...\ndone"})
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "building...\ndone"}})
 	m = Update(m, RebuildOutputOpenMsg{})
 	if !m.ShowRebuildOutput {
 		t.Error("ShowRebuildOutput = false after open with output present, want true")
@@ -178,7 +178,7 @@ func TestUpdate_RebuildOutputOpenMsg_NoOpWhenOutputEmpty(t *testing.T) {
 // with the pane closed does not move RebuildOutputOffset or open it.
 func TestUpdate_RebuildOutputScrollMsg_NoOpWhenPaneClosed(t *testing.T) {
 	m := NewModel()
-	m = Update(m, StaleStatusMsg{RebuildOutput: "l0\nl1\nl2"})
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2"}})
 	m = Update(m, RebuildOutputScrollMsg{Delta: 1})
 	if m.RebuildOutputOffset != 0 {
 		t.Errorf("RebuildOutputOffset = %d, want 0 while pane closed", m.RebuildOutputOffset)
@@ -193,7 +193,7 @@ func TestUpdate_RebuildOutputScrollMsg_NoOpWhenPaneClosed(t *testing.T) {
 // line bounds the same way SidebarScrollMsg clamps Sidebar.Offset.
 func TestUpdate_RebuildOutputScrollMsg_MovesOffset(t *testing.T) {
 	m := NewModel()
-	m = Update(m, StaleStatusMsg{RebuildOutput: "l0\nl1\nl2\nl3\nl4"})
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
 	m = Update(m, RebuildOutputOpenMsg{})
 
 	m = Update(m, RebuildOutputScrollMsg{Delta: 2})
@@ -216,7 +216,7 @@ func TestUpdate_RebuildOutputScrollMsg_MovesOffset(t *testing.T) {
 // ShowRebuildOutput so View falls back to rendering the backlog/queue.
 func TestUpdate_RebuildOutputCloseMsg_ClosesPane(t *testing.T) {
 	m := NewModel()
-	m = Update(m, StaleStatusMsg{RebuildOutput: "l0\nl1"})
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1"}})
 	m = Update(m, RebuildOutputOpenMsg{})
 	m = Update(m, RebuildOutputCloseMsg{})
 	if m.ShowRebuildOutput {
@@ -1126,19 +1126,19 @@ func TestUpdate_FilterChangedMsg_ClampsOffsetOnShrink(t *testing.T) {
 // per-render sync View's stale banner reads from (issue #652).
 func TestUpdate_StaleStatusMsg_SetsFields(t *testing.T) {
 	m := NewModel()
-	m = Update(m, StaleStatusMsg{Stale: true, Message: "rebuild needed", Rebuilding: true, RebuildErr: "boom"})
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Message: "rebuild needed", Rebuilding: true, Err: "boom"}})
 
-	if !m.Stale {
+	if !m.RebuildStatus.Stale {
 		t.Error("Stale = false, want true")
 	}
-	if m.StaleMessage != "rebuild needed" {
-		t.Errorf("StaleMessage = %q, want %q", m.StaleMessage, "rebuild needed")
+	if m.RebuildStatus.Message != "rebuild needed" {
+		t.Errorf("Message = %q, want %q", m.RebuildStatus.Message, "rebuild needed")
 	}
-	if !m.Rebuilding {
+	if !m.RebuildStatus.Rebuilding {
 		t.Error("Rebuilding = false, want true")
 	}
-	if m.RebuildErr != "boom" {
-		t.Errorf("RebuildErr = %q, want %q", m.RebuildErr, "boom")
+	if m.RebuildStatus.Err != "boom" {
+		t.Errorf("Err = %q, want %q", m.RebuildStatus.Err, "boom")
 	}
 }
 
@@ -1155,16 +1155,17 @@ func TestUpdate_OrphanRecoveryMsg_SetsErr(t *testing.T) {
 }
 
 // TestUpdate_StaleStatusMsg_PropagatesCapturedRebuildOutput verifies a
-// non-empty StaleStatusMsg.RebuildOutput lands on Model.RebuildOutput
-// verbatim — the sibling TestUpdate_StaleStatusMsg_SetsFields only ever
-// threads the zero value, which never exercised this leg (issue #1129).
+// non-empty StaleStatusMsg.RebuildStatus.Output lands on
+// Model.RebuildStatus.Output verbatim — the sibling
+// TestUpdate_StaleStatusMsg_SetsFields only ever threads the zero value,
+// which never exercised this leg (issue #1129).
 func TestUpdate_StaleStatusMsg_PropagatesCapturedRebuildOutput(t *testing.T) {
 	m := NewModel()
 	const wantOutput = "nix: building '/nix/store/abc-spindrift-1.2.3.drv'...\n"
-	m = Update(m, StaleStatusMsg{RebuildOutput: wantOutput})
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: wantOutput}})
 
-	if m.RebuildOutput != wantOutput {
-		t.Errorf("RebuildOutput = %q, want %q", m.RebuildOutput, wantOutput)
+	if m.RebuildStatus.Output != wantOutput {
+		t.Errorf("Output = %q, want %q", m.RebuildStatus.Output, wantOutput)
 	}
 }
 
