@@ -3,16 +3,26 @@ package github
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	neturl "net/url"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/gitplumbing"
 )
+
+// rebaseForcePushTimeout bounds Rebase's trailing force-push so a remote that
+// accepts the connection and then hangs server-side can't block it forever.
+// Scoped narrowly to this one call rather than porting git.go's full
+// opTimeout/WithOpTimeout pattern to execClient: Rebase's other subprocesses
+// (gh pr view, gh repo clone, checkout, rebase) are unbounded too, but that's
+// tracked as separate follow-up work rather than folded into this fix.
+const rebaseForcePushTimeout = 5 * time.Minute
 
 func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	cmd := exec.Command("gh", "pr", "list",
@@ -369,5 +379,7 @@ func (e *execClient) Rebase(prURL string) error {
 		_ = gitIn("rebase", "--abort").Run()
 		return forge.ErrMergeConflict
 	}
-	return gitplumbing.GitForcePush(dir)
+	ctx, cancel := context.WithTimeout(context.Background(), rebaseForcePushTimeout)
+	defer cancel()
+	return gitplumbing.GitForcePush(ctx, dir)
 }

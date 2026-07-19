@@ -236,7 +236,9 @@ func (g *gitClient) Rebase(branch string) error {
 		}
 		return forge.ErrMergeConflict
 	}
-	return gitplumbing.GitForcePush(dir)
+	pushCtx, pushCancel := context.WithTimeout(context.Background(), g.opTimeout)
+	defer pushCancel()
+	return gitplumbing.GitForcePush(pushCtx, dir)
 }
 
 // Probe checks that the configured remote is reachable.
