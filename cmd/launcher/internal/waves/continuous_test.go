@@ -746,8 +746,8 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	if len(fc.TransitionStateCalls) != 2 {
 		t.Fatalf("TransitionStateCalls: got %d, want 2 (suppressed stale entry must not re-attempt the claim)", len(fc.TransitionStateCalls))
 	}
-	if !strings.Contains(out, "#1 already claimed this run") {
-		t.Fatalf("output missing suppressed-stale line for #1, got:\n%s", out)
+	if strings.Contains(out, "already claimed this run") {
+		t.Fatalf("output must not log the stale re-discovery skip line, got:\n%s", out)
 	}
 }
 
