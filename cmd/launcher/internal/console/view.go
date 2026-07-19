@@ -109,8 +109,7 @@ func View(m Model) string {
 	if m.Sidebar != nil {
 		listModel := m
 		listModel.Width = m.Width - sidebarWidth - 1
-		listBudget := budget
-		list := renderBody(listModel, &listBudget)
+		list := renderBody(listModel, budget)
 		sidebar := renderSidebarDocked(*m.Sidebar, sidebarWidth, budget, m.Focus == FocusSidebar)
 		// The divider spans the taller of the two columns' actual rendered
 		// rows, not the whole budget — a short list or a short sidebar
@@ -124,7 +123,7 @@ func View(m Model) string {
 		divider := renderColumnDivider(dividerRows)
 		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, list, divider, sidebar))
 	} else {
-		b.WriteString(renderBody(m, &budget))
+		b.WriteString(renderBody(m, budget))
 	}
 	if m.Err != nil {
 		fmt.Fprintf(&b, "refresh failed: %s\n", m.Err)
@@ -228,12 +227,11 @@ func renderSectionTabs(m Model) string {
 // renderBody renders the active Section's own table under the header and
 // Section tabs (ADR 0030) — the section-switched single list that replaces
 // the two-column body of ADR 0025. budget is the row count left after the
-// header, tabs, and any prompt lines; a nil budget means unbounded, the
-// docked/floating drill-in panes' old contract now moot since drill-in
-// always renders fullscreen (issue #1500), kept so callers passing nil for
-// an unwindowed render still work.
-func renderBody(m Model, budget *int) string {
-	if budget != nil && *budget <= 0 {
+// header, tabs, and any prompt lines — always a real, already-clamped-to-
+// nonnegative figure from View, never the "unbounded" case (issue #1540;
+// Viewport's own height==0 convention covers that for callers who want it).
+func renderBody(m Model, budget int) string {
+	if budget <= 0 {
 		return ""
 	}
 	if m.ActiveSection == SectionBacklog {
@@ -242,22 +240,36 @@ func renderBody(m Model, budget *int) string {
 	return renderWorkSection(m, budget)
 }
 
-// renderTable writes header followed by rows[offset:], windowed to budget
-// rows total (header included) the same way writeColumn did for the retired
-// two-column body — renderBacklogSection and renderWorkSection's shared
-// windowing plumbing, so the two can't drift out of sync (ADR 0030).
-func renderTable(header string, rows []string, offset int, budget *int) string {
-	if budget != nil && *budget <= 0 {
-		return ""
-	}
+// renderTable writes header followed by rows windowed through vp against
+// total, budgeted to itemBudget rows (the header's own row already spent) —
+// renderBacklogSection and renderWorkSection's shared windowing plumbing, so
+// the two can't drift out of sync (ADR 0030) and so both window through the
+// same Viewport rather than re-implementing the slice math inline (issue
+// #1540). A non-positive itemBudget writes no rows and no affordance,
+// matching a terminal too short to show anything past the header — vp is
+// never asked to represent that case (Viewport's SetHeight(0) means
+// unbounded, not zero rows), so the guard lives here instead. vp's height is
+// set directly rather than through SetHeight: SetHeight's clamp-on-shrink
+// (issue #829's page-cap) is Update's job, already folded into the offset
+// Model stores by the time a render reaches here — reapplying it against a
+// freshly-constructed vp with no prior height would misfire as a shrink from
+// unbounded and needlessly re-cap an offset pgup/pgdown deliberately leaves
+// uncapped (issue #1060).
+func renderTable(header string, rows []string, vp Viewport, total, itemBudget int) string {
 	var b strings.Builder
 	b.WriteString(header)
-	if budget == nil {
-		writeWindowedRows(&b, rows, offset, nil)
+	if itemBudget <= 0 {
 		return b.String()
 	}
-	itemBudget := columnItemBudget(*budget)
-	writeWindowedRows(&b, rows, offset, &itemBudget)
+	vp.height = itemBudget
+	w := vp.Window(total)
+	shown, moreBelow := w.Shown()
+	for _, r := range rows[w.Start : w.Start+shown] {
+		b.WriteString(r)
+	}
+	if moreBelow > 0 {
+		fmt.Fprintf(&b, "… %d more below\n", moreBelow)
+	}
 	return b.String()
 }
 
@@ -281,8 +293,8 @@ const backlogFixedWidth = 1 + 1 + numberColWidth + 1 + 2 + 1
 // issue (number, title, labels), cursor-marked, under a column-header row —
 // ADR 0030's pick source, keeping its `/` label filter and #844's
 // number/title/labels shape (state and age don't apply to a plain issue).
-func renderBacklogSection(m Model, budget *int) string {
-	if budget != nil && *budget <= 0 {
+func renderBacklogSection(m Model, budget int) string {
+	if budget <= 0 {
 		return ""
 	}
 	visible := m.Visible()
@@ -313,8 +325,10 @@ func renderBacklogSection(m Model, budget *int) string {
 	// where the label text actually starts, not the bracket (issue #1500
 	// review).
 	header := roleStyle(RoleDim).Render(fmt.Sprintf("  %s %s  labels", clip("#", numberColWidth, true), clip("title", titleWidth, true)))
-	header += positionLabel(m.Offset, budget, len(visible)) + "\n"
-	return renderTable(header, rows, m.Offset, budget)
+	itemBudget := columnItemBudget(budget)
+	vp := Viewport{offset: m.Offset}
+	header += positionLabel(vp, itemBudget, len(visible)) + "\n"
+	return renderTable(header, rows, vp, len(visible), itemBudget)
 }
 
 // workFixedWidth is a work-Section row's width outside the title and extras
@@ -331,8 +345,8 @@ const workFixedWidth = 1 + 1 + numberColWidth + 1 + 1 + stateColWidth + 1 + ageC
 // heartbeat, both #858/#647-era queue-row detail, still render as a trailing
 // annotation after the fixed columns so neither signal is lost, just moved
 // out of the aligned part of the row.
-func renderWorkSection(m Model, budget *int) string {
-	if budget != nil && *budget <= 0 {
+func renderWorkSection(m Model, budget int) string {
+	if budget <= 0 {
 		return ""
 	}
 	picks := sectionPicks(m, m.ActiveSection)
@@ -374,8 +388,10 @@ func renderWorkSection(m Model, budget *int) string {
 		rows = append(rows, fmt.Sprintf("%s %s %s %s %s%s\n", marker, clip("#"+p.Number, numberColWidth, true), clip(title, titleWidth, true), state, clip(p.Age, ageColWidth, true), clip(extras.String(), extrasWidth, false)))
 	}
 	header := roleStyle(RoleDim).Render(fmt.Sprintf("  %s %s %s %s", clip("#", numberColWidth, true), clip("title", titleWidth, true), clip("state", stateColWidth, true), "age"))
-	header += positionLabel(m.Offset, budget, len(picks)) + "\n"
-	return renderTable(header, rows, m.Offset, budget)
+	itemBudget := columnItemBudget(budget)
+	vp := Viewport{offset: m.Offset}
+	header += positionLabel(vp, itemBudget, len(picks)) + "\n"
+	return renderTable(header, rows, vp, len(picks), itemBudget)
 }
 
 // clip fits s into width display columns (not runes — a wide CJK rune is 2
@@ -562,76 +578,6 @@ func renderHelp() string {
 	}, "\n")
 }
 
-// writeWindowedRows writes rows[offset:], clipped to budget rows — the
-// backlog/picks columns' body-windowing counterpart to windowLines' offset
-// slicing (issue #1035, scrolled per offset since issue #1036). When more
-// rows remain past offset than budget allows, one row is held back for a
-// trailing "N more below" affordance line instead of just truncating
-// silently, so the operator knows the list is clipped rather than complete.
-// A non-positive budget writes nothing; an offset past the end of rows is
-// treated as the end (nothing left to show). A nil budget means unbounded —
-// every row from offset writes, with no "more below" affordance (issue
-// #1039).
-func writeWindowedRows(b *strings.Builder, rows []string, offset int, budget *int) {
-	if offset < 0 {
-		offset = 0
-	}
-	if offset > len(rows) {
-		offset = len(rows)
-	}
-	remaining := rows[offset:]
-	if budget == nil {
-		for _, r := range remaining {
-			b.WriteString(r)
-		}
-		return
-	}
-	bud := *budget
-	if bud < 0 {
-		bud = 0
-	}
-	if len(remaining) <= bud {
-		for _, r := range remaining {
-			b.WriteString(r)
-		}
-		return
-	}
-	visible := bud - 1
-	if visible < 0 {
-		visible = 0
-	}
-	for _, r := range remaining[:visible] {
-		b.WriteString(r)
-	}
-	if bud > 0 {
-		fmt.Fprintf(b, "… %d more below\n", len(remaining)-visible)
-	}
-}
-
-// windowedRowCount returns how many of remaining rows writeWindowedRows
-// actually renders as content for a given budget — remaining itself when it
-// all fits, or one less than budget (the row held back for the "N more
-// below" affordance) when it doesn't. Update reuses this to compute the
-// focused column's viewport capacity at a given offset, so
-// cursor-follows-viewport (issue #1036) advances/rewinds the offset exactly
-// when the rendered window is about to stop showing the cursor's row.
-func windowedRowCount(remaining, budget int) int {
-	if budget < 0 {
-		budget = 0
-	}
-	if remaining < 0 {
-		remaining = 0
-	}
-	if remaining <= budget {
-		return remaining
-	}
-	n := budget - 1
-	if n < 0 {
-		n = 0
-	}
-	return n
-}
-
 // bodyBudget returns the row budget left for the active Section's table
 // after the header, Section tabs, and any active prompt/error lines — the
 // same figure View computes before calling renderBody (issue #1035, ADR
@@ -662,33 +608,29 @@ func bodyBudget(m Model) int {
 }
 
 // positionLabel returns a compact " (X-Y of N)" position indicator for a
-// column's label, describing the rows writeWindowedRows actually renders at
-// offset within columnBudget of total — or "" when there is nothing to show
-// a range for (an empty list, or a budget too small to render any row), so a
-// column that renders no rows doesn't grow a misleading "(1-0 of 0)" label
-// (issue #1037 AC3). A nil columnBudget means unbounded — every row from
-// offset is shown, matching writeWindowedRows' own nil handling (issue
-// #1039).
-func positionLabel(offset int, columnBudget *int, total int) string {
-	if total == 0 {
+// column's label, describing the rows vp actually renders at itemBudget of
+// total — or "" when there is nothing to show a range for (an empty list, or
+// a budget too small to render any row), so a column that renders no rows
+// doesn't grow a misleading "(1-0 of 0)" label (issue #1037 AC3). vp is
+// passed by value and left untouched by the caller's own copy; its height is
+// set directly rather than through SetHeight, matching renderTable's own
+// reasoning for skipping SetHeight's clamp-on-shrink here.
+func positionLabel(vp Viewport, itemBudget, total int) string {
+	if total == 0 || itemBudget <= 0 {
 		return ""
 	}
-	var shown int
-	if columnBudget == nil {
-		shown = total - offset
-	} else {
-		shown = visibleItemCount(offset, *columnBudget, total)
-	}
+	vp.height = itemBudget
+	w := vp.Window(total)
+	shown, _ := w.Shown()
 	if shown <= 0 {
 		return ""
 	}
-	return fmt.Sprintf(" (%d-%d of %d)", offset+1, offset+shown, total)
+	return fmt.Sprintf(" (%d-%d of %d)", w.Start+1, w.Start+shown, total)
 }
 
 // sectionPageSize returns the number of rows one page jump (pgup/pgdown)
 // moves the active Section's viewport by — the row count actually rendered
-// at its current offset (windowedRowCount, the same figure positionLabel and
-// writeWindowedRows use), not the raw item budget. A truncated window holds
+// at its current offset, not the raw item budget. A truncated window holds
 // one row back for the "N more below" affordance, so paging by the raw
 // budget would overshoot by one and skip the row right past the fold; paging
 // by what's actually on screen lands exactly on the first row the operator
@@ -697,14 +639,21 @@ func positionLabel(offset int, columnBudget *int, total int) string {
 // sidebar/rebuild-output panes' fixed fixedPaneScrollDelta, this is
 // recomputed on every keypress.
 func sectionPageSize(m Model) int {
-	return visibleItemCount(m.Offset, bodyBudget(m), sectionRowCount(m, m.ActiveSection))
+	itemBudget := columnItemBudget(bodyBudget(m))
+	if itemBudget <= 0 {
+		return 0
+	}
+	total := sectionRowCount(m, m.ActiveSection)
+	vp := Viewport{offset: m.Offset, height: itemBudget}
+	shown, _ := vp.Window(total).Shown()
+	return shown
 }
 
 // columnItemBudget converts a Section's row budget (header row included)
 // into the row budget available for its item rows alone — the "-1 for the
 // header" that renderBacklogSection and renderWorkSection get by calling
-// columnItemBudget(budget) directly before passing the result to
-// writeWindowedRows. A non-positive column budget yields zero items,
+// columnItemBudget(budget) directly before passing the result on as a
+// Viewport's item height. A non-positive column budget yields zero items,
 // matching those functions' own budget<=0-renders-nothing early return.
 func columnItemBudget(columnBudget int) int {
 	if columnBudget <= 0 {
@@ -713,49 +662,15 @@ func columnItemBudget(columnBudget int) int {
 	return columnBudget - 1
 }
 
-// visibleItemCount returns how many of a column's item rows are actually
-// visible at offset within columnBudget of total — windowedRowCount's
-// remaining/budget shape with columnItemBudget's "-1 for the label" folded
-// in, so positionLabel and sectionPageSize don't each repeat the
-// windowedRowCount(total-offset, columnItemBudget(budget)) composition
-// (issue #1061).
-func visibleItemCount(offset, columnBudget, total int) int {
-	return windowedRowCount(total-offset, columnItemBudget(columnBudget))
-}
-
-// followViewport returns offset adjusted so cursor stays within the window
-// writeWindowedRows would render at itemBudget rows — rewinding one row at a
-// time while cursor sits above offset, advancing one row at a time while
-// cursor sits past the last row windowedRowCount would actually show,
-// exactly the "moving the cursor down past the bottom visible row advances
-// the offset by one... moving up past the top row rewinds it" behavior
-// issue #1036 AC1 asks for. The result always stays in [0, total): the
-// advance loop stops at total-1 rather than total so a non-positive
-// itemBudget (windowedRowCount always 0, so the break condition never
-// fires) can't push offset one past the last valid index (issue #1054).
-func followViewport(offset, cursor, total, itemBudget int) int {
-	for cursor < offset {
-		offset--
-	}
-	for offset < total-1 {
-		if cursor < offset+windowedRowCount(total-offset, itemBudget) {
-			break
-		}
-		offset++
-	}
-	return offset
-}
-
-// windowSidebarLines returns s.Lines[offset:end], where end stops budget
-// lines past offset (or at the end of s.Lines, whichever comes first) — so a
-// render joins only what the viewport can show instead of the whole tail
-// from Offset to the end of a (potentially multi-MB) transcript (issue #722,
-// inherited from the retired windowLines/DrillInState). A non-positive
-// budget yields an empty window rather than a negative slice. s.Offset is
-// assumed already in [0, len(s.Lines)-1] — Update clamps it via
-// clampSidebarOffset before any render call reaches here. As recorded when
-// this windowing landed against DrillInState, a View call against a 10MB+
-// transcript at Offset 0, Height 24
+// windowSidebarLines returns s.Lines windowed through a Viewport at s.Offset,
+// budget rows deep — so a render joins only what the viewport can show
+// instead of the whole tail from Offset to the end of a (potentially
+// multi-MB) transcript (issue #722, inherited from the retired
+// windowLines/DrillInState). A non-positive budget yields nil rather than
+// asking Viewport to represent it (SetHeight(0) means unbounded, not zero
+// lines) — Viewport is never asked to window a real, non-positive budget. As
+// recorded when this windowing landed against DrillInState, a View call
+// against a 10MB+ transcript at Offset 0, Height 24
 // (BenchmarkView_DrillInFullscreen_LargeTranscript, issue #1016) went from
 // 3.88ms/op, 21.0MB/op, 7 allocs/op — the state right after the Lines cache
 // landed but before this windowing, still joining offset-to-end every call,
@@ -765,22 +680,21 @@ func followViewport(offset, cursor, total, itemBudget int) int {
 // behavior. Reproduce with `go test ./internal/console/... -run '^$' -bench
 // BenchmarkView_DrillInFullscreen -benchmem` from cmd/launcher.
 func windowSidebarLines(s SidebarState, budget int) []string {
-	offset := s.Offset
-	end := offset + budget
-	if end < offset {
-		end = offset
+	if budget <= 0 {
+		return nil
 	}
-	if end > len(s.Lines) {
-		end = len(s.Lines)
-	}
-	return s.Lines[offset:end]
+	vp := Viewport{offset: s.Offset, total: len(s.Lines)}
+	vp.SetHeight(budget)
+	w := vp.Window(len(s.Lines))
+	return s.Lines[w.Start:w.End]
 }
 
 // headerFooterLines is the sidebar chrome budget (label + keystroke-hint
-// footer) that renderSidebarFullscreen, renderSidebarDocked, and
-// clampSidebarOffset all subtract from height — shared so the clamp's
-// last-page cap always matches what the render functions actually have room
-// to show (issue #829, #1002, inherited from the retired drill-in pane).
+// footer) that renderSidebarFullscreen, renderSidebarDocked, and Update's
+// tail (via Viewport.SetHeight) all subtract from height — shared so the
+// clamp's last-page cap always matches what the render functions actually
+// have room to show (issue #829, #1002, inherited from the retired drill-in
+// pane).
 const headerFooterLines = 2
 
 // sidebarErr returns the error the current view should surface: s.Err
@@ -917,19 +831,14 @@ func renderRebuildOutputPane(m Model) string {
 	b.WriteString("rebuild output:\n")
 
 	budget := m.Height - headerFooterLines
-	if budget < 0 {
-		budget = 0
-	}
 	lines := strings.Split(m.RebuildOutput, "\n")
-	offset := m.RebuildOutputOffset
-	end := offset + budget
-	if end < offset {
-		end = offset
+	var visible string
+	if budget > 0 {
+		vp := Viewport{offset: m.RebuildOutputOffset, total: len(lines)}
+		vp.SetHeight(budget)
+		w := vp.Window(len(lines))
+		visible = strings.Join(lines[w.Start:w.End], "\n")
 	}
-	if end > len(lines) {
-		end = len(lines)
-	}
-	visible := strings.Join(lines[offset:end], "\n")
 	b.WriteString(visible)
 	if visible != "" && !strings.HasSuffix(visible, "\n") {
 		b.WriteString("\n")

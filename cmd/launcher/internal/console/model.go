@@ -218,9 +218,9 @@ type SidebarState struct {
 	// entry, or TranscriptRendered/TranscriptRaw per ShowTranscript/ShowRaw)
 	// pre-split on "\n". Update recomputes it only when the content or the
 	// toggle state actually changes (SidebarLoadedMsg, SidebarToggleMsg, a
-	// grown SidebarActivityMsg), so clampSidebarOffset and the render
-	// functions never re-split a
-	// multi-megabyte transcript on every keystroke (issue #722's fix,
+	// grown SidebarActivityMsg), so Update's tail and the render functions
+	// never re-split a multi-megabyte transcript on every keystroke (issue
+	// #722's fix,
 	// inherited from DrillInState.Lines — see BenchmarkUpdate_DrillInScroll
 	// for the recorded before/after).
 	Lines []string
@@ -329,10 +329,10 @@ func Update(m Model, msg Msg) Model {
 			// would otherwise read as "following" while showing stale,
 			// non-bottom lines if the Dispatch kept working while the
 			// sidebar was shut (review finding on issue #1502). Overshoot;
-			// the clamp below pulls it back to the true last page — for
-			// content that already fits the viewport, that's still 0
-			// (clampSidebarOffset's short-content case), so a short feed's
-			// fresh open looks unchanged from before this fix.
+			// Update's tail pulls it back to the true last page via
+			// Viewport's own clamp — for content that already fits the
+			// viewport, that's still 0 (the short-content case), so a short
+			// feed's fresh open looks unchanged from before this fix.
 			m.Sidebar.Offset = len(m.Sidebar.Lines)
 		}
 		if !sameNumber {
@@ -469,7 +469,22 @@ func Update(m Model, msg Msg) Model {
 	}
 	m.Width = clampSize(m.Width)
 	m.Height = clampSize(m.Height)
-	m.Cursor = clampCursor(m.Cursor, sectionRowCount(m, m.ActiveSection))
+
+	total := sectionRowCount(m, m.ActiveSection)
+	m.Cursor = clampCursor(m.Cursor, total)
+	m.Offset = clampCursor(m.Offset, total)
+	if _, ok := msg.(CursorMoveMsg); ok {
+		// height is set directly rather than through SetHeight: backlog/queue
+		// pgup/pgdown deliberately leaves Offset non-page-capped (issue
+		// #1060, tracked separately as #1053), and SetHeight's clamp-on-
+		// shrink would otherwise re-cap an Offset a prior ScrollMsg left past
+		// the fold the moment the cursor next moves — see renderTable's own
+		// reasoning for the same thing.
+		vp := Viewport{cursor: m.Cursor, offset: m.Offset, height: columnItemBudget(bodyBudget(m))}
+		vp.MoveCursor(0, total)
+		m.Offset = vp.offset
+	}
+
 	if m.Sidebar != nil {
 		// Docked (sidebarFits and not zoomed), the sidebar's actual
 		// viewport is the same row budget the list body renders into, not
@@ -486,13 +501,20 @@ func Update(m Model, msg Msg) Model {
 		if sidebarFits(m) && !m.SidebarZoom {
 			height = bodyBudget(m)
 		}
-		clampSidebarOffset(m.Sidebar, height)
+		vp := Viewport{offset: m.Sidebar.Offset}
+		vp.Scroll(0, len(m.Sidebar.Lines))
+		vp.SetHeight(height - headerFooterLines)
+		m.Sidebar.Offset = vp.offset
 	}
-	clampRebuildOutputOffset(&m)
-	m.Offset = clampCursor(m.Offset, sectionRowCount(m, m.ActiveSection))
-	if _, ok := msg.(CursorMoveMsg); ok {
-		m.Offset = followViewport(m.Offset, m.Cursor, sectionRowCount(m, m.ActiveSection), columnItemBudget(bodyBudget(m)))
+
+	if m.ShowRebuildOutput {
+		lines := strings.Count(m.RebuildOutput, "\n") + 1
+		vp := Viewport{offset: m.RebuildOutputOffset}
+		vp.Scroll(0, lines)
+		vp.SetHeight(m.Height - headerFooterLines)
+		m.RebuildOutputOffset = vp.offset
 	}
+
 	return m
 }
 
@@ -576,7 +598,7 @@ func clampCursor(cursor, n int) int {
 // SidebarPositions, keyed by its Number, before SidebarLoadedMsg replaces it
 // or SidebarCloseMsg clears it — the write side of per-Dispatch position
 // retention (issue #1502, ADR 0030). A nil Sidebar is a no-op, matching
-// clampSidebarOffset's own nil convention.
+// Update's tail's own nil check before it touches m.Sidebar.
 func saveSidebarPosition(m Model) Model {
 	if m.Sidebar == nil {
 		return m
@@ -586,41 +608,6 @@ func saveSidebarPosition(m Model) Model {
 	}
 	m.SidebarPositions[m.Sidebar.Number] = SidebarPosition{Offset: m.Sidebar.Offset, Follow: m.Sidebar.Follow}
 	return m
-}
-
-// clampSidebarOffset pulls s.Offset into [0, lines-1], further capped so the
-// last page fills the viewport instead of leaving it mostly blank (issue
-// #829's fix, inherited from clampDrillInOffset) — the sidebar analogue of
-// clampCursor, so a scroll commanded past either end of the active form
-// (Activity, or Transcript rendered/raw) never leaves an Offset the render
-// functions can't slice with, and a toggle whose other form has fewer lines
-// still lands somewhere valid (issue #786). A nil s is a no-op — Update calls
-// this unconditionally, matching the cursor clamp. Content that already fits
-// the viewport (budget >= len(Lines), the short-content case) falls all the
-// way back to 0 rather than to the last line. When height is too small to
-// fit a page at all (budget == 0), pageMax never undercuts maxOffset, so an
-// out-of-range Offset instead lands at the last line, len(Lines)-1.
-func clampSidebarOffset(s *SidebarState, height int) {
-	if s == nil {
-		return
-	}
-	budget := height - headerFooterLines
-	if budget < 0 {
-		budget = 0
-	}
-	maxOffset := len(s.Lines) - 1
-	if pageMax := len(s.Lines) - budget; pageMax < maxOffset {
-		maxOffset = pageMax
-	}
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-	switch {
-	case s.Offset < 0:
-		s.Offset = 0
-	case s.Offset > maxOffset:
-		s.Offset = maxOffset
-	}
 }
 
 // sidebarLines computes s's currently active form, pre-split on "\n" — the
@@ -650,34 +637,6 @@ func sidebarLines(s *SidebarState) []string {
 // happened, so a precise-looking HH:MM:SS prefix would be misleading (#1584).
 func formatActivityLine(a ActivityLine) string {
 	return a.Text
-}
-
-// clampRebuildOutputOffset pulls m.RebuildOutputOffset into [0, maxOffset],
-// the rebuild-output pane's analogue of clampDrillInOffset — skipped
-// entirely while the pane is closed so a large RebuildOutput never costs a
-// strings.Count on every keystroke it isn't visible for (issue #1128).
-func clampRebuildOutputOffset(m *Model) {
-	if !m.ShowRebuildOutput {
-		return
-	}
-	lines := strings.Count(m.RebuildOutput, "\n") + 1
-	budget := m.Height - headerFooterLines
-	if budget < 0 {
-		budget = 0
-	}
-	maxOffset := lines - 1
-	if pageMax := lines - budget; pageMax < maxOffset {
-		maxOffset = pageMax
-	}
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-	switch {
-	case m.RebuildOutputOffset < 0:
-		m.RebuildOutputOffset = 0
-	case m.RebuildOutputOffset > maxOffset:
-		m.RebuildOutputOffset = maxOffset
-	}
 }
 
 // minTerminalDimension is the safe floor Width and Height clamp to — a

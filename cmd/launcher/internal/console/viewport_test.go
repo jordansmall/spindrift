@@ -28,6 +28,29 @@ func TestViewport_Window_BoundedHeight_TruncatesAndCountsBelow(t *testing.T) {
 	}
 }
 
+// TestWindow_Shown_NotTruncated_ShowsEveryRowNoAffordance verifies Shown
+// reports every row in [Start, End) as shown with no "more below" count when
+// nothing is hidden.
+func TestWindow_Shown_NotTruncated_ShowsEveryRowNoAffordance(t *testing.T) {
+	w := Window{Start: 0, End: 5, Above: 0, Below: 0}
+	shown, moreBelow := w.Shown()
+	if shown != 5 || moreBelow != 0 {
+		t.Errorf("Shown() = (%d, %d), want (5, 0)", shown, moreBelow)
+	}
+}
+
+// TestWindow_Shown_Truncated_HoldsBackOneRowForMoreBelow verifies Shown
+// holds one row back from End-Start so the "… N more below" affordance
+// itself fits within the same budget, and reports the true remaining count
+// — the held-back row plus Below (issue #1061, inherited).
+func TestWindow_Shown_Truncated_HoldsBackOneRowForMoreBelow(t *testing.T) {
+	w := Window{Start: 0, End: 4, Above: 0, Below: 46}
+	shown, moreBelow := w.Shown()
+	if shown != 3 || moreBelow != 47 {
+		t.Errorf("Shown() = (%d, %d), want (3, 47)", shown, moreBelow)
+	}
+}
+
 // TestViewport_Scroll_ClampsIntoBounds verifies Scroll adds delta to offset,
 // clamped into [0, total-1] — pgup/pgdown's raw movement, independent of
 // height or any cursor.

@@ -988,11 +988,11 @@ func TestUpdate_ScrollMsg_OffsetScrollsPastEndWhenContentFitsOnScreen(t *testing
 // TestUpdate_CursorMoveMsg_OffsetFollowsCursor verifies the active Section's
 // viewport advances/rewinds by one as the cursor crosses its bottom/top
 // visible row, keeping the highlighted row always on screen (issue #1036
-// AC1). visibleRows is derived from the same bodyBudget / columnItemBudget /
-// windowedRowCount composition renderBody uses (issue #1056), so a future
-// geometry change doesn't require re-deriving a hand-computed constant —
-// this test drives the cursor across two screens' worth of rows and back to
-// exercise both directions.
+// AC1). visibleRows is derived from sectionPageSize, the same
+// bodyBudget/columnItemBudget/Viewport.Window composition renderBody uses
+// (issue #1056), so a future geometry change doesn't require re-deriving a
+// hand-computed constant — this test drives the cursor across two screens'
+// worth of rows and back to exercise both directions.
 func TestUpdate_CursorMoveMsg_OffsetFollowsCursor(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	issues := make([]forge.Issue, 50)
@@ -1001,7 +1001,7 @@ func TestUpdate_CursorMoveMsg_OffsetFollowsCursor(t *testing.T) {
 	}
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
-	visibleRows := windowedRowCount(len(issues), columnItemBudget(bodyBudget(m)))
+	visibleRows := sectionPageSize(m)
 
 	// Rows 0..visibleRows-1 are visible at offset 0; moving down within that
 	// window must not scroll.
@@ -1051,6 +1051,46 @@ func TestUpdate_CursorMoveMsg_OffsetFollowsCursor(t *testing.T) {
 	m = Update(m, CursorMoveMsg{Delta: -100})
 	if m.Cursor != 0 || m.Offset != 0 {
 		t.Fatalf("Cursor = %d, Offset = %d, want Cursor 0, Offset 0 (clamped to the top)", m.Cursor, m.Offset)
+	}
+}
+
+// TestUpdate_CursorMoveMsg_DoesNotRecapOffsetLeftPastFoldByScroll verifies a
+// CursorMoveMsg never re-applies the sidebar/rebuild-output panes'
+// last-page-fills-the-viewport cap to the backlog/queue Offset. pgup/pgdown
+// deliberately leaves Offset non-page-capped (issue #1060, tracked
+// separately as #1053); a later cursor move that doesn't itself need to
+// scroll must not silently pull a scroll-inflated Offset back toward
+// Viewport.SetHeight's clamp-on-shrink (issue #1540 review finding).
+func TestUpdate_CursorMoveMsg_DoesNotRecapOffsetLeftPastFoldByScroll(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	issues := make([]forge.Issue, 100)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+	// Drive the cursor to the end so follow settles Offset at its own
+	// natural resting point.
+	m = Update(m, CursorMoveMsg{Delta: 1000})
+	settled := m.Offset
+	if settled <= 0 || settled >= 99 {
+		t.Fatalf("test setup: Offset settled at %d, want a real intermediate resting point", settled)
+	}
+
+	// pgdown past that resting point — issue #1060's deliberately
+	// non-page-capped scroll — landing one row further than follow alone
+	// ever would.
+	m = Update(m, ScrollMsg{Delta: 1})
+	if m.Offset != settled+1 {
+		t.Fatalf("test setup: Offset = %d, want %d after nudging one row past the follow rest point", m.Offset, settled+1)
+	}
+
+	// The cursor (still at the end, still comfortably inside the nudged
+	// window) doesn't need to move; the resulting CursorMoveMsg must leave
+	// Offset alone rather than re-capping it back to the follow rest point.
+	m = Update(m, CursorMoveMsg{Delta: 0})
+	if m.Offset != settled+1 {
+		t.Errorf("Offset = %d, want %d (unchanged — pgdown's uncapped overshoot must survive a cursor move that doesn't need to scroll)", m.Offset, settled+1)
 	}
 }
 

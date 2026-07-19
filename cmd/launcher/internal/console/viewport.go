@@ -13,7 +13,12 @@ type Viewport struct {
 	// total caches the row count from the most recent Window/Scroll/
 	// MoveCursor call — SetHeight has no total parameter of its own, so a
 	// height shrink's clamp-on-shrink reclamps against whichever total was
-	// last seen.
+	// last seen. Every method that receives a total keeps this in sync, so
+	// it never drifts as long as SetHeight is called only after a total has
+	// actually been seen. A caller that wants windowing without ever
+	// invoking SetHeight's clamp-on-shrink (backlog/queue's deliberately
+	// non-page-capped pgup/pgdown, issue #1060) sets height directly via a
+	// struct literal instead — see renderTable's own doc comment.
 	total int
 }
 
@@ -22,6 +27,20 @@ type Viewport struct {
 // Geometry only — callers keep formatting the "… N more below" / "(X-Y of
 // N)" affordances from it (issue #1540).
 type Window struct{ Start, End, Above, Below int }
+
+// Shown returns how many rows Window actually renders as content, and the
+// "N more below" count to print in place of the one row held back to fit
+// that affordance line within the same budget — 0 when nothing is
+// truncated. The single composition renderTable, positionLabel, and
+// sectionPageSize each derived independently before this method existed.
+func (w Window) Shown() (shown, moreBelow int) {
+	shown = w.End - w.Start
+	if w.Below > 0 && shown > 0 {
+		shown--
+		moreBelow = w.Below + 1
+	}
+	return shown, moreBelow
+}
 
 // SetHeight sets v's content-row budget — the row count a pane can actually
 // show, already stripped of its own header/footer chrome by the caller. 0
