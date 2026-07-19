@@ -54,6 +54,35 @@ let
 
   checksInboxSet = removeAttrs sourceChecks imageOnlyCheckNames;
 
+  # A narrower axis than imageOnlyCheckNames: source checks whose *build*
+  # closure embeds the aarch64-linux image — `bats` pulls it in through
+  # batsHarness.run/build/spindrift and skillsBwrapHarness.agentFiles
+  # (nix/checks/bats.nix). `nix flake check` builds the whole checkset for the
+  # current system, so on darwin these fail with "Required system:
+  # aarch64-linux" (there is no Linux builder). Dropped from the darwin
+  # checkset below; still run on both Linux arches. Distinct from
+  # imageOnlyCheckNames: the `*-baked-in-dogfood` asserts there build natively
+  # on darwin (hostPkgs skillsDir / eval-only), so `bats` is the only truly
+  # Linux-bound source check.
+  linuxOnlyCheckNames = [ "bats" ];
+
+  # The darwin checkset drops the Linux-bound checks; Linux keeps everything.
+  portableSourceChecks =
+    if pkgs.stdenv.isLinux then sourceChecks else removeAttrs sourceChecks linuxOnlyCheckNames;
+
+  # Stale-name guard (mirrors checks-inbox-excludes-image-checks): every
+  # linuxOnlyCheckName must name a real source check, or the darwin drop
+  # silently does nothing. Eval-only.
+  linux-only-check-names-exist =
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep filter;
+      stale = filter (n: !(builtins.hasAttr n sourceChecks)) linuxOnlyCheckNames;
+    in
+    assert assertMsg (
+      stale == [ ]
+    ) "linuxOnlyCheckNames names a check absent from sourceChecks: ${concatStringsSep ", " stale}";
+    pkgs.runCommand "linux-only-check-names-exist" { } "touch $out";
+
   # Regression guard (issue #581): imageOnlyCheckNames must name checks that
   # actually exist (catches a stale/renamed entry silently doing nothing),
   # and none of them may leak into checksInboxSet (catches the exclusion
@@ -73,7 +102,12 @@ let
     pkgs.runCommand "checks-inbox-excludes-image-checks" { } "touch $out";
 in
 {
-  checks = sourceChecks // imageChecks // { inherit checks-inbox-excludes-image-checks; };
+  checks =
+    portableSourceChecks
+    // imageChecks
+    // {
+      inherit checks-inbox-excludes-image-checks linux-only-check-names-exist;
+    };
 
   # Scoped in-box gate (issue #581): every source-level check with the
   # image-realizing ones excluded, joined into one derivation so it builds
