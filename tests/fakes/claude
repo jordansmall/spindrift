@@ -123,13 +123,46 @@ fi
 # only on this fake's first invocation within a test, then emits a real
 # outcome on every call after — for exercising the resume-once recovery pass
 # (issue #1607), which must see the second (resumed) call succeed.
+#
+# FAKE_CLAUDE_WRAP_OUTCOME selects a markdown-wrapped outcome line (issue
+# #1611's #1582 repro): claude's own stream-json result text sometimes wraps
+# the line in inline backticks, bold markers, or pads it with whitespace, so
+# the entrypoint's extractor must tolerate it.
+#
+# FAKE_CLAUDE_MULTI_RESULT=1 emits a stale result event with its own outcome
+# line before the real one, simulating a multi-turn transcript with more than
+# one result event -- the extractor's tail -1 semantics must keep picking the
+# last outcome line, not the first.
 printf '{"type":"system","subtype":"init","session_id":"fake"}\n'
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"implementing #%s"}]}}\n' "${ISSUE_NUMBER:-0}"
+if [ "${FAKE_CLAUDE_MULTI_RESULT:-0}" = "1" ]; then
+  printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/0 status=blocked note=stale"}\n' \
+    "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
+fi
 if [ "${FAKE_CLAUDE_NO_OUTCOME:-0}" = "1" ] || { [ "${FAKE_CLAUDE_NO_OUTCOME_FIRST_CALL_ONLY:-0}" = "1" ] && [ "${call_index:-0}" = "0" ]; }; then
   printf '{"type":"result","subtype":"success","is_error":false,"result":"done, but forgot to report back"}\n'
 else
-  printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake"}\n' \
-    "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
+  case "${FAKE_CLAUDE_WRAP_OUTCOME:-}" in
+    backticks)
+      # The backticks are literal chars in the printf format string,
+      # simulating markdown wrapping, not unexpanded command substitution.
+      # shellcheck disable=SC2016
+      printf '{"type":"result","subtype":"success","is_error":false,"result":"CI registered.\\n\\n`SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake`"}\n' \
+        "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
+      ;;
+    bold)
+      printf '{"type":"result","subtype":"success","is_error":false,"result":"**SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake**"}\n' \
+        "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
+      ;;
+    whitespace)
+      printf '{"type":"result","subtype":"success","is_error":false,"result":"   SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake   "}\n' \
+        "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
+      ;;
+    *)
+      printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake"}\n' \
+        "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
+      ;;
+  esac
 fi
 
 # FAKE_CLAUDE_CRASH_EXIT simulates a driver killed by a transient
