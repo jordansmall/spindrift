@@ -3098,6 +3098,64 @@ func TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice(t *testing.T) {
 	}
 }
 
+// TestTea_ReopenOrphanSidebar_PicksUpTranscriptGrowth verifies closing and
+// reopening an orphan row's sidebar re-runs the whole load, picking up
+// Transcript growth the live Activity feed alone wouldn't — the same
+// reopen-to-refresh contract a session-launched Dispatch's sidebar already
+// has (issue #719, inherited), extended to orphan rows (issue #1621).
+func TestTea_ReopenOrphanSidebar_PicksUpTranscriptGrowth(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first pass"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	t.Cleanup(launch.Wait)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "first pass")
+
+	sendKey(tm, "x")
+	waitForOutput(t, tm, "fix the thing")
+
+	// Grown while the sidebar was closed -- a Transcript-only load's own
+	// #719 case, not the live Activity feed (which only advances while the
+	// sidebar stays open).
+	grown := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second pass"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(grown), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "second pass")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
 // TestTea_PollTick_AdvancesOpenOrphanSidebarActivityFeed verifies an orphan
 // row's open sidebar advances on its own as its box's on-disk pass log
 // grows, with no operator keypress — the same live-tail payoff a
