@@ -154,6 +154,13 @@ type Fake struct {
 	// invocation in order — lets a test assert call count directly instead
 	// of inferring it from side effects (#1098).
 	IssueCalls []string
+
+	// DepsOfCalls records the issue number argument of every DepsOf
+	// invocation in order — mirrors IssueCalls, letting a test assert a
+	// dependency-graph build's exact call count (e.g. a whole-backlog
+	// BuildEdges sweep) instead of inferring it from side effects
+	// (issue #1632).
+	DepsOfCalls []string
 }
 
 // NewFake returns an empty Fake client. labels configures the
@@ -412,6 +419,7 @@ func (f *Fake) CompleteVerdict(num string, verdict Verdict) error {
 func (f *Fake) DepsOf(num string) ([]Dependency, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.DepsOfCalls = append(f.DepsOfCalls, num)
 	if native, ok := f.NativeDeps[num]; ok && len(native) > 0 {
 		return WithSource(native, DepSourceNative), nil
 	}
