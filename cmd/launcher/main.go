@@ -1079,6 +1079,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if args[0] == "doctor" {
 		return cmdDoctor()
 	}
+	if args[0] == "__complete-issues" {
+		return cmdCompleteIssues()
+	}
 	if args[0] == "console" {
 		lc, err := bootstrap(true, dispatchKindWork)
 		if err != nil {
