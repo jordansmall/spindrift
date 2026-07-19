@@ -528,3 +528,58 @@ func TestGitClient_Merge_TimesOutOnHangingPush(t *testing.T) {
 		t.Fatalf("Merge error = %v, want errors.Is(err, context.DeadlineExceeded)", err)
 	}
 }
+
+// installHangingGitRebaseShim puts a "git" shim ahead of the real one on
+// PATH that sleeps forever on a non-abort `git ... rebase <ref>` invocation
+// and delegates every other subcommand (clone, checkout, config, config,
+// rebase --abort, ...) to the real git binary unchanged. Rebase's checkout
+// and rebase steps are local (no network round trip to hang mid-handshake
+// the way hangingRemoteURL or a pre-receive hook can), so this is the only
+// deterministic way to exercise their timeout wrapping.
+func installHangingGitRebaseShim(t *testing.T) {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("look up real git: %v", err)
+	}
+	shimDir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"if [ \"$3\" = \"rebase\" ] && [ \"$4\" != \"--abort\" ]; then\n" +
+		"  sleep 999\n" +
+		"fi\n" +
+		"exec " + realGit + " \"$@\"\n"
+	shim := filepath.Join(shimDir, "git")
+	gitWriteFile(t, shim, script)
+	if err := os.Chmod(shim, 0o755); err != nil {
+		t.Fatalf("chmod git shim: %v", err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestGitClient_Rebase_TimesOutOnHangingRebase verifies that Rebase bounds
+// its post-clone git subprocesses (checkout, rebase) with a timeout: against
+// a `git rebase` invocation that hangs, Rebase must still return in bounded
+// time with a distinguishable timeout error instead of blocking forever.
+func TestGitClient_Rebase_TimesOutOnHangingRebase(t *testing.T) {
+	bare := newBareRemoteWithBranches(t)
+	installHangingGitRebaseShim(t)
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-",
+		WithOpTimeout(200*time.Millisecond))
+
+	start := time.Now()
+	err := g.Rebase("agent/issue-1")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Rebase against hanging rebase invocation: want error, got nil")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("Rebase took %s to return, want it bounded by the configured op timeout", elapsed)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("Rebase error = %q, want it to mention timing out", err.Error())
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Rebase error = %v, want errors.Is(err, context.DeadlineExceeded)", err)
+	}
+}
