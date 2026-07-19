@@ -38,6 +38,22 @@ setup() {
   grep -q -- "--verbose" "$CLAUDE_LOG"
 }
 
+# Issue #1609: the claude Driver's flagsCommon strips the harness's
+# re-invocation-promising tools from the Driver's tool surface -- exercised
+# here through DRIVER_PREAMBLE_FILE (the same registry-rendered bytes the
+# image bakes, issue #433), not a hand-copied literal.
+@test "entrypoint invokes claude with --disallowedTools blocking loop/background affordances" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- "--disallowedTools" "$CLAUDE_LOG"
+  grep -q -- "ScheduleWakeup" "$CLAUDE_LOG"
+  grep -q -- "CronCreate" "$CLAUDE_LOG"
+  grep -q -- "CronDelete" "$CLAUDE_LOG"
+  grep -q -- "CronList" "$CLAUDE_LOG"
+  grep -q -- "RemoteTrigger" "$CLAUDE_LOG"
+  grep -q -- "Monitor" "$CLAUDE_LOG"
+}
+
 # In-box heartbeat view (#183, absorbed into driver-exec by #626): the
 # entrypoint delegates the Driver run to driver-exec, which filters heartbeats
 # in-process so a human can `tail -f /tmp/heartbeat.log` inside the box and
