@@ -75,13 +75,17 @@ log the fallback. Go module without a devShell:
 - `go test ./...`
 
 Run every check or build gate in the foreground and block on it yourself —
-never background it (`&`, detached job, background task) and end your turn
-while it is still pending. Backgrounding a gate here is the same failure as
-backgrounding WATCH CI below: your turn ends before the gate finishes, no
-`SPINDRIFT_OUTCOME` line is ever printed, and the run is lost even when the
-underlying work was green. Wait for the gate to finish before moving on, and
-do not stop this run until a terminal `SPINDRIFT_OUTCOME` line (`status=ready`
-or `status=blocked`) has been printed.
+never background it (`&`, detached job, background task, the Bash tool's
+`run_in_background` flag, or a `ScheduleWakeup` call scheduling a later
+check-in) and end your turn while it is still pending, or leave it "waiting"
+on a harness notification to resume the gate. Backgrounding a gate here is
+the same failure as backgrounding WATCH CI below: the headless Driver that
+runs this prompt can exit at end of turn, and the harness's promised
+re-invocation never arrives to resume it — your turn ends before the gate
+finishes, no `SPINDRIFT_OUTCOME` line is ever printed, and the run is lost
+even when the underlying work was green. Wait for the gate to finish before
+moving on, and do not stop this run until a terminal `SPINDRIFT_OUTCOME` line
+(`status=ready` or `status=blocked`) has been printed.
 
 If you ever fall back to a background-and-poll pattern for a gate anyway,
 treat a vanished process as a failure, not as still-pending: a build that is
@@ -210,9 +214,14 @@ until gh api graphql -f query="$GQL" -f owner="$owner" -f repo="$repo" \
   2>/dev/null | grep -q .; do sleep 10; done
 ```
 
-Run this in the foreground and block on it yourself — never background it (`&`,
-detached job, background task). Backgrounding ends your turn before CI
-registers, the OUTCOME line is never printed, and the run is lost.
+Run this in the foreground and block on it yourself — never background it
+(`&`, detached job, background task, the Bash tool's `run_in_background`
+flag, or a `ScheduleWakeup` call scheduling a later check-in), and never end
+your turn "waiting" on a harness notification to resume the poll. The
+headless Driver that runs this prompt can exit at end of turn, and the
+harness's promised re-invocation never arrives to resume it — backgrounding
+ends your turn before CI registers, the OUTCOME line is never printed, and
+the run is lost.
 
 If no check registers within a few minutes, do NOT emit `status=ready` — follow
 IF BLOCKED.

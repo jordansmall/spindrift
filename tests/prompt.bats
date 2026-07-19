@@ -111,6 +111,37 @@ setup() {
   grep -qi 'fine-grained' "$prompt"
 }
 
+@test "CHECK section names the harness backgrounding affordances as forbidden" {
+  # issue #1608: the #1542 Driver backgrounded the check gate via the Bash
+  # tool's run_in_background flag, called ScheduleWakeup, and ended its turn
+  # "waiting" for a harness re-invocation that a headless Driver never
+  # delivers. The generic "never background it" wording didn't stop it, so
+  # the affordances themselves must be named.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  local check
+  check="$(sed -n '/^# CHECK$/,/^# REVIEW$/p' "$prompt")"
+  [ -n "$check" ]
+  grep -qi 'run_in_background' <<<"$check"
+  grep -qi 'ScheduleWakeup' <<<"$check"
+  grep -qi 'waiting' <<<"$check"
+  grep -qi 'headless' <<<"$check"
+}
+
+@test "WATCH CI section names the harness backgrounding affordances as forbidden" {
+  # Same #1608 treatment as the CHECK section, applied to the shared
+  # WATCH CI never-background wording.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  local watch
+  watch="$(sed -n '/^# WATCH CI$/,/^# OUTCOME$/p' "$prompt")"
+  [ -n "$watch" ]
+  grep -qi 'run_in_background' <<<"$watch"
+  grep -qi 'ScheduleWakeup' <<<"$watch"
+  grep -qi 'waiting' <<<"$watch"
+  grep -qi 'headless' <<<"$watch"
+}
+
 @test "COMMS section establishes machine-log voice with human-prose carve-outs" {
   # Output is a machine-parsed log, not a conversation: no pleasantries and
   # no restating subagent output, except on the surfaces that stay human
