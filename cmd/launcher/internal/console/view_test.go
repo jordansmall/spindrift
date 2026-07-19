@@ -831,6 +831,25 @@ func TestView_ModeHelp_ContrastsSidebarFixedPage(t *testing.T) {
 	}
 }
 
+// TestView_ModeHelp_ListsCtrlFCtrlBAlongsidePageKeys verifies the help
+// overlay lists the vim page chords ctrl+f/ctrl+b next to each pane's
+// existing pgup/pgdown entry — the list body, the sidebar, and the
+// rebuild-output pane (issue #1647 AC).
+func TestView_ModeHelp_ListsCtrlFCtrlBAlongsidePageKeys(t *testing.T) {
+	m := Update(NewModel(), HelpToggleMsg{})
+
+	out := View(m)
+	if !strings.Contains(out, "ctrl+f/ctrl+b, pgup/pgdown  jump a full page of the active Section's live") {
+		t.Errorf("View() = %q, want the list body entry to list ctrl+f/ctrl+b alongside pgup/pgdown", out)
+	}
+	if !strings.Contains(out, "j/k, ctrl+f/ctrl+b, pgup/pgdown  scroll the sidebar") {
+		t.Errorf("View() = %q, want the sidebar entry to list ctrl+f/ctrl+b alongside pgup/pgdown", out)
+	}
+	if !strings.Contains(out, "j/k, ctrl+f/ctrl+b, pgup/pgdown scroll it") {
+		t.Errorf("View() = %q, want the rebuild-output entry to list ctrl+f/ctrl+b alongside pgup/pgdown", out)
+	}
+}
+
 // TestView_ModeHelp_ListsRebuildOutputJumpKeys verifies the help overlay
 // documents "G" and "gg" for the rebuild-output pane, alongside the existing
 // "o"/j/k/pgup/pgdown entry (issue #1630 AC).

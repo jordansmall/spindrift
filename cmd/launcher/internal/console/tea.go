@@ -371,9 +371,9 @@ func (t teaModel) handleListKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		t.m = Update(t.m, SectionJumpMsg{Section: SectionSettled})
 	case "5":
 		t.m = Update(t.m, SectionJumpMsg{Section: SectionFailed})
-	case "pgdown":
+	case "pgdown", "ctrl+f":
 		t.m = Update(t.m, ScrollMsg{Delta: sectionPageSize(t.m)})
-	case "pgup":
+	case "pgup", "ctrl+b":
 		t.m = Update(t.m, ScrollMsg{Delta: -sectionPageSize(t.m)})
 	case "/":
 		t.m = Update(t.m, FilterEditStartMsg{})
@@ -482,9 +482,9 @@ func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return Update(t.m, RebuildOutputScrollMsg{Delta: 1}), nil
 	case "k", "up":
 		return Update(t.m, RebuildOutputScrollMsg{Delta: -1}), nil
-	case "pgdown":
+	case "pgdown", "ctrl+f":
 		return Update(t.m, RebuildOutputScrollMsg{Delta: fixedPaneScrollDelta}), nil
-	case "pgup":
+	case "pgup", "ctrl+b":
 		return Update(t.m, RebuildOutputScrollMsg{Delta: -fixedPaneScrollDelta}), nil
 	case "G":
 		return Update(t.m, RebuildOutputJumpToLastMsg{}), nil
@@ -540,9 +540,9 @@ func (t teaModel) handleSidebarKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return Update(t.m, SidebarScrollMsg{Delta: 1}), nil
 	case "k", "up":
 		return Update(t.m, SidebarScrollMsg{Delta: -1}), nil
-	case "pgdown":
+	case "pgdown", "ctrl+f":
 		return Update(t.m, SidebarScrollMsg{Delta: fixedPaneScrollDelta}), nil
-	case "pgup":
+	case "pgup", "ctrl+b":
 		return Update(t.m, SidebarScrollMsg{Delta: -fixedPaneScrollDelta}), nil
 	case "G", "end":
 		return Update(t.m, SidebarJumpToEndMsg{}), nil
