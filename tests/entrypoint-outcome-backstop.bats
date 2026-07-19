@@ -97,3 +97,40 @@ EOF
   [ "$status" -eq 17 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 0 ]
 }
+
+# Adoption-aware backstop (issue #1614): an open, non-draft PR on BRANCH is a
+# real, mergeable result even without a parsed outcome line -- the backstop
+# must stay silent so the launcher's own no-outcome adoption path (discover
+# PR -> self-heal merge gate -> merge) settles the run instead of a synthetic
+# line preempting it.
+@test "no outcome line + open non-draft PR on branch -> backstop stays silent" {
+  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_GH_PR_LIST_7='[{"isDraft":false}]'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 0 ]
+}
+
+# A draft PR is not a done, mergeable result -- the backstop must still
+# synthesize status=blocked exactly as it does when no PR exists at all.
+@test "no outcome line + draft PR on branch -> synthetic blocked, same as no PR" {
+  export FAKE_CLAUDE_NO_OUTCOME=1
+  export FAKE_GH_PR_LIST_7='[{"isDraft":true}]'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
+}
+
+# Regression for the #1582 shape: the driver DID print its outcome line, but
+# backtick-wrapped so the extractor's anchored grep misses it exactly as it
+# did on that dogfood run. With a ready PR on the branch the backstop must
+# still stay silent -- the launcher's own adoption path is what settles this
+# run, not a synthetic blocked line racing ahead of it.
+@test "markdown-mangled outcome line (#1582) + open non-draft PR -> no synthetic blocked line" {
+  export FAKE_CLAUDE_MANGLED_OUTCOME=1
+  export FAKE_GH_PR_LIST_7='[{"isDraft":false}]'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 0 ]
+}

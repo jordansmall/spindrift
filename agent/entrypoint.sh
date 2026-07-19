@@ -583,6 +583,16 @@ run_driver_in_env() {
 # from main only when the Driver's run produced no parseable outcome line, so
 # the launcher always gets a terminal signal to classify (issue #593) instead
 # of a silent gap.
+#
+# Adoption-aware (issue #1614): an open, non-draft PR on BRANCH is a real,
+# mergeable result even without a parsed outcome line -- the prompt contract
+# only flips a PR out of draft immediately before printing status=ready, so a
+# non-draft PR here means the Driver reached that point and just lost the
+# line on the way out (e.g. #1582's markdown-mangled line). Staying silent
+# lets the launcher's own no-outcome adoption path (discover PR -> self-heal
+# merge gate -> merge) settle the run instead of this synthetic line
+# preempting it. A missing or still-draft PR is not that -- synthesize
+# status=blocked exactly as before.
 emit_outcome_backstop() {
   local note="driver exited without emitting an outcome"
   if [ -n "${_recovery_attempted:-}" ]; then
@@ -613,6 +623,15 @@ emit_outcome_backstop() {
     note="${note}; push failed: $(tail -1 "$push_log")"
   fi
   rm -f "$push_log"
+
+  local pr_json is_draft
+  pr_json="$(gh pr list --repo "$REPO_SLUG" --head "$BRANCH" --state open --json isDraft 2>/dev/null || true)"
+  is_draft="$(printf '%s' "$pr_json" | jq -r 'if length > 0 then (.[0].isDraft | tostring) else "" end' 2>/dev/null || true)"
+  if [ "$is_draft" = "false" ]; then
+    echo "==> open non-draft PR exists on ${BRANCH} — staying silent so the launcher's adoption path settles this run"
+    return
+  fi
+
   echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=blocked note=${note}"
 }
 
