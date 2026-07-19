@@ -181,8 +181,8 @@ const (
 // (#1501, the sidebar's analogue of the retired DrillInState).
 type SidebarState struct {
 	Number string
-	// Activity is the condensed, timestamped feed ActivityFeed derived from
-	// the Dispatch's most-recent pass log — the sidebar's default view.
+	// Activity is the condensed feed ActivityFeed derived from the
+	// Dispatch's most-recent pass log — the sidebar's default view.
 	Activity []ActivityLine
 	// TranscriptRendered and TranscriptRaw are DrillIn's own two forms of the
 	// same Dispatch's whole transcript, shown instead of Activity once
@@ -629,12 +629,12 @@ func sidebarLines(s *SidebarState) []string {
 }
 
 // formatActivityLine renders one ActivityLine as the sidebar's Activity feed
-// shows it: the pass log's on-disk mtime (the coarsest-but-real timestamp
-// ActivityFeed has to attach, since the raw stream-json carries no per-event
-// timestamp of its own — see ActivityFeed's doc comment) followed by the
-// emitted status text.
+// shows it: just the emitted status text, with no timestamp — the only clock
+// ActivityFeed has to attach is the pass log's on-disk mtime, which advances
+// to ~now on every refresh rather than reflecting when the record actually
+// happened, so a precise-looking HH:MM:SS prefix would be misleading (#1584).
 func formatActivityLine(a ActivityLine) string {
-	return a.Time.Format("15:04:05") + "  " + a.Text
+	return a.Text
 }
 
 // clampRebuildOutputOffset pulls m.RebuildOutputOffset into [0, maxOffset],

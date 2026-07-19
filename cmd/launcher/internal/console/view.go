@@ -9,8 +9,8 @@ import (
 )
 
 // sidebarWidth is the docked live-tail sidebar's fixed column width — wide
-// enough for a "HH:MM:SS  " timestamp prefix plus a realistic Activity
-// status line without wrapping in the common case (ADR 0030).
+// enough for a realistic Activity status line without wrapping in the
+// common case (ADR 0030).
 const sidebarWidth = 42
 
 // sidebarMinListWidth is the narrowest the list column can render at and
