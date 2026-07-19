@@ -117,6 +117,8 @@ func TestDispatchWave_ClaimsGatedByMaxParallel(t *testing.T) {
 // claimed. This is the acceptance-criteria scenario: MAX_PARALLEL=1, failing first
 // container, later issues only claimed after the slot frees.
 func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.T) {
+	const prURL = "https://github.com/owner/repo/pull/2"
+
 	c := baseConfig()
 	c.MaxParallel = 1
 	c.Label = "agent-trigger"
@@ -124,12 +126,23 @@ func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.
 	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	var count int32
 	cfc := &countingForge{Fake: fc, claimCount: &count}
 
 	fr := runner.NewFake()
 	fr.RunErrs = []error{boxErr, nil} // first slot: fail; second: succeed
+	// The succeeding box must still report an outcome — an empty log there
+	// would (correctly, since #1605) also demote to failedLabel, muddying
+	// this test's real target: semaphore release, not settle's missing-
+	// outcome handling. WriteToOutput has no per-call targeting, so this
+	// also lands in the failing box's log, but that box returns a non-nil
+	// Run error, which routes through classification instead of outcome
+	// parsing — so the injected line is inert there.
+	fr.WriteToOutput = []byte(fmt.Sprintf(
+		"SPINDRIFT_OUTCOME issue=2 landing=%s status=ready note=ok\n", prURL,
+	))
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)

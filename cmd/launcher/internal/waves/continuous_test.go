@@ -739,8 +739,12 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	if len(fr.RunCalls) != 1 {
 		t.Fatalf("RunCalls: got %d, want 1 (stale re-discovery of #1 must not double-dispatch)", len(fr.RunCalls))
 	}
-	if len(fc.TransitionStateCalls) != 1 {
-		t.Fatalf("TransitionStateCalls: got %d, want 1 (suppressed stale entry must not re-attempt the claim)", len(fc.TransitionStateCalls))
+	// Two transitions are expected from the single live dispatch: the claim
+	// (Dispatchable -> InProgress) and settle's demotion of the box's
+	// outcome-less, PR-less run (InProgress -> Failed, issue #1605). A third
+	// would mean the suppressed stale re-discovery re-attempted the claim.
+	if len(fc.TransitionStateCalls) != 2 {
+		t.Fatalf("TransitionStateCalls: got %d, want 2 (suppressed stale entry must not re-attempt the claim)", len(fc.TransitionStateCalls))
 	}
 	if !strings.Contains(out, "#1 already claimed this run") {
 		t.Fatalf("output missing suppressed-stale line for #1, got:\n%s", out)
