@@ -592,6 +592,18 @@ emit_outcome_backstop() {
     echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=none status=blocked note=${note}"
     return
   fi
+  # Nothing to preserve if BRANCH never advanced past the base -- pushing it
+  # anyway would publish an empty branch that looks like lost work (#1606).
+  # Fall back to "assume there is work" rather than let a resolution failure
+  # abort this function under `set -e` -- that would skip the always-emit
+  # outcome invariant (#593) entirely, worse than a needless push attempt.
+  local commit_count
+  commit_count="$(git rev-list --count "origin/${BASE_BRANCH:-}..${BRANCH}" 2>/dev/null)" || commit_count=1
+  if [ "$commit_count" -eq 0 ]; then
+    note="${note}; no work to preserve"
+    echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=blocked note=${note}"
+    return
+  fi
   local push_log
   push_log="$(mktemp)"
   if ! git push --force-with-lease origin "$BRANCH" 2>"$push_log"; then

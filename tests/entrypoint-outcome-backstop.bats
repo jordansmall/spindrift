@@ -23,6 +23,21 @@ setup() {
   git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
 
+# No commits landed on the branch (the Driver died before its first commit,
+# #1606) -- the backstop must not force-push a branch byte-identical to
+# main, and the note must say so rather than claim a push happened.
+@test "driver exits with no commits and no outcome line -> no push, note says no work to preserve" {
+  export FAKE_CLAUDE_NO_OUTCOME=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*no work to preserve' <<<"$output"
+  # No commits beyond main means nothing to push -- the branch must never
+  # reach the remote.
+  run git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7"
+  [ -z "$output" ]
+}
+
 # A driver that already printed its own outcome is passed through unchanged --
 # no second/synthetic line is appended.
 @test "driver exits with its own outcome line -> passed through, no synthetic line appended" {
@@ -57,6 +72,9 @@ EOF
   chmod +x "$shim/git"
   export PATH="$shim:$PATH"
 
+  # A commit must exist on the branch, or the new no-work skip (#1606) would
+  # short-circuit before ever reaching this shimmed push.
+  export FAKE_CLAUDE_COMMIT=1
   export FAKE_CLAUDE_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
