@@ -1016,6 +1016,74 @@ func flushAmbientWarnings(stderr io.Writer, warnings *bytes.Buffer) {
 	stderr.Write(warnings.Bytes())
 }
 
+// verbHandler is the uniform shape every entry in verbHandlers implements,
+// even though the underlying cmd* functions take different arguments: args
+// is args[1:] (the subcommand's own arguments, subcommand name stripped).
+type verbHandler func(args []string, stderr io.Writer) int
+
+// verbHandlers is the declared table of the seven real subcommands (issue
+// #1574), keyed by verb name, replacing what used to be an inline
+// if-args[0]-== chain in mainRun. It is the single source of truth for
+// "what subcommands actually exist" — a test enumerates its keys to prove
+// that set programmatically. The hidden __complete-issues shell-completion
+// verb is deliberately not in this table (mainRun dispatches it separately,
+// before the table lookup), since it isn't one of the documented verbs.
+var verbHandlers = map[string]verbHandler{
+	"build":  func(args []string, stderr io.Writer) int { return cmdBuild() },
+	"doctor": func(args []string, stderr io.Writer) int { return cmdDoctor() },
+	"console": func(args []string, stderr io.Writer) int {
+		lc, err := bootstrap(true, dispatchKindWork)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s\n", err)
+			return 1
+		}
+		return cmdConsole(lc, os.Stdin, os.Stdout)
+	},
+	"recover": func(args []string, stderr io.Writer) int {
+		if len(args) < 1 {
+			fmt.Fprintln(stderr, "usage: spindrift recover <issue-number>")
+			return 1
+		}
+		lc, err := bootstrap(true, dispatchKindWork)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s\n", err)
+			return 1
+		}
+		return cmdRecover(lc, args[0])
+	},
+	"preview": func(args []string, stderr io.Writer) int {
+		return cmdPreview(dispatchIssueArgs(args))
+	},
+	"dispatch": func(args []string, stderr io.Writer) int {
+		noBuild, dispatchArgs := dispatchNoBuildArgs(args)
+		forceYes, dispatchArgs := dispatchYesArgs(dispatchArgs)
+		nums := dispatchIssueArgs(dispatchArgs)
+		lc, err := bootstrap(!noBuild, dispatchKindWork)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s\n", err)
+			return 1
+		}
+		if len(nums) > 0 {
+			return cmdDispatchSelective(lc, nums, forceYes)
+		}
+		return cmdDispatch(lc)
+	},
+	"research": func(args []string, stderr io.Writer) int {
+		noBuild, researchArgs := dispatchNoBuildArgs(args)
+		forceYes, researchArgs := dispatchYesArgs(researchArgs)
+		nums := dispatchIssueArgs(researchArgs)
+		lc, err := bootstrap(!noBuild, dispatchKindResearch)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s\n", err)
+			return 1
+		}
+		if len(nums) > 0 {
+			return cmdDispatchSelective(lc, nums, forceYes)
+		}
+		return cmdDispatch(lc)
+	},
+}
+
 // mainRun parses argv and dispatches to the selected subcommand, returning
 // the process exit code. It contains no business logic of its own beyond
 // arg parsing and subcommand selection. stdout/stderr are injected so tests
@@ -1080,65 +1148,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		loadedDoc = doc
 	}
 	flushAmbientWarnings(stderr, &ambientWarnings)
-	if args[0] == "build" {
-		return cmdBuild()
-	}
-	if args[0] == "doctor" {
-		return cmdDoctor()
-	}
 	if args[0] == "__complete-issues" {
 		return cmdCompleteIssues()
 	}
-	if args[0] == "console" {
-		lc, err := bootstrap(true, dispatchKindWork)
-		if err != nil {
-			fmt.Fprintf(stderr, "%s\n", err)
-			return 1
-		}
-		return cmdConsole(lc, os.Stdin, os.Stdout)
-	}
-	if args[0] == "recover" {
-		if len(args) < 2 {
-			fmt.Fprintln(stderr, "usage: spindrift recover <issue-number>")
-			return 1
-		}
-		lc, err := bootstrap(true, dispatchKindWork)
-		if err != nil {
-			fmt.Fprintf(stderr, "%s\n", err)
-			return 1
-		}
-		return cmdRecover(lc, args[1])
-	}
-	if args[0] == "preview" {
-		return cmdPreview(dispatchIssueArgs(args[1:]))
-	}
-	if args[0] == "dispatch" {
-		noBuild, dispatchArgs := dispatchNoBuildArgs(args[1:])
-		forceYes, dispatchArgs := dispatchYesArgs(dispatchArgs)
-		nums := dispatchIssueArgs(dispatchArgs)
-		lc, err := bootstrap(!noBuild, dispatchKindWork)
-		if err != nil {
-			fmt.Fprintf(stderr, "%s\n", err)
-			return 1
-		}
-		if len(nums) > 0 {
-			return cmdDispatchSelective(lc, nums, forceYes)
-		}
-		return cmdDispatch(lc)
-	}
-	if args[0] == "research" {
-		noBuild, researchArgs := dispatchNoBuildArgs(args[1:])
-		forceYes, researchArgs := dispatchYesArgs(researchArgs)
-		nums := dispatchIssueArgs(researchArgs)
-		lc, err := bootstrap(!noBuild, dispatchKindResearch)
-		if err != nil {
-			fmt.Fprintf(stderr, "%s\n", err)
-			return 1
-		}
-		if len(nums) > 0 {
-			return cmdDispatchSelective(lc, nums, forceYes)
-		}
-		return cmdDispatch(lc)
+	if handler, ok := verbHandlers[args[0]]; ok {
+		return handler(args[1:], stderr)
 	}
 	// Unrecognized subcommand: print help rather than silently dispatching
 	// (issue #555).
