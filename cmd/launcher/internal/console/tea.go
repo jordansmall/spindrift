@@ -24,11 +24,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// defaultPollInterval is the background backlog poll's fixed cadence when a
-// Launcher doesn't override it (production always uses this) — slow enough
-// to never spend the rate-limit window the session's Agents share (#647 AC5).
-const defaultPollInterval = 90 * time.Second
-
 // fixedPaneScrollDelta is how many lines pgup/pgdown move the drill-in
 // transcript's scroll offset — j/k and the arrows move one line at a time
 // (issue #786). Fixed, unlike the body's own page jump (sectionPageSize),
@@ -45,7 +40,7 @@ type teaModel struct {
 	launch       *Launcher
 	pollInterval time.Duration
 	// heartbeats caches each running pick's last-parsed heartbeat line so
-	// syncQueue's per-Update refresh (line ~145) skips the ReadFile+reparse
+	// refreshPickDecorations' per-Update refresh skips the ReadFile+reparse
 	// when a pick's latest pass log is unchanged since the last call (issue
 	// #731) — a pointer so it survives Update's value-receiver copies of
 	// teaModel across the session's whole lifetime.
@@ -74,8 +69,8 @@ func newTeaModel(tracker forge.IssueTracker, pwd string, launch *Launcher) teaMo
 	m := NewModel()
 	m = Update(m, DogfoodNotice(pwd))
 	interval := defaultPollInterval
-	if launch != nil && launch.pollInterval > 0 {
-		interval = launch.pollInterval
+	if launch != nil {
+		interval = launch.PollInterval()
 	}
 	return teaModel{m: m, tracker: tracker, pwd: pwd, launch: launch, pollInterval: interval, heartbeats: NewHeartbeatCache(), sidebarActivity: NewSidebarActivityCache(), done: make(chan struct{})}
 }
@@ -98,8 +93,15 @@ type pollTickMsg struct{}
 
 // refreshSignalMsg is the tea layer's translation of Launcher.Refreshes()
 // firing — the session's own tracker write (a claim, a settle, a promotion)
-// asking for an out-of-band refresh (#647 AC4).
-type refreshSignalMsg struct{}
+// asking for an out-of-band refresh (#647 AC4). picks carries the queue
+// snapshot Launcher.signalRefresh recorded at the moment it fired
+// (TakePendingSnapshot), hasPicks distinguishing "nothing pending" from a
+// genuinely empty queue — the tea side lands it without ever pulling Queue
+// itself (issue #1542).
+type refreshSignalMsg struct {
+	picks    []Pick
+	hasPicks bool
+}
 
 // pickChordTimeout is how long "p" waits for a trailing "a" before resolving
 // to a single-issue pick — long enough that a deliberate two-key "pa" always
@@ -137,9 +139,23 @@ func gChordTick() tea.Cmd {
 func (t teaModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{refreshCmd(t.tracker), pollTick(t.pollInterval)}
 	if t.launch != nil {
-		cmds = append(cmds, waitRefreshSignal(t.launch, t.done), orphanDetectCmd(t.launch))
+		cmds = append(cmds, initialQueueSyncCmd(t.launch), waitRefreshSignal(t.launch, t.done), orphanDetectCmd(t.launch))
 	}
 	return tea.Batch(cmds...)
+}
+
+// initialQueueSyncCmd bootstraps Model.Picks from launch's queue once, at
+// startup — the only outside read of the private queue's full contents past
+// construction, through Launcher's own exported Snapshot accessor rather
+// than the queue directly (issue #1542). Every later transition reaches the
+// Model synchronously through Pick/Unpick/TerminateAsync's own return value
+// or asynchronously through a pushed refreshSignalMsg — there is no
+// per-message pull to keep Model.Picks caught up with a queue that started
+// non-empty otherwise.
+func initialQueueSyncCmd(launch *Launcher) tea.Cmd {
+	return func() tea.Msg {
+		return QueueSnapshotMsg{Picks: launch.Snapshot()}
+	}
 }
 
 // Update is the tea layer's whole adapter surface: it translates every
@@ -167,12 +183,17 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.m = Update(t.m, msg)
 	case OrphanAdoptedMsg:
 		t.m = Update(t.m, msg)
+	case QueueSnapshotMsg: // the startup bootstrap, or a launcher-pushed transition
+		t.m = Update(t.m, msg)
 	case pollTickMsg:
 		if t.launch != nil {
 			t.launch.tryLaunch(t.tracker, t.pwd)
 		}
 		cmd = tea.Batch(refreshCmd(t.tracker), pollTick(t.pollInterval))
 	case refreshSignalMsg:
+		if msg.hasPicks {
+			t.m = Update(t.m, QueueSnapshotMsg{Picks: msg.picks})
+		}
 		cmd = tea.Batch(refreshCmd(t.tracker), waitRefreshSignal(t.launch, t.done))
 	case pickChordTimeoutMsg:
 		if t.m.PendingPick {
@@ -185,7 +206,7 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	t.m = syncQueue(t.m, t.launch, t.pwd, t.heartbeats, t.sidebarActivity)
+	t.m = refreshPickDecorations(t.m, t.launch, t.pwd, t.heartbeats, t.sidebarActivity)
 	t.m = syncStale(t.m, t.launch)
 	if t.m.Quitting {
 		select {
@@ -543,19 +564,23 @@ func hasTranscript(state PickState) bool {
 // ActivityFeed's contract for the combined message rather than surfacing a
 // spurious failure for a Dispatch that simply hasn't written anything yet.
 // This runs only on open (Enter) and loads the Transcript once, not live —
-// only the Activity feed advances on its own afterward, via syncQueue's
-// per-Msg SidebarActivityMsg refresh (issue #1502). Reopening (close then
-// Enter again) still re-runs this whole load, picking up any Transcript
-// growth the live Activity feed alone wouldn't (issue #719, inherited).
-// orphan marks the drill-in as an orphan row's: the empty-Activity/no-logs
-// case then also carries a graceful Notice ("no local logs for this
-// dispatch") rather than staying silently blank, since an orphan-flagged
-// Dispatch with nothing on disk yet is a standing state the operator opened
-// deliberately, not the split-second claimed-but-not-yet-launched race a
-// session-launched Pick's own Enter can hit (issue #1621).
+// only the Activity feed advances on its own afterward, via
+// refreshPickDecorations' per-Msg SidebarActivityMsg refresh (issue #1502).
+// Reopening (close then Enter again) still re-runs this whole load, picking
+// up any Transcript growth the live Activity feed alone wouldn't (issue
+// #719, inherited). orphan marks the drill-in as an orphan row's: the
+// empty-Activity/no-logs case then also carries a graceful Notice ("no
+// local logs for this dispatch") rather than staying silently blank, since
+// an orphan-flagged Dispatch with nothing on disk yet is a standing state
+// the operator opened deliberately, not the split-second
+// claimed-but-not-yet-launched race a session-launched Pick's own Enter can
+// hit (issue #1621).
 func openSidebarCmd(launch *Launcher, pwd, number string, orphan bool) tea.Cmd {
 	return func() tea.Msg {
-		drv := driverOf(launch)
+		var drv driver.Driver
+		if launch != nil {
+			drv = launch.Driver()
+		}
 		if drv == nil {
 			return SidebarLoadedMsg{Number: number, Err: fmt.Errorf("no Driver available for this session")}
 		}
@@ -596,8 +621,13 @@ func (t teaModel) handleTerminateConfirmKey(msg tea.KeyMsg) teaModel {
 		if t.launch != nil {
 			// Terminate already logs a reap failure to stderr itself
 			// (launcher.go); writing it again here would both duplicate the
-			// line and risk smearing the alt-screen render mid-frame.
-			t.launch.TerminateAsync(t.tracker, num)
+			// line and risk smearing the alt-screen render mid-frame. The
+			// actual PickTerminated transition lands later, once Terminate's
+			// background goroutine reaches it, through a pushed
+			// refreshSignalMsg — this snapshot is the queue as it stands at
+			// initiation (issue #1542).
+			picks := t.launch.TerminateAsync(t.tracker, num)
+			t.m = Update(t.m, QueueSnapshotMsg{Picks: picks})
 		}
 		t.m = Update(t.m, TerminateConfirmedMsg{Number: num})
 	case "q", "ctrl+c":
@@ -685,18 +715,13 @@ func (t teaModel) terminateTarget() string {
 // dissolved, terminated, failed) never blocks a fresh pick — that's the
 // legitimate re-pick/adopt path ADR 0024 describes.
 //
-// When a launch is live, this reads t.launch.Queue.Snapshot() directly —
-// mirroring isLive's own live read a few lines up — rather than Model.Picks,
-// which is only refreshed once per Update via syncQueue and so can still show
-// a row's pre-drain state for the rest of that same keypress's handling
-// (issue #837). A nil launch has no live Queue to read, so it falls back to
-// Model.Picks, matching the pre-#785 no-launch Console path.
+// Reads Model.Picks alone, never the launcher's own queue — Pick/Unpick/
+// TerminateAsync all land their snapshot on Model.Picks synchronously, in
+// the same Update cycle that fired the keypress, so a stale pre-drain read
+// (issue #837, the old rationale for a live-Queue bypass here) is now
+// structurally impossible (issue #1542).
 func (t teaModel) alreadyActive(num string) bool {
-	picks := t.m.Picks
-	if t.launch != nil {
-		picks = t.launch.Queue.Snapshot()
-	}
-	for _, p := range picks {
+	for _, p := range t.m.Picks {
 		if p.Number != num {
 			continue
 		}
@@ -711,14 +736,20 @@ func (t teaModel) alreadyActive(num string) bool {
 // pickAllReady picks every issue currently Dispatchable on the tracker in
 // one bulk gesture (#647 AC3) — reached via the "pa" leader chord (issue
 // #785 AC1). An issue already active from an earlier pick is skipped rather
-// than re-landed (see alreadyActive).
+// than re-landed (see alreadyActive). Each landed pick's snapshot is applied
+// to Model.Picks immediately, not batched to the end of the loop, so a later
+// iteration's alreadyActive check still sees every pick this same bulk
+// gesture already landed (issue #1542).
 func (t teaModel) pickAllReady() teaModel {
 	for _, msg := range PickAllReady(t.tracker) {
 		if queued, ok := msg.(PickQueuedMsg); ok && t.alreadyActive(queued.Number) {
 			continue
 		}
-		t.m = Update(t.m, msg)
-		t.landPick(msg)
+		if t.launch != nil {
+			t.m = Update(t.m, QueueSnapshotMsg{Picks: t.launch.Land(msg)})
+		} else {
+			t.m = Update(t.m, msg)
+		}
 	}
 	if t.launch != nil {
 		t.launch.tryLaunch(t.tracker, t.pwd)
@@ -728,18 +759,20 @@ func (t teaModel) pickAllReady() teaModel {
 
 // unpickHighlighted retracts the cursor's highlighted issue's queued pick, if
 // any — a pure session-queue edit with no tracker interaction (ADR 0023):
-// Update's own removePick already refuses to drop anything past PickQueued/
-// PickHeld, so this is safe to send even when the highlighted issue never
-// queued or already launched.
+// Launcher.Unpick already refuses to drop anything past PickQueued/PickHeld,
+// so this is safe to send even when the highlighted issue never queued or
+// already launched. A nil Launcher edits Model.Picks directly, matching the
+// pre-#785 no-launch Console path.
 func (t teaModel) unpickHighlighted() teaModel {
 	num := t.highlightedNumber()
 	if num == "" {
 		return t
 	}
-	t.m = Update(t.m, UnpickMsg{Number: num})
 	if t.launch != nil {
-		t.launch.Queue.Remove(num)
+		t.m = Update(t.m, QueueSnapshotMsg{Picks: t.launch.Unpick(num)})
+		return t
 	}
+	t.m = Update(t.m, UnpickMsg{Number: num})
 	return t
 }
 
@@ -754,14 +787,15 @@ func (t teaModel) quitOrConfirmMsg() Msg {
 	return QuitMsg{}
 }
 
-// pickHighlighted promotes the cursor's highlighted issue through PickIssue
-// and lands the result on both the pure Model and the Launcher's live Queue
-// — the keypress translation of ADR 0023's Pick-is-the-launch-button rule. A
-// nil Launcher still promotes and lands the pick on Model.Picks (matching
-// the pre-#785 no-launch Console) but never queues on a live Queue or
-// launches, since there is nothing to launch it. A no-op outside
-// SectionBacklog — Cursor indexes a work Section's Picks there, not the
-// backlog, and Backlog is ADR 0030's sole pick source (issue #1500).
+// pickHighlighted promotes the cursor's highlighted issue through
+// Launcher.Pick and applies the fresh snapshot it hands back in the same
+// Update cycle — the keypress translation of ADR 0023's
+// Pick-is-the-launch-button rule. A nil Launcher promotes through PickIssue
+// directly onto Model.Picks (matching the pre-#785 no-launch Console) but
+// never queues on a live queue or launches, since there is nothing to
+// launch it. A no-op outside SectionBacklog — Cursor indexes a work
+// Section's Picks there, not the backlog, and Backlog is ADR 0030's sole
+// pick source (issue #1500).
 func (t teaModel) pickHighlighted() teaModel {
 	if t.m.ActiveSection != SectionBacklog {
 		return t
@@ -774,41 +808,16 @@ func (t teaModel) pickHighlighted() teaModel {
 	if t.alreadyActive(iss.Number) {
 		return t
 	}
-	msg := PickIssue(t.tracker, iss.Number, iss.Title, KindWork)
-	t.m = Update(t.m, msg)
-	t.landPick(msg)
-	if _, ok := msg.(PickQueuedMsg); ok && t.launch != nil {
+	if t.launch == nil {
+		t.m = Update(t.m, PickIssue(t.tracker, iss.Number, iss.Title, KindWork))
+		return t
+	}
+	msg, picks := t.launch.Pick(t.tracker, iss.Number, iss.Title, KindWork)
+	t.m = Update(t.m, QueueSnapshotMsg{Picks: picks})
+	if _, ok := msg.(PickQueuedMsg); ok {
 		t.launch.tryLaunch(t.tracker, t.pwd)
 	}
 	return t
-}
-
-// landPick mirrors a Pick adapter's result onto the Launcher's live Queue —
-// not just the pure Model — so the row survives the very next per-render
-// Queue resync (syncQueue's QueueSnapshotMsg replaces Model.Picks wholesale
-// from launch.Queue.Snapshot()). A failed promotion lands its dissolved row
-// on the Queue exactly as a queued one does; otherwise the operator's only
-// feedback that a pick raced, closed, or got relabeled would vanish on the
-// very next frame. A nil Launcher (matching the pre-#785 no-launch Console)
-// leaves Model.Picks as the pick's only record.
-func (t teaModel) landPick(msg Msg) {
-	if t.launch == nil {
-		return
-	}
-	switch msg := msg.(type) {
-	case PickQueuedMsg:
-		t.launch.Queue.Add(Pick{Number: msg.Number, Title: msg.Title, Kind: msg.Kind, State: PickQueued})
-	case PickDissolvedMsg:
-		t.launch.Queue.Add(Pick{Number: msg.Number, Title: msg.Title, State: PickDissolved, Reason: msg.Reason})
-	default:
-		return
-	}
-	// A pick's promotion attempt is always a tracker write, win or lose —
-	// the same rationale drain's own discover() closure documents — so it
-	// triggers the same out-of-band refresh every other session write does
-	// (#647 AC4), not just the eventual one a successful pick's own drain
-	// happens to also fire.
-	t.launch.signalRefresh()
 }
 
 // handleFilterKey routes one keypress while FilterEditing: Enter applies
@@ -845,31 +854,34 @@ func pollTick(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return pollTickMsg{} })
 }
 
-// syncQueue installs launch's live Queue state onto m, so every render —
-// not just the one right after a pick — reflects claim/run/settle/dissolve
-// transitions that happen entirely on the background Queue. Every running
-// row's Heartbeat is also refreshed from its on-disk log on the way in
-// (#647 AC2) — a plain local read, unlike the backlog refresh, so it is not
-// gated behind the write/poll-triggered cadence the tracker's rate limit
-// forces on Refresh. heartbeats caches that refresh per pick number, so a
-// call whose latest pass log is unchanged since last time skips the
-// ReadFile+reparse entirely (issue #731) — syncQueue runs on every tea.Msg,
-// not just a render tick, so most calls see the same on-disk bytes as last
-// time. The open sidebar's own Activity feed is refreshed the same way,
-// scoped to whichever Dispatch it has open and only while that Dispatch is
-// still running — ADR 0030's live-tail, piggybacking this same per-Msg sync
-// rather than a dedicated timer, and bounded to one Dispatch's I/O no matter
-// how many others are running (issue #1502). It also installs the session's
-// current live parallelism cap and live count (issue #653), read straight
-// off the Launcher's Limiter — no Msg carries a resize, so this per-render
-// pull is the only path that keeps them current. A nil launch leaves m
-// untouched.
-func syncQueue(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache, sidebarActivity *SidebarActivityCache) Model {
+// refreshPickDecorations recomputes every Model.Picks row's live Heartbeat
+// and Age display fields in place, so every render — not just the one right
+// after a pick — shows an up-to-date elapsed time and, for a running row,
+// its latest on-disk heartbeat line (#647 AC2). Unlike the syncQueue pull
+// this replaces, it never touches the launcher's queue: Model.Picks is
+// already the queue's authoritative mirror — landed synchronously by
+// Pick/Unpick/TerminateAsync's own snapshot return, or pushed by a
+// background transition via refreshSignalMsg — so this only decorates the
+// rows already there (issue #1542). heartbeats caches the on-disk read per
+// pick number, so a call whose latest pass log is unchanged since last time
+// skips the ReadFile+reparse entirely (issue #731) — this runs on every
+// tea.Msg, not just a render tick, so most calls see the same on-disk bytes
+// as last time. The open sidebar's own Activity feed is refreshed the same
+// way, scoped to whichever Dispatch it has open and only while that
+// Dispatch is still running — ADR 0030's live-tail, piggybacking this same
+// per-Msg sync rather than a dedicated timer, and bounded to one Dispatch's
+// I/O no matter how many others are running (issue #1502). It also installs
+// the session's current live parallelism cap and live count (issue #653),
+// read straight off the Launcher's Limiter — no Msg carries a resize, so
+// this per-render pull is the only path that keeps them current. A nil
+// launch leaves m untouched.
+func refreshPickDecorations(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache, sidebarActivity *SidebarActivityCache) Model {
 	if launch == nil {
 		return m
 	}
-	picks := launch.Queue.Snapshot()
-	drv := driverOf(launch)
+	drv := launch.Driver()
+	picks := make([]Pick, len(m.Picks))
+	copy(picks, m.Picks)
 	for i := range picks {
 		if drv != nil && picks[i].State == PickRunning {
 			picks[i].Heartbeat = heartbeats.RunningHeartbeat(drv, pwd, picks[i].Number)
@@ -911,9 +923,9 @@ func syncQueue(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache
 }
 
 // isRunningNumber reports whether picks carries number in PickRunning state
-// — syncQueue's gate on refreshing the open sidebar's Activity feed only
-// while its Dispatch is actually live, since a Settled/Terminated/Failed
-// Dispatch's logs never change again (issue #1502).
+// — refreshPickDecorations' gate on refreshing the open sidebar's Activity
+// feed only while its Dispatch is actually live, since a Settled/Terminated/
+// Failed Dispatch's logs never change again (issue #1502).
 func isRunningNumber(picks []Pick, number string) bool {
 	for _, p := range picks {
 		if p.Number == number {
@@ -925,24 +937,13 @@ func isRunningNumber(picks []Pick, number string) bool {
 
 // syncStale installs launch's live image-freshness/rebuild state onto m, so
 // every render reflects a stale verdict a background drain saw, or a
-// rebuild's progress/outcome, exactly as syncQueue does for the picks queue
-// (issue #652). A nil launch leaves m untouched.
+// rebuild's progress/outcome, exactly as refreshPickDecorations does for the
+// picks queue (issue #652). A nil launch leaves m untouched.
 func syncStale(m Model, launch *Launcher) Model {
 	if launch == nil {
 		return m
 	}
 	return Update(m, StaleStatusMsg{RebuildStatus: launch.StaleStatus()})
-}
-
-// driverOf returns the Driver a Launcher's Factory was constructed with, or
-// nil when no Driver is available (a launch-less session, or a Launcher
-// built without a Factory) — syncQueue's heartbeat lookup skips the read
-// rather than panicking on a nil Driver.
-func driverOf(launch *Launcher) driver.Driver {
-	if launch == nil || launch.Factory == nil {
-		return nil
-	}
-	return launch.Factory.Driver()
 }
 
 // orphanDetectCmd reports every issue OrphanedIssues finds running with no
@@ -1013,7 +1014,8 @@ func waitRefreshSignal(launch *Launcher, done <-chan struct{}) tea.Cmd {
 	return func() tea.Msg {
 		select {
 		case <-ch:
-			return refreshSignalMsg{}
+			picks, ok := launch.TakePendingSnapshot()
+			return refreshSignalMsg{picks: picks, hasPicks: ok}
 		case <-done:
 			return nil
 		}
