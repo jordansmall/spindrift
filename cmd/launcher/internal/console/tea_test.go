@@ -2168,7 +2168,7 @@ func TestTea_RebuildKey_RunsRebuildFnAndClearsStale(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if stale, _, _, _, _, _ := launch.StaleStatus(); !stale {
+		if status := launch.StaleStatus(); !status.Stale {
 			break
 		}
 		if time.Now().After(deadline) {
