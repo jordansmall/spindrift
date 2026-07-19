@@ -41,17 +41,17 @@ func TestLauncher_TryLaunch_StaleFreshnessChecker_HoldsNewLaunches(t *testing.T)
 		CodeForge: f,
 		Factory:   factory,
 		Settle:    settle.NewFake(),
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		Fresh:     func() (bool, bool, string) { return true, false, "rebuild needed" },
 	}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	launch.tryLaunch(f, dir)
 	launch.Wait()
 
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls = %+v, want none while stale", fr.RunCalls)
 	}
-	snap := launch.Queue.Snapshot()
+	snap := launch.queue.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickQueued {
 		t.Errorf("queue pick = %+v, want it still PickQueued", snap)
 	}
@@ -101,17 +101,17 @@ func TestLauncher_TryLaunch_NotApplicableFreshnessChecker_DoesNotHoldLaunches(t 
 		CodeForge: f,
 		Factory:   factory,
 		Settle:    settle.NewFake(),
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		Fresh:     func() (bool, bool, string) { return false, false, "not applicable (not a git repository)" },
 	}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	launch.tryLaunch(f, dir)
 	launch.Wait()
 
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "42" {
 		t.Errorf("RunCalls = %+v, want one Box run for #42 despite Applicable=false", fr.RunCalls)
 	}
-	snap := launch.Queue.Snapshot()
+	snap := launch.queue.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickSettled {
 		t.Errorf("queue pick = %+v, want it to run and settle, not hold", snap)
 	}
@@ -161,7 +161,7 @@ func TestLauncher_TryLaunch_StaleDuringRun_RunningBoxFinishesUnaffected(t *testi
 		CodeForge: f,
 		Factory:   factory,
 		Settle:    settle.NewFake(),
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		Fresh: func() (bool, bool, string) {
 			if stale.Load() {
 				return true, false, "rebuild needed"
@@ -169,16 +169,16 @@ func TestLauncher_TryLaunch_StaleDuringRun_RunningBoxFinishesUnaffected(t *testi
 			return true, true, ""
 		},
 	}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	launch.tryLaunch(f, dir)
 
-	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickRunning})
+	waitForPickStates(t, launch.queue, map[string]PickState{"42": PickRunning})
 	stale.Store(true)
 
 	close(release)
 	launch.Wait()
 
-	snap := launch.Queue.Snapshot()
+	snap := launch.queue.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickSettled {
 		t.Errorf("queue pick = %+v, want the running Box to settle normally despite staleness", snap)
 	}
@@ -213,7 +213,7 @@ func TestLauncher_Rebuild_Success_ClearsStaleAndResumesHeldLaunch(t *testing.T) 
 		CodeForge: f,
 		Factory:   factory,
 		Settle:    settle.NewFake(),
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		Fresh: func() (bool, bool, string) {
 			if stale.Load() {
 				return true, false, "rebuild needed"
@@ -225,7 +225,7 @@ func TestLauncher_Rebuild_Success_ClearsStaleAndResumesHeldLaunch(t *testing.T) 
 			return "", "", nil
 		},
 	}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	launch.tryLaunch(f, dir)
 	launch.Wait()
 
@@ -236,7 +236,7 @@ func TestLauncher_Rebuild_Success_ClearsStaleAndResumesHeldLaunch(t *testing.T) 
 	launch.Rebuild(f, dir)
 	launch.Wait()
 
-	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickSettled})
+	waitForPickStates(t, launch.queue, map[string]PickState{"42": PickSettled})
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "42" {
 		t.Errorf("RunCalls = %+v, want one Box run for #42 after rebuild", fr.RunCalls)
 	}
@@ -274,7 +274,7 @@ func TestLauncher_Rebuild_Success_PropagatesCapturedOutput(t *testing.T) {
 		CodeForge: f,
 		Factory:   factory,
 		Settle:    settle.NewFake(),
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		Fresh:     func() (bool, bool, string) { return true, false, "rebuild needed" },
 		RebuildFn: func() (string, string, error) { return wantOutput, "", nil },
 	}
@@ -316,7 +316,7 @@ func TestLauncher_Rebuild_Success_PropagatesBranchSwitchNotice(t *testing.T) {
 		CodeForge: f,
 		Factory:   factory,
 		Settle:    settle.NewFake(),
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		Fresh:     func() (bool, bool, string) { return true, false, "rebuild needed" },
 		RebuildFn: func() (string, string, error) { return "", wantNotice, nil },
 	}
@@ -356,11 +356,11 @@ func TestLauncher_Rebuild_Failure_SurfacesErrorAndKeepsHeld(t *testing.T) {
 		CodeForge: f,
 		Factory:   factory,
 		Settle:    settle.NewFake(),
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		Fresh:     func() (bool, bool, string) { return true, false, "rebuild needed" },
 		RebuildFn: func() (string, string, error) { return "", "", errBoom },
 	}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	launch.tryLaunch(f, dir)
 	launch.Wait()
 
@@ -391,7 +391,7 @@ func TestLauncher_Rebuild_Failure_SurfacesErrorAndKeepsHeld(t *testing.T) {
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls = %+v, want none after a failed rebuild", fr.RunCalls)
 	}
-	snap := launch.Queue.Snapshot()
+	snap := launch.queue.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickQueued {
 		t.Errorf("queue pick = %+v, want it still held at PickQueued", snap)
 	}
@@ -444,7 +444,7 @@ func TestLauncher_Rebuild_WhileOtherSlotAlreadyLatchedStale_ResumesBothPicks(t *
 		CodeForge:   f,
 		Factory:     factory,
 		Settle:      settle.NewFake(),
-		Queue:       NewQueue(),
+		queue:       NewQueue(),
 		MaxParallel: 2,
 		Fresh: func() (bool, bool, string) {
 			if forcedFresh.Load() {
@@ -460,11 +460,11 @@ func TestLauncher_Rebuild_WhileOtherSlotAlreadyLatchedStale_ResumesBothPicks(t *
 			return "", "", nil
 		},
 	}
-	launch.Queue.Add(Pick{Number: "42", Title: "first", State: PickQueued})
-	launch.Queue.Add(Pick{Number: "43", Title: "second", State: PickQueued})
+	launch.queue.Add(Pick{Number: "42", Title: "first", State: PickQueued})
+	launch.queue.Add(Pick{Number: "43", Title: "second", State: PickQueued})
 	launch.tryLaunch(f, dir)
 
-	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickRunning, "43": PickQueued})
+	waitForPickStates(t, launch.queue, map[string]PickState{"42": PickRunning, "43": PickQueued})
 
 	launch.Rebuild(f, dir)
 	deadline := time.Now().Add(2 * time.Second)
@@ -481,7 +481,7 @@ func TestLauncher_Rebuild_WhileOtherSlotAlreadyLatchedStale_ResumesBothPicks(t *
 	close(release42)
 	launch.Wait()
 
-	waitForPickStates(t, launch.Queue, map[string]PickState{"42": PickSettled, "43": PickSettled})
+	waitForPickStates(t, launch.queue, map[string]PickState{"42": PickSettled, "43": PickSettled})
 }
 
 // TestLauncher_Rebuild_MarksRebuildingWhileInFlight verifies StaleStatus
@@ -490,7 +490,7 @@ func TestLauncher_Rebuild_WhileOtherSlotAlreadyLatchedStale_ResumesBothPicks(t *
 func TestLauncher_Rebuild_MarksRebuildingWhileInFlight(t *testing.T) {
 	release := make(chan struct{})
 	launch := &Launcher{
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		Fresh:     func() (bool, bool, string) { return true, false, "rebuild needed" },
 		RebuildFn: func() (string, string, error) { <-release; return "", "", nil },
 	}
@@ -525,7 +525,7 @@ func TestLauncher_Rebuild_Retry_ClearsPriorErrorImmediately(t *testing.T) {
 	release := make(chan struct{})
 	var calls atomic.Int32
 	launch := &Launcher{
-		Queue: NewQueue(),
+		queue: NewQueue(),
 		Fresh: func() (bool, bool, string) { return true, false, "rebuild needed" },
 		RebuildFn: func() (string, string, error) {
 			if calls.Add(1) == 1 {

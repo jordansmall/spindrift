@@ -533,9 +533,9 @@ func TestTea_ScrollKeys_PageDownClampsAtBacklogEnd(t *testing.T) {
 // focus to ActiveSection by issue #1500).
 func TestTea_ScrollKeys_PageThroughRunningSection(t *testing.T) {
 	f := forge.NewFake()
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
 	for i := 0; i < 50; i++ {
-		launch.Queue.Add(Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued})
+		launch.queue.Add(Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued})
 	}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 10))
@@ -558,8 +558,8 @@ func TestTea_SectionKeys_HLAndDigitsSwitchSections(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
 	launch := newTestLauncher(t, f)
-	launch.Queue.Add(Pick{Number: "10", Title: "pick one", State: PickQueued})
-	launch.Queue.Add(Pick{Number: "11", Title: "pick two", State: PickQueued})
+	launch.queue.Add(Pick{Number: "10", Title: "pick one", State: PickQueued})
+	launch.queue.Add(Pick{Number: "11", Title: "pick two", State: PickQueued})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "first")
@@ -607,8 +607,8 @@ func TestTea_EnterKey_OnRunningSection_NoOpOnQueuedRow(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -634,8 +634,8 @@ func TestTea_EnterKey_OnRunningSection_ShowsNoticeOnQueuedRow(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -657,8 +657,8 @@ func TestTea_EnterKey_OnRunningSection_NoticeClearsOnNextKey(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -726,7 +726,7 @@ func sidebarOpen(t *testing.T) *teatest.TestModel {
 		t.Fatal(err)
 	}
 	launch := newTestLauncher(t, f)
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -759,7 +759,7 @@ func TestTea_PollTick_AdvancesOpenSidebarActivityFeed(t *testing.T) {
 	}
 	launch := newTestLauncher(t, f)
 	launch.pollInterval = 5 * time.Millisecond
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -854,8 +854,8 @@ func TestTea_Sidebar_RetainsPositionAcrossDispatchSwitch(t *testing.T) {
 		t.Fatal(err)
 	}
 	launch := newTestLauncher(t, f)
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
-	launch.Queue.Add(Pick{Number: "43", Title: "second thing", State: PickRunning})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch.queue.Add(Pick{Number: "43", Title: "second thing", State: PickRunning})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -915,7 +915,7 @@ func TestTea_PollTick_DoesNotRefreshSettledSidebar(t *testing.T) {
 	}
 	launch := newTestLauncher(t, f)
 	launch.pollInterval = 5 * time.Millisecond
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickSettled})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickSettled})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -1007,8 +1007,8 @@ func TestTea_FocusKeys_MoveBetweenListAndDockedSidebar(t *testing.T) {
 		t.Fatal(err)
 	}
 	launch := newTestLauncher(t, f)
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
-	launch.Queue.Add(Pick{Number: "43", Title: "second thing", State: PickRunning})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch.queue.Add(Pick{Number: "43", Title: "second thing", State: PickRunning})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -1067,7 +1067,7 @@ func TestTea_SidebarKey_ClosesFromDockedListFocus(t *testing.T) {
 				t.Fatal(err)
 			}
 			launch := newTestLauncher(t, f)
-			launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+			launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 			tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
 			waitForOutput(t, tm, "fix the thing")
@@ -1151,7 +1151,7 @@ func TestTea_EnterKey_OnStaticRow_OpensSidebar(t *testing.T) {
 				t.Fatal(err)
 			}
 			launch := newTestLauncher(t, f)
-			launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: tt.state})
+			launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: tt.state})
 
 			tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
 			waitForOutput(t, tm, "fix the thing")
@@ -1270,7 +1270,7 @@ func TestTea_SidebarToggleKey_CyclesActivityTranscriptRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 	launch := newTestLauncher(t, f)
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -1325,7 +1325,7 @@ func TestTea_SidebarScrollKeys_PageThroughContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	launch := newTestLauncher(t, f)
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -1396,7 +1396,7 @@ func TestTea_SidebarKey_ClaimedNotYetLaunched_ShowsEmptyActivityNotError(t *test
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	launch := newTestLauncher(t, f)
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	// No log file written for #42 -- the race this test targets.
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
@@ -1591,7 +1591,7 @@ func TestTea_HelpKey_OpensOverlay(t *testing.T) {
 func TestTea_BackgroundPoll_RefreshesWithoutOperatorInput(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
-	launch := &Launcher{CodeForge: f, Queue: NewQueue(), pollInterval: 5 * time.Millisecond}
+	launch := &Launcher{CodeForge: f, queue: NewQueue(), pollInterval: 5 * time.Millisecond}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "first")
@@ -1610,7 +1610,7 @@ func TestTea_BackgroundPoll_RefreshesWithoutOperatorInput(t *testing.T) {
 func TestTea_LaunchRefreshSignal_RefreshesWithoutOperatorInput(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
-	launch := &Launcher{CodeForge: f, Queue: NewQueue(), pollInterval: time.Hour}
+	launch := &Launcher{CodeForge: f, queue: NewQueue(), pollInterval: time.Hour}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "first")
@@ -1657,7 +1657,7 @@ func waitGoroutine(t *testing.T, name string, want bool) {
 func TestTea_QuitKey_CancelsWaitRefreshSignalGoroutine(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
-	launch := &Launcher{CodeForge: f, Queue: NewQueue(), pollInterval: time.Hour}
+	launch := &Launcher{CodeForge: f, queue: NewQueue(), pollInterval: time.Hour}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "first")
@@ -1673,7 +1673,7 @@ func TestTea_QuitKey_CancelsWaitRefreshSignalGoroutine(t *testing.T) {
 // output through the same per-render sync QueueSnapshotMsg uses.
 func TestTea_WithLauncher_RendersCapAndLive(t *testing.T) {
 	f := forge.NewFake()
-	launch := &Launcher{CodeForge: f, Queue: NewQueue(), MaxParallel: 3}
+	launch := &Launcher{CodeForge: f, queue: NewQueue(), MaxParallel: 3}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "running 0/3")
@@ -1691,11 +1691,11 @@ func TestTea_WithLauncher_RendersLiveQueueState(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent", "priority-p1", "bug"}})
 
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
 	// Simulate a state transition that happened entirely on the background
 	// Queue (a real launch's claim/run/settle) — isolating the render-sync
 	// behavior from how a pick enters the queue.
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickDissolved, Reason: "issue is closed"})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickDissolved, Reason: "issue is closed"})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -1714,12 +1714,12 @@ func TestTea_WithLauncher_RendersHeldPickWithBlockedByBadge(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent", "priority-p1"}})
 
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
 	// A held pick's badge is set entirely by Queue.Discover's blocker check
 	// (queue.go setHeld); landing the state directly isolates the render-sync
 	// behavior under test from blocker-edge mechanics already covered at
 	// queue_test.go.
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickHeld, BlockedBy: "#41 (native)"})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickHeld, BlockedBy: "#41 (native)"})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -1739,8 +1739,8 @@ func TestTea_WithLauncher_RendersBlockerDespiteLongTitle(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the launcher retry backoff for the dispatch workflow", State: forge.IssueOpen})
 
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the launcher retry backoff for the dispatch workflow", State: PickHeld, BlockedBy: "#41 (native)"})
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the launcher retry backoff for the dispatch workflow", State: PickHeld, BlockedBy: "#41 (native)"})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the launcher") // prefix survives the Backlog title column's clip
@@ -1794,7 +1794,7 @@ func TestTea_StaleDetectedWhileIdle_SignalsRefreshWithoutPoll(t *testing.T) {
 // the session's own tracker write — fires a backlog refresh on its own, so
 // an issue added to the tracker while a Box is running appears on a render
 // once that Box settles, without the operator ever pressing "r" (#647 AC4,
-// issue #784). The pick itself is landed directly on launch.Queue (the
+// issue #784). The pick itself is landed directly on launch.queue (the
 // retired "p" keystroke has no tea-layer replacement yet) so this isolates
 // the async-refresh behavior under test.
 func TestTea_SettleTriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
@@ -1820,17 +1820,17 @@ func TestTea_SettleTriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
 		t.Fatalf("dispatch.NewFactory: %v", err)
 	}
 	t.Cleanup(factory.Cleanup)
-	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue(), pollInterval: time.Hour}
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: NewQueue(), pollInterval: time.Hour}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
 
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	launch.tryLaunch(f, dir)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		snap := launch.Queue.Snapshot()
+		snap := launch.queue.Snapshot()
 		if len(snap) == 1 && snap[0].State == PickRunning {
 			break
 		}
@@ -1906,7 +1906,7 @@ func TestTea_EnterKey_OnBacklogSection_FailedPromotion_ShowsDissolvedRow(t *test
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 	f.TransitionStateErr = errBoom
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -2107,44 +2107,57 @@ func TestTea_PickKey_AlreadyPicked_NoDuplicateRow(t *testing.T) {
 	}
 }
 
-// TestTea_AlreadyActive_ReadsLiveQueueSnapshot verifies alreadyActive
-// consults the launcher's live Queue, not the last-synced Model.Picks, when
-// a launch is present — a background drain can settle a row on Queue
-// between two Update calls, and until the next syncQueue catches up,
-// Model.Picks still shows the old non-terminal state (issue #837).
-func TestTea_AlreadyActive_ReadsLiveQueueSnapshot(t *testing.T) {
+// TestTea_AlreadyActive_ReadsModelPicksOnly verifies alreadyActive consults
+// only Model.Picks, never the launcher's own private queue — Pick/Unpick/
+// TerminateAsync all land their snapshot on Model.Picks synchronously, in
+// the same Update cycle that fired the keypress, so the live-queue bypass
+// #837 introduced is no longer necessary (issue #1542).
+func TestTea_AlreadyActive_ReadsModelPicksOnly(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
 	tm := newTeaModel(f, t.TempDir(), launch)
 
-	// Stale Model.Picks still shows #42 as running (as of the last sync)...
+	// Model.Picks shows #42 running...
 	tm.m.Picks = append(tm.m.Picks, Pick{Number: "42", Title: "fix the thing", State: PickRunning})
-	// ...but the live Queue has since settled it in the background, with no
-	// intervening syncQueue to refresh Model.Picks.
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickSettled})
+	// ...while the private queue, not yet synced onto Model.Picks, shows it
+	// settled — alreadyActive must not see this.
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickSettled})
 
-	if tm.alreadyActive("42") {
-		t.Errorf("alreadyActive(%q) = true, want false — live Queue shows settled, only the stale Model.Picks snapshot shows running", "42")
+	if !tm.alreadyActive("42") {
+		t.Errorf("alreadyActive(%q) = false, want true — Model.Picks shows running; the private queue must not override it", "42")
 	}
 
-	// Positive path: the live Queue shows an active row while Model.Picks
-	// is empty/stale — alreadyActive must read the live Queue.Snapshot(),
-	// not just fall through to Model.Picks, for each non-terminal state.
+	// Positive path: Model.Picks alone shows an active row for each
+	// non-terminal state.
 	for _, state := range []PickState{PickQueued, PickHeld, PickClaiming, PickRunning} {
 		t.Run(state.String(), func(t *testing.T) {
 			f := forge.NewFake()
-			launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+			launch := &Launcher{CodeForge: f, queue: NewQueue()}
 			tm := newTeaModel(f, t.TempDir(), launch)
 
-			launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: state})
+			tm.m.Picks = append(tm.m.Picks, Pick{Number: "42", Title: "fix the thing", State: state})
 
 			if !tm.alreadyActive("42") {
-				t.Errorf("alreadyActive(%q) = false, want true — live Queue shows %v", "42", state)
+				t.Errorf("alreadyActive(%q) = false, want true — Model.Picks shows %v", "42", state)
 			}
 		})
 	}
+
+	t.Run("live_queue_alone_is_not_enough", func(t *testing.T) {
+		f := forge.NewFake()
+		launch := &Launcher{CodeForge: f, queue: NewQueue()}
+		tm := newTeaModel(f, t.TempDir(), launch)
+
+		// The private queue shows #42 running, but Model.Picks was never
+		// synced from it — alreadyActive must not reach past Model.Picks.
+		launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+		if tm.alreadyActive("42") {
+			t.Errorf("alreadyActive(%q) = true, want false — Model.Picks is empty; the private queue must not be consulted", "42")
+		}
+	})
 }
 
 // TestTea_PickKey_FailedPromotion_SurvivesQueueResync verifies a raced/
@@ -2155,7 +2168,7 @@ func TestTea_PickKey_FailedPromotion_SurvivesQueueResync(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 	f.TransitionStateErr = errBoom
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -2193,7 +2206,7 @@ func TestTea_PickKey_FailedPromotion_SurvivesQueueResync(t *testing.T) {
 func TestTea_TerminateKey_NotLive_NeverArmsConfirm(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -2263,7 +2276,7 @@ func TestTea_PickKey_FailedPromotion_StillTriggersAutoRefresh(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 	f.TransitionStateErr = errBoom
-	launch := &Launcher{CodeForge: f, Queue: NewQueue(), pollInterval: time.Hour}
+	launch := &Launcher{CodeForge: f, queue: NewQueue(), pollInterval: time.Hour}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -2282,8 +2295,8 @@ func TestTea_PickKey_FailedPromotion_StillTriggersAutoRefresh(t *testing.T) {
 func TestTea_UnpickKey_RemovesQueuedHighlighted(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -2340,7 +2353,7 @@ func TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
 	launch := newTestLauncher(t, f)
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	// No tryLaunch call yet — no drain is active to observe Resize's Grown
 	// signal.
 
@@ -2357,7 +2370,7 @@ func TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain(t *testing.T) {
 	// under a stopwatch (issue #1327) — no teatest, no wall-clock timeout.
 	launch.Wait()
 
-	snap := launch.Queue.Snapshot()
+	snap := launch.queue.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickSettled {
 		t.Errorf("Queue.Snapshot() = %+v, want #42 at PickSettled (fallback tryLaunch never ran)", snap)
 	}
@@ -2367,7 +2380,7 @@ func TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain(t *testing.T) {
 // parallelism cap immediately (ADR 0023, issue #785).
 func TestTea_ResizeKeys_RaiseAndLowerLiveCap(t *testing.T) {
 	f := forge.NewFake()
-	launch := &Launcher{CodeForge: f, Queue: NewQueue(), MaxParallel: 3}
+	launch := &Launcher{CodeForge: f, queue: NewQueue(), MaxParallel: 3}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "running 0/3")
@@ -2392,7 +2405,7 @@ func TestTea_RebuildKey_NotStale_NeverRunsRebuildFn(t *testing.T) {
 	rebuilt := make(chan struct{}, 1)
 	launch := &Launcher{
 		CodeForge: f,
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		RebuildFn: func() (string, string, error) { rebuilt <- struct{}{}; return "", "", nil },
 	}
 
@@ -2423,7 +2436,7 @@ func TestTea_RebuildKey_RunsRebuildFnAndClearsStale(t *testing.T) {
 	stale.Store(true)
 	launch := &Launcher{
 		CodeForge: f,
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		Fresh: func() (bool, bool, string) {
 			if stale.Load() {
 				return true, false, "rebuild needed"
@@ -2542,7 +2555,7 @@ func TestTea_TerminateKey_ConfirmThenCapitalY_Confirms(t *testing.T) {
 func TestTea_TerminateKey_InRunningSection_TargetsHighlighted(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
 	fc.SetIssue(forge.Issue{Number: "43", Title: "also running", Labels: []string{"agent-in-progress"}})
-	launch.Queue.Add(Pick{Number: "43", Title: "also running", State: PickRunning})
+	launch.queue.Add(Pick{Number: "43", Title: "also running", State: PickRunning})
 
 	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "also running")
@@ -2594,7 +2607,7 @@ func TestTea_TerminateKey_ConfirmThenOther_Declines(t *testing.T) {
 	if len(fr.KillCalls) != 0 {
 		t.Errorf("KillCalls = %v, want none after declining", fr.KillCalls)
 	}
-	snap := launch.Queue.Snapshot()
+	snap := launch.queue.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickRunning {
 		t.Errorf("queue pick = %+v, want still PickRunning after declining", snap)
 	}
@@ -2679,7 +2692,7 @@ func TestTea_TerminateKey_ConfirmThenQuit_Stay_KeepsRunning(t *testing.T) {
 	if len(fr.KillCalls) != 0 {
 		t.Errorf("KillCalls = %v, want none after staying", fr.KillCalls)
 	}
-	snap := launch.Queue.Snapshot()
+	snap := launch.queue.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickRunning {
 		t.Errorf("queue pick = %+v, want still PickRunning after staying", snap)
 	}
@@ -2725,7 +2738,7 @@ func TestTea_TerminateKey_ConfirmThenYes_RespondsWhileTrackerCommentBlocks(t *te
 		}
 		time.Sleep(time.Millisecond)
 	}
-	snap := launch.Queue.Snapshot()
+	snap := launch.queue.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickRunning {
 		t.Fatalf("queue pick = %+v, want still PickRunning while Comment is blocked", snap)
 	}
@@ -2788,7 +2801,7 @@ func newAlphaBetaFake() *forge.Fake {
 // never reach freshnessChecker at all.
 func queueStalePick(t *testing.T, launch *Launcher, f forge.IssueTracker) {
 	t.Helper()
-	launch.Queue.Add(Pick{Number: "1", Title: "placeholder", State: PickQueued})
+	launch.queue.Add(Pick{Number: "1", Title: "placeholder", State: PickQueued})
 	launch.tryLaunch(f, t.TempDir())
 	launch.Wait()
 }
@@ -2819,7 +2832,7 @@ func newTestLauncher(t *testing.T, cf forge.CodeForge) *Launcher {
 		t.Fatalf("dispatch.NewFactory: %v", err)
 	}
 	t.Cleanup(factory.Cleanup)
-	launch := &Launcher{CodeForge: cf, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	launch := &Launcher{CodeForge: cf, Factory: factory, Settle: settle.NewFake(), queue: NewQueue()}
 	// Cleanup runs LIFO, so this drains any in-flight background dispatch
 	// before factory.Cleanup releases its resources — an un-joined drain
 	// goroutine otherwise keeps running (and printing) after the test that
@@ -2856,9 +2869,15 @@ func TestTea_Update_ReusesHeartbeatCacheAcrossCalls(t *testing.T) {
 	}
 
 	launch := newTestLauncher(t, f)
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	tm := newTeaModel(f, dir, launch)
+	// Model.Picks is the sole source refreshPickDecorations decorates —
+	// unlike the old per-Update syncQueue pull, it is never repopulated
+	// from the launcher's private queue except through Init's one-time
+	// bootstrap or a pushed transition, neither of which this direct
+	// tm.Update call triggers (issue #1542).
+	tm.m.Picks = append(tm.m.Picks, Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 	model, _ := tm.Update(struct{}{})
 	tm = model.(teaModel)
 	first1 := heartbeatFor(t, tm.m, "42")
@@ -2955,7 +2974,7 @@ func TestTea_QuitKey_Stay_DeclinesAndKeepsRunning(t *testing.T) {
 	if len(fr.KillCalls) != 0 {
 		t.Errorf("KillCalls = %v, want none after staying", fr.KillCalls)
 	}
-	snap := launch.Queue.Snapshot()
+	snap := launch.queue.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickRunning {
 		t.Errorf("queue pick = %+v, want still PickRunning after staying", snap)
 	}
@@ -2967,7 +2986,7 @@ func TestTea_QuitKey_Stay_DeclinesAndKeepsRunning(t *testing.T) {
 func TestTea_QuitKey_NoLiveDispatch_ExitsImmediately(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
-	launch := &Launcher{CodeForge: f, Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
@@ -3023,7 +3042,7 @@ func TestTea_Init_DetectsOrphanedIssuesWithoutAdopting(t *testing.T) {
 	launch := &Launcher{
 		CodeForge: f,
 		Factory:   factory,
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		RecoverFn: func(num string) error {
 			recovered <- num
 			return nil
@@ -3088,7 +3107,7 @@ func TestTea_EnterOnOrphanRow_OpensSidebarReadOnly(t *testing.T) {
 		CodeForge: f,
 		Factory:   factory,
 		Settle:    settle.NewFake(),
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		RecoverFn: func(num string) error {
 			recovered <- num
 			return nil
@@ -3154,7 +3173,7 @@ func TestTea_OrphanRow_ShowsLiveHeartbeat(t *testing.T) {
 	}
 	t.Cleanup(factory.Cleanup)
 
-	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: NewQueue()}
 	launch.pollInterval = 5 * time.Millisecond
 	t.Cleanup(launch.Wait)
 
@@ -3193,7 +3212,7 @@ func TestTea_OrphanAdopted_ClearsOrphanHeartbeats(t *testing.T) {
 	}
 	t.Cleanup(factory.Cleanup)
 
-	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: NewQueue()}
 	t.Cleanup(launch.Wait)
 
 	tm := newTeaModel(f, dir, launch)
@@ -3239,7 +3258,7 @@ func TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice(t *testing.T) {
 	}
 	t.Cleanup(factory.Cleanup)
 
-	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: NewQueue()}
 	t.Cleanup(launch.Wait)
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
@@ -3289,7 +3308,7 @@ func TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive(t *testing.T)
 	}
 	t.Cleanup(factory.Cleanup)
 
-	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: NewQueue()}
 	launch.pollInterval = 5 * time.Millisecond
 	t.Cleanup(launch.Wait)
 
@@ -3348,7 +3367,7 @@ func TestTea_ReopenOrphanSidebar_PicksUpTranscriptGrowth(t *testing.T) {
 	}
 	t.Cleanup(factory.Cleanup)
 
-	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: NewQueue()}
 	t.Cleanup(launch.Wait)
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
@@ -3406,7 +3425,7 @@ func TestTea_PollTick_AdvancesOpenOrphanSidebarActivityFeed(t *testing.T) {
 	}
 	t.Cleanup(factory.Cleanup)
 
-	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: NewQueue()}
 	launch.pollInterval = 5 * time.Millisecond
 	t.Cleanup(launch.Wait)
 
@@ -3516,7 +3535,7 @@ func TestTea_AdoptOrphanKey_NoOpenPR_SurfacesReasonWithNoAdoption(t *testing.T) 
 	launch := &Launcher{
 		CodeForge: f,
 		Factory:   factory,
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		RecoverFn: func(string) error { return errors.New("issue 42: no open PR") },
 	}
 
@@ -3557,7 +3576,7 @@ func TestTea_AdoptOrphanKey_DraftPR_SurfacesReasonWithNoAdoption(t *testing.T) {
 	launch := &Launcher{
 		CodeForge: f,
 		Factory:   factory,
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		RecoverFn: func(string) error { return errors.New("issue 42: draft PR") },
 	}
 
@@ -3600,7 +3619,7 @@ func TestTea_AdoptOrphanKey_Success_ClearsFlagPreventingRepeatAdopt(t *testing.T
 	launch := &Launcher{
 		CodeForge: f,
 		Factory:   factory,
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		RecoverFn: func(string) error {
 			atomic.AddInt32(&calls, 1)
 			return nil
@@ -3670,7 +3689,7 @@ func TestTea_AdoptOrphanKey_SecondPressWhileInFlight_NeverFiresTwice(t *testing.
 	launch := &Launcher{
 		CodeForge: f,
 		Factory:   factory,
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		RecoverFn: func(string) error {
 			atomic.AddInt32(&calls, 1)
 			entered <- struct{}{}
@@ -3733,7 +3752,7 @@ func TestTea_AdoptOrphanKey_NonOrphanRow_NoAdopt(t *testing.T) {
 	launch := &Launcher{
 		CodeForge: f,
 		Factory:   factory,
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		RecoverFn: func(num string) error {
 			recovered <- num
 			return nil
@@ -3783,7 +3802,7 @@ func TestTea_AdoptOrphanKey_OutsideBacklogSection_NoAdopt(t *testing.T) {
 	launch := &Launcher{
 		CodeForge: f,
 		Factory:   factory,
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		RecoverFn: func(num string) error {
 			recovered <- num
 			return nil
@@ -3833,7 +3852,7 @@ func TestTea_Init_OrphanedIssuesErr_NeverWarnsAtStartup(t *testing.T) {
 	launch := &Launcher{
 		CodeForge: f,
 		Factory:   factory,
-		Queue:     NewQueue(),
+		queue:     NewQueue(),
 		RecoverFn: func(string) error { return errors.New("adopt boom") },
 	}
 
@@ -3915,8 +3934,8 @@ func TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := forge.NewFake()
 			f.SetIssue(forge.Issue{Number: "1", Title: tt.backlogTitle, State: forge.IssueOpen})
-			launch := &Launcher{CodeForge: f, Queue: NewQueue()}
-			launch.Queue.Add(Pick{Number: "2", Title: tt.queueTitle, State: PickQueued})
+			launch := &Launcher{CodeForge: f, queue: NewQueue()}
+			launch.queue.Add(Pick{Number: "2", Title: tt.queueTitle, State: PickQueued})
 
 			tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 			waitForOutput(t, tm, "#1")
