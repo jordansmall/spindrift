@@ -610,19 +610,21 @@ emit_outcome_backstop() {
   # Fall back to "assume there is work" rather than let a resolution failure
   # abort this function under `set -e` -- that would skip the always-emit
   # outcome invariant (#593) entirely, worse than a needless push attempt.
+  # Either way the PR check below still runs: a non-draft PR is a real,
+  # mergeable result regardless of whether *this* Box's own local branch
+  # carries the commits that produced it.
   local commit_count
   commit_count="$(git rev-list --count "origin/${BASE_BRANCH:-}..${BRANCH}" 2>/dev/null)" || commit_count=1
   if [ "$commit_count" -eq 0 ]; then
     note="${note}; no work to preserve"
-    echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=blocked note=${note}"
-    return
+  else
+    local push_log
+    push_log="$(mktemp)"
+    if ! git push --force-with-lease origin "$BRANCH" 2>"$push_log"; then
+      note="${note}; push failed: $(tail -1 "$push_log")"
+    fi
+    rm -f "$push_log"
   fi
-  local push_log
-  push_log="$(mktemp)"
-  if ! git push --force-with-lease origin "$BRANCH" 2>"$push_log"; then
-    note="${note}; push failed: $(tail -1 "$push_log")"
-  fi
-  rm -f "$push_log"
 
   local pr_json is_draft
   pr_json="$(gh pr list --repo "$REPO_SLUG" --head "$BRANCH" --state open --json isDraft 2>/dev/null || true)"
