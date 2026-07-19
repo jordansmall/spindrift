@@ -291,6 +291,15 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		// Already on the list — nothing to move away from. Present as an
 		// explicit case (rather than falling through to the default no-op)
 		// so the h/l pair reads as one symmetric gesture at the call site.
+	case "x", "esc":
+		// Mirrors handleSidebarKey's close case (line ~392): a docked sidebar
+		// with focus moved back to the list is still open and still needs a
+		// single dismissal key, not a re-focus-then-close two-step (issue
+		// #1582). Fullscreen/zoomed sidebars never reach here — the guard at
+		// the top of handleKey already routes them to handleSidebarKey.
+		if t.m.Sidebar != nil {
+			t.m = Update(t.m, SidebarCloseMsg{})
+		}
 	case "r":
 		return t, refreshCmd(t.tracker)
 	case "q", "ctrl+c":
