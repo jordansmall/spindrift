@@ -184,9 +184,14 @@ gate): skip OPEN A PULL REQUEST and WATCH CI below entirely.
 # OPEN A PULL REQUEST
 
 1. `git push --force-with-lease -u origin ${BRANCH}`
-2. `gh pr create --base ${BASE_BRANCH} --head ${BRANCH} --title "<conventional title>" --body "<summary>"`
+2. `gh pr create --draft --base ${BASE_BRANCH} --head ${BRANCH} --title "<conventional title>" --body "<summary>"`
 3. Body MUST contain `Closes #${ISSUE_NUMBER}`. Summarize what changed and flag
    anything a reviewer should know.
+
+The PR opens as a **draft**. CI still runs on it, but the draft bit is the
+readiness signal the entrypoint backstop and launcher trust as a mechanical
+"done" — it flips to ready only in OUTCOME below, immediately before the
+`status=ready` line.
 
 # WATCH CI
 
@@ -226,9 +231,14 @@ the rebase-merge, and the complete-label swap. Stop once CI has registered.
 (`CODE_FORGE=github` only — `CODE_FORGE=git` already printed its outcome line
 and stopped under LAND THE CHANGE above.)
 
-Once CI has registered, print exactly one line as your final output —
-raw plain text, not wrapped in backticks, a code fence, or any other
-markdown formatting:
+Once CI has registered, flip the PR out of draft:
+
+```
+gh pr ready <pr-url>
+```
+
+Then print exactly one line as your final output — raw plain text, not
+wrapped in backticks, a code fence, or any other markdown formatting:
 
 SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=ready note=<short reason>
 
@@ -237,7 +247,7 @@ background task. The launcher parses this one line to learn your PR; if missing,
 the PR is never merged and the run is wasted. Grammar is validated by
 `cmd/launcher/internal/outcome` (`Parse`, `Line`, `LastInLog`).
 
-`status=ready` = branch pushed, PR open, CI started.
+`status=ready` = branch pushed, PR open and out of draft, CI started.
 Do NOT run `gh issue edit ... --add-label ${COMPLETE_LABEL}` or `gh pr merge`.
 
 # IF BLOCKED
@@ -266,7 +276,11 @@ git diff origin/${BASE_BRANCH} -- '.github/workflows/'
 Then:
 
 1. Push what you have (or note if even that is impossible).
-2. Open the PR as a draft (`--draft`).
+2. Check whether a PR already exists on this branch
+   (`gh pr view --json isDraft,url`). If it does, convert it back to draft
+   (`gh pr ready <pr-url> --undo`) — a non-draft PR reads as a done,
+   mergeable result, and this run isn't one. If no PR exists yet, open one
+   as a draft instead (`--draft`).
 3. Leave the issue in-progress — do NOT close it.
 4. Comment on the issue with what's done and what remains:
    `gh issue comment ${ISSUE_NUMBER} --body "<what's done, what remains>"`.
