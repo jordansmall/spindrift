@@ -107,6 +107,32 @@ func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 	}
 }
 
+// TestSettleAdopted_StaleSuccessNeverMerges verifies the issue #1652 fix
+// directly at the SettleAdopted seam: an adopted PR whose rollup reads
+// SUCCESS on every poll, with no PENDING/EXPECTED/NONE ever proving this
+// run's own checks registered, must never merge — the gate cannot tell it
+// apart from a rollup inherited from an earlier attempt, so it times out and
+// demotes the issue instead of trusting the inherited green.
+func TestSettleAdopted_StaleSuccessNeverMerges(t *testing.T) {
+	c := baseConfig()
+	c.MergePollTimeout = 3
+	c.MaxFixAttempts = 0
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	s := New(c, fc, fc)
+
+	s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR)
+
+	if fc.Merged != "" {
+		t.Errorf("expected no merge on an unregistered SUCCESS-only rollup; fc.Merged=%q", fc.Merged)
+	}
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must be demoted to agent-failed; labels=%v", iss.Labels)
+	}
+}
+
 // TestSettleAdopted_PushOnlyForgeSkipsVerify verifies that SettleAdopted's
 // landingMerged case guards the verifyMerged call against a push-only
 // forge's nil s.pr (issue #697), mirroring gate.go's "ready" case guard

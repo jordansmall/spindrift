@@ -53,11 +53,29 @@ var errLandingNeverGreen = errors.New("settle: force-pushed head never went gree
 // agent-assisted conflict resolution -- both subject to dispatch's own
 // in-session transient retry (issue #441).
 func (s *Settle) selfHeal(d dispatch.Dispatcher, num string, gen uint64, pr string) landingResult {
+	return s.selfHealGate(d, num, gen, pr, false)
+}
+
+// selfHealAdopted is selfHeal's counterpart for a PR discovered independently
+// of this process's own push (SettleAdopted's resume/recovery path — a Box
+// exited with no outcome line). Unlike selfHeal, it cannot assume the PR's
+// current head SHA is one this process just pushed, so its first CI gate
+// poll requires evidence this run's checks registered before trusting a
+// SUCCESS rollup (issue #1652).
+func (s *Settle) selfHealAdopted(d dispatch.Dispatcher, num string, gen uint64, pr string) landingResult {
+	return s.selfHealGate(d, num, gen, pr, true)
+}
+
+// selfHealGate is selfHeal and selfHealAdopted's shared implementation;
+// requireRegistration guards only the loop's first attempt — a fix-pass
+// retry always follows a push d.Fix just made in this process, so it is
+// never ambiguous the way the initial adopted poll can be.
+func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr string, requireRegistration bool) landingResult {
 	if s.pr == nil {
 		return s.landPushOnly(num, gen, pr)
 	}
 	for attempt := 0; ; attempt++ {
-		switch s.gateToGreen(num, gen, pr) {
+		switch s.gateToGreen(num, gen, pr, requireRegistration && attempt == 0) {
 		case gateAbandoned:
 			return landingAbandoned
 		case gateGreen:
@@ -162,13 +180,23 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 // #757), since gateToGreen also re-runs mid-landing (rewaitAfterForcePush)
 // where a swap would be premature.
 //
+// requireRegistration guards against trusting a rollup this run never
+// watched register (issue #1652): an unchanged head SHA can carry a
+// terminal SUCCESS inherited from an earlier attempt, so when set, a
+// first-poll SUCCESS is not accepted until a non-terminal state
+// (PENDING/EXPECTED/NONE) has been observed first — proof this run's own
+// checks are alive on the head commit. A caller that just performed the
+// push itself (the normal ready path, and any post-force-push rewait) has
+// no such ambiguity and passes false, preserving the original trust-on-
+// first-poll behavior.
+//
 // Returns:
 //   - gateGreen     — CI confirmed green.
 //   - gateRedRetry  — CI red (FAILURE or ERROR); caller decides whether to
 //     dispatch a fix box.
 //   - gateTerminal  — non-retriable outcome (timeout, API error). Caller
 //     must swap to failedLabel.
-func (s *Settle) gateToGreen(num string, gen uint64, pr string) gateResult {
+func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistration bool) gateResult {
 	pollIv := s.cfg.MergePollInterval
 	deadline := s.cfg.MergePollTimeout
 	// actualIv is used for elapsed tracking; floor to 1 so we don't
@@ -179,6 +207,7 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string) gateResult {
 		actualIv = 1
 	}
 	elapsed := 0
+	registered := !requireRegistration
 
 	for {
 		if s.terminated(num, gen) {
@@ -189,9 +218,17 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string) gateResult {
 			fmt.Printf("    #%s  landing=%s  status=check-state-error  !! %v\n", num, pr, stateErr)
 			return gateTerminal
 		}
+		if state != forge.StateSuccess && state != forge.StateFailure && state != forge.StateError {
+			registered = true
+		}
 
 		switch state {
 		case forge.StateSuccess:
+			if !registered {
+				// No evidence yet that this run's own checks registered —
+				// wait rather than trust a possibly-inherited rollup.
+				break
+			}
 			// Pause before confirming — back-to-back GraphQL calls return the
 			// same snapshot, so a late-registered job would not yet appear.
 			time.Sleep(time.Duration(pollIv) * time.Second)
@@ -484,7 +521,7 @@ func (s *Settle) resolveConflict(num, pr string, d dispatch.Dispatcher) error {
 // re-entered for it.
 func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
 	fmt.Printf("    #%s  landing=%s  status=post-force-push-wait\n", num, pr)
-	return rewaitGateResultErr(s.gateToGreen(num, gen, pr), pr)
+	return rewaitGateResultErr(s.gateToGreen(num, gen, pr, false), pr)
 }
 
 // rewaitGateResultErr maps a gateToGreen outcome to rewaitAfterForcePush's

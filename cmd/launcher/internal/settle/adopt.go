@@ -8,14 +8,17 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// SettleAdopted runs the merge gate (selfHeal → verifyMerged) on an
+// SettleAdopted runs the merge gate (selfHealAdopted → verifyMerged) on an
 // already-discovered open non-draft PR for num. Prints "status=adopted"
 // before running the gate. Called by the reconcile/recover entry points and
-// by Settle itself when a Box exits with no outcome line.
+// by Settle itself when a Box exits with no outcome line. Unlike Settle's own
+// "ready" path, this PR's head SHA was not necessarily pushed by this
+// process, so the gate cannot trust an immediately-green rollup without first
+// seeing evidence it registered (issue #1652) — see selfHealAdopted.
 func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
 	branch := s.cf.AgentBranch(num)
 	fmt.Printf("    #%s  landing=%s  status=adopted  note=no outcome line; PR discovered on %s\n", num, prURL, branch)
-	switch s.selfHeal(d, num, gen, prURL) {
+	switch s.selfHealAdopted(d, num, gen, prURL) {
 	case landingMerged:
 		// verifyMerged reads PR state, which a push-only Code Forge does not
 		// have (mirrors gate.go's "ready" case guard: silent skip, no

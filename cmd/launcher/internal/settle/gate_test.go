@@ -36,11 +36,12 @@ var testDispatchLabels = forge.DispatchLabels{
 // settles (issue #757) — and returns gateRedRetry on a genuine CI failure.
 func TestGateToGreen(t *testing.T) {
 	cases := []struct {
-		name           string
-		timeout        int
-		checkStates    []forge.RollupState
-		checkStateErrs []error
-		want           gateResult
+		name                string
+		timeout             int
+		checkStates         []forge.RollupState
+		checkStateErrs      []error
+		requireRegistration bool
+		want                gateResult
 	}{
 		{
 			name:        "SUCCESS on first poll reaches green without a swap",
@@ -105,6 +106,28 @@ func TestGateToGreen(t *testing.T) {
 			checkStates:    []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
 			want:           gateTerminal,
 		},
+		{
+			// issue #1652: an unchanged head SHA can carry a terminal SUCCESS
+			// rollup inherited from an earlier run that this process never
+			// watched register. requireRegistration must not trust that
+			// inherited SUCCESS until it has observed a non-terminal state
+			// (here, PENDING) proving this run's own checks are alive.
+			name:                "requireRegistration waits out a stale SUCCESS until a fresh registration appears",
+			timeout:             100,
+			requireRegistration: true,
+			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StatePending, forge.StateSuccess, forge.StateSuccess},
+			want:                gateGreen,
+		},
+		{
+			// Without ever observing a non-terminal state, requireRegistration
+			// never trusts the stale SUCCESS and times out rather than merging
+			// on unconfirmed evidence.
+			name:                "requireRegistration never trusts a SUCCESS that never re-registers",
+			timeout:             3,
+			requireRegistration: true,
+			checkStates:         []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess},
+			want:                gateTerminal,
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -121,7 +144,7 @@ func TestGateToGreen(t *testing.T) {
 			}
 			s := New(c, fc, fc)
 
-			got := s.gateToGreen("1", 0, testPR)
+			got := s.gateToGreen("1", 0, testPR, tc.requireRegistration)
 
 			if got != tc.want {
 				t.Errorf("gateToGreen = %v, want %v", got, tc.want)
