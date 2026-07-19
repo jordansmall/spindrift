@@ -607,7 +607,8 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
              ├─ run PREFETCH (optional cache warm-up)
              └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
                 └─ implement → check → commit → push → self-review (reviewer subagent)
-                   → open PR → wait for CI to register
+                   → open PR as a draft → wait for CI to register
+                   → flip PR out of draft
                    → print  SPINDRIFT_OUTCOME issue=N landing=<url> status=ready
         │
         └─ back on the host, the launcher runs the MERGE GATE for that issue:

@@ -593,6 +593,13 @@ run_driver_in_env() {
 # merge gate -> merge) settle the run instead of this synthetic line
 # preempting it. A missing or still-draft PR is not that -- synthesize
 # status=blocked exactly as before.
+#
+# This applies just as much to a fix pass: its PR is already non-draft
+# (flipped by the run it resumes), so a fix pass that exits 0 with no
+# outcome line now also lets adoption settle it, where it previously always
+# got the synthetic blocked line. That is a deliberate widening, not a gap --
+# the launcher's merge gate re-checks CI itself before merging, so an
+# actually-still-red fix pass is caught there, not here.
 emit_outcome_backstop() {
   local note="driver exited without emitting an outcome"
   if [ -n "${_recovery_attempted:-}" ]; then
