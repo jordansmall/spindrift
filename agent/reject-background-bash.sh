@@ -125,7 +125,25 @@ command_backgrounds() {
   # session-outlives-the-turn hazard this hook exists to catch, so it's
   # rejected on its own even without an accompanying &.
   local nohup_re='(^|[[:space:];|(])nohup([[:space:]]|$)'
-  [[ "$masked" =~ $nohup_re ]]
+  [[ "$masked" =~ $nohup_re ]] && return 0
+
+  # setsid detaches the process into a new session, surviving the calling
+  # shell exiting the same way nohup does -- rejected on its own.
+  local setsid_re='(^|[[:space:];|(])setsid([[:space:]]|$)'
+  [[ "$masked" =~ $setsid_re ]] && return 0
+
+  # coproc spawns a bash coprocess in a backgrounded job (named or
+  # unnamed: "coproc NAME { ...; }" and "coproc { ...; }" are both valid),
+  # the same fail-open shell-level detachment as & and nohup above.
+  local coproc_re='(^|[[:space:];|(])coproc([[:space:]]|$)'
+  [[ "$masked" =~ $coproc_re ]] && return 0
+
+  # setsid and coproc are two concrete detachment mechanisms this hook now
+  # closes (#1635); other tools that decouple a process from the calling
+  # session -- disown, at, systemd-run, screen -d, tmux new-session -d, etc.
+  # -- are a deliberately out-of-scope judgment call left for future work
+  # (#1620's original deferral list).
+  return 1
 }
 
 input="$(cat)"
@@ -157,7 +175,7 @@ fi
 command="$(jq -r '.tool_input.command // empty' 2>/dev/null <<<"$input")"
 
 if [ -n "$command" ] && command_backgrounds "$command"; then
-  deny "Bash commands that self-background (e.g. a trailing & or a mid-command &) are rejected in headless Box runs -- rerun the command in the foreground and block on it until it completes."
+  deny "Bash commands that self-background or detach (e.g. a trailing & or a mid-command &, nohup, setsid, or coproc) are rejected in headless Box runs -- rerun the command in the foreground and block on it until it completes."
 fi
 
 exit 0
