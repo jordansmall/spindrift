@@ -44,6 +44,110 @@ func TestView_DogfoodNotice_ShownWhenLiveSilentOtherwise(t *testing.T) {
 	}
 }
 
+// TestView_Backlog_TruncatedLabelsShowPlusN verifies a backlog row whose
+// labels don't all fit the label column shows as many labels as fit followed
+// by a "+N" count for the remainder, rather than the ellipsis-clipped joined
+// string title/other cells use (issue #1631).
+func TestView_Backlog_TruncatedLabelsShowPlusN(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Title: "x", Labels: []string{"alpha", "beta", "gamma", "delta", "epsilon"}},
+	}})
+
+	out := View(m)
+	if !strings.Contains(out, "alpha, beta, gamma, delta, +1") {
+		t.Errorf("View() = %q, want the fitted labels followed by \"+1\" for the one label that didn't fit", out)
+	}
+	if strings.Contains(out, "epsilon") {
+		t.Errorf("View() = %q, want \"epsilon\" omitted (it's the one label counted by +1), not spelled out", out)
+	}
+}
+
+// TestView_Backlog_FittingLabelsShowNoPlusN verifies a backlog row whose
+// labels all fit the label column renders the plain joined list with no
+// "+N" suffix (issue #1631).
+func TestView_Backlog_FittingLabelsShowNoPlusN(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Title: "x", Labels: []string{"ready-for-agent", "bug"}},
+	}})
+
+	out := View(m)
+	if !strings.Contains(out, "[ready-for-agent, bug]") {
+		t.Errorf("View() = %q, want the label cell rendered as \"[ready-for-agent, bug]\" with no +N suffix", out)
+	}
+	if strings.Contains(out, "+") {
+		t.Errorf("View() = %q, want no \"+N\" suffix when every label fits", out)
+	}
+}
+
+// TestView_Backlog_LabelCellNeverOverflowsWidth verifies the "+N" suffix
+// itself counts against the label column's width budget — even on a
+// terminal too narrow to fit any label plus its count, the cell is clipped
+// rather than left to overflow (issue #1631).
+func TestView_Backlog_LabelCellNeverOverflowsWidth(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Title: "x", Labels: []string{"ready-for-agent", "agent-in-progress", "agent-complete"}},
+	}})
+
+	out := View(m)
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, ">") {
+			open := strings.LastIndex(line, "[")
+			end := strings.LastIndex(line, "]")
+			if open == -1 || end == -1 || end < open {
+				t.Fatalf("backlog row = %q, want a bracketed label cell", line)
+			}
+			if w := runewidth.StringWidth(line[open+1 : end]); w > 16 {
+				t.Errorf("backlog row = %q, label cell width %d, want at most the 16-column budget this terminal width leaves", line, w)
+			}
+		}
+	}
+}
+
+// TestView_Backlog_OrphanLabelCountsTowardPlusN verifies the synthetic
+// "orphan" label (issue #1619) is just another entry in the label list for
+// truncation purposes — it counts toward both the shown labels and the "+N"
+// remainder like any tracker-supplied label (issue #1631).
+func TestView_Backlog_OrphanLabelCountsTowardPlusN(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Title: "x", Labels: []string{"ready-for-agent", "bug"}},
+	}})
+	m = Update(m, OrphanDetectedMsg{Numbers: []string{"1"}})
+
+	out := View(m)
+	if !strings.Contains(out, "[orphan, +2]") {
+		t.Errorf("View() = %q, want the orphan label shown and the other two labels counted by +2", out)
+	}
+}
+
+// TestView_Backlog_TitleStillEllipsisClippedNotPlusN verifies an
+// over-width title still clips with a trailing ellipsis — the "+N" scheme
+// this issue adds is scoped to the label cell, not the title column (issue
+// #1631, acceptance criterion 4).
+func TestView_Backlog_TitleStillEllipsisClippedNotPlusN(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Title: strings.Repeat("a very long title ", 5), Labels: []string{"bug"}},
+	}})
+
+	out := View(m)
+	var row string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, ">") {
+			row = line
+		}
+	}
+	if !strings.Contains(row, "…") {
+		t.Errorf("backlog row = %q, want the over-width title clipped with a trailing ellipsis", row)
+	}
+	if strings.Contains(row, "+") {
+		t.Errorf("backlog row = %q, want no \"+N\" suffix — only the title overflowed, not the labels", row)
+	}
+}
+
 // TestView_CapAndLive_Shown verifies View renders the session's live
 // parallelism cap and current live count (issue #653) in the header status
 // line — visible without a separate command, the same way the queue rows
