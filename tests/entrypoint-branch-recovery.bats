@@ -116,6 +116,13 @@ setup_rebase_conflict() {
   [ -d "$WORK_DIR/.git" ]
   # The main agent prompt must have been passed to claude.
   grep -q "Implement GitHub issue #7" "$CLAUDE_PROMPT_FILE"
+  # FAKE_CLAUDE_RESOLVE_CONFLICT stays exported for the whole run, so the main
+  # agent invocation sees it too, with no rebase left in progress -- it must
+  # fall through to a real outcome (issue #1607's resume-once recovery would
+  # otherwise kick in on the silent no-op this used to be).
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=.*status=ready' <<<"$output"
+  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 2 ]
 }
 
 @test "pre-work rebase conflict: unresolvable conflict exits non-zero" {

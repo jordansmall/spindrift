@@ -120,4 +120,9 @@ setup() {
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=none status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
+  # A research dispatch pins no session worth resuming (issue #1607) --
+  # exactly one Driver invocation, no resume pass, and its note carries no
+  # mention of a recovery attempt.
+  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 1 ]
+  ! grep -q 'resume attempt' <<<"$output"
 }

@@ -585,6 +585,9 @@ run_driver_in_env() {
 # of a silent gap.
 emit_outcome_backstop() {
   local note="driver exited without emitting an outcome"
+  if [ -n "${_recovery_attempted:-}" ]; then
+    note="${note}; a resume attempt also produced no outcome"
+  fi
   echo "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop"
   # A research dispatch never cuts a branch (ADR 0022) -- there is nothing to
   # push best-effort, and no landing reference beyond "none".
@@ -620,7 +623,7 @@ main() {
   local _rebase_and_publish _had_rebase_conflict
   local _use_dev_shell _harness_path
   local prompt agents_json _driver_session_mode
-  local _last_outcome_line
+  local _last_outcome_line _recovery_attempted
 
   configure_env
   clone_repo
@@ -641,7 +644,25 @@ main() {
     echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
   fi
   local claude_rc=0
+  _recovery_attempted=""
   run_driver_in_env "$prompt" "$agents_json" "$_driver_session_mode" || claude_rc=$?
+
+  # A driver that exited cleanly yet told us nothing most often just ended
+  # its turn early (issue #1542: ~15 minutes of scouting thrown away because
+  # the run ended "waiting" on a backgrounded task) rather than actually
+  # failing. Before falling back to the synthetic backstop, resume the same
+  # pinned session exactly once with a corrective nudge (issue #1607).
+  # Research dispatches pin no session worth resuming (ADR 0022) so they skip
+  # straight to the backstop below, same as before. The same --agents JSON as
+  # the first pass rides along too -- the run may still need to reach the
+  # scout/reviewer/filer step it never got to, and the pinned session has no
+  # other way to learn about them.
+  if [ "$claude_rc" -eq 0 ] && [ -z "$_last_outcome_line" ] && ! _is_research_kind; then
+    echo "==> driver produced no SPINDRIFT_OUTCOME line — resuming the session once with a nudge"
+    _recovery_attempted=1
+    local recovery_prompt="The run ended without printing a SPINDRIFT_OUTCOME line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required SPINDRIFT_OUTCOME line as your final message."
+    run_driver_in_env "$recovery_prompt" "$agents_json" "resume" || claude_rc=$?
+  fi
 
   # Only a driver that exited cleanly yet told us nothing gets the synthetic
   # backstop. A non-zero exit is left to propagate untouched -- the
