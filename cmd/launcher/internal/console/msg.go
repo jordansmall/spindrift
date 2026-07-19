@@ -143,6 +143,17 @@ type OrphanDetectedMsg struct {
 
 func (OrphanDetectedMsg) isConsoleMsg() {}
 
+// OrphanHeartbeatsMsg carries the live status line syncQueue derived from
+// each orphan-flagged issue's on-disk pass log, keyed by number — the
+// Backlog row's analogue of a running Pick's own Heartbeat field, so an
+// orphan the operator hasn't adopted still shows it is making progress
+// (issue #1621).
+type OrphanHeartbeatsMsg struct {
+	Heartbeats map[string]string
+}
+
+func (OrphanHeartbeatsMsg) isConsoleMsg() {}
+
 // AdoptOrphanStartedMsg marks Number as having an adopt in flight — sent
 // synchronously by handleKey the instant "A" fires adoptOrphanCmd, before
 // RecoverFn's network round-trip even starts. Model.IsAdoptingOrphan gates

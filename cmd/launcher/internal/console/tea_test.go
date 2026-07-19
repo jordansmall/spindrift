@@ -3007,6 +3007,47 @@ func TestTea_EnterOnOrphanRow_OpensSidebarReadOnly(t *testing.T) {
 	}
 }
 
+// TestTea_OrphanRow_ShowsLiveHeartbeat verifies a Backlog row flagged an
+// orphan (issue #1619) shows its box's live heartbeat, derived from its
+// on-disk pass log the same way a running Pick's queue row already does
+// (#647 AC2) — the operator can tell an orphan is still making progress
+// without drilling in (issue #1621).
+func TestTea_OrphanRow_ShowsLiveHeartbeat(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"result","num_turns":17,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	launch.pollInterval = 5 * time.Millisecond
+	t.Cleanup(launch.Wait)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(120, 24))
+	waitForOutput(t, tm, "orphan", "17 turn")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
 // TestTea_PollTick_AdvancesOpenOrphanSidebarActivityFeed verifies an orphan
 // row's open sidebar advances on its own as its box's on-disk pass log
 // grows, with no operator keypress — the same live-tail payoff a

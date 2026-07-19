@@ -62,6 +62,12 @@ type Model struct {
 	// this session launched, and adopted only through the explicit gesture
 	// IsOrphan gates (issue #1619).
 	OrphanNums []string
+	// OrphanHeartbeats is each orphan-flagged issue's last-parsed status
+	// line, keyed by number — syncQueue's orphan analogue of Pick.Heartbeat,
+	// read straight off the same on-disk pass log (issue #1621). Absent
+	// (zero value "") for a number with no complete heartbeat line yet, same
+	// as RunningHeartbeat's own contract.
+	OrphanHeartbeats map[string]string
 	// AdoptingOrphans is the issue numbers with an adopt gesture's RecoverFn
 	// call currently in flight — set the instant "A" fires, before
 	// RecoverFn's network round-trip starts, and cleared only once it
@@ -473,6 +479,8 @@ func Update(m Model, msg Msg) Model {
 		m.AdoptingOrphans = removeOrphan(m.AdoptingOrphans, msg.Number)
 	case OrphanDetectedMsg:
 		m.OrphanNums = msg.Numbers
+	case OrphanHeartbeatsMsg:
+		m.OrphanHeartbeats = msg.Heartbeats
 	case AdoptOrphanStartedMsg:
 		if !m.IsAdoptingOrphan(msg.Number) {
 			m.AdoptingOrphans = append(m.AdoptingOrphans, msg.Number)

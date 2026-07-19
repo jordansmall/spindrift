@@ -293,6 +293,9 @@ const backlogFixedWidth = 1 + 1 + numberColWidth + 1 + 2 + 1
 // issue (number, title, labels), cursor-marked, under a column-header row —
 // ADR 0030's pick source, keeping its `/` label filter and #844's
 // number/title/labels shape (state and age don't apply to a plain issue).
+// An orphan-flagged row's live heartbeat rides in the same bracket as its
+// labels, sharing labelsWidth's existing budget rather than carving out a
+// new column (issue #1621).
 func renderBacklogSection(m Model, budget int) string {
 	if budget <= 0 {
 		return ""
@@ -321,9 +324,14 @@ func renderBacklogSection(m Model, budget int) string {
 		// "orphan" alongside its real labels — the only Backlog signal that
 		// distinguishes it from a Dispatch this session launched, since
 		// startup only ever detects it now, never adopts it on its own
-		// (issue #1619).
+		// (issue #1619). Its live heartbeat, read off the same on-disk pass
+		// log a session-launched Dispatch's own Heartbeat comes from, joins
+		// the same bracket (issue #1621).
 		if m.IsOrphan(iss.Number) {
 			labels = append([]string{"orphan"}, labels...)
+			if heartbeat := m.OrphanHeartbeats[iss.Number]; heartbeat != "" {
+				labels = append(labels, SanitizeControlSequences(heartbeat))
+			}
 		}
 		rows = append(rows, fmt.Sprintf("%s %s %s [%s]\n", marker, clip("#"+iss.Number, numberColWidth, true), clip(title, titleWidth, true), clip(strings.Join(labels, ", "), labelsWidth, false)))
 	}
