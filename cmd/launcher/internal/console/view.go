@@ -317,6 +317,14 @@ func renderBacklogSection(m Model, budget int) string {
 		for j, l := range iss.Labels {
 			labels[j] = SanitizeControlSequences(l)
 		}
+		// A running sandbox with no live goroutine in this process reads as
+		// "orphan" alongside its real labels — the only Backlog signal that
+		// distinguishes it from a Dispatch this session launched, since
+		// startup only ever detects it now, never adopts it on its own
+		// (issue #1619).
+		if m.IsOrphan(iss.Number) {
+			labels = append([]string{"orphan"}, labels...)
+		}
 		rows = append(rows, fmt.Sprintf("%s %s %s [%s]\n", marker, clip("#"+iss.Number, numberColWidth, true), clip(title, titleWidth, true), clip(strings.Join(labels, ", "), labelsWidth, false)))
 	}
 	// Two spaces, not one, before "labels": each row's own label list sits
@@ -414,7 +422,7 @@ func clip(s string, width int, pad bool) string {
 }
 
 // bannerErrWidth bounds a single-line header error banner (rebuild-failed,
-// orphan-recovery-failed) to one row's worth of text. RunNixBuild wraps the
+// orphan-adopt-failed) to one row's worth of text. RunNixBuild wraps the
 // merged nix stdout+stderr (often many lines) into one error, so printing
 // m.RebuildStatus.Err unbounded blew the header banner out to arbitrary length
 // (issue #1131); the same bound applies to any other error banner sharing
@@ -456,7 +464,7 @@ const bannerCollapseMargin = 1
 // renderHeader renders the Console's full-width header: the fixed banner
 // (when the terminal is tall enough to afford it), the status line
 // (running/cap, waiting, held, settled, failed), and the stale-image,
-// rebuilding-in-progress, rebuild-failed, orphan-recovery-failed,
+// rebuilding-in-progress, rebuild-failed, orphan-adopt-failed,
 // branch-switch-notice, and competing-dogfood alert lines. The six alerts
 // render in that fixed order with no priority or dismissal logic — any
 // subset can be true at once, and each renders unconditionally on its own
@@ -516,7 +524,7 @@ func renderHeader(m Model) string {
 	if m.OrphanRecoveryErr != "" {
 		// Same split as RebuildErr above, same reason.
 		fmt.Fprintf(&b, "%s %s\n",
-			roleStyle(RoleFailed).Render(glyphWarning+" orphan recovery failed:"),
+			roleStyle(RoleFailed).Render(glyphWarning+" orphan adopt failed:"),
 			clipBannerErr(m.OrphanRecoveryErr, bannerErrWidth))
 	}
 	if m.RebuildStatus.BranchSwitchNotice != "" {
@@ -567,6 +575,9 @@ func renderHelp() string {
 		"  pa          pick all ready (bulk pick-all-ready gesture)",
 		"  X           terminate the highlighted live Dispatch (confirm y/N,",
 		"              q/ctrl+c decline and quit)",
+		"  A           adopt the highlighted orphan-flagged Backlog row (a",
+		"              running sandbox this session didn't launch); reports",
+		"              why and changes nothing without a non-draft open PR",
 		"  +           raise the live parallelism cap",
 		"  -           lower the live parallelism cap",
 		"  b           rebuild the stale image in-session",
