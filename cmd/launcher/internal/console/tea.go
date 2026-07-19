@@ -832,6 +832,17 @@ func syncQueue(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache
 		}
 	}
 	m = Update(m, QueueSnapshotMsg{Picks: picks})
+	if drv != nil && len(m.OrphanNums) > 0 {
+		// An orphan row has no Pick of its own for the heartbeat loop above
+		// to reach — same on-disk log, same RunningHeartbeat/HeartbeatCache
+		// machinery, just keyed straight off OrphanNums instead of a Pick
+		// slice (issue #1621).
+		orphanHeartbeats := make(map[string]string, len(m.OrphanNums))
+		for _, num := range m.OrphanNums {
+			orphanHeartbeats[num] = heartbeats.RunningHeartbeat(drv, pwd, num)
+		}
+		m = Update(m, OrphanHeartbeatsMsg{Heartbeats: orphanHeartbeats})
+	}
 	// An orphan-flagged sidebar has no Pick of its own to read a running
 	// state off — isRunningNumber alone would starve it of the same live
 	// tail a session-launched Dispatch gets (issue #1621). Refresh's own
