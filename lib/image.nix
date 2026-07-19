@@ -159,6 +159,33 @@ let
       + stripShebang (builtins.readFile ../agent/entrypoint.sh);
   };
 
+  # Registers the PreToolUse hook (issue #1609, layer 2) that rejects a Bash
+  # call with run_in_background: true: --disallowedTools (lib/drivers/claude.nix)
+  # strips ScheduleWakeup/Cron*/RemoteTrigger/Monitor from the Driver's tool
+  # surface, but run_in_background is a parameter of the Bash tool, not a
+  # tool name, so it cannot be stripped the same way. Rendered via
+  # builtins.toJSON, not a hand-built string, so the settings.json is always
+  # valid JSON (ADR 0007 tier-1 -- same reasoning as agentsJsonTemplate).
+  # Home-wide rather than gated behind a Driver attribute: only the claude
+  # Driver exists today and this is Claude Code's own hook mechanism, but the
+  # restriction applies to every pass sharing this $HOME (main run,
+  # conflict-resolve, fix), not to any one Driver invocation's flags.
+  rejectBackgroundBashSettings = builtins.toJSON {
+    hooks = {
+      PreToolUse = [
+        {
+          matcher = "Bash";
+          hooks = [
+            {
+              type = "command";
+              command = "/home/agent/.claude/hooks/reject-background-bash.sh";
+            }
+          ];
+        }
+      ];
+    };
+  };
+
   # Baked into the image at /agent — there is no working tree to bind-mount from
   # once spindrift is a store path. The prompt is baked in alongside the
   # entrypoint (not a host-path mount) so the Box is self-contained: a macOS
@@ -172,6 +199,10 @@ let
       # directory instead of fabricating root-owned parents (issue #447).
       mkdir -p $out/home/agent/${driverEntry.sessionCacheDirRelative}
     ''}
+    mkdir -p $out/home/agent/.claude/hooks
+    cp ${../agent/reject-background-bash.sh} $out/home/agent/.claude/hooks/reject-background-bash.sh
+    chmod +x $out/home/agent/.claude/hooks/reject-background-bash.sh
+    cp ${pkgs.writeText "settings.json" rejectBackgroundBashSettings} $out/home/agent/.claude/settings.json
     cp ${entrypoint}/bin/entrypoint $out/agent/entrypoint.sh
     chmod +x $out/agent/entrypoint.sh
     # A sibling of prompts/, not inside it, so a SPINDRIFT_PROMPT_DIR mount

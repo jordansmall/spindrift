@@ -208,6 +208,33 @@ in
     touch $out
   '';
 
+  # The Box's agent home ships no settings today (issue #1609); the
+  # PreToolUse hook rejecting backgrounded Bash calls must be baked in as
+  # both the hook script and the settings.json that registers it, so a real
+  # Box actually enforces the restriction and not just the flagsCommon layer
+  # (drivers-claude-blocks-loop-background-affordances in drivers.nix).
+  # Realizes the agent-files layer; Linux-gated like the other image checks.
+  reject-background-bash-hook-baked-into-image =
+    pkgs.runCommand "reject-background-bash-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        hook=${nonRustHarness.agentFiles}/home/agent/.claude/hooks/reject-background-bash.sh
+        [ -x "$hook" ] || {
+          echo "reject-background-bash.sh missing or not executable at $hook" >&2
+          exit 1
+        }
+        settings=${nonRustHarness.agentFiles}/home/agent/.claude/settings.json
+        jq -e '.hooks.PreToolUse[0].matcher == "Bash"' "$settings" >/dev/null || {
+          echo "settings.json does not register a PreToolUse hook matched to Bash" >&2
+          exit 1
+        }
+        jq -e '.hooks.PreToolUse[0].hooks[0].command | endswith("reject-background-bash.sh")' \
+          "$settings" >/dev/null || {
+          echo "settings.json's PreToolUse hook does not point at reject-background-bash.sh" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # The nix.conf and store DB must be present in the image so
   # `nix flake check` reuses the baked closure instead of re-substituting.
   # Realizes the default image; Linux-gated like the other image checks.
