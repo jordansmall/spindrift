@@ -117,6 +117,20 @@ func pickChordTick() tea.Cmd {
 	return tea.Tick(pickChordTimeout, func(time.Time) tea.Msg { return pickChordTimeoutMsg{} })
 }
 
+// gChordTimeout is how long a lone "g" waits for a trailing "g" before the
+// leader window cancels — same duration as pickChordTimeout, mirroring the
+// "pa" chord precedent (issue #1628).
+const gChordTimeout = 200 * time.Millisecond
+
+// gChordTimeoutMsg is the tea layer's signal that "g"'s leader window
+// elapsed with no trailing "g" — cancels the still-pending leader.
+type gChordTimeoutMsg struct{}
+
+// gChordTick arms the "gg" leader-window timeout.
+func gChordTick() tea.Cmd {
+	return tea.Tick(gChordTimeout, func(time.Time) tea.Msg { return gChordTimeoutMsg{} })
+}
+
 // Init starts the initial backlog load and both async signal sources
 // (background poll, launch-refresh) as Cmds — none of them block the
 // program's own startup.
@@ -164,6 +178,10 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t.m.PendingPick {
 			t.m = Update(t.m, PickResolvedMsg{})
 			t = t.pickHighlighted()
+		}
+	case gChordTimeoutMsg:
+		if t.m.PendingG {
+			t.m = Update(t.m, GResolvedMsg{})
 		}
 	}
 
@@ -247,6 +265,17 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 			return t.pickHighlighted(), nil
 		}
 	}
+	if t.m.PendingG {
+		t.m = Update(t.m, GResolvedMsg{})
+		if msg.String() == "g" {
+			t.m = Update(t.m, CursorJumpToFirstMsg{})
+			return t, nil
+		}
+		// Any other key cancels the leader, same as the timeout, but — unlike
+		// PendingPick's chord above — does not consume it: that key's own
+		// meaning still applies, so falls through to the switch below rather
+		// than returning here (issue #1628 AC).
+	}
 	if t.m.QueueEnterNotice != "" {
 		t.m = Update(t.m, QueueEnterNoticeClearedMsg{})
 	}
@@ -257,6 +286,11 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		// "k" is vim's cursor-up key, freed by Terminate's move to "X"
 		// (issue #1500); "i"-as-up (#838) is retired now that "k" covers it.
 		t.m = Update(t.m, CursorMoveMsg{Delta: -1})
+	case "G":
+		t.m = Update(t.m, CursorJumpToLastMsg{})
+	case "g":
+		t.m = Update(t.m, GPendingMsg{})
+		return t, gChordTick()
 	case "H":
 		t.m = Update(t.m, SectionPrevMsg{})
 	case "L":
