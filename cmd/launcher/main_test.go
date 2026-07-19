@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -277,6 +278,27 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "REPO_SLUG") {
 		t.Errorf("stderr = %q, want REPO_SLUG resolved (flag overrides document)", stderr.String())
+	}
+}
+
+// TestVerbHandlers_CoversExactlySevenRealVerbs proves the verb dispatch
+// table is the single source of truth for "what subcommands actually
+// exist" (issue #1574): it enumerates verbHandlers' keys and asserts they
+// are exactly the seven documented subcommands, no more, no fewer. The
+// hidden __complete-issues shell-completion verb is deliberately excluded
+// from this table (main.go dispatches it separately, before the table
+// lookup), so it must not appear here either.
+func TestVerbHandlers_CoversExactlySevenRealVerbs(t *testing.T) {
+	want := []string{"build", "console", "dispatch", "doctor", "preview", "recover", "research"}
+
+	got := make([]string, 0, len(verbHandlers))
+	for verb := range verbHandlers {
+		got = append(got, verb)
+	}
+	sort.Strings(got)
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("verbHandlers keys = %v, want %v", got, want)
 	}
 }
 
