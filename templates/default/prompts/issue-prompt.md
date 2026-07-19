@@ -237,6 +237,9 @@ Once CI has registered, flip the PR out of draft:
 gh pr ready <pr-url>
 ```
 
+(On a fix pass the PR is already non-draft from the run this resumes — the
+command is a harmless no-op.)
+
 Then print exactly one line as your final output — raw plain text, not
 wrapped in backticks, a code fence, or any other markdown formatting:
 
