@@ -595,6 +595,8 @@ func renderHelp() string {
 		"  b           rebuild the stale image in-session",
 		"  o           open the rebuild output pane (once a rebuild has run);",
 		"              j/k, pgup/pgdown scroll it, x/esc closes",
+		"              G jumps to its last page, gg to its first (\"g\" arms a",
+		"              pending leader, awaiting a trailing \"g\")",
 		"  q / ctrl+c  quit",
 		"  ?           toggle this help",
 		"",

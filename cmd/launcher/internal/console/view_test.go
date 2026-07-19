@@ -712,6 +712,21 @@ func TestView_ShowHelp_ContrastsSidebarFixedPage(t *testing.T) {
 	}
 }
 
+// TestView_ShowHelp_ListsRebuildOutputJumpKeys verifies the help overlay
+// documents "G" and "gg" for the rebuild-output pane, alongside the existing
+// "o"/j/k/pgup/pgdown entry (issue #1630 AC).
+func TestView_ShowHelp_ListsRebuildOutputJumpKeys(t *testing.T) {
+	m := Update(NewModel(), HelpToggleMsg{})
+
+	out := View(m)
+	if !strings.Contains(out, "G jumps to its last page") {
+		t.Errorf("View() = %q, want the rebuild-output pane's \"G\" jump documented", out)
+	}
+	if !strings.Contains(out, "gg to its first") {
+		t.Errorf("View() = %q, want the rebuild-output pane's \"gg\" jump documented", out)
+	}
+}
+
 // TestView_RebuildOutputOpen_RendersOutputInsteadOfBacklog verifies an open
 // rebuild-output pane replaces the backlog/queue rendering with the captured
 // nix output, plus a close-key hint — RebuildOutput's only consumer (issue
