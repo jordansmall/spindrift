@@ -104,6 +104,7 @@ EOF
 # PR -> self-heal merge gate -> merge) settles the run instead of a synthetic
 # line preempting it.
 @test "no outcome line + open non-draft PR on branch -> backstop stays silent" {
+  export FAKE_CLAUDE_COMMIT=1
   export FAKE_CLAUDE_NO_OUTCOME=1
   export FAKE_GH_PR_LIST_7='[{"isDraft":false}]'
   run bash "$ENTRYPOINT"
@@ -114,6 +115,7 @@ EOF
 # A draft PR is not a done, mergeable result -- the backstop must still
 # synthesize status=blocked exactly as it does when no PR exists at all.
 @test "no outcome line + draft PR on branch -> synthetic blocked, same as no PR" {
+  export FAKE_CLAUDE_COMMIT=1
   export FAKE_CLAUDE_NO_OUTCOME=1
   export FAKE_GH_PR_LIST_7='[{"isDraft":true}]'
   run bash "$ENTRYPOINT"
@@ -122,15 +124,19 @@ EOF
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
 }
 
-# Regression for the #1582 shape: the driver DID print its outcome line, but
-# backtick-wrapped so the extractor's anchored grep misses it exactly as it
-# did on that dogfood run. With a ready PR on the branch the backstop must
-# still stay silent -- the launcher's own adoption path is what settles this
-# run, not a synthetic blocked line racing ahead of it.
+# Regression for the #1582 shape end-to-end: the driver's own outcome line
+# was backtick-wrapped (FAKE_CLAUDE_WRAP_OUTCOME=backticks, issue #1611's
+# repro of the same dogfood run), and there is a ready PR on the branch.
+# #1611 already made the extractor tolerate the wrapping, so the real
+# status=ready line surfaces and this backstop never even runs -- but the
+# combined, end-to-end guarantee this issue adds is what matters: no
+# synthetic status=blocked line ever appears alongside a ready PR.
 @test "markdown-mangled outcome line (#1582) + open non-draft PR -> no synthetic blocked line" {
-  export FAKE_CLAUDE_MANGLED_OUTCOME=1
+  export FAKE_CLAUDE_WRAP_OUTCOME=backticks
   export FAKE_GH_PR_LIST_7='[{"isDraft":false}]'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  ! grep -q 'status=blocked' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready' <<<"$output"
 }
