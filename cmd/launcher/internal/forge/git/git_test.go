@@ -583,3 +583,54 @@ func TestGitClient_Rebase_TimesOutOnHangingRebase(t *testing.T) {
 		t.Fatalf("Rebase error = %v, want errors.Is(err, context.DeadlineExceeded)", err)
 	}
 }
+
+// TestGitClient_Rebase_TimesOutOnHangingPush verifies that Rebase bounds its
+// trailing force-push (gitplumbing.GitForcePush) with a timeout: against a
+// remote whose push hangs server-side, Rebase must still return in bounded
+// time with a distinguishable timeout error instead of blocking on the push
+// forever. A same-ref push never reaches the pre-receive hook (git treats it
+// as "Everything up-to-date" and skips the connection), so main must be
+// advanced past the feature branch's base first — mirroring
+// TestGitClient_Rebase_ForcePushesRebasedBranch — to force the rebase to
+// produce a new commit the remote doesn't already have.
+func TestGitClient_Rebase_TimesOutOnHangingPush(t *testing.T) {
+	// Advance main before the hook goes in — pushing this needs a working
+	// pre-receive hook, since the hanging one (installed below) would block
+	// this setup push forever too.
+	bare := newBareRemoteWithBranches(t)
+	advance := t.TempDir()
+	gitRun(t, "", "clone", bare, advance)
+	gitRun(t, advance, "checkout", "main")
+	gitRun(t, advance, "config", "user.email", "test@example.com")
+	gitRun(t, advance, "config", "user.name", "Test")
+	gitWriteFile(t, filepath.Join(advance, "later.txt"), "later\n")
+	gitRun(t, advance, "add", "later.txt")
+	gitRun(t, advance, "commit", "-m", "later main commit")
+	gitRun(t, advance, "push", "origin", "main")
+
+	hook := filepath.Join(bare, "hooks", "pre-receive")
+	gitWriteFile(t, hook, "#!/bin/sh\nsleep 999\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatalf("chmod pre-receive hook: %v", err)
+	}
+
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-",
+		WithOpTimeout(200*time.Millisecond))
+
+	start := time.Now()
+	err := g.Rebase("agent/issue-1")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Rebase against hanging push: want error, got nil")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("Rebase took %s to return, want it bounded by the configured op timeout", elapsed)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("Rebase error = %q, want it to mention timing out", err.Error())
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Rebase error = %v, want errors.Is(err, context.DeadlineExceeded)", err)
+	}
+}
