@@ -2,6 +2,7 @@
 # `nix run .#regen` renders templates/default/harness.env.example,
 # cmd/launcher/flagtable_gen.go, docs/flake-options.md,
 # cmd/launcher/internal/driver/drivernames_gen.go,
+# cmd/launcher/subcommands_gen.go,
 # tests/box_env_gen.bash, and the generated section of
 # templates/default/flake.nix's commented-out `settings` example, from their
 # respective Nix sources, and writes them into the working tree. Calls the
@@ -34,6 +35,8 @@ let
   templateSettingsBlock = renderers.renderTemplateSettingsBlock schema;
   driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
   driverNamesFile = renderers.renderDriverNamesGo driverRegistry.entries;
+  subcommands = import ../lib/subcommands.nix;
+  subcommandsFile = renderers.renderSubcommandsGo subcommands;
   inherit (pkgs.lib) escapeShellArg;
 in
 pkgs.writeShellApplication {
@@ -72,6 +75,7 @@ pkgs.writeShellApplication {
     write cmd/launcher/flagtable_gen.go ${escapeShellArg flagTable}
     write docs/flake-options.md ${escapeShellArg flakeOptionsDoc}
     write cmd/launcher/internal/driver/drivernames_gen.go ${escapeShellArg driverNamesFile}
+    write cmd/launcher/subcommands_gen.go ${escapeShellArg subcommandsFile}
     write tests/box_env_gen.bash ${escapeShellArg boxEnvFixture}
     write_between templates/default/flake.nix \
       ${escapeShellArg "            # BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT"} \
