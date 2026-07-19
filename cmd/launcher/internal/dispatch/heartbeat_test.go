@@ -135,3 +135,31 @@ func TestRun_HeartbeatSuppressedWhenDiscardConfigured(t *testing.T) {
 		t.Errorf("log file not byte-exact:\ngot:  %q\nwant: %q", string(got), streamJSON)
 	}
 }
+
+// TestFactory_SetHeartbeatOutPanicsAfterNew verifies the ordering contract on
+// SetHeartbeatOut (issue #1594) is enforced at runtime: calling it after New()
+// has already copied cfg into a Dispatch must panic rather than silently
+// racing or affecting only Dispatches constructed afterward.
+func TestFactory_SetHeartbeatOutPanicsAfterNew(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	drv, err := driver.New("claude")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	f, err := NewFactory(Config{}, dir, fr, drv, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	f.New("1", "first dispatch")
+
+	defer func() {
+		if recover() == nil {
+			t.Errorf("SetHeartbeatOut after New: want panic, got none")
+		}
+	}()
+	f.SetHeartbeatOut(io.Discard)
+}

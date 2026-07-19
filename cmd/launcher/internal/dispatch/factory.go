@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"io"
+	"sync/atomic"
 	"time"
 
 	"spindrift.dev/launcher/internal/driver"
@@ -24,12 +25,13 @@ func RealClock() Clock {
 // dir, runner, driver, and clock it will use for every issue in that
 // invocation, plus the driver-cache root all its Dispatch values share.
 type Factory struct {
-	cfg    Config
-	pwd    string
-	runner runner.Runner
-	driver driver.Driver
-	clock  Clock
-	cache  *cache
+	cfg       Config
+	pwd       string
+	runner    runner.Runner
+	driver    driver.Driver
+	clock     Clock
+	cache     *cache
+	newCalled atomic.Bool
 }
 
 // NewFactory constructs a Factory and its driver-cache root. When cfg
@@ -50,6 +52,7 @@ func NewFactory(cfg Config, pwd string, r runner.Runner, drv driver.Driver, cloc
 // New constructs a Dispatch for one issue, claiming its per-issue
 // driver-cache directory up front.
 func (f *Factory) New(number, title string) *Dispatch {
+	f.newCalled.Store(true)
 	return &Dispatch{
 		number:   number,
 		title:    title,
@@ -78,8 +81,16 @@ func (f *Factory) Driver() driver.Driver {
 
 // SetHeartbeatOut overrides the human-facing heartbeat sink every Dispatch
 // this Factory constructs afterward will use (issue #1583). Must be called
-// before any New(), which copies cfg by value into the returned Dispatch.
+// before any New(), which copies cfg by value into the returned Dispatch;
+// New() may run concurrently from multiple goroutines (waves/continuous.go,
+// waves/engine.go), so a call arriving after New() has already started
+// handing out cfg snapshots would silently leave earlier Dispatch values on
+// the old sink. Runtime-enforced (issue #1594): calling it once any New()
+// has run panics instead of racing.
 func (f *Factory) SetHeartbeatOut(w io.Writer) {
+	if f.newCalled.Load() {
+		panic("dispatch: Factory.SetHeartbeatOut called after Factory.New(); must be called before any New()")
+	}
 	f.cfg.HeartbeatOut = w
 }
 
