@@ -1,6 +1,7 @@
 package gitplumbing
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -74,7 +75,7 @@ func TestGitForcePush_StaleLeaseIsNotTransient(t *testing.T) {
 	// work's remote-tracking ref is now stale relative to origin/main.
 	run(work, "commit", "--allow-empty", "-m", "local change")
 
-	err := GitForcePush(work)
+	err := GitForcePush(context.Background(), work)
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
@@ -114,7 +115,7 @@ func TestGitForcePush_TransientFailureIsRetryable(t *testing.T) {
 	// no stale-lease/rejection markers in stderr.
 	run(work, "remote", "add", "origin", filepath.Join(dir, "does-not-exist"))
 
-	err := GitForcePush(work)
+	err := GitForcePush(context.Background(), work)
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}

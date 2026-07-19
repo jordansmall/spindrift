@@ -3,8 +3,10 @@
 package gitplumbing
 
 import (
-	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -25,12 +27,37 @@ func IsMergeConflict(stderr string) bool {
 // failure without a genuine ref-rejection marker in stderr is wrapped in
 // forge.ErrTransientPushFailure so callers know it's safe to retry. Shared by
 // the git and github adapters, both of which force-push a rebased branch.
-func GitForcePush(dir string) error {
-	var stderr bytes.Buffer
-	cmd := exec.Command("git", "-C", dir, "push", "--force-with-lease")
-	cmd.Stderr = &stderr
+// ctx bounds the push subprocess — a remote that accepts the connection and
+// then hangs server-side (e.g. a stuck pre-receive hook) would otherwise
+// block the caller forever, since git itself applies no timeout of its own.
+// A context deadline is reported as a distinct timeout error rather than run
+// through wrapForcePushError's stale-lease/transient classification, which
+// needs git's own stderr markers to work from.
+//
+// stderr is captured to a temp file rather than an in-memory io.Writer:
+// pushing to a local (non-network) remote forks git-receive-pack, which
+// forks the pre-receive hook, both inheriting the write end of the stderr
+// fd. Cmd.Run with an io.Writer Stderr copies through a pipe in a goroutine
+// that Wait blocks on until it sees EOF — EOF the killed direct child alone
+// can't produce while a hung grandchild (the hook) still holds the pipe
+// open. A plain *os.File has no such copy goroutine, so cmd.Run still
+// returns as soon as the context deadline kills the direct child.
+func GitForcePush(ctx context.Context, dir string) error {
+	stderrFile, err := os.CreateTemp("", "spindrift-force-push-stderr-*")
+	if err != nil {
+		return fmt.Errorf("git push --force-with-lease: create stderr temp file: %w", err)
+	}
+	defer os.Remove(stderrFile.Name())
+	defer stderrFile.Close()
+
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "push", "--force-with-lease")
+	cmd.Stderr = stderrFile
 	if err := cmd.Run(); err != nil {
-		return wrapForcePushError(err, stderr.String())
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("git push --force-with-lease: timed out: %w", ctx.Err())
+		}
+		stderr, _ := os.ReadFile(stderrFile.Name())
+		return wrapForcePushError(err, string(stderr))
 	}
 	return nil
 }
