@@ -66,7 +66,14 @@ setup() {
   # No FAKE_PODMAN_OUTCOME_1 → no SPINDRIFT_OUTCOME in log
   export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   # FAKE_GH_PR_DRAFT_1 not set → defaults to "false" (non-draft)
-  export FAKE_GH_GRAPHQL_ROLLUP_1="SUCCESS"
+  # The adopted path's gate (issue #1652) will not trust an immediate SUCCESS
+  # until a non-terminal state proves this run's own checks registered on the
+  # discovered head — so lead with a PENDING before the confirming SUCCESS.
+  # Bound the poll like the run-merge-gate suite so a misscript can never
+  # real-sleep out the baked MERGE_POLL_TIMEOUT (3600s).
+  export MERGE_POLL_INTERVAL=0
+  export MERGE_POLL_TIMEOUT=100
+  export FAKE_GH_GRAPHQL_ROLLUP_SEQ_1="PENDING,SUCCESS,SUCCESS"
   run "$RUN_CMD"
   # Issue 1 is dispatched this run (ready-for-agent); the Box exits with no
   # outcome line, so the per-issue gate falls back to the already-open PR it
