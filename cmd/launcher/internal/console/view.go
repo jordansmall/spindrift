@@ -544,6 +544,10 @@ func renderHelp() string {
 	return strings.Join([]string{
 		"help",
 		"  j/k, down/up  move cursor within the active Section",
+		"  G           jump to the active Section's last row, scrolling it",
+		"              into view",
+		"  gg          jump to the active Section's first row (\"g\" arms a",
+		"              pending leader, awaiting a trailing \"g\")",
 		"  H / L       switch to the previous / next Section",
 		"  1-5         jump straight to a Section (Backlog, Running, Held,",
 		"              Settled, Failed)",

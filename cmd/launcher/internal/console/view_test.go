@@ -677,6 +677,27 @@ func TestView_ShowHelp_ListsBodyScrollKeys(t *testing.T) {
 	}
 }
 
+// TestView_ShowHelp_ListsJumpKeys verifies the help overlay documents "G"
+// and "gg" — the list body's jump-to-bottom/top motions — alongside the
+// existing j/k and pgup/pgdown entries (issue #1628 AC7).
+func TestView_ShowHelp_ListsJumpKeys(t *testing.T) {
+	m := Update(NewModel(), HelpToggleMsg{})
+
+	out := View(m)
+	if !strings.Contains(out, "\n  G ") {
+		t.Errorf("View() = %q, want a \"G\" key entry", out)
+	}
+	if !strings.Contains(out, "\n  gg ") {
+		t.Errorf("View() = %q, want a \"gg\" key entry", out)
+	}
+	if !strings.Contains(out, "last row") {
+		t.Errorf("View() = %q, want the \"G\" entry to describe jumping to the last row", out)
+	}
+	if !strings.Contains(out, "first row") {
+		t.Errorf("View() = %q, want the \"gg\" entry to describe jumping to the first row", out)
+	}
+}
+
 // TestView_ShowHelp_ContrastsSidebarFixedPage verifies the help overlay's
 // sidebar pgup/pgdown line calls out that its page jump is a fixed size,
 // unlike the backlog/queue's live-viewport-derived one — the two keys share
