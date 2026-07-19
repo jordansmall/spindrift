@@ -48,3 +48,40 @@ jobs:
       # reachable to the wrapped command.
       - name: Runner sandbox integration tests
         run: nix develop -c bash -c 'cd cmd/launcher && go test -tags=integration -v ./internal/runner/... ./driver-exec/...'
+
+  # spindrift's product is a Linux OCI box, so the image build and the
+  # bwrap/OCI integration tests above are Linux-only and stay on the job
+  # above. This job guards the other axis: the developer/consumer surface on
+  # Apple Silicon (aarch64-darwin, a flake.nix system). It runs in parallel
+  # with `check` — no `needs:` between them.
+  check-macos:
+    name: flake check (aarch64-darwin)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      # Separate cache from the Linux job: primary-key already keys on
+      # runner.os, so macOS and Linux never share or evict each other.
+      - name: Restore and save the nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'go.sum') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-macos: 5G
+
+      # On aarch64-darwin the OCI-image checks self-skip (the image module is
+      # optionalAttrs-gated to Linux in nix/checks/default.nix), so this runs
+      # the source-level checks — go test/vet/fmt, shellcheck, the bats suite
+      # (driven through fakes, no real image), schema/equivalence/prompt eval —
+      # natively. The launcher commands and skillsDir build from hostPkgs
+      # (lib/mkHarness.nix), so no Linux builder is required.
+      - name: nix flake check
+        run: nix flake check --print-build-logs
+
+      # Realize the consumer-facing CLI natively on Apple Silicon — the one
+      # package a Mac consumer actually runs.
+      - name: Build the spindrift CLI
+        run: nix build .#packages.aarch64-darwin.spindrift --print-build-logs
