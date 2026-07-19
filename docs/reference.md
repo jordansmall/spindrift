@@ -622,14 +622,13 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
              ├─ run PREFETCH (optional cache warm-up)
              └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
                 └─ implement → check → commit → push → self-review (reviewer subagent)
-                   → open PR as a draft → wait for CI to register
-                   → flip PR out of draft
+                   → open PR as a draft
                    → print  SPINDRIFT_OUTCOME issue=N landing=<url> status=ready
         │
         └─ back on the host, the launcher runs the MERGE GATE for that issue:
            ├─ poll CI on the PR head until green (or red, or timeout)
-           ├─ green → apply MERGE_MODE, then swap issue to agent-complete once
-           │          the landing path settles:
+           ├─ green → flip the PR out of draft, apply MERGE_MODE, then swap
+           │          issue to agent-complete once the landing path settles:
            │           manual    → leave the green PR for a human (default)
            │           immediate → rebase-merge the PR now (rebase-retry and
            │                       an agent conflict-resolve box keep the
