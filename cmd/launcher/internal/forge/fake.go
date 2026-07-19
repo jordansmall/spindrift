@@ -154,6 +154,12 @@ type Fake struct {
 	// invocation in order — lets a test assert call count directly instead
 	// of inferring it from side effects (#1098).
 	IssueCalls []string
+	// IssueErr, if non-nil, is returned by every Issue call instead of the
+	// looked-up issue — a blanket override (ListIssuesErr's own pattern),
+	// letting a test simulate a body-fetch failure independently of
+	// ListOpenIssues/ListIssues, which read the same issues map but never
+	// consult this field (issue #1632).
+	IssueErr error
 
 	// DepsOfCalls records the issue number argument of every DepsOf
 	// invocation in order — mirrors IssueCalls, letting a test assert a
@@ -343,6 +349,9 @@ func (f *Fake) Issue(num string) (Issue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.IssueCalls = append(f.IssueCalls, num)
+	if f.IssueErr != nil {
+		return Issue{}, f.IssueErr
+	}
 	iss, ok := f.issues[num]
 	if !ok {
 		return Issue{}, fmt.Errorf("issue %s not found", num)
