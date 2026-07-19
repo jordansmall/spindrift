@@ -315,6 +315,29 @@ appends the same canonical contract to a rendered issue prompt that omits it,
 idempotently, so a runtime-mounted custom prompt can't ship an agent that
 never emits the outcome line either.
 
+#### Loop/background affordances are stripped, not merely discouraged
+
+A headless Box run has no harness watching for a promised re-invocation:
+`ScheduleWakeup`/`CronCreate`/`CronDelete`/`CronList`/`RemoteTrigger`/`Monitor`
+each end the Driver's turn trusting a later wakeup the runner never delivers,
+and a backgrounded Bash call (`run_in_background: true`) does the same for a
+gate the Driver never blocks on (issue #1542 lost a run this way: the Driver
+backgrounded its test gate, called `ScheduleWakeup`, and the run ended with
+zero work pushed). Issue #1609 makes both structurally impossible rather than
+relying on prompt wording alone (issue #1608 hardens that wording, but as
+explanation, not enforcement):
+
+- `claude.nix`'s `flagsCommon` carries a `--disallowedTools` entry naming the
+  six scheduling tools above, so the claude Driver never sees them in any of
+  the three passes that share `flagsCommon` (main run, conflict-resolve, fix)
+  — a tool the model can't see, it can't call.
+- `run_in_background` is a parameter of the Bash tool call, not a tool name,
+  so it can't be stripped the same way. `lib/image.nix` bakes a Claude Code
+  `PreToolUse` hook (`agent/reject-background-bash.sh`, registered by a
+  `~/.claude/settings.json` the image now ships) that denies any Bash call
+  carrying `run_in_background: true`, with a message telling the Driver to
+  rerun the command in the foreground and block on it.
+
 ### Cold-run toolchain nudge
 
 When a Box runs **without a configured `prefetch`** and the cloned Target
