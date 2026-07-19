@@ -170,10 +170,11 @@ unsure):
 gate): skip OPEN A PULL REQUEST and WATCH CI below entirely.
 
 1. `git push --force-with-lease -u origin ${BRANCH}` (if not already pushed).
-2. Print exactly one line as your final output and stop:
-   ```
+2. Print exactly one line as your final output and stop — raw plain text, not
+   wrapped in backticks, a code fence, or any other markdown formatting:
+
    SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ready note=<short reason>
-   ```
+
    The launcher applies `MERGE_MODE` after this line (push straight to the
    target branch on `immediate`; leave the branch as pushed on `manual`).
    Do NOT run `gh pr create` and do NOT attempt to merge.
@@ -225,11 +226,11 @@ the rebase-merge, and the complete-label swap. Stop once CI has registered.
 (`CODE_FORGE=github` only — `CODE_FORGE=git` already printed its outcome line
 and stopped under LAND THE CHANGE above.)
 
-Once CI has registered, print exactly one line as your final output:
+Once CI has registered, print exactly one line as your final output —
+raw plain text, not wrapped in backticks, a code fence, or any other
+markdown formatting:
 
-```
 SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=ready note=<short reason>
-```
 
 This must be the literal final message — nothing after it, no prose summary, no
 background task. The launcher parses this one line to learn your PR; if missing,
@@ -269,8 +270,7 @@ Then:
 3. Leave the issue in-progress — do NOT close it.
 4. Comment on the issue with what's done and what remains:
    `gh issue comment ${ISSUE_NUMBER} --body "<what's done, what remains>"`.
-5. Print exactly one line and stop:
+5. Print exactly one line and stop — raw plain text, not wrapped in
+   backticks, a code fence, or any other markdown formatting:
 
-```
-SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=blocked note=<short reason>
-```
+   SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=blocked note=<short reason>
