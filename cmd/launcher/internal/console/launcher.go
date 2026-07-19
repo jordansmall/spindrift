@@ -552,11 +552,9 @@ func (l *Launcher) Rebuild(tracker forge.IssueTracker, pwd string) {
 	}()
 }
 
-// RebuildStatus is the launcher's live image-freshness/rebuild state, in
-// one value instead of the six scalars StaleStatus used to return
-// separately — StaleStatusMsg carries one RebuildStatus into the pure core,
-// and Model stores one RebuildStatus field the header renders from (issue
-// #1541).
+// RebuildStatus is the launcher's live image-freshness/rebuild state —
+// StaleStatusMsg carries one into the pure core, and Model stores one
+// field the header renders from (issue #1541).
 type RebuildStatus struct {
 	Stale      bool
 	Message    string
