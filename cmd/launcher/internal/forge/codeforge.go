@@ -56,4 +56,7 @@ type PRForge interface {
 	CanAutoMerge() (bool, error)
 	// EnqueueAutoMerge enqueues native auto-merge for the PR.
 	EnqueueAutoMerge(prURL string) error
+	// MarkReady flips the PR out of draft. Marking an already-ready PR is
+	// idempotent: it succeeds without error rather than reporting a failure.
+	MarkReady(prURL string) error
 }

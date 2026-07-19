@@ -284,6 +284,26 @@ func (e *execClient) EnqueueAutoMerge(prURL string) error {
 	return nil
 }
 
+// MarkReady flips the PR out of draft via `gh pr ready`. Already idempotent
+// on gh's own side: `gh pr ready` on a PR that's already ready for review
+// prints a notice to stderr but exits 0, so the caller (settle's self-heal
+// merge gate) can call this unconditionally on every green PR — whether or
+// not the driver already flipped it itself — without any extra
+// already-ready classification here.
+func (e *execClient) MarkReady(prURL string) error {
+	var stderr bytes.Buffer
+	cmd := exec.Command("gh", "pr", "ready", prURL)
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		suffix := ""
+		if s := strings.TrimSpace(stderr.String()); s != "" {
+			suffix = ": " + s
+		}
+		return fmt.Errorf("gh pr ready %s: %w%s", prURL, err, suffix)
+	}
+	return nil
+}
+
 // Probe checks that gh is authenticated and the configured repository is
 // reachable. It returns the resolved repo slug on success, ErrAuthFailure if
 // the credential check fails, or ErrRepoNotFound if the repo cannot be found.

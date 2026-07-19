@@ -687,3 +687,40 @@ fi
 		t.Fatalf("undetermined mergeable state must not classify as forge.ErrMergeBlockedByChecks, got: %v", err)
 	}
 }
+
+// TestMarkReady_AlreadyReadyIsIdempotentNoOp verifies that MarkReady on a PR
+// gh already reports as ready for review is treated as success (issue
+// #1651). This mirrors gh's actual behavior: `gh pr ready` on an
+// already-ready PR prints a notice to stderr but exits 0 — MarkReady must
+// not turn that stderr notice into a spurious error.
+func TestMarkReady_AlreadyReadyIsIdempotentNoOp(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ]; then
+  printf '! Pull request owner/repo#42 is already "ready for review"\n' >&2
+  exit 0
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	if err := c.MarkReady("https://github.com/owner/repo/pull/42"); err != nil {
+		t.Fatalf("MarkReady on an already-ready PR must be a no-op, got: %v", err)
+	}
+}
+
+// TestMarkReady_GenuineFailureSurfaced verifies that a real gh pr ready
+// failure is returned as an error rather than swallowed.
+func TestMarkReady_GenuineFailureSurfaced(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ]; then
+  printf 'HTTP 403: Resource not accessible by integration\n' >&2
+  exit 1
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	err := c.MarkReady("https://github.com/owner/repo/pull/42")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error must surface gh's stderr, got: %v", err)
+	}
+}
