@@ -815,25 +815,38 @@ func run(lc *launchContext) error {
 }
 
 // runContinuousDispatch is the entry point for CONTINUOUS_DISPATCH: the
-// opt-in slot-refill dispatch mode (#527). It performs the same empty-queue
-// check as the batch path (errQueueEmpty), then hands off to
+// opt-in slot-refill dispatch mode (#527). It hands off straight to
 // waves.RunContinuous with a Discoverer that re-runs the label query and
 // edge build on every refill, and a FreshnessChecker wired to
-// freshness.Probe against the fetched base-branch tip. eval is injected so
-// tests can substitute a Fake instead of shelling out to nix — mirrors
-// previewIssues's own eval parameter.
+// freshness.Probe against the fetched base-branch tip; there is no separate
+// empty-queue precheck here (#1645) — the discover closure's first call,
+// made from RunContinuous's own bootstrap refill, is the only query a
+// continuous run makes before its first dispatch.
+//
+// firstQueryEmpty, set by that same first call, records whether it found no
+// open issues at all, as opposed to open issues that turned out blocked or
+// deferred: only the former still maps ErrOpenNoneDispatchable to
+// errQueueEmpty/exit 2 below. It's tracked here rather than inside
+// waves.RunContinuous because RunContinuous's sentinel is shared with the
+// console package's own Discoverer, which pre-filters claimed/dissolved
+// picks — a zero-issue result there doesn't mean the tracker itself is
+// empty (#1645). eval is injected so tests can substitute a Fake instead of
+// shelling out to nix — mirrors previewIssues's own eval parameter.
 func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, eval freshness.Evaluator) error {
-	issues, origin, err := discoverIssues(c, it)
-	if err != nil {
-		return err
-	}
-	if origin == waves.OriginDiscovered && len(issues) == 0 {
-		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
-		return errQueueEmpty
-	}
-
+	firstQuery := true
+	firstQueryEmpty := false
+	var firstQueryErr error
+	// firstQuery/firstQueryEmpty/firstQueryErr need no locking of their own:
+	// every discover() call, on every refill, runs under RunContinuous's own
+	// mutex (see its doc comment), so this closure is never invoked
+	// concurrently with itself.
 	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
 		issues, _, err := discoverIssues(c, it)
+		if firstQuery {
+			firstQuery = false
+			firstQueryErr = err
+			firstQueryEmpty = err == nil && len(issues) == 0
+		}
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -851,6 +864,20 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	}
 
 	if err := waves.RunContinuous(wavesConfig(c), it, cf, pwd, f, s, discover, fresh); err != nil {
+		// refill swallows every discover error to stderr and retries on the
+		// next trigger (a transient-tracker-hiccup tolerance that's fine for
+		// refill 2+, but the first call has no next trigger to retry on once
+		// nothing ever dispatches — see RunContinuous). Surface that first
+		// error here instead of letting it flatten into
+		// ErrOpenNoneDispatchable/exit 3, matching the raw-error/exit-1
+		// result the removed precheck gave a startup query failure.
+		if firstQueryErr != nil {
+			return firstQueryErr
+		}
+		if errors.Is(err, waves.ErrOpenNoneDispatchable) && firstQueryEmpty {
+			fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
+			return errQueueEmpty
+		}
 		return err
 	}
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)

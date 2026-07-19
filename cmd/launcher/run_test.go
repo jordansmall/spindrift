@@ -3,11 +3,14 @@ package main
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/testutil"
+	"spindrift.dev/launcher/internal/waves"
 )
 
 // TestRun_EmptyQueue_ReturnsErrQueueEmpty asserts run's orchestration logic
@@ -150,6 +153,71 @@ func TestRunExitCode_ContinuousDispatch_EmptyQueue_ReturnsExitCode2(t *testing.T
 	}
 }
 
+// TestRun_ContinuousDispatch_StartupQueryError_Propagates verifies that a
+// tracker failure on continuous mode's one startup query still surfaces as
+// a raw error (exit 1 via runExitCode's generic fallback), matching what
+// the removed standalone precheck gave a failing discoverIssues call — not
+// swallowed into ErrOpenNoneDispatchable/exit 3 the way refill tolerates a
+// later, mid-run discover failure.
+func TestRun_ContinuousDispatch_StartupQueryError_Propagates(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	dir := tempLogDir(t)
+	fc := forge.NewFake()
+	fc.ListIssuesErr = boxErr
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       settle.NewFake(),
+	}
+
+	err := run(lc)
+	if !errors.Is(err, boxErr) {
+		t.Fatalf("run(lc) = %v, want the raw ListIssuesErr", err)
+	}
+	if errors.Is(err, waves.ErrOpenNoneDispatchable) {
+		t.Errorf("run(lc) = %v, must not flatten into ErrOpenNoneDispatchable", err)
+	}
+}
+
+// TestRunExitCode_ContinuousDispatch_AllBlocked_ReturnsExitCode3 is the
+// regression test for #1645's other half of the exit-code split: open
+// issues exist but the only one is blocked, so continuous mode must still
+// exit 3 (ErrOpenNoneDispatchable) rather than folding into the empty-queue
+// exit 2 now that both cases route through the same waves.RunContinuous
+// call.
+func TestRunExitCode_ContinuousDispatch_AllBlocked_ReturnsExitCode3(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	dir := tempLogDir(t)
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{
+		Number: "1",
+		Body:   "## Blocked by\n- #2",
+		Labels: []string{c.label},
+	})
+	fc.SetIssue(forge.Issue{Number: "2", State: "OPEN"}) // blocker, not yet complete
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       settle.NewFake(),
+	}
+
+	if got := runExitCode(lc); got != 3 {
+		t.Errorf("runExitCode(lc) = %d, want 3 (ErrOpenNoneDispatchable)", got)
+	}
+}
+
 // TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0 verifies
 // that with CONTINUOUS_DISPATCH enabled and the freshness probe reporting
 // not-applicable (RUNTIME=bwrap, which never blocks a refill), a
@@ -181,6 +249,49 @@ func TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0(t *testing.T
 	}
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
 		t.Errorf("RunCalls: got %v, want exactly issue 1", fr.RunCalls)
+	}
+}
+
+// TestRunExitCode_ContinuousDispatch_QueriesTrackerOnceBeforeFirstDispatch is
+// the regression test for #1645: runContinuousDispatch used to run its own
+// standalone empty-queue precheck query and then, unconditionally, discover's
+// first call inside RunContinuous's bootstrap refill -- two "==> querying
+// open" lines before the first Box ever launched. Removing the precheck
+// leaves exactly one.
+func TestRunExitCode_ContinuousDispatch_QueriesTrackerOnceBeforeFirstDispatch(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	c.runtime = "bwrap"
+	dir := tempLogDir(t)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+
+	fr := runner.NewFake()
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, fr),
+		settle:       settle.NewFake(),
+	}
+
+	out := testutil.CaptureStdout(t, func() {
+		if got := runExitCode(lc); got != 0 {
+			t.Errorf("runExitCode(lc) = %d, want 0", got)
+		}
+	})
+
+	firstDispatch := strings.Index(out, "    -> #")
+	if firstDispatch == -1 {
+		t.Fatalf("no dispatch line found in output:\n%s", out)
+	}
+	before := strings.Count(out[:firstDispatch], "==> querying open")
+	if before != 1 {
+		t.Errorf("\"==> querying open\" appeared %d time(s) before the first dispatch line, want exactly 1:\n%s", before, out)
 	}
 }
 
