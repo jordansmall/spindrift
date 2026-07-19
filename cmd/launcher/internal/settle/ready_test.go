@@ -2,6 +2,7 @@ package settle
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -402,6 +403,130 @@ func TestSelfHeal_LabelStaysInProgressThroughConflictResolve(t *testing.T) {
 	}
 	if completeSwaps != 1 {
 		t.Errorf("expected exactly one InProgress->Complete swap, got %d: %+v", completeSwaps, fc.TransitionStateCalls)
+	}
+}
+
+// TestSelfHeal_MarksReadyBeforeMerge verifies that the launcher itself flips
+// a green PR out of draft — via MarkReady — after the merge guard passes and
+// before applyMergeMode's immediate-mode Merge call (issue #1651). The flip
+// is unconditional (the driver may already have flipped it itself; MarkReady
+// is idempotent), so this only asserts the call happened and preceded Merge.
+func TestSelfHeal_MarksReadyBeforeMerge(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	s := New(c, fc, fc)
+
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+
+	if landing != landingMerged {
+		t.Fatalf("selfHeal = %v, want landingMerged", landing)
+	}
+	if fc.Merged != testPR {
+		t.Fatalf("expected Merge(%q); fc.Merged=%q", testPR, fc.Merged)
+	}
+	wantLog := []string{"MarkReady:" + testPR, "Merge:" + testPR}
+	if !slices.Equal(fc.LandingCallLog, wantLog) {
+		t.Fatalf("call order = %v, want %v (MarkReady must precede Merge)", fc.LandingCallLog, wantLog)
+	}
+}
+
+// TestSelfHeal_MarksReadyBeforeEnqueueAutoMerge verifies the same MarkReady
+// ordering guarantee (issue #1651) holds under MERGE_MODE=auto: the flip
+// precedes EnqueueAutoMerge.
+func TestSelfHeal_MarksReadyBeforeEnqueueAutoMerge(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "auto"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	s := New(c, fc, fc)
+
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+
+	if landing != landingManual {
+		t.Fatalf("selfHeal = %v, want landingManual (auto mode)", landing)
+	}
+	if len(fc.EnqueueAutoMergeCalls) != 1 || fc.EnqueueAutoMergeCalls[0] != testPR {
+		t.Fatalf("expected EnqueueAutoMerge(%q); calls=%v", testPR, fc.EnqueueAutoMergeCalls)
+	}
+	wantLog := []string{"MarkReady:" + testPR, "EnqueueAutoMerge:" + testPR}
+	if !slices.Equal(fc.LandingCallLog, wantLog) {
+		t.Fatalf("call order = %v, want %v (MarkReady must precede EnqueueAutoMerge)", fc.LandingCallLog, wantLog)
+	}
+}
+
+// TestSelfHeal_MarksReadyBeforeManualHandoff verifies the same MarkReady
+// ordering guarantee (issue #1651) holds under MERGE_MODE=manual: a green
+// draft PR is still flipped ready even though manual mode otherwise leaves
+// the PR untouched.
+func TestSelfHeal_MarksReadyBeforeManualHandoff(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "manual"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	s := New(c, fc, fc)
+
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+
+	if landing != landingManual {
+		t.Fatalf("selfHeal = %v, want landingManual", landing)
+	}
+	if len(fc.MarkReadyCalls) != 1 || fc.MarkReadyCalls[0] != testPR {
+		t.Fatalf("expected MarkReady(%q) exactly once; calls=%v", testPR, fc.MarkReadyCalls)
+	}
+	if fc.Merged != "" {
+		t.Errorf("manual mode must not call Merge; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// TestSelfHeal_MergeGuardHit_SkipsMarkReady verifies that a merge-guard hit
+// downgrades to manual without flipping the PR ready — the guard's
+// hold-for-human-review intent (issue #1651 must not undermine it by
+// publishing the PR as ready right before declining to land it).
+func TestSelfHeal_MergeGuardHit_SkipsMarkReady(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.MergeGuardPaths = ".github/**"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
+	s := New(c, fc, fc)
+
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+
+	if landing != landingManual {
+		t.Fatalf("selfHeal = %v, want landingManual (guard hit)", landing)
+	}
+	if len(fc.MarkReadyCalls) != 0 {
+		t.Errorf("guard hit must skip MarkReady; calls=%v", fc.MarkReadyCalls)
+	}
+}
+
+// TestSelfHeal_MarkReadyFailureDoesNotBlockMerge verifies that a MarkReady
+// error is logged but never blocks the landing — the flip is best-effort,
+// matching EnqueueAutoMerge's own failure handling: a still-green PR must
+// still merge even if the ready-flip itself failed.
+func TestSelfHeal_MarkReadyFailureDoesNotBlockMerge(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.MarkReadyErr = errors.New("HTTP 403: Resource not accessible by integration")
+	s := New(c, fc, fc)
+
+	landing := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+
+	if landing != landingMerged {
+		t.Fatalf("selfHeal = %v, want landingMerged despite MarkReady failure", landing)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("expected Merge(%q) despite MarkReady failure; fc.Merged=%q", testPR, fc.Merged)
 	}
 }
 

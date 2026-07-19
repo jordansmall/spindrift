@@ -117,6 +117,21 @@ type Fake struct {
 	// EnqueueAutoMergeCalls records all PR URLs passed to EnqueueAutoMerge.
 	EnqueueAutoMergeCalls []string
 
+	// MarkReadyErr, if non-nil, is returned by MarkReady.
+	MarkReadyErr error
+	// MarkReadyCalls records all PR URLs passed to MarkReady, in order.
+	MarkReadyCalls []string
+
+	// LandingCallLog records, in order, every call to MarkReady, Merge, and
+	// EnqueueAutoMerge as "Method:url" — the three landing-path methods a
+	// caller can reorder relative to each other. A per-method Calls slice
+	// alone can't distinguish "MarkReady then Merge" from "Merge then
+	// MarkReady": both leave the same final Calls-slice contents, so a test
+	// asserting call presence on each slice separately passes either way.
+	// This single, cross-method log is what lets a test assert genuine
+	// ordering (issue #1651's "ready-flip precedes the merge/enqueue call").
+	LandingCallLog []string
+
 	// ProbeErr, if non-nil, is returned by Probe. Use ErrAuthFailure or
 	// ErrRepoNotFound to simulate specific failure modes.
 	ProbeErr error
@@ -550,6 +565,7 @@ func (f *Fake) FailureDetail(url string) (string, error) {
 func (f *Fake) Merge(url string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.LandingCallLog = append(f.LandingCallLog, "Merge:"+url)
 	if len(f.MergeErrs) > 0 {
 		err := f.MergeErrs[0]
 		f.MergeErrs = f.MergeErrs[1:]
@@ -592,8 +608,17 @@ func (f *Fake) CanAutoMerge() (bool, error) {
 func (f *Fake) EnqueueAutoMerge(prURL string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.LandingCallLog = append(f.LandingCallLog, "EnqueueAutoMerge:"+prURL)
 	f.EnqueueAutoMergeCalls = append(f.EnqueueAutoMergeCalls, prURL)
 	return f.EnqueueAutoMergeErr
+}
+
+func (f *Fake) MarkReady(prURL string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.LandingCallLog = append(f.LandingCallLog, "MarkReady:"+prURL)
+	f.MarkReadyCalls = append(f.MarkReadyCalls, prURL)
+	return f.MarkReadyErr
 }
 
 func (f *Fake) Probe() (string, error) {
