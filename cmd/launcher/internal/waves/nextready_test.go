@@ -26,7 +26,7 @@ func TestNextReady_FailedBlockerCascadesToFailed(t *testing.T) {
 
 	iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
 		{Number: "1", Title: "dependent"},
-	}, edges, nil, nil)
+	}, edges, nil, nil, nil)
 
 	if ok {
 		t.Fatalf("nextReady: got (%v, true), want ok=false", iss)
@@ -60,7 +60,7 @@ func TestNextReady_BlockedLineNamesBlockers(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
 		iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
 			{Number: "1", Title: "blocked issue"},
-		}, edges, nil, nil)
+		}, edges, nil, nil, nil)
 		if ok {
 			t.Fatalf("nextReady: got (%v, true), want ok=false", iss)
 		}
@@ -68,6 +68,43 @@ func TestNextReady_BlockedLineNamesBlockers(t *testing.T) {
 
 	if !strings.Contains(out, "~~ #1 blocked by #3, #4; skipping") {
 		t.Errorf("output must name the unready blockers; got:\n%s", out)
+	}
+}
+
+// TestNextReady_BlockedLineLogsOncePerState verifies that with a shared
+// dedup map, nextReady's blocked-skip line prints once across identical
+// re-walks — refill re-walks on every completion and the background poll
+// re-walks every ~30s (#1637), which would otherwise reprint the same
+// blocked line indefinitely — and re-prints only when the blocker set
+// changes.
+func TestNextReady_BlockedLineLogsOncePerState(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
+	fc.SetIssue(forge.Issue{Number: "4", State: "OPEN"})
+	checkOverlap := func(string) (string, bool) { return "", false }
+
+	logged := map[string]string{}
+	cand := []Issue{{Number: "1", Title: "blocked issue"}}
+
+	out := testutil.CaptureStdout(t, func() {
+		// Two identical re-walks over the same blocked candidate.
+		nextReady(c, fc, fc, checkOverlap, cand, map[string][]string{"1": {"3"}}, nil, nil, logged)
+		nextReady(c, fc, fc, checkOverlap, cand, map[string][]string{"1": {"3"}}, nil, nil, logged)
+	})
+	if n := strings.Count(out, "#1 blocked by #3; skipping"); n != 1 {
+		t.Fatalf("blocked-skip line must log once across identical re-walks; got %d:\n%s", n, out)
+	}
+
+	// A changed blocker set re-logs, so a genuine state change is surfaced.
+	out = testutil.CaptureStdout(t, func() {
+		nextReady(c, fc, fc, checkOverlap, cand, map[string][]string{"1": {"3", "4"}}, nil, nil, logged)
+	})
+	if !strings.Contains(out, "#1 blocked by #3, #4; skipping") {
+		t.Errorf("a changed blocker set must re-log; got:\n%s", out)
 	}
 }
 
@@ -91,7 +128,7 @@ func TestNextReady_FailedBlockerLineNamesBlockers(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
 		iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
 			{Number: "1", Title: "dependent"},
-		}, edges, nil, nil)
+		}, edges, nil, nil, nil)
 		if ok {
 			t.Fatalf("nextReady: got (%v, true), want ok=false", iss)
 		}
@@ -130,7 +167,7 @@ func TestNextReady_TouchOverlapDefers(t *testing.T) {
 	iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
 		{Number: "1", Title: "overlapping issue"},
 		{Number: "2", Title: "clean issue"},
-	}, map[string][]string{}, nil, nil)
+	}, map[string][]string{}, nil, nil, nil)
 
 	if !ok {
 		t.Fatalf("nextReady: got ok=false, want a match")
@@ -164,7 +201,7 @@ func TestNextReady_HappyPath(t *testing.T) {
 	iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
-	}, map[string][]string{}, nil, nil)
+	}, map[string][]string{}, nil, nil, nil)
 
 	if !ok {
 		t.Fatalf("nextReady: got ok=false, want a match")

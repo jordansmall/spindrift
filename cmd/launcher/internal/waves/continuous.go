@@ -59,7 +59,38 @@ type FreshnessChecker func() (applicable, fresh bool, message string)
 // nextReady's does not render it: the only current Sources consumer,
 // writeBlockedMarker, fires for OriginClaimed only, a mode continuous
 // dispatch never uses (issue #662).
-func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool) (Issue, bool) {
+func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool, logged map[string]string) (Issue, bool) {
+	// Drop dedup entries for issues no longer in the candidate batch: keeps
+	// logged from growing unbounded across a long Console session, and lets an
+	// issue that left and later returns re-log its state afresh.
+	if logged != nil {
+		present := make(map[string]bool, len(issues))
+		for _, iss := range issues {
+			present[iss.Number] = true
+		}
+		for num := range logged {
+			if !present[num] {
+				delete(logged, num)
+			}
+		}
+	}
+	// skip logs a non-dispatch outcome for an issue at most once per distinct
+	// line: refill re-walks this list on every completion and the background
+	// poll re-walks it every ~30s (#1637), so an unchanged blocked/deferred
+	// reason would otherwise reprint on every tick. logged carries the last
+	// line emitted per issue across those re-walks; a nil map (direct unit
+	// tests) disables dedup. The line re-prints when it changes -- a new
+	// blocker appears, one of several resolves -- so a real state change still
+	// surfaces.
+	skip := func(num, line string) {
+		if logged != nil && logged[num] == line {
+			return
+		}
+		fmt.Print(line)
+		if logged != nil {
+			logged[num] = line
+		}
+	}
 	for _, iss := range issues {
 		_, failed, unready := BlockerStatus(cfg, it, cf, iss.Number, edges)
 		switch {
@@ -67,15 +98,15 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 			// Own DepsOf call failed (#752, #1103) -- edges[iss.Number] is
 			// unreliable, not a confirmed zero-blocker result. Hold rather
 			// than launch or cascade-fail; the next refill retries.
-			fmt.Printf("    ~~ #%s blocker check failed; will retry\n", iss.Number)
+			skip(iss.Number, fmt.Sprintf("    ~~ #%s blocker check failed; will retry\n", iss.Number))
 		case len(failed) > 0:
-			fmt.Printf("    !! #%s  status=blocker-failed  note=#%s failed; skipping\n", iss.Number, strings.Join(failed, ", #"))
+			skip(iss.Number, fmt.Sprintf("    !! #%s  status=blocker-failed  note=#%s failed; skipping\n", iss.Number, strings.Join(failed, ", #")))
 			transitionState(it, iss.Number, forge.Dispatchable, forge.Failed)
 		case len(unready) > 0:
-			fmt.Printf("    ~~ #%s blocked by #%s; skipping\n", iss.Number, strings.Join(unready, ", #"))
+			skip(iss.Number, fmt.Sprintf("    ~~ #%s blocked by #%s; skipping\n", iss.Number, strings.Join(unready, ", #")))
 		default:
 			if collider, overlapped := checkOverlap(iss.Number); overlapped {
-				fmt.Printf("    ~~ #%s touches overlap in-progress #%s; deferring\n", iss.Number, collider)
+				skip(iss.Number, fmt.Sprintf("    ~~ #%s touches overlap in-progress #%s; deferring\n", iss.Number, collider))
 				continue
 			}
 			return iss, true
@@ -138,6 +169,13 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	stale := false
 	dispatchedAny := false
 	claimed := make(map[string]bool)
+	// logged dedups nextReady's non-dispatch skip/defer lines across the
+	// refill re-walks that share mu -- every completion, grow, and ~30s poll
+	// tick (#1637) re-walks the same candidates, so an unchanged
+	// blocked/deferred reason would otherwise reprint on every tick. Keyed by
+	// issue number to the last line emitted for it; nextReady re-prints only
+	// when that line changes and prunes issues that leave the batch.
+	logged := make(map[string]string)
 	// outstanding counts in-flight Boxes. A plain sync.WaitGroup can't
 	// coordinate safely here: the grow listener below can call refill --
 	// and so wg.Add -- from a goroutine with no causal link to any counted
@@ -189,7 +227,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 		}
 		checkOverlap := waveOverlapCheck(cfg, it, cf)
 		unclaimed := dropClaimed(issues, claimed)
-		iss, ok := nextReady(cfg, it, cf, checkOverlap, unclaimed, edges, sources, failed)
+		iss, ok := nextReady(cfg, it, cf, checkOverlap, unclaimed, edges, sources, failed, logged)
 		if !ok {
 			return false
 		}
