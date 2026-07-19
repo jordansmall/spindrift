@@ -389,10 +389,7 @@ func Update(m Model, msg Msg) Model {
 	case SidebarZoomToggleMsg:
 		m.SidebarZoom = !m.SidebarZoom
 	case SidebarCloseMsg:
-		m = saveSidebarPosition(m)
-		m.Sidebar = nil
-		m.Focus = FocusList
-		m.SidebarZoom = false
+		m = closeSidebar(m)
 	case SidebarScrollMsg:
 		if m.Sidebar != nil {
 			m.Sidebar.Offset += msg.Delta
@@ -502,17 +499,35 @@ func Update(m Model, msg Msg) Model {
 // switchSection moves m to Section s, resetting Cursor and Offset to 0 when
 // s differs from the currently active Section — a fresh Section starts at
 // its top row rather than carrying over a position that belonged to a
-// different list (issue #1500). Jumping to the Section that's already
-// active is a no-op on Cursor/Offset, so a repeated "1" or an "H"/"L" that
+// different list (issue #1500). It also closes any open Sidebar, the same
+// end state as SidebarCloseMsg (including saving its position via
+// saveSidebarPosition), since a Sidebar left open survives the switch
+// pinned to the old Dispatch under a different Section's list — nonsensical
+// over SectionBacklog, whose rows have no Sidebar at all (issue #1581).
+// Jumping to the Section that's already active is a no-op on Cursor/Offset
+// and leaves an open Sidebar alone, so a repeated "1" or an "H"/"L" that
 // wraps back onto the same Section (only possible with a single Section,
-// which sectionCount > 1 rules out today) never resets scroll position for
-// nothing.
+// which sectionCount > 1 rules out today) never resets scroll position or
+// closes a Sidebar the operator just opened.
 func switchSection(m Model, s Section) Model {
 	if s != m.ActiveSection {
 		m.Cursor = 0
 		m.Offset = 0
+		m = closeSidebar(m)
 	}
 	m.ActiveSection = s
+	return m
+}
+
+// closeSidebar clears m.Sidebar, Focus, and SidebarZoom back to their no-
+// sidebar-open state, saving the closed Sidebar's scroll/follow position
+// first so a later reopen restores it — the shared close sequence behind
+// both SidebarCloseMsg and switchSection (issue #1581).
+func closeSidebar(m Model) Model {
+	m = saveSidebarPosition(m)
+	m.Sidebar = nil
+	m.Focus = FocusList
+	m.SidebarZoom = false
 	return m
 }
 
