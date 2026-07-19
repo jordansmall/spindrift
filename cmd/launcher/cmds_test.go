@@ -115,7 +115,7 @@ func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		// runner.NewFake(), not nil like the sibling tests: Init's
-		// orphanRecoveryCmd calls Factory.OrphanedIssues -> f.runner.ListRunning
+		// orphanDetectCmd calls Factory.OrphanedIssues -> f.runner.ListRunning
 		// unconditionally on startup, which panics on a nil runner.
 		factory: testFactory(t, dir, runner.NewFake()),
 		settle:  settle.NewFake(),

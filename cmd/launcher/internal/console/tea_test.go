@@ -2787,10 +2787,12 @@ func TestTea_PickKeyThenQuit_WithLiveDispatch_ArmsPendingQuitConfirm(t *testing.
 	waitFinished(t, tm)
 }
 
-// TestTea_Init_RecoversOrphanedIssuesOnStartup verifies a sandbox still
-// running from a prior crashed session gets adopted through RecoverFn at
-// startup, without blocking the initial render (issue #651, issue #822).
-func TestTea_Init_RecoversOrphanedIssuesOnStartup(t *testing.T) {
+// TestTea_Init_DetectsOrphanedIssuesWithoutAdopting verifies a sandbox still
+// running from a prior crashed session is flagged an orphan at startup but
+// never adopted through RecoverFn on its own — adoption is the operator's
+// explicit gesture now, not a startup sweep (issue #1619, demoted from
+// #651/#822's auto-adopt).
+func TestTea_Init_DetectsOrphanedIssuesWithoutAdopting(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
@@ -2826,57 +2828,23 @@ func TestTea_Init_RecoversOrphanedIssuesOnStartup(t *testing.T) {
 
 	select {
 	case num := <-recovered:
-		if num != "42" {
-			t.Errorf("RecoverFn called with %q, want 42", num)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("RecoverFn never called for orphaned issue 42")
+		t.Errorf("RecoverFn called with %q at startup, want it never called without the operator's explicit adopt gesture", num)
+	case <-time.After(500 * time.Millisecond):
 	}
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
-}
 
-// TestOrphanRecoveryCmd_OrphanedIssuesErr_ReturnsMsg verifies a failed
-// OrphanedIssues() lookup surfaces through the returned tea.Msg instead of
-// being swallowed silently (issue #1218).
-func TestOrphanRecoveryCmd_OrphanedIssuesErr_ReturnsMsg(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	drv, err := driver.New("")
-	if err != nil {
-		t.Fatalf("driver.New: %v", err)
-	}
-	fr := runner.NewFake()
-	fr.ListRunningErr = errors.New("boom")
-	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
-	if err != nil {
-		t.Fatalf("dispatch.NewFactory: %v", err)
-	}
-	t.Cleanup(factory.Cleanup)
-
-	launch := &Launcher{
-		Factory:   factory,
-		RecoverFn: func(string) error { return nil },
-	}
-
-	msg := orphanRecoveryCmd(launch)()
-
-	rec, ok := msg.(OrphanRecoveryMsg)
-	if !ok {
-		t.Fatalf("orphanRecoveryCmd()() = %#v (%T), want OrphanRecoveryMsg", msg, msg)
-	}
-	if !strings.Contains(rec.Err, "boom") {
-		t.Errorf("OrphanRecoveryMsg.Err = %q, want it to mention the OrphanedIssues() failure %q", rec.Err, "boom")
+	final := tm.FinalModel(t).(teaModel)
+	if !final.m.IsOrphan("42") {
+		t.Error("IsOrphan(42) = false, want true — startup detection must still flag the running orphan")
 	}
 }
 
-// TestOrphanRecoveryCmd_RecoverFnErr_ReturnsMsg verifies a failed adopt
-// surfaces through the returned tea.Msg, naming the issue number and the
-// underlying error, instead of being swallowed (issue #1218).
-func TestOrphanRecoveryCmd_RecoverFnErr_ReturnsMsg(t *testing.T) {
+// TestOrphanDetectCmd_ReturnsDetectedNumbers verifies orphanDetectCmd reports
+// every issue OrphanedIssues found running through OrphanDetectedMsg, with
+// no RecoverFn call of its own (issue #1619).
+func TestOrphanDetectCmd_ReturnsDetectedNumbers(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
 		t.Fatal(err)
@@ -2893,26 +2861,54 @@ func TestOrphanRecoveryCmd_RecoverFnErr_ReturnsMsg(t *testing.T) {
 	}
 	t.Cleanup(factory.Cleanup)
 
-	launch := &Launcher{
-		Factory:   factory,
-		RecoverFn: func(string) error { return errors.New("adopt boom") },
-	}
+	launch := &Launcher{Factory: factory}
 
-	msg := orphanRecoveryCmd(launch)()
+	msg := orphanDetectCmd(launch)()
 
-	rec, ok := msg.(OrphanRecoveryMsg)
+	rec, ok := msg.(OrphanDetectedMsg)
 	if !ok {
-		t.Fatalf("orphanRecoveryCmd()() = %#v (%T), want OrphanRecoveryMsg", msg, msg)
+		t.Fatalf("orphanDetectCmd()() = %#v (%T), want OrphanDetectedMsg", msg, msg)
 	}
-	if !strings.Contains(rec.Err, "42") || !strings.Contains(rec.Err, "adopt boom") {
-		t.Errorf("OrphanRecoveryMsg.Err = %q, want it to name issue 42 and mention %q", rec.Err, "adopt boom")
+	if len(rec.Numbers) != 1 || rec.Numbers[0] != "42" {
+		t.Errorf("OrphanDetectedMsg.Numbers = %v, want [42]", rec.Numbers)
 	}
 }
 
-// TestTea_Init_OrphanRecoveryErr_SurfacedInHeader verifies a failed adopt at
-// startup reaches the rendered header through the real Bubble Tea event loop
-// — not just the pure Update function in isolation (issue #1218).
-func TestTea_Init_OrphanRecoveryErr_SurfacedInHeader(t *testing.T) {
+// TestOrphanDetectCmd_OrphanedIssuesErr_ReportsNoOrphans verifies a failed
+// OrphanedIssues() lookup at startup degrades to "no orphans detected"
+// rather than surfacing a failure banner — startup detection is best-effort
+// and silent on its own failure, mirroring DogfoodNotice's read-error
+// fallback, since #1619 retired the only startup warning ("orphan recovery
+// failed") this lookup used to feed.
+func TestOrphanDetectCmd_OrphanedIssuesErr_ReportsNoOrphans(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.ListRunningErr = errors.New("boom")
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{Factory: factory}
+
+	if msg := orphanDetectCmd(launch)(); msg != nil {
+		t.Errorf("orphanDetectCmd()() = %#v, want nil on a failed lookup", msg)
+	}
+}
+
+// TestTea_AdoptOrphanKey_NoOpenPR_SurfacesReasonWithNoAdoption verifies the
+// explicit adopt gesture ("A") on an orphan-flagged Backlog row with no open
+// PR reports the reason through the same banner startup recovery used to
+// show, and never queues or launches anything (issue #1619).
+func TestTea_AdoptOrphanKey_NoOpenPR_SurfacesReasonWithNoAdoption(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
@@ -2936,14 +2932,337 @@ func TestTea_Init_OrphanRecoveryErr_SurfacedInHeader(t *testing.T) {
 		CodeForge: f,
 		Factory:   factory,
 		Queue:     NewQueue(),
+		RecoverFn: func(string) error { return errors.New("issue 42: no open PR") },
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "A")
+	waitForOutput(t, tm, "orphan adopt failed", "no open PR")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_AdoptOrphanKey_DraftPR_SurfacesReasonWithNoAdoption verifies the
+// gesture's other "changes nothing" case — a draft PR, distinct from no PR
+// at all — reports that specific reason too, matching the acceptance
+// criterion naming both (issue #1619 AC).
+func TestTea_AdoptOrphanKey_DraftPR_SurfacesReasonWithNoAdoption(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		Queue:     NewQueue(),
+		RecoverFn: func(string) error { return errors.New("issue 42: draft PR") },
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "A")
+	waitForOutput(t, tm, "orphan adopt failed", "draft PR")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_AdoptOrphanKey_Success_ClearsFlagPreventingRepeatAdopt verifies a
+// successful adopt clears the row's orphan flag, so a second "A" press on
+// the same, now-adopted row never fires RecoverFn again — a repeat press
+// would otherwise race a second same-process settle over the PR the first
+// adopt already claimed (issue #1619 review finding).
+func TestTea_AdoptOrphanKey_Success_ClearsFlagPreventingRepeatAdopt(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	var calls int32
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		Queue:     NewQueue(),
+		RecoverFn: func(string) error {
+			atomic.AddInt32(&calls, 1)
+			return nil
+		},
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "A")
+	// Poll t's own final orphan flag via a short settle window instead of a
+	// rendered signal — a successful adopt renders no banner of its own
+	// (the whole point being "changes nothing" beyond clearing the flag).
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && atomic.LoadInt32(&calls) == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if atomic.LoadInt32(&calls) != 1 {
+		t.Fatalf("RecoverFn calls = %d after first \"A\", want 1", atomic.LoadInt32(&calls))
+	}
+	// Give the OrphanAdoptedMsg a moment to land on the Model before the
+	// second press, mirroring the same settle window above.
+	time.Sleep(50 * time.Millisecond)
+
+	sendKey(tm, "A")
+	time.Sleep(200 * time.Millisecond)
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("RecoverFn calls = %d after a second \"A\" on the same row, want still 1 — the orphan flag must clear on adopt", got)
+	}
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_AdoptOrphanKey_SecondPressWhileInFlight_NeverFiresTwice verifies a
+// second "A" press on the same orphan-flagged row, sent while the first
+// adopt's RecoverFn call is still in flight (before OrphanAdoptedMsg has had
+// a chance to clear the orphan flag), never fires a second RecoverFn call —
+// two concurrent RecoverFn calls for the same issue would race two
+// SettleAdopted goroutines over the same PR, the exact same-process
+// merge-authority race #1619 exists to prevent (review finding: the flag
+// only clears once RecoverFn returns, leaving the in-flight window itself
+// unguarded).
+func TestTea_AdoptOrphanKey_SecondPressWhileInFlight_NeverFiresTwice(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	var calls int32
+	entered := make(chan struct{}, 1)
+	unblock := make(chan struct{})
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		Queue:     NewQueue(),
+		RecoverFn: func(string) error {
+			atomic.AddInt32(&calls, 1)
+			entered <- struct{}{}
+			<-unblock
+			return nil
+		},
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "A")
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RecoverFn never entered after first \"A\"")
+	}
+
+	// The first adopt is now blocked inside RecoverFn, well before
+	// OrphanAdoptedMsg could have landed to clear the orphan flag — exactly
+	// the in-flight window a second press must not slip through.
+	sendKey(tm, "A")
+	time.Sleep(200 * time.Millisecond)
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("RecoverFn calls = %d while the first adopt was still in flight, want 1", got)
+	}
+
+	close(unblock)
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("RecoverFn calls = %d total, want 1", got)
+	}
+}
+
+// TestTea_AdoptOrphanKey_NonOrphanRow_NoAdopt verifies "A" on a highlighted
+// Backlog row that was never flagged an orphan is a no-op — the gesture is
+// scoped to orphan-flagged rows only (issue #1619).
+func TestTea_AdoptOrphanKey_NonOrphanRow_NoAdopt(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake() // no RunningNames: 42 is never reported an orphan
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	recovered := make(chan string, 1)
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		Queue:     NewQueue(),
+		RecoverFn: func(num string) error {
+			recovered <- num
+			return nil
+		},
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "A")
+
+	select {
+	case num := <-recovered:
+		t.Errorf("RecoverFn called with %q, want never called for a non-orphan row", num)
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_AdoptOrphanKey_OutsideBacklogSection_NoAdopt verifies "A" is
+// scoped to the Backlog Section — pressed while a work Section is active,
+// it must never adopt, even if the active Section happens to show the same
+// issue number as a Pick (issue #1619).
+func TestTea_AdoptOrphanKey_OutsideBacklogSection_NoAdopt(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	recovered := make(chan string, 1)
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		Queue:     NewQueue(),
+		RecoverFn: func(num string) error {
+			recovered <- num
+			return nil
+		},
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "2") // SectionRunning
+	sendKey(tm, "A")
+
+	select {
+	case num := <-recovered:
+		t.Errorf("RecoverFn called with %q, want never called outside SectionBacklog", num)
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_Init_OrphanedIssuesErr_NeverWarnsAtStartup verifies a failed
+// OrphanedIssues() lookup at startup degrades silently — no "orphan
+// recovery failed" banner, since startup never adopts (and so never fails
+// to adopt) on its own anymore (issue #1619).
+func TestTea_Init_OrphanedIssuesErr_NeverWarnsAtStartup(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.ListRunningErr = errors.New("boom")
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		Queue:     NewQueue(),
 		RecoverFn: func(string) error { return errors.New("adopt boom") },
 	}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "orphan recovery failed")
+	waitForOutput(t, tm, "fix the thing")
+	time.Sleep(500 * time.Millisecond)
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
+
+	final := tm.FinalModel(t).(teaModel)
+	if strings.Contains(View(final.m), "orphan adopt failed") {
+		t.Error("View() shows \"orphan adopt failed\" after a startup lookup failure, want no banner — startup never adopts")
+	}
 }
 
 // TestTea_WideCharacterTitle_NeverOverflowsTerminalWidth verifies backlog and
