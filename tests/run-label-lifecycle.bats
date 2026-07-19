@@ -41,6 +41,15 @@ setup() {
 
 @test "a successful run never escalates to agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
+  # A real outcome line for both issues (settle now demotes a no-outcome,
+  # no-PR box to agent-failed, so this test needs a genuine success to keep
+  # testing what it claims to test rather than tripping on that demotion).
+  export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=merged note=ok"
+  export FAKE_PODMAN_OUTCOME_2="SPINDRIFT_OUTCOME issue=2 landing=https://github.com/owner/repo/pull/2 status=merged note=ok"
+  export FAKE_GH_PR_STATE_1="MERGED"
+  export FAKE_GH_PR_STATE_2="MERGED"
+  export FAKE_GH_ISSUE_LABELS_1="agent-complete"
+  export FAKE_GH_ISSUE_LABELS_2="agent-complete"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q -- '--add-label agent-in-progress' "$GH_LOG"
