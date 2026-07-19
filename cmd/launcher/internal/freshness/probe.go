@@ -77,6 +77,12 @@ func Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evalu
 
 	rev, err := fetchBaseTip(pwd, baseBranch)
 	if err != nil {
+		if isNotAGitRepository(err) {
+			return Result{
+				Applicable: false,
+				Message:    fmt.Sprintf("not applicable (%s is not a git repository; freshness cannot be checked or rebuilt here)", pwd),
+			}
+		}
 		return Result{
 			Applicable: true,
 			Fresh:      false,
@@ -138,4 +144,15 @@ func fetchBaseTip(pwd, baseBranch string) (string, error) {
 		return "", fmt.Errorf("git rev-parse FETCH_HEAD: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// isNotAGitRepository reports whether err (as returned by fetchBaseTip) is
+// git's own "not a git repository" diagnostic — pwd isn't inside any git
+// worktree at all — rather than a transient failure (network, unreachable
+// remote, missing "origin") inside a real repository. Git emits this same
+// "not a git repository" wording whether it stops at the filesystem root or
+// at a mount boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM unset), so a substring
+// match covers both phrasings.
+func isNotAGitRepository(err error) bool {
+	return strings.Contains(err.Error(), "not a git repository")
 }
