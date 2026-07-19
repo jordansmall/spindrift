@@ -1705,3 +1705,87 @@ func TestUpdate_SizeChangedMsg_ClampsNonPositive(t *testing.T) {
 		t.Errorf("Height = %d, want clamped to %d", m.Height, minTerminalDimension)
 	}
 }
+
+// TestUpdate_DetailModalLoadedMsg_FillsBodyAndClearsLoading verifies the
+// async body fetch's result lands on the still-open modal: Loading drops to
+// false and Body is filled in, once DetailModalOpenMsg has already opened it
+// with just the number/title/labels a Backlog row has in hand (issue #1632).
+func TestUpdate_DetailModalLoadedMsg_FillsBodyAndClearsLoading(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: []string{"bug"}})
+	if !m.DetailModal.Loading {
+		t.Fatal("test setup: DetailModal.Loading = false immediately after DetailModalOpenMsg, want true")
+	}
+
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: "the full body text"})
+
+	if m.DetailModal.Loading {
+		t.Error("DetailModal.Loading = true after DetailModalLoadedMsg, want false")
+	}
+	if m.DetailModal.Body != "the full body text" {
+		t.Errorf("DetailModal.Body = %q, want %q", m.DetailModal.Body, "the full body text")
+	}
+}
+
+// TestUpdate_DetailModalLoadedMsg_StaleNumberIgnored verifies a
+// DetailModalLoadedMsg for a ticket the operator has since closed (or
+// switched away from, to a different ticket) never overwrites whatever the
+// modal shows now — the same same-number guard SidebarLoadedMsg's handling
+// applies (issue #1632).
+func TestUpdate_DetailModalLoadedMsg_StaleNumberIgnored(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalCloseMsg{})
+
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: "arrives after close"})
+
+	if m.DetailModal != nil {
+		t.Errorf("DetailModal = %+v after close, want nil — a stale load must not reopen it", m.DetailModal)
+	}
+}
+
+// TestUpdate_DetailCacheInvalidatedMsg_ClearsCacheAndEdges verifies "r"
+// (DetailCacheInvalidatedMsg) drops both the per-ticket detail cache and the
+// retained whole-backlog edge graph, so the next modal open re-fetches
+// rather than replaying data that may now be stale (issue #1632).
+func TestUpdate_DetailCacheInvalidatedMsg_ClearsCacheAndEdges(t *testing.T) {
+	m := NewModel()
+	m.DetailCache = map[string]DetailModalCache{"42": {Body: "stale"}}
+	m.Edges = map[string][]string{"42": {"7"}}
+	m.EdgeSources = map[string]map[string]forge.DepSource{"42": {"7": forge.DepSourceNative}}
+
+	m = Update(m, DetailCacheInvalidatedMsg{})
+
+	if m.DetailCache != nil {
+		t.Errorf("DetailCache = %v after DetailCacheInvalidatedMsg, want nil", m.DetailCache)
+	}
+	if m.Edges != nil {
+		t.Errorf("Edges = %v after DetailCacheInvalidatedMsg, want nil", m.Edges)
+	}
+	if m.EdgeSources != nil {
+		t.Errorf("EdgeSources = %v after DetailCacheInvalidatedMsg, want nil", m.EdgeSources)
+	}
+}
+
+// TestUpdate_SizeChangedMsg_RewrapsOpenDetailModal verifies a terminal
+// resize while the ticket detail modal is open re-wraps its body against
+// the new width — Lines is width-dependent (unlike SidebarState.Lines,
+// which never wraps), so a stale narrower-width wrap left in place would
+// either overflow the new, wider viewport's unused columns or, worse, still
+// carry line breaks sized for a width the modal no longer has (issue
+// #1632 review finding).
+func TestUpdate_SizeChangedMsg_RewrapsOpenDetailModal(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 10, Height: 24})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: "one two three four five"})
+	narrowLines := len(m.DetailModal.Lines)
+
+	m = Update(m, SizeChangedMsg{Width: 200, Height: 24})
+
+	if len(m.DetailModal.Lines) >= narrowLines {
+		t.Errorf("Lines = %d after widening, want fewer than the %d-wide wrap's %d lines", len(m.DetailModal.Lines), 10, narrowLines)
+	}
+	if m.DetailModal.Lines[0] != "one two three four five" {
+		t.Errorf("Lines[0] = %q, want the whole body unwrapped at the new 200-column width", m.DetailModal.Lines[0])
+	}
+}

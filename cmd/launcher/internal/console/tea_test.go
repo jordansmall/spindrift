@@ -1970,10 +1970,12 @@ func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_EnterKey_OnBacklogSection_PicksHighlighted verifies Enter, on the
-// Backlog Section (the default), Picks the highlighted issue exactly like
-// "p" does — the context-sensitive Enter routing (issue #845).
-func TestTea_EnterKey_OnBacklogSection_PicksHighlighted(t *testing.T) {
+// TestTea_EnterKey_OnBacklogSection_OpensDetailModal verifies Enter, on the
+// Backlog Section (the default), opens the fullscreen ticket detail modal
+// instead of picking the highlighted issue — picking moved to "p" (issue
+// #1632). The modal shows the highlighted issue's title instantly, before
+// any async body/blocker fetch lands.
+func TestTea_EnterKey_OnBacklogSection_OpensDetailModal(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 	launch := newTestLauncher(t, f)
@@ -1982,37 +1984,182 @@ func TestTea_EnterKey_OnBacklogSection_PicksHighlighted(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "enter")
-	// "settled 1" (the header's status line, always visible regardless of
-	// ActiveSection) proves the fake Dispatch this promotion launched has
-	// finished — otherwise "q" can race the still-live pick onto the quit
-	// confirm (issue #822) instead of exiting, hanging until teatest's
-	// timeout, the same guard the "p"-key pick tests already carry. Once
-	// settled, the issue may drop out of the Backlog listing (relabeled
-	// past Dispatchable), so only the Settled Section — not switched to
-	// here — would still show its title; the header count is what this
-	// assertion actually needs (issue #1500).
-	waitForOutput(t, tm, "settled 1")
+	waitForOutput(t, tm, "#42", "fix the thing", "[esc] close")
+
+	sendKey(tm, "esc")
+	waitForOutput(t, tm, "running 0/")
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
 }
 
-// TestTea_EnterKey_OnBacklogSection_FailedPromotion_ShowsDissolvedRow
-// verifies a raced/closed/relabeled promotion via Enter still surfaces as a
-// dissolved row with its reason, same as the "p" key path (issue #845).
-func TestTea_EnterKey_OnBacklogSection_FailedPromotion_ShowsDissolvedRow(t *testing.T) {
+// TestTea_DetailModal_FetchErr_ShowsFailedToLoad verifies a body fetch that
+// fails against the real tracker seam surfaces "failed to load" through the
+// actual async Cmd/Msg round-trip, not just Update applied directly (issue
+// #1632 review finding — the error render path had no integration
+// coverage).
+func TestTea_DetailModal_FetchErr_ShowsFailedToLoad(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
-	f.TransitionStateErr = errBoom
-	launch := &Launcher{CodeForge: f, queue: NewQueue()}
+	f.IssueErr = errBoom
+	launch := newTestLauncher(t, f)
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "enter")
-	sendKey(tm, "5") // PickDissolved folds into SectionFailed (ADR 0030)
-	waitForOutput(t, tm, "dissolved")
+	waitForOutput(t, tm, "failed to load", errBoom.Error())
 
+	sendKey(tm, "esc")
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_DetailModal_LoadsBodyAsyncAndCachesForReopen verifies the modal's
+// body arrives from a background fetch — a separate Issue call, since
+// ListOpenIssues never carries Body — and that reopening the same ticket
+// after closing it never issues a second Issue call: the loaded detail is
+// cached on Model.DetailCache and applied instantly instead (issue #1632).
+func TestTea_DetailModal_LoadsBodyAsyncAndCachesForReopen(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Body: "the full ticket body", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "the full ticket body")
+
+	sendKey(tm, "esc")
+	waitForOutput(t, tm, "running 0/")
+
+	calls := len(f.IssueCalls)
+	if calls == 0 {
+		t.Fatal("test setup: IssueCalls empty after first open, want at least one Issue fetch")
+	}
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "the full ticket body")
+
+	if len(f.IssueCalls) != calls {
+		t.Errorf("IssueCalls grew from %d to %d on reopen, want the cached detail applied with no new fetch", calls, len(f.IssueCalls))
+	}
+
+	sendKey(tm, "esc")
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_DetailModalKey_ScrollsBodyWithJAndArrows verifies "j"/down scrolls
+// the ticket detail modal's body forward, revealing lines the initial
+// viewport didn't have room for — the "body scrolls with j/k and the arrow
+// keys" AC (issue #1632).
+func TestTea_DetailModalKey_ScrollsBodyWithJAndArrows(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	var lines []string
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf("bodyline%02d", i))
+	}
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Body: strings.Join(lines, "\n"), State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 10))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "bodyline00")
+
+	for i := 0; i < 30; i++ {
+		sendKey(tm, "down")
+	}
+	waitForOutput(t, tm, "bodyline30")
+
+	sendKey(tm, "esc")
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_DetailModal_RetainsEdgeGraphAcrossTickets verifies the
+// whole-backlog dependency edge graph (waves.BuildEdges) is built at most
+// once per session: opening a second ticket's detail modal reuses the graph
+// the first open already built, rather than re-walking DepsOf across the
+// backlog a second time — the "no new gh calls" half of the Blocks section's
+// derivation (issue #1632).
+func TestTea_DetailModal_RetainsEdgeGraphAcrossTickets(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "7", Title: "waves core", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	f.NativeDeps = map[string][]string{"42": {"7"}}
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "waves core", "fix the thing")
+
+	// Ascending numeric order (ListOpenIssues' canonical order) puts #7
+	// first under the cursor.
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "Blocks", `#42 (native) open "fix the thing"`)
+
+	depsOfCallsAfterFirst := len(f.DepsOfCalls)
+	if depsOfCallsAfterFirst == 0 {
+		t.Fatal("test setup: DepsOfCalls empty after first open, want the whole-backlog graph built")
+	}
+
+	sendKey(tm, "esc")
+	sendKey(tm, "down")
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "Blocked by", `#7 (native) open "waves core"`)
+
+	if len(f.DepsOfCalls) != depsOfCallsAfterFirst {
+		t.Errorf("DepsOfCalls grew from %d to %d opening a second ticket, want the retained graph reused with no new DepsOf calls", depsOfCallsAfterFirst, len(f.DepsOfCalls))
+	}
+
+	sendKey(tm, "esc")
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_RefreshKey_InvalidatesDetailCache verifies "r" drops the cached
+// ticket detail: reopening the same ticket after a refresh re-fetches its
+// body instead of replaying stale cached data (issue #1632).
+func TestTea_RefreshKey_InvalidatesDetailCache(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Body: "the full ticket body", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "the full ticket body")
+	sendKey(tm, "esc")
+	waitForOutput(t, tm, "running 0/")
+
+	calls := len(f.IssueCalls)
+	if calls == 0 {
+		t.Fatal("test setup: IssueCalls empty after first open, want at least one Issue fetch")
+	}
+
+	// "r"'s cache/graph invalidation (DetailCacheInvalidatedMsg) applies
+	// synchronously in the same Update call the keypress triggers, ahead of
+	// the refreshCmd it also fires — so the very next "enter" is already
+	// guaranteed to see an empty cache with no wait needed in between. A
+	// waitForOutput here would be a red herring besides: the backlog
+	// content is unchanged by "r" (same one issue, same everything), and
+	// Bubble Tea's renderer only ever re-emits lines that actually changed
+	// since the last frame, so "fix the thing" never reappears as fresh
+	// bytes in the output stream to wait on.
+	sendKey(tm, "r")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "the full ticket body")
+
+	if len(f.IssueCalls) != calls+1 {
+		t.Errorf("IssueCalls grew from %d to %d across a refreshed reopen, want exactly one new fetch (%d)", calls, len(f.IssueCalls), calls+1)
+	}
+
+	sendKey(tm, "esc")
 	sendKey(tm, "q")
 	waitFinished(t, tm)
 }

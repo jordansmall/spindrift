@@ -3,6 +3,7 @@ package console
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -702,17 +703,18 @@ func TestView_ModeHelp_ListsSectionKeys(t *testing.T) {
 
 // TestView_ModeHelp_DescribesContextSensitiveEnter verifies the help
 // overlay's "enter" entry documents both context-sensitive behaviors —
-// picking the highlighted Backlog row and opening a work Section pick's
-// live-tail sidebar — not just the bare word "enter" (issue #995, reworded
-// for ADR 0030's Section-switched body by issue #1500, then for the sidebar
-// by #1501).
+// opening the highlighted Backlog row's ticket detail modal and opening a
+// work Section pick's live-tail sidebar — not just the bare word "enter"
+// (issue #995, reworded for ADR 0030's Section-switched body by issue #1500,
+// then for the sidebar by #1501, then for the detail modal by #1632 — Enter
+// no longer picks; picking moved to "p").
 func TestView_ModeHelp_DescribesContextSensitiveEnter(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
 	for _, want := range []string{
-		"otherwise: pick",
-		"the highlighted row (Backlog Section)",
+		"otherwise: open",
+		"the highlighted row's ticket detail (Backlog Section)",
 		"highlighted pick's live-tail sidebar",
 	} {
 		if !strings.Contains(out, want) {
@@ -907,6 +909,189 @@ func TestView_RebuildOutputOpen_ScrollOffsetWindowsContent(t *testing.T) {
 	}
 	if !strings.Contains(out, "l2") || !strings.Contains(out, "l3") {
 		t.Errorf("View() = %q, want l2/l3 visible after scrolling past l0/l1", out)
+	}
+}
+
+// TestView_DetailModal_ShowsBlockedByAndBlocksSections verifies the ticket
+// detail modal renders both its Blocked-by and Blocks sections, each entry
+// as number + source + open/closed state + title (issue #1632 AC), e.g.
+// `✗ #1540 (native) open "Waves core"`.
+func TestView_DetailModal_ShowsBlockedByAndBlocksSections(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{
+		Number: "42",
+		Body:   "the body",
+		BlockedBy: []BlockerRef{
+			{Number: "1540", Source: forge.DepSourceNative, State: forge.IssueOpen, Title: "Waves core"},
+		},
+		Blocks: []BlockerRef{
+			{Number: "99", Source: forge.DepSourceBody, State: forge.IssueClosed, Title: "downstream thing"},
+		},
+	})
+
+	out := View(m)
+	if !strings.Contains(out, "Blocked by") {
+		t.Errorf("View() = %q, want a \"Blocked by\" section header", out)
+	}
+	if !strings.Contains(out, `✗ #1540 (native) open "Waves core"`) {
+		t.Errorf("View() = %q, want the Blocked-by entry formatted number+source+state+title", out)
+	}
+	if !strings.Contains(out, "Blocks") {
+		t.Errorf("View() = %q, want a \"Blocks\" section header", out)
+	}
+	if !strings.Contains(out, `✓ #99 (body) closed "downstream thing"`) {
+		t.Errorf("View() = %q, want the Blocks entry formatted number+source+state+title", out)
+	}
+}
+
+// TestFormatBlockerRef_UnresolvedTitleAndState_RendersUnknown verifies a
+// BlockerRef whose title/state couldn't be resolved (resolveBlockerRef's
+// fallback: neither the backlog nor an Issue fetch found it) renders
+// "unknown" in place of the blank state/title, rather than a bare double
+// space and an empty quoted string (issue #1632 review finding).
+func TestFormatBlockerRef_UnresolvedTitleAndState_RendersUnknown(t *testing.T) {
+	got := formatBlockerRef(BlockerRef{Number: "123", Source: forge.DepSourceNative})
+	want := `✗ #123 (native) unknown "unknown"`
+	if got != want {
+		t.Errorf("formatBlockerRef(...) = %q, want %q", got, want)
+	}
+}
+
+// TestView_DetailModal_Err_ShowsFailedToLoad verifies a body fetch that
+// failed (openDetailModalCmd's tracker.Issue call erred) surfaces the error
+// in place of a blank or stuck-loading modal, instead of silently rendering
+// nothing (issue #1632 review finding — the error render path had no test
+// coverage).
+func TestView_DetailModal_Err_ShowsFailedToLoad(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Err: errBoom})
+
+	out := View(m)
+	if !strings.Contains(out, errBoom.Error()) {
+		t.Errorf("View() = %q, want it to contain %q", out, errBoom.Error())
+	}
+	if strings.Contains(out, "loading...") {
+		t.Errorf("View() = %q, want the loading placeholder replaced by the error, not both shown", out)
+	}
+}
+
+// TestView_DetailModal_SanitizesErr verifies a body-fetch error carrying
+// CSI/OSC escape sequences (an untrusted tracker error message, e.g. from a
+// forge API response echoed back) renders with the escapes stripped, the
+// same trust boundary every other piece of tracker-derived text in the
+// modal already crosses (issue #1632 review finding).
+func TestView_DetailModal_SanitizesErr(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Err: errors.New("evil\x1b[2Jerrtext\x1b]0;pwned\x07here")})
+
+	out := View(m)
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "evilerrtexthere") && strings.Contains(line, "\x1b") {
+			t.Errorf("detail modal row = %q, want no raw escape bytes surviving sanitization", line)
+		}
+	}
+	if !strings.Contains(out, "evilerrtexthere") {
+		t.Errorf("View() = %q, want the surrounding error text intact after stripping escapes", out)
+	}
+}
+
+// TestView_DetailModal_NoBlockersOrBlocks_ShowsNoSectionClutter verifies a
+// ticket with nothing declared in either direction doesn't grow empty
+// "Blocked by"/"Blocks" section headers with nothing under them (issue
+// #1632).
+func TestView_DetailModal_NoBlockersOrBlocks_ShowsNoSectionClutter(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: "the body"})
+
+	out := View(m)
+	if strings.Contains(out, "Blocked by") {
+		t.Errorf("View() = %q, want no \"Blocked by\" header with nothing to list", out)
+	}
+	if strings.Contains(out, "Blocks") {
+		t.Errorf("View() = %q, want no \"Blocks\" header with nothing to list", out)
+	}
+}
+
+// TestView_DetailModal_ScrollOffset_HidesLinesBeforeOffset verifies the
+// detail modal's body scrolls: once its content overflows the viewport,
+// DetailModalScrollMsg moves which lines are visible, hiding everything
+// before the new offset (issue #1632 AC — "the body scrolls with j/k and
+// the arrow keys").
+func TestView_DetailModal_ScrollOffset_HidesLinesBeforeOffset(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: detailModalChromeLines + 2})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: "l0\nl1\nl2\nl3"})
+	m = Update(m, DetailModalScrollMsg{Delta: 2})
+
+	out := View(m)
+	if strings.Contains(out, "l0") || strings.Contains(out, "l1") {
+		t.Errorf("View() = %q, want lines before the offset hidden", out)
+	}
+	if !strings.Contains(out, "l2") || !strings.Contains(out, "l3") {
+		t.Errorf("View() = %q, want lines from the offset onward", out)
+	}
+}
+
+// TestView_DetailModal_LabelsUnclipped verifies the detail modal shows every
+// label in full, unlike the backlog row's clipLabels "+N" truncation (issue
+// #1631) — the modal exists precisely so an operator can see what a clipped
+// backlog row hides (issue #1632 AC).
+func TestView_DetailModal_LabelsUnclipped(t *testing.T) {
+	labels := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"}
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: labels})
+
+	out := View(m)
+	for _, label := range labels {
+		if !strings.Contains(out, label) {
+			t.Errorf("View() = %q, want every label present unclipped, missing %q", out, label)
+		}
+	}
+	if strings.Contains(out, "+") {
+		t.Errorf("View() = %q, want no clipLabels-style \"+N\" truncation", out)
+	}
+}
+
+// TestView_DetailModal_SanitizesTitleLabelsBodyAndBlockerTitles verifies the
+// ticket detail modal strips CSI/OSC escape sequences from every piece of
+// untrusted tracker text it renders — title, labels, body, and each
+// Blocked-by/Blocks entry's title — the same trust boundary the backlog row
+// and sidebar transcript already enforce (issue #862, extended to the
+// detail modal by issue #1632 review finding): a tracker title/body/label is
+// untrusted input, and Bubble Tea does not filter arbitrary control
+// sequences before writing to the operator's terminal.
+func TestView_DetailModal_SanitizesTitleLabelsBodyAndBlockerTitles(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, DetailModalOpenMsg{
+		Number: "42",
+		Title:  "evil\x1b[2Jtitle\x1b]0;pwned\x07here",
+		Labels: []string{"evil\x1b[2Jlabel"},
+	})
+	m = Update(m, DetailModalLoadedMsg{
+		Number: "42",
+		Body:   "evil\x1b[2Jbody\x1b]0;pwned\x07here",
+		BlockedBy: []BlockerRef{
+			{Number: "7", Source: forge.DepSourceNative, State: forge.IssueOpen, Title: "evil\x1b[2Jblocker\x1b]0;pwned\x07here"},
+		},
+	})
+
+	out := View(m)
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "eviltitlehere") || strings.Contains(line, "evillabel") ||
+			strings.Contains(line, "evilbodyhere") || strings.Contains(line, "evilblockerhere") {
+			if strings.Contains(line, "\x1b") {
+				t.Errorf("detail modal row = %q, want no raw escape bytes surviving sanitization", line)
+			}
+		}
+	}
+	for _, want := range []string{"eviltitlehere", "evillabel", "evilbodyhere", "evilblockerhere"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("View() = %q, want the surrounding text %q intact after stripping escapes", out, want)
+		}
 	}
 }
 
@@ -1717,6 +1902,41 @@ func TestClip_WideCharacters_MeasuresDisplayWidthNotRuneCount(t *testing.T) {
 	}
 	if w := runewidth.StringWidth(got); w > 10 {
 		t.Errorf("clip(%q, 10, false) = %q with display width %d, want at most 10", s, got, w)
+	}
+}
+
+// TestWrapText_GreedilyFillsLinesToWidth verifies wrapText packs words onto
+// each line up to width display columns, wrapping to a new line only once
+// the next word would overflow it — the detail modal body's own word-wrap
+// (issue #1632; no markdown renderer in the dependency tree, so this is
+// hand-rolled rather than glamour).
+func TestWrapText_GreedilyFillsLinesToWidth(t *testing.T) {
+	got := wrapText("the quick brown fox jumps", 10)
+	want := []string{"the quick", "brown fox", "jumps"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("wrapText(...) = %v, want %v", got, want)
+	}
+}
+
+// TestWrapText_PreservesBlankLines verifies wrapText keeps paragraph breaks
+// (blank lines) in the source text as blank lines in the output, rather than
+// collapsing them into the surrounding wrapped text.
+func TestWrapText_PreservesBlankLines(t *testing.T) {
+	got := wrapText("first paragraph\n\nsecond paragraph", 40)
+	want := []string{"first paragraph", "", "second paragraph"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("wrapText(...) = %v, want %v", got, want)
+	}
+}
+
+// TestWrapText_WordWiderThanWidth_StandsAlone verifies a single word wider
+// than the wrap width is placed alone on its own line rather than broken
+// mid-word.
+func TestWrapText_WordWiderThanWidth_StandsAlone(t *testing.T) {
+	got := wrapText("a supercalifragilisticexpialidocious word", 10)
+	want := []string{"a", "supercalifragilisticexpialidocious", "word"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("wrapText(...) = %v, want %v", got, want)
 	}
 }
 

@@ -160,6 +160,76 @@ type Model struct {
 	// starts docked rather than still forced fullscreen from a prior
 	// session.
 	SidebarZoom bool
+	// DetailModal is the open Backlog row's fullscreen ticket detail modal,
+	// if any — nil when nothing is open. Unlike Sidebar, it is never docked:
+	// a Backlog row's title/body/blockers are read-heavy content, not a
+	// live tail, so it always takes over fullscreen (issue #1632).
+	DetailModal *DetailModalState
+	// DetailCache holds every ticket detail modal's fully-loaded content
+	// this session, keyed by issue number, so reopening the same ticket
+	// applies the cached DetailModalLoadedMsg synchronously with no fetch
+	// at all — "r" (DetailCacheInvalidatedMsg) is the only thing that clears
+	// it (issue #1632).
+	DetailCache map[string]DetailModalCache
+	// Edges is the whole-backlog dependency graph, child issue number ->
+	// blocker issue numbers, built by openDetailModalCmd's first call in a
+	// session (or the first call after "r" invalidates it) and retained
+	// here so a later ticket's own Blocks section — the graph's own reverse
+	// edges — never re-walks DepsOf across the backlog a second time
+	// (issue #1632). nil means no graph has been built yet.
+	Edges map[string][]string
+	// EdgeSources is Edges' per-blocker DepSource (native vs body-parsed),
+	// keyed the same way waves.BuildEdges' own Sources return keys it.
+	EdgeSources map[string]map[string]forge.DepSource
+}
+
+// DetailModalCache is one ticket's fully-loaded detail modal content,
+// retained on Model.DetailCache across a close/reopen — everything
+// DetailModalLoadedMsg carries except Err, since a failed load is never
+// worth caching (issue #1632).
+type DetailModalCache struct {
+	Body      string
+	BlockedBy []BlockerRef
+	Blocks    []BlockerRef
+}
+
+// DetailModalState is one Backlog issue's open ticket detail modal: the
+// number/title/labels a Backlog row already has in hand (set the instant
+// Enter opens it), plus the body and Blocked-by/Blocks lists a background
+// fetch fills in once it lands — Loading is true for the gap between the
+// two (issue #1632).
+type DetailModalState struct {
+	Number, Title string
+	Labels        []string
+	Loading       bool
+	Body          string
+	BlockedBy     []BlockerRef
+	Blocks        []BlockerRef
+	// Err is the async body/blocker fetch's failure, if any — Body,
+	// BlockedBy, and Blocks are all meaningless while it's set.
+	Err error
+	// Offset is the index of the first visible line in Lines — the modal
+	// body's scroll position, SidebarState.Offset's detail-modal analogue.
+	Offset int
+	// Lines is Body word-wrapped to the modal's width, followed by the
+	// formatted Blocked-by/Blocks sections — the flat, scrollable content
+	// renderDetailModal windows through one Viewport, computed once when
+	// DetailModalLoadedMsg lands rather than re-wrapped on every keystroke
+	// (mirrors SidebarState.Lines' #722 caching).
+	Lines []string
+}
+
+// BlockerRef is one resolved entry in a ticket detail modal's Blocked-by or
+// Blocks section: a blocker/blocked issue's number, the source its
+// dependency edge was resolved from (native relationship vs body-text
+// parsing), its open/closed state, and its title — static text this round,
+// no drill-down navigation into the referenced issue's own detail (issue
+// #1632).
+type BlockerRef struct {
+	Number string
+	Source forge.DepSource
+	State  forge.IssueState
+	Title  string
 }
 
 // SidebarPosition is one Dispatch's retained live-tail position — the
@@ -233,14 +303,27 @@ const (
 	// a single-issue pick instead — rendered as a visible hint so the wait
 	// isn't silent (issue #835).
 	ModePick
+	// ModeDetailModal is the fullscreen ticket detail modal a Backlog row's
+	// Enter opens (issue #1632) — modeActive derives it from DetailModal
+	// alone, the same "derived, not a stored Mode value" shape ModeSidebar
+	// uses, since a nil-vs-non-nil *DetailModalState already has to be the
+	// source of truth for View's own routing (issue #1632's View check
+	// mirrors ModeSidebar's own precedent, predating #1543).
+	ModeDetailModal
 )
 
 // modePrecedence is the tea layer's old handleKey if-cascade order, now
 // data: ActiveMode returns the first Mode here whose modeActive check
 // passes, so a new mode joins by appending to this slice and adding one
 // modeActive case rather than inserting an if-branch at the right depth
-// (issue #1543).
+// (issue #1543). ModeDetailModal sits ahead of ModeSidebar, matching the
+// order the pre-#1543 if-cascade checked DetailModal in (issue #1632) — the
+// two are not expected to ever both be open at once (DetailModal only opens
+// from a Backlog row's Enter, Sidebar from a work row's or an orphan
+// Backlog row's), but the ordering keeps that assumption from ever being
+// load-bearing.
 var modePrecedence = []Mode{
+	ModeDetailModal,
 	ModeSidebar,
 	ModeRebuildOutput,
 	ModeHelp,
@@ -252,13 +335,15 @@ var modePrecedence = []Mode{
 }
 
 // modeActive reports whether mode is the one currently owning the keyboard.
-// Every case but ModeSidebar and ModeList reduces to Mode's own single
-// stored field, since those two are the only modes whose ownership isn't
-// simply "m.Mode equals this value" — Sidebar's is a derived condition over
-// three other fields (see Mode's own doc comment), and List's is the
-// always-true fallback.
+// Every case but ModeDetailModal, ModeSidebar, and ModeList reduces to
+// Mode's own single stored field, since those three are the only modes
+// whose ownership isn't simply "m.Mode equals this value" — DetailModal's
+// and Sidebar's are each a derived condition over their own fields (see
+// Mode's own doc comment), and List's is the always-true fallback.
 func (m Model) modeActive(mode Mode) bool {
 	switch mode {
+	case ModeDetailModal:
+		return m.DetailModal != nil
 	case ModeSidebar:
 		return m.Sidebar != nil && (m.Focus == FocusSidebar || !sidebarFits(m) || m.SidebarZoom)
 	case ModeList:
@@ -669,12 +754,50 @@ func Update(m Model, msg Msg) Model {
 	case SizeChangedMsg:
 		m.Width = msg.Width
 		m.Height = msg.Height
+		if m.DetailModal != nil && !m.DetailModal.Loading && m.DetailModal.Err == nil {
+			// Lines is width-dependent (wrapText), unlike SidebarState.Lines,
+			// which is never wrapped — a resize must re-wrap it or the modal
+			// keeps showing line breaks sized for a width it no longer has
+			// (issue #1632 review finding).
+			m.DetailModal.Lines = detailModalLines(m.Width, *m.DetailModal)
+		}
 	case SectionPrevMsg:
 		m = switchSection(m, (m.ActiveSection-1+sectionCount)%sectionCount)
 	case SectionNextMsg:
 		m = switchSection(m, (m.ActiveSection+1)%sectionCount)
 	case SectionJumpMsg:
 		m = switchSection(m, msg.Section)
+	case DetailModalOpenMsg:
+		m.DetailModal = &DetailModalState{Number: msg.Number, Title: msg.Title, Labels: msg.Labels, Loading: true}
+	case DetailModalCloseMsg:
+		m.DetailModal = nil
+	case DetailModalScrollMsg:
+		if m.DetailModal != nil {
+			m.DetailModal.Offset += msg.Delta
+		}
+	case DetailModalLoadedMsg:
+		if msg.Edges != nil {
+			m.Edges = msg.Edges
+			m.EdgeSources = msg.Sources
+		}
+		if m.DetailModal != nil && m.DetailModal.Number == msg.Number {
+			m.DetailModal.Loading = false
+			m.DetailModal.Body = msg.Body
+			m.DetailModal.BlockedBy = msg.BlockedBy
+			m.DetailModal.Blocks = msg.Blocks
+			m.DetailModal.Err = msg.Err
+			m.DetailModal.Lines = detailModalLines(m.Width, *m.DetailModal)
+		}
+		if msg.Err == nil {
+			if m.DetailCache == nil {
+				m.DetailCache = make(map[string]DetailModalCache)
+			}
+			m.DetailCache[msg.Number] = DetailModalCache{Body: msg.Body, BlockedBy: msg.BlockedBy, Blocks: msg.Blocks}
+		}
+	case DetailCacheInvalidatedMsg:
+		m.DetailCache = nil
+		m.Edges = nil
+		m.EdgeSources = nil
 	}
 	m.Width = clampSize(m.Width)
 	m.Height = clampSize(m.Height)
@@ -725,6 +848,13 @@ func Update(m Model, msg Msg) Model {
 		vp.Scroll(0, lines)
 		vp.SetHeight(m.Height - headerFooterLines)
 		m.RebuildOutputOffset = vp.offset
+	}
+
+	if m.DetailModal != nil {
+		vp := Viewport{offset: m.DetailModal.Offset}
+		vp.Scroll(0, len(m.DetailModal.Lines))
+		vp.SetHeight(m.Height - detailModalChromeLines)
+		m.DetailModal.Offset = vp.offset
 	}
 
 	return m

@@ -177,6 +177,8 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.m = Update(t.m, msg)
 	case SidebarLoadedMsg: // async-load result, not a reactive signal
 		t.m = Update(t.m, msg)
+	case DetailModalLoadedMsg: // async-load result, not a reactive signal
+		t.m = Update(t.m, msg)
 	case OrphanRecoveryMsg:
 		t.m = Update(t.m, msg)
 	case OrphanDetectedMsg:
@@ -263,6 +265,10 @@ func isQuitKey(s string) bool {
 // branches collapsed into (issue #1543).
 func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	switch t.m.ActiveMode() {
+	case ModeDetailModal:
+		var cmd tea.Cmd
+		t.m, cmd = t.handleDetailModalKey(msg)
+		return t, cmd
 	case ModeSidebar:
 		var cmd tea.Cmd
 		t.m, cmd = t.handleSidebarKey(msg)
@@ -379,11 +385,14 @@ func (t teaModel) handleListKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		t.m = Update(t.m, FilterEditStartMsg{})
 	case "enter":
 		if t.m.ActiveSection == SectionBacklog {
-			if iss, ok := t.highlightedIssue(); ok && t.m.IsOrphan(iss.Number) {
+			iss, ok := t.highlightedIssue()
+			if !ok {
+				return t, nil
+			}
+			if t.m.IsOrphan(iss.Number) {
 				return t, openSidebarCmd(t.launch, t.pwd, iss.Number, true)
 			}
-			t = t.pickHighlighted()
-			return t, nil
+			return t.openDetailModal(iss)
 		}
 		if p, ok := t.highlightedPick(); ok {
 			if hasTranscript(p.State) {
@@ -408,6 +417,7 @@ func (t teaModel) handleListKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 			t.m = Update(t.m, SidebarCloseMsg{})
 		}
 	case "r":
+		t.m = Update(t.m, DetailCacheInvalidatedMsg{})
 		return t, refreshCmd(t.tracker)
 	case "?":
 		t.m = Update(t.m, HelpToggleMsg{})
@@ -493,6 +503,42 @@ func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return t.m, gChordTick()
 	}
 	return t.m, nil
+}
+
+// handleDetailModalKey routes one keypress while ModeDetailModal owns the
+// keyboard (the ticket detail modal is open — modeActive's ModeDetailModal
+// case): "esc" closes it, "j"/"k" and the arrow keys scroll its body one
+// line at a time, and the universal quit keystroke (isQuitKey) hard-quits —
+// it must never be swallowed by the modal, same principle as every other
+// modal pane in this file (issue #1632).
+func (t teaModel) handleDetailModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if isQuitKey(msg.String()) {
+		return Update(t.m, QuitMsg{}), nil
+	}
+	switch msg.String() {
+	case "esc":
+		return Update(t.m, DetailModalCloseMsg{}), nil
+	case "j", "down":
+		return Update(t.m, DetailModalScrollMsg{Delta: 1}), nil
+	case "k", "up":
+		return Update(t.m, DetailModalScrollMsg{Delta: -1}), nil
+	}
+	return t.m, nil
+}
+
+// openDetailModal opens iss's fullscreen ticket detail modal: instantly,
+// with the number/title/labels the highlighted Backlog row already has in
+// hand, then kicks off the async body/blocker fetch (openDetailModalCmd) —
+// or, when iss is already in Model.DetailCache, applies the cached detail
+// synchronously with no fetch at all, so reopening a ticket already visited
+// this session is instant (issue #1632).
+func (t teaModel) openDetailModal(iss forge.Issue) (teaModel, tea.Cmd) {
+	t.m = Update(t.m, DetailModalOpenMsg{Number: iss.Number, Title: iss.Title, Labels: iss.Labels})
+	if cached, ok := t.m.DetailCache[iss.Number]; ok {
+		t.m = Update(t.m, DetailModalLoadedMsg{Number: iss.Number, Body: cached.Body, BlockedBy: cached.BlockedBy, Blocks: cached.Blocks})
+		return t, nil
+	}
+	return t, openDetailModalCmd(t.tracker, t.m.All, t.m.Edges, t.m.EdgeSources, iss.Number)
 }
 
 // handleSidebarKey routes one keypress while ModeSidebar owns the keyboard

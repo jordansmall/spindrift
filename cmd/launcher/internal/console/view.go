@@ -6,6 +6,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // sidebarWidth is the docked live-tail sidebar's fixed column width — wide
@@ -57,6 +59,9 @@ func renderColumnDivider(rows int) string {
 // to show both (ADR 0030, #1501) — replacing the interim fullscreen-only
 // drill-in of issue #1500.
 func View(m Model) string {
+	if m.DetailModal != nil {
+		return renderDetailModal(*m.DetailModal, m.Height)
+	}
 	if m.Sidebar != nil && (m.SidebarZoom || !sidebarFits(m)) {
 		return renderSidebarFullscreen(*m.Sidebar, m.Height)
 	}
@@ -586,10 +591,10 @@ func renderHelp() string {
 		"              rendered rows without moving the cursor; the page",
 		"              size tracks terminal resizes",
 		"  /           filter the Backlog by label substring",
-		"  enter       apply filter (while filter-editing); otherwise: pick",
-		"              the highlighted row (Backlog Section), or open the",
-		"              highlighted pick's live-tail sidebar (a work Section,",
-		"              only when it has run)",
+		"  enter       apply filter (while filter-editing); otherwise: open",
+		"              the highlighted row's ticket detail (Backlog Section),",
+		"              or open the highlighted pick's live-tail sidebar (a",
+		"              work Section, only when it has run)",
 		"  h/l, left/right  move focus between the list and the sidebar",
 		"              (while a sidebar is open)",
 		"  esc         cancel filter edit",
@@ -606,6 +611,9 @@ func renderHelp() string {
 		"              has focus; same \"g\" leader as the list body's gg)",
 		"  z           toggle the sidebar's fullscreen zoom (while it has",
 		"              focus)",
+		"  esc         close the ticket detail modal (while it is open)",
+		"  j/k, up/down  scroll the ticket detail modal's body (while it is",
+		"              open)",
 		"  r           refresh the backlog",
 		"  p           pick the highlighted Backlog row (launch button)",
 		"  u           unpick the highlighted queued pick",
@@ -783,6 +791,165 @@ func sidebarLabel(s SidebarState) string {
 		label += " (raw)"
 	}
 	return label
+}
+
+// wrapText greedily word-wraps s into lines of at most width display
+// columns, preserving blank lines (paragraph breaks) verbatim — the detail
+// modal body's own plain-text renderer (issue #1632 notes there is no
+// glamour renderer in the dependency tree, so this is hand-rolled rather
+// than markdown-rendered). A single word wider than width is placed alone
+// on its own (overflowing) line rather than broken mid-word.
+func wrapText(s string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	var out []string
+	for _, para := range strings.Split(s, "\n") {
+		if para == "" {
+			out = append(out, "")
+			continue
+		}
+		var line string
+		for _, word := range strings.Fields(para) {
+			candidate := word
+			if line != "" {
+				candidate = line + " " + word
+			}
+			if line != "" && runewidth.StringWidth(candidate) > width {
+				out = append(out, line)
+				line = word
+				continue
+			}
+			line = candidate
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// detailModalChromeLines is the ticket detail modal's fixed, non-scrollable
+// row spend: the title line and the labels line (header, always exactly two
+// lines — an empty Labels still spends its own blank line, matching an
+// empty-label backlog row) plus the keystroke-hint footer. Shared by
+// renderDetailModal and Update's own Offset clamp, the same "clamp always
+// matches what the render actually has room to show" discipline
+// headerFooterLines documents for the sidebar/rebuild-output panes (issue
+// #1632).
+const detailModalChromeLines = 3
+
+// detailModalLines flattens s's body (word-wrapped to width) and its
+// Blocked-by/Blocks sections into one scrollable line list — the content
+// renderDetailModal windows through a single Viewport, computed once when
+// DetailModalLoadedMsg lands rather than re-wrapped on every keystroke
+// (mirrors sidebarLines' #722 caching). A section with nothing to list
+// contributes no lines at all, rather than an empty header (issue #1632).
+func detailModalLines(width int, s DetailModalState) []string {
+	lines := wrapText(SanitizeControlSequences(s.Body), width)
+	lines = append(lines, detailModalBlockerLines("Blocked by", s.BlockedBy)...)
+	lines = append(lines, detailModalBlockerLines("Blocks", s.Blocks)...)
+	return lines
+}
+
+// detailModalBlockerLines renders one of the detail modal's Blocked-by/
+// Blocks sections as lines: a blank separator, a header naming it, then one
+// line per BlockerRef — nil when refs is empty, so a ticket with nothing
+// declared in that direction doesn't grow an empty header with nothing
+// under it (issue #1632).
+func detailModalBlockerLines(header string, refs []BlockerRef) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(refs)+2)
+	lines = append(lines, "", header+":")
+	for _, r := range refs {
+		lines = append(lines, formatBlockerRef(r))
+	}
+	return lines
+}
+
+// windowDetailModalLines returns s.Lines windowed through a Viewport at
+// s.Offset, budget rows deep — windowSidebarLines' detail-modal analogue
+// (issue #1632).
+func windowDetailModalLines(s DetailModalState, budget int) []string {
+	if budget <= 0 {
+		return nil
+	}
+	vp := Viewport{offset: s.Offset, total: len(s.Lines)}
+	vp.SetHeight(budget)
+	w := vp.Window(len(s.Lines))
+	return s.Lines[w.Start:w.End]
+}
+
+// renderDetailModal renders a Backlog issue's fullscreen ticket detail
+// modal: its number/title, its labels, and — once the async fetch lands — a
+// word-wrapped plain-text body plus Blocked-by/Blocks sections, scrolled
+// together through one Viewport (issue #1632). It opens the instant Enter
+// fires, before that fetch resolves, so a "loading..." placeholder stands in
+// for the body/blocker content until DetailModalLoadedMsg fills it in.
+func renderDetailModal(s DetailModalState, height int) string {
+	if height <= 0 {
+		return ""
+	}
+	labels := make([]string, len(s.Labels))
+	for i, l := range s.Labels {
+		labels[i] = SanitizeControlSequences(l)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "#%s %s\n", s.Number, SanitizeControlSequences(s.Title))
+	b.WriteString(strings.Join(labels, ", "))
+	b.WriteString("\n")
+	switch {
+	case s.Loading:
+		b.WriteString("loading...\n")
+	case s.Err != nil:
+		fmt.Fprintf(&b, "failed to load: %s\n", SanitizeControlSequences(s.Err.Error()))
+	default:
+		visible := strings.Join(windowDetailModalLines(s, height-detailModalChromeLines), "\n")
+		b.WriteString(visible)
+		if visible != "" && !strings.HasSuffix(visible, "\n") {
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("[j/k] scroll · [esc] close\n")
+	return b.String()
+}
+
+// blockerOpenGlyph and blockerClosedGlyph mark a BlockerRef's open/closed
+// state at a glance, ahead of the spelled-out state word — the issue #1632
+// example format ("✗ #1540 (native) open \"Waves core\"").
+const (
+	blockerOpenGlyph   = "✗"
+	blockerClosedGlyph = "✓"
+)
+
+// formatBlockerRef renders one Blocked-by/Blocks entry: an open/closed
+// glyph, the issue number, its dependency source (native vs body-parsed),
+// its open/closed state spelled out, and its title — e.g.
+// `✗ #1540 (native) open "Waves core"` (issue #1632 AC). Static text only,
+// no drill-down navigation into the referenced issue's own detail this
+// round.
+func formatBlockerRef(r BlockerRef) string {
+	glyph := blockerOpenGlyph
+	if r.State == forge.IssueClosed || r.State == forge.IssueMerged {
+		glyph = blockerClosedGlyph
+	}
+	state := strings.ToLower(string(r.State))
+	if state == "" {
+		// resolveBlockerRef's failure fallback (the ref was deleted, or its
+		// own Issue fetch erred) leaves State/Title blank — render "unknown"
+		// in both rather than a bare double space and an empty quoted
+		// string (issue #1632 review finding).
+		state = "unknown"
+	}
+	title := SanitizeControlSequences(r.Title)
+	if title == "" {
+		title = "unknown"
+	}
+	// forge.Ref centralizes the "#N (source)" annotation every other
+	// blocker-diagnostic call site already shares — reusing it here keeps
+	// this format from drifting out of sync with theirs (issue #1632
+	// review finding).
+	return fmt.Sprintf("%s %s %s %q", glyph, forge.Ref(r.Number, r.Source), state, title)
 }
 
 // renderSidebarFullscreen renders one Dispatch's live-tail sidebar full
