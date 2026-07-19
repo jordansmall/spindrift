@@ -631,11 +631,11 @@ func TestView_Cursor_MarksHighlightedRow(t *testing.T) {
 	}
 }
 
-// TestView_PendingPick_EmptyBacklog_HidesIndicator verifies the "p_" pending
+// TestView_ModePick_EmptyBacklog_HidesIndicator verifies the "p_" pending
 // pick indicator does not render when the backlog is empty — with no
 // highlighted row, the chord's resolution is a no-op, so showing the
 // indicator would promise a pick that can't happen (issue #1237).
-func TestView_PendingPick_EmptyBacklog_HidesIndicator(t *testing.T) {
+func TestView_ModePick_EmptyBacklog_HidesIndicator(t *testing.T) {
 	m := Update(NewModel(), PickPendingMsg{})
 
 	out := View(m)
@@ -644,9 +644,9 @@ func TestView_PendingPick_EmptyBacklog_HidesIndicator(t *testing.T) {
 	}
 }
 
-// TestView_FilterEditing_ShowsInputLine verifies an in-progress filter edit
+// TestView_ModeFilterEdit_ShowsInputLine verifies an in-progress filter edit
 // renders a visible input line with the text typed so far (issue #784).
-func TestView_FilterEditing_ShowsInputLine(t *testing.T) {
+func TestView_ModeFilterEdit_ShowsInputLine(t *testing.T) {
 	m := NewModel()
 	m = Update(m, FilterEditStartMsg{})
 	m = Update(m, FilterChangedMsg{Filter: "bug"})
@@ -657,9 +657,9 @@ func TestView_FilterEditing_ShowsInputLine(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_ListsBoundKeys verifies the help overlay lists every key
+// TestView_ModeHelp_ListsBoundKeys verifies the help overlay lists every key
 // the tea layer binds, replacing the normal backlog rendering (issue #784).
-func TestView_ShowHelp_ListsBoundKeys(t *testing.T) {
+func TestView_ModeHelp_ListsBoundKeys(t *testing.T) {
 	m := NewModel()
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
 	m = Update(m, HelpToggleMsg{})
@@ -678,11 +678,11 @@ func TestView_ShowHelp_ListsBoundKeys(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_ListsSectionKeys verifies the help overlay describes
+// TestView_ModeHelp_ListsSectionKeys verifies the help overlay describes
 // H/L (previous/next Section) and 1-5 (direct jump) — the section-switched
 // list's navigation, replacing the retired "tab" focus-switch binding (ADR
 // 0030, issue #1500).
-func TestView_ShowHelp_ListsSectionKeys(t *testing.T) {
+func TestView_ModeHelp_ListsSectionKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
@@ -700,13 +700,13 @@ func TestView_ShowHelp_ListsSectionKeys(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_DescribesContextSensitiveEnter verifies the help
+// TestView_ModeHelp_DescribesContextSensitiveEnter verifies the help
 // overlay's "enter" entry documents both context-sensitive behaviors —
 // picking the highlighted Backlog row and opening a work Section pick's
 // live-tail sidebar — not just the bare word "enter" (issue #995, reworded
 // for ADR 0030's Section-switched body by issue #1500, then for the sidebar
 // by #1501).
-func TestView_ShowHelp_DescribesContextSensitiveEnter(t *testing.T) {
+func TestView_ModeHelp_DescribesContextSensitiveEnter(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
@@ -721,10 +721,10 @@ func TestView_ShowHelp_DescribesContextSensitiveEnter(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_ListsNewKeybindings verifies the help overlay lists the
+// TestView_ModeHelp_ListsNewKeybindings verifies the help overlay lists the
 // picks/queue-driving keys wired in issue #785, and documents "X" as the
 // Terminate key now that "k" reverted to vim's cursor-up (issue #1500).
-func TestView_ShowHelp_ListsNewKeybindings(t *testing.T) {
+func TestView_ModeHelp_ListsNewKeybindings(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
@@ -738,11 +738,11 @@ func TestView_ShowHelp_ListsNewKeybindings(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_ListsAdoptOrphanKey verifies the help overlay documents
+// TestView_ModeHelp_ListsAdoptOrphanKey verifies the help overlay documents
 // "A", the explicit adopt gesture on an orphan-flagged Backlog row (issue
 // #1619) — startup only ever detects an orphan now, so the operator needs a
 // discoverable way to learn how to adopt one.
-func TestView_ShowHelp_ListsAdoptOrphanKey(t *testing.T) {
+func TestView_ModeHelp_ListsAdoptOrphanKey(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
@@ -754,9 +754,9 @@ func TestView_ShowHelp_ListsAdoptOrphanKey(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_ListsRebuildOutputKey verifies the help overlay lists
+// TestView_ModeHelp_ListsRebuildOutputKey verifies the help overlay lists
 // "o", the rebuild-output pane's open key added by issue #1128.
-func TestView_ShowHelp_ListsRebuildOutputKey(t *testing.T) {
+func TestView_ModeHelp_ListsRebuildOutputKey(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
@@ -768,11 +768,11 @@ func TestView_ShowHelp_ListsRebuildOutputKey(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_ListsBodyScrollKeys verifies the help overlay lists
+// TestView_ModeHelp_ListsBodyScrollKeys verifies the help overlay lists
 // pgup/pgdown as the backlog/queue viewport's own line-scroll keys,
 // distinct from the sidebar's identically-named scroll keys
 // (issue #1036 AC — help overlay documents the new scroll keys).
-func TestView_ShowHelp_ListsBodyScrollKeys(t *testing.T) {
+func TestView_ModeHelp_ListsBodyScrollKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
@@ -781,10 +781,10 @@ func TestView_ShowHelp_ListsBodyScrollKeys(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_ListsJumpKeys verifies the help overlay documents "G"
+// TestView_ModeHelp_ListsJumpKeys verifies the help overlay documents "G"
 // and "gg" — the list body's jump-to-bottom/top motions — alongside the
 // existing j/k and pgup/pgdown entries (issue #1628 AC7).
-func TestView_ShowHelp_ListsJumpKeys(t *testing.T) {
+func TestView_ModeHelp_ListsJumpKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
@@ -802,10 +802,10 @@ func TestView_ShowHelp_ListsJumpKeys(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_ListsSidebarJumpToTop verifies the help overlay documents
+// TestView_ModeHelp_ListsSidebarJumpToTop verifies the help overlay documents
 // the sidebar's own "gg" — detach follow and jump to the sidebar's top —
 // alongside its existing "G / end" jump-to-bottom entry (issue #1629 AC4).
-func TestView_ShowHelp_ListsSidebarJumpToTop(t *testing.T) {
+func TestView_ModeHelp_ListsSidebarJumpToTop(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
@@ -817,11 +817,11 @@ func TestView_ShowHelp_ListsSidebarJumpToTop(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_ContrastsSidebarFixedPage verifies the help overlay's
+// TestView_ModeHelp_ContrastsSidebarFixedPage verifies the help overlay's
 // sidebar pgup/pgdown line calls out that its page jump is a fixed size,
 // unlike the backlog/queue's live-viewport-derived one — the two keys share
 // a name but not a page size (issue #1059).
-func TestView_ShowHelp_ContrastsSidebarFixedPage(t *testing.T) {
+func TestView_ModeHelp_ContrastsSidebarFixedPage(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
@@ -831,10 +831,10 @@ func TestView_ShowHelp_ContrastsSidebarFixedPage(t *testing.T) {
 	}
 }
 
-// TestView_ShowHelp_ListsRebuildOutputJumpKeys verifies the help overlay
+// TestView_ModeHelp_ListsRebuildOutputJumpKeys verifies the help overlay
 // documents "G" and "gg" for the rebuild-output pane, alongside the existing
 // "o"/j/k/pgup/pgdown entry (issue #1630 AC).
-func TestView_ShowHelp_ListsRebuildOutputJumpKeys(t *testing.T) {
+func TestView_ModeHelp_ListsRebuildOutputJumpKeys(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)

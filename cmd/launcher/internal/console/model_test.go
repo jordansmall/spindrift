@@ -137,18 +137,61 @@ func TestUpdate_FilterChangedMsg_NarrowingClampsCursor(t *testing.T) {
 	}
 }
 
-// TestUpdate_HelpToggleMsg_FlipsShowHelp verifies "?" opens the help overlay
+// TestModel_ActiveMode_DefaultsToList verifies a fresh Model's ActiveMode is
+// ModeList, modePrecedence's last resort (issue #1543).
+func TestModel_ActiveMode_DefaultsToList(t *testing.T) {
+	m := NewModel()
+	if got := m.ActiveMode(); got != ModeList {
+		t.Errorf("ActiveMode() = %v, want ModeList", got)
+	}
+}
+
+// TestModel_ActiveMode_SidebarBeatsEveryOtherMode verifies a focused sidebar
+// owns the keyboard ahead of any Mode value — mirroring the old handleKey
+// cascade's own sidebar-first check. Sidebar's ownership is a condition
+// derived from Sidebar/Focus/SidebarZoom rather than folded into Mode
+// itself (Mode's own doc comment), so a Model can still carry a stale Mode
+// alongside an active Sidebar; ActiveMode must still resolve to ModeSidebar
+// regardless (issue #1543).
+func TestModel_ActiveMode_SidebarBeatsEveryOtherMode(t *testing.T) {
+	m := NewModel()
+	m.Sidebar = &SidebarState{Number: "42"}
+	m.Focus = FocusSidebar
+	m.Mode = ModeHelp
+
+	if got := m.ActiveMode(); got != ModeSidebar {
+		t.Errorf("ActiveMode() = %v, want ModeSidebar even with Mode = ModeHelp", got)
+	}
+}
+
+// TestModel_ActiveMode_DockedSidebarDoesNotOwnKeyboard verifies a docked
+// (fits, not zoomed, list-focused) sidebar leaves Mode in charge — only a
+// focused, fullscreen-fallback, or zoomed sidebar competes for ownership
+// (ADR 0030's own sidebarFits/Focus contract, unchanged by issue #1543).
+func TestModel_ActiveMode_DockedSidebarDoesNotOwnKeyboard(t *testing.T) {
+	m := NewModel()
+	m.Width, m.Height = 200, 40
+	m.Sidebar = &SidebarState{Number: "42"}
+	m.Focus = FocusList
+	m.Mode = ModeHelp
+
+	if got := m.ActiveMode(); got != ModeHelp {
+		t.Errorf("ActiveMode() = %v, want ModeHelp for a docked, list-focused sidebar", got)
+	}
+}
+
+// TestUpdate_HelpToggleMsg_TogglesModeHelp verifies "?" opens the help overlay
 // and a second "?" closes it (issue #784).
-func TestUpdate_HelpToggleMsg_FlipsShowHelp(t *testing.T) {
+func TestUpdate_HelpToggleMsg_TogglesModeHelp(t *testing.T) {
 	m := NewModel()
 	m = Update(m, HelpToggleMsg{})
-	if !m.ShowHelp {
-		t.Error("ShowHelp = false after one toggle, want true")
+	if m.Mode != ModeHelp {
+		t.Errorf("Mode = %v after one toggle, want ModeHelp", m.Mode)
 	}
 
 	m = Update(m, HelpToggleMsg{})
-	if m.ShowHelp {
-		t.Error("ShowHelp = true after two toggles, want false")
+	if m.Mode == ModeHelp {
+		t.Error("Mode = ModeHelp after two toggles, want ModeList")
 	}
 }
 
@@ -159,8 +202,8 @@ func TestUpdate_RebuildOutputOpenMsg_OpensPaneWhenOutputPresent(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "building...\ndone"}})
 	m = Update(m, RebuildOutputOpenMsg{})
-	if !m.ShowRebuildOutput {
-		t.Error("ShowRebuildOutput = false after open with output present, want true")
+	if m.Mode != ModeRebuildOutput {
+		t.Errorf("Mode = %v after open with output present, want ModeRebuildOutput", m.Mode)
 	}
 }
 
@@ -169,8 +212,8 @@ func TestUpdate_RebuildOutputOpenMsg_OpensPaneWhenOutputPresent(t *testing.T) {
 func TestUpdate_RebuildOutputOpenMsg_NoOpWhenOutputEmpty(t *testing.T) {
 	m := NewModel()
 	m = Update(m, RebuildOutputOpenMsg{})
-	if m.ShowRebuildOutput {
-		t.Error("ShowRebuildOutput = true with no RebuildOutput captured, want false")
+	if m.Mode == ModeRebuildOutput {
+		t.Error("Mode = ModeRebuildOutput with no RebuildOutput captured, want ModeList")
 	}
 }
 
@@ -183,8 +226,8 @@ func TestUpdate_RebuildOutputScrollMsg_NoOpWhenPaneClosed(t *testing.T) {
 	if m.RebuildOutputOffset != 0 {
 		t.Errorf("RebuildOutputOffset = %d, want 0 while pane closed", m.RebuildOutputOffset)
 	}
-	if m.ShowRebuildOutput {
-		t.Error("ShowRebuildOutput = true, want false — scroll must not open the pane")
+	if m.Mode == ModeRebuildOutput {
+		t.Error("Mode = ModeRebuildOutput, want ModeList — scroll must not open the pane")
 	}
 }
 
@@ -228,25 +271,8 @@ func TestUpdate_RebuildOutputJumpMsgs_NoOpWhenPaneClosed(t *testing.T) {
 	if m.RebuildOutputOffset != 0 {
 		t.Errorf("RebuildOutputOffset = %d after jump-to-first while closed, want 0", m.RebuildOutputOffset)
 	}
-	if m.ShowRebuildOutput {
-		t.Error("ShowRebuildOutput = true, want false — neither jump must open the pane")
-	}
-}
-
-// TestUpdate_RebuildOutputJumpToLastMsg_NoOpWhenOpenPaneGoesEmpty verifies
-// jump-to-last is a safe no-op once a later StaleStatusMsg has emptied
-// RebuildStatus.Output out from under an already-open pane and closed it
-// (issue #1543) — RebuildOutputOffset must clamp to 0, not panic or go
-// negative (issue #1630 AC4).
-func TestUpdate_RebuildOutputJumpToLastMsg_NoOpWhenOpenPaneGoesEmpty(t *testing.T) {
-	m := NewModel()
-	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2"}})
-	m = Update(m, RebuildOutputOpenMsg{})
-	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: ""}})
-
-	m = Update(m, RebuildOutputJumpToLastMsg{})
-	if m.RebuildOutputOffset != 0 {
-		t.Errorf("RebuildOutputOffset = %d after jump-to-last on an emptied-out open pane, want 0", m.RebuildOutputOffset)
+	if m.Mode == ModeRebuildOutput {
+		t.Error("Mode = ModeRebuildOutput, want ModeList — neither jump must open the pane")
 	}
 }
 
@@ -267,7 +293,7 @@ func TestUpdate_RebuildOutputJumpToFirstMsg_ResetsOffsetToZero(t *testing.T) {
 
 // TestUpdate_RebuildOutputJumpToLastMsg_JumpsToLastPage verifies "G" moves
 // RebuildOutputOffset to the last page that still fills the viewport — not
-// just the last line — the same page-capped clamp the ShowRebuildOutput
+// just the last line — the same page-capped clamp the ModeRebuildOutput
 // clamp block already applies on every Update (issue #1630 AC1).
 func TestUpdate_RebuildOutputJumpToLastMsg_JumpsToLastPage(t *testing.T) {
 	m := NewModel()
@@ -281,41 +307,42 @@ func TestUpdate_RebuildOutputJumpToLastMsg_JumpsToLastPage(t *testing.T) {
 	}
 }
 
-// TestUpdate_RebuildOutputCloseMsg_ClosesPane verifies close clears
-// ShowRebuildOutput so View falls back to rendering the backlog/queue.
+// TestUpdate_RebuildOutputCloseMsg_ClosesPane verifies close returns Mode to
+// ModeList so View falls back to rendering the backlog/queue.
 func TestUpdate_RebuildOutputCloseMsg_ClosesPane(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1"}})
 	m = Update(m, RebuildOutputOpenMsg{})
 	m = Update(m, RebuildOutputCloseMsg{})
-	if m.ShowRebuildOutput {
-		t.Error("ShowRebuildOutput = true after close, want false")
+	if m.Mode == ModeRebuildOutput {
+		t.Error("Mode = ModeRebuildOutput after close, want ModeList")
 	}
 }
 
 // TestUpdate_StaleStatusMsg_ClosesOpenPaneWhenOutputEmpties verifies a later
 // StaleStatusMsg that empties RebuildStatus.Output out from under an
-// already-open pane also closes it, rather than leaving ShowRebuildOutput
-// true over blank content — the documented rough edge issue #1543 retires.
+// already-open pane also closes it, rather than leaving Mode at
+// ModeRebuildOutput over blank content — the documented rough edge issue
+// #1543 retires.
 func TestUpdate_StaleStatusMsg_ClosesOpenPaneWhenOutputEmpties(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2"}})
 	m = Update(m, RebuildOutputOpenMsg{})
 
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: ""}})
-	if m.ShowRebuildOutput {
-		t.Error("ShowRebuildOutput = true after Output emptied, want false (pane auto-closes)")
+	if m.Mode == ModeRebuildOutput {
+		t.Error("Mode = ModeRebuildOutput after Output emptied, want ModeList (pane auto-closes)")
 	}
 }
 
 // TestUpdate_FilterEditStartMsg_EntersEditingMode verifies "/" arms
-// FilterEditing so the tea layer routes further keystrokes as filter text
+// ModeFilterEdit so the tea layer routes further keystrokes as filter text
 // instead of navigation (issue #784).
 func TestUpdate_FilterEditStartMsg_EntersEditingMode(t *testing.T) {
 	m := NewModel()
 	m = Update(m, FilterEditStartMsg{})
-	if !m.FilterEditing {
-		t.Error("FilterEditing = false after FilterEditStartMsg, want true")
+	if m.Mode != ModeFilterEdit {
+		t.Errorf("Mode = %v after FilterEditStartMsg, want ModeFilterEdit", m.Mode)
 	}
 }
 
@@ -328,8 +355,8 @@ func TestUpdate_FilterEditConfirmMsg_KeepsFilterExitsEditing(t *testing.T) {
 	m = Update(m, FilterChangedMsg{Filter: "bug"})
 
 	m = Update(m, FilterEditConfirmMsg{})
-	if m.FilterEditing {
-		t.Error("FilterEditing = true after confirm, want false")
+	if m.Mode == ModeFilterEdit {
+		t.Error("Mode = ModeFilterEdit after confirm, want ModeList")
 	}
 	if m.Filter != "bug" {
 		t.Errorf("Filter = %q after confirm, want %q kept", m.Filter, "bug")
@@ -346,8 +373,8 @@ func TestUpdate_FilterEditCancelMsg_RevertsFilterExitsEditing(t *testing.T) {
 	m = Update(m, FilterChangedMsg{Filter: "bug-and-more"})
 
 	m = Update(m, FilterEditCancelMsg{})
-	if m.FilterEditing {
-		t.Error("FilterEditing = true after cancel, want false")
+	if m.Mode == ModeFilterEdit {
+		t.Error("Mode = ModeFilterEdit after cancel, want ModeList")
 	}
 	if m.Filter != "bug" {
 		t.Errorf("Filter = %q after cancel, want %q restored", m.Filter, "bug")
@@ -1101,7 +1128,7 @@ func TestUpdate_CursorJumpToLastMsg_MovesCursorAndDragsOffsetIntoView(t *testing
 }
 
 // TestUpdate_GPendingMsg_ArmsPendingG verifies a lone "g" arms the pending-g
-// leader on the Model, mirroring PendingPick's own arm/resolve toggle (issue
+// leader on the Model, mirroring ModePick's own arm/resolve toggle (issue
 // #1628 AC3).
 func TestUpdate_GPendingMsg_ArmsPendingG(t *testing.T) {
 	m := NewModel()

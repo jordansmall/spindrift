@@ -1431,8 +1431,8 @@ func TestTea_HandleKey_RebuildOutputKey_OpensPaneWhenOutputPresent(t *testing.T)
 	tm := teaModel{m: m}
 
 	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
-	if !tm.m.ShowRebuildOutput {
-		t.Error("ShowRebuildOutput = false after \"o\" with output present, want true")
+	if tm.m.Mode != ModeRebuildOutput {
+		t.Errorf("Mode = %v after \"o\" with output present, want ModeRebuildOutput", tm.m.Mode)
 	}
 }
 
@@ -1442,8 +1442,8 @@ func TestTea_HandleKey_RebuildOutputKey_NoOpWhenOutputEmpty(t *testing.T) {
 	tm := teaModel{m: NewModel()}
 
 	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
-	if tm.m.ShowRebuildOutput {
-		t.Error("ShowRebuildOutput = true with no output captured, want false")
+	if tm.m.Mode == ModeRebuildOutput {
+		t.Error("Mode = ModeRebuildOutput with no output captured, want ModeList")
 	}
 }
 
@@ -1456,8 +1456,8 @@ func TestTea_HandleRebuildOutputKey_ClosesOnXOrEsc(t *testing.T) {
 		tm := teaModel{m: m}
 
 		tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
-		if tm.m.ShowRebuildOutput {
-			t.Errorf("key %q: ShowRebuildOutput = true, want false (closed)", key)
+		if tm.m.Mode == ModeRebuildOutput {
+			t.Errorf("key %q: Mode = ModeRebuildOutput, want ModeList (closed)", key)
 		}
 	}
 }
@@ -1963,8 +1963,8 @@ func TestTea_PickKey_FollowedByA_ClearsPendingIndicator(t *testing.T) {
 	waitFinished(t, tm)
 
 	fm := tm.FinalModel(t).(teaModel)
-	if fm.m.PendingPick {
-		t.Errorf("PendingPick = true after \"a\" resolved the chord, want false")
+	if fm.m.Mode == ModePick {
+		t.Error("Mode = ModePick after \"a\" resolved the chord, want ModeList")
 	}
 }
 
@@ -1989,8 +1989,8 @@ func TestTea_PickKey_Timeout_ClearsPendingIndicator(t *testing.T) {
 	waitFinished(t, tm)
 
 	fm := tm.FinalModel(t).(teaModel)
-	if fm.m.PendingPick {
-		t.Errorf("PendingPick = true after timeout resolved the chord, want false")
+	if fm.m.Mode == ModePick {
+		t.Error("Mode = ModePick after timeout resolved the chord, want ModeList")
 	}
 }
 
@@ -2064,8 +2064,8 @@ func TestTea_PickKey_FollowedByNonA_ClearsPendingIndicator(t *testing.T) {
 	waitFinished(t, tm)
 
 	fm := tm.FinalModel(t).(teaModel)
-	if fm.m.PendingPick {
-		t.Errorf("PendingPick = true after non-a/q key resolved the chord, want false")
+	if fm.m.Mode == ModePick {
+		t.Error("Mode = ModePick after non-a/q key resolved the chord, want ModeList")
 	}
 }
 
@@ -2175,7 +2175,7 @@ func TestTea_PickKey_FailedPromotion_SurvivesQueueResync(t *testing.T) {
 
 	sendKey(tm, "p")
 	// Wait for the pending-pick chord to resolve (no trailing "a" arrives)
-	// before sending "5" — a key sent while PendingPick is still armed
+	// before sending "5" — a key sent while ModePick is still armed
 	// resolves the chord instead of switching Sections. The Failed tab's
 	// count is the signal: PickDissolved folds into SectionFailed (ADR
 	// 0030), and the header itself never counts Dissolved.
@@ -2216,8 +2216,8 @@ func TestTea_TerminateKey_NotLive_NeverArmsConfirm(t *testing.T) {
 	waitFinished(t, tm)
 
 	fm := tm.FinalModel(t).(teaModel)
-	if fm.m.PendingTerminate != "" {
-		t.Errorf("PendingTerminate = %q, want empty for a non-live issue", fm.m.PendingTerminate)
+	if fm.m.Mode == ModeTerminateConfirm {
+		t.Error("Mode = ModeTerminateConfirm, want ModeList for a non-live issue")
 	}
 }
 
@@ -2236,8 +2236,8 @@ func TestTea_TerminateKey_NilLauncher_NeverArmsConfirm(t *testing.T) {
 	waitFinished(t, tm)
 
 	fm := tm.FinalModel(t).(teaModel)
-	if fm.m.PendingTerminate != "" {
-		t.Errorf("PendingTerminate = %q, want empty in a launch-less session", fm.m.PendingTerminate)
+	if fm.m.Mode == ModeTerminateConfirm {
+		t.Error("Mode = ModeTerminateConfirm, want ModeList in a launch-less session")
 	}
 }
 
@@ -2613,14 +2613,14 @@ func TestTea_TerminateKey_ConfirmThenOther_Declines(t *testing.T) {
 	}
 }
 
-// TestTea_TerminateKey_ConfirmThenQuit_ArmsPendingQuitConfirm verifies the
+// TestTea_TerminateKey_ConfirmThenQuit_ArmsQuitConfirm verifies the
 // universal quit keystroke at the terminate-confirm prompt is not swallowed
 // by the pending terminate, but also does not quit outright: "q" declines
 // the terminate and arms the same drain/terminate-all/stay confirm the main
 // quit key uses, since a terminate-confirm prompt guarantees a live
 // Dispatch (issue #1215, ADR 0023). Driving "d" (drain) finishes the
 // scenario without killing anything.
-func TestTea_TerminateKey_ConfirmThenQuit_ArmsPendingQuitConfirm(t *testing.T) {
+func TestTea_TerminateKey_ConfirmThenQuit_ArmsQuitConfirm(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
 
 	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
@@ -2755,12 +2755,12 @@ func TestTea_TerminateKey_ConfirmThenYes_RespondsWhileTrackerCommentBlocks(t *te
 	}
 }
 
-// TestTea_TerminateConfirmKey_Quit_ClearsPendingTerminateArmsPendingQuit
+// TestTea_TerminateConfirmKey_Quit_ClearsTerminateConfirmArmsQuitConfirm
 // verifies "q"/"ctrl+c" at the terminate confirm prompt declines the
-// terminate (clearing PendingTerminate, so a later keypress cannot loop back
-// into this same handler) and arms the quit confirm instead of quitting
-// directly (issue #1215).
-func TestTea_TerminateConfirmKey_Quit_ClearsPendingTerminateArmsPendingQuit(t *testing.T) {
+// terminate (leaving ModeTerminateConfirm, so a later keypress cannot loop
+// back into this same handler) and arms the quit confirm instead of
+// quitting directly (issue #1215).
+func TestTea_TerminateConfirmKey_Quit_ClearsTerminateConfirmArmsQuitConfirm(t *testing.T) {
 	keys := []tea.KeyMsg{
 		{Type: tea.KeyRunes, Runes: []rune("q")},
 		{Type: tea.KeyCtrlC},
@@ -2772,11 +2772,8 @@ func TestTea_TerminateConfirmKey_Quit_ClearsPendingTerminateArmsPendingQuit(t *t
 
 			tm = tm.handleTerminateConfirmKey(key)
 
-			if tm.m.PendingTerminate != "" {
-				t.Errorf("PendingTerminate = %q, want cleared after declining the terminate to quit", tm.m.PendingTerminate)
-			}
-			if !tm.m.PendingQuit {
-				t.Error("PendingQuit = false, want true after quitting at the terminate confirm prompt")
+			if tm.m.Mode != ModeQuitConfirm {
+				t.Errorf("Mode = %v, want ModeQuitConfirm after declining the terminate to quit", tm.m.Mode)
 			}
 			if tm.m.Quitting {
 				t.Error("Quitting = true, want false — quit confirm armed, not yet decided")
@@ -2904,10 +2901,10 @@ func TestTea_Update_ReusesHeartbeatCacheAcrossCalls(t *testing.T) {
 	}
 }
 
-// TestTea_QuitKey_WithLiveDispatch_ArmsPendingQuitConfirm verifies "q" with a
+// TestTea_QuitKey_WithLiveDispatch_ArmsQuitConfirm verifies "q" with a
 // live Dispatch running arms the drain/terminate-all/stay confirm instead of
 // exiting immediately (issue #651, ADR 0023, issue #822).
-func TestTea_QuitKey_WithLiveDispatch_ArmsPendingQuitConfirm(t *testing.T) {
+func TestTea_QuitKey_WithLiveDispatch_ArmsQuitConfirm(t *testing.T) {
 	launch, fc, _, _ := newTermTestLauncher(t)
 
 	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
@@ -2995,11 +2992,11 @@ func TestTea_QuitKey_NoLiveDispatch_ExitsImmediately(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_PickKeyThenQuit_WithLiveDispatch_ArmsPendingQuitConfirm verifies
+// TestTea_PickKeyThenQuit_WithLiveDispatch_ArmsQuitConfirm verifies
 // the pending-pick chord's "q" resolves the pick and then still checks for
 // live Dispatches before quitting, arming the confirm dialog instead of
 // exiting immediately (issue #1216).
-func TestTea_PickKeyThenQuit_WithLiveDispatch_ArmsPendingQuitConfirm(t *testing.T) {
+func TestTea_PickKeyThenQuit_WithLiveDispatch_ArmsQuitConfirm(t *testing.T) {
 	launch, fc, _, _ := newTermTestLauncher(t)
 
 	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))

@@ -38,9 +38,19 @@ type Model struct {
 	// while Sidebar is nil, where every key targets the list as it always has
 	// (ADR 0030, #1501).
 	Focus Focus
-	// PendingTerminate is the issue number awaiting an explicit y/N confirm
-	// after "X" — empty when no terminate is pending (ADR 0024, issue #649).
-	PendingTerminate string
+	// Mode is which modal state exclusively owns the keyboard outside of
+	// Sidebar (whose own ownership is the separate Sidebar/Focus/SidebarZoom
+	// condition above) — ModeList, the zero value, is a fresh Console's
+	// default. Collapses what used to be six independently settable bool/
+	// string fields (ShowRebuildOutput, PendingQuit, PendingPick, ShowHelp,
+	// FilterEditing, PendingTerminate's non-empty check) into one, so two of
+	// them being true at once is no longer representable (issue #1543).
+	Mode Mode
+	// TerminateConfirm is the pending "X" terminate's own payload — its
+	// Number is meaningful only while Mode is ModeTerminateConfirm, the same
+	// convention Focus's own doc comment already uses for Sidebar (ADR 0024,
+	// issue #649, folded into Mode by issue #1543).
+	TerminateConfirm TerminateConfirmState
 	// Cap and Live are the session's live parallelism cap and current live
 	// count (issue #653, ADR 0023) — zero in a launch-less session, since
 	// refreshPickDecorations never sends a CapMsg when there is no Launcher
@@ -78,39 +88,28 @@ type Model struct {
 	// second concurrent RecoverFn call racing the first over the same PR
 	// (issue #1619 review finding).
 	AdoptingOrphans []string
-	// ShowRebuildOutput is whether the rebuild-output pane is open, showing
-	// RebuildStatus.Output in full — its only consumer (issue #1128).
-	// RebuildOutputOpenMsg only ever sets it while RebuildStatus.Output is
-	// non-empty, and a later StaleStatusMsg that empties it back out closes
-	// the pane rather than leaving it open over blank content (issue #1543).
-	ShowRebuildOutput bool
 	// RebuildOutputOffset is the rebuild-output pane's scroll position — the
 	// index of its first visible line, the pane's analogue of DrillInState's
-	// Offset (issue #1128).
+	// Offset (issue #1128). Meaningful only while Mode is ModeRebuildOutput.
 	RebuildOutputOffset int
-	// PendingQuit is whether a quit confirm is armed, awaiting the
-	// operator's drain/terminate-all/stay answer — only when live
-	// Dispatches exist at quit time (issue #651, ADR 0023).
-	PendingQuit bool
-	// PendingPick is whether "p" is waiting on the "pa" leader window,
-	// awaiting a trailing "a" (pick-all-ready) before the 200ms
-	// pickChordTimeout resolves it to a single-issue pick instead — rendered
-	// as a visible hint so the wait isn't silent (issue #835).
-	PendingPick bool
 	// PendingG is whether a lone "g" is waiting on the "gg" leader window,
 	// awaiting a trailing "g" (jump-to-first-row) before the gChordTimeout
 	// resolves it to a no-op cancel instead — the g-leader mechanism issue
-	// #1628 introduces, modeled on PendingPick/pickChordTimeout above but
-	// living on Model (rather than pa's pick-specific handling) so later
-	// panes can reuse the same leader. Unlike PendingPick, a non-"g" key
-	// cancels without consuming that key — it still gets its own normal
-	// handling (issue #1628 AC).
+	// #1628 introduces, modeled on ModePick/pickChordTimeout above but living
+	// on Model (rather than folded into Mode) so it can stay armed across
+	// List, ModeSidebar, and ModeRebuildOutput alike — those three modes'
+	// own handlers each check it first, rather than it competing with them
+	// for exclusive ownership the way Mode's other values do (issue #1543).
+	// Unlike ModePick, a non-"g" key cancels without consuming that key — it
+	// still gets its own normal handling (issue #1628 AC).
 	PendingG bool
 	// QueueEnterNotice is a one-shot, human-readable message rendered after
 	// Enter is a no-op on a focused work-queue row lacking a Transcript
 	// (queued/claiming/held/dissolved, per hasTranscript) — empty otherwise.
-	// It clears on the operator's next keypress, mirroring PendingPick's
-	// resolve-on-any-key precedent rather than a timer (issue #998).
+	// It clears on the operator's next keypress, mirroring ModePick's
+	// resolve-on-any-key precedent rather than a timer (issue #998). Stays
+	// off Mode for the same reason PendingG does: it's a one-shot overlay on
+	// top of ModeList, not a rival claimant to keyboard ownership.
 	QueueEnterNotice string
 	// Cursor indexes the highlighted row within the active Section's own row
 	// list — Visible() for SectionBacklog, sectionPicks(m, ActiveSection) for
@@ -122,13 +121,6 @@ type Model struct {
 	// switches, so this stays the single shared field #784 introduced rather
 	// than growing a cursor per Section.
 	Cursor int
-	// ShowHelp is whether the "?" help overlay is open, listing every key
-	// the tea layer binds (issue #784).
-	ShowHelp bool
-	// FilterEditing is whether "/" has been pressed and not yet confirmed
-	// (Enter) or cancelled (Esc) — while true, the tea layer routes typed
-	// runes into FilterChangedMsg instead of navigation keys (issue #784).
-	FilterEditing bool
 	// preEditFilter is Filter's value from just before FilterEditStartMsg,
 	// restored verbatim by FilterEditCancelMsg — Update-internal, not
 	// rendered.
@@ -187,6 +179,111 @@ const (
 	FocusList Focus = iota
 	FocusSidebar
 )
+
+// Mode names which modal state exclusively owns the keyboard — the flat
+// enum ActiveMode/modePrecedence replace the tea layer's old handleKey
+// if-cascade with (issue #1543): the first Mode in modePrecedence whose
+// modeActive check passes is the one that owns a keypress. ModeList, the
+// zero value, is a fresh Console's default and always reports active, so it
+// is always the precedence table's last resort.
+//
+// This makes the six-plus values Mode covers (RebuildOutput, Help,
+// FilterEdit, TerminateConfirm, QuitConfirm, Pick, List) mutually exclusive
+// by construction — Model can hold only one at a time. ModeSidebar stays
+// outside that guarantee on purpose: its ownership is a condition derived
+// from Sidebar/Focus/SidebarZoom (ADR 0030, predating this issue), so a
+// Model can still carry a stale Mode value alongside an active Sidebar
+// (TestModel_ActiveMode_SidebarBeatsEveryOtherMode exercises exactly this).
+// modePrecedence's Sidebar-first check, not the type system, is what keeps
+// that combination from ever misrouting a keypress.
+type Mode int
+
+const (
+	ModeList Mode = iota
+	// ModeSidebar is a focused, fullscreen-fallback, or zoomed live-tail
+	// sidebar (ADR 0030) — modeActive derives it from Sidebar/Focus/
+	// SidebarZoom rather than a stored flag, since those fields already
+	// govern View's own layout choice and must never disagree with routing
+	// about which one is showing (#1501's sidebarFits precedent).
+	ModeSidebar
+	// ModeRebuildOutput is the rebuild-output pane open over RebuildStatus.
+	// Output (issue #1128) — RebuildOutputOpenMsg only enters it while
+	// Output is non-empty, and a later StaleStatusMsg that empties Output
+	// back out leaves it, rather than rendering blank over nothing (issue
+	// #1543).
+	ModeRebuildOutput
+	// ModeHelp is the "?" help overlay listing every key the tea layer binds
+	// (issue #784).
+	ModeHelp
+	// ModeFilterEdit is "/" pressed and not yet confirmed (Enter) or
+	// cancelled (Esc) — the tea layer routes typed runes into
+	// FilterChangedMsg instead of navigation keys while it's active (issue
+	// #784).
+	ModeFilterEdit
+	// ModeTerminateConfirm is the pending "X" terminate awaiting an explicit
+	// y/N answer — TerminateConfirm.Number names the issue (ADR 0024, issue
+	// #649).
+	ModeTerminateConfirm
+	// ModeQuitConfirm is the armed quit confirm awaiting the operator's
+	// drain/terminate-all/stay answer — only entered when live Dispatches
+	// exist at quit time (issue #651, ADR 0023).
+	ModeQuitConfirm
+	// ModePick is "p" waiting on the "pa" leader window, awaiting a trailing
+	// "a" (pick-all-ready) before the 200ms pickChordTimeout resolves it to
+	// a single-issue pick instead — rendered as a visible hint so the wait
+	// isn't silent (issue #835).
+	ModePick
+)
+
+// modePrecedence is the tea layer's old handleKey if-cascade order, now
+// data: ActiveMode returns the first Mode here whose modeActive check
+// passes, so a new mode joins by appending to this slice and adding one
+// modeActive case rather than inserting an if-branch at the right depth
+// (issue #1543).
+var modePrecedence = []Mode{
+	ModeSidebar,
+	ModeRebuildOutput,
+	ModeHelp,
+	ModeFilterEdit,
+	ModeTerminateConfirm,
+	ModeQuitConfirm,
+	ModePick,
+	ModeList,
+}
+
+// modeActive reports whether mode is the one currently owning the keyboard.
+// Every case but ModeSidebar and ModeList reduces to Mode's own single
+// stored field, since those two are the only modes whose ownership isn't
+// simply "m.Mode equals this value" — Sidebar's is a derived condition over
+// three other fields (see Mode's own doc comment), and List's is the
+// always-true fallback.
+func (m Model) modeActive(mode Mode) bool {
+	switch mode {
+	case ModeSidebar:
+		return m.Sidebar != nil && (m.Focus == FocusSidebar || !sidebarFits(m) || m.SidebarZoom)
+	case ModeList:
+		return true
+	default:
+		return m.Mode == mode
+	}
+}
+
+// ActiveMode returns whichever Mode currently owns the keyboard, per
+// modePrecedence — handleKey's whole dispatch decision (issue #1543).
+func (m Model) ActiveMode() Mode {
+	for _, mode := range modePrecedence {
+		if m.modeActive(mode) {
+			return mode
+		}
+	}
+	return ModeList
+}
+
+// TerminateConfirmState is ModeTerminateConfirm's own payload — the issue
+// number "X" armed a pending y/N confirm for (ADR 0024, issue #649).
+type TerminateConfirmState struct {
+	Number string
+}
 
 // SidebarState is one Dispatch's loaded live-tail sidebar content: its
 // condensed Activity feed (ActivityFeed's derivation) and its whole
@@ -268,7 +365,7 @@ func (m Model) Visible() []forge.Issue {
 }
 
 // HasHighlighted reports whether Visible has a row at Cursor for the
-// operator to act on — the PendingPick hint's gate, since Pick only ever
+// operator to act on — ModePick's hint gate, since Pick only ever
 // targets a Backlog row (ADR 0030's pick source) regardless of which
 // Section is active when "p" is pressed. Cursor is clamped to [0,
 // len(Visible())-1] and to 0 when Visible is empty, so this is exactly
@@ -317,13 +414,13 @@ func Update(m Model, msg Msg) Model {
 	case FilterChangedMsg:
 		m.Filter = msg.Filter
 	case QuitRequestedMsg:
-		m.PendingQuit = true
+		m.Mode = ModeQuitConfirm
 	case QuitCancelledMsg:
-		m.PendingQuit = false
+		m.Mode = ModeList
 	case PickPendingMsg:
-		m.PendingPick = true
+		m.Mode = ModePick
 	case PickResolvedMsg:
-		m.PendingPick = false
+		m.Mode = ModeList
 	case GPendingMsg:
 		m.PendingG = true
 	case GResolvedMsg:
@@ -333,7 +430,7 @@ func Update(m Model, msg Msg) Model {
 	case QueueEnterNoticeClearedMsg:
 		m.QueueEnterNotice = ""
 	case QuitMsg:
-		m.PendingQuit = false
+		m.Mode = ModeList
 		m.Quitting = true
 	case DogfoodNoticeMsg:
 		m.DogfoodLive = msg.Live
@@ -482,23 +579,26 @@ func Update(m Model, msg Msg) Model {
 		// rows (issue #1060; a viewport-aware fix, if wanted, is #1053).
 		m.Offset += msg.Delta
 	case TerminateRequestedMsg:
-		m.PendingTerminate = msg.Number
+		m.Mode = ModeTerminateConfirm
+		m.TerminateConfirm = TerminateConfirmState{Number: msg.Number}
 	case TerminateConfirmedMsg:
-		m.PendingTerminate = ""
+		m.Mode = ModeList
+		m.TerminateConfirm = TerminateConfirmState{}
 	case TerminateCancelledMsg:
-		m.PendingTerminate = ""
+		m.Mode = ModeList
+		m.TerminateConfirm = TerminateConfirmState{}
 	case CapMsg:
 		m.Cap = msg.Cap
 		m.Live = msg.Live
 	case StaleStatusMsg:
 		m.RebuildStatus = msg.RebuildStatus
-		if m.ShowRebuildOutput && m.RebuildStatus.Output == "" {
+		if m.Mode == ModeRebuildOutput && m.RebuildStatus.Output == "" {
 			// A rebuild-output pane open over content that then empties out
 			// (a fresh StaleStatusMsg with no Output) has nothing left to
 			// show — close it rather than leave it rendering blank (issue
 			// #1543, retiring the rough edge ShowRebuildOutput's own doc
 			// comment used to describe).
-			m.ShowRebuildOutput = false
+			m.Mode = ModeList
 		}
 	case OrphanRecoveryMsg:
 		m.OrphanRecoveryErr = msg.Err
@@ -520,27 +620,27 @@ func Update(m Model, msg Msg) Model {
 		m.OrphanRecoveryErr = ""
 	case RebuildOutputOpenMsg:
 		if m.RebuildStatus.Output != "" {
-			m.ShowRebuildOutput = true
+			m.Mode = ModeRebuildOutput
 		}
 	case RebuildOutputCloseMsg:
-		m.ShowRebuildOutput = false
+		m.Mode = ModeList
 	case RebuildOutputScrollMsg:
-		if m.ShowRebuildOutput {
+		if m.Mode == ModeRebuildOutput {
 			m.RebuildOutputOffset += msg.Delta
 		}
 	case RebuildOutputJumpToFirstMsg:
-		if m.ShowRebuildOutput {
+		if m.Mode == ModeRebuildOutput {
 			m.RebuildOutputOffset = 0
 		}
 	case RebuildOutputJumpToLastMsg:
-		// Set past the last valid offset — the ShowRebuildOutput clamp block
+		// Set past the last valid offset — the ModeRebuildOutput clamp block
 		// below (the same Viewport.SetHeight page-capped maxOffset arithmetic
 		// every other Update call already runs) pulls it back to the last
 		// page that fills the viewport. Unlike CursorJumpToLastMsg, which
 		// drags Offset into view via MoveCursor's cursor-follow, the
 		// rebuild-output pane is cursorless, so landing on the page-capped
 		// maxOffset directly is the whole jump.
-		if m.ShowRebuildOutput {
+		if m.Mode == ModeRebuildOutput {
 			m.RebuildOutputOffset = strings.Count(m.RebuildStatus.Output, "\n") + 1
 		}
 	case CursorMoveMsg:
@@ -553,14 +653,18 @@ func Update(m Model, msg Msg) Model {
 		// below runs before its cursor<0 check, so it lands on 0 either way.
 		m.Cursor = sectionRowCount(m, m.ActiveSection) - 1
 	case HelpToggleMsg:
-		m.ShowHelp = !m.ShowHelp
+		if m.Mode == ModeHelp {
+			m.Mode = ModeList
+		} else {
+			m.Mode = ModeHelp
+		}
 	case FilterEditStartMsg:
-		m.FilterEditing = true
+		m.Mode = ModeFilterEdit
 		m.preEditFilter = m.Filter
 	case FilterEditConfirmMsg:
-		m.FilterEditing = false
+		m.Mode = ModeList
 	case FilterEditCancelMsg:
-		m.FilterEditing = false
+		m.Mode = ModeList
 		m.Filter = m.preEditFilter
 	case SizeChangedMsg:
 		m.Width = msg.Width
@@ -615,7 +719,7 @@ func Update(m Model, msg Msg) Model {
 		m.Sidebar.Offset = vp.offset
 	}
 
-	if m.ShowRebuildOutput {
+	if m.Mode == ModeRebuildOutput {
 		lines := strings.Count(m.RebuildStatus.Output, "\n") + 1
 		vp := Viewport{offset: m.RebuildOutputOffset}
 		vp.Scroll(0, lines)
