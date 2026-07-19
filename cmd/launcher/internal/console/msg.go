@@ -197,6 +197,12 @@ type SidebarLoadedMsg struct {
 	Rendered, Raw string
 	Err           error
 	TranscriptErr error
+	// Notice is a graceful, non-error explanation to show in place of an
+	// empty pane — set when an orphan-flagged Dispatch has no local pass
+	// log yet (issue #1621). "" for every other open, including the
+	// session-launched claimed-but-not-yet-launched race, which keeps its
+	// existing silent-empty contract.
+	Notice string
 }
 
 func (SidebarLoadedMsg) isConsoleMsg() {}

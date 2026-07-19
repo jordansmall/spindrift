@@ -3048,6 +3048,56 @@ func TestTea_OrphanRow_ShowsLiveHeartbeat(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice verifies an
+// orphan row with no local pass log yet — e.g. a box the orphan-detected
+// sandbox hasn't written its first log line for, or one CI dispatched on a
+// remote runner and this host only ever sees as a running container —
+// opens the sidebar with a graceful explanatory message rather than a blank
+// pane or an error (issue #1621).
+func TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately no logs/issue-42.log -- the race/remote-dispatch case
+	// this test targets.
+
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	t.Cleanup(launch.Wait)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "no local logs for this dispatch")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	final := tm.FinalModel(t).(teaModel)
+	if final.m.Sidebar == nil {
+		t.Fatal("Sidebar = nil, want a loaded sidebar with a graceful notice")
+	}
+	if final.m.Sidebar.Err != nil {
+		t.Errorf("Sidebar.Err = %v, want nil (graceful notice, not a failure)", final.m.Sidebar.Err)
+	}
+}
+
 // TestTea_PollTick_AdvancesOpenOrphanSidebarActivityFeed verifies an orphan
 // row's open sidebar advances on its own as its box's on-disk pass log
 // grows, with no operator keypress — the same live-tail payoff a
