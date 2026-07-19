@@ -51,10 +51,27 @@ type Model struct {
 	// (issue #652). One value replaces the six scalar fields this used to
 	// be spread across (issue #1541).
 	RebuildStatus RebuildStatus
-	// OrphanRecoveryErr is startup orphan recovery's last failure, if any —
-	// "" when detection and every adopt succeeded, or recovery hasn't run
-	// yet (issue #1218).
+	// OrphanRecoveryErr is the explicit adopt gesture's last failure, if
+	// any — "" when nothing has been adopted yet, or the last adopt
+	// succeeded (issue #1218, demoted from a startup-only signal to the
+	// gesture's own by issue #1619).
 	OrphanRecoveryErr string
+	// OrphanNums is the issue numbers startup detection reported running
+	// with no live goroutine in this process to account for them — flagged
+	// in the backlog so the operator can tell them apart from a Dispatch
+	// this session launched, and adopted only through the explicit gesture
+	// IsOrphan gates (issue #1619).
+	OrphanNums []string
+	// AdoptingOrphans is the issue numbers with an adopt gesture's RecoverFn
+	// call currently in flight — set the instant "A" fires, before
+	// RecoverFn's network round-trip starts, and cleared only once it
+	// returns (OrphanAdoptedMsg or OrphanRecoveryMsg). IsAdoptingOrphan
+	// gates a second "A" press on the same row for that whole window, not
+	// just after RecoverFn returns — the orphan flag alone doesn't clear
+	// until completion, so gating on it left the in-flight window open to a
+	// second concurrent RecoverFn call racing the first over the same PR
+	// (issue #1619 review finding).
+	AdoptingOrphans []string
 	// ShowRebuildOutput is whether the rebuild-output pane is open, showing
 	// RebuildStatus.Output in full — its only consumer (issue #1128).
 	// RebuildOutputOpenMsg only ever sets it while RebuildStatus.Output is
@@ -240,6 +257,33 @@ func (m Model) HasHighlighted() bool {
 	return len(m.Visible()) > 0
 }
 
+// IsOrphan reports whether num is one of the issues startup detection
+// reported as an orphan — a running agent-issue-<N> sandbox this process
+// has no live goroutine for (issue #1619). Gates the explicit adopt
+// gesture, and flags the row so the Backlog can render it distinguishable
+// from a Dispatch this session launched.
+func (m Model) IsOrphan(num string) bool {
+	for _, n := range m.OrphanNums {
+		if n == num {
+			return true
+		}
+	}
+	return false
+}
+
+// IsAdoptingOrphan reports whether num's adopt gesture has a RecoverFn call
+// still in flight — gates a second "A" press on the same row for the whole
+// window between the keypress and OrphanAdoptedMsg/OrphanRecoveryMsg
+// landing, not just after RecoverFn returns (issue #1619 review finding).
+func (m Model) IsAdoptingOrphan(num string) bool {
+	for _, n := range m.AdoptingOrphans {
+		if n == num {
+			return true
+		}
+	}
+	return false
+}
+
 // Update applies msg to m and returns the resulting Model. It is pure: no
 // I/O, no network — the adapter and the tea layer are the only callers that
 // touch either, translating their results into a Msg before calling Update.
@@ -413,6 +457,20 @@ func Update(m Model, msg Msg) Model {
 		m.RebuildStatus = msg.RebuildStatus
 	case OrphanRecoveryMsg:
 		m.OrphanRecoveryErr = msg.Err
+		m.AdoptingOrphans = removeOrphan(m.AdoptingOrphans, msg.Number)
+	case OrphanDetectedMsg:
+		m.OrphanNums = msg.Numbers
+	case AdoptOrphanStartedMsg:
+		if !m.IsAdoptingOrphan(msg.Number) {
+			m.AdoptingOrphans = append(m.AdoptingOrphans, msg.Number)
+		}
+	case OrphanAdoptedMsg:
+		m.OrphanNums = removeOrphan(m.OrphanNums, msg.Number)
+		m.AdoptingOrphans = removeOrphan(m.AdoptingOrphans, msg.Number)
+		// A later successful adopt (of this row or another) must not leave
+		// an earlier failed adopt's banner stuck on screen forever — it
+		// only ever restates the last attempt's outcome (review finding).
+		m.OrphanRecoveryErr = ""
 	case RebuildOutputOpenMsg:
 		if m.RebuildStatus.Output != "" {
 			m.ShowRebuildOutput = true
@@ -643,6 +701,19 @@ func removePick(picks []Pick, num string) []Pick {
 			continue
 		}
 		out = append(out, p)
+	}
+	return out
+}
+
+// removeOrphan drops num out of orphans — OrphanAdoptedMsg's own removal, so
+// a successfully adopted issue stops reading as an orphan (issue #1619).
+func removeOrphan(orphans []string, num string) []string {
+	var out []string
+	for _, n := range orphans {
+		if n == num {
+			continue
+		}
+		out = append(out, n)
 	}
 	return out
 }

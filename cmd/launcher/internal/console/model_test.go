@@ -1154,6 +1154,41 @@ func TestUpdate_OrphanRecoveryMsg_SetsErr(t *testing.T) {
 	}
 }
 
+// TestUpdate_OrphanDetectedMsg_FlagsIsOrphan verifies OrphanDetectedMsg
+// installs the reported issue numbers so IsOrphan reports them flagged,
+// leaving every other number unflagged — Update's detect-only half of
+// #1619's demotion (startup only ever detects now, never adopts).
+func TestUpdate_OrphanDetectedMsg_FlagsIsOrphan(t *testing.T) {
+	m := NewModel()
+	m = Update(m, OrphanDetectedMsg{Numbers: []string{"42"}})
+
+	if !m.IsOrphan("42") {
+		t.Error("IsOrphan(42) = false, want true after OrphanDetectedMsg{Numbers: [42]}")
+	}
+	if m.IsOrphan("7") {
+		t.Error("IsOrphan(7) = true, want false — never reported as orphaned")
+	}
+}
+
+// TestUpdate_OrphanAdoptedMsg_ClearsIsOrphan verifies a successful adopt
+// clears the issue's orphan flag — leaving it set would let a second press
+// of the adopt gesture on the same, now-adopted row fire RecoverFn again,
+// racing a second same-process settle over the one PR the first adopt
+// already claimed (issue #1619 review finding).
+func TestUpdate_OrphanAdoptedMsg_ClearsIsOrphan(t *testing.T) {
+	m := NewModel()
+	m = Update(m, OrphanDetectedMsg{Numbers: []string{"42", "7"}})
+
+	m = Update(m, OrphanAdoptedMsg{Number: "42"})
+
+	if m.IsOrphan("42") {
+		t.Error("IsOrphan(42) = true after OrphanAdoptedMsg{Number: 42}, want false")
+	}
+	if !m.IsOrphan("7") {
+		t.Error("IsOrphan(7) = false, want true — only 42 was adopted")
+	}
+}
+
 // TestUpdate_StaleStatusMsg_PropagatesCapturedRebuildOutput verifies a
 // non-empty StaleStatusMsg.RebuildStatus.Output lands on
 // Model.RebuildStatus.Output verbatim — the sibling

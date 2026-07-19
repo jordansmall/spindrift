@@ -15,7 +15,6 @@ package console
 import (
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -124,7 +123,7 @@ func pickChordTick() tea.Cmd {
 func (t teaModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{refreshCmd(t.tracker), pollTick(t.pollInterval)}
 	if t.launch != nil {
-		cmds = append(cmds, waitRefreshSignal(t.launch, t.done), orphanRecoveryCmd(t.launch))
+		cmds = append(cmds, waitRefreshSignal(t.launch, t.done), orphanDetectCmd(t.launch))
 	}
 	return tea.Batch(cmds...)
 }
@@ -149,6 +148,10 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SidebarLoadedMsg: // async-load result, not a reactive signal
 		t.m = Update(t.m, msg)
 	case OrphanRecoveryMsg:
+		t.m = Update(t.m, msg)
+	case OrphanDetectedMsg:
+		t.m = Update(t.m, msg)
+	case OrphanAdoptedMsg:
 		t.m = Update(t.m, msg)
 	case pollTickMsg:
 		if t.launch != nil {
@@ -311,6 +314,13 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		return t, pickChordTick()
 	case "u":
 		t = t.unpickHighlighted()
+	case "A":
+		if t.m.ActiveSection == SectionBacklog && t.launch != nil && t.launch.RecoverFn != nil {
+			if iss, ok := t.highlightedIssue(); ok && t.m.IsOrphan(iss.Number) && !t.m.IsAdoptingOrphan(iss.Number) {
+				t.m = Update(t.m, AdoptOrphanStartedMsg{Number: iss.Number})
+				return t, adoptOrphanCmd(t.launch, iss.Number)
+			}
+		}
 	case "X":
 		if num := t.terminateTarget(); num != "" && t.isLive(num) {
 			t.m = Update(t.m, TerminateRequestedMsg{Number: num})
@@ -828,35 +838,56 @@ func driverOf(launch *Launcher) driver.Driver {
 	return launch.Factory.Driver()
 }
 
-// orphanRecoveryCmd adopts every issue OrphanedIssues reports through
-// launch's RecoverFn in the background at startup — a crash or dropped SSH
-// from a prior session left these sandboxes running with no live goroutine
-// in this fresh process to account for them (issue #651, issue #822). Errors
-// from either call surface through the returned OrphanRecoveryMsg — Update
-// threads it onto Model.OrphanRecoveryErr the same way StaleStatusMsg threads
-// RebuildErr — instead of being swallowed (issue #1218); a failed adopt still
-// leaves that issue for the operator to notice and Pick again like any other
-// orphaned Dispatch. nil (no Cmd) when launch or RecoverFn is nil, matching
+// orphanDetectCmd reports every issue OrphanedIssues finds running with no
+// live goroutine in this process — a crash or dropped SSH from a prior
+// session, or a competing process (a live dogfood loop, a second console
+// session) that legitimately owns boxes this one has no goroutine for
+// (issue #651, issue #822). It never adopts them: a runner-visible sandbox
+// is not proof of abandonment, and an automatic adopt used to race a second
+// settle against whichever process actually owns the box (issue #1619,
+// demoting the auto-adopt ADR 0023 held). Detection is best-effort and
+// silent on its own failure — a failed OrphanedIssues() call degrades to "no
+// orphans found" rather than a startup warning, mirroring DogfoodNotice's
+// read-error fallback, now that nothing here ever adopts for a warning to
+// guard against. nil (no Cmd) when launch is nil, matching
 // waitRefreshSignal's nil-launch convention.
-func orphanRecoveryCmd(launch *Launcher) tea.Cmd {
-	if launch == nil || launch.RecoverFn == nil {
+func orphanDetectCmd(launch *Launcher) tea.Cmd {
+	if launch == nil {
 		return nil
 	}
 	return func() tea.Msg {
 		nums, err := launch.OrphanedIssues()
 		if err != nil {
-			return OrphanRecoveryMsg{Err: fmt.Sprintf("failed to list orphaned issues: %s", err)}
-		}
-		var failures []string
-		for _, num := range nums {
-			if err := launch.RecoverFn(num); err != nil {
-				failures = append(failures, fmt.Sprintf("failed to adopt orphan #%s: %s", num, err))
-			}
-		}
-		if len(failures) == 0 {
 			return nil
 		}
-		return OrphanRecoveryMsg{Err: strings.Join(failures, "; ")}
+		return OrphanDetectedMsg{Numbers: nums}
+	}
+}
+
+// adoptOrphanCmd adopts num through launch's RecoverFn in the background —
+// the operator's explicit gesture on an orphan-flagged Backlog row (issue
+// #1619), the same settle-adoption path startup used to invoke on its own.
+// A failure (no open PR, a draft PR, or a resolve error) surfaces through
+// the returned OrphanRecoveryMsg exactly as a startup adopt failure used to
+// (issue #1218) — Update threads it onto Model.OrphanRecoveryErr — and
+// changes nothing else. A success returns OrphanAdoptedMsg, clearing num's
+// orphan flag so a second press on the same row can't fire RecoverFn again.
+// Either result also clears num out of Model.AdoptingOrphans, the in-flight
+// mark handleKey sets synchronously before this Cmd ever starts — necessary
+// because this whole call is the in-flight window itself: gating a repeat
+// press on the orphan flag alone would still let a second "A" pressed
+// before this goroutine returns fire a second concurrent RecoverFn call,
+// racing the first over the same PR (review finding). nil (no Cmd) when
+// launch or RecoverFn is nil.
+func adoptOrphanCmd(launch *Launcher, num string) tea.Cmd {
+	if launch == nil || launch.RecoverFn == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		if err := launch.RecoverFn(num); err != nil {
+			return OrphanRecoveryMsg{Number: num, Err: fmt.Sprintf("failed to adopt orphan #%s: %s", num, err)}
+		}
+		return OrphanAdoptedMsg{Number: num}
 	}
 }
 
