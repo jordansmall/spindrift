@@ -336,7 +336,17 @@ explanation, not enforcement):
   `PreToolUse` hook (`agent/reject-background-bash.sh`, registered by a
   `~/.claude/settings.json` the image now ships) that denies any Bash call
   carrying `run_in_background: true`, with a message telling the Driver to
-  rerun the command in the foreground and block on it.
+  rerun the command in the foreground and block on it. `run_in_background`
+  only sees the structured tool-call parameter, so a foreground Bash call
+  can still self-background at the shell level — a trailing or mid-command
+  `&`, or `nohup` — without ever setting that parameter. Issue #1620 widens
+  the same hook to also parse `tool_input.command` for that: it masks quoted
+  and backslash-escaped characters, then denies any standalone `&` control
+  operator (as opposed to `&&`, a `>&`/`<&`/`&>` redirection token, or the
+  `|&` pipe operator) or a `nohup` invocation. Two edge cases are accepted
+  false positives rather than chased: a literal `&` in arithmetic context
+  (`$((3 & 4))`) and a literal `&` inside a heredoc body both deny a call
+  that was actually safe, since the parser isn't `$((...))`- or line-aware.
 
 ### Cold-run toolchain nudge
 
