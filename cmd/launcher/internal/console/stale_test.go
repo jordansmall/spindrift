@@ -71,6 +71,63 @@ func TestLauncher_TryLaunch_StaleFreshnessChecker_HoldsNewLaunches(t *testing.T)
 	}
 }
 
+// TestLauncher_TryLaunch_NotApplicableFreshnessChecker_DoesNotHoldLaunches
+// verifies a Fresh checker reporting Applicable=false — the freshness.Probe
+// verdict for a pwd that isn't a git repository (issue #1579), mirroring the
+// pre-existing bwrap-runtime not-applicable case — never holds a queued pick:
+// dispatch proceeds against the already-loaded image and StaleStatus reports
+// no held-launch state, unlike the Applicable=true/Fresh=false case in
+// TestLauncher_TryLaunch_StaleFreshnessChecker_HoldsNewLaunches above.
+func TestLauncher_TryLaunch_NotApplicableFreshnessChecker_DoesNotHoldLaunches(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		Settle:    settle.NewFake(),
+		Queue:     NewQueue(),
+		Fresh:     func() (bool, bool, string) { return false, false, "not applicable (not a git repository)" },
+	}
+	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch.tryLaunch(f, dir)
+	launch.Wait()
+
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "42" {
+		t.Errorf("RunCalls = %+v, want one Box run for #42 despite Applicable=false", fr.RunCalls)
+	}
+	snap := launch.Queue.Snapshot()
+	if len(snap) != 1 || snap[0].State != PickSettled {
+		t.Errorf("queue pick = %+v, want it to run and settle, not hold", snap)
+	}
+
+	stale, _, rebuilding, rebuildErr, _, _ := launch.StaleStatus()
+	if stale {
+		t.Error("StaleStatus stale = true, want false when Applicable is false")
+	}
+	if rebuilding {
+		t.Error("StaleStatus rebuilding = true, want false")
+	}
+	if rebuildErr != "" {
+		t.Errorf("StaleStatus rebuildErr = %q, want empty", rebuildErr)
+	}
+}
+
 // TestLauncher_TryLaunch_StaleDuringRun_RunningBoxFinishesUnaffected
 // verifies a Box already running when the freshness checker turns stale
 // rides out to its normal settle — staleness only gates a slot refill, it

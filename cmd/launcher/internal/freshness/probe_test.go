@@ -220,6 +220,31 @@ func TestProbe_FetchFailureFailsClosed(t *testing.T) {
 	}
 }
 
+// TestProbe_NotAGitRepo verifies that a pwd which is not inside any git
+// repository at all reports not-applicable — distinct from a transient fetch
+// failure inside a real repo (TestProbe_FetchFailureFailsClosed) — so the
+// console does not hold launches or offer a [b] rebuild that would fail the
+// same way.
+func TestProbe_NotAGitRepo(t *testing.T) {
+	pwd := t.TempDir()
+	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+
+	if res.Applicable {
+		t.Errorf("Applicable = true, want false when pwd is not a git repository")
+	}
+	if !strings.Contains(res.Message, "not a git repository") {
+		t.Errorf("Message %q does not name the not-a-git-repository condition", res.Message)
+	}
+	if res.Rev != "" {
+		t.Errorf("Rev = %q, want empty when Applicable is false", res.Rev)
+	}
+	if len(eval.Calls) != 0 {
+		t.Errorf("Eval called %d times, want 0 when pwd is not a git repository", len(eval.Calls))
+	}
+}
+
 // TestProbe_FetchFailure_MessageIncludesGitStderr verifies that the loud
 // fetch-failure message surfaces git's own diagnostic (its stderr), not just
 // the bare exit status, so an operator reading `preview` output can see why.

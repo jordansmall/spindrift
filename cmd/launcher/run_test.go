@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -230,8 +231,12 @@ func TestRun_DoesNotAdoptLiveRunnersInProgressIssue(t *testing.T) {
 
 // TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4 verifies
 // the new exit code (#527 AC): with the freshness probe reporting
-// rebuild-needed (here, forced by a base-branch fetch that fails — pwd has
-// no git remote configured), no Box launches and the run exits 4.
+// rebuild-needed (here, forced by a base-branch fetch that fails — pwd is a
+// real git repo whose "origin" remote is unreachable, a transient failure —
+// see issue #1579, which carves the pwd-is-not-a-git-repo-at-all case out of
+// this same fetch-failure path into a distinct not-applicable verdict, so
+// this test must exercise a genuine repo to still land on rebuild-needed), no
+// Box launches and the run exits 4.
 func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -240,6 +245,12 @@ func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T
 	c.runtime = "podman"
 	c.baseBranch = "main"
 	dir := tempLogDir(t)
+	if err := runGit(dir, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := runGit(dir, "remote", "add", "origin", filepath.Join(dir, "does-not-exist.git")); err != nil {
+		t.Fatalf("git remote add: %v", err)
+	}
 
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
