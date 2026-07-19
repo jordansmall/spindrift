@@ -638,7 +638,7 @@ rec {
   # `man spindrift` roff content: the full flag reference that keeps
   # `spindrift --help` (cmd/launcher/flags.go printHelp) concise.
   renderManpageRoff =
-    schema: spindriftVersion:
+    schema: spindriftVersion: subcommands:
     let
       nonSecret = builtins.filter (e: !(e.secret or false)) (builtins.attrValues schema);
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
@@ -647,6 +647,12 @@ rec {
       unknownGroups = builtins.filter (g: !(builtins.elem g groupOrder)) (
         map (e: e.group or "") nonSecret
       );
+      subcommandBlock =
+        s:
+        let
+          usage = if s.usage == "" then "" else " " + escFlag s.usage;
+        in
+        ".TP\n.B ${s.name}${usage}\n\\&${esc s.doc}\n";
       optionBlock =
         e:
         let
@@ -688,30 +694,7 @@ rec {
         .I harness.env
         in the working directory.
         .SH SUBCOMMANDS
-        .TP
-        .B dispatch [\-\-no-build] [\-\-yes] [issue...]
-        Fan out agents. With no issue list, discover dispatchable issues by label;
-        an explicit issue list dispatches exactly those, bypassing the label and
-        barrier gates.
-        .TP
-        .B research [\-\-no-build] [\-\-yes] [issue...]
-        Advise-only research dispatch: same selective semantics as
-        .BR dispatch ,
-        but drains the
-        .I agent-research
-        label instead and posts a verdict comment per issue rather than landing
-        code.
-        .TP
-        .B preview [issue...]
-        Dry run: show what dispatch would pick up, in order, without launching any
-        agent.
-        .TP
-        .B build
-        Realize the agent image (or store closures) without running any agent.
-        .TP
-        .B recover <issue>
-        Run the merge gate for a single issue whose agent already finished.
-        .SH "DISPATCH FLAGS"
+        ${concatStrings (map subcommandBlock subcommands)}.SH "DISPATCH FLAGS"
         .TP
         .B \-\-no-build
         Fail fast if the image is absent instead of building it; pair with
