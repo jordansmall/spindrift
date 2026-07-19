@@ -912,7 +912,6 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout io.Writer) int {
 		CodeForge:   lc.codeForge,
 		Factory:     lc.factory,
 		Settle:      lc.settle,
-		Queue:       console.NewQueue(),
 		MaxParallel: lc.config.maxParallel,
 		FailedLabel: lc.config.failedLabel,
 		Fresh:       fresh,

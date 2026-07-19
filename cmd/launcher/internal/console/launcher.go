@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/terminate"
@@ -23,7 +24,6 @@ type Launcher struct {
 	CodeForge forge.CodeForge
 	Factory   *dispatch.Factory
 	Settle    settle.Settler
-	Queue     *Queue
 	// MaxParallel sets the live cap's *starting* value only (1 unless
 	// positive, matching the pre-#647 single-slot behaviour) — since #653
 	// (ADR 0023) the cap actually enforced during a session lives in
@@ -59,6 +59,19 @@ type Launcher struct {
 	launching bool
 	wg        sync.WaitGroup
 	refresh   chan struct{}
+	// pendingSnapshot is the queue snapshot signalRefresh most recently
+	// recorded, delivered once a waiter drains refresh (issue #1542) —
+	// pairs with hasPending so TakePendingSnapshot can tell "nothing
+	// pending yet" apart from a genuine empty queue.
+	pendingSnapshot []Pick
+	hasPending      bool
+	// queue is the session's private operator queue — Pick, Unpick, and
+	// Land are its sole outside mutators; every other transition (claim,
+	// settle, terminate) is one of Launcher's own methods. Lazily
+	// constructed by queueRef(), mirroring registry()/limiter()'s pattern,
+	// so a bare struct literal (every production and test call site) needs
+	// no constructor (issue #1542).
+	queue *Queue
 	// stale and staleMessage record the last stale verdict a drain saw —
 	// read by StaleStatus for the console's banner. staleMessage is updated
 	// on every freshnessChecker() call, stale (and rebuilding/rebuildErr)
@@ -127,6 +140,75 @@ func (l *Launcher) limiter() *waves.Limiter {
 	return l.cap
 }
 
+// queueRef lazily constructs l.queue, mirroring limiter()/registry()'s
+// pattern so a bare struct literal (every production and test call site)
+// needs no constructor — every Launcher method that touches the queue goes
+// through this accessor, never the raw field, so it can never observe a nil
+// Queue (issue #1542).
+func (l *Launcher) queueRef() *Queue {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.queue == nil {
+		l.queue = NewQueue()
+	}
+	return l.queue
+}
+
+// Snapshot returns the session's current queue state — the tea layer's
+// one-time startup bootstrap (Init's initialQueueSyncCmd), the sole
+// legitimate outside read of the private queue's full contents, since
+// nothing else populates Model.Picks before the first Pick/Unpick/Terminate
+// command or pushed transition lands (issue #1542).
+func (l *Launcher) Snapshot() []Pick {
+	return l.queueRef().Snapshot()
+}
+
+// Pick promotes num through PickIssue and lands the result on the private
+// queue, returning both the outcome Msg and the queue's fresh snapshot in
+// the same call — the tea side updates Model.Picks from the snapshot in the
+// same Update cycle it fired the keypress, never a render behind (issue
+// #1542, closing the one-frame lag #837 worked around).
+func (l *Launcher) Pick(tracker forge.IssueTracker, num, title string, kind Kind) (Msg, []Pick) {
+	msg := PickIssue(tracker, num, title, kind)
+	return msg, l.Land(msg)
+}
+
+// Land applies an already-resolved pick-outcome Msg (PickQueuedMsg or
+// PickDissolvedMsg) onto the private queue and returns the fresh snapshot —
+// PickAllReady's per-issue landing step, factored out of Pick so a bulk scan
+// (which already resolved every issue's tracker transition in one
+// ListIssues round trip) doesn't repeat PickIssue's own terminal-state
+// checks per issue. A failed promotion lands its dissolved row on the queue
+// exactly as a queued one does, so the operator's only feedback that a pick
+// raced, closed, or got relabeled survives past the next snapshot push
+// (issue #1542).
+func (l *Launcher) Land(msg Msg) []Pick {
+	switch m := msg.(type) {
+	case PickQueuedMsg:
+		l.queueRef().Add(Pick{Number: m.Number, Title: m.Title, Kind: m.Kind, State: PickQueued})
+	case PickDissolvedMsg:
+		l.queueRef().Add(Pick{Number: m.Number, Title: m.Title, State: PickDissolved, Reason: m.Reason})
+	default:
+		return l.queueRef().Snapshot()
+	}
+	// A pick's promotion attempt is always a tracker write, win or lose —
+	// the same rationale drain's own discover() closure documents — so it
+	// triggers the same out-of-band refresh every other session write does
+	// (#647 AC4).
+	l.signalRefresh()
+	return l.queueRef().Snapshot()
+}
+
+// Unpick retracts num's queued-but-unlaunched pick from the private queue
+// and returns the fresh snapshot synchronously — a pure session-queue edit
+// with no tracker interaction (ADR 0023): Queue.Remove already refuses to
+// drop anything past PickQueued/PickHeld, so this is safe to call even when
+// num never queued or already launched.
+func (l *Launcher) Unpick(num string) []Pick {
+	l.queueRef().Remove(num)
+	return l.queueRef().Snapshot()
+}
+
 // Cap returns the session's current live parallelism cap.
 func (l *Launcher) Cap() int {
 	return l.limiter().Cap()
@@ -146,7 +228,7 @@ func (l *Launcher) Live() int {
 // Dispatches" a moment before the Limiter itself agrees.
 func (l *Launcher) LiveIssues() []string {
 	var nums []string
-	for _, p := range l.Queue.Snapshot() {
+	for _, p := range l.queueRef().Snapshot() {
 		if p.State == PickRunning {
 			nums = append(nums, p.Number)
 		}
@@ -164,6 +246,33 @@ func (l *Launcher) OrphanedIssues() ([]string, error) {
 		return nil, nil
 	}
 	return l.Factory.OrphanedIssues()
+}
+
+// Driver returns the Driver l.Factory was constructed with, or nil when no
+// Driver is available (a Launcher built without a Factory) — the tea side's
+// heartbeat/sidebar-activity lookups go through this accessor instead of
+// reaching through l.Factory directly (issue #1542).
+func (l *Launcher) Driver() driver.Driver {
+	if l.Factory == nil {
+		return nil
+	}
+	return l.Factory.Driver()
+}
+
+// defaultPollInterval is the background backlog poll's fixed cadence when a
+// Launcher doesn't override it (production always uses this) — slow enough
+// to never spend the rate-limit window the session's Agents share (#647 AC5).
+const defaultPollInterval = 90 * time.Second
+
+// PollInterval returns l.pollInterval when a test has shrunk it below
+// defaultPollInterval, or the default otherwise — the tea side's poll-tick
+// cadence goes through this accessor instead of reaching into the
+// unexported field directly (issue #1542).
+func (l *Launcher) PollInterval() time.Duration {
+	if l.pollInterval > 0 {
+		return l.pollInterval
+	}
+	return defaultPollInterval
 }
 
 // Resize adjusts the live parallelism cap by delta (+1/-1 from the
@@ -280,20 +389,25 @@ func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: post comment: %v\n", num, err)
 	}
 
-	l.Queue.setState(num, PickTerminated, "terminated by operator")
+	l.queueRef().setState(num, PickTerminated, "terminated by operator")
 	l.signalRefresh()
 	return killErr
 }
 
 // TerminateAsync runs Terminate for num in the background (issue #745),
 // mirroring tryLaunch/Rebuild's pattern so the operator's confirm key
-// returns immediately instead of blocking the Update loop on tracker I/O.
+// returns immediately instead of blocking the Update loop on tracker I/O —
+// returning the queue's snapshot as it stands at initiation, same signature
+// shape as Pick/Unpick, so the tea side lands it the same way (issue #1542).
 // num already in flight makes a second call a no-op: the queue pick stays
 // PickRunning until Terminate itself sets PickTerminated at the very end, so
 // isLive keeps reporting num live for the whole call, not just its old
 // synchronous window — a second confirm on the same row would otherwise
-// race a duplicate Kill/Comment/TransitionState.
-func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) {
+// race a duplicate Kill/Comment/TransitionState. The actual PickTerminated
+// transition, once Terminate's goroutine reaches it, reaches the Model
+// through the pushed refresh-signal snapshot (signalRefresh inside
+// Terminate), not through this call's return value.
+func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) []Pick {
 	// Two short critical sections, not one: terminating() takes l.mu itself
 	// to lazily construct the map, then this function re-takes it right
 	// after for the check-and-set below. Splitting them is safe because
@@ -305,7 +419,7 @@ func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) {
 	l.mu.Lock()
 	if inFlight[num] {
 		l.mu.Unlock()
-		return
+		return l.queueRef().Snapshot()
 	}
 	inFlight[num] = true
 	l.wg.Add(1)
@@ -326,6 +440,8 @@ func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) {
 		delete(inFlight, num)
 		l.mu.Unlock()
 	}()
+
+	return l.queueRef().Snapshot()
 }
 
 // terminating lazily constructs l.terminatingNums, mirroring registry()'s
@@ -353,15 +469,42 @@ func (l *Launcher) refreshChan() chan struct{} {
 	return l.refresh
 }
 
-// signalRefresh marks a refresh pending — called after every write this
-// session makes to the tracker (a claim, a settle, a promotion), so Run's
-// select loop re-queries the backlog without the operator asking (#647 AC4).
-// Non-blocking: a refresh already pending is left alone.
+// signalRefresh marks a refresh pending and records the queue's current
+// snapshot for TakePendingSnapshot to deliver — called after every write
+// this session makes to the tracker or queue (a claim, a settle, a
+// promotion, a terminate), so Run's select loop re-queries the backlog and
+// the tea side lands the queue's latest transition without ever pulling
+// Queue itself (#647 AC4, issue #1542). The wake itself stays a
+// non-blocking one-slot send exactly as before; pendingSnapshot always holds
+// the most recent snapshot regardless of whether the wake was already
+// pending, so a burst of writes before a waiter drains it can only ever
+// deliver the latest state, never a stale intermediate one.
 func (l *Launcher) signalRefresh() {
+	picks := l.queueRef().Snapshot()
+	l.mu.Lock()
+	l.pendingSnapshot = picks
+	l.hasPending = true
+	l.mu.Unlock()
+
 	select {
 	case l.refreshChan() <- struct{}{}:
 	default:
 	}
+}
+
+// TakePendingSnapshot returns the most recent queue snapshot signalRefresh
+// recorded and clears the pending flag, reporting whether one was actually
+// pending — waitRefreshSignal's translation of a refresh-channel wake into
+// the payload it pushes onto Model.Picks, the sole outside read of the
+// private queue's live state after startup (issue #1542).
+func (l *Launcher) TakePendingSnapshot() ([]Pick, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	picks := l.pendingSnapshot
+	had := l.hasPending
+	l.pendingSnapshot = nil
+	l.hasPending = false
+	return picks, had
 }
 
 // Refreshes returns the channel Run selects on for background-write-triggered
@@ -382,7 +525,7 @@ func (l *Launcher) Refreshes() <-chan struct{} {
 // interval regardless of queue state — see Queue.Empty (#650) for why the
 // gate must cover PickHeld as well as PickQueued.
 func (l *Launcher) tryLaunch(tracker forge.IssueTracker, pwd string) {
-	if l.Queue.Empty() {
+	if l.queueRef().Empty() {
 		return
 	}
 
@@ -412,7 +555,7 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 	defer l.wg.Done()
 	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
 		defer l.signalRefresh() // a claim attempt is always a tracker write, win or lose
-		issues, edges, sources, err := l.Queue.Discover(tracker, l.CodeForge, l.FailedLabel)
+		issues, edges, sources, err := l.queueRef().Discover(tracker, l.CodeForge, l.FailedLabel)
 		// A successful claim here is a fresh Dispatch starting for issues,
 		// so any earlier Terminate mark for these numbers must not carry
 		// over — otherwise a re-pick's own settle would abandon on its very
@@ -445,7 +588,7 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		// TestRunContinuous_ConsoleConfig_SkipsRedundantClaim and
 		// TestRunContinuous_DivergentLabels_DoubleClaims (launch_test.go)
 		// pin this: diverging Label from InProgressLabel double-claims.
-		err := waves.RunContinuous(waves.Config{Limiter: l.limiter(), Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.Queue, l.signalRefresh, l.registry()}, discover, l.freshnessChecker())
+		err := waves.RunContinuous(waves.Config{Limiter: l.limiter(), Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.queueRef(), l.signalRefresh, l.registry()}, discover, l.freshnessChecker())
 
 		if errors.Is(err, waves.ErrImageStale) {
 			// RunContinuous's own "stale" flag is a one-shot latch for this
@@ -469,8 +612,9 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 			}
 		}
 
+		q := l.queueRef()
 		l.mu.Lock()
-		if !l.Queue.hasQueued() {
+		if !q.hasQueued() {
 			l.launching = false
 			l.mu.Unlock()
 			return
