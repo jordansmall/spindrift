@@ -43,8 +43,8 @@ type Model struct {
 	PendingTerminate string
 	// Cap and Live are the session's live parallelism cap and current live
 	// count (issue #653, ADR 0023) — zero in a launch-less session, since
-	// refreshPickDecorations never sends a CapMsg when there is no Launcher to read them
-	// from.
+	// refreshPickDecorations never sends a CapMsg when there is no Launcher
+	// to read them from.
 	Cap, Live int
 	// RebuildStatus is the launcher's live image-freshness/rebuild state —
 	// new launches hold while Stale is true; a running Box rides it out

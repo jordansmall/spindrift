@@ -208,13 +208,14 @@ type SidebarLoadedMsg struct {
 func (SidebarLoadedMsg) isConsoleMsg() {}
 
 // SidebarActivityMsg carries the open sidebar's Dispatch's freshly re-derived
-// Activity feed — refreshPickDecorations's per-Msg refresh, piggybacking the existing
-// per-Msg sync tick (ADR 0030) and scoped to whichever Dispatch the sidebar
-// has open so I/O stays bounded even with many Dispatches running (issue
-// #1502). A no-op when no sidebar is open or Number no longer matches it —
-// the operator may have switched or closed the sidebar in the same Update
-// batch that produced this message. Only Activity is re-derived; the
-// Transcript stays the one-shot load SidebarLoadedMsg already provides
+// Activity feed — refreshPickDecorations's per-Msg refresh, piggybacking
+// the existing per-Msg sync tick (ADR 0030) and scoped to whichever
+// Dispatch the sidebar has open so I/O stays bounded even with many
+// Dispatches running (issue #1502). A no-op when no sidebar is open or
+// Number no longer matches it — the operator may have switched or closed
+// the sidebar in the same Update batch that produced this message. Only
+// Activity is re-derived; the Transcript stays the one-shot load
+// SidebarLoadedMsg already provides
 // (#1501) — the condensed feed, not the full firehose, is what tails live.
 type SidebarActivityMsg struct {
 	Number   string
