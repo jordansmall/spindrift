@@ -403,7 +403,7 @@ func renderWorkSection(m Model, budget int) string {
 			fmt.Fprintf(&extras, "  (%s)", reason)
 		}
 		if p.Heartbeat != "" {
-			fmt.Fprintf(&extras, "  %s", p.Heartbeat)
+			fmt.Fprintf(&extras, "  %s", SanitizeControlSequences(p.Heartbeat))
 		}
 		state := roleStyle(role).Render(clip(p.State.String(), stateColWidth, true))
 		rows = append(rows, fmt.Sprintf("%s %s %s %s %s%s\n", marker, clip("#"+p.Number, numberColWidth, true), clip(title, titleWidth, true), state, clip(p.Age, ageColWidth, true), clip(extras.String(), extrasWidth, false)))
