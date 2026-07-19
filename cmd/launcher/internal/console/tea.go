@@ -221,8 +221,9 @@ func (t teaModel) View() string {
 // Model.Focus (ADR 0030, #1501, inherited from #786's drill-in precedence).
 func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	if t.m.Sidebar != nil && (t.m.Focus == FocusSidebar || !sidebarFits(t.m) || t.m.SidebarZoom) {
-		t.m = t.handleSidebarKey(msg)
-		return t, nil
+		var cmd tea.Cmd
+		t.m, cmd = t.handleSidebarKey(msg)
+		return t, cmd
 	}
 	if t.m.ShowRebuildOutput {
 		t.m = t.handleRebuildOutputKey(msg)
@@ -419,39 +420,56 @@ func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) Model {
 // sidebar is docked (a no-op in the fullscreen fallback, which has no list
 // on screen to focus), "x"/Esc closes back to the body, the scroll keys page
 // through the loaded content (issue #786's drill-in precedent), "G"/"end"
-// re-attaches Follow and jumps to the bottom, "z" toggles the fullscreen
-// zoom (issue #1502), and "q"/"ctrl+c" hard-quit — the universal quit
-// keystroke must never be swallowed by the sidebar, same principle as the
-// PendingPick chord in handleKey (issue #826) but not the same mechanics:
-// PendingPick resolves the chord (pickHighlighted) before quitting, while the
-// sidebar quits directly with no resolve step.
-func (t teaModel) handleSidebarKey(msg tea.KeyMsg) Model {
+// re-attaches Follow and jumps to the bottom, "gg" detaches Follow and jumps
+// to the top — reusing the same Model.PendingG leader and gChordTick timeout
+// the list body's own "gg" arms (issue #1628), rather than a second chord
+// mechanism (issue #1629) — "z" toggles the fullscreen zoom (issue #1502),
+// and "q"/"ctrl+c" hard-quit — the universal quit keystroke must never be
+// swallowed by the sidebar, same principle as the PendingPick chord in
+// handleKey (issue #826) but not the same mechanics: PendingPick resolves
+// the chord (pickHighlighted) before quitting, while the sidebar quits
+// directly with no resolve step.
+func (t teaModel) handleSidebarKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if t.m.PendingG {
+		t.m = Update(t.m, GResolvedMsg{})
+		if msg.String() == "g" {
+			t.m = Update(t.m, SidebarJumpToBeginningMsg{})
+			return t.m, nil
+		}
+		// Any other key cancels the leader, same as the timeout, but — like
+		// handleKey's own list-body branch — does not consume it: that key's
+		// own meaning still applies, so falls through to the switch below
+		// rather than returning here (issue #1628 AC, #1629).
+	}
 	switch msg.String() {
 	case "q", "ctrl+c":
-		return Update(t.m, QuitMsg{})
+		return Update(t.m, QuitMsg{}), nil
 	case "t":
-		return Update(t.m, SidebarToggleMsg{})
+		return Update(t.m, SidebarToggleMsg{}), nil
 	case "h", "left":
 		if sidebarFits(t.m) && !t.m.SidebarZoom {
-			return Update(t.m, FocusListMsg{})
+			return Update(t.m, FocusListMsg{}), nil
 		}
-		return t.m
+		return t.m, nil
 	case "x", "esc":
-		return Update(t.m, SidebarCloseMsg{})
+		return Update(t.m, SidebarCloseMsg{}), nil
 	case "j", "down":
-		return Update(t.m, SidebarScrollMsg{Delta: 1})
+		return Update(t.m, SidebarScrollMsg{Delta: 1}), nil
 	case "k", "up":
-		return Update(t.m, SidebarScrollMsg{Delta: -1})
+		return Update(t.m, SidebarScrollMsg{Delta: -1}), nil
 	case "pgdown":
-		return Update(t.m, SidebarScrollMsg{Delta: fixedPaneScrollDelta})
+		return Update(t.m, SidebarScrollMsg{Delta: fixedPaneScrollDelta}), nil
 	case "pgup":
-		return Update(t.m, SidebarScrollMsg{Delta: -fixedPaneScrollDelta})
+		return Update(t.m, SidebarScrollMsg{Delta: -fixedPaneScrollDelta}), nil
 	case "G", "end":
-		return Update(t.m, SidebarJumpToEndMsg{})
+		return Update(t.m, SidebarJumpToEndMsg{}), nil
+	case "g":
+		t.m = Update(t.m, GPendingMsg{})
+		return t.m, gChordTick()
 	case "z":
-		return Update(t.m, SidebarZoomToggleMsg{})
+		return Update(t.m, SidebarZoomToggleMsg{}), nil
 	}
-	return t.m
+	return t.m, nil
 }
 
 // highlightedIssue returns the backlog row under the cursor, or false when

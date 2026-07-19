@@ -801,6 +801,33 @@ func TestTea_SidebarKey_ScrollUpDetachesFollow_GReattaches(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_SidebarKey_ggJumpsToTop verifies the "gg" chord, while the sidebar
+// has focus, scrolls it to the top and detaches Follow — reusing the same
+// g-leader chord the Section list's "gg" (issue #1628) already arms, rather
+// than a duplicate chord mechanism (issue #1629). sidebarOpen's freshly
+// loaded, still-following sidebar starts with Offset overshot to len(Lines)
+// (model.go's SidebarLoadedMsg comment) — 1 here, not yet clamped back to 0
+// by a render — so gg's reset to 0 is a real, verifiable field transition,
+// not a no-op against an already-zero Offset.
+func TestTea_SidebarKey_ggJumpsToTop(t *testing.T) {
+	tm := sidebarOpen(t)
+
+	sendKey(tm, "g")
+	sendKey(tm, "g")
+	waitForOutput(t, tm, "[paused]")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.Sidebar.Follow {
+		t.Error("Follow = true after gg, want false")
+	}
+	if fm.m.Sidebar.Offset != 0 {
+		t.Errorf("Offset = %d, want 0 after gg", fm.m.Sidebar.Offset)
+	}
+}
+
 // TestTea_Sidebar_RetainsPositionAcrossDispatchSwitch verifies switching the
 // docked sidebar from one running Dispatch to another and back restores the
 // first Dispatch's scroll offset and detached Follow state exactly where the
