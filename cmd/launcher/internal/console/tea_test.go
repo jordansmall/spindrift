@@ -3155,14 +3155,16 @@ func TestTea_QuitKey_WithLiveDispatch_ArmsQuitConfirm(t *testing.T) {
 	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
 
+	// The first confirm is a fresh paint and asserts reliably; it pins this
+	// test's own concern — a live Dispatch renders the full drain/
+	// terminate-all/stay prompt. The stay-then-requit dance is covered
+	// deterministically off the renderer by
+	// TestTea_QuitKey_Stay_DeclinesAndKeepsRunning, so it is not repeated
+	// here where the second confirm's frame-coalescing hang (issue #1664)
+	// lived. Drain to finish cleanly.
 	sendKey(tm, "q")
 	waitForOutput(t, tm, "quit with live Dispatches", "drain", "terminate-all", "stay")
 
-	sendKey(tm, "s")
-	waitForOutput(t, tm, "fix the thing") // confirm prompt gone, backlog/queue view back
-
-	sendKey(tm, "q")
-	waitForOutput(t, tm, "quit with live Dispatches")
 	sendKey(tm, "d")
 	waitFinished(t, tm)
 }
@@ -3195,23 +3197,37 @@ func TestTea_QuitKey_TerminateAll_ReapsEveryLiveDispatch(t *testing.T) {
 // TestTea_QuitKey_Stay_DeclinesAndKeepsRunning verifies "s" at the quit
 // confirm cancels the quit, touching no live Dispatch and leaving the
 // session running (issue #651, ADR 0023, issue #822).
+//
+// Driven through handleKey directly rather than teatest: the quit-confirm
+// frame renders the backlog body beneath its prompt line, and tm.Output()
+// drains as it is read, so a q -> s -> q sequence painted under Bubble Tea's
+// frame-coalescing renderer can emit no fresh "quit with live Dispatches"
+// bytes for the second confirm — the darwin scheduler made that coalescing
+// reliable enough to hang the old teatest wait past 30s (issue #1664).
+// Asserting Mode on the returned model exercises the same arming
+// deterministically, off the renderer — the #1327 approach for this class of
+// hang. The seeded pick never leaves PickRunning here (no tryLaunch, no
+// dispatch), so no "settled" guard applies.
 func TestTea_QuitKey_Stay_DeclinesAndKeepsRunning(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
 
-	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
+	tm := newTeaModel(fc, t.TempDir(), launch)
 
-	sendKey(tm, "q")
-	waitForOutput(t, tm, "quit with live Dispatches")
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if tm.m.Mode != ModeQuitConfirm {
+		t.Fatalf("Mode after q = %v, want ModeQuitConfirm (live Dispatch present)", tm.m.Mode)
+	}
 
-	sendKey(tm, "s")
-	waitForOutput(t, tm, "fix the thing") // confirm prompt gone, backlog/queue view back
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if tm.m.Mode != ModeList {
+		t.Fatalf("Mode after s = %v, want ModeList (stay declines the quit)", tm.m.Mode)
+	}
 
-	// Still live after staying — drain to finish the test cleanly.
-	sendKey(tm, "q")
-	waitForOutput(t, tm, "quit with live Dispatches")
-	sendKey(tm, "d")
-	waitFinished(t, tm)
+	// Still live after staying — the second quit re-arms the same confirm.
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if tm.m.Mode != ModeQuitConfirm {
+		t.Fatalf("Mode after second q = %v, want ModeQuitConfirm (Dispatch still live)", tm.m.Mode)
+	}
 
 	if len(fr.KillCalls) != 0 {
 		t.Errorf("KillCalls = %v, want none after staying", fr.KillCalls)
