@@ -10,10 +10,11 @@ import (
 )
 
 // Settle interprets result (a Dispatcher's Run outcome) and drives num to its
-// terminal label: routing to SettleAdopted or the self-heal merge gate as
-// needed, then posting the usage comment. Called immediately after a Box
-// exits so each issue reaches CompleteLabel or its failed label independently
-// of its wave siblings.
+// terminal label: routing to the self-heal merge gate on a parsed "ready"
+// outcome, or reporting blocked/missing/malformed otherwise, then posting
+// the usage comment. Called immediately after a Box exits so each issue
+// reaches CompleteLabel or its failed label independently of its wave
+// siblings.
 func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
 	if result.ParseErr != nil {
 		fmt.Printf("    #%s  status=malformed  note=unparseable outcome line\n", num)
@@ -42,11 +43,15 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			s.transitionState(num, forge.InProgress, forge.Failed)
 			return
 		}
-		if res.IsDraft {
-			fmt.Printf("    #%s  landing=%s  status=blocked  note=draft PR on %s; no outcome line\n", num, res.URL, branch)
-			return
-		}
-		s.SettleAdopted(d, num, gen, res.URL)
+		// No transitionState here, on purpose, regardless of draft-ness
+		// (issue #1654 folded the non-draft case into this same branch): an
+		// open PR — draft or not — is a real, if unmergeable-right-now,
+		// result, and ADR 0012 reserves agent-failed for "never produced a
+		// green PR." A non-draft PR only ever got that way via this
+		// launcher's own MarkReady at green (issue #1651), so if anything
+		// it is *more* likely to have gone green than a draft one — never
+		// less deserving of the same restraint.
+		fmt.Printf("    #%s  landing=%s  status=blocked  note=no outcome line; PR on %s not adopted\n", num, res.URL, branch)
 		return
 	}
 

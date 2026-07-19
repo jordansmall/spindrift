@@ -98,33 +98,34 @@ EOF
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 0 ]
 }
 
-# Adoption-aware backstop (issue #1614): an open, non-draft PR on BRANCH is a
-# real, mergeable result even without a parsed outcome line -- the backstop
-# must stay silent so the launcher's own no-outcome adoption path (discover
-# PR -> self-heal merge gate -> merge) settles the run instead of a synthetic
-# line preempting it.
-@test "no outcome line + open non-draft PR on branch -> backstop stays silent" {
+# The no-outcome backstop no longer branches on draft-ness (issue #1654): a
+# non-draft PR on BRANCH is no longer treated as a salvage signal that the
+# Driver reached status=ready and merely lost the line -- the launcher's own
+# no-outcome path never adopts off draft-ness either, so both sides agree a
+# lost outcome line always synthesizes status=blocked.
+@test "no outcome line + open non-draft PR on branch -> synthetic blocked" {
   export FAKE_CLAUDE_COMMIT=1
   export FAKE_CLAUDE_NO_OUTCOME=1
   export FAKE_GH_PR_LIST_7='[{"isDraft":false}]'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
 }
 
-# A draft PR is not a done, mergeable result -- the backstop must still
-# synthesize status=blocked exactly as it does when no PR exists at all.
-# The no-work-to-preserve early return (#1606) skips the push, but must not
-# skip the PR check too -- a non-draft PR reachable with zero local commits
-# ahead of base (e.g. this Box resumed a session whose transcript is gone but
-# whose branch/PR another process already advanced) is still a real,
-# mergeable result the backstop must stay silent for.
-@test "no outcome line + no commits + open non-draft PR on branch -> backstop still stays silent" {
+# A non-draft PR is not a salvage signal (issue #1654) -- the backstop must
+# still synthesize status=blocked exactly as it does when no PR exists at
+# all, even with zero local commits ahead of base (e.g. this Box resumed a
+# session whose transcript is gone but whose branch/PR another process
+# already advanced): the no-work-to-preserve early return (#1606) skips the
+# push, not the synthesized outcome line.
+@test "no outcome line + no commits + open non-draft PR on branch -> synthetic blocked" {
   export FAKE_CLAUDE_NO_OUTCOME=1
   export FAKE_GH_PR_LIST_7='[{"isDraft":false}]'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*no work to preserve' <<<"$output"
 }
 
 @test "no outcome line + draft PR on branch -> synthetic blocked, same as no PR" {

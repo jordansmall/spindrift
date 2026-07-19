@@ -92,14 +92,15 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				s.transitionState(num, forge.InProgress, forge.Complete)
 				return landingManual
 			}
-			// The launcher now owns the draft->ready flip at green, ahead of
-			// the merge itself (issue #1651) — the expand step of inverting
-			// the draft-until-ready invariant (#1614/#1625). MarkReady is
-			// idempotent, so this runs unconditionally even though the driver
-			// still flips the PR itself too; a failure only reaches the
-			// console log below (never a public issue comment), so it never
-			// blocks the merge, matching EnqueueAutoMerge's best-effort
-			// precedent below.
+			// The launcher owns the draft->ready flip at green, ahead of the
+			// merge itself (issue #1651) — the Driver itself never flips a PR
+			// ready anymore (#1653), and a no-outcome run is never adopted as
+			// ready off draft-ness either (#1654), completing the inversion
+			// of the old draft-until-ready invariant (#1614/#1625). MarkReady
+			// is idempotent, so this runs unconditionally; a failure only
+			// reaches the console log below (never a public issue comment),
+			// so it never blocks the merge, matching EnqueueAutoMerge's
+			// best-effort precedent below.
 			if err := s.pr.MarkReady(pr); err != nil {
 				fmt.Printf("    #%s  landing=%s  status=mark-ready-failed  !! %v\n", num, pr, err)
 			}
