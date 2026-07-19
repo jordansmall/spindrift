@@ -108,6 +108,10 @@ func sendKey(tm *teatest.TestModel, s string) {
 		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlF})
 	case "ctrl+b":
 		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlB})
+	case "ctrl+d":
+		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlD})
+	case "ctrl+u":
+		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlU})
 	case "tab":
 		tm.Send(tea.KeyMsg{Type: tea.KeyTab})
 	case "ctrl+c":
@@ -408,6 +412,32 @@ func TestTea_ScrollKeys_CtrlFCtrlBPageThroughBacklogWithoutMovingCursor(t *testi
 	waitForOutput(t, tm, rowNumberCell("4")+" issue 4")
 
 	sendKey(tm, "ctrl+b")
+	waitForOutput(t, tm, "> #0")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_ScrollKeys_CtrlDCtrlUHalfPageThroughBacklogWithoutMovingCursor
+// verifies the vim half-page chords ctrl+d/ctrl+u each move the backlog
+// viewport by half of what ctrl+f/ctrl+b move it: two ctrl+d presses land
+// on the same offset one ctrl+f does, and two ctrl+u presses undo it back
+// to the top (issue #1648).
+func TestTea_ScrollKeys_CtrlDCtrlUHalfPageThroughBacklogWithoutMovingCursor(t *testing.T) {
+	f := forge.NewFake()
+	for i := 0; i < 50; i++ {
+		f.SetIssue(forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i), State: forge.IssueOpen})
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10))
+	waitForOutput(t, tm, "> #0")
+
+	sendKey(tm, "ctrl+d")
+	sendKey(tm, "ctrl+d")
+	waitForOutput(t, tm, rowNumberCell("4")+" issue 4")
+
+	sendKey(tm, "ctrl+u")
+	sendKey(tm, "ctrl+u")
 	waitForOutput(t, tm, "> #0")
 
 	sendKey(tm, "q")
@@ -1434,6 +1464,59 @@ func TestTea_SidebarScrollKeys_CtrlFCtrlBPageThroughContent(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_SidebarScrollKeys_CtrlDCtrlUHalfPageThroughContent mirrors
+// TestTea_SidebarScrollKeys_CtrlFCtrlBPageThroughContent for the vim
+// half-page chords ctrl+d/ctrl+u, which must move the sidebar by half of
+// what ctrl+f/ctrl+b move it (issue #1648).
+func TestTea_SidebarScrollKeys_CtrlDCtrlUHalfPageThroughContent(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var lines strings.Builder
+	for i := 0; i < 50; i++ {
+		fmt.Fprintf(&lines, `{"type":"assistant","message":{"content":[{"type":"text","text":"line-%02d"}]}}`+"\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(lines.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "2")
+	waitForOutput(t, tm, "running")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "line-49") // fresh open while following starts at the bottom
+
+	for i := 0; i < 6; i++ {
+		sendKey(tm, "ctrl+u") // 6 half-pages (-5 each) detaches Follow, clamps to the top
+	}
+	waitForOutput(t, tm, "line-00")
+
+	sendKey(tm, "ctrl+d")
+	sendKey(tm, "ctrl+d") // two half-pages (+5 each) match one ctrl+f
+	waitForOutput(t, tm, "line-19")
+
+	sendKey(tm, "ctrl+u")
+	sendKey(tm, "ctrl+u") // two half-pages (-5 each) match one ctrl+b
+	waitForOutput(t, tm, "line-00")
+
+	sendKey(tm, "x")
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+	sendKey(tm, "d")
+	waitFinished(t, tm)
+}
+
 // TestTea_SidebarKey_NoDriver_ShowsGracefulMessage verifies opening the
 // sidebar during a launch-less session (no Driver configured) surfaces a
 // readable error instead of panicking on a nil Driver (issue #786 AC4).
@@ -1575,6 +1658,26 @@ func TestTea_HandleRebuildOutputKey_ScrollsOnCtrlFCtrlB(t *testing.T) {
 	tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyCtrlB})
 	if tm.m.RebuildOutputOffset != 0 {
 		t.Errorf("RebuildOutputOffset = %d after ctrl+b, want 0", tm.m.RebuildOutputOffset)
+	}
+}
+
+// TestTea_HandleRebuildOutputKey_ScrollsOnCtrlDCtrlU mirrors
+// TestTea_HandleRebuildOutputKey_ScrollsOnCtrlFCtrlB for the vim half-page
+// chords ctrl+d/ctrl+u, which must page RebuildOutputOffset by half of
+// fixedPaneScrollDelta lines (issue #1648).
+func TestTea_HandleRebuildOutputKey_ScrollsOnCtrlDCtrlU(t *testing.T) {
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Output: strings.Repeat("l\n", 40)}})
+	m = Update(m, RebuildOutputOpenMsg{})
+	tm := teaModel{m: m}
+
+	tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	if tm.m.RebuildOutputOffset != fixedPaneScrollDelta/2 {
+		t.Errorf("RebuildOutputOffset = %d after ctrl+d, want %d", tm.m.RebuildOutputOffset, fixedPaneScrollDelta/2)
+	}
+
+	tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	if tm.m.RebuildOutputOffset != 0 {
+		t.Errorf("RebuildOutputOffset = %d after ctrl+u, want 0", tm.m.RebuildOutputOffset)
 	}
 }
 
