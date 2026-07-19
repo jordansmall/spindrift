@@ -7,11 +7,23 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/settle"
 )
+
+// defaultPollInterval is the background refill poll's fixed cadence (issue
+// #1637): a ticker goroutine, symmetric to the Grown() listener below,
+// retries drainRefill() on this interval so a transient refill miss -- an
+// eventually-consistent discover() result that doesn't yet show a
+// just-merged blocker's child as ready, a blocker resolving while every Box
+// is busy, a touch-overlap deferral, or a transient DepsOf hiccup -- gets
+// retried without waiting for an unrelated Box to finish. Hardcoded for now;
+// a follow-up issue (#1638) makes it an operator knob. cfg.pollInterval
+// overrides it for tests that can't wait out a real interval.
+const defaultPollInterval = 30 * time.Second
 
 // ErrImageStale is returned by RunContinuous when the freshness checker
 // reports the loaded image would be rebuilt against the current
@@ -132,7 +144,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	var refill func() bool
 	// drainRefill is predeclared here, like refill above, so refill's
 	// completion-handler goroutine can call it before its body is assigned.
-	var drainRefill func()
+	var drainRefill func() int
 	refill = func() bool {
 		if stale || closed {
 			return false
@@ -206,16 +218,21 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 
 	// drainRefill fills every currently-free slot that has ready work,
 	// looping refill until a call finally does nothing rather than assuming
-	// one trigger is worth exactly one launch. All three refill triggers --
-	// bootstrap, the grow listener, and a completing Box -- share this: a
+	// one trigger is worth exactly one launch, and reports how many it
+	// launched so the poll ticker below can log only the ticks that actually
+	// did something. All four refill triggers -- bootstrap, the grow
+	// listener, a completing Box, and the poll ticker -- share this: a
 	// single free slot the moment of the call is not the only thing that
 	// may be fillable, since a slot freed by an earlier transient refill
 	// miss (a not-yet-visible discover result, an unresolved blocker, a
 	// touch-overlap deferral, or a DepsOf hiccup) stays free at the limiter
 	// level until some later refill call successfully claims it (#1587).
-	drainRefill = func() {
+	drainRefill = func() int {
+		n := 0
 		for refill() {
+			n++
 		}
+		return n
 	}
 
 	// growDone stops the grow listener once this call is finished; done
@@ -245,6 +262,43 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 		}
 	}()
 
+	// pollInterval is cfg's test override, or the production default.
+	// pollDone/pollExited mirror growDone/done exactly: pollDone stops the
+	// ticker once this call is finished, pollExited confirms it has actually
+	// exited before RunContinuous returns.
+	pollInterval := cfg.pollInterval
+	if pollInterval <= 0 {
+		pollInterval = defaultPollInterval
+	}
+	pollDone := make(chan struct{})
+	pollExited := make(chan struct{})
+	go func() {
+		defer close(pollExited)
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				// A tick after closed is set is a no-op: refill()'s own
+				// stale||closed guard (above) makes drainRefill() return 0
+				// immediately, so no explicit shutdown race-check is needed
+				// here beyond the pollDone case below.
+				mu.Lock()
+				n := drainRefill()
+				mu.Unlock()
+				if n > 0 {
+					// Usually means an event-driven refill missed and the slot
+					// sat idle until this tick -- but a tick can also just win
+					// the race against a completion/grow trigger, so this
+					// isn't proof of a miss, only that the poll did something.
+					fmt.Printf("    <- poll: launched %d issue(s)\n", n)
+				}
+			case <-pollDone:
+				return
+			}
+		}
+	}()
+
 	mu.Lock()
 	drainRefill()
 	for outstanding > 0 {
@@ -255,6 +309,8 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 
 	close(growDone)
 	<-done
+	close(pollDone)
+	<-pollExited
 
 	if stale {
 		return ErrImageStale
