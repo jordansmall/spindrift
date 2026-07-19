@@ -13,11 +13,28 @@
 # `spindrift` now points operators at the interactive console).
 #
 # Fields:
-#   name   string  verb name; must match a verbHandlers key exactly
-#   usage  string  bracketed argument synopsis shown after name; "" when the
-#                  verb takes none
-#   doc    string  one-line summary rendered into --help and (eventually) the
-#                  completions/man page
+#   name                    string   verb name; must match a verbHandlers key
+#                                    exactly
+#   usage                   string   bracketed argument synopsis shown after
+#                                    name; "" when the verb takes none
+#   doc                     string   one-line summary rendered into --help
+#                                    and (eventually) the completions/man page
+#   dynamicIssueCompletion  bool     opts this subcommand into shelling out to
+#                                    `spindrift __complete-issues` for
+#                                    positional issue-number completion
+#                                    (issue #556); omitted (defaults to false)
+#                                    for every subcommand that doesn't. Not
+#                                    the same question as "does usage show a
+#                                    positional issue arg" — `research` does
+#                                    (see its usage below) but is deliberately
+#                                    left unset here, since issue #556 scopes
+#                                    dynamic completion to dispatch/preview/
+#                                    recover only (research drains
+#                                    agent-research, a different queue).
+#                                    lib/renderers.nix's
+#                                    issueCompletionSubcommands derives the
+#                                    renderer/schema-drift-guard gate list
+#                                    from this field (issue #1603).
 [
   {
     name = "console";
@@ -28,6 +45,7 @@
     name = "dispatch";
     usage = "[--no-build] [--yes] [issue...]";
     doc = "dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)";
+    dynamicIssueCompletion = true;
   }
   {
     name = "research";
@@ -38,6 +56,7 @@
     name = "preview";
     usage = "[issue...]";
     doc = "dry-run: show what dispatch would pick up, in order";
+    dynamicIssueCompletion = true;
   }
   {
     name = "build";
@@ -48,6 +67,7 @@
     name = "recover";
     usage = "<issue>";
     doc = "run the merge gate for a single issue";
+    dynamicIssueCompletion = true;
   }
   {
     name = "doctor";
