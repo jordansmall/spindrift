@@ -40,8 +40,5 @@ Everything from COMMS onward below is the shared contract every box runs on
   rewriting its own unmerged history is expected.
 - The PR for this issue is already open (see TASK above) and there is no
   REVIEW step on a fix pass. Where the shared flow below reaches REVIEW or
-  OPEN A PULL REQUEST, skip them — do not run `gh pr create`. IF BLOCKED's
-  draft-revert step still applies as written: convert the existing PR back
-  to draft before emitting `status=blocked`, since a non-draft PR reads as
-  a done, mergeable result and a blocked fix pass isn't one. Go straight
-  from COMMIT to LAND THE CHANGE's `$CODE_FORGE` branch, then WATCH CI.
+  OPEN A PULL REQUEST, skip them — do not run `gh pr create`. Go straight
+  from COMMIT to LAND THE CHANGE's `$CODE_FORGE` branch, then OUTCOME.

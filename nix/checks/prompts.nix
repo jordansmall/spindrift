@@ -226,15 +226,15 @@ in
   '';
 
   # The CHECK-phase never-background / emit-outcome guardrail (issue #592)
-  # generalizes WATCH CI's rule to the CHECK phase's own blocking gates
-  # (`nix build .#checks-inbox`, test suites). Written once in
-  # issue-prompt.md's CHECK section and inherited by fix-prompt.md through
-  # the CHECK block injection above. Both greps are scoped to issue-prompt's
-  # CHECK section itself (not the whole file) -- WATCH CI carries the same
-  # "never background it" phrase further down, so an unscoped grep would
-  # keep passing even if the #592 CHECK paragraph were deleted. Fix-prompt
-  # side is covered by mkharness-prompt-fix-check-no-drift's byte-for-byte
-  # diff, not re-pinned here (issue #1009).
+  # covers the CHECK phase's own blocking gates (`nix build .#checks-inbox`,
+  # test suites). Written once in issue-prompt.md's CHECK section and
+  # inherited by fix-prompt.md through the CHECK block injection above. Both
+  # greps are scoped to issue-prompt's CHECK section itself (not the whole
+  # file) -- OUTCOME carries its own "Do NOT run" phrasing further down, so
+  # an unscoped grep would keep passing even if the #592 CHECK paragraph
+  # were deleted. Fix-prompt side is covered by
+  # mkharness-prompt-fix-check-no-drift's byte-for-byte diff, not re-pinned
+  # here (issue #1009).
   mkharness-prompt-check-never-background =
     pkgs.runCommand "mkharness-prompt-check-never-background" { }
       ''
@@ -373,20 +373,25 @@ in
         touch $out
       '';
 
-  # Grep pin (issue #455 acceptance criteria): the WATCH CI GraphQL query
-  # literal must appear in exactly one prompt *source* file on disk.
-  # fix-prompt.md's CONTEXT section legitimately references the unrelated
-  # `statusCheckRollup` JSON field name via `gh pr view --json`, so the query
-  # body itself -- distinctive to the shared WATCH CI block -- is the pin, not
-  # the field name alone. fix-prompt.md gets the WATCH CI block by injection
-  # now, never as hand-copied source text -- a regression here means someone
-  # pasted the block back in.
-  prompt-source-statusCheckRollup-query-appears-once =
-    pkgs.runCommand "prompt-source-statusCheckRollup-query-appears-once" { }
+  # Grep pin (issue #1653): the Driver no longer polls CI itself -- the
+  # launcher already gates on CI green before flipping the PR ready and
+  # merging (issue #1651) -- so the WATCH CI GraphQL query must not appear
+  # in any prompt *source* file on disk. fix-prompt.md's CONTEXT section
+  # legitimately references the unrelated `statusCheckRollup` JSON field
+  # name via `gh pr view --json`, so the query body itself -- distinctive to
+  # the old shared WATCH CI block -- is the pin, not the field name alone. A
+  # regression here means someone pasted the block back in.
+  prompt-source-statusCheckRollup-query-absent =
+    pkgs.runCommand "prompt-source-statusCheckRollup-query-absent" { }
       ''
-        count=$(grep -rlF 'query($owner:String!' ${../../templates/default/prompts} | wc -l)
-        [ "$count" -eq 1 ] || {
-          echo "expected the WATCH CI GraphQL query in exactly one prompt source file, got $count" >&2
+        # `|| true`: under stdenv's pipefail, a no-match exit (grep's status
+        # 1) would otherwise abort the script right here, before the
+        # assertion below ever runs. The grep in the error branch below
+        # needs no such guard -- it only runs once count != 0, i.e. once a
+        # match is already known to exist.
+        count=$(grep -rlF 'query($owner:String!' ${../../templates/default/prompts} | wc -l || true)
+        [ "$count" -eq 0 ] || {
+          echo "expected the WATCH CI GraphQL query in no prompt source file, got $count" >&2
           grep -rlF 'query($owner:String!' ${../../templates/default/prompts} >&2
           exit 1
         }
