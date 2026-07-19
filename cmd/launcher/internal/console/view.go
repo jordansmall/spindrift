@@ -333,7 +333,7 @@ func renderBacklogSection(m Model, budget int) string {
 				labels = append(labels, SanitizeControlSequences(heartbeat))
 			}
 		}
-		rows = append(rows, fmt.Sprintf("%s %s %s [%s]\n", marker, clip("#"+iss.Number, numberColWidth, true), clip(title, titleWidth, true), clip(strings.Join(labels, ", "), labelsWidth, false)))
+		rows = append(rows, fmt.Sprintf("%s %s %s [%s]\n", marker, clip("#"+iss.Number, numberColWidth, true), clip(title, titleWidth, true), clipLabels(labels, labelsWidth)))
 	}
 	// Two spaces, not one, before "labels": each row's own label list sits
 	// after a literal " [" (space + bracket), one column wider than a bare
@@ -427,6 +427,29 @@ func clip(s string, width int, pad bool) string {
 	default:
 		return s
 	}
+}
+
+// clipLabels fits a label list into width display columns: unlike clip()'s
+// ellipsis, an over-width label list drops whole labels from the tail and
+// replaces them with a "+N" count of how many were dropped, so an operator
+// scanning the Backlog can tell there's more without the label text itself
+// getting mangled mid-word (issue #1631).
+func clipLabels(labels []string, width int) string {
+	full := strings.Join(labels, ", ")
+	if runewidth.StringWidth(full) <= width {
+		return full
+	}
+	bare := fmt.Sprintf("+%d", len(labels))
+	for k := len(labels) - 1; k > 0; k-- {
+		suffix := fmt.Sprintf("+%d", len(labels)-k)
+		candidate := strings.Join(labels[:k], ", ") + ", " + suffix
+		if runewidth.StringWidth(candidate) <= width {
+			return candidate
+		}
+	}
+	// Not even one whole label fits alongside its count — fall back to the
+	// bare "+N" for every label, clipped further if that itself overflows.
+	return clip(bare, width, false)
 }
 
 // bannerErrWidth bounds a single-line header error banner (rebuild-failed,
