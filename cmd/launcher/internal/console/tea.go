@@ -183,7 +183,7 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.m = Update(t.m, msg)
 	case OrphanAdoptedMsg:
 		t.m = Update(t.m, msg)
-	case QueueSnapshotMsg: // the startup bootstrap, or a launcher-pushed transition
+	case QueueSnapshotMsg: // startup bootstrap, or a launcher-pushed transition
 		t.m = Update(t.m, msg)
 	case pollTickMsg:
 		if t.launch != nil {

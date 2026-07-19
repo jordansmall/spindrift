@@ -95,13 +95,13 @@ func activityEqual(a, b []ActivityLine) bool {
 }
 
 // SidebarActivityCache remembers the open sidebar's last-refreshed Activity
-// feed, keyed by (Number, path, size, modTime) — refreshPickDecorations's per-Msg refresh
-// runs on every tea.Msg (issue #1502, ADR 0030's "piggybacking the existing
-// per-Msg sync tick"), so most calls see the exact same on-disk pass log as
-// last time; a stat match skips the ReadFile+reparse and returns the cached
-// feed, mirroring HeartbeatCache's own skip (issue #731). Single-entry
-// rather than a map: only one sidebar can be open at a time, so there is
-// never more than one Dispatch to track.
+// feed, keyed by (Number, path, size, modTime) — refreshPickDecorations's
+// per-Msg refresh runs on every tea.Msg (issue #1502, ADR 0030's
+// "piggybacking the existing per-Msg sync tick"), so most calls see the
+// exact same on-disk pass log as last time; a stat match skips the
+// ReadFile+reparse and returns the cached feed, mirroring HeartbeatCache's
+// own skip (issue #731). Single-entry rather than a map: only one sidebar
+// can be open at a time, so there is never more than one Dispatch to track.
 type SidebarActivityCache struct {
 	number   string
 	path     string
