@@ -142,8 +142,10 @@ let
   schema = import ./env-schema.nix;
 
   # Subcommand registry (issue #1575): single source of truth for the
-  # completion renderers' subcommand candidate lists below (issue #1577).
+  # completion renderers' subcommand candidate lists (issue #1577) and the
+  # man page SUBCOMMANDS section below.
   subcommandRegistry = import ./subcommands.nix;
+  subcommands = subcommandRegistry;
 
   # Section taxonomy and man-page renderer, shared with flakeModule.nix and the
   # nix/checks/schema-drift.nix guards so none of them can drift from each
@@ -620,7 +622,7 @@ let
 
   # Roff man page rendered from the schema so `man spindrift` carries the full
   # flag reference while `spindrift --help` stays concise.
-  manpageRoff = renderers.renderManpageRoff schema spindriftVersion;
+  manpageRoff = renderers.renderManpageRoff schema spindriftVersion subcommands;
 
   manpage = hostPkgs.runCommand "spindrift-manpage" { } ''
     install -Dm644 ${hostPkgs.writeText "spindrift.1" manpageRoff} \

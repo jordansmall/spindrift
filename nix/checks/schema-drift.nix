@@ -382,6 +382,8 @@ in
       groupChecks = concatMapStrings (g: "need -F '.SS ${g}'\n") groups;
       flagChecks = concatMapStrings (e: "need -F '${roffFlag e}'\n") nonSecret;
       secretChecks = concatMapStrings (e: "need -F '${e.env}'\n") secretEntries;
+      subcommands = import ../../lib/subcommands.nix;
+      subcommandChecks = concatMapStrings (s: "need -F '.B ${s.name}'\n") subcommands;
     in
     pkgs.runCommand "launcher-manpage"
       {
@@ -398,6 +400,7 @@ in
         ${groupChecks}
         ${flagChecks}
         ${secretChecks}
+        ${subcommandChecks}
         touch $out
       '';
 
