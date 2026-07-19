@@ -72,6 +72,28 @@ in
         touch $out
       '';
 
+  # cmd/launcher/subcommands_gen.go must match the content generated from
+  # lib/subcommands.nix. Fails when a subcommand is added/edited in the Nix
+  # registry but the committed generated file is not regenerated. Shares its
+  # renderer with `nix run .#regen` via lib/renderers.nix (issue #1575).
+  subcommands-gen =
+    let
+      subcommands = import ../../lib/subcommands.nix;
+      generated = pkgs.writeText "subcommands_gen.go.generated" (
+        renderers.renderSubcommandsGo subcommands
+      );
+    in
+    pkgs.runCommand "subcommands-gen"
+      {
+        inherit generated;
+        committed = ../../cmd/launcher/subcommands_gen.go;
+      }
+      ''
+        diff "$generated" "$committed" \
+          || { echo "cmd/launcher/subcommands_gen.go is out of sync with lib/subcommands.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # harness.env.example must match the content generated from env-schema.nix.
   # Fails when a new schema knob is added but the committed file is not
   # regenerated (golden-file drift; resolves issue #109). Shares its renderer
