@@ -313,18 +313,11 @@ rec {
   # crib this structure. Rendered fresh at build time, no committed copy —
   # same as renderManpageRoff below.
   renderBashCompletion =
-    schema:
+    schema: subcommandRegistry:
     let
       nonSecret = builtins.filter (e: !(e.secret or false)) (builtins.attrValues schema);
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
-      subcommands = [
-        "dispatch"
-        "research"
-        "preview"
-        "build"
-        "recover"
-        "doctor"
-      ];
+      subcommands = map (s: s.name) subcommandRegistry;
       # Hardcoded like renderManpageRoff's DISPATCH FLAGS / SYNOPSIS sections:
       # dispatch's boolean flags and the top-level flags aren't schema entries.
       extraFlags = [
@@ -433,18 +426,11 @@ rec {
   # flag's schema doc string as its `-d` description. Rendered fresh at build
   # time, no committed copy — same as renderBashCompletion.
   renderFishCompletion =
-    schema:
+    schema: subcommandRegistry:
     let
       nonSecret = builtins.filter (e: !(e.secret or false)) (builtins.attrValues schema);
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
-      subcommands = [
-        "dispatch"
-        "research"
-        "preview"
-        "build"
-        "recover"
-        "doctor"
-      ];
+      subcommands = map (s: s.name) subcommandRegistry;
       extraFlags = [
         {
           flag = "no-build";
@@ -522,36 +508,11 @@ rec {
   # same text `--help --all` prints). Rendered fresh at build time, no
   # committed copy — same as renderBashCompletion/renderManpageRoff.
   renderZshCompletion =
-    schema:
+    schema: subcommandRegistry:
     let
       nonSecret = builtins.filter (e: !(e.secret or false)) (builtins.attrValues schema);
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
-      subcommands = [
-        {
-          name = "dispatch";
-          doc = "dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)";
-        }
-        {
-          name = "research";
-          doc = "advise-only research dispatch: post a verdict comment per issue; never merges, never promotes";
-        }
-        {
-          name = "preview";
-          doc = "dry-run: show what dispatch would pick up, in order";
-        }
-        {
-          name = "build";
-          doc = "realize the agent image without running any agent";
-        }
-        {
-          name = "recover";
-          doc = "run the merge gate for a single issue";
-        }
-        {
-          name = "doctor";
-          doc = "check forge credentials, repository connectivity, and triage label presence";
-        }
-      ];
+      subcommands = subcommandRegistry;
       # A `_describe` array entry is 'completion:description' (colon-split
       # on the first colon, same convention the subcommands array above
       # uses); the only character that needs escaping to survive the

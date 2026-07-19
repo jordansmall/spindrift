@@ -141,6 +141,10 @@ let
   # lines appear anywhere else in this file.
   schema = import ./env-schema.nix;
 
+  # Subcommand registry (issue #1575): single source of truth for the
+  # completion renderers' subcommand candidate lists below (issue #1577).
+  subcommandRegistry = import ./subcommands.nix;
+
   # Section taxonomy and man-page renderer, shared with flakeModule.nix and the
   # nix/checks/schema-drift.nix guards so none of them can drift from each
   # other (issue #461).
@@ -626,7 +630,7 @@ let
   # Bash completion script rendered from the schema (issue #551), same
   # build-time-only pattern as the man page: no committed copy, out of
   # `nix run .#regen`, coverage-guarded by nix/checks/schema-drift.nix.
-  bashCompletionScript = renderers.renderBashCompletion schema;
+  bashCompletionScript = renderers.renderBashCompletion schema subcommandRegistry;
 
   bashCompletion = hostPkgs.runCommand "spindrift-bash-completion" { } ''
     install -Dm644 ${hostPkgs.writeText "spindrift-completion.bash" bashCompletionScript} \
@@ -636,7 +640,7 @@ let
   # Fish completion script rendered from the schema (issue #553), same
   # build-time-only pattern as the bash completion above: no committed copy,
   # out of `nix run .#regen`, coverage-guarded by nix/checks/schema-drift.nix.
-  fishCompletionScript = renderers.renderFishCompletion schema;
+  fishCompletionScript = renderers.renderFishCompletion schema subcommandRegistry;
 
   fishCompletion = hostPkgs.runCommand "spindrift-fish-completion" { } ''
     install -Dm644 ${hostPkgs.writeText "spindrift.fish" fishCompletionScript} \
@@ -647,7 +651,7 @@ let
   # build-time-only pattern as the bash completion and man page: no
   # committed copy, out of `nix run .#regen`, coverage-guarded by
   # nix/checks/schema-drift.nix.
-  zshCompletionScript = renderers.renderZshCompletion schema;
+  zshCompletionScript = renderers.renderZshCompletion schema subcommandRegistry;
 
   zshCompletion = hostPkgs.runCommand "spindrift-zsh-completion" { } ''
     install -Dm644 ${hostPkgs.writeText "_spindrift" zshCompletionScript} \

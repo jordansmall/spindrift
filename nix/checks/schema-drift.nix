@@ -410,8 +410,9 @@ in
   renderer-zsh-completion-shape =
     let
       schema = import ../../lib/env-schema.nix;
+      subcommandRegistry = import ../../lib/subcommands.nix;
       inherit (pkgs.lib) assertMsg hasInfix;
-      out = renderers.renderZshCompletion schema;
+      out = renderers.renderZshCompletion schema subcommandRegistry;
     in
     assert assertMsg (hasInfix "#compdef spindrift" out)
       "renderZshCompletion must emit a #compdef spindrift header, got: ${out}";
@@ -460,8 +461,8 @@ in
           ];
         };
       };
-      bashOut = renderers.renderBashCompletion syntheticSchema;
-      zshOut = renderers.renderZshCompletion syntheticSchema;
+      bashOut = renderers.renderBashCompletion syntheticSchema [ ];
+      zshOut = renderers.renderZshCompletion syntheticSchema [ ];
     in
     assert assertMsg
       (hasInfix ''
@@ -483,12 +484,14 @@ in
     pkgs.runCommand "renderer-choices-alias-shape" { } "touch $out";
 
   # The generated bash completion script must totally cover the schema and the
-  # launcher's hardcoded subcommand set: every non-secret flag, the --issue
-  # alias, every secret --*-file flag, and all six subcommands. A new knob or
-  # subcommand with no completion presence fails here. Mirrors launcher-manpage.
+  # registry's subcommand set (lib/subcommands.nix): every non-secret flag,
+  # the --issue alias, every secret --*-file flag, and every registered
+  # subcommand. A new knob or subcommand with no completion presence fails
+  # here. Mirrors launcher-manpage.
   launcher-bash-completion =
     let
       schema = import ../../lib/env-schema.nix;
+      subcommandRegistry = import ../../lib/subcommands.nix;
       inherit (pkgs.lib)
         filter
         attrValues
@@ -498,14 +501,7 @@ in
       nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
       secretEntries = filter (e: e.secret or false) (attrValues schema);
       choicesKnobs = filter (e: e ? choices) nonSecret;
-      subcommands = [
-        "dispatch"
-        "research"
-        "preview"
-        "build"
-        "recover"
-        "doctor"
-      ];
+      subcommands = map (s: s.name) subcommandRegistry;
       # Token-boundary match (quote or whitespace on both sides): a plain
       # substring grep would let e.g. `--issue` pass as "covered" merely
       # because `--issue-number` contains it as a prefix.
@@ -562,12 +558,13 @@ in
       '';
 
   # The generated fish completion script must totally cover the schema and the
-  # launcher's hardcoded subcommand set: every non-secret flag, the --issue
-  # alias, every secret --*-file flag, and all six subcommands. Mirrors
-  # launcher-bash-completion above.
+  # registry's subcommand set (lib/subcommands.nix): every non-secret flag,
+  # the --issue alias, every secret --*-file flag, and every registered
+  # subcommand. Mirrors launcher-bash-completion above.
   launcher-fish-completion =
     let
       schema = import ../../lib/env-schema.nix;
+      subcommandRegistry = import ../../lib/subcommands.nix;
       inherit (pkgs.lib)
         filter
         attrValues
@@ -576,14 +573,7 @@ in
       nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
       secretEntries = filter (e: e.secret or false) (attrValues schema);
       choicesKnobs = filter (e: e ? choices) nonSecret;
-      subcommands = [
-        "dispatch"
-        "research"
-        "preview"
-        "build"
-        "recover"
-        "doctor"
-      ];
+      subcommands = map (s: s.name) subcommandRegistry;
       # fish's `-l LONG_OPTION` takes the flag name without its leading `--`,
       # so the needle is `-l <name>` (still boundary-checked on both sides:
       # `-l issue` must not match inside `-l issue-number`).
@@ -632,16 +622,18 @@ in
       '';
 
   # zsh equivalent of launcher-bash-completion: every non-secret flag, the
-  # --issue alias, every secret --*-file flag, and all six subcommands must
-  # appear in the rendered zsh completion function. renderZshCompletion emits
-  # each as a single-quoted `_describe` entry `'--flag:description'` (or
-  # `'name:description'` for a subcommand), so the flag/subcommand name
-  # immediately followed by `:` inside its opening quote is itself an
-  # unambiguous token boundary — a substring check suffices (no --issue vs
-  # --issue-number collision, since the colon only follows the exact name).
+  # --issue alias, every secret --*-file flag, and every registry subcommand
+  # (lib/subcommands.nix) must appear in the rendered zsh completion
+  # function. renderZshCompletion emits each as a single-quoted `_describe`
+  # entry `'--flag:description'` (or `'name:description'` for a subcommand),
+  # so the flag/subcommand name immediately followed by `:` inside its
+  # opening quote is itself an unambiguous token boundary — a substring
+  # check suffices (no --issue vs --issue-number collision, since the colon
+  # only follows the exact name).
   launcher-zsh-completion =
     let
       schema = import ../../lib/env-schema.nix;
+      subcommandRegistry = import ../../lib/subcommands.nix;
       inherit (pkgs.lib)
         filter
         attrValues
@@ -650,14 +642,7 @@ in
       nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
       secretEntries = filter (e: e.secret or false) (attrValues schema);
       choicesKnobs = filter (e: e ? choices) nonSecret;
-      subcommands = [
-        "dispatch"
-        "research"
-        "preview"
-        "build"
-        "recover"
-        "doctor"
-      ];
+      subcommands = map (s: s.name) subcommandRegistry;
       flagChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}:\"\n") nonSecret;
       aliasChecks = concatMapStrings (e: if e ? alias then "need \"'--${e.alias}:\"\n" else "") nonSecret;
       secretChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}-file:\"\n") secretEntries;
