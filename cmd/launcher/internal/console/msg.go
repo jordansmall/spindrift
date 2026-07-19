@@ -257,6 +257,15 @@ type SidebarJumpToEndMsg struct{}
 
 func (SidebarJumpToEndMsg) isConsoleMsg() {}
 
+// SidebarJumpToBeginningMsg is the tea layer's signal that the operator
+// completed the "gg" leader chord while the sidebar has focus — moves Offset
+// to 0 and detaches Follow, the same as a manual scroll-up, so the operator
+// parks at the start of the buffer (issue #1629). A no-op when no sidebar is
+// open.
+type SidebarJumpToBeginningMsg struct{}
+
+func (SidebarJumpToBeginningMsg) isConsoleMsg() {}
+
 // SidebarZoomToggleMsg is the tea layer's signal that the operator pressed
 // "z" — toggles Model.SidebarZoom, forcing the sidebar to render fullscreen
 // (or releasing that force, falling back to sidebarFits' own width check) for

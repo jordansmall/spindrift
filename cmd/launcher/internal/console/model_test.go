@@ -702,6 +702,37 @@ func TestUpdate_SidebarJumpToEndMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	}
 }
 
+// TestUpdate_SidebarJumpToBeginningMsg_DetachesFollowAndJumpsToTop verifies
+// gg moves Offset to 0 and detaches Follow, the same way scrolling up with
+// "k" does — the operator parks at the start of the buffer (issue #1629).
+func TestUpdate_SidebarJumpToBeginningMsg_DetachesFollowAndJumpsToTop(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3\nl4"})
+	m = Update(m, SidebarToggleMsg{})
+	if !m.Sidebar.Follow {
+		t.Fatal("test setup: Follow must start attached")
+	}
+
+	m = Update(m, SidebarJumpToBeginningMsg{})
+
+	if m.Sidebar.Follow {
+		t.Error("Follow = true, want false after gg")
+	}
+	if m.Sidebar.Offset != 0 {
+		t.Errorf("Offset = %d, want 0 (the first line)", m.Sidebar.Offset)
+	}
+}
+
+// TestUpdate_SidebarJumpToBeginningMsg_NoOpWhenNoSidebarOpen verifies gg with
+// no sidebar open does not panic or fabricate a Sidebar state.
+func TestUpdate_SidebarJumpToBeginningMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarJumpToBeginningMsg{})
+	if m.Sidebar != nil {
+		t.Errorf("Sidebar = %+v, want nil", m.Sidebar)
+	}
+}
+
 // TestUpdate_SidebarActivityMsg_UpdatesActivityAndLines verifies a
 // SidebarActivityMsg for the open sidebar's own Number installs the
 // refreshed Activity feed and recomputes Lines — syncQueue's per-Msg live
