@@ -626,6 +626,12 @@ emit_outcome_backstop() {
     rm -f "$push_log"
   fi
 
+  # A lookup failure (transient gh/network error) is indistinguishable here
+  # from a confirmed empty result -- both fall through to the synthesized
+  # status=blocked below. That's the same conservative direction this
+  # function already failed in before this check existed, so a blip here
+  # never makes an outcome-less run worse than it was; it just occasionally
+  # misses a chance to stay silent for a run that did in fact finish.
   local pr_json is_draft
   pr_json="$(gh pr list --repo "$REPO_SLUG" --head "$BRANCH" --state open --json isDraft 2>/dev/null || true)"
   is_draft="$(printf '%s' "$pr_json" | jq -r 'if length > 0 then (.[0].isDraft | tostring) else "" end' 2>/dev/null || true)"
