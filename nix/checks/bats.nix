@@ -27,6 +27,7 @@ in
           ${../../dogfood.sh} \
           ${../../agent/entrypoint.sh} \
           ${../../agent/format-transcript.sh} \
+          ${../../agent/reject-background-bash.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/fakes/claude} \
@@ -67,6 +68,11 @@ in
         IMAGE_PATH = batsHarness.imagePath;
         ENTRYPOINT = ../../agent/entrypoint.sh;
         FORMAT_TRANSCRIPT_SCRIPT = ../../agent/format-transcript.sh;
+        # The PreToolUse hook script baked into the image at
+        # /home/agent/.claude/hooks/reject-background-bash.sh (issue #1609);
+        # exercised here directly against its own source, not the baked copy,
+        # since it takes no dependency on the Box environment.
+        REJECT_BACKGROUND_BASH_SCRIPT = ../../agent/reject-background-bash.sh;
         DOGFOOD_SH = ../../dogfood.sh;
         PROMPTS_DIR = ../../templates/default/prompts;
         # The baked default prompt dir the `run` command mounts, and a
