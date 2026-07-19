@@ -18,7 +18,18 @@
   # Flags common to every claude invocation in agent/entrypoint.sh (the
   # conflict-resolve agent, the main run, and the devShell wrapper),
   # space-separated so the entrypoint can splice them in unquoted.
-  flagsCommon = "--verbose --output-format stream-json --dangerously-skip-permissions";
+  #
+  # --disallowedTools strips the harness's re-invocation-promising tools from
+  # the Driver's tool surface (issue #1609): none of ScheduleWakeup,
+  # CronCreate, CronDelete, CronList, RemoteTrigger, or Monitor has a
+  # legitimate use in a single-shot headless Box run, since each is a promise
+  # of a later re-invocation the headless runner will not keep (#1542 lost a
+  # run outright when the Driver backgrounded its test gate and called
+  # ScheduleWakeup, trusting a re-invocation that never came). The model
+  # cannot call a tool it never sees. A single comma-separated token so the
+  # entrypoint's unquoted word-split (see driver-exec/args.go's
+  # strings.Fields) never breaks it into separate argv elements.
+  flagsCommon = "--verbose --output-format stream-json --dangerously-skip-permissions --disallowedTools ScheduleWakeup,CronCreate,CronDelete,CronList,RemoteTrigger,Monitor";
 
   # Directory Claude Code scans for skill files, relative to $HOME.
   skillsDirRelative = ".claude/skills";
