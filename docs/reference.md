@@ -343,10 +343,15 @@ explanation, not enforcement):
   the same hook to also parse `tool_input.command` for that: it masks quoted
   and backslash-escaped characters, then denies any standalone `&` control
   operator (as opposed to `&&`, a `>&`/`<&`/`&>` redirection token, or the
-  `|&` pipe operator) or a `nohup` invocation. Two edge cases are accepted
-  false positives rather than chased: a literal `&` in arithmetic context
-  (`$((3 & 4))`) and a literal `&` inside a heredoc body both deny a call
-  that was actually safe, since the parser isn't `$((...))`- or line-aware.
+  `|&` pipe operator) or a `nohup` invocation. Issue #1635 further widens the
+  same hook to also deny `setsid` and bash's `coproc` keyword, two more
+  concrete shell-level detachment mechanisms; other detachment tools
+  (`disown`, `at`, `systemd-run`, `screen -d`, `tmux new-session -d`, etc.)
+  remain a deliberately out-of-scope judgment call for future work. Two edge
+  cases are accepted false positives rather than chased: a literal `&` in
+  arithmetic context (`$((3 & 4))`) and a literal `&` inside a heredoc body
+  both deny a call that was actually safe, since the parser isn't
+  `$((...))`- or line-aware.
 
 ### Cold-run toolchain nudge
 

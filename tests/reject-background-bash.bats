@@ -112,6 +112,48 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "denies a Bash call invoking setsid" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"setsid long_running.sh"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "allows a Bash call whose command merely contains setsid as part of a longer word" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo mysetsidthing"}}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "allows a Bash call where setsid only appears inside a quoted string" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"setsid\""}}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "denies a Bash call using named coproc" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"coproc foo { sleep 300; }"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "denies a Bash call using unnamed coproc" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"coproc { sleep 300; }"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "allows a Bash call whose command merely contains coproc as part of a longer word" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo mycoprocthing"}}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "allows a Bash call where coproc only appears inside a quoted string" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"coproc\""}}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "allows a Bash call using |& to pipe stdout and stderr in the foreground" {
   run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"make |& tee build.log"}}'
   [ "$status" -eq 0 ]
