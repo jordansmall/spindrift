@@ -552,19 +552,44 @@ func (l *Launcher) Rebuild(tracker forge.IssueTracker, pwd string) {
 	}()
 }
 
+// RebuildStatus is the launcher's live image-freshness/rebuild state, in
+// one value instead of the six scalars StaleStatus used to return
+// separately — StaleStatusMsg carries one RebuildStatus into the pure core,
+// and Model stores one RebuildStatus field the header renders from (issue
+// #1541).
+type RebuildStatus struct {
+	Stale      bool
+	Message    string
+	Rebuilding bool
+	Err        string
+	// Output is the last rebuild's captured nix output (issue #765).
+	Output string
+	// BranchSwitchNotice is the last rebuild's branch-switch notice, if any
+	// — "" when pwd's checkout didn't move off the branch it was on (issue
+	// #1141).
+	BranchSwitchNotice string
+}
+
 // StaleStatus returns the launcher's live image-freshness/rebuild state —
 // the console's per-render sync source for the stale banner (issue #652).
-// rebuildOutput is the last rebuild's captured nix output (issue #765),
-// branchSwitchNotice is its branch-switch notice (issue #1141), both
+// Output is the last rebuild's captured nix output (issue #765),
+// BranchSwitchNotice is its branch-switch notice (issue #1141), both
 // retrievable here instead of ever being streamed to the Console's own
 // stdout/stderr.
-func (l *Launcher) StaleStatus() (stale bool, message string, rebuilding bool, rebuildErr string, rebuildOutput string, branchSwitchNotice string) {
+func (l *Launcher) StaleStatus() RebuildStatus {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.rebuildErr != nil {
-		rebuildErr = l.rebuildErr.Error()
+	status := RebuildStatus{
+		Stale:              l.stale,
+		Message:            l.staleMessage,
+		Rebuilding:         l.rebuilding,
+		Output:             l.rebuildOutput,
+		BranchSwitchNotice: l.branchSwitchNotice,
 	}
-	return l.stale, l.staleMessage, l.rebuilding, rebuildErr, l.rebuildOutput, l.branchSwitchNotice
+	if l.rebuildErr != nil {
+		status.Err = l.rebuildErr.Error()
+	}
+	return status
 }
 
 // Wait blocks until any in-flight background drain finishes — Run calls it

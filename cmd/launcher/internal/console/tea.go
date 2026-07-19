@@ -805,8 +805,8 @@ func syncStale(m Model, launch *Launcher) Model {
 	if launch == nil {
 		return m
 	}
-	stale, msg, rebuilding, rebuildErr, rebuildOutput, branchSwitchNotice := launch.StaleStatus()
-	return Update(m, StaleStatusMsg{Stale: stale, Message: msg, Rebuilding: rebuilding, RebuildErr: rebuildErr, RebuildOutput: rebuildOutput, BranchSwitchNotice: branchSwitchNotice})
+	status := launch.StaleStatus()
+	return Update(m, StaleStatusMsg{Stale: status.Stale, Message: status.Message, Rebuilding: status.Rebuilding, RebuildErr: status.Err, RebuildOutput: status.Output, BranchSwitchNotice: status.BranchSwitchNotice})
 }
 
 // driverOf returns the Driver a Launcher's Factory was constructed with, or
