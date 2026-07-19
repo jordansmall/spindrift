@@ -486,6 +486,63 @@ in
       "renderZshCompletion's choicesFlagBranch must complete both the canonical flag name and the --ac alias to the choices list in one case arm, got: ${zshOut}";
     pkgs.runCommand "renderer-choices-alias-shape" { } "touch $out";
 
+  # Pure-eval pin (issue #1603): dynamic issue-number completion gating must
+  # be *derived* from each registry entry's dynamicIssueCompletion field, not
+  # a list independent of the passed-in subcommandRegistry. A hand-built
+  # synthetic registry — none of its names are real subcommands — proves the
+  # renderers actually read the field instead of coincidentally matching the
+  # production dispatch/preview/recover literal. Mirrors "research" by name
+  # (unflagged, like the real registry entry) to pin the issue #556 exclusion
+  # this field must preserve: a subcommand can carry issue-shaped `usage`
+  # text and still be deliberately absent from dynamic completion.
+  renderer-issue-completion-registry-shape =
+    let
+      inherit (pkgs.lib) assertMsg hasInfix;
+      syntheticSubcommandRegistry = [
+        {
+          name = "alpha";
+          doc = "opts in to dynamic issue completion";
+          dynamicIssueCompletion = true;
+        }
+        {
+          name = "beta";
+          doc = "leaves dynamicIssueCompletion unset";
+        }
+        {
+          name = "gamma";
+          doc = "opts out explicitly";
+          dynamicIssueCompletion = false;
+        }
+        {
+          name = "research";
+          doc = "takes an issue list but stays excluded (issue #556)";
+        }
+      ];
+      bashOut = renderers.renderBashCompletion { } syntheticSubcommandRegistry;
+      fishOut = renderers.renderFishCompletion { } syntheticSubcommandRegistry;
+      zshOut = renderers.renderZshCompletion { } syntheticSubcommandRegistry;
+      excluded = [
+        "beta"
+        "gamma"
+        "research"
+      ];
+    in
+    assert assertMsg (hasInfix "alpha)" bashOut)
+      "renderBashCompletion's issue-completion case arm must include a dynamicIssueCompletion = true entry, got: ${bashOut}";
+    assert assertMsg (builtins.all (n: !hasInfix "${n})" bashOut) excluded)
+      "renderBashCompletion's issue-completion case arm must exclude entries without dynamicIssueCompletion = true, got: ${bashOut}";
+    # The closing "'" right after "alpha" makes this an exact-membership
+    # pin, not just a prefix check: any excluded name appended (or
+    # prepended) after alpha would push the closing quote further along the
+    # string, so this single assertion covers both inclusion and exclusion.
+    assert assertMsg (hasInfix "'__fish_seen_subcommand_from alpha'" fishOut)
+      "renderFishCompletion's __fish_seen_subcommand_from predicate must be exactly the dynamicIssueCompletion = true entries, got: ${fishOut}";
+    assert assertMsg (hasInfix "alpha)" zshOut)
+      "renderZshCompletion's issue-completion case arm must include a dynamicIssueCompletion = true entry, got: ${zshOut}";
+    assert assertMsg (builtins.all (n: !hasInfix "${n})" zshOut) excluded)
+      "renderZshCompletion's issue-completion case arm must exclude entries without dynamicIssueCompletion = true, got: ${zshOut}";
+    pkgs.runCommand "renderer-issue-completion-registry-shape" { } "touch $out";
+
   # The generated bash completion script must totally cover the schema and the
   # registry's subcommand set (lib/subcommands.nix): every non-secret flag,
   # the --issue alias, every secret --*-file flag, and every registered
@@ -527,10 +584,12 @@ in
         + "|| { echo 'bash completion missing choices for --${renderers.toKebab e.env}' >&2; exit 1; }\n"
       ) choicesKnobs;
       # Dynamic issue-number completion (issue #556) must gate on exactly
-      # dispatch/preview/recover, not the full subcommand set (build/doctor
-      # take no issue argument) — pin the exact case-arm pattern the renderer
-      # emits, mirroring subcommandLine's exact-list rationale above.
-      issueCaseLine = concatStringsSep "|" renderers.issuePositionalSubcommands;
+      # the registry's dynamicIssueCompletion = true entries, not the full
+      # subcommand set (build/doctor take no issue argument) — pin the exact
+      # case-arm pattern the renderer emits, mirroring subcommandLine's
+      # exact-list rationale above. Derived the same way renderBashCompletion
+      # derives it (issue #1603), so this can't drift from the renderer.
+      issueCaseLine = concatStringsSep "|" (renderers.issueCompletionSubcommands subcommandRegistry);
     in
     pkgs.runCommand "launcher-bash-completion"
       {
@@ -595,9 +654,11 @@ in
         e: "needF \"-a '${builtins.concatStringsSep " " e.choices}'\"\n"
       ) choicesKnobs;
       # Dynamic issue-number completion (issue #556) must gate on exactly
-      # dispatch/preview/recover, not the full subcommand set — pin the exact
-      # `__fish_seen_subcommand_from` condition the renderer emits.
-      issueSeenFrom = "__fish_seen_subcommand_from ${builtins.concatStringsSep " " renderers.issuePositionalSubcommands}";
+      # the registry's dynamicIssueCompletion = true entries, not the full
+      # subcommand set — pin the exact `__fish_seen_subcommand_from`
+      # condition the renderer emits. Derived the same way
+      # renderFishCompletion derives it (issue #1603).
+      issueSeenFrom = "__fish_seen_subcommand_from ${builtins.concatStringsSep " " (renderers.issueCompletionSubcommands subcommandRegistry)}";
     in
     pkgs.runCommand "launcher-fish-completion"
       {
@@ -657,9 +718,13 @@ in
         e: "need 'compadd -- ${builtins.concatStringsSep " " e.choices}'\n"
       ) choicesKnobs;
       # Dynamic issue-number completion (issue #556) must gate on exactly
-      # dispatch/preview/recover, not the full subcommand set — pin the exact
-      # case-arm pattern the renderer emits, mirroring the bash guard above.
-      issueCaseLine = builtins.concatStringsSep "|" renderers.issuePositionalSubcommands;
+      # the registry's dynamicIssueCompletion = true entries, not the full
+      # subcommand set — pin the exact case-arm pattern the renderer emits,
+      # mirroring the bash guard above. Derived the same way
+      # renderZshCompletion derives it (issue #1603).
+      issueCaseLine = builtins.concatStringsSep "|" (
+        renderers.issueCompletionSubcommands subcommandRegistry
+      );
     in
     pkgs.runCommand "launcher-zsh-completion"
       {
