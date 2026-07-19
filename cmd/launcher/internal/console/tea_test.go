@@ -1455,7 +1455,7 @@ func TestTea_HandleRebuildOutputKey_ClosesOnXOrEsc(t *testing.T) {
 		m = Update(m, RebuildOutputOpenMsg{})
 		tm := teaModel{m: m}
 
-		tm.m = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
 		if tm.m.ShowRebuildOutput {
 			t.Errorf("key %q: ShowRebuildOutput = true, want false (closed)", key)
 		}
@@ -1469,15 +1469,105 @@ func TestTea_HandleRebuildOutputKey_ScrollsOnJK(t *testing.T) {
 	m = Update(m, RebuildOutputOpenMsg{})
 	tm := teaModel{m: m}
 
-	tm.m = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
 	if tm.m.RebuildOutputOffset != 1 {
 		t.Errorf("RebuildOutputOffset = %d after \"j\", want 1", tm.m.RebuildOutputOffset)
 	}
 
-	tm.m = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
 	if tm.m.RebuildOutputOffset != 0 {
 		t.Errorf("RebuildOutputOffset = %d after \"k\", want 0", tm.m.RebuildOutputOffset)
 	}
+}
+
+// TestTea_HandleRebuildOutputKey_GJumpsToLastPage verifies "G" jumps
+// RebuildOutputOffset to the pane's last page, the rebuild-output pane's own
+// analogue of the list body's "G" (issue #1630 AC1).
+func TestTea_HandleRebuildOutputKey_GJumpsToLastPage(t *testing.T) {
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
+	m = Update(m, RebuildOutputOpenMsg{})
+	tm := teaModel{m: m}
+
+	tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	if tm.m.RebuildOutputOffset != 4 {
+		t.Errorf("RebuildOutputOffset = %d after \"G\", want 4 (last line, unbounded height)", tm.m.RebuildOutputOffset)
+	}
+}
+
+// TestTea_HandleKey_RebuildOutput_ggJumpsToFirstPage verifies a lone "g"
+// followed by a second "g" resets RebuildOutputOffset to 0 while the
+// rebuild-output pane is open — reusing the same PendingG/gChordTick
+// machinery issue #1628 introduced for the list body rather than duplicating
+// it (issue #1630 AC2/AC3).
+func TestTea_HandleKey_RebuildOutput_ggJumpsToFirstPage(t *testing.T) {
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
+	m = Update(m, RebuildOutputOpenMsg{})
+	m = Update(m, RebuildOutputScrollMsg{Delta: 3})
+	tm := teaModel{m: m}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	if !tm.m.PendingG {
+		t.Fatal("PendingG = false after a lone \"g\", want true")
+	}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	if tm.m.PendingG {
+		t.Error("PendingG = true after the second \"g\", want false (chord resolved)")
+	}
+	if tm.m.RebuildOutputOffset != 0 {
+		t.Errorf("RebuildOutputOffset = %d after \"gg\", want 0", tm.m.RebuildOutputOffset)
+	}
+}
+
+// TestTea_HandleKey_RebuildOutput_gLeader_NonGKey_CancelsAndStillScrolls
+// verifies a lone "g" followed by a non-"g" key in the rebuild-output pane
+// cancels the pending leader without consuming that key — its own scroll
+// binding still applies, mirroring the list body's own g-leader fallthrough
+// (issue #1628 AC) rather than swallowing the second key (issue #1630 AC3).
+func TestTea_HandleKey_RebuildOutput_gLeader_NonGKey_CancelsAndStillScrolls(t *testing.T) {
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
+	m = Update(m, RebuildOutputOpenMsg{})
+	tm := teaModel{m: m}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if tm.m.PendingG {
+		t.Error("PendingG = true after a non-g key, want false")
+	}
+	if tm.m.RebuildOutputOffset != 1 {
+		t.Errorf("RebuildOutputOffset = %d, want 1 (\"j\" still scrolled after the chord cancelled)", tm.m.RebuildOutputOffset)
+	}
+}
+
+// TestTea_RebuildOutputPane_ggAndGJumpTopAndBottom drives the rebuild-output
+// pane end to end: opening it, jumping to the bottom with "G", then back to
+// the top with "gg" — the pane's own analogue of TestTea_GKey_JumpsToLastRow/
+// TestTea_ggChord_JumpsToFirstRow for the list body (issue #1630 AC1/AC2).
+func TestTea_RebuildOutputPane_ggAndGJumpTopAndBottom(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+	lines := make([]string, 20)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	launch.rebuildOutput = strings.Join(lines, "\n")
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 10))
+	waitForOutput(t, tm, "> #1")
+
+	sendKey(tm, "o")
+	waitForOutput(t, tm, "l0")
+
+	sendKey(tm, "G")
+	waitForOutput(t, tm, "l19")
+
+	sendKey(tm, "g")
+	sendKey(tm, "g")
+	waitForOutput(t, tm, "l0")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
 }
 
 // TestTea_HelpKey_OpensOverlay verifies "?" opens the help overlay listing

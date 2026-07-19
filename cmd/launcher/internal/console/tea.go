@@ -226,8 +226,9 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		return t, cmd
 	}
 	if t.m.ShowRebuildOutput {
-		t.m = t.handleRebuildOutputKey(msg)
-		return t, nil
+		var cmd tea.Cmd
+		t.m, cmd = t.handleRebuildOutputKey(msg)
+		return t, cmd
 	}
 	if t.m.ShowHelp {
 		if s := msg.String(); s == "?" || s == "esc" {
@@ -392,25 +393,43 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 
 // handleRebuildOutputKey routes one keypress while the rebuild-output pane
 // is open: "x"/Esc closes back to the backlog, the scroll keys page through
-// the captured output, and "q"/"ctrl+c" hard-quit — the universal quit
-// keystroke must never be swallowed by the pane, matching handleDrillInKey
-// (issue #1128).
-func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) Model {
+// the captured output, "G"/"gg" jump to the last/first page, and "q"/
+// "ctrl+c" hard-quit — the universal quit keystroke must never be swallowed
+// by the pane, matching handleDrillInKey (issue #1128). handleKey's own
+// ShowRebuildOutput guard routes here before it ever reaches its own
+// PendingG check (tea.go's handleKey, below), so the "gg" chord's PendingG
+// gate lives here instead — reusing Model.PendingG and gChordTick rather
+// than a second, pane-scoped leader (issue #1630 AC3).
+func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if t.m.PendingG {
+		t.m = Update(t.m, GResolvedMsg{})
+		if msg.String() == "g" {
+			return Update(t.m, RebuildOutputJumpToFirstMsg{}), nil
+		}
+		// Any other key cancels the leader without consuming it — that key's
+		// own meaning still applies below, mirroring handleKey's own
+		// PendingG fallthrough (issue #1628 AC).
+	}
 	switch msg.String() {
 	case "q", "ctrl+c":
-		return Update(t.m, QuitMsg{})
+		return Update(t.m, QuitMsg{}), nil
 	case "x", "esc":
-		return Update(t.m, RebuildOutputCloseMsg{})
+		return Update(t.m, RebuildOutputCloseMsg{}), nil
 	case "j", "down":
-		return Update(t.m, RebuildOutputScrollMsg{Delta: 1})
+		return Update(t.m, RebuildOutputScrollMsg{Delta: 1}), nil
 	case "k", "up":
-		return Update(t.m, RebuildOutputScrollMsg{Delta: -1})
+		return Update(t.m, RebuildOutputScrollMsg{Delta: -1}), nil
 	case "pgdown":
-		return Update(t.m, RebuildOutputScrollMsg{Delta: fixedPaneScrollDelta})
+		return Update(t.m, RebuildOutputScrollMsg{Delta: fixedPaneScrollDelta}), nil
 	case "pgup":
-		return Update(t.m, RebuildOutputScrollMsg{Delta: -fixedPaneScrollDelta})
+		return Update(t.m, RebuildOutputScrollMsg{Delta: -fixedPaneScrollDelta}), nil
+	case "G":
+		return Update(t.m, RebuildOutputJumpToLastMsg{}), nil
+	case "g":
+		t.m = Update(t.m, GPendingMsg{})
+		return t.m, gChordTick()
 	}
-	return t.m
+	return t.m, nil
 }
 
 // handleSidebarKey routes one keypress while the sidebar has focus (or the
