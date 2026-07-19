@@ -500,7 +500,9 @@ func Update(m Model, msg Msg) Model {
 		m.Cursor = 0
 		m.Offset = 0
 	case CursorJumpToLastMsg:
-		m.Cursor = sectionRowCount(m, m.ActiveSection)
+		// -1 on an empty Section is still safe: clampCursor's n==0 check
+		// below runs before its cursor<0 check, so it lands on 0 either way.
+		m.Cursor = sectionRowCount(m, m.ActiveSection) - 1
 	case HelpToggleMsg:
 		m.ShowHelp = !m.ShowHelp
 	case FilterEditStartMsg:
