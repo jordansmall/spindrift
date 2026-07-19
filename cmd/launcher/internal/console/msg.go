@@ -405,6 +405,21 @@ type RebuildOutputScrollMsg struct {
 
 func (RebuildOutputScrollMsg) isConsoleMsg() {}
 
+// RebuildOutputJumpToFirstMsg is the tea layer's signal that "gg" completed
+// in the rebuild-output pane — resets RebuildOutputOffset to 0, reusing the
+// g-leader chord CursorJumpToFirstMsg introduced for the list body rather
+// than duplicating it (issue #1630).
+type RebuildOutputJumpToFirstMsg struct{}
+
+func (RebuildOutputJumpToFirstMsg) isConsoleMsg() {}
+
+// RebuildOutputJumpToLastMsg is the tea layer's signal that "G" was pressed
+// in the rebuild-output pane — jumps RebuildOutputOffset to the last page,
+// mirroring CursorJumpToLastMsg for the list body (issue #1630).
+type RebuildOutputJumpToLastMsg struct{}
+
+func (RebuildOutputJumpToLastMsg) isConsoleMsg() {}
+
 // CursorMoveMsg is the tea layer's signal that the operator pressed a
 // navigation key (j/down, or the up arrow — "k" moved to Terminate in
 // #785) — Delta is +1 (down) or -1 (up); Update clamps the result into

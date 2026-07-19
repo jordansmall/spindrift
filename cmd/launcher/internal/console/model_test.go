@@ -212,6 +212,76 @@ func TestUpdate_RebuildOutputScrollMsg_MovesOffset(t *testing.T) {
 	}
 }
 
+// TestUpdate_RebuildOutputJumpMsgs_NoOpWhenPaneClosed verifies both jump
+// messages leave RebuildOutputOffset untouched while the pane is closed —
+// RebuildOutputOpenMsg (case above) already refuses to open the pane while
+// RebuildStatus.Output is "", so this is the reachable form of the "no-op
+// on empty output" AC for a pane that was never opened (issue #1630 AC4).
+func TestUpdate_RebuildOutputJumpMsgs_NoOpWhenPaneClosed(t *testing.T) {
+	m := NewModel()
+	m = Update(m, RebuildOutputJumpToLastMsg{})
+	if m.RebuildOutputOffset != 0 {
+		t.Errorf("RebuildOutputOffset = %d after jump-to-last while closed, want 0", m.RebuildOutputOffset)
+	}
+
+	m = Update(m, RebuildOutputJumpToFirstMsg{})
+	if m.RebuildOutputOffset != 0 {
+		t.Errorf("RebuildOutputOffset = %d after jump-to-first while closed, want 0", m.RebuildOutputOffset)
+	}
+	if m.ShowRebuildOutput {
+		t.Error("ShowRebuildOutput = true, want false — neither jump must open the pane")
+	}
+}
+
+// TestUpdate_RebuildOutputJumpToLastMsg_NoOpWhenOpenPaneGoesEmpty verifies
+// jump-to-last is a safe no-op for the pane's other empty-output path: a
+// later StaleStatusMsg can empty RebuildStatus.Output out from under an
+// already-open pane (Model.ShowRebuildOutput's own doc comment) without
+// closing it — RebuildOutputOffset must clamp to 0, not panic or go
+// negative (issue #1630 AC4).
+func TestUpdate_RebuildOutputJumpToLastMsg_NoOpWhenOpenPaneGoesEmpty(t *testing.T) {
+	m := NewModel()
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2"}})
+	m = Update(m, RebuildOutputOpenMsg{})
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: ""}})
+
+	m = Update(m, RebuildOutputJumpToLastMsg{})
+	if m.RebuildOutputOffset != 0 {
+		t.Errorf("RebuildOutputOffset = %d after jump-to-last on an emptied-out open pane, want 0", m.RebuildOutputOffset)
+	}
+}
+
+// TestUpdate_RebuildOutputJumpToFirstMsg_ResetsOffsetToZero verifies "gg"
+// resets RebuildOutputOffset to 0 from a scrolled-down position, mirroring
+// CursorJumpToFirstMsg's own reset for the list body (issue #1630 AC2).
+func TestUpdate_RebuildOutputJumpToFirstMsg_ResetsOffsetToZero(t *testing.T) {
+	m := NewModel()
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
+	m = Update(m, RebuildOutputOpenMsg{})
+	m = Update(m, RebuildOutputScrollMsg{Delta: 3})
+
+	m = Update(m, RebuildOutputJumpToFirstMsg{})
+	if m.RebuildOutputOffset != 0 {
+		t.Errorf("RebuildOutputOffset = %d, want 0", m.RebuildOutputOffset)
+	}
+}
+
+// TestUpdate_RebuildOutputJumpToLastMsg_JumpsToLastPage verifies "G" moves
+// RebuildOutputOffset to the last page that still fills the viewport — not
+// just the last line — the same page-capped clamp the ShowRebuildOutput
+// clamp block already applies on every Update (issue #1630 AC1).
+func TestUpdate_RebuildOutputJumpToLastMsg_JumpsToLastPage(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Height: 6}) // minus headerFooterLines(2) = a 4-row viewport
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9"}})
+	m = Update(m, RebuildOutputOpenMsg{})
+
+	m = Update(m, RebuildOutputJumpToLastMsg{})
+	if m.RebuildOutputOffset != 6 {
+		t.Errorf("RebuildOutputOffset = %d, want 6 (10 lines, 4-row viewport: last page starts at line 6)", m.RebuildOutputOffset)
+	}
+}
+
 // TestUpdate_RebuildOutputCloseMsg_ClosesPane verifies close clears
 // ShowRebuildOutput so View falls back to rendering the backlog/queue.
 func TestUpdate_RebuildOutputCloseMsg_ClosesPane(t *testing.T) {
