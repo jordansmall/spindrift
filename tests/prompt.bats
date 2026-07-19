@@ -239,3 +239,63 @@ setup() {
   grep -qF 'landing=${BRANCH} status=ready' "$prompt"
   grep -q 'Do NOT run `gh pr create`' "$prompt"
 }
+
+@test "OPEN A PULL REQUEST opens the PR as a draft" {
+  # issue #1614: the draft bit is the readiness signal the entrypoint
+  # backstop and launcher trust, so the PR must never open non-draft.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  local section
+  section="$(sed -n '/^# OPEN A PULL REQUEST$/,/^# WATCH CI$/p' "$prompt")"
+  [ -n "$section" ]
+  grep -q 'gh pr create --draft' <<<"$section"
+}
+
+@test "OUTCOME flips the PR out of draft before printing status=ready" {
+  # issue #1614: the PR only becomes a non-draft "done" signal at the exact
+  # moment the driver would print status=ready -- so the flip must land
+  # before that line, not after (a crash between them must not leave a
+  # ready-looking PR with no outcome line printed at all).
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  local section
+  section="$(sed -n '/^# OUTCOME$/,/^# IF BLOCKED$/p' "$prompt")"
+  [ -n "$section" ]
+  grep -q 'gh pr ready' <<<"$section"
+  local ready_line outcome_line
+  ready_line="$(grep -n 'gh pr ready' <<<"$section" | head -1 | cut -d: -f1)"
+  outcome_line="$(grep -n 'status=ready' <<<"$section" | head -1 | cut -d: -f1)"
+  [ -n "$ready_line" ]
+  [ -n "$outcome_line" ]
+  [ "$ready_line" -lt "$outcome_line" ]
+}
+
+@test "IF BLOCKED converts an already-open PR back to draft before emitting status=blocked" {
+  # issue #1614: symmetric to the OUTCOME flip above -- a blocked run must
+  # not leave a non-draft PR looking like a done, mergeable result.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  local section
+  section="$(sed -n '/^# IF BLOCKED$/,$p' "$prompt")"
+  [ -n "$section" ]
+  grep -q -- '--undo' <<<"$section"
+  local undo_line blocked_line
+  undo_line="$(grep -n -- '--undo' <<<"$section" | head -1 | cut -d: -f1)"
+  blocked_line="$(grep -n 'SPINDRIFT_OUTCOME.*status=blocked' <<<"$section" | head -1 | cut -d: -f1)"
+  [ -n "$undo_line" ]
+  [ -n "$blocked_line" ]
+  [ "$undo_line" -lt "$blocked_line" ]
+}
+
+@test "fix-prompt.md no longer tells a blocked fix pass to leave the PR as-is" {
+  # issue #1614: IF BLOCKED's old "open the PR as a draft" step (skipped on a
+  # fix pass, since the PR already exists) became a "convert the existing PR
+  # back to draft" step -- which DOES apply on a fix pass. fix-prompt.md's
+  # hand-written override bullet must not still tell the agent to leave a
+  # blocked fix pass's PR as-is, which would contradict the shared IF BLOCKED
+  # section it falls through to.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/fix-prompt.md"
+  ! grep -qi 'leave the existing PR as-is' "$prompt"
+  grep -qi 'draft-revert' "$prompt"
+}
