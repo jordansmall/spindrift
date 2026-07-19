@@ -302,6 +302,34 @@ func TestVerbHandlers_CoversExactlySevenRealVerbs(t *testing.T) {
 	}
 }
 
+// TestSubcommandRegistry_MatchesVerbHandlers proves the generated
+// subcommandRegistry (lib/subcommands.nix, issue #1575) names exactly the
+// same set as verbHandlers: a verb added to one table without the other
+// fails here, before it can silently drift the way console/doctor already
+// had across the hand-written completion/man-page listings.
+func TestSubcommandRegistry_MatchesVerbHandlers(t *testing.T) {
+	verbSet := make(map[string]bool, len(verbHandlers))
+	for verb := range verbHandlers {
+		verbSet[verb] = true
+	}
+
+	regSet := make(map[string]bool, len(subcommandRegistry))
+	for _, e := range subcommandRegistry {
+		regSet[e.name] = true
+	}
+
+	for verb := range verbSet {
+		if !regSet[verb] {
+			t.Errorf("verbHandlers verb %q has no matching subcommandRegistry entry", verb)
+		}
+	}
+	for name := range regSet {
+		if !verbSet[name] {
+			t.Errorf("subcommandRegistry entry %q has no matching verbHandlers verb", name)
+		}
+	}
+}
+
 // TestConfigHasNoModelFields enforces that model/scoutModel/reviewModel were
 // removed from the config struct; models forward via BOX_ENV_VARS instead.
 func TestConfigHasNoModelFields(t *testing.T) {
