@@ -44,8 +44,18 @@
 
   # Shell function body extracting the SPINDRIFT_OUTCOME line from claude's
   # stream-json result event; called as `_driver_extract_outcome "$stream_log"`.
+  # claude's own result text sometimes wraps the line in inline backticks,
+  # bold markers, or pads it with whitespace (issue #1611, seen on the #1582
+  # dogfood run) -- strip that wrapping per line before the `^SPINDRIFT_OUTCOME `
+  # anchor is tested, so the launcher's grep and outcome.Parse both see the
+  # line bare. Stripping runs before grep -- grepping the raw wrapped line
+  # first would never match.
   outcomeExtractFnBody = ''
+    # The backtick below is a literal char in a single-quoted sed script, not
+    # an unexpanded command substitution.
+    # shellcheck disable=SC2016
     jq -r 'select(.type == "result") | .result // empty' "$1" 2>/dev/null \
+      | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' \
       | grep '^SPINDRIFT_OUTCOME ' | tail -1 || true
   '';
 

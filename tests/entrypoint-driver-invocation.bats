@@ -96,6 +96,47 @@ setup() {
   printf '%s\n' "$output" | grep -q '^SPINDRIFT_OUTCOME .*status=ready'
 }
 
+# Regression (#1611): the #1582 dogfood run wrapped the outcome line in
+# inline backticks inside claude's stream-json result text. The extractor's
+# `^SPINDRIFT_OUTCOME ` anchor failed to match, so the launcher never saw a
+# real outcome and the entrypoint's own backstop fired a synthetic
+# status=blocked over a PR that was actually green.
+@test "entrypoint strips a backtick-wrapped SPINDRIFT_OUTCOME line" {
+  export FAKE_CLAUDE_WRAP_OUTCOME=backticks
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^SPINDRIFT_OUTCOME ')" -eq 1 ]
+  printf '%s\n' "$output" | grep -q '^SPINDRIFT_OUTCOME issue=7 .*status=ready'
+}
+
+@test "entrypoint strips a bold-marker-wrapped SPINDRIFT_OUTCOME line" {
+  export FAKE_CLAUDE_WRAP_OUTCOME=bold
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^SPINDRIFT_OUTCOME ')" -eq 1 ]
+  printf '%s\n' "$output" | grep -q '^SPINDRIFT_OUTCOME issue=7 .*status=ready'
+}
+
+@test "entrypoint strips a whitespace-padded SPINDRIFT_OUTCOME line" {
+  export FAKE_CLAUDE_WRAP_OUTCOME=whitespace
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^SPINDRIFT_OUTCOME ')" -eq 1 ]
+  printf '%s\n' "$output" | grep -q '^SPINDRIFT_OUTCOME issue=7 .*status=ready'
+}
+
+@test "entrypoint keeps the last outcome line across multiple result events" {
+  export FAKE_CLAUDE_MULTI_RESULT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  # Two result events each carry an outcome line, but only the last is
+  # re-emitted as a bare SPINDRIFT_OUTCOME line -- the raw stale event still
+  # appears verbatim in the raw stream-json passed through to stdout, so the
+  # assertion below is scoped to bare lines only.
+  [ "$(printf '%s\n' "$output" | grep -c '^SPINDRIFT_OUTCOME ')" -eq 1 ]
+  printf '%s\n' "$output" | grep '^SPINDRIFT_OUTCOME ' | grep -q 'status=ready note=fake$'
+}
+
 @test "entrypoint runs the configured prefetch hook inside the work tree" {
   export PREFETCH_LOG="$BATS_TEST_TMPDIR/prefetch.log"
   {
