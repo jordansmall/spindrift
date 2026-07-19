@@ -1431,6 +1431,17 @@ and an enumerable flag's argument (`--merge-mode`, `--code-forge`,
 `--issue-tracker`, `--overlap-gate`) completes to its fixed set of legal values
 (e.g. `--merge-mode <TAB>` offers `immediate auto manual`).
 
+`dispatch`, `preview`, and `recover` additionally complete their positional
+issue-number argument dynamically: `spindrift dispatch <TAB>` queries the
+configured issue tracker (honoring the effective `LABEL`, `REPO_SLUG`, and
+`ISSUE_TRACKER`) and offers the numbers currently in the dispatchable queue —
+zsh and fish annotate each with its title, bash offers the bare numbers.
+`build` and `doctor` take no issue argument and complete none. The query goes
+through a hidden `spindrift __complete-issues` sub-verb (not a documented
+subcommand — it exists solely for the completion scripts to shell out to) and
+is bounded by a short timeout: a slow, offline, or erroring tracker yields no
+candidates instead of blocking or erroring your shell mid-`<TAB>`.
+
 **bash.** `nix develop` puts the completion script on
 `share/bash-completion/completions` under `spindrift`'s store path; source it
 directly to enable it in your shell:

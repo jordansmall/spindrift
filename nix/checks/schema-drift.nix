@@ -505,6 +505,11 @@ in
         "grep -qF -- 'compgen -W \"${concatStringsSep " " e.choices}\"' \"$completion\" "
         + "|| { echo 'bash completion missing choices for --${renderers.toKebab e.env}' >&2; exit 1; }\n"
       ) choicesKnobs;
+      # Dynamic issue-number completion (issue #556) must gate on exactly
+      # dispatch/preview/recover, not the full subcommand set (build/doctor
+      # take no issue argument) — pin the exact case-arm pattern the renderer
+      # emits, mirroring subcommandLine's exact-list rationale above.
+      issueCaseLine = concatStringsSep "|" renderers.issuePositionalSubcommands;
     in
     pkgs.runCommand "launcher-bash-completion"
       {
@@ -527,6 +532,10 @@ in
         grep -qF -- '${subcommandLine}' "$completion" \
           || { echo "bash completion missing subcommand list: ${subcommandLine}" >&2; exit 1; }
         ${choicesChecks}
+        grep -qF -- '${issueCaseLine})' "$completion" \
+          || { echo "bash completion missing issue-completion case arm: ${issueCaseLine}" >&2; exit 1; }
+        grep -qF -- 'spindrift __complete-issues' "$completion" \
+          || { echo "bash completion never shells out to __complete-issues" >&2; exit 1; }
         touch $out
       '';
 
@@ -570,6 +579,10 @@ in
       choicesChecks = concatMapStrings (
         e: "needF \"-a '${builtins.concatStringsSep " " e.choices}'\"\n"
       ) choicesKnobs;
+      # Dynamic issue-number completion (issue #556) must gate on exactly
+      # dispatch/preview/recover, not the full subcommand set — pin the exact
+      # `__fish_seen_subcommand_from` condition the renderer emits.
+      issueSeenFrom = "__fish_seen_subcommand_from ${builtins.concatStringsSep " " renderers.issuePositionalSubcommands}";
     in
     pkgs.runCommand "launcher-fish-completion"
       {
@@ -591,6 +604,8 @@ in
         ${secretChecks}
         ${subcommandChecks}
         ${choicesChecks}
+        needF "${issueSeenFrom}"
+        needF "-a '(spindrift __complete-issues 2>/dev/null)'"
         touch $out
       '';
 
@@ -631,6 +646,10 @@ in
       choicesChecks = concatMapStrings (
         e: "need 'compadd -- ${builtins.concatStringsSep " " e.choices}'\n"
       ) choicesKnobs;
+      # Dynamic issue-number completion (issue #556) must gate on exactly
+      # dispatch/preview/recover, not the full subcommand set — pin the exact
+      # case-arm pattern the renderer emits, mirroring the bash guard above.
+      issueCaseLine = builtins.concatStringsSep "|" renderers.issuePositionalSubcommands;
     in
     pkgs.runCommand "launcher-zsh-completion"
       {
@@ -648,6 +667,9 @@ in
         ${secretChecks}
         ${subcommandChecks}
         ${choicesChecks}
+        need '${issueCaseLine})'
+        need '_describe -t issues'
+        need 'spindrift __complete-issues'
         touch $out
       '';
 }
