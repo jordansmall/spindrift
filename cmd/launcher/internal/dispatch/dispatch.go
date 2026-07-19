@@ -6,6 +6,7 @@
 package dispatch
 
 import (
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -62,6 +63,16 @@ type Config struct {
 	// to Found: false there), not by leaving this field nil -- callers may
 	// rely on it being non-nil.
 	OpenPRForIssue func(number string) (bool, error)
+
+	// HeartbeatOut is the human-facing sink every Box's heartbeat writer
+	// echoes to, alongside its unconditional pass-log file capture. Nil
+	// defaults to os.Stdout in box.go (every pre-#1583 caller and test). The
+	// console entry point sets this to io.Discard via Factory.SetHeartbeatOut
+	// -- Bubble Tea owns the terminal in alt-screen/raw mode there, and a
+	// bare-\n heartbeat line stairsteps down the screen instead of returning
+	// to column 0, while the sidebar activity feed already re-renders the
+	// same lines by independently re-reading the pass log from disk.
+	HeartbeatOut io.Writer
 }
 
 // buildBoxEnv assembles the env map forwarded into a Box. It combines the

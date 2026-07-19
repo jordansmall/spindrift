@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // TestRun_HeartbeatRawLogExact verifies that bytes written by the runner to
@@ -52,10 +54,6 @@ func TestRun_HeartbeatRawLogExact(t *testing.T) {
 func TestRun_HeartbeatEmitsToStdout(t *testing.T) {
 	dir := tempLogDir(t)
 
-	origStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
 	streamJSON := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}]}}` + "\n" +
 		`{"type":"result","num_turns":5,"duration_ms":2000}` + "\n"
 
@@ -73,30 +71,67 @@ func TestRun_HeartbeatEmitsToStdout(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("99", "heartbeat stdout test")
-	result := d.Run()
-
-	w.Close()
-	os.Stdout = origStdout
-
-	var buf strings.Builder
-	tmp := make([]byte, 4096)
-	for {
-		n, _ := r.Read(tmp)
-		if n == 0 {
-			break
-		}
-		buf.Write(tmp[:n])
-	}
+	var result Result
+	out := testutil.CaptureStdout(t, func() { result = d.Run() })
 
 	if !result.Success {
 		t.Fatalf("Run: want Success=true, got %+v", result)
 	}
-
-	out := buf.String()
 	if !strings.Contains(out, "#99") {
 		t.Errorf("heartbeat missing issue prefix in stdout: %q", out)
 	}
 	if !strings.Contains(out, "bash") {
 		t.Errorf("heartbeat missing tool kind 'bash' in stdout: %q", out)
+	}
+}
+
+// TestRun_HeartbeatSuppressedWhenDiscardConfigured verifies that a Factory
+// with its heartbeat sink set to io.Discard (the console entry point, issue
+// #1583) writes no heartbeat lines (role headers or tool-count lines) to
+// stdout, while the log file still captures the full raw stream untouched.
+// Console's own non-heartbeat "-> #NN: title" announce line (box.go's
+// dispatchWithRetry callers) is out of this issue's scope and deliberately
+// not asserted against here.
+func TestRun_HeartbeatSuppressedWhenDiscardConfigured(t *testing.T) {
+	dir := tempLogDir(t)
+
+	streamJSON := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}]}}` + "\n" +
+		`{"type":"result","num_turns":5,"duration_ms":2000}` + "\n"
+
+	fr := runner.NewFake()
+	fr.WriteToOutput = []byte(streamJSON)
+
+	drv, err := driver.New("claude")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	f, err := NewFactory(Config{}, dir, fr, drv, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	f.SetHeartbeatOut(io.Discard)
+
+	d := f.New("99", "heartbeat discard test")
+	var result Result
+	out := testutil.CaptureStdout(t, func() { result = d.Run() })
+
+	if !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+	if strings.Contains(out, "\xe2\x94\x80\xe2\x94\x80") {
+		t.Errorf("stdout should carry no heartbeat role header when discarded, got %q", out)
+	}
+	if strings.Contains(out, "bash") {
+		t.Errorf("stdout should carry no heartbeat tool-count line when discarded, got %q", out)
+	}
+
+	logPath := filepath.Join(dir, "logs", "issue-99.log")
+	got, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if string(got) != streamJSON {
+		t.Errorf("log file not byte-exact:\ngot:  %q\nwant: %q", string(got), streamJSON)
 	}
 }

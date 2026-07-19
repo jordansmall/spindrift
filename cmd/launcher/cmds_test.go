@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 
@@ -131,5 +132,33 @@ func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
 	}
 	if !called {
 		t.Error("cmdConsole did not run lc.cleanup()")
+	}
+}
+
+// TestCmdConsole_SetsHeartbeatOutToDiscard verifies cmdConsole routes its
+// factory's heartbeat sink to io.Discard before console.Run starts (issue
+// #1583): Bubble Tea owns the terminal in alt-screen/raw mode, so a
+// dispatch's heartbeat writer echoing to os.Stdout there would stairstep
+// down the screen instead of returning to column 0.
+func TestCmdConsole_SetsHeartbeatOutToDiscard(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake()
+	dir := tempLogDir(t)
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, runner.NewFake()),
+		settle:       settle.NewFake(),
+		cleanup:      func() {},
+	}
+
+	stdin := strings.NewReader("q")
+	var stdout bytes.Buffer
+	cmdConsole(lc, stdin, &stdout)
+
+	if got := lc.factory.HeartbeatOut(); got != io.Discard {
+		t.Errorf("factory heartbeat sink = %v, want io.Discard", got)
 	}
 }
