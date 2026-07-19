@@ -584,22 +584,15 @@ run_driver_in_env() {
 # the launcher always gets a terminal signal to classify (issue #593) instead
 # of a silent gap.
 #
-# Adoption-aware (issue #1614): an open, non-draft PR on BRANCH is a real,
-# mergeable result even without a parsed outcome line -- the prompt contract
-# only flips a PR out of draft immediately before printing status=ready, so a
-# non-draft PR here means the Driver reached that point and just lost the
-# line on the way out (e.g. #1582's markdown-mangled line). Staying silent
-# lets the launcher's own no-outcome adoption path (discover PR -> self-heal
-# merge gate -> merge) settle the run instead of this synthetic line
-# preempting it. A missing or still-draft PR is not that -- synthesize
-# status=blocked exactly as before.
-#
-# This applies just as much to a fix pass: its PR is already non-draft
-# (flipped by the run it resumes), so a fix pass that exits 0 with no
-# outcome line now also lets adoption settle it, where it previously always
-# got the synthetic blocked line. That is a deliberate widening, not a gap --
-# the launcher's merge gate re-checks CI itself before merging, so an
-# actually-still-red fix pass is caught there, not here.
+# Draft-ness retired as a salvage signal (issue #1654): the Driver no longer
+# flips a PR out of draft itself (#1653) -- the launcher owns that flip, once
+# CI is green, before it merges. So a PR's draft state here says nothing
+# about whether the Driver reached status=ready and just lost the line on
+# the way out; synthesize status=blocked unconditionally, exactly as for a
+# missing PR. The launcher's own no-outcome path agrees: it never adopts a
+# PR off draft-ness either (cmd/launcher/internal/settle/gate.go), so both
+# sides land on the same terminal classification instead of one side staying
+# silent for the other to settle.
 emit_outcome_backstop() {
   local note="driver exited without emitting an outcome"
   if [ -n "${_recovery_attempted:-}" ]; then
@@ -617,9 +610,6 @@ emit_outcome_backstop() {
   # Fall back to "assume there is work" rather than let a resolution failure
   # abort this function under `set -e` -- that would skip the always-emit
   # outcome invariant (#593) entirely, worse than a needless push attempt.
-  # Either way the PR check below still runs: a non-draft PR is a real,
-  # mergeable result regardless of whether *this* Box's own local branch
-  # carries the commits that produced it.
   local commit_count
   commit_count="$(git rev-list --count "origin/${BASE_BRANCH:-}..${BRANCH}" 2>/dev/null)" || commit_count=1
   if [ "$commit_count" -eq 0 ]; then
@@ -631,20 +621,6 @@ emit_outcome_backstop() {
       note="${note}; push failed: $(tail -1 "$push_log")"
     fi
     rm -f "$push_log"
-  fi
-
-  # A lookup failure (transient gh/network error) is indistinguishable here
-  # from a confirmed empty result -- both fall through to the synthesized
-  # status=blocked below. That's the same conservative direction this
-  # function already failed in before this check existed, so a blip here
-  # never makes an outcome-less run worse than it was; it just occasionally
-  # misses a chance to stay silent for a run that did in fact finish.
-  local pr_json is_draft
-  pr_json="$(gh pr list --repo "$REPO_SLUG" --head "$BRANCH" --state open --json isDraft 2>/dev/null || true)"
-  is_draft="$(printf '%s' "$pr_json" | jq -r 'if length > 0 then (.[0].isDraft | tostring) else "" end' 2>/dev/null || true)"
-  if [ "$is_draft" = "false" ]; then
-    echo "==> open non-draft PR exists on ${BRANCH} — staying silent so the launcher's adoption path settles this run"
-    return
   fi
 
   echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=blocked note=${note}"

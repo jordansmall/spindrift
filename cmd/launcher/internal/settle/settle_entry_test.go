@@ -211,25 +211,27 @@ func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 	}
 }
 
-// TestSettle_NoOutcome_AdoptsDiscoveredPR verifies that a box exiting with no
-// outcome line falls back to discovering an open non-draft PR on the issue's
-// branch and running the merge gate on it (SettleAdopted).
-func TestSettle_NoOutcome_AdoptsDiscoveredPR(t *testing.T) {
+// TestSettle_NoOutcome_NonDraftPRBlocked verifies that a box exiting with no
+// outcome line reports status=blocked and takes no action even when the
+// discovered PR is non-draft — a no-outcome run is never adopted off
+// draft-ness (issue #1654); adoption only happens via the explicit
+// agent-recover entry point (SettleAdopted).
+func TestSettle_NoOutcome_NonDraftPRBlocked(t *testing.T) {
 	fc := forge.NewFake()
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{"agent-in-progress"}})
 	branch := fc.AgentBranch("3")
 	fc.SetPR(branch, forge.PR{URL: testPR, IsDraft: false})
-	// A leading PENDING proves this run's own checks registered — issue
-	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	c := baseConfig()
 	s := New(c, fc, fc)
 	s.Settle(dispatch.NewFake(), "3", 0, dispatch.Result{Success: true})
 
-	if fc.Merged != testPR {
-		t.Errorf("expected the discovered PR to be merged; fc.Merged=%q", fc.Merged)
+	if fc.Merged != "" {
+		t.Errorf("non-draft PR must not be merged off draft-ness; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("non-draft PR must not trigger label churn; got %v", fc.TransitionStateCalls)
 	}
 }
 

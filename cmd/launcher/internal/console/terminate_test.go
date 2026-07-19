@@ -241,14 +241,16 @@ func TestLauncher_Terminate_AppendsBoxLogTerminalLine(t *testing.T) {
 	}
 }
 
-// TestLauncher_TerminateThenRepick_AdoptsAbandonedPR verifies the
+// TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked verifies the
 // terminate-then-repick reclaim loop end to end (ADR 0024, issue #649): once
 // Terminate leaves an issue Dispatchable with an open PR still up, re-picking
-// it dispatches a fresh Box that — reporting no outcome line, as a box that
-// finds the PR already open would — routes through the existing settle
-// adoption path (SettleAdopted) rather than being abandoned by a stale
-// terminate mark left over from the prior run.
-func TestLauncher_TerminateThenRepick_AdoptsAbandonedPR(t *testing.T) {
+// it dispatches a fresh Box that reports no outcome line, as a box that
+// finds the PR already open would. That box is not abandoned by a stale
+// terminate mark left over from the prior run — Settle still runs its
+// no-outcome path — but the no-outcome path itself never adopts a PR off
+// draft-ness (issue #1654), so it reports status=blocked rather than
+// merging.
+func TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Complete: "agent-complete"}
 	fc := forge.NewFake(labels)
 	fc.BranchPrefix = "agent/issue-"
@@ -284,9 +286,6 @@ func TestLauncher_TerminateThenRepick_AdoptsAbandonedPR(t *testing.T) {
 		t.Fatalf("Terminate: %v", err)
 	}
 	fc.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/owner/repo/pull/7"})
-	// A leading PENDING proves this run's own checks registered — issue
-	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
-	fc.SetCheckStates("https://github.com/owner/repo/pull/7", []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	// Re-pick: a fresh claim must not inherit the stale terminate mark.
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
@@ -304,8 +303,11 @@ func TestLauncher_TerminateThenRepick_AdoptsAbandonedPR(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	if fc.Merged != "https://github.com/owner/repo/pull/7" {
-		t.Errorf("Merged = %q, want the adopted PR merged (adoption path ran to completion, not abandoned)", fc.Merged)
+	// A no-outcome run is never adopted off draft-ness (issue #1654): the
+	// re-picked run's own no-outcome path finds #7 open and non-draft, but
+	// reports status=blocked instead of merging it.
+	if fc.Merged != "" {
+		t.Errorf("Merged = %q, want no merge (no-outcome runs are never adopted off draft-ness)", fc.Merged)
 	}
 }
 
