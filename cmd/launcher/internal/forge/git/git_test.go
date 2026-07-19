@@ -454,3 +454,30 @@ func TestGitClient_Rebase_CloneTimesOutOnHangingRemote(t *testing.T) {
 		t.Fatalf("Rebase error leaks embedded credential: %v", err)
 	}
 }
+
+// TestGitClient_Probe_TimesOutOnHangingRemote verifies that Probe bounds its
+// `git ls-remote` invocation with a timeout: against a remote that accepts
+// the connection and then hangs, Probe must still return in bounded time
+// with a distinguishable timeout error, not block indefinitely.
+func TestGitClient_Probe_TimesOutOnHangingRemote(t *testing.T) {
+	const secret = "sometoken123"
+	g := NewGitClient(hangingRemoteURL(t, secret), "main", "Test Bot", "bot@example.com", "agent/issue-",
+		WithOpTimeout(200*time.Millisecond))
+
+	start := time.Now()
+	_, err := g.Probe()
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Probe against hanging remote: want error, got nil")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("Probe took %s to return, want it bounded by the configured op timeout", elapsed)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("Probe error = %q, want it to mention timing out", err.Error())
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("Probe error leaks embedded credential: %v", err)
+	}
+}

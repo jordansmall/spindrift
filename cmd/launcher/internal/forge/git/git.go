@@ -20,6 +20,13 @@ import (
 // cloneToTemp forever, since git itself applies no timeout of its own.
 const defaultCloneTimeout = 5 * time.Minute
 
+// defaultOpTimeout bounds every git subprocess gitClient runs after the
+// initial clone (Probe's ls-remote, and Merge/Rebase's checkout, fetch,
+// merge, and push) when the caller doesn't override it via WithOpTimeout.
+// Without it, the same hung-remote failure mode defaultCloneTimeout guards
+// against for cloneToTemp could block these calls forever too.
+const defaultOpTimeout = 5 * time.Minute
+
 // gitClient is the push-only Code Forge adapter for a plain git remote
 // (self-hosted git, gitea, GitLab-without-MRs, a bare server repo). It has no
 // PR or CI concept — it implements forge.CodeForge only, never PRForge — and
@@ -32,6 +39,7 @@ type gitClient struct {
 	userEmail    string
 	branchPrefix string
 	cloneTimeout time.Duration
+	opTimeout    time.Duration
 }
 
 // Option configures optional gitClient behavior beyond NewGitClient's
@@ -43,6 +51,15 @@ type Option func(*gitClient)
 // behavior against a remote that hangs rather than fails fast.
 func WithCloneTimeout(d time.Duration) Option {
 	return func(g *gitClient) { g.cloneTimeout = d }
+}
+
+// WithOpTimeout overrides defaultOpTimeout, the deadline bounding each git
+// subprocess gitClient runs after the initial clone (Probe's ls-remote, and
+// Merge/Rebase's checkout, fetch, merge, and push). Mainly for tests
+// exercising timeout behavior against a remote that hangs rather than fails
+// fast.
+func WithOpTimeout(d time.Duration) Option {
+	return func(g *gitClient) { g.opTimeout = d }
 }
 
 // NewGitClient returns a forge.CodeForge backed by a plain git remote URL.
@@ -59,6 +76,7 @@ func NewGitClient(remoteURL, baseBranch, userName, userEmail, branchPrefix strin
 		userEmail:    userEmail,
 		branchPrefix: branchPrefix,
 		cloneTimeout: defaultCloneTimeout,
+		opTimeout:    defaultOpTimeout,
 	}
 	for _, opt := range opts {
 		opt(g)
@@ -193,7 +211,12 @@ func (g *gitClient) Rebase(branch string) error {
 
 // Probe checks that the configured remote is reachable.
 func (g *gitClient) Probe() (string, error) {
-	if err := exec.Command("git", "ls-remote", g.remoteURL).Run(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), g.opTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "git", "ls-remote", g.remoteURL).Run(); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "", fmt.Errorf("%w: timed out after %s: %s", forge.ErrRepoNotFound, g.opTimeout, forge.RedactURLCredentials(g.remoteURL))
+		}
 		return "", fmt.Errorf("%w: %s", forge.ErrRepoNotFound, forge.RedactURLCredentials(g.remoteURL))
 	}
 	return g.remoteURL, nil
