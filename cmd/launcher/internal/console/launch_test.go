@@ -163,7 +163,7 @@ func TestLauncher_MaxParallel_CapsConcurrency_RefillsOnSettle(t *testing.T) {
 	}
 	t.Cleanup(factory.Cleanup)
 
-	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: q, MaxParallel: 2}
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: q, MaxParallel: 2}
 	launch.tryLaunch(f, dir)
 
 	waitForPickStates(t, q, map[string]PickState{"42": PickRunning, "43": PickRunning, "44": PickQueued})
@@ -305,7 +305,7 @@ func setupForgeQueueFactory(t *testing.T) (f *forge.Fake, dir string, factory *d
 
 // TestQueue_Discover_AlreadyInProgressPick_NeverLaunches drives PickIssue's
 // rejection of an already-InProgress issue all the way through
-// teaModel.landPick's message wiring and Queue.Discover/RunContinuous,
+// Launcher.Land's message wiring and Queue.Discover/RunContinuous,
 // proving the "only one box launches" guarantee (#707) end to end rather
 // than through PickIssue's own return value and TransitionStateCalls proxy
 // alone (pick_adapter_test.go's
@@ -319,13 +319,13 @@ func TestQueue_Discover_AlreadyInProgressPick_NeverLaunches(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
 
 	q := NewQueue()
-	launch := &Launcher{Queue: q}
+	launch := &Launcher{queue: q}
 
 	msg := PickIssue(f, "42", "fix the thing", KindWork)
 	if _, ok := msg.(PickDissolvedMsg); !ok {
 		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
 	}
-	teaModel{launch: launch}.landPick(msg)
+	launch.Land(msg)
 
 	if got := q.Snapshot(); len(got) != 1 || got[0].State != PickDissolved {
 		t.Fatalf("queue snapshot = %+v, want one PickDissolved row", got)
@@ -384,13 +384,13 @@ func TestQueue_Discover_AlreadyCompletePick_NeverLaunches(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-complete"}})
 
 	q := NewQueue()
-	launch := &Launcher{Queue: q}
+	launch := &Launcher{queue: q}
 
 	msg := PickIssue(f, "42", "fix the thing", KindWork)
 	if _, ok := msg.(PickDissolvedMsg); !ok {
 		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
 	}
-	teaModel{launch: launch}.landPick(msg)
+	launch.Land(msg)
 
 	if got := q.Snapshot(); len(got) != 1 || got[0].State != PickDissolved {
 		t.Fatalf("queue snapshot = %+v, want one PickDissolved row", got)

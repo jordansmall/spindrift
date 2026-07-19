@@ -28,6 +28,38 @@ func TestLauncher_CapDefaultsToMaxParallel(t *testing.T) {
 	}
 }
 
+// TestLauncher_Pick_QueuesAndReturnsSnapshot verifies Pick mutates the
+// private queue and hands back the fresh snapshot synchronously, in the
+// same call — the tea side never has to pull Queue itself to see the row it
+// just landed (issue #1542).
+func TestLauncher_Pick_QueuesAndReturnsSnapshot(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	launch := &Launcher{}
+	msg, picks := launch.Pick(f, "42", "fix the thing", KindWork)
+
+	if _, ok := msg.(PickQueuedMsg); !ok {
+		t.Fatalf("Pick msg = %#v, want PickQueuedMsg", msg)
+	}
+	if len(picks) != 1 || picks[0].Number != "42" || picks[0].State != PickQueued {
+		t.Fatalf("Pick snapshot = %+v, want one PickQueued row for #42", picks)
+	}
+}
+
+// TestLauncher_Unpick_RemovesAndReturnsSnapshot verifies Unpick drops the
+// queued pick from the private queue and hands back the fresh snapshot
+// synchronously (issue #1542).
+func TestLauncher_Unpick_RemovesAndReturnsSnapshot(t *testing.T) {
+	launch := &Launcher{}
+	launch.Pick(forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"}), "42", "fix the thing", KindWork)
+
+	picks := launch.Unpick("42")
+	if len(picks) != 0 {
+		t.Fatalf("Unpick snapshot = %+v, want empty", picks)
+	}
+}
+
 // TestLauncher_Wait_BlocksUntilBackgroundDrainFinishes verifies Wait
 // doesn't return while tryLaunch's background RunContinuous drain still has
 // a Box in flight — quitting the console must never race the caller's
@@ -56,8 +88,8 @@ func TestLauncher_Wait_BlocksUntilBackgroundDrainFinishes(t *testing.T) {
 	}
 	t.Cleanup(factory.Cleanup)
 
-	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	launch.tryLaunch(f, dir)
 
 	waitDone := make(chan struct{})
@@ -87,7 +119,7 @@ func TestLauncher_Wait_BlocksUntilBackgroundDrainFinishes(t *testing.T) {
 // regardless of queue state, so an empty queue must be a real no-op rather
 // than a wasted RunContinuous pass.
 func TestLauncher_TryLaunch_SkipsWhenQueueEmpty(t *testing.T) {
-	launch := &Launcher{Queue: NewQueue()}
+	launch := &Launcher{queue: NewQueue()}
 	launch.tryLaunch(nil, "")
 
 	if launch.launching {
@@ -137,12 +169,12 @@ func TestLauncher_TryLaunch_HeldPickLaunchesAfterBlockerClearsOutOfBand(t *testi
 	}
 	t.Cleanup(factory.Cleanup)
 
-	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	launch.tryLaunch(f, dir)
 	launch.Wait()
 
-	if got := launch.Queue.Snapshot()[0].State; got != PickHeld {
+	if got := launch.queue.Snapshot()[0].State; got != PickHeld {
 		t.Fatalf("pick state = %v, want PickHeld (blocked on #41)", got)
 	}
 
@@ -155,7 +187,7 @@ func TestLauncher_TryLaunch_HeldPickLaunchesAfterBlockerClearsOutOfBand(t *testi
 	launch.tryLaunch(f, dir)
 	launch.Wait()
 
-	if got := launch.Queue.Snapshot()[0].State; got != PickRunning && got != PickSettled {
+	if got := launch.queue.Snapshot()[0].State; got != PickRunning && got != PickSettled {
 		t.Fatalf("pick state = %v, want it to have launched (Running or Settled)", got)
 	}
 }
@@ -185,12 +217,12 @@ func TestLauncher_TryLaunch_BoxFailureReachesPickFailed(t *testing.T) {
 	}
 	t.Cleanup(factory.Cleanup)
 
-	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	launch.tryLaunch(f, dir)
 	launch.Wait()
 
-	if got := launch.Queue.Snapshot()[0].State; got != PickFailed {
+	if got := launch.queue.Snapshot()[0].State; got != PickFailed {
 		t.Fatalf("pick state = %v, want PickFailed", got)
 	}
 }
@@ -200,9 +232,9 @@ func TestLauncher_TryLaunch_BoxFailureReachesPickFailed(t *testing.T) {
 // practice (issue #974) — the exclusion was true by construction but had no
 // test asserting it directly.
 func TestLauncher_LiveIssues_ExcludesPickFailed(t *testing.T) {
-	launch := &Launcher{Queue: NewQueue()}
-	launch.Queue.Add(Pick{Number: "41", Title: "running one", State: PickRunning})
-	launch.Queue.Add(Pick{Number: "42", Title: "failed one", State: PickFailed})
+	launch := &Launcher{queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "41", Title: "running one", State: PickRunning})
+	launch.queue.Add(Pick{Number: "42", Title: "failed one", State: PickFailed})
 
 	got := launch.LiveIssues()
 	want := []string{"41"}
@@ -238,12 +270,12 @@ func TestLauncher_TryLaunch_RacingAddNeverStrands(t *testing.T) {
 			t.Fatalf("dispatch.NewFactory: %v", err)
 		}
 
-		launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
-		launch.Queue.Add(Pick{Number: "42", Title: "first", State: PickQueued})
+		launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: NewQueue()}
+		launch.queue.Add(Pick{Number: "42", Title: "first", State: PickQueued})
 		launch.tryLaunch(f, dir)
 
 		go func() {
-			launch.Queue.Add(Pick{Number: "43", Title: "second", State: PickQueued})
+			launch.queue.Add(Pick{Number: "43", Title: "second", State: PickQueued})
 			launch.tryLaunch(f, dir)
 		}()
 
@@ -256,7 +288,7 @@ func TestLauncher_TryLaunch_RacingAddNeverStrands(t *testing.T) {
 		// read loop has already stopped accepting "p" commands).
 		deadline := time.Now().Add(2 * time.Second)
 		for {
-			snap := launch.Queue.Snapshot()
+			snap := launch.queue.Snapshot()
 			if len(snap) == 2 && snap[0].State == PickSettled && snap[1].State == PickSettled {
 				break
 			}

@@ -58,8 +58,8 @@ func newTermTestLauncher(t *testing.T) (launch *Launcher, fc *forge.Fake, fr *ru
 	t.Cleanup(factory.Cleanup)
 
 	s := settle.New(settle.Config{MergeMode: "manual", CompleteLabel: "agent-complete"}, fc, fc)
-	launch = &Launcher{CodeForge: fc, Factory: factory, Settle: s, Queue: NewQueue()}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch = &Launcher{CodeForge: fc, Factory: factory, Settle: s, queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 	return launch, fc, fr, dir
 }
 
@@ -105,7 +105,7 @@ func TestLauncher_Terminate_ReapsTransitionsAndComments(t *testing.T) {
 		t.Errorf("comment must link the open PR; body=%q", body)
 	}
 
-	snap := launch.Queue.Snapshot()
+	snap := launch.queue.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickTerminated {
 		t.Errorf("queue pick = %+v, want PickTerminated", snap)
 	}
@@ -139,8 +139,8 @@ func TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel(t *testing.T) {
 	}
 	t.Cleanup(factory.Cleanup)
 	s := settle.New(settle.Config{MergeMode: "manual", CompleteLabel: "agent-complete"}, fc, fc)
-	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, Queue: NewQueue()}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	if err := launch.Terminate(fc, "42"); err != nil {
 		t.Fatalf("Terminate: %v", err)
@@ -187,7 +187,7 @@ func TestLauncher_Terminate_PropagatesKillError(t *testing.T) {
 		t.Errorf("Box log = %q, want it to carry a terminal line despite kill error", got)
 	}
 
-	snap := launch.Queue.Snapshot()
+	snap := launch.queue.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickTerminated {
 		t.Errorf("queue pick = %+v, want PickTerminated despite kill error", snap)
 	}
@@ -276,8 +276,8 @@ func TestLauncher_TerminateThenRepick_AdoptsAbandonedPR(t *testing.T) {
 		MergePollTimeout:  100,
 	}, fc, fc)
 
-	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, Queue: NewQueue()}
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	// Terminate: issue -> Dispatchable, registry marks #42, PR left dangling.
 	if err := launch.Terminate(fc, "42"); err != nil {
@@ -287,12 +287,12 @@ func TestLauncher_TerminateThenRepick_AdoptsAbandonedPR(t *testing.T) {
 	fc.SetCheckStates("https://github.com/owner/repo/pull/7", []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	// Re-pick: a fresh claim must not inherit the stale terminate mark.
-	launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	launch.tryLaunch(fc, dir)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		snap := launch.Queue.Snapshot()
+		snap := launch.queue.Snapshot()
 		if len(snap) == 2 && snap[1].State == PickSettled {
 			break
 		}
@@ -328,7 +328,7 @@ func TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes(t *testing.T)
 		t.Fatal("TerminateAsync never returned while Comment was blocked")
 	}
 
-	snap := launch.Queue.Snapshot()
+	snap := launch.queue.Snapshot()
 	if len(snap) != 1 || snap[0].State != PickRunning {
 		t.Fatalf("queue pick = %+v, want still PickRunning before Comment unblocks", snap)
 	}
@@ -337,7 +337,7 @@ func TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes(t *testing.T)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		snap := launch.Queue.Snapshot()
+		snap := launch.queue.Snapshot()
 		if len(snap) == 1 && snap[0].State == PickTerminated {
 			break
 		}
