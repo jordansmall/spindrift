@@ -602,6 +602,8 @@ func renderHelp() string {
 		"              detaches the running Activity feed's live follow",
 		"  G / end     re-attach follow and jump to the sidebar's bottom",
 		"              (while the sidebar has focus)",
+		"  gg          detach follow and jump to the sidebar's top (while it",
+		"              has focus; same \"g\" leader as the list body's gg)",
 		"  z           toggle the sidebar's fullscreen zoom (while it has",
 		"              focus)",
 		"  r           refresh the backlog",

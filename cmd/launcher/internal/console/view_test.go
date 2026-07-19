@@ -802,6 +802,21 @@ func TestView_ShowHelp_ListsJumpKeys(t *testing.T) {
 	}
 }
 
+// TestView_ShowHelp_ListsSidebarJumpToTop verifies the help overlay documents
+// the sidebar's own "gg" — detach follow and jump to the sidebar's top —
+// alongside its existing "G / end" jump-to-bottom entry (issue #1629 AC4).
+func TestView_ShowHelp_ListsSidebarJumpToTop(t *testing.T) {
+	m := Update(NewModel(), HelpToggleMsg{})
+
+	out := View(m)
+	if !strings.Contains(out, "G / end     re-attach follow and jump to the sidebar's bottom") {
+		t.Errorf("View() = %q, want the sidebar's \"G / end\" entry unchanged", out)
+	}
+	if !strings.Contains(out, "gg          detach follow and jump to the sidebar's top") {
+		t.Errorf("View() = %q, want a sidebar \"gg\" entry", out)
+	}
+}
+
 // TestView_ShowHelp_ContrastsSidebarFixedPage verifies the help overlay's
 // sidebar pgup/pgdown line calls out that its page jump is a fixed size,
 // unlike the backlog/queue's live-viewport-derived one — the two keys share
