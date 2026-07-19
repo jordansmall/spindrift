@@ -1275,6 +1275,89 @@ func TestUpdate_SidebarCloseMsg_ResetsZoom(t *testing.T) {
 	}
 }
 
+// TestUpdate_SectionNextMsg_ClosesSidebarWhenOpen verifies switching Sections
+// with SectionNextMsg while a sidebar is docked and focus already back on
+// the list (the common state after "h") dismisses the sidebar instead of
+// leaving it pinned to the old Dispatch under the new Section's list (issue
+// #1581).
+func TestUpdate_SectionNextMsg_ClosesSidebarWhenOpen(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	m = Update(m, FocusListMsg{})
+
+	m = Update(m, SectionNextMsg{})
+
+	if m.Sidebar != nil {
+		t.Errorf("Sidebar = %+v, want nil after switching Sections", m.Sidebar)
+	}
+	if m.Focus != FocusList {
+		t.Errorf("Focus = %v, want FocusList after switching Sections", m.Focus)
+	}
+}
+
+// TestUpdate_SectionPrevMsg_ClosesSidebarWhenOpen mirrors
+// TestUpdate_SectionNextMsg_ClosesSidebarWhenOpen for the "H" direction
+// (issue #1581).
+func TestUpdate_SectionPrevMsg_ClosesSidebarWhenOpen(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	m = Update(m, FocusListMsg{})
+
+	m = Update(m, SectionPrevMsg{})
+
+	if m.Sidebar != nil {
+		t.Errorf("Sidebar = %+v, want nil after switching Sections", m.Sidebar)
+	}
+	if m.Focus != FocusList {
+		t.Errorf("Focus = %v, want FocusList after switching Sections", m.Focus)
+	}
+}
+
+// TestUpdate_SectionJumpMsg_ClosesSidebarWhenOpen mirrors
+// TestUpdate_SectionNextMsg_ClosesSidebarWhenOpen for a direct "1"-"5" jump,
+// and additionally verifies SidebarZoom resets and the position is saved so
+// a later reopen restores scroll/follow (issue #1581).
+func TestUpdate_SectionJumpMsg_ClosesSidebarWhenOpen(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	m = Update(m, FocusListMsg{})
+	m = Update(m, SidebarZoomToggleMsg{})
+	if !m.SidebarZoom {
+		t.Fatal("test setup: SidebarZoom must be true")
+	}
+
+	m = Update(m, SectionJumpMsg{Section: SectionHeld})
+
+	if m.Sidebar != nil {
+		t.Errorf("Sidebar = %+v, want nil after switching Sections", m.Sidebar)
+	}
+	if m.Focus != FocusList {
+		t.Errorf("Focus = %v, want FocusList after switching Sections", m.Focus)
+	}
+	if m.SidebarZoom {
+		t.Error("SidebarZoom = true, want false after switching Sections")
+	}
+	if _, ok := m.SidebarPositions["42"]; !ok {
+		t.Error("SidebarPositions[42] missing, want position saved before close")
+	}
+}
+
+// TestUpdate_SectionJumpMsg_SameSectionLeavesSidebarOpen verifies jumping to
+// the Section that's already active does not close a Sidebar the operator
+// just opened, consistent with switchSection's existing same-section guard
+// on Cursor/Offset (issue #1581).
+func TestUpdate_SectionJumpMsg_SameSectionLeavesSidebarOpen(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	m = Update(m, FocusListMsg{})
+
+	m = Update(m, SectionJumpMsg{Section: m.ActiveSection})
+
+	if m.Sidebar == nil {
+		t.Error("Sidebar = nil, want unchanged (jumped to the already-active Section)")
+	}
+}
+
 // TestUpdate_SizeChangedMsg_AppliesWidthHeight verifies a SizeChangedMsg
 // lands its Width/Height straight onto Model (issue #842).
 func TestUpdate_SizeChangedMsg_AppliesWidthHeight(t *testing.T) {
