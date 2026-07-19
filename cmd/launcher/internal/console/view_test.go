@@ -408,7 +408,7 @@ func TestView_OrphanRecoveryErr_Surfaced(t *testing.T) {
 }
 
 // TestView_Header_OrphanRecoveryAlert_StyledWithGlyph verifies the
-// orphan-recovery-failed alert carries the plain-Unicode warning glyph and
+// orphan-adopt-failed alert carries the plain-Unicode warning glyph and
 // renders styled by role (ADR 0031), while keeping its existing content.
 func TestView_Header_OrphanRecoveryAlert_StyledWithGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
@@ -419,13 +419,13 @@ func TestView_Header_OrphanRecoveryAlert_StyledWithGlyph(t *testing.T) {
 
 	var bannerLine string
 	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "orphan recovery failed") {
+		if strings.Contains(line, "orphan adopt failed") {
 			bannerLine = line
 			break
 		}
 	}
 	if bannerLine == "" {
-		t.Fatalf("View() = %q, want an orphan-recovery-failed banner line", out)
+		t.Fatalf("View() = %q, want an orphan-adopt-failed banner line", out)
 	}
 	if !strings.Contains(bannerLine, "⚠") {
 		t.Errorf("orphan-recovery banner line = %q, want the warning glyph", bannerLine)
@@ -631,6 +631,22 @@ func TestView_ShowHelp_ListsNewKeybindings(t *testing.T) {
 	}
 	if !strings.Contains(out, "terminate the highlighted live Dispatch") {
 		t.Errorf("View() = %q, want \"X\" documented as Terminate", out)
+	}
+}
+
+// TestView_ShowHelp_ListsAdoptOrphanKey verifies the help overlay documents
+// "A", the explicit adopt gesture on an orphan-flagged Backlog row (issue
+// #1619) — startup only ever detects an orphan now, so the operator needs a
+// discoverable way to learn how to adopt one.
+func TestView_ShowHelp_ListsAdoptOrphanKey(t *testing.T) {
+	m := Update(NewModel(), HelpToggleMsg{})
+
+	out := View(m)
+	if !strings.Contains(out, "\n  A ") {
+		t.Errorf("View() = %q, want an \"A\" key entry", out)
+	}
+	if !strings.Contains(out, "adopt") || !strings.Contains(out, "orphan") {
+		t.Errorf("View() = %q, want it to describe the \"A\" adopt-orphan gesture", out)
 	}
 }
 
@@ -965,6 +981,37 @@ func TestView_BacklogSection_HasColumnHeader(t *testing.T) {
 	out := View(m)
 	if !strings.Contains(out, "title") {
 		t.Errorf("View() = %q, want the Backlog Section's column-header row", out)
+	}
+}
+
+// TestView_BacklogSection_FlagsOrphanRow verifies a Backlog row for an issue
+// startup detection flagged an orphan renders distinguishable from an
+// ordinary row — the operator's only signal that a running sandbox exists
+// with no Dispatch this session launched to account for it (issue #1619).
+func TestView_BacklogSection_FlagsOrphanRow(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Title: "fix the widget"},
+		{Number: "2", Title: "fix the gadget"},
+	}})
+	m = Update(m, OrphanDetectedMsg{Numbers: []string{"1"}})
+
+	out := View(m)
+	lines := strings.Split(out, "\n")
+	var orphanLine, ordinaryLine string
+	for _, l := range lines {
+		if strings.Contains(l, "fix the widget") {
+			orphanLine = l
+		}
+		if strings.Contains(l, "fix the gadget") {
+			ordinaryLine = l
+		}
+	}
+	if !strings.Contains(orphanLine, "orphan") {
+		t.Errorf("orphan row = %q, want it flagged with \"orphan\"", orphanLine)
+	}
+	if strings.Contains(ordinaryLine, "orphan") {
+		t.Errorf("ordinary row = %q, want no orphan flag", ordinaryLine)
 	}
 }
 
