@@ -234,10 +234,9 @@ func TestUpdate_RebuildOutputJumpMsgs_NoOpWhenPaneClosed(t *testing.T) {
 }
 
 // TestUpdate_RebuildOutputJumpToLastMsg_NoOpWhenOpenPaneGoesEmpty verifies
-// jump-to-last is a safe no-op for the pane's other empty-output path: a
-// later StaleStatusMsg can empty RebuildStatus.Output out from under an
-// already-open pane (Model.ShowRebuildOutput's own doc comment) without
-// closing it — RebuildOutputOffset must clamp to 0, not panic or go
+// jump-to-last is a safe no-op once a later StaleStatusMsg has emptied
+// RebuildStatus.Output out from under an already-open pane and closed it
+// (issue #1543) — RebuildOutputOffset must clamp to 0, not panic or go
 // negative (issue #1630 AC4).
 func TestUpdate_RebuildOutputJumpToLastMsg_NoOpWhenOpenPaneGoesEmpty(t *testing.T) {
 	m := NewModel()
@@ -291,6 +290,21 @@ func TestUpdate_RebuildOutputCloseMsg_ClosesPane(t *testing.T) {
 	m = Update(m, RebuildOutputCloseMsg{})
 	if m.ShowRebuildOutput {
 		t.Error("ShowRebuildOutput = true after close, want false")
+	}
+}
+
+// TestUpdate_StaleStatusMsg_ClosesOpenPaneWhenOutputEmpties verifies a later
+// StaleStatusMsg that empties RebuildStatus.Output out from under an
+// already-open pane also closes it, rather than leaving ShowRebuildOutput
+// true over blank content — the documented rough edge issue #1543 retires.
+func TestUpdate_StaleStatusMsg_ClosesOpenPaneWhenOutputEmpties(t *testing.T) {
+	m := NewModel()
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2"}})
+	m = Update(m, RebuildOutputOpenMsg{})
+
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: ""}})
+	if m.ShowRebuildOutput {
+		t.Error("ShowRebuildOutput = true after Output emptied, want false (pane auto-closes)")
 	}
 }
 

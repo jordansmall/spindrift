@@ -81,9 +81,8 @@ type Model struct {
 	// ShowRebuildOutput is whether the rebuild-output pane is open, showing
 	// RebuildStatus.Output in full — its only consumer (issue #1128).
 	// RebuildOutputOpenMsg only ever sets it while RebuildStatus.Output is
-	// non-empty, but a later StaleStatusMsg can still empty it out from
-	// under an already-open pane — the pane just renders blank rather than
-	// closing itself.
+	// non-empty, and a later StaleStatusMsg that empties it back out closes
+	// the pane rather than leaving it open over blank content (issue #1543).
 	ShowRebuildOutput bool
 	// RebuildOutputOffset is the rebuild-output pane's scroll position — the
 	// index of its first visible line, the pane's analogue of DrillInState's
@@ -493,6 +492,14 @@ func Update(m Model, msg Msg) Model {
 		m.Live = msg.Live
 	case StaleStatusMsg:
 		m.RebuildStatus = msg.RebuildStatus
+		if m.ShowRebuildOutput && m.RebuildStatus.Output == "" {
+			// A rebuild-output pane open over content that then empties out
+			// (a fresh StaleStatusMsg with no Output) has nothing left to
+			// show — close it rather than leave it rendering blank (issue
+			// #1543, retiring the rough edge ShowRebuildOutput's own doc
+			// comment used to describe).
+			m.ShowRebuildOutput = false
+		}
 	case OrphanRecoveryMsg:
 		m.OrphanRecoveryErr = msg.Err
 		m.AdoptingOrphans = removeOrphan(m.AdoptingOrphans, msg.Number)
