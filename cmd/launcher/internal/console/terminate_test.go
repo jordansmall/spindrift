@@ -284,7 +284,9 @@ func TestLauncher_TerminateThenRepick_AdoptsAbandonedPR(t *testing.T) {
 		t.Fatalf("Terminate: %v", err)
 	}
 	fc.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/owner/repo/pull/7"})
-	fc.SetCheckStates("https://github.com/owner/repo/pull/7", []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	// A leading PENDING proves this run's own checks registered — issue
+	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
+	fc.SetCheckStates("https://github.com/owner/repo/pull/7", []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	// Re-pick: a fresh claim must not inherit the stale terminate mark.
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})

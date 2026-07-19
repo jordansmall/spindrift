@@ -220,7 +220,9 @@ func TestSettle_NoOutcome_AdoptsDiscoveredPR(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{"agent-in-progress"}})
 	branch := fc.AgentBranch("3")
 	fc.SetPR(branch, forge.PR{URL: testPR, IsDraft: false})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	// A leading PENDING proves this run's own checks registered — issue
+	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	c := baseConfig()
 	s := New(c, fc, fc)
