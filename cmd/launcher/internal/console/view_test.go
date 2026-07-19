@@ -1076,11 +1076,13 @@ func TestView_HeldSection_BlockerVisibleDespiteLongTitle(t *testing.T) {
 	}
 }
 
-// TestRenderBacklogSection_NilBudgetNeverTruncates verifies a nil budget
-// renders every Backlog row with no "more below" affordance, regardless of
-// row count — the nil-means-unbounded semantics that replaced the
-// unboundedBudget magic-constant sentinel (issue #1039).
-func TestRenderBacklogSection_NilBudgetNeverTruncates(t *testing.T) {
+// TestRenderBacklogSection_BudgetExceedsRowCount_NeverTruncates verifies a
+// budget comfortably larger than the row count renders every Backlog row
+// with no "more below" affordance (issue #1540 — the render pipeline's
+// budget is always a real, finite figure; Viewport's own height==0 covers
+// "unbounded" for callers who actually want that, exercised directly in
+// viewport_test.go).
+func TestRenderBacklogSection_BudgetExceedsRowCount_NeverTruncates(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	issues := make([]forge.Issue, 500)
 	for i := range issues {
@@ -1088,19 +1090,19 @@ func TestRenderBacklogSection_NilBudgetNeverTruncates(t *testing.T) {
 	}
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
-	out := renderBacklogSection(m, nil)
+	out := renderBacklogSection(m, len(issues)+1)
 	if !strings.Contains(out, "issue 499") {
-		t.Errorf("renderBacklogSection(m, nil) = %q, want the last of 500 rows present, unwindowed", out)
+		t.Errorf("renderBacklogSection(m, 501) = %q, want the last of 500 rows present, unwindowed", out)
 	}
 	if strings.Contains(out, "more below") {
-		t.Errorf("renderBacklogSection(m, nil) = %q, want no truncation affordance for a nil budget", out)
+		t.Errorf("renderBacklogSection(m, 501) = %q, want no truncation affordance", out)
 	}
 }
 
-// TestRenderWorkSection_NilBudgetNeverTruncates is
-// TestRenderBacklogSection_NilBudgetNeverTruncates mirrored for a work
-// Section (issue #1039).
-func TestRenderWorkSection_NilBudgetNeverTruncates(t *testing.T) {
+// TestRenderWorkSection_BudgetExceedsRowCount_NeverTruncates is
+// TestRenderBacklogSection_BudgetExceedsRowCount_NeverTruncates mirrored for
+// a work Section.
+func TestRenderWorkSection_BudgetExceedsRowCount_NeverTruncates(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	picks := make([]Pick, 500)
 	for i := range picks {
@@ -1109,12 +1111,12 @@ func TestRenderWorkSection_NilBudgetNeverTruncates(t *testing.T) {
 	m = Update(m, QueueSnapshotMsg{Picks: picks})
 	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
-	out := renderWorkSection(m, nil)
+	out := renderWorkSection(m, len(picks)+1)
 	if !strings.Contains(out, "pick 499") {
-		t.Errorf("renderWorkSection(m, nil) = %q, want the last of 500 rows present, unwindowed", out)
+		t.Errorf("renderWorkSection(m, 501) = %q, want the last of 500 rows present, unwindowed", out)
 	}
 	if strings.Contains(out, "more below") {
-		t.Errorf("renderWorkSection(m, nil) = %q, want no truncation affordance for a nil budget", out)
+		t.Errorf("renderWorkSection(m, 501) = %q, want no truncation affordance", out)
 	}
 }
 
@@ -1567,76 +1569,56 @@ func TestView_Queue_SanitizesTitleAndReasonControlSequences(t *testing.T) {
 	}
 }
 
-// TestFollowViewport_NonPositiveBudget_ClampsOffsetBelowTotal verifies
-// followViewport never returns offset == total: when itemBudget <= 0,
-// windowedRowCount always returns 0, so the advance loop's break condition
-// cursor < offset+0 never fires once offset >= cursor, and the loop's old
-// `for offset < total` bound let it climb one past the last valid index
-// (issue #1054).
-func TestFollowViewport_NonPositiveBudget_ClampsOffsetBelowTotal(t *testing.T) {
-	if got, want := followViewport(0, 4, 5, 0), 4; got != want {
-		t.Errorf("followViewport(0, 4, 5, 0) = %d, want %d (total-1, not total)", got, want)
-	}
-}
-
-// TestFollowViewport_PositiveBudget_AdvancesToExactSameOffsetAsBefore
-// guards the total-1 advance bound against regressing the itemBudget > 0
-// path: the break condition fires well before offset reaches total-1, so
-// tightening the loop bound from total to total-1 must not change the
-// result here (issue #1054).
-func TestFollowViewport_PositiveBudget_AdvancesToExactSameOffsetAsBefore(t *testing.T) {
-	if got, want := followViewport(0, 4, 5, 2), 3; got != want {
-		t.Errorf("followViewport(0, 4, 5, 2) = %d, want %d", got, want)
-	}
-}
-
-// TestVisibleItemCount_TruncatedWindow_HoldsBackOneRowForMoreBelow verifies
-// visibleItemCount folds columnItemBudget's "-1 for the label" into
-// windowedRowCount's remaining/budget shape, the composition positionLabel
-// and focusedPageSize each repeated before this helper existed (issue
-// #1061). columnBudget 5 leaves an item budget of 4 (columnItemBudget's -1
-// for the label); with 50 remaining rows that doesn't fit, windowedRowCount
-// holds one more back for the "N more below" affordance, so 3 rows show.
-func TestVisibleItemCount_TruncatedWindow_HoldsBackOneRowForMoreBelow(t *testing.T) {
-	if got, want := visibleItemCount(0, 5, 50), 3; got != want {
-		t.Errorf("visibleItemCount(0, 5, 50) = %d, want %d", got, want)
-	}
-}
-
-// TestRenderTable_NonPositiveBudgetRendersNothing verifies renderTable, the
-// helper renderBacklogSection and renderWorkSection share, reproduces their
-// budget<=0-renders-nothing guard (issue #1035) regardless of header or rows
-// content — the guard lives in the shared helper (issue #1040, ADR 0030).
-func TestRenderTable_NonPositiveBudgetRendersNothing(t *testing.T) {
-	budget := 0
-	got := renderTable("header\n", []string{"row1\n"}, 0, &budget)
-	if got != "" {
-		t.Errorf("renderTable() with budget 0 = %q, want empty", got)
+// TestRenderTable_NonPositiveItemBudgetRendersHeaderOnly verifies renderTable,
+// the helper renderBacklogSection and renderWorkSection share, writes the
+// header and nothing else when itemBudget leaves no room for any row — the
+// guard lives in the shared helper (issue #1040, ADR 0030), and Viewport is
+// never asked to represent a non-positive item budget itself (issue #1540:
+// SetHeight(0) means unbounded, not zero rows).
+func TestRenderTable_NonPositiveItemBudgetRendersHeaderOnly(t *testing.T) {
+	got := renderTable("header\n", []string{"row1\n"}, Viewport{}, 1, 0)
+	if want := "header\n"; got != want {
+		t.Errorf("renderTable() with itemBudget 0 = %q, want %q", got, want)
 	}
 }
 
 // TestRenderTable_RendersHeaderAndWindowedRows verifies renderTable writes
-// the header line followed by rows windowed to budget-1 (the header costs
-// one row), matching the convention renderBacklogSection/renderWorkSection
-// applied inline before extraction.
+// the header line followed by every row when they all fit within itemBudget,
+// matching the convention renderBacklogSection/renderWorkSection applied
+// inline before extraction.
 func TestRenderTable_RendersHeaderAndWindowedRows(t *testing.T) {
-	budget := 3
-	got := renderTable("header\n", []string{"row1\n", "row2\n"}, 0, &budget)
+	got := renderTable("header\n", []string{"row1\n", "row2\n"}, Viewport{}, 2, 2)
 	want := "header\nrow1\nrow2\n"
 	if got != want {
 		t.Errorf("renderTable() = %q, want %q", got, want)
 	}
 }
 
-// TestRenderTable_PassesOffsetThroughToWindowedRows verifies renderTable
-// forwards its offset argument to writeWindowedRows rather than always
-// windowing from the start of rows — the Section's own scroll position
-// (m.Offset) both callers pass through.
-func TestRenderTable_PassesOffsetThroughToWindowedRows(t *testing.T) {
-	budget := 3
-	got := renderTable("header\n", []string{"row1\n", "row2\n", "row3\n"}, 1, &budget)
+// TestRenderTable_PassesOffsetThroughToWindow verifies renderTable windows
+// through vp's own offset rather than always starting at row 0 — the
+// Section's own scroll position (m.Offset) both callers pass through.
+func TestRenderTable_PassesOffsetThroughToWindow(t *testing.T) {
+	vp := Viewport{offset: 1}
+	got := renderTable("header\n", []string{"row1\n", "row2\n", "row3\n"}, vp, 3, 2)
 	want := "header\nrow2\nrow3\n"
 	if got != want {
 		t.Errorf("renderTable() with offset 1 = %q, want %q", got, want)
+	}
+}
+
+// TestRenderTable_TruncatedWindow_HoldsBackOneRowForMoreBelow verifies an
+// itemBudget too small for every row holds one row back so the "… N more
+// below" affordance itself fits within itemBudget rather than overflowing it
+// by one line (issue #1061, inherited): itemBudget 4 against 50 rows shows
+// 3 rows plus the affordance, not 4 rows with no room left to name it.
+func TestRenderTable_TruncatedWindow_HoldsBackOneRowForMoreBelow(t *testing.T) {
+	rows := make([]string, 50)
+	for i := range rows {
+		rows[i] = fmt.Sprintf("row%d\n", i)
+	}
+	got := renderTable("header\n", rows, Viewport{}, 50, 4)
+	want := "header\nrow0\nrow1\nrow2\n… 47 more below\n"
+	if got != want {
+		t.Errorf("renderTable() = %q, want %q", got, want)
 	}
 }
