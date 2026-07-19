@@ -314,14 +314,14 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	case "enter":
 		if t.m.ActiveSection == SectionBacklog {
 			if iss, ok := t.highlightedIssue(); ok && t.m.IsOrphan(iss.Number) {
-				return t, openSidebarCmd(t.launch, t.pwd, iss.Number)
+				return t, openSidebarCmd(t.launch, t.pwd, iss.Number, true)
 			}
 			t = t.pickHighlighted()
 			return t, nil
 		}
 		if p, ok := t.highlightedPick(); ok {
 			if hasTranscript(p.State) {
-				return t, openSidebarCmd(t.launch, t.pwd, p.Number)
+				return t, openSidebarCmd(t.launch, t.pwd, p.Number, false)
 			}
 			t.m = Update(t.m, QueueEnterNoticedMsg{})
 		}
@@ -510,7 +510,13 @@ func hasTranscript(state PickState) bool {
 // per-Msg SidebarActivityMsg refresh (issue #1502). Reopening (close then
 // Enter again) still re-runs this whole load, picking up any Transcript
 // growth the live Activity feed alone wouldn't (issue #719, inherited).
-func openSidebarCmd(launch *Launcher, pwd, number string) tea.Cmd {
+// orphan marks the drill-in as an orphan row's: the empty-Activity/no-logs
+// case then also carries a graceful Notice ("no local logs for this
+// dispatch") rather than staying silently blank, since an orphan-flagged
+// Dispatch with nothing on disk yet is a standing state the operator opened
+// deliberately, not the split-second claimed-but-not-yet-launched race a
+// session-launched Pick's own Enter can hit (issue #1621).
+func openSidebarCmd(launch *Launcher, pwd, number string, orphan bool) tea.Cmd {
 	return func() tea.Msg {
 		drv := driverOf(launch)
 		if drv == nil {
@@ -518,7 +524,11 @@ func openSidebarCmd(launch *Launcher, pwd, number string) tea.Cmd {
 		}
 		activity := ActivityFeed(drv, pwd, number)
 		if len(dispatch.LogPaths(pwd, number)) == 0 {
-			return SidebarLoadedMsg{Number: number, Activity: activity}
+			msg := SidebarLoadedMsg{Number: number, Activity: activity}
+			if orphan {
+				msg.Notice = "no local logs for this dispatch"
+			}
+			return msg
 		}
 		// DrillIn always returns a DrillInMsg; the type assertion can't fail.
 		dm, _ := DrillIn(drv, pwd, number).(DrillInMsg)

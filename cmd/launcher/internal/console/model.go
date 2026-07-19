@@ -221,6 +221,12 @@ type SidebarState struct {
 	// while ShowTranscript is true, so a Transcript-only failure never
 	// blanks out an otherwise-good Activity feed (#1501 review finding).
 	TranscriptErr error
+	// Notice is a graceful, non-error explanation shown in place of an
+	// empty pane — currently only "no local logs for this dispatch" for an
+	// orphan-flagged Dispatch with nothing on disk yet (issue #1621).
+	// sidebarLines shows it only while nothing else has loaded; a live
+	// SidebarActivityMsg with real content clears it.
+	Notice string
 	// Offset is the index of the first visible line in the currently active
 	// form — the scroll position, DrillInState.Offset's sidebar analogue.
 	Offset int
@@ -363,6 +369,7 @@ func Update(m Model, msg Msg) Model {
 			ShowRaw:            showRaw,
 			Err:                msg.Err,
 			TranscriptErr:      msg.TranscriptErr,
+			Notice:             msg.Notice,
 			Offset:             offset,
 			Follow:             follow,
 		}
@@ -420,6 +427,13 @@ func Update(m Model, msg Msg) Model {
 			// detaching Follow) back to the bottom on every keystroke.
 			changed := !activityEqual(msg.Activity, m.Sidebar.Activity)
 			m.Sidebar.Activity = msg.Activity
+			if len(msg.Activity) > 0 {
+				// A graceful "no local logs" Notice only ever applies while
+				// there is nothing else to show — real Activity arriving
+				// live (the box's first log write landing after an orphan
+				// open beat it) supersedes it (issue #1621).
+				m.Sidebar.Notice = ""
+			}
 			if changed && !m.Sidebar.ShowTranscript {
 				// The #722 Lines cache exists precisely so a re-split only
 				// happens on an actual content change — recomputing it on
@@ -683,6 +697,14 @@ func saveSidebarPosition(m Model) Model {
 // the loaded content or the toggle state changes (SidebarLoadedMsg,
 // SidebarToggleMsg), matching DrillInState.Lines' recompute-on-change caching.
 func sidebarLines(s *SidebarState) []string {
+	// Notice only ever accompanies an open with nothing else to show
+	// (openSidebarCmd sets it only alongside an empty Activity and no
+	// Transcript load attempt) — so this single check covers every toggle
+	// state, not just the Activity view, without an empty pane reading as a
+	// hang (issue #1621).
+	if s.Notice != "" && len(s.Activity) == 0 && s.TranscriptRendered == "" && s.TranscriptRaw == "" {
+		return []string{s.Notice}
+	}
 	if !s.ShowTranscript {
 		lines := make([]string, len(s.Activity))
 		for i, a := range s.Activity {
