@@ -521,6 +521,21 @@ func Update(m Model, msg Msg) Model {
 		if m.ShowRebuildOutput {
 			m.RebuildOutputOffset += msg.Delta
 		}
+	case RebuildOutputJumpToFirstMsg:
+		if m.ShowRebuildOutput {
+			m.RebuildOutputOffset = 0
+		}
+	case RebuildOutputJumpToLastMsg:
+		// Set past the last valid offset — the ShowRebuildOutput clamp block
+		// below (the same Viewport.SetHeight page-capped maxOffset arithmetic
+		// every other Update call already runs) pulls it back to the last
+		// page that fills the viewport. Unlike CursorJumpToLastMsg, which
+		// drags Offset into view via MoveCursor's cursor-follow, the
+		// rebuild-output pane is cursorless, so landing on the page-capped
+		// maxOffset directly is the whole jump.
+		if m.ShowRebuildOutput {
+			m.RebuildOutputOffset = strings.Count(m.RebuildStatus.Output, "\n") + 1
+		}
 	case CursorMoveMsg:
 		m.Cursor += msg.Delta
 	case CursorJumpToFirstMsg:
