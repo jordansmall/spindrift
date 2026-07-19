@@ -109,7 +109,7 @@ func TestView_Header_StaleAlert_StyledWithGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
 
-	m := Update(NewModel(), StaleStatusMsg{Stale: true, Message: "rebuild needed"})
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Message: "rebuild needed"}})
 	out := View(m)
 
 	if !strings.Contains(out, "⚠") {
@@ -131,7 +131,7 @@ func TestView_Header_RebuildingAlert_StyledWithGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
 
-	m := Update(NewModel(), StaleStatusMsg{Rebuilding: true})
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Rebuilding: true}})
 	out := View(m)
 
 	if !strings.Contains(out, "↻") {
@@ -191,7 +191,7 @@ func TestBannerHeight_MatchesRenderedRowCount(t *testing.T) {
 // TestView_Rebuilding_ShowsProgress and TestView_RebuildErr_Surfaced below.
 func TestView_Header_AlertsRenderBeforeEphemeralPrompts(t *testing.T) {
 	m := NewModel()
-	m = Update(m, StaleStatusMsg{Stale: true, Message: "rebuild needed"})
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Message: "rebuild needed"}})
 	m = Update(m, DogfoodNoticeMsg{Live: true})
 	m = Update(m, FilterEditStartMsg{})
 	m = Update(m, FilterChangedMsg{Filter: "bug"})
@@ -294,7 +294,7 @@ func TestView_StaleBanner_ShownWhenStaleSilentOtherwise(t *testing.T) {
 		t.Errorf("View() with no stale status = %q, want no mention of stale", fresh)
 	}
 
-	m := Update(NewModel(), StaleStatusMsg{Stale: true, Message: "rebuild needed (main tip abc123 produces spindrift:def, loaded image is spindrift:abc)"})
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Message: "rebuild needed (main tip abc123 produces spindrift:def, loaded image is spindrift:abc)"}})
 	out := View(m)
 	if !strings.Contains(out, "stale") {
 		t.Errorf("View() = %q, want a stale banner", out)
@@ -310,7 +310,7 @@ func TestView_StaleBanner_ShownWhenStaleSilentOtherwise(t *testing.T) {
 // TestView_Rebuilding_ShowsProgress verifies an in-flight rebuild renders a
 // progress line so the operator sees the confirm key took effect.
 func TestView_Rebuilding_ShowsProgress(t *testing.T) {
-	m := Update(NewModel(), StaleStatusMsg{Stale: true, Rebuilding: true})
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Rebuilding: true}})
 	out := View(m)
 	if !strings.Contains(out, "rebuild") {
 		t.Errorf("View() = %q, want a rebuilding-in-progress line", out)
@@ -320,7 +320,7 @@ func TestView_Rebuilding_ShowsProgress(t *testing.T) {
 // TestView_RebuildErr_Surfaced verifies a failed rebuild's error text
 // appears, and launches stay noted as held (Stale remains true).
 func TestView_RebuildErr_Surfaced(t *testing.T) {
-	m := Update(NewModel(), StaleStatusMsg{Stale: true, RebuildErr: "nix build failed"})
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Err: "nix build failed"}})
 	out := View(m)
 	if !strings.Contains(out, "nix build failed") {
 		t.Errorf("View() = %q, want the rebuild failure surfaced", out)
@@ -334,7 +334,7 @@ func TestView_Header_RebuildFailedAlert_StyledWithGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
 
-	m := Update(NewModel(), StaleStatusMsg{RebuildErr: "nix build failed"})
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Err: "nix build failed"}})
 	out := View(m)
 
 	var bannerLine string
@@ -369,7 +369,7 @@ func TestView_RebuildErr_Truncated(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 
 	long := strings.Repeat("line of nix build output that is quite long\n", 20)
-	m := Update(NewModel(), StaleStatusMsg{Stale: true, RebuildErr: long})
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Err: long}})
 	out := View(m)
 
 	var bannerLine string
@@ -392,8 +392,8 @@ func TestView_RebuildErr_Truncated(t *testing.T) {
 	if n := lipgloss.Width(bannerLine); n > bannerErrWidth+prefixWidth {
 		t.Errorf("banner line width = %d, want <= %d", n, bannerErrWidth+prefixWidth)
 	}
-	if m.RebuildErr != long {
-		t.Errorf("m.RebuildErr = %q, want the full untruncated text preserved", m.RebuildErr)
+	if m.RebuildStatus.Err != long {
+		t.Errorf("m.RebuildStatus.Err = %q, want the full untruncated text preserved", m.RebuildStatus.Err)
 	}
 }
 
@@ -445,7 +445,7 @@ func TestView_BranchSwitchNotice_Surfaced(t *testing.T) {
 		t.Errorf("View() with no branch-switch notice = %q, want no mention of a switch", fresh)
 	}
 
-	m := Update(NewModel(), StaleStatusMsg{BranchSwitchNotice: "switched off-branch tree from feature to main"})
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{BranchSwitchNotice: "switched off-branch tree from feature to main"}})
 	out := View(m)
 	if !strings.Contains(out, "switched off-branch tree from feature to main") {
 		t.Errorf("View() = %q, want the branch-switch notice surfaced", out)
@@ -460,7 +460,7 @@ func TestView_Header_BranchSwitchAndDogfoodNotices_StyledWithGlyph(t *testing.T)
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
 
-	m := Update(NewModel(), StaleStatusMsg{BranchSwitchNotice: "switched off-branch tree from feature to main"})
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{BranchSwitchNotice: "switched off-branch tree from feature to main"}})
 	m = Update(m, DogfoodNoticeMsg{Live: true})
 	out := View(m)
 
@@ -682,7 +682,7 @@ func TestView_ShowHelp_ContrastsSidebarFixedPage(t *testing.T) {
 func TestView_RebuildOutputOpen_RendersOutputInsteadOfBacklog(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
-	m = Update(m, StaleStatusMsg{RebuildOutput: "building derivation...\ndone"})
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "building derivation...\ndone"}})
 	m = Update(m, RebuildOutputOpenMsg{})
 
 	out := View(m)
@@ -707,7 +707,7 @@ func TestView_RebuildOutputOpen_ScrollOffsetWindowsContent(t *testing.T) {
 	// instead of clamping straight back to the top like a short transcript
 	// that already fits (mirrored from DrillIn's own clamp, model.go).
 	m := Update(NewModel(), SizeChangedMsg{Height: 4})
-	m = Update(m, StaleStatusMsg{RebuildOutput: "l0\nl1\nl2\nl3\nl4"})
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
 	m = Update(m, RebuildOutputOpenMsg{})
 	m = Update(m, RebuildOutputScrollMsg{Delta: 2})
 
@@ -1450,7 +1450,7 @@ func TestView_HeaderHeight_AdaptsToAlertLines(t *testing.T) {
 
 	withAlert := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 12})
 	withAlert = Update(withAlert, IssuesLoadedMsg{Issues: issues})
-	withAlert = Update(withAlert, StaleStatusMsg{Stale: true, Message: "rebuild needed"})
+	withAlert = Update(withAlert, StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Message: "rebuild needed"}})
 	withAlertOut := View(withAlert)
 	withAlertRows := strings.Count(withAlertOut, "issue ")
 

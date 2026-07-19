@@ -46,38 +46,21 @@ type Model struct {
 	// syncQueue never sends a CapMsg when there is no Launcher to read them
 	// from.
 	Cap, Live int
-	// Stale is whether the freshness probe found the loaded image would be
-	// rebuilt against the current base-branch tip — new launches hold while
-	// true; a running Box rides it out (issue #652).
-	Stale bool
-	// StaleMessage is the probe's human-readable explanation, shown
-	// alongside Stale in the banner.
-	StaleMessage string
-	// Rebuilding is whether an operator-triggered in-session rebuild is in
-	// flight.
-	Rebuilding bool
-	// RebuildErr is the last rebuild's failure, if any — "" on success or
-	// when no rebuild has run yet.
-	RebuildErr string
+	// RebuildStatus is the launcher's live image-freshness/rebuild state —
+	// new launches hold while Stale is true; a running Box rides it out
+	// (issue #652). One value replaces the six scalar fields this used to
+	// be spread across (issue #1541).
+	RebuildStatus RebuildStatus
 	// OrphanRecoveryErr is startup orphan recovery's last failure, if any —
 	// "" when detection and every adopt succeeded, or recovery hasn't run
 	// yet (issue #1218).
 	OrphanRecoveryErr string
-	// RebuildOutput is the last rebuild's captured nix output (issue #765)
-	// — stdout/stderr merged, in build order — never streamed to the
-	// Console's own stdout/stderr while the rebuild ran. "" when no rebuild
-	// has run yet.
-	RebuildOutput string
-	// BranchSwitchNotice is the last rebuild's branch-switch notice, if any
-	// — "" when pwd's checkout didn't move off the branch it was on (issue
-	// #1141), shown alongside the other rebuild alert lines in the header.
-	BranchSwitchNotice string
 	// ShowRebuildOutput is whether the rebuild-output pane is open, showing
-	// RebuildOutput in full — RebuildOutput's only consumer (issue #1128).
-	// RebuildOutputOpenMsg only ever sets it while RebuildOutput is
-	// non-empty, but a later StaleStatusMsg can still empty RebuildOutput
-	// out from under an already-open pane — the pane just renders blank
-	// rather than closing itself.
+	// RebuildStatus.Output in full — its only consumer (issue #1128).
+	// RebuildOutputOpenMsg only ever sets it while RebuildStatus.Output is
+	// non-empty, but a later StaleStatusMsg can still empty it out from
+	// under an already-open pane — the pane just renders blank rather than
+	// closing itself.
 	ShowRebuildOutput bool
 	// RebuildOutputOffset is the rebuild-output pane's scroll position — the
 	// index of its first visible line, the pane's analogue of DrillInState's
@@ -427,16 +410,11 @@ func Update(m Model, msg Msg) Model {
 		m.Cap = msg.Cap
 		m.Live = msg.Live
 	case StaleStatusMsg:
-		m.Stale = msg.Stale
-		m.StaleMessage = msg.Message
-		m.Rebuilding = msg.Rebuilding
-		m.RebuildErr = msg.RebuildErr
-		m.RebuildOutput = msg.RebuildOutput
-		m.BranchSwitchNotice = msg.BranchSwitchNotice
+		m.RebuildStatus = msg.RebuildStatus
 	case OrphanRecoveryMsg:
 		m.OrphanRecoveryErr = msg.Err
 	case RebuildOutputOpenMsg:
-		if m.RebuildOutput != "" {
+		if m.RebuildStatus.Output != "" {
 			m.ShowRebuildOutput = true
 		}
 	case RebuildOutputCloseMsg:
@@ -508,7 +486,7 @@ func Update(m Model, msg Msg) Model {
 	}
 
 	if m.ShowRebuildOutput {
-		lines := strings.Count(m.RebuildOutput, "\n") + 1
+		lines := strings.Count(m.RebuildStatus.Output, "\n") + 1
 		vp := Viewport{offset: m.RebuildOutputOffset}
 		vp.Scroll(0, lines)
 		vp.SetHeight(m.Height - headerFooterLines)
