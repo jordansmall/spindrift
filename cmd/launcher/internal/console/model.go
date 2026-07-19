@@ -92,6 +92,15 @@ type Model struct {
 	// pickChordTimeout resolves it to a single-issue pick instead — rendered
 	// as a visible hint so the wait isn't silent (issue #835).
 	PendingPick bool
+	// PendingG is whether a lone "g" is waiting on the "gg" leader window,
+	// awaiting a trailing "g" (jump-to-first-row) before the gChordTimeout
+	// resolves it to a no-op cancel instead — the g-leader mechanism issue
+	// #1628 introduces, modeled on PendingPick/pickChordTimeout above but
+	// living on Model (rather than pa's pick-specific handling) so later
+	// panes can reuse the same leader. Unlike PendingPick, a non-"g" key
+	// cancels without consuming that key — it still gets its own normal
+	// handling (issue #1628 AC).
+	PendingG bool
 	// QueueEnterNotice is a one-shot, human-readable message rendered after
 	// Enter is a no-op on a focused work-queue row lacking a Transcript
 	// (queued/claiming/held/dissolved, per hasTranscript) — empty otherwise.
@@ -304,6 +313,10 @@ func Update(m Model, msg Msg) Model {
 		m.PendingPick = true
 	case PickResolvedMsg:
 		m.PendingPick = false
+	case GPendingMsg:
+		m.PendingG = true
+	case GResolvedMsg:
+		m.PendingG = false
 	case QueueEnterNoticedMsg:
 		m.QueueEnterNotice = "no transcript to show"
 	case QueueEnterNoticeClearedMsg:
@@ -483,6 +496,11 @@ func Update(m Model, msg Msg) Model {
 		}
 	case CursorMoveMsg:
 		m.Cursor += msg.Delta
+	case CursorJumpToFirstMsg:
+		m.Cursor = 0
+		m.Offset = 0
+	case CursorJumpToLastMsg:
+		m.Cursor = sectionRowCount(m, m.ActiveSection)
 	case HelpToggleMsg:
 		m.ShowHelp = !m.ShowHelp
 	case FilterEditStartMsg:
@@ -509,13 +527,16 @@ func Update(m Model, msg Msg) Model {
 	total := sectionRowCount(m, m.ActiveSection)
 	m.Cursor = clampCursor(m.Cursor, total)
 	m.Offset = clampCursor(m.Offset, total)
-	if _, ok := msg.(CursorMoveMsg); ok {
+	switch msg.(type) {
+	case CursorMoveMsg, CursorJumpToLastMsg:
 		// height is set directly rather than through SetHeight: backlog/queue
 		// pgup/pgdown deliberately leaves Offset non-page-capped (issue
 		// #1060, tracked separately as #1053), and SetHeight's clamp-on-
 		// shrink would otherwise re-cap an Offset a prior ScrollMsg left past
 		// the fold the moment the cursor next moves — see renderTable's own
-		// reasoning for the same thing.
+		// reasoning for the same thing. CursorJumpToLastMsg ("G") shares this
+		// drag-into-view follow, not CursorJumpToFirstMsg ("gg"), which sets
+		// Offset to 0 directly per its own AC (issue #1628).
 		vp := Viewport{cursor: m.Cursor, offset: m.Offset, height: columnItemBudget(bodyBudget(m))}
 		vp.MoveCursor(0, total)
 		m.Offset = vp.offset
