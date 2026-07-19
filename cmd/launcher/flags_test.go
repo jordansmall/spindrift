@@ -294,6 +294,27 @@ func TestPrintSubcommands_ConsoleFirst(t *testing.T) {
 	}
 }
 
+// TestPrintSubcommands_ExactOutput pins the rendered subcommand listing
+// byte-for-byte so a future subcommandRegistry-vs-format change (e.g. the
+// column-width constant in printSubcommands) can't silently misalign the
+// output the way a hand-picked width once did (issue #1575 review).
+func TestPrintSubcommands_ExactOutput(t *testing.T) {
+	want := "Subcommands:\n" +
+		"  console                                   browse the open backlog interactively (read-only)\n" +
+		"  dispatch [--no-build] [--yes] [issue...]  dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)\n" +
+		"  research [--no-build] [--yes] [issue...]  advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes\n" +
+		"  preview [issue...]                        dry-run: show what dispatch would pick up, in order\n" +
+		"  build                                     realize the agent image without running any agent\n" +
+		"  recover <issue>                           run the merge gate for a single issue\n" +
+		"  doctor                                    check forge credentials, repository connectivity, and label presence (triage fatal, research advisory)\n"
+
+	var buf bytes.Buffer
+	printSubcommands(&buf)
+	if got := buf.String(); got != want {
+		t.Errorf("printSubcommands output =\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestPrintHelp_ShowsResearchSubcommand verifies the research dispatch kind
 // (ADR 0022) is discoverable beside dispatch, not buried in a flag doc.
 func TestPrintHelp_ShowsResearchSubcommand(t *testing.T) {
