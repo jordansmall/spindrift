@@ -269,6 +269,96 @@ func TestTea_CursorKeys_MoveHighlightedRow(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_GKey_JumpsToLastRow verifies "G" moves the cursor marker straight
+// to the backlog's last row, scrolling it into view (issue #1628 AC1).
+func TestTea_GKey_JumpsToLastRow(t *testing.T) {
+	f := forge.NewFake()
+	for i := 0; i < 50; i++ {
+		f.SetIssue(forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i), State: forge.IssueOpen})
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10))
+	waitForOutput(t, tm, "> #0")
+
+	sendKey(tm, "G")
+	waitForOutput(t, tm, "> "+rowNumberCell("49"))
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_ggChord_JumpsToFirstRow verifies a lone "g" followed by a second
+// "g" moves the cursor marker back to the first row and resets the scroll
+// offset, from a cursor already scrolled well down the list (issue #1628
+// AC2).
+func TestTea_ggChord_JumpsToFirstRow(t *testing.T) {
+	f := forge.NewFake()
+	for i := 0; i < 50; i++ {
+		f.SetIssue(forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i), State: forge.IssueOpen})
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10))
+	waitForOutput(t, tm, "> #0")
+
+	sendKey(tm, "G")
+	waitForOutput(t, tm, "> "+rowNumberCell("49"))
+
+	sendKey(tm, "g")
+	sendKey(tm, "g")
+	waitForOutput(t, tm, "> "+rowNumberCell("0"))
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_gLeader_NonGKey_CancelsAndStillActsNormally verifies a lone "g"
+// followed by any other key cancels the pending leader without consuming
+// that key — unlike the "pa" chord, which resolves to a pick, the g-leader's
+// AC requires the second key's own binding to still apply (issue #1628 AC).
+func TestTea_gLeader_NonGKey_CancelsAndStillActsNormally(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "2", Title: "second", State: forge.IssueOpen})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "> #1")
+
+	sendKey(tm, "g")
+	sendKey(tm, "j") // not "g" — cancels the leader, then still moves the cursor down
+	waitForOutput(t, tm, "> #2")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.PendingG {
+		t.Errorf("PendingG = true after a non-g key, want false")
+	}
+}
+
+// TestTea_gLeader_Timeout_CancelsPendingG verifies a lone "g" left
+// unanswered cancels the pending leader once the 200ms window times out —
+// mirroring TestTea_PickKey_Timeout_ClearsPendingIndicator for the "gg"
+// chord (issue #1628 AC).
+func TestTea_gLeader_Timeout_CancelsPendingG(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "> #1")
+
+	sendKey(tm, "g")
+	time.Sleep(gChordTimeout + 50*time.Millisecond)
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.PendingG {
+		t.Errorf("PendingG = true after the leader window timed out, want false")
+	}
+}
+
 // TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor verifies pgdown/
 // pgup move the focused backlog column's viewport directly, independent of
 // the cursor, revealing and restoring rows past the fold, by exactly one
