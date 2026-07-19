@@ -929,6 +929,84 @@ func TestTea_FocusKeys_MoveBetweenListAndDockedSidebar(t *testing.T) {
 	}
 }
 
+// TestTea_SidebarKey_ClosesFromDockedListFocus verifies both "esc" and "x"
+// close a docked sidebar even when keyboard focus is on the list — the
+// key-routing guard in handleKey only ever reached handleSidebarKey's
+// close case when Focus was on the sidebar, so a docked sidebar with focus
+// moved back to the list ("h") could not be dismissed without first
+// pressing "l" to refocus it (issue #1582).
+func TestTea_SidebarKey_ClosesFromDockedListFocus(t *testing.T) {
+	for _, key := range []string{"esc", "x"} {
+		t.Run(key, func(t *testing.T) {
+			f := forge.NewFake()
+			f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+			dir := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+			if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			launch := newTestLauncher(t, f)
+			launch.Queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+			tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
+			waitForOutput(t, tm, "fix the thing")
+
+			sendKey(tm, "2")
+			waitForOutput(t, tm, "running")
+			sendKey(tm, "enter")
+			waitForOutput(t, tm, "activity #42")
+
+			sendKey(tm, "h") // move focus back to the list, sidebar stays docked open
+			sendKey(tm, key)
+
+			sendKey(tm, "q")
+			waitForOutput(t, tm, "quit with live Dispatches")
+			sendKey(tm, "d")
+			waitFinished(t, tm)
+
+			fm := tm.FinalModel(t).(teaModel)
+			if fm.m.Sidebar != nil {
+				t.Errorf("Sidebar = %+v, want nil — %q from docked list focus must close it", fm.m.Sidebar, key)
+			}
+			if fm.m.Focus != FocusList {
+				t.Errorf("Focus = %v, want FocusList after close", fm.m.Focus)
+			}
+		})
+	}
+}
+
+// TestTea_SidebarKey_NoSidebarListKeysStillNoOp verifies "x" and "esc" on the
+// list remain a no-op when no sidebar is open — the new close case in the
+// list handler only fires when Model.Sidebar is non-nil (issue #1582 AC2).
+func TestTea_SidebarKey_NoSidebarListKeysStillNoOp(t *testing.T) {
+	for _, key := range []string{"esc", "x"} {
+		t.Run(key, func(t *testing.T) {
+			f := forge.NewFake()
+			f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+			tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 24))
+			waitForOutput(t, tm, "fix the thing")
+
+			sendKey(tm, key)
+
+			sendKey(tm, "q")
+			waitFinished(t, tm)
+
+			fm := tm.FinalModel(t).(teaModel)
+			if fm.m.Sidebar != nil {
+				t.Errorf("Sidebar = %+v, want nil — %q must stay a no-op with no sidebar open", fm.m.Sidebar, key)
+			}
+			if fm.m.Focus != FocusList {
+				t.Errorf("Focus = %v, want FocusList unchanged", fm.m.Focus)
+			}
+		})
+	}
+}
+
 // TestTea_EnterKey_OnStaticRow_OpensSidebar verifies Enter opens the sidebar
 // for a Settled, Terminated, or Failed pick — the static case with nothing
 // left to tail, still shown from its final on-disk logs (#1501 AC5).
