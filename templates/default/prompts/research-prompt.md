@@ -59,19 +59,17 @@ issue, never promote it to dispatchable. Comments only.
 
 # OUTCOME
 
-Once the comment is posted, print exactly one line as your final output:
+Once the comment is posted, print exactly one line as your final output —
+raw plain text, not wrapped in backticks, a code fence, or any other
+markdown formatting:
 
-```
 SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale>
-```
 
 This must be the literal final message — nothing after it, no prose summary.
 `landing` is the URL of the comment you just posted (`gh issue comment`
 prints it). `status` carries the verdict, not a work-style ready/blocked.
 
 If you cannot reach a verdict, or the comment cannot be posted, use `blocked`
-as the escape hatch instead:
+as the escape hatch instead — same raw plain text requirement:
 
-```
 SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=none status=blocked note=<short reason>
-```

@@ -136,6 +136,24 @@ in
         touch $out
       '';
 
+  # The #1582 dogfood run printed SPINDRIFT_OUTCOME backtick-wrapped, and the
+  # extractor's anchored grep missed it -- the contract only ever *showed* the
+  # line inside a fenced example, never told the driver its own output must be
+  # raw text (issue #1612). Pin the explicit instruction adjacent to "print
+  # exactly one line as your final output" so a future edit can't drop it or
+  # relocate it away from that instruction. -z/-P with the (?s) modifier lets
+  # "." span the line break the wording wraps across, so the check still
+  # matches regardless of exactly where the prose wraps. The {0,60} window is
+  # sized for "and stop —"/"—" separators plus one wrapped line (the widest
+  # gap the current wording has) -- widen it if a future rewrap pushes the
+  # phrase further from the instruction.
+  mkharness-prompt-outcome-contract-raw-text =
+    pkgs.runCommand "mkharness-prompt-outcome-contract-raw-text" { }
+      ''
+        grep -Pzoq '(?is)final output.{0,60}raw plain text' ${batsHarness.outcomeContractFile}
+        touch $out
+      '';
+
   # fix-prompt.md's default template carries only its fix-specific preamble
   # (issue #455): the rendered prompt must still gain the COMMS, CHECK/COMMIT,
   # and outcome-contract blocks, each exactly once, mirroring the issue
@@ -326,6 +344,15 @@ in
           echo "expected every SPINDRIFT_OUTCOME line to carry landing=, $missing did not" >&2
           exit 1
         }
+        touch $out
+      '';
+
+  # Same raw-text pin as mkharness-prompt-outcome-contract-raw-text, for the
+  # research kind's own contract (issue #1612).
+  mkharness-prompt-research-outcome-contract-raw-text =
+    pkgs.runCommand "mkharness-prompt-research-outcome-contract-raw-text" { }
+      ''
+        grep -Pzoq '(?is)final output.{0,60}raw plain text' ${batsHarness.researchOutcomeContractFile}
         touch $out
       '';
 
