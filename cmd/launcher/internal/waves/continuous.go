@@ -59,15 +59,10 @@ type FreshnessChecker func() (applicable, fresh bool, message string)
 // nextReady's does not render it: the only current Sources consumer,
 // writeBlockedMarker, fires for OriginClaimed only, a mode continuous
 // dispatch never uses (issue #662).
-func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool, claimed map[string]bool) (Issue, bool) {
+func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool) (Issue, bool) {
 	for _, iss := range issues {
-		var failed, unready []string
-		if !claimed[iss.Number] {
-			_, failed, unready = BlockerStatus(cfg, it, cf, iss.Number, edges)
-		}
+		_, failed, unready := BlockerStatus(cfg, it, cf, iss.Number, edges)
 		switch {
-		case claimed[iss.Number]:
-			fmt.Printf("    ~~ #%s already claimed this run; stale re-discovery, skipping\n", iss.Number)
 		case !cfg.IgnoreBlockers && depsOfFailed[iss.Number]:
 			// Own DepsOf call failed (#752, #1103) -- edges[iss.Number] is
 			// unreliable, not a confirmed zero-blocker result. Hold rather
@@ -87,6 +82,23 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 		}
 	}
 	return Issue{}, false
+}
+
+// dropClaimed filters a refill's discover result against the in-run claimed
+// set before nextReady scans it (issue #1646). GitHub's search-backed issue
+// listing is eventually consistent, so a refill soon after a claim can still
+// see the just-claimed issue as dispatchable; dropping it here rather than
+// inside nextReady's loop keeps the no-double-dispatch guarantee intact
+// while avoiding a per-issue skip line every refill re-walks — with N slots
+// claimed that line would otherwise repeat O(N^2) times over a run.
+func dropClaimed(issues []Issue, claimed map[string]bool) []Issue {
+	unclaimed := make([]Issue, 0, len(issues))
+	for _, iss := range issues {
+		if !claimed[iss.Number] {
+			unclaimed = append(unclaimed, iss)
+		}
+	}
+	return unclaimed
 }
 
 // RunContinuous runs the opt-in slot-refill dispatch mode (#527): it fills
@@ -176,7 +188,8 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			}
 		}
 		checkOverlap := waveOverlapCheck(cfg, it, cf)
-		iss, ok := nextReady(cfg, it, cf, checkOverlap, issues, edges, sources, failed, claimed)
+		unclaimed := dropClaimed(issues, claimed)
+		iss, ok := nextReady(cfg, it, cf, checkOverlap, unclaimed, edges, sources, failed)
 		if !ok {
 			return false
 		}
