@@ -301,6 +301,19 @@ func TestUpdate_DogfoodNoticeMsg_SetsLive(t *testing.T) {
 	}
 }
 
+// TestFormatActivityLine_RendersTextOnly verifies the Activity feed no
+// longer prefixes a record with a rendered timestamp: ActivityFeed's only
+// per-record clock is the pass log's on-disk mtime, which advances to ~now
+// on every refresh rather than reflecting when the record actually
+// happened, so a precise-looking HH:MM:SS prefix would be misleading (#1584).
+func TestFormatActivityLine_RendersTextOnly(t *testing.T) {
+	got := formatActivityLine(ActivityLine{Text: "#42 · hi"})
+	want := "#42 · hi"
+	if got != want {
+		t.Errorf("formatActivityLine() = %q, want %q (no timestamp prefix)", got, want)
+	}
+}
+
 // TestUpdate_SidebarLoadedMsg_OpensSidebar_ActivityDefault verifies a
 // SidebarLoadedMsg installs the loaded Activity feed and Transcript content
 // on Model and focuses the sidebar, with the Activity feed as the default

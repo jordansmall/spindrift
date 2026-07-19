@@ -14,7 +14,6 @@ import (
 // ActivityLine is one distinct emitted status line of a Dispatch's Activity
 // feed (ADR 0030).
 type ActivityLine struct {
-	Time time.Time
 	Text string
 }
 
@@ -23,14 +22,10 @@ type ActivityLine struct {
 // against the same latest pass log (#647 AC2) -- and returns the whole
 // ordered sequence of status lines it emitted, rather than just the last one.
 // Consecutive identical lines collapse to one entry, so the feed reads as one
-// line per distinct Driver step (#1501 AC1). Every returned line carries the
-// same Time: the pass log's on-disk ModTime as this call observed it -- the
-// raw stream-json carries no per-event timestamp of its own, so the file's
-// mtime is the coarsest-but-real signal available without fabricating one.
-// Returns nil when no log exists yet for number (claimed
-// but not yet launched) or when the log can't be read or parsed -- the same
-// graceful-empty contract RunningHeartbeat uses, rather than an error every
-// caller must handle.
+// line per distinct Driver step (#1501 AC1). Returns nil when no log exists
+// yet for number (claimed but not yet launched) or when the log can't be
+// read or parsed -- the same graceful-empty contract RunningHeartbeat uses,
+// rather than an error every caller must handle.
 func ActivityFeed(drv driver.Driver, pwd, number string) []ActivityLine {
 	if drv == nil {
 		return nil
@@ -40,10 +35,6 @@ func ActivityFeed(drv driver.Driver, pwd, number string) []ActivityLine {
 		return nil
 	}
 	path := passes[len(passes)-1].Path
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil
-	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
@@ -53,7 +44,7 @@ func ActivityFeed(drv driver.Driver, pwd, number string) []ActivityLine {
 	if _, err := w.Write(data); err != nil {
 		return nil
 	}
-	return collapseActivityLines(buf.String(), info.ModTime())
+	return collapseActivityLines(buf.String())
 }
 
 // collapseActivityLines splits s on newlines, drops a trailing empty line,
@@ -65,7 +56,7 @@ func ActivityFeed(drv driver.Driver, pwd, number string) []ActivityLine {
 // one line per parsed event, not per distinct step, so two events that
 // narrate the same text back-to-back would otherwise duplicate the same
 // line in the feed.
-func collapseActivityLines(s string, t time.Time) []ActivityLine {
+func collapseActivityLines(s string) []ActivityLine {
 	s = strings.TrimRight(s, "\n")
 	if s == "" {
 		return nil
@@ -78,7 +69,7 @@ func collapseActivityLines(s string, t time.Time) []ActivityLine {
 		if !first && line == last {
 			continue
 		}
-		out = append(out, ActivityLine{Time: t, Text: line})
+		out = append(out, ActivityLine{Text: line})
 		last = line
 		first = false
 	}
@@ -96,7 +87,7 @@ func activityEqual(a, b []ActivityLine) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].Text != b[i].Text || !a[i].Time.Equal(b[i].Time) {
+		if a[i].Text != b[i].Text {
 			return false
 		}
 	}
