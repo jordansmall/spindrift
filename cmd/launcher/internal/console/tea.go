@@ -313,6 +313,9 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		t.m = Update(t.m, FilterEditStartMsg{})
 	case "enter":
 		if t.m.ActiveSection == SectionBacklog {
+			if iss, ok := t.highlightedIssue(); ok && t.m.IsOrphan(iss.Number) {
+				return t, openSidebarCmd(t.launch, t.pwd, iss.Number)
+			}
 			t = t.pickHighlighted()
 			return t, nil
 		}

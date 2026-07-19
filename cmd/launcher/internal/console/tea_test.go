@@ -2931,6 +2931,75 @@ func TestTea_Init_DetectsOrphanedIssuesWithoutAdopting(t *testing.T) {
 	}
 }
 
+// TestTea_EnterOnOrphanRow_OpensSidebarReadOnly verifies pressing Enter on a
+// Backlog row flagged as an orphan (issue #1619) opens the same live-tail
+// sidebar a session-launched Dispatch gets, loaded from that issue's local
+// pass logs, instead of picking the issue onto the operator's queue — and
+// that opening it never calls RecoverFn, since drill-in on an orphan row is
+// read-only end to end (issue #1621).
+func TestTea_EnterOnOrphanRow_OpensSidebarReadOnly(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	// RunningNames flags #42 as a locally-running orphan sandbox at startup
+	// detection (issue #1619) — a manually-seeded OrphanNums would just be
+	// overwritten by the real orphanDetectCmd Init() fires, same as any
+	// other startup detection result.
+	fr := runner.NewFake()
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	recovered := make(chan string, 1)
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		Settle:    settle.NewFake(),
+		Queue:     NewQueue(),
+		RecoverFn: func(num string) error {
+			recovered <- num
+			return nil
+		},
+	}
+	t.Cleanup(launch.Wait)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "hi")
+
+	select {
+	case num := <-recovered:
+		t.Errorf("RecoverFn called with %q, want drill-in to never adopt", num)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	final := tm.FinalModel(t).(teaModel)
+	if len(final.m.Picks) != 0 {
+		t.Errorf("Picks = %v, want Enter on an orphan row to never queue a pick", final.m.Picks)
+	}
+}
+
 // TestOrphanDetectCmd_ReturnsDetectedNumbers verifies orphanDetectCmd reports
 // every issue OrphanedIssues found running through OrphanDetectedMsg, with
 // no RecoverFn call of its own (issue #1619).
