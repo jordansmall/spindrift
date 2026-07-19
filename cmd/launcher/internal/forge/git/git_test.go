@@ -1,6 +1,8 @@
 package git
 
 import (
+	"context"
+	"errors"
 	"net"
 	"net/url"
 	"os"
@@ -479,5 +481,50 @@ func TestGitClient_Probe_TimesOutOnHangingRemote(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("Probe error leaks embedded credential: %v", err)
+	}
+}
+
+// newBareRemoteWithHangingPush is newBareRemoteWithBranches plus a
+// pre-receive hook that accepts the push connection and then sleeps
+// forever, simulating a remote that hangs partway through a push instead of
+// a hung clone (hangingRemoteURL's scenario) or a hung pre-connect handshake.
+// Local pushes still run server-side hooks, so this reproduces a hang on any
+// gitClient operation that pushes without needing a real network listener.
+func newBareRemoteWithHangingPush(t *testing.T) string {
+	t.Helper()
+	bare := newBareRemoteWithBranches(t)
+	hook := filepath.Join(bare, "hooks", "pre-receive")
+	gitWriteFile(t, hook, "#!/bin/sh\nsleep 999\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatalf("chmod pre-receive hook: %v", err)
+	}
+	return bare
+}
+
+// TestGitClient_Merge_TimesOutOnHangingPush verifies that Merge bounds its
+// post-clone git subprocesses (checkout, fetch, merge, push) with a timeout:
+// against a remote whose push hangs server-side, Merge must still return in
+// bounded time with a distinguishable timeout error instead of blocking on
+// the push forever.
+func TestGitClient_Merge_TimesOutOnHangingPush(t *testing.T) {
+	bare := newBareRemoteWithHangingPush(t)
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-",
+		WithOpTimeout(200*time.Millisecond))
+
+	start := time.Now()
+	err := g.Merge("agent/issue-1")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Merge against hanging push: want error, got nil")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("Merge took %s to return, want it bounded by the configured op timeout", elapsed)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("Merge error = %q, want it to mention timing out", err.Error())
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Merge error = %v, want errors.Is(err, context.DeadlineExceeded)", err)
 	}
 }

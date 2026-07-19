@@ -107,7 +107,7 @@ func validateGitRef(ref string) error {
 // the caller must defer. Shared scaffold for Merge and Rebase. The clone is
 // bounded by timeout so a remote that hangs mid-handshake fails instead of
 // blocking cloneToTemp forever.
-func cloneToTemp(remoteURL, prefix string, timeout time.Duration) (dir string, gitIn func(args ...string) *exec.Cmd, cleanup func(), err error) {
+func cloneToTemp(remoteURL, prefix string, timeout time.Duration) (dir string, gitIn func(ctx context.Context, args ...string) *exec.Cmd, cleanup func(), err error) {
 	dir, err = os.MkdirTemp("", prefix)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("mkdtemp: %w", err)
@@ -123,21 +123,37 @@ func cloneToTemp(remoteURL, prefix string, timeout time.Duration) (dir string, g
 		}
 		return "", nil, nil, fmt.Errorf("git clone %s: %w", forge.RedactURLCredentials(remoteURL), err)
 	}
-	gitIn = func(args ...string) *exec.Cmd {
-		return exec.Command("git", append([]string{"-C", dir}, args...)...)
+	gitIn = func(ctx context.Context, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	}
 	return dir, gitIn, cleanup, nil
+}
+
+// runGit runs `git <args...>` against gitIn's clone, bounded by g.opTimeout,
+// and reports a timeout distinctly from any other git failure — the same
+// hung-remote failure mode cloneToTemp already guards the clone itself
+// against.
+func (g *gitClient) runGit(gitIn func(ctx context.Context, args ...string) *exec.Cmd, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), g.opTimeout)
+	defer cancel()
+	if err := gitIn(ctx, args...).Run(); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("git %s: timed out after %s: %w", strings.Join(args, " "), g.opTimeout, ctx.Err())
+		}
+		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return nil
 }
 
 // setCommitIdentity configures the launcher-supplied commit identity on a
 // throwaway clone so Merge/Rebase don't depend on ambient host git config,
 // which may be unset on a bare CI runner.
-func (g *gitClient) setCommitIdentity(gitIn func(args ...string) *exec.Cmd) error {
-	if err := gitIn("config", "user.name", g.userName).Run(); err != nil {
-		return fmt.Errorf("git config user.name: %w", err)
+func (g *gitClient) setCommitIdentity(gitIn func(ctx context.Context, args ...string) *exec.Cmd) error {
+	if err := g.runGit(gitIn, "config", "user.name", g.userName); err != nil {
+		return err
 	}
-	if err := gitIn("config", "user.email", g.userEmail).Run(); err != nil {
-		return fmt.Errorf("git config user.email: %w", err)
+	if err := g.runGit(gitIn, "config", "user.email", g.userEmail); err != nil {
+		return err
 	}
 	return nil
 }
@@ -160,27 +176,30 @@ func (g *gitClient) Merge(branch string) error {
 	if err := g.setCommitIdentity(gitIn); err != nil {
 		return err
 	}
-	if err := gitIn("checkout", g.baseBranch).Run(); err != nil {
-		return fmt.Errorf("git checkout %s: %w", g.baseBranch, err)
+	if err := g.runGit(gitIn, "checkout", g.baseBranch); err != nil {
+		return err
 	}
-	if err := gitIn("fetch", "origin", branch).Run(); err != nil {
-		return fmt.Errorf("git fetch origin %s: %w", branch, err)
+	if err := g.runGit(gitIn, "fetch", "origin", branch); err != nil {
+		return err
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), g.opTimeout)
+	defer cancel()
 	var out bytes.Buffer
-	mergeCmd := gitIn("merge", "--no-ff", "FETCH_HEAD")
+	mergeCmd := gitIn(ctx, "merge", "--no-ff", "FETCH_HEAD")
 	mergeCmd.Stdout = &out
 	mergeCmd.Stderr = &out
 	if err := mergeCmd.Run(); err != nil {
-		_ = gitIn("merge", "--abort").Run()
+		_ = g.runGit(gitIn, "merge", "--abort")
 		if gitplumbing.IsMergeConflict(out.String()) {
 			return forge.ErrMergeConflict
 		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("git merge %s: timed out after %s: %w", branch, g.opTimeout, ctx.Err())
+		}
 		return fmt.Errorf("git merge %s: %w: %s", branch, err, forge.RedactURLCredentials(strings.TrimSpace(out.String())))
 	}
-	if err := gitIn("push", "origin", "HEAD:"+g.baseBranch).Run(); err != nil {
-		return fmt.Errorf("git push origin HEAD:%s: %w", g.baseBranch, err)
-	}
-	return nil
+	return g.runGit(gitIn, "push", "origin", "HEAD:"+g.baseBranch)
 }
 
 // Rebase rebases branch onto baseBranch and force-pushes it back to the
@@ -199,11 +218,11 @@ func (g *gitClient) Rebase(branch string) error {
 	if err := g.setCommitIdentity(gitIn); err != nil {
 		return err
 	}
-	if err := gitIn("checkout", branch).Run(); err != nil {
+	if err := gitIn(context.Background(), "checkout", branch).Run(); err != nil {
 		return fmt.Errorf("git checkout %s: %w", branch, err)
 	}
-	if err := gitIn("rebase", "origin/"+g.baseBranch).Run(); err != nil {
-		_ = gitIn("rebase", "--abort").Run()
+	if err := gitIn(context.Background(), "rebase", "origin/"+g.baseBranch).Run(); err != nil {
+		_ = gitIn(context.Background(), "rebase", "--abort").Run()
 		return forge.ErrMergeConflict
 	}
 	return gitplumbing.GitForcePush(dir)
