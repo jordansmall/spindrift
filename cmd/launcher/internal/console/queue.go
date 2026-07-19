@@ -27,7 +27,7 @@ func NewQueue() *Queue {
 }
 
 // Add appends a queued pick, stamping QueuedAt to now — the single choke
-// point every pick lands through, so Age (syncQueue) always has a real
+// point every pick lands through, so Age (refreshPickDecorations) always has a real
 // source moment to format from (issue #1500).
 func (q *Queue) Add(p Pick) {
 	q.mu.Lock()

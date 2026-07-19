@@ -185,7 +185,7 @@ type Pick struct {
 	// #1500).
 	QueuedAt time.Time
 	// Age is QueuedAt's rendered age (e.g. "3m", "1h12m", "2d"), precomputed
-	// by syncQueue on every sync the same way Heartbeat is — View stays pure
+	// by refreshPickDecorations on every sync the same way Heartbeat is — View stays pure
 	// and never calls time.Now() itself. "" until the first sync populates
 	// it.
 	Age string

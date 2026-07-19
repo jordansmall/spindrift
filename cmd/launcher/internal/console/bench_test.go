@@ -165,7 +165,7 @@ func BenchmarkHeartbeatCache_CacheHit_LargeLog(b *testing.B) {
 // latency reduction with allocations eliminated entirely; alloc counts
 // are the invariant, ns/op and B/op vary by machine and Go version.
 func BenchmarkTryLaunch_EmptyQueue(b *testing.B) {
-	launch := &Launcher{Queue: NewQueue()}
+	launch := &Launcher{queue: NewQueue()}
 
 	b.ReportAllocs()
 	b.ResetTimer()

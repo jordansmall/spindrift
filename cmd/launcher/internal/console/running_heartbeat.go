@@ -40,7 +40,7 @@ type heartbeatCacheEntry struct {
 }
 
 // HeartbeatCache remembers each running pick's last-parsed heartbeat line,
-// keyed by pick number. syncQueue calls RunningHeartbeat on every tea.Msg —
+// keyed by pick number. refreshPickDecorations calls RunningHeartbeat on every tea.Msg —
 // every keypress, poll tick, and refresh signal, not just a fixed render
 // cadence — so most calls see the exact same on-disk log as last time. A
 // stat (size + mtime) that matches the cached entry skips the ReadFile and

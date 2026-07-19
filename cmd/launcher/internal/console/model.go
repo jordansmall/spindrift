@@ -43,7 +43,7 @@ type Model struct {
 	PendingTerminate string
 	// Cap and Live are the session's live parallelism cap and current live
 	// count (issue #653, ADR 0023) — zero in a launch-less session, since
-	// syncQueue never sends a CapMsg when there is no Launcher to read them
+	// refreshPickDecorations never sends a CapMsg when there is no Launcher to read them
 	// from.
 	Cap, Live int
 	// RebuildStatus is the launcher's live image-freshness/rebuild state —
@@ -420,7 +420,7 @@ func Update(m Model, msg Msg) Model {
 			// on only the latest pass log, so a fresh fix/conflict-resolve
 			// pass's feed can be shorter than the finished pass it follows)
 			// — content equality catches that pass rollover the same as an
-			// ordinary append, while still skipping syncQueue's frequent
+			// ordinary append, while still skipping refreshPickDecorations's frequent
 			// no-op refreshes (most calls, between actual writes) that
 			// would otherwise re-snap a Follow-ing operator's manual
 			// downward scroll (pgdown, which moves Offset without
