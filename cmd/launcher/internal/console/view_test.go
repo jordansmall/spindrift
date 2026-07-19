@@ -876,6 +876,24 @@ func TestView_ModeHelp_ListsCtrlFCtrlBAlongsidePageKeys(t *testing.T) {
 	}
 }
 
+// TestView_ModeHelp_ListsCtrlDCtrlUAlongsideHalfPageKeys verifies the help
+// overlay lists the vim half-page chords ctrl+d/ctrl+u for each pane — the
+// list body, the sidebar, and the rebuild-output pane (issue #1648 AC).
+func TestView_ModeHelp_ListsCtrlDCtrlUAlongsideHalfPageKeys(t *testing.T) {
+	m := Update(NewModel(), HelpToggleMsg{})
+
+	out := View(m)
+	if !strings.Contains(out, "ctrl+d/ctrl+u  jump a half page of the active Section's live") {
+		t.Errorf("View() = %q, want the list body entry to list ctrl+d/ctrl+u", out)
+	}
+	if !strings.Contains(out, "ctrl+d/ctrl+u  scroll the sidebar a half page") {
+		t.Errorf("View() = %q, want the sidebar entry to list ctrl+d/ctrl+u", out)
+	}
+	if !strings.Contains(out, "ctrl+d/ctrl+u scroll it a half page") {
+		t.Errorf("View() = %q, want the rebuild-output entry to list ctrl+d/ctrl+u", out)
+	}
+}
+
 // TestView_ModeHelp_ListsRebuildOutputJumpKeys verifies the help overlay
 // documents "G" and "gg" for the rebuild-output pane, alongside the existing
 // "o"/j/k/pgup/pgdown entry (issue #1630 AC).

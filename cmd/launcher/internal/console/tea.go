@@ -381,6 +381,12 @@ func (t teaModel) handleListKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		t.m = Update(t.m, ScrollMsg{Delta: sectionPageSize(t.m)})
 	case "pgup", "ctrl+b":
 		t.m = Update(t.m, ScrollMsg{Delta: -sectionPageSize(t.m)})
+	case "ctrl+d":
+		// Integer division rounds down: a one-row page yields Delta 0,
+		// a no-op — fine under the "roughly half" spec (issue #1648).
+		t.m = Update(t.m, ScrollMsg{Delta: sectionPageSize(t.m) / 2})
+	case "ctrl+u":
+		t.m = Update(t.m, ScrollMsg{Delta: -(sectionPageSize(t.m) / 2)})
 	case "/":
 		t.m = Update(t.m, FilterEditStartMsg{})
 	case "enter":
@@ -496,6 +502,10 @@ func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return Update(t.m, RebuildOutputScrollMsg{Delta: fixedPaneScrollDelta}), nil
 	case "pgup", "ctrl+b":
 		return Update(t.m, RebuildOutputScrollMsg{Delta: -fixedPaneScrollDelta}), nil
+	case "ctrl+d":
+		return Update(t.m, RebuildOutputScrollMsg{Delta: fixedPaneScrollDelta / 2}), nil
+	case "ctrl+u":
+		return Update(t.m, RebuildOutputScrollMsg{Delta: -(fixedPaneScrollDelta / 2)}), nil
 	case "G":
 		return Update(t.m, RebuildOutputJumpToLastMsg{}), nil
 	case "g":
@@ -590,6 +600,10 @@ func (t teaModel) handleSidebarKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return Update(t.m, SidebarScrollMsg{Delta: fixedPaneScrollDelta}), nil
 	case "pgup", "ctrl+b":
 		return Update(t.m, SidebarScrollMsg{Delta: -fixedPaneScrollDelta}), nil
+	case "ctrl+d":
+		return Update(t.m, SidebarScrollMsg{Delta: fixedPaneScrollDelta / 2}), nil
+	case "ctrl+u":
+		return Update(t.m, SidebarScrollMsg{Delta: -(fixedPaneScrollDelta / 2)}), nil
 	case "G", "end":
 		return Update(t.m, SidebarJumpToEndMsg{}), nil
 	case "g":
