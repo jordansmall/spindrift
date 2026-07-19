@@ -125,9 +125,12 @@ in
     grep -q 'Fix box for GitHub issue' \
       ${promptHarness.agentFiles}/agent/prompts/fix-prompt.md
     # fix-prompt.md's fix-specific preamble is baked as-is, but the shared
-    # WATCH CI block only ever reaches it via injection (issue #455) — proof
-    # the baked image, not just the eval-only promptDir, carries it.
-    grep -q 'statusCheckRollup' \
+    # outcome contract (LAND THE CHANGE onward) only ever reaches it via
+    # injection (issue #455) — proof the baked image, not just the eval-only
+    # promptDir, carries it. `gh pr create --draft` is OPEN A PULL REQUEST's
+    # own text, distinct from fix-prompt.md's hand-written preamble (which
+    # explicitly skips `gh pr create` on a fix pass).
+    grep -q 'gh pr create --draft' \
       ${promptHarness.agentFiles}/agent/prompts/fix-prompt.md
     touch $out
   '';

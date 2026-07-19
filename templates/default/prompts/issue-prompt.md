@@ -76,12 +76,12 @@ log the fallback. Go module without a devShell:
 
 Run every check or build gate in the foreground and block on it yourself —
 never background it (`&`, detached job, background task) and end your turn
-while it is still pending. Backgrounding a gate here is the same failure as
-backgrounding WATCH CI below: your turn ends before the gate finishes, no
-`SPINDRIFT_OUTCOME` line is ever printed, and the run is lost even when the
-underlying work was green. Wait for the gate to finish before moving on, and
-do not stop this run until a terminal `SPINDRIFT_OUTCOME` line (`status=ready`
-or `status=blocked`) has been printed.
+while it is still pending. Backgrounding a gate here means your turn ends
+before the gate finishes, no `SPINDRIFT_OUTCOME` line is ever printed, and
+the run is lost even when the underlying work was green. Wait for the gate
+to finish before moving on, and do not stop this run until a terminal
+`SPINDRIFT_OUTCOME` line (`status=ready` or `status=blocked`) has been
+printed.
 
 If you ever fall back to a background-and-poll pattern for a gate anyway,
 treat a vanished process as a failure, not as still-pending: a build that is
@@ -167,7 +167,7 @@ Check `$CODE_FORGE` (already in your environment — run `echo $CODE_FORGE` if
 unsure):
 
 **`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge
-gate): skip OPEN A PULL REQUEST and WATCH CI below entirely.
+gate): skip OPEN A PULL REQUEST below entirely.
 
 1. `git push --force-with-lease -u origin ${BRANCH}` (if not already pushed).
 2. Print exactly one line as your final output and stop — raw plain text, not
@@ -188,60 +188,20 @@ gate): skip OPEN A PULL REQUEST and WATCH CI below entirely.
 3. Body MUST contain `Closes #${ISSUE_NUMBER}`. Summarize what changed and flag
    anything a reviewer should know.
 
-The PR opens as a **draft**. CI still runs on it, but the draft bit is the
-readiness signal the entrypoint backstop and launcher trust as a mechanical
-"done" — it flips to ready only in OUTCOME below, immediately before the
-`status=ready` line.
-
-# WATCH CI
-
-After opening the PR, capture the URL that `gh pr create` prints and block
-until CI registers. Right after the PR is created the `statusCheckRollup`
-state is absent — treating that as green would merge before CI starts. Wait
-for the rollup to return any non-empty state:
-
-```
-# gh pr checks uses the check-runs REST endpoint which 403s under fine-grained
-# PATs. Use statusCheckRollup (GraphQL) instead — it works with fine-grained
-# tokens and aggregates both commit statuses and check-runs faithfully, so a
-# missing check reads as not-started rather than silently green.
-PR_URL=<the URL gh pr create printed, e.g. https://github.com/owner/repo/pull/42>
-GQL='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}'
-owner=$(echo "$PR_URL" | cut -d/ -f4)
-repo=$(echo "$PR_URL"  | cut -d/ -f5)
-num=$(echo "$PR_URL"   | cut -d/ -f7)
-until gh api graphql -f query="$GQL" -f owner="$owner" -f repo="$repo" \
-  -F number="$num" \
-  --jq '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state // ""' \
-  2>/dev/null | grep -q .; do sleep 10; done
-```
-
-Run this in the foreground and block on it yourself — never background it (`&`,
-detached job, background task). Backgrounding ends your turn before CI
-registers, the OUTCOME line is never printed, and the run is lost.
-
-If no check registers within a few minutes, do NOT emit `status=ready` — follow
-IF BLOCKED.
-
-Do NOT merge. The LAUNCHER (outside this container) owns the CI-green decision,
-the rebase-merge, and the complete-label swap. Stop once CI has registered.
+The PR opens as a **draft** and stays a **draft** — the launcher flips it to
+ready once CI reaches green, immediately before it merges (the launcher
+already gates on CI green itself, so there is nothing left for you to watch
+or confirm here). Do NOT merge and do NOT flip it yourself; the LAUNCHER
+(outside this container) owns the CI-green decision, the ready flip, the
+rebase-merge, and the complete-label swap.
 
 # OUTCOME
 
 (`CODE_FORGE=github` only — `CODE_FORGE=git` already printed its outcome line
 and stopped under LAND THE CHANGE above.)
 
-Once CI has registered, flip the PR out of draft:
-
-```
-gh pr ready <pr-url>
-```
-
-(On a fix pass the PR is already non-draft from the run this resumes — the
-command is a harmless no-op.)
-
-Then print exactly one line as your final output — raw plain text, not
-wrapped in backticks, a code fence, or any other markdown formatting:
+Print exactly one line as your final output — raw plain text, not wrapped in
+backticks, a code fence, or any other markdown formatting:
 
 SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=ready note=<short reason>
 
@@ -250,8 +210,10 @@ background task. The launcher parses this one line to learn your PR; if missing,
 the PR is never merged and the run is wasted. Grammar is validated by
 `cmd/launcher/internal/outcome` (`Parse`, `Line`, `LastInLog`).
 
-`status=ready` = branch pushed, PR open and out of draft, CI started.
-Do NOT run `gh issue edit ... --add-label ${COMPLETE_LABEL}` or `gh pr merge`.
+`status=ready` = branch pushed, PR open, left in draft. The launcher flips it
+to ready once CI reaches green, immediately before it merges.
+Do NOT run `gh pr ready`, `gh issue edit ... --add-label ${COMPLETE_LABEL}`,
+or `gh pr merge`.
 
 # IF BLOCKED
 
@@ -279,11 +241,10 @@ git diff origin/${BASE_BRANCH} -- '.github/workflows/'
 Then:
 
 1. Push what you have (or note if even that is impossible).
-2. Check whether a PR already exists on this branch
-   (`gh pr view --json isDraft,url`). If it does, convert it back to draft
-   (`gh pr ready <pr-url> --undo`) — a non-draft PR reads as a done,
-   mergeable result, and this run isn't one. If no PR exists yet, open one
-   as a draft instead (`--draft`).
+2. Check whether a PR already exists on this branch (`gh pr view --json url`).
+   If not, open one as a draft (`--draft`). If it does, leave it as-is — the
+   Driver never flips a PR to ready, so it is already draft and there is
+   nothing to revert.
 3. Leave the issue in-progress — do NOT close it.
 4. Comment on the issue with what's done and what remains:
    `gh issue comment ${ISSUE_NUMBER} --body "<what's done, what remains>"`.

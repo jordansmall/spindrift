@@ -99,16 +99,15 @@ setup() {
   grep -qi 'never hand-merge' "$prompt"
 }
 
-@test "WATCH CI section uses GraphQL statusCheckRollup not gh pr checks" {
-  # gh pr checks uses the check-runs REST endpoint which 403s under
-  # fine-grained PATs; the prompt must use statusCheckRollup (GraphQL).
-  # PROMPTS_DIR is exported by the nix check derivation; fall back to the
-  # source tree when running bats locally outside the nix harness.
+@test "issue prompt drops the Driver's own WATCH CI polling" {
+  # issue #1653: the launcher already gates on CI green (gateToGreen) before
+  # flipping the PR ready and merging (issue #1651) -- the Driver polling
+  # for CI registration too is a redundant LLM step the issue's own
+  # acceptance criteria call for dropping.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
-  ! grep -q 'until gh pr checks' "$prompt"
-  grep -q 'statusCheckRollup' "$prompt"
-  grep -qi 'fine-grained' "$prompt"
+  grep -q 'OPEN A PULL REQUEST' "$prompt"
+  ! grep -q '^# WATCH CI$' "$prompt"
 }
 
 @test "COMMS section establishes machine-log voice with human-prose carve-outs" {
@@ -235,7 +234,7 @@ setup() {
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   grep -q 'CODE_FORGE=git' "$prompt"
-  grep -q 'skip OPEN A PULL REQUEST and WATCH CI' "$prompt"
+  grep -q 'skip OPEN A PULL REQUEST below entirely' "$prompt"
   grep -qF 'landing=${BRANCH} status=ready' "$prompt"
   grep -q 'Do NOT run `gh pr create`' "$prompt"
 }
@@ -246,56 +245,45 @@ setup() {
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local section
-  section="$(sed -n '/^# OPEN A PULL REQUEST$/,/^# WATCH CI$/p' "$prompt")"
+  section="$(sed -n '/^# OPEN A PULL REQUEST$/,/^# OUTCOME$/p' "$prompt")"
   [ -n "$section" ]
   grep -q 'gh pr create --draft' <<<"$section"
 }
 
-@test "OUTCOME flips the PR out of draft before printing status=ready" {
-  # issue #1614: the PR only becomes a non-draft "done" signal at the exact
-  # moment the driver would print status=ready -- so the flip must land
-  # before that line, not after (a crash between them must not leave a
-  # ready-looking PR with no outcome line printed at all).
+@test "OUTCOME leaves the PR in draft and never flips it ready" {
+  # issue #1653: the launcher, not the Driver, owns the draft->ready flip
+  # (issue #1651) -- the Driver's OUTCOME step must print status=ready
+  # without ever calling `gh pr ready`.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local section
   section="$(sed -n '/^# OUTCOME$/,/^# IF BLOCKED$/p' "$prompt")"
   [ -n "$section" ]
-  grep -q 'gh pr ready' <<<"$section"
-  local ready_line outcome_line
-  ready_line="$(grep -n 'gh pr ready' <<<"$section" | head -1 | cut -d: -f1)"
-  outcome_line="$(grep -n 'status=ready' <<<"$section" | head -1 | cut -d: -f1)"
-  [ -n "$ready_line" ]
-  [ -n "$outcome_line" ]
-  [ "$ready_line" -lt "$outcome_line" ]
+  grep -q 'status=ready' <<<"$section"
+  # Anchored to a bare invocation line, not the prose forbidding it below.
+  ! grep -q '^gh pr ready' <<<"$section"
 }
 
-@test "IF BLOCKED converts an already-open PR back to draft before emitting status=blocked" {
-  # issue #1614: symmetric to the OUTCOME flip above -- a blocked run must
-  # not leave a non-draft PR looking like a done, mergeable result.
+@test "IF BLOCKED never reverts the PR to draft -- it is always already draft" {
+  # issue #1653: the Driver never flips a PR to ready (only the launcher
+  # does, at green -- issue #1651), so a blocked run has nothing to revert.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local section
   section="$(sed -n '/^# IF BLOCKED$/,$p' "$prompt")"
   [ -n "$section" ]
-  grep -q -- '--undo' <<<"$section"
-  local undo_line blocked_line
-  undo_line="$(grep -n -- '--undo' <<<"$section" | head -1 | cut -d: -f1)"
-  blocked_line="$(grep -n 'SPINDRIFT_OUTCOME.*status=blocked' <<<"$section" | head -1 | cut -d: -f1)"
-  [ -n "$undo_line" ]
-  [ -n "$blocked_line" ]
-  [ "$undo_line" -lt "$blocked_line" ]
+  grep -q 'SPINDRIFT_OUTCOME.*status=blocked' <<<"$section"
+  ! grep -q -- '--undo' <<<"$section"
 }
 
-@test "fix-prompt.md no longer tells a blocked fix pass to leave the PR as-is" {
-  # issue #1614: IF BLOCKED's old "open the PR as a draft" step (skipped on a
-  # fix pass, since the PR already exists) became a "convert the existing PR
-  # back to draft" step -- which DOES apply on a fix pass. fix-prompt.md's
-  # hand-written override bullet must not still tell the agent to leave a
-  # blocked fix pass's PR as-is, which would contradict the shared IF BLOCKED
-  # section it falls through to.
+@test "fix-prompt.md drops the draft-revert override -- nothing to revert" {
+  # issue #1653: the Driver never flips a PR to ready (only the launcher
+  # does, at green), so fix-prompt.md's hand-written override bullet must
+  # no longer tell a blocked fix pass to convert the PR back to draft --
+  # there's nothing to revert, it never left draft.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/fix-prompt.md"
   ! grep -qi 'leave the existing PR as-is' "$prompt"
-  grep -qi 'draft-revert' "$prompt"
+  grep -q 'do not run `gh pr create`' "$prompt"
+  ! grep -qi 'draft-revert' "$prompt"
 }
