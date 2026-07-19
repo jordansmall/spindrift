@@ -68,6 +68,11 @@ type Fake struct {
 	// PRFilesErr, if non-nil, is returned by every ListPRFiles call.
 	PRFilesErr error
 
+	// OpenPRForBranchErr, if non-nil, is returned by every OpenPRForBranch
+	// call (simulating a transient forge lookup failure, distinct from "no
+	// open PR yet").
+	OpenPRForBranchErr error
+
 	// TouchesOfErr, keyed by issue number, is returned by TouchesOf for that
 	// number instead of parsing its body. Per-number (not blanket, unlike
 	// PRFilesErr) because a single overlap-gate check calls TouchesOf for
@@ -442,6 +447,9 @@ func (f *Fake) Comment(num, body string) error {
 func (f *Fake) OpenPRForBranch(branch string) (PR, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.OpenPRForBranchErr != nil {
+		return PR{}, false, f.OpenPRForBranchErr
+	}
 	url, ok := f.branchPRs[branch]
 	if !ok {
 		return PR{}, false, nil
