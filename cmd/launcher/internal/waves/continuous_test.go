@@ -902,3 +902,122 @@ func TestRunContinuous_RefillHoldsDepsOfFailedIssue(t *testing.T) {
 		t.Errorf("issue 1 must NOT be cascade-failed on a DepsOf check failure; labels=%v", iss1.Labels)
 	}
 }
+
+// TestRunContinuous_CompletionDrainsAllFreedSlots verifies #1587: the
+// completing-Box refill trigger must drain every currently-free slot with
+// ready work, not launch at most one replacement. #1 and #2 complete while
+// #4/#5 are still invisible to discover, stranding two free slots; #3's
+// later completion reveals both -- a single refill() call there launches
+// only one, so this fails pre-fix and passes once the handler drains.
+func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+	c.MaxParallel = 3
+
+	fc := forge.NewFake(dispatchLabels(c))
+	for _, n := range []string{"1", "2", "3", "4", "5"} {
+		fc.SetIssue(forge.Issue{Number: n, Labels: []string{c.Label}})
+	}
+
+	var visMu sync.Mutex
+	visible := []string{"1", "2", "3"}
+	calls := make(chan struct{}, 100)
+	discover := func() ([]Issue, map[string][]string, Sources, map[string]bool, error) {
+		visMu.Lock()
+		nums := append([]string(nil), visible...)
+		visMu.Unlock()
+		out := make([]Issue, len(nums))
+		for i, n := range nums {
+			out[i] = Issue{Number: n, Title: "issue " + n}
+		}
+		calls <- struct{}{}
+		return out, map[string][]string{}, nil, nil, nil
+	}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	fr := runner.NewFake()
+	release3 := make(chan struct{})
+	release4 := make(chan struct{})
+	release5 := make(chan struct{})
+	started4 := make(chan struct{})
+	started5 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		switch box.Issue {
+		case "3":
+			<-release3
+		case "4":
+			close(started4)
+			<-release4
+		case "5":
+			close(started5)
+			<-release5
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	resultCh := make(chan error, 1)
+	go func() { resultCh <- RunContinuous(c, fc, fc, dir, f, s, discover, fresh) }()
+
+	drain := func(n int) {
+		t.Helper()
+		for i := 0; i < n; i++ {
+			select {
+			case <-calls:
+			case <-time.After(3 * time.Second):
+				t.Fatalf("timed out waiting for discover call %d/%d", i+1, n)
+			}
+		}
+	}
+
+	// Bootstrap drains discover three times, one per launch of #1, #2, #3.
+	// Its own terminating refill() attempt never reaches discover: with all
+	// three slots claimed, TryAcquire fails first, so that check is silent.
+	drain(3)
+
+	// #1 and #2 complete immediately (no RunFunc case blocks them). Their
+	// mu-serialized completion handlers each fire exactly one refill
+	// attempt (two more discover calls) while #4/#5 are still invisible,
+	// so both find only the already-claimed #1-#3 and strand their freed
+	// slot.
+	drain(2)
+
+	// The backlog becomes visible now that both stranded slots already
+	// exist. #3 is still holding the only running slot; releasing it is
+	// the sole remaining trigger that can ever revisit those two free
+	// slots.
+	visMu.Lock()
+	visible = []string{"1", "2", "3", "4", "5"}
+	visMu.Unlock()
+	close(release3)
+
+	select {
+	case <-started4:
+	case <-time.After(2 * time.Second):
+		t.Fatal("issue #4 was never dispatched after the backlog became visible")
+	}
+	select {
+	case <-started5:
+	case <-time.After(2 * time.Second):
+		t.Fatal("issue #5 was never dispatched -- completion refill filled only one freed slot instead of draining all of them, so the pool never climbed back to MAX_PARALLEL")
+	}
+
+	close(release4)
+	close(release5)
+
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatalf("RunContinuous: got %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return")
+	}
+
+	if len(fr.RunCalls) != 5 {
+		t.Fatalf("RunCalls: got %d, want 5", len(fr.RunCalls))
+	}
+}
