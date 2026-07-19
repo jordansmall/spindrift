@@ -3048,6 +3048,51 @@ func TestTea_OrphanRow_ShowsLiveHeartbeat(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_OrphanAdopted_ClearsOrphanHeartbeats verifies OrphanHeartbeats
+// drops a number the instant it stops being an orphan — an adopt succeeding
+// (or any other path that empties OrphanNums) must not leave a stale
+// heartbeat sitting in the map forever, even though view.go's IsOrphan gate
+// already keeps it from ever rendering (issue #1621 review finding).
+func TestTea_OrphanAdopted_ClearsOrphanHeartbeats(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"result","num_turns":17,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, runner.NewFake(), drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	t.Cleanup(launch.Wait)
+
+	tm := newTeaModel(f, dir, launch)
+	model, _ := tm.Update(OrphanDetectedMsg{Numbers: []string{"42"}})
+	tm = model.(teaModel)
+	if tm.m.OrphanHeartbeats["42"] == "" {
+		t.Fatal("test setup: OrphanHeartbeats[42] = \"\", want a parsed heartbeat before the adopt")
+	}
+
+	model, _ = tm.Update(OrphanAdoptedMsg{Number: "42"})
+	tm = model.(teaModel)
+	if len(tm.m.OrphanHeartbeats) != 0 {
+		t.Errorf("OrphanHeartbeats = %v, want it cleared once #42 is no longer an orphan", tm.m.OrphanHeartbeats)
+	}
+}
+
 // TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice verifies an
 // orphan row with no local pass log yet — e.g. a box the orphan-detected
 // sandbox hasn't written its first log line for, or one CI dispatched on a
@@ -3095,6 +3140,63 @@ func TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice(t *testing.T) {
 	}
 	if final.m.Sidebar.Err != nil {
 		t.Errorf("Sidebar.Err = %v, want nil (graceful notice, not a failure)", final.m.Sidebar.Err)
+	}
+}
+
+// TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive verifies a
+// "no local logs for this dispatch" Notice, shown while an orphan row's
+// sidebar is open on an issue with nothing on disk yet, clears the instant
+// the box's first log line lands and syncQueue's live tail picks it up —
+// the operator's stale-race window resolving itself must not leave the
+// notice covering up real content that has since arrived (issue #1621).
+func TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately no logs/issue-42.log yet -- the sidebar opens on the
+	// graceful-notice path this test then races against a real log write.
+
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), Queue: NewQueue()}
+	launch.pollInterval = 5 * time.Millisecond
+	t.Cleanup(launch.Wait)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "no local logs for this dispatch")
+
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"box is alive"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitForOutput(t, tm, "box is alive")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	final := tm.FinalModel(t).(teaModel)
+	if final.m.Sidebar == nil {
+		t.Fatal("Sidebar = nil, want it still open")
+	}
+	if final.m.Sidebar.Notice != "" {
+		t.Errorf("Sidebar.Notice = %q, want cleared once real Activity arrived", final.m.Sidebar.Notice)
 	}
 }
 

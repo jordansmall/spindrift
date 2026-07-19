@@ -842,7 +842,14 @@ func syncQueue(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache
 		}
 	}
 	m = Update(m, QueueSnapshotMsg{Picks: picks})
-	if drv != nil && len(m.OrphanNums) > 0 {
+	// The len(m.OrphanHeartbeats) > 0 half of this guard, not just
+	// len(m.OrphanNums) > 0, matters once OrphanNums drops to empty (the
+	// last orphan adopted, or the whole list re-detected empty): without it
+	// this whole branch is skipped and the previous tick's map is never
+	// replaced with an empty one, leaving a stale heartbeat parked in
+	// Model.OrphanHeartbeats indefinitely (harmless today since view.go
+	// only ever reads it behind IsOrphan, but still stale state).
+	if drv != nil && (len(m.OrphanNums) > 0 || len(m.OrphanHeartbeats) > 0) {
 		// An orphan row has no Pick of its own for the heartbeat loop above
 		// to reach — same on-disk log, same RunningHeartbeat/HeartbeatCache
 		// machinery, just keyed straight off OrphanNums instead of a Pick

@@ -697,12 +697,13 @@ func saveSidebarPosition(m Model) Model {
 // the loaded content or the toggle state changes (SidebarLoadedMsg,
 // SidebarToggleMsg), matching DrillInState.Lines' recompute-on-change caching.
 func sidebarLines(s *SidebarState) []string {
-	// Notice only ever accompanies an open with nothing else to show
-	// (openSidebarCmd sets it only alongside an empty Activity and no
-	// Transcript load attempt) — so this single check covers every toggle
-	// state, not just the Activity view, without an empty pane reading as a
-	// hang (issue #1621).
-	if s.Notice != "" && len(s.Activity) == 0 && s.TranscriptRendered == "" && s.TranscriptRaw == "" {
+	// Notice only ever accompanies an open with nothing else to show:
+	// openSidebarCmd sets it only on its no-local-logs early return, before
+	// any Transcript load is attempted, and the SidebarActivityMsg handler
+	// clears it the instant real Activity arrives live — so checking Notice
+	// alone is enough, covering every toggle state without an empty pane
+	// reading as a hang (issue #1621).
+	if s.Notice != "" {
 		return []string{s.Notice}
 	}
 	if !s.ShowTranscript {
