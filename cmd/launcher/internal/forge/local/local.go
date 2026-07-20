@@ -142,11 +142,12 @@ func toIssue(num string, li localIssue) forge.Issue {
 		state = forge.IssueClosed
 	}
 	return forge.Issue{
-		Number: num,
-		Title:  li.frontmatter.Title,
-		Body:   li.body,
-		State:  state,
-		Labels: labels,
+		Number:  num,
+		Title:   li.frontmatter.Title,
+		Body:    li.body,
+		State:   state,
+		Labels:  labels,
+		Landing: li.frontmatter.Landing,
 	}
 }
 
@@ -334,6 +335,21 @@ func (lt *LocalTracker) RecordLanding(num, landing string) error {
 		return err
 	}
 	li.frontmatter.Landing = landing
+	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
+		return fmt.Errorf("write local issue %s: %w", num, err)
+	}
+	return nil
+}
+
+// CloseIssue marks issue num closed by setting the closed: frontmatter field
+// (forge.IssueCloser, ADR 0029) — only the local adapter implements this
+// optional method; reconcile is its sole caller.
+func (lt *LocalTracker) CloseIssue(num string) error {
+	li, err := lt.readIssueFile(num)
+	if err != nil {
+		return err
+	}
+	li.frontmatter.Closed = true
 	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
 		return fmt.Errorf("write local issue %s: %w", num, err)
 	}

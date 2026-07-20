@@ -125,3 +125,15 @@ type LandingRecorder interface {
 	// merge-state is cached — a later reconcile re-checks the forge live.
 	RecordLanding(num, landing string) error
 }
+
+// IssueCloser is the optional IssueTracker surface for adapters with a
+// native open/closed axis reconcile can flip (ADR 0029). Only the local
+// adapter implements it — a github/jira issue closes through the forge's own
+// merged-PR auto-close, with no separate axis for reconcile to drive.
+// Callers discover it with a type assertion — `ic, ok := it.(IssueCloser)` —
+// the same optional-interface pattern PRForge and LandingRecorder use.
+type IssueCloser interface {
+	// CloseIssue marks issue num closed (the local closed: axis, ADR 0029).
+	// Reconcile is its sole caller.
+	CloseIssue(num string) error
+}
