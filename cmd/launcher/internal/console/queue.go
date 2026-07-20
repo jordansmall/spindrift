@@ -98,8 +98,17 @@ func (q *Queue) Snapshot() []Pick {
 // engine's own blocker gate, which would otherwise have nothing left to
 // check); a refill with nothing launchable returns no issues, which may
 // still have moved one or more picks onto PickHeld.
-func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string) ([]waves.Issue, map[string][]string, waves.Sources, error) {
+//
+// kind restricts the scan to picks whose effectiveKind matches — the
+// console's per-kind drain (issue #1708) calls Discover once per kind, each
+// time with the tracker instance carrying that kind's own label family, so a
+// pick of the other kind is skipped in place (left at its current state)
+// rather than claimed on the wrong tracker.
+func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string, kind Kind) ([]waves.Issue, map[string][]string, waves.Sources, error) {
 	for _, pick := range q.claimable() {
+		if pick.effectiveKind() != kind {
+			continue
+		}
 		readiness, _ := waves.NewReadiness(tracker, []waves.Issue{{Number: pick.Number, Title: pick.Title}})
 		if readiness.Failed[pick.Number] {
 			// A transient DepsOf failure looks identical to "confirmed zero

@@ -15,6 +15,18 @@ const (
 	KindResearch Kind = "research"
 )
 
+// effectiveKind returns p.Kind, defaulting an unset ("") Kind to KindWork —
+// every Pick literal built before #1708 (test fixtures included) never sets
+// Kind, and dispatch.Config.Kind's own established empty-defaults-to-work
+// convention (buildBoxEnv) gives precedent for the same fallback here rather
+// than treating a zero-value Kind as a third, undispatchable kind.
+func (p Pick) effectiveKind() Kind {
+	if p.Kind == "" {
+		return KindWork
+	}
+	return p.Kind
+}
+
 // PickState is a queue row's position in its launch lifecycle.
 type PickState int
 

@@ -24,6 +24,19 @@ type Launcher struct {
 	CodeForge forge.CodeForge
 	Factory   *dispatch.Factory
 	Settle    settle.Settler
+	// ResearchTracker, ResearchFactory, and ResearchSettle mirror
+	// CodeForge/Factory/Settle for the research dispatch kind (ADR 0022,
+	// issue #1708) — a Pick carrying KindResearch promotes and launches
+	// through these instead, since ResearchTracker carries the fixed
+	// agent-research label family (forge.ResearchDispatchLabels) a plain
+	// TransitionState call can't select per-call. Nil (every pre-#1708
+	// construction site, and any test not exercising research) means no
+	// research stack is wired: a KindResearch pick then falls back to the
+	// caller-supplied work tracker in Pick, and drain's stacks() only ever
+	// yields the work stack.
+	ResearchTracker forge.IssueTracker
+	ResearchFactory *dispatch.Factory
+	ResearchSettle  settle.Settler
 	// MaxParallel sets the live cap's *starting* value only (1 unless
 	// positive, matching the pre-#647 single-slot behaviour) — since #653
 	// (ADR 0023) the cap actually enforced during a session lives in
@@ -169,8 +182,20 @@ func (l *Launcher) Snapshot() []Pick {
 // same Update cycle it fired the keypress, never a render behind (issue
 // #1542, closing the one-frame lag #837 worked around).
 func (l *Launcher) Pick(tracker forge.IssueTracker, num, title string, kind Kind) (Msg, []Pick) {
-	msg := PickIssue(tracker, num, title, kind)
+	msg := PickIssue(l.trackerFor(kind, tracker), num, title, kind)
 	return msg, l.Land(msg)
+}
+
+// trackerFor returns l.ResearchTracker for a KindResearch pick when one is
+// wired, or workTracker (the caller-supplied default) otherwise — the
+// selection a research promotion or claim must make so its TransitionState
+// call lands on the tracker instance carrying the matching label family
+// (issue #1708).
+func (l *Launcher) trackerFor(kind Kind, workTracker forge.IssueTracker) forge.IssueTracker {
+	if kind == KindResearch && l.ResearchTracker != nil {
+		return l.ResearchTracker
+	}
+	return workTracker
 }
 
 // Land applies an already-resolved pick-outcome Msg (PickQueuedMsg or
@@ -541,21 +566,73 @@ func (l *Launcher) tryLaunch(tracker forge.IssueTracker, pwd string) {
 	go l.drain(tracker, pwd)
 }
 
-// drain runs waves.RunContinuous to completion, then — still holding
-// l.mu — checks Queue for a pick that landed too late for that run's last
-// discover() to see (RunContinuous returns as soon as its outstanding count
-// of in-flight Boxes drops to zero and the idle cond wakes it, with no
-// listener for a subsequent increment). Finding one re-drains
-// immediately instead of clearing l.launching, so a concurrent tryLaunch
-// call racing this same window can never observe l.launching==true with
-// nothing left to pick it up — either this loop sees the new pick, or its
-// Add()+tryLaunch happens-after this critical section releases l.mu and
-// starts a fresh drain itself.
+// launchStack pairs one Dispatch kind's tracker, dispatch factory, and
+// settle — the three kind-specific legs drain's per-stack loop assembles so
+// a KindResearch pick launches and settles through its own instance of each
+// rather than the work kind's (issue #1708).
+type launchStack struct {
+	kind    Kind
+	tracker forge.IssueTracker
+	factory *dispatch.Factory
+	settle  settle.Settler
+}
+
+// stacks returns the launch stacks drain services this call, in order: the
+// work stack (tracker, the caller-supplied instance) always first, then the
+// research stack when ResearchFactory and ResearchTracker are both wired.
+// Neither wired (every pre-#1708 call site, and any test not exercising
+// research) yields just the work stack, so drain's behaviour is unchanged
+// when no research stack exists.
+func (l *Launcher) stacks(tracker forge.IssueTracker) []launchStack {
+	stacks := []launchStack{{kind: KindWork, tracker: tracker, factory: l.Factory, settle: l.Settle}}
+	if l.ResearchFactory != nil && l.ResearchTracker != nil {
+		stacks = append(stacks, launchStack{kind: KindResearch, tracker: l.ResearchTracker, factory: l.ResearchFactory, settle: l.ResearchSettle})
+	}
+	return stacks
+}
+
+// drain runs runStack for every wired launch stack (work, then research) to
+// completion, then — still holding l.mu — checks Queue for a pick that
+// landed too late for that pass's last discover() to see (RunContinuous
+// returns as soon as its outstanding count of in-flight Boxes drops to zero
+// and the idle cond wakes it, with no listener for a subsequent increment).
+// Finding one re-drains immediately instead of clearing l.launching, so a
+// concurrent tryLaunch call racing this same window can never observe
+// l.launching==true with nothing left to pick it up — either this loop sees
+// the new pick, or its Add()+tryLaunch happens-after this critical section
+// releases l.mu and starts a fresh drain itself. A stale image aborts the
+// whole loop, not just the stack that hit it (runStack's bool return) — the
+// research stack getting one more pass in after work went stale would still
+// need the same rebuild.
 func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 	defer l.wg.Done()
+	for {
+		for _, st := range l.stacks(tracker) {
+			if l.runStack(st, pwd) {
+				return
+			}
+		}
+
+		q := l.queueRef()
+		l.mu.Lock()
+		if !q.hasQueued() {
+			l.launching = false
+			l.mu.Unlock()
+			return
+		}
+		l.mu.Unlock()
+	}
+}
+
+// runStack drives waves.RunContinuous once for st's kind, filling up to the
+// session's shared parallelism cap (l.limiter()) with st's ready picks
+// before returning — drain's per-stack unit (issue #1708). Reports whether
+// the image went stale and the caller must abort the whole drain rather than
+// try the next stack.
+func (l *Launcher) runStack(st launchStack, pwd string) bool {
 	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
 		defer l.signalRefresh() // a claim attempt is always a tracker write, win or lose
-		issues, edges, sources, err := l.queueRef().Discover(tracker, l.CodeForge, l.FailedLabel)
+		issues, edges, sources, err := l.queueRef().Discover(st.tracker, l.CodeForge, l.FailedLabel, st.kind)
 		// A successful claim here is a fresh Dispatch starting for issues,
 		// so any earlier Terminate mark for these numbers must not carry
 		// over — otherwise a re-pick's own settle would abandon on its very
@@ -576,51 +653,39 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		// always correct here, never a set nextReady would need to act on.
 		return issues, edges, sources, nil, err
 	}
-	for {
-		// Label, InProgressLabel, and OverlapGate are deliberately left
-		// zero-value (#706). Label==InProgressLabel (both "") makes
-		// claimIssue (waves/engine.go) skip a second Dispatchable->InProgress
-		// transition — Queue.Discover (queue.go, the discover closure above)
-		// already performed that claim itself. OverlapGate=="" leaves the
-		// touch-overlap gate a no-op, because Console picks are
-		// operator-directed, not batch-discovered, so they're exempt from
-		// deferring on another in-progress issue's touched files.
-		// TestRunContinuous_ConsoleConfig_SkipsRedundantClaim and
-		// TestRunContinuous_DivergentLabels_DoubleClaims (launch_test.go)
-		// pin this: diverging Label from InProgressLabel double-claims.
-		err := waves.RunContinuous(waves.Config{PreResolved: true}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.queueRef(), l.signalRefresh, l.registry()}, discover, l.freshnessChecker())
+	// Label, InProgressLabel, and OverlapGate are deliberately left
+	// zero-value (#706). Label==InProgressLabel (both "") makes claimIssue
+	// (waves/engine.go) skip a second Dispatchable->InProgress transition —
+	// Queue.Discover (queue.go, the discover closure above) already
+	// performed that claim itself. OverlapGate=="" leaves the touch-overlap
+	// gate a no-op, because Console picks are operator-directed, not
+	// batch-discovered, so they're exempt from deferring on another
+	// in-progress issue's touched files. TestRunContinuous_ConsoleConfig_SkipsRedundantClaim
+	// and TestRunContinuous_DivergentLabels_DoubleClaims (launch_test.go)
+	// pin this: diverging Label from InProgressLabel double-claims.
+	err := waves.RunContinuous(waves.Config{PreResolved: true}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, st.tracker, l.CodeForge, pwd, st.factory, queueSettler{st.settle, l.queueRef(), l.signalRefresh, l.registry()}, discover, l.freshnessChecker())
 
-		if errors.Is(err, waves.ErrImageStale) {
-			// RunContinuous's own "stale" flag is a one-shot latch for this
-			// single invocation: once any refill sees a stale verdict, every
-			// later refill (including one triggered by a Box that was
-			// already running when staleness hit) short-circuits without
-			// ever consulting fresh() again. That leaves a window where a
-			// concurrent Rebuild finishes — flipping the checker back to
-			// fresh and calling tryLaunch — while this drain is still
-			// waiting on that in-flight Box; tryLaunch no-ops (l.launching
-			// is still true), and this loop would otherwise park a held
-			// pick with no one left to resume it. Re-checking freshness
-			// once more here catches that race: a fresh verdict re-drains
-			// immediately instead of parking, exactly as if Rebuild's own
-			// tryLaunch call had landed.
-			if applicable, fresh, _ := l.freshnessChecker()(); applicable && !fresh {
-				l.mu.Lock()
-				l.launching = false
-				l.mu.Unlock()
-				return
-			}
-		}
-
-		q := l.queueRef()
-		l.mu.Lock()
-		if !q.hasQueued() {
+	if errors.Is(err, waves.ErrImageStale) {
+		// RunContinuous's own "stale" flag is a one-shot latch for this
+		// single invocation: once any refill sees a stale verdict, every
+		// later refill (including one triggered by a Box that was already
+		// running when staleness hit) short-circuits without ever
+		// consulting fresh() again. That leaves a window where a concurrent
+		// Rebuild finishes — flipping the checker back to fresh and calling
+		// tryLaunch — while this drain is still waiting on that in-flight
+		// Box; tryLaunch no-ops (l.launching is still true), and this loop
+		// would otherwise park a held pick with no one left to resume it.
+		// Re-checking freshness once more here catches that race: a fresh
+		// verdict re-drains immediately instead of parking, exactly as if
+		// Rebuild's own tryLaunch call had landed.
+		if applicable, fresh, _ := l.freshnessChecker()(); applicable && !fresh {
+			l.mu.Lock()
 			l.launching = false
 			l.mu.Unlock()
-			return
+			return true
 		}
-		l.mu.Unlock()
 	}
+	return false
 }
 
 // freshnessChecker wraps l.Fresh so every call also records the verdict for

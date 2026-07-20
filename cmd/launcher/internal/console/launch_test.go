@@ -48,7 +48,7 @@ func TestRunContinuous_DrainsScriptedQueue_LaunchesOneDispatchEndToEnd(t *testin
 	qs := queueSettler{Settler: inner, q: q}
 
 	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
-		issues, edges, sources, err := q.Discover(f, f, "")
+		issues, edges, sources, err := q.Discover(f, f, "", KindWork)
 		return issues, edges, sources, nil, err
 	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
@@ -225,7 +225,7 @@ func TestQueue_Discover_HeldPickLaunchesOnceBlockerClears(t *testing.T) {
 	qs := queueSettler{Settler: inner, q: q}
 
 	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
-		issues, edges, sources, err := q.Discover(f, f, "agent-failed")
+		issues, edges, sources, err := q.Discover(f, f, "agent-failed", KindWork)
 		return issues, edges, sources, nil, err
 	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
@@ -295,7 +295,7 @@ func setupForgeQueueFactory(t *testing.T) (f *forge.Fake, dir string, factory *d
 	qs = queueSettler{Settler: inner, q: q}
 
 	discover = func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
-		issues, edges, sources, err := q.Discover(f, f, "")
+		issues, edges, sources, err := q.Discover(f, f, "", KindWork)
 		return issues, edges, sources, nil, err
 	}
 	fresh = func() (bool, bool, string) { return false, true, "" }
@@ -350,7 +350,7 @@ func TestQueue_Discover_AlreadyInProgressPick_NeverLaunches(t *testing.T) {
 	qs := queueSettler{Settler: inner, q: q}
 
 	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
-		issues, edges, sources, err := q.Discover(f, f, "")
+		issues, edges, sources, err := q.Discover(f, f, "", KindWork)
 		return issues, edges, sources, nil, err
 	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
@@ -415,7 +415,7 @@ func TestQueue_Discover_AlreadyCompletePick_NeverLaunches(t *testing.T) {
 	qs := queueSettler{Settler: inner, q: q}
 
 	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
-		issues, edges, sources, err := q.Discover(f, f, "")
+		issues, edges, sources, err := q.Discover(f, f, "", KindWork)
 		return issues, edges, sources, nil, err
 	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
