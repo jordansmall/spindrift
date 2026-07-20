@@ -96,6 +96,29 @@ setup() {
   ! grep -q 'know\.The PR opens' "$CLAUDE_PROMPT_FILE"
 }
 
+# issue #1691/ADR 0032: the issue-read step's ISSUE_TRACKER_GITHUB/
+# ISSUE_TRACKER_LOCAL gates (agent/entrypoint.sh's phase_prompt_assembly
+# precompute block) drive four row pairs -- this exercises issue-prompt.md's,
+# the one CLAUDE_PROMPT_FILE captures directly; the other three prompts share
+# the same gates and are covered at the fragment-content level by
+# nix/checks/prompts.nix.
+@test "issue-read step: github tracker keeps gh issue view unchanged" {
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-github"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'gh issue view 7 --comments' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF '/issues/7.md' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "issue-read step: local tracker reads the /issues mount, never gh issue view" {
+  export ISSUE_TRACKER=local
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-local"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF '/issues/7.md' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'gh issue view' "$CLAUDE_PROMPT_FILE"
+}
+
 # A scout/reviewer-only template (no "filer" key) must not require
 # filer-prompt.md to exist -- the file read has to be gated on the template
 # actually carrying a filer entry, same as the FILE_ISSUES_STEP gate above.

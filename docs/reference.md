@@ -1068,6 +1068,18 @@ and still needs a real git remote — pair `ISSUE_TRACKER=local` with a `git`
 Code Forge for the fully private loop, or with `github` to keep opening PRs
 against a real repo while keeping the issue backlog itself private.
 
+A local issue has no in-box reachability — there's no server to reach, and
+`gh issue view` inside the Box either fails or, for a numeric slug, silently
+fetches an unrelated real issue on the Target repo. So for `ISSUE_TRACKER=local`
+the launcher instead bind-mounts `LOCAL_ISSUES_DIR` read-only into the Box at
+`/issues` (the one documented exception to the Box's zero-shared-host-filesystem
+rule — see [ADR 0032](adr/0032-host-mediated-local-issue-content.md)); the agent
+reads `/issues/${ISSUE_NUMBER}.md` directly and follows its `## Blocked
+by`/`parent` links to any linked issues in the same folder. The mount is skipped
+when `LOCAL_ISSUES_DIR` doesn't exist at dispatch time. `github` (and `jira`)
+Dispatches are unchanged — they keep reading and writing in-box via `gh issue
+view`/`gh issue comment`.
+
 Each issue is one file, named `<slug>.md`, where `<slug>` is the issue's ID
 (used anywhere the GitHub backend would use an issue number — dependency
 refs, branch names, log file names):
