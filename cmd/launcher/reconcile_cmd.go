@@ -72,19 +72,26 @@ func cmdReconcile() int {
 	c := loadConfig()
 	it := newIssueTracker(c)
 	cf := newCodeForge(c)
-	pwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		return 1
+
+	// The runner only matters for the LivenessProbe's container check, which
+	// runReconcile below only reaches for a local tracker — skip building one
+	// for the common github/jira "nothing to do" refusal.
+	var lp reconcile.LivenessProbe
+	if c.issueTracker == "local" {
+		pwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			return 1
+		}
+		rc := runnerConfig(c)
+		var r runner.Runner
+		if c.runtime == "bwrap" {
+			r = runner.NewBwrap(rc)
+		} else {
+			r = runner.NewOCI(rc, pwd)
+		}
+		lp = reconcile.NewFSProbe(pwd, r)
 	}
-	rc := runnerConfig(c)
-	var r runner.Runner
-	if c.runtime == "bwrap" {
-		r = runner.NewBwrap(rc)
-	} else {
-		r = runner.NewOCI(rc, pwd)
-	}
-	lp := reconcile.NewFSProbe(pwd, r)
 	if err := runReconcile(it, cf, lp, c.issueTracker, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1

@@ -366,6 +366,33 @@ func TestRun_LeavesInProgressUntouched_WhenPRExistsForBranch(t *testing.T) {
 	}
 }
 
+// TestRun_LeavesInProgressUntouched_WhenBranchExistsNoPR verifies Reconcile
+// never resets an InProgress issue whose agent branch was pushed but has no
+// PR yet — the die-after-push-before-PR window the composite gate must not
+// silently re-dispatch over.
+func TestRun_LeavesInProgressUntouched_WhenBranchExistsNoPR(t *testing.T) {
+	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
+	f := forge.NewFake(labels)
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Labels: []string{"in-progress"}})
+	f.SetBranchExists(f.AgentBranch("42"), true)
+	lp := fakeLiveness{stale: map[string]bool{"42": true}, reachable: map[string]bool{"42": true}}
+
+	res, err := reconcile.Run(f, f, lp)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Reset) != 0 {
+		t.Errorf("Reset = %v, want none — the agent branch already exists", res.Reset)
+	}
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !slices.Contains(iss.Labels, "in-progress") {
+		t.Errorf("Labels = %v, want in-progress untouched", iss.Labels)
+	}
+}
+
 // TestRun_LeavesInProgressUntouched_WhenLogFresh verifies Reconcile never
 // resets an InProgress issue whose Box log is not stale — a live or
 // recently active Box still owns it.
