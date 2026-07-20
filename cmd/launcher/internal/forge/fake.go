@@ -49,10 +49,16 @@ type Fake struct {
 	VerdictLabels VerdictLabels
 	issues        map[string]Issue
 	// NativeDeps, when set for an issue number, is returned by DepsOf as
-	// DepSourceNative and takes precedence over body parsing — mirroring
-	// the GitHub adapter's native-wins-when-non-empty rule, so tests can
-	// script native-sourced, body-sourced, and mixed-batch blockers.
-	NativeDeps      map[string][]string
+	// DepSourceNative and takes precedence over body parsing — the
+	// native-wins-when-non-empty rule forgetest.RunTrackerContract's DepsOf
+	// scenario pins across every adapter, so tests can script native-sourced,
+	// body-sourced, and mixed-batch blockers.
+	NativeDeps map[string][]string
+	// NativeDepsErr, keyed by issue number, is returned by DepsOf for that
+	// number instead of consulting NativeDeps — scripts the native-API
+	// failure DepsOf falls back to body parsing for (forgetest's
+	// NativeFailureIsolatable scenario, issue #1544).
+	NativeDepsErr   map[string]error
 	prs             map[string]PR             // URL → PR
 	branchPRs       map[string]string         // branch → PR URL
 	prStates        map[string]PRState        // URL → canonical PR state
@@ -413,9 +419,10 @@ func (f *Fake) TransitionState(num string, from, to DispatchState) error {
 // CompleteVerdict swaps the InProgress label for verdict's terminal label on
 // issue num. Best-effort on missing issues (no error), matching
 // TransitionState's contract. Unlike TransitionState, it asserts num
-// currently carries InProgress before editing — mirroring the real
-// adapter's #701 double-dispatch guard — and errors without mutating labels
-// when it's absent.
+// currently carries InProgress before editing — the double-dispatch guard
+// (#701) forgetest.RunTrackerContract's DoubleDispatchGuard scenario pins
+// across every adapter — and errors without mutating labels when it's
+// absent.
 func (f *Fake) CompleteVerdict(num string, verdict Verdict) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -453,8 +460,10 @@ func (f *Fake) DepsOf(num string) ([]Dependency, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.DepsOfCalls = append(f.DepsOfCalls, num)
-	if native, ok := f.NativeDeps[num]; ok && len(native) > 0 {
-		return WithSource(native, DepSourceNative), nil
+	if err := f.NativeDepsErr[num]; err == nil {
+		if native, ok := f.NativeDeps[num]; ok && len(native) > 0 {
+			return WithSource(native, DepSourceNative), nil
+		}
 	}
 	iss, ok := f.issues[num]
 	if !ok {
