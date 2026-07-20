@@ -6,7 +6,24 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/reconcile"
 )
+
+// fakeLiveness is a no-op reconcile.LivenessProbe: every issue reports live
+// (not stale, container live+reachable), so it never triggers a reset —
+// exactly what the Closed-only tests in this file need from the seam.
+type fakeLiveness struct {
+	stale     map[string]bool
+	reachable map[string]bool
+}
+
+func (f fakeLiveness) LogStale(num string) bool { return f.stale[num] }
+
+func (f fakeLiveness) ContainerLive(num string) (live, reachable bool) {
+	return false, f.reachable[num]
+}
+
+var _ reconcile.LivenessProbe = fakeLiveness{}
 
 // TestRunReconcile_ClosesMergedLandingIssue verifies runReconcile drives the
 // reconcile.Run seam against a local-tracker config and reports the closed
@@ -17,7 +34,7 @@ func TestRunReconcile_ClosesMergedLandingIssue(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
 	var buf bytes.Buffer
-	if err := runReconcile(f, f, "local", &buf); err != nil {
+	if err := runReconcile(f, f, fakeLiveness{}, "local", &buf); err != nil {
 		t.Fatalf("runReconcile: %v", err)
 	}
 	if !strings.Contains(buf.String(), "42") {
@@ -59,7 +76,7 @@ func TestRunReconcile_NonLocalTrackerIsClearNoOp(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
 	var buf bytes.Buffer
-	if err := runReconcile(f, f, "github", &buf); err != nil {
+	if err := runReconcile(f, f, fakeLiveness{}, "github", &buf); err != nil {
 		t.Fatalf("runReconcile: %v", err)
 	}
 	if !strings.Contains(buf.String(), "nothing to do") {
@@ -67,6 +84,25 @@ func TestRunReconcile_NonLocalTrackerIsClearNoOp(t *testing.T) {
 	}
 	if len(f.CloseIssueCalls) != 0 {
 		t.Errorf("CloseIssueCalls = %v, want none for a github tracker", f.CloseIssueCalls)
+	}
+}
+
+// TestRunReconcile_ReportsResetIssue verifies runReconcile reports an
+// InProgress issue that reconcile.Run reset, alongside the (empty) closed
+// report, so an operator running `spindrift reconcile` sees which issues
+// came back to Dispatchable.
+func TestRunReconcile_ReportsResetIssue(t *testing.T) {
+	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
+	f := forge.NewFake(labels)
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Labels: []string{"in-progress"}})
+	lp := fakeLiveness{stale: map[string]bool{"42": true}, reachable: map[string]bool{"42": true}}
+
+	var buf bytes.Buffer
+	if err := runReconcile(f, f, lp, "local", &buf); err != nil {
+		t.Fatalf("runReconcile: %v", err)
+	}
+	if !strings.Contains(buf.String(), "reset 1 issue(s): 42") {
+		t.Errorf("want output to report reset issue 42, got %q", buf.String())
 	}
 }
 
@@ -83,7 +119,7 @@ func TestReconcileAfterDispatch_LocalTracker_ClosesMergedLanding(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
 	var buf bytes.Buffer
-	if err := reconcileAfterDispatch(c, f, f, &buf); err != nil {
+	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, &buf); err != nil {
 		t.Fatalf("reconcileAfterDispatch: %v", err)
 	}
 
@@ -108,7 +144,7 @@ func TestReconcileAfterDispatch_NonLocalTracker_SilentNoOp(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
 	var buf bytes.Buffer
-	if err := reconcileAfterDispatch(c, f, f, &buf); err != nil {
+	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, &buf); err != nil {
 		t.Fatalf("reconcileAfterDispatch: %v", err)
 	}
 	if buf.Len() != 0 {
