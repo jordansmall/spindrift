@@ -409,7 +409,6 @@ func TestPreviewIssues_WithList_NoMutatingCalls(t *testing.T) {
 // TestEvictUnmetBlockers_EvictsExternalUnmet verifies that an issue whose only
 // blocker is NOT in the list (and not yet merged) is evicted with a notice.
 func TestEvictUnmetBlockers_EvictsExternalUnmet(t *testing.T) {
-	c := baseConfig()
 	fc := forge.NewFake()
 	// #15 is in the list; it is blocked by #99 which is NOT in the list and is open.
 	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Labels: []string{}})
@@ -418,7 +417,7 @@ func TestEvictUnmetBlockers_EvictsExternalUnmet(t *testing.T) {
 	issues := []issue{{number: "15", title: "needs 99"}}
 	edges := map[string][]string{"15": {"99"}}
 
-	kept, notices := evictUnmetBlockers(c, fc, fc, issues, edges, nil)
+	kept, notices := evictUnmetBlockers(fc, fc, waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 0 {
 		t.Errorf("kept = %v, want empty (issue should be evicted)", kept)
@@ -437,7 +436,6 @@ func TestEvictUnmetBlockers_EvictsExternalUnmet(t *testing.T) {
 // operator can tell drift between a stale body section and native links
 // apart from the notice alone.
 func TestEvictUnmetBlockers_NoticeAnnotatesSource(t *testing.T) {
-	c := baseConfig()
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Labels: []string{}})
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Labels: []string{}})
@@ -446,7 +444,7 @@ func TestEvictUnmetBlockers_NoticeAnnotatesSource(t *testing.T) {
 	edges := map[string][]string{"15": {"99"}}
 	sources := waves.Sources{"15": {"99": forge.DepSourceNative}}
 
-	_, notices := evictUnmetBlockers(c, fc, fc, issues, edges, sources)
+	_, notices := evictUnmetBlockers(fc, fc, waves.Readiness{Edges: edges, Sources: sources}, issues)
 
 	if len(notices) != 1 {
 		t.Fatalf("notices = %v, want 1 notice", notices)
@@ -459,7 +457,6 @@ func TestEvictUnmetBlockers_NoticeAnnotatesSource(t *testing.T) {
 // TestEvictUnmetBlockers_KeepsInListBlocker verifies that when the blocker is
 // also in the list the dependent is retained (will be ordered behind it).
 func TestEvictUnmetBlockers_KeepsInListBlocker(t *testing.T) {
-	c := baseConfig()
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "10", Title: "blocker", Labels: []string{}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "depends on 10", Labels: []string{}})
@@ -471,7 +468,7 @@ func TestEvictUnmetBlockers_KeepsInListBlocker(t *testing.T) {
 	}
 	edges := map[string][]string{"15": {"10"}}
 
-	kept, notices := evictUnmetBlockers(c, fc, fc, issues, edges, nil)
+	kept, notices := evictUnmetBlockers(fc, fc, waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 2 {
 		t.Errorf("kept = %v, want 2 issues (both should survive)", kept)
@@ -484,7 +481,6 @@ func TestEvictUnmetBlockers_KeepsInListBlocker(t *testing.T) {
 // TestEvictUnmetBlockers_KeepsMergedBlocker verifies that a closed/merged
 // external blocker (not in list) satisfies the edge (no eviction).
 func TestEvictUnmetBlockers_KeepsMergedBlocker(t *testing.T) {
-	c := baseConfig()
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Labels: []string{}})
 	// #99 is CLOSED (merged) — satisfies the edge even though not in list.
@@ -493,7 +489,7 @@ func TestEvictUnmetBlockers_KeepsMergedBlocker(t *testing.T) {
 	issues := []issue{{number: "15", title: "needs 99"}}
 	edges := map[string][]string{"15": {"99"}}
 
-	kept, notices := evictUnmetBlockers(c, fc, fc, issues, edges, nil)
+	kept, notices := evictUnmetBlockers(fc, fc, waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 1 {
 		t.Errorf("kept = %v, want [#15] (closed blocker satisfies edge)", kept)
@@ -506,7 +502,6 @@ func TestEvictUnmetBlockers_KeepsMergedBlocker(t *testing.T) {
 // TestEvictUnmetBlockers_CascadingEviction verifies that when A is evicted
 // because of an unmet external blocker, B (which depends on A) is also evicted.
 func TestEvictUnmetBlockers_CascadingEviction(t *testing.T) {
-	c := baseConfig()
 	fc := forge.NewFake()
 	// #99 blocks #10 (both in list); but #99 is blocked by #200 (external, unmet).
 	fc.SetIssue(forge.Issue{Number: "10", Title: "depends on 99", Labels: []string{}})
@@ -522,7 +517,7 @@ func TestEvictUnmetBlockers_CascadingEviction(t *testing.T) {
 		"10": {"99"},  // in-list blocker (but 99 will be evicted)
 	}
 
-	kept, notices := evictUnmetBlockers(c, fc, fc, issues, edges, nil)
+	kept, notices := evictUnmetBlockers(fc, fc, waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 0 {
 		t.Errorf("kept = %v, want empty (both should cascade-evict)", kept)
