@@ -498,6 +498,7 @@ warns) but is no longer the primary channel:
 | ------------------------- | ---------------------- | ---------------------------------------- |
 | `REPO_SLUG`               | — (required; baked via `settings.repository.repoSlug`) | target repo, `owner/repo` |
 | `GH_TOKEN`                | — (required)           | GitHub token for `gh` inside containers (secret; env only) |
+| `GH_TOKEN_REFRESH_FILE`   | — (baked via `settings.repository.ghTokenRefreshFile`) | path the launcher polls to keep `GH_TOKEN` current past an installation token's ~1h lifetime — see [GitHub App installation token](#github-app-installation-token-recommended) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — (one auth required)  | from `claude setup-token` (secret; env only) |
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
 | `GIT_USER_NAME`           | host `git config`; baked via `settings.repository.gitUserName` | commit author name (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config)) |
@@ -1245,13 +1246,28 @@ user's. The single-repo installation is still what bounds
 `--dangerously-skip-permissions`: like the PAT, the App can touch nothing but
 the one repo it is installed on.
 
-> **Known limitation — token lifetime.** An installation token expires **~1h
-> after minting**, and that same token is what the launcher forwards into the
-> Box and uses at `gh pr merge`. A run that exceeds ~1h will fail at merge until
-> in-Box token refresh / late-minting lands (issue #1027). The App path is
-> therefore safe for the short issues dispatch handles today, but not yet for
-> long runs — keep `SPINDRIFT_GH_TOKEN` provisioned as the fallback until #1027
-> ships.
+**Token lifetime on long runs.** An installation token expires **~1h after
+minting**, which used to mean a run exceeding that window would fail at `gh pr
+merge` on a stale token (issue #1027). `agent-dispatch.yml` and
+`agent-recover.yml` now pair the mint step with the `gh-token-refresher`
+composite action (`.github/actions/gh-token-refresher`): it re-mints a fresh
+installation token every 45 minutes for the rest of the job — directly against
+the App's installation-token endpoint, signing its own short-lived JWT with the
+App private key — and writes it to a file in `$RUNNER_TEMP`, exported as
+`GH_TOKEN_REFRESH_FILE`. The private key stays in that backgrounded loop's
+memory and a runner-temp file removed when the job ends; only the resulting
+~1h tokens ever touch disk, and neither the key nor the launcher's own
+`GH_TOKEN` reaches the Box.
+
+The launcher's `--gh-token-refresh-file` flag (`GH_TOKEN_REFRESH_FILE` knob)
+points at that file: once set, `bootstrap` starts a background poll
+(`cmd/launcher/internal/tokenrefresh`) that re-reads it every 60s for the rest
+of the process and swaps any new value into `GH_TOKEN`, so the terminal gh
+calls (merge, label edits, the final comment) draw on whatever the refresher
+most recently minted rather than the token captured at job start. The knob is
+optional and off by default — an unset `GH_TOKEN_REFRESH_FILE` leaves `GH_TOKEN`
+static for the whole run, as before (the fine-grained-PAT path, and any
+deployment that doesn't wire up a refresher, are unaffected).
 
 ### Research token (least-privilege, optional)
 

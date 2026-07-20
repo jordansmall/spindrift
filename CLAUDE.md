@@ -30,12 +30,14 @@ from the worker App secrets `SPINDRIFT_AGENT_WORKER_APP_ID` /
 fine-grained PAT. The App installation has its own rate-limit bucket, isolated
 from any personal PAT — the fix for the 403 / secondary rate limiting hit during
 dispatch, CI polling, and merge. The composite `agent-setup` action is unchanged;
-it consumes whatever `gh-token` it is handed. **Caveat:** an installation token
-expires ~1h after minting, so a Box whose run exceeds ~1h fails at `gh pr merge`
-until in-Box token refresh lands (#1027) — keep `SPINDRIFT_GH_TOKEN` provisioned
-as the fallback until then. See [GitHub App installation
+it consumes whatever `gh-token` it is handed. An installation token expires ~1h
+after minting, so both workflows pair the mint step with the `gh-token-refresher`
+composite action, which re-mints a fresh token every 45 minutes for the rest of
+the job and hands the launcher `--gh-token-refresh-file` (issue #1027) — the App
+private key stays in that backgrounded loop, never reaching the launcher or the
+Box. See [GitHub App installation
 token](docs/reference.md#github-app-installation-token-recommended) for the full
-setup and required App permissions.
+setup, required App permissions, and how the refresh mechanism works.
 
 ### Research label lifecycle
 
