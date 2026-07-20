@@ -61,6 +61,7 @@ type Fake struct {
 	NativeDepsErr   map[string]error
 	prs             map[string]PR             // URL → PR
 	branchPRs       map[string]string         // branch → PR URL
+	branchExists    map[string]bool           // branch → scripted BranchExists result
 	prStates        map[string]PRState        // URL → canonical PR state
 	mergeableStates map[string]MergeableState // URL → scripted Mergeable result
 	needsUpdate     map[string]bool           // URL → scripted NeedsUpdate result
@@ -83,6 +84,9 @@ type Fake struct {
 	// call (simulating a transient forge lookup failure, distinct from "no
 	// open PR yet").
 	OpenPRForBranchErr error
+
+	// BranchExistsErr, if non-nil, is returned by every BranchExists call.
+	BranchExistsErr error
 
 	// TouchesOfErr, keyed by issue number, is returned by TouchesOf for that
 	// number instead of parsing its body. Per-number (not blanket, unlike
@@ -225,6 +229,7 @@ func NewFake(labels ...DispatchLabels) *Fake {
 		issues:          map[string]Issue{},
 		prs:             map[string]PR{},
 		branchPRs:       map[string]string{},
+		branchExists:    map[string]bool{},
 		prStates:        map[string]PRState{},
 		mergeableStates: map[string]MergeableState{},
 		needsUpdate:     map[string]bool{},
@@ -243,6 +248,17 @@ func (f *Fake) AgentBranch(num string) string {
 	return f.BranchPrefix + num
 }
 
+// BranchExists returns the scripted result set by SetBranchExists (false for
+// an unscripted branch), or BranchExistsErr if set.
+func (f *Fake) BranchExists(branch string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.BranchExistsErr != nil {
+		return false, f.BranchExistsErr
+	}
+	return f.branchExists[branch], nil
+}
+
 // SetIssue upserts an issue into the fake store.
 func (f *Fake) SetIssue(iss Issue) {
 	f.mu.Lock()
@@ -259,6 +275,14 @@ func (f *Fake) SetPR(branch string, pr PR) {
 	if _, ok := f.prStates[pr.URL]; !ok {
 		f.prStates[pr.URL] = PROpen
 	}
+}
+
+// SetBranchExists scripts BranchExists's result for branch. Unset branches
+// default to false (not found).
+func (f *Fake) SetBranchExists(branch string, exists bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.branchExists[branch] = exists
 }
 
 // SetPRState overrides the canonical state of a known PR.
@@ -756,9 +780,10 @@ type pushOnlyForge struct{ f *Fake }
 // AsPushOnly returns f wrapped so it satisfies CodeForge but not PRForge.
 func (f *Fake) AsPushOnly() CodeForge { return pushOnlyForge{f} }
 
-func (p pushOnlyForge) AgentBranch(num string) string { return p.f.AgentBranch(num) }
-func (p pushOnlyForge) Merge(url string) error        { return p.f.Merge(url) }
-func (p pushOnlyForge) Rebase(url string) error       { return p.f.Rebase(url) }
-func (p pushOnlyForge) Probe() (string, error)        { return p.f.Probe() }
+func (p pushOnlyForge) AgentBranch(num string) string            { return p.f.AgentBranch(num) }
+func (p pushOnlyForge) Merge(url string) error                   { return p.f.Merge(url) }
+func (p pushOnlyForge) Rebase(url string) error                  { return p.f.Rebase(url) }
+func (p pushOnlyForge) Probe() (string, error)                   { return p.f.Probe() }
+func (p pushOnlyForge) BranchExists(branch string) (bool, error) { return p.f.BranchExists(branch) }
 
 var _ CodeForge = pushOnlyForge{}

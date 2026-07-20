@@ -10,6 +10,12 @@ type CodeForge interface {
 	// owner of the branch-prefix rule — callers never concatenate it
 	// themselves.
 	AgentBranch(num string) string
+	// BranchExists reports whether branch exists on the remote, independent
+	// of any PR — the signal a bare `git push` with no PR opened yet (or a
+	// PR already closed) still leaves behind. Reconcile's gated orphan reset
+	// (#1432, #600) needs this alongside PRForge's PR-shaped checks, so it
+	// lives on the core CodeForge surface every adapter honors.
+	BranchExists(branch string) (bool, error)
 	// Merge lands ref onto the target branch: a rebase merge of the PR (github)
 	// or a plain merge-and-push of the branch name (git, MERGE_MODE=immediate).
 	Merge(ref string) error

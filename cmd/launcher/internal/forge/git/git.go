@@ -241,6 +241,29 @@ func (g *gitClient) Rebase(branch string) error {
 	return gitplumbing.GitForcePush(pushCtx, dir)
 }
 
+// BranchExists reports whether branch exists on the remote, via
+// `git ls-remote --exit-code`: exit code 2 means no matching ref (a clean
+// "not found", not an error); any other non-zero exit is a genuine failure.
+func (g *gitClient) BranchExists(branch string) (bool, error) {
+	if err := validateGitRef(branch); err != nil {
+		return false, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), g.opTimeout)
+	defer cancel()
+	err := exec.CommandContext(ctx, "git", "ls-remote", "--exit-code", "--heads", g.remoteURL, branch).Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
+		return false, nil
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return false, fmt.Errorf("git ls-remote %s: timed out after %s: %w", branch, g.opTimeout, ctx.Err())
+	}
+	return false, fmt.Errorf("git ls-remote %s: %w", branch, err)
+}
+
 // Probe checks that the configured remote is reachable.
 func (g *gitClient) Probe() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), g.opTimeout)
