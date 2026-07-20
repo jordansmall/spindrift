@@ -115,6 +115,28 @@ func TestLocalIssue_RenderParseRoundTrip_Closed(t *testing.T) {
 	}
 }
 
+// TestLocalIssue_RenderParseRoundTrip_Landing verifies landing: survives a
+// parse/render round trip alongside the other frontmatter fields — the
+// immutable landing ref RecordLanding writes (ADR 0029).
+func TestLocalIssue_RenderParseRoundTrip_Landing(t *testing.T) {
+	li := localIssue{
+		frontmatter: localFrontmatter{
+			Title:   "Fix the thing",
+			State:   "agent-complete",
+			Created: "2026-07-09T12:00:00Z",
+			Landing: "https://github.com/o/r/pull/1",
+		},
+		body: "## What to build\n\nDo the thing.\n",
+	}
+	got, err := parseLocalIssue([]byte(li.render()))
+	if err != nil {
+		t.Fatalf("parseLocalIssue(render()): %v", err)
+	}
+	if !reflect.DeepEqual(got, li) {
+		t.Errorf("round trip = %+v, want %+v", got, li)
+	}
+}
+
 func TestLocalTracker_ListIssues_OrderedByCreated(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -519,6 +541,40 @@ func TestLocalTracker_Issue_ReportsClosedState(t *testing.T) {
 	}
 	if open.State != forge.IssueOpen {
 		t.Errorf("open.State = %v, want IssueOpen", open.State)
+	}
+}
+
+// TestLocalTracker_ImplementsLandingRecorder asserts *LocalTracker satisfies
+// the optional forge.LandingRecorder surface (ADR 0029) — only the local
+// adapter records a landing ref; github/jira don't implement it.
+func TestLocalTracker_ImplementsLandingRecorder(t *testing.T) {
+	var _ forge.LandingRecorder = NewLocalTracker(t.TempDir(), testLabels)
+}
+
+// TestLocalTracker_RecordLanding_WritesLandingField verifies RecordLanding
+// persists the given ref as the issue's landing: frontmatter field.
+func TestLocalTracker_RecordLanding_WritesLandingField(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "fix-thing", localIssue{frontmatter: localFrontmatter{
+		Title: "Fix thing", State: labels.InProgress, Created: "2026-07-09T12:00:00Z",
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	if err := lt.RecordLanding("fix-thing", "https://github.com/o/r/pull/1"); err != nil {
+		t.Fatalf("RecordLanding: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "fix-thing.md"))
+	if err != nil {
+		t.Fatalf("read issue file: %v", err)
+	}
+	li, err := parseLocalIssue(data)
+	if err != nil {
+		t.Fatalf("parseLocalIssue: %v", err)
+	}
+	if li.frontmatter.Landing != "https://github.com/o/r/pull/1" {
+		t.Errorf("Landing = %q, want %q", li.frontmatter.Landing, "https://github.com/o/r/pull/1")
 	}
 }
 

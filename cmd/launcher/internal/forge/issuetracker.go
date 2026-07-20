@@ -112,3 +112,16 @@ type IssueTracker interface {
 	// color (without the leading #).
 	CreateLabel(name, description, color string) error
 }
+
+// LandingRecorder is the optional IssueTracker surface for adapters that can
+// persist where a Dispatch's work landed (ADR 0029). Only the local adapter
+// implements it — github/jira issues close through the forge's own
+// mechanisms and have no such ref to persist. Callers discover it with a
+// type assertion — `lr, ok := it.(LandingRecorder)` — the same
+// optional-interface pattern PRForge uses.
+type LandingRecorder interface {
+	// RecordLanding persists landing (a PR URL or push-only branch ref) as
+	// issue num's immutable landing reference. Only the ref is stored; no
+	// merge-state is cached — a later reconcile re-checks the forge live.
+	RecordLanding(num, landing string) error
+}

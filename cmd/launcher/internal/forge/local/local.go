@@ -25,6 +25,10 @@ type localFrontmatter struct {
 	// Closed is the local-only open/closed axis (ADR 0029), independent of
 	// the dispatch State marker — absent/false means open.
 	Closed bool
+	// Landing is the immutable landing reference RecordLanding writes after
+	// a work outcome line is parsed (ADR 0029) — a PR URL or push-only
+	// branch ref, never a cached merge-state.
+	Landing string
 }
 
 // localIssue is a parsed local issue file: its frontmatter plus Markdown body.
@@ -69,6 +73,8 @@ func parseLocalIssue(data []byte) (localIssue, error) {
 			fm.Parent = unquote(val)
 		case "closed":
 			fm.Closed = unquote(val) == "true"
+		case "landing":
+			fm.Landing = unquote(val)
 		case "labels":
 			fm.Labels = parseFlowList(val)
 		}
@@ -310,6 +316,21 @@ func (lt *LocalTracker) Comment(num, body string) error {
 	return nil
 }
 
+// RecordLanding persists landing as issue num's immutable landing:
+// frontmatter field (forge.LandingRecorder, ADR 0029) — only the local
+// adapter implements this optional method.
+func (lt *LocalTracker) RecordLanding(num, landing string) error {
+	li, err := lt.readIssueFile(num)
+	if err != nil {
+		return err
+	}
+	li.frontmatter.Landing = landing
+	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
+		return fmt.Errorf("write local issue %s: %w", num, err)
+	}
+	return nil
+}
+
 // Probe ensures the local issues directory exists and returns its absolute
 // path (the local analogue of a resolved repo slug).
 func (lt *LocalTracker) Probe() (string, error) {
@@ -350,6 +371,9 @@ func (li localIssue) render() string {
 	}
 	if li.frontmatter.Closed {
 		b.WriteString("closed: true\n")
+	}
+	if li.frontmatter.Landing != "" {
+		fmt.Fprintf(&b, "landing: %s\n", li.frontmatter.Landing)
 	}
 	b.WriteString(frontmatterDelim + "\n")
 	b.WriteString(li.body)
