@@ -165,8 +165,9 @@ requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
 at any directory to override it at runtime for zero-rebuild iteration.
 
 Opt-in prompt steps (the skill preamble, the caveman-default narration
-directive, `FILE ISSUES`, `AUTO-FORMAT`, `AUTO-LINT`, and `CI FAILURE`) are
-each one row in a nix-owned **Conditional fragment registry**
+directive, `FILE ISSUES`, `AUTO-FORMAT`, `AUTO-LINT`, `CI FAILURE`, and the
+`OPEN A PULL REQUEST` ticket-reference line) are each one row in a nix-owned
+**Conditional fragment registry**
 (`lib/fragments.nix`) — a gate variable, a fragment file under
 `prompts/fragments/`, and a substitution variable — rendered into the
 entrypoint's single fragment loop and its substitution allowlist together,
@@ -181,6 +182,14 @@ model, etc.) must ship the matching `fragments/*.md` file, exactly as it
 already must ship `filer-prompt.md` when the filer is configured — the
 entrypoint reads the fragment unconditionally once its gate is on, with no
 baked-in fallback.
+
+The `OPEN A PULL REQUEST` ticket-reference line is the one row with three
+mutually exclusive fragments (`pr-body-closes.md` / `pr-body-local-ref.md` /
+`pr-body-local-noref.md`) instead of one on/off pair: `ISSUE_TRACKER` and
+`LOCAL_ISSUE_REFERENCE` together pick exactly one gate, so issue-prompt.md
+concatenates all three substitution variables and only the active one ever
+renders — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)
+for the three cases.
 
 The caveman-default step is keyed on the baked skill itself rather than a
 separate knob: whenever `DRIVER_SKILLS_DIR/caveman/SKILL.md` is present at
@@ -1107,6 +1116,31 @@ landing: https://github.com/owner/repo/pull/123
 - `spindrift doctor`'s label-presence check always passes for the local
   adapter — there is no separate label registry to check; the four dispatch
   markers above always exist as values the `state` field can take.
+
+#### PR-body ticket reference (`LOCAL_ISSUE_REFERENCE`)
+
+`ISSUE_NUMBER` is the ticket's file slug when `ISSUE_TRACKER=local`, and a
+slug can be numeric (`.../42.md` → slug `42`). An unconditional
+`Closes #${ISSUE_NUMBER}` in the PR body — the `github`-tracker default — would
+therefore risk silently closing real GitHub issue #42 on the Target repo, on
+top of leaking a private ticket slug into a PR body on the shared remote. To
+avoid both, the PR-body reference is a three-way conditional fragment (see
+the Conditional fragment registry above) keyed on `ISSUE_TRACKER` and the
+`LOCAL_ISSUE_REFERENCE` global setting (grouped settings surface, ADR 0015;
+`settings.issueDiscovery.localIssueReference`):
+
+- `ISSUE_TRACKER=github`: unchanged — the PR body still MUST contain
+  `Closes #${ISSUE_NUMBER}`.
+- `ISSUE_TRACKER=local`, `LOCAL_ISSUE_REFERENCE` off (**default**): the PR
+  body has no reference to the ticket at all — no slug, no `Closes`/`Fixes`.
+- `ISSUE_TRACKER=local`, `LOCAL_ISSUE_REFERENCE` on: the PR body carries
+  `Local-issue: <slug>` — a plain, non-auto-closing breadcrumb for
+  correlating a PR back to its private ticket — never a `Closes`/`Fixes`
+  keyword, so a numeric slug can never trigger GitHub's issue auto-close.
+
+Default off, because the local tracker's whole premise is a private ticket
+folder (see above); opt in only if you want that traceability and have
+weighed the slug leaking into the (shared, `github` Code Forge) PR body.
 
 ---
 
