@@ -1,6 +1,7 @@
 package local
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -77,4 +78,46 @@ func landingRef(repoPath, branch string) (string, error) {
 		return "", fmt.Errorf("local: resolve %s sha: %w: %s", branch, err, out)
 	}
 	return branch + "@" + strings.TrimSpace(string(out)), nil
+}
+
+// parseLandingRef splits landing (landingRef's own "<branch>@<sha>" output)
+// back into its branch and sha parts. ok is false for anything that doesn't
+// match that shape — notably the raw agent-branch name settle records before
+// a merge is even attempted (gate.go's early recordLanding call), which never
+// contains "@" and so is never mistaken for a landed ref — and for a sha
+// starting with "-", rejected outright rather than trusted to isMergedIntoIntegration's
+// own "--" guard against it being misread as a git option.
+func parseLandingRef(landing string) (branch, sha string, ok bool) {
+	branch, sha, found := strings.Cut(landing, "@")
+	if !found || branch == "" || sha == "" || strings.HasPrefix(sha, "-") {
+		return "", "", false
+	}
+	return branch, sha, true
+}
+
+// isMergedIntoIntegration reports whether sha is an ancestor of
+// integrationBranch's current tip inside repoPath — the no-network merge
+// observation VerifyLanding relies on (ADR 0029, ADR 0033). Ancestry, not
+// tip equality, because a sibling seam landing after this one moves
+// integrationBranch's tip forward without ever un-merging this commit. A
+// non-ancestor result (sha unknown to the repo, or genuinely not merged —
+// e.g. the merge that was supposed to record it in fact conflicted) reports
+// false with a nil error, the same "not merged" posture as any other
+// not-yet-landed seam; only a git invocation failure that isn't itself a
+// verdict (the repo path is unreadable, git itself can't run) is a real
+// error.
+func isMergedIntoIntegration(repoPath, sha, integrationBranch string) (bool, error) {
+	// The "--" guard matches relayBundle's own defense in depth: sha comes
+	// from a parsed landing ref, so treat it as untrusted input rather than
+	// assume it can never start with "-" and be misread as a git option.
+	cmd := exec.Command("git", "-C", repoPath, "merge-base", "--is-ancestor", "--", sha, "refs/heads/"+integrationBranch)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return false, nil
+	}
+	return false, fmt.Errorf("local: merge-base --is-ancestor %s %s: %w", sha, integrationBranch, err)
 }
