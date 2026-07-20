@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -391,12 +392,34 @@ func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) e
 // terminal label, riding the same label-fallback mechanism TransitionState
 // falls back to (ADR 0022: jira has no native status mapping for research
 // verdicts yet).
+//
+// Before swapping, it asserts num currently carries the InProgress fallback
+// label — mirroring the github adapter's #701 double-dispatch guard — and
+// errors without issuing the swap when it's absent. This is check-then-edit,
+// not atomic compare-and-swap, the same narrowed-but-not-closed TOCTOU
+// window exec.go's CompleteVerdict documents.
 func (j *jiraClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 	add := j.cfg.VerdictLabels.Label(verdict)
 	if add == "" {
 		return fmt.Errorf("jira: no label configured for verdict %v", verdict)
 	}
-	return j.swapLabel(num, add, j.cfg.Labels.Label(forge.InProgress))
+
+	remove := j.cfg.Labels.Label(forge.InProgress)
+	if remove != "" {
+		var payload jiraIssuePayload
+		status, err := j.do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload)
+		if err != nil {
+			return err
+		}
+		if status != http.StatusOK {
+			return fmt.Errorf("jira: issue %s: unexpected status %d", num, status)
+		}
+		if !slices.Contains(payload.Fields.Labels, remove) {
+			return fmt.Errorf("jira: issue %s: expected %q label, issue has %v", num, remove, payload.Fields.Labels)
+		}
+	}
+
+	return j.swapLabel(num, add, remove)
 }
 
 type jiraSearchPayload struct {
