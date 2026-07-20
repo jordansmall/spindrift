@@ -27,6 +27,17 @@ type Result struct {
 	// the box's log.
 	OutcomeFound bool
 
+	// Comment is the body of the last complete SPINDRIFT_COMMENT_BEGIN …
+	// SPINDRIFT_COMMENT_END block in the box's log, populated when
+	// CommentFound is true (ADR 0032, issue #1692) — the host-mediated
+	// write channel a local Dispatch's Box uses to hand settle its verdict
+	// or blocked-note comment instead of posting it in-box.
+	Comment string
+
+	// CommentFound reports whether a complete SPINDRIFT_COMMENT block was
+	// present in the box's log.
+	CommentFound bool
+
 	// ParseErr is non-nil when the box's log contained an unparseable
 	// SPINDRIFT_OUTCOME line (as opposed to no line at all). No
 	// classification is attempted in this case.
