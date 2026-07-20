@@ -185,10 +185,7 @@ gate): skip OPEN A PULL REQUEST below entirely.
 
 1. `git push --force-with-lease -u origin ${BRANCH}`
 2. `gh pr create --draft --base ${BASE_BRANCH} --head ${BRANCH} --title "<conventional title>" --body "<summary>"`
-3. Body MUST contain `Closes #${ISSUE_NUMBER}`. Summarize what changed and flag
-   anything a reviewer should know.
-
-The PR opens as a **draft** and stays a **draft** — the launcher flips it to
+${PR_BODY_CLOSES_STEP}${PR_BODY_LOCAL_REF_STEP}${PR_BODY_LOCAL_NOREF_STEP}The PR opens as a **draft** and stays a **draft** — the launcher flips it to
 ready once CI reaches green, immediately before it merges (the launcher
 already gates on CI green itself, so there is nothing left for you to watch
 or confirm here). Do NOT merge and do NOT flip it yourself; the LAUNCHER

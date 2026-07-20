@@ -49,6 +49,53 @@ setup() {
   done
 }
 
+# issue #1429/ADR 0029: the PR-body ticket-reference step is the one
+# registry row with three mutually exclusive fragments instead of an on/off
+# pair -- ISSUE_TRACKER x LOCAL_ISSUE_REFERENCE together pick exactly one of
+# PR_BODY_CLOSES/PR_BODY_LOCAL_REF/PR_BODY_LOCAL_NOREF
+# (agent/entrypoint.sh's phase_prompt_assembly precompute block). The three
+# tests below cover the acceptance criteria's three cells; box_env_gen.bash
+# already exports ISSUE_TRACKER=github (the schema default), so the first
+# case needs no override.
+@test "PR-body reference: github tracker keeps Closes unchanged" {
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-pr-body-github"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'Closes #7' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'Local-issue:' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "PR-body reference: local tracker defaults to no reference at all" {
+  export ISSUE_TRACKER=local
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-pr-body-local-off"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -qF 'Closes #7' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'Local-issue:' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "PR-body reference: local tracker opt-in emits a Local-issue breadcrumb, never Closes" {
+  export ISSUE_TRACKER=local
+  export LOCAL_ISSUE_REFERENCE=1
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-pr-body-local-on"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'Local-issue: 7' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'Closes #7' "$CLAUDE_PROMPT_FILE"
+}
+
+# issue #1429: same conditional-residue separation guarantee as the
+# AUTO-FORMAT/AUTO-LINT pair above, but this step abuts the next paragraph on
+# the same template line rather than a following heading (see
+# templates/default/prompts/issue-prompt.md), so the failure mode here is the
+# two gluing together with no blank line, not a missing heading.
+@test "PR-body reference step stays separated from the following paragraph" {
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-pr-body-sep"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'know\.The PR opens' "$CLAUDE_PROMPT_FILE"
+}
+
 # A scout/reviewer-only template (no "filer" key) must not require
 # filer-prompt.md to exist -- the file read has to be gated on the template
 # actually carrying a filer entry, same as the FILE_ISSUES_STEP gate above.

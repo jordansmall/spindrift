@@ -58,6 +58,8 @@
             #   jiraIncludeComments = "";
             #   # issues carrying this label are dispatchable (the launch button)
             #   label = "ready-for-agent";
+            #   # when non-empty and ISSUE_TRACKER=local, the PR body includes a non-auto-closing `Local-issue: <slug>` breadcrumb; default off keeps the private local ticket slug out of the PR body entirely (ISSUE_TRACKER=github is unaffected -- `Closes #ISSUE_NUMBER` stays either way)
+            #   localIssueReference = false;
             #   # directory scanned for issue files when ISSUE_TRACKER=local; keep it git-ignored so breakout issues stay private
             #   localIssuesDir = ".spindrift/issues";
             # };
