@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// ErrOpenNoneDispatchable is returned by Run when ModeDrain selects zero
+// ErrOpenNoneDispatchable is returned by Dispatch when ModeDrain selects zero
 // issues (all remaining candidates are blocked or deferred) — the caller
 // should stop with a triage message rather than hot-looping. Exported so
 // main.go can map it to the launcher's exit code 3.
