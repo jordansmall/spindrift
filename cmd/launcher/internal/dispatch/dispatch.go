@@ -53,6 +53,14 @@ type Config struct {
 	// construction site.
 	Kind string
 
+	// CodeForge is the CODE_FORGE knob value. runOnce consults it to decide
+	// whether a Box needs a writable outbox directory at all (ADR 0033):
+	// only "local" ever mounts one, so every other value (every
+	// pre-existing construction site) skips creating
+	// .spindrift/outbox/<num> entirely rather than leaving a harmless but
+	// pointless empty directory behind on every dispatch.
+	CodeForge string
+
 	// OpenPRForIssue reports whether an open PR already exists for the
 	// issue's agent branch. Consulted before a zero-exit, no-outcome box is
 	// held-and-retried on a transient classification (issue #565), so a box

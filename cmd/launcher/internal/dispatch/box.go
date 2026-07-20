@@ -37,6 +37,16 @@ func (d *Dispatch) conflictLogPath() string {
 	return conflictLogPathFor(d.pwd, d.number)
 }
 
+// OutboxDirFor returns the host path of number's per-issue writable outbox
+// directory (CODE_FORGE=local, ADR 0033) — the Box's code-out bundle lands
+// here for the Launcher to relay into the Accumulation repo. Exported so
+// callers that need to independently locate an issue's outbox (settle's
+// bundle relay) compute the identical path runOnce mounts, without needing
+// the Dispatch object itself.
+func OutboxDirFor(pwd, number string) string {
+	return filepath.Join(pwd, ".spindrift", "outbox", number)
+}
+
 // logPathFor, fixLogPathFor, and conflictLogPathFor are the single source of
 // truth for a Dispatch's log naming, shared with LogPaths (logs.go) so a
 // drill-in's pass discovery can never drift from the paths a Dispatch itself
@@ -116,6 +126,18 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	}
 	defer logFile.Close()
 
+	// Only CODE_FORGE=local ever mounts an outbox (ADR 0033); every other
+	// value skips creating .spindrift/outbox/<num> entirely rather than
+	// leaving a harmless but pointless empty directory behind on every
+	// dispatch.
+	var outboxDir string
+	if d.cfg.CodeForge == "local" {
+		outboxDir = OutboxDirFor(d.pwd, d.number)
+		if err := resetOutboxDir(outboxDir); err != nil {
+			return fmt.Errorf("reset outbox dir: %w", err)
+		}
+	}
+
 	heartbeatOut := d.cfg.HeartbeatOut
 	if heartbeatOut == nil {
 		heartbeatOut = os.Stdout
@@ -126,8 +148,20 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		Env:            env,
 		Output:         d.driver.NewHeartbeatWriter(logFile, d.number, heartbeatOut),
 		DriverCacheDir: driverCacheDir,
+		OutboxDir:      outboxDir,
 	}
 	return d.runner.Run(box)
+}
+
+// resetOutboxDir removes any bundle a previous attempt at this issue may
+// have left in dir, then recreates it empty — the writable outbox mount must
+// start empty every dispatch (ADR 0033), and buildMountSpecs only produces
+// the mount at all when the source directory already exists.
+func resetOutboxDir(dir string) error {
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	return os.MkdirAll(dir, 0o755)
 }
 
 // rotateStaleLog renames an existing file at logPath aside to the first

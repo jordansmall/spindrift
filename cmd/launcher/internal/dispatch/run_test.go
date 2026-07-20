@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"os"
 	"testing"
 
 	"spindrift.dev/launcher/internal/runner"
@@ -91,6 +92,66 @@ func TestRun_PopulatesBoxDriverCacheDir(t *testing.T) {
 	}
 	if got := fr.RunCalls[0].DriverCacheDir; got == "" {
 		t.Error("Box.DriverCacheDir: got empty, want the per-issue cache dir")
+	}
+}
+
+// TestRun_PopulatesBoxOutboxDir verifies Run forwards a fresh, existing
+// per-issue outbox directory onto the dispatched Box (CODE_FORGE=local, ADR
+// 0033) — the runner's mount code only produces the writable /outbox mount
+// when the source directory already exists (candidateMount), so runOnce must
+// create it, not merely name it.
+func TestRun_PopulatesBoxOutboxDir(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{CodeForge: "local"}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("77", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	outboxDir := fr.RunCalls[0].OutboxDir
+	if outboxDir == "" {
+		t.Fatal("Box.OutboxDir: got empty, want the per-issue outbox dir")
+	}
+	info, err := os.Stat(outboxDir)
+	if err != nil || !info.IsDir() {
+		t.Errorf("Box.OutboxDir %q: want an existing directory, stat err=%v", outboxDir, err)
+	}
+}
+
+// TestRun_NoOutboxDirForNonLocalCodeForge verifies that a Box dispatched
+// under any CodeForge other than "local" gets no outbox directory at all —
+// creating .spindrift/outbox/<num> on every dispatch would otherwise litter
+// the github/git-flow majority with a directory nothing ever mounts.
+func TestRun_NoOutboxDirForNonLocalCodeForge(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("78", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if got := fr.RunCalls[0].OutboxDir; got != "" {
+		t.Errorf("Box.OutboxDir: got %q, want empty when CodeForge != local", got)
 	}
 }
 
