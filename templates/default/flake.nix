@@ -140,6 +140,8 @@
             #   codeForge = "github";
             #   # plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise
             #   codeForgeRemoteURL = "";
+            #   # path to a file the launcher re-reads and swaps into GH_TOKEN whenever its content changes — lets an external minter (e.g. a workflow step re-minting a GitHub App installation token, keeping the App private key in the workflow rather than the launcher) keep the credential fresh across a run that outlives the token's ~1h lifetime (#1027); empty (default) leaves GH_TOKEN static for the whole run
+            #   ghTokenRefreshFile = "";
             #   # commit identity email; falls back to host git config user.email
             #   gitUserEmail = "";
             #   # commit identity name; falls back to host git config user.name

@@ -123,6 +123,14 @@ type config struct {
 	gitUserName      string
 	gitUserEmail     string
 
+	// ghTokenRefreshFile, when set, names a file the launcher polls for the
+	// remainder of the run, swapping its trimmed contents into GH_TOKEN
+	// whenever they change (issue #1027) — lets an external minter (e.g. a
+	// workflow step re-minting a GitHub App installation token) keep the
+	// launcher's credential fresh past the token's ~1h lifetime, without the
+	// App private key ever reaching the launcher itself.
+	ghTokenRefreshFile string
+
 	// Optional prompt override
 	spindriftPromptDir string
 	// Optional skills override
@@ -341,11 +349,12 @@ func loadConfig() config {
 		maxRebaseAttempts:  atoiNonnegSchema("MAX_REBASE_ATTEMPTS"),
 		preflightStaleBase: getenvSchema("PREFLIGHT_STALE_BASE") != "",
 
-		ghToken:          os.Getenv("GH_TOKEN"),
-		claudeOAuthToken: os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
-		anthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
-		gitUserName:      gitIdentityField("GIT_USER_NAME", "user.name"),
-		gitUserEmail:     gitIdentityField("GIT_USER_EMAIL", "user.email"),
+		ghToken:            os.Getenv("GH_TOKEN"),
+		claudeOAuthToken:   os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
+		anthropicAPIKey:    os.Getenv("ANTHROPIC_API_KEY"),
+		gitUserName:        gitIdentityField("GIT_USER_NAME", "user.name"),
+		gitUserEmail:       gitIdentityField("GIT_USER_EMAIL", "user.email"),
+		ghTokenRefreshFile: getenvSchema("GH_TOKEN_REFRESH_FILE"),
 
 		spindriftPromptDir: getenvSchema("SPINDRIFT_PROMPT_DIR"),
 		spindriftSkillsDir: getenvSchema("SPINDRIFT_SKILLS_DIR"),
