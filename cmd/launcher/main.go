@@ -1060,14 +1060,19 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout io.Writer) int {
 	fresh, rebuild := newConsoleFreshness(lc.config, lc.pwd, runner.NixEvaluator{},
 		func() (string, string, error) { return consoleGitSync(lc.pwd, lc.config.baseBranch) },
 		func() (string, error) { return consoleNixBuild(lc.pwd) })
+	researchTracker, researchFactory, researchSettle := researchLaunchStack(lc)
+	defer researchFactory.Cleanup()
 	launch := &console.Launcher{
-		CodeForge:   lc.codeForge,
-		Factory:     lc.factory,
-		Settle:      lc.settle,
-		MaxParallel: lc.config.maxParallel,
-		FailedLabel: lc.config.failedLabel,
-		Fresh:       fresh,
-		RebuildFn:   rebuild,
+		CodeForge:       lc.codeForge,
+		Factory:         lc.factory,
+		Settle:          lc.settle,
+		ResearchTracker: researchTracker,
+		ResearchFactory: researchFactory,
+		ResearchSettle:  researchSettle,
+		MaxParallel:     lc.config.maxParallel,
+		FailedLabel:     lc.config.failedLabel,
+		Fresh:           fresh,
+		RebuildFn:       rebuild,
 		RecoverFn: func(issueNum string) error {
 			return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle, issueNum)
 		},
