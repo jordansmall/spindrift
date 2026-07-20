@@ -493,6 +493,98 @@ func TestLocalTracker_DepsOf_StripsBackticksFromSlug(t *testing.T) {
 	}
 }
 
+// TestLocalTracker_DepsOf_SkipsSentinelBullet mirrors the GitHub parser's
+// sentinel case (forge.TestParseBlockerRefs_SentinelNoneBulletIgnoresInlineRef
+// in seams_test.go): a "- None" bullet under "## Blocked by" means zero
+// blockers, not a literal slug named "None — can start immediately".
+func TestLocalTracker_DepsOf_SkipsSentinelBullet(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "first-slice", localIssue{
+		frontmatter: localFrontmatter{Title: "First slice", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
+		body: "## What to build\n\nDo the thing.\n\n" +
+			"## Blocked by\n\n- None — can start immediately\n",
+	})
+
+	lt := NewLocalTracker(dir, labels)
+	deps, err := lt.DepsOf("first-slice")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	if len(deps) != 0 {
+		t.Errorf("DepsOf = %v, want none", deps)
+	}
+}
+
+// TestLocalTracker_DepsOf_SkipsBacktickQuotedSentinel locks in the local
+// adapter's widened sentinel recognition: the sentinel check runs after
+// backtick-stripping, so a backtick-quoted "`None`" bullet is skipped too,
+// unlike ParseBlockerRefs which checks raw bullet content.
+func TestLocalTracker_DepsOf_SkipsBacktickQuotedSentinel(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "backtick-sentinel", localIssue{
+		frontmatter: localFrontmatter{Title: "Backtick sentinel", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
+		body: "## What to build\n\nDo the thing.\n\n" +
+			"## Blocked by\n\n- `None`\n",
+	})
+
+	lt := NewLocalTracker(dir, labels)
+	deps, err := lt.DepsOf("backtick-sentinel")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	if len(deps) != 0 {
+		t.Errorf("DepsOf = %v, want none", deps)
+	}
+}
+
+// TestLocalTracker_DepsOf_SkipsSentinelBulletNA covers the "N/A" spelling
+// of the sentinel (AC names it explicitly, alongside "None").
+func TestLocalTracker_DepsOf_SkipsSentinelBulletNA(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "third-slice", localIssue{
+		frontmatter: localFrontmatter{Title: "Third slice", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
+		body: "## What to build\n\nDo the thing.\n\n" +
+			"## Blocked by\n\n- N/A\n",
+	})
+
+	lt := NewLocalTracker(dir, labels)
+	deps, err := lt.DepsOf("third-slice")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	if len(deps) != 0 {
+		t.Errorf("DepsOf = %v, want none", deps)
+	}
+}
+
+// TestLocalTracker_DepsOf_SentinelBulletDoesNotSuppressRealSlug confirms a
+// sentinel bullet only cancels itself — a real slug bullet in the same
+// section still surfaces as a dependency.
+func TestLocalTracker_DepsOf_SentinelBulletDoesNotSuppressRealSlug(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "second-slice", localIssue{
+		frontmatter: localFrontmatter{Title: "Second slice", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
+		body: "## What to build\n\nDo the thing.\n\n" +
+			"## Blocked by\n\n- None\n- 01-calc-add\n",
+	})
+
+	lt := NewLocalTracker(dir, labels)
+	deps, err := lt.DepsOf("second-slice")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	want := []forge.Dependency{
+		{ID: "01-calc-add", Source: forge.DepSourceBody},
+	}
+	if !reflect.DeepEqual(deps, want) {
+		t.Errorf("DepsOf = %v, want %v", deps, want)
+	}
+}
+
 func TestLocalTracker_DepsOf_NoBlockedBySection(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -503,6 +595,29 @@ func TestLocalTracker_DepsOf_NoBlockedBySection(t *testing.T) {
 
 	lt := NewLocalTracker(dir, labels)
 	deps, err := lt.DepsOf("standalone")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	if len(deps) != 0 {
+		t.Errorf("DepsOf = %v, want none", deps)
+	}
+}
+
+// TestLocalTracker_DepsOf_EmptyBlockedBySection confirms an explicit
+// "## Blocked by" section with no bullets parses to zero blockers, same
+// as omitting the section entirely (AC: "behavior stays identical for
+// issues that already omit the section or leave it empty").
+func TestLocalTracker_DepsOf_EmptyBlockedBySection(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "empty-section", localIssue{
+		frontmatter: localFrontmatter{Title: "Empty section", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
+		body: "## What to build\n\nDo the thing.\n\n" +
+			"## Blocked by\n\n## Touches\n\nsrc/\n",
+	})
+
+	lt := NewLocalTracker(dir, labels)
+	deps, err := lt.DepsOf("empty-section")
 	if err != nil {
 		t.Fatalf("DepsOf: %v", err)
 	}

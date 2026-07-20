@@ -308,7 +308,15 @@ func parseLocalBlockers(body string) []string {
 			inSection = false
 		}
 		if inSection && forge.IsBulletItem(line) {
+			// Sentinel check runs after backtick-stripping (unlike
+			// ParseBlockerRefs, which checks the raw bullet content) so a
+			// backtick-quoted "`None`" slug is also recognised as the
+			// sentinel — real slugs are never backtick-quoted "None", so
+			// this only widens sentinel recognition, never narrows it.
 			slug := strings.Trim(forge.ExtractBulletContent(line), "`")
+			if forge.IsSentinelBullet(slug) {
+				continue
+			}
 			if slug != "" && !seen[slug] {
 				seen[slug] = true
 				refs = append(refs, slug)

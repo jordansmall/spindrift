@@ -36,6 +36,15 @@ func StripInlineCode(line string) string {
 	return inlineCodeSpan.ReplaceAllString(line, "")
 }
 
+// IsSentinelBullet reports whether content (a bullet's extracted text) is a
+// "no blockers" sentinel — "None"/"N/A", case-insensitively, optionally
+// followed by a continuation. ParseBlockerRefs uses this to skip such
+// bullets in the "## Blocked by" section; local.go's parseLocalBlockers
+// calls it too, so the two backends agree on what "no blockers" means.
+func IsSentinelBullet(content string) bool {
+	return sentinelBullet.MatchString(content)
+}
+
 // IsBlockedByHeader reports whether line is a "## Blocked by" section header.
 // The local adapter's parseLocalBlockers calls this to reuse the same
 // section-parsing grammar for slug-based (rather than "#N") blocker refs.
@@ -111,7 +120,7 @@ func ParseBlockerRefs(body string) []string {
 		}
 
 		if inSection && IsBulletItem(line) {
-			if sentinelBullet.MatchString(ExtractBulletContent(line)) {
+			if IsSentinelBullet(ExtractBulletContent(line)) {
 				continue
 			}
 			for _, m := range issueRef.FindAllStringSubmatch(line, -1) {
