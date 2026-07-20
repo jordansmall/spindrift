@@ -27,6 +27,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/freshness"
+	"spindrift.dev/launcher/internal/reconcile"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/waves"
@@ -805,6 +806,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 // tests construct it directly with fakes.
 func run(lc *launchContext) error {
 	c, it, cf, f, s, pwd := lc.config, lc.issueTracker, lc.codeForge, lc.factory, lc.settle, lc.pwd
+	lp := reconcile.NewFSProbe(pwd, lc.runner)
 
 	fmt.Printf("repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
 
@@ -819,7 +821,7 @@ func run(lc *launchContext) error {
 	// operator-driven `spindrift recover <n>`, fired by the agent-recover
 	// label — see recoverByNumber and .github/workflows/agent-recover.yml.
 	if resolveOrigin(c) == waves.OriginDiscovered && c.continuousDispatch {
-		return runContinuousDispatch(c, it, cf, pwd, f, s, runner.NixEvaluator{})
+		return runContinuousDispatch(c, it, cf, pwd, f, s, runner.NixEvaluator{}, lp)
 	}
 
 	issues, origin, err := discoverIssues(c, it)
@@ -829,7 +831,7 @@ func run(lc *launchContext) error {
 
 	if origin == waves.OriginDiscovered && len(issues) == 0 {
 		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
-		if err := reconcileAfterDispatch(c, it, cf, os.Stdout); err != nil {
+		if err := reconcileAfterDispatch(c, it, cf, lp, os.Stdout); err != nil {
 			return err
 		}
 		return errQueueEmpty
@@ -845,7 +847,7 @@ func run(lc *launchContext) error {
 	}
 
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
-	return reconcileAfterDispatch(c, it, cf, os.Stdout)
+	return reconcileAfterDispatch(c, it, cf, lp, os.Stdout)
 }
 
 // runContinuousDispatch is the entry point for CONTINUOUS_DISPATCH: the
@@ -866,7 +868,7 @@ func run(lc *launchContext) error {
 // picks — a zero-issue result there doesn't mean the tracker itself is
 // empty (#1645). eval is injected so tests can substitute a Fake instead of
 // shelling out to nix — mirrors previewIssues's own eval parameter.
-func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, eval freshness.Evaluator) error {
+func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, eval freshness.Evaluator, lp reconcile.LivenessProbe) error {
 	firstQuery := true
 	firstQueryEmpty := false
 	var firstQueryErr error
@@ -921,7 +923,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		}
 		if errors.Is(err, waves.ErrOpenNoneDispatchable) && firstQueryEmpty {
 			fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
-			if err := reconcileAfterDispatch(c, it, cf, os.Stdout); err != nil {
+			if err := reconcileAfterDispatch(c, it, cf, lp, os.Stdout); err != nil {
 				return err
 			}
 			return errQueueEmpty
@@ -929,7 +931,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return err
 	}
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
-	return reconcileAfterDispatch(c, it, cf, os.Stdout)
+	return reconcileAfterDispatch(c, it, cf, lp, os.Stdout)
 }
 
 // cmdBuild is the `build` subcommand: realize the sandbox image or store
