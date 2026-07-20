@@ -744,7 +744,7 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   gate swap `agent-in-progress` → `agent-complete` — the agent's work is done.
   `Closes #N` in the PR body closes the issue whenever the PR merges.
   (Dependency ordering keys off the PR actually being merged, not this label —
-  see [`BlockerReady`](../cmd/launcher/internal/waves/blocker.go).)
+  see [`Readiness.Ready`](../cmd/launcher/internal/waves/blocker.go).)
 - **Red CI self-heals before it fails.** If CI goes genuinely red, the launcher
   dispatches up to `MAX_FIX_ATTEMPTS` fix boxes on the same branch and re-gates
   after each. Only once those are exhausted (or a fix box exits non-zero

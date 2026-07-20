@@ -859,7 +859,7 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 
 // TestRunContinuous_RefillHoldsDepsOfFailedIssue verifies that a refill's
 // Discoverer naming an issue in its failed set (#1103, the Discoverer's own
-// BuildEdges/DepsOf call errored) holds it rather than dispatching it — the
+// NewReadiness/DepsOf call errored) holds it rather than dispatching it — the
 // continuous-mode counterpart of TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue.
 func TestRunContinuous_RefillHoldsDepsOfFailedIssue(t *testing.T) {
 	c := baseConfig()

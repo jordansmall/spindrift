@@ -131,7 +131,7 @@ func TestNewPlan_OriginPropagates(t *testing.T) {
 
 // TestNewPlan_FailedPropagates verifies NewPlan carries Input.Failed through
 // to Plan.Failed unchanged — drainMaxJobs (#1103) reads it off the Plan to
-// hold an issue whose own BuildEdges/DepsOf call errored, rather than
+// hold an issue whose own NewReadiness/DepsOf call errored, rather than
 // treating the missing Edges entry as a confirmed zero-blocker issue.
 func TestNewPlan_FailedPropagates(t *testing.T) {
 	cfg := Config{}
