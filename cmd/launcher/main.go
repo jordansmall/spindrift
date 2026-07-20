@@ -583,6 +583,45 @@ func newDriver(c config) driver.Driver {
 	return d
 }
 
+// localBaseBranchResolver returns resolveBoxEnvVar, except that under
+// CODE_FORGE=local it forwards BASE_BRANCH as the seam's Integration branch
+// (integration/<parent>, ADR 0033) once cf.BranchExists confirms it's
+// there, instead of the operator's real base branch. Any seam's Box needs
+// the Integration branch as its clone target once one exists, so it builds
+// on whatever has landed so far (issue #1700). But ensureIntegrationBranch
+// only ever creates that ref host-side, from inside RelayBundle, once some
+// seam actually lands -- a broad ticket's first (or wholly independent)
+// seam dispatches before that, so forwarding a not-yet-existing ref would
+// break its Box's clone; ResolveEnv falls back to c.baseBranch until
+// BranchExists says otherwise (and, defensively, on a BranchExists error --
+// logged rather than silent, since ResolveEnv's func(string) string shape
+// leaves no error to propagate to its dispatch.Config caller). c.baseBranch
+// itself still reaches newCodeForge unchanged either way, since
+// ensureIntegrationBranch needs the real base branch to seed
+// integration/<parent> the first time a parent's seam lands.
+func localBaseBranchResolver(c config, cf forge.CodeForge) func(string) string {
+	if c.codeForge != "local" {
+		return resolveBoxEnvVar
+	}
+	integrationBranch := local.IntegrationBranch(c.codeForgeIntegrationParent)
+	return func(name string) string {
+		if name == "BASE_BRANCH" {
+			// Checked fresh on every call (once per Box constructed) rather
+			// than cached at construction: a later seam's dispatch, within
+			// the same continuous run, must see integration/<parent> as it
+			// exists at that later moment, not as it stood at process start.
+			exists, err := cf.BranchExists(integrationBranch)
+			if err != nil {
+				fmt.Printf("!! BASE_BRANCH: checking %s: %v; falling back to %s\n", integrationBranch, err, c.baseBranch)
+			}
+			if err == nil && exists {
+				return integrationBranch
+			}
+		}
+		return resolveBoxEnvVar(name)
+	}
+}
+
 // dispatchConfig builds the subset of config a dispatch.Factory needs.
 // OpenPRForIssue wires forge.ResolveOpenPR (issue #565), so a zero-exit
 // rate-limited retry never re-runs a box whose work already landed a PR;
@@ -591,7 +630,7 @@ func newDriver(c config) driver.Driver {
 func dispatchConfig(c config, cf forge.CodeForge) dispatch.Config {
 	return dispatch.Config{
 		BoxEnvVars:            c.boxEnvVars,
-		ResolveEnv:            resolveBoxEnvVar,
+		ResolveEnv:            localBaseBranchResolver(c, cf),
 		Kind:                  c.dispatchKind,
 		CodeForge:             c.codeForge,
 		TransientRetryMax:     c.transientRetryMax,
