@@ -61,6 +61,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	case "blocked":
 		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
 		s.transitionState(num, forge.InProgress, forge.Failed)
+		s.postBlockedNoteComment(num, o.Note)
 		s.postUsageComment(num, d)
 	case "ready":
 		switch s.selfHeal(d, num, gen, o.Landing) {
@@ -100,6 +101,24 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 func (s *Settle) transitionState(num string, from, to forge.DispatchState) {
 	if err := s.it.TransitionState(num, from, to); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %d\n", num, to)
+	}
+}
+
+// postBlockedNoteComment posts note as a comment via the optional local
+// content plane (ADR 0032, issue #1692): a local Dispatch's Box has no
+// in-box tracker client, so its issue-prompt cannot post the blocked-note
+// comment github's Box posts via gh issue comment — settle posts it
+// host-side instead, mirroring recordLanding's "s.landing != nil" test for
+// a tracker that implements the optional LandingRecorder surface (only the
+// local adapter). A no-op for github/jira, whose Box already posted its own
+// blocked-note comment in-box, and for an empty note. Best-effort, matching
+// postUsageComment's log-but-don't-propagate contract.
+func (s *Settle) postBlockedNoteComment(num, note string) {
+	if s.landing == nil || note == "" {
+		return
+	}
+	if err := s.it.Comment(num, note); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not post blocked-note comment: %v\n", num, err)
 	}
 }
 

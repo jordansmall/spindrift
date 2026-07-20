@@ -15,6 +15,15 @@ import (
 // leaner still: research lands no code, so there is nothing to adopt either.
 type ResearchSettle struct {
 	it forge.IssueTracker
+	// landing is it's optional LandingRecorder surface (ADR 0029), resolved
+	// once at construction via a type assertion — non-nil only for the
+	// local adapter (github/jira don't implement it). Doubles as this
+	// Settle's "is local" test (ADR 0032, issue #1692): a local Dispatch's
+	// Box has no in-box tracker client, so its verdict comment travels as a
+	// SPINDRIFT_COMMENT block on stdout instead of a direct gh issue
+	// comment, and this Settle posts it host-side before applying the
+	// verdict label.
+	landing forge.LandingRecorder
 }
 
 var _ Settler = (*ResearchSettle)(nil)
@@ -23,7 +32,8 @@ var _ Settler = (*ResearchSettle)(nil)
 // research-labeled IssueTracker instance (ADR 0022's fixed
 // agent-research/agent-research-in-progress/verdict label family).
 func NewResearchSettle(it forge.IssueTracker) *ResearchSettle {
-	return &ResearchSettle{it: it}
+	landing, _ := it.(forge.LandingRecorder)
+	return &ResearchSettle{it: it, landing: landing}
 }
 
 // Settle interprets result and drives num to its terminal research label:
@@ -31,22 +41,36 @@ func NewResearchSettle(it forge.IssueTracker) *ResearchSettle {
 // "blocked", an unparseable status, or a missing outcome line all mean the
 // Box produced no usable verdict, so num is transitioned to Failed
 // (agent-research-failed) instead — crash-retry and verdict-review stay
-// separate human queues.
+// separate human queues. For a local tracker (ADR 0032, issue #1692), a
+// verdict outcome additionally requires a complete SPINDRIFT_COMMENT block —
+// posted host-side via Comment before the verdict label is applied — a
+// missing or malformed block is treated the same as a missing outcome line.
 func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
 	if !result.OutcomeFound {
 		r.fail(num, "no verdict outcome line")
 		return
 	}
 	o := result.Outcome
-	if verdict, ok := forge.ParseVerdict(o.Status); ok {
-		if err := r.it.CompleteVerdict(num, verdict); err != nil {
-			fmt.Printf("    #%s  landing=%s  status=verdict-apply-failed  !! %v\n", num, o.Landing, err)
-			return
-		}
-		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
+	verdict, ok := forge.ParseVerdict(o.Status)
+	if !ok {
+		r.fail(num, o.Note)
 		return
 	}
-	r.fail(num, o.Note)
+	if r.landing != nil {
+		if !result.CommentFound || result.Comment == "" {
+			r.fail(num, "no verdict comment block")
+			return
+		}
+		if err := r.it.Comment(num, result.Comment); err != nil {
+			fmt.Printf("    #%s  status=comment-post-failed  !! %v\n", num, err)
+			return
+		}
+	}
+	if err := r.it.CompleteVerdict(num, verdict); err != nil {
+		fmt.Printf("    #%s  landing=%s  status=verdict-apply-failed  !! %v\n", num, o.Landing, err)
+		return
+	}
+	fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
 }
 
 // fail transitions num from InProgress to Failed (agent-research-failed),
