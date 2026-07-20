@@ -185,7 +185,7 @@ func TestQueue_Discover_DuplicateNumber_ClaimTargetsNewestRow(t *testing.T) {
 
 // TestQueue_Discover_HoldsPickWithOpenBlocker verifies a pick whose declared
 // blocker is not yet ready holds at PickHeld instead of launching — edge
-// resolution reuses waves.BuildEdges/BlockerStatus, no second parser (#650).
+// resolution reuses waves.NewReadiness/Status, no second parser (#650).
 func TestQueue_Discover_HoldsPickWithOpenBlocker(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
