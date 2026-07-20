@@ -146,6 +146,14 @@ type Fake struct {
 	// LandingRefCallCount counts every LandingRef invocation.
 	LandingRefCallCount int
 
+	// verifyLandingResults scripts VerifyLanding's result per landing ref —
+	// merged, or an error simulating a genuine (non-malformed) local-git
+	// failure. Only reachable through AsLocal(), the only wrapper
+	// implementing forge.LandingVerifier.
+	verifyLandingResults map[string]verifyLandingResult
+	// VerifyLandingCalls records every VerifyLanding invocation in order.
+	VerifyLandingCalls []string
+
 	// AutoMergeAllowed controls what CanAutoMerge returns (default false).
 	AutoMergeAllowed bool
 	// AutoMergeErr, if non-nil, is returned by CanAutoMerge.
@@ -764,6 +772,37 @@ func (f *Fake) landingRef() (string, error) {
 	return f.LandingRefValue, nil
 }
 
+// verifyLandingResult scripts a single SetVerifyLanding entry.
+type verifyLandingResult struct {
+	merged bool
+	err    error
+}
+
+// SetVerifyLanding scripts VerifyLanding(landing)'s result — merged, or a
+// genuine error distinct from the normal "not merged" (malformed ref,
+// conflicting/unlanded merge) outcome, which callers script as merged=false,
+// err=nil instead.
+func (f *Fake) SetVerifyLanding(landing string, merged bool, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.verifyLandingResults == nil {
+		f.verifyLandingResults = map[string]verifyLandingResult{}
+	}
+	f.verifyLandingResults[landing] = verifyLandingResult{merged: merged, err: err}
+}
+
+// verifyLanding backs the optional LandingVerifier surface (ADR 0029, ADR
+// 0033), the same AsLocal()-only restriction as relayBundle above, for the
+// same reason. An unscripted landing defaults to merged=false, nil — the
+// same posture as a malformed or not-yet-merged ref in production.
+func (f *Fake) verifyLanding(landing string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.VerifyLandingCalls = append(f.VerifyLandingCalls, landing)
+	res := f.verifyLandingResults[landing]
+	return res.merged, res.err
+}
+
 // CloseIssue implements the optional IssueCloser surface (ADR 0029), setting
 // the issue's State to IssueClosed and recording the call for tests to
 // assert against.
@@ -843,9 +882,11 @@ type localForge struct{ pushOnlyForge }
 // LandingRef, but not PRForge — the local adapter's shape.
 func (f *Fake) AsLocal() CodeForge { return localForge{pushOnlyForge{f}} }
 
-func (l localForge) RelayBundle(outboxDir, ref string) error { return l.f.relayBundle(outboxDir, ref) }
-func (l localForge) LandingRef() (string, error)             { return l.f.landingRef() }
+func (l localForge) RelayBundle(outboxDir, ref string) error    { return l.f.relayBundle(outboxDir, ref) }
+func (l localForge) LandingRef() (string, error)                { return l.f.landingRef() }
+func (l localForge) VerifyLanding(landing string) (bool, error) { return l.f.verifyLanding(landing) }
 
 var _ CodeForge = localForge{}
 var _ BundleRelay = localForge{}
 var _ LandingRef = localForge{}
+var _ LandingVerifier = localForge{}
