@@ -77,6 +77,16 @@ func TestJiraClient_ImplementsIssueTracker(t *testing.T) {
 	var _ forge.IssueTracker = jira.NewJiraClient(jira.JiraConfig{})
 }
 
+// TestJiraClient_DoesNotImplementLandingRecorder verifies the jira adapter
+// does not satisfy forge.LandingRecorder (ADR 0029): only the local adapter
+// records a landing ref; jira has no such concept.
+func TestJiraClient_DoesNotImplementLandingRecorder(t *testing.T) {
+	it := jira.NewJiraClient(jira.JiraConfig{})
+	if _, ok := it.(forge.LandingRecorder); ok {
+		t.Error("JiraClient satisfies forge.LandingRecorder, want it hidden")
+	}
+}
+
 // TestJiraClient_Probe_Success verifies Probe() confirms connectivity and
 // returns the configured project key on success.
 func TestJiraClient_Probe_Success(t *testing.T) {

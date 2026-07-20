@@ -29,6 +29,17 @@ func TestExecClient_ImplementsPRForge(t *testing.T) {
 	var _ forge.PRForge = NewExecClient("owner/repo", testLabels, "agent/issue-")
 }
 
+// TestExecClient_DoesNotImplementLandingRecorder verifies the github adapter
+// does not satisfy forge.LandingRecorder (ADR 0029): GitHub issues close
+// through the forge's own auto-close mechanism, so there is no landing ref
+// to persist. Only the local adapter implements this optional method.
+func TestExecClient_DoesNotImplementLandingRecorder(t *testing.T) {
+	var it forge.IssueTracker = NewExecClient("owner/repo", testLabels, "agent/issue-")
+	if _, ok := it.(forge.LandingRecorder); ok {
+		t.Error("ExecClient satisfies forge.LandingRecorder, want it hidden")
+	}
+}
+
 // prependFakeGH writes a counting-wrapper gh script to a temp dir, prepends
 // that dir to PATH, and returns the dir. Each invocation of the fake gh
 // records its argv to call-NN.txt (zero-indexed) inside the dir.
