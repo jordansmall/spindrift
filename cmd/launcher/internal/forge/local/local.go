@@ -29,6 +29,9 @@ type localFrontmatter struct {
 	// a work outcome line is parsed (ADR 0029) — a PR URL or push-only
 	// branch ref, never a cached merge-state.
 	Landing string
+	// Abandoned is set by FlagAbandoned when the issue's landing PR was
+	// closed without merging (ADR 0029) — absent/false means not abandoned.
+	Abandoned bool
 }
 
 // localIssue is a parsed local issue file: its frontmatter plus Markdown body.
@@ -75,6 +78,8 @@ func parseLocalIssue(data []byte) (localIssue, error) {
 			fm.Closed = unquote(val) == "true"
 		case "landing":
 			fm.Landing = unquote(val)
+		case "abandoned":
+			fm.Abandoned = unquote(val) == "true"
 		case "labels":
 			fm.Labels = parseFlowList(val)
 		}
@@ -142,12 +147,13 @@ func toIssue(num string, li localIssue) forge.Issue {
 		state = forge.IssueClosed
 	}
 	return forge.Issue{
-		Number:  num,
-		Title:   li.frontmatter.Title,
-		Body:    li.body,
-		State:   state,
-		Labels:  labels,
-		Landing: li.frontmatter.Landing,
+		Number:    num,
+		Title:     li.frontmatter.Title,
+		Body:      li.body,
+		State:     state,
+		Labels:    labels,
+		Landing:   li.frontmatter.Landing,
+		Abandoned: li.frontmatter.Abandoned,
 	}
 }
 
@@ -356,6 +362,22 @@ func (lt *LocalTracker) CloseIssue(num string) error {
 	return nil
 }
 
+// FlagAbandoned marks issue num abandoned by setting the abandoned:
+// frontmatter field (forge.AbandonedFlagger, ADR 0029) — only the local
+// adapter implements this optional method; reconcile is its sole caller,
+// invoked when the issue's landing PR closed without merging.
+func (lt *LocalTracker) FlagAbandoned(num string) error {
+	li, err := lt.readIssueFile(num)
+	if err != nil {
+		return err
+	}
+	li.frontmatter.Abandoned = true
+	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
+		return fmt.Errorf("write local issue %s: %w", num, err)
+	}
+	return nil
+}
+
 // Probe ensures the local issues directory exists and returns its absolute
 // path (the local analogue of a resolved repo slug).
 func (lt *LocalTracker) Probe() (string, error) {
@@ -399,6 +421,9 @@ func (li localIssue) render() string {
 	}
 	if li.frontmatter.Landing != "" {
 		fmt.Fprintf(&b, "landing: %s\n", li.frontmatter.Landing)
+	}
+	if li.frontmatter.Abandoned {
+		b.WriteString("abandoned: true\n")
 	}
 	b.WriteString(frontmatterDelim + "\n")
 	b.WriteString(li.body)

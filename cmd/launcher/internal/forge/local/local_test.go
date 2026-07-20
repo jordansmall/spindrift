@@ -137,6 +137,29 @@ func TestLocalIssue_RenderParseRoundTrip_Landing(t *testing.T) {
 	}
 }
 
+// TestLocalIssue_RenderParseRoundTrip_Abandoned verifies abandoned: survives
+// a parse/render round trip alongside the other frontmatter fields — set by
+// FlagAbandoned when a landing PR closes without merging (ADR 0029).
+func TestLocalIssue_RenderParseRoundTrip_Abandoned(t *testing.T) {
+	li := localIssue{
+		frontmatter: localFrontmatter{
+			Title:     "Fix the thing",
+			State:     "agent-in-progress",
+			Created:   "2026-07-09T12:00:00Z",
+			Landing:   "https://github.com/o/r/pull/1",
+			Abandoned: true,
+		},
+		body: "## What to build\n\nDo the thing.\n",
+	}
+	got, err := parseLocalIssue([]byte(li.render()))
+	if err != nil {
+		t.Fatalf("parseLocalIssue(render()): %v", err)
+	}
+	if !reflect.DeepEqual(got, li) {
+		t.Errorf("round trip = %+v, want %+v", got, li)
+	}
+}
+
 func TestLocalTracker_ListIssues_OrderedByCreated(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -565,6 +588,27 @@ func TestLocalTracker_Issue_ReportsLandingRef(t *testing.T) {
 	}
 }
 
+// TestLocalTracker_Issue_ReportsAbandonedFlag verifies Issue() surfaces the
+// frontmatter abandoned: flag on forge.Issue.Abandoned — reconcile's read
+// side of FlagAbandoned's write (ADR 0029).
+func TestLocalTracker_Issue_ReportsAbandonedFlag(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "fix-thing", localIssue{frontmatter: localFrontmatter{
+		Title: "Fix thing", State: labels.InProgress, Created: "2026-07-09T12:00:00Z",
+		Landing: "https://github.com/o/r/pull/1", Abandoned: true,
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	iss, err := lt.Issue("fix-thing")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !iss.Abandoned {
+		t.Errorf("Abandoned = %v, want true", iss.Abandoned)
+	}
+}
+
 // TestLocalTracker_ImplementsLandingRecorder asserts *LocalTracker satisfies
 // the optional forge.LandingRecorder surface (ADR 0029) — only the local
 // adapter records a landing ref; github/jira don't implement it.
@@ -627,6 +671,43 @@ func TestLocalTracker_CloseIssue_SetsClosedTrue(t *testing.T) {
 	}
 	if iss.State != forge.IssueClosed {
 		t.Errorf("State = %v, want IssueClosed", iss.State)
+	}
+	if iss.Landing != "https://github.com/o/r/pull/1" {
+		t.Errorf("Landing = %q, want unchanged %q", iss.Landing, "https://github.com/o/r/pull/1")
+	}
+}
+
+// TestLocalTracker_ImplementsAbandonedFlagger asserts *LocalTracker satisfies
+// the optional forge.AbandonedFlagger surface (ADR 0029) — only the local
+// adapter has a native abandoned: axis for reconcile to flip.
+func TestLocalTracker_ImplementsAbandonedFlagger(t *testing.T) {
+	var _ forge.AbandonedFlagger = NewLocalTracker(t.TempDir(), testLabels)
+}
+
+// TestLocalTracker_FlagAbandoned_SetsAbandonedTrue verifies FlagAbandoned
+// flips the abandoned: frontmatter field without touching state/landing.
+func TestLocalTracker_FlagAbandoned_SetsAbandonedTrue(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "fix-thing", localIssue{frontmatter: localFrontmatter{
+		Title: "Fix thing", State: labels.InProgress, Created: "2026-07-09T12:00:00Z",
+		Landing: "https://github.com/o/r/pull/1",
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	if err := lt.FlagAbandoned("fix-thing"); err != nil {
+		t.Fatalf("FlagAbandoned: %v", err)
+	}
+
+	iss, err := lt.Issue("fix-thing")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !iss.Abandoned {
+		t.Errorf("Abandoned = %v, want true", iss.Abandoned)
+	}
+	if iss.State != forge.IssueOpen {
+		t.Errorf("State = %v, want unchanged IssueOpen", iss.State)
 	}
 	if iss.Landing != "https://github.com/o/r/pull/1" {
 		t.Errorf("Landing = %q, want unchanged %q", iss.Landing, "https://github.com/o/r/pull/1")
