@@ -210,6 +210,62 @@ func TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount(t *testing.T) {
 	}
 }
 
+// TestBuildMountSpecs_IssuesDirMounted verifies that ISSUE_TRACKER=local plus
+// a present LocalIssuesDir produce a read-only MountSpec targeting the
+// top-level /issues path (issue #1691, ADR 0032) — computed once, independent
+// of backend. Silent: unlike the operator-triggered overrides above, this
+// mount is the tracker's normal read path, not a diagnostic override.
+func TestBuildMountSpecs_IssuesDirMounted(t *testing.T) {
+	dir := t.TempDir()
+	specs := buildMountSpecs(MountParams{IssueTracker: "local", LocalIssuesDir: dir}, Box{})
+
+	var found *MountSpec
+	for i := range specs {
+		if specs[i].Target == "/issues" {
+			found = &specs[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected an /issues spec in %+v", specs)
+	}
+	if found.Source != dir {
+		t.Errorf("Source = %q, want %q", found.Source, dir)
+	}
+	if !found.ReadOnly {
+		t.Errorf("issues-dir mount must be read-only")
+	}
+	if found.Message != "" {
+		t.Errorf("issues-dir mount must be silent; got Message = %q", found.Message)
+	}
+}
+
+// TestBuildMountSpecs_IssuesDirNonLocalTracker_NoMount verifies that a
+// non-local ISSUE_TRACKER never mounts /issues, even when LocalIssuesDir
+// resolves to a real directory — the mount is local-only (ADR 0032).
+func TestBuildMountSpecs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
+	dir := t.TempDir()
+	specs := buildMountSpecs(MountParams{IssueTracker: "github", LocalIssuesDir: dir}, Box{})
+
+	for _, s := range specs {
+		if s.Target == "/issues" {
+			t.Errorf("unexpected /issues spec for a non-local tracker: %+v", specs)
+		}
+	}
+}
+
+// TestBuildMountSpecs_IssuesDirMissing_NoMount verifies that ISSUE_TRACKER=local
+// with an absent LocalIssuesDir yields no mount rather than an error — a
+// misconfigured or not-yet-created issues dir fails gracefully (ADR 0032).
+func TestBuildMountSpecs_IssuesDirMissing_NoMount(t *testing.T) {
+	specs := buildMountSpecs(MountParams{IssueTracker: "local", LocalIssuesDir: "/nonexistent/does-not-exist"}, Box{})
+
+	for _, s := range specs {
+		if s.Target == "/issues" {
+			t.Errorf("unexpected /issues spec for a missing dir: %+v", specs)
+		}
+	}
+}
+
 // TestAdaptersRenderOnly_NoDuplicatedMountDecisions is the issue's grep pin:
 // the prompt-dir/skills-dir mount gates and their operator messages must
 // live only in buildMountSpecs, not be duplicated in either adapter file.

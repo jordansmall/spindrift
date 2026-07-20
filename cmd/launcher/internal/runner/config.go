@@ -49,4 +49,9 @@ type Config struct {
 	// is "local" (ADR 0033, issue #1697).
 	CodeForge           string
 	AccumulationRepoDir string
+
+	// IssueTracker and LocalIssuesDir gate the read-only /issues mount
+	// (ADR 0032): only ISSUE_TRACKER=local reads its issues from the Box.
+	IssueTracker   string
+	LocalIssuesDir string
 }
