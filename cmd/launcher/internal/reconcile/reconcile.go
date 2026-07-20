@@ -18,6 +18,25 @@ type Result struct {
 	// Abandoned lists the issue numbers Run flagged abandoned this sweep —
 	// their recorded landing PR was closed without merging.
 	Abandoned []string
+	// Reset lists the issue numbers Run reset from InProgress to
+	// Dispatchable this sweep, in the order ListIssues returned them.
+	Reset []string
+}
+
+// LivenessProbe is reconcile's injected death-signal seam (#600, ADR 0029):
+// whether an InProgress issue's Box is still alive. Run never touches
+// os.Stat or the container runtime itself — every liveness fact comes
+// through this seam, so it is fakeable in tests.
+type LivenessProbe interface {
+	// LogStale reports whether issue num's Box log has gone stale beyond
+	// reconcile's threshold — the log-side half of the death signal.
+	LogStale(num string) bool
+	// ContainerLive reports whether issue num's Box container/sandbox is
+	// currently running. reachable is false when the container runtime
+	// itself could not be queried (e.g. the runtime is unreachable
+	// on-host); Run treats that as no evidence of a live container, not as
+	// proof of one, so it never blocks a reset on an unreachable runtime.
+	ContainerLive(num string) (live, reachable bool)
 }
 
 // Run sweeps every open issue it reports: an issue carrying a recorded
@@ -29,7 +48,14 @@ type Result struct {
 // Run is a no-op, not an error, when it has no IssueCloser surface (every
 // tracker but local) or cf has no PRForge surface (the push-only git Code
 // Forge) — there is nothing to check or nowhere to write in either case.
-func Run(it forge.IssueTracker, cf forge.CodeForge) (Result, error) {
+//
+// After closing, Run sweeps every InProgress issue and resets it to
+// Dispatchable when lp reports the composite death signal: no PR (in any
+// state — open, closed, or merged) exists for its agent branch, its Box log
+// is stale, and (when the container runtime is reachable) its Box container
+// is absent. This qualifies #600: a bare InProgress label is never enough to
+// reset on its own, only the composite evidence from lp is.
+func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe) (Result, error) {
 	closer, ok := it.(forge.IssueCloser)
 	if !ok {
 		return Result{}, nil
@@ -85,5 +111,45 @@ func Run(it forge.IssueTracker, cf forge.CodeForge) (Result, error) {
 			res.Abandoned = append(res.Abandoned, iss.Number)
 		}
 	}
+
+	inProgress, err := it.ListIssues(forge.InProgress)
+	if err != nil {
+		return res, fmt.Errorf("reconcile: list in-progress issues: %w", err)
+	}
+	for _, iss := range inProgress {
+		orphaned, err := isOrphaned(pr, cf, lp, iss.Number)
+		if err != nil {
+			return res, fmt.Errorf("reconcile issue %s: liveness check: %w", iss.Number, err)
+		}
+		if !orphaned {
+			continue
+		}
+		if err := it.TransitionState(iss.Number, forge.InProgress, forge.Dispatchable); err != nil {
+			return res, fmt.Errorf("reconcile issue %s: reset: %w", iss.Number, err)
+		}
+		res.Reset = append(res.Reset, iss.Number)
+	}
 	return res, nil
+}
+
+// isOrphaned reports whether num's InProgress issue shows the full
+// composite death signal: no PR of any state for its agent branch, a stale
+// Box log, and — only when the container runtime answered — no live
+// container. A PR of any state (not just open/merged) counts as evidence a
+// runner touched this branch, so a closed-unmerged PR withholds the reset
+// rather than silently re-dispatching what a human or CI already rejected;
+// flagging that case as abandoned is a separate reconcile concern.
+func isOrphaned(pr forge.PRForge, cf forge.CodeForge, lp LivenessProbe, num string) (bool, error) {
+	if _, found, err := pr.PRForBranch(cf.AgentBranch(num)); err != nil {
+		return false, err
+	} else if found {
+		return false, nil
+	}
+	if !lp.LogStale(num) {
+		return false, nil
+	}
+	if live, reachable := lp.ContainerLive(num); reachable && live {
+		return false, nil
+	}
+	return true, nil
 }
