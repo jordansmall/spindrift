@@ -36,7 +36,7 @@ var ErrImageStale = errors.New("image stale; rebuild and re-invoke")
 
 // Discoverer re-queries the dispatchable batch, its blocker edges, the
 // source (native relationship vs body-text parsing) each blocker was
-// resolved from, and the set of issues whose own BuildEdges/DepsOf call
+// resolved from, and the set of issues whose own NewReadiness/DepsOf call
 // errored (#752, #1103) — a transient tracker hiccup that looks identical to
 // a confirmed zero-blocker issue in edges alone unless a caller checks
 // failed explicitly. RunContinuous calls it once at startup and again before
@@ -157,18 +157,15 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	}
 
 	var limiter *Limiter
+	var terminated *terminate.Registry
 	if session != nil {
-		limiter = session.Limiter
+		limiter, terminated = session.Limiter, session.Terminated
 	}
 	if limiter == nil {
 		// Headless (CONTINUOUS_DISPATCH) and every nil-Session call site: a
 		// fixed cap for this invocation only, never resized -- behaviour is
 		// unchanged from the plain int cfg.MaxParallel this replaces.
 		limiter = NewLimiter(cfg.MaxParallel)
-	}
-	var terminated *terminate.Registry
-	if session != nil {
-		terminated = session.Terminated
 	}
 
 	// mu also guards stale/dispatchedAny/claimed/outstanding below, exactly
