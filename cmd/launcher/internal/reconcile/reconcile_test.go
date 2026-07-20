@@ -95,6 +95,141 @@ func TestRun_SecondSweepIsNoOp(t *testing.T) {
 	}
 }
 
+// TestRun_DiscoversMergedLandingByBranchAndCloses verifies Reconcile
+// discovers an issue's PR by its agent branch when no landing was recorded
+// (the box died before its outcome line was parsed), records the landing,
+// and closes the issue when the discovered PR is merged (ADR 0029 branch
+// discovery).
+func TestRun_DiscoversMergedLandingByBranchAndCloses(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
+	branch := f.AgentBranch("42")
+	f.SetPR(branch, forge.PR{URL: "https://github.com/o/r/pull/7"})
+	f.SetPRState("https://github.com/o/r/pull/7", forge.PRMerged)
+
+	res, err := reconcile.Run(f, f)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != "42" {
+		t.Errorf("Closed = %v, want [42]", res.Closed)
+	}
+	if len(f.RecordLandingCalls) != 1 || f.RecordLandingCalls[0] != (forge.RecordLandingCall{Num: "42", Landing: "https://github.com/o/r/pull/7"}) {
+		t.Errorf("RecordLandingCalls = %v, want one call recording the discovered PR", f.RecordLandingCalls)
+	}
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.State != forge.IssueClosed {
+		t.Errorf("State = %v, want IssueClosed", iss.State)
+	}
+}
+
+// TestRun_DiscoversOpenLandingByBranchAndLeavesIssueOpen verifies Reconcile
+// records a discovered branch PR's landing even when that PR is still open,
+// but does not close the issue — an open PR, green or in approval limbo, is
+// left for a later sweep (ADR 0029 branch discovery).
+func TestRun_DiscoversOpenLandingByBranchAndLeavesIssueOpen(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
+	branch := f.AgentBranch("42")
+	f.SetPR(branch, forge.PR{URL: "https://github.com/o/r/pull/7"})
+
+	res, err := reconcile.Run(f, f)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 0 {
+		t.Errorf("Closed = %v, want none", res.Closed)
+	}
+	if len(f.RecordLandingCalls) != 1 || f.RecordLandingCalls[0] != (forge.RecordLandingCall{Num: "42", Landing: "https://github.com/o/r/pull/7"}) {
+		t.Errorf("RecordLandingCalls = %v, want one call recording the discovered PR", f.RecordLandingCalls)
+	}
+	if len(f.CloseIssueCalls) != 0 {
+		t.Errorf("CloseIssueCalls = %v, want none", f.CloseIssueCalls)
+	}
+}
+
+// TestRun_DiscoversClosedUnmergedLandingByBranchAndFlagsAbandoned verifies
+// Reconcile flags an issue abandoned when the PR it discovers by branch (no
+// landing was recorded) turns out to have been closed without merging — the
+// discovery path feeds the same abandoned check as a pre-recorded landing.
+func TestRun_DiscoversClosedUnmergedLandingByBranchAndFlagsAbandoned(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
+	branch := f.AgentBranch("42")
+	f.SetPR(branch, forge.PR{URL: "https://github.com/o/r/pull/7"})
+	f.SetPRState("https://github.com/o/r/pull/7", forge.PRClosed)
+
+	res, err := reconcile.Run(f, f)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Abandoned) != 1 || res.Abandoned[0] != "42" {
+		t.Errorf("Abandoned = %v, want [42]", res.Abandoned)
+	}
+	if len(f.RecordLandingCalls) != 1 || f.RecordLandingCalls[0] != (forge.RecordLandingCall{Num: "42", Landing: "https://github.com/o/r/pull/7"}) {
+		t.Errorf("RecordLandingCalls = %v, want one call recording the discovered PR", f.RecordLandingCalls)
+	}
+	if len(f.CloseIssueCalls) != 0 {
+		t.Errorf("CloseIssueCalls = %v, want none", f.CloseIssueCalls)
+	}
+}
+
+// TestRun_FlagsAbandonedWhenLandingPRClosedUnmerged verifies Reconcile flags
+// an issue abandoned — rather than closing it or leaving it open forever —
+// when its recorded landing PR was closed without merging (a human rejected
+// it, ADR 0029).
+func TestRun_FlagsAbandonedWhenLandingPRClosedUnmerged(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
+	f.SetPRState("https://github.com/o/r/pull/1", forge.PRClosed)
+
+	res, err := reconcile.Run(f, f)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 0 {
+		t.Errorf("Closed = %v, want none", res.Closed)
+	}
+	if len(res.Abandoned) != 1 || res.Abandoned[0] != "42" {
+		t.Errorf("Abandoned = %v, want [42]", res.Abandoned)
+	}
+	if len(f.FlagAbandonedCalls) != 1 || f.FlagAbandonedCalls[0] != "42" {
+		t.Errorf("FlagAbandonedCalls = %v, want [42]", f.FlagAbandonedCalls)
+	}
+	if len(f.CloseIssueCalls) != 0 {
+		t.Errorf("CloseIssueCalls = %v, want none", f.CloseIssueCalls)
+	}
+}
+
+// TestRun_SecondSweepDoesNotReflagAbandoned verifies a second Run over an
+// already-abandoned issue does not flag it again — unlike a close, an
+// abandon leaves the issue open (and so still in ListOpenIssues), so
+// idempotency here rests on Reconcile itself skipping an already-abandoned
+// issue rather than on it dropping out of the open list.
+func TestRun_SecondSweepDoesNotReflagAbandoned(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
+	f.SetPRState("https://github.com/o/r/pull/1", forge.PRClosed)
+
+	if _, err := reconcile.Run(f, f); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	res, err := reconcile.Run(f, f)
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if len(res.Abandoned) != 0 {
+		t.Errorf("second sweep Abandoned = %v, want none", res.Abandoned)
+	}
+	if len(f.FlagAbandonedCalls) != 1 {
+		t.Errorf("FlagAbandonedCalls = %v, want exactly 1 call across both sweeps", f.FlagAbandonedCalls)
+	}
+}
+
 // TestRun_NoOpForNonLocalTracker verifies Reconcile is a clean no-op — not
 // an error — against a tracker with no IssueCloser surface (github/jira's
 // shape), even though a merged landing PR exists.

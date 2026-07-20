@@ -15,6 +15,9 @@ type Result struct {
 	// Closed lists the issue numbers Run closed this sweep, in the order
 	// ListOpenIssues returned them.
 	Closed []string
+	// Abandoned lists the issue numbers Run flagged abandoned this sweep —
+	// their recorded landing PR was closed without merging.
+	Abandoned []string
 }
 
 // Run sweeps every open issue it reports: an issue carrying a recorded
@@ -35,6 +38,8 @@ func Run(it forge.IssueTracker, cf forge.CodeForge) (Result, error) {
 	if !ok {
 		return Result{}, nil
 	}
+	lr, _ := it.(forge.LandingRecorder)
+	flagger, _ := it.(forge.AbandonedFlagger)
 
 	issues, err := it.ListOpenIssues()
 	if err != nil {
@@ -43,20 +48,42 @@ func Run(it forge.IssueTracker, cf forge.CodeForge) (Result, error) {
 
 	var res Result
 	for _, iss := range issues {
-		if iss.Landing == "" {
-			continue
+		landing := iss.Landing
+		if landing == "" {
+			if lr == nil {
+				continue
+			}
+			url, found, err := pr.PRForBranch(cf.AgentBranch(iss.Number))
+			if err != nil {
+				return res, fmt.Errorf("reconcile issue %s: resolve branch PR: %w", iss.Number, err)
+			}
+			if !found {
+				continue
+			}
+			if err := lr.RecordLanding(iss.Number, url); err != nil {
+				return res, fmt.Errorf("reconcile issue %s: record landing: %w", iss.Number, err)
+			}
+			landing = url
 		}
-		state, err := pr.PRState(iss.Landing)
+		state, err := pr.PRState(landing)
 		if err != nil {
-			return res, fmt.Errorf("reconcile issue %s: PR state for %s: %w", iss.Number, iss.Landing, err)
+			return res, fmt.Errorf("reconcile issue %s: PR state for %s: %w", iss.Number, landing, err)
 		}
-		if state != forge.PRMerged {
-			continue
+		switch state {
+		case forge.PRMerged:
+			if err := closer.CloseIssue(iss.Number); err != nil {
+				return res, fmt.Errorf("reconcile issue %s: close: %w", iss.Number, err)
+			}
+			res.Closed = append(res.Closed, iss.Number)
+		case forge.PRClosed:
+			if flagger == nil || iss.Abandoned {
+				continue
+			}
+			if err := flagger.FlagAbandoned(iss.Number); err != nil {
+				return res, fmt.Errorf("reconcile issue %s: flag abandoned: %w", iss.Number, err)
+			}
+			res.Abandoned = append(res.Abandoned, iss.Number)
 		}
-		if err := closer.CloseIssue(iss.Number); err != nil {
-			return res, fmt.Errorf("reconcile issue %s: close: %w", iss.Number, err)
-		}
-		res.Closed = append(res.Closed, iss.Number)
 	}
 	return res, nil
 }
