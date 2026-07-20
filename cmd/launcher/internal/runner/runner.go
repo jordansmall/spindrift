@@ -28,6 +28,14 @@ type Box struct {
 	// --security-opt=no-new-privileges) must stay unconditional regardless.
 	// The launcher treats its contents as opaque: create/mount/evict only.
 	DriverCacheDir string
+
+	// OutboxDir is a host path mounted writable at /outbox under
+	// CODE_FORGE=local (ADR 0033). It must be empty-at-start and throwaway:
+	// the Box cannot push to the read-only /repo Accumulation-repo mount, so
+	// it emits its finished branch as a git bundle written here instead, and
+	// the Launcher relays the bundle host-side after the run. Empty omits
+	// the mount, the same convention as DriverCacheDir.
+	OutboxDir string
 }
 
 // Runner is the seam through which the launcher manages agent sandbox life-cycles.
