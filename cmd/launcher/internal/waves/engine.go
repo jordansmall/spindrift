@@ -260,10 +260,10 @@ outer:
 	return nil
 }
 
-// Run executes plan: the claim/dispatch/settle loop per issue, the
+// run executes plan: the claim/dispatch/settle loop per issue, the
 // MAX_PARALLEL semaphore within a wave, MAX_JOBS drain concurrency, and the
 // Touches overlap check between concurrent Dispatches. pwd is the working
-// directory; Run creates its logs/ subdirectory before dispatching any
+// directory; run creates its logs/ subdirectory before dispatching any
 // issue.
 //
 // ModeDrain (ADR 0019) is the only mode NewPlan ever selects, for every
@@ -272,9 +272,29 @@ outer:
 // dispatch (#524) shares this path with the queue: an in-list blocker that
 // hasn't reached CompleteLabel holds its dependent for a later invocation
 // rather than looping waves in-process.
-func Run(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, plan Plan) error {
+func run(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, plan Plan) error {
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
 		return err
 	}
 	return drainMaxJobs(cfg, it, cf, pwd, f, s, plan.Issues, plan.Edges, plan.Sources, plan.Failed, plan.Origin)
+}
+
+// Dispatch is the one-shot headless entry point folding the previously
+// hand-sequenced build-readiness/plan/run steps into a single call (#1547):
+// it resolves issues' blocker readiness through NewReadiness, validates the
+// resulting Plan (a dependency cycle among them is reported as an error),
+// and runs it as one wave. main.go's run() and the operator
+// `dispatch <nums>` path (selectiveListDispatch) are its callers; preview
+// stops short of running and uses NewReadiness/NewPlan directly since it
+// never launches a Box.
+func Dispatch(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, origin Origin, issues []Issue) error {
+	readiness, err := NewReadiness(it, issues)
+	if err != nil {
+		return err
+	}
+	plan, err := NewPlan(cfg, Input{Origin: origin, Issues: issues, Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed})
+	if err != nil {
+		return err
+	}
+	return run(cfg, it, cf, pwd, f, s, plan)
 }
