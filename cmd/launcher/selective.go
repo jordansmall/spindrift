@@ -51,7 +51,8 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return nil
 	}
 
-	return waves.Dispatch(selectiveWavesConfig(c), it, cf, pwd, f, s, waves.OriginSelective, toWaveIssues(issues))
+	in := waves.Input{Origin: waves.OriginSelective, Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}
+	return waves.Dispatch(selectiveWavesConfig(c), it, cf, pwd, f, s, in)
 }
 
 // fetchSelectiveIssues fetches each issue by number and returns the full list

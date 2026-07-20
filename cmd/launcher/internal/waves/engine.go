@@ -151,7 +151,7 @@ func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd str
 	failedBlockersByIssue := map[string][]string{}
 outer:
 	for _, iss := range issues {
-		// An issue named in depsOfFailed had its own BuildEdges/DepsOf call
+		// An issue named in depsOfFailed had its own NewReadiness/DepsOf call
 		// error — a transient tracker hiccup indistinguishable from
 		// "confirmed zero blockers" in edges alone (#752, #1103). Hold it
 		// for a later invocation rather than reading the missing edges
@@ -280,19 +280,18 @@ func run(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *d
 }
 
 // Dispatch is the one-shot headless entry point folding the previously
-// hand-sequenced build-readiness/plan/run steps into a single call (#1547):
-// it resolves issues' blocker readiness through NewReadiness, validates the
-// resulting Plan (a dependency cycle among them is reported as an error),
+// hand-sequenced plan/run pair into a single call (#1547): it validates in
+// as a Plan (a dependency cycle among in.Issues is reported as an error)
 // and runs it as one wave. main.go's run() and the operator
-// `dispatch <nums>` path (selectiveListDispatch) are its callers; preview
-// stops short of running and uses NewReadiness/NewPlan directly since it
-// never launches a Box.
-func Dispatch(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, origin Origin, issues []Issue) error {
-	readiness, err := NewReadiness(it, issues)
-	if err != nil {
-		return err
-	}
-	plan, err := NewPlan(cfg, Input{Origin: origin, Issues: issues, Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed})
+// `dispatch <nums>` path (selectiveListDispatch) are its callers; both
+// resolve in.Edges/in.Sources via NewReadiness themselves first, since
+// selective dispatch's external-blocker eviction pass needs that same
+// graph before it decides which issues survive into in — building it again
+// inside Dispatch would cost a second DepsOf sweep over issues Dispatch
+// already has the graph for. preview stops short of running and uses
+// NewReadiness/NewPlan directly since it never launches a Box.
+func Dispatch(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, in Input) error {
+	plan, err := NewPlan(cfg, in)
 	if err != nil {
 		return err
 	}

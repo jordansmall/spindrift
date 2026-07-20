@@ -832,7 +832,12 @@ func run(lc *launchContext) error {
 		return errQueueEmpty
 	}
 
-	if err := waves.Dispatch(wavesConfig(c), it, cf, pwd, f, s, origin, toWaveIssues(issues)); err != nil {
+	readiness, err := waves.NewReadiness(it, toWaveIssues(issues))
+	if err != nil {
+		return err
+	}
+	in := waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}
+	if err := waves.Dispatch(wavesConfig(c), it, cf, pwd, f, s, in); err != nil {
 		return err
 	}
 
