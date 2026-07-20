@@ -374,6 +374,44 @@ func TestRunnerConfig_DriverSessionCacheDirUnset(t *testing.T) {
 	}
 }
 
+// TestRunnerConfig_IssueTrackerAndLocalIssuesDir verifies that ISSUE_TRACKER
+// reaches runner.Config unchanged and LOCAL_ISSUES_DIR reaches it resolved to
+// an absolute path (issue #1691, ADR 0032): the runners render the /issues
+// mount's Source directly into their bind syntax, and a relative host path
+// there is a footgun the Launcher must not hand off.
+func TestRunnerConfig_IssueTrackerAndLocalIssuesDir(t *testing.T) {
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", "relative-issues-dir")
+
+	c := loadConfig()
+	rc := runnerConfig(c)
+
+	if rc.IssueTracker != "local" {
+		t.Errorf("IssueTracker = %q, want local", rc.IssueTracker)
+	}
+	if !filepath.IsAbs(rc.LocalIssuesDir) {
+		t.Errorf("LocalIssuesDir = %q, want an absolute path", rc.LocalIssuesDir)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(wd, "relative-issues-dir")
+	if rc.LocalIssuesDir != want {
+		t.Errorf("LocalIssuesDir = %q, want %q", rc.LocalIssuesDir, want)
+	}
+}
+
+// TestAbsLocalIssuesDir_EmptyStaysEmpty verifies the empty-string guard: an
+// unset LOCAL_ISSUES_DIR must reach runner.Config as "", not filepath.Abs("")
+// (which resolves to the process cwd and would silently mount cwd at
+// /issues once a caller ever sets ISSUE_TRACKER=local with the dir unset).
+func TestAbsLocalIssuesDir_EmptyStaysEmpty(t *testing.T) {
+	if got := absLocalIssuesDir(""); got != "" {
+		t.Errorf("absLocalIssuesDir(\"\") = %q, want \"\"", got)
+	}
+}
+
 // --- newIssueTracker tests ---
 
 // TestNewIssueTracker_Jira verifies that ISSUE_TRACKER=jira selects a tracker

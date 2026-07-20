@@ -44,7 +44,11 @@ type bwrapAdapter struct {
 	// "local" (ADR 0033, issue #1697).
 	codeForge           string
 	accumulationRepoDir string
-	unshareNet          bool // when true, adds --unshare-net (isolates from host netns)
+	// issueTracker and localIssuesDir gate the read-only /issues mount
+	// (ADR 0032); see MountParams.
+	issueTracker   string
+	localIssuesDir string
+	unshareNet     bool // when true, adds --unshare-net (isolates from host netns)
 
 	// mu guards running, the box-name -> live process map Kill (issue #649)
 	// consults — bwrap sandboxes are unnamed child processes with no
@@ -71,6 +75,8 @@ func NewBwrap(cfg Config) Runner {
 		driverSessionCacheDir: cfg.DriverSessionCacheDir,
 		codeForge:             cfg.CodeForge,
 		accumulationRepoDir:   cfg.AccumulationRepoDir,
+		issueTracker:          cfg.IssueTracker,
+		localIssuesDir:        cfg.LocalIssuesDir,
 		unshareNet:            cfg.BwrapUnshareNet,
 	}
 }
@@ -93,6 +99,8 @@ func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
 		DriverSessionCacheDir: a.driverSessionCacheDir,
 		CodeForge:             a.codeForge,
 		AccumulationRepoDir:   a.accumulationRepoDir,
+		IssueTracker:          a.issueTracker,
+		LocalIssuesDir:        a.localIssuesDir,
 	}, box)
 }
 

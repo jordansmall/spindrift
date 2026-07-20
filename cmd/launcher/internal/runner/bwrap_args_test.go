@@ -95,6 +95,50 @@ func TestBwrapArgs_SkillsMountTarget_FromDriverDeclaration(t *testing.T) {
 	}
 }
 
+// TestBwrapArgs_IssuesDirMounted verifies that ISSUE_TRACKER=local plus a
+// resolved localIssuesDir renders a top-level --ro-bind /issues entry (issue
+// #1691, ADR 0032) — top-level, not nested under /agent, since bwrap cannot
+// fabricate a mountpoint inside its read-only /agent store bind.
+func TestBwrapArgs_IssuesDirMounted(t *testing.T) {
+	dir := t.TempDir()
+	a := &bwrapAdapter{
+		agentFiles:     "/fake/agent",
+		agentEnv:       "/fake/env",
+		bakedPrefetch:  "echo ok",
+		issueTracker:   "local",
+		localIssuesDir: dir,
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	argStr := strings.Join(args, " ")
+	want := "--ro-bind " + dir + " /issues"
+	if !strings.Contains(argStr, want) {
+		t.Errorf("issues bind %q not found in args: %v", want, args)
+	}
+	if strings.Contains(argStr, "/agent/issues") {
+		t.Errorf("issues mount must not nest under /agent: %v", args)
+	}
+}
+
+// TestBwrapArgs_IssuesDirUnset_NoMount verifies that a non-local tracker never
+// renders an /issues bind.
+func TestBwrapArgs_IssuesDirUnset_NoMount(t *testing.T) {
+	dir := t.TempDir()
+	a := &bwrapAdapter{
+		agentFiles:     "/fake/agent",
+		agentEnv:       "/fake/env",
+		bakedPrefetch:  "echo ok",
+		issueTracker:   "github",
+		localIssuesDir: dir,
+	}
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	argStr := strings.Join(args, " ")
+	if strings.Contains(argStr, "/issues") {
+		t.Errorf("unexpected /issues bind for a non-local tracker: %v", args)
+	}
+}
+
 // TestBwrapArgs_DriverCacheDirMountedWritable verifies that a Box.DriverCacheDir
 // produces a writable --bind (not --ro-bind) entry for
 // /home/agent/.claude/projects.

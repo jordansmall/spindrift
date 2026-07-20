@@ -486,6 +486,23 @@ func newCodeForge(c config) forge.CodeForge {
 	return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
 }
 
+// absLocalIssuesDir resolves the local tracker's issues dir to an absolute
+// path for the runner's /issues mount source (ADR 0032, issue #1691): the
+// OCI/bwrap adapters render Source directly into their bind syntax, so a
+// relative path would resolve against the wrong process. Empty stays empty
+// (no ISSUE_TRACKER=local configured); a resolution error falls back to dir
+// unchanged, matching LocalTracker.Probe()'s own fallback.
+func absLocalIssuesDir(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return dir
+	}
+	return abs
+}
+
 // runnerConfig builds the runner.Config a runner adapter needs from loaded
 // config. Shared by both the `run` and `build` subcommand entry points; the
 // build entry point never calls Run(), so leaving PromptDir/SkillsDir/
@@ -513,6 +530,8 @@ func runnerConfig(c config) runner.Config {
 		SkillsDir:             c.spindriftSkillsDir,
 		DriverSkillsDir:       c.driverSkillsDir,
 		DriverSessionCacheDir: c.driverSessionCacheDir,
+		IssueTracker:          c.issueTracker,
+		LocalIssuesDir:        absLocalIssuesDir(c.localIssuesDir),
 	}
 }
 

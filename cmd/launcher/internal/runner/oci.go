@@ -35,9 +35,13 @@ type ociAdapter struct {
 	// "local" (ADR 0033, issue #1697).
 	codeForge           string
 	accumulationRepoDir string
-	podmanNetwork       string // optional --network value; empty omits the flag
-	pidsLimit           string // --pids-limit value; empty disables the flag
-	memoryLimit         string // --memory value; empty disables the flag
+	// issueTracker and localIssuesDir gate the read-only /issues mount
+	// (ADR 0032); see MountParams.
+	issueTracker   string
+	localIssuesDir string
+	podmanNetwork  string // optional --network value; empty omits the flag
+	pidsLimit      string // --pids-limit value; empty disables the flag
+	memoryLimit    string // --memory value; empty disables the flag
 }
 
 // runtimeCLI maps a Config.Runtime value to the CLI binary it invokes.
@@ -72,6 +76,8 @@ func NewOCI(cfg Config, pwd string) Runner {
 		driverSessionCacheDir: cfg.DriverSessionCacheDir,
 		codeForge:             cfg.CodeForge,
 		accumulationRepoDir:   cfg.AccumulationRepoDir,
+		issueTracker:          cfg.IssueTracker,
+		localIssuesDir:        cfg.LocalIssuesDir,
 		podmanNetwork:         cfg.PodmanNetwork,
 		pidsLimit:             cfg.PidsLimit,
 		memoryLimit:           cfg.MemoryLimit,
@@ -250,6 +256,8 @@ func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
 		DriverSessionCacheDir: a.driverSessionCacheDir,
 		CodeForge:             a.codeForge,
 		AccumulationRepoDir:   a.accumulationRepoDir,
+		IssueTracker:          a.issueTracker,
+		LocalIssuesDir:        a.localIssuesDir,
 	}, box)
 }
 

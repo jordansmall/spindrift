@@ -33,6 +33,13 @@ type MountParams struct {
 	// AccumulationRepoDir is the host path to the bare Accumulation repo
 	// (.spindrift/repo.git) mounted read-only at /repo under CODE_FORGE=local.
 	AccumulationRepoDir string
+
+	// IssueTracker and LocalIssuesDir gate the read-only /issues mount
+	// (ADR 0032): only ISSUE_TRACKER=local reads its issues from the Box, so
+	// only that tracker gets the mount, and only when LocalIssuesDir resolves
+	// to a real directory.
+	IssueTracker   string
+	LocalIssuesDir string
 }
 
 // candidateMount reports whether source should be mounted at target: both
@@ -74,6 +81,17 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 			specs = append(specs, spec)
 		}
 		if spec, ok := candidateMount(box.OutboxDir, "/outbox", false); ok {
+			specs = append(specs, spec)
+		}
+	}
+
+	// The local issue tracker has no in-box reachability (ADR 0032): its
+	// content plane is host-mediated via a read-only mount of the issues dir
+	// at the fixed top-level target /issues, silent like the driver-cache
+	// mount (this is the tracker's normal read path, not an operator
+	// override). A missing dir or non-local tracker yields no mount.
+	if p.IssueTracker == "local" {
+		if spec, ok := candidateMount(p.LocalIssuesDir, "/issues", true); ok {
 			specs = append(specs, spec)
 		}
 	}

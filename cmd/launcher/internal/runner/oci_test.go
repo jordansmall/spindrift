@@ -310,6 +310,46 @@ func TestBuildRunArgs_SkillsMountTarget_FromDriverDeclaration(t *testing.T) {
 	}
 }
 
+// TestBuildRunArgs_IssuesDirMounted verifies that ISSUE_TRACKER=local plus a
+// resolved localIssuesDir renders a read-only -v <dir>:/issues:ro entry
+// (issue #1691, ADR 0032).
+func TestBuildRunArgs_IssuesDirMounted(t *testing.T) {
+	dir := t.TempDir()
+	a := &ociAdapter{
+		cli:            "podman",
+		image:          "spindrift:test",
+		issueTracker:   "local",
+		localIssuesDir: dir,
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	args := a.buildRunArgs(box)
+
+	want := dir + ":/issues:ro"
+	if !containsArg(args, want) {
+		t.Errorf("issues mount %q not found in args: %v", want, args)
+	}
+}
+
+// TestBuildRunArgs_IssuesDirNonLocalTracker_NoMount verifies that a
+// non-local tracker never renders an /issues mount.
+func TestBuildRunArgs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
+	dir := t.TempDir()
+	a := &ociAdapter{
+		cli:            "podman",
+		image:          "spindrift:test",
+		issueTracker:   "github",
+		localIssuesDir: dir,
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	args := a.buildRunArgs(box)
+
+	for _, arg := range args {
+		if strings.Contains(arg, ":/issues") {
+			t.Errorf("unexpected /issues mount for a non-local tracker: %v", args)
+		}
+	}
+}
+
 func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
