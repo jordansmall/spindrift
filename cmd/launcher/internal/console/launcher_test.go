@@ -291,6 +291,64 @@ func TestLauncher_TryLaunch_ResearchPick_UsesResearchFactoryAndSettle(t *testing
 	}
 }
 
+// TestLauncher_Stacks_ResearchFailedLabelIsResearchFamily verifies the
+// research stack's failedLabel is the fixed agent-research-failed label, not
+// l.FailedLabel (the work family's own failed label) — a research pick's
+// blocker-readiness check must never consult the wrong family when deciding
+// whether a blocker counts as failed (issue #1708).
+func TestLauncher_Stacks_ResearchFailedLabelIsResearchFamily(t *testing.T) {
+	launch := &Launcher{
+		FailedLabel:     "agent-failed",
+		ResearchTracker: forge.NewFake(forge.ResearchDispatchLabels()),
+		ResearchFactory: &dispatch.Factory{},
+		ResearchSettle:  settle.NewFake(),
+	}
+
+	stacks := launch.stacks(forge.NewFake())
+
+	if len(stacks) != 2 {
+		t.Fatalf("stacks() = %+v, want 2 (work + research)", stacks)
+	}
+	if stacks[0].failedLabel != "agent-failed" {
+		t.Errorf("work stack failedLabel = %q, want %q", stacks[0].failedLabel, "agent-failed")
+	}
+	if stacks[1].failedLabel != "agent-research-failed" {
+		t.Errorf("research stack failedLabel = %q, want %q", stacks[1].failedLabel, "agent-research-failed")
+	}
+}
+
+// TestLauncher_TryLaunch_ResearchPickNoResearchStack_DrainStopsInsteadOfSpinning
+// verifies drain terminates instead of busy-spinning forever when a
+// KindResearch pick is queued but no research stack is wired (ResearchFactory/
+// ResearchTracker both nil): the work-only stacks() never claims a
+// research-kind pick, so the old unconditional q.hasQueued() check treated
+// that untouched pick as "still work to do" and looped without ever making
+// progress. The pick is left stranded at PickQueued — there is truly nowhere
+// for it to launch — but drain itself must still return (issue #1708).
+func TestLauncher_TryLaunch_ResearchPickNoResearchStack_DrainStopsInsteadOfSpinning(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+
+	launch := &Launcher{CodeForge: f, Settle: settle.NewFake(), queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "research this", State: PickQueued, Kind: KindResearch})
+	launch.tryLaunch(f, t.TempDir())
+
+	done := make(chan struct{})
+	go func() {
+		launch.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("drain never returned — busy-spinning on an unserviceable research pick")
+	}
+
+	if got := launch.queue.Snapshot()[0].State; got != PickQueued {
+		t.Fatalf("pick state = %v, want left at PickQueued (no research stack to claim it)", got)
+	}
+}
+
 // TestLauncher_TryLaunch_BoxFailureReachesPickFailed verifies that a Box
 // which runs and exits non-zero moves its queue row to the terminal
 // PickFailed state instead of stranding it at PickRunning — the gap issue

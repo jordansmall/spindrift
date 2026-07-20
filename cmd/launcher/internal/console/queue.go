@@ -53,13 +53,24 @@ func (q *Queue) Remove(num string) bool {
 	return false
 }
 
-// hasQueued reports whether any pick still holds at PickQueued.
-func (q *Queue) hasQueued() bool {
+// hasQueuedForKinds reports whether any pick still holds at PickQueued whose
+// effectiveKind is one of kinds — drain's loop-continuation gate (issue
+// #1708). A plain "any kind" check would have drain loop forever on a pick
+// whose kind has no wired launch stack (stacks() never yields it, so no
+// Discover call ever claims it): scoping the check to the kinds drain is
+// actually servicing this pass means an unserviceable pick is left stranded
+// at PickQueued instead of spinning.
+func (q *Queue) hasQueuedForKinds(kinds []Kind) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for _, p := range q.picks {
-		if p.State == PickQueued {
-			return true
+		if p.State != PickQueued {
+			continue
+		}
+		for _, k := range kinds {
+			if p.effectiveKind() == k {
+				return true
+			}
 		}
 	}
 	return false
