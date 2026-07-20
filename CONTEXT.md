@@ -121,24 +121,30 @@ though, are per-tracker — in-box for a remote tracker, host-mediated for
 `local` (ADR 0032).
 _Avoid_: issue data, payload.
 
-**Remote / local tracker**:
-Whether an Issue Tracker is reachable from inside the Box. Remote trackers
-(`github`; `gitlab`/`bitbucket`/`jira` as they land) are reached in-box over
-the network via their own client, so the Box reads and writes them directly.
-`local` is unreachable in-box — no server, git-ignored, absent from the fresh
-clone — so its content is host-mediated: the Box reads its issue through a
-read-only in-box view of the issues directory (the one documented exception to
-zero-shared-host-filesystem) and never writes it, emitting comments for the
-Launcher to post on its behalf (ADR 0032).
-_Avoid_: online/offline tracker, connected tracker.
+**Remote / local (in-box reachability)**:
+The organizing split on *both* backend axes: whether a backend is reachable from
+inside the Box. **Remote** backends (`github`; `gitlab`/`bitbucket`/`jira` as
+they land; the `git` code forge) are reached in-box — over the network via their
+own client — so the Box reads and lands directly. **`local`** is unreachable
+in-box (no server, git-ignored, absent from the fresh clone), so it is
+**host-mediated**: a read-only mount in, a Launcher-applied artifact out. On the
+issue plane the Box reads its issue through a read-only view of the issues
+directory and never writes it, emitting comments for the Launcher to post (ADR
+0032); on the code plane the Box clones a read-only mount of the Accumulation
+repo and emits a bundle for the Launcher to land (ADR 0033). These read-only
+mounts, plus the writable outbox, are the documented exceptions to
+zero-shared-host-filesystem.
+_Avoid_: online/offline, connected/disconnected.
 
 **Code Forge**:
 The seam through which the Harness lands code — the narrow core every adapter
 honors with real behavior: agent branch naming, rebase, merge/landing under
 `MERGE_MODE`, and a connectivity probe. A second axis independent of the Issue
-Tracker, freely combinable with any of them. **A git remote always exists** —
-the Box clones from it and pushes to it exactly as it does today; there is no
-mounting of a host working copy and no launcher-side git. Two values:
+Tracker, freely combinable with any of them. A git endpoint always exists,
+split — like the Issue Tracker — by in-box reachability: **reachable** endpoints
+(`github`, `git`) let the Box clone from and push to them directly; the
+**host-mediated** endpoint (`local`) is not reachable in-box, so the Launcher
+mediates. Three values:
 
 - `github` — the full flow: open a PR, watch the CI rollup, rebase, merge. The
   `gh`-exec adapter; the only value that additionally implements **PRForge**
@@ -149,11 +155,20 @@ mounting of a host working copy and no launcher-side git. Two values:
   with no stub methods. `MERGE_MODE` maps to remote pushes — `manual` pushes
   the feature branch; `immediate` pushes straight to the target branch; `auto`
   is native GitHub auto-merge and has no meaning here.
+- `local` — **host-mediated**, the code-plane mirror of the `local` tracker
+  (ADR 0033): the Box clones from a read-only mount of the Accumulation repo and
+  emits its branch as a git bundle through a writable outbox; the Launcher lands
+  it host-side by merging onto the per-ticket Integration branch. No network on
+  the code plane. Shares the `git` adapter's substrate internally (branch
+  naming, the temp-clone landing helper); differs only in the host-mediated
+  code-out channel.
 
-The no-remote / fully-local code path (mount the operator's repo, launcher lands
-the branch) was considered and **cut**: a git remote to push to is a hard
-requirement. Solo/private use is served by pairing `git` here with an
-`ISSUE_TRACKER=local` (private issues, published code).
+The fully-local code path was **cut** by ADR 0013 ("a git remote is a hard
+requirement") and **reopened** by ADR 0033 on new terms: not a read-write mount
+of the operator's repo, but the host-mediated `local` value above — a read-only
+clone mount in, a Launcher-landed bundle out. Solo/private use is served either
+by `local` here (private issues *and* private local code) or by pairing `git`
+with `ISSUE_TRACKER=local` (private issues, published code).
 _Was_: "Forge" (a single seam over the Target repo host); split into Issue
 Tracker + Code Forge once issues and code host became independent axes.
 _Avoid_: GitHub adapter, API layer, client wrapper.
@@ -172,6 +187,25 @@ _Was_: a `PushOnly()` bool on the combined Code Forge interface, plus six
 stubbed methods on the `git` adapter.
 _Avoid_: PR client, GitHub-only interface.
 
+**Accumulation repo**:
+The Launcher-owned bare git repo (`.spindrift/repo.git`) that the `local` Code
+Forge (ADR 0033) accumulates code in — the code-plane sibling of the
+`.spindrift/issues/` directory. Its base is seeded host-side from the operator's
+local checkout (offline); each seam clones it through a read-only mount and
+lands onto an Integration branch inside it. Deliberately *not* the operator's
+working checkout: a bare repo has no checked-out branch, keeps agent refs and
+objects out of the operator's repo, and resets with `rm -rf`.
+_Avoid_: mirror, staging repo, local remote.
+
+**Integration branch**:
+The branch in the Accumulation repo where all the seams of one broad ticket
+converge, keyed on the local issue's `parent` frontmatter
+(`integration/<parent>`) — one per broad ticket, so several can be in flight.
+Each seam's landing is a host-side merge onto it; when the ticket is done the
+operator surfaces it as a single team PR by hand. Distinct from a seam's
+per-issue agent branch, which merges *into* it.
+_Avoid_: feature branch, epic branch, accumulation branch.
+
 **Conformance contract**:
 The executable contract for the forge seams: a shared `forgetest` suite that
 every adapter of a seam interface — the shared test Fake included — must pass,
@@ -187,7 +221,11 @@ _Avoid_: parity test, integration suite (it is hermetic), mock verification.
 Issue Tracker and Code Forge are two independent, freely-combinable axes
 (`ISSUE_TRACKER` × `CODE_FORGE`). All cells are permitted — the harness does not
 reject "incoherent" pairings (e.g. github-issues + no-code-forge); an operator
-who selects one owns the consequences.
+who selects one owns the consequences. `local × local` is the fully-specified
+cell — the **local loop**, both planes host-mediated and offline (ADR 0033);
+`CODE_FORGE=local`'s per-ticket Integration branch assumes a tracker that
+supplies a `parent`/epic link, which `local` does today and other trackers do
+as their sub-issue links land.
 _Avoid_: preset, profile, mode.
 
 **Launcher input**:
