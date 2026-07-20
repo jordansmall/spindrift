@@ -1069,6 +1069,7 @@ state: ready-for-agent
 labels: [bug, priority-high]
 created: 2026-07-09T12:00:00Z
 parent: some-upstream-slug
+landing: https://github.com/owner/repo/pull/123
 ---
 ## What to build
 
@@ -1079,6 +1080,8 @@ parent: some-upstream-slug
 - some-other-issue-slug
 ```
 
+(`closed:` is omitted above since this issue is open — the default — see below.)
+
 - `title`, `labels`, `created` (RFC 3339) mirror the GitHub adapter's fields.
 - `state` is the dispatch-state marker the launcher swaps in place —
   `ready-for-agent` / `agent-in-progress` / `agent-complete` / `agent-failed`
@@ -1087,6 +1090,16 @@ parent: some-upstream-slug
   frontmatter value instead of a GitHub label).
 - `parent` is optional and purely informational; the local tracker is
   standalone — any linkage to an upstream tracker is out of scope (ADR 0013).
+- `closed` is a boolean, local-only open/closed axis (ADR 0029), independent
+  of `state`: absent or `false` means open; `true` excludes the issue from
+  both `ListOpenIssues` and `ListIssues`, so it is never re-dispatched or
+  shown as outstanding. Nothing in this issue's foundation slice sets
+  `closed: true` yet — that's the `reconcile` sweep's job.
+- `landing` is the immutable landing reference (a PR URL, or a push-only
+  branch ref under `CODE_FORGE=git`) the launcher writes after a work
+  outcome line is parsed. It's a plain pointer, not cached merge-state — a
+  later `reconcile` re-checks the forge live rather than trusting this field
+  for anything beyond "where did this land."
 - **Canonical order is ascending `created`** — the local analogue of GitHub's
   ascending issue-number order.
 - **Dependencies** come from a `## Blocked by` section: one issue slug per
