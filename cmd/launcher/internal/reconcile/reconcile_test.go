@@ -108,7 +108,7 @@ func TestRun_DiscoversMergedLandingByBranchAndCloses(t *testing.T) {
 	f.SetPR(branch, forge.PR{URL: "https://github.com/o/r/pull/7"})
 	f.SetPRState("https://github.com/o/r/pull/7", forge.PRMerged)
 
-	res, err := reconcile.Run(f, f)
+	res, err := reconcile.Run(f, f, fakeLiveness{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestRun_DiscoversOpenLandingByBranchAndLeavesIssueOpen(t *testing.T) {
 	branch := f.AgentBranch("42")
 	f.SetPR(branch, forge.PR{URL: "https://github.com/o/r/pull/7"})
 
-	res, err := reconcile.Run(f, f)
+	res, err := reconcile.Run(f, f, fakeLiveness{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestRun_DiscoversClosedUnmergedLandingByBranchAndFlagsAbandoned(t *testing.
 	f.SetPR(branch, forge.PR{URL: "https://github.com/o/r/pull/7"})
 	f.SetPRState("https://github.com/o/r/pull/7", forge.PRClosed)
 
-	res, err := reconcile.Run(f, f)
+	res, err := reconcile.Run(f, f, fakeLiveness{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestRun_FlagsAbandonedWhenLandingPRClosedUnmerged(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRClosed)
 
-	res, err := reconcile.Run(f, f)
+	res, err := reconcile.Run(f, f, fakeLiveness{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -216,10 +216,10 @@ func TestRun_SecondSweepDoesNotReflagAbandoned(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRClosed)
 
-	if _, err := reconcile.Run(f, f); err != nil {
+	if _, err := reconcile.Run(f, f, fakeLiveness{}); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	res, err := reconcile.Run(f, f)
+	res, err := reconcile.Run(f, f, fakeLiveness{})
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -273,10 +273,10 @@ func TestRun_NoOpForPushOnlyCodeForge(t *testing.T) {
 }
 
 // fakeLiveness scripts LivenessProbe per issue number for tests. Zero value
-// reports every issue live (not stale, container live+reachable) since a
-// zero-value bool read from a nil map is exactly the "not stale"/"not live"
-// default — tests opt in per issue number to the death-signal values they
-// want to assert against.
+// never triggers a reset by itself: LogStale defaults to false (not stale)
+// and ContainerLive defaults to (false, false) (not live, not reachable) —
+// tests opt in per issue number to the death-signal values they want to
+// assert against.
 type fakeLiveness struct {
 	stale     map[string]bool
 	live      map[string]bool

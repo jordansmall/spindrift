@@ -9,9 +9,10 @@ import (
 	"spindrift.dev/launcher/internal/reconcile"
 )
 
-// fakeLiveness is a no-op reconcile.LivenessProbe: every issue reports live
-// (not stale, container live+reachable), so it never triggers a reset —
-// exactly what the Closed-only tests in this file need from the seam.
+// fakeLiveness is a no-op reconcile.LivenessProbe by default: LogStale
+// defaults to false (not stale) and ContainerLive always reports live=false,
+// so it never triggers a reset on its own — exactly what the Closed-only
+// tests in this file need from the seam.
 type fakeLiveness struct {
 	stale     map[string]bool
 	reachable map[string]bool
@@ -59,7 +60,7 @@ func TestRunReconcile_ReportsAbandonedIssue(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRClosed)
 
 	var buf bytes.Buffer
-	if err := runReconcile(f, f, "local", &buf); err != nil {
+	if err := runReconcile(f, f, fakeLiveness{}, "local", &buf); err != nil {
 		t.Fatalf("runReconcile: %v", err)
 	}
 	if !strings.Contains(buf.String(), "abandoned") || !strings.Contains(buf.String(), "42") {
