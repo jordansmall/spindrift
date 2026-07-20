@@ -1201,6 +1201,92 @@ func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testin
 	}
 }
 
+// TestDispatchConfig_Local_ResolveEnv_ForwardsIntegrationBranchAsBaseBranch
+// verifies that under CODE_FORGE=local, dispatchConfig's ResolveEnv resolves
+// BASE_BRANCH to the seam's Integration branch (integration/<parent>, ADR
+// 0033) once that branch exists -- so a dependent seam's Box clones a
+// branch that already contains its blocker's landed code (issue #1700).
+func TestDispatchConfig_Local_ResolveEnv_ForwardsIntegrationBranchAsBaseBranch(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.baseBranch = "main"
+	c.codeForgeIntegrationParent = "42"
+	fc := forge.NewFake()
+	fc.SetBranchExists("integration/42", true)
+	cf := fc.AsLocal()
+
+	cfg := dispatchConfig(c, cf)
+
+	if got := cfg.ResolveEnv("BASE_BRANCH"); got != "integration/42" {
+		t.Errorf("ResolveEnv(BASE_BRANCH) = %q, want %q", got, "integration/42")
+	}
+}
+
+// TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchBeforeFirstLand
+// verifies the other half of the same seam: a broad ticket's first (or
+// wholly independent) seam dispatches before any blocker has ever landed,
+// so integration/<parent> does not exist yet on the Accumulation repo --
+// ensureIntegrationBranch only ever creates it host-side, from inside
+// RelayBundle, once some seam actually lands. Forwarding BASE_BRANCH as
+// that not-yet-existing ref would make the Box's `git checkout -b $BRANCH
+// origin/$BASE_BRANCH` fail outright, so ResolveEnv must fall back to the
+// operator's real base branch until BranchExists confirms the Integration
+// branch is there.
+func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchBeforeFirstLand(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.baseBranch = "main"
+	c.codeForgeIntegrationParent = "42"
+	fc := forge.NewFake()
+	fc.SetBranchExists("integration/42", false)
+	cf := fc.AsLocal()
+
+	cfg := dispatchConfig(c, cf)
+
+	if got := cfg.ResolveEnv("BASE_BRANCH"); got != "main" {
+		t.Errorf("ResolveEnv(BASE_BRANCH) = %q, want %q", got, "main")
+	}
+}
+
+// TestDispatchConfig_NonLocal_ResolveEnv_PassesThroughUnchanged verifies
+// that localBaseBranchResolver's non-local branch forwards BASE_BRANCH
+// exactly as resolveBoxEnvVar would -- CODE_FORGE=github/git never consult
+// cf.BranchExists at all, unlike the CODE_FORGE=local cases above.
+func TestDispatchConfig_NonLocal_ResolveEnv_PassesThroughUnchanged(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "github"
+	cf := forge.NewFake()
+
+	t.Setenv("BASE_BRANCH", "release")
+	cfg := dispatchConfig(c, cf)
+
+	if got := cfg.ResolveEnv("BASE_BRANCH"); got != "release" {
+		t.Errorf("ResolveEnv(BASE_BRANCH) = %q, want %q", got, "release")
+	}
+}
+
+// TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchOnBranchExistsError
+// verifies that a BranchExists failure (e.g. the Accumulation repo path is
+// unreadable) falls back to the operator's real base branch rather than
+// forwarding a ref that was never confirmed to exist -- the same safe
+// posture as "not found", just reached through the error return instead of
+// exists=false.
+func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchOnBranchExistsError(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.baseBranch = "main"
+	c.codeForgeIntegrationParent = "42"
+	fc := forge.NewFake()
+	fc.BranchExistsErr = errors.New("repo path unreadable")
+	cf := fc.AsLocal()
+
+	cfg := dispatchConfig(c, cf)
+
+	if got := cfg.ResolveEnv("BASE_BRANCH"); got != "main" {
+		t.Errorf("ResolveEnv(BASE_BRANCH) = %q, want %q", got, "main")
+	}
+}
+
 // minimalValidConfig returns a config that passes validate() so tests can
 // mutate exactly one field at a time.
 func minimalValidConfig() config {
