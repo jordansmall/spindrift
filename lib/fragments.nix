@@ -150,4 +150,31 @@
     fragment = "review-issue-read-local.md";
     var = "REVIEW_ISSUE_READ_LOCAL_STEP";
   }
+  # The local content-plane write step (issue #1692, ADR 0032): a local
+  # Dispatch's Box has no in-box tracker client, so it can't run
+  # gh issue comment itself -- the research verdict travels as a
+  # SPINDRIFT_COMMENT block on stdout instead, and the work blocked-note
+  # rides the outcome line's own note= field; settle posts both host-side.
+  # Reuses ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL (declared once above) --
+  # no new gate, just two more render sites sharing the same computation.
+  {
+    gate = "ISSUE_TRACKER_GITHUB";
+    fragment = "research-verdict-github.md";
+    var = "RESEARCH_VERDICT_GITHUB_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_LOCAL";
+    fragment = "research-verdict-local.md";
+    var = "RESEARCH_VERDICT_LOCAL_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_GITHUB";
+    fragment = "issue-blocked-comment-github.md";
+    var = "ISSUE_BLOCKED_COMMENT_GITHUB_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_LOCAL";
+    fragment = "issue-blocked-comment-local.md";
+    var = "ISSUE_BLOCKED_COMMENT_LOCAL_STEP";
+  }
 ]

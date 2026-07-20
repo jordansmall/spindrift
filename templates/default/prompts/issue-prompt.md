@@ -257,9 +257,7 @@ Then:
    Driver never flips a PR to ready, so it is already draft and there is
    nothing to revert.
 3. Leave the issue in-progress — do NOT close it.
-4. Comment on the issue with what's done and what remains:
-   `gh issue comment ${ISSUE_NUMBER} --body "<what's done, what remains>"`.
-5. Print exactly one line and stop — raw plain text, not wrapped in
+${ISSUE_BLOCKED_COMMENT_GITHUB_STEP}${ISSUE_BLOCKED_COMMENT_LOCAL_STEP}5. Print exactly one line and stop — raw plain text, not wrapped in
    backticks, a code fence, or any other markdown formatting:
 
    SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=blocked note=<short reason>
