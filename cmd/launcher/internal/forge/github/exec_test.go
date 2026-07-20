@@ -322,6 +322,21 @@ esac`)
 	}
 }
 
+// TestExecClient_BranchExists_RejectsEmptyBranch verifies BranchExists
+// refuses an empty branch without shelling out — an empty branch would
+// otherwise query every ref under heads/ instead of a single branch.
+func TestExecClient_BranchExists_RejectsEmptyBranch(t *testing.T) {
+	dir := prependFakeGH(t, `exit 1`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	if _, err := c.BranchExists(""); err == nil {
+		t.Error("BranchExists(\"\"): want error, got nil")
+	}
+	if matches, _ := filepath.Glob(filepath.Join(dir, "call-*.txt")); len(matches) != 0 {
+		t.Errorf("want no gh invocation for an empty branch, got %d", len(matches))
+	}
+}
+
 // TestExecClient_TouchesOf_FetchesFullIssueBody verifies that TouchesOf
 // fetches the issue's full body via `gh issue view` (unlike ListIssues,
 // whose --json number,title summary never includes body) and parses its

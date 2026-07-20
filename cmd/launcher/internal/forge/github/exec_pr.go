@@ -53,8 +53,14 @@ func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 // BranchExists reports whether branch exists on the remote, independent of
 // any PR. matching-refs prefix-matches, so the result is filtered to an
 // exact "refs/heads/<branch>" match rather than trusting a non-empty
-// response.
+// response. branch becomes one path segment of the API URL rather than a
+// standalone gh argument, so it can't be misparsed as a flag the way
+// gitClient's ls-remote-based BranchExists guards against; an empty branch
+// is still rejected since it would otherwise query every ref under heads/.
 func (e *execClient) BranchExists(branch string) (bool, error) {
+	if branch == "" {
+		return false, fmt.Errorf("branch must not be empty")
+	}
 	cmd := exec.Command("gh", "api",
 		fmt.Sprintf("repos/%s/git/matching-refs/heads/%s", e.repo, branch),
 		"--jq", ".[].ref",
