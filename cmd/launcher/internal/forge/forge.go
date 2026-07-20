@@ -40,6 +40,10 @@ type Issue struct {
 	Body   string
 	State  IssueState
 	Labels []string
+	// Landing is the local adapter's immutable landing ref (ADR 0029, a PR
+	// URL or push-only branch ref) — empty for github/jira, which have no
+	// such field to report.
+	Landing string
 }
 
 // IssueState is the canonical open/closed state of an issue. Each

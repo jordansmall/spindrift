@@ -544,6 +544,27 @@ func TestLocalTracker_Issue_ReportsClosedState(t *testing.T) {
 	}
 }
 
+// TestLocalTracker_Issue_ReportsLandingRef verifies Issue() surfaces the
+// frontmatter landing: ref on forge.Issue.Landing — reconcile's read side of
+// RecordLanding's write (ADR 0029).
+func TestLocalTracker_Issue_ReportsLandingRef(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "fix-thing", localIssue{frontmatter: localFrontmatter{
+		Title: "Fix thing", State: labels.InProgress, Created: "2026-07-09T12:00:00Z",
+		Landing: "https://github.com/o/r/pull/1",
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	iss, err := lt.Issue("fix-thing")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.Landing != "https://github.com/o/r/pull/1" {
+		t.Errorf("Landing = %q, want %q", iss.Landing, "https://github.com/o/r/pull/1")
+	}
+}
+
 // TestLocalTracker_ImplementsLandingRecorder asserts *LocalTracker satisfies
 // the optional forge.LandingRecorder surface (ADR 0029) — only the local
 // adapter records a landing ref; github/jira don't implement it.
@@ -575,6 +596,40 @@ func TestLocalTracker_RecordLanding_WritesLandingField(t *testing.T) {
 	}
 	if li.frontmatter.Landing != "https://github.com/o/r/pull/1" {
 		t.Errorf("Landing = %q, want %q", li.frontmatter.Landing, "https://github.com/o/r/pull/1")
+	}
+}
+
+// TestLocalTracker_ImplementsIssueCloser asserts *LocalTracker satisfies the
+// optional forge.IssueCloser surface (ADR 0029) — only the local adapter has
+// a native closed: axis for reconcile to flip.
+func TestLocalTracker_ImplementsIssueCloser(t *testing.T) {
+	var _ forge.IssueCloser = NewLocalTracker(t.TempDir(), testLabels)
+}
+
+// TestLocalTracker_CloseIssue_SetsClosedTrue verifies CloseIssue flips the
+// closed: frontmatter field without touching state/labels/landing.
+func TestLocalTracker_CloseIssue_SetsClosedTrue(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "fix-thing", localIssue{frontmatter: localFrontmatter{
+		Title: "Fix thing", State: labels.InProgress, Created: "2026-07-09T12:00:00Z",
+		Landing: "https://github.com/o/r/pull/1",
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	if err := lt.CloseIssue("fix-thing"); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+
+	iss, err := lt.Issue("fix-thing")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.State != forge.IssueClosed {
+		t.Errorf("State = %v, want IssueClosed", iss.State)
+	}
+	if iss.Landing != "https://github.com/o/r/pull/1" {
+		t.Errorf("Landing = %q, want unchanged %q", iss.Landing, "https://github.com/o/r/pull/1")
 	}
 }
 

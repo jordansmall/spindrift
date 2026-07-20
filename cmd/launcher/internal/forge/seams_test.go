@@ -93,6 +93,46 @@ func TestFake_AsNoLandingRecorder_HidesLandingRecorder(t *testing.T) {
 	}
 }
 
+// TestFake_ImplementsIssueCloser asserts that *Fake satisfies the optional
+// IssueCloser surface, matching the local adapter's shape.
+func TestFake_ImplementsIssueCloser(t *testing.T) {
+	var _ forge.IssueCloser = forge.NewFake()
+}
+
+// TestFake_AsNoLandingRecorder_HidesIssueCloser verifies that
+// AsNoLandingRecorder also hides IssueCloser, matching the github/jira
+// adapters' shape (neither implements either optional write) — the mechanism
+// reconcile uses to no-op for them.
+func TestFake_AsNoLandingRecorder_HidesIssueCloser(t *testing.T) {
+	f := forge.NewFake()
+	it := f.AsNoLandingRecorder()
+	if _, ok := it.(forge.IssueCloser); ok {
+		t.Error("AsNoLandingRecorder() satisfies IssueCloser, want it hidden")
+	}
+}
+
+// TestFake_CloseIssue_SetsIssueClosed verifies CloseIssue flips the issue's
+// State to IssueClosed and records the call.
+func TestFake_CloseIssue_SetsIssueClosed(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
+
+	if err := f.CloseIssue("42"); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.State != forge.IssueClosed {
+		t.Errorf("State = %v, want IssueClosed", iss.State)
+	}
+	if len(f.CloseIssueCalls) != 1 || f.CloseIssueCalls[0] != "42" {
+		t.Errorf("CloseIssueCalls = %v, want [42]", f.CloseIssueCalls)
+	}
+}
+
 // --- TransitionState tests ---
 
 func TestFake_TransitionState_DispatchableToInProgress(t *testing.T) {

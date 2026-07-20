@@ -197,6 +197,12 @@ type Fake struct {
 	// NewReadiness sweep) instead of inferring it from side effects
 	// (issue #1632).
 	DepsOfCalls []string
+
+	// CloseIssueCalls records the issue number argument of every CloseIssue
+	// invocation in order.
+	CloseIssueCalls []string
+	// CloseIssueErr, if non-nil, is returned by every CloseIssue call.
+	CloseIssueErr error
 }
 
 // NewFake returns an empty Fake client. labels configures the
@@ -682,14 +688,36 @@ func (f *Fake) RecordLanding(num, landing string) error {
 
 var _ LandingRecorder = (*Fake)(nil)
 
+// CloseIssue implements the optional IssueCloser surface (ADR 0029), setting
+// the issue's State to IssueClosed and recording the call for tests to
+// assert against.
+func (f *Fake) CloseIssue(num string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.CloseIssueCalls = append(f.CloseIssueCalls, num)
+	if f.CloseIssueErr != nil {
+		return f.CloseIssueErr
+	}
+	iss, ok := f.issues[num]
+	if !ok {
+		return fmt.Errorf("issue %s not found", num)
+	}
+	iss.State = IssueClosed
+	f.issues[num] = iss
+	return nil
+}
+
+var _ IssueCloser = (*Fake)(nil)
+
 // noLandingIssueTracker adapts a Fake to expose only the core IssueTracker
-// surface, hiding its RecordLanding method so a type assertion against it
-// reports absence — the IssueTracker analogue of pushOnlyForge, matching a
-// github/jira adapter's shape (ADR 0029).
+// surface, hiding both its RecordLanding and CloseIssue methods so a type
+// assertion against either reports absence — the IssueTracker analogue of
+// pushOnlyForge, matching a github/jira adapter's shape (ADR 0029): neither
+// implements the optional local-only write surfaces.
 type noLandingIssueTracker struct{ IssueTracker }
 
-// AsNoLandingRecorder returns f wrapped so it satisfies IssueTracker but not
-// LandingRecorder.
+// AsNoLandingRecorder returns f wrapped so it satisfies IssueTracker but
+// neither LandingRecorder nor IssueCloser.
 func (f *Fake) AsNoLandingRecorder() IssueTracker { return noLandingIssueTracker{f} }
 
 // pushOnlyForge adapts a Fake to expose only the core CodeForge surface,
