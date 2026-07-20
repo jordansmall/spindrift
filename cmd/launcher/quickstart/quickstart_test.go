@@ -1068,31 +1068,6 @@ func TestRunQuickstart_AcceptSetupToken_RunsItAndPastesToken(t *testing.T) {
 	}
 }
 
-func TestRunQuickstart_GitUserNameWithNixSpecialChars_IsEscaped(t *testing.T) {
-	dir := t.TempDir()
-	var out bytes.Buffer
-	stdin := strings.NewReader(strings.Join([]string{
-		"jordansmall/spindrift",
-		"podman",
-		`Ada "Countess" ${evil}`, // git user name with a Nix string terminator and interpolation
-		"ada@example.com",
-		"ghp_faketoken",
-	}, "\n") + "\n")
-	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
-
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
-		t.Fatalf("runQuickstart: %v", err)
-	}
-
-	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
-	if err != nil {
-		t.Fatalf("read flake.nix: %v", err)
-	}
-	if !strings.Contains(string(flakeNix), `Ada \"Countess\" \${evil}`) {
-		t.Errorf("expected the git user name to be Nix-escaped, got:\n%s", flakeNix)
-	}
-}
-
 func TestRunQuickstart_AmbientClaudeOAuthToken_ReusedWithoutPrompt(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -1256,5 +1231,141 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("expected closing summary to list %q, got:\n%s", want, out.String())
 		}
+	}
+}
+
+func TestRender_HappyPath_ReturnsFourFiles(t *testing.T) {
+	a := answers{
+		repoSlug:         "jordansmall/spindrift",
+		runtime:          "podman",
+		gitUserName:      "Ada Lovelace",
+		gitUserEmail:     "ada@example.com",
+		tracker:          trackerSettings{issueTracker: "github"},
+		ghToken:          "ghp_faketoken",
+		claudeOAuthToken: "claude-oauth-faketoken",
+	}
+
+	files := render(a)
+
+	byPath := make(map[string]scaffoldFile, len(files))
+	for _, f := range files {
+		byPath[f.path] = f
+	}
+
+	flakeNix, ok := byPath["flake.nix"]
+	if !ok {
+		t.Fatalf("expected flake.nix among rendered files, got: %v", files)
+	}
+	if flakeNix.mode != 0o644 {
+		t.Errorf("expected flake.nix mode 0644, got %o", flakeNix.mode)
+	}
+	for _, want := range []string{"jordansmall/spindrift", "podman", "Ada Lovelace", "ada@example.com"} {
+		if !strings.Contains(flakeNix.content, want) {
+			t.Errorf("expected flake.nix to contain %q, got:\n%s", want, flakeNix.content)
+		}
+	}
+
+	harnessEnv, ok := byPath["harness.env"]
+	if !ok {
+		t.Fatalf("expected harness.env among rendered files, got: %v", files)
+	}
+	if harnessEnv.mode != 0o600 {
+		t.Errorf("expected harness.env mode 0600, got %o", harnessEnv.mode)
+	}
+	if !strings.Contains(harnessEnv.content, "GH_TOKEN=ghp_faketoken") {
+		t.Errorf("expected harness.env to contain GH_TOKEN, got:\n%s", harnessEnv.content)
+	}
+	if !strings.Contains(harnessEnv.content, "CLAUDE_CODE_OAUTH_TOKEN=claude-oauth-faketoken") {
+		t.Errorf("expected harness.env to contain the Claude OAuth token, got:\n%s", harnessEnv.content)
+	}
+
+	gitignore, ok := byPath[".gitignore"]
+	if !ok || gitignore.mode != 0o644 || !strings.Contains(gitignore.content, "harness.env") {
+		t.Errorf("expected .gitignore mode 0644 protecting harness.env, got: %+v", gitignore)
+	}
+
+	envrc, ok := byPath[".envrc"]
+	if !ok || envrc.mode != 0o644 || envrc.content != "use flake\n" {
+		t.Errorf("expected .envrc mode 0644 content %q, got: %+v", "use flake\n", envrc)
+	}
+}
+
+func TestRender_AnthropicAPIKey_WrittenWhenNoOAuthToken(t *testing.T) {
+	a := answers{
+		repoSlug:        "jordansmall/spindrift",
+		runtime:         "podman",
+		gitUserName:     "Ada Lovelace",
+		gitUserEmail:    "ada@example.com",
+		tracker:         trackerSettings{issueTracker: "github"},
+		ghToken:         "ghp_faketoken",
+		anthropicAPIKey: "sk-ant-faketoken",
+	}
+
+	var harnessEnv string
+	for _, f := range render(a) {
+		if f.path == "harness.env" {
+			harnessEnv = f.content
+		}
+	}
+	if !strings.Contains(harnessEnv, "ANTHROPIC_API_KEY=sk-ant-faketoken") {
+		t.Errorf("expected harness.env to contain the Anthropic API key, got:\n%s", harnessEnv)
+	}
+	if strings.Contains(harnessEnv, "CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Errorf("expected no CLAUDE_CODE_OAUTH_TOKEN line when only an API key is set, got:\n%s", harnessEnv)
+	}
+}
+
+func TestRender_NixSpecialChars_AreEscaped(t *testing.T) {
+	base := answers{
+		repoSlug:     "jordansmall/spindrift",
+		runtime:      "podman",
+		gitUserName:  "Ada Lovelace",
+		gitUserEmail: "ada@example.com",
+		tracker:      trackerSettings{issueTracker: "github"},
+		ghToken:      "ghp_faketoken",
+	}
+
+	cases := []struct {
+		name    string
+		mutate  func(a answers) answers
+		wantRaw string // the unescaped operator string that must never appear literally
+		wantEsc string // the escaped form that must appear instead
+	}{
+		{
+			name:    "git user name with quote and interpolation",
+			mutate:  func(a answers) answers { a.gitUserName = `Ada "Countess" ${evil}`; return a },
+			wantRaw: `Ada "Countess" ${evil}`,
+			wantEsc: `Ada \"Countess\" \${evil}`,
+		},
+		{
+			name:    "repo slug with interpolation splice",
+			mutate:  func(a answers) answers { a.repoSlug = "jordansmall/${evil}"; return a },
+			wantRaw: "jordansmall/${evil}",
+			wantEsc: `jordansmall/\${evil}`,
+		},
+		{
+			name:    "git user email with backslash",
+			mutate:  func(a answers) answers { a.gitUserEmail = `ada\example.com`; return a },
+			wantRaw: `ada\example.com`,
+			wantEsc: `ada\\example.com`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			files := render(tc.mutate(base))
+			var flakeNix string
+			for _, f := range files {
+				if f.path == "flake.nix" {
+					flakeNix = f.content
+				}
+			}
+			if strings.Contains(flakeNix, tc.wantRaw) {
+				t.Errorf("expected flake.nix not to contain unescaped %q, got:\n%s", tc.wantRaw, flakeNix)
+			}
+			if !strings.Contains(flakeNix, tc.wantEsc) {
+				t.Errorf("expected flake.nix to contain escaped %q, got:\n%s", tc.wantEsc, flakeNix)
+			}
+		})
 	}
 }
