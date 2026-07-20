@@ -18,7 +18,10 @@ import (
 var stalePRLabel = regexp.MustCompile(`\bpr=`)
 
 // TestSettle_PostsUsageComment_Blocked verifies that Settle posts d's usage
-// report as a comment when the outcome is "blocked".
+// report as a comment when the outcome is "blocked". Uses a github-shaped
+// tracker (AsNoLandingRecorder): a local tracker's blocked path posts an
+// additional note comment (TestSettle_LocalForge_BlockedPostsNoteAsComment),
+// which is out of scope for this usage-comment-specific assertion.
 func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -34,7 +37,7 @@ func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
 	}
 
-	s := New(baseConfig(), fc, fc)
+	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -108,7 +111,8 @@ func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
 
 // TestSettle_UsageMissing_NoCrash verifies that Settle still posts whatever
 // UsageReport returns (including its "unavailable" fallback body) without
-// crashing.
+// crashing. Uses a github-shaped tracker (AsNoLandingRecorder) for the same
+// reason as TestSettle_PostsUsageComment_Blocked.
 func TestSettle_UsageMissing_NoCrash(t *testing.T) {
 	const issNum = "7"
 	const prURL = "https://github.com/owner/repo/pull/7"
@@ -124,7 +128,7 @@ func TestSettle_UsageMissing_NoCrash(t *testing.T) {
 		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "no result"},
 	}
 
-	s := New(baseConfig(), fc, fc)
+	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CommentCalls) != 1 {
