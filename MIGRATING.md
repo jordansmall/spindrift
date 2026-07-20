@@ -48,6 +48,7 @@ idiom; set it in `flake.nix` `settings` instead.
 | `JIRA_STATUS_MAPPING` | `--jira-status-mapping` | `settings.lifecycleLabels.jiraStatusMapping` |
 | `LABEL` | `--label` | `settings.issueDiscovery.label` |
 | `LOCAL_ISSUES_DIR` | `--local-issues-dir` | `settings.issueDiscovery.localIssuesDir` |
+| `LOCAL_ISSUE_REFERENCE` | `--local-issue-reference` | `settings.issueDiscovery.localIssueReference` |
 | `MAX_FIX_ATTEMPTS` | `--max-fix-attempts` | `settings.selfHealing.maxFixAttempts` |
 | `MAX_JOBS` | `--max-jobs` | `settings.concurrency.maxJobs` |
 | `MAX_PARALLEL` | `--max-parallel` | `settings.concurrency.maxParallel` |
