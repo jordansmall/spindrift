@@ -93,12 +93,8 @@ func (h *codeforgeHarness) SeedLandable(num string) string {
 	if err := os.MkdirAll(prDir, 0o755); err != nil {
 		h.t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(prDir, "head"), []byte(branch), 0o644); err != nil {
-		h.t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(prDir, "base"), []byte(h.base), 0o644); err != nil {
-		h.t.Fatal(err)
-	}
+	writeFile(h.t, filepath.Join(prDir, "head"), branch)
+	writeFile(h.t, filepath.Join(prDir, "base"), h.base)
 
 	return h.prURL(num)
 }
