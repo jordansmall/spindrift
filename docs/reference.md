@@ -1109,7 +1109,14 @@ landing: https://github.com/owner/repo/pull/123
   branch ref under `CODE_FORGE=git`) the launcher writes after a work
   outcome line is parsed. It's a plain pointer, not cached merge-state — a
   later `reconcile` re-checks the forge live rather than trusting this field
-  for anything beyond "where did this land."
+  for anything beyond "where did this land." `reconcile` (below) also writes
+  it itself when it discovers a PR by agent branch for an issue with no
+  recorded `landing`.
+- `abandoned` is a boolean, local-only flag (ADR 0029) `reconcile` (below)
+  sets when the issue's `landing` PR was closed without merging — a human
+  rejected it. The issue stays open (`abandoned` never implies `closed`), so
+  it keeps showing up in `ListOpenIssues` as something needing attention,
+  rather than waiting forever on a merge that will never come.
 - **Canonical order is ascending `created`** — the local analogue of GitHub's
   ascending issue-number order.
 - **Dependencies** come from a `## Blocked by` section: one issue slug per
@@ -1128,15 +1135,22 @@ of acting; `dispatch` also auto-invokes it as a final step whenever
 closes) needs no extra command.
 
 Per open local issue carrying a recorded `landing`, reconcile asks the Code
-Forge whether that PR merged and, if so, sets `closed: true`; an issue with
-no `landing`, or whose `landing` PR is still open (green-and-mergeable, or in
-approval limbo), is left untouched. Running it twice never double-acts: a
-closed issue drops out of `ListOpenIssues`, so a later sweep never revisits
-it.
+Forge whether that PR merged and, if so, sets `closed: true`; an issue whose
+`landing` PR is still open (green-and-mergeable, or in approval limbo) is
+left untouched. For an open issue with **no** recorded `landing` — the Box
+died after opening a PR but before its outcome line was parsed — reconcile
+discovers the PR by the issue's agent branch (the same branch→PR resolution
+`PRForge.PRForBranch` gives every other call site), records it as `landing`,
+then closes the issue if that discovered PR already merged; if it's still
+open, reconcile records the landing and leaves the issue for a later sweep.
+When a `landing` PR (recorded or freshly discovered) was closed **without**
+merging, reconcile sets `abandoned: true` instead of closing — a human
+rejected it, so there's no merge left to wait on. Running it twice never
+double-acts: a closed issue drops out of `ListOpenIssues`, and an
+already-`abandoned` issue is skipped on later sweeps, so neither is ever
+revisited.
 
-This first slice covers only close-on-merged-landing. Discovering a PR by
-agent branch when no `landing` was recorded, flagging a PR closed unmerged,
-and the gated `InProgress → Dispatchable` orphan-reset are later work — see
+The gated `InProgress → Dispatchable` orphan-reset is later work — see
 [ADR 0029](adr/0029-local-issue-lifecycle-and-reconcile.md).
 
 #### PR-body ticket reference (`LOCAL_ISSUE_REFERENCE`)
