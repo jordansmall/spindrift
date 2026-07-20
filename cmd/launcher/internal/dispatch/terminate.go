@@ -7,15 +7,17 @@ import (
 	"strings"
 )
 
-// boxNamePrefix is boxName's deterministic prefix — shared with
+// boxNamePrefix is BoxName's deterministic prefix — shared with
 // OrphanedIssues, the reverse direction of the same naming scheme.
 const boxNamePrefix = "agent-issue-"
 
-// boxName returns the deterministic sandbox name a Dispatch launches issue
-// number under. Shared between runOnce (which launches it) and Factory.Kill
-// (Terminate, issue #649, which has no live *Dispatch to ask) so the two can
-// never drift apart.
-func boxName(number string) string {
+// BoxName returns the deterministic sandbox name a Dispatch launches issue
+// number under. Shared between runOnce (which launches it), Factory.Kill
+// (Terminate, issue #649, which has no live *Dispatch to ask), and
+// reconcile's LivenessProbe (issue #1432, which checks container presence
+// by name with no live *Dispatch either) so none of the three can drift
+// apart.
+func BoxName(number string) string {
 	return boxNamePrefix + number
 }
 
@@ -25,7 +27,7 @@ func boxName(number string) string {
 // Dispatch goroutine elsewhere in the process is untouched by this call
 // beyond losing its running sandbox out from under it.
 func (f *Factory) Kill(number string) error {
-	return f.runner.Kill(boxName(number))
+	return f.runner.Kill(BoxName(number))
 }
 
 // OrphanedIssues returns the issue numbers of every sandbox the runner
