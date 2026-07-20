@@ -113,6 +113,25 @@ as files in the Target repo, no server). The launcher reasons in canonical
 Dispatch states, never in a backend's native mechanism.
 _Avoid_: issue source, ticketing, backlog.
 
+**Content plane**:
+An issue's body and comments — the text a Dispatch reads to do its work and
+the comment it writes back — as distinct from the Dispatch lifecycle (its
+state transitions). The Launcher is the sole writer on both planes; reads,
+though, are per-tracker — in-box for a remote tracker, host-mediated for
+`local` (ADR 0032).
+_Avoid_: issue data, payload.
+
+**Remote / local tracker**:
+Whether an Issue Tracker is reachable from inside the Box. Remote trackers
+(`github`; `gitlab`/`bitbucket`/`jira` as they land) are reached in-box over
+the network via their own client, so the Box reads and writes them directly.
+`local` is unreachable in-box — no server, git-ignored, absent from the fresh
+clone — so its content is host-mediated: the Box reads its issue through a
+read-only in-box view of the issues directory (the one documented exception to
+zero-shared-host-filesystem) and never writes it, emitting comments for the
+Launcher to post on its behalf (ADR 0032).
+_Avoid_: online/offline tracker, connected tracker.
+
 **Code Forge**:
 The seam through which the Harness lands code — the narrow core every adapter
 honors with real behavior: agent branch naming, rebase, merge/landing under
