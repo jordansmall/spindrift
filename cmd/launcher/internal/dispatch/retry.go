@@ -127,7 +127,11 @@ func (d *Dispatch) successResult(logPath string) Result {
 		return Result{Success: true, ParseErr: err}
 	}
 	if found {
-		return Result{Success: true, Outcome: o, OutcomeFound: true}
+		comment, commentFound, commentErr := outcome.LastCommentInLog(logPath)
+		if commentErr != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: comment scan: %v\n", d.number, commentErr)
+		}
+		return Result{Success: true, Outcome: o, OutcomeFound: true, Comment: comment, CommentFound: commentFound}
 	}
 	cls, clsErr := d.driver.ClassifyTransient(logPath)
 	return Result{Success: true, Classification: cls, ClassifyErr: clsErr}
