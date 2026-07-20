@@ -43,6 +43,10 @@ configure_env() {
   # host without a container.
   WORK_DIR="${WORK_DIR:-/work}"
   PROMPTS_DIR="${PROMPTS_DIR:-/agent/prompts}"
+  # REPO_MOUNT_DIR is the read-only Accumulation-repo mount CODE_FORGE=local
+  # clones from instead of a network remote (ADR 0033, issue #1697's /repo
+  # mount); unused otherwise.
+  REPO_MOUNT_DIR="${REPO_MOUNT_DIR:-/repo}"
 
   # The canonical SPINDRIFT_OUTCOME contract (issue #419), baked at a sibling
   # path to /agent/prompts so a SPINDRIFT_PROMPT_DIR mount -- which shadows only
@@ -84,17 +88,27 @@ configure_env() {
 # clone_repo authenticates, clones the target repo into WORK_DIR, sets the
 # repo-local git identity, and fetches the latest refs.
 clone_repo() {
-  export GH_TOKEN
-  gh auth setup-git
+  # CODE_FORGE=local clones from a local filesystem mount, never github.com,
+  # so there is nothing for gh's credential helper to apply to -- skipping it
+  # keeps this path a genuine no-forge-network-call guarantee (ADR 0033)
+  # rather than merely "the actual clone happens not to use it."
+  if [ "${CODE_FORGE:-github}" != "local" ]; then
+    export GH_TOKEN
+    gh auth setup-git
+  fi
 
   # CODE_FORGE=git clones from and pushes to a configured plain git remote
-  # instead of the target GitHub repo (ADR 0013); REPO_SLUG still resolves the
-  # Issue Tracker regardless. Gated on CODE_FORGE=git so a stray
-  # CODE_FORGE_REMOTE_URL left set in the environment can't silently redirect a
-  # CODE_FORGE=github (default) deployment to the wrong remote.
+  # instead of the target GitHub repo (ADR 0013); CODE_FORGE=local clones from
+  # the read-only Accumulation-repo mount instead of any network remote (ADR
+  # 0033) -- REPO_SLUG still resolves the Issue Tracker regardless of either.
+  # Gated on the exact CODE_FORGE value so a stray CODE_FORGE_REMOTE_URL left
+  # set in the environment can't silently redirect a CODE_FORGE=github
+  # (default) deployment to the wrong remote.
   local CLONE_URL="https://github.com/${REPO_SLUG}.git"
   if [ "${CODE_FORGE:-github}" = "git" ]; then
     CLONE_URL="${CODE_FORGE_REMOTE_URL:?CODE_FORGE_REMOTE_URL is required when CODE_FORGE=git}"
+  elif [ "${CODE_FORGE:-github}" = "local" ]; then
+    CLONE_URL="$REPO_MOUNT_DIR"
   fi
   echo "==> cloning $CLONE_URL"
   git clone "$CLONE_URL" "$WORK_DIR"
@@ -122,6 +136,21 @@ phase_branch_recovery() {
   # open PR exists, check out the prior work so the pre-work rebase can replay
   # it onto current origin/BASE_BRANCH before the agent begins.
   _rebase_and_publish=""
+
+  # CODE_FORGE=local has no PR concept and no writable origin -- the
+  # Accumulation-repo mount is read-only (ADR 0033), and nothing is ever
+  # pushed there mid-session, only bundled out at the very end. A
+  # refs/remotes/origin/$BRANCH left by an earlier, abandoned attempt (a
+  # landed-then-conflicting bundle, say) is simply superseded by a fresh
+  # checkout: there is nothing to adopt via a gh call that would violate the
+  # no-forge-network-calls guarantee, and no remote branch this Box could
+  # force-push to reset even if it wanted to.
+  if [ "${CODE_FORGE:-github}" = "local" ]; then
+    echo "==> CODE_FORGE=local: starting $BRANCH fresh from origin/${BASE_BRANCH:-}"
+    git checkout -b "$BRANCH" "origin/${BASE_BRANCH:-}"
+    return
+  fi
+
   if git rev-parse --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
     # Fail hard on gh errors: a silent empty response (network/auth failure)
     # is indistinguishable from "no PR" and must not trigger the force-reset.
@@ -659,6 +688,12 @@ emit_outcome_backstop() {
   commit_count="$(git rev-list --count "origin/${BASE_BRANCH:-}..${BRANCH}" 2>/dev/null)" || commit_count=1
   if [ "$commit_count" -eq 0 ]; then
     note="${note}; no work to preserve"
+  elif [ "${CODE_FORGE:-github}" = "local" ]; then
+    # origin is the read-only Accumulation-repo mount under CODE_FORGE=local
+    # (ADR 0033) -- a push here would only ever fail, and the commits are
+    # already sitting in this Box's own clone regardless, unlike git/github
+    # where a push is the only way work survives the container exiting.
+    note="${note}; no bundle was ever emitted (no writable remote under CODE_FORGE=local)"
   else
     local push_log
     push_log="$(mktemp)"

@@ -176,6 +176,23 @@ gate): skip OPEN A PULL REQUEST below entirely.
    target branch on `immediate`; leave the branch as pushed on `manual`).
    Do NOT run `gh pr create` and do NOT attempt to merge.
 
+**`CODE_FORGE=local`** (host-mediated Code Forge — no PR, no CI-watch, no
+network; the launcher lands your branch after this container exits): skip
+OPEN A PULL REQUEST below entirely.
+
+1. `git bundle create /outbox/seam.bundle origin/${BASE_BRANCH}..${BRANCH}`
+   — do NOT `git push`: the repo you cloned from (`/repo`) is mounted
+   read-only, and the bundle is the only way your finished branch leaves
+   this container.
+2. Print exactly one line as your final output and stop — raw plain text, not
+   wrapped in backticks, a code fence, or any other markdown formatting:
+
+   SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ready note=<short reason>
+
+   The launcher relays the bundle into the Accumulation repo and merges it
+   onto the Integration branch host-side. There is no PR to open, no CI to
+   watch, and nothing further for you to do.
+
 **`CODE_FORGE=github`** (default): continue with OPEN A PULL REQUEST below.
 
 # OPEN A PULL REQUEST
@@ -191,8 +208,8 @@ rebase-merge, and the complete-label swap.
 
 # OUTCOME
 
-(`CODE_FORGE=github` only — `CODE_FORGE=git` already printed its outcome line
-and stopped under LAND THE CHANGE above.)
+(`CODE_FORGE=github` only — `CODE_FORGE=git` and `CODE_FORGE=local` already
+printed their outcome line and stopped under LAND THE CHANGE above.)
 
 Print exactly one line as your final output — raw plain text, not wrapped in
 backticks, a code fence, or any other markdown formatting:
