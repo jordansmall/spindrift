@@ -22,6 +22,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
 | `spindrift doctor`               | check forge credentials, repository connectivity, and label presence — the four triage labels (fatal if missing) and the six `agent-research*` labels (ADR 0022, advisory only); when run interactively (TTY attached) and labels are missing it offers to create them with default colors and descriptions; in CI (no TTY) it reports missing labels and exits non-zero only if a triage label is missing |
+| `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (same content as `man spindrift`)  |
 | `man spindrift`                  | the manual page (installed alongside the binary on your PATH)                    |
@@ -1102,8 +1103,8 @@ landing: https://github.com/owner/repo/pull/123
 - `closed` is a boolean, local-only open/closed axis (ADR 0029), independent
   of `state`: absent or `false` means open; `true` excludes the issue from
   both `ListOpenIssues` and `ListIssues`, so it is never re-dispatched or
-  shown as outstanding. Nothing in this issue's foundation slice sets
-  `closed: true` yet — that's the `reconcile` sweep's job.
+  shown as outstanding. `reconcile` (below) is the sole authority that sets
+  `closed: true`.
 - `landing` is the immutable landing reference (a PR URL, or a push-only
   branch ref under `CODE_FORGE=git`) the launcher writes after a work
   outcome line is parsed. It's a plain pointer, not cached merge-state — a
@@ -1116,6 +1117,27 @@ landing: https://github.com/owner/repo/pull/123
 - `spindrift doctor`'s label-presence check always passes for the local
   adapter — there is no separate label registry to check; the four dispatch
   markers above always exist as values the `state` field can take.
+
+#### `reconcile`: closing a local issue
+
+`spindrift reconcile` is the local-tracker bookkeeping sweep (ADR 0029): the
+sole authority that closes a local issue. It is observational — it never
+lands code. On `github`/`jira` it prints a plain "nothing to do" line instead
+of acting; `dispatch` also auto-invokes it as a final step whenever
+`ISSUE_TRACKER=local`, so the common loop (dispatch → immediate-merge → issue
+closes) needs no extra command.
+
+Per open local issue carrying a recorded `landing`, reconcile asks the Code
+Forge whether that PR merged and, if so, sets `closed: true`; an issue with
+no `landing`, or whose `landing` PR is still open (green-and-mergeable, or in
+approval limbo), is left untouched. Running it twice never double-acts: a
+closed issue drops out of `ListOpenIssues`, so a later sweep never revisits
+it.
+
+This first slice covers only close-on-merged-landing. Discovering a PR by
+agent branch when no `landing` was recorded, flagging a PR closed unmerged,
+and the gated `InProgress → Dispatchable` orphan-reset are later work — see
+[ADR 0029](adr/0029-local-issue-lifecycle-and-reconcile.md).
 
 #### PR-body ticket reference (`LOCAL_ISSUE_REFERENCE`)
 
