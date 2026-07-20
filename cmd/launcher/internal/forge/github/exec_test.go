@@ -252,6 +252,76 @@ esac`)
 	}
 }
 
+// TestExecClient_BranchExists_ExactMatch verifies BranchExists returns true
+// when the matching-refs endpoint reports the exact ref.
+func TestExecClient_BranchExists_ExactMatch(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*matching-refs/heads/agent/issue-1*)
+	printf 'refs/heads/agent/issue-1\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	exists, err := c.BranchExists("agent/issue-1")
+	if err != nil {
+		t.Fatalf("BranchExists: %v", err)
+	}
+	if !exists {
+		t.Error("BranchExists(agent/issue-1) = false, want true")
+	}
+}
+
+// TestExecClient_BranchExists_RejectsPrefixMatch verifies BranchExists
+// returns false when the matching-refs endpoint's prefix match only found a
+// longer sibling branch ("agent/issue-10"), not the exact branch queried
+// ("agent/issue-1") — matching-refs prefix-matches, so a naive
+// non-empty-response check would wrongly report the shorter branch as
+// existing too.
+func TestExecClient_BranchExists_RejectsPrefixMatch(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*matching-refs/heads/agent/issue-1*)
+	printf 'refs/heads/agent/issue-10\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	exists, err := c.BranchExists("agent/issue-1")
+	if err != nil {
+		t.Fatalf("BranchExists: %v", err)
+	}
+	if exists {
+		t.Error("BranchExists(agent/issue-1) = true, want false — only the longer sibling branch matched")
+	}
+}
+
+// TestExecClient_BranchExists_NoMatch verifies BranchExists returns false
+// when the matching-refs endpoint reports no refs at all.
+func TestExecClient_BranchExists_NoMatch(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*matching-refs/heads/agent/issue-1*)
+	printf ''
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	exists, err := c.BranchExists("agent/issue-1")
+	if err != nil {
+		t.Fatalf("BranchExists: %v", err)
+	}
+	if exists {
+		t.Error("BranchExists(agent/issue-1) = true, want false")
+	}
+}
+
 // TestExecClient_TouchesOf_FetchesFullIssueBody verifies that TouchesOf
 // fetches the issue's full body via `gh issue view` (unlike ListIssues,
 // whose --json number,title summary never includes body) and parses its

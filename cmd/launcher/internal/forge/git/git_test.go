@@ -350,6 +350,29 @@ func TestGitClient_Probe(t *testing.T) {
 	}
 }
 
+// TestGitClient_BranchExists verifies BranchExists reports true for a
+// branch pushed to the remote, false for one that was never pushed.
+func TestGitClient_BranchExists(t *testing.T) {
+	bare := newBareRemoteWithBranches(t)
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+
+	exists, err := g.BranchExists("agent/issue-1")
+	if err != nil {
+		t.Fatalf("BranchExists(agent/issue-1): %v", err)
+	}
+	if !exists {
+		t.Error("BranchExists(agent/issue-1) = false, want true — the branch was pushed")
+	}
+
+	exists, err = g.BranchExists("agent/issue-999")
+	if err != nil {
+		t.Fatalf("BranchExists(agent/issue-999): %v", err)
+	}
+	if exists {
+		t.Error("BranchExists(agent/issue-999) = true, want false — the branch was never pushed")
+	}
+}
+
 // TestGitClient_Probe_DoesNotLeakCredentials verifies that Probe's error
 // against a credential-bearing remote URL never echoes the credential back
 // — Probe's error can reach `doctor` output, and any error text derived

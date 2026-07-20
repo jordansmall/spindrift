@@ -50,6 +50,28 @@ func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	return forge.PR{URL: url, IsDraft: isDraft}, true, nil
 }
 
+// BranchExists reports whether branch exists on the remote, independent of
+// any PR. matching-refs prefix-matches, so the result is filtered to an
+// exact "refs/heads/<branch>" match rather than trusting a non-empty
+// response.
+func (e *execClient) BranchExists(branch string) (bool, error) {
+	cmd := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/git/matching-refs/heads/%s", e.repo, branch),
+		"--jq", ".[].ref",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("gh api matching-refs heads/%s: %w", branch, err)
+	}
+	want := "refs/heads/" + branch
+	for _, ref := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if ref == want {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (e *execClient) PRForBranch(branch string) (string, bool, error) {
 	cmd := exec.Command("gh", "pr", "list",
 		"--repo", e.repo,
