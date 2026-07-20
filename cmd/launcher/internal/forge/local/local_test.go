@@ -91,6 +91,30 @@ func TestLocalIssue_RenderParseRoundTrip(t *testing.T) {
 	}
 }
 
+// TestLocalIssue_RenderParseRoundTrip_Closed verifies closed: survives a
+// parse/render round trip alongside the other frontmatter fields, mirroring
+// TestLocalIssue_RenderParseRoundTrip's open-issue case.
+func TestLocalIssue_RenderParseRoundTrip_Closed(t *testing.T) {
+	li := localIssue{
+		frontmatter: localFrontmatter{
+			Title:   "Fix the thing",
+			State:   "agent-complete",
+			Labels:  []string{"bug"},
+			Created: "2026-07-09T12:00:00Z",
+			Parent:  "parent-slug",
+			Closed:  true,
+		},
+		body: "## What to build\n\nDo the thing.\n",
+	}
+	got, err := parseLocalIssue([]byte(li.render()))
+	if err != nil {
+		t.Fatalf("parseLocalIssue(render()): %v", err)
+	}
+	if !reflect.DeepEqual(got, li) {
+		t.Errorf("round trip = %+v, want %+v", got, li)
+	}
+}
+
 func TestLocalTracker_ListIssues_OrderedByCreated(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -147,6 +171,54 @@ func TestLocalTracker_ListOpenIssues_AllStatesOrderedByCreated(t *testing.T) {
 	if issues[0].Number != "in-progress" || issues[1].Number != "first" || issues[2].Number != "second" {
 		t.Errorf("order = [%s, %s, %s], want [in-progress, first, second]",
 			issues[0].Number, issues[1].Number, issues[2].Number)
+	}
+}
+
+// TestLocalTracker_ListOpenIssues_ExcludesClosed verifies ListOpenIssues
+// drops a closed: true issue from the backlog, matching forge.Fake's own
+// closed-exclusion behavior (ADR 0029).
+func TestLocalTracker_ListOpenIssues_ExcludesClosed(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+
+	writeLocalIssue(t, dir, "open", localIssue{frontmatter: localFrontmatter{
+		Title: "Open", State: labels.Dispatchable, Created: "2026-07-08T12:00:00Z",
+	}})
+	writeLocalIssue(t, dir, "closed", localIssue{frontmatter: localFrontmatter{
+		Title: "Closed", State: labels.Complete, Created: "2026-07-09T12:00:00Z", Closed: true,
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	issues, err := lt.ListOpenIssues()
+	if err != nil {
+		t.Fatalf("ListOpenIssues: %v", err)
+	}
+	if len(issues) != 1 || issues[0].Number != "open" {
+		t.Errorf("ListOpenIssues = %+v, want [open]", issues)
+	}
+}
+
+// TestLocalTracker_ListIssues_ExcludesClosed verifies ListIssues drops a
+// closed: true issue even when its dispatch state marker still matches the
+// requested state.
+func TestLocalTracker_ListIssues_ExcludesClosed(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+
+	writeLocalIssue(t, dir, "open", localIssue{frontmatter: localFrontmatter{
+		Title: "Open", State: labels.Complete, Created: "2026-07-08T12:00:00Z",
+	}})
+	writeLocalIssue(t, dir, "closed", localIssue{frontmatter: localFrontmatter{
+		Title: "Closed", State: labels.Complete, Created: "2026-07-09T12:00:00Z", Closed: true,
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	issues, err := lt.ListIssues(forge.Complete)
+	if err != nil {
+		t.Fatalf("ListIssues(Complete): %v", err)
+	}
+	if len(issues) != 1 || issues[0].Number != "open" {
+		t.Errorf("ListIssues(Complete) = %+v, want [open]", issues)
 	}
 }
 
@@ -417,6 +489,36 @@ func TestLocalTracker_Issue_LabelsIncludeDispatchState(t *testing.T) {
 	want := []string{"bug", labels.Failed}
 	if !reflect.DeepEqual(iss.Labels, want) {
 		t.Errorf("Labels = %v, want %v", iss.Labels, want)
+	}
+}
+
+// TestLocalTracker_Issue_ReportsClosedState verifies Issue() reports
+// forge.IssueClosed for a closed: true issue and forge.IssueOpen otherwise
+// (absent or false), matching ADR 0029's local-only open/closed axis.
+func TestLocalTracker_Issue_ReportsClosedState(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "done", localIssue{frontmatter: localFrontmatter{
+		Title: "Done", State: labels.Complete, Created: "2026-07-09T12:00:00Z", Closed: true,
+	}})
+	writeLocalIssue(t, dir, "open", localIssue{frontmatter: localFrontmatter{
+		Title: "Open", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z",
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	done, err := lt.Issue("done")
+	if err != nil {
+		t.Fatalf("Issue(done): %v", err)
+	}
+	if done.State != forge.IssueClosed {
+		t.Errorf("done.State = %v, want IssueClosed", done.State)
+	}
+	open, err := lt.Issue("open")
+	if err != nil {
+		t.Fatalf("Issue(open): %v", err)
+	}
+	if open.State != forge.IssueOpen {
+		t.Errorf("open.State = %v, want IssueOpen", open.State)
 	}
 }
 

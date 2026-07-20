@@ -22,6 +22,9 @@ type localFrontmatter struct {
 	Labels  []string
 	Created string
 	Parent  string
+	// Closed is the local-only open/closed axis (ADR 0029), independent of
+	// the dispatch State marker — absent/false means open.
+	Closed bool
 }
 
 // localIssue is a parsed local issue file: its frontmatter plus Markdown body.
@@ -64,6 +67,8 @@ func parseLocalIssue(data []byte) (localIssue, error) {
 			fm.Created = unquote(val)
 		case "parent":
 			fm.Parent = unquote(val)
+		case "closed":
+			fm.Closed = unquote(val) == "true"
 		case "labels":
 			fm.Labels = parseFlowList(val)
 		}
@@ -118,36 +123,40 @@ func (lt *LocalTracker) readIssueFile(num string) (localIssue, error) {
 }
 
 // toIssue converts a parsed local issue file into the launcher's Issue type.
-// Local issues have no closed/open concept of their own; State is always
-// reported OPEN. The frontmatter's dispatch-state marker is appended to
-// Labels so cross-backend logic that checks for a specific dispatch label
-// (e.g. failedLabel) works the same as it does against the GitHub adapter,
-// whose Labels already include whatever label represents current state.
+// State reflects the frontmatter's closed: axis (ADR 0029) — IssueClosed
+// when true, IssueOpen otherwise (absent/false). The frontmatter's
+// dispatch-state marker is appended to Labels so cross-backend logic that
+// checks for a specific dispatch label (e.g. failedLabel) works the same as
+// it does against the GitHub adapter, whose Labels already include whatever
+// label represents current state.
 func toIssue(num string, li localIssue) forge.Issue {
 	labels := append(append([]string(nil), li.frontmatter.Labels...), li.frontmatter.State)
+	state := forge.IssueOpen
+	if li.frontmatter.Closed {
+		state = forge.IssueClosed
+	}
 	return forge.Issue{
 		Number: num,
 		Title:  li.frontmatter.Title,
 		Body:   li.body,
-		State:  forge.IssueOpen,
+		State:  state,
 		Labels: labels,
 	}
 }
 
-// ListIssues returns issues whose frontmatter state marker matches state, in
-// canonical order (ascending by the created timestamp).
+// ListIssues returns issues whose frontmatter state marker matches state,
+// excluding closed issues, in canonical order (ascending by the created
+// timestamp).
 func (lt *LocalTracker) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 	want := lt.labels.Label(state)
-	return lt.listIssues(func(li localIssue) bool { return li.frontmatter.State == want })
+	return lt.listIssues(func(li localIssue) bool { return !li.frontmatter.Closed && li.frontmatter.State == want })
 }
 
-// ListOpenIssues returns every issue file in dir, in canonical order
-// (ascending by the created timestamp), regardless of its frontmatter state
-// marker — unlike ListIssues, which filters to a single state. Local issues
-// have no closed/open concept of their own (toIssue always reports OPEN), so
-// every file in dir is "open".
+// ListOpenIssues returns every non-closed issue file in dir, in canonical
+// order (ascending by the created timestamp), regardless of its frontmatter
+// state marker — unlike ListIssues, which filters to a single state.
 func (lt *LocalTracker) ListOpenIssues() ([]forge.Issue, error) {
-	return lt.listIssues(func(localIssue) bool { return true })
+	return lt.listIssues(func(li localIssue) bool { return !li.frontmatter.Closed })
 }
 
 // listIssues scans dir for issue files matching keep, in canonical order
@@ -338,6 +347,9 @@ func (li localIssue) render() string {
 	fmt.Fprintf(&b, "created: %s\n", li.frontmatter.Created)
 	if li.frontmatter.Parent != "" {
 		fmt.Fprintf(&b, "parent: %s\n", li.frontmatter.Parent)
+	}
+	if li.frontmatter.Closed {
+		b.WriteString("closed: true\n")
 	}
 	b.WriteString(frontmatterDelim + "\n")
 	b.WriteString(li.body)
