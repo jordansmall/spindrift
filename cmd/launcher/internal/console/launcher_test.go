@@ -47,6 +47,40 @@ func TestLauncher_Pick_QueuesAndReturnsSnapshot(t *testing.T) {
 	}
 }
 
+// TestLauncher_Pick_ResearchKind_PromotesOnResearchTracker verifies a
+// KindResearch pick promotes through l.ResearchTracker — carrying the
+// agent-research label family — rather than the work tracker the caller
+// passed in, and that the work tracker sees no call at all (issue #1708):
+// the two kinds' promotions must land on different tracker instances, since
+// each instance's TransitionState resolves the same canonical DispatchState
+// values through its own baked-in label family.
+func TestLauncher_Pick_ResearchKind_PromotesOnResearchTracker(t *testing.T) {
+	workTracker := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	workTracker.SetIssue(forge.Issue{Number: "42", Title: "research this"})
+	researchTracker := forge.NewFake(forge.ResearchDispatchLabels())
+	researchTracker.SetIssue(forge.Issue{Number: "42", Title: "research this"})
+
+	launch := &Launcher{ResearchTracker: researchTracker}
+	msg, picks := launch.Pick(workTracker, "42", "research this", KindResearch)
+
+	if _, ok := msg.(PickQueuedMsg); !ok {
+		t.Fatalf("Pick msg = %#v, want PickQueuedMsg", msg)
+	}
+	if len(picks) != 1 || picks[0].Number != "42" || picks[0].Kind != KindResearch {
+		t.Fatalf("Pick snapshot = %+v, want one KindResearch row for #42", picks)
+	}
+	if len(workTracker.TransitionStateCalls) != 0 {
+		t.Errorf("workTracker.TransitionStateCalls = %+v, want none — a research pick must never touch the work tracker", workTracker.TransitionStateCalls)
+	}
+	iss, err := researchTracker.Issue("42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasLabel(iss, "agent-research") {
+		t.Errorf("researchTracker issue #42 labels = %v, want agent-research promoted onto it", iss.Labels)
+	}
+}
+
 // TestLauncher_Unpick_RemovesAndReturnsSnapshot verifies Unpick drops the
 // queued pick from the private queue and hands back the fresh snapshot
 // synchronously (issue #1542).
@@ -189,6 +223,71 @@ func TestLauncher_TryLaunch_HeldPickLaunchesAfterBlockerClearsOutOfBand(t *testi
 
 	if got := launch.queue.Snapshot()[0].State; got != PickRunning && got != PickSettled {
 		t.Fatalf("pick state = %v, want it to have launched (Running or Settled)", got)
+	}
+}
+
+// TestLauncher_TryLaunch_ResearchPick_UsesResearchFactoryAndSettle verifies
+// drain routes a KindResearch pick through ResearchFactory/ResearchSettle —
+// never the work Factory/Settle — claiming on ResearchTracker's own
+// agent-research label family (issue #1708). Both stacks share MaxParallel=1
+// and thus the same underlying dispatch.Factory-driven Box run; only the
+// wiring (which tracker claims, which Settler settles) differs by kind.
+func TestLauncher_TryLaunch_ResearchPick_UsesResearchFactoryAndSettle(t *testing.T) {
+	workTracker := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	researchTracker := forge.NewFake(forge.ResearchDispatchLabels())
+	researchTracker.SetIssue(forge.Issue{Number: "42", Title: "research this", Labels: []string{"agent-research"}})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	researchFactory, err := dispatch.NewFactory(dispatch.Config{Kind: "research"}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(researchFactory.Cleanup)
+
+	workSettle := settle.NewFake()
+	researchSettle := settle.NewFake()
+
+	launch := &Launcher{
+		CodeForge:       workTracker,
+		Factory:         nil,
+		Settle:          workSettle,
+		ResearchTracker: researchTracker,
+		ResearchFactory: researchFactory,
+		ResearchSettle:  researchSettle,
+		queue:           NewQueue(),
+	}
+	launch.queue.Add(Pick{Number: "42", Title: "research this", State: PickQueued, Kind: KindResearch})
+	launch.tryLaunch(workTracker, dir)
+	launch.Wait()
+
+	if len(workSettle.SettleCalls) != 0 {
+		t.Errorf("workSettle.SettleCalls = %+v, want none — a research pick must never settle through the work Settler", workSettle.SettleCalls)
+	}
+	if len(researchSettle.SettleCalls) != 1 || researchSettle.SettleCalls[0].Num != "42" {
+		t.Errorf("researchSettle.SettleCalls = %+v, want one call for #42", researchSettle.SettleCalls)
+	}
+	if len(workTracker.TransitionStateCalls) != 0 {
+		t.Errorf("workTracker.TransitionStateCalls = %+v, want none — a research pick must never claim on the work tracker", workTracker.TransitionStateCalls)
+	}
+	foundClaim := false
+	for _, call := range researchTracker.TransitionStateCalls {
+		if call.Num == "42" && call.From == forge.Dispatchable && call.To == forge.InProgress {
+			foundClaim = true
+		}
+	}
+	if !foundClaim {
+		t.Errorf("researchTracker.TransitionStateCalls = %+v, want a Dispatchable->InProgress claim for #42", researchTracker.TransitionStateCalls)
+	}
+	if got := launch.queue.Snapshot()[0].State; got != PickSettled {
+		t.Fatalf("pick state = %v, want settled", got)
 	}
 }
 
