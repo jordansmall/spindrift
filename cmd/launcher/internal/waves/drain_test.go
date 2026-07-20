@@ -574,7 +574,7 @@ func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 }
 
 // TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue verifies that an issue named
-// in BuildEdges' failed set (#1103) — its own DepsOf call errored, a
+// in NewReadiness's failed set (#1103) — its own DepsOf call errored, a
 // transient tracker hiccup indistinguishable from "confirmed zero blockers"
 // in edges alone — is held for a later invocation rather than dispatched or
 // cascade-failed, mirroring the console's Queue.Discover hold (#752).

@@ -3,9 +3,9 @@
 // engine (concurrent wave fan-out, MAX_JOBS cap), and the declared-##
 // Touches overlap gate. Plan is pure — given a batch of issues and their
 // blocker edges, it validates them (or reports a cycle) with no side
-// effects. Run executes a Plan: the claim/dispatch/settle loop,
-// MAX_PARALLEL/MAX_JOBS concurrency, and the Touches overlap check, all in
-// a single selection-pass-then-exit wave (ADR 0019).
+// effects. Dispatch validates a Plan and runs it: the claim/dispatch/settle
+// loop, MAX_PARALLEL/MAX_JOBS concurrency, and the Touches overlap check,
+// all in a single selection-pass-then-exit wave (ADR 0019).
 package waves
 
 import (
@@ -73,7 +73,7 @@ type Input struct {
 	Edges   map[string][]string
 	Sources Sources
 
-	// Failed names issues whose own BuildEdges/DepsOf call errored (#752,
+	// Failed names issues whose own NewReadiness/DepsOf call errored (#752,
 	// #1103) — a transient tracker hiccup that looks identical to a
 	// confirmed zero-blocker issue in Edges alone. NewPlan carries it
 	// through to Plan unchanged so drainMaxJobs can hold these issues for

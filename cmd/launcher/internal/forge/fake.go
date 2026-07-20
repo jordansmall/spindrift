@@ -194,7 +194,7 @@ type Fake struct {
 	// DepsOfCalls records the issue number argument of every DepsOf
 	// invocation in order — mirrors IssueCalls, letting a test assert a
 	// dependency-graph build's exact call count (e.g. a whole-backlog
-	// BuildEdges sweep) instead of inferring it from side effects
+	// NewReadiness sweep) instead of inferring it from side effects
 	// (issue #1632).
 	DepsOfCalls []string
 }

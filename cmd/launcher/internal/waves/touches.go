@@ -48,7 +48,7 @@ func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) fun
 	for i, fi := range inProgress {
 		// it.TouchesOf fetches num's full issue afresh — ListIssues' summary
 		// (github: --json number,title) never carries body — the same
-		// per-issue-fetch cost BuildEdges already pays calling it.DepsOf on a
+		// per-issue-fetch cost NewReadiness already pays calling it.DepsOf on a
 		// ListIssues batch. On github this also means an in-progress issue's
 		// own declared touches are now seen here for the first time (the old
 		// direct-body-parse read ListIssues' body-less summary and so never
