@@ -44,6 +44,10 @@ type Issue struct {
 	// URL or push-only branch ref) — empty for github/jira, which have no
 	// such field to report.
 	Landing string
+	// Abandoned reports the local adapter's abandoned: axis (ADR 0029) — set
+	// by reconcile when the issue's landing PR closed without merging.
+	// Always false for github/jira, which have no such field to report.
+	Abandoned bool
 }
 
 // IssueState is the canonical open/closed state of an issue. Each
