@@ -157,7 +157,7 @@ outer:
 		// for a later invocation rather than reading the missing edges
 		// entry as ready, and never cascade-fail it: the failure is the
 		// lookup itself, not a dependency.
-		if !cfg.IgnoreBlockers && depsOfFailed[iss.Number] {
+		if !cfg.PreResolved && !cfg.IgnoreBlockers && depsOfFailed[iss.Number] {
 			fmt.Printf("    ~~ #%s blocker check failed; will retry\n", iss.Number)
 			continue
 		}
@@ -167,7 +167,7 @@ outer:
 		// two-helper-function version had before this reused BlockerStatus.
 		var failed, unready []string
 		switch {
-		case cfg.IgnoreBlockers:
+		case cfg.PreResolved, cfg.IgnoreBlockers:
 		case origin != OriginClaimed:
 			_, failed, unready = BlockerStatus(cfg, it, cf, iss.Number, edges)
 		default:

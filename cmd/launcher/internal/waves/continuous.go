@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 )
 
 // defaultPollInterval is the background refill poll's fixed cadence (issue
@@ -92,9 +93,12 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 		}
 	}
 	for _, iss := range issues {
-		_, failed, unready := BlockerStatus(cfg, it, cf, iss.Number, edges)
+		var failed, unready []string
+		if !cfg.PreResolved {
+			_, failed, unready = BlockerStatus(cfg, it, cf, iss.Number, edges)
+		}
 		switch {
-		case !cfg.IgnoreBlockers && depsOfFailed[iss.Number]:
+		case !cfg.PreResolved && !cfg.IgnoreBlockers && depsOfFailed[iss.Number]:
 			// Own DepsOf call failed (#752, #1103) -- edges[iss.Number] is
 			// unreliable, not a confirmed zero-blocker result. Hold rather
 			// than launch or cascade-fail; the next refill retries.
@@ -147,17 +151,24 @@ func dropClaimed(issues []Issue, claimed map[string]bool) []Issue {
 // issue listing is eventually consistent, so a refill soon after a claim
 // can still see the just-claimed issue as dispatchable; the in-run record
 // is what actually stops a second Box from launching for it.
-func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, discover Discoverer, fresh FreshnessChecker) error {
+func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, discover Discoverer, fresh FreshnessChecker) error {
 	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
 		return err
 	}
 
-	limiter := cfg.Limiter
+	var limiter *Limiter
+	if session != nil {
+		limiter = session.Limiter
+	}
 	if limiter == nil {
-		// Headless (CONTINUOUS_DISPATCH) and every pre-#653 call site: a
+		// Headless (CONTINUOUS_DISPATCH) and every nil-Session call site: a
 		// fixed cap for this invocation only, never resized -- behaviour is
 		// unchanged from the plain int cfg.MaxParallel this replaces.
 		limiter = NewLimiter(cfg.MaxParallel)
+	}
+	var terminated *terminate.Registry
+	if session != nil {
+		terminated = session.Terminated
 	}
 
 	// mu also guards stale/dispatchedAny/claimed/outstanding below, exactly
@@ -241,7 +252,7 @@ func RunContinuous(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			defer d.Close()
 			result := d.Run()
 			switch {
-			case cfg.Terminated.Marked(iss.Number, iss.Generation):
+			case terminated.Marked(iss.Number, iss.Generation):
 				// Terminate (ADR 0024, issue #649) already reaped this Box,
 				// transitioned the issue back to Dispatchable, and recorded
 				// its own comment/log line -- neither a Failed transition
