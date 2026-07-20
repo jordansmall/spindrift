@@ -1,5 +1,166 @@
 # Changelog
 
+## [0.6.0](https://github.com/jordansmall/spindrift/compare/v0.5.1...v0.6.0) (2026-07-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **console:** the live-tail sidebar now advances a running Dispatch's Activity feed on its own instead of staying frozen at whatever it showed on open, opens at the bottom of the feed instead of the top, and gains new keys (G/end to re-attach follow, z to toggle fullscreen zoom).
+* **console:** the Console's drill-in keymap changes. Enter opens a docked sidebar (fullscreen only when the terminal is too narrow) instead of always going fullscreen; "t" cycles Activity feed -> Transcript -> raw JSONL instead of a plain rendered/raw toggle; "h"/ "l" and left/right now move focus between the list and the sidebar.
+* **console:** the Console keymap changes for anyone driving a session interactively. Tab (switch backlog/queue focus) and the docked/floating/fullscreen pane-mode key are removed; Terminate moves from "k" to "X"; "i" no longer moves the cursor up (use "k"). The body now shows one Section at a time instead of two columns side by side, navigated with H/L (previous/next Section) and 1-5 (jump directly).
+
+### Features
+
+* **agent:** resume-once recovery when the Driver exits without an outcome ([6828a00](https://github.com/jordansmall/spindrift/commit/6828a007b950f10f3536dc4163411b479b567a3b))
+* **completion:** dynamic issue-number completion ([14ab6bd](https://github.com/jordansmall/spindrift/commit/14ab6bdefafe7b58a9fffdfde298278c9df363da))
+* **console:** add a Viewport type for scroll/cursor geometry ([e2ea1b4](https://github.com/jordansmall/spindrift/commit/e2ea1b4dcf921470e26ec76fc020cea817ece1dc)), closes [#1540](https://github.com/jordansmall/spindrift/issues/1540)
+* **console:** add ActiveSection and Section-nav Msgs ([6ed4617](https://github.com/jordansmall/spindrift/commit/6ed4617cc1eaaac198297e53bdbfec68633c1da0))
+* **console:** add Activity-feed derivation ([c5edcc2](https://github.com/jordansmall/spindrift/commit/c5edcc20ff0ca8ec50058bf2ccc47574ab621dd9))
+* **console:** add ADR 0031 palette-resolver seam ([5afaeac](https://github.com/jordansmall/spindrift/commit/5afaeac250ca34fd5a9efb8f4d5485838ab2715e))
+* **console:** add ctrl+d/ctrl+u half-page vim scroll ([dd59cf0](https://github.com/jordansmall/spindrift/commit/dd59cf0c56eb7de996df61d2644ffa7a34505703)), closes [#1648](https://github.com/jordansmall/spindrift/issues/1648)
+* **console:** add ctrl+f/ctrl+b page scroll to all panes ([28ddbfc](https://github.com/jordansmall/spindrift/commit/28ddbfcd48a2701aaef1d401ea3ae7a02ff6f240)), closes [#1647](https://github.com/jordansmall/spindrift/issues/1647)
+* **console:** add jump-to-first/last Msg types and Model wiring ([0669b61](https://github.com/jordansmall/spindrift/commit/0669b61fa27a7ddf463fd1b7cdceef04010ba5cf))
+* **console:** add rebuild-output jump-to-first/last Msg types ([c8439e1](https://github.com/jordansmall/spindrift/commit/c8439e1f83852a8ca24ad25e0ce69362384ae67f))
+* **console:** add Section type and pickSection mapping ([f2ad16b](https://github.com/jordansmall/spindrift/commit/f2ad16bc96258195284f29b01dabba7c8457d014))
+* **console:** add SidebarJumpToBeginningMsg ([22fe6e5](https://github.com/jordansmall/spindrift/commit/22fe6e582381f2a3037731164551a1d5bfe61adb))
+* **console:** add ticket detail modal for backlog tickets ([f829704](https://github.com/jordansmall/spindrift/commit/f829704355564333193ba1c72415bbb33ecea538)), closes [#1632](https://github.com/jordansmall/spindrift/issues/1632)
+* **console:** demote startup orphan recovery to detect-only ([e852efb](https://github.com/jordansmall/spindrift/commit/e852efb5276d6ff941c46cbb56d2029069bb9741))
+* **console:** flag orphan rows and document the adopt gesture ([944759c](https://github.com/jordansmall/spindrift/commit/944759c2c1d639a42f296fa60286dc081931d49b))
+* **console:** live-tail an open orphan sidebar ([007573a](https://github.com/jordansmall/spindrift/commit/007573ae4e36c399f9631be07a760b62d2a7e476))
+* **console:** live-tail the sidebar with follow and zoom ([21f1886](https://github.com/jordansmall/spindrift/commit/21f1886a4e5eee3fa3c2bf766387d87b0045c654)), closes [#1502](https://github.com/jordansmall/spindrift/issues/1502)
+* **console:** notice orphan sidebar with no local logs ([6ce4d7f](https://github.com/jordansmall/spindrift/commit/6ce4d7f67c1aaf936c5f3a53825c8558a953a506))
+* **console:** open sidebar on Enter for orphan rows ([426beef](https://github.com/jordansmall/spindrift/commit/426beef719248f45708d8ef06a281f3ad8811a14))
+* **console:** replace fullscreen drill-in with docked sidebar ([1fc7fe5](https://github.com/jordansmall/spindrift/commit/1fc7fe5e6d573085b9e664b8745d67fb50810ec7))
+* **console:** replace two-column body with Section-switched list ([b0d2a69](https://github.com/jordansmall/spindrift/commit/b0d2a695f75c744c7259f4b9166567d802f0980b))
+* **console:** show +N for truncated backlog labels ([03f3c68](https://github.com/jordansmall/spindrift/commit/03f3c68928203a756c9fe62d4e36326131ca160f)), closes [#1631](https://github.com/jordansmall/spindrift/issues/1631)
+* **console:** show a live heartbeat on orphan rows ([8a2de46](https://github.com/jordansmall/spindrift/commit/8a2de466f4d92f21ba283a21059a7f6b77d5b1a0))
+* **console:** wire G/gg into the rebuild-output pane ([6196b91](https://github.com/jordansmall/spindrift/commit/6196b91153882312936cfb76fa14e3d0c625a99e))
+* **console:** wire G/gg keys and the g-leader chord ([c734e15](https://github.com/jordansmall/spindrift/commit/c734e150c5158b108305958a76dc8b49b91f803c))
+* **console:** wire gg to Sidebar jump-to-top ([b90a7d0](https://github.com/jordansmall/spindrift/commit/b90a7d014e469888bb9f20998f663c08f4fbf6ff))
+* **drivers:** strip loop tools from claude Driver flags ([140218a](https://github.com/jordansmall/spindrift/commit/140218a7a1a57dc57a38cd42b6de0b6d9b17ae86)), closes [#1609](https://github.com/jordansmall/spindrift/issues/1609)
+* **image:** reject backgrounded Bash via a PreToolUse hook ([e66e3dd](https://github.com/jordansmall/spindrift/commit/e66e3ddfb1a98f71e7bef807c133d355c901d2d2)), closes [#1609](https://github.com/jordansmall/spindrift/issues/1609)
+* **launcher:** add hidden __complete-issues subcommand ([f882858](https://github.com/jordansmall/spindrift/commit/f88285803a110f647a46c15261615b7e2667df6b))
+* **launcher:** render subcommand help from a table ([a048c41](https://github.com/jordansmall/spindrift/commit/a048c41259d72777485e842dcc298cafeb2215b8))
+* **nix:** complete subcommands from registry ([f626551](https://github.com/jordansmall/spindrift/commit/f62655132ea23d07cf694cb741497647eedae7d6))
+* **nix:** render man page SUBCOMMANDS from the registry ([a6783db](https://github.com/jordansmall/spindrift/commit/a6783db9e68a6f046c3bb4258655878f33d35b8e))
+* **nix:** single-source subcommands, generate + guard ([a5a5e85](https://github.com/jordansmall/spindrift/commit/a5a5e85d96250f81b2a09d88dc3d191ae6e02359))
+* **prompt:** draft-until-ready PR lifecycle in the driver contract ([27b3b96](https://github.com/jordansmall/spindrift/commit/27b3b969094bb3d66f697bb3e8c1b44993905851))
+* **prompts:** drop Driver's ready flip ([12ace71](https://github.com/jordansmall/spindrift/commit/12ace7199268246b546afd8ffb97a737b47bfedf))
+* **quickstart:** make issue tracker github-only ([d37ccb4](https://github.com/jordansmall/spindrift/commit/d37ccb417fa6b60ce6646292a9e5c1560f1ffb83)), closes [#1559](https://github.com/jordansmall/spindrift/issues/1559)
+* **quickstart:** stop echoing secret prompts ([4527360](https://github.com/jordansmall/spindrift/commit/4527360ed411cd2c51c54094731cb00bbee5f381))
+* **quickstart:** validate repo slug and runtime prompts ([dd02cd1](https://github.com/jordansmall/spindrift/commit/dd02cd1dc94f5db331ecc7d837211f0e4585840b)), closes [#1560](https://github.com/jordansmall/spindrift/issues/1560)
+* **settle:** flip PR ready before merge, at green ([c4cabd7](https://github.com/jordansmall/spindrift/commit/c4cabd70a4f952e92dbdac2ac540c808fd09d9d9))
+* **waves:** add background refill poll ([85c0763](https://github.com/jordansmall/spindrift/commit/85c0763cefc1d6eadf06146b78c48e84c54e508e)), closes [#1637](https://github.com/jordansmall/spindrift/issues/1637)
+
+
+### Bug Fixes
+
+* **agent:** block shell-level Bash backgrounding ([22a68d3](https://github.com/jordansmall/spindrift/commit/22a68d352a3c15b83d0850a4a040a4640514dda3)), closes [#1620](https://github.com/jordansmall/spindrift/issues/1620)
+* **agent:** skip backstop push with no work to preserve ([46e30c3](https://github.com/jordansmall/spindrift/commit/46e30c3682c794285b01aef7e8607abed28885b4)), closes [#1606](https://github.com/jordansmall/spindrift/issues/1606)
+* **box:** check for a ready PR even with no local commits ([34795ec](https://github.com/jordansmall/spindrift/commit/34795ecb7581a117ba639cd4e2611bcd12dd1151))
+* **box:** stay silent when a ready PR backstops no outcome ([b5c9330](https://github.com/jordansmall/spindrift/commit/b5c9330e6baeb3cc8ad662a29a86432d0f25d91d))
+* **checks:** drop bats from the darwin checkset ([69a56e6](https://github.com/jordansmall/spindrift/commit/69a56e61710dec00be7c47c685f92710f025dd8b))
+* **claude:** classify OAuth session-limit text as rate limit ([87942cc](https://github.com/jordansmall/spindrift/commit/87942cc7fe4be00da7cc96c1224c58a2867cc8c7)), closes [#1539](https://github.com/jordansmall/spindrift/issues/1539)
+* **claude:** strip markdown-wrapped outcome lines ([e6dc584](https://github.com/jordansmall/spindrift/commit/e6dc5846019ce57ffb79abec044b1f10c03d59f1)), closes [#1611](https://github.com/jordansmall/spindrift/issues/1611)
+* **console:** address review findings on the sidebar diff ([a75d342](https://github.com/jordansmall/spindrift/commit/a75d342b31a15c212938dde51113184c49014f5e))
+* **console:** auto-close rebuild-output pane on emptied output ([14eea33](https://github.com/jordansmall/spindrift/commit/14eea334160d7a04eda1f5c524fd385fc309c976))
+* **console:** budget renderDrillIn footer against height ([13d2ab7](https://github.com/jordansmall/spindrift/commit/13d2ab7c8459890c0121ba80abc9c95d74b10cba)), closes [#1534](https://github.com/jordansmall/spindrift/issues/1534)
+* **console:** close docked sidebar from list focus ([161a7f6](https://github.com/jordansmall/spindrift/commit/161a7f6e659e0d346bd9d00a2c93f0f4d72e07a0)), closes [#1582](https://github.com/jordansmall/spindrift/issues/1582)
+* **console:** close sidebar on section switch ([f3f690d](https://github.com/jordansmall/spindrift/commit/f3f690d23c8a55ce03b63106b4b673d2275de0bd)), closes [#1581](https://github.com/jordansmall/spindrift/issues/1581)
+* **console:** correct docked-mode budget and empty-log race ([1e5e19e](https://github.com/jordansmall/spindrift/commit/1e5e19e0c8db0549c00acfe63d96f1301f0a4483))
+* **console:** drop misleading timestamp from live-log sidebar ([16bb60c](https://github.com/jordansmall/spindrift/commit/16bb60c753c491f3f98560003851e1da6728a41e)), closes [#1584](https://github.com/jordansmall/spindrift/issues/1584)
+* **console:** sanitize control sequences in heartbeat ([79a6e37](https://github.com/jordansmall/spindrift/commit/79a6e37a7c04b1c93c85c6a52eaa131786ae6c3b)), closes [#1639](https://github.com/jordansmall/spindrift/issues/1639)
+* **console:** split sidebar load error from transcript error ([681ffe4](https://github.com/jordansmall/spindrift/commit/681ffe4757a56b6e8624d81a7740a7cace575683))
+* **console:** stop heartbeat corrupting TUI ([f9455b1](https://github.com/jordansmall/spindrift/commit/f9455b169d01eddfa93664742943ad597ff0a1e7)), closes [#1583](https://github.com/jordansmall/spindrift/issues/1583)
+* **dispatch:** panic if SetHeartbeatOut fires after New() ([92d2231](https://github.com/jordansmall/spindrift/commit/92d2231765a9129b06f181d3065c4ae252e22094)), closes [#1594](https://github.com/jordansmall/spindrift/issues/1594)
+* **freshness:** treat not-a-git-repo as not-applicable ([db95165](https://github.com/jordansmall/spindrift/commit/db95165efb2e67efc16e1a39c1b952842af07811)), closes [#1579](https://github.com/jordansmall/spindrift/issues/1579)
+* **gitplumbing:** bound GitForcePush by context timeout ([5cb3c95](https://github.com/jordansmall/spindrift/commit/5cb3c954f83a3704b05866be592a1237bbab1c6a))
+* **git:** time out cloneToTemp's clone ([cb972ac](https://github.com/jordansmall/spindrift/commit/cb972ac4a0a1567c59cab6d0062a1392d3106b41))
+* **git:** time out gitClient's Merge subprocesses ([44815d8](https://github.com/jordansmall/spindrift/commit/44815d8966c71c09ef16f795150b03f04846f999))
+* **git:** time out gitClient's Probe ls-remote ([46a6bde](https://github.com/jordansmall/spindrift/commit/46a6bde85c6b7329bc1cabc63af9593c2ba1d1e4))
+* **git:** time out gitClient's Rebase checkout/rebase ([33fa859](https://github.com/jordansmall/spindrift/commit/33fa859dc3c3946e0c1e9daa09f005959920424f))
+* **launcher:** quiet steady-state discover polls ([7f2ddf6](https://github.com/jordansmall/spindrift/commit/7f2ddf64493842662062a2a08653bc7f3f6bde33)), closes [#1666](https://github.com/jordansmall/spindrift/issues/1666)
+* **nix:** derive issuePositionalSubcommands from registry ([992fe5f](https://github.com/jordansmall/spindrift/commit/992fe5fbe70cb85fdaf64e9e67012b972f804d25)), closes [#1603](https://github.com/jordansmall/spindrift/issues/1603)
+* **prompts:** require raw text for SPINDRIFT_OUTCOME line ([78d7f50](https://github.com/jordansmall/spindrift/commit/78d7f50da64ccee2a0ea11942bf573691283d96e)), closes [#1612](https://github.com/jordansmall/spindrift/issues/1612)
+* **reject-background-bash:** detect setsid and coproc ([026656c](https://github.com/jordansmall/spindrift/commit/026656ce6d3235f8da3d092ab0235b2605e26368)), closes [#1635](https://github.com/jordansmall/spindrift/issues/1635)
+* **settle:** demote blocked/missing-outcome runs to agent-failed ([16e7e7f](https://github.com/jordansmall/spindrift/commit/16e7e7feea31a42608844ff6881c9797f66bde8d))
+* **settle:** require CI registration before adopted green ([cbed3ed](https://github.com/jordansmall/spindrift/commit/cbed3ede52f82cba954e034802a65badff8d7b9d))
+* **settle:** stop adopting no-outcome PRs off draft-ness ([aaa1ede](https://github.com/jordansmall/spindrift/commit/aaa1ede46c6150a8b7c5fe7120c2affaa40ee097))
+* **tests:** use landed markdown-strip knob, not a duplicate ([29b2904](https://github.com/jordansmall/spindrift/commit/29b2904dc90a9f040827e4dfed587bad6f13f5b5))
+* **waves:** dedup continuous refill skip lines ([0fff1fc](https://github.com/jordansmall/spindrift/commit/0fff1fc7b77e03ac4c868cf9d323bc4789e70ba2))
+* **waves:** drain refill on Box completion ([29cae09](https://github.com/jordansmall/spindrift/commit/29cae091ce1dbfa7d32340f6eea69a0767f5e266)), closes [#1587](https://github.com/jordansmall/spindrift/issues/1587)
+
+
+### Performance Improvements
+
+* **console:** cache roleStyle's renderer per color profile ([ec7ff97](https://github.com/jordansmall/spindrift/commit/ec7ff9788386167ebae51f8186671ae917bf5b24))
+
+
+### Documentation
+
+* **adr:** list all six header alerts in ADR 0025 ([fd3ba63](https://github.com/jordansmall/spindrift/commit/fd3ba636339aaa12a765737ad17db762e2408b5a)), closes [#1510](https://github.com/jordansmall/spindrift/issues/1510)
+* **box:** note two deliberate edge-case tradeoffs ([4d409b5](https://github.com/jordansmall/spindrift/commit/4d409b532ccd9b742151cdc71759cff7221d2971))
+* **console:** clarify DrillInMsg's internal-only role ([1d9ec9d](https://github.com/jordansmall/spindrift/commit/1d9ec9df06d19d77900bb77b6981287373849bca))
+* **console:** list G/gg in the help overlay ([3227220](https://github.com/jordansmall/spindrift/commit/322722063a7a06e007151d31a1708220a703dd34))
+* **console:** list G/gg in the rebuild-output help entry ([9e09b82](https://github.com/jordansmall/spindrift/commit/9e09b8268d41c0fc827fa37006fca34ca3eaaf1d))
+* **console:** list Sidebar gg in the help overlay ([4cee453](https://github.com/jordansmall/spindrift/commit/4cee453dd01c3ab64cb1a1253cc5bd36c3e48043))
+* **console:** note why rebuild-failed styling stops at the label ([001dda1](https://github.com/jordansmall/spindrift/commit/001dda18b902e7a5ca365824868fd913ef56b467))
+* **console:** trim RebuildStatus doc comment ([e0d9452](https://github.com/jordansmall/spindrift/commit/e0d94527408577a6c037b06bbfc6341f07f22856))
+* **context:** add deepening-campaign module terms ([7bd9274](https://github.com/jordansmall/spindrift/commit/7bd9274b1843d573aa6d7743935ec9bf9a8b07fd))
+* note fix-pass widening and update runtime-flow diagram ([041f235](https://github.com/jordansmall/spindrift/commit/041f2358c47837af0a9493b5a818d1e12195d5c4))
+* **readme:** advertise Quickstart as GitHub-only ([cc75413](https://github.com/jordansmall/spindrift/commit/cc75413a0441dd0ded2b5278e2f1831b017c7216)), closes [#1561](https://github.com/jordansmall/spindrift/issues/1561)
+* **reference:** document the loop/background guardrails ([748ea37](https://github.com/jordansmall/spindrift/commit/748ea3750872820d550c7b636bdb8577563ddc9f)), closes [#1609](https://github.com/jordansmall/spindrift/issues/1609)
+* **reference:** launcher flips the PR, not the Driver ([5a70fa5](https://github.com/jordansmall/spindrift/commit/5a70fa5a42f6b6e9e15c7e513cdfa0a04f4fa40a))
+
+
+### Code Refactoring
+
+* **console:** compute jump-to-last index directly ([ee21e78](https://github.com/jordansmall/spindrift/commit/ee21e7833e477532bc2a80b02afccccc8cac7e17))
+* **console:** drive Model.Picks from pushed snapshots ([7a96fc7](https://github.com/jordansmall/spindrift/commit/7a96fc704998da80d8a188589d11f7fb6727ddb6))
+* **console:** privatize Launcher queue behind commands ([c37fd20](https://github.com/jordansmall/spindrift/commit/c37fd209ab01a25261ce878c3db9e6933079f9bb)), closes [#1542](https://github.com/jordansmall/spindrift/issues/1542)
+* **console:** replace modal key cascade with a mode enum ([a97d939](https://github.com/jordansmall/spindrift/commit/a97d939c1005ae285da02dac6651706b9319ace0)), closes [#1543](https://github.com/jordansmall/spindrift/issues/1543)
+* **console:** return RebuildStatus from StaleStatus ([b32b51d](https://github.com/jordansmall/spindrift/commit/b32b51df3d148c3c6e1113d379a06430ac619ebe))
+* **console:** thread RebuildStatus through Msg/Model ([e2c343b](https://github.com/jordansmall/spindrift/commit/e2c343bd4365a4693054dda34448557b11e35e9e))
+* **console:** window all three panes through Viewport ([a244d52](https://github.com/jordansmall/spindrift/commit/a244d52b48f31882051be4dba9b2fe964ba0f4bb)), closes [#1540](https://github.com/jordansmall/spindrift/issues/1540)
+* **launcher:** query tracker once at startup ([88725cd](https://github.com/jordansmall/spindrift/commit/88725cdb343913f386ade4a3158260fd5ad192aa)), closes [#1645](https://github.com/jordansmall/spindrift/issues/1645)
+* **launcher:** verb dispatch via table ([f0fac5e](https://github.com/jordansmall/spindrift/commit/f0fac5e7d9539b19cd7a6b71650b9f15eecb3494)), closes [#1574](https://github.com/jordansmall/spindrift/issues/1574)
+* **waves:** drop claimed issues before nextReady scans ([d0aedb9](https://github.com/jordansmall/spindrift/commit/d0aedb9da773a0b6cf554fd7a2903edf5633a764))
+
+
+### Tests
+
+* **console:** add golden snapshots for the styled header ([fc273dd](https://github.com/jordansmall/spindrift/commit/fc273dd9160e2254f1980707f9024ef189e6dc01))
+* **console:** catch tail-truncation off-by-one in clip ([23bdf1d](https://github.com/jordansmall/spindrift/commit/23bdf1dd8dc3d807bbf14ce05d2bf45dfed58f13)), closes [#1522](https://github.com/jordansmall/spindrift/issues/1522)
+* **console:** cover docked layout, focus keys, narrow fallback ([aea57ea](https://github.com/jordansmall/spindrift/commit/aea57ea26bab23401cfafe55dc13f59a6e74d483))
+* **console:** cover Notice-clears and stale-heartbeat cases ([e212f0f](https://github.com/jordansmall/spindrift/commit/e212f0fe5ff57297ccb71b020f1c565bd00bca3e))
+* **console:** cover orphan sidebar reopen-to-refresh ([d4e8a0c](https://github.com/jordansmall/spindrift/commit/d4e8a0c2b7b17e3562887c5efb4a8e5c4e9aa990))
+* **console:** cover the private queue's command surface ([e5fc9ef](https://github.com/jordansmall/spindrift/commit/e5fc9ef5a496fa52492759412091d1d093fa2e7b))
+* **console:** de-flake darwin quit-confirm render race ([8e96866](https://github.com/jordansmall/spindrift/commit/8e96866e7141e3487fd6492370babb18f35e67aa)), closes [#1664](https://github.com/jordansmall/spindrift/issues/1664) [#1663](https://github.com/jordansmall/spindrift/issues/1663)
+* **console:** migrate coverage to Section-switched keymap ([aa6f7b6](https://github.com/jordansmall/spindrift/commit/aa6f7b67edf52b969df3e2d0d004033bab6ebf03))
+* **console:** scope escape-injection checks to the affected row ([a170644](https://github.com/jordansmall/spindrift/commit/a17064443df17492ecb6ab8be771f4c5666bd610))
+* **console:** verify arrow keys mirror h/l for focus ([7782aec](https://github.com/jordansmall/spindrift/commit/7782aec95034b53bf4878d06d4bc2b893c0eda27))
+* **fakes:** let the claude fake survive a second call ([5ad9b65](https://github.com/jordansmall/spindrift/commit/5ad9b65e83917e4fea8d3ec6ac36a2ccb265bf07))
+* **forge:** record DepsOf calls on the fake tracker ([3584a22](https://github.com/jordansmall/spindrift/commit/3584a221ed88160960d76f61bef96ee03d747ce8))
+* **git:** cover Rebase timeout on hanging push ([c4401d7](https://github.com/jordansmall/spindrift/commit/c4401d7ccfdc0a3f68028b921129d1d5ec903555))
+* **settle:** unstick adopted-path bats fixture ([3cafd3e](https://github.com/jordansmall/spindrift/commit/3cafd3e47235f8cd156f5b83aa01cb942c8856e4))
+* **settle:** unstick recover-path bats fixtures ([0f3bd74](https://github.com/jordansmall/spindrift/commit/0f3bd74b77798b74b2a59b8987d233187006d5fe))
+* **settle:** update fixtures for adopted-path CI gate ([87d2665](https://github.com/jordansmall/spindrift/commit/87d266561db6beb9ad507b419b25d59bfb2242f2))
+* **settle:** update fixtures for settle's new failed demotion ([b8ce060](https://github.com/jordansmall/spindrift/commit/b8ce060f991c8471a3e214818532e8ad70f32022))
+
+
+### Continuous Integration
+
+* add aarch64-darwin flake check job ([d80a481](https://github.com/jordansmall/spindrift/commit/d80a4817071f2a03466a13d70b749b7c8df89673))
+* run the Linux job on x86_64 and aarch64 ([9feda23](https://github.com/jordansmall/spindrift/commit/9feda23c8b29571d43cddb06a06c55a6396af61d))
+
+
+### Styles
+
+* **console:** color the rebuilding/rebuild-failed alerts ([70ac514](https://github.com/jordansmall/spindrift/commit/70ac514518990922918e8c661d62eaf5dcdebe89))
+* **console:** color the remaining header alerts by role ([db614e9](https://github.com/jordansmall/spindrift/commit/db614e908ab4f66d431868cfbe904c0ec166aa64))
+* **console:** color the status line by semantic role ([8e7fe93](https://github.com/jordansmall/spindrift/commit/8e7fe93d5fa089d19927ca2a375931a419745ac1))
+* **console:** rewrap comments after syncQueue rename ([fceb47e](https://github.com/jordansmall/spindrift/commit/fceb47eab1feb09dedab77260625b7a931498ca3))
+
 ## [0.5.1](https://github.com/jordansmall/spindrift/compare/v0.5.0...v0.5.1) (2026-07-18)
 
 
