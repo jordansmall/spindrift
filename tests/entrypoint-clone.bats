@@ -57,6 +57,25 @@ setup() {
   [ "$output" = "$REPO_MOUNT_DIR" ]
 }
 
+# CODE_FORGE=local: under rootless podman the Box's mapped uid never matches
+# the host-owned Accumulation-repo bind mount's uid, so git's dubious-ownership
+# guard rejects the mount before a single object is copied (#1720).
+# GIT_TEST_ASSUME_DIFFERENT_OWNER=1 is git's own test-suite knob (used by its
+# t0034-root-safe-directory.sh) for faking that mismatch without a real
+# differently-owned mount, which an unprivileged bats sandbox can't produce.
+@test "CODE_FORGE=local clones a differently-owned mount without tripping the dubious-ownership guard" {
+  export CODE_FORGE="local"
+  export REPO_MOUNT_DIR="$REMOTE_ROOT/owner/repo.git"
+  export GIT_TEST_ASSUME_DIFFERENT_OWNER=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -d "$WORK_DIR/.git" ]
+  run git config --global --get-all safe.directory
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$REPO_MOUNT_DIR"* ]]
+  [[ "$output" == *"$WORK_DIR"* ]]
+}
+
 # CODE_FORGE=local: a ref left at origin/agent/issue-7 by an earlier,
 # abandoned attempt (a landed-then-conflicting bundle, say) must not trigger
 # the github/git adoption path's `gh pr list` call -- that's a forge network

@@ -109,6 +109,21 @@ clone_repo() {
     CLONE_URL="${CODE_FORGE_REMOTE_URL:?CODE_FORGE_REMOTE_URL is required when CODE_FORGE=git}"
   elif [ "${CODE_FORGE:-github}" = "local" ]; then
     CLONE_URL="$REPO_MOUNT_DIR"
+    # Under rootless podman the Box's mapped uid never matches the
+    # host-owned Accumulation-repo bind mount's uid, so git's
+    # dubious-ownership guard rejects $REPO_MOUNT_DIR before the clone
+    # copies a single object (#1720). Trust both paths this Box's git
+    # commands ever open under CODE_FORGE=local: the mount itself, which
+    # git fetch origin below re-opens via local transport after the clone,
+    # and WORK_DIR, the clone of it that the rest of the run (identity
+    # config, commits, the Seam bundle) operates on. A standing global
+    # config entry, not a one-shot flag on the clone command alone, since
+    # both paths outlive the clone step. This is the one CODE_FORGE=local
+    # exception to #404's empty-global-git-config invariant below; every
+    # check suite that asserts that invariant runs a non-local forge, so
+    # it stays untouched.
+    git config --global --add safe.directory "$REPO_MOUNT_DIR"
+    git config --global --add safe.directory "$WORK_DIR"
   fi
   echo "==> cloning $CLONE_URL"
   git clone "$CLONE_URL" "$WORK_DIR"
