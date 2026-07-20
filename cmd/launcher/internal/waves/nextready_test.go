@@ -185,6 +185,50 @@ func TestNextReady_TouchOverlapDefers(t *testing.T) {
 	}
 }
 
+// TestNextReady_Local_ClosedOnDiskUnblocksDependent_IndependentSeamUnaffected
+// verifies CODE_FORGE=local's offline chaining (issue #1700): with cf shaped
+// like the local adapter (forge.CodeForge but no PRForge, ADR 0033),
+// blockerStatus's only path to readiness is it.Issue's closed-on-disk state
+// — no PR lookup is even possible. A seam blocked by another stays unready
+// until its blocker's frontmatter flips to closed, while a concurrently
+// eligible independent seam is unaffected and dispatches regardless.
+func TestNextReady_Local_ClosedOnDiskUnblocksDependent_IndependentSeamUnaffected(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+
+	fc := forge.NewFake(dispatchLabels(c))
+	cf := fc.AsLocal()
+
+	// Seam 2 is blocked by seam 1 (still open); seam 3 has no blockers.
+	fc.SetIssue(forge.Issue{Number: "1", State: "OPEN"})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+
+	edges := map[string][]string{"2": {"1"}}
+	checkOverlap := func(string) (string, bool) { return "", false }
+
+	// Seam 1 still open: seam 2 stays blocked, so the independent seam 3 is
+	// selected instead of waiting on it.
+	iss, ok := nextReady(c, fc, cf, checkOverlap, []Issue{
+		{Number: "2", Title: "dependent"},
+		{Number: "3", Title: "independent"},
+	}, edges, nil, nil, nil)
+	if !ok || iss.Number != "3" {
+		t.Fatalf("nextReady before blocker closes: got (%v, %v), want (\"3\", true)", iss, ok)
+	}
+
+	// Seam 1 lands and closes on disk (forge.IssueCloser, ADR 0029) -- a
+	// frontmatter flip, no network call, and no PR for cf to even look up.
+	fc.SetIssue(forge.Issue{Number: "1", State: "CLOSED"})
+
+	iss, ok = nextReady(c, fc, cf, checkOverlap, []Issue{
+		{Number: "2", Title: "dependent"},
+	}, edges, nil, nil, nil)
+	if !ok || iss.Number != "2" {
+		t.Fatalf("nextReady after blocker closes: got (%v, %v), want (\"2\", true)", iss, ok)
+	}
+}
+
 // TestNextReady_HappyPath verifies that with no cascade or overlap in play,
 // nextReady still selects the first dispatch-ready issue in scan order —
 // guarding against the cascade and overlap tests masking the happy path.
