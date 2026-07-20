@@ -200,7 +200,7 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pickChordTimeoutMsg:
 		if t.m.Mode == ModePick {
 			t.m = Update(t.m, PickResolvedMsg{})
-			t = t.pickHighlighted()
+			t = t.pickHighlighted(KindWork)
 		}
 	case gChordTimeoutMsg:
 		if t.m.PendingG {
@@ -304,24 +304,28 @@ func (t teaModel) handleHelpKey(msg tea.KeyMsg) teaModel {
 }
 
 // handlePickChordKey routes one keypress while ModePick is armed, awaiting
-// "pa"'s trailing "a": "a" resolves to pick-all-ready, the universal quit
-// keystroke resolves the chord (matching any other non-"a" key) and then
-// still quits — but the pick just landed may itself be live now, so this
-// still gates on LiveIssues() via quitOrConfirmMsg rather than an
-// unconditional QuitMsg (issue #1216) — and anything else resolves the
-// chord to a single-issue pick, same as letting the leader window time out;
-// that second key's own meaning is not separately reprocessed.
+// "pa"'s trailing "a" or "pr"'s trailing "r": "a" resolves to pick-all-ready,
+// "r" resolves to a single-issue pick as KindResearch (issue #1709) — the
+// console gesture for ADR 0022's advise-only research dispatch — the
+// universal quit keystroke resolves the chord (matching any other non-a/r
+// key) and then still quits — but the pick just landed may itself be live
+// now, so this still gates on LiveIssues() via quitOrConfirmMsg rather than
+// an unconditional QuitMsg (issue #1216) — and anything else resolves the
+// chord to a single-issue KindWork pick, same as letting the leader window
+// time out; that second key's own meaning is not separately reprocessed.
 func (t teaModel) handlePickChordKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	t.m = Update(t.m, PickResolvedMsg{})
 	switch s := msg.String(); {
 	case s == "a":
 		return t.pickAllReady(), nil
+	case s == "r":
+		return t.pickHighlighted(KindResearch), nil
 	case isQuitKey(s):
-		t = t.pickHighlighted()
+		t = t.pickHighlighted(KindWork)
 		t.m = Update(t.m, t.quitOrConfirmMsg())
 		return t, nil
 	default:
-		return t.pickHighlighted(), nil
+		return t.pickHighlighted(KindWork), nil
 	}
 }
 
@@ -893,13 +897,16 @@ func (t teaModel) quitOrConfirmMsg() Msg {
 // pickHighlighted promotes the cursor's highlighted issue through
 // Launcher.Pick and applies the fresh snapshot it hands back in the same
 // Update cycle — the keypress translation of ADR 0023's
-// Pick-is-the-launch-button rule. A nil Launcher promotes through PickIssue
-// directly onto Model.Picks (matching the pre-#785 no-launch Console) but
-// never queues on a live queue or launches, since there is nothing to
-// launch it. A no-op outside SectionBacklog — Cursor indexes a work
-// Section's Picks there, not the backlog, and Backlog is ADR 0030's sole
-// pick source (issue #1500).
-func (t teaModel) pickHighlighted() teaModel {
+// Pick-is-the-launch-button rule. kind selects the Dispatch kind the pick
+// carries: KindWork for the "p"/"pa" gestures, KindResearch for "pr" (issue
+// #1709) — Launcher.Pick's own trackerFor already routes a KindResearch pick
+// onto ResearchTracker when one is wired. A nil Launcher promotes through
+// PickIssue directly onto Model.Picks (matching the pre-#785 no-launch
+// Console) but never queues on a live queue or launches, since there is
+// nothing to launch it. A no-op outside SectionBacklog — Cursor indexes a
+// work Section's Picks there, not the backlog, and Backlog is ADR 0030's
+// sole pick source (issue #1500).
+func (t teaModel) pickHighlighted(kind Kind) teaModel {
 	if t.m.ActiveSection != SectionBacklog {
 		return t
 	}
@@ -912,10 +919,17 @@ func (t teaModel) pickHighlighted() teaModel {
 		return t
 	}
 	if t.launch == nil {
-		t.m = Update(t.m, PickIssue(t.tracker, iss.Number, iss.Title, KindWork))
+		// No Launcher means no trackerFor to pick a ResearchTracker over
+		// t.tracker either — a KindResearch pick here still promotes on
+		// t.tracker's own label family, tagged with the kind it was asked
+		// for regardless. Harmless in practice: production always supplies
+		// a Launcher (cmdConsole wires ResearchTracker unconditionally), so
+		// this branch is exercised only by tests that deliberately skip the
+		// launch stack to exercise bare Pick/Unpick bookkeeping.
+		t.m = Update(t.m, PickIssue(t.tracker, iss.Number, iss.Title, kind))
 		return t
 	}
-	msg, picks := t.launch.Pick(t.tracker, iss.Number, iss.Title, KindWork)
+	msg, picks := t.launch.Pick(t.tracker, iss.Number, iss.Title, kind)
 	t.m = Update(t.m, QueueSnapshotMsg{Picks: picks})
 	if _, ok := msg.(PickQueuedMsg); ok {
 		t.launch.tryLaunch(t.tracker, t.pwd)

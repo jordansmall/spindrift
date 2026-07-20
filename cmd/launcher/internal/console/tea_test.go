@@ -1778,7 +1778,9 @@ func TestTea_HelpKey_OpensOverlay(t *testing.T) {
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 24))
 
 	sendKey(tm, "?")
-	waitForOutput(t, tm, "toggle this help")
+	// "pr" (issue #1709) is listed distinct from "p"/"pa", the work-pick
+	// keys — a keybinding nobody can find in this overlay isn't discoverable.
+	waitForOutput(t, tm, "toggle this help", "pr", "as a research", "dispatch (advise-only")
 
 	sendKey(tm, "?") // close the overlay — it's modal, so "q" alone can't reach quit while open
 	sendKey(tm, "q")
@@ -2071,6 +2073,53 @@ func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
+}
+
+// TestTea_PickResearchChordKey_PromotesAndQueuesHighlightedAsResearch verifies
+// "pr" promotes the highlighted issue as a KindResearch pick, landing it on
+// the research tracker's own agent-research label family rather than the
+// work tracker's ready-for-agent (issue #1709) — the console gesture for
+// ADR 0022's advise-only research dispatch. The existing "p"/"pa" work-pick
+// chords are unchanged; this only adds a third resolution to the same
+// leader.
+func TestTea_PickResearchChordKey_PromotesAndQueuesHighlightedAsResearch(t *testing.T) {
+	workTracker := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	workTracker.SetIssue(forge.Issue{Number: "42", Title: "research this", State: forge.IssueOpen})
+	researchTracker := forge.NewFake(forge.ResearchDispatchLabels())
+	researchTracker.SetIssue(forge.Issue{Number: "42", Title: "research this", State: forge.IssueOpen})
+
+	launch := newTestLauncher(t, workTracker)
+	launch.ResearchTracker = researchTracker
+
+	tm := teatest.NewTestModel(t, newTeaModel(workTracker, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "research this")
+
+	sendKey(tm, "p")
+	sendKey(tm, "r")
+	// "waiting 1": no ResearchFactory is wired here, so the pick queues but
+	// never claims/launches (drain only services kinds with a full stack,
+	// launcher.go's stacks/hasQueuedForKinds) — it parks at PickQueued
+	// exactly as an unserviceable kind should, which is this test's proof
+	// the pick landed at all.
+	waitForOutput(t, tm, "waiting 1")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if len(fm.m.Picks) != 1 || fm.m.Picks[0].Kind != KindResearch {
+		t.Fatalf("Picks = %+v, want one KindResearch row for #42", fm.m.Picks)
+	}
+	if len(workTracker.TransitionStateCalls) != 0 {
+		t.Errorf("workTracker.TransitionStateCalls = %+v, want none — a research pick must never touch the work tracker", workTracker.TransitionStateCalls)
+	}
+	iss, err := researchTracker.Issue("42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasLabel(iss, "agent-research") {
+		t.Errorf("researchTracker issue #42 labels = %v, want agent-research promoted onto it", iss.Labels)
+	}
 }
 
 // TestTea_EnterKey_OnBacklogSection_OpensDetailModal verifies Enter, on the
