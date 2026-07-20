@@ -237,6 +237,12 @@ func (lt *LocalTracker) TransitionState(num string, from, to forge.DispatchState
 // without touching the file when no state is configured for verdict (the
 // work-kind construction path), rather than overwriting frontmatter.State
 // with an empty string.
+//
+// Before writing, it asserts num's current state is InProgress — mirroring
+// the github adapter's #701 double-dispatch guard — and errors without
+// touching the file when it's not. This is check-then-write, not atomic
+// compare-and-swap: it narrows the double-dispatch window without closing
+// it, the same caveat exec.go's CompleteVerdict documents.
 func (lt *LocalTracker) CompleteVerdict(num string, verdict forge.Verdict) error {
 	state := lt.verdictLabels.Label(verdict)
 	if state == "" {
@@ -245,6 +251,9 @@ func (lt *LocalTracker) CompleteVerdict(num string, verdict forge.Verdict) error
 	li, err := lt.readIssueFile(num)
 	if err != nil {
 		return err
+	}
+	if want := lt.labels.Label(forge.InProgress); want != "" && li.frontmatter.State != want {
+		return fmt.Errorf("local: issue %s: expected state %q, has %q", num, want, li.frontmatter.State)
 	}
 	li.frontmatter.State = state
 	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
