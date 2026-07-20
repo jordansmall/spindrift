@@ -75,6 +75,24 @@ func TestFake_AsPushOnly_HidesPRForge(t *testing.T) {
 	}
 }
 
+// TestFake_ImplementsLandingRecorder asserts that *Fake satisfies the
+// optional LandingRecorder surface, matching the local adapter's shape.
+func TestFake_ImplementsLandingRecorder(t *testing.T) {
+	var _ forge.LandingRecorder = forge.NewFake()
+}
+
+// TestFake_AsNoLandingRecorder_HidesLandingRecorder verifies that
+// AsNoLandingRecorder wraps a Fake so a type assertion against
+// LandingRecorder reports absence, matching the github/jira adapters' shape
+// — the mechanism Settle uses to no-op RecordLanding for them.
+func TestFake_AsNoLandingRecorder_HidesLandingRecorder(t *testing.T) {
+	f := forge.NewFake()
+	it := f.AsNoLandingRecorder()
+	if _, ok := it.(forge.LandingRecorder); ok {
+		t.Error("AsNoLandingRecorder() satisfies LandingRecorder, want it hidden")
+	}
+}
+
 // --- TransitionState tests ---
 
 func TestFake_TransitionState_DispatchableToInProgress(t *testing.T) {

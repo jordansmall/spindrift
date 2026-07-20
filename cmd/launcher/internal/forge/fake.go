@@ -30,6 +30,11 @@ type CommentCall struct {
 	Num, Body string
 }
 
+// RecordLandingCall records a single RecordLanding invocation.
+type RecordLandingCall struct {
+	Num, Landing string
+}
+
 // Fake is an in-memory Client for unit tests. All methods are safe for
 // concurrent use. CheckState pops from a scripted RollupState queue so polling
 // tests need no real sleeps.
@@ -107,6 +112,10 @@ type Fake struct {
 	CompleteVerdictErr error
 	// CommentCalls records all Comment invocations in order.
 	CommentCalls []CommentCall
+	// RecordLandingCalls records all RecordLanding invocations in order.
+	RecordLandingCalls []RecordLandingCall
+	// RecordLandingErr, if non-nil, is returned by every RecordLanding call.
+	RecordLandingErr error
 
 	// AutoMergeAllowed controls what CanAutoMerge returns (default false).
 	AutoMergeAllowed bool
@@ -652,6 +661,27 @@ func (f *Fake) CreateLabel(name, description, color string) error {
 	f.CreateLabelCalls = append(f.CreateLabelCalls, CreateLabelCall{name, description, color})
 	return f.CreateLabelErr
 }
+
+// RecordLanding implements the optional LandingRecorder surface (ADR 0029),
+// recording each call for tests to assert against.
+func (f *Fake) RecordLanding(num, landing string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.RecordLandingCalls = append(f.RecordLandingCalls, RecordLandingCall{num, landing})
+	return f.RecordLandingErr
+}
+
+var _ LandingRecorder = (*Fake)(nil)
+
+// noLandingIssueTracker adapts a Fake to expose only the core IssueTracker
+// surface, hiding its RecordLanding method so a type assertion against it
+// reports absence — the IssueTracker analogue of pushOnlyForge, matching a
+// github/jira adapter's shape (ADR 0029).
+type noLandingIssueTracker struct{ IssueTracker }
+
+// AsNoLandingRecorder returns f wrapped so it satisfies IssueTracker but not
+// LandingRecorder.
+func (f *Fake) AsNoLandingRecorder() IssueTracker { return noLandingIssueTracker{f} }
 
 // pushOnlyForge adapts a Fake to expose only the core CodeForge surface,
 // hiding its PRForge methods so a type assertion against it reports absence

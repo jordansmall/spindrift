@@ -81,6 +81,10 @@ type Settle struct {
 	// assertion — nil for the push-only git adapter. Callers branch on pr ==
 	// nil instead of a removed PushOnly() flag.
 	pr forge.PRForge
+	// landing is the IssueTracker's optional LandingRecorder surface (ADR
+	// 0029), resolved once at construction via a type assertion — nil for
+	// github/jira, which don't implement it.
+	landing forge.LandingRecorder
 	// term is checked at every CI-watch/fix-pass/merge-gate loop checkpoint
 	// so a Terminate (ADR 0024, issue #649) landing mid-settle is noticed and
 	// abandoned instead of corrupting the issue's state after Terminate
@@ -115,5 +119,6 @@ var _ Settler = (*Settle)(nil)
 // (nil when cf is push-only, e.g. the git adapter).
 func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	pr, _ := cf.(forge.PRForge)
-	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr}
+	landing, _ := it.(forge.LandingRecorder)
+	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing}
 }
