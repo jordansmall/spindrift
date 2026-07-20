@@ -35,6 +35,11 @@ type RecordLandingCall struct {
 	Num, Landing string
 }
 
+// RelayBundleCall records a single RelayBundle invocation.
+type RelayBundleCall struct {
+	OutboxDir, Ref string
+}
+
 // Fake is an in-memory Client for unit tests. All methods are safe for
 // concurrent use. CheckState pops from a scripted RollupState queue so polling
 // tests need no real sleeps.
@@ -126,6 +131,20 @@ type Fake struct {
 	RecordLandingCalls []RecordLandingCall
 	// RecordLandingErr, if non-nil, is returned by every RecordLanding call.
 	RecordLandingErr error
+
+	// RelayBundleErr, if non-nil, is returned by every RelayBundle call —
+	// scripts CODE_FORGE=local's missing/malformed-bundle failure mode (ADR
+	// 0033). Only reachable through AsLocal(), the only wrapper implementing
+	// forge.BundleRelay.
+	RelayBundleErr error
+	// RelayBundleCalls records all RelayBundle invocations in order.
+	RelayBundleCalls []RelayBundleCall
+	// LandingRefValue is returned by LandingRef on success.
+	LandingRefValue string
+	// LandingRefErr, if non-nil, is returned by every LandingRef call.
+	LandingRefErr error
+	// LandingRefCallCount counts every LandingRef invocation.
+	LandingRefCallCount int
 
 	// AutoMergeAllowed controls what CanAutoMerge returns (default false).
 	AutoMergeAllowed bool
@@ -718,6 +737,33 @@ func (f *Fake) RecordLanding(num, landing string) error {
 
 var _ LandingRecorder = (*Fake)(nil)
 
+// relayBundle backs the optional BundleRelay surface (ADR 0033), recording
+// each call for tests to assert against. Deliberately unexported: unlike
+// Merge/Rebase/RecordLanding, this must NOT be a method Go's type-assertion
+// machinery can see directly on *Fake, or every settle test constructing
+// Settle with a bare *Fake as its CodeForge (the github/git-flow majority)
+// would silently start satisfying forge.BundleRelay too. Only localForge's
+// own exported RelayBundle (reachable exclusively through AsLocal()) calls
+// this.
+func (f *Fake) relayBundle(outboxDir, ref string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.RelayBundleCalls = append(f.RelayBundleCalls, RelayBundleCall{OutboxDir: outboxDir, Ref: ref})
+	return f.RelayBundleErr
+}
+
+// landingRef backs the optional LandingRef surface (ADR 0033), the same
+// AsLocal()-only restriction as relayBundle above, for the same reason.
+func (f *Fake) landingRef() (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.LandingRefCallCount++
+	if f.LandingRefErr != nil {
+		return "", f.LandingRefErr
+	}
+	return f.LandingRefValue, nil
+}
+
 // CloseIssue implements the optional IssueCloser surface (ADR 0029), setting
 // the issue's State to IssueClosed and recording the call for tests to
 // assert against.
@@ -787,3 +833,19 @@ func (p pushOnlyForge) Probe() (string, error)                   { return p.f.Pr
 func (p pushOnlyForge) BranchExists(branch string) (bool, error) { return p.f.BranchExists(branch) }
 
 var _ CodeForge = pushOnlyForge{}
+
+// localForge adapts a Fake to expose the push-only CodeForge surface plus
+// the BundleRelay and LandingRef hooks CODE_FORGE=local's adapter implements
+// (ADR 0033) — the Fake analogue of local.localCodeForge's real wrapper.
+type localForge struct{ pushOnlyForge }
+
+// AsLocal returns f wrapped so it satisfies CodeForge, BundleRelay, and
+// LandingRef, but not PRForge — the local adapter's shape.
+func (f *Fake) AsLocal() CodeForge { return localForge{pushOnlyForge{f}} }
+
+func (l localForge) RelayBundle(outboxDir, ref string) error { return l.f.relayBundle(outboxDir, ref) }
+func (l localForge) LandingRef() (string, error)             { return l.f.landingRef() }
+
+var _ CodeForge = localForge{}
+var _ BundleRelay = localForge{}
+var _ LandingRef = localForge{}
