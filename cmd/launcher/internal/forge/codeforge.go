@@ -26,6 +26,33 @@ type CodeForge interface {
 	Probe() (string, error)
 }
 
+// BundleRelay is CODE_FORGE=local's optional pre-merge landing hook (ADR
+// 0033): the Box cannot push to its read-only Accumulation-repo mount, so it
+// leaves its finished branch as a git bundle in the writable outbox instead;
+// before Merge(ref) can find that branch as a ref on the backing repo, the
+// bundle must be relayed in. Discovered via type assertion, like PRForge and
+// LandingRecorder — only the local adapter implements it.
+type BundleRelay interface {
+	// RelayBundle imports ref from the bundle file the Box left in outboxDir
+	// into the Code Forge's backing repo, so a subsequent Merge(ref) finds
+	// the branch. Returns an error, leaving the seam unlanded, when the
+	// bundle is missing or malformed.
+	RelayBundle(outboxDir, ref string) error
+}
+
+// LandingRef is CODE_FORGE=local's optional post-merge landing-reference
+// resolver (ADR 0029, ADR 0033): once Merge has landed the seam's branch,
+// LandingRef resolves the immutable Integration ref + commit sha the
+// landing: field records — richer than the raw branch name RecordLanding
+// gets for github/git. Discovered via type assertion; only the local
+// adapter implements it. Unlike Merge/Rebase, it takes no ref argument: the
+// value it resolves is a property of the adapter's own fixed Integration
+// branch (baked in at construction), not of whichever branch was merged.
+type LandingRef interface {
+	// LandingRef resolves the landing reference, once a merge has landed.
+	LandingRef() (string, error)
+}
+
 // PRForge is the optional PR, CI-rollup, and auto-merge surface. Only
 // adapters that open pull requests and watch CI implement it (github); the
 // push-only git adapter does not. Callers discover it with a type assertion —
