@@ -3,6 +3,7 @@ package jira_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -568,6 +569,8 @@ func TestJiraClient_CompleteVerdict_SwapsInProgressForVerdictLabel(t *testing.T)
 		var gotLabelOps []map[string]string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-3":
+				fmt.Fprint(w, `{"key":"PROJ-3","fields":{"labels":["agent-research-in-progress"]}}`)
 			case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-3":
 				var body struct {
 					Update struct {
@@ -630,6 +633,8 @@ func TestJiraClient_CompleteVerdict_ThenRetryResearchable(t *testing.T) {
 	call := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-5":
+			fmt.Fprint(w, `{"key":"PROJ-5","fields":{"labels":["agent-research-in-progress"]}}`)
 		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-5":
 			var body struct {
 				Update struct {
