@@ -74,4 +74,9 @@
     usage = "";
     doc = "check forge credentials, repository connectivity, and label presence (triage fatal, research advisory)";
   }
+  {
+    name = "reconcile";
+    usage = "";
+    doc = "local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)";
+  }
 ]

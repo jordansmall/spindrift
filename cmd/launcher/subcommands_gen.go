@@ -11,4 +11,5 @@ var subcommandRegistry = []subcommandEntry{
 	{name: "build", usage: "", doc: "realize the agent image without running any agent"},
 	{name: "recover", usage: "<issue>", doc: "run the merge gate for a single issue"},
 	{name: "doctor", usage: "", doc: "check forge credentials, repository connectivity, and label presence (triage fatal, research advisory)"},
+	{name: "reconcile", usage: "", doc: "local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)"},
 }

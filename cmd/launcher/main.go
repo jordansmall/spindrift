@@ -829,6 +829,9 @@ func run(lc *launchContext) error {
 
 	if origin == waves.OriginDiscovered && len(issues) == 0 {
 		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
+		if err := reconcileAfterDispatch(c, it, cf, os.Stdout); err != nil {
+			return err
+		}
 		return errQueueEmpty
 	}
 
@@ -842,7 +845,7 @@ func run(lc *launchContext) error {
 	}
 
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
-	return nil
+	return reconcileAfterDispatch(c, it, cf, os.Stdout)
 }
 
 // runContinuousDispatch is the entry point for CONTINUOUS_DISPATCH: the
@@ -918,12 +921,15 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		}
 		if errors.Is(err, waves.ErrOpenNoneDispatchable) && firstQueryEmpty {
 			fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
+			if err := reconcileAfterDispatch(c, it, cf, os.Stdout); err != nil {
+				return err
+			}
 			return errQueueEmpty
 		}
 		return err
 	}
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
-	return nil
+	return reconcileAfterDispatch(c, it, cf, os.Stdout)
 }
 
 // cmdBuild is the `build` subcommand: realize the sandbox image or store
@@ -1089,7 +1095,7 @@ func flushAmbientWarnings(stderr io.Writer, warnings *bytes.Buffer) {
 // is args[1:] (the subcommand's own arguments, subcommand name stripped).
 type verbHandler func(args []string, stderr io.Writer) int
 
-// verbHandlers is the declared table of the seven real subcommands (issue
+// verbHandlers is the declared table of the eight real subcommands (issue
 // #1574), keyed by verb name, replacing what used to be an inline
 // if-args[0]-== chain in mainRun. It is the single source of truth for
 // "what subcommands actually exist" — a test enumerates its keys to prove
@@ -1097,8 +1103,9 @@ type verbHandler func(args []string, stderr io.Writer) int
 // verb is deliberately not in this table (mainRun dispatches it separately,
 // before the table lookup), since it isn't one of the documented verbs.
 var verbHandlers = map[string]verbHandler{
-	"build":  func(args []string, stderr io.Writer) int { return cmdBuild() },
-	"doctor": func(args []string, stderr io.Writer) int { return cmdDoctor() },
+	"build":     func(args []string, stderr io.Writer) int { return cmdBuild() },
+	"doctor":    func(args []string, stderr io.Writer) int { return cmdDoctor() },
+	"reconcile": func(args []string, stderr io.Writer) int { return cmdReconcile() },
 	"console": func(args []string, stderr io.Writer) int {
 		lc, err := bootstrap(true, dispatchKindWork)
 		if err != nil {
