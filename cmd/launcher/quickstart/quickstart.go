@@ -287,25 +287,22 @@ func runQuickstart(dir string, env Environment, runner CommandRunner, forgeBuild
 		anthropicAPIKey = promptMasked("Anthropic API key (ANTHROPIC_API_KEY)")
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte(renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail, tracker)), 0o644); err != nil {
-		return fmt.Errorf("write flake.nix: %w", err)
+	a := answers{
+		repoSlug:         repoSlug,
+		runtime:          runtime,
+		gitUserName:      gitUserName,
+		gitUserEmail:     gitUserEmail,
+		tracker:          tracker,
+		ghToken:          ghToken,
+		claudeOAuthToken: claudeOAuthToken,
+		anthropicAPIKey:  anthropicAPIKey,
 	}
-	fmt.Fprintln(w, "wrote: flake.nix")
-
-	if err := os.WriteFile(filepath.Join(dir, "harness.env"), []byte(renderHarnessEnv(ghToken, claudeOAuthToken, anthropicAPIKey)), 0o600); err != nil {
-		return fmt.Errorf("write harness.env: %w", err)
+	for _, f := range render(a) {
+		if err := os.WriteFile(filepath.Join(dir, f.path), []byte(f.content), f.mode); err != nil {
+			return fmt.Errorf("write %s: %w", f.path, err)
+		}
+		fmt.Fprintf(w, "wrote: %s\n", f.path)
 	}
-	fmt.Fprintln(w, "wrote: harness.env")
-
-	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(quickstartGitignore), 0o644); err != nil {
-		return fmt.Errorf("write .gitignore: %w", err)
-	}
-	fmt.Fprintln(w, "wrote: .gitignore")
-
-	if err := os.WriteFile(filepath.Join(dir, ".envrc"), []byte(quickstartEnvrc), 0o644); err != nil {
-		return fmt.Errorf("write .envrc: %w", err)
-	}
-	fmt.Fprintln(w, "wrote: .envrc")
 
 	// The gh CLI (used by the github Code Forge, and by the github Issue
 	// Tracker branch) reads auth from GH_TOKEN in the process environment.
@@ -465,6 +462,43 @@ type trackerSettings struct {
 	jiraProjectKey string
 	jiraEmail      string
 	localIssuesDir string
+}
+
+// answers holds every operator decision the prompt/detect phase gathers —
+// one field per decision, detected defaults already folded in — so render
+// can turn it into the generated scaffold without touching Environment,
+// stdin, or any other I/O seam.
+type answers struct {
+	repoSlug         string
+	runtime          string
+	gitUserName      string
+	gitUserEmail     string
+	tracker          trackerSettings
+	ghToken          string
+	claudeOAuthToken string
+	anthropicAPIKey  string
+}
+
+// scaffoldFile is one generated scaffold file: its path relative to the
+// target directory, its content, and the mode runQuickstart should write it
+// with.
+type scaffoldFile struct {
+	path    string
+	content string
+	mode    os.FileMode
+}
+
+// render turns answers into the full generated scaffold — flake.nix,
+// harness.env, .gitignore, .envrc — with no I/O of its own: every operator
+// string crosses the Nix-escaping seam (nixEscape, via renderFlakeNix)
+// inside this call, before runQuickstart writes the result to disk.
+func render(a answers) []scaffoldFile {
+	return []scaffoldFile{
+		{path: "flake.nix", content: renderFlakeNix(a.repoSlug, a.runtime, a.gitUserName, a.gitUserEmail, a.tracker), mode: 0o644},
+		{path: "harness.env", content: renderHarnessEnv(a.ghToken, a.claudeOAuthToken, a.anthropicAPIKey), mode: 0o600},
+		{path: ".gitignore", content: quickstartGitignore, mode: 0o644},
+		{path: ".envrc", content: quickstartEnvrc, mode: 0o644},
+	}
 }
 
 // renderFlakeNix generates a minimal Consumer flake.nix carrying only the
