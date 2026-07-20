@@ -274,12 +274,12 @@ func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 	}
 }
 
-// TestJiraClient_Issue_IncludeComments_MultilineCommentIsOneBullet verifies
-// that Issue() renders each comment as a single bullet line, collapsing
-// embedded newlines to spaces — the same formatting the local adapter's
-// shared comment-append helper applies, so both consumers produce
-// consistent "## Comments" sections.
-func TestJiraClient_Issue_IncludeComments_MultilineCommentIsOneBullet(t *testing.T) {
+// TestJiraClient_Issue_IncludeComments_MultilineCommentIsVerbatimBlock
+// verifies that Issue() renders a multi-line comment as a verbatim block set
+// off by a "---" separator, preserving embedded newlines — the same
+// formatting the local adapter's shared comment-append helper applies, so
+// both consumers produce consistent "## Comments" sections.
+func TestJiraClient_Issue_IncludeComments_MultilineCommentIsVerbatimBlock(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/rest/api/2/issue/PROJ-8":
@@ -302,8 +302,8 @@ func TestJiraClient_Issue_IncludeComments_MultilineCommentIsOneBullet(t *testing
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if !strings.Contains(iss.Body, "- line one line two") {
-		t.Errorf("Body = %q, want a single bullet with embedded newlines collapsed to spaces", iss.Body)
+	if !strings.Contains(iss.Body, "---\n\nline one\nline two") {
+		t.Errorf("Body = %q, want a verbatim block with the newline preserved", iss.Body)
 	}
 }
 
