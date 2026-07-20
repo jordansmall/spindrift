@@ -25,9 +25,12 @@
 set -euo pipefail
 
 # Masks quoted and backslash-escaped characters in a shell command string
-# with 'x' (preserving length/word-boundaries) so the caller can pattern-match
-# operators like & without tripping on one that's just a quoted/escaped
-# literal, e.g. "foo & bar" or foo\&bar.
+# with 'x' so the caller can pattern-match operators like & without
+# tripping on one that's just a quoted/escaped literal, e.g. "foo & bar"
+# or foo\&bar. A backslash-escaped ordinary letter/digit is the exception:
+# it's unmasked to its literal char instead, since bash's backslash is a
+# no-op there and the escaped text still forms a real keyword (\setsid),
+# so this doesn't preserve length/word-boundaries in that one case.
 mask_command() {
   local cmd="$1"
   local -i i=0
@@ -68,7 +71,20 @@ mask_command() {
     fi
 
     if [[ "$ch" == "$backslash" ]]; then
-      masked+="xx"
+      # A backslash suppresses the special meaning of the character that
+      # follows it. For a metacharacter (&, ;, space, ...) that neutralizes
+      # an operator, so masking both chars to "xx" is correct -- neither one
+      # can be mistaken for the operator or a keyword boundary. For an
+      # ordinary letter/digit, bash's backslash is a no-op: \setsid really
+      # does invoke setsid. Masking that case would hide the keyword from
+      # command_backgrounds()'s regexes, so drop the backslash and keep the
+      # literal character instead, letting the keyword match proceed.
+      local next="${cmd:i+1:1}"
+      if [[ "$next" =~ [[:alnum:]] ]]; then
+        masked+="$next"
+      else
+        masked+="xx"
+      fi
       i=$((i + 2))
       continue
     fi

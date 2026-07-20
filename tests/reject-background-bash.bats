@@ -112,6 +112,18 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "denies a Bash call invoking nohup via a backslash-escaped keyword prefix" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"\\nohup long_running.sh"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "allows a Bash call where a backslash escapes the space before nohup" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo foo\\ nohup"}}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "denies a Bash call invoking setsid" {
   run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"setsid long_running.sh"}}'
   [ "$status" -eq 0 ]
@@ -128,6 +140,12 @@ setup() {
   run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"setsid\""}}'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "denies a Bash call invoking setsid via a backslash-escaped keyword prefix" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"\\setsid long_running.sh"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 }
 
 @test "denies a Bash call using named coproc" {
@@ -152,6 +170,12 @@ setup() {
   run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"coproc\""}}'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "denies a Bash call invoking coproc via a backslash-escaped keyword prefix" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"\\coproc foo { sleep 300; }"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 }
 
 @test "allows a Bash call using |& to pipe stdout and stderr in the foreground" {
