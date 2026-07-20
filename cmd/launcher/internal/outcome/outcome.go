@@ -86,6 +86,50 @@ func LastInLog(path string) (Outcome, bool, error) {
 	return o, true, nil
 }
 
+// LastCommentInLog scans the file at path and returns the body of the last
+// complete SPINDRIFT_COMMENT_BEGIN … SPINDRIFT_COMMENT_END block — the lines
+// between the delimiters, joined with "\n" — using the same last-wins and
+// oversized-line-skipping semantics as LastInLog. An unterminated BEGIN (no
+// matching END before EOF or before a later BEGIN) is discarded rather than
+// returned as a partial block.
+//
+// Returns ("", false, nil) when no complete block is present or the file
+// does not exist. Returns ("", false, err) on I/O errors other than
+// file-not-found or oversized lines.
+func LastCommentInLog(path string) (string, bool, error) {
+	const beginMarker = "SPINDRIFT_COMMENT_BEGIN"
+	const endMarker = "SPINDRIFT_COMMENT_END"
+
+	var last string
+	var found bool
+	var open bool
+	var buf []string
+
+	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
+		switch {
+		case line == beginMarker:
+			open = true
+			buf = nil
+		case line == endMarker:
+			if open {
+				last = strings.Join(buf, "\n")
+				found = true
+			}
+			open = false
+			buf = nil
+		case open:
+			buf = append(buf, line)
+		}
+	})
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return last, found, nil
+}
+
 // tokenField extracts the value of key=<val> from a space-delimited line.
 // val ends at the next space; use tailField for the note field.
 func tokenField(line, key string) string {
