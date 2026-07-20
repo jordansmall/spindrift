@@ -242,6 +242,105 @@ func TestLastInLog_OversizedLineBeforeOutcome(t *testing.T) {
 	}
 }
 
+// --- LastCommentInLog tests ---
+
+func TestLastCommentInLog_Found(t *testing.T) {
+	path := writeLog(t,
+		"some output",
+		"SPINDRIFT_COMMENT_BEGIN",
+		"verdict body line one",
+		"SPINDRIFT_COMMENT_END",
+	)
+	body, found, err := outcome.LastCommentInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if body != "verdict body line one" {
+		t.Errorf("body: got %q, want %q", body, "verdict body line one")
+	}
+}
+
+func TestLastCommentInLog_TakesLast(t *testing.T) {
+	path := writeLog(t,
+		"SPINDRIFT_COMMENT_BEGIN",
+		"stale verdict",
+		"SPINDRIFT_COMMENT_END",
+		"some more output",
+		"SPINDRIFT_COMMENT_BEGIN",
+		"final verdict",
+		"SPINDRIFT_COMMENT_END",
+	)
+	body, found, err := outcome.LastCommentInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if body != "final verdict" {
+		t.Errorf("body: got %q, want %q", body, "final verdict")
+	}
+}
+
+func TestLastCommentInLog_PreservesMultiLineAndMarker(t *testing.T) {
+	path := writeLog(t,
+		"SPINDRIFT_COMMENT_BEGIN",
+		"**Verdict** — recommend",
+		"",
+		"<!-- spindrift-research -->",
+		"SPINDRIFT_COMMENT_END",
+	)
+	body, found, err := outcome.LastCommentInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	want := "**Verdict** — recommend\n\n<!-- spindrift-research -->"
+	if body != want {
+		t.Errorf("body: got %q, want %q", body, want)
+	}
+}
+
+func TestLastCommentInLog_NotFound(t *testing.T) {
+	path := writeLog(t, "some output", "no comment block here")
+	_, found, err := outcome.LastCommentInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false")
+	}
+}
+
+func TestLastCommentInLog_FileNotFound(t *testing.T) {
+	_, found, err := outcome.LastCommentInLog("/nonexistent/path/test.log")
+	if err != nil {
+		t.Fatalf("unexpected error for missing file: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false for missing file")
+	}
+}
+
+func TestLastCommentInLog_UnterminatedBlockDiscarded(t *testing.T) {
+	path := writeLog(t,
+		"SPINDRIFT_COMMENT_BEGIN",
+		"never closed",
+	)
+	_, found, err := outcome.LastCommentInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false for unterminated block")
+	}
+}
+
 func TestLastInLog_OversizedLine_TakesLast(t *testing.T) {
 	const fiveMiB = 5 * 1024 * 1024
 	path := writeBigLog(t,
