@@ -34,14 +34,14 @@ func newLocalCodeForgeHarness(t *testing.T) *localCodeForgeHarness {
 		t:      t,
 		repo:   repo,
 		parent: parent,
-		cf:     NewLocalCodeForge(repo.Bare, parent, "Test Bot", "bot@example.com", "agent/issue-"),
+		cf:     NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-"),
 	}
 }
 
 func (h *localCodeForgeHarness) Forge() forge.CodeForge { return h.cf }
 
 func (h *localCodeForgeHarness) Unreachable() forge.CodeForge {
-	return NewLocalCodeForge(filepath.Join(h.t.TempDir(), "does-not-exist.git"), h.parent, "Test Bot", "bot@example.com", "agent/issue-")
+	return NewLocalCodeForge(filepath.Join(h.t.TempDir(), "does-not-exist.git"), IntegrationBranch(h.parent), h.parent, "Test Bot", "bot@example.com", "agent/issue-")
 }
 
 func (h *localCodeForgeHarness) BranchPrefix() string { return "agent/issue-" }
