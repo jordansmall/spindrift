@@ -38,6 +38,13 @@ type Config struct {
 	// (no textual conflict) and re-waits for CI before merging. When false
 	// (the default), a green-but-behind PR merges as-is (ADR 0028).
 	PreflightStaleBase bool
+
+	// OutboxDir resolves an issue number to its Box's writable outbox
+	// directory (CODE_FORGE=local, ADR 0033) — the host path the Code
+	// Forge's optional BundleRelay hook reads the code-out bundle from
+	// before Merge. Nil for every non-local construction site; consulted
+	// only when the Code Forge implements forge.BundleRelay.
+	OutboxDir func(num string) string
 }
 
 // Settler is the seam callers depend on so tests can inject a Fake instead of
