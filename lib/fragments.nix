@@ -99,4 +99,55 @@
     fragment = "pr-body-local-noref.md";
     var = "PR_BODY_LOCAL_NOREF_STEP";
   }
+  # The issue-read step (issue #1691, ADR 0032): local issues are read from
+  # the read-only /issues mount instead of gh issue view. ISSUE_TRACKER_GITHUB
+  # / ISSUE_TRACKER_LOCAL (agent/entrypoint.sh's phase_prompt_assembly
+  # precompute block, derived from ISSUE_TRACKER) are shared by all four
+  # per-prompt row pairs below -- one gate computation, several render sites.
+  # Each pair's fragment folds in the following unconditional line(s) too
+  # (the trailing `git log`/prior-research-comment bullet, the Inputs: block's
+  # git diff/git log lines) rather than leaving them in the template outside
+  # the substitution: the fragment loop appends a blank-line separator after
+  # every rendered fragment, so a `${VAR}` sitting mid-list/mid-block would
+  # otherwise split a tight list or an indented command block in two.
+  {
+    gate = "ISSUE_TRACKER_GITHUB";
+    fragment = "issue-read-github.md";
+    var = "ISSUE_READ_GITHUB_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_LOCAL";
+    fragment = "issue-read-local.md";
+    var = "ISSUE_READ_LOCAL_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_GITHUB";
+    fragment = "research-issue-read-github.md";
+    var = "RESEARCH_ISSUE_READ_GITHUB_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_LOCAL";
+    fragment = "research-issue-read-local.md";
+    var = "RESEARCH_ISSUE_READ_LOCAL_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_GITHUB";
+    fragment = "scout-issue-read-github.md";
+    var = "SCOUT_ISSUE_READ_GITHUB_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_LOCAL";
+    fragment = "scout-issue-read-local.md";
+    var = "SCOUT_ISSUE_READ_LOCAL_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_GITHUB";
+    fragment = "review-issue-read-github.md";
+    var = "REVIEW_ISSUE_READ_GITHUB_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_LOCAL";
+    fragment = "review-issue-read-local.md";
+    var = "REVIEW_ISSUE_READ_LOCAL_STEP";
+  }
 ]

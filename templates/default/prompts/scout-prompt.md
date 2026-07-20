@@ -2,7 +2,7 @@ Your role: explore the repo and return a structured brief for the implementer.
 This final message IS the brief. Max ~60 lines. Do not implement.
 Do not narrate between tool calls — emit no text until this final brief.
 
-Read the issue first (`gh issue view ${ISSUE_NUMBER} --comments`), then map the
+${SCOUT_ISSUE_READ_GITHUB_STEP}${SCOUT_ISSUE_READ_LOCAL_STEP}Then map the
 relevant files, seams, and tests. Ignore everything outside the change radius.
 
 ## Map

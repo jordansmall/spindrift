@@ -15,11 +15,9 @@ upstream commits look like part of this branch:
   git fetch origin
 
 Inputs:
-  gh issue view ${ISSUE_NUMBER} --comments        # acceptance criteria
   git diff origin/${BASE_BRANCH}...HEAD           # the change
   git log origin/${BASE_BRANCH}..HEAD --oneline   # commit messages
-
-The dimensions below render regardless of whether the `/code-review` skill
+${REVIEW_ISSUE_READ_GITHUB_STEP}${REVIEW_ISSUE_READ_LOCAL_STEP}The dimensions below render regardless of whether the `/code-review` skill
 is baked, and hunting every one is still required either way: when the
 deferral above fires, the skill's two-axis verdict is reconciled into this
 Blocking/Non-blocking contract rather than replacing these dimensions.

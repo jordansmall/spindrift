@@ -8,10 +8,7 @@ Fresh clone, new branch `${BRANCH}` cut from `${BASE_BRANCH}`. This issue only.
 
 Read first (run these yourself):
 
-- `gh issue view ${ISSUE_NUMBER} --comments` — the issue plus any parent/linked
-  issue or PRD it references (pull those in too).
-- `git log -n 10 --oneline` — recent history.
-
+${ISSUE_READ_GITHUB_STEP}${ISSUE_READ_LOCAL_STEP}
 # COMMS
 
 ${CAVEMAN_STEP}Your text output is a machine-parsed log, not a conversation.

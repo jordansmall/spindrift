@@ -539,4 +539,41 @@ in
         ! grep -qi 'closes\|fixes' ${../../templates/default/prompts/fragments/pr-body-local-ref.md}
         touch $out
       '';
+
+  # The issue-read step (issue #1691, ADR 0032): the four local-tracker
+  # fragments must never invoke `gh issue view` -- for a numeric slug it can
+  # silently fetch an unrelated real issue on the Target repo, the exact
+  # footgun the read-only /issues mount exists to close -- and must reference
+  # /issues instead. The fragment-gate-parity check above only pins that each
+  # gate name agrees between lib/fragments.nix and entrypoint.sh; it says
+  # nothing about a fragment's own content, so a future edit reintroducing
+  # `gh issue view` into a local variant would otherwise go uncaught. Same
+  # static, eval-only grep shape as the pr-body-reference-* checks above.
+  issue-read-local-fragments-never-invoke-gh-issue-view =
+    pkgs.runCommand "issue-read-local-fragments-never-invoke-gh-issue-view" { }
+      ''
+        for f in issue-read-local.md research-issue-read-local.md \
+          scout-issue-read-local.md review-issue-read-local.md; do
+          n=$(grep -c 'gh issue view' ${../../templates/default/prompts/fragments}/"$f" || true)
+          [ "$n" -eq 0 ] || {
+            echo "$f: expected no 'gh issue view', found $n occurrence(s)" >&2
+            exit 1
+          }
+          grep -q '/issues/''${ISSUE_NUMBER}\.md' ${../../templates/default/prompts/fragments}/"$f"
+        done
+        touch $out
+      '';
+
+  # The github-side counterpart: each of the four github variants keeps
+  # `gh issue view ''${ISSUE_NUMBER}` unchanged, exactly as it read before
+  # issue #1691's branch existed.
+  issue-read-github-fragments-keep-gh-issue-view-unchanged =
+    pkgs.runCommand "issue-read-github-fragments-keep-gh-issue-view-unchanged" { }
+      ''
+        for f in issue-read-github.md research-issue-read-github.md \
+          scout-issue-read-github.md review-issue-read-github.md; do
+          grep -q 'gh issue view ''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments}/"$f"
+        done
+        touch $out
+      '';
 }
