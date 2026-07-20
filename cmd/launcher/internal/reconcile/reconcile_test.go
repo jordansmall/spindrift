@@ -1,6 +1,7 @@
 package reconcile_test
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
@@ -266,6 +267,129 @@ func TestRun_NoOpForPushOnlyCodeForge(t *testing.T) {
 	}
 	if len(res.Closed) != 0 {
 		t.Errorf("Closed = %v, want none", res.Closed)
+	}
+	if len(f.CloseIssueCalls) != 0 {
+		t.Errorf("CloseIssueCalls = %v, want none", f.CloseIssueCalls)
+	}
+}
+
+// TestRun_ClosesLocalLandingVerifiedMerged verifies Reconcile closes an open
+// issue whose recorded landing verifies as merged into the local Code
+// Forge's Integration branch (CODE_FORGE=local, ADR 0033) — the no-PR
+// counterpart of TestRun_ClosesIssueWithMergedLanding, checked via
+// LandingVerifier rather than PRForge.
+func TestRun_ClosesLocalLandingVerifiedMerged(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "integration/1694@abc123"})
+	f.SetVerifyLanding("integration/1694@abc123", true, nil)
+	cf := f.AsLocal()
+
+	res, err := reconcile.Run(f, cf, fakeLiveness{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != "42" {
+		t.Errorf("Closed = %v, want [42]", res.Closed)
+	}
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.State != forge.IssueClosed {
+		t.Errorf("State = %v, want IssueClosed", iss.State)
+	}
+}
+
+// TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged verifies Reconcile
+// leaves an issue open when its recorded local landing does not verify as
+// merged — a conflicting land (ADR 0033: "a conflicting merge leaves the
+// seam unlanded and blocked") or a malformed landing ref both surface here
+// identically as VerifyLanding reporting merged=false.
+func TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
+	f.SetVerifyLanding("agent/issue-42", false, nil)
+	cf := f.AsLocal()
+
+	res, err := reconcile.Run(f, cf, fakeLiveness{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 0 {
+		t.Errorf("Closed = %v, want none", res.Closed)
+	}
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.State != forge.IssueOpen {
+		t.Errorf("State = %v, want unchanged IssueOpen", iss.State)
+	}
+	if len(f.CloseIssueCalls) != 0 {
+		t.Errorf("CloseIssueCalls = %v, want none", f.CloseIssueCalls)
+	}
+}
+
+// TestRun_SkipsLocalIssueWithNoLanding verifies Reconcile leaves a local
+// issue with no recorded landing untouched, never calling VerifyLanding — a
+// local landing has no branch-discovery fallback (unlike the PRForge path):
+// settle is the only writer of the landing: field.
+func TestRun_SkipsLocalIssueWithNoLanding(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
+	cf := f.AsLocal()
+
+	res, err := reconcile.Run(f, cf, fakeLiveness{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 0 {
+		t.Errorf("Closed = %v, want none", res.Closed)
+	}
+	if len(f.VerifyLandingCalls) != 0 {
+		t.Errorf("VerifyLandingCalls = %v, want none", f.VerifyLandingCalls)
+	}
+}
+
+// TestRun_SecondSweepLocalLandingIsNoOp verifies a second Run over an
+// already-closed local landing closes nothing further, mirroring
+// TestRun_SecondSweepIsNoOp for the LandingVerifier path.
+func TestRun_SecondSweepLocalLandingIsNoOp(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "integration/1694@abc123"})
+	f.SetVerifyLanding("integration/1694@abc123", true, nil)
+	cf := f.AsLocal()
+
+	if _, err := reconcile.Run(f, cf, fakeLiveness{}); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	res, err := reconcile.Run(f, cf, fakeLiveness{})
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if len(res.Closed) != 0 {
+		t.Errorf("second sweep Closed = %v, want none", res.Closed)
+	}
+	if len(f.CloseIssueCalls) != 1 {
+		t.Errorf("CloseIssueCalls = %v, want exactly 1 call across both sweeps", f.CloseIssueCalls)
+	}
+}
+
+// TestRun_PropagatesLocalLandingVerifyError verifies Reconcile surfaces a
+// genuine VerifyLanding error (a local-git failure, not the normal
+// merged=false "not landed yet" outcome) rather than swallowing it.
+func TestRun_PropagatesLocalLandingVerifyError(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "integration/1694@abc123"})
+	wantErr := errors.New("local: repo unreadable")
+	f.SetVerifyLanding("integration/1694@abc123", false, wantErr)
+	cf := f.AsLocal()
+
+	_, err := reconcile.Run(f, cf, fakeLiveness{})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Run error = %v, want it to wrap %v", err, wantErr)
 	}
 	if len(f.CloseIssueCalls) != 0 {
 		t.Errorf("CloseIssueCalls = %v, want none", f.CloseIssueCalls)

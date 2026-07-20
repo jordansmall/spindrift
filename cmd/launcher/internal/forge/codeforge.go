@@ -53,6 +53,24 @@ type LandingRef interface {
 	LandingRef() (string, error)
 }
 
+// LandingVerifier is CODE_FORGE=local's optional no-network merge-observation
+// surface (ADR 0029, ADR 0033): reconcile's sole closing authority extends
+// here for a Code Forge with no PR concept to check instead. Discovered via
+// type assertion, like PRForge; only the local adapter implements it.
+type LandingVerifier interface {
+	// VerifyLanding reports whether landing — the immutable ref
+	// RecordLanding persisted — is merged into the adapter's own Integration
+	// branch, checked via local git ancestry, never a network call. A
+	// malformed landing (not this adapter's "<branch>@<sha>" shape) and a
+	// landing whose commit is not an ancestor of the Integration branch's
+	// current tip (the merge that recorded it in fact conflicted) both
+	// report merged=false with a nil error — either way reconcile leaves the
+	// seam-issue open rather than closing it, the same "stays open, blocked"
+	// posture. A non-nil error is reserved for a genuine local-git failure
+	// (e.g. the Accumulation repo itself is unreadable).
+	VerifyLanding(landing string) (merged bool, err error)
+}
+
 // PRForge is the optional PR, CI-rollup, and auto-merge surface. Only
 // adapters that open pull requests and watch CI implement it (github); the
 // push-only git adapter does not. Callers discover it with a type assertion —
