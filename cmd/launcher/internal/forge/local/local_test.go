@@ -735,6 +735,33 @@ func TestLocalTracker_Comment_AppendsToBody(t *testing.T) {
 	}
 }
 
+func TestLocalTracker_Comment_MultilineUsageReportRendersAsBlock(t *testing.T) {
+	dir := t.TempDir()
+	writeLocalIssue(t, dir, "fix-thing", localIssue{
+		frontmatter: localFrontmatter{Title: "Fix thing", State: testLabels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
+		body:        "## What to build\n\nDo the thing.\n",
+	})
+
+	lt := NewLocalTracker(dir, testLabels)
+	report := "## Run usage\n\n" +
+		"| Field | Value |\n| --- | --- |\n| Cost | $1 |\n\n" +
+		"| Metric | Count |\n| --- | --- |\n| Turns | 3 |\n"
+	if err := lt.Comment("fix-thing", report); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+
+	iss, err := lt.Issue("fix-thing")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !strings.Contains(iss.Body, "\n## Run usage\n") {
+		t.Errorf("Body = %q, want \"## Run usage\" as a real heading on its own line", iss.Body)
+	}
+	if strings.Count(iss.Body, "\n| --- | --- |\n") != 2 {
+		t.Errorf("Body = %q, want both table delimiter rows preserved on their own lines", iss.Body)
+	}
+}
+
 func TestLocalTracker_Probe_CreatesDirAndReturnsPath(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "issues")
 	lt := NewLocalTracker(dir, testLabels)
