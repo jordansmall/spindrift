@@ -75,15 +75,15 @@ func (q *Queue) Snapshot() []Pick {
 }
 
 // Discover is the waves.Discoverer this queue backs. It walks queued and
-// held picks in order; a pick whose declared blockers (waves.BuildEdges,
-// waves.BlockerStatus — the same machinery headless waves use, no second
+// held picks in order; a pick whose declared blockers (waves.NewReadiness,
+// its Status method — the same machinery headless waves use, no second
 // parser) are not all satisfied holds at PickHeld with BlockedBy naming
 // them, and Discover moves on to the next candidate rather than launching
 // it, so an earlier held pick never stalls a later ready one. A pick whose
 // DepsOf call itself failed (transient tracker hiccup — rate limit, timeout,
 // flaky API call) holds too, with a reason distinguishing it from a real
-// open blocker, rather than launching: BuildEdges' best-effort skip makes a
-// failed lookup indistinguishable from "confirmed zero blockers" unless
+// open blocker, rather than launching: NewReadiness's best-effort skip makes
+// a failed lookup indistinguishable from "confirmed zero blockers" unless
 // Discover checks the failed set explicitly (#752). A ready
 // pick's atomic Dispatchable->InProgress claim, once it races (another
 // loop, a closed issue, a relabel), dissolves that pick with the reason and
@@ -94,14 +94,14 @@ func (q *Queue) Snapshot() []Pick {
 // launch. The first pick that claims successfully is returned as a
 // single-issue batch (edges and sources always empty — Discover already
 // resolved this pick's own readiness and rendered BlockedBy itself via
-// setHeld below, so the engine's own blocker gate has nothing left to
+// setHeld below, so the caller must set Config.PreResolved to disable the
+// engine's own blocker gate, which would otherwise have nothing left to
 // check); a refill with nothing launchable returns no issues, which may
 // still have moved one or more picks onto PickHeld.
 func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string) ([]waves.Issue, map[string][]string, waves.Sources, error) {
 	for _, pick := range q.claimable() {
-		result, _ := waves.BuildEdges(tracker, []waves.Issue{{Number: pick.Number, Title: pick.Title}})
-		edges, sources := result.Edges, result.Sources
-		if result.Failed[pick.Number] {
+		readiness, _ := waves.NewReadiness(tracker, []waves.Issue{{Number: pick.Number, Title: pick.Title}})
+		if readiness.Failed[pick.Number] {
 			// A transient DepsOf failure looks identical to "confirmed zero
 			// blockers" in edges alone — hold rather than launch, since a
 			// genuinely-blocked pick must never claim on a tracker hiccup
@@ -109,9 +109,9 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			q.setState(pick.Number, PickHeld, "blocker check failed, will retry")
 			continue
 		}
-		ready, failed, unready := waves.BlockerStatus(waves.Config{FailedLabel: failedLabel}, tracker, cf, pick.Number, edges)
+		ready, failed, unready := readiness.Status(waves.Config{FailedLabel: failedLabel}, tracker, cf, pick.Number)
 		if !ready {
-			q.setHeld(pick.Number, unready, failed, sources[pick.Number])
+			q.setHeld(pick.Number, unready, failed, readiness.Sources[pick.Number])
 			continue
 		}
 		if !q.tryMarkClaiming(pick.Number) {

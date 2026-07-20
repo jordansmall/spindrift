@@ -574,7 +574,7 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 }
 
 // TestRunContinuous_DiscoverSourcesReachRefill verifies issue #662: the
-// discover closure's Sources return value (BuildEdges' native/body
+// discover closure's Sources return value (NewReadiness's native/body
 // provenance for each blocker) survives the trip through RunContinuous's
 // refill loop instead of being silently discarded. #2's declared blocker is
 // body-parsed, populating Sources; RunContinuous must complete without
@@ -604,7 +604,7 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 		for i, fi := range raw {
 			out[i] = Issue{Number: fi.Number, Title: fi.Title}
 		}
-		result, err := BuildEdges(fc, out)
+		result, err := NewReadiness(fc, out)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}

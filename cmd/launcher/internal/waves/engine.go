@@ -164,12 +164,12 @@ outer:
 		// The failed scan only matters for the cascade-fail case below
 		// (origin != OriginClaimed), so OriginClaimed skips it and fetches
 		// only what unreadyBlockers needs -- matching the fetch profile the
-		// two-helper-function version had before this reused BlockerStatus.
+		// two-helper-function version had before this reused blockerStatus.
 		var failed, unready []string
 		switch {
 		case cfg.PreResolved, cfg.IgnoreBlockers:
 		case origin != OriginClaimed:
-			_, failed, unready = BlockerStatus(cfg, it, cf, iss.Number, edges)
+			_, failed, unready = blockerStatus(cfg, it, cf, iss.Number, edges)
 		default:
 			unready = unreadyBlockers(it, cf, iss.Number, edges)
 		}

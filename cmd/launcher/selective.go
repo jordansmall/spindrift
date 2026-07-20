@@ -36,13 +36,13 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	}
 
 	// Build blocker graph and evict dependents with unmet external blockers.
-	result, err := waves.BuildEdges(it, toWaveIssues(issues))
+	readiness, err := waves.NewReadiness(it, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
-	edges, sources, failed := result.Edges, result.Sources, result.Failed
+	edges, sources, failed := readiness.Edges, readiness.Sources, readiness.Failed
 
-	issues, notices := evictUnmetBlockers(c, it, cf, issues, edges, sources)
+	issues, notices := evictUnmetBlockers(it, cf, readiness, issues)
 	for _, n := range notices {
 		fmt.Fprintln(stdout, n)
 	}
@@ -98,7 +98,7 @@ func confirmUnlabeled(n int, forceYes bool, stdin io.Reader, stdout io.Writer) b
 // evictUnmetBlockers removes issues whose unmerged blockers are absent from the
 // list. Eviction cascades: if A is evicted, anything blocked by A is also
 // evicted. Returns the retained issues and a notice string per evicted issue.
-func evictUnmetBlockers(c config, it forge.IssueTracker, cf forge.CodeForge, issues []issue, edges map[string][]string, sources waves.Sources) ([]issue, []string) {
+func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, readiness waves.Readiness, issues []issue) ([]issue, []string) {
 	// willRun tracks which issue numbers are still candidates.
 	willRun := make(map[string]bool, len(issues))
 	for _, iss := range issues {
@@ -112,7 +112,7 @@ func evictUnmetBlockers(c config, it forge.IssueTracker, cf forge.CodeForge, iss
 		if willRun[blocker] {
 			return true
 		}
-		return waves.BlockerReady(it, cf, blocker)
+		return readiness.Ready(it, cf, blocker)
 	}
 
 	// Iterate the issues slice (not the map) to produce stable output order.
@@ -122,7 +122,7 @@ func evictUnmetBlockers(c config, it forge.IssueTracker, cf forge.CodeForge, iss
 			if !willRun[iss.number] {
 				continue
 			}
-			for _, dep := range edges[iss.number] {
+			for _, dep := range readiness.Edges[iss.number] {
 				if !blockerSatisfied(dep) {
 					toEvict = append(toEvict, iss.number)
 					break
@@ -133,9 +133,9 @@ func evictUnmetBlockers(c config, it forge.IssueTracker, cf forge.CodeForge, iss
 			break
 		}
 		for _, num := range toEvict {
-			dep := firstUnmet(c, it, cf, willRun, edges[num])
+			dep := firstUnmet(it, cf, readiness, willRun, readiness.Edges[num])
 			notices = append(notices, fmt.Sprintf("⚠ #%s blocked by %s (not in list, unmerged); skipping",
-				num, forge.Ref(dep, sources[num][dep])))
+				num, forge.Ref(dep, readiness.Sources[num][dep])))
 			delete(willRun, num)
 		}
 	}
@@ -151,9 +151,9 @@ func evictUnmetBlockers(c config, it forge.IssueTracker, cf forge.CodeForge, iss
 
 // firstUnmet returns the first entry in deps that is neither in willRun nor
 // already satisfied (closed/complete). Used only for notice formatting.
-func firstUnmet(c config, it forge.IssueTracker, cf forge.CodeForge, willRun map[string]bool, deps []string) string {
+func firstUnmet(it forge.IssueTracker, cf forge.CodeForge, readiness waves.Readiness, willRun map[string]bool, deps []string) string {
 	for _, dep := range deps {
-		if !willRun[dep] && !waves.BlockerReady(it, cf, dep) {
+		if !willRun[dep] && !readiness.Ready(it, cf, dep) {
 			return dep
 		}
 	}

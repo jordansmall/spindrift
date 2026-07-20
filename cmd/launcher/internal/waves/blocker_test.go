@@ -7,16 +7,16 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// --- BuildEdges tests ---
+// --- NewReadiness tests ---
 
-func TestBuildEdges_MultipleIssuesWithBlockers(t *testing.T) {
+func TestNewReadiness_MultipleIssuesWithBlockers(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Body: "## Blocked by\n- #2\n- #3"})
 	fc.SetIssue(forge.Issue{Number: "2", Body: "## Blocked by\n- #3"})
 	fc.SetIssue(forge.Issue{Number: "3", Body: ""})
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
-	got, err := BuildEdges(fc, issues)
+	got, err := NewReadiness(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -29,13 +29,13 @@ func TestBuildEdges_MultipleIssuesWithBlockers(t *testing.T) {
 	}
 }
 
-func TestBuildEdges_NoBlockersOmitted(t *testing.T) {
+func TestNewReadiness_NoBlockersOmitted(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Body: "## Blocked by\n- #2"})
 	fc.SetIssue(forge.Issue{Number: "2", Body: ""})
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}}
-	got, err := BuildEdges(fc, issues)
+	got, err := NewReadiness(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -48,14 +48,14 @@ func TestBuildEdges_NoBlockersOmitted(t *testing.T) {
 	}
 }
 
-func TestBuildEdges_DepsOfErrorNonFatal(t *testing.T) {
+func TestNewReadiness_DepsOfErrorNonFatal(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Body: "## Blocked by\n- #2"})
 	// Issue "2" is deliberately not registered, so DepsOf("2") errors.
 	fc.SetIssue(forge.Issue{Number: "3", Body: "## Blocked by\n- #1"})
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
-	got, err := BuildEdges(fc, issues)
+	got, err := NewReadiness(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -71,12 +71,12 @@ func TestBuildEdges_DepsOfErrorNonFatal(t *testing.T) {
 	}
 }
 
-// TestBuildEdges_MixedNativeAndBodySources verifies BuildEdges tags each
+// TestNewReadiness_MixedNativeAndBodySources verifies NewReadiness tags each
 // blocker ref with the source DepsOf resolved it from — one issue's
 // native-relationship blocker and another's body-parsed blocker must not
 // collapse into the same source, so mixed-batch preview/skip/marker
 // annotations can tell them apart.
-func TestBuildEdges_MixedNativeAndBodySources(t *testing.T) {
+func TestNewReadiness_MixedNativeAndBodySources(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Body: ""})
 	fc.SetIssue(forge.Issue{Number: "2", Body: "## Blocked by\n- #3"})
@@ -84,7 +84,7 @@ func TestBuildEdges_MixedNativeAndBodySources(t *testing.T) {
 	fc.NativeDeps = map[string][]string{"1": {"3"}}
 
 	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
-	result, err := BuildEdges(fc, issues)
+	result, err := NewReadiness(fc, issues)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -205,19 +205,19 @@ func TestUnreadyBlockers_Mixed(t *testing.T) {
 	}
 }
 
-func TestBlockerReady_MergedPR(t *testing.T) {
+func TestReadinessReady_MergedPR(t *testing.T) {
 	fc := forge.NewFake()
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN"})
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
 	fc.SetPRState("https://github.com/owner/repo/pull/99", forge.PRMerged)
 
-	if !BlockerReady(fc, fc, "99") {
-		t.Error("blockerReady: want true for merged PR, got false")
+	if !(Readiness{}).Ready(fc, fc, "99") {
+		t.Error("Readiness.Ready: want true for merged PR, got false")
 	}
 }
 
-func TestBlockerReady_OpenPRWithCompleteLabel(t *testing.T) {
+func TestReadinessReady_OpenPRWithCompleteLabel(t *testing.T) {
 	c := baseConfig()
 
 	fc := forge.NewFake()
@@ -226,93 +226,95 @@ func TestBlockerReady_OpenPRWithCompleteLabel(t *testing.T) {
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
 	// state defaults to OPEN when SetPR is called without SetPRState override
 
-	if BlockerReady(fc, fc, "99") {
-		t.Error("blockerReady: want false for open PR with agent-complete label, got true")
+	if (Readiness{}).Ready(fc, fc, "99") {
+		t.Error("Readiness.Ready: want false for open PR with agent-complete label, got true")
 	}
 }
 
-func TestBlockerReady_ClosedIssueFallback(t *testing.T) {
+func TestReadinessReady_ClosedIssueFallback(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "99", State: "CLOSED"})
 	// No PR registered — simulates human-handled work absorbed outside spindrift.
 
-	if !BlockerReady(fc, fc, "99") {
-		t.Error("blockerReady: want true for closed issue with no PR, got false")
+	if !(Readiness{}).Ready(fc, fc, "99") {
+		t.Error("Readiness.Ready: want true for closed issue with no PR, got false")
 	}
 }
 
-func TestBlockerReady_MergedIssueFallback(t *testing.T) {
+func TestReadinessReady_MergedIssueFallback(t *testing.T) {
 	fc := forge.NewFake()
 	// Blocker ref resolves to a PR number: no agent branch, so it falls
 	// back to it.Issue(ref), which returns MERGED for a merged PR.
 	fc.SetIssue(forge.Issue{Number: "99", State: "MERGED"})
 
-	if !BlockerReady(fc, fc, "99") {
-		t.Error("blockerReady: want true for merged issue fallback, got false")
+	if !(Readiness{}).Ready(fc, fc, "99") {
+		t.Error("Readiness.Ready: want true for merged issue fallback, got false")
 	}
 }
 
-func TestBlockerReady_OpenIssueFallback(t *testing.T) {
+func TestReadinessReady_OpenIssueFallback(t *testing.T) {
 	fc := forge.NewFake()
 	// No PR registered, so it falls back to it.Issue(ref), which returns
 	// still-OPEN — must keep blocking.
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN"})
 
-	if BlockerReady(fc, fc, "99") {
-		t.Error("blockerReady: want false for open issue fallback, got true")
+	if (Readiness{}).Ready(fc, fc, "99") {
+		t.Error("Readiness.Ready: want false for open issue fallback, got true")
 	}
 }
 
-// --- BlockerStatus tests ---
+// --- Readiness.Status tests ---
 
-func TestBlockerStatus_ClosedAndFailed(t *testing.T) {
+func TestReadinessStatus_ClosedAndFailed(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
-	// #11: closed with no PR — BlockerReady's fallback treats it as ready,
-	// but it also carries the Failed label, which must never be satisfiable.
+	// #11: closed with no PR — Readiness.Ready's fallback treats it as
+	// ready, but it also carries the Failed label, which must never be
+	// satisfiable.
 	fc.SetIssue(forge.Issue{Number: "11", State: "CLOSED", Labels: []string{c.FailedLabel}})
 	edges := map[string][]string{"10": {"11"}}
 
-	ready, failed, unready := BlockerStatus(c, fc, fc, "10", edges)
+	ready, failed, unready := (Readiness{Edges: edges}).Status(c, fc, fc, "10")
 	if ready {
-		t.Error("BlockerStatus: want ready=false for closed+failed blocker, got true")
+		t.Error("Readiness.Status: want ready=false for closed+failed blocker, got true")
 	}
 	if !reflect.DeepEqual(failed, []string{"11"}) {
-		t.Errorf("BlockerStatus: want failed=[11], got %v", failed)
+		t.Errorf("Readiness.Status: want failed=[11], got %v", failed)
 	}
-	// #11 is closed, so BlockerReady's fallback (blocker.go) already calls it
-	// satisfied — it must stay out of unready even though it's also failed,
-	// or the console would redundantly render both BlockedBy and Reason for
-	// the same blocker (the #755 regression the BlockerStatus doc warns about).
+	// #11 is closed, so Readiness.Ready's fallback (blocker.go) already
+	// calls it satisfied — it must stay out of unready even though it's
+	// also failed, or the console would redundantly render both BlockedBy
+	// and Reason for the same blocker (the #755 regression Readiness.Status's
+	// doc warns about).
 	if len(unready) != 0 {
-		t.Errorf("BlockerStatus: want unready=[] for closed+failed blocker, got %v", unready)
+		t.Errorf("Readiness.Status: want unready=[] for closed+failed blocker, got %v", unready)
 	}
 }
 
-// TestBlockerStatus_OneIssueFetchPerBlocker guards against the double-fetch
-// #1098 found: unreadyBlockers' BlockerReady call and the FailedLabel loop
-// each independently called it.Issue(dep) for the same blocker. No PR is
-// registered here, so BlockerReady falls through to it.Issue — the path
-// where the duplicate always fired.
-func TestBlockerStatus_OneIssueFetchPerBlocker(t *testing.T) {
+// TestReadinessStatus_OneIssueFetchPerBlocker guards against the double-fetch
+// #1098 found: unreadyBlockers' Ready call and the FailedLabel loop each
+// independently called it.Issue(dep) for the same blocker. No PR is
+// registered here, so Ready falls through to it.Issue — the path where the
+// duplicate always fired.
+func TestReadinessStatus_OneIssueFetchPerBlocker(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
 	edges := map[string][]string{"10": {"11"}}
 
-	BlockerStatus(c, fc, fc, "10", edges)
+	(Readiness{Edges: edges}).Status(c, fc, fc, "10")
 
 	if len(fc.IssueCalls) != 1 {
 		t.Errorf("IssueCalls = %v, want exactly 1 (no duplicate fetch)", fc.IssueCalls)
 	}
 }
 
-// TestBlockerStatus_MergedPRStillChecksFailedLabel covers the fi == nil
+// TestReadinessStatus_MergedPRStillChecksFailedLabel covers the fi == nil
 // branch: a merged PR resolves readiness without blockerReady ever calling
 // it.Issue, so the FailedLabel loop's fetch is the only call, not a
 // duplicate — and it must still run so a failed-labeled blocker with a
 // stale merged PR can't slip past the failed check.
-func TestBlockerStatus_MergedPRStillChecksFailedLabel(t *testing.T) {
+func TestReadinessStatus_MergedPRStillChecksFailedLabel(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
 	fc.BranchPrefix = "agent/issue-"
@@ -321,26 +323,26 @@ func TestBlockerStatus_MergedPRStillChecksFailedLabel(t *testing.T) {
 	fc.SetPRState("https://github.com/owner/repo/pull/11", forge.PRMerged)
 	edges := map[string][]string{"10": {"11"}}
 
-	ready, failed, unready := BlockerStatus(c, fc, fc, "10", edges)
+	ready, failed, unready := (Readiness{Edges: edges}).Status(c, fc, fc, "10")
 
 	if ready {
-		t.Error("BlockerStatus: want ready=false for merged PR with Failed label, got true")
+		t.Error("Readiness.Status: want ready=false for merged PR with Failed label, got true")
 	}
 	if !reflect.DeepEqual(failed, []string{"11"}) {
-		t.Errorf("BlockerStatus: want failed=[11], got %v", failed)
+		t.Errorf("Readiness.Status: want failed=[11], got %v", failed)
 	}
 	if len(unready) != 0 {
-		t.Errorf("BlockerStatus: want unready=[] (merged PR is ready), got %v", unready)
+		t.Errorf("Readiness.Status: want unready=[] (merged PR is ready), got %v", unready)
 	}
 	if len(fc.IssueCalls) != 1 {
 		t.Errorf("IssueCalls = %v, want exactly 1 (merged-PR path fetches once for FailedLabel)", fc.IssueCalls)
 	}
 }
 
-// TestBlockerStatus_MultipleBlockersOneFetchEach extends the one-fetch
+// TestReadinessStatus_MultipleBlockersOneFetchEach extends the one-fetch
 // invariant across a mixed set of blockers (push-only-style fall-through and
 // merged-PR) so the dedup holds per-dep, not just for a single blocker.
-func TestBlockerStatus_MultipleBlockersOneFetchEach(t *testing.T) {
+func TestReadinessStatus_MultipleBlockersOneFetchEach(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
 	fc.BranchPrefix = "agent/issue-"
@@ -350,7 +352,7 @@ func TestBlockerStatus_MultipleBlockersOneFetchEach(t *testing.T) {
 	fc.SetPRState("https://github.com/owner/repo/pull/12", forge.PRMerged)
 	edges := map[string][]string{"10": {"11", "12"}}
 
-	BlockerStatus(c, fc, fc, "10", edges)
+	(Readiness{Edges: edges}).Status(c, fc, fc, "10")
 
 	if len(fc.IssueCalls) != 2 {
 		t.Errorf("IssueCalls = %v, want exactly 2 (one per blocker)", fc.IssueCalls)

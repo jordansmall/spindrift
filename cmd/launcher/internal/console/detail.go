@@ -1,8 +1,8 @@
 // Package console: detail.go carries the ticket detail modal's async
 // fetch — its body and its Blocked-by/Blocks lists — the seam through which
-// tea.go's openDetailModal reaches the forge.IssueTracker and waves.
-// BuildEdges (issue #1632). tea.go stays the thin key-routing adapter;
-// this file holds the actual data-resolution logic, mirroring
+// tea.go's openDetailModal reaches the forge.IssueTracker and
+// waves.NewReadiness (issue #1632). tea.go stays the thin key-routing
+// adapter; this file holds the actual data-resolution logic, mirroring
 // activity.go/transcript.go's own split from tea.go for the live-tail
 // sidebar.
 package console
@@ -19,15 +19,15 @@ import (
 
 // openDetailModalCmd loads number's body — a separate Issue fetch, since
 // ListOpenIssues never carries Body — plus its Blocked-by and Blocks lists,
-// both derived from the whole-backlog dependency edge graph (waves.
-// BuildEdges) rather than a fresh per-ticket DepsOf call: Blocks is the
-// graph's own reverse edges, and Blocked-by rides along in the same batch
-// call for free. edges/sources are the Model's already-retained graph; nil
-// means no session-scoped graph exists yet (never opened a detail modal
-// since startup, or "r" just invalidated it), so this builds it once here
-// and hands the built graph back on DetailModalLoadedMsg for Update to
-// retain — every later modal open within the same session reuses it without
-// a further BuildEdges sweep (issue #1632).
+// both derived from the whole-backlog dependency edge graph
+// (waves.NewReadiness) rather than a fresh per-ticket DepsOf call: Blocks is
+// the graph's own reverse edges, and Blocked-by rides along in the same
+// batch call for free. edges/sources are the Model's already-retained
+// graph; nil means no session-scoped graph exists yet (never opened a
+// detail modal since startup, or "r" just invalidated it), so this builds
+// it once here and hands the built graph back on DetailModalLoadedMsg for
+// Update to retain — every later modal open within the same session reuses
+// it without a further NewReadiness sweep (issue #1632).
 func openDetailModalCmd(tracker forge.IssueTracker, all []forge.Issue, edges map[string][]string, sources map[string]map[string]forge.DepSource, number string) tea.Cmd {
 	return func() tea.Msg {
 		issue, err := tracker.Issue(number)
@@ -40,7 +40,7 @@ func openDetailModalCmd(tracker forge.IssueTracker, all []forge.Issue, edges map
 			for i, iss := range all {
 				wavesIssues[i] = waves.Issue{Number: iss.Number, Title: iss.Title}
 			}
-			result, _ := waves.BuildEdges(tracker, wavesIssues)
+			result, _ := waves.NewReadiness(tracker, wavesIssues)
 			edges, sources = result.Edges, result.Sources
 		}
 		blockedBy := resolveBlockerRefs(tracker, all, edges[number], sources[number])
