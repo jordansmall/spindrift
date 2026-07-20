@@ -35,8 +35,8 @@ Render exactly one of three verdicts:
 
 # POST THE VERDICT
 
-Post exactly ONE comment on the issue (`gh issue comment ${ISSUE_NUMBER}
---body "..."`), structured in this order:
+${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_LOCAL_STEP}
+Structure the verdict in this order:
 
 1. **Verdict** — `recommend` / `reject` / `unclear`, plus a one-line rationale.
 2. **Context for a worker** — code pointers (file:line), related issues/PRs,
@@ -61,8 +61,10 @@ markdown formatting:
 SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale>
 
 This must be the literal final message — nothing after it, no prose summary.
-`landing` is the URL of the comment you just posted (`gh issue comment`
-prints it). `status` carries the verdict, not a work-style ready/blocked.
+For github, `landing` is the URL of the comment you just posted
+(`gh issue comment` prints it). For local, nothing was posted from in-box —
+use `landing=none`. `status` carries the verdict, not a work-style
+ready/blocked.
 
 If you cannot reach a verdict, or the comment cannot be posted, use `blocked`
 as the escape hatch instead — same raw plain text requirement:

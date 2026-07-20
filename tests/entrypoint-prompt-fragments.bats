@@ -119,6 +119,51 @@ setup() {
   ! grep -qF 'gh issue view' "$CLAUDE_PROMPT_FILE"
 }
 
+# issue #1692/ADR 0032: the local content-plane write step. A local
+# Dispatch's Box has no in-box tracker client, so the research verdict
+# travels as a SPINDRIFT_COMMENT block on stdout instead of a direct
+# gh issue comment, and the work blocked-note step is a no-op in-box
+# (settle posts the outcome note= host-side instead).
+@test "research verdict step: github tracker keeps gh issue comment unchanged" {
+  export DISPATCH_KIND="research"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "research verdict step: local tracker emits a SPINDRIFT_COMMENT block, never gh issue comment" {
+  export DISPATCH_KIND="research"
+  export ISSUE_TRACKER=local
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-local"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'SPINDRIFT_COMMENT_END' "$CLAUDE_PROMPT_FILE"
+  # Not the bare substring: the unconditional OUTCOME section still
+  # explains the github-side `gh issue comment` URL source for contrast.
+  # It's the invocation shape (issue number immediately after) that must
+  # be absent for local.
+  ! grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "issue blocked-comment step: github tracker keeps gh issue comment unchanged" {
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-github"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "issue blocked-comment step: local tracker never runs gh issue comment" {
+  export ISSUE_TRACKER=local
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-local"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -qF 'gh issue comment' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'the launcher posts the SPINDRIFT_OUTCOME' "$CLAUDE_PROMPT_FILE"
+}
+
 # A scout/reviewer-only template (no "filer" key) must not require
 # filer-prompt.md to exist -- the file read has to be gated on the template
 # actually carrying a filer entry, same as the FILE_ISSUES_STEP gate above.
