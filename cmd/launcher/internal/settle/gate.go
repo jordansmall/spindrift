@@ -56,6 +56,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	}
 
 	o := result.Outcome
+	s.recordLanding(num, o.Landing)
 	switch o.Status {
 	case "blocked":
 		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
@@ -99,5 +100,22 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 func (s *Settle) transitionState(num string, from, to forge.DispatchState) {
 	if err := s.it.TransitionState(num, from, to); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %d\n", num, to)
+	}
+}
+
+// recordLanding persists landing onto the tracker issue via the optional
+// LandingRecorder surface (ADR 0029) once a work outcome line is parsed, so
+// a later reconcile has a pointer to check without re-deriving it. A no-op
+// for a tracker that doesn't implement it (github, jira), or when landing is
+// empty — outcome.Parse never yields that today, but a blank write must
+// never clear an already-recorded ref (only cf's own SPINDRIFT_OUTCOME line
+// is meant to update it). Best-effort on a tracker that does implement it,
+// matching transitionState's log-but-don't-propagate contract.
+func (s *Settle) recordLanding(num, landing string) {
+	if s.landing == nil || landing == "" {
+		return
+	}
+	if err := s.landing.RecordLanding(num, landing); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not record landing: %v\n", num, err)
 	}
 }

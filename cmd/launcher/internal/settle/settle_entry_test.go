@@ -342,6 +342,88 @@ func TestSettle_GitForge_NoOutcome_DemotesToFailed(t *testing.T) {
 	}
 }
 
+// TestSettle_RecordsLanding_WhenTrackerImplementsIt verifies Settle calls
+// the optional LandingRecorder method with the parsed outcome's landing ref
+// once a work-kind outcome line is parsed, for a tracker that implements it
+// (ADR 0029) — exercised on the simplest "blocked" outcome path.
+func TestSettle_RecordsLanding_WhenTrackerImplementsIt(t *testing.T) {
+	const issNum = "42"
+	const prURL = "https://github.com/owner/repo/pull/99"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+	}
+
+	s := New(baseConfig(), fc, fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.RecordLandingCalls) != 1 {
+		t.Fatalf("want 1 RecordLanding call, got %d", len(fc.RecordLandingCalls))
+	}
+	call := fc.RecordLandingCalls[0]
+	if call.Num != issNum || call.Landing != prURL {
+		t.Errorf("unexpected call: %+v", call)
+	}
+}
+
+// TestSettle_RecordsLanding_OnReadyOutcome verifies recordLanding fires on
+// the "ready" outcome path too, not just "blocked" — it sits ahead of the
+// status switch, so every work outcome status records the landing ref.
+func TestSettle_RecordsLanding_OnReadyOutcome(t *testing.T) {
+	const issNum = "55"
+	const prURL = "https://github.com/owner/repo/pull/55"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+	}
+
+	s := New(baseConfig(), fc, fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.RecordLandingCalls) != 1 {
+		t.Fatalf("want 1 RecordLanding call, got %d", len(fc.RecordLandingCalls))
+	}
+	call := fc.RecordLandingCalls[0]
+	if call.Num != issNum || call.Landing != prURL {
+		t.Errorf("unexpected call: %+v", call)
+	}
+}
+
+// TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt verifies Settle
+// settles normally, without panicking, against a tracker that doesn't
+// implement LandingRecorder — matching the github/jira adapters' shape.
+func TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
+	const issNum = "42"
+	const prURL = "https://github.com/owner/repo/pull/99"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+	}
+
+	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.RecordLandingCalls) != 0 {
+		t.Errorf("want no RecordLanding calls against a tracker that doesn't implement it, got %+v", fc.RecordLandingCalls)
+	}
+}
+
 var errFake = fakeErr("fake error")
 
 type fakeErr string
