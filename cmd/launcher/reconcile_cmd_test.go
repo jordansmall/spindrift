@@ -33,6 +33,23 @@ func TestRunReconcile_ClosesMergedLandingIssue(t *testing.T) {
 	}
 }
 
+// TestRunReconcile_ReportsAbandonedIssue verifies runReconcile reports an
+// issue flagged abandoned (its landing PR closed without merging) in its
+// output, distinct from a closed issue (ADR 0029).
+func TestRunReconcile_ReportsAbandonedIssue(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
+	f.SetPRState("https://github.com/o/r/pull/1", forge.PRClosed)
+
+	var buf bytes.Buffer
+	if err := runReconcile(f, f, "local", &buf); err != nil {
+		t.Fatalf("runReconcile: %v", err)
+	}
+	if !strings.Contains(buf.String(), "abandoned") || !strings.Contains(buf.String(), "42") {
+		t.Errorf("want output to mention abandoned issue 42, got %q", buf.String())
+	}
+}
+
 // TestRunReconcile_NonLocalTrackerIsClearNoOp verifies runReconcile refuses
 // cleanly (a plain message, not an error) for github/jira, and never touches
 // the forge even when a merged landing PR exists to close against.

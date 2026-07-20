@@ -23,13 +23,21 @@ func runReconcile(it forge.IssueTracker, cf forge.CodeForge, issueTracker string
 		if len(res.Closed) > 0 {
 			fmt.Fprintf(w, "reconcile: closed %d issue(s) before error: %s\n", len(res.Closed), strings.Join(res.Closed, ", "))
 		}
+		if len(res.Abandoned) > 0 {
+			fmt.Fprintf(w, "reconcile: flagged %d issue(s) abandoned before error: %s\n", len(res.Abandoned), strings.Join(res.Abandoned, ", "))
+		}
 		return err
 	}
-	if len(res.Closed) == 0 {
+	if len(res.Closed) == 0 && len(res.Abandoned) == 0 {
 		fmt.Fprintln(w, "reconcile: no issues closed.")
 		return nil
 	}
-	fmt.Fprintf(w, "reconcile: closed %d issue(s): %s\n", len(res.Closed), strings.Join(res.Closed, ", "))
+	if len(res.Closed) > 0 {
+		fmt.Fprintf(w, "reconcile: closed %d issue(s): %s\n", len(res.Closed), strings.Join(res.Closed, ", "))
+	}
+	if len(res.Abandoned) > 0 {
+		fmt.Fprintf(w, "reconcile: flagged %d issue(s) abandoned: %s\n", len(res.Abandoned), strings.Join(res.Abandoned, ", "))
+	}
 	return nil
 }
 
