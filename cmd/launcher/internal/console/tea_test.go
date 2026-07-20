@@ -2184,7 +2184,7 @@ func TestTea_DetailModalKey_ScrollsBodyWithJAndArrows(t *testing.T) {
 }
 
 // TestTea_DetailModal_RetainsEdgeGraphAcrossTickets verifies the
-// whole-backlog dependency edge graph (waves.BuildEdges) is built at most
+// whole-backlog dependency edge graph (waves.NewReadiness) is built at most
 // once per session: opening a second ticket's detail modal reuses the graph
 // the first open already built, rather than re-walking DepsOf across the
 // backlog a second time — the "no new gh calls" half of the Blocks section's

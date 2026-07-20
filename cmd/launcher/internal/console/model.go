@@ -179,7 +179,7 @@ type Model struct {
 	// (issue #1632). nil means no graph has been built yet.
 	Edges map[string][]string
 	// EdgeSources is Edges' per-blocker DepSource (native vs body-parsed),
-	// keyed the same way waves.BuildEdges' own Sources return keys it.
+	// keyed the same way waves.NewReadiness' own Sources return keys it.
 	EdgeSources map[string]map[string]forge.DepSource
 }
 
