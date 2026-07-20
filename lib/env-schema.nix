@@ -333,10 +333,11 @@
     env = "CODE_FORGE";
     group = "Repository & identity";
     default = "github";
-    doc = "code-landing backend: github (open PR, watch CI, merge) or git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate)";
+    doc = "code-landing backend: github (open PR, watch CI, merge), git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate), or local (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network; ADR 0033)";
     choices = [
       "github"
       "git"
+      "local"
     ];
     flakeOption = true;
     boxEnv = true;
@@ -347,6 +348,20 @@
     doc = "plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise";
     flakeOption = true;
     boxEnv = true;
+  };
+  codeForgeAccumulationRepoDir = {
+    env = "CODE_FORGE_ACCUMULATION_REPO_DIR";
+    group = "Repository & identity";
+    doc = "host path to the bare Accumulation repo (ADR 0033), mounted read-only into the Box and landed into host-side; required when CODE_FORGE=local, unused otherwise";
+    flakeOption = true;
+    boxEnv = false;
+  };
+  codeForgeIntegrationParent = {
+    env = "CODE_FORGE_INTEGRATION_PARENT";
+    group = "Repository & identity";
+    doc = "the seam issue's parent/broad-ticket key (ADR 0033) — selects the Accumulation repo's integration/<parent> Integration branch this run's seam lands onto; required when CODE_FORGE=local, unused otherwise";
+    flakeOption = true;
+    boxEnv = false;
   };
   # ── Operator-tunable knobs (flakeOption = true; also tune via harness.env) ─
   maxFixAttempts = {

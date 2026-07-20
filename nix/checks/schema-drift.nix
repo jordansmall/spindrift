@@ -187,8 +187,9 @@ in
       schema.codeForge.choices or [ ] == [
         "github"
         "git"
+        "local"
       ]
-    ) "lib/env-schema.nix: codeForge.choices must be [ github git ]";
+    ) "lib/env-schema.nix: codeForge.choices must be [ github git local ]";
     assert assertMsg (
       schema.issueTracker.choices or [ ] == [
         "github"

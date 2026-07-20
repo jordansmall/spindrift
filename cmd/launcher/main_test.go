@@ -1061,6 +1061,36 @@ func TestValidateCodeForge_AcceptsKnown(t *testing.T) {
 	if err := validate(c); err != nil {
 		t.Errorf("validate() rejected valid CODE_FORGE=git config: %v", err)
 	}
+
+	c = minimalValidConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = ".spindrift/repo.git"
+	c.codeForgeIntegrationParent = "1694"
+	if err := validate(c); err != nil {
+		t.Errorf("validate() rejected valid CODE_FORGE=local config: %v", err)
+	}
+}
+
+// TestValidateCodeForge_Local_RequiresAccumulationRepoDirAndParent verifies
+// that validate() fails fast when CODE_FORGE=local but either of the two
+// values NewLocalCodeForge needs (the Accumulation repo path, and the
+// Integration branch's parent key, ADR 0033) is unset.
+func TestValidateCodeForge_Local_RequiresAccumulationRepoDirAndParent(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = ""
+	c.codeForgeIntegrationParent = "1694"
+	if err := validate(c); err == nil {
+		t.Fatal("validate() should require CODE_FORGE_ACCUMULATION_REPO_DIR when CODE_FORGE=local")
+	}
+
+	c = minimalValidConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = ".spindrift/repo.git"
+	c.codeForgeIntegrationParent = ""
+	if err := validate(c); err == nil {
+		t.Fatal("validate() should require CODE_FORGE_INTEGRATION_PARENT when CODE_FORGE=local")
+	}
 }
 
 // TestNewCodeForge_Git_ReturnsPushOnlyAdapter verifies that CODE_FORGE=git
@@ -1075,6 +1105,29 @@ func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
 
 	if _, ok := cf.(forge.PRForge); ok {
 		t.Error("newCodeForge(CODE_FORGE=git) satisfies PRForge, want the push-only git adapter to implement CodeForge only")
+	}
+}
+
+// TestNewCodeForge_Local_ReturnsBundleRelayAdapter verifies that
+// CODE_FORGE=local wires newCodeForge to an adapter that is push-only (no
+// PRForge) but does implement the BundleRelay/LandingRef hooks the local
+// landing path needs (ADR 0033) — neither the git nor the github adapter do.
+func TestNewCodeForge_Local_ReturnsBundleRelayAdapter(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "repo.git")
+	c.codeForgeIntegrationParent = "1694"
+
+	cf := newCodeForge(c)
+
+	if _, ok := cf.(forge.PRForge); ok {
+		t.Error("newCodeForge(CODE_FORGE=local) satisfies PRForge, want a push-only adapter")
+	}
+	if _, ok := cf.(forge.BundleRelay); !ok {
+		t.Error("newCodeForge(CODE_FORGE=local) does not satisfy forge.BundleRelay")
+	}
+	if _, ok := cf.(forge.LandingRef); !ok {
+		t.Error("newCodeForge(CODE_FORGE=local) does not satisfy forge.LandingRef")
 	}
 }
 

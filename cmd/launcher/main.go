@@ -173,6 +173,17 @@ type config struct {
 	// pushes to when codeForge is "git". Unused (and unrequired) otherwise.
 	codeForgeRemoteURL string
 
+	// codeForgeAccumulationRepoDir is the host path to the bare Accumulation
+	// repo (ADR 0033) newCodeForge lands seams into when codeForge is
+	// "local". Unused (and unrequired) otherwise.
+	codeForgeAccumulationRepoDir string
+
+	// codeForgeIntegrationParent is the local issue's parent/broad-ticket
+	// key this run's seam lands under (ADR 0033) — newCodeForge bakes it in
+	// as the Integration branch (integration/<parent>) when codeForge is
+	// "local". Unused (and unrequired) otherwise.
+	codeForgeIntegrationParent string
+
 	// dispatchKind is "work" (the default, zero value) or "research" (ADR
 	// 0022). Set once by bootstrap via applyDispatchKind, never read from
 	// the environment directly — it is operator intent carried by which
@@ -372,8 +383,10 @@ func loadConfig() config {
 		mergeMode:       getenvSchema("MERGE_MODE"),
 		mergeGuardPaths: getenvSchema("MERGE_GUARD_PATHS"),
 
-		codeForge:          getenvSchema("CODE_FORGE"),
-		codeForgeRemoteURL: getenvSchema("CODE_FORGE_REMOTE_URL"),
+		codeForge:                    getenvSchema("CODE_FORGE"),
+		codeForgeRemoteURL:           getenvSchema("CODE_FORGE_REMOTE_URL"),
+		codeForgeAccumulationRepoDir: getenvSchema("CODE_FORGE_ACCUMULATION_REPO_DIR"),
+		codeForgeIntegrationParent:   getenvSchema("CODE_FORGE_INTEGRATION_PARENT"),
 	}
 }
 
@@ -426,8 +439,15 @@ func validate(c config) error {
 		if c.codeForgeRemoteURL == "" {
 			return fmt.Errorf("set CODE_FORGE_REMOTE_URL (the plain git remote to clone from and push to) when CODE_FORGE=git")
 		}
+	case "local":
+		if c.codeForgeAccumulationRepoDir == "" {
+			return fmt.Errorf("set CODE_FORGE_ACCUMULATION_REPO_DIR (the bare Accumulation repo path) when CODE_FORGE=local")
+		}
+		if c.codeForgeIntegrationParent == "" {
+			return fmt.Errorf("set CODE_FORGE_INTEGRATION_PARENT (the seam's parent/broad-ticket key) when CODE_FORGE=local")
+		}
 	default:
-		return fmt.Errorf("CODE_FORGE=%q is not valid; must be github or git", c.codeForge)
+		return fmt.Errorf("CODE_FORGE=%q is not valid; must be github, git, or local", c.codeForge)
 	}
 	return nil
 }
@@ -486,13 +506,18 @@ func newIssueTracker(c config) forge.IssueTracker {
 }
 
 // newCodeForge returns the CodeForge adapter selected by CODE_FORGE: "github"
-// (open PR, watch CI, merge) or "git" (push-only to codeForgeRemoteURL; no
-// PR, CI-watch, or merge gate).
+// (open PR, watch CI, merge), "git" (push-only to codeForgeRemoteURL; no PR,
+// CI-watch, or merge gate), or "local" (host-mediated landing onto the
+// Accumulation repo's Integration branch; ADR 0033).
 func newCodeForge(c config) forge.CodeForge {
-	if c.codeForge == "git" {
+	switch c.codeForge {
+	case "git":
 		return git.NewGitClient(c.codeForgeRemoteURL, c.baseBranch, c.gitUserName, c.gitUserEmail, c.branchPrefix)
+	case "local":
+		return local.NewLocalCodeForge(c.codeForgeAccumulationRepoDir, c.baseBranch, c.codeForgeIntegrationParent, c.gitUserName, c.gitUserEmail, c.branchPrefix)
+	default:
+		return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
 	}
-	return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
 }
 
 // absLocalIssuesDir resolves the local tracker's issues dir to an absolute
@@ -541,6 +566,8 @@ func runnerConfig(c config) runner.Config {
 		DriverSessionCacheDir: c.driverSessionCacheDir,
 		IssueTracker:          c.issueTracker,
 		LocalIssuesDir:        absLocalIssuesDir(c.localIssuesDir),
+		CodeForge:             c.codeForge,
+		AccumulationRepoDir:   c.codeForgeAccumulationRepoDir,
 	}
 }
 
@@ -566,6 +593,7 @@ func dispatchConfig(c config, cf forge.CodeForge) dispatch.Config {
 		BoxEnvVars:            c.boxEnvVars,
 		ResolveEnv:            resolveBoxEnvVar,
 		Kind:                  c.dispatchKind,
+		CodeForge:             c.codeForge,
 		TransientRetryMax:     c.transientRetryMax,
 		TransientBackoffSecs:  c.transientBackoffSecs,
 		HoldJitterSecs:        c.holdJitterSecs,
@@ -590,7 +618,12 @@ func newDispatchFactory(c config, pwd string, r runner.Runner, cf forge.CodeForg
 	return f
 }
 
-// settleConfig builds the subset of config a settle.Settle needs.
+// settleConfig builds the subset of config a settle.Settle needs. OutboxDir
+// resolves an issue number to the same per-issue outbox path runOnce mounts
+// (dispatch.OutboxDirFor) — read via os.Getwd() rather than a threaded pwd
+// so every existing settleConfig/newSettle call site (test and production)
+// is unaffected; only a Code Forge implementing forge.BundleRelay (CODE_FORGE
+// =local) ever consults it.
 func settleConfig(c config) settle.Config {
 	return settle.Config{
 		MergeMode:          c.mergeMode,
@@ -601,6 +634,20 @@ func settleConfig(c config) settle.Config {
 		MaxFixAttempts:     c.maxFixAttempts,
 		MaxRebaseAttempts:  c.maxRebaseAttempts,
 		PreflightStaleBase: c.preflightStaleBase,
+		OutboxDir: func(num string) string {
+			pwd, err := os.Getwd()
+			if err != nil {
+				// Surprising (the process's own cwd went missing mid-run) and
+				// worth a loud diagnostic: the empty return still degrades
+				// safely (RelayBundle reports it as a missing bundle and the
+				// seam blocks, same as any other bundle-relay failure) rather
+				// than panicking, but silently swallowing a Getwd fault here
+				// would otherwise look identical to a genuinely missing bundle.
+				fmt.Fprintf(os.Stderr, "==> outbox dir: os.Getwd failed: %v\n", err)
+				return ""
+			}
+			return dispatch.OutboxDirFor(pwd, num)
+		},
 	}
 }
 
