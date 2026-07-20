@@ -12,8 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"spindrift.dev/launcher/internal/terminate"
 )
 
 // ErrOpenNoneDispatchable is returned by Run when ModeDrain selects zero
@@ -115,27 +113,22 @@ type Config struct {
 	// still apply unchanged.
 	IgnoreBlockers bool
 
+	// PreResolved states that the caller already resolved every candidate
+	// issue's blocker readiness through the Readiness query seam
+	// (CONTEXT.md's Readiness entry) before calling in — Console's
+	// Queue.Discover is the only caller today (#650) — so the engine's own
+	// blocker gate (drainMaxJobs, nextReady) is redundant here and skipped
+	// entirely. Replaces the pre-#1547 convention of a caller passing empty
+	// edges to the same effect, which worked only by coincidence (an
+	// empty/nil edges map reads as "no declared blockers", not "already
+	// checked") and was documented solely in a Queue.Discover comment.
+	PreResolved bool
+
 	// Verb is the CLI subcommand name a selective wave's rerun hint tells the
 	// operator to re-invoke (e.g. "spindrift research --yes <nums>" instead
 	// of "spindrift dispatch --yes <nums>"). Empty defaults to "dispatch",
 	// matching every pre-existing (kind-unaware) construction site.
 	Verb string
-
-	// Terminated is checked by RunContinuous's per-issue goroutine after a
-	// Box exits, so an issue the operator Terminated (ADR 0024, issue #649)
-	// while it was running is neither transitioned to Failed nor handed to
-	// Settle — Terminate already reclaimed it. Nil (every headless dispatch
-	// path) means "never terminated"; only the Console wires a Registry.
-	Terminated *terminate.Registry
-
-	// Limiter is the resizable concurrency bound RunContinuous acquires a
-	// slot from before claiming an issue (issue #653). Nil (every headless
-	// dispatch path) means "build one fresh from MaxParallel for this call
-	// and never resize it" — a fixed cap, matching pre-#653 behaviour. The
-	// Console builds one persistent Limiter per session and passes it here
-	// so a live "+"/"-" resize takes effect on the RunContinuous call
-	// already in flight, not just the next one.
-	Limiter *Limiter
 
 	// pollInterval overrides RunContinuous's background refill-poll cadence
 	// (issue #1637) — zero (every production construction site) means "use

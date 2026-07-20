@@ -910,7 +910,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return res.Applicable, res.Fresh, res.Message
 	}
 
-	if err := waves.RunContinuous(wavesConfig(c), it, cf, pwd, f, s, discover, fresh); err != nil {
+	if err := waves.RunContinuous(wavesConfig(c), nil, it, cf, pwd, f, s, discover, fresh); err != nil {
 		// refill swallows every discover error to stderr and retries on the
 		// next trigger (a transient-tracker-hiccup tolerance that's fine for
 		// refill 2+, but the first call has no next trigger to retry on once

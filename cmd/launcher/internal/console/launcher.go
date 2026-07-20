@@ -588,7 +588,7 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		// TestRunContinuous_ConsoleConfig_SkipsRedundantClaim and
 		// TestRunContinuous_DivergentLabels_DoubleClaims (launch_test.go)
 		// pin this: diverging Label from InProgressLabel double-claims.
-		err := waves.RunContinuous(waves.Config{Limiter: l.limiter(), Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.queueRef(), l.signalRefresh, l.registry()}, discover, l.freshnessChecker())
+		err := waves.RunContinuous(waves.Config{PreResolved: true}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, tracker, l.CodeForge, pwd, l.Factory, queueSettler{l.Settle, l.queueRef(), l.signalRefresh, l.registry()}, discover, l.freshnessChecker())
 
 		if errors.Is(err, waves.ErrImageStale) {
 			// RunContinuous's own "stale" flag is a one-shot latch for this
