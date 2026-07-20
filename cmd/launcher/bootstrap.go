@@ -101,3 +101,20 @@ func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 		cleanup:      f.Cleanup,
 	}, nil
 }
+
+// researchLaunchStack builds the research-kind tracker, dispatch factory,
+// and settle the Console wires in as its second launch stack alongside lc's
+// own work-kind stack (issue #1708, ADR 0022) — reusing the same
+// newIssueTracker/newDispatchFactory/newSettle helpers bootstrap's work-kind
+// construction goes through, just with dispatchKindResearch applied, rather
+// than a second bootstrap() call: lc's runner is already ready (EnsureReady
+// already ran), so a second readiness check and driver-cache watch goroutine
+// would be pure duplication. The returned Factory owns its own driver-cache
+// root; the caller must arrange its own Cleanup call, same as lc.factory's.
+func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Factory, settle.Settler) {
+	rc := applyDispatchKind(lc.config, dispatchKindResearch)
+	it := newIssueTracker(rc)
+	f := newDispatchFactory(rc, lc.pwd, lc.runner, lc.codeForge)
+	s := newSettle(rc, it, lc.codeForge)
+	return it, f, s
+}
