@@ -133,16 +133,24 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe) (Result, e
 }
 
 // isOrphaned reports whether num's InProgress issue shows the full
-// composite death signal: no PR of any state for its agent branch, a stale
-// Box log, and — only when the container runtime answered — no live
-// container. A PR of any state (not just open/merged) counts as evidence a
-// runner touched this branch, so a closed-unmerged PR withholds the reset
-// rather than silently re-dispatching what a human or CI already rejected;
-// flagging that case as abandoned is a separate reconcile concern.
+// composite death signal: no PR of any state for its agent branch, no
+// branch pushed for it either, a stale Box log, and — only when the
+// container runtime answered — no live container. A PR of any state (not
+// just open/merged) counts as evidence a runner touched this branch, so a
+// closed-unmerged PR withholds the reset rather than silently re-dispatching
+// what a human or CI already rejected; flagging that case as abandoned is a
+// separate reconcile concern. The bare branch check catches the narrower
+// die-after-push-before-PR window a PR-only check would miss.
 func isOrphaned(pr forge.PRForge, cf forge.CodeForge, lp LivenessProbe, num string) (bool, error) {
-	if _, found, err := pr.PRForBranch(cf.AgentBranch(num)); err != nil {
+	branch := cf.AgentBranch(num)
+	if _, found, err := pr.PRForBranch(branch); err != nil {
 		return false, err
 	} else if found {
+		return false, nil
+	}
+	if exists, err := cf.BranchExists(branch); err != nil {
+		return false, err
+	} else if exists {
 		return false, nil
 	}
 	if !lp.LogStale(num) {

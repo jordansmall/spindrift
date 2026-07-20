@@ -31,7 +31,7 @@ func (f *Factory) Kill(number string) error {
 }
 
 // OrphanedIssues returns the issue numbers of every sandbox the runner
-// currently reports running, parsed from the deterministic boxName scheme —
+// currently reports running, parsed from the deterministic BoxName scheme —
 // Console startup orphan detection (issue #651): a crash or dropped SSH
 // leaves these running with no live goroutine in a fresh process to account
 // for them. A name that doesn't match the scheme, or whose suffix isn't a
