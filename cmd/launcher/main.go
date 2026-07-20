@@ -832,17 +832,7 @@ func run(lc *launchContext) error {
 		return errQueueEmpty
 	}
 
-	// Build the dependency graph for the batch.
-	result, err := waves.NewReadiness(it, toWaveIssues(issues))
-	if err != nil {
-		return err
-	}
-
-	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: result.Edges, Sources: result.Sources, Failed: result.Failed})
-	if err != nil {
-		return err
-	}
-	if err := waves.Run(wavesConfig(c), it, cf, pwd, f, s, plan); err != nil {
+	if err := waves.Dispatch(wavesConfig(c), it, cf, pwd, f, s, origin, toWaveIssues(issues)); err != nil {
 		return err
 	}
 
