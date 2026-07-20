@@ -39,7 +39,12 @@ type bwrapAdapter struct {
 	// selected Driver declares no session-state dir, in which case
 	// box.DriverCacheDir is never bound regardless of its value.
 	driverSessionCacheDir string
-	unshareNet            bool // when true, adds --unshare-net (isolates from host netns)
+	// codeForge is the CODE_FORGE knob value; accumulationRepoDir is the host
+	// path to the bare Accumulation repo bound read-only at /repo when it is
+	// "local" (ADR 0033, issue #1697).
+	codeForge           string
+	accumulationRepoDir string
+	unshareNet          bool // when true, adds --unshare-net (isolates from host netns)
 
 	// mu guards running, the box-name -> live process map Kill (issue #649)
 	// consults — bwrap sandboxes are unnamed child processes with no
@@ -64,6 +69,8 @@ func NewBwrap(cfg Config) Runner {
 		skillsDir:             cfg.SkillsDir,
 		driverSkillsDir:       cfg.DriverSkillsDir,
 		driverSessionCacheDir: cfg.DriverSessionCacheDir,
+		codeForge:             cfg.CodeForge,
+		accumulationRepoDir:   cfg.AccumulationRepoDir,
 		unshareNet:            cfg.BwrapUnshareNet,
 	}
 }
@@ -84,6 +91,8 @@ func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
 		SkillsDir:             a.skillsDir,
 		DriverSkillsDir:       a.driverSkillsDir,
 		DriverSessionCacheDir: a.driverSessionCacheDir,
+		CodeForge:             a.codeForge,
+		AccumulationRepoDir:   a.accumulationRepoDir,
 	}, box)
 }
 
@@ -112,10 +121,10 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	// Mount decisions (gates, existence guards, operator messages) are
 	// computed once in buildMountSpecs, shared with the OCI adapter; bwrap
 	// only renders each spec into its own bind syntax. The driver-cache spec
-	// (issue #427) is the only writable mount buildMountSpecs ever produces,
-	// scoped to the Driver's declared session-cache dir rather than its
-	// parent so it can never shadow a sibling skills bind regardless of
-	// order.
+	// (issue #427), scoped to the Driver's declared session-cache dir rather
+	// than its parent so it can never shadow a sibling skills bind regardless
+	// of order, and the CODE_FORGE=local outbox spec (ADR 0033, issue #1697)
+	// are the only writable mounts buildMountSpecs ever produces.
 	for _, m := range a.mountSpecs(box) {
 		if m.Message != "" {
 			fmt.Print(m.Message)

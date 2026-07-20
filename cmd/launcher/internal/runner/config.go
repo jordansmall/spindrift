@@ -43,4 +43,10 @@ type Config struct {
 	// mounted regardless of Box.DriverCacheDir.
 	DriverSkillsDir       string
 	DriverSessionCacheDir string
+
+	// CodeForge is the CODE_FORGE knob value; AccumulationRepoDir is the host
+	// path to the bare Accumulation repo mounted read-only at /repo when it
+	// is "local" (ADR 0033, issue #1697).
+	CodeForge           string
+	AccumulationRepoDir string
 }

@@ -26,6 +26,13 @@ type MountParams struct {
 	SkillsDir             string
 	DriverSkillsDir       string
 	DriverSessionCacheDir string
+
+	// CodeForge is the CODE_FORGE knob value; the Accumulation-repo and
+	// outbox mounts below apply only when it is "local" (ADR 0033).
+	CodeForge string
+	// AccumulationRepoDir is the host path to the bare Accumulation repo
+	// (.spindrift/repo.git) mounted read-only at /repo under CODE_FORGE=local.
+	AccumulationRepoDir string
 }
 
 // candidateMount reports whether source should be mounted at target: both
@@ -60,6 +67,15 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 	if spec, ok := candidateMount(p.SkillsDir, p.DriverSkillsDir, true); ok {
 		spec.Message = fmt.Sprintf("==> SPINDRIFT_SKILLS_DIR set; mounting %s over %s\n", spec.Source, spec.Target)
 		specs = append(specs, spec)
+	}
+
+	if p.CodeForge == "local" {
+		if spec, ok := candidateMount(p.AccumulationRepoDir, "/repo", true); ok {
+			specs = append(specs, spec)
+		}
+		if spec, ok := candidateMount(box.OutboxDir, "/outbox", false); ok {
+			specs = append(specs, spec)
+		}
 	}
 
 	return specs

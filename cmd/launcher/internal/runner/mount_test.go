@@ -2,6 +2,7 @@ package runner
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -118,6 +119,97 @@ func TestBuildMountSpecs_SkillsDirUnset_NoMount(t *testing.T) {
 	}
 }
 
+// TestBuildMountSpecs_LocalCodeForge_AccumulationRepoMountedReadOnly verifies
+// that CODE_FORGE=local plus a present AccumulationRepoDir produces a
+// read-only /repo MountSpec (ADR 0033: the code-in mount keeps the operator's
+// Accumulation repo single-writer).
+func TestBuildMountSpecs_LocalCodeForge_AccumulationRepoMountedReadOnly(t *testing.T) {
+	dir := t.TempDir()
+	specs := buildMountSpecs(MountParams{CodeForge: "local", AccumulationRepoDir: dir}, Box{})
+
+	var found *MountSpec
+	for i := range specs {
+		if specs[i].Target == "/repo" {
+			found = &specs[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected a /repo spec in %+v", specs)
+	}
+	if found.Source != dir {
+		t.Errorf("Source = %q, want %q", found.Source, dir)
+	}
+	if !found.ReadOnly {
+		t.Errorf("accumulation-repo mount must be read-only")
+	}
+}
+
+// TestBuildMountSpecs_LocalCodeForge_OutboxMountedWritable verifies that
+// CODE_FORGE=local plus a present Box.OutboxDir produces a writable /outbox
+// MountSpec (ADR 0033: the Box emits its branch bundle through a throwaway
+// writable outbox since it cannot push to the read-only /repo mount).
+func TestBuildMountSpecs_LocalCodeForge_OutboxMountedWritable(t *testing.T) {
+	dir := t.TempDir()
+	specs := buildMountSpecs(MountParams{CodeForge: "local"}, Box{OutboxDir: dir})
+
+	var found *MountSpec
+	for i := range specs {
+		if specs[i].Target == "/outbox" {
+			found = &specs[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected an /outbox spec in %+v", specs)
+	}
+	if found.Source != dir {
+		t.Errorf("Source = %q, want %q", found.Source, dir)
+	}
+	if found.ReadOnly {
+		t.Errorf("outbox mount must be writable, not read-only")
+	}
+}
+
+// TestBuildMountSpecs_NonLocalCodeForge_NoAccumulationOrOutboxMount verifies
+// that a present AccumulationRepoDir/OutboxDir produce neither mount when
+// CodeForge is not "local" — the two mounts are local-only (ADR 0033).
+func TestBuildMountSpecs_NonLocalCodeForge_NoAccumulationOrOutboxMount(t *testing.T) {
+	repoDir, outboxDir := t.TempDir(), t.TempDir()
+	for _, cf := range []string{"github", "git", ""} {
+		specs := buildMountSpecs(MountParams{CodeForge: cf, AccumulationRepoDir: repoDir}, Box{OutboxDir: outboxDir})
+		for _, s := range specs {
+			if s.Target == "/repo" || s.Target == "/outbox" {
+				t.Errorf("CodeForge=%q: unexpected spec %+v", cf, s)
+			}
+		}
+	}
+}
+
+// TestBuildMountSpecs_LocalCodeForge_AbsentAccumulationRepoDir_NoMount
+// verifies that an unset/nonexistent AccumulationRepoDir yields no /repo
+// spec even under CODE_FORGE=local — both local mounts stay gated on
+// candidateMount, not just the CodeForge check.
+func TestBuildMountSpecs_LocalCodeForge_AbsentAccumulationRepoDir_NoMount(t *testing.T) {
+	specs := buildMountSpecs(MountParams{CodeForge: "local"}, Box{})
+
+	for _, s := range specs {
+		if s.Target == "/repo" {
+			t.Errorf("unexpected /repo spec when AccumulationRepoDir is unset: %+v", specs)
+		}
+	}
+}
+
+// TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount verifies that an
+// unset Box.OutboxDir yields no /outbox spec even under CODE_FORGE=local.
+func TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount(t *testing.T) {
+	specs := buildMountSpecs(MountParams{CodeForge: "local"}, Box{})
+
+	for _, s := range specs {
+		if s.Target == "/outbox" {
+			t.Errorf("unexpected /outbox spec when OutboxDir is unset: %+v", specs)
+		}
+	}
+}
+
 // TestAdaptersRenderOnly_NoDuplicatedMountDecisions is the issue's grep pin:
 // the prompt-dir/skills-dir mount gates and their operator messages must
 // live only in buildMountSpecs, not be duplicated in either adapter file.
@@ -184,5 +276,79 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 		if !strings.Contains(bwrapArgs, mount.source+" "+mount.target) {
 			t.Errorf("bwrap missing mount %s -> %s in args: %s", mount.source, mount.target, bwrapArgs)
 		}
+	}
+}
+
+// TestLocalCodeForgeMounts_RenderedIdenticallyAcrossBackends verifies the
+// Accumulation-repo (read-only) and outbox (writable) mounts reach both
+// backends the same way the other mounts do (ADR 0033, issue #1697): OCI
+// renders /repo with :ro and /outbox without it; bwrap renders /repo with
+// --ro-bind and /outbox with --bind.
+func TestLocalCodeForgeMounts_RenderedIdenticallyAcrossBackends(t *testing.T) {
+	repoDir := t.TempDir()
+	outboxDir := t.TempDir()
+
+	oci := &ociAdapter{
+		cli:                 "podman",
+		image:               "spindrift:test",
+		codeForge:           "local",
+		accumulationRepoDir: repoDir,
+	}
+	bwrap := &bwrapAdapter{
+		agentFiles:          t.TempDir(),
+		agentEnv:            "/fake/env",
+		bakedPrefetch:       "echo ok",
+		codeForge:           "local",
+		accumulationRepoDir: repoDir,
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
+
+	ociArgSlice := oci.buildRunArgs(box)
+	ociArgs := strings.Join(ociArgSlice, " ")
+	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+
+	if !slices.Contains(ociArgSlice, repoDir+":/repo:ro") {
+		t.Errorf("OCI missing read-only /repo mount in args: %s", ociArgs)
+	}
+	if !slices.Contains(ociArgSlice, outboxDir+":/outbox") {
+		t.Errorf("OCI missing writable /outbox mount in args: %s", ociArgs)
+	}
+	if !strings.Contains(bwrapArgs, "--ro-bind "+repoDir+" /repo") {
+		t.Errorf("bwrap missing read-only /repo mount in args: %s", bwrapArgs)
+	}
+	if !strings.Contains(bwrapArgs, "--bind "+outboxDir+" /outbox") {
+		t.Errorf("bwrap missing writable /outbox mount in args: %s", bwrapArgs)
+	}
+}
+
+// TestLocalCodeForgeMounts_AbsentOnNonLocalBackends verifies that neither
+// backend renders the /repo or /outbox mount when CodeForge is not "local",
+// even though both host dirs are present — the render layer must not leak
+// the local-only mounts through either adapter's own path.
+func TestLocalCodeForgeMounts_AbsentOnNonLocalBackends(t *testing.T) {
+	repoDir := t.TempDir()
+	outboxDir := t.TempDir()
+
+	oci := &ociAdapter{
+		cli:                 "podman",
+		image:               "spindrift:test",
+		accumulationRepoDir: repoDir,
+	}
+	bwrap := &bwrapAdapter{
+		agentFiles:          t.TempDir(),
+		agentEnv:            "/fake/env",
+		bakedPrefetch:       "echo ok",
+		accumulationRepoDir: repoDir,
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
+
+	ociArgSlice := oci.buildRunArgs(box)
+	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+
+	if slices.Contains(ociArgSlice, repoDir+":/repo:ro") || slices.Contains(ociArgSlice, outboxDir+":/outbox") {
+		t.Errorf("OCI must not mount /repo or /outbox with CodeForge unset: %s", strings.Join(ociArgSlice, " "))
+	}
+	if strings.Contains(bwrapArgs, "--ro-bind "+repoDir+" /repo") || strings.Contains(bwrapArgs, "--bind "+outboxDir+" /outbox") {
+		t.Errorf("bwrap must not mount /repo or /outbox with CodeForge unset: %s", bwrapArgs)
 	}
 }

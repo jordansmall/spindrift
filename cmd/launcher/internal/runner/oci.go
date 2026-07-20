@@ -30,9 +30,14 @@ type ociAdapter struct {
 	// selected Driver declares no session-state dir, in which case
 	// box.DriverCacheDir is never mounted regardless of its value.
 	driverSessionCacheDir string
-	podmanNetwork         string // optional --network value; empty omits the flag
-	pidsLimit             string // --pids-limit value; empty disables the flag
-	memoryLimit           string // --memory value; empty disables the flag
+	// codeForge is the CODE_FORGE knob value; accumulationRepoDir is the host
+	// path to the bare Accumulation repo bound read-only at /repo when it is
+	// "local" (ADR 0033, issue #1697).
+	codeForge           string
+	accumulationRepoDir string
+	podmanNetwork       string // optional --network value; empty omits the flag
+	pidsLimit           string // --pids-limit value; empty disables the flag
+	memoryLimit         string // --memory value; empty disables the flag
 }
 
 // runtimeCLI maps a Config.Runtime value to the CLI binary it invokes.
@@ -65,6 +70,8 @@ func NewOCI(cfg Config, pwd string) Runner {
 		skillsDir:             cfg.SkillsDir,
 		driverSkillsDir:       cfg.DriverSkillsDir,
 		driverSessionCacheDir: cfg.DriverSessionCacheDir,
+		codeForge:             cfg.CodeForge,
+		accumulationRepoDir:   cfg.AccumulationRepoDir,
 		podmanNetwork:         cfg.PodmanNetwork,
 		pidsLimit:             cfg.PidsLimit,
 		memoryLimit:           cfg.MemoryLimit,
@@ -241,6 +248,8 @@ func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
 		SkillsDir:             a.skillsDir,
 		DriverSkillsDir:       a.driverSkillsDir,
 		DriverSessionCacheDir: a.driverSessionCacheDir,
+		CodeForge:             a.codeForge,
+		AccumulationRepoDir:   a.accumulationRepoDir,
 	}, box)
 }
 
