@@ -203,6 +203,12 @@ type Fake struct {
 	CloseIssueCalls []string
 	// CloseIssueErr, if non-nil, is returned by every CloseIssue call.
 	CloseIssueErr error
+
+	// FlagAbandonedCalls records the issue number argument of every
+	// FlagAbandoned invocation in order.
+	FlagAbandonedCalls []string
+	// FlagAbandonedErr, if non-nil, is returned by every FlagAbandoned call.
+	FlagAbandonedErr error
 }
 
 // NewFake returns an empty Fake client. labels configures the
@@ -708,6 +714,27 @@ func (f *Fake) CloseIssue(num string) error {
 }
 
 var _ IssueCloser = (*Fake)(nil)
+
+// FlagAbandoned implements the optional AbandonedFlagger surface (ADR 0029),
+// setting the issue's Abandoned field and recording the call for tests to
+// assert against.
+func (f *Fake) FlagAbandoned(num string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.FlagAbandonedCalls = append(f.FlagAbandonedCalls, num)
+	if f.FlagAbandonedErr != nil {
+		return f.FlagAbandonedErr
+	}
+	iss, ok := f.issues[num]
+	if !ok {
+		return fmt.Errorf("issue %s not found", num)
+	}
+	iss.Abandoned = true
+	f.issues[num] = iss
+	return nil
+}
+
+var _ AbandonedFlagger = (*Fake)(nil)
 
 // noLandingIssueTracker adapts a Fake to expose only the core IssueTracker
 // surface, hiding both its RecordLanding and CloseIssue methods so a type

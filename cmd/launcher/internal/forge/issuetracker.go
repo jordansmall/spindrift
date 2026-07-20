@@ -137,3 +137,16 @@ type IssueCloser interface {
 	// Reconcile is its sole caller.
 	CloseIssue(num string) error
 }
+
+// AbandonedFlagger is the optional IssueTracker surface for adapters with a
+// native abandoned axis reconcile can flip (ADR 0029). Only the local adapter
+// implements it — a github/jira PR closed without merging needs no further
+// local tracking. Callers discover it with a type assertion — `af, ok :=
+// it.(AbandonedFlagger)` — the same optional-interface pattern IssueCloser
+// and LandingRecorder use.
+type AbandonedFlagger interface {
+	// FlagAbandoned marks issue num abandoned (the local abandoned: axis,
+	// ADR 0029) — set when the issue's landing PR was closed without
+	// merging. Reconcile is its sole caller.
+	FlagAbandoned(num string) error
+}
