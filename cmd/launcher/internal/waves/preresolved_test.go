@@ -69,3 +69,58 @@ func TestNextReady_PreResolved_ReturnsIssueDespiteUnmetBlocker(t *testing.T) {
 		t.Errorf("nextReady issue: got #%s, want #1", iss.Number)
 	}
 }
+
+// TestDrainMaxJobs_PreResolved_DispatchesDespiteDepsOfFailed verifies that
+// Config.PreResolved also skips the depsOfFailed hold path, not just the
+// blocker-status check: a caller vouching readiness was already resolved
+// means a stale/absent depsOfFailed entry from a prior sweep must not hold
+// the issue either.
+func TestDrainMaxJobs_PreResolved_DispatchesDespiteDepsOfFailed(t *testing.T) {
+	c := baseConfig()
+	c.MaxParallel = 1
+	c.PreResolved = true
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+
+	fr := runner.NewFake()
+	depsOfFailed := map[string]bool{"1": true}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+		{Number: "1", Title: "pre-resolved issue"},
+	}, nil, nil, depsOfFailed, OriginDiscovered); err != nil {
+		t.Fatalf("drainMaxJobs: %v", err)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1 (PreResolved must skip the depsOfFailed hold)", len(fr.RunCalls))
+	}
+}
+
+// TestNextReady_PreResolved_ReturnsIssueDespiteDepsOfFailed is
+// TestDrainMaxJobs_PreResolved_DispatchesDespiteDepsOfFailed's counterpart on
+// the continuous-refill selection path.
+func TestNextReady_PreResolved_ReturnsIssueDespiteDepsOfFailed(t *testing.T) {
+	c := baseConfig()
+	c.PreResolved = true
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+
+	depsOfFailed := map[string]bool{"1": true}
+	checkOverlap := func(string) (string, bool) { return "", false }
+
+	iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
+		{Number: "1", Title: "pre-resolved issue"},
+	}, nil, nil, depsOfFailed, nil)
+
+	if !ok {
+		t.Fatalf("nextReady: got ok=false, want ok=true (PreResolved must skip the depsOfFailed hold)")
+	}
+	if iss.Number != "1" {
+		t.Errorf("nextReady issue: got #%s, want #1", iss.Number)
+	}
+}
