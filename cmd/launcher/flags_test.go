@@ -306,7 +306,8 @@ func TestPrintSubcommands_ExactOutput(t *testing.T) {
 		"  preview [issue...]                        dry-run: show what dispatch would pick up, in order\n" +
 		"  build                                     realize the agent image without running any agent\n" +
 		"  recover <issue>                           run the merge gate for a single issue\n" +
-		"  doctor                                    check forge credentials, repository connectivity, and label presence (triage fatal, research advisory)\n"
+		"  doctor                                    check forge credentials, repository connectivity, and label presence (triage fatal, research advisory)\n" +
+		"  reconcile                                 local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)\n"
 
 	var buf bytes.Buffer
 	printSubcommands(&buf)
