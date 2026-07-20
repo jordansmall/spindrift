@@ -31,9 +31,11 @@ type Launcher struct {
 	// agent-research label family (forge.ResearchDispatchLabels) a plain
 	// TransitionState call can't select per-call. Nil (every pre-#1708
 	// construction site, and any test not exercising research) means no
-	// research stack is wired: a KindResearch pick then falls back to the
-	// caller-supplied work tracker in Pick, and drain's stacks() only ever
-	// yields the work stack.
+	// research stack is wired: a KindResearch pick's promotion (Pick) then
+	// falls back to the caller-supplied work tracker, but drain's stacks()
+	// yields only the work stack, so the pick is never claimed — it sits at
+	// PickQueued rather than launching, since there is truly nowhere for it
+	// to go.
 	ResearchTracker forge.IssueTracker
 	ResearchFactory *dispatch.Factory
 	ResearchSettle  settle.Settler
@@ -575,6 +577,13 @@ type launchStack struct {
 	tracker forge.IssueTracker
 	factory *dispatch.Factory
 	settle  settle.Settler
+	// failedLabel is the tracker label that marks a blocker issue Failed,
+	// resolved per stack: the work stack uses the operator-configured
+	// l.FailedLabel, the research stack the fixed agent-research-failed
+	// label (forge.ResearchDispatchLabels) — the two families' Failed
+	// labels differ, so a research pick's blocker check must never consult
+	// the work one.
+	failedLabel string
 }
 
 // stacks returns the launch stacks drain services this call, in order: the
@@ -584,9 +593,9 @@ type launchStack struct {
 // research) yields just the work stack, so drain's behaviour is unchanged
 // when no research stack exists.
 func (l *Launcher) stacks(tracker forge.IssueTracker) []launchStack {
-	stacks := []launchStack{{kind: KindWork, tracker: tracker, factory: l.Factory, settle: l.Settle}}
+	stacks := []launchStack{{kind: KindWork, tracker: tracker, factory: l.Factory, settle: l.Settle, failedLabel: l.FailedLabel}}
 	if l.ResearchFactory != nil && l.ResearchTracker != nil {
-		stacks = append(stacks, launchStack{kind: KindResearch, tracker: l.ResearchTracker, factory: l.ResearchFactory, settle: l.ResearchSettle})
+		stacks = append(stacks, launchStack{kind: KindResearch, tracker: l.ResearchTracker, factory: l.ResearchFactory, settle: l.ResearchSettle, failedLabel: forge.ResearchDispatchLabels().Failed})
 	}
 	return stacks
 }
@@ -606,8 +615,13 @@ func (l *Launcher) stacks(tracker forge.IssueTracker) []launchStack {
 // need the same rebuild.
 func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 	defer l.wg.Done()
+	stacks := l.stacks(tracker)
+	kinds := make([]Kind, len(stacks))
+	for i, st := range stacks {
+		kinds[i] = st.kind
+	}
 	for {
-		for _, st := range l.stacks(tracker) {
+		for _, st := range stacks {
 			if l.runStack(st, pwd) {
 				return
 			}
@@ -615,7 +629,14 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 
 		q := l.queueRef()
 		l.mu.Lock()
-		if !q.hasQueued() {
+		// Scoped to kinds, not "any pick queued": a pick whose kind has no
+		// wired stack (e.g. a KindResearch pick with no research stack) is
+		// never claimed by the loop above and never will be, so treating it
+		// as "more work to do" here would spin drain forever without ever
+		// making progress (issue #1708) — it is left stranded at PickQueued
+		// instead, same as any other unserviceable state this Launcher
+		// can't act on.
+		if !q.hasQueuedForKinds(kinds) {
 			l.launching = false
 			l.mu.Unlock()
 			return
@@ -632,7 +653,7 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 func (l *Launcher) runStack(st launchStack, pwd string) bool {
 	discover := func() ([]waves.Issue, map[string][]string, waves.Sources, map[string]bool, error) {
 		defer l.signalRefresh() // a claim attempt is always a tracker write, win or lose
-		issues, edges, sources, err := l.queueRef().Discover(st.tracker, l.CodeForge, l.FailedLabel, st.kind)
+		issues, edges, sources, err := l.queueRef().Discover(st.tracker, l.CodeForge, st.failedLabel, st.kind)
 		// A successful claim here is a fresh Dispatch starting for issues,
 		// so any earlier Terminate mark for these numbers must not carry
 		// over — otherwise a re-pick's own settle would abandon on its very
