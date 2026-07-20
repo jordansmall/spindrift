@@ -24,6 +24,8 @@ set_box_env() {
   export GIT_USER_EMAIL="bot@example.com"
   export GIT_USER_NAME="Test Bot"
   export IN_PROGRESS_LABEL="agent-in-progress"
+  export ISSUE_TRACKER="github"
+  export LOCAL_ISSUE_REFERENCE=""
   export MODEL="claude-sonnet-5"
   export REPO_SLUG="owner/repo"
   export REVIEW_MODEL="claude-opus-4-8"

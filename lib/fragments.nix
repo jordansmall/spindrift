@@ -73,4 +73,30 @@
     var = "CI_FAILURE_STEP";
     extraSubstVars = [ "CI_FAILURE_SUMMARY" ];
   }
+  # The PR-body ticket-reference step (issue #1429, ADR 0029): exactly one of
+  # these three gates is ever on (agent/entrypoint.sh's phase_prompt_assembly
+  # precompute block derives them from ISSUE_TRACKER x LOCAL_ISSUE_REFERENCE),
+  # so issue-prompt.md concatenates all three vars and only the active one
+  # ever renders -- the same conditional-residue mechanism every other row
+  # shares, just with three mutually exclusive gates instead of one on/off
+  # knob. github (and jira, which shares the same branch -- its issue key
+  # isn't a bare number GitHub's auto-close syntax would match, so it carries
+  # no footgun) stays unconditional `Closes #${ISSUE_NUMBER}`; local defaults
+  # to no reference at all; local's opt-in emits a non-auto-closing
+  # `Local-issue: <slug>` breadcrumb, never a `Closes`/`Fixes` keyword.
+  {
+    gate = "PR_BODY_CLOSES";
+    fragment = "pr-body-closes.md";
+    var = "PR_BODY_CLOSES_STEP";
+  }
+  {
+    gate = "PR_BODY_LOCAL_REF";
+    fragment = "pr-body-local-ref.md";
+    var = "PR_BODY_LOCAL_REF_STEP";
+  }
+  {
+    gate = "PR_BODY_LOCAL_NOREF";
+    fragment = "pr-body-local-noref.md";
+    var = "PR_BODY_LOCAL_NOREF_STEP";
+  }
 ]

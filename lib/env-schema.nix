@@ -53,7 +53,12 @@
       "jira"
     ];
     flakeOption = true;
-    boxEnv = false;
+    # Forwarded into the Box (issue #1429): the issue prompt's PR-body
+    # reference step (lib/fragments.nix PR_BODY_CLOSES/PR_BODY_LOCAL_REF/
+    # PR_BODY_LOCAL_NOREF gates) needs to know the tracker in-box to pick the
+    # right case; still read directly by the launcher too (main.go), so no
+    # boxEnvOnly here.
+    boxEnv = true;
   };
   localIssuesDir = {
     env = "LOCAL_ISSUES_DIR";
@@ -62,6 +67,15 @@
     doc = "directory scanned for issue files when ISSUE_TRACKER=local; keep it git-ignored so breakout issues stay private";
     flakeOption = true;
     boxEnv = false;
+  };
+  localIssueReference = {
+    env = "LOCAL_ISSUE_REFERENCE";
+    group = "Issue discovery";
+    default = false;
+    doc = "when non-empty and ISSUE_TRACKER=local, the PR body includes a non-auto-closing `Local-issue: <slug>` breadcrumb; default off keeps the private local ticket slug out of the PR body entirely (ISSUE_TRACKER=github is unaffected -- `Closes #ISSUE_NUMBER` stays either way)";
+    flakeOption = true;
+    boxEnv = true;
+    boxEnvOnly = true;
   };
   baseBranch = {
     env = "BASE_BRANCH";

@@ -20,6 +20,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `settings.issueDiscovery.issueTracker` | `ISSUE_TRACKER` | `github` | IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), or jira (see JIRA_BASE_URL/JIRA_PROJECT_KEY/JIRA_TOKEN); the Code Forge (PR/CI/merge) stays github regardless |
 | `settings.issueDiscovery.jiraIncludeComments` | `JIRA_INCLUDE_COMMENTS` | — | when non-empty, the Jira adapter appends the issue's comment thread to the description it returns; empty (default) keeps the prompt-injection surface tight |
 | `settings.issueDiscovery.label` | `LABEL` | `ready-for-agent` | issues carrying this label are dispatchable (the launch button) |
+| `settings.issueDiscovery.localIssueReference` | `LOCAL_ISSUE_REFERENCE` | `` | when non-empty and ISSUE_TRACKER=local, the PR body includes a non-auto-closing `Local-issue: <slug>` breadcrumb; default off keeps the private local ticket slug out of the PR body entirely (ISSUE_TRACKER=github is unaffected -- `Closes #ISSUE_NUMBER` stays either way) |
 | `settings.issueDiscovery.localIssuesDir` | `LOCAL_ISSUES_DIR` | `.spindrift/issues` | directory scanned for issue files when ISSUE_TRACKER=local; keep it git-ignored so breakout issues stay private |
 
 ## Lifecycle labels (`settings.lifecycleLabels`)

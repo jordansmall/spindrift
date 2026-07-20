@@ -417,6 +417,35 @@ phase_prompt_assembly() {
     FILER_ENABLED=1
   fi
 
+  # The PR-body ticket-reference gates the pr-body-closes/pr-body-local-ref/
+  # pr-body-local-noref registry rows name (issue #1429, ADR 0029): exactly
+  # one is ever on, picked from ISSUE_TRACKER x LOCAL_ISSUE_REFERENCE (both
+  # launcher-delivered knobs) rather than a single knob's presence, since no
+  # one knob alone selects among three cases. github always keeps the
+  # unconditional `Closes #ISSUE_NUMBER`; local's default is no reference to
+  # the (private, possibly numeric-slugged) ticket at all, closing the
+  # Closes-#<slug> auto-close footgun; local's opt-in swaps in a non-auto-
+  # closing `Local-issue: <slug>` breadcrumb instead. jira falls into the
+  # same `else` branch as github here -- issue #1429's footgun is
+  # local-only (a jira key isn't a bare number GitHub's auto-close syntax
+  # would match), so jira's `Closes #ISSUE_NUMBER` stays exactly as it was
+  # pre-#1429, unconditional and out of this issue's scope.
+  local PR_BODY_CLOSES=""
+  local PR_BODY_LOCAL_REF=""
+  local PR_BODY_LOCAL_NOREF=""
+  if [ "${ISSUE_TRACKER:-github}" = "local" ]; then
+    if [ -n "${LOCAL_ISSUE_REFERENCE:-}" ]; then
+      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+      PR_BODY_LOCAL_REF=1
+    else
+      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+      PR_BODY_LOCAL_NOREF=1
+    fi
+  else
+    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+    PR_BODY_CLOSES=1
+  fi
+
   # One loop over the Conditional fragment registry (lib/fragments.nix, issue
   # #622), rendered into _FRAGMENT_ROWS by lib/mkHarness.nix's
   # fragmentRegistryPreamble: each row's gate variable (a knob env var for

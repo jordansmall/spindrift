@@ -501,4 +501,42 @@ in
         grep -q -- '--label agent-research-reject --state closed' ${../../templates/default/prompts/filer-prompt.md}
         touch $out
       '';
+
+  # The PR-body ticket-reference toggle (issue #1429, ADR 0029): the three
+  # PR_BODY_CLOSES/PR_BODY_LOCAL_REF/PR_BODY_LOCAL_NOREF fragment files are
+  # each unconditional prose for their one case (agent/entrypoint.sh's
+  # precompute block picks exactly one gate per run, never a nix-time
+  # rendering choice), so a static grep on the fragment file source -- the
+  # same eval-only, no-image-build shape as filer-prompt-dedup-* above --
+  # pins each case's contract without needing a live container run:
+  #   github (unchanged):  `Closes #${ISSUE_NUMBER}` stays, byte-identical to
+  #                         the pre-#1429 unconditional instruction.
+  #   local, toggle off:   no reference to the ticket at all, and neither
+  #                         auto-close keyword.
+  #   local, toggle on:    a `Local-issue: <slug>` breadcrumb, and neither
+  #                         auto-close keyword -- the footgun fix.
+  # The runtime wiring that picks the right gate from ISSUE_TRACKER x
+  # LOCAL_ISSUE_REFERENCE is covered by tests/entrypoint-prompt-fragments.bats,
+  # not here -- that needs a live entrypoint.sh run, out of scope for an
+  # eval-only checks-inbox check.
+  pr-body-reference-github-unchanged = pkgs.runCommand "pr-body-reference-github-unchanged" { } ''
+    grep -qF 'Closes #''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments/pr-body-closes.md}
+    touch $out
+  '';
+
+  pr-body-reference-local-off-has-no-reference =
+    pkgs.runCommand "pr-body-reference-local-off-has-no-reference" { }
+      ''
+        ! grep -qi 'closes\|fixes\|local-issue\|''${ISSUE_NUMBER}' \
+          ${../../templates/default/prompts/fragments/pr-body-local-noref.md}
+        touch $out
+      '';
+
+  pr-body-reference-local-on-has-breadcrumb-not-closing-keyword =
+    pkgs.runCommand "pr-body-reference-local-on-has-breadcrumb-not-closing-keyword" { }
+      ''
+        grep -qF 'Local-issue: ''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments/pr-body-local-ref.md}
+        ! grep -qi 'closes\|fixes' ${../../templates/default/prompts/fragments/pr-body-local-ref.md}
+        touch $out
+      '';
 }
