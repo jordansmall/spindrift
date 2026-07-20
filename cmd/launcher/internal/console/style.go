@@ -72,6 +72,17 @@ const (
 	glyphNotice     = "ℹ"
 )
 
+// researchMarker tags a research-kind pick's row in the work Sections
+// (renderWorkSection) — the visible distinction issue #1710 asks for between
+// a research pick and a work pick, which carries no marker at all. Left
+// unstyled, like the rest of a row's extras (held-by badge, reason,
+// heartbeat): renderWorkSection measures and clips extras as one plain
+// string (the same clip-before-style discipline renderSectionTabs documents)
+// before any styling would apply, so a Role-styled marker mixed into it
+// would have its ANSI escape bytes miscounted as display columns on a color
+// terminal.
+const researchMarker = "[research]"
+
 // renderers caches one lipgloss.Renderer per termenv.Profile, so a header
 // with several styled segments (the status line alone styles five) doesn't
 // allocate and re-detect a renderer per segment per frame. Keyed by profile

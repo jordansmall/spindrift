@@ -1468,6 +1468,39 @@ func TestView_Section_RowsShowAge(t *testing.T) {
 	}
 }
 
+// TestView_ResearchPick_ShowsMarker verifies a research-kind pick's row
+// carries a marker distinct from a work pick's row, driven off Pick.Kind
+// (issue #1710) — the console needs a way to tell an operator, at a glance,
+// which queued/in-flight picks are research-only versus real work.
+func TestView_ResearchPick_ShowsMarker(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "1", Title: "research one", Kind: KindResearch, State: PickQueued},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+
+	out := View(m)
+	if !strings.Contains(out, researchMarker) {
+		t.Errorf("View() = %q, want the research pick's row to carry %q", out, researchMarker)
+	}
+}
+
+// TestView_WorkPick_HasNoResearchMarker verifies a work-kind pick's row
+// stays free of the research marker — the marker tags research picks only,
+// leaving a work pick's row unchanged (issue #1710).
+func TestView_WorkPick_HasNoResearchMarker(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "1", Title: "work one", Kind: KindWork, State: PickQueued},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+
+	out := View(m)
+	if strings.Contains(out, researchMarker) {
+		t.Errorf("View() = %q, want no research marker on a work pick's row", out)
+	}
+}
+
 // TestView_HeldSection_ShowsBlocker verifies a held row in the Held Section
 // carries its state and blocker badge.
 func TestView_HeldSection_ShowsBlocker(t *testing.T) {
