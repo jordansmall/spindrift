@@ -528,7 +528,7 @@ func TestEvictUnmetBlockers_CascadingEviction(t *testing.T) {
 }
 
 // TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched
-// verifies that selective dispatch threads BuildEdges' failed set (#1103)
+// verifies that selective dispatch threads NewReadiness's failed set (#1103)
 // through to the wave engine: an issue whose own DepsOf call errored is held
 // for retry, not dispatched and not cascade-failed, while an unaffected
 // sibling still dispatches normally.

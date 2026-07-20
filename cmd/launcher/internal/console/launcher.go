@@ -289,7 +289,7 @@ func (l *Launcher) Resize(delta int) {
 // registry lazily constructs l.terminated and, the first time, wires it into
 // l.Settle when that Settle is a concrete *settle.Settle (a settle.Fake has
 // no loop to check, so the wiring is skipped harmlessly). Both tryLaunch's
-// drain (via waves.Config.Terminated) and Terminate itself share the one
+// drain (via waves.Session.Terminated) and Terminate itself share the one
 // Registry this returns.
 //
 // Re-pick vs. abandoned-settle race (issue #743, found reviewing #649): a

@@ -160,7 +160,7 @@ func (q *Queue) claimable() []Pick {
 // setHeld marks the pick numbered num held on unready, formatting it as the
 // BlockedBy badge; failed — every declared blocker carrying the Failed
 // label, whether or not it's also in unready (a closed blocker can be
-// Failed-labeled and still read ready by BlockerReady's fallback) — renders
+// Failed-labeled and still read ready by Readiness.Ready's fallback) — renders
 // as Reason, surfacing on the row without dissolving the pick, since the
 // Console never auto-unpicks (#650).
 func (q *Queue) setHeld(num string, unready, failed []string, sources map[string]forge.DepSource) {

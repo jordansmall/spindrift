@@ -438,7 +438,7 @@ func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T
 }
 
 // TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched verifies that the batch
-// dispatch path (`run`) threads BuildEdges' failed set (#1103) through to the
+// dispatch path (`run`) threads NewReadiness's failed set (#1103) through to the
 // wave engine: an issue whose own DepsOf call errored is held for retry, not
 // dispatched and not cascade-failed, while an unaffected sibling in the same
 // batch still dispatches normally.
@@ -479,7 +479,7 @@ func TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
 }
 
 // TestRunExitCode_ContinuousDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched
-// verifies that CONTINUOUS_DISPATCH's discover closure threads BuildEdges'
+// verifies that CONTINUOUS_DISPATCH's discover closure threads NewReadiness's
 // failed set (#1103) through to nextReady exactly as the batch path does: an
 // issue whose own DepsOf call errored is held for retry rather than
 // dispatched, while an unaffected sibling still dispatches.
