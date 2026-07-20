@@ -165,10 +165,23 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 	s.transitionState(num, forge.InProgress, forge.Complete)
 	if err := s.applyMergeMode(num, gen, branch, nil); err != nil {
 		fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
-		s.it.Comment(num, fmt.Sprintf("merge blocked after push: %v", err))
+		s.it.Comment(num, fmt.Sprintf("landing blocked: %v", err))
 		return landingManual
 	}
 	if s.cfg.MergeMode == "immediate" {
+		// CODE_FORGE=local's landing: needs the resolved Integration ref +
+		// commit sha (ADR 0029/0033), richer than the raw branch name
+		// recordLanding already wrote when the outcome line was parsed — so
+		// overwrite it now that Merge has actually landed. Best-effort: a
+		// resolution failure here is surprising (the merge just succeeded)
+		// but must never turn an actual successful land into a failure.
+		if lr, ok := s.cf.(forge.LandingRef); ok {
+			if landing, err := lr.LandingRef(); err == nil {
+				s.recordLanding(num, landing)
+			} else {
+				fmt.Printf("    #%s  landing=%s  status=landing-ref-unresolved  !! %v\n", num, branch, err)
+			}
+		}
 		return landingMerged
 	}
 	return landingManual
@@ -311,7 +324,16 @@ func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Di
 		fmt.Printf("    #%s  landing=%s  status=auto-merge-enqueued\n", num, pr)
 		return nil
 	case "manual":
-		fmt.Printf("    #%s  landing=%s  status=agent-complete  merge-mode=%s\n", num, pr, s.cfg.MergeMode)
+		note := ""
+		if _, ok := s.cf.(forge.BundleRelay); ok {
+			// Manual mode never calls RelayBundle (that only happens inside
+			// mergeImmediate's immediate-mode path), so a local seam's outbox
+			// bundle sits unrelayed until a later immediate-mode run -- worth
+			// a loud note, since there's nothing else to point the operator
+			// at it the way a pushed branch does for git.
+			note = "  note=bundle left in outbox, not relayed (requires MERGE_MODE=immediate to land under CODE_FORGE=local)"
+		}
+		fmt.Printf("    #%s  landing=%s  status=agent-complete  merge-mode=%s%s\n", num, pr, s.cfg.MergeMode, note)
 		return nil
 	default:
 		return fmt.Errorf("unrecognised MERGE_MODE: %q", s.cfg.MergeMode)
@@ -350,6 +372,20 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 	// before a real conflict ever arises (or vice versa).
 	if err := s.preflightStaleBase(num, gen, pr, d); err != nil {
 		return err
+	}
+	// CODE_FORGE=local's Merge assumes ref already exists as a branch on the
+	// backing repo, exactly like git/github — but the Box's read-only repo
+	// mount means it never pushed there directly. Relay the Box's code-out
+	// bundle in first, once, so the loop below's Merge(pr) attempts find the
+	// ref (ADR 0033). A relay failure (missing/malformed bundle) is returned
+	// directly: there is nothing to retry, unlike a merge conflict below.
+	if br, ok := s.cf.(forge.BundleRelay); ok {
+		if s.cfg.OutboxDir == nil {
+			return fmt.Errorf("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay — every CODE_FORGE=local construction site must supply an OutboxDir resolver")
+		}
+		if err := br.RelayBundle(s.cfg.OutboxDir(num), pr); err != nil {
+			return err
+		}
 	}
 	for {
 		if s.terminated(num, gen) {
@@ -520,7 +556,19 @@ func (s *Settle) resolveConflict(num, pr string, d dispatch.Dispatcher) error {
 // that ends in genuine CI failure or a timeout returns an error distinct from
 // forge.ErrMergeConflict — the caller's conflict-retry path is never
 // re-entered for it.
+//
+// A no-op for a push-only forge (s.pr == nil, git and local alike): there is
+// no CI to wait for, so the force-push having succeeded is itself enough —
+// mirroring preflightStaleBase's own s.pr == nil guard. Without this, the
+// reactive conflict-retry loop's rebase-succeeded branch would call
+// gateToGreen unconditionally and crash on s.pr.CheckState (issue found in
+// review of #1698): a merge conflict followed by a clean rebase, landing
+// on the retry, is a routine occurrence for CODE_FORGE=local specifically,
+// where concurrent seams commonly land onto the same Integration branch.
 func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
+	if s.pr == nil {
+		return nil
+	}
 	fmt.Printf("    #%s  landing=%s  status=post-force-push-wait\n", num, pr)
 	return rewaitGateResultErr(s.gateToGreen(num, gen, pr, false), pr)
 }
