@@ -446,6 +446,12 @@ func validate(c config) error {
 		if c.codeForgeIntegrationParent == "" {
 			return fmt.Errorf("set CODE_FORGE_INTEGRATION_PARENT (the seam's parent/broad-ticket key) when CODE_FORGE=local")
 		}
+		if c.mergeMode != "immediate" {
+			return fmt.Errorf(
+				"CODE_FORGE=local requires MERGE_MODE=immediate (got %q) — "+
+					"only immediate relays the seam bundle into the Accumulation "+
+					"repo; manual/auto strand it in the outbox", c.mergeMode)
+		}
 	default:
 		return fmt.Errorf("CODE_FORGE=%q is not valid; must be github, git, or local", c.codeForge)
 	}
