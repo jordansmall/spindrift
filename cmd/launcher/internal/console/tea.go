@@ -51,6 +51,18 @@ type teaModel struct {
 	// ADR 0030's "piggybacking the existing per-Msg sync tick"), scoped to
 	// that one Dispatch so I/O stays bounded even with many running.
 	sidebarActivity *SidebarActivityCache
+	// sidebarTickArmed tracks whether a sidebarActivityTick is currently
+	// in flight, so Update arms at most one at a time instead of stacking a
+	// second while the first is still pending (issue #1735).
+	sidebarTickArmed bool
+	// sidebarTickGen increments every time Update arms a sidebarActivityTick
+	// — on the first open and on every one of the tick's own re-arms alike —
+	// the value each armed tea.Tick's Msg carries, so a stale timer left
+	// over from a close-then-reopen within one tick interval
+	// (sidebarActivityTickMsg's own doc comment) is recognized by its
+	// now-superseded generation and dropped instead of re-arming a second,
+	// permanently duplicate tick chain.
+	sidebarTickGen uint64
 	// done is closed exactly once, at the Quitting choke point below, to
 	// unblock waitRefreshSignal's goroutine — bubbletea can't cancel a Cmd
 	// goroutine itself (issue #823), so the closure has to select on this
@@ -101,6 +113,36 @@ type pollTickMsg struct{}
 type refreshSignalMsg struct {
 	picks    []Pick
 	hasPicks bool
+}
+
+// sidebarActivityTickInterval is how often the docked sidebar's own live-tail
+// tick fires — independent of both keypresses and the 90s pollTick backlog
+// cadence, so a running Dispatch's open sidebar advances while the operator
+// sits and watches, including while zoomed (issue #1735).
+const sidebarActivityTickInterval = time.Second
+
+// sidebarActivityTickMsg is the tea layer's dedicated live-tail signal.
+// Landing it is enough to reach Update's post-switch refreshPickDecorations
+// call, the same refresh path a keypress or the 90s pollTick already drives.
+// gen pins it to the teaModel.sidebarTickGen that armed it: tea.Tick can't be
+// cancelled once scheduled, so a close-then-reopen within one tick interval
+// can leave a stale timer in flight alongside a freshly armed one — gen lets
+// Update recognize and drop that stale straggler instead of it re-arming a
+// second, permanently duplicate tick chain (review finding on issue #1735).
+type sidebarActivityTickMsg struct{ gen uint64 }
+
+// sidebarActivityTick arms one sidebarActivityTickMsg carrying gen.
+func sidebarActivityTick(gen uint64) tea.Cmd {
+	return tea.Tick(sidebarActivityTickInterval, func(time.Time) tea.Msg { return sidebarActivityTickMsg{gen: gen} })
+}
+
+// sidebarActivityLive reports whether the docked sidebar is open on a
+// Dispatch whose Activity feed can still change — the same gate
+// refreshPickDecorations applies before refreshing it (isRunningNumber or an
+// orphan row, issue #1502/#1621) — so the live-tail tick arms and disarms in
+// lockstep with the refresh it exists to drive.
+func sidebarActivityLive(m Model) bool {
+	return m.Sidebar != nil && (isRunningNumber(m.Picks, m.Sidebar.Number) || m.IsOrphan(m.Sidebar.Number))
 }
 
 // pickChordTimeout is how long "p" waits for a trailing "a" before resolving
@@ -206,10 +248,32 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t.m.PendingG {
 			t.m = Update(t.m, GResolvedMsg{})
 		}
+	case sidebarActivityTickMsg:
+		if msg.gen != t.sidebarTickGen {
+			// A stale straggler from a close-then-reopen within one tick
+			// interval (sidebarActivityTickMsg's own doc comment) — a fresh
+			// tick already carries the current generation, so this one is
+			// dropped rather than re-armed into a second, permanently
+			// duplicate tick chain.
+			return t, nil
+		}
+		// This fire already consumed the Cmd that scheduled it — clear the
+		// flag so the generic re-arm check below issues a fresh one instead
+		// of reading it as "still in flight" and skipping re-arm entirely.
+		t.sidebarTickArmed = false
 	}
 
 	t.m = refreshPickDecorations(t.m, t.launch, t.pwd, t.heartbeats, t.sidebarActivity)
 	t.m = syncStale(t.m, t.launch)
+	if sidebarActivityLive(t.m) {
+		if !t.sidebarTickArmed {
+			t.sidebarTickGen++
+			cmd = tea.Batch(cmd, sidebarActivityTick(t.sidebarTickGen))
+			t.sidebarTickArmed = true
+		}
+	} else {
+		t.sidebarTickArmed = false
+	}
 	if t.m.Quitting {
 		select {
 		case <-t.done:
