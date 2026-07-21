@@ -324,16 +324,12 @@ func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Di
 		fmt.Printf("    #%s  landing=%s  status=auto-merge-enqueued\n", num, pr)
 		return nil
 	case "manual":
-		note := ""
-		if _, ok := s.cf.(forge.BundleRelay); ok {
-			// Manual mode never calls RelayBundle (that only happens inside
-			// mergeImmediate's immediate-mode path), so a local seam's outbox
-			// bundle sits unrelayed until a later immediate-mode run -- worth
-			// a loud note, since there's nothing else to point the operator
-			// at it the way a pushed branch does for git.
-			note = "  note=bundle left in outbox, not relayed (requires MERGE_MODE=immediate to land under CODE_FORGE=local)"
-		}
-		fmt.Printf("    #%s  landing=%s  status=agent-complete  merge-mode=%s%s\n", num, pr, s.cfg.MergeMode, note)
+		// CODE_FORGE=local requires MERGE_MODE=immediate (validated at
+		// launcher startup, issue #1725), so a local seam's forge.BundleRelay
+		// hook can never reach manual mode here — every operator-visible
+		// combination for a Code Forge with no PR support already relays via
+		// mergeImmediate.
+		fmt.Printf("    #%s  landing=%s  status=agent-complete  merge-mode=%s\n", num, pr, s.cfg.MergeMode)
 		return nil
 	default:
 		return fmt.Errorf("unrecognised MERGE_MODE: %q", s.cfg.MergeMode)
