@@ -303,6 +303,48 @@ func TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp(t *testing.T) {
 	}
 }
 
+// TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets
+// verifies surfaceAfterDispatch iterates every distinct resolved parent
+// among the tracker's issues (ADR 0033, issue #1734) — a mixed batch
+// surfaces the broad ticket whose seams are all closed while leaving one
+// with an open seam alone, instead of collapsing onto a single env-wide
+// parent the way the removed CODE_FORGE_INTEGRATION_PARENT knob did.
+func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *testing.T) {
+	setGitIdentityEnv(t)
+	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch("broad-a"))
+	repo.SeedBranch(local.IntegrationBranch("broad-b"), "1")
+	pwd := t.TempDir()
+	mustInitCheckout(t, pwd, "main")
+
+	issuesDir := t.TempDir()
+	writeSeamIssue(t, issuesDir, "seam-a1", "broad-a", true)
+	writeSeamIssue(t, issuesDir, "seam-a2", "broad-a", true)
+	writeSeamIssue(t, issuesDir, "seam-b1", "broad-b", true)
+	writeSeamIssue(t, issuesDir, "seam-b2", "broad-b", false)
+
+	c := baseConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = repo.Bare
+	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
+
+	var buf bytes.Buffer
+	if err := surfaceAfterDispatch(c, it, pwd, &buf); err != nil {
+		t.Fatalf("surfaceAfterDispatch: %v", err)
+	}
+	if !strings.Contains(buf.String(), "broad-a") {
+		t.Errorf("want output to mention completed ticket broad-a, got %q", buf.String())
+	}
+	if strings.Contains(buf.String(), "broad-b") {
+		t.Errorf("want no mention of still-open ticket broad-b, got %q", buf.String())
+	}
+	if err := runGit(pwd, "rev-parse", "--verify", "--quiet", "refs/heads/broad-a"); err != nil {
+		t.Errorf("refs/heads/broad-a missing, want it surfaced: %v", err)
+	}
+	if err := runGit(pwd, "rev-parse", "--verify", "--quiet", "refs/heads/broad-b"); err == nil {
+		t.Error("refs/heads/broad-b exists, want no branch surfaced for the still-open ticket")
+	}
+}
+
 // TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch verifies
 // runReconcile's wiring end to end: closing a broad ticket's last open seam
 // this very sweep — not just a ticket that was already fully closed coming
