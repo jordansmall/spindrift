@@ -1482,6 +1482,21 @@ func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchOnBranchExistsErro
 	}
 }
 
+// TestResolveIssueParent_IssueLookupError_FallsBackToOwnSlug verifies
+// resolveIssueParent falls back to num's own sanitized slug — the same
+// posture ResolveParent gives an issue with no parent: set — when the
+// IssueTracker lookup itself fails, rather than propagating the error
+// through ResolveEnv's func(string) string shape (which has no error
+// return to give it).
+func TestResolveIssueParent_IssueLookupError_FallsBackToOwnSlug(t *testing.T) {
+	fc := forge.NewFake()
+	fc.IssueErr = errors.New("issue file unreadable")
+
+	if got, want := resolveIssueParent(fc, "Broad Ticket"), "broad-ticket"; got != want {
+		t.Errorf("resolveIssueParent = %q, want %q", got, want)
+	}
+}
+
 // createIntegrationBranchForTest points newBranch at fromBranch's current
 // tip inside the bare repo at bare, standing in for an earlier seam already
 // having landed — settleConfig's CodeForgeForIssue only needs a real ref to
