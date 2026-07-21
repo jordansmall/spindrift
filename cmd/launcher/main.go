@@ -524,6 +524,24 @@ func newCodeForge(c config) forge.CodeForge {
 	}
 }
 
+// dispatchCompletionBanner returns the forge-aware end-of-dispatch
+// completion line for c.codeForge, so the single/wave and continuous
+// dispatch paths can share one wording and never drift out of sync
+// (issue #1733).
+func dispatchCompletionBanner(c config) string {
+	switch c.codeForge {
+	case "git":
+		return fmt.Sprintf("==> all agents finished — branches pushed on %s.\n", c.repoSlug)
+	case "local":
+		return fmt.Sprintf("==> all agents finished — seams landed host-side into the Accumulation repo's %s branch.\n", local.IntegrationBranch(c.codeForgeIntegrationParent))
+	default:
+		// validate() restricts c.codeForge to "git", "local", or "github" —
+		// github is the fallback so a future forge fails loud in validate()
+		// rather than silently inheriting this wording.
+		return fmt.Sprintf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
+	}
+}
+
 // absLocalIssuesDir resolves the local tracker's issues dir to an absolute
 // path for the runner's /issues mount source (ADR 0032, issue #1691): the
 // OCI/bwrap adapters render Source directly into their bind syntax, so a
@@ -987,7 +1005,7 @@ func run(lc *launchContext) error {
 		return err
 	}
 
-	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
+	fmt.Print(dispatchCompletionBanner(c))
 	return reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout)
 }
 
@@ -1071,7 +1089,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		}
 		return err
 	}
-	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
+	fmt.Print(dispatchCompletionBanner(c))
 	return reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout)
 }
 
