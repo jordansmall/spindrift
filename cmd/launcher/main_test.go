@@ -402,6 +402,67 @@ func TestRunnerConfig_IssueTrackerAndLocalIssuesDir(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_CodeForgeLocal_DefaultsAccumulationRepoDir verifies that
+// loadConfig() itself applies absCodeForgeAccumulationRepoDir when
+// CODE_FORGE=local, so every downstream reader of
+// c.codeForgeAccumulationRepoDir (newCodeForge's host-side landing forge and
+// runnerConfig's /repo mount source) agrees on the same resolved absolute
+// path (issue #1726).
+func TestLoadConfig_CodeForgeLocal_DefaultsAccumulationRepoDir(t *testing.T) {
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", "")
+
+	c := loadConfig()
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(wd, ".spindrift", "accum.git")
+	if c.codeForgeAccumulationRepoDir != want {
+		t.Errorf("loadConfig().codeForgeAccumulationRepoDir = %q, want %q", c.codeForgeAccumulationRepoDir, want)
+	}
+}
+
+// TestLoadConfig_CodeForgeGithub_AccumulationRepoDirStaysEmpty verifies the
+// default is local-only: github/git forges get no Accumulation repo default
+// (issue #1726 acceptance criterion: "the field stays empty/unused").
+func TestLoadConfig_CodeForgeGithub_AccumulationRepoDirStaysEmpty(t *testing.T) {
+	t.Setenv("CODE_FORGE", "github")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", "")
+
+	c := loadConfig()
+
+	if c.codeForgeAccumulationRepoDir != "" {
+		t.Errorf("loadConfig().codeForgeAccumulationRepoDir = %q, want empty for CODE_FORGE=github", c.codeForgeAccumulationRepoDir)
+	}
+}
+
+// TestRunnerConfig_CodeForgeLocal_MatchesNewCodeForgeAccumulationRepoDir
+// verifies the /repo mount source (runnerConfig) and the host-side landing
+// forge (newCodeForge) resolve to the exact same absolute Accumulation repo
+// path when CODE_FORGE=local and the knob is left to default (issue #1726
+// acceptance criterion: "the read-only /repo mount and the host-side
+// landing forge use the same resolved path").
+func TestRunnerConfig_CodeForgeLocal_MatchesNewCodeForgeAccumulationRepoDir(t *testing.T) {
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", "")
+	t.Setenv("CODE_FORGE_INTEGRATION_PARENT", "1694")
+
+	c := loadConfig()
+	rc := runnerConfig(c)
+	if cf := newCodeForge(c); cf == nil {
+		t.Fatal("newCodeForge(CODE_FORGE=local) = nil")
+	}
+
+	if !filepath.IsAbs(rc.AccumulationRepoDir) {
+		t.Fatalf("runnerConfig().AccumulationRepoDir = %q, want an absolute path", rc.AccumulationRepoDir)
+	}
+	if rc.AccumulationRepoDir != c.codeForgeAccumulationRepoDir {
+		t.Errorf("runnerConfig().AccumulationRepoDir = %q, want %q (loadConfig's resolved value)", rc.AccumulationRepoDir, c.codeForgeAccumulationRepoDir)
+	}
+}
+
 // TestAbsLocalIssuesDir_EmptyStaysEmpty verifies the empty-string guard: an
 // unset LOCAL_ISSUES_DIR must reach runner.Config as "", not filepath.Abs("")
 // (which resolves to the process cwd and would silently mount cwd at
@@ -409,6 +470,56 @@ func TestRunnerConfig_IssueTrackerAndLocalIssuesDir(t *testing.T) {
 func TestAbsLocalIssuesDir_EmptyStaysEmpty(t *testing.T) {
 	if got := absLocalIssuesDir(""); got != "" {
 		t.Errorf("absLocalIssuesDir(\"\") = %q, want \"\"", got)
+	}
+}
+
+// TestAbsCodeForgeAccumulationRepoDir_DefaultsWhenLocalAndUnset verifies that
+// CODE_FORGE=local with the knob unset defaults to .spindrift/accum.git
+// under the process cwd, resolved to an absolute path (issue #1726) — the
+// same absolute-path requirement absLocalIssuesDir enforces for the /issues
+// mount, here so the /repo mount and the host-side landing forge agree.
+func TestAbsCodeForgeAccumulationRepoDir_DefaultsWhenLocalAndUnset(t *testing.T) {
+	got := absCodeForgeAccumulationRepoDir("local", "")
+
+	if !filepath.IsAbs(got) {
+		t.Fatalf("absCodeForgeAccumulationRepoDir(local, \"\") = %q, want an absolute path", got)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(wd, ".spindrift", "accum.git")
+	if got != want {
+		t.Errorf("absCodeForgeAccumulationRepoDir(local, \"\") = %q, want %q", got, want)
+	}
+}
+
+// TestAbsCodeForgeAccumulationRepoDir_ExplicitOverrideResolvedAbsolute
+// verifies an operator-supplied relative override still wins over the
+// default and still gets resolved to an absolute path (issue #1726
+// acceptance criterion: "an explicitly set value still overrides the
+// default and is resolved to an absolute path").
+func TestAbsCodeForgeAccumulationRepoDir_ExplicitOverrideResolvedAbsolute(t *testing.T) {
+	got := absCodeForgeAccumulationRepoDir("local", "custom-accum-dir")
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(wd, "custom-accum-dir")
+	if got != want {
+		t.Errorf("absCodeForgeAccumulationRepoDir(local, %q) = %q, want %q", "custom-accum-dir", got, want)
+	}
+}
+
+// TestAbsCodeForgeAccumulationRepoDir_NonLocalLeavesDirUntouched verifies
+// github/git forges get no default and no resolution — the field stays
+// empty/unused there (issue #1726 acceptance criterion).
+func TestAbsCodeForgeAccumulationRepoDir_NonLocalLeavesDirUntouched(t *testing.T) {
+	for _, cf := range []string{"github", "git", ""} {
+		if got := absCodeForgeAccumulationRepoDir(cf, ""); got != "" {
+			t.Errorf("absCodeForgeAccumulationRepoDir(%q, \"\") = %q, want \"\"", cf, got)
+		}
 	}
 }
 
@@ -1068,18 +1179,25 @@ func TestValidateCodeForge_AcceptsKnown(t *testing.T) {
 	}
 }
 
-// TestValidateCodeForge_Local_RequiresAccumulationRepoDirAndParent verifies
-// that validate() fails fast when CODE_FORGE=local but either of the two
-// values NewLocalCodeForge needs (the Accumulation repo path, and the
-// Integration branch's parent key, ADR 0033) is unset.
-func TestValidateCodeForge_Local_RequiresAccumulationRepoDirAndParent(t *testing.T) {
+// TestValidateCodeForge_Local_AcceptsUnsetAccumulationRepoDir verifies that
+// validate() no longer requires CODE_FORGE_ACCUMULATION_REPO_DIR under
+// CODE_FORGE=local (issue #1726): loadConfig() now defaults it to
+// .spindrift/accum.git, so an empty value here (as a hand-built config, or a
+// validate() call before loadConfig()'s default runs) must not fail fast.
+func TestValidateCodeForge_Local_AcceptsUnsetAccumulationRepoDir(t *testing.T) {
 	c := minimalValidLocalConfig()
 	c.codeForgeAccumulationRepoDir = ""
-	if err := validate(c); err == nil {
-		t.Fatal("validate() should require CODE_FORGE_ACCUMULATION_REPO_DIR when CODE_FORGE=local")
+	if err := validate(c); err != nil {
+		t.Errorf("validate() rejected CODE_FORGE=local with CODE_FORGE_ACCUMULATION_REPO_DIR unset: %v", err)
 	}
+}
 
-	c = minimalValidLocalConfig()
+// TestValidateCodeForge_Local_RequiresIntegrationParent verifies that
+// validate() still fails fast when CODE_FORGE=local and the Integration
+// branch's parent key (ADR 0033) is unset — unlike the Accumulation repo
+// dir, this knob has no default.
+func TestValidateCodeForge_Local_RequiresIntegrationParent(t *testing.T) {
+	c := minimalValidLocalConfig()
 	c.codeForgeIntegrationParent = ""
 	if err := validate(c); err == nil {
 		t.Fatal("validate() should require CODE_FORGE_INTEGRATION_PARENT when CODE_FORGE=local")
@@ -1308,7 +1426,7 @@ func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchOnBranchExistsErro
 func minimalValidLocalConfig() config {
 	c := minimalValidConfig()
 	c.codeForge = "local"
-	c.codeForgeAccumulationRepoDir = ".spindrift/repo.git"
+	c.codeForgeAccumulationRepoDir = ".spindrift/accum.git"
 	c.codeForgeIntegrationParent = "1694"
 	c.mergeMode = "immediate"
 	return c

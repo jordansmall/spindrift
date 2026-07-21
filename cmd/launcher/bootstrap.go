@@ -6,6 +6,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/tokenrefresh"
@@ -57,6 +58,9 @@ func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 	if err := validate(c); err != nil {
 		return nil, err
 	}
+	if err := seedAccumulationRepoIfLocal(c, pwd); err != nil {
+		return nil, err
+	}
 
 	// A run that outlives GH_TOKEN_REFRESH_FILE's minter's token lifetime
 	// (issue #1027) would otherwise 401 at the terminal gh calls (merge,
@@ -100,6 +104,25 @@ func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 		settle:       s,
 		cleanup:      f.Cleanup,
 	}, nil
+}
+
+// seedAccumulationRepoIfLocal creates and seeds the bare Accumulation repo
+// (ADR 0033) from pwd's checkout before any Box runs, when c.codeForge is
+// "local" and the dispatch kind is work — a no-op for github/git, which use
+// no Accumulation repo, and for research, which never mounts /repo or lands
+// code (it posts one verdict comment and stops), so seeding for it would be
+// pure waste and a needless new failure surface. Wired into bootstrap's
+// prologue (issue #1726) rather than left for the mount or landing forge to
+// discover on demand: a defaulted-but-nonexistent AccumulationRepoDir
+// otherwise makes candidateMount silently skip the /repo mount, and
+// host-side landing then fails against a repo that was never created.
+// c.codeForgeAccumulationRepoDir is already resolved to an absolute path by
+// loadConfig, matching SeedAccumulationRepo's requirement.
+func seedAccumulationRepoIfLocal(c config, pwd string) error {
+	if c.codeForge != "local" || c.dispatchKind == dispatchKindResearch {
+		return nil
+	}
+	return local.SeedAccumulationRepo(c.codeForgeAccumulationRepoDir, pwd, c.baseBranch)
 }
 
 // researchLaunchStack builds the research-kind tracker, dispatch factory,
