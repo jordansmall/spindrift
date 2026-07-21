@@ -93,14 +93,23 @@ The pieces:
   parallel-where-independent are the same mechanism, selected per seam by its
   edges.
 
-- **Surface — manual, and deliberately so.** Spindrift's responsibility ends at
-  "the integration branch is assembled and ready in `.spindrift/accum.git`." The
-  operator surfaces the single team PR with the git/gh gestures they already
-  know (`git fetch .spindrift/accum.git integration/<parent>:<branch>` →
-  `git push origin <branch>` → `gh pr create`). Keeping the local→shared
-  transition a human act is the right trust boundary: it is the operator who
-  decides when private breakdown work becomes public, the same caution ADR 0029
-  applied to leaking private local content into a shared remote.
+- **Surface — auto-fetch into the checkout, publish stays manual.** Once a
+  broad ticket's seams are all landed and closed, the Launcher auto-surfaces
+  `integration/<parent>`'s current tip into the operator's primary checkout as
+  a local branch named after the ticket (issue #1730) — a host-side `git
+  fetch` from `.spindrift/accum.git` into `pwd` that creates or fast-forwards
+  only that branch ref, never switches the operator's checked-out branch, and
+  makes no `origin` push. Nothing is surfaced for an incomplete ticket, an
+  already-surfaced unchanged one is a no-op, and a target branch name the
+  operator currently has checked out is left alone rather than clobbered. A
+  one-line notice tells the operator it happened, so an assembled branch
+  appearing is discoverable, not silent magic. Spindrift's responsibility still
+  ends short of the shared remote: the operator surfaces the single team PR
+  with the git/gh gestures they already know (`git push origin <branch>` →
+  `gh pr create`). Keeping the local→shared *publish* transition a human act is
+  the right trust boundary: it is the operator who decides when private
+  breakdown work becomes public, the same caution ADR 0029 applied to leaking
+  private local content into a shared remote.
 
 - **Internal structure — a shared `git` substrate.** `local` and the existing
   `git` (remote push) forge share the `forge/git` package — branch naming and
@@ -213,6 +222,7 @@ neither touches the invariant ADR 0032 protected:
   trackers paired with `CODE_FORGE=local` stay permitted (ADR 0013's matrix is
   unchanged) but are unspecified until their sub-issue links land, degrading to a
   single integration branch.
-- The operator surfaces the team PR manually; spindrift stops at the assembled
-  integration branch. A `finalize` verb and a hard-air-gap local-model driver
-  are noted futures.
+- The Launcher auto-surfaces a completed broad ticket's integration branch
+  into the operator's checkout as a local branch (issue #1730); the operator
+  still publishes the team PR manually. A `finalize` verb (push + PR) and a
+  hard-air-gap local-model driver are noted futures.

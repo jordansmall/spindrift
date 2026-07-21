@@ -204,9 +204,11 @@ _Avoid_: mirror, staging repo, local remote.
 The branch in the Accumulation repo where all the seams of one broad ticket
 converge, keyed on the local issue's `parent` frontmatter
 (`integration/<parent>`) — one per broad ticket, so several can be in flight.
-Each seam's landing is a host-side merge onto it; when the ticket is done the
-operator surfaces it as a single team PR by hand. Distinct from a seam's
-per-issue agent branch, which merges *into* it.
+Each seam's landing is a host-side merge onto it; once every one of the
+ticket's seam issues is closed, the Launcher auto-surfaces its current tip
+into the operator's checkout as a local branch named after the ticket (ADR
+0033, issue #1730) — the operator still publishes the single team PR by hand.
+Distinct from a seam's per-issue agent branch, which merges *into* it.
 _Avoid_: feature branch, epic branch, accumulation branch.
 
 **Conformance contract**:
