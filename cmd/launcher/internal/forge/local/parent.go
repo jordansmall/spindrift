@@ -4,13 +4,14 @@ import "strings"
 
 // ResolveParent returns the sanitized Integration-branch key for a seam
 // issue: rawParent (the issue's own parent: frontmatter field), sanitized,
-// or — when rawParent is unset — issueNumber itself, sanitized, so a
-// parentless seam is its own broad ticket (ADR 0033, issue #1734).
+// or — when rawParent is unset, or sanitizes to empty (a parent: value made
+// entirely of non-[a-z0-9] characters) — issueNumber itself, sanitized, so
+// a parentless seam is its own broad ticket (ADR 0033, issue #1734).
 func ResolveParent(issueNumber, rawParent string) string {
-	if rawParent == "" {
-		return SanitizeParent(issueNumber)
+	if sanitized := SanitizeParent(rawParent); sanitized != "" {
+		return sanitized
 	}
-	return SanitizeParent(rawParent)
+	return SanitizeParent(issueNumber)
 }
 
 // SanitizeParent normalizes an operator-authored parent: value (or an

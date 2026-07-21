@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -100,6 +101,7 @@ func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writ
 		}
 		groups[parent] = append(groups[parent], iss)
 	}
+	var errs []error
 	for _, parent := range order {
 		allClosed := true
 		for _, s := range groups[parent] {
@@ -113,7 +115,11 @@ func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writ
 		}
 		surfaced, skipped, err := local.SurfaceIntegrationBranch(c.codeForgeAccumulationRepoDir, pwd, parent)
 		if err != nil {
-			return fmt.Errorf("surface %s: %w", parent, err)
+			// Recorded, not returned immediately: one parent's genuine
+			// surface failure must not stop the sweep from attempting every
+			// other completed broad ticket in the same batch.
+			errs = append(errs, fmt.Errorf("surface %s: %w", parent, err))
+			continue
 		}
 		if skipped != "" {
 			fmt.Fprintf(w, "surface: %s skipped — %s\n", parent, skipped)
@@ -124,7 +130,7 @@ func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writ
 				parent, local.IntegrationBranch(parent), parent)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // cmdReconcile is the `reconcile` subcommand: the local-tracker bookkeeping
