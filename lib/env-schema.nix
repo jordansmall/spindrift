@@ -352,7 +352,7 @@
   codeForgeAccumulationRepoDir = {
     env = "CODE_FORGE_ACCUMULATION_REPO_DIR";
     group = "Repository & identity";
-    doc = "host path to the bare Accumulation repo (ADR 0033), mounted read-only into the Box and landed into host-side; required when CODE_FORGE=local, unused otherwise";
+    doc = "host path to the bare Accumulation repo (ADR 0033), mounted read-only into the Box and landed into host-side; when CODE_FORGE=local, defaults to .spindrift/accum.git under the launcher's working directory (auto-created and seeded) and an explicit value still overrides it; unused otherwise";
     flakeOption = true;
     boxEnv = false;
   };
