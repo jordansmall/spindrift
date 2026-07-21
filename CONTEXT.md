@@ -202,13 +202,19 @@ _Avoid_: mirror, staging repo, local remote.
 
 **Integration branch**:
 The branch in the Accumulation repo where all the seams of one broad ticket
-converge, keyed on the local issue's `parent` frontmatter
-(`integration/<parent>`) — one per broad ticket, so several can be in flight.
-Each seam's landing is a host-side merge onto it; once every one of the
-ticket's seam issues is closed, the Launcher auto-surfaces its current tip
-into the operator's checkout as a local branch named after the ticket (ADR
-0033, issue #1730) — the operator still publishes the single team PR by hand.
-Distinct from a seam's per-issue agent branch, which merges *into* it.
+converge, keyed on *each seam's own* local issue's `parent` frontmatter
+(`integration/<sanitized-parent>`) — never a single knob shared across a run,
+so a mixed-parent dispatch batch converges each seam onto its own branch (ADR
+0033, issue #1734). An issue with no `parent:` set is its own broad ticket,
+keyed on its own sanitized slug instead of a shared fallback branch. `parent`
+is opaque and operator-authored — spindrift never resolves it against another
+tracker, it only sanitizes it into a git-ref-safe token (lowercased, each run
+of non-`[a-z0-9]` characters collapsed to a single dash) before forming the
+branch name. Each seam's landing is a host-side merge onto it; once every one
+of a broad ticket's seam issues is closed, the Launcher auto-surfaces its
+current tip into the operator's checkout as a local branch named after the
+ticket (issue #1730) — the operator still publishes the single team PR by
+hand. Distinct from a seam's per-issue agent branch, which merges *into* it.
 _Avoid_: feature branch, epic branch, accumulation branch.
 
 **Conformance contract**:
@@ -230,7 +236,8 @@ who selects one owns the consequences. `local × local` is the fully-specified
 cell — the **local loop**, both planes host-mediated and offline (ADR 0033);
 `CODE_FORGE=local`'s per-ticket Integration branch assumes a tracker that
 supplies a `parent`/epic link, which `local` does today and other trackers do
-as their sub-issue links land.
+as their sub-issue links land — an issue with no such link is simply its own
+broad ticket rather than an unspecified case.
 _Avoid_: preset, profile, mode.
 
 **Launcher input**:
