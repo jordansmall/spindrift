@@ -138,7 +138,7 @@
             # repository = {
             #   # code-landing backend: github (open PR, watch CI, merge), git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate), or local (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network; ADR 0033)
             #   codeForge = "github";
-            #   # host path to the bare Accumulation repo (ADR 0033), mounted read-only into the Box and landed into host-side; required when CODE_FORGE=local, unused otherwise
+            #   # host path to the bare Accumulation repo (ADR 0033), mounted read-only into the Box and landed into host-side; when CODE_FORGE=local, defaults to .spindrift/accum.git under the launcher's working directory (auto-created and seeded) and an explicit value still overrides it; unused otherwise
             #   codeForgeAccumulationRepoDir = "";
             #   # the seam issue's parent/broad-ticket key (ADR 0033) — selects the Accumulation repo's integration/<parent> Integration branch this run's seam lands onto; required when CODE_FORGE=local, unused otherwise
             #   codeForgeIntegrationParent = "";
