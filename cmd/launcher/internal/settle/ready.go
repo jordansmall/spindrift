@@ -506,11 +506,12 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 		return nil
 	}
 	fmt.Printf("    #%s  landing=%s  status=stale-base-rebase  attempt=1/%d\n", num, pr, s.cfg.MaxRebaseAttempts)
-	rbErr := s.cf.Rebase(pr)
+	cf := s.cfForNum(num)
+	rbErr := cf.Rebase(pr)
 	for pushRetries := 0; rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && pushRetries < s.cfg.MaxRebaseAttempts; pushRetries++ {
 		fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
 			num, pr, pushRetries+1, s.cfg.MaxRebaseAttempts, rbErr)
-		rbErr = s.cf.Rebase(pr)
+		rbErr = cf.Rebase(pr)
 	}
 	if rbErr != nil {
 		if errors.Is(rbErr, forge.ErrMergeConflict) && d != nil {

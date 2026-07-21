@@ -14,6 +14,17 @@ func TestResolveParent_FallsBackToOwnSlugWhenUnset(t *testing.T) {
 	}
 }
 
+// TestResolveParent_FallsBackToOwnSlugWhenParentSanitizesToEmpty verifies a
+// parent: value made entirely of non-[a-z0-9] characters (e.g. "///") — which
+// SanitizeParent collapses to "" — falls back to the issue's own sanitized
+// slug instead of silently producing "integration/" (no parent segment at
+// all).
+func TestResolveParent_FallsBackToOwnSlugWhenParentSanitizesToEmpty(t *testing.T) {
+	if got, want := ResolveParent("42", "///"), "42"; got != want {
+		t.Errorf("ResolveParent(42, \"///\") = %q, want %q", got, want)
+	}
+}
+
 func TestSanitizeParent(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"jordansmall/spindrift#1694", "jordansmall-spindrift-1694"},

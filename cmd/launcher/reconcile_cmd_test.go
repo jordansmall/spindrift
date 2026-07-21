@@ -342,6 +342,41 @@ func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *t
 	}
 }
 
+// TestSurfaceAfterDispatch_OneParentErrors_StillAttemptsTheOthers verifies a
+// genuine SurfaceIntegrationBranch error for one completed broad ticket
+// doesn't abort the sweep before every other distinct resolved parent gets
+// its own attempt (issue #1734 review follow-up) — pwd not being a git repo
+// at all makes every parent's own "current branch" resolution fail the same
+// way, so both must appear in the combined error for the sweep to have
+// actually reached the second one instead of stopping after the first.
+func TestSurfaceAfterDispatch_OneParentErrors_StillAttemptsTheOthers(t *testing.T) {
+	setGitIdentityEnv(t)
+	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch("broad-a"))
+	repo.SeedBranch(local.IntegrationBranch("broad-b"), "1")
+	pwd := t.TempDir() // deliberately never git-inited
+
+	issuesDir := t.TempDir()
+	writeSeamIssue(t, issuesDir, "seam-a1", "broad-a", true)
+	writeSeamIssue(t, issuesDir, "seam-b1", "broad-b", true)
+
+	c := baseConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = repo.Bare
+	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
+
+	var buf bytes.Buffer
+	err := surfaceAfterDispatch(c, it, pwd, &buf)
+	if err == nil {
+		t.Fatal("surfaceAfterDispatch: want an error since pwd is not a git repo, got nil")
+	}
+	if !strings.Contains(err.Error(), "broad-a") {
+		t.Errorf("want the combined error to mention broad-a, got %q", err)
+	}
+	if !strings.Contains(err.Error(), "broad-b") {
+		t.Errorf("want the combined error to mention broad-b too — the sweep must not stop after the first parent's error, got %q", err)
+	}
+}
+
 // TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch verifies
 // runReconcile's wiring end to end: closing a broad ticket's last open seam
 // this very sweep — not just a ticket that was already fully closed coming
