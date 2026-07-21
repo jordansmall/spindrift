@@ -1274,6 +1274,56 @@ func TestNewCodeForge_Github_ImplementsPRForge(t *testing.T) {
 	}
 }
 
+// TestDispatchCompletionBanner_Github verifies that CODE_FORGE=github keeps
+// the "branches pushed and PRs opened" wording, since it's the only forge
+// that opens PRs (issue #1733).
+func TestDispatchCompletionBanner_Github(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "github"
+	c.repoSlug = "owner/repo"
+
+	got := dispatchCompletionBanner(c)
+
+	want := "==> all agents finished — branches pushed and PRs opened on owner/repo.\n"
+	if got != want {
+		t.Errorf("dispatchCompletionBanner(github) = %q, want %q", got, want)
+	}
+}
+
+// TestDispatchCompletionBanner_Git verifies that CODE_FORGE=git reports
+// branches pushed but drops the PR claim — the git adapter is push-only and
+// never opens a PR (issue #1733).
+func TestDispatchCompletionBanner_Git(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "git"
+	c.repoSlug = "owner/repo"
+	c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
+
+	got := dispatchCompletionBanner(c)
+
+	want := "==> all agents finished — branches pushed on owner/repo.\n"
+	if got != want {
+		t.Errorf("dispatchCompletionBanner(git) = %q, want %q", got, want)
+	}
+}
+
+// TestDispatchCompletionBanner_Local verifies that CODE_FORGE=local claims
+// neither a push nor a PR — the launcher lands seams host-side onto the
+// Accumulation repo's Integration branch instead (ADR 0033, issue #1733).
+func TestDispatchCompletionBanner_Local(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.codeForgeIntegrationParent = "1694"
+	c.mergeMode = "immediate"
+
+	got := dispatchCompletionBanner(c)
+
+	want := "==> all agents finished — seams landed host-side into the Accumulation repo's integration/1694 branch.\n"
+	if got != want {
+		t.Errorf("dispatchCompletionBanner(local) = %q, want %q", got, want)
+	}
+}
+
 // TestDispatchConfig_PRForge_WiresOpenPRForIssue verifies issue #565's
 // wiring: when cf implements forge.PRForge, dispatchConfig sets
 // OpenPRForIssue to a closure that resolves the issue's agent branch and
