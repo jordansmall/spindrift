@@ -94,11 +94,11 @@ func TestLocalCodeForge_VerifyLanding_ReportsUnmergedForUnknownSHA(t *testing.T)
 	}
 }
 
-// TestLocalCodeForge_VerifyLanding_ReportsUnmergedForWrongParent asserts
-// VerifyLanding reports merged=false for a landing stamped onto a different
-// parent's Integration branch — defense in depth against a landing: value
-// that migrated from elsewhere, even though production never mixes them.
-func TestLocalCodeForge_VerifyLanding_ReportsUnmergedForWrongParent(t *testing.T) {
+// TestLocalCodeForge_VerifyLanding_ReportsUnmergedForNonexistentBranch
+// asserts VerifyLanding reports merged=false for a landing naming a branch
+// that doesn't exist in the repo at all — a stale or forged ref, same
+// "not merged" posture as any other not-yet-landed seam.
+func TestLocalCodeForge_VerifyLanding_ReportsUnmergedForNonexistentBranch(t *testing.T) {
 	setGitIdentityEnv(t)
 
 	const parent = "1694"
@@ -112,7 +112,49 @@ func TestLocalCodeForge_VerifyLanding_ReportsUnmergedForWrongParent(t *testing.T
 		t.Fatalf("VerifyLanding: %v", err)
 	}
 	if merged {
-		t.Error("VerifyLanding(wrong parent) = true, want false")
+		t.Error("VerifyLanding(nonexistent branch) = true, want false")
+	}
+}
+
+// TestLocalCodeForge_VerifyLanding_IsInstanceAgnostic asserts VerifyLanding
+// checks the landing's own named branch and sha, not whichever parent this
+// particular CodeForge instance was constructed with (issue #1734: a single
+// shared instance now verifies landings across every parent in a mixed
+// batch, not just the one it happened to be built for). A landing for
+// parent 2200, verified through a CodeForge instance built for parent 1694,
+// still reports merged=true.
+func TestLocalCodeForge_VerifyLanding_IsInstanceAgnostic(t *testing.T) {
+	setGitIdentityEnv(t)
+
+	const parent1, parent2 = "1694", "2200"
+	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent1))
+	cf1 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent1, "Test Bot", "bot@example.com", "agent/issue-")
+
+	// parent2's Integration branch doesn't exist yet -- cf2's RelayBundle
+	// creates it from cf1's own Integration branch tip on demand
+	// (ensureIntegrationBranch), exactly like a second broad ticket's first
+	// seam landing in the same run.
+	cf2 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent2, "Test Bot", "bot@example.com", "agent/issue-")
+	outbox := t.TempDir()
+	branch := "agent/issue-2201"
+	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent1), outbox, branch, "2201")
+	if err := cf2.(forge.BundleRelay).RelayBundle(outbox, branch); err != nil {
+		t.Fatalf("RelayBundle: %v", err)
+	}
+	if err := cf2.Merge(branch); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	landing2, err := cf2.(forge.LandingRef).LandingRef()
+	if err != nil {
+		t.Fatalf("LandingRef: %v", err)
+	}
+
+	merged, err := cf1.(forge.LandingVerifier).VerifyLanding(landing2)
+	if err != nil {
+		t.Fatalf("VerifyLanding: %v", err)
+	}
+	if !merged {
+		t.Errorf("VerifyLanding(%q) via a differently-parented instance = false, want true", landing2)
 	}
 }
 

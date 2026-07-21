@@ -72,19 +72,21 @@ func (l *localCodeForge) LandingRef() (string, error) {
 	return landingRef(l.repoPath, IntegrationBranch(l.parent))
 }
 
-// VerifyLanding reports whether landing is merged into this adapter's own
-// Integration branch, with no network call (forge.LandingVerifier, ADR 0029,
-// ADR 0033) — reconcile's sole closing authority calls this instead of a
-// PRForge check when cf has no PR concept. landing must both parse as
-// "<branch>@<sha>" and name this adapter's own IntegrationBranch(parent);
-// anything else (a raw agent-branch name settle recorded before a merge was
-// attempted, or a landing stamped by some other parent) is reported
-// unmerged rather than an error — the same "stays open" posture a genuine
-// ancestry miss gets.
+// VerifyLanding reports whether landing is merged into its own named
+// Integration branch, with no network call (forge.LandingVerifier, ADR
+// 0029, ADR 0033) — reconcile's sole closing authority calls this instead of
+// a PRForge check when cf has no PR concept. landing is self-describing
+// ("<branch>@<sha>", ADR 0033), so verification never depends on which
+// parent this particular adapter instance was constructed with (issue
+// #1734) — one shared instance correctly verifies every parent's seams in a
+// mixed batch, not just its own. A landing that doesn't parse (the raw
+// agent-branch name settle recorded before a merge was attempted) is
+// reported unmerged rather than an error — the same "stays open" posture a
+// genuine ancestry miss gets.
 func (l *localCodeForge) VerifyLanding(landing string) (bool, error) {
 	branch, sha, ok := parseLandingRef(landing)
-	if !ok || branch != IntegrationBranch(l.parent) {
+	if !ok {
 		return false, nil
 	}
-	return isMergedIntoIntegration(l.repoPath, sha, IntegrationBranch(l.parent))
+	return isMergedIntoIntegration(l.repoPath, sha, branch)
 }

@@ -116,7 +116,7 @@ func preview(issueNums []string) error {
 		return err
 	}
 	it := newIssueTracker(c)
-	cf := newCodeForge(c)
+	cf := newCodeForge(c, "")
 	pwd, err := os.Getwd()
 	if err != nil {
 		return err

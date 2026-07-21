@@ -119,7 +119,7 @@ func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writ
 func cmdReconcile() int {
 	c := loadConfig()
 	it := newIssueTracker(c)
-	cf := newCodeForge(c)
+	cf := newCodeForge(c, "")
 
 	pwd, err := os.Getwd()
 	if err != nil {
