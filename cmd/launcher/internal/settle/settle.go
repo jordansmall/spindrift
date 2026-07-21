@@ -45,6 +45,19 @@ type Config struct {
 	// before Merge. Nil for every non-local construction site; consulted
 	// only when the Code Forge implements forge.BundleRelay.
 	OutboxDir func(num string) string
+
+	// CodeForgeForIssue resolves num's own CodeForge instance for the
+	// parent-sensitive landing calls (RelayBundle, Merge, and the reactive
+	// Rebase retry, all inside mergeImmediate; LandingRef in
+	// landPushOnly) — CODE_FORGE=local, ADR 0033/issue #1734: each
+	// dispatched issue may key its Integration branch off a different
+	// parent, so those calls must land through ITS OWN resolved instance,
+	// not the single cf New() received. Every parent-agnostic operation
+	// (AgentBranch, BranchExists, the PRForge/BundleRelay capability
+	// probes) still uses New's cf unchanged. Defaults to always returning
+	// that cf when nil (every non-local construction site, and every
+	// pre-#1734 test) -- there is exactly one instance to use there.
+	CodeForgeForIssue func(num string) forge.CodeForge
 }
 
 // Settler is the seam callers depend on so tests can inject a Fake instead of
@@ -98,6 +111,10 @@ type Settle struct {
 	// already reclaimed it. Nil (every construction site but the Console's)
 	// means "never terminated" — terminate.Registry is nil-safe.
 	term *terminate.Registry
+	// cfForNum resolves num's own CodeForge instance for the parent-sensitive
+	// landing calls (Config.CodeForgeForIssue, issue #1734) — defaults to
+	// always returning cf when Config.CodeForgeForIssue is nil.
+	cfForNum func(num string) forge.CodeForge
 }
 
 // SetTerminated wires reg as this Settle's termination registry — called
@@ -127,5 +144,9 @@ var _ Settler = (*Settle)(nil)
 func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	pr, _ := cf.(forge.PRForge)
 	landing, _ := it.(forge.LandingRecorder)
-	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing}
+	cfForNum := cfg.CodeForgeForIssue
+	if cfForNum == nil {
+		cfForNum = func(string) forge.CodeForge { return cf }
+	}
+	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, cfForNum: cfForNum}
 }

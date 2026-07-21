@@ -147,6 +147,48 @@ func TestSelfHeal_LocalForge_RelaysBundleBeforeMergeAndRecordsLandingRef(t *test
 	}
 }
 
+// TestSelfHeal_LocalForge_UsesPerIssueCodeForgeForMerge asserts that when
+// Config.CodeForgeForIssue is set, mergeImmediate's RelayBundle/Merge calls
+// land through the resolved-for-this-issue instance it returns, not the
+// single cf New() received — CODE_FORGE=local's per-seam Integration branch
+// keying (ADR 0033, issue #1734): a mixed-parent batch must merge each seam
+// through its own resolved instance, not whichever one the run's shared cf
+// happened to be constructed with.
+func TestSelfHeal_LocalForge_UsesPerIssueCodeForgeForMerge(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	sharedFC := forge.NewFake(testDispatchLabels)
+	sharedFC.SetIssue(forge.Issue{Number: "10", Labels: []string{"agent-in-progress"}})
+	ownFC := forge.NewFake()
+	c.CodeForgeForIssue = func(num string) forge.CodeForge {
+		if num == "10" {
+			return ownFC.AsLocal()
+		}
+		return sharedFC.AsLocal()
+	}
+	branch := "agent/issue-10"
+	s := New(c, sharedFC, sharedFC.AsLocal())
+
+	landing := s.selfHeal(dispatch.NewFake(), "10", 0, branch)
+
+	if landing != landingMerged {
+		t.Fatalf("selfHeal = %v, want landingMerged", landing)
+	}
+	if ownFC.Merged != branch {
+		t.Errorf("expected the per-issue instance to receive Merge(%q); ownFC.Merged=%q", branch, ownFC.Merged)
+	}
+	if sharedFC.Merged != "" {
+		t.Errorf("expected the shared cf to receive no Merge call; sharedFC.Merged=%q", sharedFC.Merged)
+	}
+	if len(ownFC.RelayBundleCalls) != 1 {
+		t.Errorf("expected the per-issue instance to receive the RelayBundle call, got %d", len(ownFC.RelayBundleCalls))
+	}
+	if len(sharedFC.RelayBundleCalls) != 0 {
+		t.Errorf("expected the shared cf to receive no RelayBundle call, got %d", len(sharedFC.RelayBundleCalls))
+	}
+}
+
 // TestSelfHeal_LocalForge_LandingRefErrorStaysMergedWithoutRecording asserts
 // LandingRef is a best-effort enrichment: a resolution failure after a
 // successful merge must never turn an actual land into a failure — the seam

@@ -512,13 +512,16 @@ func newIssueTracker(c config) forge.IssueTracker {
 // newCodeForge returns the CodeForge adapter selected by CODE_FORGE: "github"
 // (open PR, watch CI, merge), "git" (push-only to codeForgeRemoteURL; no PR,
 // CI-watch, or merge gate), or "local" (host-mediated landing onto the
-// Accumulation repo's Integration branch; ADR 0033).
-func newCodeForge(c config) forge.CodeForge {
+// Accumulation repo's Integration branch; ADR 0033). parent is the seam's
+// own resolved Integration-branch key (local.ResolveParent, issue #1734);
+// every other codeForge ignores it — there is no per-run parent knob left
+// to derive it from.
+func newCodeForge(c config, parent string) forge.CodeForge {
 	switch c.codeForge {
 	case "git":
 		return git.NewGitClient(c.codeForgeRemoteURL, c.baseBranch, c.gitUserName, c.gitUserEmail, c.branchPrefix)
 	case "local":
-		return local.NewLocalCodeForge(c.codeForgeAccumulationRepoDir, c.baseBranch, c.codeForgeIntegrationParent, c.gitUserName, c.gitUserEmail, c.branchPrefix)
+		return local.NewLocalCodeForge(c.codeForgeAccumulationRepoDir, c.baseBranch, parent, c.gitUserName, c.gitUserEmail, c.branchPrefix)
 	default:
 		return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
 	}
@@ -723,8 +726,15 @@ func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTra
 // (dispatch.OutboxDirFor) — read via os.Getwd() rather than a threaded pwd
 // so every existing settleConfig/newSettle call site (test and production)
 // is unaffected; only a Code Forge implementing forge.BundleRelay (CODE_FORGE
-// =local) ever consults it.
-func settleConfig(c config) settle.Config {
+// =local) ever consults it. CodeForgeForIssue resolves each dispatched
+// issue's own CodeForge instance (ADR 0033, issue #1734): for CODE_FORGE
+// =local, a fresh instance keyed to that issue's own resolved parent;
+// every other codeForge has no per-issue parent concept, so it always
+// returns cf unchanged — the same instance New() itself received, not a
+// freshly constructed one, so a caller substituting a fake or specially
+// configured cf (every test, and any future non-local construction site)
+// is honored rather than silently bypassed.
+func settleConfig(c config, it forge.IssueTracker, cf forge.CodeForge) settle.Config {
 	return settle.Config{
 		MergeMode:          c.mergeMode,
 		MergeGuardPaths:    c.mergeGuardPaths,
@@ -748,6 +758,12 @@ func settleConfig(c config) settle.Config {
 			}
 			return dispatch.OutboxDirFor(pwd, num)
 		},
+		CodeForgeForIssue: func(num string) forge.CodeForge {
+			if c.codeForge != "local" {
+				return cf
+			}
+			return newCodeForge(c, resolveIssueParent(it, num))
+		},
 	}
 }
 
@@ -758,7 +774,7 @@ func newSettle(c config, it forge.IssueTracker, cf forge.CodeForge) settle.Settl
 	if c.dispatchKind == dispatchKindResearch {
 		return settle.NewResearchSettle(it)
 	}
-	return settle.New(settleConfig(c), it, cf)
+	return settle.New(settleConfig(c, it, cf), it, cf)
 }
 
 // wavesConfig builds the subset of config the wave engine (internal/waves)
@@ -1127,7 +1143,7 @@ func cmdBuild() int {
 func cmdDoctor() int {
 	c := loadConfig()
 	it := newIssueTracker(c)
-	cf := newCodeForge(c)
+	cf := newCodeForge(c, "")
 	stat, serr := os.Stdin.Stat()
 	interactive := serr == nil && (stat.Mode()&os.ModeCharDevice) != 0
 	if err := runDoctor(it, cf, c, os.Stdout, os.Stdin, interactive); err != nil {

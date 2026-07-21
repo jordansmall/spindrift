@@ -175,7 +175,7 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 		// overwrite it now that Merge has actually landed. Best-effort: a
 		// resolution failure here is surprising (the merge just succeeded)
 		// but must never turn an actual successful land into a failure.
-		if lr, ok := s.cf.(forge.LandingRef); ok {
+		if lr, ok := s.cfForNum(num).(forge.LandingRef); ok {
 			if landing, err := lr.LandingRef(); err == nil {
 				s.recordLanding(num, landing)
 			} else {
@@ -369,13 +369,17 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 	if err := s.preflightStaleBase(num, gen, pr, d); err != nil {
 		return err
 	}
+	// cf is resolved once for this call and reused throughout: num's own
+	// parent-keyed instance (CODE_FORGE=local, issue #1734) when
+	// Config.CodeForgeForIssue is set, otherwise New's cf unchanged.
+	cf := s.cfForNum(num)
 	// CODE_FORGE=local's Merge assumes ref already exists as a branch on the
 	// backing repo, exactly like git/github — but the Box's read-only repo
 	// mount means it never pushed there directly. Relay the Box's code-out
 	// bundle in first, once, so the loop below's Merge(pr) attempts find the
 	// ref (ADR 0033). A relay failure (missing/malformed bundle) is returned
 	// directly: there is nothing to retry, unlike a merge conflict below.
-	if br, ok := s.cf.(forge.BundleRelay); ok {
+	if br, ok := cf.(forge.BundleRelay); ok {
 		if s.cfg.OutboxDir == nil {
 			return fmt.Errorf("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay — every CODE_FORGE=local construction site must supply an OutboxDir resolver")
 		}
@@ -387,7 +391,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 		if s.terminated(num, gen) {
 			return errAbandoned
 		}
-		err := s.cf.Merge(pr)
+		err := cf.Merge(pr)
 		if err == nil {
 			return nil
 		}
@@ -416,12 +420,12 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 		rebaseAttempts++
 		fmt.Printf("    #%s  landing=%s  status=rebase-retry  attempt=%d/%d\n",
 			num, pr, rebaseAttempts, s.cfg.MaxRebaseAttempts)
-		rbErr := s.cf.Rebase(pr)
+		rbErr := cf.Rebase(pr)
 		for rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && pushRetries < s.cfg.MaxRebaseAttempts {
 			pushRetries++
 			fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
 				num, pr, pushRetries, s.cfg.MaxRebaseAttempts, rbErr)
-			rbErr = s.cf.Rebase(pr)
+			rbErr = cf.Rebase(pr)
 		}
 		if rbErr != nil {
 			if errors.Is(rbErr, forge.ErrTransientPushFailure) {

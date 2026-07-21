@@ -90,7 +90,7 @@ func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 	}
 
 	it := newIssueTracker(c)
-	cf := newCodeForge(c)
+	cf := newCodeForge(c, "")
 	f := newDispatchFactory(c, pwd, r, it, cf)
 	s := newSettle(c, it, cf)
 
