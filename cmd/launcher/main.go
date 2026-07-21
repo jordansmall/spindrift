@@ -311,6 +311,7 @@ func gitIdentityField(env, gitConfigKey string) string {
 func loadConfig() config {
 	imageTag := getenvArtifact("IMAGE_TAG", "spindrift:latest")
 	image := getenvArtifact("IMAGE", imageTag)
+	codeForge := getenvSchema("CODE_FORGE")
 	return config{
 		imageArchive:    getenvArtifact("IMAGE_ARCHIVE", ""),
 		imageTag:        imageTag,
@@ -383,9 +384,9 @@ func loadConfig() config {
 		mergeMode:       getenvSchema("MERGE_MODE"),
 		mergeGuardPaths: getenvSchema("MERGE_GUARD_PATHS"),
 
-		codeForge:                    getenvSchema("CODE_FORGE"),
+		codeForge:                    codeForge,
 		codeForgeRemoteURL:           getenvSchema("CODE_FORGE_REMOTE_URL"),
-		codeForgeAccumulationRepoDir: getenvSchema("CODE_FORGE_ACCUMULATION_REPO_DIR"),
+		codeForgeAccumulationRepoDir: absCodeForgeAccumulationRepoDir(codeForge, getenvSchema("CODE_FORGE_ACCUMULATION_REPO_DIR")),
 		codeForgeIntegrationParent:   getenvSchema("CODE_FORGE_INTEGRATION_PARENT"),
 	}
 }
@@ -440,9 +441,6 @@ func validate(c config) error {
 			return fmt.Errorf("set CODE_FORGE_REMOTE_URL (the plain git remote to clone from and push to) when CODE_FORGE=git")
 		}
 	case "local":
-		if c.codeForgeAccumulationRepoDir == "" {
-			return fmt.Errorf("set CODE_FORGE_ACCUMULATION_REPO_DIR (the bare Accumulation repo path) when CODE_FORGE=local")
-		}
 		if c.codeForgeIntegrationParent == "" {
 			return fmt.Errorf("set CODE_FORGE_INTEGRATION_PARENT (the seam's parent/broad-ticket key) when CODE_FORGE=local")
 		}
@@ -535,6 +533,29 @@ func newCodeForge(c config) forge.CodeForge {
 func absLocalIssuesDir(dir string) string {
 	if dir == "" {
 		return ""
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return dir
+	}
+	return abs
+}
+
+// absCodeForgeAccumulationRepoDir resolves the Accumulation repo dir (ADR
+// 0033) for CODE_FORGE=local to an absolute host path, defaulting an unset
+// knob to .spindrift/accum.git under the process cwd rather than requiring
+// an operator-supplied path (issue #1726): both the read-only /repo Box
+// mount and the host-side landing forge's git subprocesses (which run from
+// inside cwd) need the same absolute path, so resolving it once here — and
+// storing the result back onto config — keeps every consumer downstream in
+// agreement. Other forges leave dir untouched and unresolved, matching the
+// field's existing empty-and-unused treatment.
+func absCodeForgeAccumulationRepoDir(codeForge, dir string) string {
+	if codeForge != "local" {
+		return dir
+	}
+	if dir == "" {
+		dir = filepath.Join(".spindrift", "accum.git")
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {

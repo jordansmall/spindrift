@@ -31,7 +31,8 @@ type MountParams struct {
 	// outbox mounts below apply only when it is "local" (ADR 0033).
 	CodeForge string
 	// AccumulationRepoDir is the host path to the bare Accumulation repo
-	// (.spindrift/repo.git) mounted read-only at /repo under CODE_FORGE=local.
+	// (.spindrift/accum.git by default, issue #1726) mounted read-only at
+	// /repo under CODE_FORGE=local.
 	AccumulationRepoDir string
 
 	// IssueTracker and LocalIssuesDir gate the read-only /issues mount

@@ -26,6 +26,81 @@ func TestBootstrap_PropagatesValidateError(t *testing.T) {
 	}
 }
 
+// mustRunGit runs `git -C dir args...` via the package's own runGit helper,
+// failing t on error.
+func mustRunGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	if err := runGit(dir, args...); err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+}
+
+// TestSeedAccumulationRepoIfLocal_Local_SeedsFromPwd verifies
+// seedAccumulationRepoIfLocal wires local.SeedAccumulationRepo (ADR 0033)
+// against config's already-resolved codeForgeAccumulationRepoDir and
+// baseBranch, seeding the bare Accumulation repo from pwd's checkout (issue
+// #1726: seeding must happen before any Box runs, since a defaulted-but-
+// nonexistent path makes the /repo mount silently skip).
+func TestSeedAccumulationRepoIfLocal_Local_SeedsFromPwd(t *testing.T) {
+	checkout := t.TempDir()
+	mustRunGit(t, checkout, "init", "-b", "main")
+	mustRunGit(t, checkout, "config", "user.email", "test@example.com")
+	mustRunGit(t, checkout, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(checkout, "base.txt"), []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustRunGit(t, checkout, "add", "base.txt")
+	mustRunGit(t, checkout, "commit", "-m", "base")
+
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+	c := baseConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = repoPath
+	c.baseBranch = "main"
+
+	if err := seedAccumulationRepoIfLocal(c, checkout); err != nil {
+		t.Fatalf("seedAccumulationRepoIfLocal: %v", err)
+	}
+
+	if _, err := os.Stat(repoPath); err != nil {
+		t.Fatalf("Accumulation repo not created: %v", err)
+	}
+}
+
+// TestSeedAccumulationRepoIfLocal_NonLocal_NoOp verifies
+// seedAccumulationRepoIfLocal does nothing for github/git (issue #1726
+// acceptance criterion: "no seeding occurs" for those forges) — passing a
+// nonexistent pwd here would fail SeedAccumulationRepo's git push if it
+// were invoked, so a nil error proves the no-op.
+func TestSeedAccumulationRepoIfLocal_NonLocal_NoOp(t *testing.T) {
+	c := baseConfig()
+	c.codeForge = "github"
+
+	if err := seedAccumulationRepoIfLocal(c, "/nonexistent/pwd"); err != nil {
+		t.Errorf("seedAccumulationRepoIfLocal(CODE_FORGE=github) = %v, want nil (no-op)", err)
+	}
+}
+
+// TestSeedAccumulationRepoIfLocal_ResearchKind_NoOp verifies
+// seedAccumulationRepoIfLocal skips seeding for the research dispatch kind
+// even under CODE_FORGE=local: research never mounts /repo or lands code
+// (it posts one verdict comment and stops), so seeding would be pure waste
+// and a needless new failure surface (a missing baseBranch in pwd) for a
+// run that never uses the repo it seeded. Passing a nonexistent pwd would
+// fail SeedAccumulationRepo's git push if it were invoked, so a nil error
+// proves the no-op.
+func TestSeedAccumulationRepoIfLocal_ResearchKind_NoOp(t *testing.T) {
+	c := baseConfig()
+	c.codeForge = "local"
+	c.dispatchKind = dispatchKindResearch
+	c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "accum.git")
+	c.baseBranch = "main"
+
+	if err := seedAccumulationRepoIfLocal(c, "/nonexistent/pwd"); err != nil {
+		t.Errorf("seedAccumulationRepoIfLocal(research kind) = %v, want nil (no-op)", err)
+	}
+}
+
 // TestResearchLaunchStack_WiresResearchLabelsAndSettle verifies
 // researchLaunchStack (cmdConsole's research-kind mirror of bootstrap's own
 // work-kind wiring, issue #1708) returns a tracker carrying the fixed
