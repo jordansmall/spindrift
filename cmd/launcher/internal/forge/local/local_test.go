@@ -743,6 +743,27 @@ func TestLocalTracker_Issue_ReportsLandingRef(t *testing.T) {
 	}
 }
 
+// TestLocalTracker_Issue_ReportsParent verifies Issue() surfaces the
+// frontmatter parent: field on forge.Issue.Parent (ADR 0033, issue #1734) —
+// the per-issue key newCodeForge resolves the Integration branch from.
+func TestLocalTracker_Issue_ReportsParent(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "fix-thing", localIssue{frontmatter: localFrontmatter{
+		Title: "Fix thing", State: labels.InProgress, Created: "2026-07-09T12:00:00Z",
+		Parent: "Calc Engine",
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	iss, err := lt.Issue("fix-thing")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.Parent != "Calc Engine" {
+		t.Errorf("Parent = %q, want %q", iss.Parent, "Calc Engine")
+	}
+}
+
 // TestLocalTracker_Issue_ReportsAbandonedFlag verifies Issue() surfaces the
 // frontmatter abandoned: flag on forge.Issue.Abandoned — reconcile's read
 // side of FlagAbandoned's write (ADR 0029).

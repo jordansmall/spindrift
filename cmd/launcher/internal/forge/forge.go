@@ -48,6 +48,13 @@ type Issue struct {
 	// by reconcile when the issue's landing PR closed without merging.
 	// Always false for github/jira, which have no such field to report.
 	Abandoned bool
+	// Parent is the local adapter's opaque, operator-authored parent:
+	// frontmatter field (ADR 0033) — the broad-ticket key CODE_FORGE=local
+	// resolves this seam's Integration branch from. Empty for github/jira,
+	// which have no such field, and for a local issue with no parent: set
+	// (a parentless seam is its own broad ticket, keyed on its own slug
+	// instead — see local.ResolveParent).
+	Parent string
 }
 
 // IssueState is the canonical open/closed state of an issue. Each
