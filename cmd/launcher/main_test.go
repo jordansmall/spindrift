@@ -449,7 +449,6 @@ func TestLoadConfig_CodeForgeGithub_AccumulationRepoDirStaysEmpty(t *testing.T) 
 func TestRunnerConfig_CodeForgeLocal_MatchesNewCodeForgeAccumulationRepoDir(t *testing.T) {
 	t.Setenv("CODE_FORGE", "local")
 	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", "")
-	t.Setenv("CODE_FORGE_INTEGRATION_PARENT", "1694")
 
 	c := loadConfig()
 	rc := runnerConfig(c)
@@ -1194,18 +1193,6 @@ func TestValidateCodeForge_Local_AcceptsUnsetAccumulationRepoDir(t *testing.T) {
 	}
 }
 
-// TestValidateCodeForge_Local_RequiresIntegrationParent verifies that
-// validate() still fails fast when CODE_FORGE=local and the Integration
-// branch's parent key (ADR 0033) is unset — unlike the Accumulation repo
-// dir, this knob has no default.
-func TestValidateCodeForge_Local_RequiresIntegrationParent(t *testing.T) {
-	c := minimalValidLocalConfig()
-	c.codeForgeIntegrationParent = ""
-	if err := validate(c); err == nil {
-		t.Fatal("validate() should require CODE_FORGE_INTEGRATION_PARENT when CODE_FORGE=local")
-	}
-}
-
 // TestValidateCodeForge_Local_RequiresImmediateMergeMode verifies that
 // validate() fails fast when CODE_FORGE=local is paired with any MERGE_MODE
 // other than immediate — only immediate relays the seam bundle into the
@@ -1248,9 +1235,8 @@ func TestNewCodeForge_Local_ReturnsBundleRelayAdapter(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "repo.git")
-	c.codeForgeIntegrationParent = "1694"
 
-	cf := newCodeForge(c, "")
+	cf := newCodeForge(c, "1694")
 
 	if _, ok := cf.(forge.PRForge); ok {
 		t.Error("newCodeForge(CODE_FORGE=local) satisfies PRForge, want a push-only adapter")
@@ -1569,14 +1555,13 @@ func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *test
 // minimalValidConfig returns a config that passes validate() so tests can
 // mutate exactly one field at a time.
 // minimalValidLocalConfig returns a minimalValidConfig() wired for a valid
-// CODE_FORGE=local run (accumulation dir, integration parent, and the only
-// merge mode local accepts), so local-specific tests only need to override
-// the one field under test.
+// CODE_FORGE=local run (accumulation dir and the only merge mode local
+// accepts), so local-specific tests only need to override the one field
+// under test.
 func minimalValidLocalConfig() config {
 	c := minimalValidConfig()
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = ".spindrift/accum.git"
-	c.codeForgeIntegrationParent = "1694"
 	c.mergeMode = "immediate"
 	return c
 }

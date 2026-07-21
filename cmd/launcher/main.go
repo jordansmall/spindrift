@@ -178,12 +178,6 @@ type config struct {
 	// "local". Unused (and unrequired) otherwise.
 	codeForgeAccumulationRepoDir string
 
-	// codeForgeIntegrationParent is the local issue's parent/broad-ticket
-	// key this run's seam lands under (ADR 0033) — newCodeForge bakes it in
-	// as the Integration branch (integration/<parent>) when codeForge is
-	// "local". Unused (and unrequired) otherwise.
-	codeForgeIntegrationParent string
-
 	// dispatchKind is "work" (the default, zero value) or "research" (ADR
 	// 0022). Set once by bootstrap via applyDispatchKind, never read from
 	// the environment directly — it is operator intent carried by which
@@ -387,7 +381,6 @@ func loadConfig() config {
 		codeForge:                    codeForge,
 		codeForgeRemoteURL:           getenvSchema("CODE_FORGE_REMOTE_URL"),
 		codeForgeAccumulationRepoDir: absCodeForgeAccumulationRepoDir(codeForge, getenvSchema("CODE_FORGE_ACCUMULATION_REPO_DIR")),
-		codeForgeIntegrationParent:   getenvSchema("CODE_FORGE_INTEGRATION_PARENT"),
 	}
 }
 
@@ -441,9 +434,6 @@ func validate(c config) error {
 			return fmt.Errorf("set CODE_FORGE_REMOTE_URL (the plain git remote to clone from and push to) when CODE_FORGE=git")
 		}
 	case "local":
-		if c.codeForgeIntegrationParent == "" {
-			return fmt.Errorf("set CODE_FORGE_INTEGRATION_PARENT (the seam's parent/broad-ticket key) when CODE_FORGE=local")
-		}
 		if c.mergeMode != "immediate" {
 			return fmt.Errorf(
 				"CODE_FORGE=local requires MERGE_MODE=immediate (got %q) — "+
