@@ -68,45 +68,61 @@ func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge,
 	return runReconcile(c, it, cf, lp, pwd, w)
 }
 
-// surfaceAfterDispatch surfaces c.codeForgeIntegrationParent's Integration
-// branch into pwd as a local branch named after the ticket, once every one
-// of its seam issues is closed — CODE_FORGE=local's auto-surface exit (ADR
-// 0033, issue #1730). It is a no-op for any codeForge other than "local",
-// an unset parent (validate() already requires one when codeForge is
-// local, so this only guards a call before validate has run), a tracker
-// with no SeamLister surface (every tracker but local), a parent with no
-// known seams yet, or one with any seam still open.
+// surfaceAfterDispatch surfaces every completed broad ticket's Integration
+// branch into pwd as a local branch named after its resolved parent, once
+// every one of its seam issues is closed — CODE_FORGE=local's auto-surface
+// exit (ADR 0033, issue #1730). Each issue keys its own broad ticket from
+// its own parent: frontmatter, or its own slug when unset (local.
+// ResolveParent, issue #1734), so a mixed-parent batch may complete several
+// broad tickets in the same sweep — this iterates every distinct resolved
+// parent among the tracker's issues instead of a single run-wide parent.
+// It is a no-op for any codeForge other than "local" or a tracker with no
+// SeamLister surface (every tracker but local); a resolved parent with any
+// seam still open is skipped, not an error.
 func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writer) error {
-	if c.codeForge != "local" || c.codeForgeIntegrationParent == "" {
+	if c.codeForge != "local" {
 		return nil
 	}
 	sl, ok := it.(forge.SeamLister)
 	if !ok {
 		return nil
 	}
-	seams, err := sl.SeamsOf(c.codeForgeIntegrationParent)
+	issues, err := sl.AllIssues()
 	if err != nil {
-		return fmt.Errorf("surface %s: list seams: %w", c.codeForgeIntegrationParent, err)
+		return fmt.Errorf("surface: list issues: %w", err)
 	}
-	if len(seams) == 0 {
-		return nil
-	}
-	for _, s := range seams {
-		if s.State != forge.IssueClosed {
-			return nil
+	groups := map[string][]forge.Issue{}
+	var order []string
+	for _, iss := range issues {
+		parent := local.ResolveParent(iss.Number, iss.Parent)
+		if _, seen := groups[parent]; !seen {
+			order = append(order, parent)
 		}
+		groups[parent] = append(groups[parent], iss)
 	}
-	surfaced, skipped, err := local.SurfaceIntegrationBranch(c.codeForgeAccumulationRepoDir, pwd, c.codeForgeIntegrationParent)
-	if err != nil {
-		return fmt.Errorf("surface %s: %w", c.codeForgeIntegrationParent, err)
-	}
-	if skipped != "" {
-		fmt.Fprintf(w, "surface: %s skipped — %s\n", c.codeForgeIntegrationParent, skipped)
-		return nil
-	}
-	if surfaced {
-		fmt.Fprintf(w, "surface: broad ticket %s complete — %s's Integration branch is ready in the checkout as local branch %q.\n",
-			c.codeForgeIntegrationParent, local.IntegrationBranch(c.codeForgeIntegrationParent), c.codeForgeIntegrationParent)
+	for _, parent := range order {
+		allClosed := true
+		for _, s := range groups[parent] {
+			if s.State != forge.IssueClosed {
+				allClosed = false
+				break
+			}
+		}
+		if !allClosed {
+			continue
+		}
+		surfaced, skipped, err := local.SurfaceIntegrationBranch(c.codeForgeAccumulationRepoDir, pwd, parent)
+		if err != nil {
+			return fmt.Errorf("surface %s: %w", parent, err)
+		}
+		if skipped != "" {
+			fmt.Fprintf(w, "surface: %s skipped — %s\n", parent, skipped)
+			continue
+		}
+		if surfaced {
+			fmt.Fprintf(w, "surface: broad ticket %s complete — %s's Integration branch is ready in the checkout as local branch %q.\n",
+				parent, local.IntegrationBranch(parent), parent)
+		}
 	}
 	return nil
 }

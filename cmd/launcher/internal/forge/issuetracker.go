@@ -163,4 +163,10 @@ type SeamLister interface {
 	// ticket's seams are all landed (CODE_FORGE=local's auto-surface exit,
 	// issue #1730).
 	SeamsOf(parent string) ([]Issue, error)
+	// AllIssues returns every issue (open or closed) the tracker holds, in
+	// canonical order, regardless of parent, state, or dispatch marker —
+	// the auto-surface sweep's basis for discovering every distinct
+	// resolved parent across a mixed batch (ADR 0033, issue #1734), since
+	// SeamsOf alone can only look up one already-known parent at a time.
+	AllIssues() ([]Issue, error)
 }

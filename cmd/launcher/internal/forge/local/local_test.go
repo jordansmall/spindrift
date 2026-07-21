@@ -307,6 +307,38 @@ func TestLocalTracker_SeamsOf_ReturnsOpenAndClosedMatchingParent(t *testing.T) {
 	}
 }
 
+// TestLocalTracker_AllIssues_ReturnsEveryIssueOpenAndClosed verifies
+// AllIssues returns every issue file in dir regardless of parent, state, or
+// dispatch marker (ADR 0033, issue #1734) — the auto-surface sweep's basis
+// for discovering every distinct resolved parent across a mixed batch,
+// since SeamsOf alone can only look up one already-known parent at a time.
+func TestLocalTracker_AllIssues_ReturnsEveryIssueOpenAndClosed(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+
+	writeLocalIssue(t, dir, "seam-2", localIssue{frontmatter: localFrontmatter{
+		Title: "Seam 2", State: labels.Complete, Created: "2026-07-09T12:00:00Z", Parent: "broad-1", Closed: true,
+	}})
+	writeLocalIssue(t, dir, "seam-1", localIssue{frontmatter: localFrontmatter{
+		Title: "Seam 1", State: labels.Dispatchable, Created: "2026-07-08T12:00:00Z", Parent: "broad-1",
+	}})
+	writeLocalIssue(t, dir, "no-parent", localIssue{frontmatter: localFrontmatter{
+		Title: "No parent", State: labels.Dispatchable, Created: "2026-07-06T12:00:00Z",
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	issues, err := lt.AllIssues()
+	if err != nil {
+		t.Fatalf("AllIssues: %v", err)
+	}
+	if len(issues) != 3 {
+		t.Fatalf("AllIssues returned %d issues, want 3: %+v", len(issues), issues)
+	}
+	if issues[0].Number != "no-parent" || issues[1].Number != "seam-1" || issues[2].Number != "seam-2" {
+		t.Fatalf("AllIssues = %+v, want [no-parent, seam-1, seam-2] (created-ascending)", issues)
+	}
+}
+
 func TestLocalTracker_TransitionState_RewritesFrontmatterInPlace(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels

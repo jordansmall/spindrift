@@ -183,6 +183,13 @@ func (lt *LocalTracker) SeamsOf(parent string) ([]forge.Issue, error) {
 	return lt.listIssues(func(li localIssue) bool { return li.frontmatter.Parent == parent })
 }
 
+// AllIssues returns every issue file in dir, in canonical order (ascending
+// by the created timestamp), regardless of parent, state, or dispatch
+// marker — see forge.SeamLister.
+func (lt *LocalTracker) AllIssues() ([]forge.Issue, error) {
+	return lt.listIssues(func(localIssue) bool { return true })
+}
+
 // listIssues scans dir for issue files matching keep, in canonical order
 // (ascending by the created timestamp) — the shared walk behind ListIssues
 // and ListOpenIssues.
