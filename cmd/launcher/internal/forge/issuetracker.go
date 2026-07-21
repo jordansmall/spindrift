@@ -150,3 +150,17 @@ type AbandonedFlagger interface {
 	// merging. Reconcile is its sole caller.
 	FlagAbandoned(num string) error
 }
+
+// SeamLister is the optional IssueTracker surface for adapters that group
+// issues under a parent/broad-ticket field (ADR 0033). Only the local
+// adapter implements it — github/jira issues have no such grouping for the
+// launcher to query. Callers discover it with a type assertion — `sl, ok :=
+// it.(SeamLister)` — the same optional-interface pattern IssueCloser and
+// LandingRecorder use.
+type SeamLister interface {
+	// SeamsOf returns every issue (open or closed) whose parent field
+	// equals parent, in canonical order — used to test whether a broad
+	// ticket's seams are all landed (CODE_FORGE=local's auto-surface exit,
+	// issue #1730).
+	SeamsOf(parent string) ([]Issue, error)
+}
