@@ -73,9 +73,17 @@ The pieces:
 
 - **Landing — synchronous, host-side, onto an integration branch.** The Launcher
   merges the fetched branch onto **`integration/<parent>`** (one integration
-  branch per broad ticket, keyed on the local issue's existing `parent`
-  frontmatter), reusing the `git` adapter's temp-clone → merge → push-ref helper.
-  The merge *succeeding* **is** the landing — there is no PR, no network, no
+  branch per broad ticket, keyed on *that seam's own* local issue's `parent`
+  frontmatter — never a knob shared across the whole run, so a mixed-parent
+  batch lands each seam onto its own branch instead of collapsing onto one),
+  reusing the `git` adapter's temp-clone → merge → push-ref helper. `parent`
+  is opaque and operator-authored (a GitHub URL, a Jira key, another local
+  issue's slug); spindrift never reaches into another tracker to resolve it,
+  it only sanitizes the string into a git-ref-safe token (lowercased, each run
+  of non-`[a-z0-9]` characters collapsed to a single dash) before forming the
+  branch name. An issue with no `parent:` set is its own broad ticket, keyed
+  on its own sanitized slug instead — never a shared fallback branch. The
+  merge *succeeding* **is** the landing — there is no PR, no network, no
   wait. A clean merge closes the seam-issue through the existing `reconcile`
   path (ADR 0029); a conflicting merge leaves the seam unlanded and blocked (the
   same failure posture ADR 0032 gives a missing/malformed comment block).
@@ -216,12 +224,19 @@ neither touches the invariant ADR 0032 protected:
   onto its integration branch, not a remote PR; the `waves` blocker resolution
   reads the on-disk closed state for `local`, so dependency scheduling needs no
   network.
-- The integration branch is keyed on the local issue's `parent` field, so
-  `CODE_FORGE=local`'s per-ticket accumulation **assumes a tracker that supplies
-  a parent/epic link**. `local × local` is the fully-specified cell; other
-  trackers paired with `CODE_FORGE=local` stay permitted (ADR 0013's matrix is
-  unchanged) but are unspecified until their sub-issue links land, degrading to a
-  single integration branch.
+- Each seam's integration branch is keyed on *its own* local issue's `parent`
+  field (issue #1734), so `CODE_FORGE=local`'s per-ticket accumulation
+  **assumes a tracker that supplies a parent/epic link** — but never
+  degrades to one shared branch: an issue with no `parent:` set is its own
+  broad ticket, keyed on its own slug. `local × local` is the fully-specified
+  cell; other trackers paired with `CODE_FORGE=local` stay permitted (ADR
+  0013's matrix is unchanged) but are unspecified until their sub-issue links
+  land.
+- The Launcher's per-run wiring resolves every seam's parent independently —
+  a mixed-parent dispatch batch lands, chains (`BASE_BRANCH` forwarding), and
+  auto-surfaces (see below) each broad ticket on its own Integration branch; a
+  cross-parent `## Blocked by` edge only orders scheduling and never folds one
+  parent's work into another's base.
 - The Launcher auto-surfaces a completed broad ticket's integration branch
   into the operator's checkout as a local branch (issue #1730); the operator
   still publishes the team PR manually. A `finalize` verb (push + PR) and a
