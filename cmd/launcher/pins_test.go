@@ -252,12 +252,12 @@ func TestOsExitOnlyInMain(t *testing.T) {
 // criterion: run, the selective `dispatch <nums>` path, and recover used to
 // each carry their own copy of the six-step prologue (config load+validate,
 // runner construction, ready-check, forge client, dispatch factory, settle).
-// newDispatchFactory(c, pwd, r, cf) is a distinctive literal that appears
-// only inside that prologue -- build, preview, and doctor never construct a
-// dispatch.Factory -- so pinning its count to 1 across the whole package
-// (excluding tests) proves the prologue now lives in bootstrap only.
+// newDispatchFactory(c, pwd, r, it, cf) is a distinctive literal that
+// appears only inside that prologue -- build, preview, and doctor never
+// construct a dispatch.Factory -- so pinning its count to 1 across the whole
+// package (excluding tests) proves the prologue now lives in bootstrap only.
 func TestBootstrapPrologueAppearsOnce(t *testing.T) {
-	const needle = "newDispatchFactory(c, pwd, r, cf)"
+	const needle = "newDispatchFactory(c, pwd, r, it, cf)"
 	total := 0
 	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
 		if err != nil {

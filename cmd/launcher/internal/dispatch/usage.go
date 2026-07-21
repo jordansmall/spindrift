@@ -15,9 +15,9 @@ import (
 func (d *Dispatch) UsageReport() string {
 	resolve := d.cfg.ResolveEnv
 	if resolve == nil {
-		resolve = os.Getenv
+		resolve = func(_, name string) string { return os.Getenv(name) }
 	}
-	model := resolve("MODEL")
+	model := resolve(d.number, "MODEL")
 	if model == "" {
 		model = "unknown"
 	}

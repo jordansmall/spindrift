@@ -1332,7 +1332,7 @@ func TestDispatchConfig_PRForge_WiresOpenPRForIssue(t *testing.T) {
 	cf := forge.NewFake()
 	cf.SetPR(cf.AgentBranch("42"), forge.PR{URL: "https://github.com/o/r/pull/1"})
 
-	cfg := dispatchConfig(minimalValidConfig(), cf)
+	cfg := dispatchConfig(minimalValidConfig(), forge.NewFake(), cf)
 
 	if cfg.OpenPRForIssue == nil {
 		t.Fatal("want OpenPRForIssue set for a PRForge-implementing Code Forge")
@@ -1367,7 +1367,7 @@ func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testin
 		t.Fatal("test setup: expected a non-PRForge Code Forge")
 	}
 
-	cfg := dispatchConfig(c, cf)
+	cfg := dispatchConfig(c, forge.NewFake(), cf)
 
 	if cfg.OpenPRForIssue == nil {
 		t.Fatal("want OpenPRForIssue set for a non-PRForge Code Forge")
@@ -1383,22 +1383,49 @@ func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testin
 
 // TestDispatchConfig_Local_ResolveEnv_ForwardsIntegrationBranchAsBaseBranch
 // verifies that under CODE_FORGE=local, dispatchConfig's ResolveEnv resolves
-// BASE_BRANCH to the seam's Integration branch (integration/<parent>, ADR
-// 0033) once that branch exists -- so a dependent seam's Box clones a
-// branch that already contains its blocker's landed code (issue #1700).
+// BASE_BRANCH to the dispatched issue's own Integration branch
+// (integration/<parent>, ADR 0033, issue #1734) once that branch exists --
+// so a dependent seam's Box clones a branch that already contains its
+// blocker's landed code (issue #1700). The issue has no parent: frontmatter
+// set, so its resolved parent falls back to its own number.
 func TestDispatchConfig_Local_ResolveEnv_ForwardsIntegrationBranchAsBaseBranch(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "local"
 	c.baseBranch = "main"
-	c.codeForgeIntegrationParent = "42"
 	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "42"})
 	fc.SetBranchExists("integration/42", true)
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, cf)
+	cfg := dispatchConfig(c, fc, cf)
 
-	if got := cfg.ResolveEnv("BASE_BRANCH"); got != "integration/42" {
-		t.Errorf("ResolveEnv(BASE_BRANCH) = %q, want %q", got, "integration/42")
+	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "integration/42" {
+		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "integration/42")
+	}
+}
+
+// TestDispatchConfig_Local_ResolveEnv_UsesEachIssuesOwnParent verifies two
+// issues dispatched in the same run resolve BASE_BRANCH from their own
+// distinct parent: frontmatter (issue #1734) -- a mixed-parent batch must
+// never collapse onto a single Integration branch.
+func TestDispatchConfig_Local_ResolveEnv_UsesEachIssuesOwnParent(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.baseBranch = "main"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "10", Parent: "Calc Engine"})
+	fc.SetIssue(forge.Issue{Number: "11", Parent: "Render Pipeline"})
+	fc.SetBranchExists("integration/calc-engine", true)
+	fc.SetBranchExists("integration/render-pipeline", true)
+	cf := fc.AsLocal()
+
+	cfg := dispatchConfig(c, fc, cf)
+
+	if got := cfg.ResolveEnv("10", "BASE_BRANCH"); got != "integration/calc-engine" {
+		t.Errorf("ResolveEnv(10, BASE_BRANCH) = %q, want %q", got, "integration/calc-engine")
+	}
+	if got := cfg.ResolveEnv("11", "BASE_BRANCH"); got != "integration/render-pipeline" {
+		t.Errorf("ResolveEnv(11, BASE_BRANCH) = %q, want %q", got, "integration/render-pipeline")
 	}
 }
 
@@ -1416,15 +1443,15 @@ func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchBeforeFirstLand(t 
 	c := minimalValidConfig()
 	c.codeForge = "local"
 	c.baseBranch = "main"
-	c.codeForgeIntegrationParent = "42"
 	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "42"})
 	fc.SetBranchExists("integration/42", false)
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, cf)
+	cfg := dispatchConfig(c, fc, cf)
 
-	if got := cfg.ResolveEnv("BASE_BRANCH"); got != "main" {
-		t.Errorf("ResolveEnv(BASE_BRANCH) = %q, want %q", got, "main")
+	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "main" {
+		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "main")
 	}
 }
 
@@ -1438,10 +1465,10 @@ func TestDispatchConfig_NonLocal_ResolveEnv_PassesThroughUnchanged(t *testing.T)
 	cf := forge.NewFake()
 
 	t.Setenv("BASE_BRANCH", "release")
-	cfg := dispatchConfig(c, cf)
+	cfg := dispatchConfig(c, forge.NewFake(), cf)
 
-	if got := cfg.ResolveEnv("BASE_BRANCH"); got != "release" {
-		t.Errorf("ResolveEnv(BASE_BRANCH) = %q, want %q", got, "release")
+	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "release" {
+		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "release")
 	}
 }
 
@@ -1455,15 +1482,15 @@ func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchOnBranchExistsErro
 	c := minimalValidConfig()
 	c.codeForge = "local"
 	c.baseBranch = "main"
-	c.codeForgeIntegrationParent = "42"
 	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "42"})
 	fc.BranchExistsErr = errors.New("repo path unreadable")
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, cf)
+	cfg := dispatchConfig(c, fc, cf)
 
-	if got := cfg.ResolveEnv("BASE_BRANCH"); got != "main" {
-		t.Errorf("ResolveEnv(BASE_BRANCH) = %q, want %q", got, "main")
+	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "main" {
+		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "main")
 	}
 }
 
