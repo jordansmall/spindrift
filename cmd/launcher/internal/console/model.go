@@ -627,6 +627,30 @@ func Update(m Model, msg Msg) Model {
 				}
 			}
 		}
+	case SidebarTranscriptMsg:
+		if m.Sidebar != nil && m.Sidebar.Number == msg.Number {
+			// String equality, not activityEqual's line-slice comparison —
+			// the Transcript render is a single blob, not a parsed sequence
+			// of distinct entries, and gating the Lines recompute below on
+			// this skips the same frequent no-op refreshes (most calls,
+			// between actual pass-log writes) SidebarActivityMsg already
+			// skips (issue #1502's rationale, extended to Transcript by
+			// #1736).
+			changed := msg.Rendered != m.Sidebar.TranscriptRendered || msg.Raw != m.Sidebar.TranscriptRaw
+			m.Sidebar.TranscriptRendered = msg.Rendered
+			m.Sidebar.TranscriptRaw = msg.Raw
+			if changed && m.Sidebar.ShowTranscript {
+				// Only while ShowTranscript is active: recomputing Lines
+				// while the operator is looking at the Activity feed would
+				// re-split a form they can't even see, wasted work the #722
+				// cache exists to avoid (mirrors SidebarActivityMsg's own
+				// !ShowTranscript-gated recompute in reverse).
+				m.Sidebar.Lines = sidebarLines(m.Sidebar)
+				if m.Sidebar.Follow {
+					m.Sidebar.Offset = len(m.Sidebar.Lines)
+				}
+			}
+		}
 	case SidebarZoomToggleMsg:
 		m.SidebarZoom = !m.SidebarZoom
 	case SidebarCloseMsg:

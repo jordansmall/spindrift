@@ -116,6 +116,44 @@ func TestDrillIn_MultiplePasses_ConcatenatesInOrderWithBoundaries(t *testing.T) 
 	}
 }
 
+// TestSidebarTranscriptCache_UnchangedStat_SkipsReDrillIn verifies a second
+// Refresh against the same, untouched pass logs returns the cached render
+// rather than re-running DrillIn — the Transcript analogue of
+// SidebarActivityCache's own stat-based skip (issue #1736).
+func TestSidebarTranscriptCache_UnchangedStat_SkipsReDrillIn(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	cache := NewSidebarTranscriptCache()
+
+	rendered1, raw1, ok := cache.Refresh(drv, dir, "42")
+	if !ok {
+		t.Fatal("first Refresh: ok = false, want true")
+	}
+	want := "=== pass: initial ===\n[implementor] hi\n"
+	if rendered1 != want {
+		t.Errorf("first Refresh: Rendered = %q, want %q", rendered1, want)
+	}
+
+	rendered2, raw2, ok := cache.Refresh(drv, dir, "42")
+	if !ok {
+		t.Fatal("second Refresh: ok = false, want true")
+	}
+	if rendered2 != rendered1 || raw2 != raw1 {
+		t.Errorf("second Refresh() = (%q, %q), want the cached (%q, %q) unchanged", rendered2, raw2, rendered1, raw1)
+	}
+}
+
 // TestDrillIn_NoLogsOnDisk_ReturnsErr verifies drilling into an issue with
 // no Dispatch history yet surfaces an error instead of an empty transcript
 // that could be mistaken for a Dispatch that ran and said nothing.
