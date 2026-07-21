@@ -188,12 +188,15 @@ stubbed methods on the `git` adapter.
 _Avoid_: PR client, GitHub-only interface.
 
 **Accumulation repo**:
-The Launcher-owned bare git repo (`.spindrift/repo.git`) that the `local` Code
-Forge (ADR 0033) accumulates code in — the code-plane sibling of the
-`.spindrift/issues/` directory. Its base is seeded host-side from the operator's
-local checkout (offline); each seam clones it through a read-only mount and
-lands onto an Integration branch inside it. Deliberately *not* the operator's
-working checkout: a bare repo has no checked-out branch, keeps agent refs and
+The Launcher-owned bare git repo that the `local` Code Forge (ADR 0033)
+accumulates code in — the code-plane sibling of the `.spindrift/issues/`
+directory. Defaults to `.spindrift/accum.git` under the launcher's working
+directory; `CODE_FORGE_ACCUMULATION_REPO_DIR` overrides it. The Launcher
+auto-creates and seeds it (base branch ref from the operator's local
+checkout, offline) before any Box runs, idempotently on every run
+thereafter; each seam clones it through a read-only mount and lands onto an
+Integration branch inside it. Deliberately *not* the operator's working
+checkout: a bare repo has no checked-out branch, keeps agent refs and
 objects out of the operator's repo, and resets with `rm -rf`.
 _Avoid_: mirror, staging repo, local remote.
 

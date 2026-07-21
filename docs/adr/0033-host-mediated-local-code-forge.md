@@ -47,15 +47,19 @@ one principle:
 The pieces:
 
 - **Endpoint — a dedicated bare accumulation repo.** Code accumulates in
-  `.spindrift/repo.git`, a bare repo the Launcher owns, the code-plane sibling
-  of `.spindrift/issues/`. Its base is seeded host-side from the operator's
-  local checkout (offline). It is *not* the operator's working repo: a bare repo
-  has no checked-out branch (no `receive.denyCurrentBranch` foot-gun), keeps
-  agent refs and objects out of the operator's `git branch`/gc, is isolated from
-  the operator's live branch-juggling, and resets with `rm -rf`.
+  `.spindrift/accum.git` by default under the launcher's working directory
+  (`CODE_FORGE_ACCUMULATION_REPO_DIR` overrides it), a bare repo the Launcher
+  owns, the code-plane sibling of `.spindrift/issues/`. The Launcher
+  auto-creates it and seeds its base host-side from the operator's local
+  checkout (offline) before any Box runs, idempotently on every run
+  thereafter — no operator setup step required (issue #1726). It is *not* the
+  operator's working repo: a bare repo has no checked-out branch (no
+  `receive.denyCurrentBranch` foot-gun), keeps agent refs and objects out of
+  the operator's `git branch`/gc, is isolated from the operator's live
+  branch-juggling, and resets with `rm -rf`.
 
 - **Code-in — a read-only clone mount.** The Launcher RO bind-mounts
-  `.spindrift/repo.git` into the Box; the agent runs `git clone /repo /work`
+  `.spindrift/accum.git` into the Box; the agent runs `git clone /repo /work`
   and works in the tmpfs work dir. The mount is read-only, so the operator's
   code stays single-writer (the Launcher), exactly as ADR 0032 keeps the issue
   file single-writer.
@@ -65,7 +69,7 @@ The pieces:
   `<base>..<agent-branch>` written to a small, **empty-at-start, throwaway
   writable outbox mount** (the code-plane analog of ADR 0032's stdout comment
   block). The Launcher relays it host-side —
-  `git -C .spindrift/repo.git fetch <outbox>/seam.bundle <branch>`.
+  `git -C .spindrift/accum.git fetch <outbox>/seam.bundle <branch>`.
 
 - **Landing — synchronous, host-side, onto an integration branch.** The Launcher
   merges the fetched branch onto **`integration/<parent>`** (one integration
@@ -90,9 +94,9 @@ The pieces:
   edges.
 
 - **Surface — manual, and deliberately so.** Spindrift's responsibility ends at
-  "the integration branch is assembled and ready in `.spindrift/repo.git`." The
+  "the integration branch is assembled and ready in `.spindrift/accum.git`." The
   operator surfaces the single team PR with the git/gh gestures they already
-  know (`git fetch .spindrift/repo.git integration/<parent>:<branch>` →
+  know (`git fetch .spindrift/accum.git integration/<parent>:<branch>` →
   `git push origin <branch>` → `gh pr create`). Keeping the local→shared
   transition a human act is the right trust boundary: it is the operator who
   decides when private breakdown work becomes public, the same caution ADR 0029
@@ -138,7 +142,7 @@ The read-only clone mount and the writable outbox both clear the bar, and
 neither touches the invariant ADR 0032 protected:
 
 - **The operator's code stays single-writer.** The repo mount is read-only; the
-  Launcher is the only writer of `.spindrift/repo.git`. The Box writes only its
+  Launcher is the only writer of `.spindrift/accum.git`. The Box writes only its
   own throwaway outbox — never the accumulation repo, never the operator's
   working checkout.
 - **The new isolation statement is narrow.** ADR 0032 already documented one RO
@@ -146,7 +150,7 @@ neither touches the invariant ADR 0032 protected:
   plus one writable *scratch* mount. Neither is a writable mount of the
   operator's repo — the breach 0013's cut and 0032's rejected read-write option
   both feared. The honest new claim is "a read-only clone mount of
-  `.spindrift/repo.git` and a writable throwaway outbox exist under
+  `.spindrift/accum.git` and a writable throwaway outbox exist under
   `CODE_FORGE=local`."
 - **A buggy or hostile Box cannot corrupt the endpoint.** Read-only enforces it
   structurally; a conflicting or malformed bundle fails the host-side merge and
@@ -193,7 +197,7 @@ neither touches the invariant ADR 0032 protected:
 - `CODE_FORGE=local` is an additive knob value (MINOR under ADR 0010).
 - `buildMountSpecs` (the Launcher computes specs; runners stay backend-agnostic)
   gains, gated on `CODE_FORGE=local` and `candidateMount`, a read-only mount of
-  `.spindrift/repo.git` and a writable outbox mount. The zero-shared-host-filesystem
+  `.spindrift/accum.git` and a writable outbox mount. The zero-shared-host-filesystem
   claim now carries a third documented exception alongside ADR 0032's `/issues`.
 - A new `git bundle` code-out grammar and a host-side relay join ADR 0032's
   comment-block extractor; `settle` wires the fetched branch to a host-side
