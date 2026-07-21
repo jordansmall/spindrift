@@ -154,6 +154,7 @@ func toIssue(num string, li localIssue) forge.Issue {
 		Labels:    labels,
 		Landing:   li.frontmatter.Landing,
 		Abandoned: li.frontmatter.Abandoned,
+		Parent:    li.frontmatter.Parent,
 	}
 }
 
