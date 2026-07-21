@@ -506,7 +506,6 @@ warns) but is no longer the primary channel:
 | `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), or `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)) |
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
-| `CODE_FORGE_INTEGRATION_PARENT` | — (required when `CODE_FORGE=local`) | the seam issue's parent/broad-ticket key; selects the Accumulation repo's `integration/<parent>` Integration branch this run's seam lands onto |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
 | `ISSUE_TRACKER`           | `github` (baked)       | IssueTracker backend: `github`, `local` (private Markdown + YAML frontmatter files — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)), or `jira` (see [Issue Tracker backends](#issue-tracker-backends)) |
@@ -1113,8 +1112,15 @@ landing: https://github.com/owner/repo/pull/123
   by default (same names as `LABEL`/`IN_PROGRESS_LABEL`/`COMPLETE_LABEL`/
   `FAILED_LABEL`, which still apply — the local adapter uses them as the
   frontmatter value instead of a GitHub label).
-- `parent` is optional and purely informational; the local tracker is
-  standalone — any linkage to an upstream tracker is out of scope (ADR 0013).
+- `parent` is optional and opaque — the local tracker is standalone; any
+  linkage to an upstream tracker (a GitHub URL, a Jira key, another local
+  issue's slug) is out of scope (ADR 0013) and never resolved by spindrift
+  itself. Under `CODE_FORGE=local` it doubles as the seam's broad-ticket
+  key (ADR 0033): the issue lands onto `integration/<sanitized-parent>` in
+  the Accumulation repo, sanitized to a git-ref-safe token (lowercased,
+  each run of non-`[a-z0-9]` characters collapsed to a single dash). A
+  parentless issue lands on `integration/<own-sanitized-slug>` instead — a
+  parentless seam is its own broad ticket.
 - `closed` is a boolean, local-only open/closed axis (ADR 0029), independent
   of `state`: absent or `false` means open; `true` excludes the issue from
   both `ListOpenIssues` and `ListIssues`, so it is never re-dispatched or

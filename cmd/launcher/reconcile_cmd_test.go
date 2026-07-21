@@ -230,7 +230,6 @@ func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 	c := baseConfig()
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = repo.Bare
-	c.codeForgeIntegrationParent = parent
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
 	var buf bytes.Buffer
@@ -265,7 +264,6 @@ func TestSurfaceAfterDispatch_OpenSeamRemains_NoOp(t *testing.T) {
 	c := baseConfig()
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = repo.Bare
-	c.codeForgeIntegrationParent = parent
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
 	var buf bytes.Buffer
@@ -291,7 +289,6 @@ func TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp(t *testing.T) {
 
 	c := baseConfig()
 	c.codeForge = "github"
-	c.codeForgeIntegrationParent = parent
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
 	var buf bytes.Buffer
@@ -379,7 +376,6 @@ func TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch(t *testing.T) {
 	c.issueTracker = "local"
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = repo.Bare
-	c.codeForgeIntegrationParent = parent
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
 	var buf bytes.Buffer

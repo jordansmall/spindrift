@@ -356,13 +356,6 @@
     flakeOption = true;
     boxEnv = false;
   };
-  codeForgeIntegrationParent = {
-    env = "CODE_FORGE_INTEGRATION_PARENT";
-    group = "Repository & identity";
-    doc = "the seam issue's parent/broad-ticket key (ADR 0033) — selects the Accumulation repo's integration/<parent> Integration branch this run's seam lands onto; required when CODE_FORGE=local, unused otherwise";
-    flakeOption = true;
-    boxEnv = false;
-  };
   # ── Operator-tunable knobs (flakeOption = true; also tune via harness.env) ─
   maxFixAttempts = {
     env = "MAX_FIX_ATTEMPTS";
