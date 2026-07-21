@@ -157,11 +157,22 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 // have left in dir, then recreates it empty — the writable outbox mount must
 // start empty every dispatch (ADR 0033), and buildMountSpecs only produces
 // the mount at all when the source directory already exists.
+//
+// The dir is created other-writable (0o777) so the Box's uid-1000 agent user
+// can write into it regardless of how rootless podman/docker remaps host-to-
+// container ownership (issue #1723) — an explicit os.Chmod follows MkdirAll
+// because MkdirAll's mode is filtered through the launcher process's umask,
+// which on a typical 0o022 host would otherwise still leave the dir at 0o755.
+// No sticky bit: the dir is single-writer and per-issue (ADR 0033), so this
+// trades a shared-host tamper caveat for staying backend-agnostic.
 func resetOutboxDir(dir string) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
-	return os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		return err
+	}
+	return os.Chmod(dir, 0o777)
 }
 
 // rotateStaleLog renames an existing file at logPath aside to the first

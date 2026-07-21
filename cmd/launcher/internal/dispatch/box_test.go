@@ -226,3 +226,23 @@ func TestRotateStaleLog_NoOpWhenMissing(t *testing.T) {
 		t.Errorf("logPath: want still absent, got err=%v", err)
 	}
 }
+
+// TestResetOutboxDir_CreatesOtherWritableDirectory verifies the outbox dir is
+// mode 0o777 so the Box's uid-1000 agent user can write a seam bundle
+// regardless of how rootless podman/docker remaps host-to-container
+// ownership (issue #1723).
+func TestResetOutboxDir_CreatesOtherWritableDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "outbox")
+
+	if err := resetOutboxDir(dir); err != nil {
+		t.Fatalf("resetOutboxDir: %v", err)
+	}
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat dir: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o777 {
+		t.Errorf("dir mode: got %o, want %o", got, 0o777)
+	}
+}
