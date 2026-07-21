@@ -1044,6 +1044,140 @@ func TestTea_SidebarActivityTick_AdvancesWithoutKeypressOrPoll(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_SidebarActivityTick_AdvancesTranscriptView verifies the same
+// dedicated ~1s tick that live-tails the Activity feed (#1735) also
+// re-reads and re-renders the Transcript view once "t" switches to it — the
+// open-time-snapshot bug issue #1736 fixes. pollInterval is pinned to an
+// hour and no key is sent between the log's growth and the assertion, so
+// only the tick can be responsible for "second update" landing.
+func TestTea_SidebarActivityTick_AdvancesTranscriptView(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.pollInterval = time.Hour
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "2")
+	waitForOutput(t, tm, "running")
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "first update")
+
+	sendKey(tm, "t")
+	waitForOutput(t, tm, "transcript #42", "[implementor] first update")
+
+	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitForOutput(t, tm, "second update")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_SidebarActivityTick_AdvancesTranscriptViewWhileZoomed verifies the
+// tick keeps refreshing the Transcript view after "z" zooms it fullscreen —
+// zoom is passive reading with no keypresses of its own, the same
+// frozen-until-keypress symptom #1735 fixed for Activity, extended to
+// Transcript by #1736 AC2 ("works while zoomed").
+func TestTea_SidebarActivityTick_AdvancesTranscriptViewWhileZoomed(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.pollInterval = time.Hour
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "2")
+	waitForOutput(t, tm, "running")
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "first update")
+
+	sendKey(tm, "t")
+	waitForOutput(t, tm, "transcript #42", "[implementor] first update")
+
+	sendKey(tm, "z")
+	waitForOutput(t, tm, "first update") // zoomed render still shows the transcript
+
+	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitForOutput(t, tm, "second update")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_SidebarActivityTick_AdvancesRawTranscriptView verifies the tick
+// keeps refreshing the Transcript view's byte-exact raw form too, not just
+// the rendered one — the raw toggle ("t" twice) reads the same live
+// SidebarTranscriptMsg.Raw payload (issue #1736).
+func TestTea_SidebarActivityTick_AdvancesRawTranscriptView(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.pollInterval = time.Hour
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "2")
+	waitForOutput(t, tm, "running")
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "first update")
+
+	sendKey(tm, "t")
+	waitForOutput(t, tm, "transcript #42", "[implementor] first update")
+	sendKey(tm, "t")
+	waitForOutput(t, tm, "(raw)", `"text":"first update"`)
+
+	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitForOutput(t, tm, `"text":"second update"`)
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
 // TestTea_SidebarActivityTick_AdvancesWhileZoomed verifies the live-tail tick
 // keeps refreshing the sidebar's activity feed after "z" zooms it fullscreen
 // — zoom is passive reading with no keypresses of its own, exactly the
@@ -3522,6 +3656,86 @@ func TestTea_Update_ReusesHeartbeatCacheAcrossCalls(t *testing.T) {
 	got := heartbeatFor(t, tm.m, "42")
 	if got != first1 {
 		t.Errorf("second Update heartbeat = %q, want cached %q (unchanged stat must skip reparse)", got, first1)
+	}
+}
+
+// TestTea_Update_RefreshesOpenTranscriptView_WhenPassLogGrows verifies
+// refreshPickDecorations re-reads and re-renders the Transcript while
+// ShowTranscript is active on a running Dispatch's open sidebar, driven by
+// the same per-Update refresh path the #1735 tick already exercises for the
+// Activity feed — the open-time-snapshot bug issue #1736 fixes.
+func TestTea_Update_RefreshesOpenTranscriptView_WhenPassLogGrows(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "logs", "issue-42.log")
+	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	launch := newTestLauncher(t, f)
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := newTeaModel(f, dir, launch)
+	tm.m.Picks = append(tm.m.Picks, Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	tm.m = Update(tm.m, SidebarLoadedMsg{Number: "42"})
+	tm.m = Update(tm.m, SidebarToggleMsg{}) // switch to the rendered Transcript
+
+	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	model, _ := tm.Update(struct{}{})
+	tm = model.(teaModel)
+
+	if !strings.Contains(tm.m.Sidebar.TranscriptRendered, "second") {
+		t.Errorf("TranscriptRendered = %q, want it to reflect the grown pass log without reopening the sidebar", tm.m.Sidebar.TranscriptRendered)
+	}
+}
+
+// TestTea_Update_DoesNotRefreshTranscript_ForSettledSidebar verifies a
+// Settled Dispatch's open sidebar, with the Transcript view active, never
+// re-reads its pass logs even though they grow on disk afterward — a
+// Settled Dispatch has nothing left to tail, mirroring Activity's own scope
+// (#1502) and satisfying #1736 AC3 ("not needlessly re-read").
+func TestTea_Update_DoesNotRefreshTranscript_ForSettledSidebar(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "logs", "issue-42.log")
+	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	launch := newTestLauncher(t, f)
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickSettled})
+
+	tm := newTeaModel(f, dir, launch)
+	tm.m.Picks = append(tm.m.Picks, Pick{Number: "42", Title: "fix the thing", State: PickSettled})
+	tm.m = Update(tm.m, SidebarLoadedMsg{Number: "42", Rendered: "=== pass: initial ===\n[implementor] first\n"})
+	tm.m = Update(tm.m, SidebarToggleMsg{})
+
+	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	model, _ := tm.Update(struct{}{})
+	tm = model.(teaModel)
+
+	if strings.Contains(tm.m.Sidebar.TranscriptRendered, "second") {
+		t.Errorf("TranscriptRendered = %q, want the growth never to have arrived — a Settled Dispatch's sidebar must never refresh", tm.m.Sidebar.TranscriptRendered)
 	}
 }
 

@@ -213,16 +213,29 @@ func (SidebarLoadedMsg) isConsoleMsg() {}
 // Dispatch the sidebar has open so I/O stays bounded even with many
 // Dispatches running (issue #1502). A no-op when no sidebar is open or
 // Number no longer matches it — the operator may have switched or closed
-// the sidebar in the same Update batch that produced this message. Only
-// Activity is re-derived; the Transcript stays the one-shot load
-// SidebarLoadedMsg already provides
-// (#1501) — the condensed feed, not the full firehose, is what tails live.
+// the sidebar in the same Update batch that produced this message. Sent
+// regardless of ShowTranscript, since the Activity feed stays cached for an
+// instant toggle back to it; SidebarTranscriptMsg is the Transcript's own
+// analogue, sent only while ShowTranscript is active (issue #1736).
 type SidebarActivityMsg struct {
 	Number   string
 	Activity []ActivityLine
 }
 
 func (SidebarActivityMsg) isConsoleMsg() {}
+
+// SidebarTranscriptMsg carries the open sidebar's Dispatch's freshly
+// re-derived Transcript render — refreshPickDecorations's per-Msg refresh,
+// the Transcript's own analogue of SidebarActivityMsg, scoped to whichever
+// Dispatch the sidebar has open and only sent while ShowTranscript is active
+// (issue #1736). A no-op when no sidebar is open or Number no longer matches
+// it, mirroring SidebarActivityMsg's own race guard.
+type SidebarTranscriptMsg struct {
+	Number        string
+	Rendered, Raw string
+}
+
+func (SidebarTranscriptMsg) isConsoleMsg() {}
 
 // SidebarToggleMsg is the run loop's signal that the operator pressed "t" —
 // advances the sidebar's content one step around its Activity -> Transcript

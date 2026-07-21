@@ -1010,6 +1010,70 @@ func TestUpdate_SidebarActivityMsg_DoesNotOverwriteTranscriptLines(t *testing.T)
 	}
 }
 
+// TestUpdate_SidebarTranscriptMsg_UpdatesTranscriptAndLinesWhileShowing
+// verifies a SidebarTranscriptMsg for the open sidebar's own Number installs
+// the refreshed Transcript render and recomputes Lines while ShowTranscript
+// is true — the Transcript's own live-tail advance, the counterpart to
+// SidebarActivityMsg's Activity refresh (issue #1736).
+func TestUpdate_SidebarTranscriptMsg_UpdatesTranscriptAndLinesWhileShowing(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "first"})
+	m = Update(m, SidebarToggleMsg{}) // switches to the rendered Transcript
+
+	m = Update(m, SidebarTranscriptMsg{Number: "42", Rendered: "first\nsecond", Raw: "raw first\nraw second"})
+
+	if m.Sidebar.TranscriptRendered != "first\nsecond" {
+		t.Errorf("TranscriptRendered = %q, want the refreshed render", m.Sidebar.TranscriptRendered)
+	}
+	if len(m.Sidebar.Lines) != 2 || m.Sidebar.Lines[1] != "second" {
+		t.Errorf("Lines = %v, want the refreshed Transcript's own two lines", m.Sidebar.Lines)
+	}
+}
+
+// TestUpdate_SidebarTranscriptMsg_FollowSnapsToBottom verifies growth of the
+// Transcript, while Follow is true and ShowTranscript is active, moves
+// Offset to show the newest line — the live-tail default already true of
+// the Activity feed (issue #1502), extended to the Transcript view (#1736
+// AC2: "honours follow").
+func TestUpdate_SidebarTranscriptMsg_FollowSnapsToBottom(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0"})
+	m = Update(m, SidebarToggleMsg{}) // switches to the rendered Transcript
+	if !m.Sidebar.Follow {
+		t.Fatal("test setup: Follow must start true")
+	}
+
+	var grown strings.Builder
+	for i := 0; i < 100; i++ {
+		fmt.Fprintf(&grown, "l%d\n", i)
+	}
+
+	m = Update(m, SidebarTranscriptMsg{Number: "42", Rendered: grown.String()})
+
+	want := len(m.Sidebar.Lines) - (20 - headerFooterLines) // last page fills the viewport (issue #829's convention)
+	if m.Sidebar.Offset != want {
+		t.Errorf("Offset = %d, want %d (the last page, following the growth)", m.Sidebar.Offset, want)
+	}
+}
+
+// TestUpdate_SidebarTranscriptMsg_NoOpWhenNumberMismatch verifies a
+// SidebarTranscriptMsg for a Dispatch other than the one the sidebar has
+// open is dropped — a stale in-flight refresh racing a Dispatch switch must
+// never clobber the newly selected Dispatch's Transcript (mirrors
+// SidebarActivityMsg's own guard, issue #1736).
+func TestUpdate_SidebarTranscriptMsg_NoOpWhenNumberMismatch(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0"})
+	m = Update(m, SidebarToggleMsg{})
+
+	m = Update(m, SidebarTranscriptMsg{Number: "43", Rendered: "l0\nl1"})
+
+	if m.Sidebar.TranscriptRendered != "l0" {
+		t.Errorf("TranscriptRendered = %q, want the original, untouched by a mismatched Number", m.Sidebar.TranscriptRendered)
+	}
+}
+
 // TestUpdate_FocusSidebarMsg_MovesFocus verifies "l"/right moves focus to an
 // open sidebar (#1501, ADR 0030).
 func TestUpdate_FocusSidebarMsg_MovesFocus(t *testing.T) {

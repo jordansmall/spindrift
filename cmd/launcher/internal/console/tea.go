@@ -51,6 +51,12 @@ type teaModel struct {
 	// ADR 0030's "piggybacking the existing per-Msg sync tick"), scoped to
 	// that one Dispatch so I/O stays bounded even with many running.
 	sidebarActivity *SidebarActivityCache
+	// sidebarTranscript caches the open sidebar's own last-refreshed
+	// Transcript render, the Transcript's own analogue of sidebarActivity —
+	// refreshPickDecorations re-derives it via the same per-Msg refresh path
+	// while ShowTranscript is active, so the Transcript view live-tails a
+	// running Dispatch instead of staying frozen at open time (issue #1736).
+	sidebarTranscript *SidebarTranscriptCache
 	// sidebarTickArmed tracks whether a sidebarActivityTick is currently
 	// in flight, so Update arms at most one at a time instead of stacking a
 	// second while the first is still pending (issue #1735).
@@ -84,7 +90,7 @@ func newTeaModel(tracker forge.IssueTracker, pwd string, launch *Launcher) teaMo
 	if launch != nil {
 		interval = launch.PollInterval()
 	}
-	return teaModel{m: m, tracker: tracker, pwd: pwd, launch: launch, pollInterval: interval, heartbeats: NewHeartbeatCache(), sidebarActivity: NewSidebarActivityCache(), done: make(chan struct{})}
+	return teaModel{m: m, tracker: tracker, pwd: pwd, launch: launch, pollInterval: interval, heartbeats: NewHeartbeatCache(), sidebarActivity: NewSidebarActivityCache(), sidebarTranscript: NewSidebarTranscriptCache(), done: make(chan struct{})}
 }
 
 // Run drives the console's full-screen Bubble Tea program to completion —
@@ -263,7 +269,7 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.sidebarTickArmed = false
 	}
 
-	t.m = refreshPickDecorations(t.m, t.launch, t.pwd, t.heartbeats, t.sidebarActivity)
+	t.m = refreshPickDecorations(t.m, t.launch, t.pwd, t.heartbeats, t.sidebarActivity, t.sidebarTranscript)
 	t.m = syncStale(t.m, t.launch)
 	if sidebarActivityLive(t.m) {
 		if !t.sidebarTickArmed {
@@ -1057,7 +1063,7 @@ func pollTick(d time.Duration) tea.Cmd {
 // read straight off the Launcher's Limiter — no Msg carries a resize, so
 // this per-render pull is the only path that keeps them current. A nil
 // launch leaves m untouched.
-func refreshPickDecorations(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache, sidebarActivity *SidebarActivityCache) Model {
+func refreshPickDecorations(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache, sidebarActivity *SidebarActivityCache, sidebarTranscript *SidebarTranscriptCache) Model {
 	if launch == nil {
 		return m
 	}
@@ -1099,6 +1105,16 @@ func refreshPickDecorations(m Model, launch *Launcher, pwd string, heartbeats *H
 	if m.Sidebar != nil && drv != nil && (isRunningNumber(picks, m.Sidebar.Number) || m.IsOrphan(m.Sidebar.Number)) {
 		if activity, ok := sidebarActivity.Refresh(drv, pwd, m.Sidebar.Number); ok {
 			m = Update(m, SidebarActivityMsg{Number: m.Sidebar.Number, Activity: activity})
+		}
+		// Scoped to ShowTranscript, on top of the same running-or-orphan gate
+		// above: DrillIn re-reads and re-renders every pass log, heavier than
+		// the Activity feed's single-file read, so it only runs while the
+		// operator is actually looking at the Transcript view (issue #1736
+		// AC1/AC3).
+		if m.Sidebar.ShowTranscript {
+			if rendered, raw, ok := sidebarTranscript.Refresh(drv, pwd, m.Sidebar.Number); ok {
+				m = Update(m, SidebarTranscriptMsg{Number: m.Sidebar.Number, Rendered: rendered, Raw: raw})
+			}
 		}
 	}
 	return Update(m, CapMsg{Cap: launch.Cap(), Live: launch.Live()})
