@@ -972,7 +972,7 @@ func run(lc *launchContext) error {
 
 	if origin == waves.OriginDiscovered && len(issues) == 0 {
 		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
-		if err := reconcileAfterDispatch(c, it, cf, lp, os.Stdout); err != nil {
+		if err := reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout); err != nil {
 			return err
 		}
 		return errQueueEmpty
@@ -988,7 +988,7 @@ func run(lc *launchContext) error {
 	}
 
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
-	return reconcileAfterDispatch(c, it, cf, lp, os.Stdout)
+	return reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout)
 }
 
 // runContinuousDispatch is the entry point for CONTINUOUS_DISPATCH: the
@@ -1064,7 +1064,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		}
 		if errors.Is(err, waves.ErrOpenNoneDispatchable) && firstQueryEmpty {
 			fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
-			if err := reconcileAfterDispatch(c, it, cf, lp, os.Stdout); err != nil {
+			if err := reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout); err != nil {
 				return err
 			}
 			return errQueueEmpty
@@ -1072,7 +1072,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return err
 	}
 	fmt.Printf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
-	return reconcileAfterDispatch(c, it, cf, lp, os.Stdout)
+	return reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout)
 }
 
 // cmdBuild is the `build` subcommand: realize the sandbox image or store

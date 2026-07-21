@@ -7,16 +7,21 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/reconcile"
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// runReconcile drives the reconcile.Run seam and reports the outcome to w.
-// reconcile is `local`-tracker-specific (ADR 0029): for any other
-// issueTracker it is a clear no-op, not an error that looks like a crash.
-func runReconcile(it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, issueTracker string, w io.Writer) error {
-	if issueTracker != "local" {
-		fmt.Fprintf(w, "reconcile is a local-tracker concern (ISSUE_TRACKER=%q) — nothing to do.\n", issueTracker)
+// runReconcile drives the reconcile.Run seam and reports the outcome to w,
+// then — on a clean sweep — surfaceAfterDispatch's auto-surface check (ADR
+// 0033, issue #1730): closing a ticket's last seam this very sweep is
+// exactly the moment that can newly complete it, so the check belongs here,
+// not only at callers that already know a ticket just finished. reconcile
+// itself is `local`-tracker-specific (ADR 0029): for any other
+// c.issueTracker it is a clear no-op, not an error that looks like a crash.
+func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, pwd string, w io.Writer) error {
+	if c.issueTracker != "local" {
+		fmt.Fprintf(w, "reconcile is a local-tracker concern (ISSUE_TRACKER=%q) — nothing to do.\n", c.issueTracker)
 		return nil
 	}
 	res, err := reconcile.Run(it, cf, lp)
@@ -47,7 +52,7 @@ func runReconcile(it forge.IssueTracker, cf forge.CodeForge, lp reconcile.Livene
 	} else {
 		fmt.Fprintf(w, "reconcile: reset %d issue(s): %s\n", len(res.Reset), strings.Join(res.Reset, ", "))
 	}
-	return nil
+	return surfaceAfterDispatch(c, it, pwd, w)
 }
 
 // reconcileAfterDispatch auto-invokes the reconcile sweep at the end of a
@@ -56,11 +61,54 @@ func runReconcile(it forge.IssueTracker, cf forge.CodeForge, lp reconcile.Livene
 // Unlike runReconcile's explicit refusal message on the standalone
 // `spindrift reconcile` verb, this is a silent no-op for any other tracker —
 // a routine github/jira dispatch run has nothing to report here.
-func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, w io.Writer) error {
+func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, pwd string, w io.Writer) error {
 	if c.issueTracker != "local" {
 		return nil
 	}
-	return runReconcile(it, cf, lp, c.issueTracker, w)
+	return runReconcile(c, it, cf, lp, pwd, w)
+}
+
+// surfaceAfterDispatch surfaces c.codeForgeIntegrationParent's Integration
+// branch into pwd as a local branch named after the ticket, once every one
+// of its seam issues is closed — CODE_FORGE=local's auto-surface exit (ADR
+// 0033, issue #1730). It is a no-op for any codeForge other than "local",
+// an unset parent (validate() already requires one when codeForge is
+// local, so this only guards a call before validate has run), a tracker
+// with no SeamLister surface (every tracker but local), a parent with no
+// known seams yet, or one with any seam still open.
+func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writer) error {
+	if c.codeForge != "local" || c.codeForgeIntegrationParent == "" {
+		return nil
+	}
+	sl, ok := it.(forge.SeamLister)
+	if !ok {
+		return nil
+	}
+	seams, err := sl.SeamsOf(c.codeForgeIntegrationParent)
+	if err != nil {
+		return fmt.Errorf("surface %s: list seams: %w", c.codeForgeIntegrationParent, err)
+	}
+	if len(seams) == 0 {
+		return nil
+	}
+	for _, s := range seams {
+		if s.State != forge.IssueClosed {
+			return nil
+		}
+	}
+	surfaced, skipped, err := local.SurfaceIntegrationBranch(c.codeForgeAccumulationRepoDir, pwd, c.codeForgeIntegrationParent)
+	if err != nil {
+		return fmt.Errorf("surface %s: %w", c.codeForgeIntegrationParent, err)
+	}
+	if skipped != "" {
+		fmt.Fprintf(w, "surface: %s skipped — %s\n", c.codeForgeIntegrationParent, skipped)
+		return nil
+	}
+	if surfaced {
+		fmt.Fprintf(w, "surface: broad ticket %s complete — %s's Integration branch is ready in the checkout as local branch %q.\n",
+			c.codeForgeIntegrationParent, local.IntegrationBranch(c.codeForgeIntegrationParent), c.codeForgeIntegrationParent)
+	}
+	return nil
 }
 
 // cmdReconcile is the `reconcile` subcommand: the local-tracker bookkeeping
@@ -73,16 +121,17 @@ func cmdReconcile() int {
 	it := newIssueTracker(c)
 	cf := newCodeForge(c)
 
+	pwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		return 1
+	}
+
 	// The runner only matters for the LivenessProbe's container check, which
 	// runReconcile below only reaches for a local tracker — skip building one
 	// for the common github/jira "nothing to do" refusal.
 	var lp reconcile.LivenessProbe
 	if c.issueTracker == "local" {
-		pwd, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
-			return 1
-		}
 		rc := runnerConfig(c)
 		var r runner.Runner
 		if c.runtime == "bwrap" {
@@ -92,7 +141,7 @@ func cmdReconcile() int {
 		}
 		lp = reconcile.NewFSProbe(pwd, r)
 	}
-	if err := runReconcile(it, cf, lp, c.issueTracker, os.Stdout); err != nil {
+	if err := runReconcile(c, it, cf, lp, pwd, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		return 1
 	}
