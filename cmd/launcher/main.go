@@ -644,17 +644,19 @@ func newDriver(c config) driver.Driver {
 // itself still reaches newCodeForge unchanged either way, since
 // ensureIntegrationBranch needs the real base branch to seed
 // integration/<parent> the first time a parent's seam lands.
-func localBaseBranchResolver(c config, cf forge.CodeForge) func(string) string {
+func localBaseBranchResolver(c config, it forge.IssueTracker, cf forge.CodeForge) func(num, name string) string {
 	if c.codeForge != "local" {
-		return resolveBoxEnvVar
+		return func(_, name string) string { return resolveBoxEnvVar(name) }
 	}
-	integrationBranch := local.IntegrationBranch(c.codeForgeIntegrationParent)
-	return func(name string) string {
+	return func(num, name string) string {
 		if name == "BASE_BRANCH" {
-			// Checked fresh on every call (once per Box constructed) rather
+			// Resolved fresh on every call (once per Box constructed) rather
 			// than cached at construction: a later seam's dispatch, within
 			// the same continuous run, must see integration/<parent> as it
-			// exists at that later moment, not as it stood at process start.
+			// exists at that later moment, not as it stood at process
+			// start -- and each num may resolve to a different parent's
+			// Integration branch entirely (issue #1734).
+			integrationBranch := local.IntegrationBranch(resolveIssueParent(it, num))
 			exists, err := cf.BranchExists(integrationBranch)
 			if err != nil {
 				fmt.Printf("!! BASE_BRANCH: checking %s: %v; falling back to %s\n", integrationBranch, err, c.baseBranch)
@@ -667,15 +669,29 @@ func localBaseBranchResolver(c config, cf forge.CodeForge) func(string) string {
 	}
 }
 
+// resolveIssueParent resolves num's own Integration-branch key (ADR 0033,
+// issue #1734): its parent: frontmatter, sanitized, or num itself,
+// sanitized, when unset or when the lookup fails (logged rather than
+// silent -- the caller's own BranchExists fallback still keeps a lookup
+// failure from breaking the Box, same posture as a BranchExists error).
+func resolveIssueParent(it forge.IssueTracker, num string) string {
+	iss, err := it.Issue(num)
+	if err != nil {
+		fmt.Printf("!! BASE_BRANCH: resolving issue %s's parent: %v; falling back to its own slug\n", num, err)
+		return local.ResolveParent(num, "")
+	}
+	return local.ResolveParent(num, iss.Parent)
+}
+
 // dispatchConfig builds the subset of config a dispatch.Factory needs.
 // OpenPRForIssue wires forge.ResolveOpenPR (issue #565), so a zero-exit
 // rate-limited retry never re-runs a box whose work already landed a PR;
 // ResolveOpenPR itself resolves to Found: false, nil for a push-only Code
 // Forge, so the retry proceeds unguarded there without any guard here.
-func dispatchConfig(c config, cf forge.CodeForge) dispatch.Config {
+func dispatchConfig(c config, it forge.IssueTracker, cf forge.CodeForge) dispatch.Config {
 	return dispatch.Config{
 		BoxEnvVars:            c.boxEnvVars,
-		ResolveEnv:            localBaseBranchResolver(c, cf),
+		ResolveEnv:            localBaseBranchResolver(c, it, cf),
 		Kind:                  c.dispatchKind,
 		CodeForge:             c.codeForge,
 		TransientRetryMax:     c.transientRetryMax,
@@ -694,8 +710,8 @@ func dispatchConfig(c config, cf forge.CodeForge) dispatch.Config {
 // recover). A driver-cache creation failure is logged and degrades to no
 // cache (fix boxes cold-start) rather than failing the dispatch -- the cache
 // is a resume optimization, not a correctness requirement (issue #427).
-func newDispatchFactory(c config, pwd string, r runner.Runner, cf forge.CodeForge) *dispatch.Factory {
-	f, err := dispatch.NewFactory(dispatchConfig(c, cf), pwd, r, newDriver(c), dispatch.RealClock())
+func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTracker, cf forge.CodeForge) *dispatch.Factory {
+	f, err := dispatch.NewFactory(dispatchConfig(c, it, cf), pwd, r, newDriver(c), dispatch.RealClock())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "==> driver cache unavailable (%v) -- fix boxes will cold-start\n", err)
 	}

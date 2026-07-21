@@ -19,13 +19,16 @@ type Config struct {
 	// every Box (schema boxEnv=true entries).
 	BoxEnvVars string
 
-	// ResolveEnv resolves one BoxEnvVars name to its forwarded value.
-	// Defaults to os.Getenv when nil (every pre-#625 caller and test).
-	// main.go wires this to the same document/flag/env chain loadConfig()
-	// uses (getenvSchema), so a boxEnv knob's document-baked value still
-	// reaches the Box even when the operator sets it nowhere (ADR 0020: the
-	// wrapper exports no per-var env any more).
-	ResolveEnv func(name string) string
+	// ResolveEnv resolves one BoxEnvVars name to its forwarded value for the
+	// issue being dispatched (num). Defaults to a num-ignoring os.Getenv
+	// when nil (every pre-#625 caller and test). main.go wires this to the
+	// same document/flag/env chain loadConfig() uses (getenvSchema), so a
+	// boxEnv knob's document-baked value still reaches the Box even when
+	// the operator sets it nowhere (ADR 0020: the wrapper exports no
+	// per-var env any more). num lets CODE_FORGE=local resolve BASE_BRANCH
+	// per seam (issue #1734): each dispatched issue may key its own
+	// Integration branch off a different parent.
+	ResolveEnv func(num, name string) string
 
 	// TransientRetryMax caps both the hold-cycle count (429 with a known
 	// reset) and the backoff-retry count (other transients) before a
@@ -89,11 +92,11 @@ type Config struct {
 func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary string) map[string]string {
 	resolve := cfg.ResolveEnv
 	if resolve == nil {
-		resolve = os.Getenv
+		resolve = func(_, name string) string { return os.Getenv(name) }
 	}
 	env := make(map[string]string)
 	for _, name := range strings.Fields(cfg.BoxEnvVars) {
-		env[name] = resolve(name)
+		env[name] = resolve(number, name)
 	}
 	env["ISSUE_NUMBER"] = number
 	env["ISSUE_TITLE"] = title

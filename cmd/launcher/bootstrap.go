@@ -91,7 +91,7 @@ func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 
 	it := newIssueTracker(c)
 	cf := newCodeForge(c)
-	f := newDispatchFactory(c, pwd, r, cf)
+	f := newDispatchFactory(c, pwd, r, it, cf)
 	s := newSettle(c, it, cf)
 
 	return &launchContext{
@@ -137,7 +137,7 @@ func seedAccumulationRepoIfLocal(c config, pwd string) error {
 func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Factory, settle.Settler) {
 	rc := applyDispatchKind(lc.config, dispatchKindResearch)
 	it := newIssueTracker(rc)
-	f := newDispatchFactory(rc, lc.pwd, lc.runner, lc.codeForge)
+	f := newDispatchFactory(rc, lc.pwd, lc.runner, it, lc.codeForge)
 	s := newSettle(rc, it, lc.codeForge)
 	return it, f, s
 }

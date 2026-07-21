@@ -40,7 +40,7 @@ func TestBuildBoxEnvForwardsSchemaVars(t *testing.T) {
 func TestBuildBoxEnvUsesResolveEnv(t *testing.T) {
 	cfg := Config{
 		BoxEnvVars: "MODEL",
-		ResolveEnv: func(name string) string {
+		ResolveEnv: func(num, name string) string {
 			if name == "MODEL" {
 				return "from-resolver"
 			}
@@ -50,6 +50,26 @@ func TestBuildBoxEnvUsesResolveEnv(t *testing.T) {
 	env := buildBoxEnv(cfg, "7", "Test issue", 0, "")
 	if env["MODEL"] != "from-resolver" {
 		t.Errorf("MODEL: got %q, want from-resolver", env["MODEL"])
+	}
+}
+
+// TestBuildBoxEnvResolveEnvReceivesIssueNumber verifies ResolveEnv is called
+// with the dispatched issue's own number (issue #1734) — CODE_FORGE=local's
+// per-seam BASE_BRANCH resolution needs to know which issue it's resolving
+// for, since each seam may key its Integration branch off a different
+// parent.
+func TestBuildBoxEnvResolveEnvReceivesIssueNumber(t *testing.T) {
+	var gotNum string
+	cfg := Config{
+		BoxEnvVars: "BASE_BRANCH",
+		ResolveEnv: func(num, name string) string {
+			gotNum = num
+			return ""
+		},
+	}
+	buildBoxEnv(cfg, "1734", "Test issue", 0, "")
+	if gotNum != "1734" {
+		t.Errorf("ResolveEnv num: got %q, want %q", gotNum, "1734")
 	}
 }
 
