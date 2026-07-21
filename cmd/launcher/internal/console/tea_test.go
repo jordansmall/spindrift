@@ -1003,6 +1003,233 @@ func TestTea_PollTick_DoesNotRefreshSettledSidebar(t *testing.T) {
 	}
 }
 
+// TestTea_SidebarActivityTick_AdvancesWithoutKeypressOrPoll verifies the
+// dedicated ~1s sidebar-refresh tick drives a running Dispatch's open
+// activity feed on its own — pollInterval is pinned to an hour, well past
+// this test's own wait, and no key is sent between the log's growth and the
+// assertion, so only the dedicated tick can be responsible for "second
+// update" landing (issue #1735).
+func TestTea_SidebarActivityTick_AdvancesWithoutKeypressOrPoll(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.pollInterval = time.Hour
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "2")
+	waitForOutput(t, tm, "running")
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "first update")
+
+	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitForOutput(t, tm, "second update")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_SidebarActivityTick_AdvancesWhileZoomed verifies the live-tail tick
+// keeps refreshing the sidebar's activity feed after "z" zooms it fullscreen
+// — zoom is passive reading with no keypresses of its own, exactly the
+// frozen-until-keypress symptom issue #1735 reports.
+func TestTea_SidebarActivityTick_AdvancesWhileZoomed(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.pollInterval = time.Hour
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "2")
+	waitForOutput(t, tm, "running")
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "first update")
+
+	sendKey(tm, "z")
+	waitForOutput(t, tm, "first update") // zoomed render still shows the feed
+
+	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitForOutput(t, tm, "second update")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_SidebarActivityTick_FollowAutoScrollsToNewLines verifies follow's
+// auto-scroll-to-bottom lands on the dedicated tick itself, not just a
+// keypress or the 90s pollTick (AC2 of issue #1735). The feed starts taller
+// than the docked viewport so a genuine scroll is observable: a line
+// appended below the current bottom only becomes visible if the tick
+// actually re-snapped Offset, not merely refreshed the underlying content.
+func TestTea_SidebarActivityTick_FollowAutoScrollsToNewLines(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	var lines strings.Builder
+	for i := 0; i < 50; i++ {
+		fmt.Fprintf(&lines, `{"type":"assistant","message":{"content":[{"type":"text","text":"line-%02d"}]}}`+"\n", i)
+	}
+	if err := os.WriteFile(logPath, []byte(lines.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := newTestLauncher(t, f)
+	launch.pollInterval = time.Hour
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "2")
+	waitForOutput(t, tm, "running")
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "activity #42", "line-49", "[follow]")
+
+	grown := lines.String() + `{"type":"assistant","message":{"content":[{"type":"text","text":"line-50"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(grown), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitForOutput(t, tm, "line-50") // no keypress — only the tick's follow re-snap reveals it
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_Update_ArmsSidebarActivityTick_OnRunningSidebarOpen_DisarmsOnClose
+// verifies the tick's arm/disarm bookkeeping directly against Update, without
+// the real-time cost of a teatest run: opening a running Dispatch's sidebar
+// arms it, and closing the sidebar disarms it again (issue #1735).
+func TestTea_Update_ArmsSidebarActivityTick_OnRunningSidebarOpen_DisarmsOnClose(t *testing.T) {
+	m := Update(NewModel(), QueueSnapshotMsg{Picks: []Pick{{Number: "42", State: PickRunning}}})
+	tm := teaModel{m: m}
+
+	next, cmd := tm.Update(SidebarLoadedMsg{Number: "42"})
+	tm = next.(teaModel)
+	if !tm.sidebarTickArmed {
+		t.Error("sidebarTickArmed = false, want true once a running Dispatch's sidebar opens")
+	}
+	if cmd == nil {
+		t.Error("cmd = nil, want a batched sidebarActivityTick Cmd")
+	}
+
+	next, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	tm = next.(teaModel)
+	if tm.sidebarTickArmed {
+		t.Error("sidebarTickArmed = true, want false after \"x\" closes the sidebar")
+	}
+}
+
+// TestTea_Update_DisarmsSidebarActivityTick_WhenDispatchSettles verifies the
+// tick disarms the moment its Dispatch stops running, even while the sidebar
+// stays open — a Settled/Terminated/Failed Dispatch's logs never change
+// again, so ticking it further would be pure waste (issue #1735).
+func TestTea_Update_DisarmsSidebarActivityTick_WhenDispatchSettles(t *testing.T) {
+	m := Update(NewModel(), QueueSnapshotMsg{Picks: []Pick{{Number: "42", State: PickRunning}}})
+	tm := teaModel{m: m}
+	next, _ := tm.Update(SidebarLoadedMsg{Number: "42"})
+	tm = next.(teaModel)
+	if !tm.sidebarTickArmed {
+		t.Fatal("sidebarTickArmed = false, want true before the Dispatch settles")
+	}
+
+	next, _ = tm.Update(QueueSnapshotMsg{Picks: []Pick{{Number: "42", State: PickSettled}}})
+	tm = next.(teaModel)
+	if tm.sidebarTickArmed {
+		t.Error("sidebarTickArmed = true, want false once the Dispatch is no longer running")
+	}
+}
+
+// TestTea_Update_SidebarActivityTickMsg_ReArmsWhileLive_StopsOnceClosed
+// verifies the tick's own arrival re-arms itself while the sidebar is still
+// live, and stops re-arming once the sidebar has since closed — the same
+// self-perpetuating-while-warranted shape as pollTickMsg (issue #1735).
+func TestTea_Update_SidebarActivityTickMsg_ReArmsWhileLive_StopsOnceClosed(t *testing.T) {
+	m := Update(NewModel(), QueueSnapshotMsg{Picks: []Pick{{Number: "42", State: PickRunning}}})
+	tm := teaModel{m: m}
+	next, _ := tm.Update(SidebarLoadedMsg{Number: "42"})
+	tm = next.(teaModel)
+
+	next, cmd := tm.Update(sidebarActivityTickMsg{gen: tm.sidebarTickGen})
+	tm = next.(teaModel)
+	if !tm.sidebarTickArmed || cmd == nil {
+		t.Errorf("sidebarTickArmed = %v, cmd = %v, want armed=true with a re-armed Cmd while still open on a running Dispatch", tm.sidebarTickArmed, cmd)
+	}
+
+	next, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	tm = next.(teaModel)
+	next, _ = tm.Update(sidebarActivityTickMsg{gen: tm.sidebarTickGen})
+	tm = next.(teaModel)
+	if tm.sidebarTickArmed {
+		t.Error("sidebarTickArmed = true, want false — the tick must not re-arm once the sidebar is closed")
+	}
+}
+
+// TestTea_Update_SidebarActivityTickMsg_DropsStaleGeneration verifies a
+// straggler tick from before a close-then-reopen — carrying the generation
+// that armed before the reopen — is dropped rather than re-armed, so a
+// close/reopen inside one tick interval never leaves two tick chains running
+// side by side forever (review finding on issue #1735).
+func TestTea_Update_SidebarActivityTickMsg_DropsStaleGeneration(t *testing.T) {
+	m := Update(NewModel(), QueueSnapshotMsg{Picks: []Pick{{Number: "42", State: PickRunning}}})
+	tm := teaModel{m: m}
+	next, _ := tm.Update(SidebarLoadedMsg{Number: "42"})
+	tm = next.(teaModel)
+	staleGen := tm.sidebarTickGen
+
+	next, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")}) // close
+	tm = next.(teaModel)
+	next, _ = tm.Update(SidebarLoadedMsg{Number: "42"}) // reopen: a fresh generation arms
+	tm = next.(teaModel)
+	if tm.sidebarTickGen == staleGen {
+		t.Fatalf("sidebarTickGen = %d, want it to have advanced past the pre-close generation %d on reopen", tm.sidebarTickGen, staleGen)
+	}
+	freshGen := tm.sidebarTickGen
+
+	next, cmd := tm.Update(sidebarActivityTickMsg{gen: staleGen}) // the pre-close timer, finally firing late
+	tm = next.(teaModel)
+	if cmd != nil {
+		t.Error("cmd != nil, want the stale-generation tick dropped with no re-arm")
+	}
+	if tm.sidebarTickGen != freshGen || !tm.sidebarTickArmed {
+		t.Errorf("sidebarTickGen = %d, sidebarTickArmed = %v, want the fresh chain (gen %d, armed) left untouched by the stale fire", tm.sidebarTickGen, tm.sidebarTickArmed, freshGen)
+	}
+}
+
 // TestTea_SidebarKey_OpensActivityPane verifies Enter, on the Running
 // Section, opens a full-screen sidebar showing the highlighted running
 // pick's Activity feed by default (issue #786; retargeted to a work-Section
