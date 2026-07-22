@@ -1082,6 +1082,45 @@ func TestView_DetailModal_SanitizesErr(t *testing.T) {
 	}
 }
 
+// TestView_DetailModal_DimsListBehind verifies the base layer the floating
+// detail modal composites over renders in RoleDim's foreground while the
+// modal is open (issue #1760's scrim) — a running Pick's own RoleRunning
+// escape is replaced by RoleDim's — and closing the modal restores the row's
+// normal RoleRunning styling.
+func TestView_DetailModal_DimsListBehind(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "1", Title: "running one", State: PickRunning, Heartbeat: "7 turns"},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+
+	runningEscape := "\x1b[34m"
+	dimEscape := "\x1b[90m"
+
+	before := View(m)
+	if !strings.Contains(before, runningEscape) {
+		t.Fatalf("View() before opening modal = %q, want the running row styled with %q", before, runningEscape)
+	}
+
+	opened := Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	duringModal := View(opened)
+	if !strings.Contains(duringModal, dimEscape) {
+		t.Errorf("View() with modal open = %q, want the base layer dimmed with %q", duringModal, dimEscape)
+	}
+	if strings.Contains(duringModal, runningEscape) {
+		t.Errorf("View() with modal open = %q, want the running row's own %q replaced by the dim style", duringModal, runningEscape)
+	}
+
+	closed := Update(opened, DetailModalCloseMsg{})
+	after := View(closed)
+	if !strings.Contains(after, runningEscape) {
+		t.Errorf("View() after closing modal = %q, want the running row's normal %q styling restored", after, runningEscape)
+	}
+}
+
 // TestView_DetailModal_NoBlockersOrBlocks_ShowsNoSectionClutter verifies a
 // ticket with nothing declared in either direction doesn't grow empty
 // "Blocked by"/"Blocks" section headers with nothing under them (issue

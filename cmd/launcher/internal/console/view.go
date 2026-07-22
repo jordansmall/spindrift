@@ -155,7 +155,8 @@ func View(m Model) string {
 		boxWidth, boxHeight := detailModalBoxSize(m.Width, m.Height)
 		x, y := detailModalBoxOrigin(m.Width, m.Height, boxWidth, boxHeight)
 		box := renderDetailModalBox(*m.DetailModal, boxWidth, boxHeight)
-		base = compositeOverlay(padBaseForOverlay(base, m.Width, y+boxHeight), box, x, y)
+		base = dimBase(padBaseForOverlay(base, m.Width, y+boxHeight))
+		base = compositeOverlay(base, box, x, y)
 	}
 	return base
 }
