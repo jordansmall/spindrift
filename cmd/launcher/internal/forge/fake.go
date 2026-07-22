@@ -403,6 +403,14 @@ func (f *Fake) ListIssues(state DispatchState) ([]Issue, error) {
 		if iss.State == IssueClosed {
 			continue
 		}
+		if label == "" {
+			// Mirrors GitHub's `--label ""` (ignored by gh, returns every
+			// open issue) and Local's `frontmatter.State == ""` (matches
+			// every untriaged issue): a DispatchState left unmapped by the
+			// tracker's label family matches everything, not nothing.
+			out = append(out, iss)
+			continue
+		}
 		for _, l := range iss.Labels {
 			if l == label {
 				out = append(out, iss)
