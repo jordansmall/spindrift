@@ -60,3 +60,39 @@ func TestRunBundleOut_ParsesFlagsAndDelegates(t *testing.T) {
 		t.Fatalf("bundle not created: %v", err)
 	}
 }
+
+// TestRunBundleOut_MissingRequiredFlagReturnsNonZero verifies a missing
+// -branch fails loudly (exit 1) instead of running bundleout.Run against a
+// zero-value Config.
+func TestRunBundleOut_MissingRequiredFlagReturnsNonZero(t *testing.T) {
+	var stdout bytes.Buffer
+	rc := runBundleOut([]string{
+		"--repo", t.TempDir(),
+		"--base", "main",
+		"--outbox", t.TempDir(),
+	}, &stdout)
+	if rc == 0 {
+		t.Fatal("runBundleOut exit = 0, want non-zero for a missing -branch")
+	}
+}
+
+// TestIsBundleOutInvocation verifies the bundle-out subcommand's dispatch
+// guard: a bare "bundle-out" first arg selects it, while the ordinary
+// "--"-flag invocation (and no args at all) fall through to the default
+// Driver-invocation path.
+func TestIsBundleOutInvocation(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"bundle-out first arg", []string{"bundle-out", "--repo", "x"}, true},
+		{"ordinary flag invocation", []string{"--prompt-file", "x"}, false},
+		{"no args", nil, false},
+	}
+	for _, c := range cases {
+		if got := isBundleOutInvocation(c.args); got != c.want {
+			t.Errorf("%s: isBundleOutInvocation(%v) = %v, want %v", c.name, c.args, got, c.want)
+		}
+	}
+}

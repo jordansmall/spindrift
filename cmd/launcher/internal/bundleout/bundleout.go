@@ -8,6 +8,7 @@
 package bundleout
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -71,9 +72,14 @@ func Run(cfg Config, w io.Writer) error {
 }
 
 func commitCount(repo, base, branch string) (int, error) {
-	out, err := exec.Command("git", "-C", repo, "rev-list", "--count", base+".."+branch).CombinedOutput()
+	cmd := exec.Command("git", "-C", repo, "rev-list", "--count", base+".."+branch)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	// Output() (stdout only) rather than CombinedOutput(): a git warning on
+	// stderr would otherwise merge into the count text and break Atoi below.
+	out, err := cmd.Output()
 	if err != nil {
-		return 0, fmt.Errorf("bundleout: rev-list --count %s..%s: %w: %s", base, branch, err, out)
+		return 0, fmt.Errorf("bundleout: rev-list --count %s..%s: %w: %s", base, branch, err, stderr.String())
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
 	if err != nil {

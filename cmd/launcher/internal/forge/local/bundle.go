@@ -11,14 +11,6 @@ import (
 	"spindrift.dev/launcher/internal/seambundle"
 )
 
-// BundleFileName re-exports seambundle.FileName, the fixed name the Box
-// writes its code-out bundle under in the writable outbox mount (ADR 0033).
-// The constant itself lives in the dependency-free seambundle package
-// (issue #1808) so driver-exec's bundle-out verb — the producer, built with
-// a deliberately tight nix fileset — can share it without depending on this
-// package's own forge/forge-git import closure.
-const BundleFileName = seambundle.FileName
-
 // relayBundle imports ref from the git bundle the Box left in outboxDir into
 // repoPath (the bare Accumulation repo), so a subsequent Merge(ref) — which
 // fetches ref from repoPath itself — finds it. Returns an error, leaving the
@@ -37,7 +29,7 @@ func relayBundle(repoPath, outboxDir, ref string) error {
 	if ref == "" || strings.HasPrefix(ref, "-") {
 		return fmt.Errorf("local: invalid ref %q", ref)
 	}
-	bundlePath := filepath.Join(outboxDir, BundleFileName)
+	bundlePath := filepath.Join(outboxDir, seambundle.FileName)
 	if _, err := os.Stat(bundlePath); err != nil {
 		return fmt.Errorf("local: bundle relay: %w", err)
 	}
