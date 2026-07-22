@@ -46,7 +46,7 @@ func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	dir := tempLogDir(t)
-	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, fc), "42")
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc), "42")
 
 	if err != nil {
 		t.Errorf("expected nil error on green path; got %v", err)
@@ -74,7 +74,7 @@ func TestRecoverByNumber_DraftPRSkipped(t *testing.T) {
 	dir := tempLogDir(t)
 	var err error
 	out := testutil.CaptureStdout(t, func() {
-		err = recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, fc), "42")
+		err = recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc), "42")
 	})
 
 	if err == nil {
@@ -105,7 +105,7 @@ func TestRecoverByNumber_NoPRSkipped(t *testing.T) {
 	// No PR registered for the branch.
 
 	dir := tempLogDir(t)
-	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, fc), "42")
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc), "42")
 
 	if err == nil {
 		t.Error("expected error for no-PR case; got nil")
@@ -130,7 +130,7 @@ func TestRecoverByNumber_RedFollowsSelfHeal(t *testing.T) {
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StateFailure})
 
 	dir := tempLogDir(t)
-	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, fc), "42")
+	err := recoverByNumber(c, fc, fc, dir, testFactory(t, dir, nil), newSettle(c, fc, testWired(fc), fc), "42")
 
 	if err != nil {
 		t.Errorf("expected nil error (gate result expressed via labels); got %v", err)

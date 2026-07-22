@@ -29,7 +29,7 @@ func TestSelectiveListDispatch_AllLabeledNoPrompt(t *testing.T) {
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(c, fc, fc)
+	s := newSettle(c, fc, testWired(fc), fc)
 
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
@@ -63,7 +63,7 @@ func TestSelectiveListDispatch_UnlabeledWarnsAndPrompts(t *testing.T) {
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(c, fc, fc)
+	s := newSettle(c, fc, testWired(fc), fc)
 
 	stdin := strings.NewReader("y\n")
 	stdout := &bytes.Buffer{}
@@ -97,7 +97,7 @@ func TestSelectiveListDispatch_UnlabeledAbortOnN(t *testing.T) {
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(c, fc, fc)
+	s := newSettle(c, fc, testWired(fc), fc)
 
 	stdin := strings.NewReader("n\n")
 	stdout := &bytes.Buffer{}
@@ -123,7 +123,7 @@ func TestSelectiveListDispatch_YesFlagSkipsPrompt(t *testing.T) {
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(c, fc, fc)
+	s := newSettle(c, fc, testWired(fc), fc)
 
 	stdin := &bytes.Buffer{} // no input; would hang if prompt fired
 	stdout := &bytes.Buffer{}
@@ -149,7 +149,7 @@ func TestSelectiveListDispatch_NonInteractiveAbort(t *testing.T) {
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(c, fc, fc)
+	s := newSettle(c, fc, testWired(fc), fc)
 
 	stdin := &bytes.Buffer{} // EOF immediately = non-interactive
 	stdout := &bytes.Buffer{}
@@ -181,7 +181,7 @@ func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(c, fc, fc)
+	s := newSettle(c, fc, testWired(fc), fc)
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
@@ -216,7 +216,7 @@ func TestSelectiveListDispatch_InListUnmergedBlocker_DispatchesOnlyBlocker(t *te
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(c, fc, fc)
+	s := newSettle(c, fc, testWired(fc), fc)
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
@@ -253,7 +253,7 @@ func TestSelectiveListDispatch_UnmetExternalEviction(t *testing.T) {
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(c, fc, fc)
+	s := newSettle(c, fc, testWired(fc), fc)
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
@@ -544,7 +544,7 @@ func TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *tes
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(c, fc, fc)
+	s := newSettle(c, fc, testWired(fc), fc)
 
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}

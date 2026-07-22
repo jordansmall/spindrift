@@ -246,7 +246,12 @@ campaign #1803 T1). The launcher's command path and the package's own
 composed **local loop** test (seeded Accumulation repo → fixture commit →
 bundle in the outbox → settle → reconcile → surface) drive the identical
 composition, so a regression in any gate names itself in one place instead
-of two independently maintained copies drifting apart.
+of two independently maintained copies drifting apart. `Wire` resolves each
+issue's parent exactly once, sealed as `local.SanitizedParent` — a struct
+mintable only by the parent-resolution function — and hands that one value
+to the forge constructor, the launcher's BASE_BRANCH resolver, and surface
+grouping; `IntegrationBranch` and its siblings accept only the sealed type,
+so an unsanitized string can't reach a branch name (issue #1810).
 _Avoid_: local-loop glue, launcher wiring (both too vague — `localloop` is
 the package name).
 

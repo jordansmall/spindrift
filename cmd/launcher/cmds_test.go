@@ -28,7 +28,7 @@ func TestCmdRecover_RunsCleanupOnEveryExit(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       newSettle(c, fc, fc),
+		settle:       newSettle(c, fc, testWired(fc), fc),
 		cleanup:      func() { called = true },
 	}
 

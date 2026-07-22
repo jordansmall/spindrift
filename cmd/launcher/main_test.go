@@ -17,6 +17,8 @@ import (
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/localloop"
 )
 
 // TestMainRun_NoArgs_PrintsHelpAndDoesNotDispatch verifies a bare `spindrift`
@@ -452,7 +454,7 @@ func TestRunnerConfig_CodeForgeLocal_MatchesNewCodeForgeAccumulationRepoDir(t *t
 
 	c := loadConfig()
 	rc := runnerConfig(c)
-	if cf := newCodeForge(c, ""); cf == nil {
+	if cf := newCodeForge(c, local.SanitizedParent{}); cf == nil {
 		t.Fatal("newCodeForge(CODE_FORGE=local) = nil")
 	}
 
@@ -1220,7 +1222,7 @@ func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
 	c.codeForge = "git"
 	c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
 
-	cf := newCodeForge(c, "")
+	cf := newCodeForge(c, local.SanitizedParent{})
 
 	if _, ok := cf.(forge.PRForge); ok {
 		t.Error("newCodeForge(CODE_FORGE=git) satisfies PRForge, want the push-only git adapter to implement CodeForge only")
@@ -1236,7 +1238,7 @@ func TestNewCodeForge_Local_ReturnsBundleRelayAdapter(t *testing.T) {
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "repo.git")
 
-	cf := newCodeForge(c, "1694")
+	cf := newCodeForge(c, local.ResolveParent("1694", ""))
 
 	if _, ok := cf.(forge.PRForge); ok {
 		t.Error("newCodeForge(CODE_FORGE=local) satisfies PRForge, want a push-only adapter")
@@ -1255,7 +1257,7 @@ func TestNewCodeForge_Github_ImplementsPRForge(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "github"
 
-	cf := newCodeForge(c, "")
+	cf := newCodeForge(c, local.SanitizedParent{})
 
 	if _, ok := cf.(forge.PRForge); !ok {
 		t.Error("newCodeForge(CODE_FORGE=github) does not satisfy PRForge")
@@ -1322,7 +1324,7 @@ func TestDispatchConfig_PRForge_WiresOpenPRForIssue(t *testing.T) {
 	cf := forge.NewFake()
 	cf.SetPR(cf.AgentBranch("42"), forge.PR{URL: "https://github.com/o/r/pull/1"})
 
-	cfg := dispatchConfig(minimalValidConfig(), forge.NewFake(), cf)
+	cfg := dispatchConfig(minimalValidConfig(), testWired(forge.NewFake()), cf)
 
 	if cfg.OpenPRForIssue == nil {
 		t.Fatal("want OpenPRForIssue set for a PRForge-implementing Code Forge")
@@ -1352,12 +1354,12 @@ func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testin
 	c := minimalValidConfig()
 	c.codeForge = "git"
 	c.codeForgeRemoteURL = "https://example.com/repo.git"
-	cf := newCodeForge(c, "")
+	cf := newCodeForge(c, local.SanitizedParent{})
 	if _, ok := cf.(forge.PRForge); ok {
 		t.Fatal("test setup: expected a non-PRForge Code Forge")
 	}
 
-	cfg := dispatchConfig(c, forge.NewFake(), cf)
+	cfg := dispatchConfig(c, testWired(forge.NewFake()), cf)
 
 	if cfg.OpenPRForIssue == nil {
 		t.Fatal("want OpenPRForIssue set for a non-PRForge Code Forge")
@@ -1387,7 +1389,7 @@ func TestDispatchConfig_Local_ResolveEnv_ForwardsIntegrationBranchAsBaseBranch(t
 	fc.SetBranchExists("integration/42", true)
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, fc, cf)
+	cfg := dispatchConfig(c, testWired(fc), cf)
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "integration/42" {
 		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "integration/42")
@@ -1409,7 +1411,7 @@ func TestDispatchConfig_Local_ResolveEnv_UsesEachIssuesOwnParent(t *testing.T) {
 	fc.SetBranchExists("integration/render-pipeline", true)
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, fc, cf)
+	cfg := dispatchConfig(c, testWired(fc), cf)
 
 	if got := cfg.ResolveEnv("10", "BASE_BRANCH"); got != "integration/calc-engine" {
 		t.Errorf("ResolveEnv(10, BASE_BRANCH) = %q, want %q", got, "integration/calc-engine")
@@ -1438,7 +1440,7 @@ func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchBeforeFirstLand(t 
 	fc.SetBranchExists("integration/42", false)
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, fc, cf)
+	cfg := dispatchConfig(c, testWired(fc), cf)
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "main" {
 		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "main")
@@ -1455,7 +1457,7 @@ func TestDispatchConfig_NonLocal_ResolveEnv_PassesThroughUnchanged(t *testing.T)
 	cf := forge.NewFake()
 
 	t.Setenv("BASE_BRANCH", "release")
-	cfg := dispatchConfig(c, forge.NewFake(), cf)
+	cfg := dispatchConfig(c, testWired(forge.NewFake()), cf)
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "release" {
 		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "release")
@@ -1477,7 +1479,7 @@ func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchOnBranchExistsErro
 	fc.BranchExistsErr = errors.New("repo path unreadable")
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, fc, cf)
+	cfg := dispatchConfig(c, testWired(fc), cf)
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "main" {
 		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "main")
@@ -1521,7 +1523,7 @@ func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *test
 	fc.SetIssue(forge.Issue{Number: "10", Parent: "Calc Engine"})
 	fc.SetIssue(forge.Issue{Number: "11", Parent: "Render Pipeline"})
 
-	sc := settleConfig(c, fc, fc.AsLocal())
+	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc.AsLocal())
 	if sc.CodeForgeForIssue == nil {
 		t.Fatal("settleConfig(CODE_FORGE=local).CodeForgeForIssue is nil")
 	}

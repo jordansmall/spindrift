@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
 	"spindrift.dev/launcher/internal/runner"
@@ -90,7 +91,7 @@ func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writ
 func cmdReconcile() int {
 	c := loadConfig()
 	it := newIssueTracker(c)
-	cf := newCodeForge(c, "")
+	cf := newCodeForge(c, local.SanitizedParent{})
 
 	pwd, err := os.Getwd()
 	if err != nil {

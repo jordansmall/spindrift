@@ -7,6 +7,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/tokenrefresh"
@@ -90,9 +91,10 @@ func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 	}
 
 	it := newIssueTracker(c)
-	cf := newCodeForge(c, "")
-	f := newDispatchFactory(c, pwd, r, it, cf)
-	s := newSettle(c, it, cf)
+	cf := newCodeForge(c, local.SanitizedParent{})
+	lw := localloop.Wire(localloopConfig(c), it)
+	f := newDispatchFactory(c, pwd, r, lw, cf)
+	s := newSettle(c, it, lw, cf)
 
 	return &launchContext{
 		config:       c,
@@ -137,7 +139,8 @@ func seedAccumulationRepoIfLocal(c config, pwd string) error {
 func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Factory, settle.Settler) {
 	rc := applyDispatchKind(lc.config, dispatchKindResearch)
 	it := newIssueTracker(rc)
-	f := newDispatchFactory(rc, lc.pwd, lc.runner, it, lc.codeForge)
-	s := newSettle(rc, it, lc.codeForge)
+	lw := localloop.Wire(localloopConfig(rc), it)
+	f := newDispatchFactory(rc, lc.pwd, lc.runner, lw, lc.codeForge)
+	s := newSettle(rc, it, lw, lc.codeForge)
 	return it, f, s
 }
