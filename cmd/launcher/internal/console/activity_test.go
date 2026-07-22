@@ -54,11 +54,10 @@ func TestActivityFeed_ReplaysLatestPassLog_ReturnsOrderedDistinctLines(t *testin
 }
 
 // TestSidebarActivityCache_UnchangedStat_SkipsReparse verifies a second
-// Refresh call against a pass log whose (path, size, modTime) match what was
-// cached last time returns the cached feed rather than re-deriving it —
-// syncQueue's per-Msg refresh runs on every tea.Msg, so most calls see the
-// same on-disk log as last time (issue #1502, mirroring HeartbeatCache's own
-// skip, issue #731).
+// Refresh call against a pass log whose size matches the cached offset
+// returns the cached feed rather than re-deriving it — syncQueue's per-Msg
+// refresh runs on every tea.Msg, so most calls see the same on-disk log as
+// last time (issue #1502, mirroring HeartbeatCache's own skip, issue #731).
 func TestSidebarActivityCache_UnchangedStat_SkipsReparse(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
@@ -67,10 +66,6 @@ func TestSidebarActivityCache_UnchangedStat_SkipsReparse(t *testing.T) {
 	path := filepath.Join(dir, "logs", "issue-9.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"aaaaa"}]}}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,9 +88,6 @@ func TestSidebarActivityCache_UnchangedStat_SkipsReparse(t *testing.T) {
 		t.Fatalf("test setup: second log must be same length as first, got %d want %d", len(second), len(first))
 	}
 	if err := os.WriteFile(path, []byte(second), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -160,8 +152,8 @@ func TestSidebarActivityCache_ChangedStat_Reparses(t *testing.T) {
 // Dispatch is cached (the operator selected a different running Dispatch)
 // invalidates the cache even though the new Dispatch's own log stat has
 // never been seen before — Refresh's cache-hit check compares Number too,
-// not just (path, size, modTime), so a stale entry never leaks a wrong
-// Dispatch's feed onto a freshly selected one (issue #1502).
+// not just path and offset, so a stale entry never leaks a wrong Dispatch's
+// feed onto a freshly selected one (issue #1502).
 func TestSidebarActivityCache_NumberChange_Reparses(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
@@ -204,6 +196,153 @@ func TestSidebarActivityCache_NumberChange_Reparses(t *testing.T) {
 	}
 	if !sawTen {
 		t.Errorf("Refresh(10) = %v, want #10's own content, not a cached #9 feed", ten)
+	}
+}
+
+// TestSidebarActivityCache_DuplicateNarrationAcrossIncrementalBoundary_CollapsesToOneLine
+// verifies that when the second half of a pair of consecutive identical
+// narration events lands in a later append than the first (a Refresh call
+// falls between them), the incremental cache still collapses them to one
+// feed entry — the same collapse ActivityFeed's own whole-file parse gives
+// two back-to-back duplicates (#1501 AC1) — proving the append-tail switch
+// doesn't leak a duplicate line at the boundary between two increments
+// (issue #1749 AC3 parity).
+func TestSidebarActivityCache_DuplicateNarrationAcrossIncrementalBoundary_CollapsesToOneLine(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "logs", "issue-9.log")
+	narration := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the config file."}]}}` + "\n"
+
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	cache := NewSidebarActivityCache()
+
+	if err := os.WriteFile(path, []byte(narration), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, ok := cache.Refresh(drv, dir, "9")
+	if !ok {
+		t.Fatal("first Refresh: ok = false, want true")
+	}
+
+	if err := os.WriteFile(path, []byte(narration+narration), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, ok := cache.Refresh(drv, dir, "9")
+	if !ok {
+		t.Fatal("second Refresh: ok = false, want true")
+	}
+
+	var narrationCount int
+	for _, line := range second {
+		if strings.Contains(line.Text, "Reading the config file") {
+			narrationCount++
+		}
+	}
+	if narrationCount != 1 {
+		t.Errorf("Refresh() after a duplicate narration split across two appends had %d narration lines, want exactly 1 (collapsed across the append boundary): %v", narrationCount, second)
+	}
+	if !activityEqual(first, second) {
+		t.Errorf("Refresh() after a duplicate append = %v, want unchanged from first Refresh %v (the second event added no new distinct line)", second, first)
+	}
+}
+
+// TestSidebarActivityCache_FileShorterThanOffset_ResetsAndReparses verifies
+// that when a watched log's size falls below the cache's stored offset (the
+// file was truncated or rotated out from under a running Dispatch), Refresh
+// resets and starts a fresh parser at 0 instead of seeking past the file's
+// new end and mis-parsing — the sidebar feed's own analogue of
+// TestRunningHeartbeat_FileShorterThanOffset_ResetsAndReparses.
+func TestSidebarActivityCache_FileShorterThanOffset_ResetsAndReparses(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "logs", "issue-9.log")
+	long := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n" +
+		`{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	if err := os.WriteFile(path, []byte(long), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	cache := NewSidebarActivityCache()
+
+	if _, ok := cache.Refresh(drv, dir, "9"); !ok {
+		t.Fatal("first Refresh: ok = false, want true")
+	}
+
+	short := `{"type":"result","num_turns":2,"total_cost_usd":0.01,"duration_ms":1000}` + "\n"
+	if len(short) >= len(long) {
+		t.Fatalf("test setup: short log must be shorter than long, got %d want < %d", len(short), len(long))
+	}
+	if err := os.WriteFile(path, []byte(short), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := cache.Refresh(drv, dir, "9")
+	if !ok {
+		t.Fatal("second Refresh: ok = false, want true")
+	}
+	var sawTwoTurns bool
+	for _, line := range got {
+		if strings.Contains(line.Text, "2 turn") {
+			sawTwoTurns = true
+		}
+	}
+	if !sawTwoTurns {
+		t.Errorf("Refresh() after truncation = %v, want it to reflect the shorter file's own content, not a mis-parse of stale offset state", got)
+	}
+}
+
+// TestSidebarActivityCache_IncrementalAppend_FeedsOnlyAppendedBytes verifies
+// three successive Refresh calls against the same growing pass log each hand
+// the driver's heartbeat parser only the bytes appended since the last call,
+// not the whole file again -- the sidebar feed's own analogue of
+// TestRunningHeartbeat_IncrementalAppend_FeedsOnlyAppendedBytes, now that
+// this ticket points the sidebar's Activity feed at the same append-tail
+// parser RunningHeartbeat already uses (issue #1749).
+func TestSidebarActivityCache_IncrementalAppend_FeedsOnlyAppendedBytes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "logs", "issue-9.log")
+
+	real, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	var fed int
+	drv := spyHeartbeatDriver{Driver: real, fed: &fed}
+	cache := NewSidebarActivityCache()
+
+	chunks := []string{
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n",
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Grep","id":"g1","input":{}}]}}` + "\n",
+		`{"type":"result","num_turns":3,"total_cost_usd":0.01,"duration_ms":5000}` + "\n",
+	}
+
+	var written string
+	for _, chunk := range chunks {
+		written += chunk
+		if err := os.WriteFile(path, []byte(written), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := cache.Refresh(drv, dir, "9"); !ok {
+			t.Fatal("Refresh: ok = false, want true")
+		}
+	}
+
+	if fed != len(written) {
+		t.Errorf("bytes fed to heartbeat parser across 3 Refreshes = %d, want %d (exactly the appended bytes, not a whole-file reread each call)", fed, len(written))
 	}
 }
 
