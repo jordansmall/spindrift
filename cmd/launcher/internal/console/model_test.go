@@ -683,7 +683,7 @@ func TestUpdate_SidebarScrollMsg_DockedClampsToBodyBudgetNotFullHeight(t *testin
 	if budget >= 20 {
 		t.Fatalf("test setup: bodyBudget(m) = %d, want it under Height (20) — header/tabs must actually eat into the docked budget", budget)
 	}
-	want := 100 - (budget - 2)
+	want := 100 - (budget - sidebarDockedFooterLines)
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (last page fills the docked body budget, not the full terminal height)", m.Sidebar.Offset, want)
 	}
