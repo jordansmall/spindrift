@@ -125,8 +125,30 @@ func TestResolveParent_IssueLookupError_FallsBackToOwnSlug(t *testing.T) {
 	fc := forge.NewFake()
 	fc.IssueErr = errors.New("issue file unreadable")
 
-	if got, want := localloop.ResolveParent(fc, "Broad Ticket"), "broad-ticket"; got != want {
+	if got, want := localloop.ResolveParent(fc, "Broad Ticket").String(), "broad-ticket"; got != want {
 		t.Errorf("ResolveParent = %q, want %q", got, want)
+	}
+}
+
+// TestWired_ResolveParent_MemoizesPerIssue verifies Wire resolves each
+// issue's parent exactly once (issue #1810): a second Wired.ResolveParent
+// call for the same issue number reuses the first call's resolved value
+// instead of hitting the IssueTracker again, so the forge constructor, base-
+// branch resolver, and surface grouping consuming the same *Wired share one
+// resolution per issue rather than each re-deriving it independently.
+func TestWired_ResolveParent_MemoizesPerIssue(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "42", Parent: "Calc Engine"})
+
+	lw := localloop.Wire(localloop.Config{}, fc)
+	first := lw.ResolveParent("42")
+	second := lw.ResolveParent("42")
+
+	if first != second {
+		t.Errorf("ResolveParent(42) = %v then %v, want the same resolved value", first, second)
+	}
+	if got := len(fc.IssueCalls); got != 1 {
+		t.Errorf("IssueCalls = %v (%d calls), want exactly 1 -- ResolveParent must resolve issue 42's parent once, not on every call", fc.IssueCalls, got)
 	}
 }
 
@@ -170,7 +192,7 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 	}, it)
 
 	parent := lw.ResolveParent(num)
-	if parent != num {
+	if parent.String() != num {
 		t.Fatalf("ResolveParent(%s) = %q, want %q (parentless seam is its own broad ticket)", num, parent, num)
 	}
 	cf := lw.CodeForgeForIssue(num)
@@ -212,12 +234,12 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 		t.Fatalf("Surface: %v", err)
 	}
 
-	surfacedTip := revParse(t, operatorDir, "refs/heads/"+parent)
+	surfacedTip := revParse(t, operatorDir, "refs/heads/"+parent.String())
 	wantTip := revParse(t, accumDir, "refs/heads/"+local.IntegrationBranch(parent))
 	if surfacedTip != wantTip {
 		t.Errorf("surfaced branch %s tip = %s, want %s (Integration branch tip)", parent, surfacedTip, wantTip)
 	}
-	if err := exec.Command("git", "-C", operatorDir, "merge-base", "--is-ancestor", fixtureSHA, "refs/heads/"+parent).Run(); err != nil {
+	if err := exec.Command("git", "-C", operatorDir, "merge-base", "--is-ancestor", fixtureSHA, "refs/heads/"+parent.String()).Run(); err != nil {
 		t.Errorf("fixture commit %s not reachable from surfaced branch %s", fixtureSHA, parent)
 	}
 }
@@ -292,7 +314,7 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 	if err := lw.Surface(operatorDir, io.Discard); err != nil {
 		t.Fatalf("Surface: %v", err)
 	}
-	if err := exec.Command("git", "-C", operatorDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent).Run(); err == nil {
+	if err := exec.Command("git", "-C", operatorDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent.String()).Run(); err == nil {
 		t.Errorf("refs/heads/%s must not exist — parent's only seam never landed", parent)
 	}
 }
@@ -328,7 +350,8 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 		GitUserEmail:        "bot@example.com",
 		BranchPrefix:        "agent/issue-",
 	}, it)
-	if got := lw.ResolveParent(landedNum); got != parent {
+	sanitizedParent := lw.ResolveParent(landedNum)
+	if got := sanitizedParent.String(); got != parent {
 		t.Fatalf("ResolveParent(%s) = %q, want %q", landedNum, got, parent)
 	}
 
@@ -361,8 +384,8 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 	// Sanity: the parent's Integration branch really did land in the
 	// Accumulation repo, so the assertion below tests the sibling-open
 	// gate specifically, not a "never landed" false negative.
-	if err := exec.Command("git", "-C", accumDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+local.IntegrationBranch(parent)).Run(); err != nil {
-		t.Fatalf("Integration branch %s missing from Accumulation repo after landedNum settled", local.IntegrationBranch(parent))
+	if err := exec.Command("git", "-C", accumDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+local.IntegrationBranch(sanitizedParent)).Run(); err != nil {
+		t.Fatalf("Integration branch %s missing from Accumulation repo after landedNum settled", local.IntegrationBranch(sanitizedParent))
 	}
 
 	if err := lw.Surface(operatorDir, io.Discard); err != nil {
