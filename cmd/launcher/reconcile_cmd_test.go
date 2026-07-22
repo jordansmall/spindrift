@@ -431,6 +431,81 @@ func TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch(t *testing.T) {
 	}
 }
 
+// TestSurfaceAfterDispatch_ManyNeverLandedParents_CollapsesIntoOneSummaryLine
+// verifies that closed parentless issues whose Integration branch has never
+// landed (SurfaceIntegrationBranch's "no seam of <parent> has landed yet"
+// skip) collapse into a single summary line instead of one line per parent
+// (issue #1739): each closed parentless issue is its own singleton broad
+// ticket (ADR 0033, issue #1734, local.ResolveParent), so a tracker with
+// hundreds of closed standalone issues that never went through
+// CODE_FORGE=local would otherwise print that many identical-shaped lines
+// on every single reconcile sweep, forever.
+func TestSurfaceAfterDispatch_ManyNeverLandedParents_CollapsesIntoOneSummaryLine(t *testing.T) {
+	setGitIdentityEnv(t)
+	repo := forgetest.NewGitRepoFixture(t, "main")
+	pwd := t.TempDir()
+	mustInitCheckout(t, pwd, "main")
+
+	issuesDir := t.TempDir()
+	writeSeamIssue(t, issuesDir, "9001", "", true)
+	writeSeamIssue(t, issuesDir, "9002", "", true)
+	writeSeamIssue(t, issuesDir, "9003", "", true)
+
+	c := baseConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = repo.Bare
+	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
+
+	var buf bytes.Buffer
+	if err := surfaceAfterDispatch(c, it, pwd, &buf); err != nil {
+		t.Fatalf("surfaceAfterDispatch: %v", err)
+	}
+	if got := strings.Count(buf.String(), "skipped"); got != 1 {
+		t.Errorf("want exactly one summary line mentioning skipped parents, got %d occurrences in %q", got, buf.String())
+	}
+	want := "surface: 3 broad ticket(s) skipped — no seam has landed yet\n"
+	if buf.String() != want {
+		t.Errorf("surfaceAfterDispatch output = %q, want %q", buf.String(), want)
+	}
+}
+
+// TestSurfaceAfterDispatch_NeverLandedAndCheckedOut_OnlyNeverLandedCollapses
+// verifies the collapse is specific to the permanent "never landed" skip
+// reason: a parent skipped because it's currently checked out in pwd (a
+// transient, operator-actionable condition, not tracker-history noise)
+// still gets its own line, alongside the never-landed parents' single
+// summary line (issue #1739).
+func TestSurfaceAfterDispatch_NeverLandedAndCheckedOut_OnlyNeverLandedCollapses(t *testing.T) {
+	setGitIdentityEnv(t)
+	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch("9010"))
+	pwd := t.TempDir()
+	mustInitCheckout(t, pwd, "9010")
+
+	issuesDir := t.TempDir()
+	writeSeamIssue(t, issuesDir, "9001", "", true)
+	writeSeamIssue(t, issuesDir, "9002", "", true)
+	writeSeamIssue(t, issuesDir, "9010", "", true)
+
+	c := baseConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = repo.Bare
+	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
+
+	var buf bytes.Buffer
+	if err := surfaceAfterDispatch(c, it, pwd, &buf); err != nil {
+		t.Fatalf("surfaceAfterDispatch: %v", err)
+	}
+	if !strings.Contains(buf.String(), "surface: 9010 skipped — 9010 is currently checked out\n") {
+		t.Errorf("want 9010's checked-out skip reported on its own line, got %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "surface: 2 broad ticket(s) skipped — no seam has landed yet\n") {
+		t.Errorf("want the two never-landed parents collapsed into one summary line, got %q", buf.String())
+	}
+	if got := strings.Count(buf.String(), "skipped"); got != 2 {
+		t.Errorf("want exactly two skip lines total (one checked-out, one summary), got %d in %q", got, buf.String())
+	}
+}
+
 // revParseTest resolves ref inside the repo at dir, failing t on error.
 func revParseTest(t *testing.T, dir, ref string) string {
 	t.Helper()
