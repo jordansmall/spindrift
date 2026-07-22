@@ -1300,20 +1300,21 @@ func TestView_DetailModal_FullscreenFallback_FooterStyledDim(t *testing.T) {
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 
 	out := View(m)
-	if !strings.Contains(out, "\x1b[90m[j/k] scroll · [esc] close\x1b[0m") {
+	if !strings.Contains(out, "\x1b[90m[esc] close\x1b[0m") {
 		t.Errorf("View() = %q, want the fullscreen fallback footer dim-styled with its hint text intact", out)
 	}
 }
 
 // TestView_DetailModal_FullscreenFallback_NarrowWidth_FooterFitsWidth
-// verifies the tiny-terminal fullscreen fallback's "[j/k] scroll · [esc]
-// close" footer — long enough to wrap past one row when rendered unclipped
-// — clips to the terminal's own width like every other footer in this file
-// (issue #1818).
+// verifies the tiny-terminal fullscreen fallback's "[esc] close" footer
+// clips to the terminal's own width like every other footer in this file
+// (issue #1818). The title is kept short so the width picked here (narrower
+// than "[esc] close" itself) exercises the footer's own clip path rather
+// than tripping on an unrelated, longer line first.
 func TestView_DetailModal_FullscreenFallback_NarrowWidth_FooterFitsWidth(t *testing.T) {
-	const width, height = 20, 24
+	const width, height = 10, 24
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
-	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "x"})
 
 	out := View(m)
 	for i, line := range strings.Split(out, "\n") {
@@ -1490,7 +1491,7 @@ func TestView_DetailModal_FloatingBox_FooterStyledDim(t *testing.T) {
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 
 	out := View(m)
-	if !strings.Contains(out, "\x1b[90m[j/k] scroll · [esc] close") {
+	if !strings.Contains(out, "\x1b[90m[esc] close") {
 		t.Errorf("View() = %q, want the floating box's footer dim-styled with its hint text intact", out)
 	}
 }
@@ -1819,7 +1820,7 @@ func TestView_DetailModal_LabelOverflowShowsIndicator(t *testing.T) {
 	if !strings.Contains(out, "more labels") {
 		t.Errorf("View() = %q, want a \"+N more labels\" overflow indicator", out)
 	}
-	if !strings.Contains(out, "[j/k] scroll") {
+	if !strings.Contains(out, "[esc] close") {
 		t.Errorf("View() = %q, want the footer never dropped by label overflow", out)
 	}
 	// Each label is 99 columns, wider than the 98-column interior padDisplay
