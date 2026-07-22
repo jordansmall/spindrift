@@ -330,7 +330,6 @@ var keymap = []Binding{
 		Keys: []string{"j", "down", "k", "up"}, Modes: []Mode{ModeDetailModal},
 		Help: "  j/k, up/down  scroll the ticket detail modal's body (while it is\n" +
 			"              open)",
-		Footer: "[j/k] scroll",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			delta := 1
 			if s := msg.String(); s == "k" || s == "up" {
