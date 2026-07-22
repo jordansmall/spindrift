@@ -1265,8 +1265,7 @@ func TestUpdate_CursorJumpToLastMsg_LastRowReachable_WithListFooter(t *testing.T
 }
 
 // TestUpdate_GPendingMsg_ArmsPendingG verifies a lone "g" arms the pending-g
-// leader on the Model, mirroring ModePick's own arm/resolve toggle (issue
-// #1628 AC3).
+// leader on the Model (issue #1628 AC3).
 func TestUpdate_GPendingMsg_ArmsPendingG(t *testing.T) {
 	m := NewModel()
 

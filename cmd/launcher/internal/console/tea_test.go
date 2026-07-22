@@ -322,8 +322,8 @@ func TestTea_ggChord_JumpsToFirstRow(t *testing.T) {
 
 // TestTea_gLeader_NonGKey_CancelsAndStillActsNormally verifies a lone "g"
 // followed by any other key cancels the pending leader without consuming
-// that key — unlike the "pa" chord, which resolves to a pick, the g-leader's
-// AC requires the second key's own binding to still apply (issue #1628 AC).
+// that key — the g-leader's AC requires the second key's own binding to
+// still apply (issue #1628 AC).
 func TestTea_gLeader_NonGKey_CancelsAndStillActsNormally(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
@@ -2265,9 +2265,10 @@ func TestTea_HelpKey_OpensOverlay(t *testing.T) {
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 24))
 
 	sendKey(tm, "?")
-	// "pr" (issue #1709) is listed distinct from "p"/"pa", the work-pick
-	// keys — a keybinding nobody can find in this overlay isn't discoverable.
-	waitForOutput(t, tm, "toggle this help", "pr", "as a research", "dispatch (advise-only")
+	// "p" and "P" (issue #1838) are each listed as their own standalone
+	// keybinding — a keybinding nobody can find in this overlay isn't
+	// discoverable.
+	waitForOutput(t, tm, "toggle this help", "pick the highlighted Backlog row", "pick all ready")
 
 	sendKey(tm, "?") // close the overlay — it's modal, so "q" alone can't reach quit while open
 	sendKey(tm, "q")
@@ -2555,57 +2556,31 @@ func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
 	// otherwise "q" can race the still-live pick and land on the quit
 	// confirm (issue #822) instead of exiting, hanging until teatest's
 	// timeout (same race TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue
-	// already guards against).
-	waitForOutput(t, tm, "fix the thing", "settled 1")
+	// already guards against). Not paired with "fix the thing" here: an
+	// instant pick (issue #1838) never shifts the body's row positions the
+	// way the old "p_" hint's insert/remove did, so bubbletea's differential
+	// renderer has no reason to re-emit that already-consumed row's bytes.
+	waitForOutput(t, tm, "settled 1")
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
 }
 
-// TestTea_PickResearchChordKey_PromotesAndQueuesHighlightedAsResearch verifies
-// "pr" promotes the highlighted issue as a KindResearch pick, landing it on
-// the research tracker's own agent-research label family rather than the
-// work tracker's ready-for-agent (issue #1709) — the console gesture for
-// ADR 0022's advise-only research dispatch. The existing "p"/"pa" work-pick
-// chords are unchanged; this only adds a third resolution to the same
-// leader.
-func TestTea_PickResearchChordKey_PromotesAndQueuesHighlightedAsResearch(t *testing.T) {
-	workTracker := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
-	workTracker.SetIssue(forge.Issue{Number: "42", Title: "research this", State: forge.IssueOpen})
-	researchTracker := forge.NewFake(forge.ResearchDispatchLabels())
-	researchTracker.SetIssue(forge.Issue{Number: "42", Title: "research this", State: forge.IssueOpen})
+// TestTea_PickKey_QueuesHighlightedInstantly verifies "p" lands the pick in
+// the same Update call the keystroke triggers — no pending mode, no
+// intermediate hint, no trailing key needed — replacing the "pa" leader
+// chord's 200ms wait (issue #1838).
+func TestTea_PickKey_QueuesHighlightedInstantly(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
 
-	launch := newTestLauncher(t, workTracker)
-	launch.ResearchTracker = researchTracker
+	tm := newTeaModel(f, t.TempDir(), launch)
+	tm.m = Update(tm.m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "42", Title: "fix the thing", State: forge.IssueOpen}}})
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 
-	tm := teatest.NewTestModel(t, newTeaModel(workTracker, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "research this")
-
-	sendKey(tm, "p")
-	sendKey(tm, "r")
-	// "waiting 1": no ResearchFactory is wired here, so the pick queues but
-	// never claims/launches (drain only services kinds with a full stack,
-	// launcher.go's stacks/hasQueuedForKinds) — it parks at PickQueued
-	// exactly as an unserviceable kind should, which is this test's proof
-	// the pick landed at all.
-	waitForOutput(t, tm, "waiting 1")
-
-	sendKey(tm, "q")
-	waitFinished(t, tm)
-
-	fm := tm.FinalModel(t).(teaModel)
-	if len(fm.m.Picks) != 1 || fm.m.Picks[0].Kind != KindResearch {
-		t.Fatalf("Picks = %+v, want one KindResearch row for #42", fm.m.Picks)
-	}
-	if len(workTracker.TransitionStateCalls) != 0 {
-		t.Errorf("workTracker.TransitionStateCalls = %+v, want none — a research pick must never touch the work tracker", workTracker.TransitionStateCalls)
-	}
-	iss, err := researchTracker.Issue("42")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !hasLabel(iss, "agent-research") {
-		t.Errorf("researchTracker issue #42 labels = %v, want agent-research promoted onto it", iss.Labels)
+	if len(tm.m.Picks) != 1 || tm.m.Picks[0].Number != "42" {
+		t.Fatalf("Picks = %+v after a single \"p\", want #42 landed instantly", tm.m.Picks)
 	}
 }
 
@@ -3164,85 +3139,10 @@ func TestTea_RefreshKey_ReopenAfterRefreshStaysBoundedCost(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_PickKey_ShowsPendingIndicator verifies "p" renders a visible hint
-// immediately, before the trailing "a" arrives or the 200ms leader window
-// times out — the pending pick chord was previously silent (issue #835).
-func TestTea_PickKey_ShowsPendingIndicator(t *testing.T) {
-	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
-	launch := newTestLauncher(t, f)
-
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "p")
-	waitForOutput(t, tm, "p_")
-
-	sendKey(tm, "a")
-	sendKey(tm, "q")
-	waitFinished(t, tm)
-}
-
-// TestTea_PickKey_FollowedByA_ClearsPendingIndicator verifies the pending
-// pick indicator armed by "p" clears once the trailing "a" resolves the
-// chord (issue #835).
-func TestTea_PickKey_FollowedByA_ClearsPendingIndicator(t *testing.T) {
-	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
-	launch := newTestLauncher(t, f)
-
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "p")
-	waitForOutput(t, tm, "p_")
-
-	sendKey(tm, "a")
-	// "settled 1" guards the same live-dispatch quit-confirm race
-	// TestTea_PickKey_PromotesAndQueuesHighlighted hits (issue #822):
-	// without it, "q" can race the still-live pick and hang until
-	// teatest's timeout instead of exiting.
-	waitForOutput(t, tm, "settled 1")
-
-	sendKey(tm, "q")
-	waitFinished(t, tm)
-
-	fm := tm.FinalModel(t).(teaModel)
-	if fm.m.Mode == ModePick {
-		t.Error("Mode = ModePick after \"a\" resolved the chord, want ModeList")
-	}
-}
-
-// TestTea_PickKey_Timeout_ClearsPendingIndicator verifies the pending pick
-// indicator armed by a lone "p" clears once the 200ms leader window times
-// out and resolves to a single-issue pick (issue #835).
-func TestTea_PickKey_Timeout_ClearsPendingIndicator(t *testing.T) {
-	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
-	launch := newTestLauncher(t, f)
-
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "p")
-	waitForOutput(t, tm, "p_")
-	// timeout fires unassisted, resolving to a single pick; "settled 1"
-	// guards the same live-dispatch quit-confirm race (issue #822).
-	waitForOutput(t, tm, "settled 1")
-
-	sendKey(tm, "q")
-	waitFinished(t, tm)
-
-	fm := tm.FinalModel(t).(teaModel)
-	if fm.m.Mode == ModePick {
-		t.Error("Mode = ModePick after timeout resolved the chord, want ModeList")
-	}
-}
-
 // TestTea_PickKey_FollowedByQuit_PicksThenQuits verifies "p" followed by
-// "q" still exits the program — the pending "pa" chord resolves the pick
-// (same as any non-"a" key) but must not swallow the universal quit
-// keystroke along with it (issue #785 review).
+// "q" still exits the program — the pick already landed on the keystroke
+// itself, so "q" must not be swallowed along with it (issue #785 review,
+// issue #1838).
 func TestTea_PickKey_FollowedByQuit_PicksThenQuits(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -3260,60 +3160,6 @@ func TestTea_PickKey_FollowedByQuit_PicksThenQuits(t *testing.T) {
 	}
 }
 
-// TestTea_PickKey_FollowedByNonA_ResolvesToSinglePick verifies "p" followed
-// by any key other than "a" resolves the leader chord to a single-issue
-// pick immediately, rather than making the operator wait out the timeout
-// (issue #785 AC1).
-func TestTea_PickKey_FollowedByNonA_ResolvesToSinglePick(t *testing.T) {
-	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
-	launch := newTestLauncher(t, f)
-
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "p")
-	sendKey(tm, "z") // not "a" — resolves to a single pick right away
-	// "settled 1" guards the same live-dispatch quit-confirm race the other
-	// launch-backed pick tests guard against (issue #822): without it, "q"
-	// can race the still-live pick and hang until teatest's timeout instead
-	// of exiting.
-	waitForOutput(t, tm, "settled 1")
-
-	sendKey(tm, "q")
-	waitFinished(t, tm)
-}
-
-// TestTea_PickKey_FollowedByNonA_ClearsPendingIndicator verifies the pending
-// pick indicator armed by "p" clears once a trailing non-a/q key resolves
-// the chord to a single-issue pick (issue #1238).
-func TestTea_PickKey_FollowedByNonA_ClearsPendingIndicator(t *testing.T) {
-	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
-	launch := newTestLauncher(t, f)
-
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "p")
-	waitForOutput(t, tm, "p_")
-
-	sendKey(tm, "z") // not "a" — resolves to a single pick right away
-	// "settled 1" guards the same live-dispatch quit-confirm race
-	// TestTea_PickKey_PromotesAndQueuesHighlighted hits (issue #822):
-	// without it, "q" can race the still-live pick and hang until
-	// teatest's timeout instead of exiting.
-	waitForOutput(t, tm, "settled 1")
-
-	sendKey(tm, "q")
-	waitFinished(t, tm)
-
-	fm := tm.FinalModel(t).(teaModel)
-	if fm.m.Mode == ModePick {
-		t.Error("Mode = ModePick after non-a/q key resolved the chord, want ModeList")
-	}
-}
-
 // TestTea_PickKey_AlreadyPicked_NoDuplicateRow verifies picking an issue
 // that already has an active (non-terminal) row never appends a second one
 // — Queue's row-scan helpers (setState, tryMarkClaiming) assume at most one
@@ -3327,7 +3173,6 @@ func TestTea_PickKey_AlreadyPicked_NoDuplicateRow(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "p")
-	sendKey(tm, "z") // resolve the "pa" chord to a single pick right away
 	// "waiting 1" (the header's status line, always visible regardless of
 	// ActiveSection) proves the first pick landed before the second attempt
 	// below — checking the header rather than switching to the Running
@@ -3336,7 +3181,6 @@ func TestTea_PickKey_AlreadyPicked_NoDuplicateRow(t *testing.T) {
 	waitForOutput(t, tm, "waiting 1")
 
 	sendKey(tm, "p")
-	sendKey(tm, "z")
 	sendKey(tm, "q")
 	waitFinished(t, tm)
 
@@ -3419,11 +3263,9 @@ func TestTea_PickKey_FailedPromotion_SurvivesQueueResync(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "p")
-	// Wait for the pending-pick chord to resolve (no trailing "a" arrives)
-	// before sending "5" — a key sent while ModePick is still armed
-	// resolves the chord instead of switching Sections. The Failed tab's
-	// count is the signal: PickDissolved folds into SectionFailed (ADR
-	// 0030), and the header itself never counts Dissolved.
+	// The Failed tab's count is the signal: PickDissolved folds into
+	// SectionFailed (ADR 0030), and the header itself never counts
+	// Dissolved.
 	waitForOutput(t, tm, "Failed(1)")
 	sendKey(tm, "5")
 	waitForOutput(t, tm, "dissolved")
@@ -3556,10 +3398,10 @@ func TestTea_UnpickKey_RemovesQueuedHighlighted(t *testing.T) {
 	}
 }
 
-// TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue verifies "pa" (the
-// literal two-key leader sequence named in issue #785's AC1) picks every
-// currently-Dispatchable issue in one bulk gesture (#647 AC3) rather than
-// requiring one "p" per row.
+// TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue verifies "P" picks
+// every currently-Dispatchable issue in one bulk gesture (#647 AC3) rather
+// than requiring one "p" per row — a standalone key, not a trailing "a"
+// after "p" (issue #1838 replaced that leader chord).
 func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
@@ -3569,8 +3411,7 @@ func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing", "also ready")
 
-	sendKey(tm, "p")
-	sendKey(tm, "a")
+	sendKey(tm, "P")
 	// Both picks race the fake Dispatch to completion behind the default
 	// cap of 1; wait for both to settle so "q" always lands with nothing
 	// live, rather than racing the quit confirm (issue #822).

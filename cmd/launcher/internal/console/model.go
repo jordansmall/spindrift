@@ -95,21 +95,20 @@ type Model struct {
 	// PendingG is whether a lone "g" is waiting on the "gg" leader window,
 	// awaiting a trailing "g" (jump-to-first-row) before the gChordTimeout
 	// resolves it to a no-op cancel instead — the g-leader mechanism issue
-	// #1628 introduces, modeled on ModePick/pickChordTimeout above but living
-	// on Model (rather than folded into Mode) so it can stay armed across
-	// List, ModeSidebar, and ModeRebuildOutput alike — those three modes'
-	// own handlers each check it first, rather than it competing with them
-	// for exclusive ownership the way Mode's other values do (issue #1543).
-	// Unlike ModePick, a non-"g" key cancels without consuming that key — it
-	// still gets its own normal handling (issue #1628 AC).
+	// #1628 introduces, living on Model (rather than folded into Mode) so it
+	// can stay armed across List, ModeSidebar, and ModeRebuildOutput alike —
+	// those three modes' own handlers each check it first, rather than it
+	// competing with them for exclusive ownership the way Mode's other
+	// values do (issue #1543). A non-"g" key cancels without consuming that
+	// key — it still gets its own normal handling (issue #1628 AC).
 	PendingG bool
 	// QueueEnterNotice is a one-shot, human-readable message rendered after
 	// Enter is a no-op on a focused work-queue row lacking a Transcript
 	// (queued/claiming/held/dissolved, per hasTranscript) — empty otherwise.
-	// It clears on the operator's next keypress, mirroring ModePick's
-	// resolve-on-any-key precedent rather than a timer (issue #998). Stays
-	// off Mode for the same reason PendingG does: it's a one-shot overlay on
-	// top of ModeList, not a rival claimant to keyboard ownership.
+	// It clears on the operator's next keypress rather than a timer (issue
+	// #998). Stays off Mode for the same reason PendingG does: it's a
+	// one-shot overlay on top of ModeList, not a rival claimant to keyboard
+	// ownership.
 	QueueEnterNotice string
 	// Toast is a one-shot, human-readable message rendered after a queued
 	// pick transitions to running, settled, failed, or held — "" otherwise
@@ -299,11 +298,6 @@ const (
 	// drain/terminate-all/stay answer — only entered when live Dispatches
 	// exist at quit time (issue #651, ADR 0023).
 	ModeQuitConfirm
-	// ModePick is "p" waiting on the "pa" leader window, awaiting a trailing
-	// "a" (pick-all-ready) before the 200ms pickChordTimeout resolves it to
-	// a single-issue pick instead — rendered as a visible hint so the wait
-	// isn't silent (issue #835).
-	ModePick
 	// ModeDetailModal is the fullscreen ticket detail modal a Backlog row's
 	// Enter opens (issue #1632) — modeActive derives it from DetailModal
 	// alone, the same "derived, not a stored Mode value" shape ModeSidebar
@@ -331,7 +325,6 @@ var modePrecedence = []Mode{
 	ModeFilterEdit,
 	ModeTerminateConfirm,
 	ModeQuitConfirm,
-	ModePick,
 	ModeList,
 }
 
@@ -450,16 +443,6 @@ func (m Model) Visible() []forge.Issue {
 	return out
 }
 
-// HasHighlighted reports whether Visible has a row at Cursor for the
-// operator to act on — ModePick's hint gate, since Pick only ever
-// targets a Backlog row (ADR 0030's pick source) regardless of which
-// Section is active when "p" is pressed. Cursor is clamped to [0,
-// len(Visible())-1] and to 0 when Visible is empty, so this is exactly
-// len(m.Visible()) > 0.
-func (m Model) HasHighlighted() bool {
-	return len(m.Visible()) > 0
-}
-
 // IsOrphan reports whether num is one of the issues startup detection
 // reported as an orphan — a running agent-issue-<N> sandbox this process
 // has no live goroutine for (issue #1619). Gates the explicit adopt
@@ -502,10 +485,6 @@ func Update(m Model, msg Msg) Model {
 	case QuitRequestedMsg:
 		m.Mode = ModeQuitConfirm
 	case QuitCancelledMsg:
-		m.Mode = ModeList
-	case PickPendingMsg:
-		m.Mode = ModePick
-	case PickResolvedMsg:
 		m.Mode = ModeList
 	case GPendingMsg:
 		m.PendingG = true

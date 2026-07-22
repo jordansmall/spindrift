@@ -308,12 +308,6 @@ func viewBody(m Model) string {
 		fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeQuitConfirm, []string{"d"}, m.Width, false))
 		reservedLines++
 	}
-	if m.Mode == ModePick && m.HasHighlighted() {
-		const prefix = "p_  "
-		fmt.Fprintf(&b, "%s%s\n", prefix,
-			renderFooterHints(ModePick, []string{"a", "r"}, footerHintWidth(m.Width, prefix), false))
-		reservedLines++
-	}
 	if m.QueueEnterNotice != "" {
 		fmt.Fprintf(&b, "%s\n", m.QueueEnterNotice)
 		reservedLines++
@@ -479,16 +473,18 @@ func renderSectionTabs(m Model) string {
 }
 
 // listFooterKeys are the ModeList bindings the main list view's pinned
-// footer hints (issue #1792) — filter, pick, and refresh, the list's own
-// action verbs with no other on-screen affordance. Navigation (j/k, g/G,
-// pgup/pgdown) and Section-jump (H/L, 1-5, already inline on the Section
-// tabs row) are deliberately left out, matching the restraint the other
-// three migrated footers already show toward their own modes' full binding
-// set (e.g. the sidebar's scroll keys never get a footer entry either).
-// Ordered filter/pick/refresh (not keymap's own r-before-p declaration
-// order) — the read-then-act sequence an operator actually follows, not an
-// accident to "fix" back into keymap order.
-var listFooterKeys = []string{"/", "p", "r"}
+// footer hints (issue #1792) — filter, pick, pick-all, and refresh, the
+// list's own action verbs with no other on-screen affordance. Navigation
+// (j/k, g/G, pgup/pgdown) and Section-jump (H/L, 1-5, already inline on the
+// Section tabs row) are deliberately left out, matching the restraint the
+// other three migrated footers already show toward their own modes' full
+// binding set (e.g. the sidebar's scroll keys never get a footer entry
+// either). Ordered filter/pick/pick-all/refresh (not keymap's own
+// declaration order) — the read-then-act sequence an operator actually
+// follows, not an accident to "fix" back into keymap order. "P" joined this
+// list in issue #1838, when the old "pa" leader chord (with no footer entry
+// of its own) became a standalone key.
+var listFooterKeys = []string{"/", "p", "P", "r"}
 
 // renderBody renders the active Section's own table under the header and
 // Section tabs (ADR 0030) — the section-switched single list that replaces
@@ -1032,9 +1028,6 @@ func bodyBudget(m Model) int {
 		reservedLines++
 	}
 	if m.Mode == ModeQuitConfirm {
-		reservedLines++
-	}
-	if m.Mode == ModePick && m.HasHighlighted() {
 		reservedLines++
 	}
 	if m.QueueEnterNotice != "" {

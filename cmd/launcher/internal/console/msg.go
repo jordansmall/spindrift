@@ -340,30 +340,15 @@ type TerminateCancelledMsg struct{}
 
 func (TerminateCancelledMsg) isConsoleMsg() {}
 
-// PickPendingMsg is the tea layer's signal that "p" armed the "pa" leader
-// window — renders a visible hint so the operator knows the keystroke landed
-// while it waits out the trailing "a" (issue #835).
-type PickPendingMsg struct{}
-
-func (PickPendingMsg) isConsoleMsg() {}
-
-// PickResolvedMsg is the tea layer's signal that a pending pick chord
-// resolved — either "a" arrived, the 200ms leader window timed out, or any
-// other key resolved it to a single-issue pick (issue #835).
-type PickResolvedMsg struct{}
-
-func (PickResolvedMsg) isConsoleMsg() {}
-
 // GPendingMsg is the tea layer's signal that "g" armed the "gg" leader
-// window — mirrors PickPendingMsg's own arm signal (issue #1628).
+// window (issue #1628).
 type GPendingMsg struct{}
 
 func (GPendingMsg) isConsoleMsg() {}
 
 // GResolvedMsg is the tea layer's signal that a pending "gg" chord
 // resolved — either a trailing "g" completed it, the leader window timed
-// out, or any other key cancelled it — mirrors PickResolvedMsg's own
-// resolve signal (issue #1628).
+// out, or any other key cancelled it (issue #1628).
 type GResolvedMsg struct{}
 
 func (GResolvedMsg) isConsoleMsg() {}

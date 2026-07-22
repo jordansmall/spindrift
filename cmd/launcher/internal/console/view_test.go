@@ -41,7 +41,7 @@ func TestView_ModeList_ShowsPinnedFooter(t *testing.T) {
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "one"}}})
 
 	out := View(m)
-	for _, want := range []string{"[/] filter", "[p] pick", "[r] refresh"} {
+	for _, want := range []string{"[/] filter", "[p] pick", "[P] pick all", "[r] refresh"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("View() = %q, want it to contain pinned footer hint %q", out, want)
 		}
@@ -739,41 +739,6 @@ func TestView_Cursor_MarksHighlightedRow(t *testing.T) {
 	}
 }
 
-// TestView_ModePick_EmptyBacklog_HidesIndicator verifies the "p_" pending
-// pick indicator does not render when the backlog is empty — with no
-// highlighted row, the chord's resolution is a no-op, so showing the
-// indicator would promise a pick that can't happen (issue #1237).
-func TestView_ModePick_EmptyBacklog_HidesIndicator(t *testing.T) {
-	m := Update(NewModel(), PickPendingMsg{})
-
-	out := View(m)
-	if strings.Contains(out, "p_") {
-		t.Errorf("View() with empty backlog = %q, want no \"p_\" indicator", out)
-	}
-}
-
-// TestView_ModePick_FooterStyledDim verifies the pending pick chord's
-// a/r hints render dim (RoleDim, "\x1b[90m") via the shared footer
-// renderer, the same treatment the other migrated footers already got,
-// while the "p_" chord indicator itself is preserved verbatim (issue
-// #1793).
-func TestView_ModePick_FooterStyledDim(t *testing.T) {
-	t.Setenv("NO_COLOR", "")
-	t.Setenv("TERM", "xterm-256color")
-
-	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "fix the thing"}}})
-	m = Update(m, PickPendingMsg{})
-
-	out := View(m)
-	if !strings.Contains(out, "p_") {
-		t.Errorf("View() = %q, want the \"p_\" chord indicator preserved", out)
-	}
-	if !strings.Contains(out, "\x1b[90m[a] pick all · [r] research\x1b[0m") {
-		t.Errorf("View() = %q, want the pick-chord hint dim-styled with its text intact", out)
-	}
-}
-
 // TestView_ModeFilterEdit_NarrowWidth_FooterFitsWidth verifies the
 // filter-edit prompt's "/filter  " prefix plus its enter/esc hint clips to
 // the terminal's own width — accounting for the prefix's own columns, not
@@ -793,59 +758,6 @@ func TestView_ModeFilterEdit_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	}
 	if got := strings.Count(out, "\n") + 1; got > height {
 		t.Errorf("View() rendered %d lines, want at most Height (%d) — a clipped footer must still fit bodyBudget's single reserved row for it", got, height)
-	}
-}
-
-// TestView_ModePick_NarrowWidth_FooterFitsWidth verifies the pending pick
-// chord's "p_  " prefix plus its a/r hint clips to the terminal's own
-// width — accounting for the prefix's own columns, not just the hint text
-// — rather than wrapping past bodyBudget's single reserved row for it on a
-// narrow terminal (issue #1818).
-func TestView_ModePick_NarrowWidth_FooterFitsWidth(t *testing.T) {
-	// Wide enough that the backlog table's own header/row columns (not this
-	// issue's concern) already fit, narrow enough that the pick-chord
-	// footer's 32-column unclipped hint would still overflow it.
-	const width, height = 30, 24
-	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "fix the thing"}}})
-	m = Update(m, PickPendingMsg{})
-
-	out := View(m)
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.HasPrefix(line, "p_") {
-			continue
-		}
-		if got := lipgloss.Width(line); got > width {
-			t.Errorf("View() pick-chord line is %d columns wide, want at most the terminal's %d: %q", got, width, line)
-		}
-	}
-	if got := strings.Count(out, "\n") + 1; got > height {
-		t.Errorf("View() rendered %d lines, want at most Height (%d) — a clipped footer must still fit bodyBudget's single reserved row for it", got, height)
-	}
-}
-
-// TestView_ModePick_PrefixWiderThanTerminal_FooterStaysBounded verifies the
-// pick-chord footer stays bounded to roughly the terminal's own width even
-// when the "p_  " prefix alone consumes it — renderFooterHints' width<=0
-// branch renders unclipped, so a naive m.Width-prefixWidth subtraction goes
-// negative and falls through to that branch, letting the full, unbounded
-// hint text back in behind a too-narrow prefix (issue #1818 review
-// finding). A floor of 1 keeps clip() itself in play, bounding the
-// overflow to a small constant instead of the whole unclipped hint.
-func TestView_ModePick_PrefixWiderThanTerminal_FooterStaysBounded(t *testing.T) {
-	const width = 4 // exactly len("p_  ")
-	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "fix the thing"}}})
-	m = Update(m, PickPendingMsg{})
-
-	out := View(m)
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.HasPrefix(line, "p_") {
-			continue
-		}
-		if got := lipgloss.Width(line); got > width+1 {
-			t.Errorf("View() pick-chord line is %d columns wide, want at most %d (terminal's %d plus the clip floor's one column): %q", got, width+1, width, line)
-		}
 	}
 }
 
@@ -994,7 +906,7 @@ func TestView_ModeHelp_ListsNewKeybindings(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
 	out := View(m)
-	for _, want := range []string{"p ", "u ", "pa ", "X ", "+", "-", "b "} {
+	for _, want := range []string{"p ", "u ", "P ", "X ", "+", "-", "b "} {
 		if !strings.Contains(out, want) {
 			t.Errorf("View() = %q, want it to mention key %q", out, want)
 		}
@@ -2188,23 +2100,22 @@ func TestView_SidebarOpen_DumbTerminal_PanelsRenderAsciiBorder(t *testing.T) {
 	}
 }
 
-// TestView_SidebarOpen_ModePick_DockedPanelsRespectHeight verifies that a
-// docked sidebar with ModePick's "p_" hint line also showing never renders
-// more than Height total lines — bodyBudget must reserve exactly the same
-// lines View itself reserves (including the ModePick hint and the
-// QueueEnterNotice line), or the bordered panels' row budget comes out too
-// generous and the render spills a line past the terminal (issue #1755,
-// the #1035/#1500 "never overflow Height" invariant).
-func TestView_SidebarOpen_ModePick_DockedPanelsRespectHeight(t *testing.T) {
+// TestView_SidebarOpen_QueueEnterNotice_DockedPanelsRespectHeight verifies
+// that a docked sidebar with the QueueEnterNotice line also showing never
+// renders more than Height total lines — bodyBudget must reserve exactly the
+// same lines View itself reserves, or the bordered panels' row budget comes
+// out too generous and the render spills a line past the terminal (issue
+// #1755, the #1035/#1500 "never overflow Height" invariant).
+func TestView_SidebarOpen_QueueEnterNotice_DockedPanelsRespectHeight(t *testing.T) {
 	const height = 10
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: height})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "still visible"}}})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
-	m = Update(m, PickPendingMsg{})
+	m = Update(m, QueueEnterNoticedMsg{})
 
 	out := View(m)
 	if got := strings.Count(out, "\n") + 1; got > height {
-		t.Errorf("View() rendered %d lines, want at most Height (%d) with ModePick's hint line showing beside a docked sidebar: %q", got, height, out)
+		t.Errorf("View() rendered %d lines, want at most Height (%d) with QueueEnterNotice showing beside a docked sidebar: %q", got, height, out)
 	}
 }
 

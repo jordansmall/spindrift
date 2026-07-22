@@ -12,14 +12,10 @@ import (
 // it up under, it applies whatever Msg(s) that key means and returns the
 // resulting teaModel plus any tea.Cmd to run — the same (teaModel, tea.Cmd)
 // shape handleKey itself returns. mode is passed explicitly rather than
-// re-derived via t.m.ActiveMode(): dispatchKey's own ModePick pre-step
-// resolves the pick chord (PickResolvedMsg) before ever looking up an entry,
-// which flips Mode away from ModePick, so an Action re-deriving the mode
-// afterward would read the wrong one. An entry spanning several modes with
-// different behaviour (e.g. the shared quit entry below, whose ModePick case
-// relies on that same pre-step having already run) switches on mode inside
-// its own Action rather than splitting into several near-duplicate entries
-// (issue #1790).
+// re-derived via t.m.ActiveMode() so an entry spanning several modes with
+// different behaviour (e.g. the shared quit entry below) can switch on mode
+// inside its own Action rather than splitting into several near-duplicate
+// entries (issue #1790).
 type Action func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd)
 
 // Binding is one entry in the console's declarative keymap: the single
@@ -408,8 +404,15 @@ var keymap = []Binding{
 		Help:   "  p           pick the highlighted Backlog row (launch button)",
 		Footer: "[p] pick",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			t.m = Update(t.m, PickPendingMsg{})
-			return t, pickChordTick()
+			return t.pickHighlighted(KindWork), nil
+		},
+	},
+	{
+		Keys: []string{"P"}, Modes: []Mode{ModeList},
+		Help:   "  P           pick all ready (bulk pick-all-ready gesture)",
+		Footer: "[P] pick all",
+		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
+			return t.pickAllReady(), nil
 		},
 	},
 	{
@@ -417,24 +420,6 @@ var keymap = []Binding{
 		Help: "  u           unpick the highlighted queued pick",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			return t.unpickHighlighted(), nil
-		},
-	},
-	{
-		Keys: []string{"a"}, Modes: []Mode{ModePick},
-		Help:   "  pa          pick all ready (bulk pick-all-ready gesture)",
-		Footer: "[a] pick all",
-		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			return t.pickAllReady(), nil
-		},
-	},
-	{
-		Keys: []string{"r"}, Modes: []Mode{ModePick},
-		Help: "  pr          pick the highlighted Backlog row as a research\n" +
-			"              dispatch (advise-only: posts one verdict comment,\n" +
-			"              never opens a branch/PR)",
-		Footer: "[r] research",
-		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			return t.pickHighlighted(KindResearch), nil
 		},
 	},
 	{
@@ -568,20 +553,12 @@ var keymap = []Binding{
 	{
 		Keys: []string{"q", "ctrl+c"},
 		Modes: []Mode{
-			ModeList, ModePick, ModeRebuildOutput, ModeDetailModal, ModeSidebar, ModeTerminateConfirm,
+			ModeList, ModeRebuildOutput, ModeDetailModal, ModeSidebar, ModeTerminateConfirm,
 		},
 		Help: "  q / ctrl+c  quit",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			switch mode {
 			case ModeList:
-				t.m = Update(t.m, t.quitOrConfirmMsg())
-			case ModePick:
-				// handlePickChordKey's own quit case: the pick just landed may
-				// itself be live now, so this still gates on LiveIssues() via
-				// quitOrConfirmMsg rather than an unconditional QuitMsg
-				// (issue #1216) — PickResolvedMsg already ran in dispatchKey's
-				// ModePick pre-step above.
-				t = t.pickHighlighted(KindWork)
 				t.m = Update(t.m, t.quitOrConfirmMsg())
 			case ModeTerminateConfirm:
 				// A quit keystroke declines the terminate (returning to

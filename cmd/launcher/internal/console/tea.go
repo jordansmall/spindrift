@@ -196,25 +196,10 @@ func sidebarActivityLive(m Model) bool {
 	return m.Sidebar != nil && (isRunningNumber(m.Picks, m.Sidebar.Number) || m.IsOrphan(m.Sidebar.Number))
 }
 
-// pickChordTimeout is how long "p" waits for a trailing "a" before resolving
-// to a single-issue pick — long enough that a deliberate two-key "pa" always
-// lands within it, short enough that a lone "p" still reads as instant
-// (issue #785 AC1).
-const pickChordTimeout = 200 * time.Millisecond
-
-// pickChordTimeoutMsg is the tea layer's signal that "p"'s leader window
-// elapsed with no trailing "a" — resolves a still-pending chord to a
-// single-issue pick.
-type pickChordTimeoutMsg struct{}
-
-// pickChordTick arms the leader-window timeout.
-func pickChordTick() tea.Cmd {
-	return tea.Tick(pickChordTimeout, func(time.Time) tea.Msg { return pickChordTimeoutMsg{} })
-}
-
 // gChordTimeout is how long a lone "g" waits for a trailing "g" before the
-// leader window cancels — same duration as pickChordTimeout, mirroring the
-// "pa" chord precedent (issue #1628).
+// leader window cancels — long enough that a deliberate two-key "gg" always
+// lands within it, short enough that a lone "g" still reads as responsive
+// (issue #1628).
 const gChordTimeout = 200 * time.Millisecond
 
 // gChordTimeoutMsg is the tea layer's signal that "g"'s leader window
@@ -287,7 +272,7 @@ func initialQueueSyncCmd(launch *Launcher) tea.Cmd {
 // Run loop did on every render. "Internal signal" spans two shapes: results
 // of a completed async load (a backlog refresh, a drill-in fetch), which
 // carry a payload, and reactive notifications, which carry none (poll
-// ticks, refresh signals, pick-chord timeouts).
+// ticks, refresh signals, "gg" leader timeouts).
 func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	prevToast := t.m.Toast
@@ -322,11 +307,6 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.m = Update(t.m, QueueSnapshotMsg{Picks: msg.picks})
 		}
 		cmd = tea.Batch(refreshCmd(t.tracker), waitRefreshSignal(t.launch, t.done))
-	case pickChordTimeoutMsg:
-		if t.m.Mode == ModePick {
-			t.m = Update(t.m, PickResolvedMsg{})
-			t = t.pickHighlighted(KindWork)
-		}
 	case gChordTimeoutMsg:
 		if t.m.PendingG {
 			t.m = Update(t.m, GResolvedMsg{})
@@ -421,14 +401,11 @@ func pendingGJump(mode Mode) func(Model) Model {
 
 // dispatchDefault applies whatever a mode's retired handler did when no key
 // matched any of its switch cases. Most modes simply did nothing (the
-// switch's implicit fallthrough); three had a real default of their own:
-// ModePick resolves the chord to a single-issue pick, same as the timeout;
+// switch's implicit fallthrough); two had a real default of their own:
 // ModeTerminateConfirm declines the terminate; ModeQuitConfirm declines the
 // quit (issue #1790).
 func (t teaModel) dispatchDefault(mode Mode) (teaModel, tea.Cmd) {
 	switch mode {
-	case ModePick:
-		return t.pickHighlighted(KindWork), nil
 	case ModeTerminateConfirm:
 		t.m = Update(t.m, TerminateCancelledMsg{})
 	case ModeQuitConfirm:
@@ -438,14 +415,14 @@ func (t teaModel) dispatchDefault(mode Mode) (teaModel, tea.Cmd) {
 }
 
 // dispatchKey resolves one keypress against mode: mode-specific pre-dispatch
-// state (a pending "gg" leader, ModeList's queued-enter notice, ModePick's
-// always-resolve-on-any-key rule) runs first, exactly as it did inline at
-// the top of each retired handler, then the keymap entry naming (mode, key)
-// is looked up and its Action invoked — or, when no entry matches,
-// dispatchDefault's mode-specific fallback. Every handleXKey method below is
-// a thin wrapper around this one function, pinning mode to its own Mode
-// rather than re-deriving it from t.m.ActiveMode() — handleKey's own routing
-// switch already made that choice (issue #1790).
+// state (a pending "gg" leader, ModeList's queued-enter notice) runs first,
+// exactly as it did inline at the top of each retired handler, then the
+// keymap entry naming (mode, key) is looked up and its Action invoked — or,
+// when no entry matches, dispatchDefault's mode-specific fallback. Every
+// handleXKey method below is a thin wrapper around this one function,
+// pinning mode to its own Mode rather than re-deriving it from
+// t.m.ActiveMode() — handleKey's own routing switch already made that choice
+// (issue #1790).
 func (t teaModel) dispatchKey(mode Mode, msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	if onFirst := pendingGJump(mode); onFirst != nil {
 		m, consumed := resolvePendingG(t.m, msg, onFirst)
@@ -462,11 +439,6 @@ func (t teaModel) dispatchKey(mode Mode, msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	if mode == ModeList && t.m.Toast != "" {
 		t.m = Update(t.m, ToastDismissedMsg{})
 	}
-	if mode == ModePick {
-		// handlePickChordKey resolved the chord before ever looking at which
-		// key was pressed — every key, matched or not, ends the chord.
-		t.m = Update(t.m, PickResolvedMsg{})
-	}
 
 	key := msg.String()
 	if mode == ModeFilterEdit {
@@ -481,9 +453,9 @@ func (t teaModel) dispatchKey(mode Mode, msg tea.KeyMsg) (teaModel, tea.Cmd) {
 // handleKey translates one keypress into a console Msg and applies it,
 // dispatching on whichever Mode Model.ActiveMode reports owns the keyboard
 // right now. modePrecedence (model.go) is the flat, ordered data this used
-// to be an if-cascade over — the six router functions below (plus
-// handleListKey for the ModeList default) are what the cascade's six
-// branches collapsed into (issue #1543).
+// to be an if-cascade over — the five router functions below (plus
+// handleListKey for the ModeList default) are what the cascade's branches
+// collapsed into (issue #1543).
 func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	switch t.m.ActiveMode() {
 	case ModeDetailModal:
@@ -506,8 +478,6 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		return t.handleTerminateConfirmKey(msg), nil
 	case ModeQuitConfirm:
 		return t.handleQuitConfirmKey(msg), nil
-	case ModePick:
-		return t.handlePickChordKey(msg)
 	default: // ModeList
 		return t.handleListKey(msg)
 	}
@@ -521,15 +491,6 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 func (t teaModel) handleHelpKey(msg tea.KeyMsg) teaModel {
 	t, _ = t.dispatchKey(ModeHelp, msg)
 	return t
-}
-
-// handlePickChordKey routes one keypress while ModePick is armed, awaiting
-// "pa"'s trailing "a" or "pr"'s trailing "r", through dispatchKey pinned to
-// ModePick — see dispatchKey (whose ModePick pre-step resolves the chord on
-// every key, matched or not) and the keymap's ModePick/quit entries and
-// dispatchDefault's KindWork fallback (issue #1790).
-func (t teaModel) handlePickChordKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
-	return t.dispatchKey(ModePick, msg)
 }
 
 // handleListKey routes one keypress against the plain backlog/queue body —
@@ -767,10 +728,11 @@ func (t teaModel) alreadyActive(num string) bool {
 }
 
 // pickAllReady picks every issue currently Dispatchable on the tracker in
-// one bulk gesture (#647 AC3) — reached via the "pa" leader chord (issue
-// #785 AC1). An issue already active from an earlier pick is skipped rather
-// than re-landed (see alreadyActive). Each landed pick's snapshot is applied
-// to Model.Picks immediately, not batched to the end of the loop, so a later
+// one bulk gesture (#647 AC3) — reached via the standalone "P" key (issue
+// #1838; previously the "pa" leader chord, issue #785 AC1). An issue
+// already active from an earlier pick is skipped rather than re-landed
+// (see alreadyActive). Each landed pick's snapshot is applied to
+// Model.Picks immediately, not batched to the end of the loop, so a later
 // iteration's alreadyActive check still sees every pick this same bulk
 // gesture already landed (issue #1542).
 func (t teaModel) pickAllReady() teaModel {
@@ -810,9 +772,9 @@ func (t teaModel) unpickHighlighted() teaModel {
 }
 
 // quitOrConfirmMsg picks QuitRequestedMsg over QuitMsg whenever live
-// Dispatches exist, so any "q"/"ctrl+c" quit path — chorded through
-// ModePick or not — arms the drain/terminate-all/stay confirm instead of
-// exiting outright (issue #1216, ADR 0023).
+// Dispatches exist, so any "q"/"ctrl+c" quit path arms the
+// drain/terminate-all/stay confirm instead of exiting outright (issue
+// #1216, ADR 0023).
 func (t teaModel) quitOrConfirmMsg() Msg {
 	if t.launch != nil && len(t.launch.LiveIssues()) > 0 {
 		return QuitRequestedMsg{}
@@ -825,23 +787,24 @@ func (t teaModel) quitOrConfirmMsg() Msg {
 // pickHighlighted and pickDetailModalIssue both land through, so their two
 // pick sources (cursor row vs. open modal) can never drift apart on how a
 // resolved target actually gets queued/launched. kind selects the Dispatch
-// kind the pick carries: KindWork for the "p"/"pa" gestures and the modal's
-// own "p", KindResearch for "pr" (issue #1709) — Launcher.Pick's own
-// trackerFor already routes a KindResearch pick onto ResearchTracker when
-// one is wired. A nil Launcher promotes through PickIssue directly onto
+// kind the pick carries: KindWork for the "p"/"P" gestures and the modal's
+// own "p"; KindResearch has no console binding yet (issue #1838 leaves it
+// unbound; #1709 wired the record itself) — Launcher.Pick's own trackerFor
+// already routes a KindResearch pick onto ResearchTracker when one is
+// wired. A nil Launcher promotes through PickIssue directly onto
 // Model.Picks (matching the pre-#785 no-launch Console) but never queues on
 // a live queue or launches, since there is nothing to launch it.
 func (t teaModel) landPick(num, title string, kind Kind) (teaModel, Msg) {
 	if t.launch == nil {
 		// No Launcher means no trackerFor to pick a ResearchTracker over
-		// t.tracker either — relevant only to pickHighlighted's "pr" chord,
-		// the sole KindResearch caller (pickDetailModalIssue always passes
-		// KindWork); a KindResearch pick here still promotes on t.tracker's
-		// own label family, tagged with the kind it was asked for
-		// regardless. Harmless in practice: production always supplies a
-		// Launcher (cmdConsole wires ResearchTracker unconditionally), so
-		// this branch is exercised only by tests that deliberately skip the
-		// launch stack to exercise bare Pick/Unpick bookkeeping.
+		// t.tracker either — moot today since neither caller passes
+		// KindResearch (issue #1838 left it unbound); a KindResearch pick
+		// here would still promote on t.tracker's own label family, tagged
+		// with the kind it was asked for regardless. Harmless in practice:
+		// production always supplies a Launcher (cmdConsole wires
+		// ResearchTracker unconditionally), so this branch is exercised
+		// only by tests that deliberately skip the launch stack to
+		// exercise bare Pick/Unpick bookkeeping.
 		msg := PickIssue(t.tracker, num, title, kind)
 		t.m = Update(t.m, msg)
 		return t, msg
