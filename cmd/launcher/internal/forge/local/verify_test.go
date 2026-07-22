@@ -15,7 +15,7 @@ import (
 func TestLocalCodeForge_VerifyLanding_ReportsMergedAfterCleanLand(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	outbox := t.TempDir()
 	branch := "agent/issue-1698"
@@ -58,7 +58,7 @@ func TestLocalCodeForge_VerifyLanding_ReportsMergedAfterCleanLand(t *testing.T) 
 func TestLocalCodeForge_VerifyLanding_ReportsUnmergedForMalformedRef(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
 	verifier := cf.(forge.LandingVerifier)
@@ -79,7 +79,7 @@ func TestLocalCodeForge_VerifyLanding_ReportsUnmergedForMalformedRef(t *testing.
 func TestLocalCodeForge_VerifyLanding_ReportsUnmergedForUnknownSHA(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
 	verifier := cf.(forge.LandingVerifier)
@@ -101,7 +101,7 @@ func TestLocalCodeForge_VerifyLanding_ReportsUnmergedForUnknownSHA(t *testing.T)
 func TestLocalCodeForge_VerifyLanding_ReportsUnmergedForNonexistentBranch(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
 	verifier := cf.(forge.LandingVerifier)
@@ -126,7 +126,8 @@ func TestLocalCodeForge_VerifyLanding_ReportsUnmergedForNonexistentBranch(t *tes
 func TestLocalCodeForge_VerifyLanding_IsInstanceAgnostic(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent1, parent2 = "1694", "2200"
+	parent1 := ResolveParent("1694", "")
+	parent2 := ResolveParent("2200", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent1))
 	cf1 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent1, "Test Bot", "bot@example.com", "agent/issue-")
 
@@ -165,7 +166,7 @@ func TestLocalCodeForge_VerifyLanding_IsInstanceAgnostic(t *testing.T) {
 func TestLocalCodeForge_VerifyLanding_ReportsUnmergedForDashPrefixedSHA(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
 	verifier := cf.(forge.LandingVerifier)
@@ -186,7 +187,7 @@ func TestLocalCodeForge_VerifyLanding_ReportsUnmergedForDashPrefixedSHA(t *testi
 func TestLocalCodeForge_VerifyLanding_ErrorsOnGenuineGitFailure(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
 	verifier := cf.(forge.LandingVerifier)

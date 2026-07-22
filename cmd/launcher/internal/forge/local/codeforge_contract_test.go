@@ -17,7 +17,7 @@ import (
 type localCodeForgeHarness struct {
 	t      *testing.T
 	repo   *forgetest.GitRepoFixture
-	parent string
+	parent SanitizedParent
 	cf     forge.CodeForge
 }
 
@@ -28,7 +28,7 @@ func newLocalCodeForgeHarness(t *testing.T) *localCodeForgeHarness {
 	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	return &localCodeForgeHarness{
 		t:      t,

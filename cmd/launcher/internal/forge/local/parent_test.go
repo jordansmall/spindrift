@@ -3,13 +3,13 @@ package local
 import "testing"
 
 func TestResolveParent_UsesFrontmatterParentWhenSet(t *testing.T) {
-	if got, want := ResolveParent("42", "Calc Engine"), "calc-engine"; got != want {
+	if got, want := ResolveParent("42", "Calc Engine").String(), "calc-engine"; got != want {
 		t.Errorf("ResolveParent(42, Calc Engine) = %q, want %q", got, want)
 	}
 }
 
 func TestResolveParent_FallsBackToOwnSlugWhenUnset(t *testing.T) {
-	if got, want := ResolveParent("01-calc-add", ""), "01-calc-add"; got != want {
+	if got, want := ResolveParent("01-calc-add", "").String(), "01-calc-add"; got != want {
 		t.Errorf("ResolveParent(01-calc-add, \"\") = %q, want %q", got, want)
 	}
 }
@@ -20,7 +20,7 @@ func TestResolveParent_FallsBackToOwnSlugWhenUnset(t *testing.T) {
 // slug instead of silently producing "integration/" (no parent segment at
 // all).
 func TestResolveParent_FallsBackToOwnSlugWhenParentSanitizesToEmpty(t *testing.T) {
-	if got, want := ResolveParent("42", "///"), "42"; got != want {
+	if got, want := ResolveParent("42", "///").String(), "42"; got != want {
 		t.Errorf("ResolveParent(42, \"///\") = %q, want %q", got, want)
 	}
 }

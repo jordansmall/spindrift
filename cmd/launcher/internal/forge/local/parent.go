@@ -2,6 +2,22 @@ package local
 
 import "strings"
 
+// SanitizedParent is a seam issue's resolved Integration-branch key — a
+// ref-safe token already run through SanitizeParent. Its only mint point is
+// ResolveParent: the unexported field keeps a caller from fabricating one
+// from an arbitrary string, turning the previous "callers must pass
+// pre-sanitized input" doc-comment invariant on IntegrationBranch and
+// SurfaceIntegrationBranch into a compile error (issue #1810).
+type SanitizedParent struct {
+	token string
+}
+
+// String returns p's sanitized token, the git-ref-safe component
+// IntegrationBranch and its siblings compose into a full ref name.
+func (p SanitizedParent) String() string {
+	return p.token
+}
+
 // ResolveParent returns the sanitized Integration-branch key for a seam
 // issue: rawParent (the issue's own parent: frontmatter field), sanitized,
 // or — when rawParent is unset, or sanitizes to empty (a parent: value made
@@ -12,11 +28,11 @@ import "strings"
 // reachable through the local tracker in practice — every issue's number
 // comes from a non-empty ".md" filename basename — so this is left
 // unguarded rather than invented a third fallback with no natural value.
-func ResolveParent(issueNumber, rawParent string) string {
+func ResolveParent(issueNumber, rawParent string) SanitizedParent {
 	if sanitized := SanitizeParent(rawParent); sanitized != "" {
-		return sanitized
+		return SanitizedParent{token: sanitized}
 	}
-	return SanitizeParent(issueNumber)
+	return SanitizedParent{token: SanitizeParent(issueNumber)}
 }
 
 // SanitizeParent normalizes an operator-authored parent: value (or an
