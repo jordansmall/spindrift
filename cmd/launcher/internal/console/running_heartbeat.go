@@ -23,7 +23,10 @@ import (
 // call that appends no complete new line must still return the prior one.
 // ok is false when the file can't be read or written through drv's parser
 // (the same "no heartbeat yet" cases HeartbeatCache.RunningHeartbeat
-// returns "" for).
+// returns "" for). A file truncated between RunningHeartbeat's stat and this
+// Seek — past the size check already ruled a shrink out — reads zero bytes
+// here rather than erroring; the stale cached line rides one more refresh
+// and self-heals once the file's growth or next truncation is observed.
 func appendHeartbeat(drv driver.Driver, number string, entry *heartbeatCacheEntry) (line string, ok bool) {
 	f, err := os.Open(entry.path)
 	if err != nil {
