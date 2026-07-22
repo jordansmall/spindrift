@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/exp/golden"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // goldenHeaderModel builds a Model that exercises the banner, the status
@@ -45,4 +47,38 @@ func TestView_Header_Golden_NoColor(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 
 	golden.RequireEqual(t, []byte(View(goldenHeaderModel())))
+}
+
+// goldenDockedModel builds a Model with the docked sidebar open at a
+// representative terminal size — wide enough to dock, short enough to keep
+// the golden file small — so the bordered list/sidebar panels, the docked
+// footer hints, and the width/height budget math all land in one snapshot
+// (issue #1755).
+func goldenDockedModel() Model {
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 12})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "still visible", Labels: []string{"bug"}}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
+	return m
+}
+
+// TestView_Docked_Golden_Styled pins the docked list/sidebar panels' exact
+// byte output — rounded RoleDim borders around both columns — on a
+// color-capable terminal, so a change to the border styling or the
+// width/height budget math shows up as a diff here (issue #1755 AC).
+func TestView_Docked_Golden_Styled(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	golden.RequireEqual(t, []byte(View(goldenDockedModel())))
+}
+
+// TestView_Docked_Golden_NoColor pins the same docked layout's exact byte
+// output under NO_COLOR, verifying the panel borders degrade to plain ASCII
+// glyphs with no ANSI escape sequences at all (issue #1755 AC).
+func TestView_Docked_Golden_NoColor(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("TERM", "xterm-256color")
+
+	golden.RequireEqual(t, []byte(View(goldenDockedModel())))
 }
