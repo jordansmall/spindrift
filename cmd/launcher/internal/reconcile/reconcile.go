@@ -178,10 +178,11 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 // localLandingReconciler bundles the seams reconcile's local-landing path
 // needs per issue (mirroring prReconciler for the PRForge path). repair is
 // nil for a Code Forge with no forge.LandingRepair surface (every adapter
-// but local, though reconcileLocalLanding's caller never reaches that case
-// today since Run only takes this path when cf implements LandingVerifier,
-// which only local does too) — a LandingBranchRef then falls back to the
-// pre-#1809 "stays open" no-op, since there is no ancestor check to run.
+// but local, though (localLandingReconciler).reconcile's caller never
+// reaches that case today since Run only takes this path when cf implements
+// LandingVerifier, which only local does too) — a LandingBranchRef then
+// prints a loud "no repair surface" line rather than the pre-#1809 silent
+// no-op, since there is no ancestor check to run.
 type localLandingReconciler struct {
 	closer   forge.IssueCloser
 	verifier forge.LandingVerifier
@@ -239,6 +240,7 @@ func (l localLandingReconciler) reconcile(res *Result, iss forge.Issue) error {
 // see (localLandingReconciler).reconcile's doc for the full behavior.
 func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue, landing forge.Landing) error {
 	if l.repair == nil {
+		fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! Code Forge has no repair surface to check branch %s against\n", iss.Number, iss.Landing, landing.Branch)
 		return nil
 	}
 	parent := local.ResolveParent(iss.Number, iss.Parent)

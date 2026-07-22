@@ -49,6 +49,10 @@ func ParseLanding(s string) (Landing, error) {
 	if s == "" {
 		return Landing{}, errors.New("forge: empty landing")
 	}
+	// Checked ahead of the "@" cut below: a URL prefix wins over any
+	// IntegrationRef/BranchRef reading. Real branch names never carry an
+	// "http(s)://" prefix (AgentBranch's own naming, ADR 0033's
+	// "integration/<parent>"), so this never misclassifies a genuine one.
 	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
 		return Landing{Kind: LandingPRURL, URL: s}, nil
 	}
