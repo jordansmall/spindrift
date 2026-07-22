@@ -1216,6 +1216,28 @@ func TestUpdate_CursorJumpToLastMsg_MovesCursorAndDragsOffsetIntoView(t *testing
 	}
 }
 
+// TestUpdate_CursorJumpToLastMsg_Docked_LastRowReachable verifies "G" on a
+// docked (bordered) list actually renders the last row — not just that
+// Offset lands on some clamp formula, but that the clamp agrees with the
+// bordered panel's real row budget, or the last row ends up permanently
+// unreachable behind the panel border (issue #1755, the list-side
+// counterpart of the sidebar's own docked scroll-clamp fix).
+func TestUpdate_CursorJumpToLastMsg_Docked_LastRowReachable(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 10})
+	issues := make([]forge.Issue, 50)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	m = Update(m, CursorJumpToLastMsg{})
+
+	if !strings.Contains(View(m), "issue 49") {
+		t.Errorf("View() = %q, want the last row (issue 49) reachable after \"G\" with the sidebar docked", View(m))
+	}
+}
+
 // TestUpdate_GPendingMsg_ArmsPendingG verifies a lone "g" arms the pending-g
 // leader on the Model, mirroring ModePick's own arm/resolve toggle (issue
 // #1628 AC3).
