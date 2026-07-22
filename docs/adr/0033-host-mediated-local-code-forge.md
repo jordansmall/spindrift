@@ -80,8 +80,9 @@ The pieces:
   is opaque and operator-authored (a GitHub URL, a Jira key, another local
   issue's slug); spindrift never reaches into another tracker to resolve it,
   it only sanitizes the string into a git-ref-safe token (lowercased, each run
-  of non-`[a-z0-9]` characters collapsed to a single dash) before forming the
-  branch name. An issue with no `parent:` set is its own broad ticket, keyed
+  of non-`[a-z0-9]` characters collapsed to a single dash, leading/trailing
+  dashes trimmed) before forming the branch name. An issue with no `parent:`
+  set is its own broad ticket, keyed
   on its own sanitized slug instead — never a shared fallback branch. The
   merge *succeeding* **is** the landing — there is no PR, no network, no
   wait. A clean merge closes the seam-issue through the existing `reconcile`

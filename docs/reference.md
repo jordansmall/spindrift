@@ -1118,9 +1118,10 @@ landing: https://github.com/owner/repo/pull/123
   itself. Under `CODE_FORGE=local` it doubles as the seam's broad-ticket
   key (ADR 0033): the issue lands onto `integration/<sanitized-parent>` in
   the Accumulation repo, sanitized to a git-ref-safe token (lowercased,
-  each run of non-`[a-z0-9]` characters collapsed to a single dash). A
-  parentless issue lands on `integration/<own-sanitized-slug>` instead — a
-  parentless seam is its own broad ticket.
+  each run of non-`[a-z0-9]` characters collapsed to a single dash,
+  leading/trailing dashes trimmed). A parentless issue lands on
+  `integration/<own-sanitized-slug>` instead — a parentless seam is its own
+  broad ticket.
 - `closed` is a boolean, local-only open/closed axis (ADR 0029), independent
   of `state`: absent or `false` means open; `true` excludes the issue from
   both `ListOpenIssues` and `ListIssues`, so it is never re-dispatched or
