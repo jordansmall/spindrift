@@ -71,6 +71,36 @@ type LandingVerifier interface {
 	VerifyLanding(landing string) (merged bool, err error)
 }
 
+// LandingRepair is CODE_FORGE=local's optional bookkeeping-repair surface
+// (ADR 0029, ADR 0033, issue #1809): Reconcile's healing path for a seam
+// whose merge landed but whose post-merge landing upgrade (settle's
+// LandingRef call) never ran, leaving a stale LandingBranchRef recorded
+// instead of the rich LandingIntegrationRef. Unlike LandingRef and
+// LandingVerifier — which lean on either the adapter's own construction-time
+// parent or a self-describing ref — Reconcile's sweep holds one Code Forge
+// instance across a whole, possibly mixed-parent batch (its cf is always
+// constructed with an empty parent), so both methods here take the issue's
+// own resolved parent explicitly rather than relying on the adapter's own.
+// Discovered via type assertion, like BundleRelay/LandingRef; only the local
+// adapter implements it.
+type LandingRepair interface {
+	// BranchMergedIntoIntegration reports whether branch — the raw,
+	// pre-merge landing record settle's outcome line wrote before any
+	// post-merge upgrade — is an ancestor of parent's own Integration
+	// branch, checked via local git ancestry, never a network call. A
+	// branch absent from the Accumulation repo (never relayed, or a
+	// since-abandoned attempt) reports merged=false, nil — the same
+	// "stays open" posture VerifyLanding gives a not-yet-landed ref; a
+	// non-nil error is reserved for a genuine local-git failure.
+	BranchMergedIntoIntegration(branch, parent string) (bool, error)
+	// IntegrationTip resolves parent's own Integration branch to its
+	// current landing-ready "<branch>@<sha>" reference — the value
+	// Reconcile's repair records once BranchMergedIntoIntegration confirms
+	// the merge, the same grammar LandingRef produces for the fresh-merge
+	// path.
+	IntegrationTip(parent string) (string, error)
+}
+
 // PRForge is the optional PR, CI-rollup, and auto-merge surface. Only
 // adapters that open pull requests and watch CI implement it (github); the
 // push-only git adapter does not. Callers discover it with a type assertion —

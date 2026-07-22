@@ -90,3 +90,31 @@ func (l *localCodeForge) VerifyLanding(landing string) (bool, error) {
 	}
 	return isMergedIntoIntegration(l.repoPath, sha, branch)
 }
+
+// BranchMergedIntoIntegration implements the optional forge.LandingRepair
+// surface (ADR 0029, ADR 0033, issue #1809) — reconcile's healing-path check
+// for a stuck LandingBranchRef: is branch, resolved against parent's own
+// Integration branch (explicit, not l's own construction-time parent — see
+// forge.LandingRepair), an ancestor of it. A branch the Accumulation repo has
+// never seen (never relayed, or a since-abandoned attempt) reports
+// merged=false, nil, the same "stays open" posture as a genuinely unmerged
+// one.
+func (l *localCodeForge) BranchMergedIntoIntegration(branch, parent string) (bool, error) {
+	sha, ok, err := branchTipSHA(l.repoPath, branch)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+	return isMergedIntoIntegration(l.repoPath, sha, IntegrationBranch(parent))
+}
+
+// IntegrationTip implements the optional forge.LandingRepair surface (ADR
+// 0029, ADR 0033, issue #1809) — reconcile's healing-path resolution of
+// parent's own Integration branch (explicit, not l's own construction-time
+// parent) to its current landing-ready "<branch>@<sha>" reference, the value
+// a confirmed BranchMergedIntoIntegration repair records.
+func (l *localCodeForge) IntegrationTip(parent string) (string, error) {
+	return landingRef(l.repoPath, IntegrationBranch(parent))
+}

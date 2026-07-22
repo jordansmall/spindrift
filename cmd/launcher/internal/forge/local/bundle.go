@@ -95,6 +95,21 @@ func parseLandingRef(landing string) (branch, sha string, ok bool) {
 	return branch, sha, true
 }
 
+// branchTipSHA resolves branch's current tip commit sha inside repoPath. ok
+// is false, with a nil error, when branch doesn't exist there — `git
+// rev-parse --verify --quiet` exits non-zero with no output for a missing
+// ref, indistinguishable at this layer from git itself failing to run, so
+// both collapse to the same "nothing to report" result BranchMergedIntoIntegration
+// treats as merged=false rather than a hard error (a genuine git failure
+// surfaces one call later, at the merge-base check itself).
+func branchTipSHA(repoPath, branch string) (sha string, ok bool, err error) {
+	out, err := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Output()
+	if err != nil {
+		return "", false, nil
+	}
+	return strings.TrimSpace(string(out)), true, nil
+}
+
 // isMergedIntoIntegration reports whether sha is an ancestor of
 // integrationBranch's current tip inside repoPath — the no-network merge
 // observation VerifyLanding relies on (ADR 0029, ADR 0033). Ancestry, not
