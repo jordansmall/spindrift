@@ -267,12 +267,13 @@ func TestCompositeOverlay_EmptyBoxLineLeavesRowUntouched(t *testing.T) {
 // generalizing detailModalBoxSize's own TestDetailModalBoxSize_MidTerminal_
 // SizedToFraction).
 func TestModalBoxSize_MidTerminal_SizedToFraction(t *testing.T) {
-	width, height := modalBoxSize(60, 30, 80, 80, 10, 5, 200, 100)
+	spec := modalBoxSpec{WidthPercent: 80, HeightPercent: 80, MinWidth: 10, MinHeight: 5, MaxWidth: 200, MaxHeight: 100}
+	width, height := modalBoxSize(60, 30, spec)
 	if width != 48 {
-		t.Errorf("modalBoxSize(60, 30, 80, 80, 10, 5, 200, 100) width = %d, want 48 (80%% of 60)", width)
+		t.Errorf("modalBoxSize(60, 30, %+v) width = %d, want 48 (80%% of 60)", spec, width)
 	}
 	if height != 24 {
-		t.Errorf("modalBoxSize(60, 30, 80, 80, 10, 5, 200, 100) height = %d, want 24 (80%% of 30)", height)
+		t.Errorf("modalBoxSize(60, 30, %+v) height = %d, want 24 (80%% of 30)", spec, height)
 	}
 }
 
@@ -281,12 +282,13 @@ func TestModalBoxSize_MidTerminal_SizedToFraction(t *testing.T) {
 // size (issue #1844, generalizing detailModalBoxSize's own
 // TestDetailModalBoxSize_WideTerminal_ClampsToMax).
 func TestModalBoxSize_WideTerminal_ClampsToMax(t *testing.T) {
-	width, height := modalBoxSize(300, 100, 80, 80, 10, 5, 100, 30)
+	spec := modalBoxSpec{WidthPercent: 80, HeightPercent: 80, MinWidth: 10, MinHeight: 5, MaxWidth: 100, MaxHeight: 30}
+	width, height := modalBoxSize(300, 100, spec)
 	if width != 100 {
-		t.Errorf("modalBoxSize(300, 100, 80, 80, 10, 5, 100, 30) width = %d, want 100 (clamped to max)", width)
+		t.Errorf("modalBoxSize(300, 100, %+v) width = %d, want 100 (clamped to max)", spec, width)
 	}
 	if height != 30 {
-		t.Errorf("modalBoxSize(300, 100, 80, 80, 10, 5, 100, 30) height = %d, want 30 (clamped to max)", height)
+		t.Errorf("modalBoxSize(300, 100, %+v) height = %d, want 30 (clamped to max)", spec, height)
 	}
 }
 
@@ -296,12 +298,13 @@ func TestModalBoxSize_WideTerminal_ClampsToMax(t *testing.T) {
 // detailModalBoxSize's own
 // TestDetailModalBoxSize_NearFloorTerminal_ClampsToMin).
 func TestModalBoxSize_NearFloorTerminal_ClampsToMin(t *testing.T) {
-	width, height := modalBoxSize(10, 5, 80, 80, 10, 5, 100, 30)
+	spec := modalBoxSpec{WidthPercent: 80, HeightPercent: 80, MinWidth: 10, MinHeight: 5, MaxWidth: 100, MaxHeight: 30}
+	width, height := modalBoxSize(10, 5, spec)
 	if width != 10 {
-		t.Errorf("modalBoxSize(10, 5, 80, 80, 10, 5, 100, 30) width = %d, want 10 (clamped to min)", width)
+		t.Errorf("modalBoxSize(10, 5, %+v) width = %d, want 10 (clamped to min)", spec, width)
 	}
 	if height != 5 {
-		t.Errorf("modalBoxSize(10, 5, 80, 80, 10, 5, 100, 30) height = %d, want 5 (clamped to min)", height)
+		t.Errorf("modalBoxSize(10, 5, %+v) height = %d, want 5 (clamped to min)", spec, height)
 	}
 }
 
