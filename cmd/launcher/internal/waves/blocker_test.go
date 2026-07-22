@@ -1,11 +1,84 @@
 package waves
 
 import (
+	"fmt"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 )
+
+// concurrencyTrackingFake wraps forge.Fake's DepsOf with an in-flight
+// counter and a short sleep, so a test can observe whether NewReadiness's
+// DepsOf calls ever overlap in time. A sequential caller can never push
+// inFlight above 1; a bounded-concurrency caller pushes it above 1 (up to
+// the bound), regardless of GOMAXPROCS, because the sleep yields the OS
+// thread rather than spinning.
+type concurrencyTrackingFake struct {
+	*forge.Fake
+	mu          sync.Mutex
+	inFlight    int
+	maxInFlight int
+}
+
+func (f *concurrencyTrackingFake) DepsOf(num string) ([]forge.Dependency, error) {
+	f.mu.Lock()
+	f.inFlight++
+	if f.inFlight > f.maxInFlight {
+		f.maxInFlight = f.inFlight
+	}
+	f.mu.Unlock()
+
+	time.Sleep(20 * time.Millisecond)
+
+	f.mu.Lock()
+	f.inFlight--
+	f.mu.Unlock()
+
+	return f.Fake.DepsOf(num)
+}
+
+// TestNewReadiness_DepsOfCallsOverlap guards issue #1745: NewReadiness must
+// fan its per-issue DepsOf calls out with concurrency, not one at a time —
+// a sequential loop can never observe more than one in-flight call.
+func TestNewReadiness_DepsOfCallsOverlap(t *testing.T) {
+	fc := &concurrencyTrackingFake{Fake: forge.NewFake()}
+	fc.SetIssue(forge.Issue{Number: "1", Body: ""})
+	fc.SetIssue(forge.Issue{Number: "2", Body: ""})
+	fc.SetIssue(forge.Issue{Number: "3", Body: ""})
+
+	issues := []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}
+	if _, err := NewReadiness(fc, issues); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if fc.maxInFlight <= 1 {
+		t.Errorf("maxInFlight = %d, want > 1 (DepsOf calls must overlap)", fc.maxInFlight)
+	}
+}
+
+// TestNewReadiness_DepsOfConcurrencyBounded guards issue #1745's other half:
+// the fan-out must not spawn one goroutine per issue unbounded — with more
+// issues than depsOfConcurrency, maxInFlight must never exceed the cap.
+func TestNewReadiness_DepsOfConcurrencyBounded(t *testing.T) {
+	fc := &concurrencyTrackingFake{Fake: forge.NewFake()}
+	issues := make([]Issue, depsOfConcurrency*3)
+	for i := range issues {
+		num := fmt.Sprintf("%d", i+1)
+		fc.SetIssue(forge.Issue{Number: num, Body: ""})
+		issues[i] = Issue{Number: num}
+	}
+
+	if _, err := NewReadiness(fc, issues); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if fc.maxInFlight > depsOfConcurrency {
+		t.Errorf("maxInFlight = %d, want <= %d (bounded concurrency)", fc.maxInFlight, depsOfConcurrency)
+	}
+}
 
 // --- NewReadiness tests ---
 

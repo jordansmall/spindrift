@@ -2,9 +2,16 @@ package waves
 
 import (
 	"fmt"
+	"sync"
 
 	"spindrift.dev/launcher/internal/forge"
 )
+
+// depsOfConcurrency bounds how many DepsOf subprocess calls NewReadiness
+// ever has in flight at once (#1745) — a small fixed pool, not
+// cfg.MaxParallel, since this fans out per-issue lookups within a single
+// wave rather than whole-dispatch parallelism.
+const depsOfConcurrency = 8
 
 // Sources maps an issue number to the source (native relationship vs
 // body-text parsing) DepsOf resolved each of its blockers from, mirroring
@@ -50,11 +57,31 @@ type Readiness struct {
 // alone, since both simply omit the issue's key. Callers pass the result's
 // Edges as Input.Edges and Sources as Input.Sources to NewPlan.
 func NewReadiness(it forge.IssueTracker, issues []Issue) (Readiness, error) {
+	type depsResult struct {
+		deps []forge.Dependency
+		err  error
+	}
+	results := make([]depsResult, len(issues))
+
+	limiter := NewLimiter(depsOfConcurrency)
+	var wg sync.WaitGroup
+	for i, iss := range issues {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			limiter.Acquire()
+			defer limiter.Release()
+			deps, depsErr := it.DepsOf(iss.Number)
+			results[i] = depsResult{deps: deps, err: depsErr}
+		}()
+	}
+	wg.Wait()
+
 	edges := map[string][]string{}
 	sources := Sources{}
 	failed := map[string]bool{}
-	for _, iss := range issues {
-		deps, depsErr := it.DepsOf(iss.Number)
+	for i, iss := range issues {
+		deps, depsErr := results[i].deps, results[i].err
 		if depsErr != nil {
 			// Non-fatal: skip issues whose data cannot be fetched.
 			failed[iss.Number] = true
@@ -65,8 +92,8 @@ func NewReadiness(it forge.IssueTracker, issues []Issue) (Readiness, error) {
 		}
 		ids := make([]string, len(deps))
 		srcs := make(map[string]forge.DepSource, len(deps))
-		for i, d := range deps {
-			ids[i] = d.ID
+		for j, d := range deps {
+			ids[j] = d.ID
 			srcs[d.ID] = d.Source
 		}
 		edges[iss.Number] = ids
