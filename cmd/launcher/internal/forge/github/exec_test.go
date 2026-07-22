@@ -260,6 +260,61 @@ esac`)
 	}
 }
 
+// TestExecClient_ImplementsBlockersLister verifies the github adapter
+// satisfies forge.BlockersLister: GitHub's issue-dependencies API tracks
+// blocked/blocking as a genuine bidirectional native relationship, so the
+// reverse direction is one more native call, not a whole-backlog scan
+// (issue #1744).
+func TestExecClient_ImplementsBlockersLister(t *testing.T) {
+	var _ forge.BlockersLister = NewExecClient("owner/repo", testLabels, "agent/issue-")
+}
+
+// TestExecClient_BlocksOf_ReturnsNativeBlocking verifies BlocksOf queries
+// GitHub's native issue-dependencies "blocking" endpoint and reports every
+// result as DepSourceNative — there is no body-text fallback, since no
+// prose grammar declares a forward "blocks" relationship (issue #1744).
+func TestExecClient_BlocksOf_ReturnsNativeBlocking(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*dependencies/blocking*)
+	printf '42\n43\n'
+	;;
+*)
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	blocks, err := c.BlocksOf("7")
+	if err != nil {
+		t.Fatalf("BlocksOf: %v", err)
+	}
+	want := []forge.Dependency{{ID: "42", Source: forge.DepSourceNative}, {ID: "43", Source: forge.DepSourceNative}}
+	if !reflect.DeepEqual(blocks, want) {
+		t.Fatalf("BlocksOf = %v, want %v", blocks, want)
+	}
+}
+
+// TestExecClient_BlocksOf_PropagatesNativeError verifies BlocksOf surfaces
+// a native lookup failure directly rather than degrading to some fallback
+// — there is none to fall back to.
+func TestExecClient_BlocksOf_PropagatesNativeError(t *testing.T) {
+	prependFakeGH(t, `case "$*" in
+*dependencies/blocking*)
+	printf 'HTTP 404: Not Found\n' >&2
+	exit 1
+	;;
+esac`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	_, err := c.BlocksOf("7")
+	if err == nil {
+		t.Fatal("BlocksOf: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "404") {
+		t.Fatalf("BlocksOf error = %q, want it to mention the gh api failure", err.Error())
+	}
+}
+
 // TestExecClient_BranchExists_ExactMatch verifies BranchExists returns true
 // when the matching-refs endpoint reports the exact ref.
 func TestExecClient_BranchExists_ExactMatch(t *testing.T) {
