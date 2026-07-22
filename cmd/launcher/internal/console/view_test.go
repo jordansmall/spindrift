@@ -3237,6 +3237,83 @@ func TestView_LongBacklog_FitsHeightWithBannerAndFooterPinned(t *testing.T) {
 	}
 }
 
+// TestView_ExactFitBacklog_FitsHeightWithBannerAndFooterPinned verifies a
+// Backlog sized to land exactly on the pre-reservation item budget — total
+// == itemBudget, the one case #1794's own fix left unreserved since its
+// condition (total > itemBudget) only fires once total spills past the
+// budget, not when it just fills it — still never renders more physical
+// lines than m.Height (issue #1825). Split, not TrimRight-then-count:
+// View()'s output always ends in exactly one trailing "\n" (its own
+// documented convention), and that trailing "\n" costs the terminal a
+// physical row of its own — reserving it here converts what would have been
+// an invisible, unreserved exact-fit into a correctly-labeled "… N more
+// below" instead of silently overrunning Height.
+func TestView_ExactFitBacklog_FitsHeightWithBannerAndFooterPinned(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	issues := make([]forge.Issue, 4)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+	out := View(m)
+	if got := len(strings.Split(out, "\n")); got > m.Height {
+		t.Errorf("View() rendered %d physical lines, want <= m.Height (%d): %q", got, m.Height, out)
+	}
+	if !strings.Contains(out, "running 0/0") {
+		t.Errorf("View() = %q, want the top banner status line present", out)
+	}
+	if !strings.Contains(out, "[/] filter") {
+		t.Errorf("View() = %q, want the bottom footer hint line present", out)
+	}
+}
+
+// TestView_VeryShortTerminal_FitsHeightWithBannerPinned verifies a Backlog
+// on a terminal too short to show any item row at all (m.Height <= ~6)
+// still never renders more physical lines than m.Height, and the top
+// banner survives regardless — even at the very bottom of that range,
+// where the header alone (unboxed, with the Section tabs line also
+// collapsed) is all that fits. The bottom footer joins it once Height
+// leaves room for it. Split, not TrimRight-then-count, for the same reason
+// TestView_ExactFitBacklog_FitsHeightWithBannerAndFooterPinned uses it:
+// View()'s own guaranteed trailing "\n" costs the terminal a physical row
+// that trimming would hide (issue #1825).
+func TestView_VeryShortTerminal_FitsHeightWithBannerPinned(t *testing.T) {
+	issues := make([]forge.Issue, 20)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+
+	// wantFooter only turns true at height 6: below that, the header (and,
+	// once there's room, the Section tabs line) already consume the whole
+	// budget, leaving no row for the footer to claim — its absence there
+	// isn't a regression, just this range's own collapse order.
+	for _, tc := range []struct {
+		height     int
+		wantFooter bool
+	}{
+		{height: 2, wantFooter: false},
+		{height: 3, wantFooter: false},
+		{height: 4, wantFooter: false},
+		{height: 5, wantFooter: false},
+		{height: 6, wantFooter: true},
+	} {
+		m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: tc.height})
+		m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+		out := View(m)
+		if got := len(strings.Split(out, "\n")); got > m.Height {
+			t.Errorf("height=%d: View() rendered %d physical lines, want <= m.Height (%d): %q", tc.height, got, m.Height, out)
+		}
+		if !strings.Contains(out, "running 0/0") {
+			t.Errorf("height=%d: View() = %q, want the top banner status line present", tc.height, out)
+		}
+		if got := strings.Contains(out, "[/] filter"); got != tc.wantFooter {
+			t.Errorf("height=%d: View() footer present = %v, want %v: %q", tc.height, got, tc.wantFooter, out)
+		}
+	}
+}
+
 // TestView_ScrolledBacklog_ReachesLastRow verifies scrolling the backlog
 // column all the way (BacklogOffset clamped to its maximum) surfaces the
 // last loaded issue — every row in the (filtered) backlog is reachable by
@@ -3291,8 +3368,10 @@ func TestView_BacklogSection_ShowsPositionIndicator(t *testing.T) {
 	// listFooterLines, ModeList's own pinned footer row (issue #1792), so
 	// that reservation doesn't eat into the item budget this test pins.
 	// columnItemBudget holds one further row back whenever the Section
-	// overflows (issue #1794), one row short of what this height would
-	// otherwise show — the "5"/"10" below, not "6"/"11".
+	// overflows (issue #1794), and viewBody's own budget holds one further
+	// row back for View()'s guaranteed trailing "\n" (issue #1825) — the two
+	// reservations land on the same row here, not two rows short, so this
+	// stays "5"/"10" rather than the pre-#1794 "6"/"11" or a stacked "4"/"9".
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows + listFooterLines})
 	issues := make([]forge.Issue, 50)
 	for i := range issues {
@@ -3325,8 +3404,11 @@ func TestView_WorkSection_ShowsPositionIndicator(t *testing.T) {
 	// listFooterLines, ModeList's own pinned footer row (issue #1792), so
 	// that reservation doesn't eat into the item budget this test pins.
 	// columnItemBudget holds one further row back whenever the Section
-	// overflows (issue #1794), one row short of what this height would
-	// otherwise show — "(1-5 of 50)", not "(1-6 of 50)".
+	// overflows (issue #1794), and viewBody's own budget holds one further
+	// row back for View()'s guaranteed trailing "\n" (issue #1825) — the two
+	// reservations land on the same row here, not two rows short, so this
+	// stays "(1-5 of 50)" rather than the pre-#1794 "(1-6 of 50)" or a
+	// stacked "(1-4 of 50)".
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows + listFooterLines})
 	picks := make([]Pick, 50)
 	for i := range picks {
@@ -3441,9 +3523,11 @@ func TestView_HeaderHeight_AdaptsToAlertLines(t *testing.T) {
 // budget (issue #1035 AC3, extended to the titled border by issue #1798). At
 // Height 2, renderBoxedHeader's own fitness check (its minimum boxed render
 // is 3 rows) falls back to the unboxed header, leaving no room for any
-// backlog row at all — a stronger invariant than "some rows clip": zero
-// rows show, and the header/tabs rows exactly fill Height without spilling
-// past it.
+// backlog row at all. sectionTabsReserved now also collapses the Section
+// tabs line here: showing it (unboxed header's 1 row plus the tabs line's
+// own 1 row) would land right on Height, leaving no row over for View()'s
+// own guaranteed trailing "\n" (issue #1825) — so the header alone renders,
+// under Height rather than exactly filling it.
 func TestView_HeaderHeight_TooShortToBox_StillBudgetsBody(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 2})
 	issues := make([]forge.Issue, 20)
@@ -3462,8 +3546,11 @@ func TestView_HeaderHeight_TooShortToBox_StillBudgetsBody(t *testing.T) {
 	if strings.Contains(out, "issue 0") {
 		t.Errorf("View() = %q, want the backlog fully clipped — no room left after the header/tabs rows", out)
 	}
-	if got := strings.Count(out, "\n"); got != m.Height {
-		t.Errorf("View() rendered %d lines, want exactly Height (%d) — the header/tabs rows must not overrun it", got, m.Height)
+	if strings.Contains(out, "[1] Backlog") {
+		t.Errorf("View() = %q, want the Section tabs line also collapsed — no room left after the header", out)
+	}
+	if got := len(strings.Split(out, "\n")); got > m.Height {
+		t.Errorf("View() rendered %d physical lines, want <= Height (%d)", got, m.Height)
 	}
 }
 
