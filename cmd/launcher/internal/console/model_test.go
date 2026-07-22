@@ -481,7 +481,7 @@ func TestUpdate_SidebarLoadedMsg_FreshOpenWhileFollowing_StartsAtBottom(t *testi
 	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity})
 
-	want := len(m.Sidebar.Lines) - (20 - headerFooterLines) // last page fills the viewport
+	want := len(m.Sidebar.Lines) - (20 - headerFooterLines - trailingNewlineRow) // last page fills the viewport
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (a fresh open while following starts at the bottom)", m.Sidebar.Offset, want)
 	}
@@ -570,7 +570,7 @@ func TestUpdate_SidebarToggleMsg_BackToActivityWhileFollowing_SnapsToBottom(t *t
 	if m.Sidebar.ShowTranscript {
 		t.Fatal("test setup: three toggles must land back on the Activity feed")
 	}
-	want := len(m.Sidebar.Lines) - (20 - headerFooterLines) // last page fills the viewport
+	want := len(m.Sidebar.Lines) - (20 - headerFooterLines - trailingNewlineRow) // last page fills the viewport
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (following, snapped back to the Activity feed's own bottom)", m.Sidebar.Offset, want)
 	}
@@ -655,7 +655,7 @@ func TestUpdate_SidebarScrollMsg_ClampsToViewportHeight(t *testing.T) {
 
 	m = Update(m, SidebarScrollMsg{Delta: 1000})
 
-	want := 100 - (20 - 2) // last page fills the 18-line fullscreen budget
+	want := 100 - (20 - headerFooterLines - trailingNewlineRow) // last page fills the fullscreen budget
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (last page fills viewport)", m.Sidebar.Offset, want)
 	}
@@ -737,7 +737,7 @@ func TestUpdate_SidebarScrollMsg_ZoomedClampsToFullHeightNotBodyBudget(t *testin
 	if budget >= 20 {
 		t.Fatalf("test setup: bodyBudget(m) = %d, want it under Height (20) — the docked/zoomed budgets must actually differ to distinguish them", budget)
 	}
-	want := 100 - (20 - headerFooterLines) // last page fills the full terminal height, not the docked budget
+	want := 100 - (20 - headerFooterLines - trailingNewlineRow) // last page fills the full terminal height, not the docked budget
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (last page fills the zoomed fullscreen's full height, not the docked body budget)", m.Sidebar.Offset, want)
 	}
@@ -904,7 +904,7 @@ func TestUpdate_SidebarActivityMsg_FollowSnapsToBottom(t *testing.T) {
 	}
 	m = Update(m, SidebarActivityMsg{Number: "42", Activity: grown})
 
-	want := len(m.Sidebar.Lines) - (20 - headerFooterLines) // last page fills the viewport (issue #829's convention)
+	want := len(m.Sidebar.Lines) - (20 - headerFooterLines - trailingNewlineRow) // last page fills the viewport (issue #829's convention)
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (the last page, following the growth)", m.Sidebar.Offset, want)
 	}
@@ -1076,7 +1076,7 @@ func TestUpdate_SidebarTranscriptMsg_FollowSnapsToBottom(t *testing.T) {
 
 	m = Update(m, SidebarTranscriptMsg{Number: "42", Rendered: grown.String()})
 
-	want := len(m.Sidebar.Lines) - (20 - headerFooterLines) // last page fills the viewport (issue #829's convention)
+	want := len(m.Sidebar.Lines) - (20 - headerFooterLines - trailingNewlineRow) // last page fills the viewport (issue #829's convention)
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (the last page, following the growth)", m.Sidebar.Offset, want)
 	}
@@ -1659,7 +1659,7 @@ func TestUpdate_SidebarLoadedMsg_ReopenWhileFollowing_SnapsToNewBottom(t *testin
 	}
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: grown})
 
-	want := len(m.Sidebar.Lines) - (20 - headerFooterLines) // last page fills the viewport
+	want := len(m.Sidebar.Lines) - (20 - headerFooterLines - trailingNewlineRow) // last page fills the viewport
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (the new bottom, not the stale %d saved before close)", m.Sidebar.Offset, want, staleOffset)
 	}

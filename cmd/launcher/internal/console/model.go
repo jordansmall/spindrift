@@ -874,12 +874,18 @@ func Update(m Model, msg Msg) Model {
 		// height and the wider headerFooterLines budget (its label still
 		// renders as an interior row) — otherwise the clamp targets the
 		// docked view the operator zoomed away from (review finding on
-		// issue #1502).
+		// issue #1502). The fullscreen branch also reserves trailingNewlineRow
+		// (issue #1841): renderSidebarFullscreen budgets its own content
+		// window the same way, and bodyBudget's "-1" already covers the
+		// docked branch, so only the fullscreen footerLines needs it added
+		// here to keep this clamp in lockstep with what View actually renders.
 		height := m.Height
 		footerLines := headerFooterLines
 		if sidebarFits(m) && !m.SidebarZoom {
 			height = bodyBudget(m)
 			footerLines = sidebarDockedFooterLines
+		} else {
+			footerLines += trailingNewlineRow
 		}
 		vp := Viewport{offset: m.Sidebar.Offset}
 		vp.Scroll(0, len(m.Sidebar.Lines))
