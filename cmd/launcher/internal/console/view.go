@@ -1410,12 +1410,19 @@ func padBaseForOverlay(s string, width, height int) string {
 // exactly its inner width, or the side border runes drift out of column
 // with the rest of the box (issue #1758). An overflowing s is truncated with
 // a trailing ellipsis, mirroring clip, so the cut is visible rather than
-// silent (issue #1779).
+// silent (issue #1779). Measured with ansi.StringWidth rather than
+// runewidth.StringWidth — the same swap padBaseForOverlay's own measurement
+// already made — so a caller may hand it an already-styled row (the detail
+// modal box's own dim-styled footer, issue #1791) without its ANSI escape
+// bytes being miscounted as display columns — the same clip-before-style
+// hazard sectionTabsHint's own comment documents. The truncate branch stays
+// runewidth-based and is only ever safe to reach with plain content clipped
+// to width beforehand, same as every other caller through clip() today.
 func padDisplay(s string, width int) string {
 	if width < 0 {
 		width = 0
 	}
-	w := runewidth.StringWidth(s)
+	w := ansi.StringWidth(s)
 	if w > width {
 		return truncateWithEllipsis(s, width)
 	}
@@ -1500,7 +1507,7 @@ func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) [
 	if len(lines) > contentBudget {
 		lines = lines[:contentBudget]
 	}
-	lines = append(lines, footerHint(ModeDetailModal, "j")+" · "+footerHint(ModeDetailModal, "esc"))
+	lines = append(lines, renderFooterHints(ModeDetailModal, []string{"j", "esc"}, 0, false))
 	for len(lines) < innerHeight {
 		lines = append(lines, "")
 	}
@@ -1573,7 +1580,7 @@ func renderDetailModal(s DetailModalState, height int) string {
 			b.WriteString("\n")
 		}
 	}
-	fmt.Fprintf(&b, "%s · %s\n", footerHint(ModeDetailModal, "j"), footerHint(ModeDetailModal, "esc"))
+	fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeDetailModal, []string{"j", "esc"}, 0, false))
 	return b.String()
 }
 
@@ -1651,9 +1658,40 @@ func renderSidebarFullscreen(s SidebarState, height int) string {
 	if visible != "" && !strings.HasSuffix(visible, "\n") {
 		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, "%s · %s · %s\n",
-		footerHint(ModeSidebar, "t"), footerHint(ModeSidebar, "x"), footerHint(ModeSidebar, "z"))
+	fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeSidebar, []string{"t", "x", "z"}, 0, false))
 	return b.String()
+}
+
+// renderFooterHints renders one mode's pinned keystroke-hint line: each
+// key's Footer text from keymap (issue #1789), joined and dim-styled — the
+// zoomed sidebar's own "·"-separated pinned-bottom-line shape, generalized
+// (and newly dim-styled — none of the four bespoke footers below styled
+// their hint line before) so they share one source instead of each
+// hand-building its own hint string (issue #1791). compact switches to
+// footerHintCompact and the docked sidebar's
+// tighter "·" separator (view.go's renderSidebarDocked, the one footer
+// tight enough to need it); width clips the joined line before styling —
+// never after, or the naive runewidth-based clip() would miscount the
+// styling's own ANSI escape bytes as display columns (the same hazard
+// sectionTabsHint's clip-before-style comment already documents) — and 0
+// or negative leaves it unclipped, matching every fullscreen caller's own
+// unbounded footer today.
+func renderFooterHints(mode Mode, keys []string, width int, compact bool) string {
+	hintFor := footerHint
+	sep := " · "
+	if compact {
+		hintFor = footerHintCompact
+		sep = " ·"
+	}
+	hints := make([]string, len(keys))
+	for i, key := range keys {
+		hints[i] = hintFor(mode, key)
+	}
+	line := strings.Join(hints, sep)
+	if width > 0 {
+		line = clip(line, width, false)
+	}
+	return roleStyle(RoleDim).Render(line)
 }
 
 // renderSidebarDocked renders one Dispatch's live-tail sidebar as a column
@@ -1691,13 +1729,7 @@ func renderSidebarDocked(s SidebarState, width, budget int) string {
 	// joins): four hints plus full " · " separators measure 43 columns,
 	// one over sidebarWidth's 42-column budget, so the space after each
 	// "·" is dropped to fit all four without clipping the last one.
-	docked := strings.Join([]string{
-		footerHintCompact(ModeSidebar, "t"),
-		footerHint(ModeSidebar, "h"),
-		footerHint(ModeSidebar, "x"),
-		footerHint(ModeSidebar, "z"),
-	}, " ·")
-	b.WriteString(clip(docked, width, false))
+	b.WriteString(renderFooterHints(ModeSidebar, []string{"t", "h", "x", "z"}, width, true))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -1724,6 +1756,6 @@ func renderRebuildOutputPane(m Model) string {
 	if visible != "" && !strings.HasSuffix(visible, "\n") {
 		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, "%s\n", footerHint(ModeRebuildOutput, "x"))
+	fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeRebuildOutput, []string{"x"}, 0, false))
 	return b.String()
 }

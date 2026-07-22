@@ -972,6 +972,24 @@ func TestView_RebuildOutputOpen_ScrollOffsetWindowsContent(t *testing.T) {
 	}
 }
 
+// TestView_RebuildOutputOpen_FooterStyledDim verifies the rebuild-output
+// pane's close-key hint renders dim (RoleDim, "\x1b[90m") via the shared
+// footer renderer, the same treatment the other three migrated footers
+// already got (issue #1791).
+func TestView_RebuildOutputOpen_FooterStyledDim(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Height: 24})
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "building derivation...\ndone"}})
+	m = Update(m, RebuildOutputOpenMsg{})
+
+	out := View(m)
+	if !strings.Contains(out, "\x1b[90m[x] close\x1b[0m") {
+		t.Errorf("View() = %q, want the close-key hint dim-styled", out)
+	}
+}
+
 // TestView_DetailModal_FloatsOverList_BannerStillVisible verifies the ticket
 // detail modal renders as a box floating over the still-rendered list rather
 // than a fullscreen takeover: the header banner above the box's top edge
@@ -1015,6 +1033,24 @@ func TestView_DetailModal_TinyTerminal_FallsBackToFullscreen(t *testing.T) {
 				t.Errorf("View() = %q, want the fullscreen renderer's own number/title line", out)
 			}
 		})
+	}
+}
+
+// TestView_DetailModal_FullscreenFallback_FooterStyledDim verifies the
+// tiny-terminal fullscreen fallback's keystroke-hint footer renders dim
+// (RoleDim, "\x1b[90m") via the shared footer renderer, the same treatment
+// the fullscreen sidebar and docked-sidebar footers already got (issue
+// #1791).
+func TestView_DetailModal_FullscreenFallback_FooterStyledDim(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: detailModalBoxMinWidth - 1, Height: 24})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+
+	out := View(m)
+	if !strings.Contains(out, "\x1b[90m[j/k] scroll · [esc] close\x1b[0m") {
+		t.Errorf("View() = %q, want the fullscreen fallback footer dim-styled with its hint text intact", out)
 	}
 }
 
@@ -1165,6 +1201,25 @@ func TestView_DetailModal_NoColor_BorderDegradesToAscii(t *testing.T) {
 	}
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("View() = %q, want no escape sequences at all under NO_COLOR", out)
+	}
+}
+
+// TestView_DetailModal_FloatingBox_FooterStyledDim verifies the floating
+// detail-modal box's own footer line — the primary path View actually
+// renders once detailModalFits (issue #1758), not just the tiny-terminal
+// fullscreen fallback — renders dim (RoleDim, "\x1b[90m") via the shared
+// footer renderer too, so the same modal doesn't show its footer dim on a
+// tiny terminal but plain on a normal one (issue #1791).
+func TestView_DetailModal_FloatingBox_FooterStyledDim(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+
+	out := View(m)
+	if !strings.Contains(out, "\x1b[90m[j/k] scroll · [esc] close") {
+		t.Errorf("View() = %q, want the floating box's footer dim-styled with its hint text intact", out)
 	}
 }
 
@@ -2117,6 +2172,41 @@ func TestView_SidebarFooter_WideTerminal_RendersFullHintsUnclipped(t *testing.T)
 	}
 }
 
+// TestView_SidebarDocked_FooterStyledDim verifies the docked sidebar's
+// keystroke-hint footer renders dim (RoleDim, ANSI slot 8 — "\x1b[90m",
+// confirmed against the panel border's own existing golden fixture) via the
+// shared footer renderer, without disturbing the tight "·" separators and
+// footerHintCompact wording the 42-column docked budget already needs
+// (issue #1791).
+func TestView_SidebarDocked_FooterStyledDim(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	out := View(m)
+	if !strings.Contains(out, "\x1b[90m[t] cycle ·[h] list ·[x] close ·[z] zoom\x1b[0m") {
+		t.Errorf("View() = %q, want the docked footer dim-styled with its compact wording/separators intact", out)
+	}
+}
+
+// TestRenderFooterHints_NarrowWidth_ClipsWithEllipsis verifies
+// renderFooterHints' own width param actually truncates an over-wide hint
+// line — no caller today ever hands it a width narrower than its hints
+// (the docked sidebar's 42-column floor comfortably fits its 40-column
+// compact footer), so this exercises the clip branch directly rather than
+// leaving it uncovered (issue #1791 review).
+func TestRenderFooterHints_NarrowWidth_ClipsWithEllipsis(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	got := renderFooterHints(ModeSidebar, []string{"t", "h", "x", "z"}, 10, true)
+	if want := "\x1b[90m[t] cycle…\x1b[0m"; got != want {
+		t.Errorf("renderFooterHints(...) = %q, want %q — clipped to 10 columns with a trailing ellipsis", got, want)
+	}
+}
+
 // TestView_SidebarLabel_ShowsFollowIndicator verifies the sidebar's label
 // names whether the Activity feed is following the newest line or paused
 // after a scroll-up — the operator's only render-level signal for Follow
@@ -2212,6 +2302,28 @@ func TestView_SidebarFooter_ShowsZoomHint(t *testing.T) {
 	m = Update(m, SidebarZoomToggleMsg{})
 	if !strings.Contains(View(m), "[z] zoom") {
 		t.Errorf("fullscreen View() = %q, want the zoom key hint", View(m))
+	}
+}
+
+// TestView_SidebarFullscreen_FooterStyledDim verifies the fullscreen
+// sidebar's keystroke-hint footer renders dim, the same RoleDim treatment
+// every other hint/border in the module already gets, via the shared
+// footer renderer (issue #1791).
+func TestView_SidebarFullscreen_FooterStyledDim(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	m = Update(m, SidebarZoomToggleMsg{})
+
+	out := View(m)
+	if !strings.Contains(out, "[t] cycle activity/transcript") {
+		t.Errorf("View() = %q, want the fullscreen footer hint text preserved", out)
+	}
+	footer := out[strings.LastIndex(out, "[t] cycle"):]
+	if !strings.Contains(footer, "\x1b[") {
+		t.Errorf("View() footer = %q, want it styled with an ANSI escape sequence", footer)
 	}
 }
 
