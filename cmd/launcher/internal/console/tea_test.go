@@ -2896,6 +2896,158 @@ func TestTea_HandleKey_DetailModal_gLeader_NonGKey_CancelsAndStillScrolls(t *tes
 	}
 }
 
+// TestTea_DetailModalKey_PicksDisplayedIssueAndClosesModal verifies "p",
+// pressed while the ticket detail modal is open, promotes the modal's own
+// displayed issue through the same Untriaged->Dispatchable pick/launch path
+// as the Backlog list's "p" (issue #785), then closes the modal — issue
+// #1835.
+func TestTea_DetailModalKey_PicksDisplayedIssueAndClosesModal(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Body: "the full ticket body", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "the full ticket body")
+
+	sendKey(tm, "p")
+	// "settled 1" (the header's status line, always visible) proves the pick
+	// landed and its fake Dispatch finished — same race guard
+	// TestTea_PickKey_PromotesAndQueuesHighlighted's own comment explains.
+	waitForOutput(t, tm, "settled 1")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.DetailModal != nil {
+		t.Errorf("DetailModal = %+v after a successful pick, want nil (modal closed)", fm.m.DetailModal)
+	}
+}
+
+// TestTea_HandleDetailModalKey_PickAlreadyActive_NoOpAndModalStaysOpen
+// verifies "p", pressed on a ticket detail modal whose displayed issue
+// already has an active (queued/held/claiming/running) pick, neither
+// appends a second row nor closes the modal — the "no longer dispatchable"
+// degrade-safely AC (issue #1835), mirroring
+// TestTea_PickKey_AlreadyPicked_NoDuplicateRow's Backlog-list coverage of
+// the same alreadyActive gate.
+func TestTea_HandleDetailModalKey_PickAlreadyActive_NoOpAndModalStaysOpen(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m.Picks = []Pick{{Number: "42", Title: "fix the thing", State: PickQueued}}
+	tm := teaModel{m: m, tracker: f}
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+
+	if tm.m.DetailModal == nil {
+		t.Error("DetailModal = nil after picking an already-active issue, want the modal to stay open")
+	}
+	count := 0
+	for _, p := range tm.m.Picks {
+		if p.Number == "42" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("Picks = %+v, want exactly one row for #42, got %d", tm.m.Picks, count)
+	}
+}
+
+// TestTea_HandleDetailModalKey_PickTargetsModalIssueDespiteBacklogReorder
+// verifies "p" picks the ticket detail modal's own displayed issue even
+// when a background Backlog refresh has reordered rows underneath the open
+// modal and left Cursor pointing at a different issue's new row — the pick
+// must key on DetailModal.Number, never the cursor position (issue #1835).
+func TestTea_HandleDetailModalKey_PickTargetsModalIssueDespiteBacklogReorder(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "7", Title: "unrelated issue", State: forge.IssueOpen})
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "42", Title: "fix the thing", State: forge.IssueOpen},
+		{Number: "7", Title: "unrelated issue", State: forge.IssueOpen},
+	}})
+	// Cursor sits on row 0 (#42) when the modal opens.
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	// A background refresh lands while the modal is still open, reordering
+	// row 0 to #7 — Cursor is untouched by IssuesLoadedMsg, so it now points
+	// at #7's row instead of the modal's own #42.
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "7", Title: "unrelated issue", State: forge.IssueOpen},
+		{Number: "42", Title: "fix the thing", State: forge.IssueOpen},
+	}})
+	tm := teaModel{m: m, tracker: f}
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+
+	if len(tm.m.Picks) != 1 || tm.m.Picks[0].Number != "42" {
+		t.Errorf("Picks = %+v, want exactly one row for #42 (the modal's own issue), not the reordered cursor row #7", tm.m.Picks)
+	}
+}
+
+// TestTea_HandleDetailModalKey_PickNoLongerDispatchable_DissolvesAndStaysOpen
+// verifies "p" on a modal whose displayed issue has gone InProgress since
+// the modal opened (claimed elsewhere) lands a PickDissolvedMsg rather than
+// mis-picking, and leaves the modal open — the tracker-side half of the
+// "no longer dispatchable" degrade-safely AC (issue #1835), mirroring
+// TestPickIssue_AlreadyInProgress_ReturnsDissolvedMsg_NoTransition's
+// coverage of PickIssue's own rejection.
+func TestTea_HandleDetailModalKey_PickNoLongerDispatchable_DissolvesAndStaysOpen(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	tm := teaModel{m: m, tracker: f}
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+
+	if tm.m.DetailModal == nil {
+		t.Error("DetailModal = nil after a rejected pick, want the modal to stay open")
+	}
+	if len(tm.m.Picks) != 1 || tm.m.Picks[0].State != PickDissolved {
+		t.Errorf("Picks = %+v, want one PickDissolved row for #42", tm.m.Picks)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none — an InProgress issue must never be relabeled", f.TransitionStateCalls)
+	}
+}
+
+// TestTea_HandleDetailModalKey_PickViaLauncher_DissolveLeavesModalOpen
+// mirrors TestTea_HandleDetailModalKey_PickNoLongerDispatchable_
+// DissolvesAndStaysOpen but through the launcher-backed landPick branch
+// (t.launch != nil) rather than the nil-launcher PickIssue one, closing the
+// production degrade-safe path's coverage gap a review of issue #1835
+// flagged — a raced/failed TransitionState landing a PickDissolvedMsg via
+// Launcher.Pick must leave the modal open exactly like the nil-launcher
+// case does.
+func TestTea_HandleDetailModalKey_PickViaLauncher_DissolveLeavesModalOpen(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	f.TransitionStateErr = errBoom
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	tm := teaModel{m: m, tracker: f, launch: launch}
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+
+	if tm.m.DetailModal == nil {
+		t.Error("DetailModal = nil after a launcher-routed dissolved pick, want the modal to stay open")
+	}
+	if len(tm.m.Picks) != 1 || tm.m.Picks[0].State != PickDissolved {
+		t.Errorf("Picks = %+v, want one PickDissolved row for #42", tm.m.Picks)
+	}
+}
+
 // TestTea_DetailModal_ResolvesOnlyOwnBlockersNotWholeBacklog verifies
 // opening a ticket detail modal costs exactly the DepsOf call needed for
 // that one ticket's own Blocked-by edge — not a DepsOf call per backlog
