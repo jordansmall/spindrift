@@ -218,6 +218,26 @@ ticket (issue #1730) — the operator still publishes the single team PR by
 hand. Distinct from a seam's per-issue agent branch, which merges *into* it.
 _Avoid_: feature branch, epic branch, accumulation branch.
 
+**Landing**:
+The sealed `forge.Landing` value (`cmd/launcher/internal/forge`, issue
+#1809) a stored landing string parses into, via one `ParseLanding` function,
+at the two seams that consume it: settle's post-merge upgrade and
+Reconcile's verification. Three variants: `PRURL` (`github`'s landing
+grammar), `BranchRef` (a raw pre-merge branch name — `local`'s landing
+string before a merge lands, and `git`'s only shape), and
+`IntegrationRef` (`local`'s post-merge `<Integration branch>@<sha>`, ADR
+0029/0033). Storage (issue frontmatter, the outcome line) and every
+remote-tracker interface keep the plain string unchanged; only the two
+consuming seams match on the typed variant instead of each re-deriving the
+three-grammars-in-one-string ambiguity itself. Finding a `BranchRef` already
+an ancestor of its Integration branch means the merge landed but the
+post-merge upgrade never ran — Reconcile repairs it in place (upgrades the
+recorded landing to `IntegrationRef`, closes the seam) instead of leaving it
+stuck open silently forever; not yet an ancestor prints a loud stuck verdict
+naming the branch.
+_Avoid_: landing ref, landing string (fine for the untyped stored form;
+ambiguous once the typed value is in scope).
+
 **localloop**:
 The `cmd/launcher/internal/localloop` package: CODE_FORGE=local's per-issue
 Code Forge construction, outbox resolution, and parent resolution, plus the
@@ -483,12 +503,18 @@ agent branch when no landing was recorded (a box that died before its outcome
 line), flags one whose PR was closed unmerged, and — only behind a composite
 death signal (no PR/branch, a stale Box log, and an absent container when the
 runtime is reachable) — resets an orphaned `InProgress` to `Dispatchable`,
-supplying the liveness signal #600 required before any such reset. Auto-invoked
-at the end of a `dispatch` run and available standalone (`spindrift reconcile`)
-for the between-runs cases: a runner that died, or a PR in approval limbo. Does
-not itself merge — landing stays with `dispatch` and the explicit `recover`
-gesture. _Avoid_: sync, sweep, cleanup, recover (the operator's explicit
-per-issue adopt-and-merge gesture, a different act).
+supplying the liveness signal #600 required before any such reset. Against a
+push-only `local` Code Forge it parses the recorded string into a
+[[Landing]] instead: an `IntegrationRef` closes on a confirmed merge exactly
+like a PR; a `BranchRef` still an ancestor of its own Integration branch is
+repaired in place (landing upgraded, seam closed) rather than left stuck
+open, and one that isn't prints a stuck verdict naming the branch (issue
+#1809). Auto-invoked at the end of a `dispatch` run and available standalone
+(`spindrift reconcile`) for the between-runs cases: a runner that died, or a
+PR in approval limbo. Does not itself merge — landing stays with `dispatch`
+and the explicit `recover` gesture. _Avoid_: sync, sweep, cleanup, recover
+(the operator's explicit per-issue adopt-and-merge gesture, a different
+act).
 
 **Transcript**:
 The Driver-rendered record of a Dispatch's work across its pass logs — the full
