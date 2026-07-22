@@ -291,6 +291,76 @@ func TestLauncher_TryLaunch_ResearchPick_UsesResearchFactoryAndSettle(t *testing
 	}
 }
 
+// TestLauncher_Pick_ResearchKind_UntriagedIssue_LaunchesAndSettles drives a
+// KindResearch pick through the actual operator gesture — Launcher.Pick,
+// then tryLaunch, exactly as pickHighlighted (tea.go) chains them — starting
+// from an untriaged Backlog issue with no labels at all, rather than
+// pre-seeding queue state or the agent-research label directly (#1742). This
+// is the exact shape that used to false-fire: research's DispatchLabels
+// leaves Complete unmapped, so the pre-fix double-box guard queried
+// ListIssues(Complete), got every open issue back, and dissolved the pick
+// with a bogus "already complete" reason before it ever reached
+// transitionToDispatchable, let alone tryLaunch/drain. Confirms the full
+// chain — queue, not dissolve; promote onto agent-research; claim; run;
+// settle through ResearchSettle, never the work Settler — actually reaches
+// drain rather than just PickIssue's promotion step in isolation.
+func TestLauncher_Pick_ResearchKind_UntriagedIssue_LaunchesAndSettles(t *testing.T) {
+	workTracker := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	researchTracker := forge.NewFake(forge.ResearchDispatchLabels())
+	researchTracker.SetIssue(forge.Issue{Number: "42", Title: "research this"}) // untriaged: no labels
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	researchFactory, err := dispatch.NewFactory(dispatch.Config{Kind: "research"}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(researchFactory.Cleanup)
+
+	workSettle := settle.NewFake()
+	researchSettle := settle.NewFake()
+
+	launch := &Launcher{
+		CodeForge:       workTracker,
+		Settle:          workSettle,
+		ResearchTracker: researchTracker,
+		ResearchFactory: researchFactory,
+		ResearchSettle:  researchSettle,
+		queue:           NewQueue(),
+	}
+
+	msg, _ := launch.Pick(workTracker, "42", "research this", KindResearch)
+	if _, ok := msg.(PickQueuedMsg); !ok {
+		t.Fatalf("Pick() = %#v, want PickQueuedMsg", msg)
+	}
+	launch.tryLaunch(workTracker, dir)
+	launch.Wait()
+
+	iss, err := researchTracker.Issue("42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasLabel(iss, "agent-research-in-progress") {
+		t.Errorf("researchTracker issue #42 labels = %v, want claimed onto agent-research-in-progress", iss.Labels)
+	}
+	if len(workSettle.SettleCalls) != 0 {
+		t.Errorf("workSettle.SettleCalls = %+v, want none — a research pick must never settle through the work Settler", workSettle.SettleCalls)
+	}
+	if len(researchSettle.SettleCalls) != 1 || researchSettle.SettleCalls[0].Num != "42" {
+		t.Errorf("researchSettle.SettleCalls = %+v, want one call for #42", researchSettle.SettleCalls)
+	}
+	if got := launch.queue.Snapshot()[0].State; got != PickSettled {
+		t.Fatalf("pick state = %v, want settled", got)
+	}
+}
+
 // TestLauncher_Stacks_ResearchFailedLabelIsResearchFamily verifies the
 // research stack's failedLabel is the fixed agent-research-failed label, not
 // l.FailedLabel (the work family's own failed label) — a research pick's
