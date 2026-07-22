@@ -70,6 +70,14 @@ type teaModel struct {
 	// now-superseded generation and dropped instead of re-arming a second,
 	// permanently duplicate tick chain.
 	sidebarTickGen uint64
+	// toastGen increments every time Update arms a fresh toastDismissTick —
+	// on every pick-transition toast a QueueSnapshotMsg sets (issue #1830,
+	// Model.Toast). Mirrors sidebarTickGen's own doc comment: a toast a newer
+	// one already replaced leaves its own dismiss timer still in flight (a
+	// tea.Tick can't be cancelled once scheduled), so the fired
+	// toastDismissTickMsg carries the generation that armed it and Update
+	// drops it as stale instead of clearing the newer toast.
+	toastGen uint64
 	// watcher fires a logWriteMsg on a write to any path in watchedPaths — a
 	// running pick's current log file — so Update's post-switch
 	// refreshPickDecorations call runs the incremental heartbeat refresh
@@ -139,6 +147,23 @@ type pollTickMsg struct{}
 type refreshSignalMsg struct {
 	picks    []Pick
 	hasPicks bool
+}
+
+// toastDismissDelay is how long a pick-transition toast (Model.Toast, issue
+// #1830) stays visible before it auto-dismisses — long enough to read a
+// short "#NN started: title" line, short enough that it never lingers into
+// the next transition's own toast.
+const toastDismissDelay = 4 * time.Second
+
+// toastDismissTickMsg is the tea layer's one-shot auto-dismiss signal for a
+// pick-transition toast. gen pins it to the teaModel.toastGen that armed it —
+// see toastGen's own doc comment for why a stale straggler must be dropped
+// rather than clearing a newer toast.
+type toastDismissTickMsg struct{ gen uint64 }
+
+// toastDismissTick arms one toastDismissTickMsg carrying gen.
+func toastDismissTick(gen uint64) tea.Cmd {
+	return tea.Tick(toastDismissDelay, func(time.Time) tea.Msg { return toastDismissTickMsg{gen: gen} })
 }
 
 // sidebarActivityTickInterval is how often the docked sidebar's own live-tail
@@ -265,6 +290,7 @@ func initialQueueSyncCmd(launch *Launcher) tea.Cmd {
 // ticks, refresh signals, pick-chord timeouts).
 func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	prevToast := t.m.Toast
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		t, cmd = t.handleKey(msg)
@@ -318,6 +344,14 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// flag so the generic re-arm check below issues a fresh one instead
 		// of reading it as "still in flight" and skipping re-arm entirely.
 		t.sidebarTickArmed = false
+	case toastDismissTickMsg:
+		if msg.gen != t.toastGen {
+			// A stale straggler from a toast a newer one already replaced
+			// (toastGen's own doc comment) — dropped rather than clearing
+			// whatever toast is current now.
+			return t, nil
+		}
+		t.m = Update(t.m, ToastDismissedMsg{})
 	}
 
 	t.m = refreshPickDecorations(t.m, t.launch, t.pwd, t.heartbeats, t.sidebarActivity, t.sidebarTranscript)
@@ -331,6 +365,14 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	} else {
 		t.sidebarTickArmed = false
+	}
+	if t.m.Toast != "" && t.m.Toast != prevToast {
+		// A fresh or replaced toast — arm its own dismiss timer under a new
+		// generation so a still-in-flight timer from whatever toast this one
+		// replaced is recognized as stale and dropped (toastGen's own doc
+		// comment) instead of clearing this one early.
+		t.toastGen++
+		cmd = tea.Batch(cmd, toastDismissTick(t.toastGen))
 	}
 	if t.m.Quitting {
 		select {
@@ -416,6 +458,9 @@ func (t teaModel) dispatchKey(mode Mode, msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	}
 	if mode == ModeList && t.m.QueueEnterNotice != "" {
 		t.m = Update(t.m, QueueEnterNoticeClearedMsg{})
+	}
+	if mode == ModeList && t.m.Toast != "" {
+		t.m = Update(t.m, ToastDismissedMsg{})
 	}
 	if mode == ModePick {
 		// handlePickChordKey resolved the chord before ever looking at which

@@ -383,6 +383,14 @@ type QueueEnterNoticeClearedMsg struct{}
 
 func (QueueEnterNoticeClearedMsg) isConsoleMsg() {}
 
+// ToastDismissedMsg is the tea layer's signal that a pick-transition toast
+// (Model.Toast, issue #1830) should clear — fired by the operator's next
+// keypress or the generation-pinned auto-dismiss timer, whichever comes
+// first.
+type ToastDismissedMsg struct{}
+
+func (ToastDismissedMsg) isConsoleMsg() {}
+
 // CapMsg carries the session's live parallelism cap and current live count
 // (issue #653) — Run's per-render sync, the same pattern QueueSnapshotMsg
 // uses, since both live entirely on the background Launcher rather than

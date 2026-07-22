@@ -111,6 +111,17 @@ type Model struct {
 	// off Mode for the same reason PendingG does: it's a one-shot overlay on
 	// top of ModeList, not a rival claimant to keyboard ownership.
 	QueueEnterNotice string
+	// Toast is a one-shot, human-readable message rendered after a queued
+	// pick transitions to running, settled, failed, or held — "" otherwise
+	// (issue #1830). Set by QueueSnapshotMsg's own handler, which diffs the
+	// incoming snapshot against the outgoing m.Picks (pickTransitionToast,
+	// toast.go) rather than reading a dedicated transition message, since the
+	// snapshot is Update's only signal of a Queue-side state change. Clears
+	// on the operator's next keypress or an auto-dismiss timer, whichever
+	// comes first (ToastDismissedMsg) — the tea layer's generation-pinned
+	// tick (mirroring sidebarActivityTickMsg, tea.go) so a stale timer from a
+	// toast a newer one already replaced can never clear that newer toast.
+	Toast string
 	// Cursor indexes the highlighted row within the active Section's own row
 	// list — Visible() for SectionBacklog, sectionPicks(m, ActiveSection) for
 	// a work Section (ADR 0030) — the tea layer's j/down and up/arrow
@@ -504,6 +515,8 @@ func Update(m Model, msg Msg) Model {
 		m.QueueEnterNotice = "no transcript to show"
 	case QueueEnterNoticeClearedMsg:
 		m.QueueEnterNotice = ""
+	case ToastDismissedMsg:
+		m.Toast = ""
 	case QuitMsg:
 		m.Mode = ModeList
 		m.Quitting = true
@@ -516,6 +529,9 @@ func Update(m Model, msg Msg) Model {
 	case UnpickMsg:
 		m.Picks = removePick(m.Picks, msg.Number)
 	case QueueSnapshotMsg:
+		if toast := pickTransitionToast(m.Picks, msg.Picks); toast != "" {
+			m.Toast = toast
+		}
 		m.Picks = msg.Picks
 	case SidebarLoadedMsg:
 		showTranscript := false
