@@ -207,3 +207,154 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 		t.Errorf("fixture commit %s not reachable from surfaced branch %s", fixtureSHA, parent)
 	}
 }
+
+// TestWire_ComposedLoop_MissingBundleBlocksNotFailed drives the missing-
+// bundle held path through the same composed surface: no bundle ever lands
+// in the outbox (the Agent produced nothing), so settle's relay fails and
+// the seam blocks — agent-complete, not agent-failed (ADR 0033) — reconcile
+// leaves it open, and surface never surfaces its parent (issue #1806 AC4).
+func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	const num = "43"
+	writeLocalIssue(t, issuesDir, num, "seam 43", "", testLabels.InProgress)
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+	parent := lw.ResolveParent(num)
+	cf := lw.CodeForgeForIssue(num)
+	branch := cf.AgentBranch(num)
+
+	// No bundleFixtureCommit call: the outbox stays empty, standing in for
+	// an Agent that produced no code-out.
+
+	cfg := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+	}
+	s := settle.New(cfg, it, cf)
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
+	}
+	s.Settle(dispatch.NewFake(), num, 0, result)
+
+	iss, err := it.Issue(num)
+	if err != nil {
+		t.Fatalf("Issue(%s): %v", num, err)
+	}
+	if !containsLabel(iss.Labels, testLabels.Complete) {
+		t.Fatalf("issue %s labels = %v, want %s (blocked stays agent-complete)", num, iss.Labels, testLabels.Complete)
+	}
+	if containsLabel(iss.Labels, testLabels.Failed) {
+		t.Fatalf("issue %s labels = %v, must NOT carry %s after a blocked relay", num, iss.Labels, testLabels.Failed)
+	}
+
+	res, err := reconcile.Run(it, cf, nil)
+	if err != nil {
+		t.Fatalf("reconcile.Run: %v", err)
+	}
+	if len(res.Closed) != 0 {
+		t.Fatalf("reconcile.Run closed = %v, want none (landing never verified)", res.Closed)
+	}
+
+	if err := lw.Surface(operatorDir, io.Discard); err != nil {
+		t.Fatalf("Surface: %v", err)
+	}
+	if err := exec.Command("git", "-C", operatorDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent).Run(); err == nil {
+		t.Errorf("refs/heads/%s must not exist — parent's only seam never landed", parent)
+	}
+}
+
+// TestWire_ComposedLoop_OneOpenSiblingNotSurfaced drives the one-open-
+// sibling held path: a broad ticket's first seam lands and closes, but its
+// sibling stays open — surface must not publish the parent's Integration
+// branch into the operator's checkout until every seam is closed, even
+// though that branch already exists in the Accumulation repo (issue #1806
+// AC4).
+func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	const parent = "1700"
+	const landedNum = "44"
+	const openNum = "45"
+	writeLocalIssue(t, issuesDir, landedNum, "seam 44", parent, testLabels.InProgress)
+	writeLocalIssue(t, issuesDir, openNum, "seam 45", parent, testLabels.InProgress)
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+	if got := lw.ResolveParent(landedNum); got != parent {
+		t.Fatalf("ResolveParent(%s) = %q, want %q", landedNum, got, parent)
+	}
+
+	cf := lw.CodeForgeForIssue(landedNum)
+	branch := cf.AgentBranch(landedNum)
+	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, landedNum, lw.OutboxDir(landedNum))
+
+	cfg := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+	}
+	s := settle.New(cfg, it, cf)
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: landedNum, Landing: branch, Status: "ready"},
+	}
+	s.Settle(dispatch.NewFake(), landedNum, 0, result)
+
+	res, err := reconcile.Run(it, cf, nil)
+	if err != nil {
+		t.Fatalf("reconcile.Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != landedNum {
+		t.Fatalf("reconcile.Run closed = %v, want [%s]", res.Closed, landedNum)
+	}
+
+	// Sanity: the parent's Integration branch really did land in the
+	// Accumulation repo, so the assertion below tests the sibling-open
+	// gate specifically, not a "never landed" false negative.
+	if err := exec.Command("git", "-C", accumDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+local.IntegrationBranch(parent)).Run(); err != nil {
+		t.Fatalf("Integration branch %s missing from Accumulation repo after landedNum settled", local.IntegrationBranch(parent))
+	}
+
+	if err := lw.Surface(operatorDir, io.Discard); err != nil {
+		t.Fatalf("Surface: %v", err)
+	}
+	if err := exec.Command("git", "-C", operatorDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent).Run(); err == nil {
+		t.Errorf("refs/heads/%s must not exist — sibling %s is still open", parent, openNum)
+	}
+}
