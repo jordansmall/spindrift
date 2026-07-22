@@ -245,6 +245,31 @@ func TestProbe_NotAGitRepo(t *testing.T) {
 	}
 }
 
+// TestProbe_MissingRemoteRefNotApplicable verifies that a base branch which
+// simply doesn't exist on origin — git's own "couldn't find remote ref"
+// diagnostic — reports not-applicable rather than fail-closed: this repo's
+// origin has no such branch, so freshness cannot be checked here, and
+// continuous dispatch must not treat it as rebuild-needed (#1753).
+func TestProbe_MissingRemoteRefNotApplicable(t *testing.T) {
+	pwd := newCloneWithOrigin(t, "main")
+	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+
+	res := Probe("podman", pwd, "release", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+
+	if res.Applicable {
+		t.Errorf("Applicable = true, want false when the base branch isn't on origin")
+	}
+	if !strings.Contains(res.Message, "release") {
+		t.Errorf("Message %q does not name the missing base branch", res.Message)
+	}
+	if res.Rev != "" {
+		t.Errorf("Rev = %q, want empty when Applicable is false", res.Rev)
+	}
+	if len(eval.Calls) != 0 {
+		t.Errorf("Eval called %d times, want 0 when the base branch is missing", len(eval.Calls))
+	}
+}
+
 // TestProbe_FetchFailure_MessageIncludesGitStderr verifies that the loud
 // fetch-failure message surfaces git's own diagnostic (its stderr), not just
 // the bare exit status, so an operator reading `preview` output can see why.
