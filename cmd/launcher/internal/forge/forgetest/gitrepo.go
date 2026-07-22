@@ -30,6 +30,11 @@ func NewGitRepoFixture(t *testing.T, base string) *GitRepoFixture {
 
 	g := &GitRepoFixture{t: t, Bare: bare, base: base}
 	g.run("", "init", "--bare", bare)
+	// Disable auto-gc: git forks a detached `git gc --auto` after a push
+	// crosses the loose-object threshold, and that background process can
+	// still be repacking objects.git when t.TempDir()'s cleanup runs
+	// RemoveAll on the fixture, failing with "directory not empty".
+	g.run(bare, "config", "gc.auto", "0")
 	g.run("", "clone", bare, work)
 	g.run(work, "checkout", "-B", base)
 	g.writeFile(filepath.Join(work, "base.txt"), "base\n")
