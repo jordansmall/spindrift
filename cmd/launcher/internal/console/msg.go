@@ -192,7 +192,7 @@ func (OrphanAdoptedMsg) isConsoleMsg() {}
 // showable, since the sidebar's default view never depends on the
 // Transcript's own success.
 type SidebarLoadedMsg struct {
-	Number        string
+	Number, Title string
 	Activity      []ActivityLine
 	Rendered, Raw string
 	Err           error

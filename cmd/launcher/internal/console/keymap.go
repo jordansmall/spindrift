@@ -173,13 +173,13 @@ var keymap = []Binding{
 					return t, nil
 				}
 				if t.m.IsOrphan(iss.Number) {
-					return t, openSidebarCmd(t.launch, t.pwd, iss.Number, true)
+					return t, openSidebarCmd(t.launch, t.pwd, iss.Number, iss.Title, true)
 				}
 				return t.openDetailModal(iss)
 			}
 			if p, ok := t.highlightedPick(); ok {
 				if hasTranscript(p.State) {
-					return t, openSidebarCmd(t.launch, t.pwd, p.Number, false)
+					return t, openSidebarCmd(t.launch, t.pwd, p.Number, p.Title, false)
 				}
 				t.m = Update(t.m, QueueEnterNoticedMsg{})
 			}

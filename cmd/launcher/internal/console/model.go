@@ -370,7 +370,7 @@ type TerminateConfirmState struct {
 // Activity/Transcript and rendered/raw toggles both need no further I/O
 // (#1501, the sidebar's analogue of the retired DrillInState).
 type SidebarState struct {
-	Number string
+	Number, Title string
 	// Activity is the condensed feed ActivityFeed derived from the
 	// Dispatch's most-recent pass log — the sidebar's default view.
 	Activity []ActivityLine
@@ -528,6 +528,7 @@ func Update(m Model, msg Msg) Model {
 		}
 		m.Sidebar = &SidebarState{
 			Number:             msg.Number,
+			Title:              msg.Title,
 			Activity:           msg.Activity,
 			TranscriptRendered: msg.Rendered,
 			TranscriptRaw:      msg.Raw,
@@ -847,28 +848,30 @@ func Update(m Model, msg Msg) Model {
 		// sidebarDockedFooterLines from bodyBudget(m), same as this clamp
 		// must, or the "last page fills the viewport" cap (issue #829)
 		// target a taller page than the docked render actually has room to
-		// show (#1501 review finding). SidebarZoom forces
-		// renderSidebarFullscreen regardless of sidebarFits (View's own
-		// decision, mirrored here), so it must also use the whole terminal
-		// height and the wider headerFooterLines budget (its label still
-		// renders as an interior row) — otherwise the clamp targets the
-		// docked view the operator zoomed away from (review finding on
-		// issue #1502). The fullscreen branch also reserves trailingNewlineRow
-		// (issue #1841): renderSidebarFullscreen budgets its own content
-		// window the same way, and bodyBudget's "-1" already covers the
-		// docked branch, so only the fullscreen footerLines needs it added
-		// here to keep this clamp in lockstep with what View actually renders.
-		height := m.Height
-		footerLines := headerFooterLines
-		if sidebarFits(m) && !m.SidebarZoom {
-			height = bodyBudget(m)
-			footerLines = sidebarDockedFooterLines
-		} else {
-			footerLines += trailingNewlineRow
+		// show (#1501 review finding). Off the docked path, View picks
+		// between two non-docked renders (its own sidebarModal +
+		// sidebarModalFits decision, mirrored here): sidebarModalFits routes
+		// to the floating ~80% log modal, whose own content window is
+		// sidebarModalScrollBudget — the log-modal analogue of
+		// detailModalScrollBudget below (issue #1845) — while a terminal too
+		// small for even that floating box falls back to
+		// renderSidebarFullscreen's whole-terminal
+		// headerFooterLines+trailingNewlineRow budget, same as before this
+		// modal existed (issue #1841). Getting this clamp out of sync with
+		// whichever branch View actually renders reintroduces the "last
+		// page fills the viewport" bug for whichever branch it drifts from.
+		var height int
+		switch {
+		case sidebarFits(m) && !m.SidebarZoom:
+			height = bodyBudget(m) - sidebarDockedFooterLines
+		case sidebarModalFits(m):
+			height = sidebarModalScrollBudget(m)
+		default:
+			height = m.Height - headerFooterLines - trailingNewlineRow
 		}
 		vp := Viewport{offset: m.Sidebar.Offset}
 		vp.Scroll(0, len(m.Sidebar.Lines))
-		vp.SetHeight(height - footerLines)
+		vp.SetHeight(height)
 		m.Sidebar.Offset = vp.offset
 	}
 

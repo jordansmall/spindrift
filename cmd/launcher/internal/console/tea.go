@@ -613,18 +613,18 @@ func hasTranscript(state PickState) bool {
 // the operator opened deliberately, not the split-second
 // claimed-but-not-yet-launched race a session-launched Pick's own Enter can
 // hit (issue #1621).
-func openSidebarCmd(launch *Launcher, pwd, number string, orphan bool) tea.Cmd {
+func openSidebarCmd(launch *Launcher, pwd, number, title string, orphan bool) tea.Cmd {
 	return func() tea.Msg {
 		var drv driver.Driver
 		if launch != nil {
 			drv = launch.Driver()
 		}
 		if drv == nil {
-			return SidebarLoadedMsg{Number: number, Err: fmt.Errorf("no Driver available for this session")}
+			return SidebarLoadedMsg{Number: number, Title: title, Err: fmt.Errorf("no Driver available for this session")}
 		}
 		activity := ActivityFeed(drv, pwd, number)
 		if len(dispatch.LogPaths(pwd, number)) == 0 {
-			msg := SidebarLoadedMsg{Number: number, Activity: activity}
+			msg := SidebarLoadedMsg{Number: number, Title: title, Activity: activity}
 			if orphan {
 				msg.Notice = "no local logs for this dispatch"
 			}
@@ -632,7 +632,7 @@ func openSidebarCmd(launch *Launcher, pwd, number string, orphan bool) tea.Cmd {
 		}
 		// DrillIn always returns a DrillInMsg; the type assertion can't fail.
 		dm, _ := DrillIn(drv, pwd, number).(DrillInMsg)
-		return SidebarLoadedMsg{Number: number, Activity: activity, Rendered: dm.Rendered, Raw: dm.Raw, TranscriptErr: dm.Err}
+		return SidebarLoadedMsg{Number: number, Title: title, Activity: activity, Rendered: dm.Rendered, Raw: dm.Raw, TranscriptErr: dm.Err}
 	}
 }
 
