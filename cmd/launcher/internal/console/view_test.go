@@ -761,7 +761,7 @@ func TestView_ModePick_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
 
-	m := NewModel()
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "fix the thing"}}})
 	m = Update(m, PickPendingMsg{})
 
@@ -771,6 +771,123 @@ func TestView_ModePick_FooterStyledDim(t *testing.T) {
 	}
 	if !strings.Contains(out, "\x1b[90m[a] pick all · [r] research\x1b[0m") {
 		t.Errorf("View() = %q, want the pick-chord hint dim-styled with its text intact", out)
+	}
+}
+
+// TestView_ModeFilterEdit_NarrowWidth_FooterFitsWidth verifies the
+// filter-edit prompt's "/filter  " prefix plus its enter/esc hint clips to
+// the terminal's own width — accounting for the prefix's own columns, not
+// just the hint text — rather than wrapping past bodyBudget's single
+// reserved row for it on a narrow terminal (issue #1818).
+func TestView_ModeFilterEdit_NarrowWidth_FooterFitsWidth(t *testing.T) {
+	const width, height = 20, 24
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
+	m = Update(m, FilterEditStartMsg{})
+	m = Update(m, FilterChangedMsg{Filter: "bug"})
+
+	out := View(m)
+	for i, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("View() line %d is %d columns wide, want at most the terminal's %d: %q", i, got, width, line)
+		}
+	}
+	if got := strings.Count(out, "\n") + 1; got > height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — a clipped footer must still fit bodyBudget's single reserved row for it", got, height)
+	}
+}
+
+// TestView_ModePick_NarrowWidth_FooterFitsWidth verifies the pending pick
+// chord's "p_  " prefix plus its a/r hint clips to the terminal's own
+// width — accounting for the prefix's own columns, not just the hint text
+// — rather than wrapping past bodyBudget's single reserved row for it on a
+// narrow terminal (issue #1818).
+func TestView_ModePick_NarrowWidth_FooterFitsWidth(t *testing.T) {
+	// Wide enough that the backlog table's own header/row columns (not this
+	// issue's concern) already fit, narrow enough that the pick-chord
+	// footer's 32-column unclipped hint would still overflow it.
+	const width, height = 30, 24
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "fix the thing"}}})
+	m = Update(m, PickPendingMsg{})
+
+	out := View(m)
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "p_") {
+			continue
+		}
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("View() pick-chord line is %d columns wide, want at most the terminal's %d: %q", got, width, line)
+		}
+	}
+	if got := strings.Count(out, "\n") + 1; got > height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — a clipped footer must still fit bodyBudget's single reserved row for it", got, height)
+	}
+}
+
+// TestView_ModePick_PrefixWiderThanTerminal_FooterStaysBounded verifies the
+// pick-chord footer stays bounded to roughly the terminal's own width even
+// when the "p_  " prefix alone consumes it — renderFooterHints' width<=0
+// branch renders unclipped, so a naive m.Width-prefixWidth subtraction goes
+// negative and falls through to that branch, letting the full, unbounded
+// hint text back in behind a too-narrow prefix (issue #1818 review
+// finding). A floor of 1 keeps clip() itself in play, bounding the
+// overflow to a small constant instead of the whole unclipped hint.
+func TestView_ModePick_PrefixWiderThanTerminal_FooterStaysBounded(t *testing.T) {
+	const width = 4 // exactly len("p_  ")
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "fix the thing"}}})
+	m = Update(m, PickPendingMsg{})
+
+	out := View(m)
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "p_") {
+			continue
+		}
+		if got := lipgloss.Width(line); got > width+1 {
+			t.Errorf("View() pick-chord line is %d columns wide, want at most %d (terminal's %d plus the clip floor's one column): %q", got, width+1, width, line)
+		}
+	}
+}
+
+// TestView_ModeTerminateConfirm_NarrowWidth_FooterFitsWidth verifies the
+// terminate-confirm prompt's "terminate #N? " prefix plus its y hint clips
+// to the terminal's own width — accounting for the prefix's own columns,
+// not just the hint text — rather than wrapping past bodyBudget's single
+// reserved row for it on a narrow terminal (issue #1818).
+func TestView_ModeTerminateConfirm_NarrowWidth_FooterFitsWidth(t *testing.T) {
+	const width, height = 20, 24
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
+	m = Update(m, TerminateRequestedMsg{Number: "42"})
+
+	out := View(m)
+	for i, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("View() line %d is %d columns wide, want at most the terminal's %d: %q", i, got, width, line)
+		}
+	}
+	if got := strings.Count(out, "\n") + 1; got > height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — a clipped footer must still fit bodyBudget's single reserved row for it", got, height)
+	}
+}
+
+// TestView_ModeQuitConfirm_NarrowWidth_FooterFitsWidth verifies the
+// quit-confirm footer hint — long enough to wrap past one row when rendered
+// unclipped — is clipped to the terminal's own width like every other footer
+// in this file, so bodyBudget's single reserved row for it is never
+// exceeded on a narrow terminal (issue #1818).
+func TestView_ModeQuitConfirm_NarrowWidth_FooterFitsWidth(t *testing.T) {
+	const width, height = 20, 24
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
+	m = Update(m, QuitRequestedMsg{})
+
+	out := View(m)
+	for i, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("View() line %d is %d columns wide, want at most the terminal's %d: %q", i, got, width, line)
+		}
+	}
+	if got := strings.Count(out, "\n") + 1; got > height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — a clipped footer must still fit bodyBudget's single reserved row for it", got, height)
 	}
 }
 
@@ -795,7 +912,7 @@ func TestView_ModeFilterEdit_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
 
-	m := NewModel()
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, FilterEditStartMsg{})
 	m = Update(m, FilterChangedMsg{Filter: "bug"})
 
@@ -1185,6 +1302,27 @@ func TestView_DetailModal_FullscreenFallback_FooterStyledDim(t *testing.T) {
 	out := View(m)
 	if !strings.Contains(out, "\x1b[90m[j/k] scroll · [esc] close\x1b[0m") {
 		t.Errorf("View() = %q, want the fullscreen fallback footer dim-styled with its hint text intact", out)
+	}
+}
+
+// TestView_DetailModal_FullscreenFallback_NarrowWidth_FooterFitsWidth
+// verifies the tiny-terminal fullscreen fallback's "[j/k] scroll · [esc]
+// close" footer — long enough to wrap past one row when rendered unclipped
+// — clips to the terminal's own width like every other footer in this file
+// (issue #1818).
+func TestView_DetailModal_FullscreenFallback_NarrowWidth_FooterFitsWidth(t *testing.T) {
+	const width, height = 20, 24
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+
+	out := View(m)
+	for i, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("View() line %d is %d columns wide, want at most the terminal's %d: %q", i, got, width, line)
+		}
+	}
+	if got := strings.Count(out, "\n") + 1; got > height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — a clipped footer must still fit its reserved row", got, height)
 	}
 }
 
@@ -2061,6 +2199,30 @@ func TestView_SidebarOpen_NarrowTerminal_FallsBackFullscreen(t *testing.T) {
 	}
 }
 
+// TestView_SidebarFullscreen_NarrowWidth_FooterFitsWidth verifies the
+// fullscreen sidebar's "[t] cycle activity/transcript · [x] close · [z]
+// ..." footer — long enough to wrap past one row when rendered unclipped —
+// clips to the terminal's own width like every other footer in this file
+// (issue #1818).
+func TestView_SidebarFullscreen_NarrowWidth_FooterFitsWidth(t *testing.T) {
+	// Wide enough that the sidebar's own label line (not this issue's
+	// concern) already fits, narrow enough that the footer's 52-column
+	// unclipped hint would still overflow it.
+	const width, height = 25, 24
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
+
+	out := View(m)
+	for i, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("View() line %d is %d columns wide, want at most the terminal's %d: %q", i, got, width, line)
+		}
+	}
+	if got := strings.Count(out, "\n") + 1; got > height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — a clipped footer must still fit its reserved row", got, height)
+	}
+}
+
 // TestQueueNarrowed_SidebarDocked_ReportsTrue verifies queueNarrowed reports
 // true once the sidebar is open and docked beside the list — the trigger for
 // the compact/wrapped queue-row form (issue #1752).
@@ -2447,7 +2609,7 @@ func TestView_SidebarFullscreen_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
 
-	m := Update(NewModel(), SizeChangedMsg{Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
 	m = Update(m, SidebarZoomToggleMsg{})
 
@@ -3133,7 +3295,7 @@ func TestView_SidebarFullscreen_RespectsTinyBudget(t *testing.T) {
 // where label+footer exactly fills the budget, one above the Height: 1 case
 // that drops the footer (issue #1534, inherited).
 func TestView_SidebarFullscreen_RetainsFooterAtBoundary(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Height: 2})
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 2})
 	lines := make([]string, 100)
 	for i := range lines {
 		lines[i] = fmt.Sprintf("transcript line %d", i)

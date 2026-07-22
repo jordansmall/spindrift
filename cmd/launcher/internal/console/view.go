@@ -215,7 +215,7 @@ func renderTitledTopBorder(width int, title string, titleRole Role, border lipgl
 // (issue #1759).
 func View(m Model) string {
 	if m.DetailModal != nil && !detailModalFits(m) {
-		return renderDetailModal(*m.DetailModal, m.Height)
+		return renderDetailModal(*m.DetailModal, m.Width, m.Height)
 	}
 	base := viewBody(m)
 	if m.DetailModal != nil {
@@ -275,7 +275,7 @@ func renderBoxedHeader(m Model) string {
 // over it instead of a fullscreen replacement (issue #1758).
 func viewBody(m Model) string {
 	if m.Sidebar != nil && (m.SidebarZoom || !sidebarFits(m)) {
-		return renderSidebarFullscreen(*m.Sidebar, m.Height)
+		return renderSidebarFullscreen(*m.Sidebar, m.Width, m.Height)
 	}
 	if m.Mode == ModeRebuildOutput {
 		return renderRebuildOutputPane(m)
@@ -293,21 +293,25 @@ func viewBody(m Model) string {
 		b.WriteString(renderSectionTabs(m))
 	}
 	if m.Mode == ModeFilterEdit {
-		fmt.Fprintf(&b, "/%s  %s\n", m.Filter,
-			renderFooterHints(ModeFilterEdit, []string{"enter", "esc"}, 0, false))
+		prefix := fmt.Sprintf("/%s  ", m.Filter)
+		fmt.Fprintf(&b, "%s%s\n", prefix,
+			renderFooterHints(ModeFilterEdit, []string{"enter", "esc"}, footerHintWidth(m.Width, prefix), false))
 		reservedLines++
 	}
 	if m.Mode == ModeTerminateConfirm {
-		fmt.Fprintf(&b, "terminate #%s? %s\n", m.TerminateConfirm.Number,
-			renderFooterHints(ModeTerminateConfirm, []string{"y"}, 0, false))
+		prefix := fmt.Sprintf("terminate #%s? ", m.TerminateConfirm.Number)
+		fmt.Fprintf(&b, "%s%s\n", prefix,
+			renderFooterHints(ModeTerminateConfirm, []string{"y"}, footerHintWidth(m.Width, prefix), false))
 		reservedLines++
 	}
 	if m.Mode == ModeQuitConfirm {
-		fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeQuitConfirm, []string{"d"}, 0, false))
+		fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeQuitConfirm, []string{"d"}, m.Width, false))
 		reservedLines++
 	}
 	if m.Mode == ModePick && m.HasHighlighted() {
-		fmt.Fprintf(&b, "p_  %s\n", renderFooterHints(ModePick, []string{"a", "r"}, 0, false))
+		const prefix = "p_  "
+		fmt.Fprintf(&b, "%s%s\n", prefix,
+			renderFooterHints(ModePick, []string{"a", "r"}, footerHintWidth(m.Width, prefix), false))
 		reservedLines++
 	}
 	if m.QueueEnterNotice != "" {
@@ -1598,7 +1602,7 @@ func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) [
 	if len(lines) > contentBudget {
 		lines = lines[:contentBudget]
 	}
-	lines = append(lines, renderFooterHints(ModeDetailModal, []string{"j", "esc"}, 0, false))
+	lines = append(lines, renderFooterHints(ModeDetailModal, []string{"j", "esc"}, innerWidth, false))
 	for len(lines) < innerHeight {
 		lines = append(lines, "")
 	}
@@ -1647,7 +1651,7 @@ func renderDetailModalBox(s DetailModalState, width, height int) string {
 // no longer calls this directly (issue #1758 floats renderDetailModalBox
 // over the list instead) — kept callable for the small-terminal fallback
 // ticket that AC promises will reuse it.
-func renderDetailModal(s DetailModalState, height int) string {
+func renderDetailModal(s DetailModalState, width, height int) string {
 	if height <= 0 {
 		return ""
 	}
@@ -1671,7 +1675,7 @@ func renderDetailModal(s DetailModalState, height int) string {
 			b.WriteString("\n")
 		}
 	}
-	fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeDetailModal, []string{"j", "esc"}, 0, false))
+	fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeDetailModal, []string{"j", "esc"}, width, false))
 	return b.String()
 }
 
@@ -1725,7 +1729,7 @@ func formatBlockerRef(r BlockerRef) string {
 // (issue #1534, mirroring #1380's renderTranscriptColumn fix): at height 1,
 // only the label renders and the footer or Err line is dropped, whichever
 // would come next.
-func renderSidebarFullscreen(s SidebarState, height int) string {
+func renderSidebarFullscreen(s SidebarState, width, height int) string {
 	if height <= 0 {
 		return ""
 	}
@@ -1749,8 +1753,29 @@ func renderSidebarFullscreen(s SidebarState, height int) string {
 	if visible != "" && !strings.HasSuffix(visible, "\n") {
 		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeSidebar, []string{"t", "x", "z"}, 0, false))
+	fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeSidebar, []string{"t", "x", "z"}, width, false))
 	return b.String()
+}
+
+// footerHintWidth returns the width left for a fullscreen overlay's hint
+// text once its own literal prefix (e.g. "p_  ", "/filter  ") has eaten
+// into the same line: total minus the prefix's own rendered columns,
+// floored at 1 whenever total is itself a real (positive) width — so a
+// terminal narrow enough that the prefix alone eats the whole line still
+// clips the hint down to (at most) one extra column, rather than the
+// subtraction going negative and falling through renderFooterHints' own
+// width<=0 "leave unclipped" sentinel and letting the full hint back in
+// behind a too-narrow prefix (issue #1818 review finding). total<=0 (an
+// unset, zero-value Model.Width in a test that never sent a
+// SizeChangedMsg) passes the negative result through unchanged, so that
+// sentinel still reaches renderFooterHints and renders the hint unclipped,
+// same as before this file threaded real widths through at all.
+func footerHintWidth(total int, prefix string) int {
+	w := total - lipgloss.Width(prefix)
+	if total > 0 && w < 1 {
+		w = 1
+	}
+	return w
 }
 
 // renderFooterHints renders one mode's pinned keystroke-hint line: each
@@ -1764,9 +1789,13 @@ func renderSidebarFullscreen(s SidebarState, height int) string {
 // tight enough to need it); width clips the joined line before styling —
 // never after, or the naive runewidth-based clip() would miscount the
 // styling's own ANSI escape bytes as display columns (the same hazard
-// sectionTabsHint's clip-before-style comment already documents) — and 0
-// or negative leaves it unclipped, matching every fullscreen caller's own
-// unbounded footer today.
+// sectionTabsHint's clip-before-style comment already documents) — and 0 or
+// negative leaves it unclipped, the sentinel renderRebuildOutputPane's own
+// call still relies on (untouched here — its single short "[x] close" hint
+// isn't the wrap risk this issue targets, and #1827 covers that call site's
+// own budget for a different bug class) now that every other fullscreen
+// caller passes its own real width instead of wrapping unbudgeted past
+// bodyBudget's single reserved row for it (issue #1818).
 func renderFooterHints(mode Mode, keys []string, width int, compact bool) string {
 	hintFor := footerHint
 	sep := " · "
