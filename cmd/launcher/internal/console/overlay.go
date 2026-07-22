@@ -28,26 +28,46 @@ func compositeOverlay(base, box string, x, y int) string {
 }
 
 // compositeLine replaces baseLine's span starting at display column x with
-// boxLine, leaving everything before x untouched. Cuts are made by display
-// column via ansi.Cut, which steps over SGR escapes rather than splitting
-// them and, on a styled line, closes the open style at the cut point and
-// reopens it on the far side — so a styled baseLine can't bleed its color
-// into or past boxLine without this function inserting a reset itself.
+// boxLine, leaving everything outside that span untouched. A negative x
+// clips boxLine's leading -x columns instead of dropping the row outright,
+// mirroring how a boxLine wider than the remaining space clips its trailing
+// columns at the right edge — both edges clip rather than drop the whole
+// row. The two directions don't clip identically at a mid-wide-rune
+// boundary (see below), just symmetrically in the sense that neither one
+// bails out. Cuts are made by display column via ansi.Cut, which steps over
+// SGR escapes rather than splitting them and, on a styled line, closes the
+// open style at the cut point and reopens it on the far side — so a styled
+// baseLine can't bleed its color into or past boxLine without this function
+// inserting a reset itself.
 //
 // A box edge landing mid-wide-rune makes ansi.Cut drop the straddled rune
-// outright rather than split it, which can leave the composited line short
-// of baseWidth's column count and the box up to one column left of the
-// requested x; the trailing pad below restores the width so the row stays
-// aligned with the rest of a fixed-width table (the position drift itself
-// is inherent to not splitting a rune in half, not a bug this pad hides).
+// outright at the right/far edge rather than split it, which can leave the
+// composited line short of baseWidth's column count and the box up to one
+// column left of the requested x; the trailing pad below restores the width
+// so the row stays aligned with the rest of a fixed-width table (the
+// position drift itself is inherent to not splitting a rune in half, not a
+// bug this pad hides). At the left/near edge ansi.Cut does the opposite:
+// TruncateLeft keeps a straddled rune whole rather than dropping it, so a
+// negative x can render the box up to one column right of the requested
+// origin instead of short — the same "never split a rune" rule, applied by
+// the library in the direction that favors keeping content over the
+// direction that favors trimming it.
 func compositeLine(baseLine, boxLine string, x int) string {
 	baseWidth := ansi.StringWidth(baseLine)
-	if x < 0 || x >= baseWidth {
+	if x >= baseWidth {
 		return baseLine
 	}
 	boxWidth := ansi.StringWidth(boxLine)
 	if boxWidth == 0 {
 		return baseLine
+	}
+	if x < 0 {
+		if -x >= boxWidth {
+			return baseLine
+		}
+		boxLine = ansi.Cut(boxLine, -x, boxWidth)
+		boxWidth = ansi.StringWidth(boxLine)
+		x = 0
 	}
 	if available := baseWidth - x; boxWidth > available {
 		boxLine = ansi.Cut(boxLine, 0, available)
