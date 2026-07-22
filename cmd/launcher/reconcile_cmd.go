@@ -102,6 +102,7 @@ func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writ
 		groups[parent] = append(groups[parent], iss)
 	}
 	var errs []error
+	neverLanded := 0
 	for _, parent := range order {
 		allClosed := true
 		for _, s := range groups[parent] {
@@ -122,6 +123,18 @@ func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writ
 			continue
 		}
 		if skipped != "" {
+			// The "never landed" reason is the expected, permanent shape for
+			// any closed parentless issue that never went through
+			// CODE_FORGE=local (issue #1739): as a tracker's closed-issue
+			// history grows, printing one line per such parent on every
+			// sweep, forever, drowns out the two other skip reasons
+			// (checked-out / diverged) that are transient and operator-
+			// actionable. Those still print individually below; this one
+			// collapses into a single end-of-sweep count instead.
+			if skipped == local.NeverLandedSkip(parent) {
+				neverLanded++
+				continue
+			}
 			fmt.Fprintf(w, "surface: %s skipped — %s\n", parent, skipped)
 			continue
 		}
@@ -129,6 +142,9 @@ func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writ
 			fmt.Fprintf(w, "surface: broad ticket %s complete — %s's Integration branch is ready in the checkout as local branch %q.\n",
 				parent, local.IntegrationBranch(parent), parent)
 		}
+	}
+	if neverLanded > 0 {
+		fmt.Fprintf(w, "surface: %d broad ticket(s) skipped — no seam has landed yet\n", neverLanded)
 	}
 	return errors.Join(errs...)
 }

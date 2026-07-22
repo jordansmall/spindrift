@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+// NeverLandedSkip is the skipped reason SurfaceIntegrationBranch reports
+// when parent's Integration branch doesn't exist yet in the Accumulation
+// repo — exported so callers that need to tell this permanent, expected
+// reason apart from the transient checked-out/diverged ones (issue #1739)
+// don't reconstruct the literal string themselves.
+func NeverLandedSkip(parent string) string {
+	return "no seam of " + parent + " has landed yet"
+}
+
 // SurfaceIntegrationBranch fetches parent's Integration branch from the
 // Accumulation repo at repoPath into pwd as a local branch named after
 // parent — CODE_FORGE=local's auto-surface exit (ADR 0033, issue #1730),
@@ -26,7 +35,7 @@ import (
 func SurfaceIntegrationBranch(repoPath, pwd, parent string) (surfaced bool, skipped string, err error) {
 	integrationBranch := IntegrationBranch(parent)
 	if exists := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+integrationBranch).Run() == nil; !exists {
-		return false, "no seam of " + parent + " has landed yet", nil
+		return false, NeverLandedSkip(parent), nil
 	}
 
 	current, err := exec.Command("git", "-C", pwd, "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
