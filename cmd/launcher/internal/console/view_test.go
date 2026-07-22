@@ -1283,6 +1283,25 @@ func TestView_SidebarOpen_WideTerminal_DocksBesideList(t *testing.T) {
 	}
 }
 
+// TestView_SidebarOpen_WideTerminal_PanelsRenderBordered verifies the docked
+// list and the docked sidebar each render inside a muted rounded border
+// once the sidebar is open — the bordered-panel look that replaces the bare
+// column divider, so the split reads as two distinct boxes rather than one
+// continuous surface (issue #1755).
+func TestView_SidebarOpen_WideTerminal_PanelsRenderBordered(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "still visible"}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
+
+	out := View(m)
+	if got := strings.Count(out, "╭"); got != 2 {
+		t.Errorf("View() has %d rounded top-left corners, want 2 (one bordered panel for the list, one for the sidebar): %q", got, out)
+	}
+}
+
 // TestView_SidebarOpen_ShortContent_DividerDoesNotFillWholeBudget verifies
 // the divider between the docked list and sidebar spans only as many rows
 // as the taller of the two actually rendered, not the whole body budget —
