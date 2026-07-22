@@ -57,12 +57,14 @@ remote`, an ambient token) and asks only for the rest — a GitHub token
 provisions **GitHub** as the Issue Tracker; it never asks. The `jira` and
 `local` trackers are experimental and reachable only by hand-editing
 `ISSUE_TRACKER` in the generated `flake.nix` — see [Issue Tracker
-backends](docs/reference.md#issue-tracker-backends). It then writes a
-minimal `flake.nix`, a secrets-only `harness.env`, a `.gitignore` protecting
-it, and an `.envrc`; runs the doctor checks (offering to create missing
-labels); and kicks off the first image build — leaving `spindrift dispatch`
-as the only remaining step. Refuses to clobber an existing flake without
-`--force`.
+backends](docs/reference.md#issue-tracker-backends). Pair `ISSUE_TRACKER=local`
+with `CODE_FORGE=local` for a fully private, fully offline breakdown loop — see
+[Local code forge](docs/reference.md#local-code-forge-code_forgelocal). It
+then writes a minimal `flake.nix`, a secrets-only `harness.env`, a
+`.gitignore` protecting it, and an `.envrc`; runs the doctor checks (offering
+to create missing labels); and kicks off the first image build — leaving
+`spindrift dispatch` as the only remaining step. Refuses to clobber an
+existing flake without `--force`.
 
 Prefer a fully-commented scaffold you edit by hand instead? Use the bundled
 template:
@@ -265,10 +267,10 @@ spindrift console
 
 Picks launch through the same continuous engine the headless loops use, up to a
 live parallelism cap you can resize in-session. You can filter the backlog,
-drill into a running Dispatch's rendered transcript, terminate a live Dispatch
-by hand, rebuild a stale image without leaving the session, and adopt orphaned
-containers left by a crash. See [`docs/console.md`](docs/console.md) for the
-full command table and behavior.
+open a Backlog row's ticket-detail modal or a running Dispatch's live-tail
+sidebar, terminate a live Dispatch by hand, rebuild a stale image without
+leaving the session, and adopt orphaned containers left by a crash. See
+[`docs/console.md`](docs/console.md) for the full command table and behavior.
 
 ## Documentation
 
