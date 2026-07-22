@@ -1803,7 +1803,7 @@ func renderSidebarFullscreen(s SidebarState, width, height int) string {
 	if visible != "" && !strings.HasSuffix(visible, "\n") {
 		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeSidebar, []string{"t", "x", "z"}, width, false))
+	fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeSidebar, []string{"t", "x", "z", "H"}, width, false))
 	return b.String()
 }
 
@@ -1896,10 +1896,12 @@ func renderSidebarDocked(s SidebarState, width, budget int) string {
 	}
 	// Deliberately tighter than the fullscreen footer's " · " spacing (and
 	// the rest of the module's own convention, e.g. renderHeader's segment
-	// joins): four hints plus full " · " separators measure 43 columns,
-	// one over sidebarWidth's 42-column budget, so the space after each
-	// "·" is dropped to fit all four without clipping the last one.
-	b.WriteString(renderFooterHints(ModeSidebar, []string{"t", "h", "x", "z"}, width, true))
+	// joins): five hints plus full " · " separators would badly overflow
+	// sidebarWidth's 42-column budget, so the space after each "·" is
+	// dropped, and "z"'s own hint shortens to "[z]" (FooterCompact), to fit
+	// all five — including "H/L" (issue #1846) — without clipping the
+	// last one.
+	b.WriteString(renderFooterHints(ModeSidebar, []string{"t", "h", "x", "z", "H"}, width, true))
 	b.WriteString("\n")
 	return b.String()
 }

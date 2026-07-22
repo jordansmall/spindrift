@@ -93,7 +93,7 @@ var keymap = []Binding{
 	{
 		Keys: []string{"H", "L"}, Modes: []Mode{ModeList, ModeSidebar},
 		Help: "  H / L       switch to the previous / next Section (from the\n" +
-			"              sidebar, also closes it — issue #1846)",
+			"              sidebar, also closes it)",
 		Footer: "H/L",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			if msg.String() == "H" {
@@ -309,6 +309,9 @@ var keymap = []Binding{
 		Help: "  z           toggle the sidebar's fullscreen zoom (while it has\n" +
 			"              focus)",
 		Footer: "[z] zoom",
+		// FooterCompact shortened to make room for the docked footer's new
+		// "H/L" hint (issue #1846) within the 42-column sidebarWidth floor.
+		FooterCompact: "[z]",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			t.m = Update(t.m, SidebarZoomToggleMsg{})
 			return t, nil
