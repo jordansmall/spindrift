@@ -1808,27 +1808,18 @@ func TestUpdate_DetailModalLoadedMsg_StaleNumberIgnored(t *testing.T) {
 	}
 }
 
-// TestUpdate_DetailCacheInvalidatedMsg_ClearsCacheKeepsEdges verifies "r"
-// (DetailCacheInvalidatedMsg) drops the per-ticket detail cache but retains
-// the whole-backlog edge graph, so a refresh re-fetches stale ticket bodies
-// without paying the full graph rebuild again on the next modal open (issue
-// #1746).
-func TestUpdate_DetailCacheInvalidatedMsg_ClearsCacheKeepsEdges(t *testing.T) {
+// TestUpdate_DetailCacheInvalidatedMsg_ClearsCache verifies "r"
+// (DetailCacheInvalidatedMsg) drops the per-ticket detail cache, so the
+// next modal open re-fetches rather than replaying data that may now be
+// stale (issue #1632).
+func TestUpdate_DetailCacheInvalidatedMsg_ClearsCache(t *testing.T) {
 	m := NewModel()
 	m.DetailCache = map[string]DetailModalCache{"42": {Body: "stale"}}
-	m.Edges = map[string][]string{"42": {"7"}}
-	m.EdgeSources = map[string]map[string]forge.DepSource{"42": {"7": forge.DepSourceNative}}
 
 	m = Update(m, DetailCacheInvalidatedMsg{})
 
 	if m.DetailCache != nil {
 		t.Errorf("DetailCache = %v after DetailCacheInvalidatedMsg, want nil", m.DetailCache)
-	}
-	if m.Edges == nil {
-		t.Error("Edges = nil after DetailCacheInvalidatedMsg, want retained")
-	}
-	if m.EdgeSources == nil {
-		t.Error("EdgeSources = nil after DetailCacheInvalidatedMsg, want retained")
 	}
 }
 

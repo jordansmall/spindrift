@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime/pprof"
 	"strings"
 	"sync/atomic"
@@ -2593,39 +2594,33 @@ func TestTea_DetailModalKey_ScrollsBodyWithJAndArrows(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_DetailModal_RetainsEdgeGraphAcrossTickets verifies the
-// whole-backlog dependency edge graph (waves.NewReadiness) is built at most
-// once per session: opening a second ticket's detail modal reuses the graph
-// the first open already built, rather than re-walking DepsOf across the
-// backlog a second time — the "no new gh calls" half of the Blocks section's
-// derivation (issue #1632).
-func TestTea_DetailModal_RetainsEdgeGraphAcrossTickets(t *testing.T) {
+// TestTea_DetailModal_ResolvesOnlyOwnBlockersNotWholeBacklog verifies
+// opening a ticket detail modal costs exactly the DepsOf call needed for
+// that one ticket's own Blocked-by edge — not a DepsOf call per backlog
+// issue — so first-open latency no longer scales with backlog size (issue
+// #1744). Blocks resolves from the Fake's BlockersLister-backed BlocksOf
+// instead, which the Fake derives in-memory rather than issuing any
+// tracked call, mirroring the github/jira adapters' single native
+// "blocking" lookup.
+func TestTea_DetailModal_ResolvesOnlyOwnBlockersNotWholeBacklog(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "7", Title: "waves core", State: forge.IssueOpen})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "43", Title: "unrelated one", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "44", Title: "unrelated two", State: forge.IssueOpen})
 	f.NativeDeps = map[string][]string{"42": {"7"}}
 	launch := newTestLauncher(t, f)
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "waves core", "fix the thing")
+	waitForOutput(t, tm, "waves core", "fix the thing", "unrelated one", "unrelated two")
 
 	// Ascending numeric order (ListOpenIssues' canonical order) puts #7
 	// first under the cursor.
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "Blocks", `#42 (native) open "fix the thing"`)
 
-	depsOfCallsAfterFirst := len(f.DepsOfCalls)
-	if depsOfCallsAfterFirst == 0 {
-		t.Fatal("test setup: DepsOfCalls empty after first open, want the whole-backlog graph built")
-	}
-
-	sendKey(tm, "esc")
-	sendKey(tm, "down")
-	sendKey(tm, "enter")
-	waitForOutput(t, tm, "Blocked by", `#7 (native) open "waves core"`)
-
-	if len(f.DepsOfCalls) != depsOfCallsAfterFirst {
-		t.Errorf("DepsOfCalls grew from %d to %d opening a second ticket, want the retained graph reused with no new DepsOf calls", depsOfCallsAfterFirst, len(f.DepsOfCalls))
+	if want := []string{"7"}; !reflect.DeepEqual(f.DepsOfCalls, want) {
+		t.Errorf("DepsOfCalls = %v, want %v — exactly one call, for the opened ticket only", f.DepsOfCalls, want)
 	}
 
 	sendKey(tm, "esc")
@@ -2677,13 +2672,14 @@ func TestTea_RefreshKey_InvalidatesDetailCache(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_RefreshKey_RetainsEdgeGraph verifies "r" leaves the retained
-// whole-backlog dependency edge graph in place: reopening a ticket detail
-// after a refresh re-fetches the ticket's own body (DetailCache was
-// cleared) but does not re-walk DepsOf across the backlog, so the next
-// detail open stays as fast as a warm open instead of paying the full
-// first-open graph build again (issue #1746).
-func TestTea_RefreshKey_RetainsEdgeGraph(t *testing.T) {
+// TestTea_RefreshKey_ReopenAfterRefreshStaysBoundedCost verifies reopening a
+// ticket detail after "r" re-resolves it with exactly one DepsOf call — not
+// zero (there is no whole-backlog graph left to stay "warm" the way issue
+// #1746 once meant to keep one warm across a refresh) and not a call per
+// backlog issue either — so a refresh never reintroduces the O(backlog)
+// cost issue #1744 removed, even though DetailCache was just cleared and
+// this open is a genuine re-fetch (issue #1744).
+func TestTea_RefreshKey_ReopenAfterRefreshStaysBoundedCost(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "7", Title: "waves core", Body: "core body", State: forge.IssueOpen})
 	launch := newTestLauncher(t, f)
@@ -2694,11 +2690,6 @@ func TestTea_RefreshKey_RetainsEdgeGraph(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "core body")
 
-	depsOfCallsAfterFirst := len(f.DepsOfCalls)
-	if depsOfCallsAfterFirst == 0 {
-		t.Fatal("test setup: DepsOfCalls empty after first open, want the whole-backlog graph built")
-	}
-
 	sendKey(tm, "esc")
 	waitForOutput(t, tm, "running 0/")
 	sendKey(tm, "r")
@@ -2706,8 +2697,8 @@ func TestTea_RefreshKey_RetainsEdgeGraph(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "core body")
 
-	if len(f.DepsOfCalls) != depsOfCallsAfterFirst {
-		t.Errorf("DepsOfCalls grew from %d to %d reopening after a refresh, want the retained graph reused with no new DepsOf calls", depsOfCallsAfterFirst, len(f.DepsOfCalls))
+	if want := []string{"7", "7"}; !reflect.DeepEqual(f.DepsOfCalls, want) {
+		t.Errorf("DepsOfCalls = %v, want %v — one call per open, for the opened ticket only", f.DepsOfCalls, want)
 	}
 
 	sendKey(tm, "esc")
