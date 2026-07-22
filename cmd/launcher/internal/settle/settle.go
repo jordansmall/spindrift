@@ -47,16 +47,17 @@ type Config struct {
 	OutboxDir func(num string) string
 
 	// CodeForgeForIssue resolves num's own CodeForge instance for the
-	// parent-sensitive landing calls (RelayBundle, Merge, and the reactive
-	// Rebase retry, all inside mergeImmediate; LandingRef in
-	// landPushOnly) — CODE_FORGE=local, ADR 0033/issue #1734: each
-	// dispatched issue may key its Integration branch off a different
-	// parent, so those calls must land through ITS OWN resolved instance,
-	// not the single cf New() received. Every parent-agnostic operation
-	// (AgentBranch, BranchExists, the PRForge/BundleRelay capability
-	// probes) still uses New's cf unchanged. Defaults to always returning
-	// that cf when nil (every non-local construction site, and every
-	// pre-#1734 test) -- there is exactly one instance to use there.
+	// parent-sensitive landing calls (RelayBundle and its BundleRelay/
+	// LandingRef capability probes, Merge, and the reactive Rebase retry,
+	// all inside mergeImmediate; LandingRef in landPushOnly) — CODE_FORGE
+	// =local, ADR 0033/issue #1734: each dispatched issue may key its
+	// Integration branch off a different parent, so those calls must land
+	// through ITS OWN resolved instance, not the single cf New() received.
+	// Every parent-agnostic operation (AgentBranch, BranchExists, and the
+	// PRForge capability resolved once at New() into s.pr) still uses New's
+	// cf unchanged. Defaults to always returning that cf when nil (every
+	// non-local construction site, and every pre-#1734 test) -- there is
+	// exactly one instance to use there.
 	CodeForgeForIssue func(num string) forge.CodeForge
 }
 
