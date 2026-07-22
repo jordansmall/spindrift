@@ -667,6 +667,10 @@ func TestTea_ScrollKeys_PageSizeTracksViewportHeight(t *testing.T) {
 // item budget instead of the rendered content-row count would overshoot the
 // "N more below" line held back at each truncated screen and silently skip
 // the row right past the fold on every page boundary (issue #1037 AC1).
+// columnItemBudget holds one further row back for a truncated Section's own
+// trailing newline (issue #1794), shrinking each page from 5 rows to 4 —
+// "issue 4"/"issue 8" (each page boundary's first new row) below, not the
+// pre-#1794 "issue 6"/"issue 12".
 func TestTea_ScrollKeys_PageDown_SkipsNoRow(t *testing.T) {
 	f := forge.NewFake()
 	for i := 0; i < 50; i++ {
@@ -677,10 +681,10 @@ func TestTea_ScrollKeys_PageDown_SkipsNoRow(t *testing.T) {
 	waitForOutput(t, tm, "> #0")
 
 	sendKey(tm, "pgdown")
-	waitForOutput(t, tm, rowNumberCell("6")+" issue 6")
+	waitForOutput(t, tm, rowNumberCell("4")+" issue 4")
 
 	sendKey(tm, "pgdown")
-	waitForOutput(t, tm, rowNumberCell("12")+" issue 12")
+	waitForOutput(t, tm, rowNumberCell("8")+" issue 8")
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)

@@ -3201,6 +3201,42 @@ func TestView_LongPicksQueue_HeaderStaysPinnedAndShowsMoreBelow(t *testing.T) {
 	}
 }
 
+// TestView_LongBacklog_FitsHeightWithBannerAndFooterPinned verifies the
+// top banner and bottom footer both survive at full budget: a Backlog long
+// enough to show "… N more below" must still render no more physical lines
+// than m.Height, counted without trimming the trailing newline (issue
+// #1794) — the existing height tests' own strings.TrimRight(out, "\n")
+// before counting is exactly why this regression slipped through.
+func TestView_LongBacklog_FitsHeightWithBannerAndFooterPinned(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	issues := make([]forge.Issue, 50)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+	out := View(m)
+	if !strings.Contains(out, "more below") {
+		t.Fatalf("View() = %q, want a \"more below\" affordance line", out)
+	}
+	// Split, not TrimRight-then-count: View()'s output always ends in
+	// exactly one trailing "\n" (its own documented convention), and that
+	// trailing "\n" costs the terminal a physical row of its own — printing
+	// it at the very bottom of an already-full m.Height budget is what
+	// scrolls the pinned top banner off-screen. Trimming first (the
+	// existing height tests' approach) throws away exactly the row this
+	// regression turns on.
+	if got := len(strings.Split(out, "\n")); got > m.Height {
+		t.Errorf("View() rendered %d physical lines, want <= m.Height (%d): %q", got, m.Height, out)
+	}
+	if !strings.Contains(out, "running 0/0") {
+		t.Errorf("View() = %q, want the top banner status line present", out)
+	}
+	if !strings.Contains(out, "[/] filter") {
+		t.Errorf("View() = %q, want the bottom footer hint line present", out)
+	}
+}
+
 // TestView_ScrolledBacklog_ReachesLastRow verifies scrolling the backlog
 // column all the way (BacklogOffset clamped to its maximum) surfaces the
 // last loaded issue — every row in the (filtered) backlog is reachable by
@@ -3254,6 +3290,9 @@ func TestView_BacklogSection_ShowsPositionIndicator(t *testing.T) {
 	// the exact position ranges below) this test was written against. Plus
 	// listFooterLines, ModeList's own pinned footer row (issue #1792), so
 	// that reservation doesn't eat into the item budget this test pins.
+	// columnItemBudget holds one further row back whenever the Section
+	// overflows (issue #1794), one row short of what this height would
+	// otherwise show — the "5"/"10" below, not "6"/"11".
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows + listFooterLines})
 	issues := make([]forge.Issue, 50)
 	for i := range issues {
@@ -3262,14 +3301,14 @@ func TestView_BacklogSection_ShowsPositionIndicator(t *testing.T) {
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
 	out := View(m)
-	if !strings.Contains(out, "(1-6 of 50)") {
-		t.Errorf("View() = %q, want the Backlog header to show \"(1-6 of 50)\"", out)
+	if !strings.Contains(out, "(1-5 of 50)") {
+		t.Errorf("View() = %q, want the Backlog header to show \"(1-5 of 50)\"", out)
 	}
 
 	m = Update(m, ScrollMsg{Delta: 5})
 	out = View(m)
-	if !strings.Contains(out, "(6-11 of 50)") {
-		t.Errorf("View() = %q, want the Backlog header to show \"(6-11 of 50)\" after scrolling", out)
+	if !strings.Contains(out, "(6-10 of 50)") {
+		t.Errorf("View() = %q, want the Backlog header to show \"(6-10 of 50)\" after scrolling", out)
 	}
 }
 
@@ -3285,6 +3324,9 @@ func TestView_WorkSection_ShowsPositionIndicator(t *testing.T) {
 	// the exact position range below) this test was written against. Plus
 	// listFooterLines, ModeList's own pinned footer row (issue #1792), so
 	// that reservation doesn't eat into the item budget this test pins.
+	// columnItemBudget holds one further row back whenever the Section
+	// overflows (issue #1794), one row short of what this height would
+	// otherwise show — "(1-5 of 50)", not "(1-6 of 50)".
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows + listFooterLines})
 	picks := make([]Pick, 50)
 	for i := range picks {
@@ -3294,8 +3336,8 @@ func TestView_WorkSection_ShowsPositionIndicator(t *testing.T) {
 	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
 	out := View(m)
-	if !strings.Contains(out, "(1-6 of 50)") {
-		t.Errorf("View() = %q, want the Running header to show \"(1-6 of 50)\"", out)
+	if !strings.Contains(out, "(1-5 of 50)") {
+		t.Errorf("View() = %q, want the Running header to show \"(1-5 of 50)\"", out)
 	}
 
 	empty := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
