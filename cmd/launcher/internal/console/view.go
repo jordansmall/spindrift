@@ -166,14 +166,11 @@ func View(m Model) string {
 		width := computeSidebarWidth(m.Width)
 		listModel := m
 		listModel.Width = m.Width - width - dockedBorderCols
-		// Both panels' top/bottom border rows come out of the same body
-		// budget, not one deduction per panel — the two panels render side
-		// by side within the same row band, so the border rows only need
-		// subtracting once (issue #1755).
-		panelBudget := budget - boxBorderRows
-		if panelBudget < 0 {
-			panelBudget = 0
-		}
+		// bodyBudget(m) already subtracts boxBorderRows for the docked case
+		// (mirrored here so View's own render and Update's scroll/cursor
+		// clamps always agree on how many rows the bordered panels actually
+		// have room for — issue #1755).
+		panelBudget := bodyBudget(m)
 		list := renderBody(listModel, panelBudget)
 		sidebar := renderSidebarDocked(*m.Sidebar, width, panelBudget, m.Focus == FocusSidebar)
 		listBox := renderBoxedColumn(list, listModel.Width)
@@ -725,6 +722,18 @@ func bodyBudget(m Model) int {
 	budget := m.Height - headerLines - reservedLines
 	if budget < 0 {
 		budget = 0
+	}
+	if m.Sidebar != nil && sidebarFits(m) && !m.SidebarZoom {
+		// Docked, both bordered panels eat boxBorderRows out of the same
+		// row band View renders them into — bodyBudget must match, or
+		// Update's scroll/cursor clamps cap the last page against a taller
+		// budget than the bordered render actually has room to show,
+		// stranding the last couple of lines behind the border forever
+		// (issue #1755, extending the #1501/#1502 shared-budget invariant).
+		budget -= boxBorderRows
+		if budget < 0 {
+			budget = 0
+		}
 	}
 	return budget
 }

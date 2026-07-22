@@ -689,6 +689,31 @@ func TestUpdate_SidebarScrollMsg_DockedClampsToBodyBudgetNotFullHeight(t *testin
 	}
 }
 
+// TestUpdate_SidebarScrollMsg_Docked_LastLineReachable verifies a pgdown
+// past the end of a transcript, docked beside the list, actually renders
+// the transcript's last line — not just that Offset lands on some clamp
+// formula, but that the clamp and the docked panel's real (bordered) row
+// budget agree, or the last two lines end up permanently unreachable behind
+// the panel border (issue #1755).
+func TestUpdate_SidebarScrollMsg_Docked_LastLineReachable(t *testing.T) {
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	lines[99] = "TAIL-MARKER"
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 20})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+	m = Update(m, SidebarToggleMsg{})
+
+	m = Update(m, SidebarScrollMsg{Delta: 1000})
+
+	out := View(m)
+	if !strings.Contains(out, "TAIL-MARKER") {
+		t.Errorf("View() = %q, want the transcript's last line reachable after pgdown to the end", out)
+	}
+}
+
 // TestUpdate_SidebarScrollMsg_ZoomedClampsToFullHeightNotBodyBudget verifies
 // a pgdown past the end of a transcript, zoomed on a terminal wide enough to
 // dock, lands Offset against the whole terminal Height — the row budget
