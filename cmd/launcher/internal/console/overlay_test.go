@@ -156,6 +156,94 @@ func TestCompositeOverlay_ClippedBoxWideRuneShowsBaseTail(t *testing.T) {
 	}
 }
 
+// TestCompositeOverlay_ClipsLeftEdge verifies a box positioned so it starts
+// before the base's left edge is clipped to the base's origin instead of
+// dropping the entire row, mirroring how a box overflowing the right edge
+// clips rather than disappearing.
+func TestCompositeOverlay_ClipsLeftEdge(t *testing.T) {
+	base := "aaaaaaaaaa"
+	box := "XXXXX"
+	got := compositeOverlay(base, box, -2, 0)
+	want := "XXXaaaaaaa"
+	if got != want {
+		t.Errorf("compositeOverlay(...) = %q, want %q", got, want)
+	}
+}
+
+// TestCompositeOverlay_ClipsTopEdge verifies a box positioned so it starts
+// above the base's top row drops only the box rows that land above row 0,
+// compositing the rest normally.
+func TestCompositeOverlay_ClipsTopEdge(t *testing.T) {
+	base := "aaaaaaaaaa\nbbbbbbbbbb"
+	box := "XXX\nYYY"
+	got := compositeOverlay(base, box, 2, -1)
+	want := "aaYYYaaaaa\nbbbbbbbbbb"
+	if got != want {
+		t.Errorf("compositeOverlay(...) = %q, want %q", got, want)
+	}
+}
+
+// TestCompositeOverlay_ClipsTopLeftCorner verifies a box straddling both the
+// left and top edges at once clips both dimensions together instead of one
+// masking the other.
+func TestCompositeOverlay_ClipsTopLeftCorner(t *testing.T) {
+	base := "aaaaaaaaaa\nbbbbbbbbbb"
+	box := "XXX\nYYY"
+	got := compositeOverlay(base, box, -1, -1)
+	want := "YYaaaaaaaa\nbbbbbbbbbb"
+	if got != want {
+		t.Errorf("compositeOverlay(...) = %q, want %q", got, want)
+	}
+}
+
+// TestCompositeOverlay_NegativeXStyledBoxDoesNotBleed verifies a styled
+// overlay box clipped at the left edge stays self-contained: the columns
+// dropped off its left side don't leak style into the plain base text that
+// follows it, mirroring StyledBoxOverPlainBaseDoesNotBleed for the near edge.
+func TestCompositeOverlay_NegativeXStyledBoxDoesNotBleed(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	base := "bbbbbbbbbb"
+	box := roleStyle(RoleFailed).Render("XXX")
+
+	got := compositeOverlay(base, box, -1, 0)
+	want := "\x1b[31mXX\x1b[0mbbbbbbbb"
+	if got != want {
+		t.Errorf("compositeOverlay(...) = %q, want %q", got, want)
+	}
+}
+
+// TestCompositeOverlay_NegativeXWideRuneKeptWhole verifies that when the
+// left clip boundary lands mid-wide-rune, ansi.Cut keeps that rune whole
+// rather than splitting it — the opposite of the right edge, where a
+// straddled rune is dropped outright (TestCompositeOverlay_ClippedBoxWideRuneShowsBaseTail).
+// Either way no rune is corrupted, and the row still lands at baseWidth.
+func TestCompositeOverlay_NegativeXWideRuneKeptWhole(t *testing.T) {
+	base := "aaaaa" // 5 columns
+	box := "永永"     // 2 runes, 4 columns
+	got := compositeOverlay(base, box, -1, 0)
+	want := "永永a"
+	if got != want {
+		t.Errorf("compositeOverlay(...) = %q, want %q", got, want)
+	}
+	if gotWidth := ansi.StringWidth(got); gotWidth != ansi.StringWidth(base) {
+		t.Errorf("compositeOverlay(...) width = %d, want %d", gotWidth, ansi.StringWidth(base))
+	}
+}
+
+// TestCompositeOverlay_EntirelyLeftOfBaseLeavesRowUntouched verifies a box
+// positioned so far left that none of it reaches column 0 leaves the base
+// row unchanged, rather than compositing an empty remainder.
+func TestCompositeOverlay_EntirelyLeftOfBaseLeavesRowUntouched(t *testing.T) {
+	base := "aaaaaaaaaa"
+	box := "XXX"
+	got := compositeOverlay(base, box, -3, 0)
+	if got != base {
+		t.Errorf("compositeOverlay(...) = %q, want unchanged %q", got, base)
+	}
+}
+
 // TestCompositeOverlay_EmptyBoxLineLeavesRowUntouched verifies a
 // zero-width box row (e.g. a blank line inside a multi-line box) leaves the
 // covered base row byte-for-byte as-is, rather than re-cutting and
