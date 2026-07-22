@@ -954,6 +954,43 @@ func TestView_RebuildOutputOpen_ScrollOffsetWindowsContent(t *testing.T) {
 	}
 }
 
+// TestView_DetailModal_FloatsOverList_BannerStillVisible verifies the ticket
+// detail modal renders as a box floating over the still-rendered list rather
+// than a fullscreen takeover: the header banner above the box's top edge
+// stays visible instead of being replaced entirely (issue #1758).
+func TestView_DetailModal_FloatsOverList_BannerStillVisible(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+
+	out := View(m)
+	if !strings.Contains(out, "spindrift") {
+		t.Errorf("View() = %q, want the banner still visible above the floating detail modal instead of a fullscreen takeover", out)
+	}
+}
+
+// TestView_DetailModal_BorderShowsNumberAndTitle verifies the floating
+// detail modal box has a visible border, with the ticket's "#number title"
+// set in the box's top border line rather than as its own interior content
+// row (issue #1758 AC).
+func TestView_DetailModal_BorderShowsNumberAndTitle(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+
+	out := View(m)
+	found := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "╭") && strings.Contains(line, "#42 fix the thing") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("View() = %q, want the #number title set in the box's top border line", out)
+	}
+	if !strings.Contains(out, "╰") {
+		t.Errorf("View() = %q, want a visible bottom border on the floating box", out)
+	}
+}
+
 // TestView_DetailModal_ShowsBlockedByAndBlocksSections verifies the ticket
 // detail modal renders both its Blocked-by and Blocks sections, each entry
 // as number + source + open/closed state + title (issue #1632 AC), e.g.
@@ -1030,9 +1067,14 @@ func TestView_DetailModal_SanitizesErr(t *testing.T) {
 	m = Update(m, DetailModalLoadedMsg{Number: "42", Err: errors.New("evil\x1b[2Jerrtext\x1b]0;pwned\x07here")})
 
 	out := View(m)
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "evilerrtexthere") && strings.Contains(line, "\x1b") {
-			t.Errorf("detail modal row = %q, want no raw escape bytes surviving sanitization", line)
+	// Checked as specific injected byte sequences rather than "no \x1b
+	// anywhere on this line": the floating box (issue #1758) can now share
+	// a physical row with styled base UI (e.g. colored Section tabs), whose
+	// own legitimate SGR escapes must not trip a check meant to catch the
+	// untrusted error text's own control sequences surviving sanitization.
+	for _, escape := range []string{"\x1b[2J", "\x1b]0;pwned\x07"} {
+		if strings.Contains(out, escape) {
+			t.Errorf("View() = %q, want the injected escape sequence %q stripped by sanitization", out, escape)
 		}
 	}
 	if !strings.Contains(out, "evilerrtexthere") {
@@ -1062,9 +1104,15 @@ func TestView_DetailModal_NoBlockersOrBlocks_ShowsNoSectionClutter(t *testing.T)
 // detail modal's body scrolls: once its content overflows the viewport,
 // DetailModalScrollMsg moves which lines are visible, hiding everything
 // before the new offset (issue #1632 AC — "the body scrolls with j/k and
-// the arrow keys").
+// the arrow keys"). Height is sized so the floating box's own interior body
+// budget (issue #1758: 2*margin + 2 border rows + floatModalChromeLines,
+// leaving exactly 2 rows for the body) shows exactly 2 of the 4 body lines
+// at once, the same "content overflows the viewport" setup the fullscreen
+// renderer's version of this test used against detailModalChromeLines.
 func TestView_DetailModal_ScrollOffset_HidesLinesBeforeOffset(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: detailModalChromeLines + 2})
+	const bodyBudget = 2
+	height := 2*detailModalBoxMargin + 2 + floatModalChromeLines + bodyBudget
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: height})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: "l0\nl1\nl2\nl3"})
 	m = Update(m, DetailModalScrollMsg{Delta: 2})
@@ -1122,12 +1170,15 @@ func TestView_DetailModal_SanitizesTitleLabelsBodyAndBlockerTitles(t *testing.T)
 	})
 
 	out := View(m)
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "eviltitlehere") || strings.Contains(line, "evillabel") ||
-			strings.Contains(line, "evilbodyhere") || strings.Contains(line, "evilblockerhere") {
-			if strings.Contains(line, "\x1b") {
-				t.Errorf("detail modal row = %q, want no raw escape bytes surviving sanitization", line)
-			}
+	// Checked as specific injected byte sequences rather than "no \x1b
+	// anywhere on this line": the floating box (issue #1758) can now share
+	// a physical row with styled base UI (e.g. colored Section tabs), whose
+	// own legitimate SGR escapes must not trip a check meant to catch the
+	// untrusted title/label/body/blocker text's own control sequences
+	// surviving sanitization.
+	for _, escape := range []string{"\x1b[2J", "\x1b]0;pwned\x07"} {
+		if strings.Contains(out, escape) {
+			t.Errorf("View() = %q, want the injected escape sequence %q stripped by sanitization", out, escape)
 		}
 	}
 	for _, want := range []string{"eviltitlehere", "evillabel", "evilbodyhere", "evilblockerhere"} {

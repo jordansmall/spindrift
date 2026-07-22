@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 
@@ -131,11 +132,27 @@ func renderBoxedColumn(content string, width int) string {
 // 0030). An open sidebar (m.Sidebar != nil) docks beside the still-visible
 // list when sidebarFits, or takes over fullscreen on a terminal too narrow
 // to show both (ADR 0030, #1501) — replacing the interim fullscreen-only
-// drill-in of issue #1500.
+// drill-in of issue #1500. An open detail modal (m.DetailModal != nil)
+// floats as a bordered box over the still-rendered list instead of a
+// fullscreen takeover (issue #1758) — the same "keep driving while you
+// read" shape ADR 0030's sidebar already established for the transcript.
 func View(m Model) string {
+	base := viewBody(m)
 	if m.DetailModal != nil {
-		return renderDetailModal(*m.DetailModal, m.Height)
+		boxWidth, boxHeight := detailModalBoxSize(m.Width, m.Height)
+		x, y := detailModalBoxOrigin(m.Width, m.Height, boxWidth, boxHeight)
+		box := renderDetailModalBox(*m.DetailModal, boxWidth, boxHeight)
+		base = compositeOverlay(padBaseForOverlay(base, m.Width, y+boxHeight), box, x, y)
 	}
+	return base
+}
+
+// viewBody renders everything View shows below/behind an open detail modal —
+// the header, Section tabs, and either the docked sidebar layout or the
+// plain single-list body — the same rendering the list-only path always
+// used, now split out so View can composite the floating detail modal box
+// over it instead of a fullscreen replacement (issue #1758).
+func viewBody(m Model) string {
 	if m.Sidebar != nil && (m.SidebarZoom || !sidebarFits(m)) {
 		return renderSidebarFullscreen(*m.Sidebar, m.Height)
 	}
@@ -983,12 +1000,204 @@ func windowDetailModalLines(s DetailModalState, budget int) []string {
 	return s.Lines[w.Start:w.End]
 }
 
+// detailModalBoxMargin is the minimum gap kept between the floating detail
+// modal box and the terminal edge on every side, so the box reads as
+// floating over the list rather than touching the frame (issue #1758).
+const detailModalBoxMargin = 2
+
+// detailModalBoxMaxWidth and detailModalBoxMaxHeight cap the floating box at
+// a comfortable reading size on a wide/tall terminal instead of stretching
+// it corner to corner — "roughly centered at a sensible default size" (issue
+// #1758 AC). A terminal too narrow/short for even the margin is the small-
+// terminal fallback ticket's job, not this one's.
+const (
+	detailModalBoxMaxWidth  = 84
+	detailModalBoxMaxHeight = 30
+)
+
+// detailModalBoxSize returns the floating detail modal box's outer width and
+// height for a termWidth x termHeight terminal: the terminal size minus
+// detailModalBoxMargin on every side, capped at detailModalBoxMax{Width,Height}.
+func detailModalBoxSize(termWidth, termHeight int) (width, height int) {
+	width = termWidth - 2*detailModalBoxMargin
+	if width > detailModalBoxMaxWidth {
+		width = detailModalBoxMaxWidth
+	}
+	height = termHeight - 2*detailModalBoxMargin
+	if height > detailModalBoxMaxHeight {
+		height = detailModalBoxMaxHeight
+	}
+	return width, height
+}
+
+// detailModalBoxOrigin centers a boxWidth x boxHeight box within a
+// termWidth x termHeight terminal, the (x, y) compositeOverlay places it at.
+func detailModalBoxOrigin(termWidth, termHeight, boxWidth, boxHeight int) (x, y int) {
+	return (termWidth - boxWidth) / 2, (termHeight - boxHeight) / 2
+}
+
+// detailModalInnerSize returns the floating detail modal box's interior
+// width/height for a termWidth x termHeight terminal — the box outer size
+// (detailModalBoxSize) minus the one-column/one-row border on every side.
+// This is what the width-dependent modal machinery (the Lines word-wrap, the
+// scroll budget) must key off instead of Model.Width/Model.Height (issue
+// #1758), so a resize and the box's own render always agree on how wide the
+// body was actually wrapped.
+func detailModalInnerSize(termWidth, termHeight int) (width, height int) {
+	boxWidth, boxHeight := detailModalBoxSize(termWidth, termHeight)
+	width, height = boxWidth-2, boxHeight-2
+	if width < 1 {
+		width = 1
+	}
+	if height < 1 {
+		height = 1
+	}
+	return width, height
+}
+
+// padBaseForOverlay pads every line of s out to at least width display
+// columns and appends blank width-wide lines until s has at least height
+// lines. compositeLine only composites onto a base row whose display width
+// already reaches the box's x origin — it leaves a too-short row untouched
+// instead — and compositeOverlay only overwrites rows base already has. But
+// viewBody's rendered rows stop at whatever content they actually have
+// (renderBody doesn't pad a short list out to the row budget), so a base
+// built for its own natural size must be padded to the terminal's full frame
+// before a box lower on screen, or wider than a short row, can land on it
+// (issue #1758).
+func padBaseForOverlay(s string, width, height int) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if w := ansi.StringWidth(line); w < width {
+			lines[i] = line + strings.Repeat(" ", width-w)
+		}
+	}
+	blank := strings.Repeat(" ", width)
+	for len(lines) < height {
+		lines = append(lines, blank)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// floatModalChromeLines is the floating detail modal box's fixed,
+// non-scrollable interior row spend: the labels line plus the keystroke-hint
+// footer. Unlike detailModalChromeLines (the fullscreen renderer's three —
+// title, labels, footer), the floating box's title lives in its own top
+// border line instead of an interior content row (issue #1758 AC), so its
+// interior chrome is one line lighter.
+const floatModalChromeLines = 2
+
+// detailModalBoxTopBorder renders the floating box's top edge at exactly
+// width display columns: the corner runes, a dash lead-in, the ticket's
+// "#number title" (truncated with an ellipsis if it doesn't fit), then
+// border rune fill out to width — the box's AC1 placement for the ticket
+// number/title (issue #1758).
+func detailModalBoxTopBorder(width int, title string) string {
+	inner := width - 2
+	if inner < 0 {
+		inner = 0
+	}
+	label := "─ " + title + " "
+	if runewidth.StringWidth(label) > inner {
+		label = runewidth.Truncate(label, inner, "…")
+	}
+	fill := inner - runewidth.StringWidth(label)
+	if fill < 0 {
+		fill = 0
+	}
+	return "╭" + label + strings.Repeat("─", fill) + "╮"
+}
+
+// detailModalBoxBottomBorder renders the floating box's bottom edge at
+// exactly width display columns.
+func detailModalBoxBottomBorder(width int) string {
+	inner := width - 2
+	if inner < 0 {
+		inner = 0
+	}
+	return "╰" + strings.Repeat("─", inner) + "╯"
+}
+
+// padDisplay right-pads (or, if it overflows, truncates) s to exactly width
+// display columns — every interior row of the floating box must land at
+// exactly its inner width, or the side border runes drift out of column
+// with the rest of the box (issue #1758).
+func padDisplay(s string, width int) string {
+	if width < 0 {
+		width = 0
+	}
+	w := runewidth.StringWidth(s)
+	if w > width {
+		return runewidth.Truncate(s, width, "")
+	}
+	if w < width {
+		return s + strings.Repeat(" ", width-w)
+	}
+	return s
+}
+
+// renderDetailModalContent renders the floating detail modal box's interior
+// — the labels line, the loading/error/body-window content, and the
+// scroll/close footer hint — as exactly innerHeight lines, word-wrapped and
+// scrolled against innerWidth/innerHeight (the box interior, not the
+// terminal, per issue #1758's width-dependent-machinery AC): the split half
+// of the old renderDetailModal that stays width/height-parameterized rather
+// than reading Model.Width/Model.Height directly.
+func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) []string {
+	labels := make([]string, len(s.Labels))
+	for i, l := range s.Labels {
+		labels[i] = SanitizeControlSequences(l)
+	}
+	lines := []string{strings.Join(labels, ", ")}
+	switch {
+	case s.Loading:
+		lines = append(lines, "loading...")
+	case s.Err != nil:
+		lines = append(lines, fmt.Sprintf("failed to load: %s", SanitizeControlSequences(s.Err.Error())))
+	default:
+		lines = append(lines, windowDetailModalLines(s, innerHeight-floatModalChromeLines)...)
+	}
+	lines = append(lines, "[j/k] scroll · [esc] close")
+	for len(lines) < innerHeight {
+		lines = append(lines, "")
+	}
+	if len(lines) > innerHeight {
+		lines = lines[:innerHeight]
+	}
+	return lines
+}
+
+// renderDetailModalBox renders s as a bordered floating box exactly
+// width x height display cells: the "#number title" set in the top border
+// (AC1), the interior content renderDetailModalContent produces windowed to
+// the box's interior, and every row padded to width so compositeOverlay
+// fully occludes whatever list content sits behind it (issue #1758).
+func renderDetailModalBox(s DetailModalState, width, height int) string {
+	if width < 4 || height < 3 {
+		return ""
+	}
+	innerWidth := width - 2
+	innerHeight := height - 2
+	title := fmt.Sprintf("#%s %s", SanitizeControlSequences(s.Number), SanitizeControlSequences(s.Title))
+
+	lines := make([]string, 0, height)
+	lines = append(lines, detailModalBoxTopBorder(width, title))
+	for _, content := range renderDetailModalContent(s, innerWidth, innerHeight) {
+		lines = append(lines, "│"+padDisplay(content, innerWidth)+"│")
+	}
+	lines = append(lines, detailModalBoxBottomBorder(width))
+	return strings.Join(lines, "\n")
+}
+
 // renderDetailModal renders a Backlog issue's fullscreen ticket detail
 // modal: its number/title, its labels, and — once the async fetch lands — a
 // word-wrapped plain-text body plus Blocked-by/Blocks sections, scrolled
 // together through one Viewport (issue #1632). It opens the instant Enter
 // fires, before that fetch resolves, so a "loading..." placeholder stands in
-// for the body/blocker content until DetailModalLoadedMsg fills it in.
+// for the body/blocker content until DetailModalLoadedMsg fills it in. View
+// no longer calls this directly (issue #1758 floats renderDetailModalBox
+// over the list instead) — kept callable for the small-terminal fallback
+// ticket that AC promises will reuse it.
 func renderDetailModal(s DetailModalState, height int) string {
 	if height <= 0 {
 		return ""

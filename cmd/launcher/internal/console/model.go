@@ -772,8 +772,11 @@ func Update(m Model, msg Msg) Model {
 			// Lines is width-dependent (wrapText), unlike SidebarState.Lines,
 			// which is never wrapped — a resize must re-wrap it or the modal
 			// keeps showing line breaks sized for a width it no longer has
-			// (issue #1632 review finding).
-			m.DetailModal.Lines = detailModalLines(m.Width, *m.DetailModal)
+			// (issue #1632 review finding). Wrapped against the floating
+			// box's interior width, not m.Width directly — the box is
+			// narrower than the terminal (issue #1758).
+			innerWidth, _ := detailModalInnerSize(m.Width, m.Height)
+			m.DetailModal.Lines = detailModalLines(innerWidth, *m.DetailModal)
 		}
 	case SectionPrevMsg:
 		m = switchSection(m, (m.ActiveSection-1+sectionCount)%sectionCount)
@@ -796,7 +799,8 @@ func Update(m Model, msg Msg) Model {
 			m.DetailModal.BlockedBy = msg.BlockedBy
 			m.DetailModal.Blocks = msg.Blocks
 			m.DetailModal.Err = msg.Err
-			m.DetailModal.Lines = detailModalLines(m.Width, *m.DetailModal)
+			innerWidth, _ := detailModalInnerSize(m.Width, m.Height)
+			m.DetailModal.Lines = detailModalLines(innerWidth, *m.DetailModal)
 		}
 		if msg.Err == nil {
 			if m.DetailCache == nil {
@@ -859,9 +863,13 @@ func Update(m Model, msg Msg) Model {
 	}
 
 	if m.DetailModal != nil {
+		// Clamped against the floating box's own interior row budget, not
+		// Model.Height/detailModalChromeLines (the fullscreen renderer's
+		// figures) — the box is shorter than the terminal (issue #1758).
+		_, innerHeight := detailModalInnerSize(m.Width, m.Height)
 		vp := Viewport{offset: m.DetailModal.Offset}
 		vp.Scroll(0, len(m.DetailModal.Lines))
-		vp.SetHeight(m.Height - detailModalChromeLines)
+		vp.SetHeight(innerHeight - floatModalChromeLines)
 		m.DetailModal.Offset = vp.offset
 	}
 
