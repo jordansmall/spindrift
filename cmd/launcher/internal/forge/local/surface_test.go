@@ -29,7 +29,7 @@ func TestSurfaceIntegrationBranch_CreatesLocalBranchAtIntegrationTip(t *testing.
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	pwd := newCheckoutFixture(t, "main")
 
-	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent)
+	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent, parent.String())
 	if err != nil {
 		t.Fatalf("SurfaceIntegrationBranch: %v", err)
 	}
@@ -49,6 +49,40 @@ func TestSurfaceIntegrationBranch_CreatesLocalBranchAtIntegrationTip(t *testing.
 	}
 }
 
+// TestSurfaceIntegrationBranch_BranchNameDecoupledFromIntegrationKey
+// verifies SurfaceIntegrationBranch creates the local branch under
+// branchName while still fetching from parent's own Integration branch —
+// the two must be independently settable so a parentless ticket can surface
+// under a title-derived name while the Integration branch it fetches from,
+// and the Integration-branch key itself, stay keyed on the stable slug
+// (issue #1811).
+func TestSurfaceIntegrationBranch_BranchNameDecoupledFromIntegrationKey(t *testing.T) {
+	setGitIdentityEnv(t)
+	parent := ResolveParent("42", "")
+	const branchName = "seam-42"
+	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
+	pwd := newCheckoutFixture(t, "main")
+
+	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent, branchName)
+	if err != nil {
+		t.Fatalf("SurfaceIntegrationBranch: %v", err)
+	}
+	if skipped != "" {
+		t.Fatalf("skipped = %q, want none", skipped)
+	}
+	if !surfaced {
+		t.Fatalf("surfaced = false, want true")
+	}
+
+	want := revParse(t, repo.Bare, "refs/heads/"+IntegrationBranch(parent))
+	if got := revParse(t, pwd.dir, "refs/heads/"+branchName); got != want {
+		t.Errorf("refs/heads/%s = %s, want %s (Integration branch tip)", branchName, got, want)
+	}
+	if err := exec.Command("git", "-C", pwd.dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent.String()).Run(); err == nil {
+		t.Errorf("refs/heads/%s must not exist — the local branch name is branchName, not parent", parent)
+	}
+}
+
 // TestSurfaceIntegrationBranch_UnchangedReRunIsNoOp verifies re-surfacing an
 // already-surfaced, unchanged ticket reports surfaced=false — the idempotent
 // no-op AC (issue #1730 AC5) — rather than repeating the notice every run.
@@ -58,11 +92,11 @@ func TestSurfaceIntegrationBranch_UnchangedReRunIsNoOp(t *testing.T) {
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	pwd := newCheckoutFixture(t, "main")
 
-	if _, _, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent); err != nil {
+	if _, _, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent, parent.String()); err != nil {
 		t.Fatalf("SurfaceIntegrationBranch (first run): %v", err)
 	}
 
-	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent)
+	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent, parent.String())
 	if err != nil {
 		t.Fatalf("SurfaceIntegrationBranch (second run): %v", err)
 	}
@@ -85,7 +119,7 @@ func TestSurfaceIntegrationBranch_RefusesWhenTargetBranchCheckedOut(t *testing.T
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	pwd := newCheckoutFixture(t, parent.String())
 
-	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent)
+	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent, parent.String())
 	if err != nil {
 		t.Fatalf("SurfaceIntegrationBranch: %v", err)
 	}
@@ -110,7 +144,7 @@ func TestSurfaceIntegrationBranch_SkipsWhenIntegrationBranchAbsent(t *testing.T)
 	repo := forgetest.NewGitRepoFixture(t, "main")
 	pwd := newCheckoutFixture(t, "main")
 
-	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent)
+	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent, parent.String())
 	if err != nil {
 		t.Fatalf("SurfaceIntegrationBranch: %v", err)
 	}
@@ -138,7 +172,7 @@ func TestSurfaceIntegrationBranch_RefusesDivergedLocalBranch(t *testing.T) {
 	pwd.run("checkout", "main")
 	diverged := revParse(t, pwd.dir, parent.String())
 
-	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent)
+	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent, parent.String())
 	if err != nil {
 		t.Fatalf("SurfaceIntegrationBranch: %v", err)
 	}
