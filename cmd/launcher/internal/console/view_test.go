@@ -2652,8 +2652,15 @@ func TestView_BacklogSection_HasColumnHeader(t *testing.T) {
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "fix the thing"}}})
 
 	out := View(m)
-	if !strings.Contains(out, "title") {
-		t.Errorf("View() = %q, want the Backlog Section's column-header row", out)
+	var headerLine string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "title") && strings.Contains(l, "labels") {
+			headerLine = l
+			break
+		}
+	}
+	if !strings.Contains(headerLine, "issue") {
+		t.Errorf("header row = %q, want the number column labeled \"issue\"", headerLine)
 	}
 }
 
@@ -2697,6 +2704,16 @@ func TestView_WorkSection_RendersEvenWhenEmpty(t *testing.T) {
 	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
 	out := View(m)
+	var headerLine string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "state") && strings.Contains(l, "age") {
+			headerLine = l
+			break
+		}
+	}
+	if !strings.Contains(headerLine, "issue") {
+		t.Errorf("header row = %q, want the number column labeled \"issue\"", headerLine)
+	}
 	if !strings.Contains(out, "state") || !strings.Contains(out, "age") {
 		t.Errorf("View() = %q, want the work Section's column-header row even with no picks", out)
 	}

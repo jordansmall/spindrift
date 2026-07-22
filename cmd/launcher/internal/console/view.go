@@ -634,7 +634,7 @@ func renderBacklogSection(m Model, budget int, compact bool) string {
 	// space separator — matching it here keeps the header word aligned with
 	// where the label text actually starts, not the bracket (issue #1500
 	// review).
-	headerText := fmt.Sprintf("  %s %s  labels", clip("#", numberColWidth, true), clip("title", titleWidth, true))
+	headerText := fmt.Sprintf("  %s %s  labels", clip("issue", numberColWidth, true), clip("title", titleWidth, true))
 	if compact {
 		// The classic header's aligned column words no longer describe the
 		// compact row's own two-line shape — echo its own header-line format
@@ -716,7 +716,7 @@ func renderWorkSection(m Model, budget int, compact bool) string {
 		state := roleStyle(role).Render(clip(p.State.String(), stateColWidth, true))
 		rows = append(rows, fmt.Sprintf("%s %s %s %s %s%s\n", marker, clip("#"+p.Number, numberColWidth, true), clip(title, titleWidth, true), state, clip(p.Age, ageColWidth, true), clip(extras.String(), extrasWidth, false)))
 	}
-	headerText := fmt.Sprintf("  %s %s %s %s", clip("#", numberColWidth, true), clip("title", titleWidth, true), clip("state", stateColWidth, true), "age")
+	headerText := fmt.Sprintf("  %s %s %s %s", clip("issue", numberColWidth, true), clip("title", titleWidth, true), clip("state", stateColWidth, true), "age")
 	if compact {
 		// The classic header's aligned column words no longer describe the
 		// compact row's own two-line shape — echo its own header-line format

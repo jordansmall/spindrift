@@ -4,5 +4,5 @@
 |ℹ notice: a live dogfood loop (.dogfood.pid) is competing for the same queue  |
 +------------------------------------------------------------------------------+
 [1] Backlog [2] Running(1) [3] Held(1) [4] Settled(1) [5] Failed(1) [H/L,1-5]
-  #       title                                  labels
+  issue   title                                  labels
 [/] filter · [p] pick · [r] refresh
