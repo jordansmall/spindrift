@@ -840,7 +840,7 @@ func Update(m Model, msg Msg) Model {
 		// reasoning for the same thing. CursorJumpToLastMsg ("G") shares this
 		// drag-into-view follow, not CursorJumpToFirstMsg ("gg"), which sets
 		// Offset to 0 directly per its own AC (issue #1628).
-		vp := Viewport{cursor: m.Cursor, offset: m.Offset, height: queueItemBudget(m, listContentBudget(m), total)}
+		vp := Viewport{cursor: m.Cursor, offset: m.Offset, height: queueItemBudget(m, listContentBudget(m))}
 		vp.MoveCursor(0, total)
 		m.Offset = vp.offset
 	}

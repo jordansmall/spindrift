@@ -667,11 +667,9 @@ func TestTea_ScrollKeys_PageSizeTracksViewportHeight(t *testing.T) {
 // item budget instead of the rendered content-row count would overshoot the
 // "N more below" line held back at each truncated screen and silently skip
 // the row right past the fold on every page boundary (issue #1037 AC1). Rows
-// 4 and 8, not 6 and 12: columnItemBudget holds one further row back for a
-// truncated Section's own trailing newline (issue #1794), and the body
-// budget above it holds one further row back for View()'s own guaranteed
-// trailing "\n" (issue #1825) — together shrinking each page from 5 rows to
-// 4 (the two reservations land on the same row here, not two rows lost).
+// 4 and 8, not 5 and 10: the body budget holds one row back for View()'s own
+// guaranteed trailing "\n" (issue #1825), shrinking each page from 5 rows to
+// 4.
 func TestTea_ScrollKeys_PageDown_SkipsNoRow(t *testing.T) {
 	f := forge.NewFake()
 	for i := 0; i < 50; i++ {
