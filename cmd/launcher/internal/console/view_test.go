@@ -1383,8 +1383,13 @@ func TestView_SidebarOpen_MinimumFittingWidth_PanelsFitTerminalWidth(t *testing.
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
 
 	out := View(m)
+	// lipgloss.Width, not runewidth.StringWidth: on a color-capable ambient
+	// TERM the panel border carries ANSI codes (ADR 0031), which
+	// runewidth.StringWidth counts as display width and lipgloss's
+	// ANSI-aware measurement does not (mirrors the rebuild-banner width
+	// check above).
 	for i, line := range strings.Split(out, "\n") {
-		if got := runewidth.StringWidth(line); got > width {
+		if got := lipgloss.Width(line); got > width {
 			t.Errorf("View() line %d is %d columns wide, want at most the terminal's %d: %q", i, got, width, line)
 		}
 	}
