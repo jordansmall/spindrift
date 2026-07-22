@@ -252,14 +252,21 @@ func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue,
 		fmt.Printf("    #%s  landing=%s  status=stuck  !! branch %s not merged into %s\n", iss.Number, iss.Landing, landing.Branch, local.IntegrationBranch(parent))
 		return nil
 	}
+	if l.lr == nil {
+		// No LandingRecorder to persist the upgrade through: closing anyway
+		// would leave the issue closed with a stale BranchRef forever, worse
+		// than leaving it open for a later sweep with a working tracker.
+		// Unreachable today (LocalTracker, the only IssueTracker this path
+		// ever runs against, always implements LandingRecorder).
+		fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! branch %s merged but no LandingRecorder to persist the repaired landing\n", iss.Number, iss.Landing, landing.Branch)
+		return nil
+	}
 	tip, err := l.repair.IntegrationTip(parent)
 	if err != nil {
 		return fmt.Errorf("reconcile issue %s: resolve integration tip for %s: %w", iss.Number, parent, err)
 	}
-	if l.lr != nil {
-		if err := l.lr.RecordLanding(iss.Number, tip); err != nil {
-			return fmt.Errorf("reconcile issue %s: record repaired landing: %w", iss.Number, err)
-		}
+	if err := l.lr.RecordLanding(iss.Number, tip); err != nil {
+		return fmt.Errorf("reconcile issue %s: record repaired landing: %w", iss.Number, err)
 	}
 	fmt.Printf("    #%s  landing=%s  status=landing-repaired  repaired-landing=%s\n", iss.Number, iss.Landing, tip)
 	return l.close(res, iss.Number)
