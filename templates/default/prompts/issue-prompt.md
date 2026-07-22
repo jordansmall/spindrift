@@ -178,13 +178,11 @@ gate): skip OPEN A PULL REQUEST below entirely.
 
 **`CODE_FORGE=local`** (host-mediated Code Forge — no PR, no CI-watch, no
 network; the launcher lands your branch after this container exits): skip
-OPEN A PULL REQUEST below entirely.
+OPEN A PULL REQUEST below entirely. Do NOT `git push` — the repo you cloned
+from is mounted read-only — and do NOT run `git bundle create` yourself: the
+Harness bundles your commits out of the container after you exit.
 
-1. `git bundle create /outbox/seam.bundle origin/${BASE_BRANCH}..${BRANCH}`
-   — do NOT `git push`: the repo you cloned from (`/repo`) is mounted
-   read-only, and the bundle is the only way your finished branch leaves
-   this container.
-2. Print exactly one line as your final output and stop — raw plain text, not
+1. Print exactly one line as your final output and stop — raw plain text, not
    wrapped in backticks, a code fence, or any other markdown formatting:
 
    SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ready note=<short reason>
