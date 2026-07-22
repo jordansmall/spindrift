@@ -154,6 +154,24 @@ type Fake struct {
 	// VerifyLandingCalls records every VerifyLanding invocation in order.
 	VerifyLandingCalls []string
 
+	// branchMergedIntoIntegrationResults scripts BranchMergedIntoIntegration's
+	// result per (branch, parent) pair, defaulting to merged=false, nil when
+	// unscripted — the same "stays open" default verifyLandingResults uses.
+	// Only reachable through AsLocal(), the only wrapper implementing
+	// forge.LandingRepair.
+	branchMergedIntoIntegrationResults map[branchParentKey]branchIntegrationResult
+	// BranchMergedIntoIntegrationCalls records every
+	// BranchMergedIntoIntegration invocation in order.
+	BranchMergedIntoIntegrationCalls []BranchMergedIntoIntegrationCall
+
+	// integrationTipResults scripts IntegrationTip's success result per
+	// parent. Only reachable through AsLocal().
+	integrationTipResults map[string]string
+	// IntegrationTipErr, if non-nil, is returned by every IntegrationTip call.
+	IntegrationTipErr error
+	// IntegrationTipCalls records every IntegrationTip invocation in order.
+	IntegrationTipCalls []string
+
 	// AutoMergeAllowed controls what CanAutoMerge returns (default false).
 	AutoMergeAllowed bool
 	// AutoMergeErr, if non-nil, is returned by CanAutoMerge.
@@ -847,6 +865,74 @@ func (f *Fake) verifyLanding(landing string) (bool, error) {
 	return res.merged, res.err
 }
 
+// branchParentKey keys branchMergedIntoIntegrationResults on the
+// (branch, parent) pair forge.LandingRepair's BranchMergedIntoIntegration
+// takes both of explicitly.
+type branchParentKey struct{ branch, parent string }
+
+// branchIntegrationResult scripts a single SetBranchMergedIntoIntegration entry.
+type branchIntegrationResult struct {
+	merged bool
+	err    error
+}
+
+// BranchMergedIntoIntegrationCall records a single BranchMergedIntoIntegration
+// invocation.
+type BranchMergedIntoIntegrationCall struct {
+	Branch, Parent string
+}
+
+// SetBranchMergedIntoIntegration scripts BranchMergedIntoIntegration(branch,
+// parent)'s result — merged, or a genuine error distinct from the normal
+// "not merged" outcome, which callers script as merged=false, err=nil
+// instead.
+func (f *Fake) SetBranchMergedIntoIntegration(branch, parent string, merged bool, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.branchMergedIntoIntegrationResults == nil {
+		f.branchMergedIntoIntegrationResults = map[branchParentKey]branchIntegrationResult{}
+	}
+	f.branchMergedIntoIntegrationResults[branchParentKey{branch, parent}] = branchIntegrationResult{merged: merged, err: err}
+}
+
+// branchMergedIntoIntegration backs the optional LandingRepair surface (ADR
+// 0029, ADR 0033, issue #1809), the same AsLocal()-only restriction as
+// relayBundle above. An unscripted (branch, parent) pair defaults to
+// merged=false, nil — the same posture as an unscripted VerifyLanding call.
+func (f *Fake) branchMergedIntoIntegration(branch, parent string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.BranchMergedIntoIntegrationCalls = append(f.BranchMergedIntoIntegrationCalls, BranchMergedIntoIntegrationCall{Branch: branch, Parent: parent})
+	res := f.branchMergedIntoIntegrationResults[branchParentKey{branch, parent}]
+	return res.merged, res.err
+}
+
+// SetIntegrationTip scripts IntegrationTip(parent)'s success result — the
+// resolved landing-ready "<branch>@<sha>" reference IntegrationTipErr's
+// precedence overrides for every call, mirroring LandingRefErr over
+// LandingRefValue.
+func (f *Fake) SetIntegrationTip(parent, ref string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.integrationTipResults == nil {
+		f.integrationTipResults = map[string]string{}
+	}
+	f.integrationTipResults[parent] = ref
+}
+
+// integrationTip backs the optional LandingRepair surface (ADR 0029, ADR
+// 0033, issue #1809), the same AsLocal()-only restriction as relayBundle
+// above.
+func (f *Fake) integrationTip(parent string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.IntegrationTipCalls = append(f.IntegrationTipCalls, parent)
+	if f.IntegrationTipErr != nil {
+		return "", f.IntegrationTipErr
+	}
+	return f.integrationTipResults[parent], nil
+}
+
 // CloseIssue implements the optional IssueCloser surface (ADR 0029), setting
 // the issue's State to IssueClosed and recording the call for tests to
 // assert against.
@@ -929,8 +1015,13 @@ func (f *Fake) AsLocal() CodeForge { return localForge{pushOnlyForge{f}} }
 func (l localForge) RelayBundle(outboxDir, ref string) error    { return l.f.relayBundle(outboxDir, ref) }
 func (l localForge) LandingRef() (string, error)                { return l.f.landingRef() }
 func (l localForge) VerifyLanding(landing string) (bool, error) { return l.f.verifyLanding(landing) }
+func (l localForge) BranchMergedIntoIntegration(branch, parent string) (bool, error) {
+	return l.f.branchMergedIntoIntegration(branch, parent)
+}
+func (l localForge) IntegrationTip(parent string) (string, error) { return l.f.integrationTip(parent) }
 
 var _ CodeForge = localForge{}
 var _ BundleRelay = localForge{}
 var _ LandingRef = localForge{}
 var _ LandingVerifier = localForge{}
+var _ LandingRepair = localForge{}
