@@ -47,7 +47,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 
 | attr path | env var | default | description |
 |---|---|---|---|
-| `settings.concurrency.continuousDispatch` | `CONTINUOUS_DISPATCH` | `` | when non-empty, dispatch runs as a long-running slot-refill loop instead of a single wave (#527): as each Box finishes, the launcher re-discovers the queue and refills the freed slot when the image-freshness probe (#526) reports fresh; a rebuild-needed result stops refilling, lets in-flight Boxes finish, and exits with the new documented code (see README's exit-code table). Off by default; applies to queue discovery only — ISSUE_NUMBER-claimed and selective dispatch ignore it |
+| `settings.concurrency.continuousDispatch` | `CONTINUOUS_DISPATCH` | `` | when non-empty, dispatch runs as a long-running slot-refill loop instead of a single wave (#527): as each Box finishes, the launcher re-discovers the queue and refills the freed slot when the image-freshness probe (#526) reports fresh; a rebuild-needed result stops refilling, lets in-flight Boxes finish, and exits with the new documented code (see the exit-code table in docs/reference.md's Dogfood loop section, under Termination). Off by default; applies to queue discovery only — ISSUE_NUMBER-claimed and selective dispatch ignore it |
 | `settings.concurrency.maxJobs` | `MAX_JOBS` | `0` | caps the wave size; 0 means uncapped |
 | `settings.concurrency.maxParallel` | `MAX_PARALLEL` | `3` | maximum concurrent agent containers |
 | `settings.concurrency.overlapGate` | `OVERLAP_GATE` | `defer` | declared ## Touches overlap policy: defer (hold a Dispatchable issue whose declared touch-set intersects an InProgress issue's, retrying once the collider completes), off (disable the check) |
