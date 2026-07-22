@@ -319,15 +319,30 @@ func (e *execClient) EnqueueAutoMerge(prURL string) error {
 // not the driver already flipped it itself — without any extra
 // already-ready classification here.
 func (e *execClient) MarkReady(prURL string) error {
+	return runGHReadyToggle(prURL, "pr", "ready", prURL)
+}
+
+// MarkDraft flips the PR back to draft via `gh pr ready --undo` — the
+// inverse of MarkReady. Idempotent on gh's own side the same way: `gh pr
+// ready --undo` on a PR that's already a draft prints a notice to stderr
+// but exits 0.
+func (e *execClient) MarkDraft(prURL string) error {
+	return runGHReadyToggle(prURL, "pr", "ready", "--undo", prURL)
+}
+
+// runGHReadyToggle runs a `gh` command that flips a PR's ready/draft state
+// (MarkReady's `gh pr ready` or MarkDraft's `gh pr ready --undo`), wrapping
+// any failure with the command's own stderr for context.
+func runGHReadyToggle(prURL string, args ...string) error {
 	var stderr bytes.Buffer
-	cmd := exec.Command("gh", "pr", "ready", prURL)
+	cmd := exec.Command("gh", args...)
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		suffix := ""
 		if s := strings.TrimSpace(stderr.String()); s != "" {
 			suffix = ": " + s
 		}
-		return fmt.Errorf("gh pr ready %s: %w%s", prURL, err, suffix)
+		return fmt.Errorf("gh %s %s: %w%s", strings.Join(args[:len(args)-1], " "), prURL, err, suffix)
 	}
 	return nil
 }

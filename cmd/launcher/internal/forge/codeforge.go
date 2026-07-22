@@ -140,4 +140,8 @@ type PRForge interface {
 	// MarkReady flips the PR out of draft. Marking an already-ready PR is
 	// idempotent: it succeeds without error rather than reporting a failure.
 	MarkReady(prURL string) error
+	// MarkDraft flips the PR back to draft — the inverse of MarkReady.
+	// Marking an already-draft PR is idempotent: it succeeds without error
+	// rather than reporting a failure.
+	MarkDraft(prURL string) error
 }
