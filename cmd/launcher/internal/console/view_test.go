@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -968,6 +969,115 @@ func TestView_DetailModal_FloatsOverList_BannerStillVisible(t *testing.T) {
 	}
 }
 
+// TestView_DetailModal_TinyTerminal_FallsBackToFullscreen verifies a
+// terminal too narrow or short for a legible floating box (below
+// detailModalFits' threshold) renders the detail modal via the existing
+// fullscreen renderer instead of a cramped floating box — mirroring the
+// sidebar's sidebarFits degradation (issue #1759 AC).
+func TestView_DetailModal_TinyTerminal_FallsBackToFullscreen(t *testing.T) {
+	cases := []struct {
+		name          string
+		width, height int
+	}{
+		{"width short", detailModalBoxMinWidth - 1, 24},
+		{"height short", 80, detailModalBoxMinHeight - 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := Update(NewModel(), SizeChangedMsg{Width: c.width, Height: c.height})
+			m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+
+			out := View(m)
+			if strings.Contains(out, "spindrift") {
+				t.Errorf("View() = %q, want the fullscreen fallback to replace the banner entirely, not float over it", out)
+			}
+			if strings.Contains(out, "╭") || strings.Contains(out, "╰") {
+				t.Errorf("View() = %q, want no floating box border on a too-small terminal", out)
+			}
+			if !strings.Contains(out, "#42 fix the thing") {
+				t.Errorf("View() = %q, want the fullscreen renderer's own number/title line", out)
+			}
+		})
+	}
+}
+
+// detailModalBoxBorderWidth returns the display width of out's floating
+// detail modal box itself — just the "╭...╮" span of its top border row,
+// not the full composited terminal row around it (compositeOverlay splices
+// the box into a still-visible base row, so the row as a whole is always
+// terminal-width; the box's own width is the corner-to-corner span) — the
+// box's actual rendered outer width, independent of detailModalBoxSize's own
+// math, so tests can check the box View() produced without recomputing the
+// expected value the same way the code does.
+func detailModalBoxBorderWidth(t *testing.T, out string) int {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		start := strings.Index(line, "╭")
+		if start < 0 {
+			continue
+		}
+		end := strings.Index(line[start:], "╮")
+		if end < 0 {
+			t.Fatalf("View() = %q, want a matching closing corner on the top border line", out)
+		}
+		return runewidth.StringWidth(line[start : start+end+len("╮")])
+	}
+	t.Fatalf("View() = %q, want a floating box top border line", out)
+	return 0
+}
+
+// detailModalBoxOriginX returns the display column out's floating detail
+// modal box's top-left corner ("╭") lands at — the leading prefix on that
+// row measured with ansi.StringWidth so any styled base content (e.g. a
+// colored Section tab sharing the same physical row) doesn't skew the
+// count, unlike a plain byte or rune index into the line.
+func detailModalBoxOriginX(t *testing.T, out string) int {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if idx := strings.Index(line, "╭"); idx >= 0 {
+			return ansi.StringWidth(line[:idx])
+		}
+	}
+	t.Fatalf("View() = %q, want a floating box top border line", out)
+	return 0
+}
+
+// TestView_DetailModal_Resize_RecentersAndResizesBox verifies a resize while
+// the detail modal is open re-sizes and re-centers the floating box rather
+// than leaving it pinned at whatever size it opened at (issue #1759 AC).
+func TestView_DetailModal_Resize_RecentersAndResizesBox(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 60, Height: 30})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	outSmall := View(m)
+	smallWidth := detailModalBoxBorderWidth(t, outSmall)
+	smallX := detailModalBoxOriginX(t, outSmall)
+
+	m = Update(m, SizeChangedMsg{Width: 120, Height: 30})
+	outGrown := View(m)
+	grownWidth := detailModalBoxBorderWidth(t, outGrown)
+	grownX := detailModalBoxOriginX(t, outGrown)
+
+	wantSmall, _ := detailModalBoxSize(60, 30)
+	wantGrown, _ := detailModalBoxSize(120, 30)
+	wantSmallX, _ := detailModalBoxOrigin(60, 30, wantSmall, 0)
+	wantGrownX, _ := detailModalBoxOrigin(120, 30, wantGrown, 0)
+	if smallX != wantSmallX {
+		t.Errorf("box origin x at 60-column terminal = %d, want %d (centered)", smallX, wantSmallX)
+	}
+	if grownX != wantGrownX {
+		t.Errorf("box origin x at 120-column terminal = %d, want %d (re-centered)", grownX, wantGrownX)
+	}
+	if smallWidth != wantSmall {
+		t.Errorf("box border width at 60-column terminal = %d, want %d", smallWidth, wantSmall)
+	}
+	if grownWidth != wantGrown {
+		t.Errorf("box border width at 120-column terminal = %d, want %d", grownWidth, wantGrown)
+	}
+	if grownWidth <= smallWidth {
+		t.Errorf("box border width after widening = %d, want wider than the original %d", grownWidth, smallWidth)
+	}
+}
+
 // TestView_DetailModal_BorderShowsNumberAndTitle verifies the floating
 // detail modal box has a visible border, with the ticket's "#number title"
 // set in the box's top border line rather than as its own interior content
@@ -1143,27 +1253,102 @@ func TestView_DetailModal_NoBlockersOrBlocks_ShowsNoSectionClutter(t *testing.T)
 // detail modal's body scrolls: once its content overflows the viewport,
 // DetailModalScrollMsg moves which lines are visible, hiding everything
 // before the new offset (issue #1632 AC — "the body scrolls with j/k and
-// the arrow keys"). Height is sized so the floating box's own interior body
-// budget (issue #1758: 2*margin + 2 border rows + the no-labels case's 1
-// label line + 1 footer line, leaving exactly 2 rows for the body) shows
-// exactly 2 of the 4 body lines at once, the same "content overflows the
-// viewport" setup the fullscreen renderer's version of this test used
-// against detailModalChromeLines.
+// the arrow keys"). Height is pinned to detailModalBoxMinHeight, the
+// smallest terminal still on the floating path (issue #1759) — its interior
+// body budget (2 border rows, the no-labels case's 1 label line, and 1
+// footer line subtracted, issue #1772) leaves bodyBudget rows, short of the
+// 8-line body so the scroll actually clips something, the same "content
+// overflows the viewport" setup the fullscreen renderer's version of this
+// test used against detailModalChromeLines.
 func TestView_DetailModal_ScrollOffset_HidesLinesBeforeOffset(t *testing.T) {
-	const bodyBudget = 2
-	const labelAndFooterLines = 2 // no Labels set below, so 1 empty label line + 1 footer line
-	height := 2*detailModalBoxMargin + 2 + labelAndFooterLines + bodyBudget
-	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: height})
+	const labelLines = 1 // no Labels set below, so wrapText produces 1 empty line
+	const bodyBudget = detailModalBoxMinHeight - 2 - labelLines - detailModalFooterLines
+	lines := make([]string, 8)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: detailModalBoxMinHeight})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
-	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: "l0\nl1\nl2\nl3"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: strings.Join(lines, "\n")})
 	m = Update(m, DetailModalScrollMsg{Delta: 2})
 
 	out := View(m)
 	if strings.Contains(out, "l0") || strings.Contains(out, "l1") {
 		t.Errorf("View() = %q, want lines before the offset hidden", out)
 	}
-	if !strings.Contains(out, "l2") || !strings.Contains(out, "l3") {
+	if !strings.Contains(out, "l2") || !strings.Contains(out, fmt.Sprintf("l%d", 1+bodyBudget)) {
 		t.Errorf("View() = %q, want lines from the offset onward", out)
+	}
+}
+
+// TestDetailModalBoxSize_WideTerminal_ClampsToMax verifies the floating
+// detail modal box never grows edge-to-edge on a large terminal: its width
+// and height are capped at detailModalBoxMax{Width,Height} rather than
+// scaling without bound (issue #1759 AC).
+func TestDetailModalBoxSize_WideTerminal_ClampsToMax(t *testing.T) {
+	width, height := detailModalBoxSize(300, 100)
+	if width != detailModalBoxMaxWidth {
+		t.Errorf("detailModalBoxSize(300, 100) width = %d, want %d (clamped to max)", width, detailModalBoxMaxWidth)
+	}
+	if height != detailModalBoxMaxHeight {
+		t.Errorf("detailModalBoxSize(300, 100) height = %d, want %d (clamped to max)", height, detailModalBoxMaxHeight)
+	}
+}
+
+// TestDetailModalBoxSize_MidTerminal_SizedToFraction verifies the floating
+// detail modal box scales with the terminal rather than shrinking by a fixed
+// margin: on a terminal well under the max clamp, the box width/height are a
+// fraction of the terminal's own dimensions (issue #1759 AC).
+func TestDetailModalBoxSize_MidTerminal_SizedToFraction(t *testing.T) {
+	width, height := detailModalBoxSize(60, 30)
+	wantWidth := 60 * detailModalBoxWidthPercent / 100
+	wantHeight := 30 * detailModalBoxHeightPercent / 100
+	if width != wantWidth {
+		t.Errorf("detailModalBoxSize(60, 30) width = %d, want %d (%d%% of terminal width)", width, wantWidth, detailModalBoxWidthPercent)
+	}
+	if height != wantHeight {
+		t.Errorf("detailModalBoxSize(60, 30) height = %d, want %d (%d%% of terminal height)", height, wantHeight, detailModalBoxHeightPercent)
+	}
+}
+
+// TestDetailModalBoxSize_NearFloorTerminal_ClampsToMin verifies a terminal
+// just above detailModalFits' own threshold — where the width/height
+// fraction would otherwise fall short of the floor — clamps the box up to
+// detailModalBoxMin{Width,Height} rather than the smaller fraction (issue
+// #1759 AC's "clamped to a minimum").
+func TestDetailModalBoxSize_NearFloorTerminal_ClampsToMin(t *testing.T) {
+	width, height := detailModalBoxSize(detailModalBoxMinWidth, detailModalBoxMinHeight)
+	if width != detailModalBoxMinWidth {
+		t.Errorf("detailModalBoxSize(%d, %d) width = %d, want %d (clamped to min)", detailModalBoxMinWidth, detailModalBoxMinHeight, width, detailModalBoxMinWidth)
+	}
+	if height != detailModalBoxMinHeight {
+		t.Errorf("detailModalBoxSize(%d, %d) height = %d, want %d (clamped to min)", detailModalBoxMinWidth, detailModalBoxMinHeight, height, detailModalBoxMinHeight)
+	}
+}
+
+// TestDetailModalFits_BelowMinDimension_ReturnsFalse verifies detailModalFits
+// — the single predicate gating floating-vs-fullscreen (issue #1759 AC),
+// sidebarFits' detail-modal analogue — rejects a terminal narrower or
+// shorter than the box's own legibility floor, and accepts one that meets
+// both floors.
+func TestDetailModalFits_BelowMinDimension_ReturnsFalse(t *testing.T) {
+	cases := []struct {
+		name          string
+		width, height int
+		want          bool
+	}{
+		{"both at floor", detailModalBoxMinWidth, detailModalBoxMinHeight, true},
+		{"width one short", detailModalBoxMinWidth - 1, detailModalBoxMinHeight, false},
+		{"height one short", detailModalBoxMinWidth, detailModalBoxMinHeight - 1, false},
+		{"plenty of room", detailModalBoxMinWidth * 2, detailModalBoxMinHeight * 2, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := Model{Width: c.width, Height: c.height}
+			if got := detailModalFits(m); got != c.want {
+				t.Errorf("detailModalFits(Width:%d, Height:%d) = %v, want %v", c.width, c.height, got, c.want)
+			}
+		})
 	}
 }
 

@@ -160,10 +160,10 @@ type Model struct {
 	// starts docked rather than still forced fullscreen from a prior
 	// session.
 	SidebarZoom bool
-	// DetailModal is the open Backlog row's fullscreen ticket detail modal,
-	// if any — nil when nothing is open. Unlike Sidebar, it is never docked:
-	// a Backlog row's title/body/blockers are read-heavy content, not a
-	// live tail, so it always takes over fullscreen (issue #1632).
+	// DetailModal is the open Backlog row's ticket detail modal, if any —
+	// nil when nothing is open. It floats as a bordered box over the
+	// still-rendered list (issue #1758), falling back to a fullscreen
+	// takeover only on a terminal too small for a legible box (issue #1759).
 	DetailModal *DetailModalState
 	// DetailCache holds every ticket detail modal's fully-loaded content
 	// this session, keyed by issue number, so reopening the same ticket
@@ -766,17 +766,18 @@ func Update(m Model, msg Msg) Model {
 		m.Mode = ModeList
 		m.Filter = m.preEditFilter
 	case SizeChangedMsg:
-		m.Width = msg.Width
-		m.Height = msg.Height
+		m.Width = clampSize(msg.Width)
+		m.Height = clampSize(msg.Height)
 		if m.DetailModal != nil && !m.DetailModal.Loading && m.DetailModal.Err == nil {
 			// Lines is width-dependent (wrapText), unlike SidebarState.Lines,
 			// which is never wrapped — a resize must re-wrap it or the modal
 			// keeps showing line breaks sized for a width it no longer has
-			// (issue #1632 review finding). Wrapped against the floating
-			// box's interior width, not m.Width directly — the box is
-			// narrower than the terminal (issue #1758).
-			innerWidth, _ := detailModalInnerSize(m.Width, m.Height)
-			m.DetailModal.Lines = detailModalLines(innerWidth, *m.DetailModal)
+			// (issue #1632 review finding). Wrapped against whichever width
+			// the render path is about to show — the floating box's interior
+			// width, or the fullscreen renderer's raw width below the
+			// detailModalFits threshold (issue #1759) — not always the box
+			// interior, which is narrower than the terminal (issue #1758).
+			m.DetailModal.Lines = detailModalLines(detailModalWrapWidth(m), *m.DetailModal)
 		}
 	case SectionPrevMsg:
 		m = switchSection(m, (m.ActiveSection-1+sectionCount)%sectionCount)
@@ -799,8 +800,7 @@ func Update(m Model, msg Msg) Model {
 			m.DetailModal.BlockedBy = msg.BlockedBy
 			m.DetailModal.Blocks = msg.Blocks
 			m.DetailModal.Err = msg.Err
-			innerWidth, _ := detailModalInnerSize(m.Width, m.Height)
-			m.DetailModal.Lines = detailModalLines(innerWidth, *m.DetailModal)
+			m.DetailModal.Lines = detailModalLines(detailModalWrapWidth(m), *m.DetailModal)
 		}
 		if msg.Err == nil {
 			if m.DetailCache == nil {
@@ -863,19 +863,19 @@ func Update(m Model, msg Msg) Model {
 	}
 
 	if m.DetailModal != nil {
-		// Clamped against the floating box's own interior row budget, not
-		// Model.Height/detailModalChromeLines (the fullscreen renderer's
-		// figures) — the box is shorter than the terminal (issue #1758).
-		// The labels line count is folded in dynamically rather than
-		// assumed to be 1 row, since long/many labels now wrap onto further
-		// interior rows (issue #1772) — this clamp must budget the body the
-		// same way renderDetailModalContent does, or it targets a body
-		// budget the render doesn't actually have room to show.
-		innerWidth, innerHeight := detailModalInnerSize(m.Width, m.Height)
-		labelLines := detailModalLabelLines(m.DetailModal.Labels, innerWidth)
+		// Clamped against whichever row budget the render path is about to
+		// show — the floating box's own interior budget, or the fullscreen
+		// renderer's below the detailModalFits threshold (issue #1759) — not
+		// always the box interior, which is shorter than the terminal
+		// (issue #1758). detailModalScrollBudget folds the labels line count
+		// in dynamically rather than assuming it's always 1 row, since
+		// long/many labels now wrap onto further interior rows (issue
+		// #1772) — this clamp must budget the body the same way
+		// renderDetailModalContent does, or it targets a body budget the
+		// render doesn't actually have room to show.
 		vp := Viewport{offset: m.DetailModal.Offset}
 		vp.Scroll(0, len(m.DetailModal.Lines))
-		vp.SetHeight(innerHeight - len(labelLines) - detailModalFooterLines)
+		vp.SetHeight(detailModalScrollBudget(m))
 		m.DetailModal.Offset = vp.offset
 	}
 
