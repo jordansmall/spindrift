@@ -78,12 +78,21 @@ func ResolveParent(it forge.IssueTracker, num string) local.SanitizedParent {
 // across Boxes: w.mu serializes every call, including each cache miss's own
 // it.Issue() lookup, trading a little concurrency for a lock this simple.
 func (w *Wired) ResolveParent(num string) local.SanitizedParent {
+	return w.cached(num, func() local.SanitizedParent { return ResolveParent(w.it, num) })
+}
+
+// cached returns num's memoized parent, computing and storing it via resolve
+// on a cache miss. Factored out of ResolveParent so Surface can populate the
+// same cache from an issue it already has in hand (rawParent straight off
+// AllIssues' result) instead of resolve's it.Issue(num) re-fetching a file
+// Surface just read.
+func (w *Wired) cached(num string, resolve func() local.SanitizedParent) local.SanitizedParent {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if p, ok := w.resolved[num]; ok {
 		return p
 	}
-	p := ResolveParent(w.it, num)
+	p := resolve()
 	w.resolved[num] = p
 	return p
 }
@@ -133,7 +142,13 @@ func (w *Wired) Surface(pwd string, out io.Writer) error {
 	groups := map[local.SanitizedParent][]forge.Issue{}
 	var order []local.SanitizedParent
 	for _, iss := range issues {
-		parent := w.ResolveParent(iss.Number)
+		// w.cached, not w.ResolveParent: iss.Parent is already in hand from
+		// AllIssues above, so resolving from it directly (matching the
+		// package-level ResolveParent's own it.Issue+sanitize shape) avoids
+		// re-fetching the issue file a second time on a cache miss, while
+		// still sharing and populating the same memoized value CodeForgeForIssue
+		// and any other caller of w.ResolveParent(iss.Number) will reuse.
+		parent := w.cached(iss.Number, func() local.SanitizedParent { return local.ResolveParent(iss.Number, iss.Parent) })
 		if _, seen := groups[parent]; !seen {
 			order = append(order, parent)
 		}
