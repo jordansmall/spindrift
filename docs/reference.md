@@ -624,6 +624,13 @@ errors.
 
 ### Runtime flow
 
+The Box never flips its own PR ready — it opens a draft and stays there; the
+launcher is the sole writer of the draft→ready transition, firing it once CI
+confirms green. [ADR 0032](adr/0032-launcher-owns-pr-readiness.md) records
+why draft-ness moved from a Driver-owned signal to a launcher-owned one, and
+supersedes the draft-until-ready description issue #1614 originally added
+here.
+
 ```
 spindrift dispatch   (the nix-built Go launcher, host-side)
   └─ gh issue list --label ready-for-agent        (find the work)
@@ -1059,6 +1066,15 @@ explicit, opt-in operator action:
 - **No PR was opened yet (or only a draft PR)** — there is nothing to adopt.
   Move it back to `ready-for-agent` to re-dispatch (or to `agent-failed` to park
   it).
+
+This is the only adoption path left. A Box exit *in the same `dispatch` run*
+that has no parseable outcome line no longer infers readiness from an open
+PR's draft-ness either — it always reports `status=blocked` and demotes the
+issue, whether the PR is draft or not, leaving `agent-recover` as the sole
+route back in either case. See [ADR
+0032](adr/0032-launcher-owns-pr-readiness.md): a PR is only ever non-draft
+because the launcher's own `MarkReady` put it there at confirmed green, so
+draft-ness is no longer a signal either side infers Driver intent from.
 
 ```sh
 gh issue edit <n> --repo owner/repo --add-label ready-for-agent --remove-label agent-in-progress
