@@ -94,6 +94,25 @@ func TestLocalCodeForge_BranchMergedIntoIntegration_FalseForNonexistentBranch(t 
 	}
 }
 
+// TestLocalCodeForge_BranchMergedIntoIntegration_ErrorsOnGenuineGitFailure
+// asserts BranchMergedIntoIntegration returns a real error — not
+// merged=false — when git itself cannot even run, distinct from the
+// "branch not found" outcome above, which comes from git running fine and
+// reporting no such ref.
+func TestLocalCodeForge_BranchMergedIntoIntegration_ErrorsOnGenuineGitFailure(t *testing.T) {
+	setGitIdentityEnv(t)
+
+	const parent = "1694"
+	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	repair := cf.(forge.LandingRepair)
+
+	t.Setenv("PATH", "")
+	if _, err := repair.BranchMergedIntoIntegration("agent/issue-1698", parent); err == nil {
+		t.Fatal("BranchMergedIntoIntegration with no git on PATH: got nil error, want one")
+	}
+}
+
 // TestLocalCodeForge_IntegrationTip_ResolvesNamedParentsBranch asserts
 // IntegrationTip resolves parent's own Integration branch — explicitly, not
 // the adapter's own construction-time parent — mirroring

@@ -97,17 +97,22 @@ func parseLandingRef(landing string) (branch, sha string, ok bool) {
 
 // branchTipSHA resolves branch's current tip commit sha inside repoPath. ok
 // is false, with a nil error, when branch doesn't exist there — `git
-// rev-parse --verify --quiet` exits non-zero with no output for a missing
-// ref, indistinguishable at this layer from git itself failing to run, so
-// both collapse to the same "nothing to report" result BranchMergedIntoIntegration
-// treats as merged=false rather than a hard error (a genuine git failure
-// surfaces one call later, at the merge-base check itself).
+// rev-parse --verify --quiet` exits non-zero (via *exec.ExitError) with no
+// output for a missing ref, the same "nothing to report" result
+// BranchMergedIntoIntegration treats as merged=false rather than a hard
+// error. A failure that isn't itself a verdict (git can't even run) is
+// distinct — the same distinction isMergedIntoIntegration's own exec.ExitError
+// check draws — and returns a real error instead.
 func branchTipSHA(repoPath, branch string) (sha string, ok bool, err error) {
 	out, err := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Output()
-	if err != nil {
+	if err == nil {
+		return strings.TrimSpace(string(out)), true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
 		return "", false, nil
 	}
-	return strings.TrimSpace(string(out)), true, nil
+	return "", false, fmt.Errorf("local: rev-parse %s: %w", branch, err)
 }
 
 // isMergedIntoIntegration reports whether sha is an ancestor of
