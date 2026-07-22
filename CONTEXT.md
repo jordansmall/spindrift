@@ -218,6 +218,18 @@ ticket (issue #1730) — the operator still publishes the single team PR by
 hand. Distinct from a seam's per-issue agent branch, which merges *into* it.
 _Avoid_: feature branch, epic branch, accumulation branch.
 
+**localloop**:
+The `cmd/launcher/internal/localloop` package: CODE_FORGE=local's per-issue
+Code Forge construction, outbox resolution, and parent resolution, plus the
+reconcile/surface hookup, behind one `Wire` constructor (issue #1806,
+campaign #1803 T1). The launcher's command path and the package's own
+composed **local loop** test (seeded Accumulation repo → fixture commit →
+bundle in the outbox → settle → reconcile → surface) drive the identical
+composition, so a regression in any gate names itself in one place instead
+of two independently maintained copies drifting apart.
+_Avoid_: local-loop glue, launcher wiring (both too vague — `localloop` is
+the package name).
+
 **Conformance contract**:
 The executable contract for the forge seams: a shared `forgetest` suite that
 every adapter of a seam interface — the shared test Fake included — must pass,
