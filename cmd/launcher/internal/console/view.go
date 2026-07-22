@@ -1367,14 +1367,19 @@ func detailModalBoxBottomBorder(width int) string {
 // padDisplay right-pads (or, if it overflows, truncates) s to exactly width
 // display columns — every interior row of the floating box must land at
 // exactly its inner width, or the side border runes drift out of column
-// with the rest of the box (issue #1758).
+// with the rest of the box (issue #1758). An overflowing s is truncated with
+// a trailing ellipsis, mirroring clip, so the cut is visible rather than
+// silent (issue #1779).
 func padDisplay(s string, width int) string {
 	if width < 0 {
 		width = 0
 	}
 	w := runewidth.StringWidth(s)
 	if w > width {
-		return runewidth.Truncate(s, width, "")
+		if width <= 1 {
+			return runewidth.Truncate(s, width, "")
+		}
+		return runewidth.Truncate(s, width-1, "") + "…"
 	}
 	if w < width {
 		return s + strings.Repeat(" ", width-w)
@@ -1392,7 +1397,7 @@ const detailModalFooterLines = 1
 // comma-separated string, to width display columns — shared by
 // renderDetailModalContent (issue #1772: a labels line wider than the
 // floating box's interior must wrap onto further interior rows instead of
-// padDisplay silently truncating it) and Update's own Offset clamp, which
+// padDisplay truncating it mid-word) and Update's own Offset clamp, which
 // must agree on how many interior rows the labels spend before it can
 // budget the rest to the scrollable body.
 func detailModalLabelLines(labels []string, width int) []string {

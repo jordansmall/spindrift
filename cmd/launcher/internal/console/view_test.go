@@ -3026,6 +3026,55 @@ func TestClip_WideCharacters_MeasuresDisplayWidthNotRuneCount(t *testing.T) {
 	}
 }
 
+// TestPadDisplay_TruncatesWithEllipsis verifies padDisplay marks a
+// truncated overflow with a trailing "…", mirroring clip's ellipsis
+// (issue #1779) instead of silently dropping the cut content.
+func TestPadDisplay_TruncatesWithEllipsis(t *testing.T) {
+	got := padDisplay("supercalifragilisticexpialidocious", 10)
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("padDisplay(...) = %q, want a trailing ellipsis marking the cut", got)
+	}
+	if w := runewidth.StringWidth(got); w != 10 {
+		t.Errorf("padDisplay(...) = %q with display width %d, want exactly 10", got, w)
+	}
+}
+
+// TestPadDisplay_WidthOne_TruncatesWithoutEllipsis verifies padDisplay
+// falls back to a plain truncate, without the ellipsis, when width is too
+// narrow to fit even one cut character plus the ellipsis itself — the same
+// width<=1 edge case clip guards against.
+func TestPadDisplay_WidthOne_TruncatesWithoutEllipsis(t *testing.T) {
+	got := padDisplay("overflow", 1)
+	if w := runewidth.StringWidth(got); w != 1 {
+		t.Errorf("padDisplay(...) = %q with display width %d, want exactly 1", got, w)
+	}
+	if strings.Contains(got, "…") {
+		t.Errorf("padDisplay(...) = %q, want no ellipsis when width is too narrow to fit one", got)
+	}
+}
+
+// TestView_DetailModal_OverWideLabel_ShowsEllipsis verifies the floating
+// detail modal marks an over-wide label with a trailing ellipsis rather
+// than silently cutting it (issue #1779): a single unbroken label wider
+// than the box's interior stands alone on its own wrapText line (issue
+// #1772's TestWrapText_WordWiderThanWidth_StandsAlone), which then hits
+// padDisplay's truncation path.
+func TestView_DetailModal_OverWideLabel_ShowsEllipsis(t *testing.T) {
+	label := "an-extremely-long-unbroken-label-token-that-overflows-the-box"
+	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 24})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: []string{label}})
+
+	out := View(m)
+	innerWidth, _ := detailModalInnerSize(40, 24)
+	want := label[:innerWidth-1] + "…"
+	if !strings.Contains(out, want) {
+		t.Errorf("View() = %q, want %q marking the over-wide label's cut", out, want)
+	}
+	if strings.Contains(out, label) {
+		t.Errorf("View() = %q, want the over-wide label truncated, not shown in full", out)
+	}
+}
+
 // TestWrapText_GreedilyFillsLinesToWidth verifies wrapText packs words onto
 // each line up to width display columns, wrapping to a new line only once
 // the next word would overflow it — the detail modal body's own word-wrap
