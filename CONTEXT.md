@@ -262,6 +262,25 @@ so an unsanitized string can't reach a branch name (issue #1810).
 _Avoid_: local-loop glue, launcher wiring (both too vague — `localloop` is
 the package name).
 
+**Verdict**:
+`localloop.Verdict` (issue #1811, campaign #1803 C4) — Surface's
+one-line-per-broad-ticket report, printed by both Reconcile entry points (the
+auto-run after dispatch and the standalone `spindrift reconcile`) so no
+touched broad ticket is ever silent. Two shapes: `VerdictSurfaced` names the
+branch Surface made current and how many seams it took
+(`surfaced → branch <name> (N seams)`); `VerdictHeld` names the first unmet
+gate, in order — open seam, stuck landing (reusing the wording of the typed
+**Landing**'s stuck-verdict repair check), target branch checked out,
+diverged, never landed — (`held — <reason>`). A parented broad ticket's
+surfaced branch keeps ADR 0033's sanitized-parent name; a parentless one
+surfaces under its own sanitized ticket title instead (falling back to its
+slug when the title sanitizes empty), while the Integration branch key
+stays the stable sanitized slug in every case, so an edited title never
+shifts a ticket's identity mid-flight. The Console may render the same
+value later.
+_Avoid_: surface notice, skip reason (both pre-#1811 names for the scattered
+prints Verdict consolidates).
+
 **Conformance contract**:
 The executable contract for the forge seams: a shared `forgetest` suite that
 every adapter of a seam interface — the shared test Fake included — must pass,
