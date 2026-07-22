@@ -2330,6 +2330,99 @@ func TestView_SidebarFullscreen_ExactFitContent_FitsHeightWithFooterPinned(t *te
 	}
 }
 
+// assertSidebarFitsHeightBudget is #1842's shared regression guard, reused by
+// both the fullscreen and docked sidebar tests below so a future sidebar view
+// is covered by construction instead of a copy-pasted assertion per case: no
+// rendered row may exceed width, and the total physical (post-wrap) row count
+// may not exceed height. Checking both together matters because a renderer
+// that satisfies only one half — clips every line but forgets a chrome row,
+// or reserves the right row count but joins one unclipped wide line — still
+// overflows the viewport the same way #1841 did. The height check counts
+// "\n"-split rows rather than re-wrapping the output itself, so it only
+// proves what it claims — no logical line silently ballooned into more than
+// one physical row — alongside the per-row width check right above it,
+// never on its own.
+func assertSidebarFitsHeightBudget(t *testing.T, out string, width, height int) {
+	t.Helper()
+	rows := strings.Split(out, "\n")
+	for i, row := range rows {
+		if got := lipgloss.Width(row); got > width {
+			t.Errorf("row %d is %d columns wide, want at most width (%d): %q", i, got, width, row)
+		}
+	}
+	if got := len(rows); got > height {
+		t.Errorf("rendered %d physical rows, want at most height (%d):\n%s", got, height, out)
+	}
+}
+
+// sidebarWideLinesFixture returns count deliberately over-wide (width*3
+// rune) lines, as both an Activity feed and a joined transcript string, for
+// the two tests below — the shared setup half of #1842's guard, so the
+// fullscreen and docked cases differ only in the width/height/Update
+// sequence each renderer actually needs.
+func sidebarWideLinesFixture(width, count int) (activity []ActivityLine, content string) {
+	wide := strings.Repeat("w", width*3)
+	lines := make([]string, count)
+	activity = make([]ActivityLine, count)
+	for i := range lines {
+		lines[i] = wide
+		activity[i] = ActivityLine{Text: wide}
+	}
+	return activity, strings.Join(lines, "\n")
+}
+
+// TestView_SidebarFullscreen_WideLines_FitHeightBudgetAcrossAllViews is
+// #1842's fullscreen regression guard: enough deliberately over-wide lines to
+// fill the renderer's whole viewport, in each of the three [t] views, checked
+// through the one assertSidebarFitsHeightBudget helper its docked
+// counterpart below also uses. The existing *_ClipsToWidth tests (issue
+// #1841) already catch an unclipped renderer on their own per-row width
+// check, but each uses only a single wide line — never enough to fill a
+// renderer's whole logical-line budget at once, and never shared with a
+// docked-renderer test. This is what actually covers "no sidebar view, in
+// any renderer" per the issue's AC, rather than one more per-renderer
+// one-off.
+func TestView_SidebarFullscreen_WideLines_FitHeightBudgetAcrossAllViews(t *testing.T) {
+	const width, height = 40, 24
+	activity, content := sidebarWideLinesFixture(width, height)
+
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity, Rendered: content, Raw: content})
+
+	assertSidebarFitsHeightBudget(t, View(m), width, height) // activity
+
+	m = Update(m, SidebarToggleMsg{})
+	assertSidebarFitsHeightBudget(t, View(m), width, height) // transcript (rendered)
+
+	m = Update(m, SidebarToggleMsg{})
+	assertSidebarFitsHeightBudget(t, View(m), width, height) // transcript (raw)
+}
+
+// TestView_SidebarDocked_WideLines_FitHeightBudgetAcrossAllViews is #1842's
+// docked-renderer counterpart to the fullscreen test above, sharing both
+// sidebarWideLinesFixture and assertSidebarFitsHeightBudget so the same
+// invariant covers both render paths by construction rather than a second
+// copy-pasted test. renderSidebarDocked already clips (issue #1799,
+// predating #1841's fullscreen fix), so this is expected to pass without
+// further changes — its value is guarding the docked path against ever
+// regressing the same way.
+func TestView_SidebarDocked_WideLines_FitHeightBudgetAcrossAllViews(t *testing.T) {
+	const width, height = sidebarMinListWidth + sidebarWidth + dockedBorderCols, 24
+	activity, content := sidebarWideLinesFixture(sidebarWidth, height)
+
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "still visible"}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity, Rendered: content, Raw: content})
+
+	assertSidebarFitsHeightBudget(t, View(m), width, height) // activity
+
+	m = Update(m, SidebarToggleMsg{})
+	assertSidebarFitsHeightBudget(t, View(m), width, height) // transcript (rendered)
+
+	m = Update(m, SidebarToggleMsg{})
+	assertSidebarFitsHeightBudget(t, View(m), width, height) // transcript (raw)
+}
+
 // TestQueueNarrowed_SidebarDocked_ReportsTrue verifies queueNarrowed reports
 // true once the sidebar is open and docked beside the list — the trigger for
 // the compact/wrapped queue-row form (issue #1752).
