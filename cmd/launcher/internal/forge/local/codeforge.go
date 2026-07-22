@@ -108,7 +108,7 @@ func (l *localCodeForge) BranchMergedIntoIntegration(branch, parent string) (boo
 	if !ok {
 		return false, nil
 	}
-	return isMergedIntoIntegration(l.repoPath, sha, IntegrationBranch(parent))
+	return isMergedIntoIntegration(l.repoPath, sha, IntegrationBranch(SanitizedParent{token: parent}))
 }
 
 // IntegrationTip implements the optional forge.LandingRepair surface (ADR
@@ -117,5 +117,5 @@ func (l *localCodeForge) BranchMergedIntoIntegration(branch, parent string) (boo
 // parent) to its current landing-ready "<branch>@<sha>" reference, the value
 // a confirmed BranchMergedIntoIntegration repair records.
 func (l *localCodeForge) IntegrationTip(parent string) (string, error) {
-	return landingRef(l.repoPath, IntegrationBranch(parent))
+	return landingRef(l.repoPath, IntegrationBranch(SanitizedParent{token: parent}))
 }

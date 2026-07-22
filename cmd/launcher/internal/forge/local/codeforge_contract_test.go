@@ -70,7 +70,7 @@ func (h *localCodeForgeHarness) FailNextRebase(ref string) {
 	h.repo.ConflictBase(strings.TrimPrefix(ref, h.BranchPrefix()))
 }
 
-func (h *localCodeForgeHarness) Parent() string { return h.parent }
+func (h *localCodeForgeHarness) Parent() string { return h.parent.String() }
 
 // MarkLanded implements forgetest.LandingHarness (issue #1809): merges num's
 // already-seeded branch for real and resolves the landed IntegrationRef via

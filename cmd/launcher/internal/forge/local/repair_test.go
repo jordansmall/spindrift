@@ -15,7 +15,7 @@ import (
 func TestLocalCodeForge_BranchMergedIntoIntegration_FalseBeforeMerge(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	outbox := t.TempDir()
 	branch := "agent/issue-1698"
@@ -31,7 +31,7 @@ func TestLocalCodeForge_BranchMergedIntoIntegration_FalseBeforeMerge(t *testing.
 		t.Fatalf("RelayBundle: %v", err)
 	}
 
-	merged, err := repair.BranchMergedIntoIntegration(branch, parent)
+	merged, err := repair.BranchMergedIntoIntegration(branch, parent.String())
 	if err != nil {
 		t.Fatalf("BranchMergedIntoIntegration: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestLocalCodeForge_BranchMergedIntoIntegration_FalseBeforeMerge(t *testing.
 func TestLocalCodeForge_BranchMergedIntoIntegration_TrueAfterMerge(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	outbox := t.TempDir()
 	branch := "agent/issue-1698"
@@ -63,7 +63,7 @@ func TestLocalCodeForge_BranchMergedIntoIntegration_TrueAfterMerge(t *testing.T)
 		t.Fatalf("Merge: %v", err)
 	}
 
-	merged, err := repair.BranchMergedIntoIntegration(branch, parent)
+	merged, err := repair.BranchMergedIntoIntegration(branch, parent.String())
 	if err != nil {
 		t.Fatalf("BranchMergedIntoIntegration: %v", err)
 	}
@@ -80,12 +80,12 @@ func TestLocalCodeForge_BranchMergedIntoIntegration_TrueAfterMerge(t *testing.T)
 func TestLocalCodeForge_BranchMergedIntoIntegration_FalseForNonexistentBranch(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
 	repair := cf.(forge.LandingRepair)
 
-	merged, err := repair.BranchMergedIntoIntegration("agent/issue-9999", parent)
+	merged, err := repair.BranchMergedIntoIntegration("agent/issue-9999", parent.String())
 	if err != nil {
 		t.Fatalf("BranchMergedIntoIntegration: %v", err)
 	}
@@ -102,13 +102,13 @@ func TestLocalCodeForge_BranchMergedIntoIntegration_FalseForNonexistentBranch(t 
 func TestLocalCodeForge_BranchMergedIntoIntegration_ErrorsOnGenuineGitFailure(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
 	repair := cf.(forge.LandingRepair)
 
 	t.Setenv("PATH", "")
-	if _, err := repair.BranchMergedIntoIntegration("agent/issue-1698", parent); err == nil {
+	if _, err := repair.BranchMergedIntoIntegration("agent/issue-1698", parent.String()); err == nil {
 		t.Fatal("BranchMergedIntoIntegration with no git on PATH: got nil error, want one")
 	}
 }
@@ -122,7 +122,7 @@ func TestLocalCodeForge_BranchMergedIntoIntegration_ErrorsOnGenuineGitFailure(t 
 func TestLocalCodeForge_IntegrationTip_ResolvesNamedParentsBranch(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent1, parent2 = "1694", "2200"
+	parent1, parent2 := ResolveParent("1694", ""), ResolveParent("2200", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent1))
 	cf1 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent1), parent1, "Test Bot", "bot@example.com", "agent/issue-")
 
@@ -141,7 +141,7 @@ func TestLocalCodeForge_IntegrationTip_ResolvesNamedParentsBranch(t *testing.T) 
 		t.Fatalf("LandingRef: %v", err)
 	}
 
-	got, err := cf1.(forge.LandingRepair).IntegrationTip(parent2)
+	got, err := cf1.(forge.LandingRepair).IntegrationTip(parent2.String())
 	if err != nil {
 		t.Fatalf("IntegrationTip: %v", err)
 	}

@@ -244,7 +244,7 @@ func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue,
 		return nil
 	}
 	parent := local.ResolveParent(iss.Number, iss.Parent)
-	merged, err := l.repair.BranchMergedIntoIntegration(landing.Branch, parent)
+	merged, err := l.repair.BranchMergedIntoIntegration(landing.Branch, parent.String())
 	if err != nil {
 		return fmt.Errorf("reconcile issue %s: check branch %s ancestry: %w", iss.Number, landing.Branch, err)
 	}
@@ -261,7 +261,7 @@ func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue,
 		fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! branch %s merged but no LandingRecorder to persist the repaired landing\n", iss.Number, iss.Landing, landing.Branch)
 		return nil
 	}
-	tip, err := l.repair.IntegrationTip(parent)
+	tip, err := l.repair.IntegrationTip(parent.String())
 	if err != nil {
 		return fmt.Errorf("reconcile issue %s: resolve integration tip for %s: %w", iss.Number, parent, err)
 	}
