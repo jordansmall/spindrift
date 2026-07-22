@@ -314,3 +314,47 @@ func TestRunningHeartbeat_FileShorterThanOffset_ResetsAndReparses(t *testing.T) 
 		t.Errorf("RunningHeartbeat() after truncation = %q, want it to contain %q (must reset offset and reparse from 0)", got, want)
 	}
 }
+
+// TestRunningHeartbeat_NewPassPath_ResetsOffsetAndReparses verifies that a
+// new Dispatch pass — a new log path, per LogPaths' chronological pass
+// discovery — starts a fresh parser at offset 0 rather than reusing the
+// previous pass's parser and offset. The fix-1 log here is deliberately
+// longer than the initial pass log: reusing the initial pass's byte offset
+// against it would seek into the middle of fix-1's own content instead of
+// its start, so a regression that drops the path-change reset would corrupt
+// the parse rather than merely fail to reset.
+func TestRunningHeartbeat_NewPassPath_ResetsOffsetAndReparses(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initial := `{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-9.log"), []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	cache := NewHeartbeatCache()
+
+	first := cache.RunningHeartbeat(drv, dir, "9")
+	if want := "7 turn"; !strings.Contains(first, want) {
+		t.Fatalf("first call = %q, want it to contain %q", first, want)
+	}
+
+	fix1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n" +
+		`{"type":"result","num_turns":4,"total_cost_usd":0.02,"duration_ms":6000}` + "\n"
+	if len(fix1) <= len(initial) {
+		t.Fatalf("test setup: fix-1 log must be longer than the initial pass log, got %d want > %d", len(fix1), len(initial))
+	}
+	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-9-fix-1.log"), []byte(fix1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := cache.RunningHeartbeat(drv, dir, "9")
+	if want := "4 turn"; !strings.Contains(got, want) {
+		t.Errorf("RunningHeartbeat() on new fix-1 pass = %q, want it to contain %q (a new pass path must reset offset and reparse from 0, not reuse the initial pass's parser)", got, want)
+	}
+}
