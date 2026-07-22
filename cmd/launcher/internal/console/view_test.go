@@ -1212,7 +1212,7 @@ func TestView_DetailModal_FullscreenFallback_FooterStyledDim(t *testing.T) {
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 
 	out := View(m)
-	if !strings.Contains(out, "\x1b[90m[esc] close · [p] pick\x1b[0m") {
+	if !strings.Contains(out, "\x1b[90m[esc] close · [p] pick") {
 		t.Errorf("View() = %q, want the fullscreen fallback footer dim-styled with its hint text intact", out)
 	}
 }
@@ -1421,7 +1421,7 @@ func TestView_DetailModal_FloatingBox_FooterStyledDim(t *testing.T) {
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 
 	out := View(m)
-	if !strings.Contains(out, "\x1b[90m[esc] close · [p] pick") {
+	if !strings.Contains(out, "\x1b[90m[esc] close · [p] pick · [r] research · [u] unpick\x1b[0m") {
 		t.Errorf("View() = %q, want the floating box's footer dim-styled with its hint text intact", out)
 	}
 }

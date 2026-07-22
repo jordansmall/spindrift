@@ -771,6 +771,48 @@ func (t teaModel) unpickHighlighted() teaModel {
 	return t
 }
 
+// hasPickNumber reports whether picks carries a row for num, in any state —
+// the only way a row leaves Model.Picks is a Remove call actually dropping
+// it (Queue never purges a terminal row on its own), so comparing this
+// before and after an unpick call tells unpickDetailModalIssue whether that
+// call really removed something, immune to Model.Picks lagging the
+// launcher's own live Queue by a background claim landing between the last
+// snapshot and this keypress (issue #1836).
+func hasPickNumber(picks []Pick, num string) bool {
+	for _, p := range picks {
+		if p.Number == num {
+			return true
+		}
+	}
+	return false
+}
+
+// unpickDetailModalIssue retracts the open ticket detail modal's own
+// displayed issue's queued pick, keyed by DetailModal.Number like
+// pickDetailModalIssue (issue #1835's own rationale) rather than the Backlog
+// cursor. A nil DetailModal is a defensive no-op; an issue with nothing to
+// unpick (never queued, already claiming/running/settled) is a no-op too —
+// Launcher.Unpick/Queue.Remove already refuse to drop anything past
+// PickQueued/PickHeld, so hasPickNumber's before/after comparison reports no
+// removal and the modal stays open exactly like a rejected pick does (issue
+// #1836).
+func (t teaModel) unpickDetailModalIssue() teaModel {
+	dm := t.m.DetailModal
+	if dm == nil {
+		return t
+	}
+	existed := hasPickNumber(t.m.Picks, dm.Number)
+	if t.launch != nil {
+		t.m = Update(t.m, QueueSnapshotMsg{Picks: t.launch.Unpick(dm.Number)})
+	} else {
+		t.m = Update(t.m, UnpickMsg{Number: dm.Number})
+	}
+	if existed && !hasPickNumber(t.m.Picks, dm.Number) {
+		t.m = Update(t.m, DetailModalCloseMsg{})
+	}
+	return t
+}
+
 // quitOrConfirmMsg picks QuitRequestedMsg over QuitMsg whenever live
 // Dispatches exist, so any "q"/"ctrl+c" quit path arms the
 // drain/terminate-all/stay confirm instead of exiting outright (issue
@@ -788,11 +830,12 @@ func (t teaModel) quitOrConfirmMsg() Msg {
 // pick sources (cursor row vs. open modal) can never drift apart on how a
 // resolved target actually gets queued/launched. kind selects the Dispatch
 // kind the pick carries: KindWork for the "p"/"P" gestures and the modal's
-// own "p", KindResearch for "r" (issue #1839) — Launcher.Pick's own
-// trackerFor routes a KindResearch pick onto ResearchTracker when one is
-// wired. A nil Launcher promotes through PickIssue directly onto
-// Model.Picks (matching the pre-#785 no-launch Console) but never queues on
-// a live queue or launches, since there is nothing to launch it.
+// own "p", KindResearch for the Backlog's own "r" (issue #1839) and the
+// modal's own "r" (issue #1836) — Launcher.Pick's own trackerFor routes a
+// KindResearch pick onto ResearchTracker when one is wired. A nil Launcher
+// promotes through PickIssue directly onto Model.Picks (matching the
+// pre-#785 no-launch Console) but never queues on a live queue or launches,
+// since there is nothing to launch it.
 func (t teaModel) landPick(num, title string, kind Kind) (teaModel, Msg) {
 	if t.launch == nil {
 		// No Launcher means no trackerFor to pick a ResearchTracker over
@@ -837,18 +880,20 @@ func (t teaModel) pickHighlighted(kind Kind) teaModel {
 }
 
 // pickDetailModalIssue promotes the open ticket detail modal's own displayed
-// issue through landPick as a KindWork pick, keyed by DetailModal.Number/
-// Title rather than the Backlog cursor — so a background refresh reordering
-// rows underneath the open modal can never redirect the pick onto a
-// different issue (issue #1835). A nil DetailModal (defensive only — the
-// "p" binding this feeds is scoped to ModeDetailModal, which never fires
+// issue through landPick as a kind pick — KindWork for "p", KindResearch for
+// "r" (issue #1836, mirroring the Backlog's own instant "p"/"r" after #1838
+// deleted the old "p"-then-"a"/"r" chord both views used to share) — keyed by
+// DetailModal.Number/Title rather than the Backlog cursor — so a background
+// refresh reordering rows underneath the open modal can never redirect the
+// pick onto a different issue (issue #1835). A nil DetailModal (defensive
+// only — every caller is scoped to ModeDetailModal, which never fires
 // without one) and an already active pick are both no-ops, same as
 // pickHighlighted; a pick landPick's own PickIssue/Launcher.Pick refuses
 // (already InProgress/Complete, TransitionState failure) lands as a
 // PickDissolvedMsg row rather than mis-picking anything, and leaves the
 // modal open so the operator can see why. Only a successful PickQueuedMsg
 // closes the modal.
-func (t teaModel) pickDetailModalIssue() teaModel {
+func (t teaModel) pickDetailModalIssue(kind Kind) teaModel {
 	dm := t.m.DetailModal
 	if dm == nil {
 		return t
@@ -857,7 +902,7 @@ func (t teaModel) pickDetailModalIssue() teaModel {
 		return t
 	}
 	var msg Msg
-	t, msg = t.landPick(dm.Number, dm.Title, KindWork)
+	t, msg = t.landPick(dm.Number, dm.Title, kind)
 	if _, ok := msg.(PickQueuedMsg); ok {
 		t.m = Update(t.m, DetailModalCloseMsg{})
 	}

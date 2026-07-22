@@ -391,7 +391,25 @@ var keymap = []Binding{
 			"              the modal",
 		Footer: "[p] pick",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			return t.pickDetailModalIssue(), nil
+			return t.pickDetailModalIssue(KindWork), nil
+		},
+	},
+	{
+		Keys: []string{"r"}, Modes: []Mode{ModeDetailModal},
+		Help: "  r           pick the displayed issue as a research dispatch\n" +
+			"              (advise-only: posts one verdict comment, never opens a\n" +
+			"              branch/PR), then close the modal",
+		Footer: "[r] research",
+		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
+			return t.pickDetailModalIssue(KindResearch), nil
+		},
+	},
+	{
+		Keys: []string{"u"}, Modes: []Mode{ModeDetailModal},
+		Help:   "  u           unpick the displayed issue's queued pick, if any",
+		Footer: "[u] unpick",
+		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
+			return t.unpickDetailModalIssue(), nil
 		},
 	},
 	{

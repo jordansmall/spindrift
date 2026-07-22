@@ -2943,6 +2943,47 @@ func TestTea_DetailModalKey_PicksDisplayedIssueAndClosesModal(t *testing.T) {
 	}
 }
 
+// TestTea_DetailModalKey_ResearchPicksInstantlyAndClosesModal verifies "r"
+// inside the ticket detail modal promotes the displayed issue as a
+// KindResearch pick immediately — no delay, no leader chord — and closes the
+// modal on success, the modal's own analogue of the Backlog's instant "r"
+// (issue #1839) the same way the modal's existing "p" already mirrors the
+// Backlog's instant "p" (issue #1836, redesigned after #1838 deleted the
+// old "p"-then-"a"/"r" chord this issue originally asked the modal to
+// mirror).
+func TestTea_DetailModalKey_ResearchPicksInstantlyAndClosesModal(t *testing.T) {
+	workTracker := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	workTracker.SetIssue(forge.Issue{Number: "42", Title: "research this", State: forge.IssueOpen})
+	researchTracker := forge.NewFake(forge.ResearchDispatchLabels())
+	researchTracker.SetIssue(forge.Issue{Number: "42", Title: "research this", State: forge.IssueOpen})
+
+	launch := newTestLauncher(t, workTracker)
+	launch.ResearchTracker = researchTracker
+
+	tm := teatest.NewTestModel(t, newTeaModel(workTracker, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "research this")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "#42", "research this")
+
+	sendKey(tm, "r")
+	waitForOutput(t, tm, "waiting 1")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.DetailModal != nil {
+		t.Errorf("DetailModal = %+v after a successful research pick, want nil (modal closed)", fm.m.DetailModal)
+	}
+	if len(fm.m.Picks) != 1 || fm.m.Picks[0].Kind != KindResearch {
+		t.Fatalf("Picks = %+v, want one KindResearch row for #42", fm.m.Picks)
+	}
+	if len(workTracker.TransitionStateCalls) != 0 {
+		t.Errorf("workTracker.TransitionStateCalls = %+v, want none — a research pick must never touch the work tracker", workTracker.TransitionStateCalls)
+	}
+}
+
 // TestTea_HandleDetailModalKey_PickAlreadyActive_NoOpAndModalStaysOpen
 // verifies "p", pressed on a ticket detail modal whose displayed issue
 // already has an active (queued/held/claiming/running) pick, neither
@@ -3438,6 +3479,109 @@ func TestTea_UnpickKey_RemovesQueuedHighlighted(t *testing.T) {
 	fm := tm.FinalModel(t).(teaModel)
 	if len(fm.m.Picks) != 0 {
 		t.Errorf("Picks = %+v, want empty after unpick", fm.m.Picks)
+	}
+}
+
+// TestTea_DetailModalKey_UnpicksDisplayedIssueAndCloses verifies "u" inside
+// the ticket detail modal drops the modal's own displayed issue's
+// queued-but-unlaunched pick and closes the modal — the modal's analogue of
+// the Backlog's own "u" (issue #1836).
+func TestTea_DetailModalKey_UnpicksDisplayedIssueAndCloses(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "#42", "fix the thing")
+
+	sendKey(tm, "u")
+	waitForOutput(t, tm, "[1] Backlog")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.DetailModal != nil {
+		t.Errorf("DetailModal = %+v after a successful unpick, want nil (modal closed)", fm.m.DetailModal)
+	}
+	if len(fm.m.Picks) != 0 {
+		t.Errorf("Picks = %+v, want empty after unpick", fm.m.Picks)
+	}
+}
+
+// TestTea_DetailModalKey_UnpickNoQueuedPick_NoOpAndModalStaysOpen verifies
+// "u" on a modal whose displayed issue has never been picked is a safe
+// no-op — it neither errors nor closes the modal — mirroring Launcher.
+// Unpick/Queue.Remove's own no-op contract for a number that never queued
+// (issue #1836).
+func TestTea_DetailModalKey_UnpickNoQueuedPick_NoOpAndModalStaysOpen(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	tm := teaModel{m: m, tracker: f}
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+
+	if tm.m.DetailModal == nil {
+		t.Error("DetailModal = nil after unpicking a never-queued issue, want the modal to stay open")
+	}
+	if len(tm.m.Picks) != 0 {
+		t.Errorf("Picks = %+v, want empty — never picked, nothing to remove", tm.m.Picks)
+	}
+}
+
+// TestTea_DetailModalKey_UnpickAlreadyRunning_NoOpAndModalStaysOpen verifies
+// "u" on a modal whose displayed issue has already been claimed/launched
+// (PickRunning, past PickQueued/PickHeld) is a no-op — Launcher.Unpick/
+// Queue.Remove refuse to drop anything but a still-queued/held row, so the
+// row survives and hasPickNumber's before/after comparison correctly sees no
+// removal, distinct from TestTea_DetailModalKey_UnpickNoQueuedPick_
+// NoOpAndModalStaysOpen's "never picked at all" case (issue #1836 review).
+func TestTea_DetailModalKey_UnpickAlreadyRunning_NoOpAndModalStaysOpen(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m.Picks = []Pick{{Number: "42", Title: "fix the thing", State: PickRunning}}
+	tm := teaModel{m: m, tracker: f}
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+
+	if tm.m.DetailModal == nil {
+		t.Error("DetailModal = nil after unpicking an already-running issue, want the modal to stay open")
+	}
+	if len(tm.m.Picks) != 1 || tm.m.Picks[0].State != PickRunning {
+		t.Errorf("Picks = %+v, want the running row untouched", tm.m.Picks)
+	}
+}
+
+// TestTea_DetailModalKey_BulkPickAllStaysUnbound verifies "P" — the
+// Backlog's own bulk pick-all-ready key — does nothing inside the ticket
+// detail modal: a single-issue view has no "all" to bulk-pick (issue #1836
+// AC), so the modal simply has no "P" binding of its own.
+func TestTea_DetailModalKey_BulkPickAllStaysUnbound(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "43", Title: "also ready", State: forge.IssueOpen})
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	tm := teaModel{m: m, tracker: f}
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+
+	if tm.m.DetailModal == nil {
+		t.Error("DetailModal = nil after \"P\", want the modal to stay open — \"P\" has no binding here")
+	}
+	if len(tm.m.Picks) != 0 {
+		t.Errorf("Picks = %+v, want empty — \"P\" must never bulk-pick from inside the modal", tm.m.Picks)
 	}
 }
 
