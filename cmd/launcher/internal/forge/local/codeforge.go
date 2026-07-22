@@ -8,8 +8,8 @@ import (
 // IntegrationBranch returns the per-broad-ticket Integration branch name
 // Merge lands seams onto inside the Accumulation repo (ADR 0033), keyed on
 // the local issue's parent field.
-func IntegrationBranch(parent string) string {
-	return "integration/" + parent
+func IntegrationBranch(parent SanitizedParent) string {
+	return "integration/" + parent.String()
 }
 
 // NewLocalCodeForge returns a forge.CodeForge that lands a seam's branch
@@ -30,7 +30,7 @@ func IntegrationBranch(parent string) string {
 // repo mount means Merge's usual "the branch is already pushed" assumption
 // doesn't hold here, so the branch must be relayed in from the Box's
 // code-out bundle first.
-func NewLocalCodeForge(repoPath, baseBranch, parent, userName, userEmail, branchPrefix string, opts ...git.Option) forge.CodeForge {
+func NewLocalCodeForge(repoPath, baseBranch string, parent SanitizedParent, userName, userEmail, branchPrefix string, opts ...git.Option) forge.CodeForge {
 	return &localCodeForge{
 		CodeForge:  git.NewGitClient(repoPath, IntegrationBranch(parent), userName, userEmail, branchPrefix, opts...),
 		repoPath:   repoPath,
@@ -47,7 +47,8 @@ func NewLocalCodeForge(repoPath, baseBranch, parent, userName, userEmail, branch
 // embedded git client's, unchanged.
 type localCodeForge struct {
 	forge.CodeForge
-	repoPath, baseBranch, parent string
+	repoPath, baseBranch string
+	parent               SanitizedParent
 }
 
 // RelayBundle imports ref from the bundle the Box left in outboxDir into the

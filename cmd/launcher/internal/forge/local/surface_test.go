@@ -25,7 +25,7 @@ func currentBranch(t *testing.T, dir string) string {
 // branch (issue #1730 AC1, AC2).
 func TestSurfaceIntegrationBranch_CreatesLocalBranchAtIntegrationTip(t *testing.T) {
 	setGitIdentityEnv(t)
-	const parent = "1700"
+	parent := ResolveParent("1700", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	pwd := newCheckoutFixture(t, "main")
 
@@ -41,7 +41,7 @@ func TestSurfaceIntegrationBranch_CreatesLocalBranchAtIntegrationTip(t *testing.
 	}
 
 	want := revParse(t, repo.Bare, "refs/heads/"+IntegrationBranch(parent))
-	if got := revParse(t, pwd.dir, "refs/heads/"+parent); got != want {
+	if got := revParse(t, pwd.dir, "refs/heads/"+parent.String()); got != want {
 		t.Errorf("refs/heads/%s = %s, want %s (Integration branch tip)", parent, got, want)
 	}
 	if got := currentBranch(t, pwd.dir); got != "main" {
@@ -54,7 +54,7 @@ func TestSurfaceIntegrationBranch_CreatesLocalBranchAtIntegrationTip(t *testing.
 // no-op AC (issue #1730 AC5) — rather than repeating the notice every run.
 func TestSurfaceIntegrationBranch_UnchangedReRunIsNoOp(t *testing.T) {
 	setGitIdentityEnv(t)
-	const parent = "1700"
+	parent := ResolveParent("1700", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	pwd := newCheckoutFixture(t, "main")
 
@@ -81,9 +81,9 @@ func TestSurfaceIntegrationBranch_UnchangedReRunIsNoOp(t *testing.T) {
 // clause, mirroring console_freshness.go's checkCheckoutSafe).
 func TestSurfaceIntegrationBranch_RefusesWhenTargetBranchCheckedOut(t *testing.T) {
 	setGitIdentityEnv(t)
-	const parent = "1700"
+	parent := ResolveParent("1700", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
-	pwd := newCheckoutFixture(t, parent)
+	pwd := newCheckoutFixture(t, parent.String())
 
 	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent)
 	if err != nil {
@@ -95,7 +95,7 @@ func TestSurfaceIntegrationBranch_RefusesWhenTargetBranchCheckedOut(t *testing.T
 	if skipped == "" {
 		t.Errorf("skipped = %q, want a checked-out-branch reason", skipped)
 	}
-	if got := currentBranch(t, pwd.dir); got != parent {
+	if got := currentBranch(t, pwd.dir); got != parent.String() {
 		t.Errorf("current branch = %s, want %s (untouched)", got, parent)
 	}
 }
@@ -106,7 +106,7 @@ func TestSurfaceIntegrationBranch_RefusesWhenTargetBranchCheckedOut(t *testing.T
 // at all (issue #1730 AC3: nothing surfaced for an incomplete ticket).
 func TestSurfaceIntegrationBranch_SkipsWhenIntegrationBranchAbsent(t *testing.T) {
 	setGitIdentityEnv(t)
-	const parent = "1700"
+	parent := ResolveParent("1700", "")
 	repo := forgetest.NewGitRepoFixture(t, "main")
 	pwd := newCheckoutFixture(t, "main")
 
@@ -130,13 +130,13 @@ func TestSurfaceIntegrationBranch_SkipsWhenIntegrationBranchAbsent(t *testing.T)
 // clobbering operator work).
 func TestSurfaceIntegrationBranch_RefusesDivergedLocalBranch(t *testing.T) {
 	setGitIdentityEnv(t)
-	const parent = "1700"
+	parent := ResolveParent("1700", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	pwd := newCheckoutFixture(t, "main")
-	pwd.run("checkout", "-b", parent)
+	pwd.run("checkout", "-b", parent.String())
 	pwd.commit("operator-work.txt", "operator work")
 	pwd.run("checkout", "main")
-	diverged := revParse(t, pwd.dir, parent)
+	diverged := revParse(t, pwd.dir, parent.String())
 
 	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent)
 	if err != nil {
@@ -148,7 +148,7 @@ func TestSurfaceIntegrationBranch_RefusesDivergedLocalBranch(t *testing.T) {
 	if skipped == "" {
 		t.Errorf("skipped = %q, want a diverged-branch reason", skipped)
 	}
-	if got := revParse(t, pwd.dir, parent); got != diverged {
+	if got := revParse(t, pwd.dir, parent.String()); got != diverged {
 		t.Errorf("refs/heads/%s = %s, want %s (untouched operator commit)", parent, got, diverged)
 	}
 }

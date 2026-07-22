@@ -11,8 +11,8 @@ import (
 // repo — exported so callers that need to tell this permanent, expected
 // reason apart from the transient checked-out/diverged ones (issue #1739)
 // don't reconstruct the literal string themselves.
-func NeverLandedSkip(parent string) string {
-	return "no seam of " + parent + " has landed yet"
+func NeverLandedSkip(parent SanitizedParent) string {
+	return "no seam of " + parent.String() + " has landed yet"
 }
 
 // SurfaceIntegrationBranch fetches parent's Integration branch from the
@@ -32,7 +32,8 @@ func NeverLandedSkip(parent string) string {
 // branch has diverged from the Integration branch (non-fast-forward). The
 // Integration branch not existing yet in repoPath (no seam of parent has
 // landed) is also reported through skipped, not an error.
-func SurfaceIntegrationBranch(repoPath, pwd, parent string) (surfaced bool, skipped string, err error) {
+func SurfaceIntegrationBranch(repoPath, pwd string, parent SanitizedParent) (surfaced bool, skipped string, err error) {
+	branchName := parent.String()
 	integrationBranch := IntegrationBranch(parent)
 	if exists := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+integrationBranch).Run() == nil; !exists {
 		return false, NeverLandedSkip(parent), nil
@@ -40,19 +41,19 @@ func SurfaceIntegrationBranch(repoPath, pwd, parent string) (surfaced bool, skip
 
 	current, err := exec.Command("git", "-C", pwd, "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
 	if err != nil {
-		return false, "", fmt.Errorf("local: surface %s: current branch: %w: %s", parent, err, current)
+		return false, "", fmt.Errorf("local: surface %s: current branch: %w: %s", branchName, err, current)
 	}
-	if strings.TrimSpace(string(current)) == parent {
-		return false, parent + " is currently checked out", nil
+	if strings.TrimSpace(string(current)) == branchName {
+		return false, branchName + " is currently checked out", nil
 	}
 
 	// Output (not CombinedOutput): before/after must reflect stdout alone —
 	// rev-parse's failure text on stderr for a not-yet-existing branch would
 	// otherwise land in before and make the before != after comparison work
 	// only by coincidence.
-	before, _ := exec.Command("git", "-C", pwd, "rev-parse", "refs/heads/"+parent).Output()
+	before, _ := exec.Command("git", "-C", pwd, "rev-parse", "refs/heads/"+branchName).Output()
 
-	refspec := "refs/heads/" + integrationBranch + ":refs/heads/" + parent
+	refspec := "refs/heads/" + integrationBranch + ":refs/heads/" + branchName
 	if out, err := exec.Command("git", "-C", pwd, "fetch", repoPath, refspec).CombinedOutput(); err != nil {
 		// A non-fast-forward rejection is the expected shape of "the
 		// operator's local branch has commits of its own" and is reported
@@ -64,14 +65,14 @@ func SurfaceIntegrationBranch(repoPath, pwd, parent string) (surfaced bool, skip
 		// unlike relying on a specific exit code) rather than a structured
 		// signal — git's fetch has no other way to report it.
 		if strings.Contains(string(out), "non-fast-forward") {
-			return false, "local branch " + parent + " has diverged from " + integrationBranch, nil
+			return false, "local branch " + branchName + " has diverged from " + integrationBranch, nil
 		}
-		return false, "", fmt.Errorf("local: surface %s: fetch %s: %w: %s", parent, integrationBranch, err, out)
+		return false, "", fmt.Errorf("local: surface %s: fetch %s: %w: %s", branchName, integrationBranch, err, out)
 	}
 
-	after, err := exec.Command("git", "-C", pwd, "rev-parse", "refs/heads/"+parent).Output()
+	after, err := exec.Command("git", "-C", pwd, "rev-parse", "refs/heads/"+branchName).Output()
 	if err != nil {
-		return false, "", fmt.Errorf("local: surface %s: resolve surfaced branch: %w", parent, err)
+		return false, "", fmt.Errorf("local: surface %s: resolve surfaced branch: %w", branchName, err)
 	}
 	return string(before) != string(after), "", nil
 }

@@ -50,7 +50,7 @@ func seedBundleBranch(t *testing.T, bare, base, outboxDir, branch, num string) s
 func TestLocalCodeForge_RelayBundle_ImportsBranchIntoRepo(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	outbox := t.TempDir()
 	branch := "agent/issue-1698"
@@ -77,7 +77,7 @@ func TestLocalCodeForge_RelayBundle_ImportsBranchIntoRepo(t *testing.T) {
 // 0033's "missing bundle... leaves the seam unlanded and flagged blocked").
 func TestLocalCodeForge_RelayBundle_MissingBundleErrors(t *testing.T) {
 	setGitIdentityEnv(t)
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	outbox := t.TempDir()
 
@@ -95,7 +95,7 @@ func TestLocalCodeForge_RelayBundle_MissingBundleErrors(t *testing.T) {
 // on garbage input.
 func TestLocalCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	setGitIdentityEnv(t)
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	outbox := t.TempDir()
 	if err := os.WriteFile(filepath.Join(outbox, BundleFileName), []byte("not a bundle"), 0o644); err != nil {
@@ -119,7 +119,7 @@ func TestLocalCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 func TestLocalCodeForge_RelayBundle_ReRelayOverwritesDivergedRef(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	outbox := t.TempDir()
 	branch := "agent/issue-1698"
@@ -173,7 +173,7 @@ func TestLocalCodeForge_FirstSeam_CreatesIntegrationBranchFromBase(t *testing.T)
 		t.Fatalf("SeedAccumulationRepo: %v", err)
 	}
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	outbox := t.TempDir()
 	branch := "agent/issue-1698"
 	// The bundle is built off baseBranch ("main"), not off integration/1694 —
@@ -203,7 +203,7 @@ func TestLocalCodeForge_FirstSeam_CreatesIntegrationBranchFromBase(t *testing.T)
 func TestLocalCodeForge_LandBundle_EndToEnd(t *testing.T) {
 	setGitIdentityEnv(t)
 
-	const parent = "1694"
+	parent := ResolveParent("1694", "")
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	outbox := t.TempDir()
 	branch := "agent/issue-1698"
