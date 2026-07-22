@@ -222,6 +222,78 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 	}
 }
 
+// TestWire_ComposedLoop_HealsStuckBranchRefLanding drives Reconcile's
+// healing path (issue #1809) through the composed wiring: a seam's branch is
+// relayed and merged cleanly onto its Integration branch, but its recorded
+// landing is left at the raw pre-merge branch name — standing in for
+// settle's post-merge landing upgrade (LandingRef) never having run even
+// though the merge itself succeeded. Reconcile's next sweep must recognize
+// the branch as an ancestor of the Integration branch, upgrade the recorded
+// landing to the rich IntegrationRef form, and close the seam — the seam
+// heals itself instead of staying stuck open silently forever.
+func TestWire_ComposedLoop_HealsStuckBranchRefLanding(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	const num = "46"
+	writeLocalIssue(t, issuesDir, num, "seam 46", "", testLabels.InProgress)
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+
+	parent := lw.ResolveParent(num)
+	cf := lw.CodeForgeForIssue(num)
+	branch := cf.AgentBranch(num)
+	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, num, lw.OutboxDir(num))
+
+	// Relay and merge directly through cf, standing in for settle's
+	// mergeImmediate having already succeeded — then record only the raw
+	// branch as the landing, sabotaging exactly the post-merge upgrade step
+	// issue #1809 heals.
+	if err := cf.(forge.BundleRelay).RelayBundle(lw.OutboxDir(num), branch); err != nil {
+		t.Fatalf("RelayBundle: %v", err)
+	}
+	if err := cf.Merge(branch); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if err := it.RecordLanding(num, branch); err != nil {
+		t.Fatalf("RecordLanding: %v", err)
+	}
+
+	res, err := reconcile.Run(it, cf, nil)
+	if err != nil {
+		t.Fatalf("reconcile.Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != num {
+		t.Fatalf("reconcile.Run closed = %v, want [%s]", res.Closed, num)
+	}
+
+	iss, err := it.Issue(num)
+	if err != nil {
+		t.Fatalf("Issue(%s): %v", num, err)
+	}
+	if iss.State != forge.IssueClosed {
+		t.Fatalf("issue %s state = %v, want IssueClosed", num, iss.State)
+	}
+	wantPrefix := local.IntegrationBranch(parent) + "@"
+	if !strings.HasPrefix(iss.Landing, wantPrefix) {
+		t.Errorf("issue %s landing = %q, want it upgraded to %q<sha>", num, iss.Landing, wantPrefix)
+	}
+}
+
 // TestWire_ComposedLoop_MissingBundleBlocksNotFailed drives the missing-
 // bundle held path through the same composed surface: no bundle ever lands
 // in the outbox (the Agent produced nothing), so settle's relay fails and
