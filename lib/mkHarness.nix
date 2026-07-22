@@ -326,7 +326,7 @@ let
     # present, and driver-exec's fileset (above) is narrower than
     # launcherBin's full cmd/launcher tree, so the two vendor differently even
     # off identical go.mod/go.sum (#784 fix pass).
-    vendorHash = "sha256-+RUFTEQDCn3oSihBzDfYaWgyMdoGGQMf47oAotLfvaA=";
+    vendorHash = "sha256-uaAaQReAf8PCq/TNWetYyYinj+BeUaiaL4zm/fpJPBA=";
     subPackages = [ "driver-exec" ];
     meta.license = lib.licenses.mit;
   };
@@ -574,7 +574,7 @@ let
     version = spindriftVersion;
     src = launcherSrc;
     modRoot = "cmd/launcher";
-    vendorHash = "sha256-pz95WwGNc065UWJspokZ4heMGKWh8Bsi+5O+UmCAtqA=";
+    vendorHash = "sha256-1rl00SlOdcXyd2kpgiX8C+sOsDbewLQedzDJZq98L3w=";
     subPackages = [ "." ]; # build only the launcher; driver-exec is in-box only
     # go test ./... already runs, vendored and offline, as the
     # launcher-go-test check (nix/checks/go.nix) against the same source —

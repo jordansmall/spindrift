@@ -19,7 +19,7 @@ let
       pname = "spindrift-launcher-modules";
       version = "0";
       src = ../../cmd/launcher;
-      vendorHash = "sha256-pz95WwGNc065UWJspokZ4heMGKWh8Bsi+5O+UmCAtqA=";
+      vendorHash = "sha256-1rl00SlOdcXyd2kpgiX8C+sOsDbewLQedzDJZq98L3w=";
     }).goModules;
 in
 {

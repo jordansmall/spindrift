@@ -14,7 +14,7 @@ pkgs.buildGoModule {
   version = "0";
   src = ../cmd/launcher;
   subPackages = [ "quickstart" ];
-  vendorHash = "sha256-pz95WwGNc065UWJspokZ4heMGKWh8Bsi+5O+UmCAtqA=";
+  vendorHash = "sha256-1rl00SlOdcXyd2kpgiX8C+sOsDbewLQedzDJZq98L3w=";
   # go test ./... already runs, vendored and offline, as the
   # launcher-go-test check (nix/checks/go.nix) against the same source —
   # running it again here would also fail on a docs/-relative path one of

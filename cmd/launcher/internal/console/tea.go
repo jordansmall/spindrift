@@ -18,6 +18,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/fsnotify/fsnotify"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
@@ -69,6 +70,21 @@ type teaModel struct {
 	// now-superseded generation and dropped instead of re-arming a second,
 	// permanently duplicate tick chain.
 	sidebarTickGen uint64
+	// watcher fires a logWriteMsg on a write to any path in watchedPaths — a
+	// running pick's current log file — so Update's post-switch
+	// refreshPickDecorations call runs the incremental heartbeat refresh
+	// within moments of new bytes landing, instead of waiting for the next
+	// pollTickMsg (issue #1748). nil for a launch-less session, or when
+	// fsnotify.NewWatcher failed to acquire a platform watch handle — either
+	// way, refreshPickDecorations still runs on every Msg, so the console
+	// stays correct, just back to the slower per-Msg/poll cadence.
+	watcher *fsnotify.Watcher
+	// watchedPaths mirrors watcher's own watch set (fsnotify exposes no
+	// cheap "is this path watched" query cheaper than WatchList's full
+	// slice) so reconcileWatches can diff against it in place — a map, a
+	// reference type, so every value-receiver copy of teaModel still shares
+	// the one instance newTeaModel created.
+	watchedPaths map[string]struct{}
 	// done is closed exactly once, at the Quitting choke point below, to
 	// unblock waitRefreshSignal's goroutine — bubbletea can't cancel a Cmd
 	// goroutine itself (issue #823), so the closure has to select on this
@@ -87,10 +103,14 @@ func newTeaModel(tracker forge.IssueTracker, pwd string, launch *Launcher) teaMo
 	m := NewModel()
 	m = Update(m, DogfoodNotice(pwd))
 	interval := defaultPollInterval
+	var watcher *fsnotify.Watcher
 	if launch != nil {
 		interval = launch.PollInterval()
+		if w, err := fsnotify.NewWatcher(); err == nil {
+			watcher = w
+		}
 	}
-	return teaModel{m: m, tracker: tracker, pwd: pwd, launch: launch, pollInterval: interval, heartbeats: NewHeartbeatCache(), sidebarActivity: NewSidebarActivityCache(), sidebarTranscript: NewSidebarTranscriptCache(), done: make(chan struct{})}
+	return teaModel{m: m, tracker: tracker, pwd: pwd, launch: launch, pollInterval: interval, heartbeats: NewHeartbeatCache(), sidebarActivity: NewSidebarActivityCache(), sidebarTranscript: NewSidebarTranscriptCache(), watcher: watcher, watchedPaths: make(map[string]struct{}), done: make(chan struct{})}
 }
 
 // Run drives the console's full-screen Bubble Tea program to completion —
@@ -188,6 +208,9 @@ func (t teaModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{refreshCmd(t.tracker), pollTick(t.pollInterval)}
 	if t.launch != nil {
 		cmds = append(cmds, initialQueueSyncCmd(t.launch), waitRefreshSignal(t.launch, t.done), orphanDetectCmd(t.launch))
+		if t.watcher != nil {
+			cmds = append(cmds, waitLogWrite(t.watcher, t.done))
+		}
 	}
 	return tea.Batch(cmds...)
 }
@@ -240,6 +263,8 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.launch.tryLaunch(t.tracker, t.pwd)
 		}
 		cmd = tea.Batch(refreshCmd(t.tracker), pollTick(t.pollInterval))
+	case logWriteMsg:
+		cmd = waitLogWrite(t.watcher, t.done)
 	case refreshSignalMsg:
 		if msg.hasPicks {
 			t.m = Update(t.m, QueueSnapshotMsg{Picks: msg.picks})
@@ -270,6 +295,7 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	t.m = refreshPickDecorations(t.m, t.launch, t.pwd, t.heartbeats, t.sidebarActivity, t.sidebarTranscript)
+	t = t.reconcileWatches()
 	t.m = syncStale(t.m, t.launch)
 	if sidebarActivityLive(t.m) {
 		if !t.sidebarTickArmed {
@@ -290,6 +316,9 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// concurrently.
 		default:
 			close(t.done)
+			if t.watcher != nil {
+				_ = t.watcher.Close()
+			}
 		}
 		return t, tea.Quit
 	}
