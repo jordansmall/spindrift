@@ -11,10 +11,21 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
+// boxBorderCols and boxBorderRows are the column and row overhead a single
+// docked panel's rounded border adds — one column and one row per edge, on
+// all four sides. dockedBorderCols is the docked layout's total column
+// overhead: both the list panel and the sidebar panel pay boxBorderCols,
+// replacing the old one-column divider between them with two adjacent box
+// edges (issue #1755).
+const boxBorderCols = 2
+const boxBorderRows = 2
+const dockedBorderCols = boxBorderCols * 2
+
 // sidebarWidth is the docked live-tail sidebar's minimum column width — wide
 // enough for a realistic Activity status line without wrapping in the
 // common case (ADR 0030), and the floor computeSidebarWidth never shrinks
-// below regardless of terminal width.
+// below regardless of terminal width. This is the sidebar's interior
+// content width; its bordered panel renders boxBorderCols wider still.
 const sidebarWidth = 42
 
 // sidebarMinListWidth is the narrowest the list column can render at and
@@ -28,13 +39,14 @@ const sidebarWidth = 42
 const sidebarMinListWidth = 80
 
 // sidebarFits reports whether m.Width has room for the list column (at
-// least sidebarMinListWidth) plus the docked sidebar (sidebarWidth) plus one
-// column for the divider between them — the gate View and handleKey both
-// check before choosing the docked layout over the fullscreen fallback, so
-// the two can never disagree about which one is showing (issue #1500's
-// sectionTabsReserved precedent, extended to the sidebar).
+// least sidebarMinListWidth) plus the docked sidebar (sidebarWidth) plus
+// dockedBorderCols for the two panels' bordered edges — the gate View and
+// handleKey both check before choosing the docked layout over the
+// fullscreen fallback, so the two can never disagree about which one is
+// showing (issue #1500's sectionTabsReserved precedent, extended to the
+// sidebar, widened for the panel borders by issue #1755).
 func sidebarFits(m Model) bool {
-	return m.Width >= sidebarMinListWidth+sidebarWidth+1
+	return m.Width >= sidebarMinListWidth+sidebarWidth+dockedBorderCols
 }
 
 // sidebarWidthTargetPercent is the share of the terminal's total width the
@@ -43,32 +55,24 @@ func sidebarFits(m Model) bool {
 // not a sliver, on a wide terminal.
 const sidebarWidthTargetPercent = 45
 
-// computeSidebarWidth returns the docked sidebar's column width for a
-// terminal totalWidth columns wide: sidebarWidthTargetPercent of totalWidth,
-// clamped down to whatever leaves the queue list at least sidebarMinListWidth
-// (plus the one-column divider), and clamped up to never shrink below the
-// sidebarWidth floor (issue #1751). Only meaningful when sidebarFits(m) is
-// true — totalWidth values below that threshold can drive the clamp's upper
-// bound under its lower one, which callers on the fullscreen fallback path
-// never observe.
+// computeSidebarWidth returns the docked sidebar's interior column width for
+// a terminal totalWidth columns wide: sidebarWidthTargetPercent of
+// totalWidth, clamped down to whatever leaves the queue list at least
+// sidebarMinListWidth (plus dockedBorderCols for both panels' borders), and
+// clamped up to never shrink below the sidebarWidth floor (issue #1751).
+// Only meaningful when sidebarFits(m) is true — totalWidth values below that
+// threshold can drive the clamp's upper bound under its lower one, which
+// callers on the fullscreen fallback path never observe.
 func computeSidebarWidth(totalWidth int) int {
 	target := totalWidth * sidebarWidthTargetPercent / 100
 	if target < sidebarWidth {
 		target = sidebarWidth
 	}
-	if listFloorMax := totalWidth - sidebarMinListWidth - 1; target > listFloorMax {
+	if listFloorMax := totalWidth - sidebarMinListWidth - dockedBorderCols; target > listFloorMax {
 		target = listFloorMax
 	}
 	return target
 }
-
-// boxBorderCols and boxBorderRows are the column and row overhead a single
-// docked panel's rounded border adds — one column and one row per edge, on
-// all four sides. Two docked panels (list, sidebar) each pay this cost, so
-// the width/height budgets that split m.Width/m.Height between them must
-// account for it twice (issue #1755, replacing the old one-column divider).
-const boxBorderCols = 2
-const boxBorderRows = 2
 
 // renderBoxedColumn wraps content in a muted (RoleDim) rounded border — the
 // bordered-panel look that replaces the bare column divider between the
@@ -161,9 +165,17 @@ func View(m Model) string {
 	if m.Sidebar != nil {
 		width := computeSidebarWidth(m.Width)
 		listModel := m
-		listModel.Width = m.Width - width - 1
-		list := renderBody(listModel, budget)
-		sidebar := renderSidebarDocked(*m.Sidebar, width, budget, m.Focus == FocusSidebar)
+		listModel.Width = m.Width - width - dockedBorderCols
+		// Both panels' top/bottom border rows come out of the same body
+		// budget, not one deduction per panel — the two panels render side
+		// by side within the same row band, so the border rows only need
+		// subtracting once (issue #1755).
+		panelBudget := budget - boxBorderRows
+		if panelBudget < 0 {
+			panelBudget = 0
+		}
+		list := renderBody(listModel, panelBudget)
+		sidebar := renderSidebarDocked(*m.Sidebar, width, panelBudget, m.Focus == FocusSidebar)
 		listBox := renderBoxedColumn(list, listModel.Width)
 		sidebarBox := renderBoxedColumn(sidebar, width)
 		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listBox, sidebarBox))

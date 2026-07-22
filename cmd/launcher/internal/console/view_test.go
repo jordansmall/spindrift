@@ -1270,7 +1270,7 @@ func TestView_SidebarFullscreen_WindowsToViewportHeight(t *testing.T) {
 // list, rather than the list disappearing behind a fullscreen takeover — the
 // core of ADR 0030's docked layout (#1501).
 func TestView_SidebarOpen_WideTerminal_DocksBesideList(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "still visible"}}})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
 
@@ -1292,7 +1292,7 @@ func TestView_SidebarOpen_WideTerminal_PanelsRenderBordered(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
 
-	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "still visible"}}})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
 
@@ -1302,13 +1302,57 @@ func TestView_SidebarOpen_WideTerminal_PanelsRenderBordered(t *testing.T) {
 	}
 }
 
+// TestView_SidebarOpen_NoColor_PanelsRenderAsciiBorder verifies the docked
+// panels' border degrades to plain ASCII glyphs (no rounded Unicode
+// box-drawing characters, no stray escape bytes) under NO_COLOR, the same
+// degradation colorProfile() already applies to role coloring elsewhere in
+// the package (issue #1755).
+func TestView_SidebarOpen_NoColor_PanelsRenderAsciiBorder(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "still visible"}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
+
+	out := View(m)
+	if strings.Contains(out, "╭") {
+		t.Errorf("View() = %q, want no rounded border glyphs under NO_COLOR", out)
+	}
+	if got := strings.Count(out, "+"); got != 8 {
+		t.Errorf("View() has %d ASCII corner glyphs, want 8 (two panels, four corners each): %q", got, out)
+	}
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("View() = %q, want no escape sequences at all under NO_COLOR", out)
+	}
+}
+
+// TestView_SidebarOpen_MinimumFittingWidth_PanelsFitTerminalWidth verifies
+// that at the narrowest width sidebarFits allows docking, the two bordered
+// panels' combined rendered width — border overhead included — never
+// exceeds the terminal's actual width, so nothing overflows and wraps at
+// the threshold (issue #1755).
+func TestView_SidebarOpen_MinimumFittingWidth_PanelsFitTerminalWidth(t *testing.T) {
+	width := sidebarMinListWidth + sidebarWidth + dockedBorderCols
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "still visible"}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
+
+	out := View(m)
+	for i, line := range strings.Split(out, "\n") {
+		if got := runewidth.StringWidth(line); got > width {
+			t.Errorf("View() line %d is %d columns wide, want at most the terminal's %d: %q", i, got, width, line)
+		}
+	}
+}
+
 // TestView_SidebarOpen_ShortContent_DividerDoesNotFillWholeBudget verifies
 // the divider between the docked list and sidebar spans only as many rows
 // as the taller of the two actually rendered, not the whole body budget —
 // one Backlog issue and a one-line Activity feed must not force blank
 // divider rows down to the bottom of a tall terminal (#1501 review finding).
 func TestView_SidebarOpen_ShortContent_DividerDoesNotFillWholeBudget(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "only issue"}}})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "one line"}}})
 
@@ -1327,7 +1371,7 @@ func TestView_SidebarOpen_ShortContent_DividerDoesNotFillWholeBudget(t *testing.
 // fullscreen takeover — the list disappears entirely rather than squeezing
 // both columns illegibly (ADR 0030's narrow-terminal degradation, #1501).
 func TestView_SidebarOpen_NarrowTerminal_FallsBackFullscreen(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth, Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols - 1, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
 
@@ -1346,9 +1390,9 @@ func TestView_SidebarOpen_NarrowTerminal_FallsBackFullscreen(t *testing.T) {
 // floor — there's no room to grow past it without violating the queue list's
 // own sidebarMinListWidth floor (issue #1751).
 func TestComputeSidebarWidth_MinimumFittingWidth_ReturnsFloor(t *testing.T) {
-	got := computeSidebarWidth(sidebarMinListWidth + sidebarWidth + 1)
+	got := computeSidebarWidth(sidebarMinListWidth + sidebarWidth + dockedBorderCols)
 	if got != sidebarWidth {
-		t.Errorf("computeSidebarWidth(%d) = %d, want the floor %d", sidebarMinListWidth+sidebarWidth+1, got, sidebarWidth)
+		t.Errorf("computeSidebarWidth(%d) = %d, want the floor %d", sidebarMinListWidth+sidebarWidth+dockedBorderCols, got, sidebarWidth)
 	}
 }
 
@@ -1371,10 +1415,11 @@ func TestComputeSidebarWidth_WideTerminal_TargetsFortyFivePercent(t *testing.T) 
 // (issue #1751).
 func TestComputeSidebarWidth_ModeratelyWideTerminal_ClampsToQueueFloor(t *testing.T) {
 	// 140 columns: 45% would be 63, but that only leaves the queue
-	// 140-63-1 = 76, under its 80-column floor. The clamp caps the sidebar
-	// at 140-80-1 = 59 so the queue holds exactly its floor.
+	// 140-63-4 = 73, under its 80-column floor (the 4 is dockedBorderCols,
+	// both panels' borders). The clamp caps the sidebar at 140-80-4 = 56 so
+	// the queue holds exactly its floor.
 	got := computeSidebarWidth(140)
-	if want := 59; got != want {
+	if want := 56; got != want {
 		t.Errorf("computeSidebarWidth(140) = %d, want %d (clamped so the queue keeps its %d floor)", got, want, sidebarMinListWidth)
 	}
 }
@@ -1411,7 +1456,7 @@ func TestView_SidebarOpen_WideTerminal_QueueNarrowsForWiderSidebar(t *testing.T)
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
 
 	out := View(m)
-	listWidth := width - computeSidebarWidth(width) - 1
+	listWidth := width - computeSidebarWidth(width) - dockedBorderCols
 	titleWidth := listWidth - backlogFixedWidth - extrasBudget
 	want := clip(long, titleWidth, true)
 	if !strings.Contains(out, want) {
@@ -1474,7 +1519,7 @@ func TestView_SidebarLabel_ShowsFollowIndicator(t *testing.T) {
 // TestView_SidebarFooter_ShowsZoomHint verifies both the docked and
 // fullscreen sidebar footers advertise the "z" zoom key (issue #1502).
 func TestView_SidebarFooter_ShowsZoomHint(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
 	if !strings.Contains(View(m), "[z] zoom") {
 		t.Errorf("docked View() = %q, want the zoom key hint", View(m))
@@ -1491,7 +1536,7 @@ func TestView_SidebarFooter_ShowsZoomHint(t *testing.T) {
 // the "deep reading" zoom is an operator choice independent of sidebarFits'
 // own narrow-terminal fallback (issue #1502, ADR 0030).
 func TestView_SidebarZoom_WideTerminal_ForcesFullscreen(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show while zoomed"}}})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
 	m = Update(m, SidebarZoomToggleMsg{})
