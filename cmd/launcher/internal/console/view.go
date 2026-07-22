@@ -289,20 +289,21 @@ func viewBody(m Model) string {
 		b.WriteString(renderSectionTabs(m))
 	}
 	if m.Mode == ModeFilterEdit {
-		fmt.Fprintf(&b, "/%s  %s · %s\n", m.Filter,
-			footerHint(ModeFilterEdit, "enter"), footerHint(ModeFilterEdit, "esc"))
+		fmt.Fprintf(&b, "/%s  %s\n", m.Filter,
+			renderFooterHints(ModeFilterEdit, []string{"enter", "esc"}, 0, false))
 		reservedLines++
 	}
 	if m.Mode == ModeTerminateConfirm {
-		fmt.Fprintf(&b, "terminate #%s? %s\n", m.TerminateConfirm.Number, footerHint(ModeTerminateConfirm, "y"))
+		fmt.Fprintf(&b, "terminate #%s? %s\n", m.TerminateConfirm.Number,
+			renderFooterHints(ModeTerminateConfirm, []string{"y"}, 0, false))
 		reservedLines++
 	}
 	if m.Mode == ModeQuitConfirm {
-		fmt.Fprintf(&b, "%s\n", footerHint(ModeQuitConfirm, "d"))
+		fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeQuitConfirm, []string{"d"}, 0, false))
 		reservedLines++
 	}
 	if m.Mode == ModePick && m.HasHighlighted() {
-		b.WriteString("p_\n")
+		fmt.Fprintf(&b, "p_  %s\n", renderFooterHints(ModePick, []string{"a", "r"}, 0, false))
 		reservedLines++
 	}
 	if m.QueueEnterNotice != "" {

@@ -681,6 +681,28 @@ func TestView_ModePick_EmptyBacklog_HidesIndicator(t *testing.T) {
 	}
 }
 
+// TestView_ModePick_FooterStyledDim verifies the pending pick chord's
+// a/r hints render dim (RoleDim, "\x1b[90m") via the shared footer
+// renderer, the same treatment the other migrated footers already got,
+// while the "p_" chord indicator itself is preserved verbatim (issue
+// #1793).
+func TestView_ModePick_FooterStyledDim(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := NewModel()
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "fix the thing"}}})
+	m = Update(m, PickPendingMsg{})
+
+	out := View(m)
+	if !strings.Contains(out, "p_") {
+		t.Errorf("View() = %q, want the \"p_\" chord indicator preserved", out)
+	}
+	if !strings.Contains(out, "\x1b[90m[a] pick all · [r] research\x1b[0m") {
+		t.Errorf("View() = %q, want the pick-chord hint dim-styled with its text intact", out)
+	}
+}
+
 // TestView_ModeFilterEdit_ShowsInputLine verifies an in-progress filter edit
 // renders a visible input line with the text typed so far (issue #784).
 func TestView_ModeFilterEdit_ShowsInputLine(t *testing.T) {
@@ -691,6 +713,24 @@ func TestView_ModeFilterEdit_ShowsInputLine(t *testing.T) {
 	out := View(m)
 	if !strings.Contains(out, "/bug") && !strings.Contains(out, "/ bug") {
 		t.Errorf("View() = %q, want the in-progress filter text shown", out)
+	}
+}
+
+// TestView_ModeFilterEdit_FooterStyledDim verifies the filter-edit prompt's
+// enter/esc hints render dim (RoleDim, "\x1b[90m") via the shared footer
+// renderer, the same treatment the other migrated footers already got
+// (issue #1793).
+func TestView_ModeFilterEdit_FooterStyledDim(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := NewModel()
+	m = Update(m, FilterEditStartMsg{})
+	m = Update(m, FilterChangedMsg{Filter: "bug"})
+
+	out := View(m)
+	if !strings.Contains(out, "\x1b[90m[enter] apply · [esc] cancel\x1b[0m") {
+		t.Errorf("View() = %q, want the filter-edit hint dim-styled with its text intact", out)
 	}
 }
 

@@ -409,7 +409,8 @@ var keymap = []Binding{
 	},
 	{
 		Keys: []string{"a"}, Modes: []Mode{ModePick},
-		Help: "  pa          pick all ready (bulk pick-all-ready gesture)",
+		Help:   "  pa          pick all ready (bulk pick-all-ready gesture)",
+		Footer: "[a] pick all",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			return t.pickAllReady(), nil
 		},
@@ -419,6 +420,7 @@ var keymap = []Binding{
 		Help: "  pr          pick the highlighted Backlog row as a research\n" +
 			"              dispatch (advise-only: posts one verdict comment,\n" +
 			"              never opens a branch/PR)",
+		Footer: "[r] research",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			return t.pickHighlighted(KindResearch), nil
 		},
