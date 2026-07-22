@@ -164,6 +164,26 @@ in
       "main.go reads env vars absent from schema/documentArtifactKeys: ${concatStringsSep ", " extraInGo}";
     pkgs.runCommand "launcher-env-coverage" { } "touch $out";
 
+  # continuousDispatch's doc string must point readers at the exit-code
+  # table's actual home, docs/reference.md's Dogfood loop (Termination)
+  # section, not the nonexistent "README's exit-code table" it used to cite
+  # (issue #1879) — this doc string is the single source rendered onto
+  # --help, the man page, and docs/flake-options.md, so a stale pointer
+  # there is stale everywhere.
+  continuous-dispatch-doc-reference =
+    let
+      schema = import ../../lib/env-schema.nix;
+      inherit (pkgs.lib) assertMsg hasInfix;
+      doc = schema.continuousDispatch.doc;
+    in
+    assert assertMsg (!hasInfix "README" doc)
+      "lib/env-schema.nix: continuousDispatch.doc must not point at README for the exit-code table (issue #1879) — it lives in docs/reference.md's Dogfood loop section, got: ${doc}";
+    assert assertMsg (hasInfix "docs/reference.md" doc)
+      "lib/env-schema.nix: continuousDispatch.doc must point at docs/reference.md's exit-code table (issue #1879), got: ${doc}";
+    assert assertMsg (hasInfix "Dogfood loop" doc)
+      "lib/env-schema.nix: continuousDispatch.doc must name docs/reference.md's Dogfood loop section, not just the file (issue #1879), got: ${doc}";
+    pkgs.runCommand "continuous-dispatch-doc-reference" { } "touch $out";
+
   # lib/env-schema.nix's optional `choices` field (issue #554) must be a
   # non-empty list of strings, and a knob's `default` (if any) must be a
   # member of its own `choices` — a knob completing values it can never
