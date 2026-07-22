@@ -48,6 +48,17 @@ type Config struct {
 // with no launcher changes. An empty range after any other claimed status is
 // already consistent — nothing is written.
 func Run(cfg Config, w io.Writer) error {
+	// Defense in depth, matching forge/local's relayBundle: Base and Branch
+	// are harness-controlled today (BASE_BRANCH/BRANCH), but both interpolate
+	// directly into a `base..branch` range spec, so guard them the same way
+	// regardless.
+	if err := validateRef(cfg.Base); err != nil {
+		return err
+	}
+	if err := validateRef(cfg.Branch); err != nil {
+		return err
+	}
+
 	count, err := commitCount(cfg.Repo, cfg.Base, cfg.Branch)
 	if err != nil {
 		return err
@@ -67,6 +78,13 @@ func Run(cfg Config, w io.Writer) error {
 		if _, err := fmt.Fprintln(w, corrective.Line()); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateRef(ref string) error {
+	if ref == "" || strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("bundleout: invalid ref %q", ref)
 	}
 	return nil
 }

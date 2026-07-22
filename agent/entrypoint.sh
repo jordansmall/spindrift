@@ -790,7 +790,11 @@ main() {
   # Harness, not the Agent, bundles the seam after the Driver exits. An empty
   # base..BRANCH range against a claimed status=ready prints a corrective
   # SPINDRIFT_OUTCOME line, picked up by the launcher's own last-line-wins
-  # log scan with no launcher changes.
+  # log scan with no launcher changes. Deliberately left unguarded under
+  # set -e: a bundle-out failure (e.g. a transient git error) is a genuine
+  # container failure, not a judgment call, so it belongs on the launcher's
+  # own ClassifyTransient/retry path like any other non-zero exit here,
+  # rather than a caught-and-noted best-effort step.
   if [ "${CODE_FORGE:-github}" = "local" ]; then
     driver-exec bundle-out \
       --repo "$WORK_DIR" \
