@@ -132,6 +132,52 @@ func TestPickIssue_AlreadyComplete_ReturnsDissolvedMsg_NoTransition(t *testing.T
 	}
 }
 
+// TestPickIssue_ClosedIssue_ReturnsDissolvedMsg_NoTransition verifies a pick
+// on an issue GitHub already closed is rejected outright, even when it still
+// carries no dispatch label — a closed issue must never be promoted onto the
+// dispatch lifecycle just because a dispatch label was never cleaned up
+// (#1851).
+func TestPickIssue_ClosedIssue_ReturnsDissolvedMsg_NoTransition(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueClosed})
+
+	msg := PickIssue(f, "42", "fix the thing", KindWork)
+
+	dissolved, ok := msg.(PickDissolvedMsg)
+	if !ok {
+		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
+	}
+	const wantReason = "issue #42 is already closed"
+	if dissolved.Number != "42" || dissolved.Reason != wantReason {
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with reason %q", dissolved, wantReason)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none — a closed issue must never be relabeled", f.TransitionStateCalls)
+	}
+}
+
+// TestPickIssue_IssueLookupErr_ReturnsDissolvedMsg verifies a tracker.Issue
+// failure (network fault, deleted issue) surfaces as a PickDissolvedMsg
+// carrying the tracker's error, rather than falling through to the
+// InProgress/Complete checks with a zero-value Issue.
+func TestPickIssue_IssueLookupErr_ReturnsDissolvedMsg(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.IssueErr = errBoom
+
+	msg := PickIssue(f, "42", "fix the thing", KindWork)
+
+	dissolved, ok := msg.(PickDissolvedMsg)
+	if !ok {
+		t.Fatalf("PickIssue() = %T, want PickDissolvedMsg", msg)
+	}
+	if dissolved.Number != "42" || dissolved.Reason != errBoom.Error() {
+		t.Errorf("PickDissolvedMsg = %+v, want #42 with reason %q", dissolved, errBoom.Error())
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls = %+v, want none — a failed lookup must never allow a pick through", f.TransitionStateCalls)
+	}
+}
+
 // TestPickIssue_ResearchKind_UntriagedIssue_ReturnsQueuedMsg verifies a
 // KindResearch pick on an untriaged Backlog issue queues instead of
 // dissolving (#1742). Research's DispatchLabels leaves Complete unmapped
