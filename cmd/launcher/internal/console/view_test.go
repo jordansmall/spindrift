@@ -1979,7 +1979,7 @@ func TestView_DetailModal_SanitizesTitleLabelsBodyAndBlockerTitles(t *testing.T)
 // Transcript — the operator's view of the work, not just liveness (#648,
 // #1501).
 func TestView_SidebarOpen_RendersActivityInsteadOfBacklog(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}, Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
 
@@ -2002,7 +2002,7 @@ func TestView_SidebarOpen_RendersActivityInsteadOfBacklog(t *testing.T) {
 // toggle swaps the sidebar from the Activity feed to the rendered Transcript,
 // then to the raw byte-exact form.
 func TestView_SidebarToggle_RendersTranscriptThenRaw(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}, Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
 	m = Update(m, SidebarToggleMsg{})
 
@@ -2029,7 +2029,10 @@ func TestView_SidebarToggle_RendersTranscriptThenRaw(t *testing.T) {
 // Transcript (rendered) view is toggled on so the content matches the plain
 // "l0".."l3" lines the old drill-in test exercised.
 func TestView_SidebarOffset_HidesLinesBeforeOffset(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Height: 4})
+	// Height 5, not 4: headerFooterLines(2) plus the trailing-newline
+	// reservation (issue #1841) leave a 2-line content budget here, the same
+	// 2-line window this test's offset math always assumed.
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 5})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "l0\nl1\nl2\nl3"})
 	m = Update(m, SidebarToggleMsg{})
 	m = Update(m, SidebarScrollMsg{Delta: 2})
@@ -2061,7 +2064,7 @@ func TestView_SidebarErr_Surfaced(t *testing.T) {
 // shows once the operator actually toggles to the Transcript (#1501 review
 // finding).
 func TestView_SidebarTranscriptErr_HiddenBehindActivity(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}, TranscriptErr: errBoom})
 
 	out := View(m)
@@ -2087,7 +2090,7 @@ func TestView_SidebarTranscriptErr_HiddenBehindActivity(t *testing.T) {
 // (rendered) view is toggled on so the content matches the head/tail markers
 // the old drill-in test exercised.
 func TestView_SidebarFullscreen_WindowsToViewportHeight(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Height: 5})
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 5})
 	content := "HEAD-MARKER\n" + strings.Repeat("x\n", 100) + "TAIL-MARKER"
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: content})
 	m = Update(m, SidebarToggleMsg{})
@@ -2317,6 +2320,102 @@ func TestView_SidebarFullscreen_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	}
 	if got := strings.Count(out, "\n") + 1; got > height {
 		t.Errorf("View() rendered %d lines, want at most Height (%d) — a clipped footer must still fit its reserved row", got, height)
+	}
+}
+
+// TestView_SidebarFullscreen_LongTranscriptLine_ClipsToWidth verifies a
+// rendered-transcript line longer than the pane width clips to exactly one
+// physical row, mirroring renderSidebarDocked's own per-line clip — an
+// unclipped line soft-wraps past windowSidebarLines' logical-line height
+// budget and pushes the modal's top border (and footer) off the viewport
+// (issue #1841).
+func TestView_SidebarFullscreen_LongTranscriptLine_ClipsToWidth(t *testing.T) {
+	const width, height = 40, 24
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: strings.Repeat("x", width*3)})
+	m = Update(m, SidebarToggleMsg{}) // -> Transcript (rendered)
+
+	out := View(m)
+	for i, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("View() line %d is %d columns wide, want at most the terminal's %d: %q", i, got, width, line)
+		}
+	}
+	if got := strings.Count(out, "\n") + 1; got > height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) — an unclipped line's soft-wrap must not spill past the budget", got, height)
+	}
+}
+
+// TestView_SidebarFullscreen_RawViewLongLine_ClipsToWidth verifies the clip
+// fix holds for the raw JSONL `[t]` view too, not just the rendered one —
+// windowSidebarLines and the clip loop it feeds don't care which of the
+// three views populated Sidebar.Lines (issue #1841 AC3).
+func TestView_SidebarFullscreen_RawViewLongLine_ClipsToWidth(t *testing.T) {
+	const width, height = 40, 24
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Raw: strings.Repeat("y", width*3)})
+	m = Update(m, SidebarToggleMsg{}) // -> Transcript (rendered)
+	m = Update(m, SidebarToggleMsg{}) // -> Transcript (raw)
+
+	out := View(m)
+	for i, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("View() line %d is %d columns wide, want at most the terminal's %d: %q", i, got, width, line)
+		}
+	}
+}
+
+// TestView_SidebarFullscreen_ZoomedLongLine_ClipsToWidth verifies the clip
+// fix holds on the [z]-zoom fullscreen trigger, not only the too-narrow-to-
+// dock fallback — both reach the same renderSidebarFullscreen (viewBody's
+// `m.SidebarZoom || !sidebarFits(m)` branch), but a terminal wide enough to
+// dock exercises a different width value than the narrow-fallback tests
+// above (issue #1841 AC3).
+func TestView_SidebarFullscreen_ZoomedLongLine_ClipsToWidth(t *testing.T) {
+	const width, height = sidebarMinListWidth + sidebarWidth + dockedBorderCols, 24
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: strings.Repeat("z", width*3)})
+	m = Update(m, SidebarToggleMsg{}) // -> Transcript (rendered)
+	m = Update(m, SidebarZoomToggleMsg{})
+
+	out := View(m)
+	for i, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("View() line %d is %d columns wide, want at most the terminal's %d: %q", i, got, width, line)
+		}
+	}
+}
+
+// TestView_SidebarFullscreen_ExactFitContent_FitsHeightWithFooterPinned
+// verifies a fullscreen sidebar whose content exactly fills its windowed
+// budget still renders no more physical lines than m.Height: View()'s own
+// guaranteed trailing "\n" (the same class of off-by-one #1825/#1827 fixed
+// for the list body and rebuild-output pane) costs the terminal a physical
+// row of its own, and renderSidebarFullscreen never reserved one — unlike
+// renderSidebarDocked, which inherits it via bodyBudget (issue #1841).
+func TestView_SidebarFullscreen_ExactFitContent_FitsHeightWithFooterPinned(t *testing.T) {
+	const width, height = 80, 10
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
+	// headerFooterLines(2) leaves an 8-line content budget at height 10;
+	// 8 short lines exactly fill it without soft-wrapping, isolating the
+	// trailing-newline reservation gap from the per-line clip fix above.
+	lines := make([]string, height-headerFooterLines)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
+	m = Update(m, SidebarToggleMsg{}) // -> Transcript (rendered)
+
+	out := View(m)
+	// Split, not TrimRight-then-count, for the same reason
+	// TestView_ExactFitBacklog_FitsHeightWithBannerAndFooterPinned uses it:
+	// trimming the trailing "\n" first hides exactly the row this overflow
+	// turns on.
+	if got := len(strings.Split(out, "\n")); got > height {
+		t.Errorf("View() rendered %d physical lines, want at most Height (%d): %q", got, height, out)
+	}
+	if !strings.Contains(out, "[t] cycle") {
+		t.Errorf("View() = %q, want the footer hint line still pinned and visible", out)
 	}
 }
 

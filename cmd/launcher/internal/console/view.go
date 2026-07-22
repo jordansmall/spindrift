@@ -1205,14 +1205,16 @@ func windowSidebarLines(s SidebarState, budget int) []string {
 // shares this budget — see sidebarDockedFooterLines.
 const headerFooterLines = 2
 
-// trailingNewlineRow is the extra row renderRebuildOutputPane's budget and
-// its model.go cursor-follow mirror both reserve for View()'s own
-// guaranteed trailing "\n" (issue #1827, mirroring f330ff6's fix for the
-// list view): without it, output that exactly fills or overflows the
-// budget renders header(1)+budget+footer(1) == m.Height lines, one over
-// once that trailing "\n" is counted as its own physical row. Named and
-// shared, rather than a bare "-1" at each site, so the two budgets can't
-// drift out of lockstep the way bef158e had to fix.
+// trailingNewlineRow is the extra row renderRebuildOutputPane's budget, its
+// model.go cursor-follow mirror, renderSidebarFullscreen, and *its* model.go
+// cursor-follow mirror all reserve for View()'s own guaranteed trailing "\n"
+// (issue #1827, mirroring f330ff6's fix for the list view; extended to the
+// fullscreen sidebar by issue #1841 — renderSidebarDocked never needed it,
+// since it inherits bodyBudget's own "-1" instead): without it, output that
+// exactly fills or overflows the budget renders header(1)+budget+footer(1)
+// == m.Height lines, one over once that trailing "\n" is counted as its own
+// physical row. Named and shared, rather than a bare "-1" at each site, so
+// the budgets can't drift out of lockstep the way bef158e had to fix.
 const trailingNewlineRow = 1
 
 // sidebarDockedFooterLines is the docked sidebar's own chrome budget
@@ -1798,7 +1800,12 @@ func renderSidebarFullscreen(s SidebarState, width, height int) string {
 		return b.String()
 	}
 
-	visible := strings.Join(windowSidebarLines(s, height-headerFooterLines), "\n")
+	lines := windowSidebarLines(s, height-headerFooterLines-trailingNewlineRow)
+	clipped := make([]string, len(lines))
+	for i, line := range lines {
+		clipped[i] = clip(line, width, false)
+	}
+	visible := strings.Join(clipped, "\n")
 	b.WriteString(visible)
 	if visible != "" && !strings.HasSuffix(visible, "\n") {
 		b.WriteString("\n")
