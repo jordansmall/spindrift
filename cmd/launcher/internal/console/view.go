@@ -246,7 +246,11 @@ func View(m Model) string {
 // actually renders to, there's no room for a border at all — the header
 // then renders unboxed rather than forcing a degenerate box or overrunning
 // Height on an extremely short terminal (issue #1035 AC1/AC2's invariant).
-// Height fitness is checked against the boxed render's own line count,
+// The fitness check leaves one further row of slack (< m.Height, not <=)
+// for View()'s own guaranteed trailing "\n" — boxed header content landing
+// on exactly m.Height still overflows by that trailing newline the same as
+// a full body budget does (issue #1825). Height fitness is checked against
+// the boxed render's own line count,
 // rather than predicted from the unboxed content's newline count, because
 // renderHeader doesn't pre-wrap its content to m.Width the way the docked
 // list/sidebar's content is pre-clipped before boxing — a narrow terminal
@@ -257,7 +261,7 @@ func View(m Model) string {
 func renderBoxedHeader(m Model) string {
 	header := renderHeader(m)
 	if headerWidth := m.Width - boxBorderCols; headerWidth > 0 {
-		if boxed := renderBoxedColumn(header, headerWidth, headerTitle, RoleDim) + "\n"; strings.Count(boxed, "\n") <= m.Height {
+		if boxed := renderBoxedColumn(header, headerWidth, headerTitle, RoleDim) + "\n"; strings.Count(boxed, "\n") < m.Height {
 			return boxed
 		}
 	}
@@ -317,7 +321,19 @@ func viewBody(m Model) string {
 		// finding).
 		reservedLines++
 	}
-	budget := m.Height - headerLines - reservedLines
+	// The extra "-1" reserves the row View()'s own guaranteed trailing "\n"
+	// needs: the body is the one budget component still free to shrink (the
+	// header/tabs/prompt lines above are already fixed by the time budget is
+	// computed), so it's where the reservation lands rather than in any of
+	// those. Without it, a body that exactly fills what's left — full
+	// utilization, not overflow — still ends in a "\n" with no row left to
+	// advance the cursor into, which scrolls the pinned top banner off
+	// screen exactly as visibly as spilling past the budget outright (issue
+	// #1825; #1794 caught the same class of bug but only reserved a row
+	// once the "… N more below" affordance was already showing, leaving
+	// this exact-fit case and short-terminal budgets too small for any
+	// reservation to help unaddressed).
+	budget := m.Height - headerLines - reservedLines - 1
 	if budget < 0 {
 		budget = 0
 	}
@@ -376,13 +392,16 @@ const sectionTabsLines = 1
 
 // sectionTabsReserved returns sectionTabsLines when the terminal has room
 // left for the Section tabs line after headerLines (renderHeader's own
-// line count), 0 otherwise — the tabs line's own collapse-when-short
-// degradation, so an extremely short terminal never renders more than
-// Height lines total (issue #1500). Shared by View's own budget calc and
-// bodyBudget so the two can never diverge (issue #1035's invariant,
-// extended to the tabs line).
+// line count) — with one further row of slack beyond that so showing the
+// tabs line still leaves room for View()'s own guaranteed trailing "\n"
+// (issue #1825; headerLines+sectionTabsLines landing on exactly m.Height
+// overflows by that trailing newline the same as a full body budget does)
+// — 0 otherwise — the tabs line's own collapse-when-short degradation, so
+// an extremely short terminal never renders more than Height lines total
+// (issue #1500). Shared by View's own budget calc and bodyBudget so the two
+// can never diverge (issue #1035's invariant, extended to the tabs line).
 func sectionTabsReserved(m Model, headerLines int) int {
-	if m.Height <= headerLines {
+	if m.Height <= headerLines+1 {
 		return 0
 	}
 	return sectionTabsLines
@@ -1016,7 +1035,11 @@ func bodyBudget(m Model) int {
 	if m.Err != nil {
 		reservedLines++
 	}
-	budget := m.Height - headerLines - reservedLines
+	// Mirrors viewBody's own "-1" (issue #1825): the body is the only
+	// budget component still free to shrink, so it's where the reservation
+	// for View()'s guaranteed trailing "\n" lands, keeping this figure in
+	// agreement with the one View actually renders against.
+	budget := m.Height - headerLines - reservedLines - 1
 	if budget < 0 {
 		budget = 0
 	}
