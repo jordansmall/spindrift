@@ -820,18 +820,46 @@ func (t teaModel) quitOrConfirmMsg() Msg {
 	return QuitMsg{}
 }
 
-// pickHighlighted promotes the cursor's highlighted issue through
-// Launcher.Pick and applies the fresh snapshot it hands back in the same
-// Update cycle — the keypress translation of ADR 0023's
-// Pick-is-the-launch-button rule. kind selects the Dispatch kind the pick
-// carries: KindWork for the "p"/"pa" gestures, KindResearch for "pr" (issue
-// #1709) — Launcher.Pick's own trackerFor already routes a KindResearch pick
-// onto ResearchTracker when one is wired. A nil Launcher promotes through
-// PickIssue directly onto Model.Picks (matching the pre-#785 no-launch
-// Console) but never queues on a live queue or launches, since there is
-// nothing to launch it. A no-op outside SectionBacklog — Cursor indexes a
-// work Section's Picks there, not the backlog, and Backlog is ADR 0030's
-// sole pick source (issue #1500).
+// landPick promotes num/title through Launcher.Pick and applies the fresh
+// snapshot it hands back in the same Update cycle — the shared tail
+// pickHighlighted and pickDetailModalIssue both land through, so their two
+// pick sources (cursor row vs. open modal) can never drift apart on how a
+// resolved target actually gets queued/launched. kind selects the Dispatch
+// kind the pick carries: KindWork for the "p"/"pa" gestures and the modal's
+// own "p", KindResearch for "pr" (issue #1709) — Launcher.Pick's own
+// trackerFor already routes a KindResearch pick onto ResearchTracker when
+// one is wired. A nil Launcher promotes through PickIssue directly onto
+// Model.Picks (matching the pre-#785 no-launch Console) but never queues on
+// a live queue or launches, since there is nothing to launch it.
+func (t teaModel) landPick(num, title string, kind Kind) (teaModel, Msg) {
+	if t.launch == nil {
+		// No Launcher means no trackerFor to pick a ResearchTracker over
+		// t.tracker either — relevant only to pickHighlighted's "pr" chord,
+		// the sole KindResearch caller (pickDetailModalIssue always passes
+		// KindWork); a KindResearch pick here still promotes on t.tracker's
+		// own label family, tagged with the kind it was asked for
+		// regardless. Harmless in practice: production always supplies a
+		// Launcher (cmdConsole wires ResearchTracker unconditionally), so
+		// this branch is exercised only by tests that deliberately skip the
+		// launch stack to exercise bare Pick/Unpick bookkeeping.
+		msg := PickIssue(t.tracker, num, title, kind)
+		t.m = Update(t.m, msg)
+		return t, msg
+	}
+	msg, picks := t.launch.Pick(t.tracker, num, title, kind)
+	t.m = Update(t.m, QueueSnapshotMsg{Picks: picks})
+	if _, ok := msg.(PickQueuedMsg); ok {
+		t.launch.tryLaunch(t.tracker, t.pwd)
+	}
+	return t, msg
+}
+
+// pickHighlighted promotes the cursor's highlighted issue through landPick —
+// the keypress translation of ADR 0023's Pick-is-the-launch-button rule. A
+// no-op outside SectionBacklog — Cursor indexes a work Section's Picks
+// there, not the backlog, and Backlog is ADR 0030's sole pick source (issue
+// #1500) — and a no-op when the issue already has an active (queued, held,
+// claiming, or running) row (issue #785 review).
 func (t teaModel) pickHighlighted(kind Kind) teaModel {
 	if t.m.ActiveSection != SectionBacklog {
 		return t
@@ -844,21 +872,34 @@ func (t teaModel) pickHighlighted(kind Kind) teaModel {
 	if t.alreadyActive(iss.Number) {
 		return t
 	}
-	if t.launch == nil {
-		// No Launcher means no trackerFor to pick a ResearchTracker over
-		// t.tracker either — a KindResearch pick here still promotes on
-		// t.tracker's own label family, tagged with the kind it was asked
-		// for regardless. Harmless in practice: production always supplies
-		// a Launcher (cmdConsole wires ResearchTracker unconditionally), so
-		// this branch is exercised only by tests that deliberately skip the
-		// launch stack to exercise bare Pick/Unpick bookkeeping.
-		t.m = Update(t.m, PickIssue(t.tracker, iss.Number, iss.Title, kind))
+	t, _ = t.landPick(iss.Number, iss.Title, kind)
+	return t
+}
+
+// pickDetailModalIssue promotes the open ticket detail modal's own displayed
+// issue through landPick as a KindWork pick, keyed by DetailModal.Number/
+// Title rather than the Backlog cursor — so a background refresh reordering
+// rows underneath the open modal can never redirect the pick onto a
+// different issue (issue #1835). A nil DetailModal (defensive only — the
+// "p" binding this feeds is scoped to ModeDetailModal, which never fires
+// without one) and an already active pick are both no-ops, same as
+// pickHighlighted; a pick landPick's own PickIssue/Launcher.Pick refuses
+// (already InProgress/Complete, TransitionState failure) lands as a
+// PickDissolvedMsg row rather than mis-picking anything, and leaves the
+// modal open so the operator can see why. Only a successful PickQueuedMsg
+// closes the modal.
+func (t teaModel) pickDetailModalIssue() teaModel {
+	dm := t.m.DetailModal
+	if dm == nil {
 		return t
 	}
-	msg, picks := t.launch.Pick(t.tracker, iss.Number, iss.Title, kind)
-	t.m = Update(t.m, QueueSnapshotMsg{Picks: picks})
+	if t.alreadyActive(dm.Number) {
+		return t
+	}
+	var msg Msg
+	t, msg = t.landPick(dm.Number, dm.Title, KindWork)
 	if _, ok := msg.(PickQueuedMsg); ok {
-		t.launch.tryLaunch(t.tracker, t.pwd)
+		t.m = Update(t.m, DetailModalCloseMsg{})
 	}
 	return t
 }

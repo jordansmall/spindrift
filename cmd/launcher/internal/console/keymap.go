@@ -385,6 +385,16 @@ var keymap = []Binding{
 		},
 	},
 	{
+		Keys: []string{"p"}, Modes: []Mode{ModeDetailModal},
+		Help: "  p           pick the displayed issue as a work-kind dispatch\n" +
+			"              (same launch button as the Backlog's \"p\"), then close\n" +
+			"              the modal",
+		Footer: "[p] pick",
+		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
+			return t.pickDetailModalIssue(), nil
+		},
+	},
+	{
 		Keys: []string{"r"}, Modes: []Mode{ModeList},
 		Help:   "  r           refresh the backlog",
 		Footer: "[r] refresh",

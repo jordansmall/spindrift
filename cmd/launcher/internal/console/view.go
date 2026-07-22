@@ -1646,7 +1646,7 @@ func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) [
 	if len(lines) > contentBudget {
 		lines = lines[:contentBudget]
 	}
-	lines = append(lines, renderFooterHints(ModeDetailModal, []string{"esc"}, innerWidth, false))
+	lines = append(lines, renderFooterHints(ModeDetailModal, []string{"esc", "p"}, innerWidth, false))
 	for len(lines) < innerHeight {
 		lines = append(lines, "")
 	}
@@ -1725,7 +1725,7 @@ func renderDetailModal(s DetailModalState, width, height int) string {
 			b.WriteString("\n")
 		}
 	}
-	fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeDetailModal, []string{"esc"}, width, false))
+	fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeDetailModal, []string{"esc", "p"}, width, false))
 	return b.String()
 }
 
