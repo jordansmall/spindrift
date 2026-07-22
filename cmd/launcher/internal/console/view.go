@@ -318,6 +318,10 @@ func viewBody(m Model) string {
 		fmt.Fprintf(&b, "%s\n", m.QueueEnterNotice)
 		reservedLines++
 	}
+	if m.Toast != "" {
+		fmt.Fprintf(&b, "%s\n", clip(m.Toast, m.Width, false))
+		reservedLines++
+	}
 	if m.Err != nil {
 		// The refresh-error line renders after the body (below), but must
 		// still be subtracted from budget up front or a long list plus an
@@ -1034,6 +1038,9 @@ func bodyBudget(m Model) int {
 		reservedLines++
 	}
 	if m.QueueEnterNotice != "" {
+		reservedLines++
+	}
+	if m.Toast != "" {
 		reservedLines++
 	}
 	if m.Err != nil {
