@@ -53,7 +53,7 @@ func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconc
 	} else {
 		fmt.Fprintf(w, "reconcile: reset %d issue(s): %s\n", len(res.Reset), strings.Join(res.Reset, ", "))
 	}
-	return surfaceAfterDispatch(c, it, pwd, w)
+	return surfaceAfterDispatch(c, it, pwd, w, res.Stuck)
 }
 
 // reconcileAfterDispatch auto-invokes the reconcile sweep at the end of a
@@ -70,22 +70,24 @@ func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge,
 }
 
 // surfaceAfterDispatch surfaces every completed broad ticket's Integration
-// branch into pwd as a local branch named after its resolved parent, once
-// every one of its seam issues is closed — CODE_FORGE=local's auto-surface
-// exit (ADR 0033, issue #1730), delegated to localloop.Wire's Surface (issue
-// #1806) so this and the composed loop test drive the identical sweep. A
-// no-op for any codeForge other than "local"; localloop.Wired.Surface itself
-// covers the tracker-has-no-SeamLister no-op (every tracker but local). This
-// mints its own Wired rather than sharing the run's own (issue #1810):
-// runReconcile is reachable from the standalone `reconcile` subcommand
-// (cmdReconcile), a separate process invocation with no dispatch-time Wired
-// to share, not only from reconcileAfterDispatch's tail end of a run that
-// already built one.
-func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writer) error {
+// branch into pwd as a local branch, once every one of its seam issues is
+// closed — CODE_FORGE=local's auto-surface exit (ADR 0033, issue #1730),
+// delegated to localloop.Wire's Surface (issue #1806) so this and the
+// composed loop test drive the identical sweep. stuck threads through
+// reconcile.Run's own Result.Stuck (issue #1811) so Surface's held verdicts
+// can name a ticket's stuck landing without redoing the ancestry check
+// itself. A no-op for any codeForge other than "local";
+// localloop.Wired.Surface itself covers the tracker-has-no-SeamLister no-op
+// (every tracker but local). This mints its own Wired rather than sharing
+// the run's own (issue #1810): runReconcile is reachable from the
+// standalone `reconcile` subcommand (cmdReconcile), a separate process
+// invocation with no dispatch-time Wired to share, not only from
+// reconcileAfterDispatch's tail end of a run that already built one.
+func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writer, stuck map[string]string) error {
 	if c.codeForge != "local" {
 		return nil
 	}
-	return localloop.Wire(localloopConfig(c), it).Surface(pwd, w)
+	return localloop.Wire(localloopConfig(c), it).Surface(pwd, w, stuck)
 }
 
 // cmdReconcile is the `reconcile` subcommand: the local-tracker bookkeeping

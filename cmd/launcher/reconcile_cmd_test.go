@@ -238,7 +238,7 @@ func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, it, pwd, &buf); err != nil {
+	if err := surfaceAfterDispatch(c, it, pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if !strings.Contains(buf.String(), parent) {
@@ -252,10 +252,12 @@ func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 	}
 }
 
-// TestSurfaceAfterDispatch_OpenSeamRemains_NoOp verifies surfaceAfterDispatch
-// does nothing — no branch, no notice — while any one of the ticket's seams
-// is still open (issue #1730 AC3).
-func TestSurfaceAfterDispatch_OpenSeamRemains_NoOp(t *testing.T) {
+// TestSurfaceAfterDispatch_OpenSeamRemains_PrintsHeldVerdict verifies
+// surfaceAfterDispatch surfaces no branch while any one of the ticket's
+// seams is still open (issue #1730 AC3), but — unlike the pre-#1811 silent
+// no-op — prints a held verdict naming the open seam, so the ticket is
+// never silent (issue #1811).
+func TestSurfaceAfterDispatch_OpenSeamRemains_PrintsHeldVerdict(t *testing.T) {
 	setGitIdentityEnv(t)
 	const parent = "1700"
 	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(local.ResolveParent("", parent)))
@@ -272,11 +274,12 @@ func TestSurfaceAfterDispatch_OpenSeamRemains_NoOp(t *testing.T) {
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, it, pwd, &buf); err != nil {
+	if err := surfaceAfterDispatch(c, it, pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
-	if buf.Len() != 0 {
-		t.Errorf("want no output while a seam is open, got %q", buf.String())
+	want := "surface: 1700 held — open seam #seam-2\n"
+	if buf.String() != want {
+		t.Errorf("surfaceAfterDispatch output = %q, want %q", buf.String(), want)
 	}
 	if err := runGit(pwd, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent); err == nil {
 		t.Errorf("refs/heads/%s exists, want no branch surfaced", parent)
@@ -297,7 +300,7 @@ func TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp(t *testing.T) {
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, it, "/nonexistent/pwd", &buf); err != nil {
+	if err := surfaceAfterDispatch(c, it, "/nonexistent/pwd", &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if buf.Len() != 0 {
@@ -308,9 +311,10 @@ func TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp(t *testing.T) {
 // TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets
 // verifies surfaceAfterDispatch iterates every distinct resolved parent
 // among the tracker's issues (ADR 0033, issue #1734) — a mixed batch
-// surfaces the broad ticket whose seams are all closed while leaving one
-// with an open seam alone, instead of collapsing onto a single env-wide
-// parent the way the removed CODE_FORGE_INTEGRATION_PARENT knob did.
+// surfaces the broad ticket whose seams are all closed while printing a held
+// verdict, not a branch, for the one with an open seam, instead of
+// collapsing onto a single env-wide parent the way the removed
+// CODE_FORGE_INTEGRATION_PARENT knob did.
 func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *testing.T) {
 	setGitIdentityEnv(t)
 	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(local.ResolveParent("", "broad-a")))
@@ -330,14 +334,14 @@ func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *t
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, it, pwd, &buf); err != nil {
+	if err := surfaceAfterDispatch(c, it, pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
-	if !strings.Contains(buf.String(), "broad-a") {
+	if !strings.Contains(buf.String(), "surface: broad-a surfaced") {
 		t.Errorf("want output to mention completed ticket broad-a, got %q", buf.String())
 	}
-	if strings.Contains(buf.String(), "broad-b") {
-		t.Errorf("want no mention of still-open ticket broad-b, got %q", buf.String())
+	if !strings.Contains(buf.String(), "surface: broad-b held — open seam #seam-b2") {
+		t.Errorf("want a held verdict naming still-open ticket broad-b, got %q", buf.String())
 	}
 	if err := runGit(pwd, "rev-parse", "--verify", "--quiet", "refs/heads/broad-a"); err != nil {
 		t.Errorf("refs/heads/broad-a missing, want it surfaced: %v", err)
@@ -370,7 +374,7 @@ func TestSurfaceAfterDispatch_OneParentErrors_StillAttemptsTheOthers(t *testing.
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
 	var buf bytes.Buffer
-	err := surfaceAfterDispatch(c, it, pwd, &buf)
+	err := surfaceAfterDispatch(c, it, pwd, &buf, nil)
 	if err == nil {
 		t.Fatal("surfaceAfterDispatch: want an error since pwd is not a git repo, got nil")
 	}
@@ -463,7 +467,7 @@ func TestSurfaceAfterDispatch_ManyNeverLandedParents_CollapsesIntoOneSummaryLine
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, it, pwd, &buf); err != nil {
+	if err := surfaceAfterDispatch(c, it, pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if got := strings.Count(buf.String(), "skipped"); got != 1 {
@@ -498,17 +502,17 @@ func TestSurfaceAfterDispatch_NeverLandedAndCheckedOut_OnlyNeverLandedCollapses(
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, it, pwd, &buf); err != nil {
+	if err := surfaceAfterDispatch(c, it, pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
-	if !strings.Contains(buf.String(), "surface: 9010 skipped — 9010 is currently checked out\n") {
-		t.Errorf("want 9010's checked-out skip reported on its own line, got %q", buf.String())
+	if !strings.Contains(buf.String(), "surface: 9010 held — 9010 is currently checked out\n") {
+		t.Errorf("want 9010's checked-out held verdict reported on its own line, got %q", buf.String())
 	}
 	if !strings.Contains(buf.String(), "surface: 2 broad ticket(s) skipped — no seam has landed yet\n") {
 		t.Errorf("want the two never-landed parents collapsed into one summary line, got %q", buf.String())
 	}
-	if got := strings.Count(buf.String(), "skipped"); got != 2 {
-		t.Errorf("want exactly two skip lines total (one checked-out, one summary), got %d in %q", got, buf.String())
+	if got := strings.Count(buf.String(), "\n"); got != 2 {
+		t.Errorf("want exactly two lines total (one checked-out, one summary), got %d in %q", got, buf.String())
 	}
 }
 
