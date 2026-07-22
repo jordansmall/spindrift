@@ -174,11 +174,15 @@ type jiraIssuePayload struct {
 		Labels     []string `json:"labels"`
 		IssueLinks []struct {
 			Type struct {
-				Inward string `json:"inward"`
+				Inward  string `json:"inward"`
+				Outward string `json:"outward"`
 			} `json:"type"`
 			InwardIssue *struct {
 				Key string `json:"key"`
 			} `json:"inwardIssue"`
+			OutwardIssue *struct {
+				Key string `json:"key"`
+			} `json:"outwardIssue"`
 		} `json:"issuelinks"`
 	} `json:"fields"`
 }
@@ -186,6 +190,11 @@ type jiraIssuePayload struct {
 // jiraBlockedByLink is the inward relationship text Jira's built-in "Blocks"
 // link type uses to mean "this issue is blocked by the linked issue".
 const jiraBlockedByLink = "is blocked by"
+
+// jiraBlocksLink is the same "Blocks" link type's outward relationship
+// text, read from an outwardIssue entry to mean "this issue blocks the
+// linked issue" — DepsOf's reverse direction (issue #1744).
+const jiraBlocksLink = "blocks"
 
 // DepsOf returns the canonical dependencies for issue num, resolved from
 // native Jira issue links (not prose parsing) — always DepSourceNative.
@@ -204,6 +213,29 @@ func (j *jiraClient) DepsOf(num string) ([]forge.Dependency, error) {
 		if link.Type.Inward == jiraBlockedByLink && link.InwardIssue != nil && !seen[link.InwardIssue.Key] {
 			seen[link.InwardIssue.Key] = true
 			deps = append(deps, link.InwardIssue.Key)
+		}
+	}
+	return forge.WithSource(deps, forge.DepSourceNative), nil
+}
+
+// BlocksOf returns the canonical issues num blocks — DepsOf's reverse
+// direction, read from the same issuelinks payload's outward "blocks"
+// entries rather than the inward "is blocked by" ones (issue #1744).
+func (j *jiraClient) BlocksOf(num string) ([]forge.Dependency, error) {
+	var payload jiraIssuePayload
+	status, err := j.do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("jira: issue %s: unexpected status %d", num, status)
+	}
+	var deps []string
+	seen := map[string]bool{}
+	for _, link := range payload.Fields.IssueLinks {
+		if link.Type.Outward == jiraBlocksLink && link.OutwardIssue != nil && !seen[link.OutwardIssue.Key] {
+			seen[link.OutwardIssue.Key] = true
+			deps = append(deps, link.OutwardIssue.Key)
 		}
 	}
 	return forge.WithSource(deps, forge.DepSourceNative), nil
