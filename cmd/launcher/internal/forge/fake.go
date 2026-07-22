@@ -543,6 +543,36 @@ func (f *Fake) DepsOf(num string) ([]Dependency, error) {
 	return WithSource(ParseBlockerRefs(iss.Body), DepSourceBody), nil
 }
 
+// BlocksOf returns every issue number keyed in NativeDeps whose own deps
+// name num as a blocker — DepsOf's reverse direction, mirroring the real
+// github/jira adapters' native issue-dependencies relationship, which is
+// stored (and so queryable) in both directions (issue #1744). Always
+// DepSourceNative: NativeDeps has no body-sourced counterpart to reverse.
+// Sorted ascending by numeric value for deterministic test assertions —
+// unlike DepsOf, which preserves API response order and makes no ordering
+// promise of its own, NativeDeps is an unordered map with no natural
+// "response order" to preserve, so a real github/jira adapter's own
+// BlocksOf may legitimately return the same set in a different order.
+func (f *Fake) BlocksOf(num string) ([]Dependency, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var ids []string
+	for child, blockers := range f.NativeDeps {
+		if slices.Contains(blockers, num) {
+			ids = append(ids, child)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		ni, ei := strconv.Atoi(ids[i])
+		nj, ej := strconv.Atoi(ids[j])
+		if ei == nil && ej == nil {
+			return ni < nj
+		}
+		return ids[i] < ids[j]
+	})
+	return WithSource(ids, DepSourceNative), nil
+}
+
 // TouchesOf returns the touch-set parsed from num's issue body, mirroring
 // the real adapters' shared body-grammar default.
 func (f *Fake) TouchesOf(num string) ([]string, error) {

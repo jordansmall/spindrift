@@ -433,6 +433,61 @@ func TestFake_DepsOf_MissingIssue(t *testing.T) {
 	}
 }
 
+// --- BlocksOf tests ---
+
+// TestFake_ImplementsBlockersLister asserts that *Fake satisfies the
+// optional BlockersLister surface, matching the github/jira adapters'
+// shape — the mechanism a detail-render caller (issue #1744) uses to
+// resolve a single ticket's Blocks section without a whole-backlog scan.
+func TestFake_ImplementsBlockersLister(t *testing.T) {
+	var _ forge.BlockersLister = forge.NewFake()
+}
+
+// TestFake_BlocksOf_ReturnsReverseOfNativeDeps verifies BlocksOf(num)
+// returns every issue whose NativeDeps names num as a blocker — the
+// reverse of DepsOf, resolved from the same scripted native relationships
+// (issue #1744).
+func TestFake_BlocksOf_ReturnsReverseOfNativeDeps(t *testing.T) {
+	f := forge.NewFake()
+	f.NativeDeps = map[string][]string{"42": {"7"}, "43": {"7"}, "44": {"9"}}
+
+	blocks, err := f.BlocksOf("7")
+	if err != nil {
+		t.Fatalf("BlocksOf: %v", err)
+	}
+	want := []forge.Dependency{{ID: "42", Source: forge.DepSourceNative}, {ID: "43", Source: forge.DepSourceNative}}
+	if !equalDeps(blocks, want) {
+		t.Fatalf("BlocksOf(7) = %v, want %v", blocks, want)
+	}
+}
+
+// TestFake_BlocksOf_NoneDeclareIt verifies BlocksOf returns none for an
+// issue nothing else's NativeDeps names as a blocker.
+func TestFake_BlocksOf_NoneDeclareIt(t *testing.T) {
+	f := forge.NewFake()
+	f.NativeDeps = map[string][]string{"42": {"7"}}
+
+	blocks, err := f.BlocksOf("99")
+	if err != nil {
+		t.Fatalf("BlocksOf: %v", err)
+	}
+	if len(blocks) != 0 {
+		t.Fatalf("BlocksOf(99) = %v, want none", blocks)
+	}
+}
+
+func equalDeps(a, b []forge.Dependency) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // --- TouchesOf tests ---
 
 func TestFake_TouchesOf_ParsesBody(t *testing.T) {

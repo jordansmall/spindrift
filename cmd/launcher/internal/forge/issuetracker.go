@@ -113,6 +113,27 @@ type IssueTracker interface {
 	CreateLabel(name, description, color string) error
 }
 
+// BlockersLister is the optional IssueTracker surface for adapters with a
+// genuine native reverse-dependency concept — the issues a given issue
+// blocks, as opposed to DepsOf's forward "blocked by" direction. Only
+// github and jira implement it: both track blocked/blocking as a true
+// bidirectional native relationship (GitHub's issue-dependencies API,
+// Jira's "Blocks" link type), so the reverse direction costs one more
+// native call, not a whole-backlog scan (issue #1744). The local adapter's
+// only blocker concept is one-directional body-text parsing ("## Blocked
+// by"), with no formal way to discover which other issues declare this one
+// as a blocker short of scanning every issue file, so it does not
+// implement this — a caller that needs it type-asserts, exactly as
+// LandingRecorder and IssueCloser callers already do.
+type BlockersLister interface {
+	// BlocksOf returns the canonical issues that num blocks — DepsOf's
+	// reverse direction — each tagged with the source it was resolved
+	// from. Always DepSourceNative: there is no body-text grammar for
+	// declaring a forward "blocks" relationship, so a body-sourced
+	// blocked-by edge has no reverse this method can ever surface.
+	BlocksOf(num string) ([]Dependency, error)
+}
+
 // LandingRecorder is the optional IssueTracker surface for adapters that can
 // persist where a Dispatch's work landed (ADR 0029). Only the local adapter
 // implements it — github/jira issues close through the forge's own
