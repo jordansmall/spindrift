@@ -22,6 +22,13 @@ type Result struct {
 	// Reset lists the issue numbers Run reset from InProgress to
 	// Dispatchable this sweep, in the order ListIssues returned them.
 	Reset []string
+	// Stuck maps an open issue's number to its recorded LandingBranchRef
+	// branch name when the healing path's ancestry check (issue #1809)
+	// found it not yet merged into the ticket's Integration branch — nil
+	// when Run found no such issue this sweep. Surface (issue #1811) reads
+	// this to name a broad ticket's held gate "stuck landing" instead of
+	// the generic "open seam", without redoing the ancestry check itself.
+	Stuck map[string]string
 }
 
 // LivenessProbe is reconcile's injected death-signal seam (#600, ADR 0029):
@@ -250,6 +257,10 @@ func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue,
 	}
 	if !merged {
 		fmt.Printf("    #%s  landing=%s  status=stuck  !! branch %s not merged into %s\n", iss.Number, iss.Landing, landing.Branch, local.IntegrationBranch(parent))
+		if res.Stuck == nil {
+			res.Stuck = map[string]string{}
+		}
+		res.Stuck[iss.Number] = landing.Branch
 		return nil
 	}
 	if l.lr == nil {
