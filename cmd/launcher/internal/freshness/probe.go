@@ -83,6 +83,12 @@ func Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evalu
 				Message:    fmt.Sprintf("not applicable (%s is not a git repository; freshness cannot be checked or rebuilt here)", pwd),
 			}
 		}
+		if isRemoteRefMissing(err) {
+			return Result{
+				Applicable: false,
+				Message:    fmt.Sprintf("not applicable (%s has no %s branch on origin; freshness cannot be checked here)", pwd, baseBranch),
+			}
+		}
 		return Result{
 			Applicable: true,
 			Fresh:      false,
@@ -155,4 +161,15 @@ func fetchBaseTip(pwd, baseBranch string) (string, error) {
 // match covers both phrasings.
 func isNotAGitRepository(err error) bool {
 	return strings.Contains(err.Error(), "not a git repository")
+}
+
+// isRemoteRefMissing reports whether err (as returned by fetchBaseTip) is
+// git's own "couldn't find remote ref" diagnostic — origin simply has no
+// baseBranch — rather than a transient failure (network, unreachable
+// remote) inside a repo that could plausibly have it. This is definitive,
+// not transient: pwd is not the repo baseBranch lives in, so freshness
+// cannot be checked here, and the caller should proceed rather than treat
+// it as rebuild-needed (#1753).
+func isRemoteRefMissing(err error) bool {
+	return strings.Contains(err.Error(), "couldn't find remote ref")
 }
