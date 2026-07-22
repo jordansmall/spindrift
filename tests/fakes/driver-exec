@@ -10,7 +10,36 @@
 # exit-code propagation, stream-teeing, heartbeat-filtering, and
 # relaunch-on-empty-stream logic are covered by Go unit tests
 # (cmd/launcher/driver-exec), not this fake.
+#
+# The `bundle-out` verb (issue #1808) is a second, unrelated entry point --
+# real git plumbing, not a Driver invocation -- so it is dispatched off a
+# bare first arg before the flag loop below ever runs.
 set -euo pipefail
+
+if [ "${1:-}" = "bundle-out" ]; then
+  shift
+  repo="" base="" branch="" outbox="" bundle_issue="" prior=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo) repo="$2"; shift 2 ;;
+      --base) base="$2"; shift 2 ;;
+      --branch) branch="$2"; shift 2 ;;
+      --outbox) outbox="$2"; shift 2 ;;
+      --issue) bundle_issue="$2"; shift 2 ;;
+      --prior-outcome-line) prior="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  count="$(git -C "$repo" rev-list --count "$base..$branch")"
+  if [ "$count" -gt 0 ]; then
+    mkdir -p "$outbox"
+    git -C "$repo" bundle create "$outbox/seam.bundle" "$base..$branch" >/dev/null
+  elif [[ "$prior" == *"status=ready"* ]]; then
+    printf 'SPINDRIFT_OUTCOME issue=%s landing=none status=blocked note=agent reported ready but no commits exist on %s\n' \
+      "$bundle_issue" "$branch"
+  fi
+  exit 0
+fi
 
 prompt_file="" agents_file="" session_file=""
 driver_bin="" driver_flags="" model="" issue="${ISSUE_NUMBER:-0}"

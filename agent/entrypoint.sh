@@ -47,6 +47,10 @@ configure_env() {
   # clones from instead of a network remote (ADR 0033, issue #1697's /repo
   # mount); unused otherwise.
   REPO_MOUNT_DIR="${REPO_MOUNT_DIR:-/repo}"
+  # OUTBOX_DIR is the writable mount driver-exec's bundle-out verb writes
+  # CODE_FORGE=local's seam bundle into (ADR 0033, issue #1808); unused
+  # otherwise.
+  OUTBOX_DIR="${OUTBOX_DIR:-/outbox}"
 
   # The canonical SPINDRIFT_OUTCOME contract (issue #419), baked at a sibling
   # path to /agent/prompts so a SPINDRIFT_PROMPT_DIR mount -- which shadows only
@@ -781,6 +785,22 @@ main() {
   fi
 
   [ "$claude_rc" -eq 0 ] || exit "$claude_rc"
+
+  # CODE_FORGE=local's harness-owned code-out (ADR 0033, issue #1808): the
+  # Harness, not the Agent, bundles the seam after the Driver exits. An empty
+  # base..BRANCH range against a claimed status=ready prints a corrective
+  # SPINDRIFT_OUTCOME line, picked up by the launcher's own last-line-wins
+  # log scan with no launcher changes.
+  if [ "${CODE_FORGE:-github}" = "local" ]; then
+    driver-exec bundle-out \
+      --repo "$WORK_DIR" \
+      --base "origin/${BASE_BRANCH:-}" \
+      --branch "$BRANCH" \
+      --outbox "$OUTBOX_DIR" \
+      --issue "$ISSUE_NUMBER" \
+      --prior-outcome-line "$_last_outcome_line"
+  fi
+
   echo "==> entrypoint complete for issue #$ISSUE_NUMBER"
 }
 
