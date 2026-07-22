@@ -673,7 +673,7 @@ func TestUpdate_SidebarScrollMsg_DockedClampsToBodyBudgetNotFullHeight(t *testin
 		lines[i] = fmt.Sprintf("l%d", i)
 	}
 	m := NewModel()
-	m = Update(m, SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 20})
+	m = Update(m, SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 20})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
 	m = Update(m, SidebarToggleMsg{})
 
@@ -701,7 +701,7 @@ func TestUpdate_SidebarScrollMsg_ZoomedClampsToFullHeightNotBodyBudget(t *testin
 		lines[i] = fmt.Sprintf("l%d", i)
 	}
 	m := NewModel()
-	m = Update(m, SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 20})
+	m = Update(m, SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 20})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
 	m = Update(m, SidebarToggleMsg{})
 	m = Update(m, SidebarZoomToggleMsg{})

@@ -915,7 +915,7 @@ func TestTea_Sidebar_RetainsPositionAcrossDispatchSwitch(t *testing.T) {
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 	launch.queue.Add(Pick{Number: "43", Title: "second thing", State: PickRunning})
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+dockedBorderCols, 24))
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "2")
@@ -1111,7 +1111,7 @@ func TestTea_SidebarActivityTick_AdvancesTranscriptViewWhileZoomed(t *testing.T)
 	launch.pollInterval = time.Hour
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+dockedBorderCols, 24))
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "2")
@@ -1200,7 +1200,7 @@ func TestTea_SidebarActivityTick_AdvancesWhileZoomed(t *testing.T) {
 	launch.pollInterval = time.Hour
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+dockedBorderCols, 24))
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "2")
@@ -1247,7 +1247,7 @@ func TestTea_SidebarActivityTick_FollowAutoScrollsToNewLines(t *testing.T) {
 	launch.pollInterval = time.Hour
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+dockedBorderCols, 24))
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "2")
@@ -1429,7 +1429,7 @@ func TestTea_FocusKeys_MoveBetweenListAndDockedSidebar(t *testing.T) {
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 	launch.queue.Add(Pick{Number: "43", Title: "second thing", State: PickRunning})
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+dockedBorderCols, 24))
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "2")
@@ -1488,7 +1488,7 @@ func TestTea_SidebarKey_ClosesFromDockedListFocus(t *testing.T) {
 			launch := newTestLauncher(t, f)
 			launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
-			tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+1, 24))
+			tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(sidebarMinListWidth+sidebarWidth+dockedBorderCols, 24))
 			waitForOutput(t, tm, "fix the thing")
 
 			sendKey(tm, "2")
@@ -1592,7 +1592,7 @@ func TestTea_EnterKey_OnStaticRow_OpensSidebar(t *testing.T) {
 // switch, exercised directly here since the two full teatest sequences above
 // already cover "h"/"l" letter-by-letter (#1501, ADR 0030).
 func TestTea_HandleKey_ArrowKeys_MirrorHAndL(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42"})
 	m = Update(m, FocusListMsg{}) // opening already focused the sidebar; start from the list
 	tm := teaModel{m: m}
@@ -1614,7 +1614,7 @@ func TestTea_HandleKey_ArrowKeys_MirrorHAndL(t *testing.T) {
 // effect isn't masked by sidebarFits' own narrow-terminal fallback (issue
 // #1502, ADR 0030).
 func TestTea_HandleKey_ZKey_TogglesSidebarZoom(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42"})
 	tm := teaModel{m: m}
 
@@ -1639,7 +1639,7 @@ func TestTea_HandleKey_ZoomedSidebar_RoutesKeysToSidebarRegardlessOfFocus(t *tes
 	for i := range lines {
 		lines[i] = fmt.Sprintf("l%d", i)
 	}
-	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: strings.Join(lines, "\n")})
 	m = Update(m, SidebarToggleMsg{})
 	m = Update(m, FocusListMsg{})
@@ -1660,7 +1660,7 @@ func TestTea_HandleKey_ZoomedSidebar_RoutesKeysToSidebarRegardlessOfFocus(t *tes
 // would desync it from the still-fullscreen render until "z" un-zooms
 // (review finding on issue #1502).
 func TestTea_HandleKey_HKey_NoOpWhileZoomed(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + 1, Height: 24})
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42"})
 	m = Update(m, SidebarZoomToggleMsg{})
 	tm := teaModel{m: m}
