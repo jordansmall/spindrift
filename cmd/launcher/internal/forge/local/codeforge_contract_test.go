@@ -70,6 +70,24 @@ func (h *localCodeForgeHarness) FailNextRebase(ref string) {
 	h.repo.ConflictBase(strings.TrimPrefix(ref, h.BranchPrefix()))
 }
 
+func (h *localCodeForgeHarness) Parent() string { return h.parent }
+
+// MarkLanded implements forgetest.LandingHarness (issue #1809): merges num's
+// already-seeded branch for real and resolves the landed IntegrationRef via
+// the same forge.LandingRef surface production's post-merge upgrade uses.
+func (h *localCodeForgeHarness) MarkLanded(num string) string {
+	h.t.Helper()
+	branch := h.branchName(num)
+	if err := h.cf.Merge(branch); err != nil {
+		h.t.Fatalf("Merge(%q): %v", branch, err)
+	}
+	landing, err := h.cf.(forge.LandingRef).LandingRef()
+	if err != nil {
+		h.t.Fatalf("LandingRef: %v", err)
+	}
+	return landing
+}
+
 func TestLocalCodeForge_CodeForgeContract(t *testing.T) {
 	forgetest.RunCodeForgeContract(t, newLocalCodeForgeHarness(t))
 }
