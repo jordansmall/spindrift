@@ -85,8 +85,11 @@ func TestLauncher_Pick_ResearchKind_PromotesOnResearchTracker(t *testing.T) {
 // queued pick from the private queue and hands back the fresh snapshot
 // synchronously (issue #1542).
 func TestLauncher_Unpick_RemovesAndReturnsSnapshot(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing"})
+
 	launch := &Launcher{}
-	launch.Pick(forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"}), "42", "fix the thing", KindWork)
+	launch.Pick(f, "42", "fix the thing", KindWork)
 
 	picks := launch.Unpick("42")
 	if len(picks) != 0 {
