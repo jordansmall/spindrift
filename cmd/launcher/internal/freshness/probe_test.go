@@ -270,6 +270,30 @@ func TestProbe_MissingRemoteRefNotApplicable(t *testing.T) {
 	}
 }
 
+// TestProbe_ImageAttrMissingNotApplicable verifies that an Eval failure
+// because the flake simply does not define flakeImageAttr — nix's own "does
+// not provide attribute" diagnostic — reports not-applicable rather than
+// fail-closed: pwd isn't the spindrift image-source flake, so freshness
+// cannot be checked here, and continuous dispatch must not treat it as
+// rebuild-needed (#1754).
+func TestProbe_ImageAttrMissingNotApplicable(t *testing.T) {
+	pwd := newCloneWithOrigin(t, "main")
+	attrErr := errors.New(`nix eval git+file:///tmp/target#packages.x86_64-linux.agent-image.outPath: exit status 1: error: flake 'git+file:///tmp/target' does not provide attribute 'packages.x86_64-linux.agent-image', 'legacyPackages.x86_64-linux.agent-image' or 'packages.x86_64-linux.default'`)
+	eval := &Fake{Err: attrErr}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+
+	if res.Applicable {
+		t.Errorf("Applicable = true, want false when the flake does not provide the image attr")
+	}
+	if !strings.Contains(res.Message, "packages.x86_64-linux.agent-image") {
+		t.Errorf("Message %q does not name the missing image attr", res.Message)
+	}
+	if res.Rev != "" {
+		t.Errorf("Rev = %q, want empty when Applicable is false", res.Rev)
+	}
+}
+
 // TestProbe_FetchFailure_MessageIncludesGitStderr verifies that the loud
 // fetch-failure message surfaces git's own diagnostic (its stderr), not just
 // the bare exit status, so an operator reading `preview` output can see why.

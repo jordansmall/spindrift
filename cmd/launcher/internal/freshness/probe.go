@@ -99,6 +99,12 @@ func Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evalu
 	attr := strings.TrimPrefix(flakeImageAttr, ".#")
 	outPath, err := eval.Eval(pwd, rev, attr)
 	if err != nil {
+		if isImageAttrMissing(err) {
+			return Result{
+				Applicable: false,
+				Message:    fmt.Sprintf("not applicable (%s does not provide %s; not the spindrift image-source flake, so freshness cannot be checked here)", pwd, attr),
+			}
+		}
 		return Result{
 			Applicable: true,
 			Fresh:      false,
@@ -172,4 +178,14 @@ func isNotAGitRepository(err error) bool {
 // it as rebuild-needed (#1753).
 func isRemoteRefMissing(err error) bool {
 	return strings.Contains(err.Error(), "couldn't find remote ref")
+}
+
+// isImageAttrMissing reports whether err (as returned by Eval) is nix's own
+// "does not provide attribute" diagnostic — the flake at pwd simply doesn't
+// define flakeImageAttr — rather than a genuine evaluation/build failure at
+// an attr that does exist. This is definitive, not transient: pwd is not the
+// spindrift image-source flake, so freshness cannot be checked here, and the
+// caller should proceed rather than treat it as rebuild-needed (#1754).
+func isImageAttrMissing(err error) bool {
+	return strings.Contains(err.Error(), "does not provide attribute")
 }
