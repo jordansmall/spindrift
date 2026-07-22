@@ -2654,7 +2654,7 @@ func TestTea_RefreshKey_InvalidatesDetailCache(t *testing.T) {
 		t.Fatal("test setup: IssueCalls empty after first open, want at least one Issue fetch")
 	}
 
-	// "r"'s cache/graph invalidation (DetailCacheInvalidatedMsg) applies
+	// "r"'s cache invalidation (DetailCacheInvalidatedMsg) applies
 	// synchronously in the same Update call the keypress triggers, ahead of
 	// the refreshCmd it also fires — so the very next "enter" is already
 	// guaranteed to see an empty cache with no wait needed in between. A
@@ -2670,6 +2670,44 @@ func TestTea_RefreshKey_InvalidatesDetailCache(t *testing.T) {
 
 	if len(f.IssueCalls) != calls+1 {
 		t.Errorf("IssueCalls grew from %d to %d across a refreshed reopen, want exactly one new fetch (%d)", calls, len(f.IssueCalls), calls+1)
+	}
+
+	sendKey(tm, "esc")
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_RefreshKey_RetainsEdgeGraph verifies "r" leaves the retained
+// whole-backlog dependency edge graph in place: reopening a ticket detail
+// after a refresh re-fetches the ticket's own body (DetailCache was
+// cleared) but does not re-walk DepsOf across the backlog, so the next
+// detail open stays as fast as a warm open instead of paying the full
+// first-open graph build again (issue #1746).
+func TestTea_RefreshKey_RetainsEdgeGraph(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "7", Title: "waves core", Body: "core body", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	waitForOutput(t, tm, "waves core")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "core body")
+
+	depsOfCallsAfterFirst := len(f.DepsOfCalls)
+	if depsOfCallsAfterFirst == 0 {
+		t.Fatal("test setup: DepsOfCalls empty after first open, want the whole-backlog graph built")
+	}
+
+	sendKey(tm, "esc")
+	waitForOutput(t, tm, "running 0/")
+	sendKey(tm, "r")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "core body")
+
+	if len(f.DepsOfCalls) != depsOfCallsAfterFirst {
+		t.Errorf("DepsOfCalls grew from %d to %d reopening after a refresh, want the retained graph reused with no new DepsOf calls", depsOfCallsAfterFirst, len(f.DepsOfCalls))
 	}
 
 	sendKey(tm, "esc")

@@ -577,11 +577,13 @@ type DetailModalScrollMsg struct {
 func (DetailModalScrollMsg) isConsoleMsg() {}
 
 // DetailCacheInvalidatedMsg is the tea layer's signal that the operator
-// pressed "r" — clears Model.DetailCache and the retained whole-backlog
-// dependency edge graph (Edges/EdgeSources), so a later ticket detail modal
-// open re-fetches fresh data instead of replaying data "r" was meant to
-// refresh (issue #1632). Fired alongside, not instead of, the ordinary
-// refreshCmd "r" already triggers.
+// pressed "r" — clears Model.DetailCache so a later ticket detail modal open
+// re-fetches fresh data instead of replaying data "r" was meant to refresh
+// (issue #1632). It leaves the retained whole-backlog dependency edge graph
+// (Edges/EdgeSources) in place: the graph is stable across a refresh, and
+// wiping it would force the next detail open to pay the full graph rebuild
+// again instead of staying warm (issue #1746). Fired alongside, not instead
+// of, the ordinary refreshCmd "r" already triggers.
 type DetailCacheInvalidatedMsg struct{}
 
 func (DetailCacheInvalidatedMsg) isConsoleMsg() {}
