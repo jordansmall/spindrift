@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
@@ -42,11 +43,14 @@ type Config struct {
 type Wired struct {
 	cfg Config
 	it  forge.IssueTracker
+
+	mu       sync.Mutex
+	resolved map[string]local.SanitizedParent
 }
 
 // Wire returns cfg and it's resolved local-loop wiring.
 func Wire(cfg Config, it forge.IssueTracker) *Wired {
-	return &Wired{cfg: cfg, it: it}
+	return &Wired{cfg: cfg, it: it, resolved: map[string]local.SanitizedParent{}}
 }
 
 // ResolveParent resolves num's own Integration-branch key through it: its
@@ -56,7 +60,7 @@ func Wire(cfg Config, it forge.IssueTracker) *Wired {
 // parent needs only an IssueTracker, not a Config. Shared by every caller
 // (BASE_BRANCH forwarding, per-issue Code Forge construction, surface
 // grouping), so the diagnostic names the operation, not any one caller.
-func ResolveParent(it forge.IssueTracker, num string) string {
+func ResolveParent(it forge.IssueTracker, num string) local.SanitizedParent {
 	iss, err := it.Issue(num)
 	if err != nil {
 		fmt.Printf("!! localloop: resolving issue %s's parent: %v; falling back to its own slug\n", num, err)
@@ -66,9 +70,21 @@ func ResolveParent(it forge.IssueTracker, num string) string {
 }
 
 // ResolveParent resolves num's own Integration-branch key through w's own
-// IssueTracker (see the package-level ResolveParent).
-func (w *Wired) ResolveParent(num string) string {
-	return ResolveParent(w.it, num)
+// IssueTracker (see the package-level ResolveParent), memoized so num's
+// parent is resolved exactly once per Wired: CodeForgeForIssue, Surface, and
+// any external caller sharing w (e.g. the launcher's BASE_BRANCH forwarding)
+// all consume that one resolved value instead of independently re-deriving
+// it (issue #1810). Concurrency-safe — dispatch resolves multiple issues'
+// BASE_BRANCH concurrently across Boxes.
+func (w *Wired) ResolveParent(num string) local.SanitizedParent {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if p, ok := w.resolved[num]; ok {
+		return p
+	}
+	p := ResolveParent(w.it, num)
+	w.resolved[num] = p
+	return p
 }
 
 // CodeForgeForIssue returns num's own CodeForge instance, keyed to its
@@ -113,10 +129,10 @@ func (w *Wired) Surface(pwd string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("surface: list issues: %w", err)
 	}
-	groups := map[string][]forge.Issue{}
-	var order []string
+	groups := map[local.SanitizedParent][]forge.Issue{}
+	var order []local.SanitizedParent
 	for _, iss := range issues {
-		parent := local.ResolveParent(iss.Number, iss.Parent)
+		parent := w.ResolveParent(iss.Number)
 		if _, seen := groups[parent]; !seen {
 			order = append(order, parent)
 		}
