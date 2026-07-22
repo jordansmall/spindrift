@@ -825,6 +825,18 @@ func TestLocalTracker_ImplementsIssueCloser(t *testing.T) {
 	var _ forge.IssueCloser = NewLocalTracker(t.TempDir(), testLabels)
 }
 
+// TestLocalTracker_DoesNotImplementBlockersLister asserts *LocalTracker does
+// not satisfy the optional forge.BlockersLister surface (issue #1744): its
+// only blocker concept is one-directional body-text parsing ("## Blocked
+// by"), with no native relationship to query in reverse short of scanning
+// every issue file.
+func TestLocalTracker_DoesNotImplementBlockersLister(t *testing.T) {
+	var it forge.IssueTracker = NewLocalTracker(t.TempDir(), testLabels)
+	if _, ok := it.(forge.BlockersLister); ok {
+		t.Error("LocalTracker satisfies forge.BlockersLister, want it absent")
+	}
+}
+
 // TestLocalTracker_CloseIssue_SetsClosedTrue verifies CloseIssue flips the
 // closed: frontmatter field without touching state/labels/landing.
 func TestLocalTracker_CloseIssue_SetsClosedTrue(t *testing.T) {
