@@ -1296,15 +1296,19 @@ func wrapText(s string, width int) []string {
 	return out
 }
 
-// detailModalChromeLines is the ticket detail modal's fixed, non-scrollable
-// row spend: the title line and the labels line (header, always exactly two
-// lines — an empty Labels still spends its own blank line, matching an
-// empty-label backlog row) plus the keystroke-hint footer. Shared by
-// renderDetailModal and Update's own Offset clamp, the same "clamp always
+// detailModalTitleLines is the fullscreen ticket detail modal's fixed
+// number/title header row spend — the fullscreen renderer's analogue of the
+// floating box's own border-carried title, which detailModalInnerSize
+// already excludes from its interior height. Shared by renderDetailModal
+// and detailModalScrollBudget's own Offset clamp, the same "clamp always
 // matches what the render actually has room to show" discipline
 // headerFooterLines documents for the sidebar/rebuild-output panes (issue
-// #1632).
-const detailModalChromeLines = 3
+// #1632). The labels line is no longer a fixed one-row spend alongside it —
+// like the floating box, it now wraps onto further rows once bracketed
+// (issue #1832), so both callers compute that count dynamically via
+// detailModalLabelLinesCapped instead of folding a second fixed row into
+// this constant.
+const detailModalTitleLines = 1
 
 // detailModalLines flattens s's body (word-wrapped to width) and its
 // Blocked-by/Blocks sections into one scrollable line list — the content
@@ -1410,20 +1414,28 @@ func detailModalWrapWidth(m Model) int {
 // detailModalFooterLines — the same accounting renderDetailModalContent
 // does, since a ticket's labels wrap onto further interior rows instead of
 // spending a fixed one-row budget, issue #1772) when detailModalFits(m), or
-// the fullscreen renderer's own detailModalChromeLines-based budget
+// the fullscreen renderer's own title-line-plus-wrapped-labels budget
 // otherwise — detailModalWrapWidth's height analogue, gated by the same
-// predicate (issue #1759). Uses detailModalLabelLinesCapped, not the bare
-// detailModalLabelLines, so a ticket with enough labels to fill the box's
-// whole content budget clamps against the same "+N more labels" row count
-// renderDetailModalContent actually renders, not the uncapped wrap it never
-// shows (issue #1778).
+// predicate (issue #1759). Both branches use detailModalLabelLinesCapped,
+// not the bare detailModalLabelLines, so a ticket with enough labels to
+// fill the content budget clamps against the same "+N more labels" row
+// count the render actually shows, not the uncapped wrap it never shows
+// (issue #1778) — the fullscreen renderer's own pinned label row wraps and
+// brackets the same way the floating box's does (issue #1832), so its
+// budget can no longer assume a fixed one-row label spend either.
 func detailModalScrollBudget(m Model) int {
 	if !detailModalFits(m) {
-		return m.Height - detailModalChromeLines
+		contentBudget := m.Height - detailModalTitleLines - detailModalFooterLines
+		if contentBudget < 0 {
+			contentBudget = 0
+		}
+		labelLines := detailModalLabelLinesCapped(m.DetailModal.Labels, m.Width, contentBudget)
+		return contentBudget - len(labelLines)
 	}
 	innerWidth, innerHeight := detailModalInnerSize(m.Width, m.Height)
-	labelLines := detailModalLabelLinesCapped(m.DetailModal.Labels, innerWidth, innerHeight-detailModalFooterLines)
-	return innerHeight - len(labelLines) - detailModalFooterLines
+	contentBudget := innerHeight - detailModalFooterLines
+	labelLines := detailModalLabelLinesCapped(m.DetailModal.Labels, innerWidth, contentBudget)
+	return contentBudget - len(labelLines)
 }
 
 // detailModalBoxSize returns the floating detail modal box's outer width and
@@ -1534,39 +1546,64 @@ func padDisplay(s string, width int) string {
 const detailModalFooterLines = 1
 
 // detailModalLabelLines word-wraps a ticket's labels, joined as a single
-// comma-separated string, to width display columns — shared by
-// renderDetailModalContent (issue #1772: a labels line wider than the
-// floating box's interior must wrap onto further interior rows instead of
-// padDisplay truncating it mid-word) and Update's own Offset clamp, which
-// must agree on how many interior rows the labels spend before it can
-// budget the rest to the scrollable body.
+// comma-separated string and enclosed in brackets — the backlog row's own
+// `[bug, console]` idiom (issue #1832), so the pinned row reads as labels at
+// a glance rather than a stranded line of body text — to width display
+// columns, dim-styled (RoleDim) so it visually recedes from the body and
+// degrades to plain bracketed text under NO_COLOR/a dumb terminal (ADR
+// 0031). The brackets are literal characters in the string wrapText wraps,
+// so they count toward width like any other rune instead of being added on
+// top of the budget once wrapping is done. Each wrapped line is clip()ped to
+// width — with clip's own ellipsis, for a single label wider than width that
+// wrapText leaves to stand alone unbroken on its own line rather than
+// breaking mid-word (issue #1772's TestWrapText_WordWiderThanWidth_StandsAlone)
+// — before it is styled, never after: renderDetailModalBox's own padDisplay
+// call downstream only ever pads an already-styled row that already fits,
+// since its truncate branch is runewidth-based and would otherwise miscount
+// the style's own ANSI escape bytes as display columns and mangle them
+// (padDisplay's own comment documents this truncate-branch hazard) — the
+// same clip-before-style discipline renderFooterHints' own comment
+// documents. Shared by renderDetailModalContent (issue #1772: a labels
+// line wider than the floating box's interior must wrap onto further
+// interior rows instead of padDisplay truncating it mid-word) and Update's
+// own Offset clamp, which must agree on how many interior rows the labels
+// spend before it can budget the rest to the scrollable body.
 func detailModalLabelLines(labels []string, width int) []string {
 	sanitized := make([]string, len(labels))
 	for i, l := range labels {
 		sanitized[i] = SanitizeControlSequences(l)
 	}
-	return wrapText(strings.Join(sanitized, ", "), width)
+	lines := wrapText("["+strings.Join(sanitized, ", ")+"]", width)
+	for i, l := range lines {
+		lines[i] = roleStyle(RoleDim).Render(clip(l, width, false))
+	}
+	return lines
 }
 
 // detailModalLabelLinesCapped wraps labels the same as detailModalLabelLines,
 // but caps the result at maxLines: when the wrapped labels alone would
 // exceed maxLines, it drops labels from the tail and replaces them with a
-// "+N more labels" row, the multi-row analogue of the backlog row's
-// clipLabels "+N" convention (issue #1631) — so a ticket with enough labels
-// to fill the floating box's entire interior loses its footer/body budget to
-// a visible indicator instead of renderDetailModalContent's tail-truncate
-// silently dropping trailing label lines and/or the footer row (issue #1778,
-// a gap left by #1772/#1780's wrap-instead-of-truncate fix). maxLines <= 0
-// yields the bare "+N more labels" indicator alone.
+// "+N more labels" entry folded into the same bracketed, dim-styled block
+// the retained labels render in — "[alpha, +3 more labels]" — the multi-row
+// analogue of the backlog row's clipLabels "+N" convention (issue #1631),
+// kept inside the bracket rather than appended as a separate line after the
+// closing "]" so the indicator still reads as part of the one "these are
+// labels" row (issue #1832) — so a ticket with enough labels to fill the
+// floating box's entire interior loses its footer/body budget to a visible
+// indicator instead of renderDetailModalContent's tail-truncate silently
+// dropping trailing label lines and/or the footer row (issue #1778, a gap
+// left by #1772/#1780's wrap-instead-of-truncate fix). maxLines <= 0 yields
+// the bare, unbracketed "+N more labels" indicator alone — no room for even
+// one label inside a bracket, so nothing is left to bracket around.
 func detailModalLabelLinesCapped(labels []string, width, maxLines int) []string {
 	lines := detailModalLabelLines(labels, width)
 	if len(labels) == 0 || len(lines) <= maxLines {
 		return lines
 	}
 	for k := len(labels) - 1; k >= 0; k-- {
-		trial := detailModalLabelLines(labels[:k], width)
-		if len(trial)+1 <= maxLines {
-			return append(trial, fmt.Sprintf("+%d more labels", len(labels)-k))
+		trial := detailModalLabelLines(append(append([]string{}, labels[:k]...), fmt.Sprintf("+%d more labels", len(labels)-k)), width)
+		if len(trial) <= maxLines {
+			return trial
 		}
 	}
 	return []string{fmt.Sprintf("+%d more labels", len(labels))}
@@ -1643,33 +1680,39 @@ func renderDetailModalBox(s DetailModalState, width, height int) string {
 }
 
 // renderDetailModal renders a Backlog issue's fullscreen ticket detail
-// modal: its number/title, its labels, and — once the async fetch lands — a
-// word-wrapped plain-text body plus Blocked-by/Blocks sections, scrolled
-// together through one Viewport (issue #1632). It opens the instant Enter
-// fires, before that fetch resolves, so a "loading..." placeholder stands in
-// for the body/blocker content until DetailModalLoadedMsg fills it in. View
-// no longer calls this directly (issue #1758 floats renderDetailModalBox
-// over the list instead) — kept callable for the small-terminal fallback
-// ticket that AC promises will reuse it.
+// modal: its number/title, its labels — bracketed and dim-styled the same
+// way the floating box's own pinned label row is (issue #1832), wrapped and
+// capped against width/the remaining content budget via
+// detailModalLabelLinesCapped so the two renderings stay in parity — and,
+// once the async fetch lands, a word-wrapped plain-text body plus
+// Blocked-by/Blocks sections, scrolled together through one Viewport (issue
+// #1632). It opens the instant Enter fires, before that fetch resolves, so
+// a "loading..." placeholder stands in for the body/blocker content until
+// DetailModalLoadedMsg fills it in. View no longer calls this directly
+// (issue #1758 floats renderDetailModalBox over the list instead) — kept
+// callable for the small-terminal fallback ticket that AC promises will
+// reuse it.
 func renderDetailModal(s DetailModalState, width, height int) string {
 	if height <= 0 {
 		return ""
 	}
-	labels := make([]string, len(s.Labels))
-	for i, l := range s.Labels {
-		labels[i] = SanitizeControlSequences(l)
-	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "#%s %s\n", s.Number, SanitizeControlSequences(s.Title))
-	b.WriteString(strings.Join(labels, ", "))
+	contentBudget := height - detailModalTitleLines - detailModalFooterLines
+	if contentBudget < 0 {
+		contentBudget = 0
+	}
+	labelLines := detailModalLabelLinesCapped(s.Labels, width, contentBudget)
+	b.WriteString(strings.Join(labelLines, "\n"))
 	b.WriteString("\n")
+	bodyBudget := contentBudget - len(labelLines)
 	switch {
 	case s.Loading:
 		b.WriteString("loading...\n")
 	case s.Err != nil:
 		fmt.Fprintf(&b, "failed to load: %s\n", SanitizeControlSequences(s.Err.Error()))
 	default:
-		visible := strings.Join(windowDetailModalLines(s, height-detailModalChromeLines), "\n")
+		visible := strings.Join(windowDetailModalLines(s, bodyBudget), "\n")
 		b.WriteString(visible)
 		if visible != "" && !strings.HasSuffix(visible, "\n") {
 			b.WriteString("\n")

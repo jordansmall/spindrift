@@ -1981,7 +1981,7 @@ func TestUpdate_DetailModalScroll_ClampsToBoxInteriorHeightNotTerminalHeight(t *
 	// The box's interior height at a 40-row terminal (detailModalBoxSize
 	// caps the box at 30 rows, minus 2 border rows, minus the no-labels
 	// case's 1 label line + 1 footer line) is well short of Model.Height -
-	// the fullscreen renderer's detailModalChromeLines(3) — so the two
+	// the fullscreen renderer's own title/footer budget — so the two
 	// clamps disagree unless the offset clamp was actually rewired.
 	if want := len(lines) - 26; m.DetailModal.Offset != want {
 		t.Errorf("Offset = %d after scrolling past the end, want %d (clamped to the box interior's row budget)", m.DetailModal.Offset, want)
@@ -2014,6 +2014,35 @@ func TestUpdate_DetailModalScroll_ClampsForWrappedLabelLines(t *testing.T) {
 	// lines, minus 1 footer line, leaves a body budget of 24.
 	if want := len(lines) - 24; m.DetailModal.Offset != want {
 		t.Errorf("Offset = %d after scrolling past the end, want %d (clamped to the box interior's row budget with 3 wrapped label lines)", m.DetailModal.Offset, want)
+	}
+}
+
+// TestUpdate_DetailModalScroll_Fullscreen_ClampsForWrappedLabelLines mirrors
+// TestUpdate_DetailModalScroll_ClampsForWrappedLabelLines for the
+// small-terminal fullscreen fallback (issue #1832): the pinned label row now
+// gets the same bracketed, wrapped treatment there as the floating box, so
+// the Offset clamp must fold in the fullscreen renderer's own wrapped label
+// line count too rather than a fixed one-row assumption.
+func TestUpdate_DetailModalScroll_Fullscreen_ClampsForWrappedLabelLines(t *testing.T) {
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	body := strings.Join(lines, "\n")
+	// Each label plus its bracket/comma is 32 display columns — under the
+	// 39-column fullscreen width alone, but two together (64) overflow it,
+	// so wrapText places exactly one label per line: 3 label lines.
+	labels := []string{strings.Repeat("a", 30), strings.Repeat("b", 30), strings.Repeat("c", 30)}
+
+	m := Update(NewModel(), SizeChangedMsg{Width: detailModalBoxMinWidth - 1, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: labels})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: body})
+	m = Update(m, DetailModalScrollMsg{Delta: 1000})
+
+	// Content budget (height 40, minus 1 title line, minus 1 footer line) is
+	// 38, minus 3 wrapped label lines, leaves a body budget of 35.
+	if want := len(lines) - 35; m.DetailModal.Offset != want {
+		t.Errorf("Offset = %d after scrolling past the end, want %d (clamped to the fullscreen row budget with 3 wrapped label lines)", m.DetailModal.Offset, want)
 	}
 }
 
