@@ -3,6 +3,7 @@ package bundleout_test
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -182,5 +183,23 @@ func TestRun_EmptyRangeAfterBlockedClaim_WritesNothing(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("stdout = %q, want empty (an already-blocked claim needs no correction)", stdout.String())
+	}
+}
+
+// TestRun_RejectsRefStartingWithDash verifies Run rejects a Branch that
+// could be misread as a git option once interpolated into a `base..branch`
+// range spec — the same defense in depth forge/local's relayBundle applies
+// to its own ref argument.
+func TestRun_RejectsRefStartingWithDash(t *testing.T) {
+	dir, base, _ := newRepoWithFeatureBranch(t)
+	err := bundleout.Run(bundleout.Config{
+		Repo:      dir,
+		Base:      base,
+		Branch:    "--upload-pack=evil",
+		OutboxDir: t.TempDir(),
+		Issue:     "7",
+	}, io.Discard)
+	if err == nil {
+		t.Fatal("Run: want an error for a branch starting with -, got nil")
 	}
 }
