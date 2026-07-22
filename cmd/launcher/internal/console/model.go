@@ -793,6 +793,19 @@ func Update(m Model, msg Msg) Model {
 		if m.DetailModal != nil {
 			m.DetailModal.Offset += msg.Delta
 		}
+	case DetailModalJumpToFirstMsg:
+		if m.DetailModal != nil {
+			m.DetailModal.Offset = 0
+		}
+	case DetailModalJumpToLastMsg:
+		// Set past the last valid offset — the unconditional DetailModal
+		// clamp block below (the same Viewport.SetHeight page-capped
+		// maxOffset arithmetic every other Update call already runs)
+		// pulls it back to the last page that fills the box's scroll
+		// budget, mirroring RebuildOutputJumpToLastMsg (issue #1795).
+		if m.DetailModal != nil {
+			m.DetailModal.Offset = len(m.DetailModal.Lines)
+		}
 	case DetailModalLoadedMsg:
 		if m.DetailModal != nil && m.DetailModal.Number == msg.Number {
 			m.DetailModal.Loading = false

@@ -571,6 +571,21 @@ type DetailModalScrollMsg struct {
 
 func (DetailModalScrollMsg) isConsoleMsg() {}
 
+// DetailModalJumpToFirstMsg is the tea layer's signal that "gg" completed
+// while the ticket detail modal is open — resets DetailModal.Offset to 0,
+// reusing the g-leader chord CursorJumpToFirstMsg introduced for the list
+// body rather than duplicating it (issue #1795).
+type DetailModalJumpToFirstMsg struct{}
+
+func (DetailModalJumpToFirstMsg) isConsoleMsg() {}
+
+// DetailModalJumpToLastMsg is the tea layer's signal that "G" was pressed
+// while the ticket detail modal is open — jumps DetailModal.Offset to the
+// last page, mirroring RebuildOutputJumpToLastMsg (issue #1795).
+type DetailModalJumpToLastMsg struct{}
+
+func (DetailModalJumpToLastMsg) isConsoleMsg() {}
+
 // DetailCacheInvalidatedMsg is the tea layer's signal that the operator
 // pressed "r" — clears Model.DetailCache, so a later ticket detail modal
 // open re-fetches fresh data instead of replaying data "r" was meant to
