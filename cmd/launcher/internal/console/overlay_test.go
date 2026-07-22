@@ -259,3 +259,115 @@ func TestCompositeOverlay_EmptyBoxLineLeavesRowUntouched(t *testing.T) {
 		t.Errorf("compositeOverlay(...) = %q, want unchanged %q", got, styled)
 	}
 }
+
+// TestModalBoxSize_MidTerminal_SizedToFraction verifies the generic modal
+// box sizer scales with the terminal rather than shrinking by a fixed
+// margin: on a terminal well under the max clamp, the box width/height are
+// widthPercent/heightPercent of the terminal's own dimensions (issue #1844,
+// generalizing detailModalBoxSize's own TestDetailModalBoxSize_MidTerminal_
+// SizedToFraction).
+func TestModalBoxSize_MidTerminal_SizedToFraction(t *testing.T) {
+	width, height := modalBoxSize(60, 30, 80, 80, 10, 5, 200, 100)
+	if width != 48 {
+		t.Errorf("modalBoxSize(60, 30, 80, 80, 10, 5, 200, 100) width = %d, want 48 (80%% of 60)", width)
+	}
+	if height != 24 {
+		t.Errorf("modalBoxSize(60, 30, 80, 80, 10, 5, 200, 100) height = %d, want 24 (80%% of 30)", height)
+	}
+}
+
+// TestModalBoxSize_WideTerminal_ClampsToMax verifies the generic modal box
+// sizer never grows past maxWidth/maxHeight, whatever the terminal's own
+// size (issue #1844, generalizing detailModalBoxSize's own
+// TestDetailModalBoxSize_WideTerminal_ClampsToMax).
+func TestModalBoxSize_WideTerminal_ClampsToMax(t *testing.T) {
+	width, height := modalBoxSize(300, 100, 80, 80, 10, 5, 100, 30)
+	if width != 100 {
+		t.Errorf("modalBoxSize(300, 100, 80, 80, 10, 5, 100, 30) width = %d, want 100 (clamped to max)", width)
+	}
+	if height != 30 {
+		t.Errorf("modalBoxSize(300, 100, 80, 80, 10, 5, 100, 30) height = %d, want 30 (clamped to max)", height)
+	}
+}
+
+// TestModalBoxSize_NearFloorTerminal_ClampsToMin verifies the generic modal
+// box sizer clamps up to minWidth/minHeight rather than the smaller
+// fraction on a terminal just above that floor (issue #1844, generalizing
+// detailModalBoxSize's own
+// TestDetailModalBoxSize_NearFloorTerminal_ClampsToMin).
+func TestModalBoxSize_NearFloorTerminal_ClampsToMin(t *testing.T) {
+	width, height := modalBoxSize(10, 5, 80, 80, 10, 5, 100, 30)
+	if width != 10 {
+		t.Errorf("modalBoxSize(10, 5, 80, 80, 10, 5, 100, 30) width = %d, want 10 (clamped to min)", width)
+	}
+	if height != 5 {
+		t.Errorf("modalBoxSize(10, 5, 80, 80, 10, 5, 100, 30) height = %d, want 5 (clamped to min)", height)
+	}
+}
+
+// TestModalBoxFits_BelowMinDimension_ReturnsFalse verifies the generic
+// modal-fits gate rejects a terminal narrower or shorter than minWidth/
+// minHeight, and accepts one that meets both floors (issue #1844,
+// generalizing detailModalFits' own
+// TestDetailModalFits_BelowMinDimension_ReturnsFalse).
+func TestModalBoxFits_BelowMinDimension_ReturnsFalse(t *testing.T) {
+	cases := []struct {
+		name          string
+		width, height int
+		want          bool
+	}{
+		{"both at floor", 40, 10, true},
+		{"width one short", 39, 10, false},
+		{"height one short", 40, 9, false},
+		{"plenty of room", 80, 20, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := modalBoxFits(c.width, c.height, 40, 10); got != c.want {
+				t.Errorf("modalBoxFits(%d, %d, 40, 10) = %v, want %v", c.width, c.height, got, c.want)
+			}
+		})
+	}
+}
+
+// TestModalBoxOrigin_CentersBoxInTerminal verifies the generic modal box
+// origin centers a boxWidth x boxHeight box within a termWidth x termHeight
+// terminal (issue #1844, generalizing detailModalBoxOrigin, which now
+// delegates here).
+func TestModalBoxOrigin_CentersBoxInTerminal(t *testing.T) {
+	x, y := modalBoxOrigin(100, 40, 80, 20)
+	if x != 10 {
+		t.Errorf("modalBoxOrigin(100, 40, 80, 20) x = %d, want 10", x)
+	}
+	if y != 10 {
+		t.Errorf("modalBoxOrigin(100, 40, 80, 20) y = %d, want 10", y)
+	}
+}
+
+// TestModalBoxInnerSize_SubtractsBorder verifies the generic modal box
+// inner-size helper returns the box's interior width/height once its
+// boxBorderCols/boxBorderRows border is subtracted (issue #1844,
+// generalizing detailModalInnerSize's own border accounting).
+func TestModalBoxInnerSize_SubtractsBorder(t *testing.T) {
+	width, height := modalBoxInnerSize(80, 20)
+	if width != 78 {
+		t.Errorf("modalBoxInnerSize(80, 20) width = %d, want 78", width)
+	}
+	if height != 18 {
+		t.Errorf("modalBoxInnerSize(80, 20) height = %d, want 18", height)
+	}
+}
+
+// TestModalBoxInnerSize_FloorsAtOne verifies a box smaller than its own
+// border never yields a non-positive interior — the inner size floors at 1
+// on each axis instead of going to zero or negative (issue #1844,
+// generalizing detailModalInnerSize's own floor).
+func TestModalBoxInnerSize_FloorsAtOne(t *testing.T) {
+	width, height := modalBoxInnerSize(1, 1)
+	if width != 1 {
+		t.Errorf("modalBoxInnerSize(1, 1) width = %d, want 1 (floored)", width)
+	}
+	if height != 1 {
+		t.Errorf("modalBoxInnerSize(1, 1) height = %d, want 1 (floored)", height)
+	}
+}

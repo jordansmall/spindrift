@@ -88,3 +88,62 @@ func compositeLine(baseLine, boxLine string, x int) string {
 	}
 	return line
 }
+
+// modalBoxSize returns a floating modal box's outer width and height for a
+// termWidth x termHeight terminal: widthPercent/heightPercent of the
+// terminal's own dimensions, clamped down to minWidth/minHeight and up to
+// maxWidth/maxHeight — the modal-agnostic geometry a floating box's own
+// sizing (e.g. the detail modal's detailModalBoxSize) delegates to (issue
+// #1844).
+func modalBoxSize(termWidth, termHeight, widthPercent, heightPercent, minWidth, minHeight, maxWidth, maxHeight int) (width, height int) {
+	width = termWidth * widthPercent / 100
+	if width < minWidth {
+		width = minWidth
+	}
+	if width > maxWidth {
+		width = maxWidth
+	}
+	height = termHeight * heightPercent / 100
+	if height < minHeight {
+		height = minHeight
+	}
+	if height > maxHeight {
+		height = maxHeight
+	}
+	return width, height
+}
+
+// modalBoxFits reports whether a termWidth x termHeight terminal leaves room
+// for a floating modal box at least minWidth x minHeight — the
+// modal-agnostic gate a floating box's own fits predicate (e.g. the detail
+// modal's detailModalFits) delegates to (issue #1844).
+func modalBoxFits(termWidth, termHeight, minWidth, minHeight int) bool {
+	return termWidth >= minWidth && termHeight >= minHeight
+}
+
+// modalBoxOrigin centers a boxWidth x boxHeight box within a termWidth x
+// termHeight terminal, the (x, y) compositeOverlay places it at — the
+// modal-agnostic centering a floating box's own origin (e.g. the detail
+// modal's detailModalBoxOrigin) delegates to (issue #1844).
+func modalBoxOrigin(termWidth, termHeight, boxWidth, boxHeight int) (x, y int) {
+	return (termWidth - boxWidth) / 2, (termHeight - boxHeight) / 2
+}
+
+// modalBoxInnerSize returns a boxWidth x boxHeight modal box's interior
+// width/height once its boxBorderCols/boxBorderRows border is subtracted —
+// deliberately reusing the same rounded-border constants every other
+// bordered panel in this package pays, not a modal-specific border width —
+// floored at 1x1 so a box smaller than its own border never yields a
+// non-positive interior. The modal-agnostic interior sizing a floating
+// box's own inner size (e.g. the detail modal's detailModalInnerSize)
+// delegates to (issue #1844).
+func modalBoxInnerSize(boxWidth, boxHeight int) (width, height int) {
+	width, height = boxWidth-boxBorderCols, boxHeight-boxBorderRows
+	if width < 1 {
+		width = 1
+	}
+	if height < 1 {
+		height = 1
+	}
+	return width, height
+}
