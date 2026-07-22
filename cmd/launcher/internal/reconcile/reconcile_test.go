@@ -367,6 +367,26 @@ func TestRun_PrintsStuckVerdictForUnmergedBranchRefLanding(t *testing.T) {
 	}
 }
 
+// TestRun_ReportsStuckBranchRefInResult verifies Reconcile's Result carries
+// a stuck LandingBranchRef's branch name keyed by issue number (issue
+// #1811) — Surface's basis for naming "stuck landing" as a broad ticket's
+// held gate instead of the generic "open seam", without redoing the same
+// ancestry check reconcile.Run just performed.
+func TestRun_ReportsStuckBranchRefInResult(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
+	f.SetBranchMergedIntoIntegration("agent/issue-42", "42", false, nil)
+	cf := f.AsLocal()
+
+	res, err := reconcile.Run(f, cf, fakeLiveness{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got, want := res.Stuck["42"], "agent/issue-42"; got != want {
+		t.Errorf(`Stuck["42"] = %q, want %q`, got, want)
+	}
+}
+
 // TestRun_HealsBranchRefLandingWhenAncestorOfIntegration verifies Reconcile
 // repairs a merged-but-mislabeled seam: a LandingBranchRef whose branch
 // BranchMergedIntoIntegration confirms already landed is upgraded to the
