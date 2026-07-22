@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/x/exp/golden v0.0.0-20240806155701-69247e0abc2a
 	github.com/charmbracelet/x/exp/teatest v0.0.0-20260713092006-0d683c34c74b
 	github.com/charmbracelet/x/term v0.2.1
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/mattn/go-runewidth v0.0.16
 	github.com/muesli/termenv v0.16.0
 )
