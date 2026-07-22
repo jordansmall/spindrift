@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+	"github.com/muesli/termenv"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -61,20 +62,40 @@ func computeSidebarWidth(totalWidth int) int {
 	return target
 }
 
-// renderColumnDivider renders the one-column vertical rule between the
-// docked list and sidebar — rows lines of a single dim-styled glyph, the
-// literal divider sidebarFits' width budget reserves a column for (ADR
-// 0031's border usage).
-func renderColumnDivider(rows int) string {
-	if rows <= 0 {
+// boxBorderCols and boxBorderRows are the column and row overhead a single
+// docked panel's rounded border adds — one column and one row per edge, on
+// all four sides. Two docked panels (list, sidebar) each pay this cost, so
+// the width/height budgets that split m.Width/m.Height between them must
+// account for it twice (issue #1755, replacing the old one-column divider).
+const boxBorderCols = 2
+const boxBorderRows = 2
+
+// renderBoxedColumn wraps content in a muted (RoleDim) rounded border — the
+// bordered-panel look that replaces the bare column divider between the
+// docked list and sidebar, so the split reads as two distinct boxes (issue
+// #1755). content's lines are assumed already clipped to the panel's
+// interior width; renderBoxedColumn only adds the border around them, sized
+// to exactly that width so the two panels' edges line up regardless of how
+// short any individual line is. Under NO_COLOR or a dumb terminal
+// (colorProfile() degrading to termenv.Ascii), the border falls back to
+// plain ASCII glyphs instead of the rounded Unicode box-drawing set, the
+// same degradation renderHeader's role coloring already follows. Empty
+// content renders no box at all — a zero-height budget must not draw a
+// stray empty frame.
+func renderBoxedColumn(content string, width int) string {
+	if content == "" {
 		return ""
 	}
-	glyph := roleStyle(RoleDim).Render("│")
-	lines := make([]string, rows)
-	for i := range lines {
-		lines[i] = glyph
+	content = strings.TrimSuffix(content, "\n")
+	border := lipgloss.RoundedBorder()
+	if colorProfile() == termenv.Ascii {
+		border = lipgloss.ASCIIBorder()
 	}
-	return strings.Join(lines, "\n") + "\n"
+	return rendererFor(colorProfile()).NewStyle().
+		Width(width).
+		Border(border).
+		BorderForeground(lipgloss.ANSIColor(ansiSlot(RoleDim))).
+		Render(content)
 }
 
 // View renders m as the text the run loop writes to the terminal: the
@@ -143,17 +164,9 @@ func View(m Model) string {
 		listModel.Width = m.Width - width - 1
 		list := renderBody(listModel, budget)
 		sidebar := renderSidebarDocked(*m.Sidebar, width, budget, m.Focus == FocusSidebar)
-		// The divider spans the taller of the two columns' actual rendered
-		// rows, not the whole budget — a short list or a short sidebar
-		// (few picks, a brief Activity feed) must not force the other idle
-		// the whole body budget just to fill a divider column (#1501 review
-		// finding).
-		dividerRows := strings.Count(list, "\n")
-		if n := strings.Count(sidebar, "\n"); n > dividerRows {
-			dividerRows = n
-		}
-		divider := renderColumnDivider(dividerRows)
-		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, list, divider, sidebar))
+		listBox := renderBoxedColumn(list, listModel.Width)
+		sidebarBox := renderBoxedColumn(sidebar, width)
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listBox, sidebarBox))
 	} else {
 		b.WriteString(renderBody(m, budget))
 	}
