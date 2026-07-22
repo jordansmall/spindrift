@@ -7,12 +7,17 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"spindrift.dev/launcher/internal/seambundle"
 )
 
-// BundleFileName is the fixed name the Box writes its code-out bundle under
-// in the writable outbox mount (ADR 0033) — a single well-known name, since
-// the outbox holds exactly one seam's bundle per dispatch.
-const BundleFileName = "seam.bundle"
+// BundleFileName re-exports seambundle.FileName, the fixed name the Box
+// writes its code-out bundle under in the writable outbox mount (ADR 0033).
+// The constant itself lives in the dependency-free seambundle package
+// (issue #1808) so driver-exec's bundle-out verb — the producer, built with
+// a deliberately tight nix fileset — can share it without depending on this
+// package's own forge/forge-git import closure.
+const BundleFileName = seambundle.FileName
 
 // relayBundle imports ref from the git bundle the Box left in outboxDir into
 // repoPath (the bare Accumulation repo), so a subsequent Merge(ref) — which
