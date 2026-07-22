@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -67,7 +68,7 @@ func conflictLogPathFor(pwd, number string) string {
 func (d *Dispatch) Run() Result {
 	logPath := d.logPath()
 	return d.dispatchWithRetry(logPath, func() error {
-		fmt.Printf("    -> #%s: %s\n", d.number, d.title)
+		fmt.Fprintf(d.humanOut(), "    -> #%s: %s\n", d.number, d.title)
 		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, 0, ""), d.cacheDir)
 	})
 }
@@ -76,7 +77,7 @@ func (d *Dispatch) Run() Result {
 func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 	logPath := d.fixLogPath(pass)
 	return d.dispatchWithRetry(logPath, func() error {
-		fmt.Printf("    -> #%s (fix-pass-%d): %s\n", d.number, pass, d.title)
+		fmt.Fprintf(d.humanOut(), "    -> #%s (fix-pass-%d): %s\n", d.number, pass, d.title)
 		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary), d.cacheDir)
 	})
 }
@@ -88,10 +89,22 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 // mount the driver cache -- it never runs the main agent prompt, so there is
 // no session to resume.
 func (d *Dispatch) ResolveConflict(pr string) error {
-	fmt.Printf("    -> #%s (conflict-resolve): %s\n", d.number, d.title)
+	fmt.Fprintf(d.humanOut(), "    -> #%s (conflict-resolve): %s\n", d.number, d.title)
 	env := buildBoxEnv(d.cfg, d.number, d.title, 0, "")
 	env["CONFLICT_RESOLVE_PR_URL"] = pr
 	return d.runOnce(d.conflictLogPath(), env, "")
+}
+
+// humanOut is the human-facing sink for this Dispatch: both the heartbeat
+// writer (runOnce) and each dispatch-start announce line write here (issue
+// #1829). The console entry point discards it via Factory.SetHeartbeatOut so
+// a console-driven dispatch never scribbles over the TUI frame; every other
+// caller gets the pre-#1829 stdout behaviour unchanged.
+func (d *Dispatch) humanOut() io.Writer {
+	if d.cfg.HeartbeatOut == nil {
+		return os.Stdout
+	}
+	return d.cfg.HeartbeatOut
 }
 
 // Close evicts this issue's driver-cache entry.
@@ -138,15 +151,11 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		}
 	}
 
-	heartbeatOut := d.cfg.HeartbeatOut
-	if heartbeatOut == nil {
-		heartbeatOut = os.Stdout
-	}
 	box := runner.Box{
 		Issue:          d.number,
 		Name:           name,
 		Env:            env,
-		Output:         d.driver.NewHeartbeatWriter(logFile, d.number, heartbeatOut),
+		Output:         d.driver.NewHeartbeatWriter(logFile, d.number, d.humanOut()),
 		DriverCacheDir: driverCacheDir,
 		OutboxDir:      outboxDir,
 	}
