@@ -3,10 +3,12 @@ package reconcile_test
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/reconcile"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // TestRun_ClosesIssueWithMergedLanding verifies Reconcile closes an open
@@ -304,12 +306,12 @@ func TestRun_ClosesLocalLandingVerifiedMerged(t *testing.T) {
 // TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged verifies Reconcile
 // leaves an issue open when its recorded local landing does not verify as
 // merged — a conflicting land (ADR 0033: "a conflicting merge leaves the
-// seam unlanded and blocked") or a malformed landing ref both surface here
-// identically as VerifyLanding reporting merged=false.
+// seam unlanded and blocked") reports merged=false via VerifyLanding for the
+// already-upgraded IntegrationRef form.
 func TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged(t *testing.T) {
 	f := forge.NewFake()
-	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
-	f.SetVerifyLanding("agent/issue-42", false, nil)
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "integration/1694@abc123"})
+	f.SetVerifyLanding("integration/1694@abc123", false, nil)
 	cf := f.AsLocal()
 
 	res, err := reconcile.Run(f, cf, fakeLiveness{})
@@ -329,6 +331,97 @@ func TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged(t *testing.T) {
 	}
 	if len(f.CloseIssueCalls) != 0 {
 		t.Errorf("CloseIssueCalls = %v, want none", f.CloseIssueCalls)
+	}
+}
+
+// TestRun_PrintsStuckVerdictForUnmergedBranchRefLanding verifies Reconcile
+// prints a loud, branch-naming stuck verdict — never a silent no-op — for a
+// LandingBranchRef (settle's pre-merge record) that BranchMergedIntoIntegration
+// reports as not yet an ancestor of its Integration branch (issue #1809: the
+// silent-stuck-cluster this typed repair path replaces).
+func TestRun_PrintsStuckVerdictForUnmergedBranchRefLanding(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
+	f.SetBranchMergedIntoIntegration("agent/issue-42", "42", false, nil)
+	cf := f.AsLocal()
+
+	out := testutil.CaptureStdout(t, func() {
+		res, err := reconcile.Run(f, cf, fakeLiveness{})
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if len(res.Closed) != 0 {
+			t.Errorf("Closed = %v, want none", res.Closed)
+		}
+	})
+	if !strings.Contains(out, "agent/issue-42") {
+		t.Errorf("stuck verdict must name the branch; got: %q", out)
+	}
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.State != forge.IssueOpen {
+		t.Errorf("State = %v, want unchanged IssueOpen", iss.State)
+	}
+}
+
+// TestRun_HealsBranchRefLandingWhenAncestorOfIntegration verifies Reconcile
+// repairs a merged-but-mislabeled seam: a LandingBranchRef whose branch
+// BranchMergedIntoIntegration confirms already landed is upgraded to the
+// rich IntegrationRef form (recorded via LandingRecorder) and the seam closes
+// through the normal close path — issue #1809's healing behavior for a seam
+// whose post-merge landing upgrade never ran even though the merge itself
+// succeeded.
+func TestRun_HealsBranchRefLandingWhenAncestorOfIntegration(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
+	f.SetBranchMergedIntoIntegration("agent/issue-42", "42", true, nil)
+	f.SetIntegrationTip("42", "integration/42@abc123")
+	cf := f.AsLocal()
+
+	res, err := reconcile.Run(f, cf, fakeLiveness{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != "42" {
+		t.Errorf("Closed = %v, want [42]", res.Closed)
+	}
+	if len(f.RecordLandingCalls) != 1 || f.RecordLandingCalls[0] != (forge.RecordLandingCall{Num: "42", Landing: "integration/42@abc123"}) {
+		t.Errorf("RecordLandingCalls = %v, want one call upgrading to the IntegrationRef", f.RecordLandingCalls)
+	}
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.State != forge.IssueClosed {
+		t.Errorf("State = %v, want IssueClosed", iss.State)
+	}
+}
+
+// TestRun_PrintsUnverifiableForNonLocalLandingShape verifies Reconcile prints
+// a distinct, loud "unverifiable" line — never silently treated as "not
+// merged yet" — for a landing that parses as a PR URL reaching the local
+// verification path, a shape genuinely reachable through this seam even
+// though production never records one there (issue #1809 AC2).
+func TestRun_PrintsUnverifiableForNonLocalLandingShape(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
+	cf := f.AsLocal()
+
+	out := testutil.CaptureStdout(t, func() {
+		res, err := reconcile.Run(f, cf, fakeLiveness{})
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if len(res.Closed) != 0 {
+			t.Errorf("Closed = %v, want none", res.Closed)
+		}
+	})
+	if !strings.Contains(out, "unverifiable") {
+		t.Errorf("want a loud unverifiable status line; got: %q", out)
 	}
 }
 
