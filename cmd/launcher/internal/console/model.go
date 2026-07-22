@@ -173,10 +173,13 @@ type Model struct {
 	DetailCache map[string]DetailModalCache
 	// Edges is the whole-backlog dependency graph, child issue number ->
 	// blocker issue numbers, built by openDetailModalCmd's first call in a
-	// session (or the first call after "r" invalidates it) and retained
-	// here so a later ticket's own Blocks section — the graph's own reverse
-	// edges — never re-walks DepsOf across the backlog a second time
-	// (issue #1632). nil means no graph has been built yet.
+	// session and retained here so a later ticket's own Blocks section — the
+	// graph's own reverse edges — never re-walks DepsOf across the backlog a
+	// second time (issue #1632). "r" (DetailCacheInvalidatedMsg) leaves it
+	// in place — only DetailCache goes stale on refresh, not the graph — so
+	// the next detail open after a refresh stays warm instead of paying the
+	// full rebuild again (issue #1746). nil means no graph has been built
+	// yet.
 	Edges map[string][]string
 	// EdgeSources is Edges' per-blocker DepSource (native vs body-parsed),
 	// keyed the same way waves.NewReadiness' own Sources return keys it.
@@ -820,8 +823,6 @@ func Update(m Model, msg Msg) Model {
 		}
 	case DetailCacheInvalidatedMsg:
 		m.DetailCache = nil
-		m.Edges = nil
-		m.EdgeSources = nil
 	}
 	m.Width = clampSize(m.Width)
 	m.Height = clampSize(m.Height)

@@ -23,9 +23,10 @@ import (
 // (waves.NewReadiness) rather than a fresh per-ticket DepsOf call: Blocks is
 // the graph's own reverse edges, and Blocked-by rides along in the same
 // batch call for free. edges/sources are the Model's already-retained
-// graph; nil means no session-scoped graph exists yet (never opened a
-// detail modal since startup, or "r" just invalidated it), so this builds
-// it once here and hands the built graph back on DetailModalLoadedMsg for
+// graph; nil only before the first detail modal open of the session — "r"
+// (DetailCacheInvalidatedMsg) leaves the graph in place rather than
+// re-nil-ing it (issue #1746) — so this builds it once here and hands the
+// built graph back on DetailModalLoadedMsg for
 // Update to retain — every later modal open within the same session reuses
 // it without a further NewReadiness sweep (issue #1632).
 func openDetailModalCmd(tracker forge.IssueTracker, all []forge.Issue, edges map[string][]string, sources map[string]map[string]forge.DepSource, number string) tea.Cmd {
