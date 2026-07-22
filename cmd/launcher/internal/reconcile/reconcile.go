@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/local"
 )
 
 // Result reports what a Run swept.
@@ -73,6 +74,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe) (Result, e
 	}
 	lr, _ := it.(forge.LandingRecorder)
 	flagger, _ := it.(forge.AbandonedFlagger)
+	repair, _ := cf.(forge.LandingRepair)
 
 	issues, err := it.ListOpenIssues()
 	if err != nil {
@@ -81,6 +83,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe) (Result, e
 
 	var res Result
 	prc := prReconciler{closer: closer, pr: pr, cf: cf, lr: lr, flagger: flagger}
+	llc := localLandingReconciler{closer: closer, verifier: verifier, repair: repair, lr: lr}
 	for _, iss := range issues {
 		if hasPR {
 			if err := prc.reconcile(&res, iss); err != nil {
@@ -88,7 +91,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe) (Result, e
 			}
 			continue
 		}
-		if err := reconcileLocalLanding(closer, verifier, &res, iss); err != nil {
+		if err := llc.reconcile(&res, iss); err != nil {
 			return res, err
 		}
 	}
@@ -172,28 +175,101 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 	return nil
 }
 
-// reconcileLocalLanding checks a single open issue's recorded landing against
-// a LandingVerifier — CODE_FORGE=local's no-network merge-observation surface
-// (ADR 0029, ADR 0033) — closing the issue only once the landing verifies as
-// merged into the adapter's own Integration branch. A malformed landing or
-// one that doesn't verify (the merge that recorded it in fact conflicted)
-// leaves the issue open, blocked, exactly like an issue with no landing
-// recorded yet — there is no separate "blocked" axis to set.
-func reconcileLocalLanding(closer forge.IssueCloser, verifier forge.LandingVerifier, res *Result, iss forge.Issue) error {
+// localLandingReconciler bundles the seams reconcile's local-landing path
+// needs per issue (mirroring prReconciler for the PRForge path). repair is
+// nil for a Code Forge with no forge.LandingRepair surface (every adapter
+// but local, though reconcileLocalLanding's caller never reaches that case
+// today since Run only takes this path when cf implements LandingVerifier,
+// which only local does too) — a LandingBranchRef then falls back to the
+// pre-#1809 "stays open" no-op, since there is no ancestor check to run.
+type localLandingReconciler struct {
+	closer   forge.IssueCloser
+	verifier forge.LandingVerifier
+	repair   forge.LandingRepair
+	lr       forge.LandingRecorder
+}
+
+// reconcile checks a single open issue's recorded landing, parsed into its
+// typed forge.Landing (issue #1809) so this switches on meaning instead of
+// re-deriving the string grammar itself:
+//
+//   - LandingIntegrationRef (the post-merge form) is checked via
+//     LandingVerifier exactly as before: merged closes the issue through the
+//     normal close path, not-yet-merged (a conflicting land, ADR 0033) leaves
+//     it open, blocked — there is no separate "blocked" axis to set.
+//   - LandingBranchRef (settle's pre-merge record) is Reconcile's healing
+//     path: BranchMergedIntoIntegration checks it against the ticket's own
+//     Integration branch. An ancestor means the merge landed but the
+//     post-merge upgrade never ran — repair upgrades the recorded landing to
+//     the rich IntegrationRef form and closes the seam through the same
+//     normal close path a fresh merge would have. Not an ancestor prints a
+//     loud stuck verdict naming the branch (issue #1809: the silent
+//     stuck-open cluster this replaces) and leaves the issue open.
+//   - Any other shape (e.g. a PR URL reaching this local-only path) prints a
+//     distinct, loud "unverifiable" line rather than being silently folded
+//     into "not merged yet".
+func (l localLandingReconciler) reconcile(res *Result, iss forge.Issue) error {
 	if iss.Landing == "" {
 		return nil
 	}
-	merged, err := verifier.VerifyLanding(iss.Landing)
+	landing, err := forge.ParseLanding(iss.Landing)
 	if err != nil {
-		return fmt.Errorf("reconcile issue %s: verify landing %s: %w", iss.Number, iss.Landing, err)
-	}
-	if !merged {
+		fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! %v\n", iss.Number, iss.Landing, err)
 		return nil
 	}
-	if err := closer.CloseIssue(iss.Number); err != nil {
-		return fmt.Errorf("reconcile issue %s: close: %w", iss.Number, err)
+	switch landing.Kind {
+	case forge.LandingIntegrationRef:
+		merged, err := l.verifier.VerifyLanding(iss.Landing)
+		if err != nil {
+			return fmt.Errorf("reconcile issue %s: verify landing %s: %w", iss.Number, iss.Landing, err)
+		}
+		if !merged {
+			return nil
+		}
+		return l.close(res, iss.Number)
+	case forge.LandingBranchRef:
+		return l.reconcileBranchRef(res, iss, landing)
+	default:
+		fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! landing does not verify through the local Code Forge\n", iss.Number, iss.Landing)
+		return nil
 	}
-	res.Closed = append(res.Closed, iss.Number)
+}
+
+// reconcileBranchRef is reconcile's healing path for a LandingBranchRef —
+// see (localLandingReconciler).reconcile's doc for the full behavior.
+func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue, landing forge.Landing) error {
+	if l.repair == nil {
+		return nil
+	}
+	parent := local.ResolveParent(iss.Number, iss.Parent)
+	merged, err := l.repair.BranchMergedIntoIntegration(landing.Branch, parent)
+	if err != nil {
+		return fmt.Errorf("reconcile issue %s: check branch %s ancestry: %w", iss.Number, landing.Branch, err)
+	}
+	if !merged {
+		fmt.Printf("    #%s  landing=%s  status=stuck  !! branch %s not merged into %s\n", iss.Number, iss.Landing, landing.Branch, local.IntegrationBranch(parent))
+		return nil
+	}
+	tip, err := l.repair.IntegrationTip(parent)
+	if err != nil {
+		return fmt.Errorf("reconcile issue %s: resolve integration tip for %s: %w", iss.Number, parent, err)
+	}
+	if l.lr != nil {
+		if err := l.lr.RecordLanding(iss.Number, tip); err != nil {
+			return fmt.Errorf("reconcile issue %s: record repaired landing: %w", iss.Number, err)
+		}
+	}
+	fmt.Printf("    #%s  landing=%s  status=landing-repaired  repaired-landing=%s\n", iss.Number, iss.Landing, tip)
+	return l.close(res, iss.Number)
+}
+
+// close closes num through the normal close path and records it in res —
+// shared by both the fresh-merge and the healing-repair close.
+func (l localLandingReconciler) close(res *Result, num string) error {
+	if err := l.closer.CloseIssue(num); err != nil {
+		return fmt.Errorf("reconcile issue %s: close: %w", num, err)
+	}
+	res.Closed = append(res.Closed, num)
 	return nil
 }
 
