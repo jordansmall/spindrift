@@ -132,6 +132,29 @@ func TestPickIssue_AlreadyComplete_ReturnsDissolvedMsg_NoTransition(t *testing.T
 	}
 }
 
+// TestPickIssue_ResearchKind_UntriagedIssue_ReturnsQueuedMsg verifies a
+// KindResearch pick on an untriaged Backlog issue queues instead of
+// dissolving (#1742). Research's DispatchLabels leaves Complete unmapped
+// (ADR 0022: a research dispatch reaches Complete via verdict labels, not
+// a Complete label) — the double-box guard must recognize an unmapped
+// state as "never present" rather than querying it and false-matching
+// every open issue, which used to reject every research pick with a bogus
+// "already complete" reason.
+func TestPickIssue_ResearchKind_UntriagedIssue_ReturnsQueuedMsg(t *testing.T) {
+	f := forge.NewFake(forge.ResearchDispatchLabels())
+	f.SetIssue(forge.Issue{Number: "42", Title: "worth researching"})
+
+	msg := PickIssue(f, "42", "worth researching", KindResearch)
+
+	queued, ok := msg.(PickQueuedMsg)
+	if !ok {
+		t.Fatalf("PickIssue() = %+v, want PickQueuedMsg", msg)
+	}
+	if queued.Number != "42" || queued.Kind != KindResearch {
+		t.Errorf("PickQueuedMsg = %+v, want {42 ... research}", queued)
+	}
+}
+
 // TestPickAllReady_ReturnsOneMsgPerCurrentlyDispatchableIssue verifies
 // PickAllReady picks exactly the issues currently Dispatchable on the
 // tracker, and nothing else — an issue with no dispatch label yet is left

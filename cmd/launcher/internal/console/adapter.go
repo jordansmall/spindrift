@@ -90,6 +90,16 @@ func transitionToDispatchable(tracker forge.IssueTracker, num, title string, kin
 // (GitHub/local/fake labels, Jira workflow status), so this asks the tracker
 // rather than re-deriving state from a raw Issue.Labels comparison.
 //
+// A tracker whose label family (forge.LabeledTracker) leaves state unmapped
+// — an empty label string, e.g. research's Complete (ADR 0022), which
+// reaches its terminal state through verdict labels instead — can never
+// have an issue "in" that state, so this returns false without calling
+// ListIssues at all (#1742). Skipping the round-trip isn't just an
+// optimization here: GitHub ignores an empty --label filter and Local's
+// frontmatter.State == "" matches every untriaged issue, so querying an
+// unmapped state would false-match every open issue and wrongly dissolve
+// every pick.
+//
 // ListIssues caps a single page at forge.ResultPageLimit (#986): a backlog
 // larger than that silently drops the tail rather than erroring. Elsewhere
 // (backlog listing) that's fine — an operator just reruns to drain the rest.
@@ -101,6 +111,9 @@ func transitionToDispatchable(tracker forge.IssueTracker, num, title string, kin
 // state with num genuinely absent also errors here, blocking a valid pick
 // rather than risk a double-box on a truly truncated one.
 func issueInState(tracker forge.IssueTracker, num string, state forge.DispatchState) (bool, error) {
+	if lt, ok := tracker.(forge.LabeledTracker); ok && lt.StateLabels().Label(state) == "" {
+		return false, nil
+	}
 	issues, err := tracker.ListIssues(state)
 	if err != nil {
 		return false, err

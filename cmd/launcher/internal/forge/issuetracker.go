@@ -164,3 +164,23 @@ type SeamLister interface {
 	// resolved parent across a mixed batch (ADR 0033, issue #1734).
 	AllIssues() ([]Issue, error)
 }
+
+// LabeledTracker is the optional IssueTracker surface for adapters whose
+// entire DispatchState space reduces to one DispatchLabels value (github,
+// local, and the Fake test double). PickIssue's double-box guard (#1742)
+// uses it to recognize a state the tracker's label family leaves unmapped
+// (e.g. research's Complete, which reaches its terminal state through
+// verdict labels instead, ADR 0022) and treat it as "never present"
+// without paying a ListIssues round-trip — one that would otherwise
+// false-match every open issue (GitHub ignores an empty --label filter;
+// Local's frontmatter.State == "" matches every untriaged issue). Jira
+// blends a per-state StatusMapping with Labels, which doesn't reduce to a
+// single DispatchLabels value, so it doesn't implement this and keeps
+// paying the round-trip. Callers discover it with a type assertion —
+// `lt, ok := tracker.(LabeledTracker)` — the same optional-interface
+// pattern IssueCloser and LandingRecorder use.
+type LabeledTracker interface {
+	// StateLabels returns the DispatchLabels family this tracker resolves
+	// DispatchState values through.
+	StateLabels() DispatchLabels
+}

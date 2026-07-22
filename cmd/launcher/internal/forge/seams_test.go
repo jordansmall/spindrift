@@ -99,6 +99,15 @@ func TestFake_ImplementsIssueCloser(t *testing.T) {
 	var _ forge.IssueCloser = forge.NewFake()
 }
 
+// TestFake_ImplementsLabeledTracker asserts that *Fake satisfies the
+// optional LabeledTracker surface, matching the github/local adapters'
+// shape — PickIssue's double-box guard (#1742) relies on this to skip a
+// ListIssues round-trip for a state the tracker's label family leaves
+// unmapped.
+func TestFake_ImplementsLabeledTracker(t *testing.T) {
+	var _ forge.LabeledTracker = forge.NewFake()
+}
+
 // TestFake_AsNoLandingRecorder_HidesIssueCloser verifies that
 // AsNoLandingRecorder also hides IssueCloser, matching the github/jira
 // adapters' shape (neither implements either optional write) — the mechanism
@@ -330,8 +339,8 @@ func TestFake_ListIssues_ByDispatchState(t *testing.T) {
 // regression test's fixture had no labels, so the old Fake wrongly returned
 // none for the unmapped query and never exercised the guard).
 func TestFake_ListIssues_UnmappedStateMatchesEveryOpenIssue(t *testing.T) {
-	f := forge.NewFake(researchLabels) // Complete: "" — unmapped
-	f.SetIssue(forge.Issue{Number: "1", State: forge.IssueOpen})                                          // untriaged, no labels
+	f := forge.NewFake(researchLabels)                           // Complete: "" — unmapped
+	f.SetIssue(forge.Issue{Number: "1", State: forge.IssueOpen}) // untriaged, no labels
 	f.SetIssue(forge.Issue{Number: "2", State: forge.IssueOpen, Labels: []string{"agent-research-in-progress"}})
 	f.SetIssue(forge.Issue{Number: "9", State: forge.IssueClosed})
 

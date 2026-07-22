@@ -130,6 +130,12 @@ func (e *execClient) Issue(num string) (forge.Issue, error) {
 	}, nil
 }
 
+// StateLabels implements forge.LabeledTracker, returning the DispatchLabels
+// e resolves DispatchState values through.
+func (e *execClient) StateLabels() forge.DispatchLabels {
+	return e.labels
+}
+
 // TransitionState swaps the from-state label for the to-state label on issue
 // num. It emits exactly one --add-label and one --remove-label, matching the
 // prior SwapLabel(add, remove) call contract with typed state identifiers.
