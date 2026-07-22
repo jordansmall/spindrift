@@ -1194,6 +1194,16 @@ func windowSidebarLines(s SidebarState, budget int) []string {
 // shares this budget — see sidebarDockedFooterLines.
 const headerFooterLines = 2
 
+// trailingNewlineRow is the extra row renderRebuildOutputPane's budget and
+// its model.go cursor-follow mirror both reserve for View()'s own
+// guaranteed trailing "\n" (issue #1827, mirroring f330ff6's fix for the
+// list view): without it, output that exactly fills or overflows the
+// budget renders header(1)+budget+footer(1) == m.Height lines, one over
+// once that trailing "\n" is counted as its own physical row. Named and
+// shared, rather than a bare "-1" at each site, so the two budgets can't
+// drift out of lockstep the way bef158e had to fix.
+const trailingNewlineRow = 1
+
 // sidebarDockedFooterLines is the docked sidebar's own chrome budget
 // (keystroke-hint footer only) that renderSidebarDocked and Update's tail
 // (in the docked branch) subtract from bodyBudget(m) — narrower than
@@ -1824,7 +1834,7 @@ func renderRebuildOutputPane(m Model) string {
 	var b strings.Builder
 	b.WriteString("rebuild output:\n")
 
-	budget := m.Height - headerFooterLines
+	budget := m.Height - headerFooterLines - trailingNewlineRow
 	lines := strings.Split(m.RebuildStatus.Output, "\n")
 	var visible string
 	if budget > 0 {

@@ -297,7 +297,7 @@ func TestUpdate_RebuildOutputJumpToFirstMsg_ResetsOffsetToZero(t *testing.T) {
 // clamp block already applies on every Update (issue #1630 AC1).
 func TestUpdate_RebuildOutputJumpToLastMsg_JumpsToLastPage(t *testing.T) {
 	m := NewModel()
-	m = Update(m, SizeChangedMsg{Height: 6}) // minus headerFooterLines(2) = a 4-row viewport
+	m = Update(m, SizeChangedMsg{Height: 7}) // minus headerFooterLines(2) and the issue #1827 trailing-"\n" reservation(1) = a 4-row viewport
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9"}})
 	m = Update(m, RebuildOutputOpenMsg{})
 

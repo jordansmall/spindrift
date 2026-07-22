@@ -875,7 +875,7 @@ func Update(m Model, msg Msg) Model {
 		lines := strings.Count(m.RebuildStatus.Output, "\n") + 1
 		vp := Viewport{offset: m.RebuildOutputOffset}
 		vp.Scroll(0, lines)
-		vp.SetHeight(m.Height - headerFooterLines)
+		vp.SetHeight(m.Height - headerFooterLines - trailingNewlineRow)
 		m.RebuildOutputOffset = vp.offset
 	}
 
