@@ -1321,6 +1321,121 @@ func TestView_SidebarOpen_NarrowTerminal_FallsBackFullscreen(t *testing.T) {
 	}
 }
 
+// TestComputeSidebarWidth_MinimumFittingWidth_ReturnsFloor verifies that at
+// the narrowest width sidebarFits still allows docking (sidebarMinListWidth +
+// sidebarWidth + 1), the computed sidebar width is exactly the sidebarWidth
+// floor — there's no room to grow past it without violating the queue list's
+// own sidebarMinListWidth floor (issue #1751).
+func TestComputeSidebarWidth_MinimumFittingWidth_ReturnsFloor(t *testing.T) {
+	got := computeSidebarWidth(sidebarMinListWidth + sidebarWidth + 1)
+	if got != sidebarWidth {
+		t.Errorf("computeSidebarWidth(%d) = %d, want the floor %d", sidebarMinListWidth+sidebarWidth+1, got, sidebarWidth)
+	}
+}
+
+// TestComputeSidebarWidth_WideTerminal_TargetsFortyFivePercent verifies a
+// 160-column terminal — the issue's own worked example, where the sidebar
+// used to be pinned at 42 and the queue absorbed the other ~117 — grows the
+// sidebar to 45% of the window (72) with plenty of room left for the queue's
+// own sidebarMinListWidth floor (issue #1751).
+func TestComputeSidebarWidth_WideTerminal_TargetsFortyFivePercent(t *testing.T) {
+	got := computeSidebarWidth(160)
+	if want := 72; got != want {
+		t.Errorf("computeSidebarWidth(160) = %d, want %d (45%% of 160)", got, want)
+	}
+}
+
+// TestComputeSidebarWidth_ModeratelyWideTerminal_ClampsToQueueFloor verifies
+// a terminal too narrow for a full 45% share to leave the queue list its
+// sidebarMinListWidth floor clamps the sidebar down instead — the queue must
+// never shrink below its floor even though there's room to dock at all
+// (issue #1751).
+func TestComputeSidebarWidth_ModeratelyWideTerminal_ClampsToQueueFloor(t *testing.T) {
+	// 140 columns: 45% would be 63, but that only leaves the queue
+	// 140-63-1 = 76, under its 80-column floor. The clamp caps the sidebar
+	// at 140-80-1 = 59 so the queue holds exactly its floor.
+	got := computeSidebarWidth(140)
+	if want := 59; got != want {
+		t.Errorf("computeSidebarWidth(140) = %d, want %d (clamped so the queue keeps its %d floor)", got, want, sidebarMinListWidth)
+	}
+}
+
+// TestView_SidebarOpen_WideTerminal_SidebarGrowsPastFloor verifies the
+// docked sidebar's actual rendered content clips to computeSidebarWidth's
+// wider column, not the old fixed 42-column floor, once the terminal is wide
+// enough to grow it (issue #1751). A long Activity line makes the clip
+// boundary observable: it truncates to exactly the computed width.
+func TestView_SidebarOpen_WideTerminal_SidebarGrowsPastFloor(t *testing.T) {
+	const width = 160
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
+	long := strings.Repeat("x", 300)
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: long}}})
+
+	out := View(m)
+	want := clip(long, computeSidebarWidth(width), false)
+	if !strings.Contains(out, want) {
+		t.Errorf("View() = %q, want the docked sidebar content clipped to computeSidebarWidth(%d) = %d, i.e. %q", out, width, computeSidebarWidth(width), want)
+	}
+}
+
+// TestView_SidebarOpen_WideTerminal_QueueNarrowsForWiderSidebar verifies the
+// docked queue list's title column shrinks to make room for the wider
+// sidebar computeSidebarWidth grants it, rather than staying pinned at the
+// width it had when the sidebar was a fixed 42 columns (issue #1751). A long
+// Backlog title makes the clip boundary observable the same way the sidebar
+// content test does.
+func TestView_SidebarOpen_WideTerminal_QueueNarrowsForWiderSidebar(t *testing.T) {
+	const width = 160
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
+	long := strings.Repeat("x", 300)
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: long}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	out := View(m)
+	listWidth := width - computeSidebarWidth(width) - 1
+	titleWidth := listWidth - backlogFixedWidth - extrasBudget
+	want := clip(long, titleWidth, true)
+	if !strings.Contains(out, want) {
+		t.Errorf("View() = %q, want the docked queue's title column clipped to %d (listWidth %d narrowed for the wider sidebar), i.e. %q", out, titleWidth, listWidth, want)
+	}
+}
+
+// TestView_SidebarClose_WideTerminal_QueueRestoresFullWidth verifies closing
+// the docked sidebar on a wide terminal restores the queue list's title
+// column to the width it would have with no sidebar at all — the rebalanced
+// split must not leave a stale narrower list behind once the log closes
+// (issue #1751).
+func TestView_SidebarClose_WideTerminal_QueueRestoresFullWidth(t *testing.T) {
+	const width = 160
+	long := strings.Repeat("x", 300)
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: long}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	m = Update(m, SidebarCloseMsg{})
+
+	out := View(m)
+	fullTitleWidth := width - backlogFixedWidth - extrasBudget
+	want := clip(long, fullTitleWidth, true)
+	if !strings.Contains(out, want) {
+		t.Errorf("View() = %q, want the queue's title column back at the full-width %d once the sidebar closes, i.e. %q", out, fullTitleWidth, want)
+	}
+}
+
+// TestView_SidebarFooter_WideTerminal_RendersFullHintsUnclipped verifies the
+// docked footer's fixed, tight-spaced hint text — hand-tuned to survive
+// clipping at the 42-column floor — still renders in full, unclipped, once
+// computeSidebarWidth grows the sidebar past that floor (issue #1751).
+func TestView_SidebarFooter_WideTerminal_RendersFullHintsUnclipped(t *testing.T) {
+	const width = 160
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	out := View(m)
+	if !strings.Contains(out, "[t] cycle ·[h] list ·[x] close ·[z] zoom") {
+		t.Errorf("View() = %q, want the docked footer's full, unclipped hint text at the wider computed sidebar width", out)
+	}
+}
+
 // TestView_SidebarLabel_ShowsFollowIndicator verifies the sidebar's label
 // names whether the Activity feed is following the newest line or paused
 // after a scroll-up — the operator's only render-level signal for Follow
