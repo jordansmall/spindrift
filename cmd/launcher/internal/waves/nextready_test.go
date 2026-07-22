@@ -229,6 +229,51 @@ func TestNextReady_Local_ClosedOnDiskUnblocksDependent_IndependentSeamUnaffected
 	}
 }
 
+// TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun guards issue
+// #1850: a local blocker's landing verifying merged into its Integration
+// branch must unblock its dependent immediately, in the very next readiness
+// check -- not held until the post-loop reconcile closes the blocker issue.
+func TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun(t *testing.T) {
+	c := baseConfig()
+	c.Label = "agent-trigger"
+
+	fc := forge.NewFake(dispatchLabels(c))
+	cf := fc.AsLocal()
+
+	// Seam 2 is blocked by seam 1 (still open, no landing yet); seam 3 has
+	// no blockers.
+	fc.SetIssue(forge.Issue{Number: "1", State: "OPEN"})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+
+	edges := map[string][]string{"2": {"1"}}
+	checkOverlap := func(string) (string, bool) { return "", false }
+
+	// Seam 1 still open with no landing: seam 2 stays blocked, so the
+	// independent seam 3 is selected instead of waiting on it.
+	iss, ok := nextReady(c, fc, cf, checkOverlap, []Issue{
+		{Number: "2", Title: "dependent"},
+		{Number: "3", Title: "independent"},
+	}, edges, nil, nil, nil)
+	if !ok || iss.Number != "3" {
+		t.Fatalf("nextReady before blocker lands: got (%v, %v), want (\"3\", true)", iss, ok)
+	}
+
+	// Seam 1's Box finishes and its seam lands on the parent's Integration
+	// branch -- settle's landing-upgrade records the rich
+	// integration/<parent>@<sha> ref, but seam 1's issue is still OPEN
+	// (reconcile hasn't run yet, it runs once after the loop returns).
+	fc.SetIssue(forge.Issue{Number: "1", State: "OPEN", Landing: "integration/parent@abc123"})
+	fc.SetVerifyLanding("integration/parent@abc123", true, nil)
+
+	iss, ok = nextReady(c, fc, cf, checkOverlap, []Issue{
+		{Number: "2", Title: "dependent"},
+	}, edges, nil, nil, nil)
+	if !ok || iss.Number != "2" {
+		t.Fatalf("nextReady after blocker lands: got (%v, %v), want (\"2\", true)", iss, ok)
+	}
+}
+
 // TestNextReady_HappyPath verifies that with no cascade or overlap in play,
 // nextReady still selects the first dispatch-ready issue in scan order —
 // guarding against the cascade and overlap tests masking the happy path.

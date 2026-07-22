@@ -314,6 +314,39 @@ func TestReadinessReady_ClosedIssueFallback(t *testing.T) {
 	}
 }
 
+func TestReadinessReady_LocalLandingVerifiedMerged(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: "agent/issue-99@abc123"})
+	fc.SetVerifyLanding("agent/issue-99@abc123", true, nil)
+
+	if !(Readiness{}).Ready(fc, fc.AsLocal(), "99") {
+		t.Error("Readiness.Ready: want true for blocker whose landing verifies merged, got false")
+	}
+}
+
+func TestReadinessReady_LocalLandingNotYetMerged(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: "agent/issue-99@abc123"})
+	fc.SetVerifyLanding("agent/issue-99@abc123", false, nil)
+
+	if (Readiness{}).Ready(fc, fc.AsLocal(), "99") {
+		t.Error("Readiness.Ready: want false for blocker whose landing is not yet merged, got true")
+	}
+}
+
+func TestReadinessReady_LocalLandingBranchRefStaysHeld(t *testing.T) {
+	fc := forge.NewFake()
+	// A raw, pre-merge branch ref (no "@sha") is settle's LandingBranchRef
+	// shape -- not yet upgraded to the verifiable IntegrationRef form, so it
+	// must never reach VerifyLanding and must stay held.
+	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: "agent/issue-99"})
+	fc.SetVerifyLanding("agent/issue-99", true, nil)
+
+	if (Readiness{}).Ready(fc, fc.AsLocal(), "99") {
+		t.Error("Readiness.Ready: want false for unmerged LandingBranchRef, got true")
+	}
+}
+
 func TestReadinessReady_MergedIssueFallback(t *testing.T) {
 	fc := forge.NewFake()
 	// Blocker ref resolves to a PR number: no agent branch, so it falls

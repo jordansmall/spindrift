@@ -218,6 +218,17 @@ func blockerReady(it forge.IssueTracker, cf forge.CodeForge, dep string) (ready 
 		fmt.Printf("    .. blocker #%s is a merged PR (no discoverable agent branch); treating as satisfied\n", dep)
 		return true, &issue
 	}
+	if verifier, ok := cf.(forge.LandingVerifier); ok && issue.Landing != "" {
+		if landing, perr := forge.ParseLanding(issue.Landing); perr == nil && landing.Kind == forge.LandingIntegrationRef {
+			merged, verr := verifier.VerifyLanding(issue.Landing)
+			if verr != nil {
+				fmt.Printf("    .. blocker #%s landing verification failed: %v; holding\n", dep, verr)
+			} else if merged {
+				fmt.Printf("    .. blocker #%s landing verified merged into Integration (still open); treating as satisfied\n", dep)
+				return true, &issue
+			}
+		}
+	}
 	return false, &issue
 }
 
