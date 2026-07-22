@@ -16,8 +16,8 @@ Type a command and press enter:
 | `r` / `refresh` | re-query the Issue Tracker and re-render the backlog |
 | `f <text>` / `filter <text>` | narrow the list to issues with a label containing `<text>` |
 | `f` / `filter` (no text) | clear the filter, restoring the full list |
-| `p <num>` / `pick <num>` | Pick issue `<num>` — the launch button |
-| `pa` / `pick-all-ready` | Pick every issue currently `Dispatchable` — the bulk launch button |
+| `p` | Pick the highlighted Backlog row — the launch button |
+| `P` | Pick every issue currently `Dispatchable` — the bulk launch button |
 | `u <num>` / `unpick <num>` | Unpick a queued-but-unlaunched pick |
 | `enter` (queue focus) | Drill in: open the highlighted pick's rendered transcript |
 | `t` / `toggle` | toggle the open transcript between rendered and raw |
@@ -61,11 +61,11 @@ refill and launches with no operator action the moment every blocker reaches
 `u <num>` still works on a held row exactly as it does on a queued one, so the
 operator decides whether to wait or give up on it.
 
-**Pick all ready** (`pa`) picks exactly the issues currently `Dispatchable`
+**Pick all ready** (`P`) picks exactly the issues currently `Dispatchable`
 on the tracker, in one snapshot query — an explicit action, never standing
-discovery: an issue that becomes `Dispatchable` after `pa` returns is not
+discovery: an issue that becomes `Dispatchable` after `P` returns is not
 picked until the operator asks again. Each issue queues through the same
-Pick path a single `p <num>` uses.
+Pick path a single `p` uses.
 
 **Unpick** removes a queued-but-unlaunched pick — including a held one — from
 the session with zero Issue Tracker calls — it only ever un-does the
