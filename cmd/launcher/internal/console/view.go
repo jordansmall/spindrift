@@ -105,8 +105,10 @@ func padColumnsToEqualHeight(list, sidebar string) (string, string) {
 // (colorProfile() degrading to termenv.Ascii), the border falls back to
 // plain ASCII glyphs instead of the rounded Unicode box-drawing set, the
 // same degradation renderHeader's role coloring already follows. Empty
-// content renders no box at all — a zero-height budget must not draw a
-// stray empty frame.
+// content renders no box at all: callers pad the shorter of the list and
+// sidebar columns to match the taller one before boxing either
+// (padColumnsToEqualHeight), so this only ever fires when both are empty —
+// a zero-height budget must not draw a stray empty frame.
 func renderBoxedColumn(content string, width int) string {
 	if content == "" {
 		return ""
