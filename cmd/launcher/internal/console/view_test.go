@@ -1759,6 +1759,36 @@ func TestDetailModalBoxSize_NearFloorTerminal_ClampsToMin(t *testing.T) {
 	}
 }
 
+// TestSidebarModalBoxSize_LargeTerminal_ExceedsDetailModal verifies the
+// zoomed log modal renders visibly larger than the issue detail modal on a
+// large terminal (e.g. 165x50) instead of clamping to the same footprint —
+// the log modal's own, larger max caps must actually take effect once 80%
+// of the terminal exceeds the detail modal's 100x30 cap (issue #1875 AC1).
+func TestSidebarModalBoxSize_LargeTerminal_ExceedsDetailModal(t *testing.T) {
+	sidebarWidth, sidebarHeight := sidebarModalBoxSize(165, 50)
+	detailWidth, detailHeight := detailModalBoxSize(165, 50)
+	if sidebarWidth <= detailWidth {
+		t.Errorf("sidebarModalBoxSize(165, 50) width = %d, want > detailModalBoxSize width %d", sidebarWidth, detailWidth)
+	}
+	if sidebarHeight <= detailHeight {
+		t.Errorf("sidebarModalBoxSize(165, 50) height = %d, want > detailModalBoxSize height %d", sidebarHeight, detailHeight)
+	}
+}
+
+// TestSidebarModalBoxSize_VeryLargeTerminal_PinsToMax verifies the zoomed log
+// modal stays bounded on a very large monitor (>=225 cols, >=68 rows) rather
+// than stretching corner to corner: it pins to sidebarModalBoxMax{Width,
+// Height} (180x54), the log modal's own cap (issue #1875 AC2).
+func TestSidebarModalBoxSize_VeryLargeTerminal_PinsToMax(t *testing.T) {
+	width, height := sidebarModalBoxSize(300, 100)
+	if width != sidebarModalBoxMaxWidth {
+		t.Errorf("sidebarModalBoxSize(300, 100) width = %d, want %d (pinned to max)", width, sidebarModalBoxMaxWidth)
+	}
+	if height != sidebarModalBoxMaxHeight {
+		t.Errorf("sidebarModalBoxSize(300, 100) height = %d, want %d (pinned to max)", height, sidebarModalBoxMaxHeight)
+	}
+}
+
 // TestDetailModalFits_BelowMinDimension_ReturnsFalse verifies detailModalFits
 // — the single predicate gating floating-vs-fullscreen (issue #1759 AC),
 // sidebarFits' detail-modal analogue — rejects a terminal narrower or
