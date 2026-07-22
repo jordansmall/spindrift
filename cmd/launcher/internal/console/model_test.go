@@ -1929,11 +1929,40 @@ func TestUpdate_DetailModalScroll_ClampsToBoxInteriorHeightNotTerminalHeight(t *
 	m = Update(m, DetailModalScrollMsg{Delta: 1000})
 
 	// The box's interior height at a 40-row terminal (detailModalBoxSize
-	// caps the box at 30 rows, minus 2 border rows, minus
-	// floatModalChromeLines) is well short of Model.Height - the
-	// fullscreen renderer's detailModalChromeLines(3) — so the two clamps
-	// disagree unless the offset clamp was actually rewired.
+	// caps the box at 30 rows, minus 2 border rows, minus the no-labels
+	// case's 1 label line + 1 footer line) is well short of Model.Height -
+	// the fullscreen renderer's detailModalChromeLines(3) — so the two
+	// clamps disagree unless the offset clamp was actually rewired.
 	if want := len(lines) - 26; m.DetailModal.Offset != want {
 		t.Errorf("Offset = %d after scrolling past the end, want %d (clamped to the box interior's row budget)", m.DetailModal.Offset, want)
+	}
+}
+
+// TestUpdate_DetailModalScroll_ClampsForWrappedLabelLines verifies the
+// Offset clamp folds in the labels line's own wrapped row count, not a
+// fixed one-row assumption — a ticket whose labels wrap onto further
+// interior rows leaves less room for the body than a ticket with no labels,
+// and the clamp must shrink its budget to match or it targets a body
+// budget the render doesn't actually have room to show (issue #1772).
+func TestUpdate_DetailModalScroll_ClampsForWrappedLabelLines(t *testing.T) {
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	body := strings.Join(lines, "\n")
+	// Each label is 45 display columns — under the 82-column box interior
+	// alone, but two plus their ", " separator (92) overflow it, so
+	// wrapText places exactly one label per line: 3 label lines.
+	labels := []string{strings.Repeat("a", 45), strings.Repeat("b", 45), strings.Repeat("c", 45)}
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: labels})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: body})
+	m = Update(m, DetailModalScrollMsg{Delta: 1000})
+
+	// Box interior height 28 (see the sibling test above), minus 3 label
+	// lines, minus 1 footer line, leaves a body budget of 24.
+	if want := len(lines) - 24; m.DetailModal.Offset != want {
+		t.Errorf("Offset = %d after scrolling past the end, want %d (clamped to the box interior's row budget with 3 wrapped label lines)", m.DetailModal.Offset, want)
 	}
 }

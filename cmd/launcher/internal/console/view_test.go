@@ -1105,13 +1105,15 @@ func TestView_DetailModal_NoBlockersOrBlocks_ShowsNoSectionClutter(t *testing.T)
 // DetailModalScrollMsg moves which lines are visible, hiding everything
 // before the new offset (issue #1632 AC — "the body scrolls with j/k and
 // the arrow keys"). Height is sized so the floating box's own interior body
-// budget (issue #1758: 2*margin + 2 border rows + floatModalChromeLines,
-// leaving exactly 2 rows for the body) shows exactly 2 of the 4 body lines
-// at once, the same "content overflows the viewport" setup the fullscreen
-// renderer's version of this test used against detailModalChromeLines.
+// budget (issue #1758: 2*margin + 2 border rows + the no-labels case's 1
+// label line + 1 footer line, leaving exactly 2 rows for the body) shows
+// exactly 2 of the 4 body lines at once, the same "content overflows the
+// viewport" setup the fullscreen renderer's version of this test used
+// against detailModalChromeLines.
 func TestView_DetailModal_ScrollOffset_HidesLinesBeforeOffset(t *testing.T) {
 	const bodyBudget = 2
-	height := 2*detailModalBoxMargin + 2 + floatModalChromeLines + bodyBudget
+	const labelAndFooterLines = 2 // no Labels set below, so 1 empty label line + 1 footer line
+	height := 2*detailModalBoxMargin + 2 + labelAndFooterLines + bodyBudget
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: height})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: "l0\nl1\nl2\nl3"})
@@ -1143,6 +1145,34 @@ func TestView_DetailModal_LabelsUnclipped(t *testing.T) {
 	}
 	if strings.Contains(out, "+") {
 		t.Errorf("View() = %q, want no clipLabels-style \"+N\" truncation", out)
+	}
+}
+
+// TestView_DetailModal_LabelsWrapOnOverflow verifies the floating detail
+// modal wraps a labels line that overflows the box's interior width onto
+// further interior rows instead of silently truncating it (issue #1772):
+// TestView_DetailModal_LabelsUnclipped's 8 short labels never exceed even
+// an 80-col terminal's 74-col interior (detailModalInnerSize), so it never
+// exercised the overflow path padDisplay's runewidth.Truncate hits once the
+// joined labels line runs past innerWidth. This test uses a terminal wide
+// enough to cap the box at detailModalBoxMaxWidth (issue #1772 AC2's "the
+// box's default max width"), an 82-col interior, rather than a narrower
+// uncapped box.
+func TestView_DetailModal_LabelsWrapOnOverflow(t *testing.T) {
+	labels := []string{
+		"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf",
+		"hotel", "india", "juliett", "kilo", "lima", "mike", "november",
+		"oscar", "papa", "quebec", "romeo", "sierra", "tango", "uniform",
+		"victor", "whiskey", "xray", "yankee", "zulu",
+	}
+	m := Update(NewModel(), SizeChangedMsg{Width: 200, Height: 24})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: labels})
+
+	out := View(m)
+	for _, label := range labels {
+		if !strings.Contains(out, label) {
+			t.Errorf("View() = %q, want every label present after wrapping, missing %q", out, label)
+		}
 	}
 }
 
@@ -2804,6 +2834,29 @@ func TestWrapText_WordWiderThanWidth_StandsAlone(t *testing.T) {
 	want := []string{"a", "supercalifragilisticexpialidocious", "word"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("wrapText(...) = %v, want %v", got, want)
+	}
+}
+
+// TestDetailModalLabelLines_WrapsOntoMultipleLines verifies the labels line
+// wraps across further interior rows once it overflows width, rather than
+// staying a single unwrapped string for padDisplay to silently truncate
+// (issue #1772).
+func TestDetailModalLabelLines_WrapsOntoMultipleLines(t *testing.T) {
+	got := detailModalLabelLines([]string{"alpha", "bravo", "charlie"}, 15)
+	want := []string{"alpha, bravo,", "charlie"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("detailModalLabelLines(...) = %v, want %v", got, want)
+	}
+}
+
+// TestDetailModalLabelLines_SanitizesControlSequences verifies a label
+// carrying CSI/OSC escape sequences is stripped before wrapping — a tracker
+// label is untrusted input (issue #862).
+func TestDetailModalLabelLines_SanitizesControlSequences(t *testing.T) {
+	got := detailModalLabelLines([]string{"evil\x1b[2Jlabel"}, 40)
+	want := []string{"evillabel"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("detailModalLabelLines(...) = %v, want %v", got, want)
 	}
 }
 
