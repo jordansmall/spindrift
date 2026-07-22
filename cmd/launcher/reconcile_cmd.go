@@ -75,7 +75,12 @@ func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge,
 // exit (ADR 0033, issue #1730), delegated to localloop.Wire's Surface (issue
 // #1806) so this and the composed loop test drive the identical sweep. A
 // no-op for any codeForge other than "local"; localloop.Wired.Surface itself
-// covers the tracker-has-no-SeamLister no-op (every tracker but local).
+// covers the tracker-has-no-SeamLister no-op (every tracker but local). This
+// mints its own Wired rather than sharing the run's own (issue #1810):
+// runReconcile is reachable from the standalone `reconcile` subcommand
+// (cmdReconcile), a separate process invocation with no dispatch-time Wired
+// to share, not only from reconcileAfterDispatch's tail end of a run that
+// already built one.
 func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writer) error {
 	if c.codeForge != "local" {
 		return nil

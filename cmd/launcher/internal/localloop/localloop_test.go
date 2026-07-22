@@ -395,3 +395,91 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 		t.Errorf("refs/heads/%s must not exist — sibling %s is still open", parent, openNum)
 	}
 }
+
+// TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch drives two
+// seams with distinct parents through the same *Wired end to end — issue
+// #1810 AC4's named scenario — asserting each lands, closes, and surfaces
+// onto its own Integration branch rather than collapsing onto a single one
+// (TestWired_ResolveParent_MemoizesPerIssue already covers the "resolved
+// exactly once" guarantee itself against a call-counting fake).
+func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	const numA, numB = "60", "61"
+	writeLocalIssue(t, issuesDir, numA, "seam 60", "Calc Engine", testLabels.InProgress)
+	writeLocalIssue(t, issuesDir, numB, "seam 61", "Render Pipeline", testLabels.InProgress)
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+
+	for num, want := range map[string]string{numA: "calc-engine", numB: "render-pipeline"} {
+		if got := lw.ResolveParent(num).String(); got != want {
+			t.Fatalf("ResolveParent(%s) = %q, want %q", num, got, want)
+		}
+	}
+
+	cfA, cfB := lw.CodeForgeForIssue(numA), lw.CodeForgeForIssue(numB)
+	branchA, branchB := cfA.AgentBranch(numA), cfB.AgentBranch(numB)
+	fixtureShaA := bundleFixtureCommit(t, accumDir, testBaseBranch, branchA, numA, lw.OutboxDir(numA))
+	fixtureShaB := bundleFixtureCommit(t, accumDir, testBaseBranch, branchB, numB, lw.OutboxDir(numB))
+
+	cfg := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+	}
+	sA := settle.New(cfg, it, cfA)
+	sA.Settle(dispatch.NewFake(), numA, 0, dispatch.Result{
+		Success: true, OutcomeFound: true,
+		Outcome: outcome.Outcome{Issue: numA, Landing: branchA, Status: "ready"},
+	})
+	sB := settle.New(cfg, it, cfB)
+	sB.Settle(dispatch.NewFake(), numB, 0, dispatch.Result{
+		Success: true, OutcomeFound: true,
+		Outcome: outcome.Outcome{Issue: numB, Landing: branchB, Status: "ready"},
+	})
+
+	res, err := reconcile.Run(it, cfA, nil)
+	if err != nil {
+		t.Fatalf("reconcile.Run: %v", err)
+	}
+	if len(res.Closed) != 2 {
+		t.Fatalf("reconcile.Run closed = %v, want both %s and %s", res.Closed, numA, numB)
+	}
+
+	if err := lw.Surface(operatorDir, io.Discard); err != nil {
+		t.Fatalf("Surface: %v", err)
+	}
+
+	for num, branch := range map[string]string{"calc-engine": numA, "render-pipeline": numB} {
+		surfacedTip := revParse(t, operatorDir, "refs/heads/"+num)
+		wantTip := revParse(t, accumDir, "refs/heads/integration/"+num)
+		if surfacedTip != wantTip {
+			t.Errorf("surfaced branch %s tip = %s, want %s (Integration branch tip)", num, surfacedTip, wantTip)
+		}
+		var fixtureSHA string
+		if num == "calc-engine" {
+			fixtureSHA = fixtureShaA
+		} else {
+			fixtureSHA = fixtureShaB
+		}
+		if err := exec.Command("git", "-C", operatorDir, "merge-base", "--is-ancestor", fixtureSHA, "refs/heads/"+num).Run(); err != nil {
+			t.Errorf("fixture commit for issue %s not reachable from surfaced branch %s", branch, num)
+		}
+	}
+}
