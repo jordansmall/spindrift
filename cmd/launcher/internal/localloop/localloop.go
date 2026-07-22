@@ -53,7 +53,9 @@ func Wire(cfg Config, it forge.IssueTracker) *Wired {
 // parent: frontmatter, sanitized, or its own slug when unset (local.
 // ResolveParent, issue #1734) — logged rather than silent on a lookup
 // failure. A package-level function, not a Wired method, since resolving a
-// parent needs only an IssueTracker, not a Config.
+// parent needs only an IssueTracker, not a Config. Shared by every caller
+// (BASE_BRANCH forwarding, per-issue Code Forge construction, surface
+// grouping), so the diagnostic names the operation, not any one caller.
 func ResolveParent(it forge.IssueTracker, num string) string {
 	iss, err := it.Issue(num)
 	if err != nil {

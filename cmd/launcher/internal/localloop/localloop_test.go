@@ -1,6 +1,7 @@
 package localloop_test
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -66,8 +67,6 @@ func newOperatorCheckout(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	run(t, dir, "init", "-b", testBaseBranch)
-	run(t, dir, "config", "user.email", "test@example.com")
-	run(t, dir, "config", "user.name", "Test")
 	writeFile(t, filepath.Join(dir, "base.txt"), "base\n")
 	run(t, dir, "add", "base.txt")
 	run(t, dir, "commit", "-m", "base")
@@ -114,6 +113,21 @@ func bundleFixtureCommit(t *testing.T, accumDir, base, branch, num, outboxDir st
 	}
 	run(t, work, "bundle", "create", filepath.Join(outboxDir, local.BundleFileName), base+".."+branch)
 	return sha
+}
+
+// TestResolveParent_IssueLookupError_FallsBackToOwnSlug verifies
+// ResolveParent falls back to num's own sanitized slug — the same posture
+// local.ResolveParent gives an issue with no parent: set — when the
+// IssueTracker lookup itself fails, rather than propagating the error
+// through callers with no error return to give it (e.g. BASE_BRANCH
+// forwarding's func(string) string shape).
+func TestResolveParent_IssueLookupError_FallsBackToOwnSlug(t *testing.T) {
+	fc := forge.NewFake()
+	fc.IssueErr = errors.New("issue file unreadable")
+
+	if got, want := localloop.ResolveParent(fc, "Broad Ticket"), "broad-ticket"; got != want {
+		t.Errorf("ResolveParent = %q, want %q", got, want)
+	}
 }
 
 func containsLabel(labels []string, want string) bool {
