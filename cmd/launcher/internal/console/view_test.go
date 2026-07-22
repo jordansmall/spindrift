@@ -1327,6 +1327,30 @@ func TestView_SidebarOpen_NoColor_PanelsRenderAsciiBorder(t *testing.T) {
 	}
 }
 
+// TestView_SidebarOpen_DumbTerminal_PanelsRenderAsciiBorder verifies the
+// docked panels' border also degrades to plain ASCII glyphs on a non-color
+// terminal (TERM=dumb) — the other half of colorProfile()'s degradation the
+// NO_COLOR border test covers (issue #1755).
+func TestView_SidebarOpen_DumbTerminal_PanelsRenderAsciiBorder(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "dumb")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "still visible"}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
+
+	out := View(m)
+	if strings.Contains(out, "╭") {
+		t.Errorf("View() = %q, want no rounded border glyphs on TERM=dumb", out)
+	}
+	if got := strings.Count(out, "+"); got != 8 {
+		t.Errorf("View() has %d ASCII corner glyphs, want 8 (two panels, four corners each): %q", got, out)
+	}
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("View() = %q, want no escape sequences at all on TERM=dumb", out)
+	}
+}
+
 // TestView_SidebarOpen_MinimumFittingWidth_PanelsFitTerminalWidth verifies
 // that at the narrowest width sidebarFits allows docking, the two bordered
 // panels' combined rendered width — border overhead included — never
