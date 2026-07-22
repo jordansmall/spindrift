@@ -209,8 +209,9 @@ so a mixed-parent dispatch batch converges each seam onto its own branch (ADR
 keyed on its own sanitized slug instead of a shared fallback branch. `parent`
 is opaque and operator-authored — spindrift never resolves it against another
 tracker, it only sanitizes it into a git-ref-safe token (lowercased, each run
-of non-`[a-z0-9]` characters collapsed to a single dash) before forming the
-branch name. Each seam's landing is a host-side merge onto it; once every one
+of non-`[a-z0-9]` characters collapsed to a single dash, leading/trailing
+dashes trimmed) before forming the branch name. Each seam's landing is a
+host-side merge onto it; once every one
 of a broad ticket's seam issues is closed, the Launcher auto-surfaces its
 current tip into the operator's checkout as a local branch named after the
 ticket (issue #1730) — the operator still publishes the single team PR by
