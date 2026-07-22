@@ -10,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -76,6 +77,16 @@ func tempLogDir(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+// testWired returns a *localloop.Wired over it with a zero-value Config —
+// every dispatchConfig/settleConfig/newSettle test call site needs one to
+// exercise the shared parent-resolution wiring (issue #1810), and none of
+// them depend on AccumulationRepoDir/BaseBranch/git identity beyond CODE_
+// FORGE=local's own dedicated tests, which build their own localloop.Config
+// directly.
+func testWired(it forge.IssueTracker) *localloop.Wired {
+	return localloop.Wire(localloop.Config{}, it)
 }
 
 // boxErr is a non-nil error that stands in for a non-zero box exit.

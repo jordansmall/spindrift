@@ -507,7 +507,7 @@ func newIssueTracker(c config) forge.IssueTracker {
 // own resolved Integration-branch key (local.ResolveParent, issue #1734);
 // every other codeForge ignores it — there is no per-run parent knob left
 // to derive it from.
-func newCodeForge(c config, parent string) forge.CodeForge {
+func newCodeForge(c config, parent local.SanitizedParent) forge.CodeForge {
 	switch c.codeForge {
 	case "git":
 		return git.NewGitClient(c.codeForgeRemoteURL, c.baseBranch, c.gitUserName, c.gitUserEmail, c.branchPrefix)
@@ -638,7 +638,7 @@ func newDriver(c config) driver.Driver {
 // itself still reaches newCodeForge unchanged either way, since
 // ensureIntegrationBranch needs the real base branch to seed
 // integration/<parent> the first time a parent's seam lands.
-func localBaseBranchResolver(c config, it forge.IssueTracker, cf forge.CodeForge) func(num, name string) string {
+func localBaseBranchResolver(c config, lw *localloop.Wired, cf forge.CodeForge) func(num, name string) string {
 	if c.codeForge != "local" {
 		return func(_, name string) string { return resolveBoxEnvVar(name) }
 	}
@@ -649,8 +649,11 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, cf forge.CodeForge
 			// the same continuous run, must see integration/<parent> as it
 			// exists at that later moment, not as it stood at process
 			// start -- and each num may resolve to a different parent's
-			// Integration branch entirely (issue #1734).
-			integrationBranch := local.IntegrationBranch(localloop.ResolveParent(it, num))
+			// Integration branch entirely (issue #1734). The parent itself
+			// is resolved through lw (issue #1810), the same sealed
+			// SanitizedParent value CodeForgeForIssue and Surface consume,
+			// not an independent derivation of its own.
+			integrationBranch := local.IntegrationBranch(lw.ResolveParent(num))
 			exists, err := cf.BranchExists(integrationBranch)
 			if err != nil {
 				fmt.Printf("!! BASE_BRANCH: checking %s: %v; falling back to %s\n", integrationBranch, err, c.baseBranch)
@@ -668,10 +671,10 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, cf forge.CodeForge
 // rate-limited retry never re-runs a box whose work already landed a PR;
 // ResolveOpenPR itself resolves to Found: false, nil for a push-only Code
 // Forge, so the retry proceeds unguarded there without any guard here.
-func dispatchConfig(c config, it forge.IssueTracker, cf forge.CodeForge) dispatch.Config {
+func dispatchConfig(c config, lw *localloop.Wired, cf forge.CodeForge) dispatch.Config {
 	return dispatch.Config{
 		BoxEnvVars:            c.boxEnvVars,
-		ResolveEnv:            localBaseBranchResolver(c, it, cf),
+		ResolveEnv:            localBaseBranchResolver(c, lw, cf),
 		Kind:                  c.dispatchKind,
 		CodeForge:             c.codeForge,
 		TransientRetryMax:     c.transientRetryMax,
@@ -690,8 +693,8 @@ func dispatchConfig(c config, it forge.IssueTracker, cf forge.CodeForge) dispatc
 // recover). A driver-cache creation failure is logged and degrades to no
 // cache (fix boxes cold-start) rather than failing the dispatch -- the cache
 // is a resume optimization, not a correctness requirement (issue #427).
-func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTracker, cf forge.CodeForge) *dispatch.Factory {
-	f, err := dispatch.NewFactory(dispatchConfig(c, it, cf), pwd, r, newDriver(c), dispatch.RealClock())
+func newDispatchFactory(c config, pwd string, r runner.Runner, lw *localloop.Wired, cf forge.CodeForge) *dispatch.Factory {
+	f, err := dispatch.NewFactory(dispatchConfig(c, lw, cf), pwd, r, newDriver(c), dispatch.RealClock())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "==> driver cache unavailable (%v) -- fix boxes will cold-start\n", err)
 	}
@@ -705,14 +708,16 @@ func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTra
 // is unaffected; only a Code Forge implementing forge.BundleRelay (CODE_FORGE
 // =local) ever consults it. CodeForgeForIssue resolves each dispatched
 // issue's own CodeForge instance (ADR 0033, issue #1734): for CODE_FORGE
-// =local, a fresh instance keyed to that issue's own resolved parent;
-// every other codeForge has no per-issue parent concept, so it always
-// returns cf unchanged — the same instance New() itself received, not a
-// freshly constructed one, so a caller substituting a fake or specially
-// configured cf (every test, and any future non-local construction site)
-// is honored rather than silently bypassed.
-func settleConfig(c config, it forge.IssueTracker, cf forge.CodeForge) settle.Config {
-	lw := localloop.Wire(localloopConfig(c), it)
+// =local, a fresh instance keyed to that issue's own resolved parent — lw is
+// the one localloop.Wired the caller resolved for this run (issue #1810), so
+// the parent it hands to CodeForgeForIssue is the same sealed value the
+// base-branch resolver and surface grouping consume, not an independent
+// derivation; every other codeForge has no per-issue parent concept, so it
+// always returns cf unchanged — the same instance New() itself received, not
+// a freshly constructed one, so a caller substituting a fake or specially
+// configured cf (every test, and any future non-local construction site) is
+// honored rather than silently bypassed.
+func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge) settle.Config {
 	return settle.Config{
 		MergeMode:          c.mergeMode,
 		MergeGuardPaths:    c.mergeGuardPaths,
@@ -750,11 +755,11 @@ func localloopConfig(c config) localloop.Config {
 // newSettle constructs the Settler for one top-level dispatch entry point,
 // reused across every issue in that invocation: the research kind's one-shot
 // ResearchSettle, or work's full merge-gate Settle.
-func newSettle(c config, it forge.IssueTracker, cf forge.CodeForge) settle.Settler {
+func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) settle.Settler {
 	if c.dispatchKind == dispatchKindResearch {
 		return settle.NewResearchSettle(it)
 	}
-	return settle.New(settleConfig(c, it, cf), it, cf)
+	return settle.New(settleConfig(c, lw, cf), it, cf)
 }
 
 // wavesConfig builds the subset of config the wave engine (internal/waves)
@@ -1123,7 +1128,7 @@ func cmdBuild() int {
 func cmdDoctor() int {
 	c := loadConfig()
 	it := newIssueTracker(c)
-	cf := newCodeForge(c, "")
+	cf := newCodeForge(c, local.SanitizedParent{})
 	stat, serr := os.Stdin.Stat()
 	interactive := serr == nil && (stat.Mode()&os.ModeCharDevice) != 0
 	if err := runDoctor(it, cf, c, os.Stdout, os.Stdin, interactive); err != nil {

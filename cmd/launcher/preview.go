@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/waves"
@@ -116,7 +117,7 @@ func preview(issueNums []string) error {
 		return err
 	}
 	it := newIssueTracker(c)
-	cf := newCodeForge(c, "")
+	cf := newCodeForge(c, local.SanitizedParent{})
 	pwd, err := os.Getwd()
 	if err != nil {
 		return err

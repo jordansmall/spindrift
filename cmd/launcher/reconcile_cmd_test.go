@@ -219,7 +219,8 @@ func mustInitCheckout(t *testing.T, dir, branch string) {
 func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 	setGitIdentityEnv(t)
 	const parent = "1700"
-	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(parent))
+	sanitizedParent := local.ResolveParent("", parent)
+	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(sanitizedParent))
 	pwd := t.TempDir()
 	mustInitCheckout(t, pwd, "main")
 
@@ -241,7 +242,7 @@ func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 	}
 
 	got := revParseTest(t, pwd, "refs/heads/"+parent)
-	want := revParseTest(t, repo.Bare, "refs/heads/"+local.IntegrationBranch(parent))
+	want := revParseTest(t, repo.Bare, "refs/heads/"+local.IntegrationBranch(sanitizedParent))
 	if got != want {
 		t.Errorf("refs/heads/%s = %s, want %s (Integration branch tip)", parent, got, want)
 	}
@@ -253,7 +254,7 @@ func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 func TestSurfaceAfterDispatch_OpenSeamRemains_NoOp(t *testing.T) {
 	setGitIdentityEnv(t)
 	const parent = "1700"
-	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(parent))
+	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(local.ResolveParent("", parent)))
 	pwd := t.TempDir()
 	mustInitCheckout(t, pwd, "main")
 
@@ -308,8 +309,8 @@ func TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp(t *testing.T) {
 // parent the way the removed CODE_FORGE_INTEGRATION_PARENT knob did.
 func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *testing.T) {
 	setGitIdentityEnv(t)
-	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch("broad-a"))
-	repo.SeedBranch(local.IntegrationBranch("broad-b"), "1")
+	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(local.ResolveParent("", "broad-a")))
+	repo.SeedBranch(local.IntegrationBranch(local.ResolveParent("", "broad-b")), "1")
 	pwd := t.TempDir()
 	mustInitCheckout(t, pwd, "main")
 
@@ -351,8 +352,8 @@ func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *t
 // actually reached the second one instead of stopping after the first.
 func TestSurfaceAfterDispatch_OneParentErrors_StillAttemptsTheOthers(t *testing.T) {
 	setGitIdentityEnv(t)
-	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch("broad-a"))
-	repo.SeedBranch(local.IntegrationBranch("broad-b"), "1")
+	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(local.ResolveParent("", "broad-a")))
+	repo.SeedBranch(local.IntegrationBranch(local.ResolveParent("", "broad-b")), "1")
 	pwd := t.TempDir() // deliberately never git-inited
 
 	issuesDir := t.TempDir()
@@ -386,10 +387,11 @@ func TestSurfaceAfterDispatch_OneParentErrors_StillAttemptsTheOthers(t *testing.
 func TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch(t *testing.T) {
 	setGitIdentityEnv(t)
 	const parent = "1700"
-	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(parent))
+	sanitizedParent := local.ResolveParent("", parent)
+	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(sanitizedParent))
 	repo.SeedBranch("agent/issue-42", "42")
 
-	cf := local.NewLocalCodeForge(repo.Bare, local.IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	cf := local.NewLocalCodeForge(repo.Bare, local.IntegrationBranch(sanitizedParent), sanitizedParent, "Test Bot", "bot@example.com", "agent/issue-")
 	if err := cf.Merge("agent/issue-42"); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -425,7 +427,7 @@ func TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch(t *testing.T) {
 	}
 
 	got := revParseTest(t, pwd, "refs/heads/"+parent)
-	want := revParseTest(t, repo.Bare, "refs/heads/"+local.IntegrationBranch(parent))
+	want := revParseTest(t, repo.Bare, "refs/heads/"+local.IntegrationBranch(sanitizedParent))
 	if got != want {
 		t.Errorf("refs/heads/%s = %s, want %s (Integration branch tip)", parent, got, want)
 	}
@@ -477,7 +479,7 @@ func TestSurfaceAfterDispatch_ManyNeverLandedParents_CollapsesIntoOneSummaryLine
 // summary line (issue #1739).
 func TestSurfaceAfterDispatch_NeverLandedAndCheckedOut_OnlyNeverLandedCollapses(t *testing.T) {
 	setGitIdentityEnv(t)
-	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch("9010"))
+	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(local.ResolveParent("9010", "")))
 	pwd := t.TempDir()
 	mustInitCheckout(t, pwd, "9010")
 
