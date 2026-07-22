@@ -253,23 +253,34 @@ func TestView_Header_RebuildingAlert_StyledWithGlyph(t *testing.T) {
 	}
 }
 
-// TestView_Header_Banner_ShownWhenTallCollapsedWhenShort verifies the fixed
-// "spindrift" banner renders above the status line when the terminal has
-// room for it, and collapses to the status line alone on a short terminal
-// rather than pushing the backlog/queue off-screen (issue #843, ADR 0025).
-func TestView_Header_Banner_ShownWhenTallCollapsedWhenShort(t *testing.T) {
+// TestView_Header_Title_FoldedInBorder_CollapsesWhenTooShortToBox verifies
+// the "spindrift" wordmark folds into the header panel's top border rule
+// (issue #1798) rather than rendering as a separate interior banner: the
+// literal "====" rule is gone, and the title only disappears once the
+// terminal is too short to afford the bordered header at all — the same
+// unboxed fallback renderBoxedHeader already applies for an oversized boxed
+// render (issue #1035 AC1/AC2) — not a banner-specific collapse rule.
+func TestView_Header_Title_FoldedInBorder_CollapsesWhenTooShortToBox(t *testing.T) {
 	tall := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
-	if out := View(tall); !strings.Contains(out, "spindrift") {
-		t.Errorf("View() on a tall terminal = %q, want the spindrift banner", out)
+	out := View(tall)
+	if !strings.Contains(out, "spindrift") {
+		t.Errorf("View() on a tall terminal = %q, want the spindrift title", out)
+	}
+	if strings.Contains(out, "====") {
+		t.Errorf("View() on a tall terminal = %q, want no literal ==== banner rule", out)
 	}
 
-	short := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 3})
-	out := View(short)
+	// The boxed header's minimum render is 3 rows (top border, one status
+	// line, bottom border) — a height of 2 is one row short of affording it,
+	// so renderBoxedHeader falls back to the unboxed header entirely,
+	// dropping the border and the title folded into it.
+	short := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 2})
+	out = View(short)
 	if strings.Contains(out, "spindrift") {
-		t.Errorf("View() on a short terminal = %q, want the banner collapsed", out)
+		t.Errorf("View() on a too-short terminal = %q, want the titled header collapsed unboxed", out)
 	}
 	if !strings.Contains(out, "running 0/0") {
-		t.Errorf("View() on a short terminal = %q, want the status line to remain", out)
+		t.Errorf("View() on a too-short terminal = %q, want the status line to remain", out)
 	}
 }
 
@@ -285,23 +296,6 @@ func TestView_Header_RendersBordered(t *testing.T) {
 	out := View(m)
 	if got := strings.Count(out, "╭"); got != 1 {
 		t.Errorf("View() has %d rounded top-left corners, want 1 (the header's own bordered panel): %q", got, out)
-	}
-}
-
-// TestBannerHeight_MatchesRenderedRowCount pins bannerHeight to the banner's
-// actual rendered row count (the two "===" border rows plus the "spindrift"
-// name row) rather than a raw newline count that also includes the leading
-// blank line TrimPrefix strips before rendering (issue #852).
-//
-// wantRows stays a literal rather than a strings.Count(...)-derived value:
-// deriving it with bannerHeight's own formula would make this test
-// tautological (formula(banner) == formula(banner), always true even if the
-// formula itself were wrong) — precisely what pinning it here guards against
-// (issue #1242).
-func TestBannerHeight_MatchesRenderedRowCount(t *testing.T) {
-	const wantRows = 3
-	if bannerHeight != wantRows {
-		t.Errorf("bannerHeight = %d, want %d (the banner's rendered row count)", bannerHeight, wantRows)
 	}
 }
 
@@ -3031,8 +3025,10 @@ func TestView_ScrolledQueue_ReachesLastRow(t *testing.T) {
 // they are in a long backlog without counting rows (issue #1037 AC3).
 func TestView_BacklogSection_ShowsPositionIndicator(t *testing.T) {
 	// Height 10 plus boxBorderRows pays for the header's own bordered panel
-	// (issue #1756), preserving the item budget (and so the exact position
-	// ranges below) this test was written against.
+	// (issue #1756); the header itself now costs only 3 rows — the
+	// "spindrift" wordmark folds into its top border rule rather than a
+	// separate banner (issue #1798) — preserving the item budget (and so
+	// the exact position ranges below) this test was written against.
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows})
 	issues := make([]forge.Issue, 50)
 	for i := range issues {
@@ -3041,14 +3037,14 @@ func TestView_BacklogSection_ShowsPositionIndicator(t *testing.T) {
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
 	out := View(m)
-	if !strings.Contains(out, "(1-3 of 50)") {
-		t.Errorf("View() = %q, want the Backlog header to show \"(1-3 of 50)\"", out)
+	if !strings.Contains(out, "(1-6 of 50)") {
+		t.Errorf("View() = %q, want the Backlog header to show \"(1-6 of 50)\"", out)
 	}
 
 	m = Update(m, ScrollMsg{Delta: 5})
 	out = View(m)
-	if !strings.Contains(out, "(6-8 of 50)") {
-		t.Errorf("View() = %q, want the Backlog header to show \"(6-8 of 50)\" after scrolling", out)
+	if !strings.Contains(out, "(6-11 of 50)") {
+		t.Errorf("View() = %q, want the Backlog header to show \"(6-11 of 50)\" after scrolling", out)
 	}
 }
 
@@ -3058,8 +3054,10 @@ func TestView_BacklogSection_ShowsPositionIndicator(t *testing.T) {
 // "(1-0 of 0)" (issue #1037 AC3/AC4).
 func TestView_WorkSection_ShowsPositionIndicator(t *testing.T) {
 	// Height 10 plus boxBorderRows pays for the header's own bordered panel
-	// (issue #1756), preserving the item budget (and so the exact position
-	// range below) this test was written against.
+	// (issue #1756); the header itself now costs only 3 rows — the
+	// "spindrift" wordmark folds into its top border rule rather than a
+	// separate banner (issue #1798) — preserving the item budget (and so
+	// the exact position range below) this test was written against.
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows})
 	picks := make([]Pick, 50)
 	for i := range picks {
@@ -3069,8 +3067,8 @@ func TestView_WorkSection_ShowsPositionIndicator(t *testing.T) {
 	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
 	out := View(m)
-	if !strings.Contains(out, "(1-3 of 50)") {
-		t.Errorf("View() = %q, want the Running header to show \"(1-3 of 50)\"", out)
+	if !strings.Contains(out, "(1-6 of 50)") {
+		t.Errorf("View() = %q, want the Running header to show \"(1-6 of 50)\"", out)
 	}
 
 	empty := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
@@ -3167,12 +3165,18 @@ func TestView_HeaderHeight_AdaptsToAlertLines(t *testing.T) {
 	}
 }
 
-// TestView_HeaderHeight_BannerCollapse_StillBudgetsBody verifies the body
-// windowing still leaves the header (status line) visible and clips the
-// backlog on a terminal too short for the banner — the collapsed-banner
-// header height, not the tall one, must drive the budget (issue #1035 AC3).
-func TestView_HeaderHeight_BannerCollapse_StillBudgetsBody(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 3})
+// TestView_HeaderHeight_TooShortToBox_StillBudgetsBody verifies the body
+// windowing still leaves the status line visible and never overruns Height
+// on a terminal too short to afford the titled-border header at all — the
+// unboxed header's own (smaller) height, not the boxed one, must drive the
+// budget (issue #1035 AC3, extended to the titled border by issue #1798). At
+// Height 2, renderBoxedHeader's own fitness check (its minimum boxed render
+// is 3 rows) falls back to the unboxed header, leaving no room for any
+// backlog row at all — a stronger invariant than "some rows clip": zero
+// rows show, and the header/tabs rows exactly fill Height without spilling
+// past it.
+func TestView_HeaderHeight_TooShortToBox_StillBudgetsBody(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 2})
 	issues := make([]forge.Issue, 20)
 	for i := range issues {
 		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
@@ -3181,13 +3185,16 @@ func TestView_HeaderHeight_BannerCollapse_StillBudgetsBody(t *testing.T) {
 
 	out := View(m)
 	if strings.Contains(out, "spindrift") {
-		t.Errorf("View() = %q, want the banner collapsed on a short terminal", out)
+		t.Errorf("View() = %q, want the titled header collapsed unboxed on a too-short terminal", out)
 	}
 	if !strings.Contains(out, "running 0/0") {
 		t.Errorf("View() = %q, want the status line present", out)
 	}
-	if strings.Contains(out, "issue 19") {
-		t.Errorf("View() = %q, want the backlog clipped to the short viewport", out)
+	if strings.Contains(out, "issue 0") {
+		t.Errorf("View() = %q, want the backlog fully clipped — no room left after the header/tabs rows", out)
+	}
+	if got := strings.Count(out, "\n"); got != m.Height {
+		t.Errorf("View() rendered %d lines, want exactly Height (%d) — the header/tabs rows must not overrun it", got, m.Height)
 	}
 }
 

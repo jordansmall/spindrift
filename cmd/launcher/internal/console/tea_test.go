@@ -489,11 +489,13 @@ func TestTea_DetailModal_gLeader_Timeout_CancelsPendingGAndLeavesOffsetAlone(t *
 // screenful of rendered rows — derived from the live viewport rather than a
 // fixed constant (issue #1036 AC2, issue #1037 AC1/AC2). At Width 80/Height
 // 12 (the extra 2 rows over a bare Height 10 pay for the header's own
-// bordered panel, issue #1756) the backlog column's item budget is 5, but
-// only 4 of those rows render as content at offset 0 (the 5th is held back
-// for the "N more below" line), so one pgdown must land the viewport on row
-// 4 — landing on row 5 would silently skip row 4, the exact row right past
-// the fold.
+// bordered panel, issue #1756) the backlog column's item budget is 7 — the
+// header now costs only 3 rows (the "spindrift" wordmark folded into its top
+// border rule rather than a separate banner, issue #1798) — but only 6 of
+// those rows render as content at offset 0 (the 7th is held back for the "N
+// more below" line), so one pgdown must land the viewport on row 6 —
+// landing on row 7 would silently skip row 6, the exact row right past the
+// fold.
 func TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor(t *testing.T) {
 	f := forge.NewFake()
 	for i := 0; i < 50; i++ {
@@ -504,7 +506,7 @@ func TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor(t *testing.T) {
 	waitForOutput(t, tm, "> #0")
 
 	sendKey(tm, "pgdown")
-	waitForOutput(t, tm, rowNumberCell("4")+" issue 4")
+	waitForOutput(t, tm, rowNumberCell("6")+" issue 6")
 
 	sendKey(tm, "pgup")
 	waitForOutput(t, tm, "> #0")
@@ -527,7 +529,7 @@ func TestTea_ScrollKeys_CtrlFCtrlBPageThroughBacklogWithoutMovingCursor(t *testi
 	waitForOutput(t, tm, "> #0")
 
 	sendKey(tm, "ctrl+f")
-	waitForOutput(t, tm, rowNumberCell("4")+" issue 4")
+	waitForOutput(t, tm, rowNumberCell("6")+" issue 6")
 
 	sendKey(tm, "ctrl+b")
 	waitForOutput(t, tm, "> #0")
@@ -552,7 +554,7 @@ func TestTea_ScrollKeys_CtrlDCtrlUHalfPageThroughBacklogWithoutMovingCursor(t *t
 
 	sendKey(tm, "ctrl+d")
 	sendKey(tm, "ctrl+d")
-	waitForOutput(t, tm, rowNumberCell("4")+" issue 4")
+	waitForOutput(t, tm, rowNumberCell("6")+" issue 6")
 
 	sendKey(tm, "ctrl+u")
 	sendKey(tm, "ctrl+u")
@@ -648,11 +650,11 @@ func TestTea_ScrollKeys_PageSizeTracksViewportHeight(t *testing.T) {
 	tm.Send(tea.WindowSizeMsg{Width: 80, Height: 20 + boxBorderRows})
 	waitForOutput(t, tm, "> #0")
 
-	// A page size still stuck on the Height-10 window (landing around row 4)
+	// A page size still stuck on the Height-10 window (landing around row 6)
 	// or the pre-#1037 fixed constant (10, landing its window at rows 10-23)
 	// would never surface row 25. It's visible only once the page jump uses
 	// the taller terminal's own item budget, landing the viewport around
-	// offset 14 (rows 14-27).
+	// offset 16 (rows 16-31).
 	sendKey(tm, "pgdown")
 	waitForOutput(t, tm, rowNumberCell("25")+" issue 25")
 
@@ -675,10 +677,10 @@ func TestTea_ScrollKeys_PageDown_SkipsNoRow(t *testing.T) {
 	waitForOutput(t, tm, "> #0")
 
 	sendKey(tm, "pgdown")
-	waitForOutput(t, tm, rowNumberCell("4")+" issue 4")
+	waitForOutput(t, tm, rowNumberCell("6")+" issue 6")
 
 	sendKey(tm, "pgdown")
-	waitForOutput(t, tm, rowNumberCell("8")+" issue 8")
+	waitForOutput(t, tm, rowNumberCell("12")+" issue 12")
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
@@ -721,7 +723,7 @@ func TestTea_ScrollKeys_PageThroughRunningSection(t *testing.T) {
 	waitForOutput(t, tm, "pick 0")
 
 	sendKey(tm, "pgdown")
-	waitForOutput(t, tm, rowNumberCell("4")+" pick 4")
+	waitForOutput(t, tm, rowNumberCell("6")+" pick 6")
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
@@ -2621,7 +2623,13 @@ func TestTea_EnterKey_OnBacklogSection_OpensDetailModal(t *testing.T) {
 	waitForOutput(t, tm, "#42", "fix the thing", "[esc] close")
 
 	sendKey(tm, "esc")
-	waitForOutput(t, tm, "running 0/")
+	// Not the header's status line: at Height 24 the titled-border header
+	// (issue #1798) is only 3 rows tall, entirely above the floating box's
+	// y origin, so closing the modal never changes those rows' bytes and
+	// Bubble Tea's differential renderer never re-emits them (same class of
+	// quirk as the "r"-key comment further down this file). The Section
+	// tabs row sits inside the box's overlaid range and always redraws.
+	waitForOutput(t, tm, "[1] Backlog")
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
@@ -2666,7 +2674,9 @@ func TestTea_DetailModal_LoadsBodyAsyncAndCachesForReopen(t *testing.T) {
 	waitForOutput(t, tm, "the full ticket body")
 
 	sendKey(tm, "esc")
-	waitForOutput(t, tm, "running 0/")
+	// Not the header's status line — see the same note on
+	// TestTea_EnterKey_OnBacklogSection_OpensDetailModal.
+	waitForOutput(t, tm, "[1] Backlog")
 
 	calls := len(f.IssueCalls)
 	if calls == 0 {
@@ -2931,7 +2941,9 @@ func TestTea_RefreshKey_InvalidatesDetailCache(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "the full ticket body")
 	sendKey(tm, "esc")
-	waitForOutput(t, tm, "running 0/")
+	// Not the header's status line — see the same note on
+	// TestTea_EnterKey_OnBacklogSection_OpensDetailModal.
+	waitForOutput(t, tm, "[1] Backlog")
 
 	calls := len(f.IssueCalls)
 	if calls == 0 {
@@ -2980,7 +2992,9 @@ func TestTea_RefreshKey_ReopenAfterRefreshStaysBoundedCost(t *testing.T) {
 	waitForOutput(t, tm, "core body")
 
 	sendKey(tm, "esc")
-	waitForOutput(t, tm, "running 0/")
+	// Not the header's status line — see the same note on
+	// TestTea_EnterKey_OnBacklogSection_OpensDetailModal.
+	waitForOutput(t, tm, "[1] Backlog")
 	sendKey(tm, "r")
 
 	sendKey(tm, "enter")

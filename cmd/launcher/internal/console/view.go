@@ -201,7 +201,7 @@ func renderTitledTopBorder(width int, title string, titleRole Role, border lipgl
 }
 
 // View renders m as the text the run loop writes to the terminal: the
-// full-width header (banner, status line, stale/dogfood alerts), the Section
+// full-width header (wordmark, status line, stale/dogfood alerts), the Section
 // tabs, the active Section's own aligned table, and any refresh error (ADR
 // 0030). An open sidebar (m.Sidebar != nil) docks beside the still-visible
 // list when sidebarFits, or takes over fullscreen on a terminal too narrow
@@ -228,10 +228,12 @@ func View(m Model) string {
 	return base
 }
 
-// renderBoxedHeader renders the banner/status/alert block (renderHeader),
-// wrapped in the same muted-border panel look as the docked list/sidebar
-// (issue #1756), so it reads as its own region instead of running straight
-// into the Section tabs below it. The result always ends in exactly one
+// renderBoxedHeader renders the status/alert block (renderHeader), wrapped in
+// the same muted-border panel look as the docked list/sidebar (issue #1756),
+// with the "spindrift" wordmark folded into the panel's top border rule
+// instead of sitting on an interior row (issue #1798) — so it reads as its
+// own region instead of running straight into the Section tabs below it. The
+// result always ends in exactly one
 // trailing newline, matching renderHeader's own convention, so callers never
 // have to special-case the boxed-vs-unboxed cases. bodyBudget's row-budget
 // math must count exactly these rendered rows — including the 2 border rows
@@ -255,7 +257,7 @@ func View(m Model) string {
 func renderBoxedHeader(m Model) string {
 	header := renderHeader(m)
 	if headerWidth := m.Width - boxBorderCols; headerWidth > 0 {
-		if boxed := renderBoxedColumn(header, headerWidth, "", RoleDim) + "\n"; strings.Count(boxed, "\n") <= m.Height {
+		if boxed := renderBoxedColumn(header, headerWidth, headerTitle, RoleDim) + "\n"; strings.Count(boxed, "\n") <= m.Height {
 			return boxed
 		}
 	}
@@ -373,11 +375,11 @@ const sectionTabsLines = 1
 
 // sectionTabsReserved returns sectionTabsLines when the terminal has room
 // left for the Section tabs line after headerLines (renderHeader's own
-// line count), 0 otherwise — the tabs line's collapse-when-short
-// degradation, mirroring the banner's own bannerCollapseMargin check, so an
-// extremely short terminal never renders more than Height lines total
-// (issue #1500). Shared by View's own budget calc and bodyBudget so the two
-// can never diverge (issue #1035's invariant, extended to the tabs line).
+// line count), 0 otherwise — the tabs line's own collapse-when-short
+// degradation, so an extremely short terminal never renders more than
+// Height lines total (issue #1500). Shared by View's own budget calc and
+// bodyBudget so the two can never diverge (issue #1035's invariant,
+// extended to the tabs line).
 func sectionTabsReserved(m Model, headerLines int) int {
 	if m.Height <= headerLines {
 		return 0
@@ -854,30 +856,15 @@ func clipBannerErr(s string, width int) string {
 	return clip(strings.Join(strings.Fields(s), " "), width, false)
 }
 
-// banner is the Console's fixed wordmark, printed at the top of the header
-// whenever the terminal has room for it (issue #843, ADR 0025). It is
-// hardcoded rather than figlet-rendered — the module carries no figlet
-// dependency, and the art never varies.
-const banner = `
-========================================
-  spindrift
-========================================
-`
+// headerTitle is the Console's fixed wordmark, folded into the header
+// panel's top border rule by renderBoxedHeader (issue #1798) rather than
+// rendered as a separate interior banner — ADR 0025's original three-line
+// "====\n  spindrift\n====" literal is gone; the border row it used to float
+// above already exists on every terminal wide/tall enough to box the header
+// at all.
+const headerTitle = "spindrift"
 
-// bannerHeight is the banner's rendered row count — the three lines left
-// after renderHeader's TrimPrefix strips the leading blank line above. It is
-// not the number of newlines in the raw banner literal (that count is one
-// higher, for the blank line).
-var bannerHeight = strings.Count(strings.TrimPrefix(banner, "\n"), "\n")
-
-// bannerCollapseMargin is one extra row of headroom required, on top of
-// bannerHeight, before the header shows the banner — so the collapse never
-// leaves the banner crowding the backlog/queue against the terminal's last
-// line on a borderline-tall terminal.
-const bannerCollapseMargin = 1
-
-// renderHeader renders the Console's full-width header: the fixed banner
-// (when the terminal is tall enough to afford it), the status line
+// renderHeader renders the Console's full-width header: the status line
 // (running/cap, waiting, held, settled, failed), and the stale-image,
 // rebuilding-in-progress, rebuild-failed, orphan-adopt-failed,
 // branch-switch-notice, and competing-dogfood alert lines. The six alerts
@@ -901,9 +888,6 @@ func renderHeader(m Model) string {
 	}
 
 	var b strings.Builder
-	if m.Height >= bannerHeight+bannerCollapseMargin {
-		b.WriteString(strings.TrimPrefix(banner, "\n"))
-	}
 	// The status line always renders, even in a launch-less session where
 	// Live/Cap read zero (`running 0/0`) — unlike the old `cap:` line it
 	// replaced, which was introduced by issue #653 (which gated it on
