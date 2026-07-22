@@ -1390,9 +1390,10 @@ const (
 // wrap width, the scroll budget) both check before choosing the floating
 // box over the small-terminal fullscreen fallback, so the two can never
 // disagree about which one is showing (sidebarFits' detail-modal analogue,
-// issue #1759).
+// issue #1759). Delegates to modalBoxFits, the modal-agnostic gate (issue
+// #1844).
 func detailModalFits(m Model) bool {
-	return m.Width >= detailModalBoxMinWidth && m.Height >= detailModalBoxMinHeight
+	return modalBoxFits(m.Width, m.Height, detailModalBoxMinWidth, detailModalBoxMinHeight)
 }
 
 // detailModalWrapWidth returns the width the detail modal's body should wrap
@@ -1447,28 +1448,16 @@ func detailModalScrollBudget(m Model) int {
 // (issue #1759 AC). Only meaningful when detailModalFits(m) is true — below
 // that threshold the min clamp would inflate the box past the terminal's own
 // size, which callers on the fullscreen fallback path never observe.
+// Delegates to modalBoxSize, the modal-agnostic sizer (issue #1844).
 func detailModalBoxSize(termWidth, termHeight int) (width, height int) {
-	width = termWidth * detailModalBoxWidthPercent / 100
-	if width < detailModalBoxMinWidth {
-		width = detailModalBoxMinWidth
-	}
-	if width > detailModalBoxMaxWidth {
-		width = detailModalBoxMaxWidth
-	}
-	height = termHeight * detailModalBoxHeightPercent / 100
-	if height < detailModalBoxMinHeight {
-		height = detailModalBoxMinHeight
-	}
-	if height > detailModalBoxMaxHeight {
-		height = detailModalBoxMaxHeight
-	}
-	return width, height
+	return modalBoxSize(termWidth, termHeight, detailModalBoxWidthPercent, detailModalBoxHeightPercent, detailModalBoxMinWidth, detailModalBoxMinHeight, detailModalBoxMaxWidth, detailModalBoxMaxHeight)
 }
 
 // detailModalBoxOrigin centers a boxWidth x boxHeight box within a
 // termWidth x termHeight terminal, the (x, y) compositeOverlay places it at.
+// Delegates to modalBoxOrigin, the modal-agnostic centering (issue #1844).
 func detailModalBoxOrigin(termWidth, termHeight, boxWidth, boxHeight int) (x, y int) {
-	return (termWidth - boxWidth) / 2, (termHeight - boxHeight) / 2
+	return modalBoxOrigin(termWidth, termHeight, boxWidth, boxHeight)
 }
 
 // detailModalInnerSize returns the floating detail modal box's interior
@@ -1477,17 +1466,11 @@ func detailModalBoxOrigin(termWidth, termHeight, boxWidth, boxHeight int) (x, y 
 // This is what the width-dependent modal machinery (the Lines word-wrap, the
 // scroll budget) must key off instead of Model.Width/Model.Height (issue
 // #1758), so a resize and the box's own render always agree on how wide the
-// body was actually wrapped.
+// body was actually wrapped. Delegates to modalBoxInnerSize, the
+// modal-agnostic interior sizer (issue #1844).
 func detailModalInnerSize(termWidth, termHeight int) (width, height int) {
 	boxWidth, boxHeight := detailModalBoxSize(termWidth, termHeight)
-	width, height = boxWidth-2, boxHeight-2
-	if width < 1 {
-		width = 1
-	}
-	if height < 1 {
-		height = 1
-	}
-	return width, height
+	return modalBoxInnerSize(boxWidth, boxHeight)
 }
 
 // padBaseForOverlay pads every line of s out to at least width display
