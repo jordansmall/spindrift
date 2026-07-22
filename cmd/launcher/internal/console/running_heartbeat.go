@@ -15,12 +15,15 @@ import (
 // use — and advances entry.offset by what it read. writer is drv's own
 // stateful heartbeat parser (role, turn counts, phase all persist on it
 // across calls), so this replays exactly what a whole-file reparse would
-// have replayed, just without re-walking bytes already consumed. It returns
-// the last line writer has ever emitted for this path, not only what this
-// call emitted, since a call that appends no complete new line must still
-// return the prior one. ok is false when the file can't be read or written
-// through drv's parser (the same "no heartbeat yet" cases
-// HeartbeatCache.RunningHeartbeat returns "" for).
+// have replayed, just without re-walking bytes already consumed. out is
+// reset before every feed so it only ever holds this call's own emitted
+// lines, not the pass's whole history: that keeps both the buffer and the
+// lastLine scan bounded by one refresh's output rather than growing with
+// the pass. entry.line only advances when this call emits a line, since a
+// call that appends no complete new line must still return the prior one.
+// ok is false when the file can't be read or written through drv's parser
+// (the same "no heartbeat yet" cases HeartbeatCache.RunningHeartbeat
+// returns "" for).
 func appendHeartbeat(drv driver.Driver, number string, entry *heartbeatCacheEntry) (line string, ok bool) {
 	f, err := os.Open(entry.path)
 	if err != nil {
@@ -37,23 +40,30 @@ func appendHeartbeat(drv driver.Driver, number string, entry *heartbeatCacheEntr
 	if entry.writer == nil {
 		entry.out = &bytes.Buffer{}
 		entry.writer = drv.NewHeartbeatWriter(io.Discard, number, entry.out)
+	} else {
+		entry.out.Reset()
 	}
 	if _, err := entry.writer.Write(data); err != nil {
 		return "", false
 	}
 	entry.offset += int64(len(data))
-	return lastLine(entry.out.String()), true
+	if l := lastLine(entry.out.String()); l != "" {
+		entry.line = l
+	}
+	return entry.line, true
 }
 
 // heartbeatCacheEntry holds the persistent per-log-path parser state
 // HeartbeatCache keeps alive across refreshes: the byte offset already fed
-// to writer, drv's own stateful heartbeat Writer, and everything it has ever
-// emitted for this path.
+// to writer, drv's own stateful heartbeat Writer, the scratch buffer that
+// pins each call's own emitted output, and the last line ever emitted for
+// this path.
 type heartbeatCacheEntry struct {
 	path   string
 	offset int64
 	writer io.Writer
 	out    *bytes.Buffer
+	line   string
 }
 
 // HeartbeatCache remembers each running pick's persistent heartbeat parser,
@@ -114,10 +124,7 @@ func (c *HeartbeatCache) RunningHeartbeat(drv driver.Driver, pwd, number string)
 
 	if info.Size() == entry.offset {
 		c.entries[number] = entry
-		if entry.out == nil {
-			return ""
-		}
-		return lastLine(entry.out.String())
+		return entry.line
 	}
 
 	line, ok := appendHeartbeat(drv, number, &entry)
