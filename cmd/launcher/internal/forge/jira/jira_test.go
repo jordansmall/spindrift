@@ -388,6 +388,52 @@ func TestJiraClient_DepsOf_DuplicateLinksDeduped(t *testing.T) {
 	}
 }
 
+// TestJiraClient_ImplementsBlockersLister verifies the jira adapter
+// satisfies forge.BlockersLister: Jira's "Blocks" link type is a genuine
+// bidirectional native relationship, so the reverse "blocks" direction is
+// readable from the same issuelinks payload DepsOf already reads (issue
+// #1744).
+func TestJiraClient_ImplementsBlockersLister(t *testing.T) {
+	if _, ok := jira.NewJiraClient(jira.JiraConfig{}).(forge.BlockersLister); !ok {
+		t.Error("jiraClient does not satisfy forge.BlockersLister, want it implemented")
+	}
+}
+
+// TestJiraClient_BlocksOf_NativeLinks verifies BlocksOf reads the outward
+// "blocks" issuelinks entries — DepsOf's reverse direction — ignoring the
+// inward "is blocked by" entry and any non-Blocks link type, mirroring
+// TestJiraClient_DepsOf_NativeLinks' fixture from the other direction.
+func TestJiraClient_BlocksOf_NativeLinks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"key": "PROJ-10",
+			"fields": {
+				"summary": "s", "description": "",
+				"status": {"name": "To Do"}, "labels": [],
+				"issuelinks": [
+					{"type": {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+					 "inwardIssue": {"key": "PROJ-3"}},
+					{"type": {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+					 "outwardIssue": {"key": "PROJ-99"}},
+					{"type": {"name": "Relates", "inward": "relates to", "outward": "relates to"},
+					 "outwardIssue": {"key": "PROJ-55"}}
+				]
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"}).(forge.BlockersLister)
+	blocks, err := jc.BlocksOf("PROJ-10")
+	if err != nil {
+		t.Fatalf("BlocksOf: %v", err)
+	}
+	if len(blocks) != 1 || blocks[0] != (forge.Dependency{ID: "PROJ-99", Source: forge.DepSourceNative}) {
+		t.Errorf("BlocksOf = %v, want [PROJ-99 (native)] (native blocks link only)", blocks)
+	}
+}
+
 // TestJiraClient_TransitionState_MappedStatus verifies TransitionState finds
 // and performs the workflow transition matching the configured status
 // mapping, and cleans up any stale from-state fallback label (e.g. an issue
