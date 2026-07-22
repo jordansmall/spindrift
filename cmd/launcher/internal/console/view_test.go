@@ -1351,6 +1351,26 @@ func TestView_SidebarOpen_DumbTerminal_PanelsRenderAsciiBorder(t *testing.T) {
 	}
 }
 
+// TestView_SidebarOpen_ModePick_DockedPanelsRespectHeight verifies that a
+// docked sidebar with ModePick's "p_" hint line also showing never renders
+// more than Height total lines — bodyBudget must reserve exactly the same
+// lines View itself reserves (including the ModePick hint and the
+// QueueEnterNotice line), or the bordered panels' row budget comes out too
+// generous and the render spills a line past the terminal (issue #1755,
+// the #1035/#1500 "never overflow Height" invariant).
+func TestView_SidebarOpen_ModePick_DockedPanelsRespectHeight(t *testing.T) {
+	const height = 10
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: height})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "still visible"}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
+	m = Update(m, PickPendingMsg{})
+
+	out := View(m)
+	if got := strings.Count(out, "\n") + 1; got > height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d) with ModePick's hint line showing beside a docked sidebar: %q", got, height, out)
+	}
+}
+
 // TestView_SidebarOpen_MinimumFittingWidth_PanelsFitTerminalWidth verifies
 // that at the narrowest width sidebarFits allows docking, the two bordered
 // panels' combined rendered width — border overhead included — never
@@ -1367,6 +1387,32 @@ func TestView_SidebarOpen_MinimumFittingWidth_PanelsFitTerminalWidth(t *testing.
 		if got := runewidth.StringWidth(line); got > width {
 			t.Errorf("View() line %d is %d columns wide, want at most the terminal's %d: %q", i, got, width, line)
 		}
+	}
+}
+
+// TestView_SidebarOpen_UnevenContent_PanelBottomsAlign verifies that when
+// the list and sidebar panels render a different number of content lines,
+// their bordered boxes still close at the same row — the shorter panel's
+// content pads out to the taller one's height before the border wraps it —
+// so the two boxes read as aligned panels instead of one panel's bottom
+// edge floating above a gap while the other continues (issue #1755).
+func TestView_SidebarOpen_UnevenContent_PanelBottomsAlign(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "only issue"}}})
+	activity := make([]ActivityLine, 6)
+	for i := range activity {
+		activity[i] = ActivityLine{Text: fmt.Sprintf("line %d", i)}
+	}
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity})
+
+	out := View(m)
+	lines := strings.Split(out, "\n")
+	last := lines[len(lines)-1]
+	if got := strings.Count(last, "╰"); got != 2 {
+		t.Errorf("View()'s last line has %d bottom-left corners, want 2 (both panels closing on the same row): %q\nfull output:\n%s", got, last, out)
 	}
 }
 
