@@ -173,16 +173,6 @@ func (lt *LocalTracker) ListOpenIssues() ([]forge.Issue, error) {
 	return lt.listIssues(func(li localIssue) bool { return !li.frontmatter.Closed })
 }
 
-// SeamsOf returns every issue (open or closed) whose parent frontmatter
-// equals parent, in canonical order (ascending by the created timestamp) —
-// the query CODE_FORGE=local's auto-surface sweep (ADR 0033, issue #1730)
-// uses to test whether a broad ticket's seams are all landed. Unlike
-// ListOpenIssues, closed issues are included: a fully-landed ticket is
-// exactly the state where every one of its seams has closed.
-func (lt *LocalTracker) SeamsOf(parent string) ([]forge.Issue, error) {
-	return lt.listIssues(func(li localIssue) bool { return li.frontmatter.Parent == parent })
-}
-
 // AllIssues returns every issue file in dir, in canonical order (ascending
 // by the created timestamp), regardless of parent, state, or dispatch
 // marker — see forge.SeamLister.

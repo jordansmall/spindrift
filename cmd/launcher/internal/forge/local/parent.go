@@ -7,6 +7,11 @@ import "strings"
 // or — when rawParent is unset, or sanitizes to empty (a parent: value made
 // entirely of non-[a-z0-9] characters) — issueNumber itself, sanitized, so
 // a parentless seam is its own broad ticket (ADR 0033, issue #1734).
+// issueNumber sanitizing to empty too (both a parent: value and the
+// issue's own slug made entirely of non-[a-z0-9] characters) is not
+// reachable through the local tracker in practice — every issue's number
+// comes from a non-empty ".md" filename basename — so this is left
+// unguarded rather than invented a third fallback with no natural value.
 func ResolveParent(issueNumber, rawParent string) string {
 	if sanitized := SanitizeParent(rawParent); sanitized != "" {
 		return sanitized

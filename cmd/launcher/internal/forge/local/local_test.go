@@ -271,47 +271,10 @@ func TestLocalTracker_ListIssues_ExcludesClosed(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_SeamsOf_ReturnsOpenAndClosedMatchingParent verifies
-// SeamsOf returns every issue (open or closed) whose parent frontmatter
-// equals the requested parent, in canonical created-ascending order, and
-// excludes issues with a different (or absent) parent — the query
-// CODE_FORGE=local's auto-surface sweep (issue #1730) uses to test whether a
-// broad ticket's seams are all landed.
-func TestLocalTracker_SeamsOf_ReturnsOpenAndClosedMatchingParent(t *testing.T) {
-	dir := t.TempDir()
-	labels := testLabels
-
-	writeLocalIssue(t, dir, "seam-2", localIssue{frontmatter: localFrontmatter{
-		Title: "Seam 2", State: labels.Complete, Created: "2026-07-09T12:00:00Z", Parent: "broad-1", Closed: true,
-	}})
-	writeLocalIssue(t, dir, "seam-1", localIssue{frontmatter: localFrontmatter{
-		Title: "Seam 1", State: labels.Dispatchable, Created: "2026-07-08T12:00:00Z", Parent: "broad-1",
-	}})
-	writeLocalIssue(t, dir, "other-parent", localIssue{frontmatter: localFrontmatter{
-		Title: "Other", State: labels.Dispatchable, Created: "2026-07-07T12:00:00Z", Parent: "broad-2",
-	}})
-	writeLocalIssue(t, dir, "no-parent", localIssue{frontmatter: localFrontmatter{
-		Title: "No parent", State: labels.Dispatchable, Created: "2026-07-06T12:00:00Z",
-	}})
-
-	lt := NewLocalTracker(dir, labels)
-	issues, err := lt.SeamsOf("broad-1")
-	if err != nil {
-		t.Fatalf("SeamsOf: %v", err)
-	}
-	if len(issues) != 2 || issues[0].Number != "seam-1" || issues[1].Number != "seam-2" {
-		t.Fatalf("SeamsOf(broad-1) = %+v, want [seam-1, seam-2]", issues)
-	}
-	if issues[1].State != forge.IssueClosed {
-		t.Errorf("seam-2 State = %v, want IssueClosed", issues[1].State)
-	}
-}
-
 // TestLocalTracker_AllIssues_ReturnsEveryIssueOpenAndClosed verifies
 // AllIssues returns every issue file in dir regardless of parent, state, or
 // dispatch marker (ADR 0033, issue #1734) — the auto-surface sweep's basis
-// for discovering every distinct resolved parent across a mixed batch,
-// since SeamsOf alone can only look up one already-known parent at a time.
+// for discovering every distinct resolved parent across a mixed batch.
 func TestLocalTracker_AllIssues_ReturnsEveryIssueOpenAndClosed(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
