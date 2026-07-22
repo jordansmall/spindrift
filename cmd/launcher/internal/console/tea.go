@@ -358,28 +358,79 @@ func (t teaModel) View() string {
 	return View(t.m)
 }
 
-// isQuitKey reports whether s is the universal quit keystroke — "q" or
-// "ctrl+c" — one definition shared by every mode that must not swallow it:
-// handleListKey's own primary handling below, plus the four escape hatches
-// that let a *different* mode's key still reach a quit (handlePickChordKey,
-// handleSidebarKey, handleRebuildOutputKey, and handleTerminateConfirmKey's
-// decline-and-arm case) — replacing five separately typed string matches
-// (issue #1543). ModeHelp, ModeFilterEdit, and ModeQuitConfirm deliberately
-// have no escape of their own — Help swallows every key but "?"/Esc, Esc
-// types a literal "q" into the filter, and QuitConfirm is already the
-// pending quit, so there's nothing left to escape to.
-//
-// This is only the shared string match, not a single pre-dispatch quit
-// check — each of the four escape hatches still resolves its own
-// mode-specific state (a pending pick, a declined terminate) before
-// deciding between QuitMsg and QuitRequestedMsg, and those four decisions
-// genuinely differ from each other and from handleListKey's own. A future
-// mode that needs the same escape (the ADR 0030 reskin's #1496 train, per
-// issue #1543's own sequencing note) must still call isQuitKey from inside
-// its own handler; there is no single handleKey-level check to hook into
-// instead.
-func isQuitKey(s string) bool {
-	return s == "q" || s == "ctrl+c"
+// pendingGJump returns the mode-specific "jump to first" transition a
+// trailing "g" resolves a pending leader to, or nil for a mode with no "gg"
+// leader of its own — the shape resolvePendingG's onFirst parameter expects,
+// one per pane since each keeps its own notion of "first" (issue #1802,
+// #1790).
+func pendingGJump(mode Mode) func(Model) Model {
+	switch mode {
+	case ModeList:
+		return func(m Model) Model { return Update(m, CursorJumpToFirstMsg{}) }
+	case ModeRebuildOutput:
+		return func(m Model) Model { return Update(m, RebuildOutputJumpToFirstMsg{}) }
+	case ModeDetailModal:
+		return func(m Model) Model { return Update(m, DetailModalJumpToFirstMsg{}) }
+	case ModeSidebar:
+		return func(m Model) Model { return Update(m, SidebarJumpToBeginningMsg{}) }
+	}
+	return nil
+}
+
+// dispatchDefault applies whatever a mode's retired handler did when no key
+// matched any of its switch cases. Most modes simply did nothing (the
+// switch's implicit fallthrough); three had a real default of their own:
+// ModePick resolves the chord to a single-issue pick, same as the timeout;
+// ModeTerminateConfirm declines the terminate; ModeQuitConfirm declines the
+// quit (issue #1790).
+func (t teaModel) dispatchDefault(mode Mode) (teaModel, tea.Cmd) {
+	switch mode {
+	case ModePick:
+		return t.pickHighlighted(KindWork), nil
+	case ModeTerminateConfirm:
+		t.m = Update(t.m, TerminateCancelledMsg{})
+	case ModeQuitConfirm:
+		t.m = Update(t.m, QuitCancelledMsg{})
+	}
+	return t, nil
+}
+
+// dispatchKey resolves one keypress against mode: mode-specific pre-dispatch
+// state (a pending "gg" leader, ModeList's queued-enter notice, ModePick's
+// always-resolve-on-any-key rule) runs first, exactly as it did inline at
+// the top of each retired handler, then the keymap entry naming (mode, key)
+// is looked up and its Action invoked — or, when no entry matches,
+// dispatchDefault's mode-specific fallback. Every handleXKey method below is
+// a thin wrapper around this one function, pinning mode to its own Mode
+// rather than re-deriving it from t.m.ActiveMode() — handleKey's own routing
+// switch already made that choice (issue #1790).
+func (t teaModel) dispatchKey(mode Mode, msg tea.KeyMsg) (teaModel, tea.Cmd) {
+	if onFirst := pendingGJump(mode); onFirst != nil {
+		m, consumed := resolvePendingG(t.m, msg, onFirst)
+		t.m = m
+		if consumed {
+			return t, nil
+		}
+		// Any other key cancels the leader without consuming it — that key's
+		// own meaning still applies below (issue #1628 AC).
+	}
+	if mode == ModeList && t.m.QueueEnterNotice != "" {
+		t.m = Update(t.m, QueueEnterNoticeClearedMsg{})
+	}
+	if mode == ModePick {
+		// handlePickChordKey resolved the chord before ever looking at which
+		// key was pressed — every key, matched or not, ends the chord.
+		t.m = Update(t.m, PickResolvedMsg{})
+	}
+
+	key := msg.String()
+	if mode == ModeFilterEdit {
+		key = filterEditKeyName(msg)
+	}
+	if b := binding(mode, key); b != nil && b.Action != nil {
+		return b.Action(t, msg, mode)
+	}
+	return t.dispatchDefault(mode)
 }
 
 // handleKey translates one keypress into a console Msg and applies it,
@@ -417,279 +468,55 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	}
 }
 
-// handleHelpKey routes one keypress while the help overlay is open: "?" and
-// Esc both close it, and everything else — including a quit keystroke — is
-// swallowed, unchanged from before the mode-enum refactor (issue #784,
-// #1543).
+// handleHelpKey routes one keypress while the help overlay is open, through
+// dispatchKey pinned to ModeHelp — see dispatchKey and the keymap's ModeHelp
+// entries ("?" and "esc" both toggle it closed; everything else, including a
+// quit keystroke, has no entry and so falls to dispatchDefault's no-op)
+// (issue #784, #1543, #1790).
 func (t teaModel) handleHelpKey(msg tea.KeyMsg) teaModel {
-	if s := msg.String(); s == "?" || s == "esc" {
-		t.m = Update(t.m, HelpToggleMsg{})
-	}
+	t, _ = t.dispatchKey(ModeHelp, msg)
 	return t
 }
 
 // handlePickChordKey routes one keypress while ModePick is armed, awaiting
-// "pa"'s trailing "a" or "pr"'s trailing "r": "a" resolves to pick-all-ready,
-// "r" resolves to a single-issue pick as KindResearch (issue #1709) — the
-// console gesture for ADR 0022's advise-only research dispatch — the
-// universal quit keystroke resolves the chord (matching any other non-a/r
-// key) and then still quits — but the pick just landed may itself be live
-// now, so this still gates on LiveIssues() via quitOrConfirmMsg rather than
-// an unconditional QuitMsg (issue #1216) — and anything else resolves the
-// chord to a single-issue KindWork pick, same as letting the leader window
-// time out; that second key's own meaning is not separately reprocessed.
+// "pa"'s trailing "a" or "pr"'s trailing "r", through dispatchKey pinned to
+// ModePick — see dispatchKey (whose ModePick pre-step resolves the chord on
+// every key, matched or not) and the keymap's ModePick/quit entries and
+// dispatchDefault's KindWork fallback (issue #1790).
 func (t teaModel) handlePickChordKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
-	t.m = Update(t.m, PickResolvedMsg{})
-	switch s := msg.String(); {
-	case s == "a":
-		return t.pickAllReady(), nil
-	case s == "r":
-		return t.pickHighlighted(KindResearch), nil
-	case isQuitKey(s):
-		t = t.pickHighlighted(KindWork)
-		t.m = Update(t.m, t.quitOrConfirmMsg())
-		return t, nil
-	default:
-		return t.pickHighlighted(KindWork), nil
-	}
+	return t.dispatchKey(ModePick, msg)
 }
 
 // handleListKey routes one keypress against the plain backlog/queue body —
-// ModeList, modePrecedence's last resort. PendingG's "gg" leader and
-// QueueEnterNotice's clear-on-any-key both still run first here exactly as
-// they did before the mode-enum refactor: neither is a rival claimant to
+// ModeList, modePrecedence's last resort — through dispatchKey pinned to
+// ModeList. PendingG's "gg" leader and QueueEnterNotice's clear-on-any-key
+// both still run first, inside dispatchKey's own pre-steps, exactly as they
+// did before this and the mode-enum refactor: neither is a rival claimant to
 // keyboard ownership (Mode's own doc comment), so neither earns a case in
 // handleKey's switch above — they layer on top of ModeList instead (issue
-// #1543).
+// #1543, #1790).
 func (t teaModel) handleListKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
-	m, consumed := resolvePendingG(t.m, msg, func(m Model) Model {
-		return Update(m, CursorJumpToFirstMsg{})
-	})
-	t.m = m
-	if consumed {
-		return t, nil
-	}
-	if t.m.QueueEnterNotice != "" {
-		t.m = Update(t.m, QueueEnterNoticeClearedMsg{})
-	}
-	if isQuitKey(msg.String()) {
-		t.m = Update(t.m, t.quitOrConfirmMsg())
-		return t, nil
-	}
-	switch msg.String() {
-	case "j", "down":
-		t.m = Update(t.m, CursorMoveMsg{Delta: 1})
-	case "k", "up":
-		// "k" is vim's cursor-up key, freed by Terminate's move to "X"
-		// (issue #1500); "i"-as-up (#838) is retired now that "k" covers it.
-		t.m = Update(t.m, CursorMoveMsg{Delta: -1})
-	case "G":
-		t.m = Update(t.m, CursorJumpToLastMsg{})
-	case "g":
-		m, cmd := armPendingG(t.m)
-		t.m = m
-		return t, cmd
-	case "H":
-		t.m = Update(t.m, SectionPrevMsg{})
-	case "L":
-		t.m = Update(t.m, SectionNextMsg{})
-	case "1":
-		t.m = Update(t.m, SectionJumpMsg{Section: SectionBacklog})
-	case "2":
-		t.m = Update(t.m, SectionJumpMsg{Section: SectionRunning})
-	case "3":
-		t.m = Update(t.m, SectionJumpMsg{Section: SectionHeld})
-	case "4":
-		t.m = Update(t.m, SectionJumpMsg{Section: SectionSettled})
-	case "5":
-		t.m = Update(t.m, SectionJumpMsg{Section: SectionFailed})
-	case "pgdown", "ctrl+f":
-		t.m = Update(t.m, ScrollMsg{Delta: sectionPageSize(t.m)})
-	case "pgup", "ctrl+b":
-		t.m = Update(t.m, ScrollMsg{Delta: -sectionPageSize(t.m)})
-	case "ctrl+d":
-		// Integer division rounds down: a one-row page yields Delta 0,
-		// a no-op — fine under the "roughly half" spec (issue #1648).
-		t.m = Update(t.m, ScrollMsg{Delta: sectionPageSize(t.m) / 2})
-	case "ctrl+u":
-		t.m = Update(t.m, ScrollMsg{Delta: -(sectionPageSize(t.m) / 2)})
-	case "/":
-		t.m = Update(t.m, FilterEditStartMsg{})
-	case "enter":
-		if t.m.ActiveSection == SectionBacklog {
-			iss, ok := t.highlightedIssue()
-			if !ok {
-				return t, nil
-			}
-			if t.m.IsOrphan(iss.Number) {
-				return t, openSidebarCmd(t.launch, t.pwd, iss.Number, true)
-			}
-			return t.openDetailModal(iss)
-		}
-		if p, ok := t.highlightedPick(); ok {
-			if hasTranscript(p.State) {
-				return t, openSidebarCmd(t.launch, t.pwd, p.Number, false)
-			}
-			t.m = Update(t.m, QueueEnterNoticedMsg{})
-		}
-	case "l", "right":
-		t.m = Update(t.m, FocusSidebarMsg{})
-	case "h", "left":
-		// Already on the list — nothing to move away from. Present as an
-		// explicit case (rather than falling through to the default no-op)
-		// so the h/l pair reads as one symmetric gesture at the call site.
-	case "x", "esc":
-		// Mirrors handleSidebarKey's close case (line ~392): a docked sidebar
-		// with focus moved back to the list is still open and still needs a
-		// single dismissal key, not a re-focus-then-close two-step (issue
-		// #1582). Fullscreen/zoomed sidebars never reach here — ActiveMode
-		// already resolves to ModeSidebar for those, so handleKey routes
-		// there instead of handleListKey.
-		if t.m.Sidebar != nil {
-			t.m = Update(t.m, SidebarCloseMsg{})
-		}
-	case "r":
-		t.m = Update(t.m, DetailCacheInvalidatedMsg{})
-		return t, refreshCmd(t.tracker)
-	case "?":
-		t.m = Update(t.m, HelpToggleMsg{})
-	case "p":
-		t.m = Update(t.m, PickPendingMsg{})
-		return t, pickChordTick()
-	case "u":
-		t = t.unpickHighlighted()
-	case "A":
-		if t.m.ActiveSection == SectionBacklog && t.launch != nil && t.launch.RecoverFn != nil {
-			if iss, ok := t.highlightedIssue(); ok && t.m.IsOrphan(iss.Number) && !t.m.IsAdoptingOrphan(iss.Number) {
-				t.m = Update(t.m, AdoptOrphanStartedMsg{Number: iss.Number})
-				return t, adoptOrphanCmd(t.launch, iss.Number)
-			}
-		}
-	case "X":
-		if num := t.terminateTarget(); num != "" && t.isLive(num) {
-			t.m = Update(t.m, TerminateRequestedMsg{Number: num})
-		}
-	case "+":
-		if t.launch != nil {
-			t.launch.Resize(1)
-			// Resize's own Grown signal only reaches a drain already
-			// running; a session with no active drain (nothing picked yet,
-			// or the last one already went idle) has no listener to catch
-			// it, so a raise falls back to tryLaunch — a no-op if a drain
-			// is in fact already running, or if nothing is queued/held to
-			// launch into the freed slot (#754).
-			t.launch.tryLaunch(t.tracker, t.pwd)
-		}
-	case "-":
-		if t.launch != nil {
-			t.launch.Resize(-1)
-		}
-	case "b":
-		if t.launch != nil && t.m.RebuildStatus.Stale {
-			t.launch.Rebuild(t.tracker, t.pwd)
-		}
-	case "o":
-		if t.m.RebuildStatus.Output != "" {
-			t.m = Update(t.m, RebuildOutputOpenMsg{})
-		}
-	}
-	return t, nil
+	return t.dispatchKey(ModeList, msg)
 }
 
 // handleRebuildOutputKey routes one keypress while ModeRebuildOutput owns
-// the keyboard: "x"/Esc closes back to the backlog, the scroll keys page
-// through the captured output, "G"/"gg" jump to the last/first page, and the
-// universal quit keystroke (isQuitKey) hard-quits — it must never be
-// swallowed by the pane, matching handleDrillInKey (issue #1128). ActiveMode
-// routes here before it ever reaches handleListKey's own PendingG check, so
-// the "gg" chord's PendingG gate lives here instead — reusing Model.PendingG
-// and gChordTick rather than a second, pane-scoped leader (issue #1630 AC3).
+// the keyboard, through dispatchKey pinned to ModeRebuildOutput — see
+// dispatchKey (whose pendingGJump pre-step covers this pane's own "gg"
+// leader, reusing Model.PendingG and resolvePendingG/armPendingG rather than
+// a second, pane-scoped leader, issue #1630 AC3) and the keymap's
+// ModeRebuildOutput and quit entries (issue #1790).
 func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	m, consumed := resolvePendingG(t.m, msg, func(m Model) Model {
-		return Update(m, RebuildOutputJumpToFirstMsg{})
-	})
-	t.m = m
-	if consumed {
-		return t.m, nil
-	}
-	if isQuitKey(msg.String()) {
-		return Update(t.m, QuitMsg{}), nil
-	}
-	switch msg.String() {
-	case "x", "esc":
-		return Update(t.m, RebuildOutputCloseMsg{}), nil
-	case "j", "down":
-		return Update(t.m, RebuildOutputScrollMsg{Delta: 1}), nil
-	case "k", "up":
-		return Update(t.m, RebuildOutputScrollMsg{Delta: -1}), nil
-	case "pgdown", "ctrl+f":
-		return Update(t.m, RebuildOutputScrollMsg{Delta: fixedPaneScrollDelta}), nil
-	case "pgup", "ctrl+b":
-		return Update(t.m, RebuildOutputScrollMsg{Delta: -fixedPaneScrollDelta}), nil
-	case "ctrl+d":
-		return Update(t.m, RebuildOutputScrollMsg{Delta: fixedPaneScrollDelta / 2}), nil
-	case "ctrl+u":
-		return Update(t.m, RebuildOutputScrollMsg{Delta: -(fixedPaneScrollDelta / 2)}), nil
-	case "G":
-		return Update(t.m, RebuildOutputJumpToLastMsg{}), nil
-	case "g":
-		m, cmd := armPendingG(t.m)
-		t.m = m
-		return t.m, cmd
-	}
-	return t.m, nil
+	t, cmd := t.dispatchKey(ModeRebuildOutput, msg)
+	return t.m, cmd
 }
 
 // handleDetailModalKey routes one keypress while ModeDetailModal owns the
 // keyboard (the ticket detail modal is open — modeActive's ModeDetailModal
-// case): "esc" closes it, "j"/"k" and the arrow keys scroll its body one
-// line at a time, the scroll keys page/half-page through it — sized off
-// detailModalScrollBudget rather than the sibling panes' fixed
-// fixedPaneScrollDelta, since that's the same box-interior/label-wrapping
-// budget the render path and the Offset clamp already use, and a fixed
-// constant would drift from it — "G"/"gg" jump to the last/first page —
-// reusing Model.PendingG and gChordTick rather than a second, pane-scoped
-// leader, same as handleRebuildOutputKey and handleSidebarKey (issue #1795)
-// — and the universal quit keystroke (isQuitKey) hard-quits — it must never
-// be swallowed by the modal, same principle as every other modal pane in
-// this file (issue #1632).
+// case), through dispatchKey pinned to ModeDetailModal — see dispatchKey and
+// the keymap's ModeDetailModal and quit entries (issue #1632, #1795, #1790).
 func (t teaModel) handleDetailModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	m, consumed := resolvePendingG(t.m, msg, func(m Model) Model {
-		return Update(m, DetailModalJumpToFirstMsg{})
-	})
-	t.m = m
-	if consumed {
-		return t.m, nil
-	}
-	if isQuitKey(msg.String()) {
-		return Update(t.m, QuitMsg{}), nil
-	}
-	switch msg.String() {
-	case "esc":
-		return Update(t.m, DetailModalCloseMsg{}), nil
-	case "j", "down":
-		return Update(t.m, DetailModalScrollMsg{Delta: 1}), nil
-	case "k", "up":
-		return Update(t.m, DetailModalScrollMsg{Delta: -1}), nil
-	case "pgdown", "ctrl+f":
-		return Update(t.m, DetailModalScrollMsg{Delta: detailModalScrollBudget(t.m)}), nil
-	case "pgup", "ctrl+b":
-		return Update(t.m, DetailModalScrollMsg{Delta: -detailModalScrollBudget(t.m)}), nil
-	case "ctrl+d":
-		// Integer division rounds down: a one-row budget yields Delta 0, a
-		// no-op — same "roughly half" tradeoff the list body's own ctrl+d
-		// accepts (issue #1648).
-		return Update(t.m, DetailModalScrollMsg{Delta: detailModalScrollBudget(t.m) / 2}), nil
-	case "ctrl+u":
-		return Update(t.m, DetailModalScrollMsg{Delta: -(detailModalScrollBudget(t.m) / 2)}), nil
-	case "G":
-		return Update(t.m, DetailModalJumpToLastMsg{}), nil
-	case "g":
-		m, cmd := armPendingG(t.m)
-		t.m = m
-		return t.m, cmd
-	}
-	return t.m, nil
+	t, cmd := t.dispatchKey(ModeDetailModal, msg)
+	return t.m, cmd
 }
 
 // openDetailModal opens iss's fullscreen ticket detail modal: instantly,
@@ -709,63 +536,12 @@ func (t teaModel) openDetailModal(iss forge.Issue) (teaModel, tea.Cmd) {
 
 // handleSidebarKey routes one keypress while ModeSidebar owns the keyboard
 // (the sidebar has focus, the terminal is too narrow to dock it, or the
-// operator zoomed it — modeActive's ModeSidebar case): "t" advances the
-// Activity/Transcript/raw cycle, "h"/left returns focus to the list when the
-// sidebar is docked (a no-op in the fullscreen fallback, which has no list
-// on screen to focus), "x"/Esc closes back to the body, the scroll keys page
-// through the loaded content (issue #786's drill-in precedent), "G"/"end"
-// re-attaches Follow and jumps to the bottom, "gg" detaches Follow and jumps
-// to the top — reusing the same Model.PendingG leader and gChordTick timeout
-// the list body's own "gg" arms (issue #1628), rather than a second chord
-// mechanism (issue #1629) — "z" toggles the fullscreen zoom (issue #1502),
-// and the universal quit keystroke (isQuitKey) hard-quits — it must never be
-// swallowed by the sidebar, same principle as handlePickChordKey (issue
-// #826) but not the same mechanics: handlePickChordKey resolves the chord
-// (pickHighlighted) before quitting, while the sidebar quits directly with
-// no resolve step.
+// operator zoomed it — modeActive's ModeSidebar case), through dispatchKey
+// pinned to ModeSidebar — see dispatchKey and the keymap's ModeSidebar and
+// quit entries (issue #1628, #1629, #1502, #826, #1790).
 func (t teaModel) handleSidebarKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	m, consumed := resolvePendingG(t.m, msg, func(m Model) Model {
-		return Update(m, SidebarJumpToBeginningMsg{})
-	})
-	t.m = m
-	if consumed {
-		return t.m, nil
-	}
-	if isQuitKey(msg.String()) {
-		return Update(t.m, QuitMsg{}), nil
-	}
-	switch msg.String() {
-	case "t":
-		return Update(t.m, SidebarToggleMsg{}), nil
-	case "h", "left":
-		if sidebarFits(t.m) && !t.m.SidebarZoom {
-			return Update(t.m, FocusListMsg{}), nil
-		}
-		return t.m, nil
-	case "x", "esc":
-		return Update(t.m, SidebarCloseMsg{}), nil
-	case "j", "down":
-		return Update(t.m, SidebarScrollMsg{Delta: 1}), nil
-	case "k", "up":
-		return Update(t.m, SidebarScrollMsg{Delta: -1}), nil
-	case "pgdown", "ctrl+f":
-		return Update(t.m, SidebarScrollMsg{Delta: fixedPaneScrollDelta}), nil
-	case "pgup", "ctrl+b":
-		return Update(t.m, SidebarScrollMsg{Delta: -fixedPaneScrollDelta}), nil
-	case "ctrl+d":
-		return Update(t.m, SidebarScrollMsg{Delta: fixedPaneScrollDelta / 2}), nil
-	case "ctrl+u":
-		return Update(t.m, SidebarScrollMsg{Delta: -(fixedPaneScrollDelta / 2)}), nil
-	case "G", "end":
-		return Update(t.m, SidebarJumpToEndMsg{}), nil
-	case "g":
-		m, cmd := armPendingG(t.m)
-		t.m = m
-		return t.m, cmd
-	case "z":
-		return Update(t.m, SidebarZoomToggleMsg{}), nil
-	}
-	return t.m, nil
+	t, cmd := t.dispatchKey(ModeSidebar, msg)
+	return t.m, cmd
 }
 
 // highlightedIssue returns the backlog row under the cursor, or false when
@@ -855,66 +631,22 @@ func openSidebarCmd(launch *Launcher, pwd, number string, orphan bool) tea.Cmd {
 }
 
 // handleTerminateConfirmKey routes one keypress while ModeTerminateConfirm is
-// armed: "y" confirms — firing Launcher.TerminateAsync before applying
-// TerminateConfirmedMsg, so the blocking tracker I/O runs off the Update
-// path (issue #745) — the universal quit keystroke (isQuitKey) must never be
-// swallowed by the confirm prompt, mirroring handlePickChordKey's precedent
-// (issue #748), but must not quit outright either: a terminate-confirm
-// prompt is only ever armed via isLive, so a live Dispatch was present when
-// it appeared, and the operator still deserves the drain/terminate-all/stay
-// choice ADR 0023 promises elsewhere (unconditionally arming that confirm is
-// harmless even on the rare race where the Dispatch settles between the
-// prompt and this keypress — "t" just iterates an empty LiveIssues) — so a
-// quit keystroke declines the terminate (TerminateCancelledMsg, returning to
-// ModeList so the next keypress reaches handleQuitConfirmKey instead of
-// looping back here) and arms the quit confirm (QuitRequestedMsg) rather
-// than quitting directly (issue #1215) — everything else declines the
-// terminate only (ADR 0024, issue #649/#785).
+// armed, through dispatchKey pinned to ModeTerminateConfirm — see dispatchKey
+// (whose dispatchDefault declines the terminate for any key the keymap
+// doesn't name) and the keymap's "y"/"Y" and quit entries (issue #745, #748,
+// #1215, ADR 0024, issue #649/#785, #1790).
 func (t teaModel) handleTerminateConfirmKey(msg tea.KeyMsg) teaModel {
-	num := t.m.TerminateConfirm.Number
-	switch s := msg.String(); {
-	case s == "y" || s == "Y":
-		if t.launch != nil {
-			// Terminate already logs a reap failure to stderr itself
-			// (launcher.go); writing it again here would both duplicate the
-			// line and risk smearing the alt-screen render mid-frame. The
-			// actual PickTerminated transition lands later, once Terminate's
-			// background goroutine reaches it, through a pushed
-			// refreshSignalMsg — this snapshot is the queue as it stands at
-			// initiation (issue #1542).
-			picks := t.launch.TerminateAsync(t.tracker, num)
-			t.m = Update(t.m, QueueSnapshotMsg{Picks: picks})
-		}
-		t.m = Update(t.m, TerminateConfirmedMsg{Number: num})
-	case isQuitKey(s):
-		t.m = Update(t.m, TerminateCancelledMsg{})
-		t.m = Update(t.m, QuitRequestedMsg{})
-	default:
-		t.m = Update(t.m, TerminateCancelledMsg{})
-	}
+	t, _ = t.dispatchKey(ModeTerminateConfirm, msg)
 	return t
 }
 
-// handleQuitConfirmKey routes one keypress while ModeQuitConfirm is armed:
-// "d"/enter drains — quits without touching any live Dispatch, which settles
-// on its own — "t" terminates every live Dispatch first, then quits; "s" (or
-// anything else) stays, declining the quit (issue #651, ADR 0023, issue
-// #822). Unlike handleTerminateConfirmKey, quit is already the pending
-// action here, so there is no separate quit-escape case.
+// handleQuitConfirmKey routes one keypress while ModeQuitConfirm is armed,
+// through dispatchKey pinned to ModeQuitConfirm — see dispatchKey (whose
+// dispatchDefault declines the quit, "s" included, for any key the keymap
+// doesn't name) and the keymap's "d"/"enter"/"t" entry (issue #651, ADR
+// 0023, issue #822, #1790).
 func (t teaModel) handleQuitConfirmKey(msg tea.KeyMsg) teaModel {
-	switch s := msg.String(); s {
-	case "d", "enter":
-		t.m = Update(t.m, QuitMsg{})
-	case "t":
-		if t.launch != nil {
-			for _, num := range t.launch.LiveIssues() {
-				t.launch.TerminateAsync(t.tracker, num)
-			}
-		}
-		t.m = Update(t.m, QuitMsg{})
-	default:
-		t.m = Update(t.m, QuitCancelledMsg{})
-	}
+	t, _ = t.dispatchKey(ModeQuitConfirm, msg)
 	return t
 }
 
@@ -1087,23 +819,15 @@ func (t teaModel) pickHighlighted(kind Kind) teaModel {
 }
 
 // handleFilterKey routes one keypress while ModeFilterEdit owns the
-// keyboard: Enter applies (exits editing, keeping the already-live-narrowed
-// Filter), Esc cancels (reverts to the pre-edit Filter), Backspace trims one
-// rune, and any other printable key appends to the filter text — narrowing
-// the list live.
+// keyboard, through dispatchKey pinned to ModeFilterEdit — Enter applies
+// (exits editing, keeping the already-live-narrowed Filter), Esc cancels
+// (reverts to the pre-edit Filter), Backspace trims one rune, and any other
+// printable key appends to the filter text — narrowing the list live. See
+// dispatchKey's filterEditKeyName translation (this is the one mode whose
+// dispatch is keyed by msg.Type rather than msg.String()) and the keymap's
+// ModeFilterEdit entries (issue #1790).
 func (t teaModel) handleFilterKey(msg tea.KeyMsg) teaModel {
-	switch msg.Type {
-	case tea.KeyEnter:
-		t.m = Update(t.m, FilterEditConfirmMsg{})
-	case tea.KeyEsc:
-		t.m = Update(t.m, FilterEditCancelMsg{})
-	case tea.KeyBackspace:
-		if n := len(t.m.Filter); n > 0 {
-			t.m = Update(t.m, FilterChangedMsg{Filter: t.m.Filter[:n-1]})
-		}
-	case tea.KeyRunes, tea.KeySpace:
-		t.m = Update(t.m, FilterChangedMsg{Filter: t.m.Filter + msg.String()})
-	}
+	t, _ = t.dispatchKey(ModeFilterEdit, msg)
 	return t
 }
 
