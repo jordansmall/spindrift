@@ -3097,8 +3097,20 @@ func TestClip_WideCharacters_MeasuresDisplayWidthNotRuneCount(t *testing.T) {
 	if got == s {
 		t.Errorf("clip(%q, 10, false) = %q, want truncated — 10 runes is 20 display columns, over the width-10 budget", s, got)
 	}
-	if w := runewidth.StringWidth(got); w > 10 {
-		t.Errorf("clip(%q, 10, false) = %q with display width %d, want at most 10", s, got, w)
+	if w := runewidth.StringWidth(got); w != 10 {
+		t.Errorf("clip(%q, 10, false) = %q with display width %d, want exactly 10", s, got, w)
+	}
+}
+
+// TestClip_Pad_WideCharacterStraddlesBoundary_LandsExactlyOnWidth verifies
+// clip(..., pad: true) — the shape Backlog/Work fixed-width table columns
+// use — lands on exactly the requested width even when a wide (2-column)
+// rune straddles the truncation boundary (issue #1785), not one column
+// short, so a fixed-width column never drifts by a space.
+func TestClip_Pad_WideCharacterStraddlesBoundary_LandsExactlyOnWidth(t *testing.T) {
+	got := clip("ab中文", 4, true)
+	if w := runewidth.StringWidth(got); w != 4 {
+		t.Errorf("clip(%q, 4, true) = %q with display width %d, want exactly 4", "ab中文", got, w)
 	}
 }
 
@@ -3112,6 +3124,18 @@ func TestPadDisplay_TruncatesWithEllipsis(t *testing.T) {
 	}
 	if w := runewidth.StringWidth(got); w != 10 {
 		t.Errorf("padDisplay(...) = %q with display width %d, want exactly 10", got, w)
+	}
+}
+
+// TestPadDisplay_WideCharacterStraddlesBoundary_LandsExactlyOnWidth verifies
+// padDisplay's truncation lands on exactly the requested width even when a
+// wide (2-column) rune straddles the boundary (issue #1785) — the detail
+// modal box's right border drifts out of column otherwise (issue #1758).
+func TestPadDisplay_WideCharacterStraddlesBoundary_LandsExactlyOnWidth(t *testing.T) {
+	s := "中文标题超长测试文字" // 10 runes, 20 display columns
+	got := padDisplay(s, 10)
+	if w := runewidth.StringWidth(got); w != 10 {
+		t.Errorf("padDisplay(%q, 10) = %q with display width %d, want exactly 10", s, got, w)
 	}
 }
 
@@ -3148,6 +3172,34 @@ func TestView_DetailModal_OverWideLabel_ShowsEllipsis(t *testing.T) {
 	}
 	if strings.Contains(out, label) {
 		t.Errorf("View() = %q, want the over-wide label truncated, not shown in full", out)
+	}
+}
+
+// TestView_DetailModal_WideCharacterLabel_BorderStaysAligned verifies the
+// floating detail modal's right-hand border rune stays in column even when
+// an over-wide CJK label straddles the truncation boundary (issue #1785):
+// every "│...│" row must measure exactly innerWidth display columns between
+// its borders, or the right border drifts (issue #1758's invariant).
+func TestView_DetailModal_WideCharacterLabel_BorderStaysAligned(t *testing.T) {
+	label := "中文标题超长测试文字标签内容溢出方框边界"
+	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 24})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: []string{label}})
+
+	out := View(m)
+	innerWidth, _ := detailModalInnerSize(40, 24)
+	for _, line := range strings.Split(out, "\n") {
+		first := strings.IndexRune(line, '│')
+		if first < 0 {
+			continue
+		}
+		last := strings.LastIndex(line, "│")
+		if first == last {
+			continue
+		}
+		content := line[first+len("│") : last]
+		if w := runewidth.StringWidth(content); w != innerWidth {
+			t.Errorf("row %q content width %d, want exactly innerWidth %d — right border drifted", line, w, innerWidth)
+		}
 	}
 }
 

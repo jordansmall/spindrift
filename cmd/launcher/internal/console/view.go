@@ -714,18 +714,31 @@ func compactBacklogRow(width int, marker, number, title string, labels []string)
 	return header + compactQueueTitleLine(width, title)
 }
 
+// truncateWithEllipsis fits s into exactly width display columns by cutting
+// it and marking the cut with a trailing "…" (issue #1779), shared by clip
+// and padDisplay. runewidth.Truncate(s, width-1, "") can stop one column
+// short of width-1 when a wide (2-column) rune straddles that boundary — its
+// internal loop bails out before adding a rune that would push the running
+// total over budget — so the result is re-measured and padded back to
+// exactly width rather than trusted as-is (issue #1785).
+func truncateWithEllipsis(s string, width int) string {
+	if width <= 1 {
+		return runewidth.Truncate(s, width, "")
+	}
+	cut := runewidth.Truncate(s, width-1, "") + "…"
+	return cut + strings.Repeat(" ", width-runewidth.StringWidth(cut))
+}
+
 // clip fits s into width display columns (not runes — a wide CJK rune is 2
-// columns, issue #859): truncated with a trailing ellipsis if s runs over,
+// columns, issue #859): truncated with a trailing ellipsis if s runs over
+// (regardless of pad — the ellipsis case always lands on exactly width),
 // space-padded out to width if pad is true and s is shorter, left as-is if
 // pad is false and s already fits.
 func clip(s string, width int, pad bool) string {
 	w := runewidth.StringWidth(s)
 	switch {
 	case w > width:
-		if width <= 1 {
-			return runewidth.Truncate(s, width, "")
-		}
-		return runewidth.Truncate(s, width-1, "") + "…"
+		return truncateWithEllipsis(s, width)
 	case pad:
 		return s + strings.Repeat(" ", width-w)
 	default:
@@ -1413,10 +1426,7 @@ func padDisplay(s string, width int) string {
 	}
 	w := runewidth.StringWidth(s)
 	if w > width {
-		if width <= 1 {
-			return runewidth.Truncate(s, width, "")
-		}
-		return runewidth.Truncate(s, width-1, "") + "…"
+		return truncateWithEllipsis(s, width)
 	}
 	if w < width {
 		return s + strings.Repeat(" ", width-w)
