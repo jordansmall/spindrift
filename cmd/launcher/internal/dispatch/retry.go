@@ -85,7 +85,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
 				holdCount++
 			}
 			if holdCount >= d.cfg.TransientRetryMax {
-				fmt.Printf("    !! #%s: hold cap exhausted (%d consecutive no-progress hold(s))\n",
+				fmt.Fprintf(d.humanOut(), "    !! #%s: hold cap exhausted (%d consecutive no-progress hold(s))\n",
 					d.number, d.cfg.TransientRetryMax)
 				return Result{Success: false}
 			}
@@ -93,7 +93,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
 			if wait < 0 {
 				wait = time.Duration(d.cfg.HoldJitterSecs) * time.Second
 			}
-			fmt.Printf("    .. #%s: rate limit; holding until %s\n",
+			fmt.Fprintf(d.humanOut(), "    .. #%s: rate limit; holding until %s\n",
 				d.number, cls.ResetAt.UTC().Format("15:04 UTC"))
 			d.clock.Sleep(wait)
 			prevWasHold = true
@@ -105,12 +105,12 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
 		prevWasHold = false
 		transientCount++
 		if transientCount > d.cfg.TransientRetryMax {
-			fmt.Printf("    !! #%s: transient retry cap exhausted (%d)\n",
+			fmt.Fprintf(d.humanOut(), "    !! #%s: transient retry cap exhausted (%d)\n",
 				d.number, d.cfg.TransientRetryMax)
 			return Result{Success: false}
 		}
 		backoff := time.Duration(d.cfg.TransientBackoffSecs) * time.Second * time.Duration(transientCount)
-		fmt.Printf("    .. #%s: transient (%s); retry %d/%d in %s\n",
+		fmt.Fprintf(d.humanOut(), "    .. #%s: transient (%s); retry %d/%d in %s\n",
 			d.number, cls.Reason, transientCount, d.cfg.TransientRetryMax, backoff)
 		d.clock.Sleep(backoff)
 	}
