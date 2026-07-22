@@ -1611,6 +1611,32 @@ func TestView_DetailModal_ScrollOffset_HidesLinesBeforeOffset(t *testing.T) {
 // and height are capped at detailModalBoxMax{Width,Height} rather than
 // scaling without bound (issue #1759 AC), and pins the width cap's actual
 // value at 100 columns, not the old 84 (issue #1796 AC1/AC2).
+// TestSidebarModalFits_BelowMinDimension_ReturnsFalse verifies
+// sidebarModalFits — the log modal's floating-vs-fullscreen gate, mirroring
+// detailModalFits — rejects a terminal narrower or shorter than the box's
+// own legibility floor, and accepts one that meets both floors (issue
+// #1845).
+func TestSidebarModalFits_BelowMinDimension_ReturnsFalse(t *testing.T) {
+	cases := []struct {
+		name          string
+		width, height int
+		want          bool
+	}{
+		{"both at floor", sidebarModalBoxMinWidth, sidebarModalBoxMinHeight, true},
+		{"width one short", sidebarModalBoxMinWidth - 1, sidebarModalBoxMinHeight, false},
+		{"height one short", sidebarModalBoxMinWidth, sidebarModalBoxMinHeight - 1, false},
+		{"plenty of room", sidebarModalBoxMinWidth * 2, sidebarModalBoxMinHeight * 2, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := Model{Width: c.width, Height: c.height}
+			if got := sidebarModalFits(m); got != c.want {
+				t.Errorf("sidebarModalFits(Width:%d, Height:%d) = %v, want %v", c.width, c.height, got, c.want)
+			}
+		})
+	}
+}
+
 func TestDetailModalBoxSize_WideTerminal_ClampsToMax(t *testing.T) {
 	width, height := detailModalBoxSize(300, 100)
 	if width != 100 {

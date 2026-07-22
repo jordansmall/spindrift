@@ -217,7 +217,18 @@ func View(m Model) string {
 	if m.DetailModal != nil && !detailModalFits(m) {
 		return renderDetailModal(*m.DetailModal, m.Width, m.Height)
 	}
+	sidebarModal := m.Sidebar != nil && (m.SidebarZoom || !sidebarFits(m))
+	if sidebarModal && !sidebarModalFits(m) {
+		return renderSidebarFullscreen(*m.Sidebar, m.Width, m.Height)
+	}
 	base := viewBody(m)
+	if sidebarModal {
+		boxWidth, boxHeight := sidebarModalBoxSize(m.Width, m.Height)
+		x, y := sidebarModalBoxOrigin(m.Width, m.Height, boxWidth, boxHeight)
+		box := renderSidebarModalBox(*m.Sidebar, boxWidth, boxHeight)
+		base = dimBase(padBaseForOverlay(base, m.Width, y+boxHeight))
+		base = compositeOverlay(base, box, x, y)
+	}
 	if m.DetailModal != nil {
 		boxWidth, boxHeight := detailModalBoxSize(m.Width, m.Height)
 		x, y := detailModalBoxOrigin(m.Width, m.Height, boxWidth, boxHeight)
@@ -268,15 +279,18 @@ func renderBoxedHeader(m Model) string {
 	return header
 }
 
-// viewBody renders everything View shows below/behind an open detail modal —
-// the header, Section tabs, and either the docked sidebar layout or the
-// plain single-list body — the same rendering the list-only path always
-// used, now split out so View can composite the floating detail modal box
-// over it instead of a fullscreen replacement (issue #1758).
+// viewBody renders everything View shows below/behind an open detail modal
+// or floating log modal — the header, Section tabs, and either the docked
+// sidebar layout or the plain single-list body — the same rendering the
+// list-only path always used, now split out so View can composite a floating
+// box over it instead of a fullscreen replacement (issue #1758). A zoomed or
+// too-narrow-to-dock Sidebar no longer short-circuits here into
+// renderSidebarFullscreen: View's own sidebarModal branch owns that decision
+// now (issue #1845), and the later docked-sidebar check below already only
+// fires when the sidebar both fits and isn't zoomed — so a zoomed/narrow
+// Sidebar simply falls through to the plain single-list body, the base
+// View's floating box composites over.
 func viewBody(m Model) string {
-	if m.Sidebar != nil && (m.SidebarZoom || !sidebarFits(m)) {
-		return renderSidebarFullscreen(*m.Sidebar, m.Width, m.Height)
-	}
 	if m.Mode == ModeRebuildOutput {
 		return renderRebuildOutputPane(m)
 	}
@@ -347,7 +361,7 @@ func viewBody(m Model) string {
 	// instead of two predicates a future caller could drift out of sync
 	// (issue #1752 review).
 	compact := queueNarrowed(m)
-	if m.Sidebar != nil {
+	if m.Sidebar != nil && sidebarFits(m) && !m.SidebarZoom {
 		width := computeSidebarWidth(m.Width)
 		listModel := m
 		listModel.Width = m.Width - width - dockedBorderCols
@@ -1481,6 +1495,95 @@ func detailModalInnerSize(termWidth, termHeight int) (width, height int) {
 	return modalBoxInnerSize(boxWidth, boxHeight)
 }
 
+// sidebarModalBoxWidthPercent and sidebarModalBoxHeightPercent are the log
+// modal's share of the terminal's own dimensions — the same 80%x80% target
+// the detail modal's detailModalBox{Width,Height}Percent already use, so the
+// two floating boxes read as one consistent modal treatment (issue #1845).
+const (
+	sidebarModalBoxWidthPercent  = 80
+	sidebarModalBoxHeightPercent = 80
+)
+
+// sidebarModalBoxMinWidth and sidebarModalBoxMinHeight floor the log modal's
+// floating box at the same legibility floor detailModalBoxMin{Width,Height}
+// already use — sidebarModalFits gates the floating layout on the terminal
+// itself being at least this large, so the clamp here never has to inflate
+// the box past the terminal's own size (issue #1845).
+const (
+	sidebarModalBoxMinWidth  = 40
+	sidebarModalBoxMinHeight = 10
+)
+
+// sidebarModalBoxMaxWidth and sidebarModalBoxMaxHeight cap the log modal's
+// floating box at the same comfortable-reading size detailModalBoxMax{Width,
+// Height} already use, rather than stretching it corner to corner on a wide
+// terminal (issue #1845).
+const (
+	sidebarModalBoxMaxWidth  = 100
+	sidebarModalBoxMaxHeight = 30
+)
+
+// sidebarModalFits reports whether m.Width and m.Height leave room for a
+// floating log modal box at least sidebarModalBoxMin{Width,Height} — the
+// gate View checks before choosing the floating box over the small-terminal
+// fullscreen fallback (renderSidebarFullscreen), detailModalFits' log-modal
+// analogue (issue #1845). Delegates to modalBoxFits, the modal-agnostic gate
+// (issue #1844).
+func sidebarModalFits(m Model) bool {
+	return modalBoxFits(m.Width, m.Height, sidebarModalBoxMinWidth, sidebarModalBoxMinHeight)
+}
+
+// sidebarModalBoxSize returns the floating log modal box's outer width and
+// height for a termWidth x termHeight terminal — detailModalBoxSize's
+// log-modal analogue (issue #1845). Delegates to modalBoxSize, the
+// modal-agnostic sizer (issue #1844).
+func sidebarModalBoxSize(termWidth, termHeight int) (width, height int) {
+	return modalBoxSize(termWidth, termHeight, modalBoxSpec{
+		WidthPercent:  sidebarModalBoxWidthPercent,
+		HeightPercent: sidebarModalBoxHeightPercent,
+		MinWidth:      sidebarModalBoxMinWidth,
+		MinHeight:     sidebarModalBoxMinHeight,
+		MaxWidth:      sidebarModalBoxMaxWidth,
+		MaxHeight:     sidebarModalBoxMaxHeight,
+	})
+}
+
+// sidebarModalBoxOrigin centers a boxWidth x boxHeight box within a
+// termWidth x termHeight terminal, the (x, y) compositeOverlay places it at
+// — detailModalBoxOrigin's log-modal analogue (issue #1845). Delegates to
+// modalBoxOrigin, the modal-agnostic centering (issue #1844).
+func sidebarModalBoxOrigin(termWidth, termHeight, boxWidth, boxHeight int) (x, y int) {
+	return modalBoxOrigin(termWidth, termHeight, boxWidth, boxHeight)
+}
+
+// sidebarModalInnerSize returns the floating log modal box's interior
+// width/height for a termWidth x termHeight terminal — detailModalInnerSize's
+// log-modal analogue (issue #1845). Delegates to modalBoxInnerSize, the
+// modal-agnostic interior sizer (issue #1844).
+func sidebarModalInnerSize(termWidth, termHeight int) (width, height int) {
+	boxWidth, boxHeight := sidebarModalBoxSize(termWidth, termHeight)
+	return modalBoxInnerSize(boxWidth, boxHeight)
+}
+
+// sidebarModalScrollBudget returns the content-line budget the floating log
+// modal box actually has room to show for an m.Width x m.Height terminal —
+// detailModalScrollBudget's log-modal analogue (issue #1845), and the piece
+// Update's Sidebar.Offset clamp needs to stay in lockstep with what View
+// renders once the fullscreen sidebar became a modal: renderSidebarModalContent
+// budgets its content window as innerHeight minus sidebarModalLabelLines and
+// trailingNewlineRow (the label row and the footer-hints row), so the clamp
+// must subtract exactly that, not the wider headerFooterLines budget the
+// true fullscreen fallback (renderSidebarFullscreen, below sidebarModalFits)
+// uses.
+func sidebarModalScrollBudget(m Model) int {
+	_, innerHeight := sidebarModalInnerSize(m.Width, m.Height)
+	contentBudget := innerHeight - sidebarModalLabelLines - trailingNewlineRow
+	if contentBudget < 0 {
+		contentBudget = 0
+	}
+	return contentBudget
+}
+
 // padBaseForOverlay pads every line of s out to at least width display
 // columns and appends blank width-wide lines until s has at least height
 // lines. compositeLine only composites onto a base row whose display width
@@ -1796,6 +1899,69 @@ func renderSidebarFullscreen(s SidebarState, width, height int) string {
 	}
 	fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeSidebar, []string{"t", "x", "z", "H"}, width, false))
 	return b.String()
+}
+
+// sidebarModalLabelLines is the one row renderSidebarModalContent reserves
+// for sidebarLabel — the same interior "label" row renderSidebarFullscreen
+// spends, carried over so the floating box never drops that
+// activity/transcript-and-follow-state info just because the fullscreen
+// takeover became a modal (issue #1845).
+const sidebarModalLabelLines = 1
+
+// renderSidebarModalContent renders s's body for the floating log modal,
+// windowed to innerWidth x innerHeight — the sidebar analogue of
+// renderDetailModalContent (issue #1845). Its three rows of chrome
+// (sidebarModalLabelLines' label line, sidebarErr's error line in place of
+// content when set, and one footer line) are budgeted the same way
+// renderSidebarFullscreen already budgets headerFooterLines, so a resize
+// that shrinks the box never renders more rows than innerHeight leaves room
+// for.
+func renderSidebarModalContent(s SidebarState, innerWidth, innerHeight int) []string {
+	lines := []string{clip(sidebarLabel(s), innerWidth, false)}
+	contentBudget := innerHeight - sidebarModalLabelLines - trailingNewlineRow
+	if contentBudget < 0 {
+		contentBudget = 0
+	}
+	switch err := sidebarErr(s); {
+	case err != nil:
+		lines = append(lines, clip("sidebar failed: "+err.Error(), innerWidth, false))
+	default:
+		for _, line := range windowSidebarLines(s, contentBudget) {
+			lines = append(lines, clip(line, innerWidth, false))
+		}
+	}
+	if len(lines) > innerHeight-trailingNewlineRow {
+		lines = lines[:innerHeight-trailingNewlineRow]
+	}
+	lines = append(lines, renderFooterHints(ModeSidebar, []string{"t", "x", "z", "H"}, innerWidth, false))
+	for len(lines) < innerHeight {
+		lines = append(lines, "")
+	}
+	if len(lines) > innerHeight {
+		lines = lines[:innerHeight]
+	}
+	return lines
+}
+
+// renderSidebarModalBox renders s as a bordered floating box exactly
+// width x height display cells: the "#number title" set in the top edge
+// (issue #1845 AC), matching the detail modal's own renderDetailModalBox —
+// same shared renderBoxedColumn/renderTitledTopBorder helper, same
+// padDisplay-every-row treatment so compositeOverlay fully occludes the list
+// content behind it.
+func renderSidebarModalBox(s SidebarState, width, height int) string {
+	if width < 4 || height < 3 {
+		return ""
+	}
+	innerWidth := width - 2
+	innerHeight := height - 2
+	title := fmt.Sprintf("#%s %s", SanitizeControlSequences(s.Number), SanitizeControlSequences(s.Title))
+
+	lines := renderSidebarModalContent(s, innerWidth, innerHeight)
+	for i, l := range lines {
+		lines[i] = padDisplay(l, innerWidth)
+	}
+	return renderBoxedColumn(strings.Join(lines, "\n"), innerWidth, title, RoleDim)
 }
 
 // footerHintWidth returns the width left for a fullscreen overlay's hint

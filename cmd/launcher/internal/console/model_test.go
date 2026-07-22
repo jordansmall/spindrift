@@ -452,6 +452,23 @@ func TestUpdate_SidebarLoadedMsg_OpensSidebar_ActivityDefault(t *testing.T) {
 	}
 }
 
+// TestUpdate_SidebarLoadedMsg_CarriesTitle verifies SidebarLoadedMsg's Title
+// lands on SidebarState.Title — the row identifier the floating log modal's
+// border needs (`#<num> <title>`, matching the detail modal's own aesthetic,
+// issue #1845), captured at open time the same way DetailModalOpenMsg
+// already carries its Title through to DetailModalState.
+func TestUpdate_SidebarLoadedMsg_CarriesTitle(t *testing.T) {
+	m := NewModel()
+	m = Update(m, SidebarLoadedMsg{Number: "42", Title: "fix the thing", Activity: []ActivityLine{{Text: "hi"}}})
+
+	if m.Sidebar == nil {
+		t.Fatal("Sidebar = nil, want non-nil after SidebarLoadedMsg")
+	}
+	if m.Sidebar.Title != "fix the thing" {
+		t.Errorf("Sidebar.Title = %q, want %q", m.Sidebar.Title, "fix the thing")
+	}
+}
+
 // TestUpdate_SidebarLoadedMsg_FollowDefaultsTrueOnOpen verifies a freshly
 // opened sidebar (no retained position for this Dispatch yet) starts with
 // Follow true — live-tailing is the default the moment a feed opens, not an
@@ -481,7 +498,7 @@ func TestUpdate_SidebarLoadedMsg_FreshOpenWhileFollowing_StartsAtBottom(t *testi
 	m = Update(m, SizeChangedMsg{Width: 80, Height: 20})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity})
 
-	want := len(m.Sidebar.Lines) - (20 - headerFooterLines - trailingNewlineRow) // last page fills the viewport
+	want := len(m.Sidebar.Lines) - sidebarModalScrollBudget(m) // last page fills the floating log modal's own budget (issue #1845)
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (a fresh open while following starts at the bottom)", m.Sidebar.Offset, want)
 	}
@@ -570,7 +587,7 @@ func TestUpdate_SidebarToggleMsg_BackToActivityWhileFollowing_SnapsToBottom(t *t
 	if m.Sidebar.ShowTranscript {
 		t.Fatal("test setup: three toggles must land back on the Activity feed")
 	}
-	want := len(m.Sidebar.Lines) - (20 - headerFooterLines - trailingNewlineRow) // last page fills the viewport
+	want := len(m.Sidebar.Lines) - sidebarModalScrollBudget(m) // last page fills the floating log modal's own budget (issue #1845)
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (following, snapped back to the Activity feed's own bottom)", m.Sidebar.Offset, want)
 	}
@@ -655,7 +672,7 @@ func TestUpdate_SidebarScrollMsg_ClampsToViewportHeight(t *testing.T) {
 
 	m = Update(m, SidebarScrollMsg{Delta: 1000})
 
-	want := 100 - (20 - headerFooterLines - trailingNewlineRow) // last page fills the fullscreen budget
+	want := 100 - sidebarModalScrollBudget(m) // last page fills the floating log modal's own budget (issue #1845)
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (last page fills viewport)", m.Sidebar.Offset, want)
 	}
@@ -714,13 +731,15 @@ func TestUpdate_SidebarScrollMsg_Docked_LastLineReachable(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarScrollMsg_ZoomedClampsToFullHeightNotBodyBudget verifies
+// TestUpdate_SidebarScrollMsg_ZoomedClampsToModalBudgetNotBodyBudget verifies
 // a pgdown past the end of a transcript, zoomed on a terminal wide enough to
-// dock, lands Offset against the whole terminal Height — the row budget
-// renderSidebarFullscreen actually renders into once SidebarZoom forces it —
-// not bodyBudget(m), which only applies to the docked render the operator
-// zoomed away from (review finding on issue #1502).
-func TestUpdate_SidebarScrollMsg_ZoomedClampsToFullHeightNotBodyBudget(t *testing.T) {
+// dock (and comfortably past sidebarModalFits' own floor), lands Offset
+// against the floating log modal's own content budget — the row budget
+// renderSidebarModalContent actually renders into once SidebarZoom forces
+// the modal open (issue #1845) — not bodyBudget(m), which only applies to
+// the docked render the operator zoomed away from (review finding on issue
+// #1502).
+func TestUpdate_SidebarScrollMsg_ZoomedClampsToModalBudgetNotBodyBudget(t *testing.T) {
 	lines := make([]string, 100)
 	for i := range lines {
 		lines[i] = fmt.Sprintf("l%d", i)
@@ -734,12 +753,13 @@ func TestUpdate_SidebarScrollMsg_ZoomedClampsToFullHeightNotBodyBudget(t *testin
 	m = Update(m, SidebarScrollMsg{Delta: 1000})
 
 	budget := bodyBudget(m)
-	if budget >= 20 {
-		t.Fatalf("test setup: bodyBudget(m) = %d, want it under Height (20) — the docked/zoomed budgets must actually differ to distinguish them", budget)
+	modalBudget := sidebarModalScrollBudget(m)
+	if budget >= 20 || budget == modalBudget {
+		t.Fatalf("test setup: bodyBudget(m) = %d, sidebarModalScrollBudget(m) = %d — the docked/zoomed budgets must actually differ to distinguish them", budget, modalBudget)
 	}
-	want := 100 - (20 - headerFooterLines - trailingNewlineRow) // last page fills the full terminal height, not the docked budget
+	want := 100 - modalBudget // last page fills the floating log modal's own budget, not the docked budget
 	if m.Sidebar.Offset != want {
-		t.Errorf("Offset = %d, want %d (last page fills the zoomed fullscreen's full height, not the docked body budget)", m.Sidebar.Offset, want)
+		t.Errorf("Offset = %d, want %d (last page fills the zoomed modal's own budget, not the docked body budget)", m.Sidebar.Offset, want)
 	}
 }
 
@@ -904,7 +924,7 @@ func TestUpdate_SidebarActivityMsg_FollowSnapsToBottom(t *testing.T) {
 	}
 	m = Update(m, SidebarActivityMsg{Number: "42", Activity: grown})
 
-	want := len(m.Sidebar.Lines) - (20 - headerFooterLines - trailingNewlineRow) // last page fills the viewport (issue #829's convention)
+	want := len(m.Sidebar.Lines) - sidebarModalScrollBudget(m) // last page fills the floating log modal's own budget (issue #1845)
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (the last page, following the growth)", m.Sidebar.Offset, want)
 	}
@@ -1076,7 +1096,7 @@ func TestUpdate_SidebarTranscriptMsg_FollowSnapsToBottom(t *testing.T) {
 
 	m = Update(m, SidebarTranscriptMsg{Number: "42", Rendered: grown.String()})
 
-	want := len(m.Sidebar.Lines) - (20 - headerFooterLines - trailingNewlineRow) // last page fills the viewport (issue #829's convention)
+	want := len(m.Sidebar.Lines) - sidebarModalScrollBudget(m) // last page fills the floating log modal's own budget (issue #1845)
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (the last page, following the growth)", m.Sidebar.Offset, want)
 	}
@@ -1658,7 +1678,7 @@ func TestUpdate_SidebarLoadedMsg_ReopenWhileFollowing_SnapsToNewBottom(t *testin
 	}
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: grown})
 
-	want := len(m.Sidebar.Lines) - (20 - headerFooterLines - trailingNewlineRow) // last page fills the viewport
+	want := len(m.Sidebar.Lines) - sidebarModalScrollBudget(m) // last page fills the floating log modal's own budget (issue #1845)
 	if m.Sidebar.Offset != want {
 		t.Errorf("Offset = %d, want %d (the new bottom, not the stale %d saved before close)", m.Sidebar.Offset, want, staleOffset)
 	}

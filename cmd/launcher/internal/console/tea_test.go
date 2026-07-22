@@ -1305,7 +1305,12 @@ func TestTea_SidebarActivityTick_AdvancesRawTranscriptView(t *testing.T) {
 	launch.pollInterval = time.Hour
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	// Wide enough that the floating log modal's box (issue #1845) has room
+	// to show this fixture's full raw JSON line without clipping it before
+	// reaching the "text" value — narrower than sidebarFits' docked
+	// threshold, so the sidebar still opens through the modal/narrow-terminal
+	// path this test means to exercise, not the docked layout.
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(110, 24))
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "2")
@@ -1895,7 +1900,12 @@ func TestTea_SidebarScrollKeys_PageThroughContent(t *testing.T) {
 	launch := newTestLauncher(t, f)
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	// Taller than the default 24 rows so the floating log modal's content
+	// budget (issue #1845) matches what this test's fixed pgup/pgdown counts
+	// were calibrated against pre-modal — width 80 keeps it below sidebarFits'
+	// docked threshold, so the sidebar still opens through the same
+	// modal/narrow-terminal path this test means to exercise.
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 32))
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "2")
@@ -1946,7 +1956,12 @@ func TestTea_SidebarScrollKeys_CtrlFCtrlBPageThroughContent(t *testing.T) {
 	launch := newTestLauncher(t, f)
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	// Taller than the default 24 rows so the floating log modal's content
+	// budget (issue #1845) matches what this test's fixed page counts were
+	// calibrated against pre-modal — width 80 keeps it below sidebarFits'
+	// docked threshold, so the sidebar still opens through the same
+	// modal/narrow-terminal path this test means to exercise.
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 32))
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "2")
@@ -1997,7 +2012,12 @@ func TestTea_SidebarScrollKeys_CtrlDCtrlUHalfPageThroughContent(t *testing.T) {
 	launch := newTestLauncher(t, f)
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	// Taller than the default 24 rows so the floating log modal's content
+	// budget (issue #1845) matches what this test's fixed half-page counts
+	// were calibrated against pre-modal — width 80 keeps it below sidebarFits'
+	// docked threshold, so the sidebar still opens through the same
+	// modal/narrow-terminal path this test means to exercise.
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 32))
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "2")
