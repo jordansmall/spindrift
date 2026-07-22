@@ -25,7 +25,8 @@ func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconc
 		fmt.Fprintf(w, "reconcile is a local-tracker concern (ISSUE_TRACKER=%q) — nothing to do.\n", c.issueTracker)
 		return nil
 	}
-	res, err := reconcile.Run(it, cf, lp)
+	lw := localloop.Wire(localloopConfig(c), it)
+	res, err := reconcile.Run(it, cf, lp, func(num string) string { return lw.ResolveParent(num).String() })
 	if err != nil {
 		if len(res.Closed) > 0 {
 			fmt.Fprintf(w, "reconcile: closed %d issue(s) before error: %s\n", len(res.Closed), strings.Join(res.Closed, ", "))
