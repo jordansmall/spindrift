@@ -1983,6 +1983,37 @@ func TestReferenceDocSystemRowDoesNotDuplicateIntro(t *testing.T) {
 	}
 }
 
+// TestReferenceDocHasLocalCodeForgeSection guards against the
+// `CODE_FORGE=local` host-mediated loop (ADR 0033) staying discoverable only
+// as scattered knob-table rows: it must have its own section, parallel to
+// the `ISSUE_TRACKER=local` section, cross-linking both ADR 0033 and ADR
+// 0032, and it must never reintroduce the removed `CODE_FORGE_INTEGRATION_PARENT`
+// env var (#1877).
+func TestReferenceDocHasLocalCodeForgeSection(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "reference.md"))
+	if err != nil {
+		t.Fatalf("read docs/reference.md: %v", err)
+	}
+	doc := string(raw)
+
+	heading := "### Local code forge (`CODE_FORGE=local`)"
+	idx := strings.Index(doc, heading)
+	if idx == -1 {
+		t.Fatalf("docs/reference.md is missing the %q section heading", heading)
+	}
+	section := doc[idx:]
+
+	if !strings.Contains(section, "adr/0033-host-mediated-local-code-forge.md") {
+		t.Errorf("Local code forge section does not link ADR 0033")
+	}
+	if !strings.Contains(section, "adr/0032-host-mediated-local-issue-content.md") {
+		t.Errorf("Local code forge section does not link ADR 0032")
+	}
+	if strings.Contains(doc, "CODE_FORGE_INTEGRATION_PARENT") {
+		t.Errorf("docs/reference.md must not reintroduce the removed CODE_FORGE_INTEGRATION_PARENT env var")
+	}
+}
+
 // TestTriageLabelMeta_ColorsAreDistinct guards against two label tiers
 // visually colliding in the GitHub label UI by reusing the same hex color
 // (#801) — TestReferenceDocLabelSnippetMatchesTriageDefaults checks

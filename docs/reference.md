@@ -1208,6 +1208,76 @@ Default off, because the local tracker's whole premise is a private ticket
 folder (see above); opt in only if you want that traceability and have
 weighed the slug leaking into the (shared, `github` Code Forge) PR body.
 
+### Local code forge (`CODE_FORGE=local`)
+
+`CODE_FORGE=local` is the code-plane mirror of [Local issue tracker
+(`ISSUE_TRACKER=local`)](#local-issue-tracker-issue_trackerlocal) above — the
+two host-mediated `local` planes (ADR 0033, ADR 0032): a local backend is
+host-mediated because it isn't reachable from inside the Box, on the issue
+plane and now the code plane alike. Pair the two for the fully private,
+fully offline loop, or mix `CODE_FORGE=local` with `ISSUE_TRACKER=github` (or
+vice versa) to keep only one plane private. See [ADR
+0033](adr/0033-host-mediated-local-code-forge.md) for the full design and
+[ADR 0032](adr/0032-host-mediated-local-issue-content.md) for the issue-plane
+precedent it mirrors.
+
+**Accumulation repo.** Code accumulates in a bare repo the launcher owns —
+`.spindrift/accum.git` under the launcher's working directory by default,
+overridden by `CODE_FORGE_ACCUMULATION_REPO_DIR`. The launcher auto-creates
+it and seeds its base ref from `BASE_BRANCH` in the operator's own checkout,
+offline, before any Box runs — idempotently on every run thereafter, so
+there is no operator setup step.
+
+**Code-in / code-out.** The launcher RO bind-mounts the Accumulation repo
+into the Box at `/repo`; the agent clones it read-only and works in the
+tmpfs work dir, exactly as it would clone a real remote. The Box can't push
+back through a read-only mount, so it emits its branch instead as a `git
+bundle` (`seam.bundle`) written to a small, writable `/outbox` mount — the
+code-plane analog of ADR 0032's stdout comment block. The launcher relays
+that bundle host-side, fetching it into the Accumulation repo.
+
+**Landing.** The launcher merges the relayed branch onto
+`integration/<parent>` inside the Accumulation repo — one Integration branch
+per broad ticket. `<parent>` comes from *that seam's own* local issue's
+`parent:` frontmatter, sanitized to a git-ref-safe token (lowercased, each
+run of non-`[a-z0-9]` characters collapsed to a single dash, leading/trailing
+dashes trimmed); an issue with no `parent:` set falls back to its own
+sanitized slug instead, so a parentless seam is its own broad ticket rather
+than sharing one collapsed branch. A clean merge **is** the landing — no PR,
+no CI, no network — and closes the seam through the same `reconcile` path
+(above); a conflicting merge leaves the seam unlanded and blocked instead.
+`landing:` records `<integration-branch>@<sha>`, the immutable ref + commit
+the merge produced.
+
+**`MERGE_MODE=immediate` only.** `CODE_FORGE=local` requires
+`MERGE_MODE=immediate` — the merge-and-close described above *is* the
+"immediate" behavior. `manual` and `auto` have no meaning under `local`
+(there is no PR to leave open, no GitHub auto-merge to enqueue); either one
+would strand the relayed bundle unmerged in the outbox, so the launcher
+fails fast at startup instead.
+
+**Chaining is the `## Blocked by` graph, not a knob.** How seams compose
+across a broad ticket is not a separate mode: it falls out of the `##
+Blocked by` graph the operator already authors, driven by the existing
+`waves` scheduler — independent seams fan out in parallel, dependent seams
+wait on their blockers, and all converge on the one Integration branch. For
+`local`, "blocker met" reduces to a local frontmatter fact — the blocker
+seam's issue is closed on disk — so the whole DAG schedules fully offline,
+with no remote PR query in the loop.
+
+**Auto-surface (#1730).** Once a broad ticket's seams are all landed and
+closed, the launcher fast-forwards `integration/<parent>`'s current tip into
+the operator's own checkout as a local branch named after the ticket — the
+parent key itself for a parented ticket, or the issue's own sanitized title
+for a parentless one — a host-side fetch that creates or fast-forwards only
+that branch ref, never
+switches the operator's currently checked-out branch, and never pushes to
+`origin`. Nothing is surfaced for an incomplete ticket, and an
+already-surfaced unchanged branch is a no-op. Surfacing the assembled branch
+locally is as far as spindrift goes — there is no `finalize` verb yet; the
+operator still publishes the team PR manually with the `git push origin
+<branch>` / `gh pr create` gestures they already know.
+
 ---
 
 ## Security
