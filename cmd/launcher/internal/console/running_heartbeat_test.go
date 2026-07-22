@@ -259,15 +259,18 @@ func TestRunningHeartbeat_IncrementalAppend_FeedsOnlyAppendedBytes(t *testing.T)
 		`{"type":"result","num_turns":3,"total_cost_usd":0.01,"duration_ms":5000}` + "\n",
 	}
 
-	var written string
+	var written, got string
 	for _, chunk := range chunks {
 		written += chunk
 		if err := os.WriteFile(path, []byte(written), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cache.RunningHeartbeat(drv, dir, "9")
+		got = cache.RunningHeartbeat(drv, dir, "9")
 	}
 
+	if want := "3 turn"; !strings.Contains(got, want) {
+		t.Errorf("RunningHeartbeat() after 3 appends = %q, want it to contain %q", got, want)
+	}
 	if fed != len(written) {
 		t.Errorf("bytes fed to heartbeat parser across 3 appends = %d, want %d (exactly the appended bytes, not a whole-file reread each call)", fed, len(written))
 	}

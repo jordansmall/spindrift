@@ -18,8 +18,9 @@ type ActivityLine struct {
 }
 
 // ActivityFeed replays the Dispatch's most-recent pass log through drv's
-// heartbeat parser -- the same driver machinery RunningHeartbeat feeds
-// against the same latest pass log (#647 AC2) -- and returns the whole
+// heartbeat parser -- the same driver.Driver.NewHeartbeatWriter machinery
+// RunningHeartbeat feeds against the same latest pass log (#647 AC2) -- and
+// returns the whole
 // ordered sequence of status lines it emitted, rather than just the last one.
 // Consecutive identical lines collapse to one entry, so the feed reads as one
 // line per distinct Driver step (#1501 AC1). Returns nil when no log exists
