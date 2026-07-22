@@ -123,7 +123,18 @@ func padColumnsToEqualHeight(list, sidebar string) (string, string) {
 // sidebar columns to match the taller one before boxing either
 // (padColumnsToEqualHeight), so this only ever fires when both are empty —
 // a zero-height budget must not draw a stray empty frame.
-func renderBoxedColumn(content string, width int) string {
+//
+// With title == "", the top border is the plain rule above — untouched, so
+// every existing untitled call site (header, docked list, docked sidebar)
+// renders exactly the bytes it always has. With title set, the top border
+// instead folds it into the rule itself — "╭─ title ─…─╮" ("+- title -…-+"
+// under the ASCII fallback) — generalizing the detail modal's title-in-border
+// trick (issue #1758) into this one shared helper so the modal's border gets
+// the same ASCII degradation every other panel already has (issue #1797).
+// titleRole lets a future caller (the sidebar's focus indicator) color the
+// title text distinctly from the border rule; RoleDim matches the border and
+// reproduces today's look.
+func renderBoxedColumn(content string, width int, title string, titleRole Role) string {
 	if content == "" {
 		return ""
 	}
@@ -132,11 +143,61 @@ func renderBoxedColumn(content string, width int) string {
 	if colorProfile() == termenv.Ascii {
 		border = lipgloss.ASCIIBorder()
 	}
-	return rendererFor(colorProfile()).NewStyle().
+	boxed := rendererFor(colorProfile()).NewStyle().
 		Width(width).
 		Border(border).
 		BorderForeground(lipgloss.ANSIColor(ansiSlot(RoleDim))).
 		Render(content)
+	if title == "" {
+		return boxed
+	}
+	_, rest, _ := strings.Cut(boxed, "\n")
+	return renderTitledTopBorder(width+boxBorderCols, title, titleRole, border) + "\n" + rest
+}
+
+// renderTitledTopBorder builds a bordered panel's top edge at exactly width
+// display columns, folding title into the rule: the border's own corner and
+// top-rule glyphs (already ASCII-degraded by the caller's choice of border),
+// a one-rune lead-in, the title, then rule fill out to width — generalized
+// from the detail modal's original hand-rolled Unicode-only top border
+// (issue #1758) so both the rounded and ASCII rule sets pass through. A
+// title too wide for the panel truncates with an ellipsis (runewidth.Truncate,
+// the same primitive truncateWithEllipsis uses); fill is recomputed from the
+// title's actual rendered width afterward, so the rule always lands on
+// exactly width regardless of how short Truncate's own output comes in
+// (issue #1785's wide-rune-boundary lesson).
+func renderTitledTopBorder(width int, title string, titleRole Role, border lipgloss.Border) string {
+	inner := width - runewidth.StringWidth(border.TopLeft) - runewidth.StringWidth(border.TopRight)
+	if inner < 0 {
+		inner = 0
+	}
+	lead := border.Top + " "
+	const tail = " "
+	structural := runewidth.StringWidth(lead) + runewidth.StringWidth(tail)
+	avail := inner - structural
+	if avail < 0 {
+		avail = 0
+	}
+	displayTitle := title
+	if runewidth.StringWidth(displayTitle) > avail {
+		displayTitle = runewidth.Truncate(displayTitle, avail, "…")
+	}
+	label := lead + displayTitle + tail
+	if runewidth.StringWidth(label) > inner {
+		// A panel too narrow even for the lead-in/trailing space (inner <
+		// structural) can't be fixed by shrinking the title alone — clamp
+		// the whole label together instead, so the rule never overflows
+		// width regardless of how small inner is (issue #1797 review).
+		label = runewidth.Truncate(label, inner, "")
+		label += strings.Repeat(" ", inner-runewidth.StringWidth(label))
+		return border.TopLeft + label + border.TopRight
+	}
+	fill := inner - runewidth.StringWidth(label)
+	borderStyle := roleStyle(RoleDim)
+	titleStyle := roleStyle(titleRole)
+	return borderStyle.Render(border.TopLeft+lead) +
+		titleStyle.Render(displayTitle) +
+		borderStyle.Render(tail+strings.Repeat(border.Top, fill)+border.TopRight)
 }
 
 // View renders m as the text the run loop writes to the terminal: the
@@ -194,7 +255,7 @@ func View(m Model) string {
 func renderBoxedHeader(m Model) string {
 	header := renderHeader(m)
 	if headerWidth := m.Width - boxBorderCols; headerWidth > 0 {
-		if boxed := renderBoxedColumn(header, headerWidth) + "\n"; strings.Count(boxed, "\n") <= m.Height {
+		if boxed := renderBoxedColumn(header, headerWidth, "", RoleDim) + "\n"; strings.Count(boxed, "\n") <= m.Height {
 			return boxed
 		}
 	}
@@ -277,8 +338,8 @@ func viewBody(m Model) string {
 		list := renderBody(listModel, panelBudget, compact)
 		sidebar := renderSidebarDocked(*m.Sidebar, width, panelBudget, m.Focus == FocusSidebar)
 		list, sidebar = padColumnsToEqualHeight(list, sidebar)
-		listBox := renderBoxedColumn(list, listModel.Width)
-		sidebarBox := renderBoxedColumn(sidebar, width)
+		listBox := renderBoxedColumn(list, listModel.Width, "", RoleDim)
+		sidebarBox := renderBoxedColumn(sidebar, width, "", RoleDim)
 		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listBox, sidebarBox))
 	} else {
 		b.WriteString(renderBody(m, budget, compact))
@@ -1330,37 +1391,6 @@ func padBaseForOverlay(s string, width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-// detailModalBoxTopBorder renders the floating box's top edge at exactly
-// width display columns: the corner runes, a dash lead-in, the ticket's
-// "#number title" (truncated with an ellipsis if it doesn't fit), then
-// border rune fill out to width — the box's AC1 placement for the ticket
-// number/title (issue #1758).
-func detailModalBoxTopBorder(width int, title string) string {
-	inner := width - 2
-	if inner < 0 {
-		inner = 0
-	}
-	label := "─ " + title + " "
-	if runewidth.StringWidth(label) > inner {
-		label = runewidth.Truncate(label, inner, "…")
-	}
-	fill := inner - runewidth.StringWidth(label)
-	if fill < 0 {
-		fill = 0
-	}
-	return "╭" + label + strings.Repeat("─", fill) + "╮"
-}
-
-// detailModalBoxBottomBorder renders the floating box's bottom edge at
-// exactly width display columns.
-func detailModalBoxBottomBorder(width int) string {
-	inner := width - 2
-	if inner < 0 {
-		inner = 0
-	}
-	return "╰" + strings.Repeat("─", inner) + "╯"
-}
-
 // padDisplay right-pads (or, if it overflows, truncates) s to exactly width
 // display columns — every interior row of the floating box must land at
 // exactly its inner width, or the side border runes drift out of column
@@ -1470,7 +1500,11 @@ func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) [
 // width x height display cells: the "#number title" set in the top border
 // (AC1), the interior content renderDetailModalContent produces windowed to
 // the box's interior, and every row padded to width so compositeOverlay
-// fully occludes whatever list content sits behind it (issue #1758).
+// fully occludes whatever list content sits behind it (issue #1758). Boxed
+// via the shared renderBoxedColumn/renderTitledTopBorder helper rather than
+// hand-rolled Unicode runes, so the border — titled top rule included — now
+// degrades to ASCII under NO_COLOR/a dumb terminal like every other panel in
+// the package (issue #1797).
 func renderDetailModalBox(s DetailModalState, width, height int) string {
 	if width < 4 || height < 3 {
 		return ""
@@ -1479,13 +1513,17 @@ func renderDetailModalBox(s DetailModalState, width, height int) string {
 	innerHeight := height - 2
 	title := fmt.Sprintf("#%s %s", SanitizeControlSequences(s.Number), SanitizeControlSequences(s.Title))
 
-	lines := make([]string, 0, height)
-	lines = append(lines, detailModalBoxTopBorder(width, title))
-	for _, content := range renderDetailModalContent(s, innerWidth, innerHeight) {
-		lines = append(lines, "│"+padDisplay(content, innerWidth)+"│")
+	lines := renderDetailModalContent(s, innerWidth, innerHeight)
+	// Each content line must be clipped to exactly innerWidth before it
+	// reaches renderBoxedColumn: lipgloss's Width() only ever pads a line up
+	// to width, never truncates one down, so an over-wide line (e.g. a
+	// label wrapText left unbroken) would otherwise widen the whole box
+	// instead of getting cut with an ellipsis (issue #1779/#1785's rule,
+	// carried over from this function's old inline padDisplay call).
+	for i, l := range lines {
+		lines[i] = padDisplay(l, innerWidth)
 	}
-	lines = append(lines, detailModalBoxBottomBorder(width))
-	return strings.Join(lines, "\n")
+	return renderBoxedColumn(strings.Join(lines, "\n"), innerWidth, title, RoleDim)
 }
 
 // renderDetailModal renders a Backlog issue's fullscreen ticket detail
