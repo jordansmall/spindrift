@@ -622,7 +622,7 @@ func (t teaModel) openDetailModal(iss forge.Issue) (teaModel, tea.Cmd) {
 		t.m = Update(t.m, DetailModalLoadedMsg{Number: iss.Number, Body: cached.Body, BlockedBy: cached.BlockedBy, Blocks: cached.Blocks})
 		return t, nil
 	}
-	return t, openDetailModalCmd(t.tracker, t.m.All, t.m.Edges, t.m.EdgeSources, iss.Number)
+	return t, openDetailModalCmd(t.tracker, t.m.All, iss.Number)
 }
 
 // handleSidebarKey routes one keypress while ModeSidebar owns the keyboard

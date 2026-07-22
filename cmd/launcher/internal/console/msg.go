@@ -540,26 +540,21 @@ func (DetailModalCloseMsg) isConsoleMsg() {}
 
 // DetailModalLoadedMsg carries openDetailModalCmd's async result: the
 // ticket's full body (a separate Issue fetch, since the backlog listing
-// never carries it) plus its Blocked-by and Blocks lists, resolved from the
-// whole-backlog dependency edge graph (issue #1632). Number gates against a
+// never carries it) plus its Blocked-by and Blocks lists, each resolved
+// directly from the ticket's own dependency edge rather than a
+// whole-backlog readiness graph (issue #1744). Number gates against a
 // stale load landing after the operator closed the modal or opened a
 // different ticket, mirroring SidebarLoadedMsg's own same-number guard.
-// Edges/Sources are non-nil only when this call built the graph itself
-// (Model didn't already retain one, or "r" just invalidated it) — Update
-// stores them onto Model so a later ticket's own load reuses the same
-// graph instead of rebuilding it. Err is set instead of Body when the Issue
-// fetch itself failed — openDetailModalCmd returns as soon as that call
-// errs, before ever resolving BlockedBy/Blocks, so both are empty
-// alongside a non-nil Err; renderDetailModal's error branch reflects that
-// by showing the failure in place of everything else rather than a partial
-// render.
+// Err is set instead of Body when the Issue fetch itself failed —
+// openDetailModalCmd returns as soon as that call errs, before ever
+// resolving BlockedBy/Blocks, so both are empty alongside a non-nil Err;
+// renderDetailModal's error branch reflects that by showing the failure in
+// place of everything else rather than a partial render.
 type DetailModalLoadedMsg struct {
 	Number    string
 	Body      string
 	BlockedBy []BlockerRef
 	Blocks    []BlockerRef
-	Edges     map[string][]string
-	Sources   map[string]map[string]forge.DepSource
 	Err       error
 }
 
@@ -577,13 +572,10 @@ type DetailModalScrollMsg struct {
 func (DetailModalScrollMsg) isConsoleMsg() {}
 
 // DetailCacheInvalidatedMsg is the tea layer's signal that the operator
-// pressed "r" — clears Model.DetailCache so a later ticket detail modal open
-// re-fetches fresh data instead of replaying data "r" was meant to refresh
-// (issue #1632). It leaves the retained whole-backlog dependency edge graph
-// (Edges/EdgeSources) in place: the graph is stable across a refresh, and
-// wiping it would force the next detail open to pay the full graph rebuild
-// again instead of staying warm (issue #1746). Fired alongside, not instead
-// of, the ordinary refreshCmd "r" already triggers.
+// pressed "r" — clears Model.DetailCache, so a later ticket detail modal
+// open re-fetches fresh data instead of replaying data "r" was meant to
+// refresh (issue #1632). Fired alongside, not instead of, the ordinary
+// refreshCmd "r" already triggers.
 type DetailCacheInvalidatedMsg struct{}
 
 func (DetailCacheInvalidatedMsg) isConsoleMsg() {}

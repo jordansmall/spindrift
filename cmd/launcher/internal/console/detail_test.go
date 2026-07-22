@@ -1,73 +1,99 @@
 package console
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestInvertEdges_ReturnsChildrenThatDeclareTheBlocker verifies invertEdges
-// walks the forward edge map (child -> blockers) and returns every child
-// that names number as one of its own blockers — the Blocks section's whole
-// derivation, with no separate DepsOf call of its own (issue #1632).
-func TestInvertEdges_ReturnsChildrenThatDeclareTheBlocker(t *testing.T) {
-	edges := map[string][]string{
-		"10": {"42"},
-		"11": {"42", "7"},
-		"12": {"7"},
-	}
-	sources := map[string]map[string]forge.DepSource{
-		"10": {"42": forge.DepSourceNative},
-		"11": {"42": forge.DepSourceBody, "7": forge.DepSourceNative},
+// issueTrackerOnly wraps a forge.IssueTracker so its dynamic type exposes
+// only that interface's method set, hiding any optional surface (e.g.
+// forge.BlockersLister) the wrapped value's concrete type happens to
+// implement — the fixture openDetailModalCmd's BlockersLister tests use to
+// simulate a tracker shaped like the local adapter (issue #1744).
+type issueTrackerOnly struct{ forge.IssueTracker }
+
+// TestResolveEdgeRefs_ResolvesFromFetch verifies resolveEdgeRefs turns
+// fetch's resolved dependencies into BlockerRefs, reusing resolveBlockerRef
+// to fill in each one's title/state from the backlog list (issue #1744).
+func TestResolveEdgeRefs_ResolvesFromFetch(t *testing.T) {
+	f := forge.NewFake()
+	all := []forge.Issue{{Number: "7", Title: "backlog title", State: forge.IssueOpen}}
+	fetch := func(string) ([]forge.Dependency, error) {
+		return []forge.Dependency{{ID: "7", Source: forge.DepSourceNative}}, nil
 	}
 
-	ids, sourceOf := invertEdges(edges, sources, "42")
+	refs := resolveEdgeRefs(f, all, fetch, "1")
 
-	if want := []string{"10", "11"}; !reflect.DeepEqual(ids, want) {
-		t.Errorf("invertEdges ids = %v, want %v", ids, want)
-	}
-	if sourceOf["10"] != forge.DepSourceNative {
-		t.Errorf("sourceOf[10] = %v, want native", sourceOf["10"])
-	}
-	if sourceOf["11"] != forge.DepSourceBody {
-		t.Errorf("sourceOf[11] = %v, want body", sourceOf["11"])
+	want := []BlockerRef{{Number: "7", Source: forge.DepSourceNative, State: forge.IssueOpen, Title: "backlog title"}}
+	if !reflect.DeepEqual(refs, want) {
+		t.Errorf("resolveEdgeRefs = %v, want %v", refs, want)
 	}
 }
 
-// TestInvertEdges_OrdersNumericallyAscending verifies the returned child
-// numbers sort ascending by numeric value — GitHub's own canonical order —
-// rather than the random order Go's map iteration would otherwise produce
-// (issue #1632).
-func TestInvertEdges_OrdersNumericallyAscending(t *testing.T) {
-	edges := map[string][]string{
-		"100": {"1"},
-		"9":   {"1"},
-		"20":  {"1"},
+// TestResolveEdgeRefs_FetchErrorReturnsNil verifies a fetch failure
+// resolves to no refs rather than propagating the error — a transient
+// DepsOf/BlocksOf failure must not fail the whole modal load (issue #1744).
+func TestResolveEdgeRefs_FetchErrorReturnsNil(t *testing.T) {
+	f := forge.NewFake()
+	fetch := func(string) ([]forge.Dependency, error) {
+		return nil, errors.New("boom")
 	}
-	sources := map[string]map[string]forge.DepSource{}
 
-	ids, _ := invertEdges(edges, sources, "1")
+	refs := resolveEdgeRefs(f, nil, fetch, "1")
 
-	if want := []string{"9", "20", "100"}; !reflect.DeepEqual(ids, want) {
-		t.Errorf("invertEdges ids = %v, want %v (numeric order, not lexical)", ids, want)
+	if refs != nil {
+		t.Errorf("resolveEdgeRefs = %v, want nil on fetch error", refs)
 	}
 }
 
-// TestInvertEdges_NoBlockedChildren_ReturnsEmpty verifies a number nothing
-// else declares as a blocker returns an empty Blocks list, not a nil-vs-
-// empty distinction callers would need to special-case.
-func TestInvertEdges_NoBlockedChildren_ReturnsEmpty(t *testing.T) {
-	edges := map[string][]string{"10": {"7"}}
-	sources := map[string]map[string]forge.DepSource{}
+// TestOpenDetailModalCmd_ResolvesBlockedByFromDepsOfOnly verifies the
+// returned tea.Cmd resolves Blocked-by with a single DepsOf call for the
+// opened ticket, and never touches the tracker's DepsOf for any other issue
+// — the whole point of decoupling detail-open from a whole-backlog
+// readiness graph (issue #1744).
+func TestOpenDetailModalCmd_ResolvesBlockedByFromDepsOfOnly(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "t", State: forge.IssueOpen})
+	f.SetIssue(forge.Issue{Number: "7", Title: "blocker", State: forge.IssueOpen})
+	f.NativeDeps = map[string][]string{"42": {"7"}}
+	all := []forge.Issue{{Number: "42", Title: "t", State: forge.IssueOpen}, {Number: "7", Title: "blocker", State: forge.IssueOpen}}
 
-	ids, sourceOf := invertEdges(edges, sources, "42")
-
-	if len(ids) != 0 {
-		t.Errorf("invertEdges ids = %v, want none", ids)
+	msg, ok := openDetailModalCmd(f, all, "42")().(DetailModalLoadedMsg)
+	if !ok {
+		t.Fatal("openDetailModalCmd did not return a DetailModalLoadedMsg")
 	}
-	if len(sourceOf) != 0 {
-		t.Errorf("invertEdges sourceOf = %v, want none", sourceOf)
+
+	want := []BlockerRef{{Number: "7", Source: forge.DepSourceNative, State: forge.IssueOpen, Title: "blocker"}}
+	if !reflect.DeepEqual(msg.BlockedBy, want) {
+		t.Errorf("BlockedBy = %v, want %v", msg.BlockedBy, want)
+	}
+	if want := []string{"42"}; !reflect.DeepEqual(f.DepsOfCalls, want) {
+		t.Errorf("DepsOfCalls = %v, want %v", f.DepsOfCalls, want)
+	}
+}
+
+// TestOpenDetailModalCmd_BlocksEmptyWhenTrackerLacksBlockersLister verifies
+// the Blocks section resolves to nil, rather than erroring or falling back
+// to a whole-backlog scan, on a tracker with no native reverse-dependency
+// concept — the local adapter's shape (issue #1744).
+func TestOpenDetailModalCmd_BlocksEmptyWhenTrackerLacksBlockersLister(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "t", Body: "body text", State: forge.IssueOpen})
+	tracker := issueTrackerOnly{f}
+
+	msg, ok := openDetailModalCmd(tracker, nil, "42")().(DetailModalLoadedMsg)
+	if !ok {
+		t.Fatal("openDetailModalCmd did not return a DetailModalLoadedMsg")
+	}
+
+	if msg.Err != nil {
+		t.Fatalf("Err = %v, want nil", msg.Err)
+	}
+	if msg.Blocks != nil {
+		t.Errorf("Blocks = %v, want nil (no BlockersLister)", msg.Blocks)
 	}
 }
 

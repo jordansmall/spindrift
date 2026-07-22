@@ -1,58 +1,63 @@
 // Package console: detail.go carries the ticket detail modal's async
 // fetch — its body and its Blocked-by/Blocks lists — the seam through which
-// tea.go's openDetailModal reaches the forge.IssueTracker and
-// waves.NewReadiness (issue #1632). tea.go stays the thin key-routing
-// adapter; this file holds the actual data-resolution logic, mirroring
-// activity.go/transcript.go's own split from tea.go for the live-tail
-// sidebar.
+// tea.go's openDetailModal reaches the forge.IssueTracker. tea.go stays the
+// thin key-routing adapter; this file holds the actual data-resolution
+// logic, mirroring activity.go/transcript.go's own split from tea.go for
+// the live-tail sidebar.
 package console
 
 import (
-	"sort"
-	"strconv"
-
 	tea "github.com/charmbracelet/bubbletea"
 
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/waves"
 )
 
 // openDetailModalCmd loads number's body — a separate Issue fetch, since
 // ListOpenIssues never carries Body — plus its Blocked-by and Blocks lists,
-// both derived from the whole-backlog dependency edge graph
-// (waves.NewReadiness) rather than a fresh per-ticket DepsOf call: Blocks is
-// the graph's own reverse edges, and Blocked-by rides along in the same
-// batch call for free. edges/sources are the Model's already-retained
-// graph; nil only before the first detail modal open of the session — "r"
-// (DetailCacheInvalidatedMsg) leaves the graph in place rather than
-// re-nil-ing it (issue #1746) — so this builds it once here and hands the
-// built graph back on DetailModalLoadedMsg for
-// Update to retain — every later modal open within the same session reuses
-// it without a further NewReadiness sweep (issue #1632).
-func openDetailModalCmd(tracker forge.IssueTracker, all []forge.Issue, edges map[string][]string, sources map[string]map[string]forge.DepSource, number string) tea.Cmd {
+// each resolved directly from number's own dependency edge rather than a
+// whole-backlog readiness graph (issue #1744, replacing the
+// waves.NewReadiness sweep issue #1632 originally used here, and the
+// keep-it-warm-across-refresh mitigation issue #1746 layered onto that
+// sweep in turn — both moot once nothing here ever builds the whole graph
+// to begin with): Blocked-by is a single DepsOf call, and Blocks is a
+// single BlocksOf call on trackers that implement forge.BlockersLister
+// (github, jira, whose blocked/blocking relationship is genuinely native
+// and bidirectional) — nil on trackers that don't (local, whose only
+// blocker concept is one-directional body-text parsing with no reverse to
+// query short of scanning every issue file). This keeps first-open latency
+// independent of backlog size, on every open, not just a warm one.
+func openDetailModalCmd(tracker forge.IssueTracker, all []forge.Issue, number string) tea.Cmd {
 	return func() tea.Msg {
 		issue, err := tracker.Issue(number)
 		if err != nil {
 			return DetailModalLoadedMsg{Number: number, Err: err}
 		}
-		builtGraph := edges == nil
-		if builtGraph {
-			wavesIssues := make([]waves.Issue, len(all))
-			for i, iss := range all {
-				wavesIssues[i] = waves.Issue{Number: iss.Number, Title: iss.Title}
-			}
-			result, _ := waves.NewReadiness(tracker, wavesIssues)
-			edges, sources = result.Edges, result.Sources
+		blockedBy := resolveEdgeRefs(tracker, all, tracker.DepsOf, number)
+		var blocks []BlockerRef
+		if bl, ok := tracker.(forge.BlockersLister); ok {
+			blocks = resolveEdgeRefs(tracker, all, bl.BlocksOf, number)
 		}
-		blockedBy := resolveBlockerRefs(tracker, all, edges[number], sources[number])
-		blockIDs, blockSources := invertEdges(edges, sources, number)
-		blocks := resolveBlockerRefs(tracker, all, blockIDs, blockSources)
-		msg := DetailModalLoadedMsg{Number: number, Body: issue.Body, BlockedBy: blockedBy, Blocks: blocks}
-		if builtGraph {
-			msg.Edges, msg.Sources = edges, sources
-		}
-		return msg
+		return DetailModalLoadedMsg{Number: number, Body: issue.Body, BlockedBy: blockedBy, Blocks: blocks}
 	}
+}
+
+// resolveEdgeRefs resolves number's dependency edge in one direction —
+// fetch is tracker.DepsOf for Blocked-by, or a BlockersLister's BlocksOf for
+// Blocks — into BlockerRefs. A fetch failure resolves to no refs rather
+// than failing the whole modal load, matching resolveBlockerRef's own
+// per-ref tolerance below (issue #1744).
+func resolveEdgeRefs(tracker forge.IssueTracker, all []forge.Issue, fetch func(string) ([]forge.Dependency, error), number string) []BlockerRef {
+	deps, err := fetch(number)
+	if err != nil {
+		return nil
+	}
+	ids := make([]string, len(deps))
+	sourceOf := make(map[string]forge.DepSource, len(deps))
+	for i, d := range deps {
+		ids[i] = d.ID
+		sourceOf[d.ID] = d.Source
+	}
+	return resolveBlockerRefs(tracker, all, ids, sourceOf)
 }
 
 // resolveBlockerRefs resolves each of ids into a BlockerRef, tagged with its
@@ -82,41 +87,4 @@ func resolveBlockerRef(tracker forge.IssueTracker, all []forge.Issue, id string,
 		return BlockerRef{Number: id, Source: source, State: iss.State, Title: iss.Title}
 	}
 	return BlockerRef{Number: id, Source: source}
-}
-
-// invertEdges returns the issue numbers that declare number as one of their
-// own blockers — edges' reverse direction, the Blocks section's whole
-// derivation (issue #1632) — in ascending numeric order (GitHub's own
-// canonical order, ListOpenIssues' convention), since map iteration order is
-// otherwise random. sourceOf mirrors each returned id to the DepSource the
-// forward edge (id -> number) was resolved from, the same annotation shown
-// from the other end in id's own Blocked-by section.
-func invertEdges(edges map[string][]string, sources map[string]map[string]forge.DepSource, number string) (ids []string, sourceOf map[string]forge.DepSource) {
-	sourceOf = make(map[string]forge.DepSource)
-	for child, blockers := range edges {
-		for _, b := range blockers {
-			if b == number {
-				sourceOf[child] = sources[child][number]
-				ids = append(ids, child)
-				break
-			}
-		}
-	}
-	sortIssueNumbers(ids)
-	return ids, sourceOf
-}
-
-// sortIssueNumbers sorts nums ascending by numeric value where every entry
-// parses as one, falling back to a lexical sort otherwise — GitHub's own
-// canonical issue order (ListOpenIssues' convention), applied to
-// invertEdges' otherwise map-iteration-order result.
-func sortIssueNumbers(nums []string) {
-	sort.Slice(nums, func(i, j int) bool {
-		ni, ei := strconv.Atoi(nums[i])
-		nj, ej := strconv.Atoi(nums[j])
-		if ei == nil && ej == nil {
-			return ni < nj
-		}
-		return nums[i] < nums[j]
-	})
 }
