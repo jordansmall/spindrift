@@ -77,6 +77,19 @@ func computeSidebarWidth(totalWidth int) int {
 	return target
 }
 
+// queueNarrowed reports whether the queue list column is currently rendered
+// at the sidebar-docked narrowed width rather than the terminal's full width
+// — the trigger for the compact/wrapped queue-row form (issue #1752). Mirrors
+// View's own condition for choosing the docked layout over the fullscreen
+// sidebar takeover (m.SidebarZoom or !sidebarFits(m)), so a caller checking
+// before the list is even rendered (model.go's cursor-follow) can never
+// disagree with what View ends up drawing: a fullscreen sidebar, zoomed or
+// too-narrow-to-dock, hides the list entirely, so it never counts as
+// "narrowed."
+func queueNarrowed(m Model) bool {
+	return m.Sidebar != nil && !m.SidebarZoom && sidebarFits(m)
+}
+
 // padColumnsToEqualHeight pads the shorter of the list and sidebar columns'
 // rendered content with trailing blank lines up to the taller one's line
 // count, so their bordered boxes close on the same row instead of the
@@ -202,6 +215,14 @@ func viewBody(m Model) string {
 	if budget < 0 {
 		budget = 0
 	}
+	// Computed once, here, against m before any width narrowing below —
+	// queueNarrowed(listModel) would compare listModel's already-narrowed
+	// Width against sidebarFits' full-width threshold and misfire. Threaded
+	// through explicitly rather than re-derived inside renderBody's callees,
+	// so there is exactly one source of truth for "is this render compact"
+	// instead of two predicates a future caller could drift out of sync
+	// (issue #1752 review).
+	compact := queueNarrowed(m)
 	if m.Sidebar != nil {
 		width := computeSidebarWidth(m.Width)
 		listModel := m
@@ -211,14 +232,14 @@ func viewBody(m Model) string {
 		// clamps always agree on how many rows the bordered panels actually
 		// have room for — issue #1755).
 		panelBudget := bodyBudget(m)
-		list := renderBody(listModel, panelBudget)
+		list := renderBody(listModel, panelBudget, compact)
 		sidebar := renderSidebarDocked(*m.Sidebar, width, panelBudget, m.Focus == FocusSidebar)
 		list, sidebar = padColumnsToEqualHeight(list, sidebar)
 		listBox := renderBoxedColumn(list, listModel.Width)
 		sidebarBox := renderBoxedColumn(sidebar, width)
 		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listBox, sidebarBox))
 	} else {
-		b.WriteString(renderBody(m, budget))
+		b.WriteString(renderBody(m, budget, compact))
 	}
 	if m.Err != nil {
 		fmt.Fprintf(&b, "refresh failed: %s\n", m.Err)
@@ -325,14 +346,14 @@ func renderSectionTabs(m Model) string {
 // header, tabs, and any prompt lines — always a real, already-clamped-to-
 // nonnegative figure from View, never the "unbounded" case (issue #1540;
 // Viewport's own height==0 convention covers that for callers who want it).
-func renderBody(m Model, budget int) string {
+func renderBody(m Model, budget int, compact bool) string {
 	if budget <= 0 {
 		return ""
 	}
 	if m.ActiveSection == SectionBacklog {
-		return renderBacklogSection(m, budget)
+		return renderBacklogSection(m, budget, compact)
 	}
-	return renderWorkSection(m, budget)
+	return renderWorkSection(m, budget, compact)
 }
 
 // renderTable writes header followed by rows windowed through vp against
@@ -349,8 +370,10 @@ func renderBody(m Model, budget int) string {
 // Model stores by the time a render reaches here — reapplying it against a
 // freshly-constructed vp with no prior height would misfire as a shrink from
 // unbounded and needlessly re-cap an offset pgup/pgdown deliberately leaves
-// uncapped (issue #1060).
-func renderTable(header string, rows []string, vp Viewport, total, itemBudget int) string {
+// uncapped (issue #1060). sep, when non-empty, is written between (not after)
+// consecutive rows — the compact/wrapped form's per-issue delimiter, "" for
+// the classic single-line form (issue #1752).
+func renderTable(header string, rows []string, vp Viewport, total, itemBudget int, sep string) string {
 	var b strings.Builder
 	b.WriteString(header)
 	if itemBudget <= 0 {
@@ -359,7 +382,10 @@ func renderTable(header string, rows []string, vp Viewport, total, itemBudget in
 	vp.height = itemBudget
 	w := vp.Window(total)
 	shown, moreBelow := w.Shown()
-	for _, r := range rows[w.Start : w.Start+shown] {
+	for i, r := range rows[w.Start : w.Start+shown] {
+		if i > 0 && sep != "" {
+			b.WriteString(sep)
+		}
 		b.WriteString(r)
 	}
 	if moreBelow > 0 {
@@ -391,7 +417,7 @@ const backlogFixedWidth = 1 + 1 + numberColWidth + 1 + 2 + 1
 // An orphan-flagged row's live heartbeat rides in the same bracket as its
 // labels, sharing labelsWidth's existing budget rather than carving out a
 // new column (issue #1621).
-func renderBacklogSection(m Model, budget int) string {
+func renderBacklogSection(m Model, budget int, compact bool) string {
 	if budget <= 0 {
 		return ""
 	}
@@ -428,6 +454,10 @@ func renderBacklogSection(m Model, budget int) string {
 				labels = append(labels, SanitizeControlSequences(heartbeat))
 			}
 		}
+		if compact {
+			rows = append(rows, compactBacklogRow(m.Width, marker, iss.Number, title, labels))
+			continue
+		}
 		rows = append(rows, fmt.Sprintf("%s %s %s [%s]\n", marker, clip("#"+iss.Number, numberColWidth, true), clip(title, titleWidth, true), clipLabels(labels, labelsWidth)))
 	}
 	// Two spaces, not one, before "labels": each row's own label list sits
@@ -435,11 +465,23 @@ func renderBacklogSection(m Model, budget int) string {
 	// space separator — matching it here keeps the header word aligned with
 	// where the label text actually starts, not the bracket (issue #1500
 	// review).
-	header := roleStyle(RoleDim).Render(fmt.Sprintf("  %s %s  labels", clip("#", numberColWidth, true), clip("title", titleWidth, true)))
+	headerText := fmt.Sprintf("  %s %s  labels", clip("#", numberColWidth, true), clip("title", titleWidth, true))
+	if compact {
+		// The classic header's aligned column words no longer describe the
+		// compact row's own two-line shape — echo its own header-line format
+		// instead of a stale "title ... labels" claim (issue #1752 review).
+		headerText = "  #  [labels]"
+	}
+	header := roleStyle(RoleDim).Render(headerText)
 	itemBudget := columnItemBudget(budget)
+	sep := ""
+	if compact {
+		itemBudget = compactColumnItemBudget(budget)
+		sep = compactQueueSeparator(m.Width)
+	}
 	vp := Viewport{offset: m.Offset}
 	header += positionLabel(vp, itemBudget, len(visible)) + "\n"
-	return renderTable(header, rows, vp, len(visible), itemBudget)
+	return renderTable(header, rows, vp, len(visible), itemBudget, sep)
 }
 
 // workFixedWidth is a work-Section row's width outside the title and extras
@@ -456,7 +498,7 @@ const workFixedWidth = 1 + 1 + numberColWidth + 1 + 1 + stateColWidth + 1 + ageC
 // heartbeat, both #858/#647-era queue-row detail, still render as a trailing
 // annotation after the fixed columns so neither signal is lost, just moved
 // out of the aligned part of the row.
-func renderWorkSection(m Model, budget int) string {
+func renderWorkSection(m Model, budget int, compact bool) string {
 	if budget <= 0 {
 		return ""
 	}
@@ -498,14 +540,137 @@ func renderWorkSection(m Model, budget int) string {
 		if p.Heartbeat != "" {
 			fmt.Fprintf(&extras, "  %s", SanitizeControlSequences(p.Heartbeat))
 		}
+		if compact {
+			rows = append(rows, compactWorkRow(m.Width, marker, p, title, role, extras.String()))
+			continue
+		}
 		state := roleStyle(role).Render(clip(p.State.String(), stateColWidth, true))
 		rows = append(rows, fmt.Sprintf("%s %s %s %s %s%s\n", marker, clip("#"+p.Number, numberColWidth, true), clip(title, titleWidth, true), state, clip(p.Age, ageColWidth, true), clip(extras.String(), extrasWidth, false)))
 	}
-	header := roleStyle(RoleDim).Render(fmt.Sprintf("  %s %s %s %s", clip("#", numberColWidth, true), clip("title", titleWidth, true), clip("state", stateColWidth, true), "age"))
+	headerText := fmt.Sprintf("  %s %s %s %s", clip("#", numberColWidth, true), clip("title", titleWidth, true), clip("state", stateColWidth, true), "age")
+	if compact {
+		// The classic header's aligned column words no longer describe the
+		// compact row's own two-line shape — echo its own header-line format
+		// instead of a stale "title ... state age" claim (issue #1752 review).
+		headerText = "  # · state · age"
+	}
+	header := roleStyle(RoleDim).Render(headerText)
 	itemBudget := columnItemBudget(budget)
+	sep := ""
+	if compact {
+		itemBudget = compactColumnItemBudget(budget)
+		sep = compactQueueSeparator(m.Width)
+	}
 	vp := Viewport{offset: m.Offset}
 	header += positionLabel(vp, itemBudget, len(picks)) + "\n"
-	return renderTable(header, rows, vp, len(picks), itemBudget)
+	return renderTable(header, rows, vp, len(picks), itemBudget, sep)
+}
+
+// compactQueueIndent is the left indent the compact/wrapped queue-row form's
+// title line sits at, under its own header line (issue #1752).
+const compactQueueIndent = "  "
+
+// compactQueueSeparatorGlyph is the compact/wrapped form's per-issue
+// delimiter rune — a faint horizontal rule so the two-line stacked entries
+// stay visually distinct instead of running together (issue #1752).
+const compactQueueSeparatorGlyph = "─"
+
+// compactQueueSeparator renders one row's worth of the compact form's
+// per-issue delimiter at width display columns, styled RoleDim — the console
+// palette's muted role (ADR 0031) — so it reads as administrative chrome,
+// not content (issue #1752).
+func compactQueueSeparator(width int) string {
+	if width < 1 {
+		width = 1
+	}
+	return roleStyle(RoleDim).Render(strings.Repeat(compactQueueSeparatorGlyph, width)) + "\n"
+}
+
+// compactRowLines is the physical line count one compact/wrapped queue
+// entry's own header+title block spends, not counting the separator
+// renderTable inserts between (not after) entries (issue #1752).
+const compactRowLines = 2
+
+// compactColumnItemBudget is columnItemBudget's compact-form counterpart: it
+// converts a Section's row budget (header row included) into how many
+// compact entries fit, each spending compactRowLines lines plus one more for
+// every entry but the first shown, for its separator from the previous entry
+// — item count N solves N*compactRowLines + (N-1) <= available, i.e.
+// N <= (available+1)/(compactRowLines+1) (issue #1752).
+func compactColumnItemBudget(columnBudget int) int {
+	available := columnBudget - 1 // header row
+	if available <= 0 {
+		return 0
+	}
+	return (available + 1) / (compactRowLines + 1)
+}
+
+// compactWorkRow renders one work-Section Pick in the compact form: a "#num
+// · state · age" header line carrying the cursor marker and any trailing
+// extras (blocker/reason/heartbeat), followed by the title — clip()ped, not
+// wrapped, just given a whole line of its own rather than squeezed beside
+// the state/age columns — the narrowed-queue alternative to
+// renderWorkSection's classic single-line clip()ped row, so a squeezed queue
+// column stops over-clipping the title down to a sliver (issue #1752).
+// title is expected pre-sanitized (SanitizeControlSequences), matching the
+// classic row's own discipline.
+func compactWorkRow(width int, marker string, p Pick, title string, role Role, extras string) string {
+	stateText := clip(p.State.String(), stateColWidth, false)
+	// number (with its "#") and age reuse the classic form's own column
+	// budgets as a defensive cap — real values (a short issue number,
+	// formatAge's output) never approach it — rather than leaving them
+	// unbounded like extras was before this clip (issue #1752 review).
+	// clip("#"+p.Number, ...), not "#"+clip(p.Number, ...): matching the
+	// classic row's own clip("#"+p.Number, numberColWidth, true) exactly,
+	// so the cell's cap is numberColWidth total, not numberColWidth plus an
+	// unclipped literal "#" (issue #1752 review).
+	number := clip("#"+p.Number, numberColWidth, false)
+	age := clip(p.Age, ageColWidth, false)
+	// Measured plain, before roleStyle wraps stateText in ANSI escapes below
+	// — the same clip-before-style discipline renderSectionTabs documents,
+	// so extrasWidth is computed against display columns, not escape bytes.
+	plainPrefix := fmt.Sprintf("%s %s · %s · %s", marker, number, stateText, age)
+	extrasWidth := width - runewidth.StringWidth(plainPrefix)
+	if extrasWidth < 0 {
+		extrasWidth = 0
+	}
+	header := fmt.Sprintf("%s %s · %s · %s%s\n", marker, number, roleStyle(role).Render(stateText), age, clip(extras, extrasWidth, false))
+	return header + compactQueueTitleLine(width, title)
+}
+
+// compactQueueTitleLine renders the compact/wrapped form's title line — an
+// indent, then title given the whole remainder of width rather than
+// squeezed beside the row's other columns — the piece compactWorkRow and
+// compactBacklogRow share (issue #1752 review).
+func compactQueueTitleLine(width int, title string) string {
+	titleWidth := width - runewidth.StringWidth(compactQueueIndent)
+	if titleWidth < 1 {
+		titleWidth = 1
+	}
+	return compactQueueIndent + clip(title, titleWidth, false) + "\n"
+}
+
+// compactBacklogRow renders one Backlog issue in the compact form: a "#num
+// [labels]" header line carrying the cursor marker, followed by the title —
+// clip()ped, not wrapped, just given a whole line of its own rather than
+// squeezed beside the number/labels columns — the narrowed-queue alternative
+// to renderBacklogSection's classic single-line clip()ped row (issue #1752).
+// title is expected pre-sanitized (SanitizeControlSequences), matching the
+// classic row's own discipline; labels likewise.
+func compactBacklogRow(width int, marker, number, title string, labels []string) string {
+	// clip("#"+number, ...), not "#"+clip(number, ...): matching the classic
+	// row's own clip("#"+iss.Number, numberColWidth, true) exactly, kept in
+	// sync with labelsWidth's own reservation below (issue #1752 review).
+	number = clip("#"+number, numberColWidth, false)
+	// " " before number, " [" and "]" around labels: four literal columns
+	// the "%s %s [%s]\n" format spends outside marker/number/labels.
+	const backlogHeaderLiteralWidth = 4
+	labelsWidth := width - runewidth.StringWidth(marker) - runewidth.StringWidth(number) - backlogHeaderLiteralWidth
+	if labelsWidth < 0 {
+		labelsWidth = 0
+	}
+	header := fmt.Sprintf("%s %s [%s]\n", marker, number, clipLabels(labels, labelsWidth))
+	return header + compactQueueTitleLine(width, title)
 }
 
 // clip fits s into width display columns (not runes — a wide CJK rune is 2
@@ -817,7 +982,7 @@ func positionLabel(vp Viewport, itemBudget, total int) string {
 // sidebar/rebuild-output panes' fixed fixedPaneScrollDelta, this is
 // recomputed on every keypress.
 func sectionPageSize(m Model) int {
-	itemBudget := columnItemBudget(bodyBudget(m))
+	itemBudget := queueItemBudget(m, bodyBudget(m))
 	if itemBudget <= 0 {
 		return 0
 	}
@@ -838,6 +1003,20 @@ func columnItemBudget(columnBudget int) int {
 		return 0
 	}
 	return columnBudget - 1
+}
+
+// queueItemBudget is columnItemBudget's queueNarrowed-aware wrapper: callers
+// that hold the full, pre-render Model (unlike renderWorkSection and
+// renderBacklogSection, which already narrowed m.Width by the time they run)
+// use this instead of columnItemBudget directly, so the cursor-follow
+// (model.go) and page-size (sectionPageSize) math never assumes the classic
+// one-line-per-item budget while the compact form is what actually renders
+// (issue #1752).
+func queueItemBudget(m Model, columnBudget int) int {
+	if queueNarrowed(m) {
+		return compactColumnItemBudget(columnBudget)
+	}
+	return columnItemBudget(columnBudget)
 }
 
 // windowSidebarLines returns s.Lines windowed through a Viewport at s.Offset,
