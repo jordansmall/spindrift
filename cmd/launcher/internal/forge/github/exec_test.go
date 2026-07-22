@@ -883,3 +883,39 @@ fi
 		t.Errorf("error must surface gh's stderr, got: %v", err)
 	}
 }
+
+// TestMarkDraft_AlreadyDraftIsIdempotentNoOp verifies that MarkDraft on a PR
+// gh already reports as a draft is treated as success — the inverse of
+// TestMarkReady_AlreadyReadyIsIdempotentNoOp, mirroring gh's own idempotent
+// `gh pr ready --undo` behavior.
+func TestMarkDraft_AlreadyDraftIsIdempotentNoOp(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ] && [ "$3" = "--undo" ]; then
+  printf '! Pull request owner/repo#42 is already a "draft" pull request\n' >&2
+  exit 0
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	if err := c.MarkDraft("https://github.com/owner/repo/pull/42"); err != nil {
+		t.Fatalf("MarkDraft on an already-draft PR must be a no-op, got: %v", err)
+	}
+}
+
+// TestMarkDraft_GenuineFailureSurfaced verifies that a real gh pr ready
+// --undo failure is returned as an error rather than swallowed.
+func TestMarkDraft_GenuineFailureSurfaced(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ] && [ "$3" = "--undo" ]; then
+  printf 'HTTP 403: Resource not accessible by integration\n' >&2
+  exit 1
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	err := c.MarkDraft("https://github.com/owner/repo/pull/42")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error must surface gh's stderr, got: %v", err)
+	}
+}
