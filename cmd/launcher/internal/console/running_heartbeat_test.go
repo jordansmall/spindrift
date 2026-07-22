@@ -272,3 +272,45 @@ func TestRunningHeartbeat_IncrementalAppend_FeedsOnlyAppendedBytes(t *testing.T)
 		t.Errorf("bytes fed to heartbeat parser across 3 appends = %d, want %d (exactly the appended bytes, not a whole-file reread each call)", fed, len(written))
 	}
 }
+
+// TestRunningHeartbeat_FileShorterThanOffset_ResetsAndReparses verifies that
+// when a watched log's size falls below the cache's stored offset (the file
+// was truncated or rotated out from under a running pick), RunningHeartbeat
+// resets the offset and starts a fresh parser at 0 instead of seeking past
+// the file's new end and mis-parsing.
+func TestRunningHeartbeat_FileShorterThanOffset_ResetsAndReparses(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "logs", "issue-9.log")
+	long := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n" +
+		`{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	if err := os.WriteFile(path, []byte(long), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	cache := NewHeartbeatCache()
+
+	first := cache.RunningHeartbeat(drv, dir, "9")
+	if want := "7 turn"; !strings.Contains(first, want) {
+		t.Fatalf("first call = %q, want it to contain %q", first, want)
+	}
+
+	short := `{"type":"result","num_turns":2,"total_cost_usd":0.01,"duration_ms":1000}` + "\n"
+	if len(short) >= len(long) {
+		t.Fatalf("test setup: short log must be shorter than long, got %d want < %d", len(short), len(long))
+	}
+	if err := os.WriteFile(path, []byte(short), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := cache.RunningHeartbeat(drv, dir, "9")
+	if want := "2 turn"; !strings.Contains(got, want) {
+		t.Errorf("RunningHeartbeat() after truncation = %q, want it to contain %q (must reset offset and reparse from 0)", got, want)
+	}
+}
