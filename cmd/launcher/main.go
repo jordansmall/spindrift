@@ -27,6 +27,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/freshness"
+	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
@@ -668,12 +669,7 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, cf forge.CodeForge
 // silent -- the caller's own BranchExists fallback still keeps a lookup
 // failure from breaking the Box, same posture as a BranchExists error).
 func resolveIssueParent(it forge.IssueTracker, num string) string {
-	iss, err := it.Issue(num)
-	if err != nil {
-		fmt.Printf("!! BASE_BRANCH: resolving issue %s's parent: %v; falling back to its own slug\n", num, err)
-		return local.ResolveParent(num, "")
-	}
-	return local.ResolveParent(num, iss.Parent)
+	return localloop.ResolveParent(it, num)
 }
 
 // dispatchConfig builds the subset of config a dispatch.Factory needs.
@@ -725,6 +721,7 @@ func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTra
 // configured cf (every test, and any future non-local construction site)
 // is honored rather than silently bypassed.
 func settleConfig(c config, it forge.IssueTracker, cf forge.CodeForge) settle.Config {
+	lw := localloop.Wire(localloopConfig(c), it)
 	return settle.Config{
 		MergeMode:          c.mergeMode,
 		MergeGuardPaths:    c.mergeGuardPaths,
@@ -734,26 +731,28 @@ func settleConfig(c config, it forge.IssueTracker, cf forge.CodeForge) settle.Co
 		MaxFixAttempts:     c.maxFixAttempts,
 		MaxRebaseAttempts:  c.maxRebaseAttempts,
 		PreflightStaleBase: c.preflightStaleBase,
-		OutboxDir: func(num string) string {
-			pwd, err := os.Getwd()
-			if err != nil {
-				// Surprising (the process's own cwd went missing mid-run) and
-				// worth a loud diagnostic: the empty return still degrades
-				// safely (RelayBundle reports it as a missing bundle and the
-				// seam blocks, same as any other bundle-relay failure) rather
-				// than panicking, but silently swallowing a Getwd fault here
-				// would otherwise look identical to a genuinely missing bundle.
-				fmt.Fprintf(os.Stderr, "==> outbox dir: os.Getwd failed: %v\n", err)
-				return ""
-			}
-			return dispatch.OutboxDirFor(pwd, num)
-		},
+		OutboxDir:          lw.OutboxDir,
 		CodeForgeForIssue: func(num string) forge.CodeForge {
 			if c.codeForge != "local" {
 				return cf
 			}
-			return newCodeForge(c, resolveIssueParent(it, num))
+			return lw.CodeForgeForIssue(num)
 		},
+	}
+}
+
+// localloopConfig builds the subset of config a localloop.Wire needs for
+// CODE_FORGE=local's per-issue Code Forge construction and surface sweep —
+// shared by every settleConfig/surfaceAfterDispatch construction site so
+// they can never drift out of agreement on which Accumulation repo, base
+// branch, or git identity a seam lands through.
+func localloopConfig(c config) localloop.Config {
+	return localloop.Config{
+		AccumulationRepoDir: c.codeForgeAccumulationRepoDir,
+		BaseBranch:          c.baseBranch,
+		GitUserName:         c.gitUserName,
+		GitUserEmail:        c.gitUserEmail,
+		BranchPrefix:        c.branchPrefix,
 	}
 }
 

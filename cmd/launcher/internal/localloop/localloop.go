@@ -49,17 +49,24 @@ func Wire(cfg Config, it forge.IssueTracker) *Wired {
 	return &Wired{cfg: cfg, it: it}
 }
 
-// ResolveParent returns num's resolved Integration-branch key: its own
+// ResolveParent resolves num's own Integration-branch key through it: its
 // parent: frontmatter, sanitized, or its own slug when unset (local.
 // ResolveParent, issue #1734) — logged rather than silent on a lookup
-// failure, same posture as every other local-loop caller of it.
-func (w *Wired) ResolveParent(num string) string {
-	iss, err := w.it.Issue(num)
+// failure. A package-level function, not a Wired method, since resolving a
+// parent needs only an IssueTracker, not a Config.
+func ResolveParent(it forge.IssueTracker, num string) string {
+	iss, err := it.Issue(num)
 	if err != nil {
 		fmt.Printf("!! localloop: resolving issue %s's parent: %v; falling back to its own slug\n", num, err)
 		return local.ResolveParent(num, "")
 	}
 	return local.ResolveParent(num, iss.Parent)
+}
+
+// ResolveParent resolves num's own Integration-branch key through w's own
+// IssueTracker (see the package-level ResolveParent).
+func (w *Wired) ResolveParent(num string) string {
+	return ResolveParent(w.it, num)
 }
 
 // CodeForgeForIssue returns num's own CodeForge instance, keyed to its
