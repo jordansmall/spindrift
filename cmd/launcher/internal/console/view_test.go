@@ -1314,11 +1314,12 @@ func TestView_DetailModal_ScrollOffset_HidesLinesBeforeOffset(t *testing.T) {
 // TestDetailModalBoxSize_WideTerminal_ClampsToMax verifies the floating
 // detail modal box never grows edge-to-edge on a large terminal: its width
 // and height are capped at detailModalBoxMax{Width,Height} rather than
-// scaling without bound (issue #1759 AC).
+// scaling without bound (issue #1759 AC), and pins the width cap's actual
+// value at 100 columns, not the old 84 (issue #1796 AC1/AC2).
 func TestDetailModalBoxSize_WideTerminal_ClampsToMax(t *testing.T) {
 	width, height := detailModalBoxSize(300, 100)
-	if width != detailModalBoxMaxWidth {
-		t.Errorf("detailModalBoxSize(300, 100) width = %d, want %d (clamped to max)", width, detailModalBoxMaxWidth)
+	if width != 100 {
+		t.Errorf("detailModalBoxSize(300, 100) width = %d, want 100 (new max-width cap)", width)
 	}
 	if height != detailModalBoxMaxHeight {
 		t.Errorf("detailModalBoxSize(300, 100) height = %d, want %d (clamped to max)", height, detailModalBoxMaxHeight)
@@ -1412,7 +1413,7 @@ func TestView_DetailModal_LabelsUnclipped(t *testing.T) {
 // exercised the overflow path padDisplay's runewidth.Truncate hits once the
 // joined labels line runs past innerWidth. This test uses a terminal wide
 // enough to cap the box at detailModalBoxMaxWidth (issue #1772 AC2's "the
-// box's default max width"), an 82-col interior, rather than a narrower
+// box's default max width"), a 98-col interior, rather than a narrower
 // uncapped box.
 func TestView_DetailModal_LabelsWrapOnOverflow(t *testing.T) {
 	labels := []string{
@@ -1457,7 +1458,7 @@ func TestView_DetailModal_LabelOverflowShowsIndicator(t *testing.T) {
 	if !strings.Contains(out, "[j/k] scroll") {
 		t.Errorf("View() = %q, want the footer never dropped by label overflow", out)
 	}
-	// Each label is 99 columns, wider than the 82-column interior padDisplay
+	// Each label is 99 columns, wider than the 98-column interior padDisplay
 	// truncates every row to — so checking for the full label string would
 	// pass whether or not it was capped (it never fits a row intact either
 	// way). The short "label-NN-" prefix does fit a row intact, so its
