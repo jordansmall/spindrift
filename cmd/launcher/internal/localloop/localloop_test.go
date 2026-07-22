@@ -233,7 +233,7 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 		t.Fatalf("issue %s labels = %v, want %s after settle", num, iss.Labels, testLabels.Complete)
 	}
 
-	res, err := reconcile.Run(it, cf, nil)
+	res, err := reconcile.Run(it, cf, nil, func(num string) string { return lw.ResolveParent(num).String() })
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
 	}
 	s.Settle(dispatch.NewFake(), num, 0, result)
 
-	res, err := reconcile.Run(it, cf, nil)
+	res, err := reconcile.Run(it, cf, nil, func(num string) string { return lw.ResolveParent(num).String() })
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
 	}
 	s.Settle(dispatch.NewFake(), num, 0, result)
 
-	res, err := reconcile.Run(it, cf, nil)
+	res, err := reconcile.Run(it, cf, nil, func(num string) string { return lw.ResolveParent(num).String() })
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -457,7 +457,7 @@ func TestWire_ComposedLoop_HealsStuckBranchRefLanding(t *testing.T) {
 		t.Fatalf("RecordLanding: %v", err)
 	}
 
-	res, err := reconcile.Run(it, cf, nil)
+	res, err := reconcile.Run(it, cf, nil, func(num string) string { return lw.ResolveParent(num).String() })
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -540,7 +540,7 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 		t.Fatalf("issue %s labels = %v, must NOT carry %s after a blocked relay", num, iss.Labels, testLabels.Failed)
 	}
 
-	res, err := reconcile.Run(it, cf, nil)
+	res, err := reconcile.Run(it, cf, nil, func(num string) string { return lw.ResolveParent(num).String() })
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -615,7 +615,7 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 	}
 	s.Settle(dispatch.NewFake(), landedNum, 0, result)
 
-	res, err := reconcile.Run(it, cf, nil)
+	res, err := reconcile.Run(it, cf, nil, func(num string) string { return lw.ResolveParent(num).String() })
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}
@@ -701,7 +701,7 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 		Outcome: outcome.Outcome{Issue: numB, Landing: branchB, Status: "ready"},
 	})
 
-	res, err := reconcile.Run(it, cfA, nil)
+	res, err := reconcile.Run(it, cfA, nil, func(num string) string { return lw.ResolveParent(num).String() })
 	if err != nil {
 		t.Fatalf("reconcile.Run: %v", err)
 	}

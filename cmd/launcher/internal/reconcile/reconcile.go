@@ -8,7 +8,6 @@ import (
 	"fmt"
 
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/local"
 )
 
 // Result reports what a Run swept.
@@ -69,7 +68,14 @@ type LivenessProbe interface {
 // reset on its own, only the composite evidence from lp is. This sweep is
 // PRForge-specific — a local Code Forge has no PR/branch signal to key an
 // orphan reset off, so Run skips it entirely when cf has no PRForge surface.
-func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe) (Result, error) {
+//
+// parentFor resolves an issue number to its own broad ticket's parent token
+// (ADR 0033) for the LandingBranchRef healing path's BranchMergedIntoIntegration
+// and IntegrationTip calls — reconcile stays adapter-agnostic (issue #1819)
+// by taking this as a caller-supplied callback, mirroring
+// settle.Config.CodeForgeForIssue, rather than importing forge/local itself
+// to resolve it. Unused on every path but the local-only healing path.
+func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, parentFor func(num string) string) (Result, error) {
 	closer, ok := it.(forge.IssueCloser)
 	if !ok {
 		return Result{}, nil
@@ -90,7 +96,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe) (Result, e
 
 	var res Result
 	prc := prReconciler{closer: closer, pr: pr, cf: cf, lr: lr, flagger: flagger}
-	llc := localLandingReconciler{closer: closer, verifier: verifier, repair: repair, lr: lr}
+	llc := localLandingReconciler{closer: closer, verifier: verifier, repair: repair, lr: lr, parentFor: parentFor}
 	for _, iss := range issues {
 		if hasPR {
 			if err := prc.reconcile(&res, iss); err != nil {
@@ -191,10 +197,11 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 // prints a loud "no repair surface" line rather than the pre-#1809 silent
 // no-op, since there is no ancestor check to run.
 type localLandingReconciler struct {
-	closer   forge.IssueCloser
-	verifier forge.LandingVerifier
-	repair   forge.LandingRepair
-	lr       forge.LandingRecorder
+	closer    forge.IssueCloser
+	verifier  forge.LandingVerifier
+	repair    forge.LandingRepair
+	lr        forge.LandingRecorder
+	parentFor func(num string) string
 }
 
 // reconcile checks a single open issue's recorded landing, parsed into its
@@ -250,13 +257,13 @@ func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue,
 		fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! Code Forge has no repair surface to check branch %s against\n", iss.Number, iss.Landing, landing.Branch)
 		return nil
 	}
-	parent := local.ResolveParent(iss.Number, iss.Parent)
-	merged, err := l.repair.BranchMergedIntoIntegration(landing.Branch, parent.String())
+	parent := l.parentFor(iss.Number)
+	merged, err := l.repair.BranchMergedIntoIntegration(landing.Branch, parent)
 	if err != nil {
 		return fmt.Errorf("reconcile issue %s: check branch %s ancestry: %w", iss.Number, landing.Branch, err)
 	}
 	if !merged {
-		fmt.Printf("    #%s  landing=%s  status=stuck  !! branch %s not merged into %s\n", iss.Number, iss.Landing, landing.Branch, local.IntegrationBranch(parent))
+		fmt.Printf("    #%s  landing=%s  status=stuck  !! branch %s not merged into %s's integration branch\n", iss.Number, iss.Landing, landing.Branch, parent)
 		if res.Stuck == nil {
 			res.Stuck = map[string]string{}
 		}
@@ -272,7 +279,7 @@ func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue,
 		fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! branch %s merged but no LandingRecorder to persist the repaired landing\n", iss.Number, iss.Landing, landing.Branch)
 		return nil
 	}
-	tip, err := l.repair.IntegrationTip(parent.String())
+	tip, err := l.repair.IntegrationTip(parent)
 	if err != nil {
 		return fmt.Errorf("reconcile issue %s: resolve integration tip for %s: %w", iss.Number, parent, err)
 	}
