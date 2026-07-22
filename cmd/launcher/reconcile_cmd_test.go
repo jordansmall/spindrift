@@ -219,6 +219,10 @@ func mustInitCheckout(t *testing.T, dir, branch string) {
 func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 	setGitIdentityEnv(t)
 	const parent = "1700"
+	// ResolveParent("", parent), not ResolveParent(parent, ""): parent here
+	// stands in for the raw parent: frontmatter value writeSeamIssue writes
+	// below, not an issue's own number/slug, so it belongs in ResolveParent's
+	// rawParent argument.
 	sanitizedParent := local.ResolveParent("", parent)
 	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(sanitizedParent))
 	pwd := t.TempDir()
