@@ -1255,9 +1255,9 @@ const (
 // detailModalBoxMaxWidth and detailModalBoxMaxHeight cap the floating box at
 // a comfortable reading size on a wide/tall terminal instead of stretching
 // it corner to corner — "roughly centered at a sensible default size" (issue
-// #1758 AC).
+// #1758 AC; width widened 84 -> 100 by issue #1796).
 const (
-	detailModalBoxMaxWidth  = 84
+	detailModalBoxMaxWidth  = 100
 	detailModalBoxMaxHeight = 30
 )
 
