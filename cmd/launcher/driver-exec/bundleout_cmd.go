@@ -8,6 +8,14 @@ import (
 	"spindrift.dev/launcher/internal/bundleout"
 )
 
+// isBundleOutInvocation reports whether args (os.Args[1:]) selects the
+// bundle-out subcommand: a distinct verb, not a top-level flag (issue
+// #1808). The existing invocation always starts with "--" flags, so a bare
+// first arg can only ever be this subcommand's name.
+func isBundleOutInvocation(args []string) bool {
+	return len(args) > 0 && args[0] == "bundle-out"
+}
+
 // runBundleOut is the `bundle-out` subcommand's thin CLI wrapper (ADR 0007's
 // thin-exec-glue tier, issue #1808): it parses args into a bundleout.Config
 // and delegates to bundleout.Run, the same producer the localloop composed

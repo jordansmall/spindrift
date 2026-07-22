@@ -7,6 +7,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/seambundle"
 )
 
 // setGitIdentityEnv gives ambient git commands (forgetest.NewGitRepoFixture's
@@ -23,7 +24,7 @@ func setGitIdentityEnv(t *testing.T) {
 
 // seedBundleBranch clones bare, creates branch one commit ahead of base
 // carrying a marker file unique to num, and writes a git bundle of
-// base..branch to outboxDir/BundleFileName — standing in for the Box's
+// base..branch to outboxDir/seambundle.FileName — standing in for the Box's
 // code-out (ADR 0033), never pushing branch to bare directly. Returns
 // branch's HEAD sha.
 func seedBundleBranch(t *testing.T, bare, base, outboxDir, branch, num string) string {
@@ -39,7 +40,7 @@ func seedBundleBranch(t *testing.T, bare, base, outboxDir, branch, num string) s
 	run(t, work, "config", "user.email", "test@example.com")
 	run(t, work, "config", "user.name", "Test")
 	run(t, work, "commit", "-m", "feature "+num)
-	run(t, work, "bundle", "create", filepath.Join(outboxDir, BundleFileName), base+".."+branch)
+	run(t, work, "bundle", "create", filepath.Join(outboxDir, seambundle.FileName), base+".."+branch)
 	return revParse(t, work, branch)
 }
 
@@ -98,7 +99,7 @@ func TestLocalCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	const parent = "1694"
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	outbox := t.TempDir()
-	if err := os.WriteFile(filepath.Join(outbox, BundleFileName), []byte("not a bundle"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(outbox, seambundle.FileName), []byte("not a bundle"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -146,7 +147,7 @@ func TestLocalCodeForge_RelayBundle_ReRelayOverwritesDivergedRef(t *testing.T) {
 	run(t, work, "config", "user.name", "Test")
 	run(t, work, "commit", "-m", "retried feature 1698")
 	wantSHA := revParse(t, work, branch)
-	run(t, work, "bundle", "create", filepath.Join(outbox, BundleFileName), IntegrationBranch(parent)+".."+branch)
+	run(t, work, "bundle", "create", filepath.Join(outbox, seambundle.FileName), IntegrationBranch(parent)+".."+branch)
 
 	if err := br.RelayBundle(outbox, branch); err != nil {
 		t.Fatalf("RelayBundle (retry, diverged history): %v", err)

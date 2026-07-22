@@ -22,10 +22,7 @@ import (
 )
 
 func main() {
-	// bundle-out (issue #1808) is a distinct verb, not a top-level flag: the
-	// existing invocation always starts with "--" flags, so a bare first arg
-	// can only ever be this subcommand's name.
-	if len(os.Args) > 1 && os.Args[1] == "bundle-out" {
+	if isBundleOutInvocation(os.Args[1:]) {
 		os.Exit(runBundleOut(os.Args[2:], os.Stdout))
 	}
 
