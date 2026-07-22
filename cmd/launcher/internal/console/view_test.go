@@ -1059,11 +1059,12 @@ func TestView_RebuildOutputOpen_RendersOutputInsteadOfBacklog(t *testing.T) {
 // showing from the top — an off-by-one in the offset/end clamp would either
 // repeat or skip a line at the boundary.
 func TestView_RebuildOutputOpen_ScrollOffsetWindowsContent(t *testing.T) {
-	// Height 4 leaves a 2-line content budget (headerFooterLines), too small
-	// to show all 5 lines at once — so a scroll actually slides the window
-	// instead of clamping straight back to the top like a short transcript
-	// that already fits (mirrored from DrillIn's own clamp, model.go).
-	m := Update(NewModel(), SizeChangedMsg{Height: 4})
+	// Height 5 leaves a 2-line content budget (headerFooterLines, plus the
+	// trailing-"\n" reservation issue #1827 added), too small to show all 5
+	// lines at once — so a scroll actually slides the window instead of
+	// clamping straight back to the top like a short transcript that already
+	// fits (mirrored from DrillIn's own clamp, model.go).
+	m := Update(NewModel(), SizeChangedMsg{Height: 5})
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
 	m = Update(m, RebuildOutputOpenMsg{})
 	m = Update(m, RebuildOutputScrollMsg{Delta: 2})
@@ -1074,6 +1075,34 @@ func TestView_RebuildOutputOpen_ScrollOffsetWindowsContent(t *testing.T) {
 	}
 	if !strings.Contains(out, "l2") || !strings.Contains(out, "l3") {
 		t.Errorf("View() = %q, want l2/l3 visible after scrolling past l0/l1", out)
+	}
+}
+
+// TestView_RebuildOutputExactFit_FitsHeightWithFooterPinned verifies the
+// rebuild-output pane never renders more physical lines than m.Height, even
+// when the captured output exactly fills or overflows the old (unreserved)
+// budget — the same trailing-"\n" off-by-one issue #1825 fixed for the list
+// view (issue #1827). Split, not TrimRight-then-count: View()'s output
+// always ends in exactly one trailing "\n" (its own documented convention),
+// and that trailing "\n" costs the terminal a physical row of its own.
+func TestView_RebuildOutputExactFit_FitsHeightWithFooterPinned(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Height: 10})
+	lines := make([]string, 20)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: strings.Join(lines, "\n")}})
+	m = Update(m, RebuildOutputOpenMsg{})
+
+	out := View(m)
+	if got := len(strings.Split(out, "\n")); got > m.Height {
+		t.Errorf("View() rendered %d physical lines, want <= m.Height (%d): %q", got, m.Height, out)
+	}
+	if !strings.Contains(out, "rebuild output:") {
+		t.Errorf("View() = %q, want the pane's header line still present", out)
+	}
+	if !strings.Contains(out, "close") {
+		t.Errorf("View() = %q, want the close-key hint footer present", out)
 	}
 }
 
