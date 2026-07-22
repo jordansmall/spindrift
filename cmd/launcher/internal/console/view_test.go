@@ -3367,11 +3367,9 @@ func TestView_BacklogSection_ShowsPositionIndicator(t *testing.T) {
 	// the exact position ranges below) this test was written against. Plus
 	// listFooterLines, ModeList's own pinned footer row (issue #1792), so
 	// that reservation doesn't eat into the item budget this test pins.
-	// columnItemBudget holds one further row back whenever the Section
-	// overflows (issue #1794), and viewBody's own budget holds one further
-	// row back for View()'s guaranteed trailing "\n" (issue #1825) — the two
-	// reservations land on the same row here, not two rows short, so this
-	// stays "5"/"10" rather than the pre-#1794 "6"/"11" or a stacked "4"/"9".
+	// viewBody's own budget holds one further row back for View()'s
+	// guaranteed trailing "\n" (issue #1825), so this stays "5"/"10" rather
+	// than "6"/"11".
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows + listFooterLines})
 	issues := make([]forge.Issue, 50)
 	for i := range issues {
@@ -3403,12 +3401,9 @@ func TestView_WorkSection_ShowsPositionIndicator(t *testing.T) {
 	// the exact position range below) this test was written against. Plus
 	// listFooterLines, ModeList's own pinned footer row (issue #1792), so
 	// that reservation doesn't eat into the item budget this test pins.
-	// columnItemBudget holds one further row back whenever the Section
-	// overflows (issue #1794), and viewBody's own budget holds one further
-	// row back for View()'s guaranteed trailing "\n" (issue #1825) — the two
-	// reservations land on the same row here, not two rows short, so this
-	// stays "(1-5 of 50)" rather than the pre-#1794 "(1-6 of 50)" or a
-	// stacked "(1-4 of 50)".
+	// viewBody's own budget holds one further row back for View()'s
+	// guaranteed trailing "\n" (issue #1825), so this stays "(1-5 of 50)"
+	// rather than "(1-6 of 50)".
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows + listFooterLines})
 	picks := make([]Pick, 50)
 	for i := range picks {
