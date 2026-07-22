@@ -160,6 +160,26 @@ var keymap = []Binding{
 		Footer: "[j/k] scroll",
 	},
 	{
+		Keys: []string{"pgdown", "ctrl+f", "pgup", "ctrl+b"}, Modes: []Mode{ModeDetailModal},
+		Help: "  ctrl+f/ctrl+b, pgdown/pgup  page the ticket detail modal's body\n" +
+			"              (while it is open)",
+	},
+	{
+		Keys: []string{"ctrl+d", "ctrl+u"}, Modes: []Mode{ModeDetailModal},
+		Help: "  ctrl+d/ctrl+u  scroll the ticket detail modal's body a half page\n" +
+			"              (while it is open)",
+	},
+	{
+		Keys: []string{"G"}, Modes: []Mode{ModeDetailModal},
+		Help: "  G           jump to the ticket detail modal's last page (while it\n" +
+			"              is open)",
+	},
+	{
+		Keys: []string{"g"}, Modes: []Mode{ModeDetailModal},
+		Help: "  gg          jump to the ticket detail modal's first page (while\n" +
+			"              it is open; same \"g\" leader as the list body's gg)",
+	},
+	{
 		Keys: []string{"r"}, Modes: []Mode{ModeList},
 		Help: "  r           refresh the backlog",
 	},
