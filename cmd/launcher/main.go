@@ -526,7 +526,7 @@ func dispatchCompletionBanner(c config) string {
 	case "git":
 		return fmt.Sprintf("==> all agents finished — branches pushed on %s.\n", c.repoSlug)
 	case "local":
-		return fmt.Sprintf("==> all agents finished — seams landed host-side into the Accumulation repo's %s branch.\n", local.IntegrationBranch(c.codeForgeIntegrationParent))
+		return "==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n"
 	default:
 		// validate() restricts c.codeForge to "git", "local", or "github" —
 		// github is the fallback so a future forge fails loud in validate()

@@ -1298,15 +1298,17 @@ func TestDispatchCompletionBanner_Git(t *testing.T) {
 // TestDispatchCompletionBanner_Local verifies that CODE_FORGE=local claims
 // neither a push nor a PR — the launcher lands seams host-side onto the
 // Accumulation repo's Integration branch instead (ADR 0033, issue #1733).
+// It names no single branch: each seam resolves its own Integration branch
+// from its own parent: frontmatter (issue #1734), so a mixed-parent batch
+// may land onto several in the same run.
 func TestDispatchCompletionBanner_Local(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "local"
-	c.codeForgeIntegrationParent = "1694"
 	c.mergeMode = "immediate"
 
 	got := dispatchCompletionBanner(c)
 
-	want := "==> all agents finished — seams landed host-side into the Accumulation repo's integration/1694 branch.\n"
+	want := "==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n"
 	if got != want {
 		t.Errorf("dispatchCompletionBanner(local) = %q, want %q", got, want)
 	}
