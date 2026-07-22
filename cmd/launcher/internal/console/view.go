@@ -336,10 +336,14 @@ func viewBody(m Model) string {
 		// have room for — issue #1755).
 		panelBudget := bodyBudget(m)
 		list := renderBody(listModel, panelBudget, compact)
-		sidebar := renderSidebarDocked(*m.Sidebar, width, panelBudget, m.Focus == FocusSidebar)
+		sidebar := renderSidebarDocked(*m.Sidebar, width, panelBudget)
 		list, sidebar = padColumnsToEqualHeight(list, sidebar)
 		listBox := renderBoxedColumn(list, listModel.Width, "", RoleDim)
-		sidebarBox := renderBoxedColumn(sidebar, width, "", RoleDim)
+		sidebarTitleRole := RoleDim
+		if m.Focus == FocusSidebar {
+			sidebarTitleRole = RoleAccent
+		}
+		sidebarBox := renderBoxedColumn(sidebar, width, sidebarLabel(*m.Sidebar), sidebarTitleRole)
 		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listBox, sidebarBox))
 	} else {
 		b.WriteString(renderBody(m, budget, compact))
@@ -1108,12 +1112,22 @@ func windowSidebarLines(s SidebarState, budget int) []string {
 }
 
 // headerFooterLines is the sidebar chrome budget (label + keystroke-hint
-// footer) that renderSidebarFullscreen, renderSidebarDocked, and Update's
-// tail (via Viewport.SetHeight) all subtract from height — shared so the
-// clamp's last-page cap always matches what the render functions actually
-// have room to show (issue #829, #1002, inherited from the retired drill-in
-// pane).
+// footer) that renderSidebarFullscreen and Update's tail (via
+// Viewport.SetHeight, in the fullscreen/zoomed branch) subtract from
+// height — shared so the clamp's last-page cap always matches what
+// renderSidebarFullscreen actually has room to show (issue #829, #1002,
+// inherited from the retired drill-in pane). renderSidebarDocked no longer
+// shares this budget — see sidebarDockedFooterLines.
 const headerFooterLines = 2
+
+// sidebarDockedFooterLines is the docked sidebar's own chrome budget
+// (keystroke-hint footer only) that renderSidebarDocked and Update's tail
+// (in the docked branch) subtract from bodyBudget(m) — narrower than
+// headerFooterLines because the docked panel's label folds into its
+// border title instead of spending an interior row (issue #1799);
+// renderSidebarFullscreen still renders its label as an interior row, so
+// it keeps budgeting the full headerFooterLines pair.
+const sidebarDockedFooterLines = 1
 
 // sidebarErr returns the error the current view should surface: s.Err
 // unconditionally (nothing loaded at all, e.g. no Driver), otherwise
@@ -1643,38 +1657,32 @@ func renderSidebarFullscreen(s SidebarState, height int) string {
 }
 
 // renderSidebarDocked renders one Dispatch's live-tail sidebar as a column
-// beside the still-visible list (ADR 0030): the same label/content/footer
-// shape as renderSidebarFullscreen, but clipped to width so an overflowing
-// line can't blow out the column join, and budgeted in rows (header row
-// included) to match renderTable's own row-budget contract so the two
-// columns' row counts agree before lipgloss.JoinHorizontal pads whichever
-// one falls short. focused styles the label with the accent role so the
-// operator can tell which pane keyboard input currently drives (ADR 0031).
-func renderSidebarDocked(s SidebarState, width, budget int, focused bool) string {
+// beside the still-visible list (ADR 0030): content clipped to width so an
+// overflowing line can't blow out the column join, and budgeted in rows to
+// match renderTable's own row-budget contract so the two columns' row
+// counts agree before lipgloss.JoinHorizontal pads whichever one falls
+// short. The label itself is not rendered here — the caller folds it into
+// the panel's top border via renderBoxedColumn's title instead of an
+// interior row (issue #1799), so budget only reserves
+// sidebarDockedFooterLines for the keystroke-hint footer, not the
+// label+footer pair renderSidebarFullscreen's own headerFooterLines still
+// budgets — the old budget<=1 "just the label, nothing else fits" early
+// return is gone with it: a budget of 1 now renders the footer alone,
+// since the border title shows regardless of how little interior room is
+// left.
+func renderSidebarDocked(s SidebarState, width, budget int) string {
 	if budget <= 0 {
 		return ""
 	}
 
-	label := clip(sidebarLabel(s), width, false)
-	role := RoleDim
-	if focused {
-		role = RoleAccent
-	}
 	var b strings.Builder
-	b.WriteString(roleStyle(role).Render(label))
-	b.WriteString("\n")
-
-	const labelLines = 1
-	if budget <= headerFooterLines-labelLines {
-		return b.String()
-	}
 
 	if err := sidebarErr(s); err != nil {
 		fmt.Fprintf(&b, "%s\n", clip("sidebar failed: "+err.Error(), width, false))
 		return b.String()
 	}
 
-	for _, line := range windowSidebarLines(s, budget-headerFooterLines) {
+	for _, line := range windowSidebarLines(s, budget-sidebarDockedFooterLines) {
 		b.WriteString(clip(line, width, false))
 		b.WriteString("\n")
 	}

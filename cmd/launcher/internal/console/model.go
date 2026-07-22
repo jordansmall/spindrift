@@ -849,21 +849,25 @@ func Update(m Model, msg Msg) Model {
 		// Docked (sidebarFits and not zoomed), the sidebar's actual
 		// viewport is the same row budget the list body renders into, not
 		// the whole terminal height — renderSidebarDocked subtracts
-		// headerFooterLines from bodyBudget(m), same as this clamp must,
-		// or the "last page fills the viewport" cap (issue #829) target a
-		// taller page than the docked render actually has room to show
-		// (#1501 review finding). SidebarZoom forces renderSidebarFullscreen
-		// regardless of sidebarFits (View's own decision, mirrored here),
-		// so it must also use the whole terminal height, not bodyBudget —
-		// otherwise the clamp targets the docked view the operator zoomed
-		// away from (review finding on issue #1502).
+		// sidebarDockedFooterLines from bodyBudget(m), same as this clamp
+		// must, or the "last page fills the viewport" cap (issue #829)
+		// target a taller page than the docked render actually has room to
+		// show (#1501 review finding). SidebarZoom forces
+		// renderSidebarFullscreen regardless of sidebarFits (View's own
+		// decision, mirrored here), so it must also use the whole terminal
+		// height and the wider headerFooterLines budget (its label still
+		// renders as an interior row) — otherwise the clamp targets the
+		// docked view the operator zoomed away from (review finding on
+		// issue #1502).
 		height := m.Height
+		footerLines := headerFooterLines
 		if sidebarFits(m) && !m.SidebarZoom {
 			height = bodyBudget(m)
+			footerLines = sidebarDockedFooterLines
 		}
 		vp := Viewport{offset: m.Sidebar.Offset}
 		vp.Scroll(0, len(m.Sidebar.Lines))
-		vp.SetHeight(height - headerFooterLines)
+		vp.SetHeight(height - footerLines)
 		m.Sidebar.Offset = vp.offset
 	}
 

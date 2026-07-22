@@ -2133,6 +2133,73 @@ func TestView_SidebarLabel_ShowsFollowIndicator(t *testing.T) {
 	}
 }
 
+// TestView_SidebarDocked_LabelFoldedIntoTopBorder verifies the docked
+// sidebar's label rides in its panel's top border rule, not as a separate
+// interior row above the content — the same move the header and detail
+// modal make with their own titles (issue #1799).
+func TestView_SidebarDocked_LabelFoldedIntoTopBorder(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 12})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	out := View(m)
+	if !strings.Contains(out, "+- activity #42 [follow]") {
+		t.Errorf("View() = %q, want the sidebar label folded into its top border rule", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "|activity #42 [follow]") {
+			t.Errorf("View() line %q, want the label gone from the interior content row", line)
+		}
+	}
+}
+
+// TestView_SidebarDocked_TranscriptRawLabelFoldedIntoTopBorder verifies the
+// border-fold covers every sidebarLabel mode, not just the Activity feed's
+// default "[follow]" form — here the Transcript view's "(raw)" tag (issue
+// #1799).
+func TestView_SidebarDocked_TranscriptRawLabelFoldedIntoTopBorder(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 12})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "hi"})
+	m = Update(m, SidebarToggleMsg{}) // -> Transcript (rendered)
+	m = Update(m, SidebarToggleMsg{}) // -> Transcript (raw)
+
+	out := View(m)
+	if !strings.Contains(out, "+- transcript #42 (raw)") {
+		t.Errorf("View() = %q, want the transcript (raw) label folded into its top border rule", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "|transcript #42 (raw)") {
+			t.Errorf("View() line %q, want the label gone from the interior content row", line)
+		}
+	}
+}
+
+// TestView_SidebarDocked_BorderTitleColoredByFocus verifies the docked
+// sidebar's border title carries the same focus signal the old interior
+// label row did: accent when the sidebar is focused, dim otherwise (issue
+// #1799).
+func TestView_SidebarDocked_BorderTitleColoredByFocus(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 12})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	wantAccent := roleStyle(RoleAccent).Render("activity #42 [follow]")
+	if focused := View(m); !strings.Contains(focused, wantAccent) {
+		t.Errorf("View() focused = %q, want the border title styled RoleAccent %q", focused, wantAccent)
+	}
+
+	m = Update(m, FocusListMsg{})
+	wantDim := roleStyle(RoleDim).Render("activity #42 [follow]")
+	if unfocused := View(m); !strings.Contains(unfocused, wantDim) {
+		t.Errorf("View() unfocused = %q, want the border title styled RoleDim %q", unfocused, wantDim)
+	}
+}
+
 // TestView_SidebarFooter_ShowsZoomHint verifies both the docked and
 // fullscreen sidebar footers advertise the "z" zoom key (issue #1502).
 func TestView_SidebarFooter_ShowsZoomHint(t *testing.T) {
