@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
 )
 
@@ -236,9 +237,10 @@ func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = repo.Bare
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
+	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, it, pwd, &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(c, lw, pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if !strings.Contains(buf.String(), parent) {
@@ -249,6 +251,49 @@ func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 	want := revParseTest(t, repo.Bare, "refs/heads/"+local.IntegrationBranch(sanitizedParent))
 	if got != want {
 		t.Errorf("refs/heads/%s = %s, want %s (Integration branch tip)", parent, got, want)
+	}
+}
+
+// TestSurfaceAfterDispatch_UsesPassedWiredInstance verifies surfaceAfterDispatch
+// surfaces through the *localloop.Wired it is handed, rather than minting its
+// own fresh instance from (c, it) — the fix for issue #1833's duplicate
+// Wire() construction. c's own AccumulationRepoDir points at a decoy repo;
+// only the explicitly passed lw's Config points at the repo that actually
+// carries the ticket's Integration branch. A surfaceAfterDispatch that built
+// its own Wired from c would surface the decoy's tip instead.
+func TestSurfaceAfterDispatch_UsesPassedWiredInstance(t *testing.T) {
+	setGitIdentityEnv(t)
+	const parent = "1700"
+	sanitizedParent := local.ResolveParent("", parent)
+	integrationBranch := local.IntegrationBranch(sanitizedParent)
+	decoy := forgetest.NewGitRepoFixture(t, integrationBranch)
+	real := forgetest.NewGitRepoFixture(t, integrationBranch)
+	real.AdvanceBase()
+	pwd := t.TempDir()
+	mustInitCheckout(t, pwd, "main")
+
+	issuesDir := t.TempDir()
+	writeSeamIssue(t, issuesDir, "seam-1", parent, true)
+
+	c := baseConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = decoy.Bare
+	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
+	lw := localloop.Wire(localloop.Config{AccumulationRepoDir: real.Bare}, it)
+
+	var buf bytes.Buffer
+	if err := surfaceAfterDispatch(c, lw, pwd, &buf, nil); err != nil {
+		t.Fatalf("surfaceAfterDispatch: %v", err)
+	}
+
+	got := revParseTest(t, pwd, "refs/heads/"+parent)
+	want := revParseTest(t, real.Bare, "refs/heads/"+integrationBranch)
+	if got != want {
+		t.Errorf("refs/heads/%s = %s, want %s (the passed *Wired's own Integration branch tip)", parent, got, want)
+	}
+	decoyTip := revParseTest(t, decoy.Bare, "refs/heads/"+integrationBranch)
+	if got == decoyTip {
+		t.Errorf("refs/heads/%s = decoy repo's tip %s, want surfaceAfterDispatch to ignore c's AccumulationRepoDir and use the passed *Wired's", parent, decoyTip)
 	}
 }
 
@@ -272,9 +317,10 @@ func TestSurfaceAfterDispatch_OpenSeamRemains_PrintsHeldVerdict(t *testing.T) {
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = repo.Bare
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
+	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, it, pwd, &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(c, lw, pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	want := "surface: 1700 held — open seam #seam-2\n"
@@ -298,9 +344,10 @@ func TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp(t *testing.T) {
 	c := baseConfig()
 	c.codeForge = "github"
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
+	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, it, "/nonexistent/pwd", &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(c, lw, "/nonexistent/pwd", &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if buf.Len() != 0 {
@@ -332,9 +379,10 @@ func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *t
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = repo.Bare
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
+	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, it, pwd, &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(c, lw, pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if !strings.Contains(buf.String(), "surface: broad-a surfaced") {
@@ -372,9 +420,10 @@ func TestSurfaceAfterDispatch_OneParentErrors_StillAttemptsTheOthers(t *testing.
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = repo.Bare
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
+	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	err := surfaceAfterDispatch(c, it, pwd, &buf, nil)
+	err := surfaceAfterDispatch(c, lw, pwd, &buf, nil)
 	if err == nil {
 		t.Fatal("surfaceAfterDispatch: want an error since pwd is not a git repo, got nil")
 	}
@@ -465,9 +514,10 @@ func TestSurfaceAfterDispatch_ManyNeverLandedParents_CollapsesIntoOneSummaryLine
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = repo.Bare
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
+	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, it, pwd, &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(c, lw, pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if got := strings.Count(buf.String(), "skipped"); got != 1 {
@@ -500,9 +550,10 @@ func TestSurfaceAfterDispatch_NeverLandedAndCheckedOut_OnlyNeverLandedCollapses(
 	c.codeForge = "local"
 	c.codeForgeAccumulationRepoDir = repo.Bare
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
+	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, it, pwd, &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(c, lw, pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if !strings.Contains(buf.String(), "surface: 9010 held — 9010 is currently checked out\n") {

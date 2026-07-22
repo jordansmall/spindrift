@@ -54,7 +54,7 @@ func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconc
 	} else {
 		fmt.Fprintf(w, "reconcile: reset %d issue(s): %s\n", len(res.Reset), strings.Join(res.Reset, ", "))
 	}
-	return surfaceAfterDispatch(c, it, pwd, w, res.Stuck)
+	return surfaceAfterDispatch(c, lw, pwd, w, res.Stuck)
 }
 
 // reconcileAfterDispatch auto-invokes the reconcile sweep at the end of a
@@ -79,16 +79,16 @@ func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge,
 // can name a ticket's stuck landing without redoing the ancestry check
 // itself. A no-op for any codeForge other than "local";
 // localloop.Wired.Surface itself covers the tracker-has-no-SeamLister no-op
-// (every tracker but local). This mints its own Wired rather than sharing
-// the run's own (issue #1810): runReconcile is reachable from the
-// standalone `reconcile` subcommand (cmdReconcile), a separate process
-// invocation with no dispatch-time Wired to share, not only from
-// reconcileAfterDispatch's tail end of a run that already built one.
-func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writer, stuck map[string]string) error {
+// (every tracker but local). Takes lw rather than minting its own Wired
+// (issue #1833): runReconcile's own lw is already in scope on every call
+// path (cmdReconcile and reconcileAfterDispatch alike), so a second,
+// independently-memoizing Wired only risked resolving a stuck issue's parent
+// twice for no benefit.
+func surfaceAfterDispatch(c config, lw *localloop.Wired, pwd string, w io.Writer, stuck map[string]string) error {
 	if c.codeForge != "local" {
 		return nil
 	}
-	return localloop.Wire(localloopConfig(c), it).Surface(pwd, w, stuck)
+	return lw.Surface(pwd, w, stuck)
 }
 
 // cmdReconcile is the `reconcile` subcommand: the local-tracker bookkeeping
