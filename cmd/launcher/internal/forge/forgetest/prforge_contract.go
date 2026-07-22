@@ -62,6 +62,7 @@ func RunPRForgeContract(t *testing.T, h PRForgeHarness) {
 	t.Run("CheckStateSequence", func(t *testing.T) { testCheckStateSequence(t, h) })
 	t.Run("MergeTransitionsPRState", func(t *testing.T) { testMergeTransitionsPRState(t, h) })
 	t.Run("AutoMergeEligibility", func(t *testing.T) { testAutoMergeEligibility(t, h) })
+	t.Run("MarkDraftIdempotent", func(t *testing.T) { testMarkDraftIdempotent(t, h) })
 	t.Run("FailureDetailOnFailingCheck", func(t *testing.T) { testFailureDetailOnFailingCheck(t, h) })
 }
 
@@ -212,6 +213,21 @@ func testAutoMergeEligibility(t *testing.T, h PRForgeHarness) {
 	}
 	if err := h.Forge().MarkReady(url); err != nil {
 		t.Fatalf("MarkReady(%q) second call (already ready): %v", url, err)
+	}
+}
+
+// testMarkDraftIdempotent verifies MarkDraft — the inverse of MarkReady —
+// succeeds both on a ready PR and, called again, on the now-draft PR:
+// idempotent the same way MarkReady is (MarkReady doc, exec_pr.go).
+func testMarkDraftIdempotent(t *testing.T, h PRForgeHarness) {
+	const num = "209"
+	url := h.SeedOpenPR(num)
+
+	if err := h.Forge().MarkDraft(url); err != nil {
+		t.Fatalf("MarkDraft(%q) first call: %v", url, err)
+	}
+	if err := h.Forge().MarkDraft(url); err != nil {
+		t.Fatalf("MarkDraft(%q) second call (already draft): %v", url, err)
 	}
 }
 

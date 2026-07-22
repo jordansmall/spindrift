@@ -186,9 +186,14 @@ type Fake struct {
 	// MarkReadyCalls records all PR URLs passed to MarkReady, in order.
 	MarkReadyCalls []string
 
-	// LandingCallLog records, in order, every call to MarkReady, Merge, and
-	// EnqueueAutoMerge as "Method:url" — the three landing-path methods a
-	// caller can reorder relative to each other. A per-method Calls slice
+	// MarkDraftErr, if non-nil, is returned by MarkDraft.
+	MarkDraftErr error
+	// MarkDraftCalls records all PR URLs passed to MarkDraft, in order.
+	MarkDraftCalls []string
+
+	// LandingCallLog records, in order, every call to MarkReady, MarkDraft,
+	// Merge, and EnqueueAutoMerge as "Method:url" — the landing-path methods
+	// a caller can reorder relative to each other. A per-method Calls slice
 	// alone can't distinguish "MarkReady then Merge" from "Merge then
 	// MarkReady": both leave the same final Calls-slice contents, so a test
 	// asserting call presence on each slice separately passes either way.
@@ -756,6 +761,14 @@ func (f *Fake) MarkReady(prURL string) error {
 	f.LandingCallLog = append(f.LandingCallLog, "MarkReady:"+prURL)
 	f.MarkReadyCalls = append(f.MarkReadyCalls, prURL)
 	return f.MarkReadyErr
+}
+
+func (f *Fake) MarkDraft(prURL string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.LandingCallLog = append(f.LandingCallLog, "MarkDraft:"+prURL)
+	f.MarkDraftCalls = append(f.MarkDraftCalls, prURL)
+	return f.MarkDraftErr
 }
 
 func (f *Fake) Probe() (string, error) {
