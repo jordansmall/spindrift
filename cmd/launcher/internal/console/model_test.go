@@ -1845,3 +1845,48 @@ func TestUpdate_SizeChangedMsg_RewrapsOpenDetailModal(t *testing.T) {
 		t.Errorf("Lines[0] = %q, want the whole body unwrapped at the new 200-column width", m.DetailModal.Lines[0])
 	}
 }
+
+// TestUpdate_DetailModalLoadedMsg_WrapsToBoxInteriorNotTerminalWidth
+// verifies the modal's body wraps against the floating box's (much
+// narrower) interior width, not the raw terminal width — issue #1758
+// rewires every width-dependent piece of the old fullscreen renderer to key
+// off the box interior instead of Model.Width.
+func TestUpdate_DetailModalLoadedMsg_WrapsToBoxInteriorNotTerminalWidth(t *testing.T) {
+	body := strings.TrimSpace(strings.Repeat("ab ", 40)) // 119 display columns unwrapped
+	m := Update(NewModel(), SizeChangedMsg{Width: 200, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: body})
+
+	if len(m.DetailModal.Lines) < 2 {
+		t.Errorf("Lines = %d line(s) on a 200-column terminal, want the body wrapped across multiple lines at the box's much narrower interior width, not the raw terminal width", len(m.DetailModal.Lines))
+	}
+}
+
+// TestUpdate_DetailModalScroll_ClampsToBoxInteriorHeightNotTerminalHeight
+// verifies a scroll past the end of a long body clamps against the floating
+// box's own (much shorter) interior row budget, not against
+// Model.Height — the same box-interior rewiring
+// TestUpdate_DetailModalLoadedMsg_WrapsToBoxInteriorNotTerminalWidth checks
+// for width (issue #1758).
+func TestUpdate_DetailModalScroll_ClampsToBoxInteriorHeightNotTerminalHeight(t *testing.T) {
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	body := strings.Join(lines, "\n")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: body})
+	m = Update(m, DetailModalScrollMsg{Delta: 1000})
+
+	// The box's interior height at a 40-row terminal (detailModalBoxSize
+	// caps the box at 30 rows, minus 2 border rows, minus
+	// floatModalChromeLines) is well short of Model.Height - the
+	// fullscreen renderer's detailModalChromeLines(3) — so the two clamps
+	// disagree unless the offset clamp was actually rewired.
+	if want := len(lines) - 26; m.DetailModal.Offset != want {
+		t.Errorf("Offset = %d after scrolling past the end, want %d (clamped to the box interior's row budget)", m.DetailModal.Offset, want)
+	}
+}
