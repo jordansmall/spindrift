@@ -321,6 +321,29 @@ func TestFake_ListIssues_ByDispatchState(t *testing.T) {
 	}
 }
 
+// TestFake_ListIssues_UnmappedStateMatchesEveryOpenIssue mirrors the two
+// real adapters' behavior for a DispatchState with no configured label
+// (research's Complete, ADR 0022): GitHub's `--label ""` is ignored by `gh`
+// and returns every open issue; Local's `frontmatter.State == ""` matches
+// every untriaged issue. A Fake that only matched issues literally carrying
+// an empty-string label masked the false-match bug #1742 fixed (the #1709
+// regression test's fixture had no labels, so the old Fake wrongly returned
+// none for the unmapped query and never exercised the guard).
+func TestFake_ListIssues_UnmappedStateMatchesEveryOpenIssue(t *testing.T) {
+	f := forge.NewFake(researchLabels) // Complete: "" — unmapped
+	f.SetIssue(forge.Issue{Number: "1", State: forge.IssueOpen})                                          // untriaged, no labels
+	f.SetIssue(forge.Issue{Number: "2", State: forge.IssueOpen, Labels: []string{"agent-research-in-progress"}})
+	f.SetIssue(forge.Issue{Number: "9", State: forge.IssueClosed})
+
+	matched, err := f.ListIssues(forge.Complete)
+	if err != nil {
+		t.Fatalf("ListIssues(Complete): %v", err)
+	}
+	if len(matched) != 2 || matched[0].Number != "1" || matched[1].Number != "2" {
+		t.Fatalf("ListIssues(Complete) with unmapped label = %+v, want every open issue (#1, #2)", matched)
+	}
+}
+
 // --- ListOpenIssues tests ---
 
 // TestFake_ListOpenIssues_AllStatesAscendingExcludesClosed verifies
