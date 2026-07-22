@@ -10,9 +10,10 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// sidebarWidth is the docked live-tail sidebar's fixed column width — wide
+// sidebarWidth is the docked live-tail sidebar's minimum column width — wide
 // enough for a realistic Activity status line without wrapping in the
-// common case (ADR 0030).
+// common case (ADR 0030), and the floor computeSidebarWidth never shrinks
+// below regardless of terminal width.
 const sidebarWidth = 42
 
 // sidebarMinListWidth is the narrowest the list column can render at and
@@ -33,6 +34,31 @@ const sidebarMinListWidth = 80
 // sectionTabsReserved precedent, extended to the sidebar).
 func sidebarFits(m Model) bool {
 	return m.Width >= sidebarMinListWidth+sidebarWidth+1
+}
+
+// sidebarWidthTargetPercent is the share of the terminal's total width the
+// docked sidebar targets once there's room to grow past its sidebarWidth
+// floor (issue #1751) — the activity stream should read as a real column,
+// not a sliver, on a wide terminal.
+const sidebarWidthTargetPercent = 45
+
+// computeSidebarWidth returns the docked sidebar's column width for a
+// terminal totalWidth columns wide: sidebarWidthTargetPercent of totalWidth,
+// clamped down to whatever leaves the queue list at least sidebarMinListWidth
+// (plus the one-column divider), and clamped up to never shrink below the
+// sidebarWidth floor (issue #1751). Only meaningful when sidebarFits(m) is
+// true — totalWidth values below that threshold can drive the clamp's upper
+// bound under its lower one, which callers on the fullscreen fallback path
+// never observe.
+func computeSidebarWidth(totalWidth int) int {
+	target := totalWidth * sidebarWidthTargetPercent / 100
+	if target < sidebarWidth {
+		target = sidebarWidth
+	}
+	if listFloorMax := totalWidth - sidebarMinListWidth - 1; target > listFloorMax {
+		target = listFloorMax
+	}
+	return target
 }
 
 // renderColumnDivider renders the one-column vertical rule between the
@@ -112,10 +138,11 @@ func View(m Model) string {
 		budget = 0
 	}
 	if m.Sidebar != nil {
+		width := computeSidebarWidth(m.Width)
 		listModel := m
-		listModel.Width = m.Width - sidebarWidth - 1
+		listModel.Width = m.Width - width - 1
 		list := renderBody(listModel, budget)
-		sidebar := renderSidebarDocked(*m.Sidebar, sidebarWidth, budget, m.Focus == FocusSidebar)
+		sidebar := renderSidebarDocked(*m.Sidebar, width, budget, m.Focus == FocusSidebar)
 		// The divider spans the taller of the two columns' actual rendered
 		// rows, not the whole budget — a short list or a short sidebar
 		// (few picks, a brief Activity feed) must not force the other idle
