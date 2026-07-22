@@ -17,9 +17,11 @@ import (
 // overhead: both the list panel and the sidebar panel pay boxBorderCols,
 // replacing the old one-column divider between them with two adjacent box
 // edges (issue #1755).
-const boxBorderCols = 2
-const boxBorderRows = 2
-const dockedBorderCols = boxBorderCols * 2
+const (
+	boxBorderCols    = 2
+	boxBorderRows    = 2
+	dockedBorderCols = boxBorderCols * 2
+)
 
 // sidebarWidth is the docked live-tail sidebar's minimum column width — wide
 // enough for a realistic Activity status line without wrapping in the
@@ -72,6 +74,25 @@ func computeSidebarWidth(totalWidth int) int {
 		target = listFloorMax
 	}
 	return target
+}
+
+// padColumnsToEqualHeight pads the shorter of the list and sidebar columns'
+// rendered content with trailing blank lines up to the taller one's line
+// count, so their bordered boxes close on the same row instead of the
+// shorter panel's border floating above a blank gap while the taller one
+// continues (issue #1755). Both are already budgeted from the same
+// panelBudget, so the only way they legitimately differ is by how much of
+// that shared budget each one's own content actually used.
+func padColumnsToEqualHeight(list, sidebar string) (string, string) {
+	listLines := strings.Count(list, "\n")
+	sidebarLines := strings.Count(sidebar, "\n")
+	switch {
+	case listLines > sidebarLines:
+		sidebar += strings.Repeat("\n", listLines-sidebarLines)
+	case sidebarLines > listLines:
+		list += strings.Repeat("\n", sidebarLines-listLines)
+	}
+	return list, sidebar
 }
 
 // renderBoxedColumn wraps content in a muted (RoleDim) rounded border — the
@@ -173,6 +194,7 @@ func View(m Model) string {
 		panelBudget := bodyBudget(m)
 		list := renderBody(listModel, panelBudget)
 		sidebar := renderSidebarDocked(*m.Sidebar, width, panelBudget, m.Focus == FocusSidebar)
+		list, sidebar = padColumnsToEqualHeight(list, sidebar)
 		listBox := renderBoxedColumn(list, listModel.Width)
 		sidebarBox := renderBoxedColumn(sidebar, width)
 		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, listBox, sidebarBox))
@@ -714,6 +736,12 @@ func bodyBudget(m Model) int {
 		reservedLines++
 	}
 	if m.Mode == ModeQuitConfirm {
+		reservedLines++
+	}
+	if m.Mode == ModePick && m.HasHighlighted() {
+		reservedLines++
+	}
+	if m.QueueEnterNotice != "" {
 		reservedLines++
 	}
 	if m.Err != nil {
