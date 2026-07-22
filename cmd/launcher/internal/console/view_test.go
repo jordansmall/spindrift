@@ -1018,6 +1018,30 @@ func TestView_DetailModal_TinyTerminal_FallsBackToFullscreen(t *testing.T) {
 	}
 }
 
+// detailModalBoxTopBorderLine returns out's floating detail modal box's own
+// top border row, identified by title — the same "╭" plus "#number title"
+// combination TestView_DetailModal_BorderShowsNumberAndTitle already keys
+// on — rather than the first line containing a bare "╭". A bare-"╭" search
+// is ambiguous once the header/sidebar panels grow their own RoleDim
+// rounded border (issue #1756): renderBoxedColumn degrades to ASCII glyphs
+// under termenv.Ascii, so a bare "╭" search only happened to find the
+// modal's box by accident on terminals where that degradation kicks in —
+// and reliably found the header's border instead, wherever the environment
+// resolves a non-Ascii profile (nix's sandboxed test runner, real color
+// terminals). detailModalBoxTopBorder always renders "#number title" into
+// its own border line and nowhere else, so pairing it with "╭" pins the
+// match to the modal's border regardless of what other boxes are on screen.
+func detailModalBoxTopBorderLine(t *testing.T, out, title string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "╭") && strings.Contains(line, title) {
+			return line
+		}
+	}
+	t.Fatalf("View() = %q, want a floating box top border line containing %q", out, title)
+	return ""
+}
+
 // detailModalBoxBorderWidth returns the display width of out's floating
 // detail modal box itself — just the "╭...╮" span of its top border row,
 // not the full composited terminal row around it (compositeOverlay splices
@@ -1026,21 +1050,15 @@ func TestView_DetailModal_TinyTerminal_FallsBackToFullscreen(t *testing.T) {
 // box's actual rendered outer width, independent of detailModalBoxSize's own
 // math, so tests can check the box View() produced without recomputing the
 // expected value the same way the code does.
-func detailModalBoxBorderWidth(t *testing.T, out string) int {
+func detailModalBoxBorderWidth(t *testing.T, out, title string) int {
 	t.Helper()
-	for _, line := range strings.Split(out, "\n") {
-		start := strings.Index(line, "╭")
-		if start < 0 {
-			continue
-		}
-		end := strings.Index(line[start:], "╮")
-		if end < 0 {
-			t.Fatalf("View() = %q, want a matching closing corner on the top border line", out)
-		}
-		return runewidth.StringWidth(line[start : start+end+len("╮")])
+	line := detailModalBoxTopBorderLine(t, out, title)
+	start := strings.Index(line, "╭")
+	end := strings.Index(line[start:], "╮")
+	if end < 0 {
+		t.Fatalf("View() = %q, want a matching closing corner on the top border line", out)
 	}
-	t.Fatalf("View() = %q, want a floating box top border line", out)
-	return 0
+	return runewidth.StringWidth(line[start : start+end+len("╮")])
 }
 
 // detailModalBoxOriginX returns the display column out's floating detail
@@ -1048,15 +1066,10 @@ func detailModalBoxBorderWidth(t *testing.T, out string) int {
 // row measured with ansi.StringWidth so any styled base content (e.g. a
 // colored Section tab sharing the same physical row) doesn't skew the
 // count, unlike a plain byte or rune index into the line.
-func detailModalBoxOriginX(t *testing.T, out string) int {
+func detailModalBoxOriginX(t *testing.T, out, title string) int {
 	t.Helper()
-	for _, line := range strings.Split(out, "\n") {
-		if idx := strings.Index(line, "╭"); idx >= 0 {
-			return ansi.StringWidth(line[:idx])
-		}
-	}
-	t.Fatalf("View() = %q, want a floating box top border line", out)
-	return 0
+	line := detailModalBoxTopBorderLine(t, out, title)
+	return ansi.StringWidth(line[:strings.Index(line, "╭")])
 }
 
 // TestView_DetailModal_Resize_RecentersAndResizesBox verifies a resize while
@@ -1066,13 +1079,13 @@ func TestView_DetailModal_Resize_RecentersAndResizesBox(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 60, Height: 30})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 	outSmall := View(m)
-	smallWidth := detailModalBoxBorderWidth(t, outSmall)
-	smallX := detailModalBoxOriginX(t, outSmall)
+	smallWidth := detailModalBoxBorderWidth(t, outSmall, "#42 fix the thing")
+	smallX := detailModalBoxOriginX(t, outSmall, "#42 fix the thing")
 
 	m = Update(m, SizeChangedMsg{Width: 120, Height: 30})
 	outGrown := View(m)
-	grownWidth := detailModalBoxBorderWidth(t, outGrown)
-	grownX := detailModalBoxOriginX(t, outGrown)
+	grownWidth := detailModalBoxBorderWidth(t, outGrown, "#42 fix the thing")
+	grownX := detailModalBoxOriginX(t, outGrown, "#42 fix the thing")
 
 	wantSmall, _ := detailModalBoxSize(60, 30)
 	wantGrown, _ := detailModalBoxSize(120, 30)
