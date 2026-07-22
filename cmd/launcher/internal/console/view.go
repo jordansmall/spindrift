@@ -619,7 +619,7 @@ func renderBacklogSection(m Model, budget int, compact bool) string {
 		headerText = "  #  [labels]"
 	}
 	header := roleStyle(RoleDim).Render(headerText)
-	itemBudget := columnItemBudget(budget)
+	itemBudget := columnItemBudget(budget, len(visible))
 	sep := ""
 	if compact {
 		itemBudget = compactColumnItemBudget(budget)
@@ -701,7 +701,7 @@ func renderWorkSection(m Model, budget int, compact bool) string {
 		headerText = "  # · state · age"
 	}
 	header := roleStyle(RoleDim).Render(headerText)
-	itemBudget := columnItemBudget(budget)
+	itemBudget := columnItemBudget(budget, len(picks))
 	sep := ""
 	if compact {
 		itemBudget = compactColumnItemBudget(budget)
@@ -1089,27 +1089,36 @@ func positionLabel(vp Viewport, itemBudget, total int) string {
 // sidebar/rebuild-output panes' fixed fixedPaneScrollDelta, this is
 // recomputed on every keypress.
 func sectionPageSize(m Model) int {
-	itemBudget := queueItemBudget(m, listContentBudget(m))
+	total := sectionRowCount(m, m.ActiveSection)
+	itemBudget := queueItemBudget(m, listContentBudget(m), total)
 	if itemBudget <= 0 {
 		return 0
 	}
-	total := sectionRowCount(m, m.ActiveSection)
 	vp := Viewport{offset: m.Offset, height: itemBudget}
 	shown, _ := vp.Window(total).Shown()
 	return shown
 }
 
 // columnItemBudget converts a Section's row budget (header row included)
-// into the row budget available for its item rows alone — the "-1 for the
-// header" that renderBacklogSection and renderWorkSection get by calling
-// columnItemBudget(budget) directly before passing the result on as a
-// Viewport's item height. A non-positive column budget yields zero items,
-// matching those functions' own budget<=0-renders-nothing early return.
-func columnItemBudget(columnBudget int) int {
+// into the row budget available for its item rows alone: "-1" for the
+// header, plus one further "-1" when total exceeds that, since renderTable
+// then holds a row back to print "… N more below" as its own last,
+// "\n"-terminated line — at a terminal-filling m.Height budget nothing is
+// left over for that newline, so printing it scrolls the pinned top banner
+// off-screen (issue #1794). Reserved here rather than only at render time,
+// so Update's cursor-follow/page-size math (queueItemBudget) never lands on
+// a different row count than renderBacklogSection/renderWorkSection render.
+// A non-positive column budget yields zero items, matching those
+// functions' own budget<=0-renders-nothing return.
+func columnItemBudget(columnBudget, total int) int {
 	if columnBudget <= 0 {
 		return 0
 	}
-	return columnBudget - 1
+	itemBudget := columnBudget - 1
+	if itemBudget > 0 && total > itemBudget {
+		itemBudget--
+	}
+	return itemBudget
 }
 
 // queueItemBudget is columnItemBudget's queueNarrowed-aware wrapper: callers
@@ -1118,12 +1127,14 @@ func columnItemBudget(columnBudget int) int {
 // use this instead of columnItemBudget directly, so the cursor-follow
 // (model.go) and page-size (sectionPageSize) math never assumes the classic
 // one-line-per-item budget while the compact form is what actually renders
-// (issue #1752).
-func queueItemBudget(m Model, columnBudget int) int {
+// (issue #1752). total is the active Section's row count, threaded through
+// to columnItemBudget's own truncation-aware reservation (issue #1794) —
+// the compact form's own row budget is untouched, out of this issue's scope.
+func queueItemBudget(m Model, columnBudget, total int) int {
 	if queueNarrowed(m) {
 		return compactColumnItemBudget(columnBudget)
 	}
-	return columnItemBudget(columnBudget)
+	return columnItemBudget(columnBudget, total)
 }
 
 // windowSidebarLines returns s.Lines windowed through a Viewport at s.Offset,
