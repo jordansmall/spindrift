@@ -13,7 +13,8 @@ Type a command and press enter:
 
 | command | effect |
 |---------|--------|
-| `r` / `refresh` | re-query the Issue Tracker and re-render the backlog |
+| `r` | research the highlighted Backlog row — an advise-only pick |
+| `R` | re-query the Issue Tracker and re-render the backlog |
 | `f <text>` / `filter <text>` | narrow the list to issues with a label containing `<text>` |
 | `f` / `filter` (no text) | clear the filter, restoring the full list |
 | `p` | Pick the highlighted Backlog row — the launch button |
@@ -71,9 +72,10 @@ Pick path a single `p` uses.
 the session with zero Issue Tracker calls — it only ever un-does the
 in-session queue entry, never the durable promotion a pick already recorded.
 
-Every pick defaults to a `work` Dispatch; the record carries a kind field so
-research picks can arrive later as a UI gesture rather than a remodel — only
-`work` is exposed today.
+`p`/`P` queue a `work` Dispatch; `r` queues a `research` Dispatch instead —
+advise-only, posting a single verdict comment rather than opening a
+branch/PR — for the highlighted Backlog row. Both kinds ride the same Pick
+record and queue machinery, distinguished only by the kind field.
 
 ## Live parallelism cap
 
@@ -90,11 +92,11 @@ picks-only session the operator is already the cap.
 ## Backlog freshness
 
 The Console keeps the backlog fresh without spending the shared rate-limit
-window: `r` re-queries on demand, the backlog auto-refreshes whenever the
+window: `R` re-queries on demand, the backlog auto-refreshes whenever the
 session itself writes to the tracker — a claim, a settle, or a promotion —
 and a slow background poll re-queries on a fixed cadence (60–120s) even on an
 otherwise idle session. Nothing refreshes faster than that poll; only the
-session's own writes and the operator's own `r` trigger a refresh in between.
+session's own writes and the operator's own `R` trigger a refresh in between.
 
 A running pick's queue row also shows its latest heartbeat — phase, turn
 count, last tool — reusing the same heartbeat parser the live dispatch's own

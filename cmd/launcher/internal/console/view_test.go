@@ -41,7 +41,7 @@ func TestView_ModeList_ShowsPinnedFooter(t *testing.T) {
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "one"}}})
 
 	out := View(m)
-	for _, want := range []string{"[/] filter", "[p] pick", "[P] pick all", "[r] refresh"} {
+	for _, want := range []string{"[/] filter", "[p] pick", "[P] pick all", "[r] research", "[R] refresh"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("View() = %q, want it to contain pinned footer hint %q", out, want)
 		}
@@ -71,7 +71,7 @@ func TestView_ModeList_NarrowWidth_FooterClipsWithoutOverflow(t *testing.T) {
 	if w := runewidth.StringWidth(footerLine); w > 20 {
 		t.Errorf("footer line %q is %d columns wide, want it clipped to the 20-column terminal", footerLine, w)
 	}
-	if strings.Contains(footerLine, "[r] refresh") {
+	if strings.Contains(footerLine, "[R] refresh") {
 		t.Errorf("footer line %q, want it actually clipped at width 20 rather than fitting unclipped", footerLine)
 	}
 	if !strings.Contains(footerLine, "…") {

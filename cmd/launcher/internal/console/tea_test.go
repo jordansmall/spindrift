@@ -187,9 +187,9 @@ func TestTea_QuitKey_ExitsCleanly(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_RefreshKey_ReQueriesTracker verifies "r" re-queries the tracker
+// TestTea_RefreshKey_ReQueriesTracker verifies "R" re-queries the tracker
 // and re-renders — an issue added after the program starts appears only
-// once "r" is sent.
+// once "R" is sent (issue #1839: refresh moved from "r" to "R").
 func TestTea_RefreshKey_ReQueriesTracker(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
@@ -197,7 +197,7 @@ func TestTea_RefreshKey_ReQueriesTracker(t *testing.T) {
 	waitForOutput(t, tm, "first") // wait for at least one render before mutating the fixture
 
 	f.SetIssue(forge.Issue{Number: "5", Title: "late arrival", State: forge.IssueOpen})
-	sendKey(tm, "r")
+	sendKey(tm, "R")
 	waitForOutput(t, tm, "late arrival")
 
 	sendKey(tm, "q")
@@ -2608,6 +2608,23 @@ func TestTea_PickKey_QueuesHighlightedInstantly(t *testing.T) {
 	}
 }
 
+// TestTea_ResearchKey_QueuesHighlightedInstantly verifies "r" lands the
+// highlighted issue as a KindResearch pick in the same Update call the
+// keystroke triggers — the research counterpart of "p" (issue #1839).
+func TestTea_ResearchKey_QueuesHighlightedInstantly(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+
+	tm := newTeaModel(f, t.TempDir(), launch)
+	tm.m = Update(tm.m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "42", Title: "fix the thing", State: forge.IssueOpen}}})
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+
+	if len(tm.m.Picks) != 1 || tm.m.Picks[0].Number != "42" || tm.m.Picks[0].Kind != KindResearch {
+		t.Fatalf("Picks = %+v after a single \"r\", want #42 landed instantly as KindResearch", tm.m.Picks)
+	}
+}
+
 // TestTea_EnterKey_OnBacklogSection_OpensDetailModal verifies Enter, on the
 // Backlog Section (the default), opens the fullscreen ticket detail modal
 // instead of picking the highlighted issue — picking moved to "p" (issue
@@ -3081,9 +3098,10 @@ func TestTea_DetailModal_ResolvesOnlyOwnBlockersNotWholeBacklog(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_RefreshKey_InvalidatesDetailCache verifies "r" drops the cached
+// TestTea_RefreshKey_InvalidatesDetailCache verifies "R" drops the cached
 // ticket detail: reopening the same ticket after a refresh re-fetches its
-// body instead of replaying stale cached data (issue #1632).
+// body instead of replaying stale cached data (issue #1632; refresh moved
+// from "r" to "R" in issue #1839).
 func TestTea_RefreshKey_InvalidatesDetailCache(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Body: "the full ticket body", State: forge.IssueOpen})
@@ -3104,16 +3122,16 @@ func TestTea_RefreshKey_InvalidatesDetailCache(t *testing.T) {
 		t.Fatal("test setup: IssueCalls empty after first open, want at least one Issue fetch")
 	}
 
-	// "r"'s cache invalidation (DetailCacheInvalidatedMsg) applies
+	// "R"'s cache invalidation (DetailCacheInvalidatedMsg) applies
 	// synchronously in the same Update call the keypress triggers, ahead of
 	// the refreshCmd it also fires — so the very next "enter" is already
 	// guaranteed to see an empty cache with no wait needed in between. A
 	// waitForOutput here would be a red herring besides: the backlog
-	// content is unchanged by "r" (same one issue, same everything), and
+	// content is unchanged by "R" (same one issue, same everything), and
 	// Bubble Tea's renderer only ever re-emits lines that actually changed
 	// since the last frame, so "fix the thing" never reappears as fresh
 	// bytes in the output stream to wait on.
-	sendKey(tm, "r")
+	sendKey(tm, "R")
 
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "the full ticket body")
@@ -3128,12 +3146,13 @@ func TestTea_RefreshKey_InvalidatesDetailCache(t *testing.T) {
 }
 
 // TestTea_RefreshKey_ReopenAfterRefreshStaysBoundedCost verifies reopening a
-// ticket detail after "r" re-resolves it with exactly one DepsOf call — not
+// ticket detail after "R" re-resolves it with exactly one DepsOf call — not
 // zero (there is no whole-backlog graph left to stay "warm" the way issue
 // #1746 once meant to keep one warm across a refresh) and not a call per
 // backlog issue either — so a refresh never reintroduces the O(backlog)
 // cost issue #1744 removed, even though DetailCache was just cleared and
-// this open is a genuine re-fetch (issue #1744).
+// this open is a genuine re-fetch (issue #1744; refresh moved from "r" to
+// "R" in issue #1839).
 func TestTea_RefreshKey_ReopenAfterRefreshStaysBoundedCost(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "7", Title: "waves core", Body: "core body", State: forge.IssueOpen})
@@ -3149,7 +3168,7 @@ func TestTea_RefreshKey_ReopenAfterRefreshStaysBoundedCost(t *testing.T) {
 	// Not the header's status line — see the same note on
 	// TestTea_EnterKey_OnBacklogSection_OpensDetailModal.
 	waitForOutput(t, tm, "[1] Backlog")
-	sendKey(tm, "r")
+	sendKey(tm, "R")
 
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "core body")

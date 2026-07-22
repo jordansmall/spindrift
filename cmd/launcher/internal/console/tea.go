@@ -788,23 +788,20 @@ func (t teaModel) quitOrConfirmMsg() Msg {
 // pick sources (cursor row vs. open modal) can never drift apart on how a
 // resolved target actually gets queued/launched. kind selects the Dispatch
 // kind the pick carries: KindWork for the "p"/"P" gestures and the modal's
-// own "p"; KindResearch has no console binding yet (issue #1838 leaves it
-// unbound; #1709 wired the record itself) — Launcher.Pick's own trackerFor
-// already routes a KindResearch pick onto ResearchTracker when one is
+// own "p", KindResearch for "r" (issue #1839) — Launcher.Pick's own
+// trackerFor routes a KindResearch pick onto ResearchTracker when one is
 // wired. A nil Launcher promotes through PickIssue directly onto
 // Model.Picks (matching the pre-#785 no-launch Console) but never queues on
 // a live queue or launches, since there is nothing to launch it.
 func (t teaModel) landPick(num, title string, kind Kind) (teaModel, Msg) {
 	if t.launch == nil {
 		// No Launcher means no trackerFor to pick a ResearchTracker over
-		// t.tracker either — moot today since neither caller passes
-		// KindResearch (issue #1838 left it unbound); a KindResearch pick
-		// here would still promote on t.tracker's own label family, tagged
-		// with the kind it was asked for regardless. Harmless in practice:
-		// production always supplies a Launcher (cmdConsole wires
-		// ResearchTracker unconditionally), so this branch is exercised
-		// only by tests that deliberately skip the launch stack to
-		// exercise bare Pick/Unpick bookkeeping.
+		// t.tracker either, so a KindResearch pick here still promotes on
+		// t.tracker's own label family, tagged with the kind it was asked
+		// for regardless. Harmless in practice: production always supplies
+		// a Launcher (cmdConsole wires ResearchTracker unconditionally), so
+		// this branch is exercised only by tests that deliberately skip the
+		// launch stack to exercise bare Pick/Unpick bookkeeping.
 		msg := PickIssue(t.tracker, num, title, kind)
 		t.m = Update(t.m, msg)
 		return t, msg
@@ -880,7 +877,7 @@ func (t teaModel) handleFilterKey(msg tea.KeyMsg) teaModel {
 	return t
 }
 
-// refreshCmd re-queries tracker for the backlog in the background — the "r"
+// refreshCmd re-queries tracker for the backlog in the background — the "R"
 // key, the initial load, and both async signals all funnel through this one
 // Cmd so their result lands on Model identically.
 func refreshCmd(tracker forge.IssueTracker) tea.Cmd {
