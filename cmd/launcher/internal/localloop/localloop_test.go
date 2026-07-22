@@ -241,17 +241,168 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 		t.Fatalf("reconcile.Run closed = %v, want [%s]", res.Closed, num)
 	}
 
-	if err := lw.Surface(operatorDir, io.Discard); err != nil {
+	// The seam has no parent: frontmatter — its title, "seam 42", is what
+	// surfaces the branch name (sanitized, issue #1811), not the slug
+	// ResolveParent used to key the Integration branch.
+	const wantBranch = "seam-42"
+	var out strings.Builder
+	if err := lw.Surface(operatorDir, &out, res.Stuck); err != nil {
 		t.Fatalf("Surface: %v", err)
 	}
+	wantVerdict := "surface: " + parent.String() + " surfaced → branch " + wantBranch + " (1 seams)"
+	if !strings.Contains(out.String(), wantVerdict) {
+		t.Errorf("Surface output = %q, want it to contain %q", out.String(), wantVerdict)
+	}
 
-	surfacedTip := revParse(t, operatorDir, "refs/heads/"+parent.String())
+	surfacedTip := revParse(t, operatorDir, "refs/heads/"+wantBranch)
 	wantTip := revParse(t, accumDir, "refs/heads/"+local.IntegrationBranch(parent))
 	if surfacedTip != wantTip {
-		t.Errorf("surfaced branch %s tip = %s, want %s (Integration branch tip)", parent, surfacedTip, wantTip)
+		t.Errorf("surfaced branch %s tip = %s, want %s (Integration branch tip)", wantBranch, surfacedTip, wantTip)
 	}
-	if err := exec.Command("git", "-C", operatorDir, "merge-base", "--is-ancestor", fixtureSHA, "refs/heads/"+parent.String()).Run(); err != nil {
-		t.Errorf("fixture commit %s not reachable from surfaced branch %s", fixtureSHA, parent)
+	if err := exec.Command("git", "-C", operatorDir, "merge-base", "--is-ancestor", fixtureSHA, "refs/heads/"+wantBranch).Run(); err != nil {
+		t.Errorf("fixture commit %s not reachable from surfaced branch %s", fixtureSHA, wantBranch)
+	}
+}
+
+// TestWire_ComposedLoop_EmptyTitleSanitizesToSlug drives the parentless
+// title-derived naming's slug fallback (issue #1811 AC3): a title made
+// entirely of characters SanitizeParent strips (no [a-z0-9] survives) must
+// not surface an empty-string branch name — Surface falls back to the
+// ticket's own slug, the same name a parented ticket would use.
+func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	const num = "47"
+	writeLocalIssue(t, issuesDir, num, "!!!", "", testLabels.InProgress)
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+
+	parent := lw.ResolveParent(num)
+	cf := lw.CodeForgeForIssue(num)
+	branch := cf.AgentBranch(num)
+	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, num, lw.OutboxDir(num))
+
+	cfg := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+	}
+	s := settle.New(cfg, it, cf)
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
+	}
+	s.Settle(dispatch.NewFake(), num, 0, result)
+
+	res, err := reconcile.Run(it, cf, nil)
+	if err != nil {
+		t.Fatalf("reconcile.Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != num {
+		t.Fatalf("reconcile.Run closed = %v, want [%s]", res.Closed, num)
+	}
+
+	var out strings.Builder
+	if err := lw.Surface(operatorDir, &out, res.Stuck); err != nil {
+		t.Fatalf("Surface: %v", err)
+	}
+	wantVerdict := "surface: " + parent.String() + " surfaced → branch " + parent.String() + " (1 seams)"
+	if !strings.Contains(out.String(), wantVerdict) {
+		t.Errorf("Surface output = %q, want it to contain %q", out.String(), wantVerdict)
+	}
+	if err := exec.Command("git", "-C", operatorDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent.String()).Run(); err != nil {
+		t.Errorf("refs/heads/%s missing — want the slug fallback branch surfaced", parent)
+	}
+}
+
+// TestWire_ComposedLoop_GarbageParentUsesTitleNaming verifies a seam whose
+// parent: frontmatter sanitizes to empty (garbage made entirely of
+// non-[a-z0-9] characters) is treated as parentless for surfaced-branch
+// naming, exactly like an unset parent: local.ResolveParent already folds
+// it into "its own broad ticket, keyed on its own slug" (ADR 0033, issue
+// #1734), so Surface's title-derived naming (issue #1811) must recognize it
+// the same way rather than only checking the raw parent: string for "".
+func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	const num = "48"
+	writeLocalIssue(t, issuesDir, num, "seam 48", "!!!", testLabels.InProgress)
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+
+	parent := lw.ResolveParent(num)
+	if parent.String() != num {
+		t.Fatalf("ResolveParent(%s) = %q, want %q (a garbage parent: is its own broad ticket)", num, parent, num)
+	}
+	cf := lw.CodeForgeForIssue(num)
+	branch := cf.AgentBranch(num)
+	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, num, lw.OutboxDir(num))
+
+	cfg := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+	}
+	s := settle.New(cfg, it, cf)
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
+	}
+	s.Settle(dispatch.NewFake(), num, 0, result)
+
+	res, err := reconcile.Run(it, cf, nil)
+	if err != nil {
+		t.Fatalf("reconcile.Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != num {
+		t.Fatalf("reconcile.Run closed = %v, want [%s]", res.Closed, num)
+	}
+
+	const wantBranch = "seam-48"
+	var out strings.Builder
+	if err := lw.Surface(operatorDir, &out, res.Stuck); err != nil {
+		t.Fatalf("Surface: %v", err)
+	}
+	wantVerdict := "surface: " + parent.String() + " surfaced → branch " + wantBranch + " (1 seams)"
+	if !strings.Contains(out.String(), wantVerdict) {
+		t.Errorf("Surface output = %q, want it to contain %q", out.String(), wantVerdict)
+	}
+	if err := exec.Command("git", "-C", operatorDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+wantBranch).Run(); err != nil {
+		t.Errorf("refs/heads/%s missing — want the title-derived branch surfaced", wantBranch)
 	}
 }
 
@@ -331,7 +482,10 @@ func TestWire_ComposedLoop_HealsStuckBranchRefLanding(t *testing.T) {
 // bundle held path through the same composed surface: no bundle ever lands
 // in the outbox (the Agent produced nothing), so settle's relay fails and
 // the seam blocks — agent-complete, not agent-failed (ADR 0033) — reconcile
-// leaves it open, and surface never surfaces its parent (issue #1806 AC4).
+// leaves it open (its recorded raw branch never merged, so Run's healing
+// path reports it stuck, issue #1809) and Surface reports the broad ticket
+// held on that stuck landing rather than surfacing it (issue #1806 AC4,
+// issue #1811).
 func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)
@@ -394,8 +548,13 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 		t.Fatalf("reconcile.Run closed = %v, want none (landing never verified)", res.Closed)
 	}
 
-	if err := lw.Surface(operatorDir, io.Discard); err != nil {
+	var out strings.Builder
+	if err := lw.Surface(operatorDir, &out, res.Stuck); err != nil {
 		t.Fatalf("Surface: %v", err)
+	}
+	wantVerdict := "surface: " + parent.String() + " held — stuck landing — branch " + branch + " not merged into " + local.IntegrationBranch(parent)
+	if !strings.Contains(out.String(), wantVerdict) {
+		t.Errorf("Surface output = %q, want it to contain %q", out.String(), wantVerdict)
 	}
 	if err := exec.Command("git", "-C", operatorDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent.String()).Run(); err == nil {
 		t.Errorf("refs/heads/%s must not exist — parent's only seam never landed", parent)
@@ -471,8 +630,13 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 		t.Fatalf("Integration branch %s missing from Accumulation repo after landedNum settled", local.IntegrationBranch(sanitizedParent))
 	}
 
-	if err := lw.Surface(operatorDir, io.Discard); err != nil {
+	var out strings.Builder
+	if err := lw.Surface(operatorDir, &out, res.Stuck); err != nil {
 		t.Fatalf("Surface: %v", err)
+	}
+	wantVerdict := "surface: " + parent + " held — open seam #" + openNum
+	if !strings.Contains(out.String(), wantVerdict) {
+		t.Errorf("Surface output = %q, want it to contain %q", out.String(), wantVerdict)
 	}
 	if err := exec.Command("git", "-C", operatorDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent).Run(); err == nil {
 		t.Errorf("refs/heads/%s must not exist — sibling %s is still open", parent, openNum)
@@ -545,7 +709,7 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 		t.Fatalf("reconcile.Run closed = %v, want both %s and %s", res.Closed, numA, numB)
 	}
 
-	if err := lw.Surface(operatorDir, io.Discard); err != nil {
+	if err := lw.Surface(operatorDir, io.Discard, res.Stuck); err != nil {
 		t.Fatalf("Surface: %v", err)
 	}
 

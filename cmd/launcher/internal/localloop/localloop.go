@@ -120,17 +120,33 @@ func (w *Wired) OutboxDir(num string) string {
 	return dispatch.OutboxDirFor(pwd, num)
 }
 
+// seamGroup bundles one broad ticket's member seams for Surface's grouping
+// pass: its seam issues in tracker order, whether it is parentless (its own
+// broad ticket, keyed on its own slug — local.ResolveParent), and — only
+// when parentless — the title Surface derives its surfaced branch name from
+// (issue #1811). A parented ticket keeps ADR 0033's sanitized-parent name
+// unchanged, so title is unused for it.
+type seamGroup struct {
+	issues     []forge.Issue
+	parentless bool
+	title      string
+}
+
 // Surface surfaces every completed broad ticket's Integration branch into
-// pwd as a local branch named after its resolved parent, once every one of
-// its seam issues is closed — CODE_FORGE=local's auto-surface exit (ADR
-// 0033, issue #1730). Each issue keys its own broad ticket from its own
-// parent: frontmatter, or its own slug when unset (ResolveParent), so a
-// mixed-parent batch may complete several broad tickets in the same sweep —
-// this iterates every distinct resolved parent among the tracker's issues
-// instead of a single run-wide parent. It is a no-op for a tracker with no
-// SeamLister surface (every tracker but local); a resolved parent with any
-// seam still open is skipped, not an error.
-func (w *Wired) Surface(pwd string, out io.Writer) error {
+// pwd as a local branch, once every one of its seam issues is closed —
+// CODE_FORGE=local's auto-surface exit (ADR 0033, issue #1730). Each issue
+// keys its own broad ticket from its own parent: frontmatter, or its own
+// slug when unset (ResolveParent), so a mixed-parent batch may complete
+// several broad tickets in the same sweep — this iterates every distinct
+// resolved parent among the tracker's issues instead of a single run-wide
+// parent. It prints exactly one Verdict line per broad ticket it touches —
+// surfaced or held, naming the first unmet gate — so no touched ticket is
+// ever silent (issue #1811); stuck maps an issue number to its stuck
+// LandingBranchRef branch name (reconcile.Result.Stuck), letting a held
+// ticket's gate read "stuck landing" instead of the generic "open seam"
+// without Surface redoing reconcile's own ancestry check. It is a no-op for
+// a tracker with no SeamLister surface (every tracker but local).
+func (w *Wired) Surface(pwd string, out io.Writer, stuck map[string]string) error {
 	sl, ok := w.it.(forge.SeamLister)
 	if !ok {
 		return nil
@@ -139,7 +155,7 @@ func (w *Wired) Surface(pwd string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("surface: list issues: %w", err)
 	}
-	groups := map[local.SanitizedParent][]forge.Issue{}
+	groups := map[local.SanitizedParent]*seamGroup{}
 	var order []local.SanitizedParent
 	for _, iss := range issues {
 		// w.cached, not w.ResolveParent: iss.Parent is already in hand from
@@ -149,25 +165,24 @@ func (w *Wired) Surface(pwd string, out io.Writer) error {
 		// still sharing and populating the same memoized value CodeForgeForIssue
 		// and any other caller of w.ResolveParent(iss.Number) will reuse.
 		parent := w.cached(iss.Number, func() local.SanitizedParent { return local.ResolveParent(iss.Number, iss.Parent) })
-		if _, seen := groups[parent]; !seen {
+		g, seen := groups[parent]
+		if !seen {
 			order = append(order, parent)
+			// local.SanitizeParent, not a bare iss.Parent == "" check: a
+			// parent: value made entirely of non-[a-z0-9] characters
+			// sanitizes to empty too, and ResolveParent already treats that
+			// the same as unset — its own broad ticket, keyed on its own
+			// slug (ADR 0033, issue #1734) — so title-derived naming must
+			// recognize it the same way.
+			g = &seamGroup{parentless: local.SanitizeParent(iss.Parent) == "", title: iss.Title}
+			groups[parent] = g
 		}
-		groups[parent] = append(groups[parent], iss)
+		g.issues = append(g.issues, iss)
 	}
 	var errs []error
 	neverLanded := 0
 	for _, parent := range order {
-		allClosed := true
-		for _, s := range groups[parent] {
-			if s.State != forge.IssueClosed {
-				allClosed = false
-				break
-			}
-		}
-		if !allClosed {
-			continue
-		}
-		surfaced, skipped, err := local.SurfaceIntegrationBranch(w.cfg.AccumulationRepoDir, pwd, parent)
+		v, err := w.verdictFor(pwd, parent, groups[parent], stuck)
 		if err != nil {
 			// Recorded, not returned immediately: one parent's genuine
 			// surface failure must not stop the sweep from attempting every
@@ -175,29 +190,56 @@ func (w *Wired) Surface(pwd string, out io.Writer) error {
 			errs = append(errs, fmt.Errorf("surface %s: %w", parent, err))
 			continue
 		}
-		if skipped != "" {
-			// The "never landed" reason is the expected, permanent shape for
-			// any closed parentless issue that never went through
-			// CODE_FORGE=local (issue #1739): as a tracker's closed-issue
-			// history grows, printing one line per such parent on every
-			// sweep, forever, drowns out the two other skip reasons
-			// (checked-out / diverged) that are transient and operator-
-			// actionable. Those still print individually below; this one
-			// collapses into a single end-of-sweep count instead.
-			if skipped == local.NeverLandedSkip(parent) {
-				neverLanded++
-				continue
-			}
-			fmt.Fprintf(out, "surface: %s skipped — %s\n", parent, skipped)
+		// The "never landed" reason is the expected, permanent shape for any
+		// closed parentless issue that never went through CODE_FORGE=local
+		// (issue #1739): as a tracker's closed-issue history grows, printing
+		// one line per such parent on every sweep, forever, drowns out every
+		// other, operator-actionable held reason. It alone collapses into a
+		// single end-of-sweep count instead of Verdict's usual one-line-per-
+		// ticket rendering.
+		if v.Kind == VerdictHeld && v.Held == local.NeverLandedSkip(parent) {
+			neverLanded++
 			continue
 		}
-		if surfaced {
-			fmt.Fprintf(out, "surface: broad ticket %s complete — %s's Integration branch is ready in the checkout as local branch %q.\n",
-				parent, local.IntegrationBranch(parent), parent)
-		}
+		fmt.Fprintln(out, v)
 	}
 	if neverLanded > 0 {
 		fmt.Fprintf(out, "surface: %d broad ticket(s) skipped — no seam has landed yet\n", neverLanded)
 	}
 	return errors.Join(errs...)
+}
+
+// verdictFor builds parent's Verdict: held on the group's first still-open
+// seam (naming a known-stuck LandingBranchRef specifically, else the seam
+// generically), else the outcome of actually surfacing its Integration
+// branch — surfaced under g's title-derived name when g is parentless
+// (sanitized the same ref-safe way as a parent, falling back to parent's own
+// slug when the title sanitizes empty), or under parent unchanged otherwise
+// (ADR 0033, issue #1811).
+func (w *Wired) verdictFor(pwd string, parent local.SanitizedParent, g *seamGroup, stuck map[string]string) (Verdict, error) {
+	for _, s := range g.issues {
+		if s.State == forge.IssueClosed {
+			continue
+		}
+		if branch, ok := stuck[s.Number]; ok {
+			return Verdict{Parent: parent, Kind: VerdictHeld,
+				Held: fmt.Sprintf("stuck landing — branch %s not merged into %s", branch, local.IntegrationBranch(parent))}, nil
+		}
+		return Verdict{Parent: parent, Kind: VerdictHeld, Held: "open seam #" + s.Number}, nil
+	}
+
+	branchName := parent.String()
+	if g.parentless {
+		if sanitized := local.SanitizeParent(g.title); sanitized != "" {
+			branchName = sanitized
+		}
+	}
+	_, skipped, err := local.SurfaceIntegrationBranch(w.cfg.AccumulationRepoDir, pwd, parent, branchName)
+	if err != nil {
+		return Verdict{}, err
+	}
+	if skipped != "" {
+		return Verdict{Parent: parent, Kind: VerdictHeld, Held: skipped}, nil
+	}
+	return Verdict{Parent: parent, Kind: VerdictSurfaced, Branch: branchName, SeamCount: len(g.issues)}, nil
 }
