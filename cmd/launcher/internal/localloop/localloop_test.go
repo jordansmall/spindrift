@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -93,11 +94,14 @@ func writeLocalIssue(t *testing.T, dir, num, title, parent, state string) {
 	writeFile(t, filepath.Join(dir, num+".md"), b.String())
 }
 
-// bundleFixtureCommit stands in for the Agent and the not-yet-built
-// bundle-out verb (T2): it clones accumDir, commits one marker file on
-// branch off base, and bundles just that new commit into
-// outboxDir/seam.bundle, so RelayBundle has exactly what a real Box's
-// code-out would have left there. Returns the fixture commit's sha.
+// bundleFixtureCommit stands in for the Agent: it clones accumDir and
+// commits one marker file on branch off base, the "commit on the agent
+// branch" contract every Agent now shares under CODE_FORGE=local (issue
+// #1808). The bundle itself comes from the real bundle-out producer
+// (bundleout.Run), not a hand-written `git bundle create` — the same
+// producer driver-exec's bundle-out verb calls in production — so
+// RelayBundle sees exactly what a real Box's code-out would have left
+// there. Returns the fixture commit's sha.
 func bundleFixtureCommit(t *testing.T, accumDir, base, branch, num, outboxDir string) string {
 	t.Helper()
 	work := t.TempDir()
@@ -108,10 +112,17 @@ func bundleFixtureCommit(t *testing.T, accumDir, base, branch, num, outboxDir st
 	run(t, work, "add", "feature-"+num+".txt")
 	run(t, work, "commit", "-m", "feature "+num)
 	sha := revParse(t, work, "HEAD")
-	if err := os.MkdirAll(outboxDir, 0o755); err != nil {
-		t.Fatal(err)
+	priorLine := outcome.Outcome{Issue: num, Landing: branch, Status: "ready"}.Line()
+	if err := bundleout.Run(bundleout.Config{
+		Repo:             work,
+		Base:             base,
+		Branch:           branch,
+		OutboxDir:        outboxDir,
+		Issue:            num,
+		PriorOutcomeLine: priorLine,
+	}, io.Discard); err != nil {
+		t.Fatalf("bundleout.Run: %v", err)
 	}
-	run(t, work, "bundle", "create", filepath.Join(outboxDir, local.BundleFileName), base+".."+branch)
 	return sha
 }
 
