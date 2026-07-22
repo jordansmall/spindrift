@@ -31,6 +31,77 @@ func TestView_ListsVisibleIssuesWithNumberTitleLabels(t *testing.T) {
 	}
 }
 
+// TestView_ModeList_ShowsPinnedFooter verifies the main list view renders a
+// pinned keystroke-hint footer via the shared renderer (issue #1791), the
+// same "shortcuts pinned to the bottom" treatment the zoomed log view
+// already has, closing the one Console view issue #1792 called out as
+// lacking it.
+func TestView_ModeList_ShowsPinnedFooter(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "one"}}})
+
+	out := View(m)
+	for _, want := range []string{"[/] filter", "[p] pick", "[r] refresh"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("View() = %q, want it to contain pinned footer hint %q", out, want)
+		}
+	}
+}
+
+// TestView_ModeList_NarrowWidth_FooterClipsWithoutOverflow verifies the main
+// list view's pinned footer degrades gracefully on a narrow terminal —
+// width-clipped via the shared renderer's own clip-with-ellipsis behaviour,
+// never wrapped or left to overflow the terminal width (issue #1792 AC3).
+func TestView_ModeList_NarrowWidth_FooterClipsWithoutOverflow(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 20, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "one"}}})
+
+	out := View(m)
+	footerLine := ""
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "[/] filter") {
+			footerLine = line
+		}
+	}
+	if footerLine == "" {
+		t.Fatalf("View() = %q, want a footer line starting with the filter hint", out)
+	}
+	if w := runewidth.StringWidth(footerLine); w > 20 {
+		t.Errorf("footer line %q is %d columns wide, want it clipped to the 20-column terminal", footerLine, w)
+	}
+	if strings.Contains(footerLine, "[r] refresh") {
+		t.Errorf("footer line %q, want it actually clipped at width 20 rather than fitting unclipped", footerLine)
+	}
+	if !strings.Contains(footerLine, "…") {
+		t.Errorf("footer line %q, want the clipped footer's trailing ellipsis", footerLine)
+	}
+}
+
+// TestView_ModeList_FooterSurvivesScrollClamp verifies the pinned footer
+// still renders — and the whole frame still fits the terminal — after
+// scrolling a long backlog to its clamped last page, not just on a short,
+// unscrolled list (issue #1792 AC2).
+func TestView_ModeList_FooterSurvivesScrollClamp(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	issues := make([]forge.Issue, 50)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+	m = Update(m, ScrollMsg{Delta: 1000})
+
+	out := View(m)
+	if !strings.Contains(out, "[/] filter") {
+		t.Errorf("View() = %q, want the pinned footer to survive a scroll to the clamped last page", out)
+	}
+	if lines := strings.Count(out, "\n"); lines > 10 {
+		t.Errorf("View() rendered %d lines, want it to fit within Height (10) with the footer pinned", lines)
+	}
+}
+
 // TestView_DogfoodNotice_ShownWhenLiveSilentOtherwise verifies the
 // informational dogfood-competition notice renders only when a live
 // pid-file was found at startup — absence renders nothing extra.
@@ -3180,8 +3251,10 @@ func TestView_BacklogSection_ShowsPositionIndicator(t *testing.T) {
 	// (issue #1756); the header itself now costs only 3 rows — the
 	// "spindrift" wordmark folds into its top border rule rather than a
 	// separate banner (issue #1798) — preserving the item budget (and so
-	// the exact position ranges below) this test was written against.
-	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows})
+	// the exact position ranges below) this test was written against. Plus
+	// listFooterLines, ModeList's own pinned footer row (issue #1792), so
+	// that reservation doesn't eat into the item budget this test pins.
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows + listFooterLines})
 	issues := make([]forge.Issue, 50)
 	for i := range issues {
 		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
@@ -3209,8 +3282,10 @@ func TestView_WorkSection_ShowsPositionIndicator(t *testing.T) {
 	// (issue #1756); the header itself now costs only 3 rows — the
 	// "spindrift" wordmark folds into its top border rule rather than a
 	// separate banner (issue #1798) — preserving the item budget (and so
-	// the exact position range below) this test was written against.
-	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows})
+	// the exact position range below) this test was written against. Plus
+	// listFooterLines, ModeList's own pinned footer row (issue #1792), so
+	// that reservation doesn't eat into the item budget this test pins.
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows + listFooterLines})
 	picks := make([]Pick, 50)
 	for i := range picks {
 		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}

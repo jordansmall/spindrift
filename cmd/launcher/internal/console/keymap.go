@@ -151,7 +151,8 @@ var keymap = []Binding{
 	},
 	{
 		Keys: []string{"/"}, Modes: []Mode{ModeList},
-		Help: "  /           filter the Backlog by label substring",
+		Help:   "  /           filter the Backlog by label substring",
+		Footer: "[/] filter",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			t.m = Update(t.m, FilterEditStartMsg{})
 			return t, nil
@@ -386,7 +387,8 @@ var keymap = []Binding{
 	},
 	{
 		Keys: []string{"r"}, Modes: []Mode{ModeList},
-		Help: "  r           refresh the backlog",
+		Help:   "  r           refresh the backlog",
+		Footer: "[r] refresh",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			t.m = Update(t.m, DetailCacheInvalidatedMsg{})
 			return t, refreshCmd(t.tracker)
@@ -394,7 +396,8 @@ var keymap = []Binding{
 	},
 	{
 		Keys: []string{"p"}, Modes: []Mode{ModeList},
-		Help: "  p           pick the highlighted Backlog row (launch button)",
+		Help:   "  p           pick the highlighted Backlog row (launch button)",
+		Footer: "[p] pick",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			t.m = Update(t.m, PickPendingMsg{})
 			return t, pickChordTick()

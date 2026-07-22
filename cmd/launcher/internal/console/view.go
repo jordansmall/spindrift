@@ -451,20 +451,55 @@ func renderSectionTabs(m Model) string {
 	return clip(plain, m.Width, false) + "\n"
 }
 
+// listFooterKeys are the ModeList bindings the main list view's pinned
+// footer hints (issue #1792) — filter, pick, and refresh, the list's own
+// action verbs with no other on-screen affordance. Navigation (j/k, g/G,
+// pgup/pgdown) and Section-jump (H/L, 1-5, already inline on the Section
+// tabs row) are deliberately left out, matching the restraint the other
+// three migrated footers already show toward their own modes' full binding
+// set (e.g. the sidebar's scroll keys never get a footer entry either).
+// Ordered filter/pick/refresh (not keymap's own r-before-p declaration
+// order) — the read-then-act sequence an operator actually follows, not an
+// accident to "fix" back into keymap order.
+var listFooterKeys = []string{"/", "p", "r"}
+
 // renderBody renders the active Section's own table under the header and
 // Section tabs (ADR 0030) — the section-switched single list that replaces
-// the two-column body of ADR 0025. budget is the row count left after the
-// header, tabs, and any prompt lines — always a real, already-clamped-to-
-// nonnegative figure from View, never the "unbounded" case (issue #1540;
-// Viewport's own height==0 convention covers that for callers who want it).
+// the two-column body of ADR 0025 — followed by ModeList's own pinned
+// keystroke-hint footer (issue #1792), the one Console view the shared
+// renderer (issue #1791) hadn't reached yet. budget is the row count left
+// after the header, tabs, and any prompt lines — always a real, already-
+// clamped-to-nonnegative figure from View, never the "unbounded" case (issue
+// #1540; Viewport's own height==0 convention covers that for callers who
+// want it). Only ModeList spends a row on this footer; the other Modes that
+// still reach here (FilterEdit, TerminateConfirm, QuitConfirm, Pick) already
+// show their own single-line prompt in that same reserved row instead
+// (view.go's viewBody), so showing both would double up. tableBudget's
+// "-listFooterLines" mirrors renderSidebarDocked's own
+// "-sidebarDockedFooterLines" (view.go) — listContentBudget (view.go) keeps
+// Update's cursor/scroll clamp and sectionPageSize in agreement with this
+// same reservation.
 func renderBody(m Model, budget int, compact bool) string {
 	if budget <= 0 {
 		return ""
 	}
-	if m.ActiveSection == SectionBacklog {
-		return renderBacklogSection(m, budget, compact)
+	tableBudget := budget
+	if m.Mode == ModeList {
+		tableBudget -= listFooterLines
 	}
-	return renderWorkSection(m, budget, compact)
+	var body string
+	if m.ActiveSection == SectionBacklog {
+		body = renderBacklogSection(m, tableBudget, compact)
+	} else {
+		body = renderWorkSection(m, tableBudget, compact)
+	}
+	if m.Mode != ModeList {
+		return body
+	}
+	if body != "" && !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	return body + renderFooterHints(ModeList, listFooterKeys, m.Width, compact) + "\n"
 }
 
 // renderTable writes header followed by rows windowed through vp against
@@ -1000,6 +1035,28 @@ func bodyBudget(m Model) int {
 	return budget
 }
 
+// listContentBudget is bodyBudget(m) less listFooterLines whenever ModeList's
+// own pinned footer (issue #1792) is about to consume a row — Update's
+// cursor/scroll clamp (model.go) and sectionPageSize go through this instead
+// of bodyBudget(m) directly, the same way model.go's sidebar clamp
+// separately subtracts sidebarDockedFooterLines, so neither ever targets a
+// taller page than renderBody's own "-listFooterLines" reservation actually
+// leaves room to show (issue #1755's shared-budget invariant, extended to
+// the list's footer). Unlike sidebarDockedFooterLines's docked-only
+// reservation, this applies whenever m.Mode is ModeList regardless of
+// whether a sidebar is docked beside the list — renderBody appends the same
+// footer to the list column either way.
+func listContentBudget(m Model) int {
+	budget := bodyBudget(m)
+	if m.Mode == ModeList {
+		budget -= listFooterLines
+		if budget < 0 {
+			budget = 0
+		}
+	}
+	return budget
+}
+
 // positionLabel returns a compact " (X-Y of N)" position indicator for a
 // column's label, describing the rows vp actually renders at itemBudget of
 // total — or "" when there is nothing to show a range for (an empty list, or
@@ -1032,7 +1089,7 @@ func positionLabel(vp Viewport, itemBudget, total int) string {
 // sidebar/rebuild-output panes' fixed fixedPaneScrollDelta, this is
 // recomputed on every keypress.
 func sectionPageSize(m Model) int {
-	itemBudget := queueItemBudget(m, bodyBudget(m))
+	itemBudget := queueItemBudget(m, listContentBudget(m))
 	if itemBudget <= 0 {
 		return 0
 	}
@@ -1113,6 +1170,13 @@ const headerFooterLines = 2
 // renderSidebarFullscreen still renders its label as an interior row, so
 // it keeps budgeting the full headerFooterLines pair.
 const sidebarDockedFooterLines = 1
+
+// listFooterLines is the plain list body's own chrome budget (keystroke-hint
+// footer only) that renderBody and bodyBudget/viewBody's reservedLines
+// subtract for ModeList — the same one-row reservation
+// sidebarDockedFooterLines already models for the docked sidebar's footer,
+// applied to the main list view issue #1792 gave a pinned footer of its own.
+const listFooterLines = 1
 
 // sidebarErr returns the error the current view should surface: s.Err
 // unconditionally (nothing loaded at all, e.g. no Driver), otherwise
