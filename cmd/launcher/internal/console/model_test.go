@@ -1242,6 +1242,28 @@ func TestUpdate_CursorJumpToLastMsg_Docked_LastRowReachable(t *testing.T) {
 	}
 }
 
+// TestUpdate_CursorJumpToLastMsg_LastRowReachable_WithListFooter verifies "G"
+// on the plain (undocked) list view actually renders the last row now that
+// ModeList's own pinned footer (issue #1792) reserves a row too — not just
+// that Offset lands on some clamp formula, but that the clamp
+// (listContentBudget) agrees with what renderBody actually has room to show,
+// or the last row ends up permanently unreachable behind the new footer
+// (the same class of bug issue #1755 fixed for the docked sidebar).
+func TestUpdate_CursorJumpToLastMsg_LastRowReachable_WithListFooter(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	issues := make([]forge.Issue, 50)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	m = Update(m, IssuesLoadedMsg{Issues: issues})
+
+	m = Update(m, CursorJumpToLastMsg{})
+
+	if !strings.Contains(View(m), "issue 49") {
+		t.Errorf("View() = %q, want the last row (issue 49) reachable after \"G\" with the list footer pinned", View(m))
+	}
+}
+
 // TestUpdate_GPendingMsg_ArmsPendingG verifies a lone "g" arms the pending-g
 // leader on the Model, mirroring ModePick's own arm/resolve toggle (issue
 // #1628 AC3).
