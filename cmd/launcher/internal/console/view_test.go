@@ -1058,7 +1058,7 @@ func detailModalBoxBorderWidth(t *testing.T, out, title string) int {
 	if end < 0 {
 		t.Fatalf("View() = %q, want a matching closing corner on the top border line", out)
 	}
-	return runewidth.StringWidth(line[start : start+end+len("╮")])
+	return ansi.StringWidth(line[start : start+end+len("╮")])
 }
 
 // detailModalBoxOriginX returns the display column out's floating detail
@@ -1076,6 +1076,9 @@ func detailModalBoxOriginX(t *testing.T, out, title string) int {
 // the detail modal is open re-sizes and re-centers the floating box rather
 // than leaving it pinned at whatever size it opened at (issue #1759 AC).
 func TestView_DetailModal_Resize_RecentersAndResizesBox(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
 	m := Update(NewModel(), SizeChangedMsg{Width: 60, Height: 30})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 	outSmall := View(m)
@@ -1113,6 +1116,9 @@ func TestView_DetailModal_Resize_RecentersAndResizesBox(t *testing.T) {
 // set in the box's top border line rather than as its own interior content
 // row (issue #1758 AC).
 func TestView_DetailModal_BorderShowsNumberAndTitle(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
 	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 
@@ -1128,6 +1134,37 @@ func TestView_DetailModal_BorderShowsNumberAndTitle(t *testing.T) {
 	}
 	if !strings.Contains(out, "╰") {
 		t.Errorf("View() = %q, want a visible bottom border on the floating box", out)
+	}
+}
+
+// TestView_DetailModal_NoColor_BorderDegradesToAscii verifies the floating
+// detail modal's border — including its titled top rule — degrades to plain
+// ASCII glyphs under NO_COLOR, closing the gap its old hand-rolled
+// Unicode-only top/bottom border left: every other panel in the package
+// already degrades this way (issue #1755), but the modal never did until it
+// moved onto the shared titled-border helper (issue #1797 AC).
+func TestView_DetailModal_NoColor_BorderDegradesToAscii(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+
+	out := View(m)
+	if strings.Contains(out, "╭") {
+		t.Errorf("View() = %q, want no rounded border glyphs under NO_COLOR", out)
+	}
+	found := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "+") && strings.Contains(line, "#42 fix the thing") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("View() = %q, want the #number title set in an ASCII top border line", out)
+	}
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("View() = %q, want no escape sequences at all under NO_COLOR", out)
 	}
 }
 
@@ -3198,7 +3235,7 @@ func TestView_DetailModal_WideCharacterLabel_BorderStaysAligned(t *testing.T) {
 			continue
 		}
 		content := line[first+len("│") : last]
-		if w := runewidth.StringWidth(content); w != innerWidth {
+		if w := ansi.StringWidth(content); w != innerWidth {
 			t.Errorf("row %q content width %d, want exactly innerWidth %d — right border drifted", line, w, innerWidth)
 		}
 	}
@@ -3383,5 +3420,101 @@ func TestRenderTable_TruncatedWindow_HoldsBackOneRowForMoreBelow(t *testing.T) {
 	want := "header\nrow0\nrow1\nrow2\n… 47 more below\n"
 	if got != want {
 		t.Errorf("renderTable() = %q, want %q", got, want)
+	}
+}
+
+// TestRenderBoxedColumn_TitleFoldedIntoTopBorder verifies a titled panel's
+// top border reads "╭─ <title> ─…─╮" — the title folded into the rule
+// itself rather than sitting on an interior content row (issue #1797).
+func TestRenderBoxedColumn_TitleFoldedIntoTopBorder(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	got := renderBoxedColumn("hello", 20, "my title", RoleDim)
+	top := strings.SplitN(got, "\n", 2)[0]
+	if !strings.Contains(top, "╭─ ") {
+		t.Errorf("renderBoxedColumn(...) top border = %q, want it to contain the lead-in %q", top, "╭─ ")
+	}
+	if !strings.Contains(top, "my title") {
+		t.Errorf("renderBoxedColumn(...) top border = %q, want it to contain the title %q", top, "my title")
+	}
+	if !strings.Contains(top, "╮") {
+		t.Errorf("renderBoxedColumn(...) top border = %q, want a top-right corner", top)
+	}
+	if w := ansi.StringWidth(top); w != 22 {
+		t.Errorf("renderBoxedColumn(...) top border width = %d, want 22 (width 20 + 2 border columns)", w)
+	}
+}
+
+// TestRenderBoxedColumn_Titled_NoColor_DegradesToAscii verifies a titled
+// panel's border degrades to the plain ASCII glyph set under NO_COLOR — the
+// gap the detail modal's old hand-rolled Unicode-only top border left
+// (issue #1797): previously the modal never degraded at all, unlike every
+// other border in the package.
+func TestRenderBoxedColumn_Titled_NoColor_DegradesToAscii(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	got := renderBoxedColumn("hello", 20, "my title", RoleDim)
+	top := strings.SplitN(got, "\n", 2)[0]
+	if strings.Contains(top, "╭") {
+		t.Errorf("renderBoxedColumn(...) top border = %q, want no rounded border glyph under NO_COLOR", top)
+	}
+	if !strings.Contains(top, "+- ") {
+		t.Errorf("renderBoxedColumn(...) top border = %q, want the ASCII lead-in %q", top, "+- ")
+	}
+	if !strings.Contains(top, "my title") {
+		t.Errorf("renderBoxedColumn(...) top border = %q, want it to contain the title %q", top, "my title")
+	}
+	if strings.Contains(got, "\x1b[") {
+		t.Errorf("renderBoxedColumn(...) = %q, want no escape sequences at all under NO_COLOR", got)
+	}
+}
+
+// TestRenderBoxedColumn_TitleWiderThanPanel_TruncatesWithEllipsis verifies a
+// title too wide for the panel truncates with a trailing ellipsis and the
+// top rule still lands on exactly the panel's width (issue #1797 AC) —
+// never overflowing past width regardless of how long the title is.
+func TestRenderBoxedColumn_TitleWiderThanPanel_TruncatesWithEllipsis(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	got := renderBoxedColumn("hello", 10, "a title far too long to fit in this narrow panel", RoleDim)
+	top := strings.SplitN(got, "\n", 2)[0]
+	if !strings.Contains(top, "…") {
+		t.Errorf("renderBoxedColumn(...) top border = %q, want a trailing ellipsis marking the cut", top)
+	}
+	if w := ansi.StringWidth(top); w != 12 {
+		t.Errorf("renderBoxedColumn(...) top border width = %d, want 12 (width 10 + 2 border columns)", w)
+	}
+}
+
+// TestRenderBoxedColumn_NoTitle_PlainRule verifies an untitled panel's top
+// border is the plain rounded rule, with no title-folding machinery
+// engaged — the header/docked-list/docked-sidebar call sites' shape,
+// unchanged by title support landing in the same helper (issue #1797 AC).
+func TestRenderBoxedColumn_NoTitle_PlainRule(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	got := renderBoxedColumn("hello", 20, "", RoleDim)
+	top := strings.SplitN(got, "\n", 2)[0]
+	want := "+" + strings.Repeat("-", 20) + "+"
+	if top != want {
+		t.Errorf("renderBoxedColumn(...) top border = %q, want %q", top, want)
+	}
+}
+
+// TestRenderBoxedColumn_TitledNarrowPanel_TopRuleStaysExactWidth verifies a
+// titled panel too narrow even for the dash lead-in still lands the top
+// rule on exactly the requested width columns — a panel narrower than the
+// title's own structural "─ " lead-in and trailing space must clamp the
+// whole rule together rather than overflow it (issue #1797 review).
+func TestRenderBoxedColumn_TitledNarrowPanel_TopRuleStaysExactWidth(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+
+	for width := 0; width <= 6; width++ {
+		got := renderBoxedColumn("x", width, "AB", RoleDim)
+		top := strings.SplitN(got, "\n", 2)[0]
+		if w := ansi.StringWidth(top); w != width+2 {
+			t.Errorf("renderBoxedColumn(%q, %d, ...) top border = %q with width %d, want %d", "x", width, top, w, width+2)
+		}
 	}
 }
