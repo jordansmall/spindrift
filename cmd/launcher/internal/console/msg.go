@@ -580,10 +580,11 @@ type DetailModalJumpToLastMsg struct{}
 func (DetailModalJumpToLastMsg) isConsoleMsg() {}
 
 // DetailCacheInvalidatedMsg is the tea layer's signal that the operator
-// pressed "r" — clears Model.DetailCache, so a later ticket detail modal
-// open re-fetches fresh data instead of replaying data "r" was meant to
-// refresh (issue #1632). Fired alongside, not instead of, the ordinary
-// refreshCmd "r" already triggers.
+// pressed "R" — clears Model.DetailCache, so a later ticket detail modal
+// open re-fetches fresh data instead of replaying data "R" was meant to
+// refresh (issue #1632; refresh moved from "r" to "R" in issue #1839).
+// Fired alongside, not instead of, the ordinary refreshCmd "R" already
+// triggers.
 type DetailCacheInvalidatedMsg struct{}
 
 func (DetailCacheInvalidatedMsg) isConsoleMsg() {}

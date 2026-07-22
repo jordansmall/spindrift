@@ -395,15 +395,6 @@ var keymap = []Binding{
 		},
 	},
 	{
-		Keys: []string{"r"}, Modes: []Mode{ModeList},
-		Help:   "  r           refresh the backlog",
-		Footer: "[r] refresh",
-		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			t.m = Update(t.m, DetailCacheInvalidatedMsg{})
-			return t, refreshCmd(t.tracker)
-		},
-	},
-	{
 		Keys: []string{"p"}, Modes: []Mode{ModeList},
 		Help:   "  p           pick the highlighted Backlog row (launch button)",
 		Footer: "[p] pick",
@@ -417,6 +408,23 @@ var keymap = []Binding{
 		Footer: "[P] pick all",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			return t.pickAllReady(), nil
+		},
+	},
+	{
+		Keys: []string{"r"}, Modes: []Mode{ModeList},
+		Help:   "  r           research the highlighted Backlog row (advise-only pick)",
+		Footer: "[r] research",
+		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
+			return t.pickHighlighted(KindResearch), nil
+		},
+	},
+	{
+		Keys: []string{"R"}, Modes: []Mode{ModeList},
+		Help:   "  R           refresh the backlog",
+		Footer: "[R] refresh",
+		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
+			t.m = Update(t.m, DetailCacheInvalidatedMsg{})
+			return t, refreshCmd(t.tracker)
 		},
 	},
 	{

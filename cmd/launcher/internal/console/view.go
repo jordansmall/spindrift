@@ -473,18 +473,19 @@ func renderSectionTabs(m Model) string {
 }
 
 // listFooterKeys are the ModeList bindings the main list view's pinned
-// footer hints (issue #1792) — filter, pick, pick-all, and refresh, the
-// list's own action verbs with no other on-screen affordance. Navigation
-// (j/k, g/G, pgup/pgdown) and Section-jump (H/L, 1-5, already inline on the
-// Section tabs row) are deliberately left out, matching the restraint the
-// other three migrated footers already show toward their own modes' full
-// binding set (e.g. the sidebar's scroll keys never get a footer entry
-// either). Ordered filter/pick/pick-all/refresh (not keymap's own
-// declaration order) — the read-then-act sequence an operator actually
-// follows, not an accident to "fix" back into keymap order. "P" joined this
-// list in issue #1838, when the old "pa" leader chord (with no footer entry
-// of its own) became a standalone key.
-var listFooterKeys = []string{"/", "p", "P", "r"}
+// footer hints (issue #1792) — filter, pick, pick-all, research, and
+// refresh, the list's own action verbs with no other on-screen affordance.
+// Navigation (j/k, g/G, pgup/pgdown) and Section-jump (H/L, 1-5, already
+// inline on the Section tabs row) are deliberately left out, matching the
+// restraint the other three migrated footers already show toward their own
+// modes' full binding set (e.g. the sidebar's scroll keys never get a
+// footer entry either). Ordered filter/pick/pick-all/research/refresh (not
+// keymap's own declaration order) — the read-then-act sequence an operator
+// actually follows, not an accident to "fix" back into keymap order. "P"
+// joined this list in issue #1838, when the old "pa" leader chord (with no
+// footer entry of its own) became a standalone key. "R" joined in issue
+// #1839, when refresh moved off "r" to make room for "r" = research.
+var listFooterKeys = []string{"/", "p", "P", "r", "R"}
 
 // renderBody renders the active Section's own table under the header and
 // Section tabs (ADR 0030) — the section-switched single list that replaces

@@ -5,9 +5,10 @@ import (
 	"time"
 )
 
-// Kind is the dispatch kind a Pick carries. Only KindWork is exposed by the
-// operator-facing commands today; KindResearch exists so the Pick record
-// does not need a remodel when research dispatch ships end-to-end (#646).
+// Kind is the dispatch kind a Pick carries: KindWork for "p"/"P" and the
+// detail modal's own "p", KindResearch for "r" (issue #1839) — an
+// advise-only pick that posts one verdict comment instead of opening a
+// branch/PR.
 type Kind string
 
 const (
