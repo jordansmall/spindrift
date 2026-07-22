@@ -1,8 +1,6 @@
 package console
 
 import (
-	"bytes"
-	"io"
 	"os"
 	"strings"
 
@@ -10,63 +8,36 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 )
 
-// appendHeartbeat reads the bytes appended to entry.path since entry.offset,
-// feeding only that tail to entry.writer — creating writer and out on first
-// use — and advances entry.offset by what it read. writer is drv's own
-// stateful heartbeat parser (role, turn counts, phase all persist on it
-// across calls), so this replays exactly what a whole-file reparse would
-// have replayed, just without re-walking bytes already consumed. out is
-// reset before every feed so it only ever holds this call's own emitted
-// lines, not the pass's whole history: that keeps both the buffer and the
-// lastLine scan bounded by one refresh's output rather than growing with
-// the pass. entry.line only advances when this call emits a line, since a
+// appendHeartbeat reads the bytes appended to entry.path since entry.offset
+// via entry.tailer (issue #1776) and extracts the last line the read tail
+// emitted. entry.line only advances when this call emits a line, since a
 // call that appends no complete new line must still return the prior one.
 // ok is false when the file can't be read or written through drv's parser
 // (the same "no heartbeat yet" cases HeartbeatCache.RunningHeartbeat
-// returns "" for). A file truncated between RunningHeartbeat's stat and this
-// Seek — past the size check already ruled a shrink out — reads zero bytes
-// here rather than erroring; the stale cached line rides one more refresh
-// and self-heals once the file's growth or next truncation is observed.
+// returns "" for). A file truncated between RunningHeartbeat's stat and the
+// tailer's Seek — past the size check already ruled a shrink out — reads
+// zero bytes rather than erroring; the stale cached line rides one more
+// refresh and self-heals once the file's growth or next truncation is
+// observed.
 func appendHeartbeat(drv driver.Driver, number string, entry *heartbeatCacheEntry) (line string, ok bool) {
-	f, err := os.Open(entry.path)
-	if err != nil {
+	data, ok := entry.readAppended(drv, number)
+	if !ok {
 		return "", false
 	}
-	defer f.Close()
-	if _, err := f.Seek(entry.offset, io.SeekStart); err != nil {
-		return "", false
-	}
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return "", false
-	}
-	if entry.writer == nil {
-		entry.out = &bytes.Buffer{}
-		entry.writer = drv.NewHeartbeatWriter(io.Discard, number, entry.out)
-	} else {
-		entry.out.Reset()
-	}
-	if _, err := entry.writer.Write(data); err != nil {
-		return "", false
-	}
-	entry.offset += int64(len(data))
-	if l := lastLine(entry.out.String()); l != "" {
+	if l := lastLine(data); l != "" {
 		entry.line = l
 	}
 	return entry.line, true
 }
 
 // heartbeatCacheEntry holds the persistent per-log-path parser state
-// HeartbeatCache keeps alive across refreshes: the byte offset already fed
-// to writer, drv's own stateful heartbeat Writer, the scratch buffer that
-// pins each call's own emitted output, and the last line ever emitted for
-// this path.
+// HeartbeatCache keeps alive across refreshes: entry.tailer (issue #1776)
+// carries the shared open/seek/read/write/offset-advance mechanics it
+// mirrors with activityCacheEntry, plus the last line ever emitted for this
+// path.
 type heartbeatCacheEntry struct {
-	path   string
-	offset int64
-	writer io.Writer
-	out    *bytes.Buffer
-	line   string
+	tailer
+	line string
 }
 
 // HeartbeatCache remembers each running pick's persistent heartbeat parser,
@@ -122,7 +93,7 @@ func (c *HeartbeatCache) RunningHeartbeat(drv driver.Driver, pwd, number string)
 
 	entry, ok := c.entries[number]
 	if !ok || entry.path != path || info.Size() < entry.offset {
-		entry = heartbeatCacheEntry{path: path}
+		entry = heartbeatCacheEntry{tailer: tailer{path: path}}
 	}
 
 	if info.Size() == entry.offset {

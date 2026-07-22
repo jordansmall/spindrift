@@ -96,56 +96,34 @@ func activityEqual(a, b []ActivityLine) bool {
 
 // activityCacheEntry holds the persistent per-log-path parser state
 // SidebarActivityCache keeps alive across refreshes, mirroring
-// heartbeatCacheEntry: the byte offset already fed to writer, drv's own
-// stateful heartbeat Writer, the scratch buffer that pins each call's own
-// emitted output, and the full ordered feed accumulated so far.
+// heartbeatCacheEntry: entry.tailer (issue #1776) carries the shared
+// open/seek/read/write/offset-advance mechanics, plus the full ordered feed
+// accumulated so far.
 type activityCacheEntry struct {
-	path   string
-	offset int64
-	writer io.Writer
-	out    *bytes.Buffer
-	lines  []ActivityLine
+	tailer
+	lines []ActivityLine
 }
 
-// appendActivity reads the bytes appended to entry.path since entry.offset,
-// feeding only that tail to entry.writer — creating writer and out on first
-// use, exactly as appendHeartbeat does — and advances entry.offset by what
-// it read. The tail's own output collapses through collapseActivityLines
-// the same as a whole-file parse would, then merges onto entry.lines: when
-// the merged tail's first line repeats entry.lines' last line, it's dropped
-// before appending, so a narration split across two append calls by an
-// in-between refresh still collapses to one entry exactly as a single
-// whole-file parse would have (#1501 AC1). ok is false when the file can't
-// be read or written through drv's parser, mirroring appendHeartbeat's own
-// failure contract; entry.offset and entry.lines are left unmodified in
-// that case (entry.writer/out may already be lazily created, which is
-// harmless to reuse on the next call) so a transient read hiccup doesn't
-// clobber the feed accumulated so far — Refresh itself only ever commits
-// its local entry copy back to c.entry once appendActivity reports ok.
+// appendActivity reads the bytes appended to entry.path since entry.offset
+// via entry.tailer (issue #1776). The tail's own output collapses through
+// collapseActivityLines the same as a whole-file parse would, then merges
+// onto entry.lines: when the merged tail's first line repeats entry.lines'
+// last line, it's dropped before appending, so a narration split across two
+// append calls by an in-between refresh still collapses to one entry
+// exactly as a single whole-file parse would have (#1501 AC1). ok is false
+// when the file can't be read or written through drv's parser, mirroring
+// appendHeartbeat's own failure contract; entry.offset and entry.lines are
+// left unmodified in that case (entry.writer/out may already be lazily
+// created, which is harmless to reuse on the next call) so a transient read
+// hiccup doesn't clobber the feed accumulated so far — Refresh itself only
+// ever commits its local entry copy back to c.entry once appendActivity
+// reports ok.
 func appendActivity(drv driver.Driver, number string, entry *activityCacheEntry) (lines []ActivityLine, ok bool) {
-	f, err := os.Open(entry.path)
-	if err != nil {
+	data, ok := entry.readAppended(drv, number)
+	if !ok {
 		return nil, false
 	}
-	defer f.Close()
-	if _, err := f.Seek(entry.offset, io.SeekStart); err != nil {
-		return nil, false
-	}
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, false
-	}
-	if entry.writer == nil {
-		entry.out = &bytes.Buffer{}
-		entry.writer = drv.NewHeartbeatWriter(io.Discard, number, entry.out)
-	} else {
-		entry.out.Reset()
-	}
-	if _, err := entry.writer.Write(data); err != nil {
-		return nil, false
-	}
-	entry.offset += int64(len(data))
-	tail := collapseActivityLines(entry.out.String())
+	tail := collapseActivityLines(data)
 	if len(tail) > 0 && len(entry.lines) > 0 && entry.lines[len(entry.lines)-1].Text == tail[0].Text {
 		tail = tail[1:]
 	}
@@ -193,7 +171,7 @@ func (c *SidebarActivityCache) Refresh(drv driver.Driver, pwd, number string) ([
 
 	entry := c.entry
 	if c.number != number || entry.path != path || info.Size() < entry.offset {
-		entry = activityCacheEntry{path: path}
+		entry = activityCacheEntry{tailer: tailer{path: path}}
 	}
 
 	if info.Size() > entry.offset {
