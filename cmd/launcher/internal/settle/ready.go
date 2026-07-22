@@ -409,10 +409,25 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			return err
 		}
 		if skipRebase {
+			// The stale-mergeability-snapshot retry: the conflict-resolve
+			// dispatch already ran and restored ready above, so this
+			// ErrMergeConflict is the same already-resolved conflict, not a
+			// new one -- must not re-demote (issue #1863) or the following
+			// Merge retry would be attempted against a draft PR.
 			skipRebase = false
 			fmt.Printf("    #%s  landing=%s  status=merge-retry-settle\n", num, pr)
 			time.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
 			continue
+		}
+		// A genuine conflict: demote to draft (issue #1863) as a visible
+		// signal the PR isn't currently mergeable, ahead of the
+		// rebase/conflict-resolve cycle below. Best-effort and unconditional
+		// like MarkReady's own precedent; nil-guarded since landPushOnly
+		// reaches mergeImmediate too, with s.pr unset.
+		if s.pr != nil {
+			if mdErr := s.pr.MarkDraft(pr); mdErr != nil {
+				fmt.Printf("    #%s  landing=%s  status=mark-draft-failed  !! %v\n", num, pr, mdErr)
+			}
 		}
 		if rebaseAttempts >= s.cfg.MaxRebaseAttempts {
 			return err
@@ -514,7 +529,19 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 		rbErr = cf.Rebase(pr)
 	}
 	if rbErr != nil {
-		if errors.Is(rbErr, forge.ErrMergeConflict) && d != nil {
+		isConflict := errors.Is(rbErr, forge.ErrMergeConflict)
+		if isConflict && s.pr != nil {
+			// A genuine conflict: demote to draft (issue #1863), same as the
+			// reactive conflict-retry loop above -- regardless of whether a
+			// Dispatcher is available to attempt resolution. s.pr is already
+			// guaranteed non-nil by this function early return above; checked
+			// again here so this call stays locally correct even if that
+			// guard ever moves.
+			if mdErr := s.pr.MarkDraft(pr); mdErr != nil {
+				fmt.Printf("    #%s  landing=%s  status=mark-draft-failed  !! %v\n", num, pr, mdErr)
+			}
+		}
+		if isConflict && d != nil {
 			if crErr := s.resolveConflict(num, pr, d); crErr != nil {
 				return crErr
 			}
@@ -571,7 +598,18 @@ func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
 		return nil
 	}
 	fmt.Printf("    #%s  landing=%s  status=post-force-push-wait\n", num, pr)
-	return rewaitGateResultErr(s.gateToGreen(num, gen, pr, false), pr)
+	g := s.gateToGreen(num, gen, pr, false)
+	if g == gateGreen {
+		// Restore ready (issue #1863): most rewaits here follow a conflict
+		// demote above; the stale-base clean-rebase path never demoted, but
+		// MarkReady is idempotent, so calling it unconditionally on green is
+		// simpler than threading a was-it-ever-demoted flag through. Best-
+		// effort, matching MarkDraft's own precedent above.
+		if mrErr := s.pr.MarkReady(pr); mrErr != nil {
+			fmt.Printf("    #%s  landing=%s  status=mark-ready-failed  !! %v\n", num, pr, mrErr)
+		}
+	}
+	return rewaitGateResultErr(g, pr)
 }
 
 // rewaitGateResultErr maps a gateToGreen outcome to rewaitAfterForcePush's
