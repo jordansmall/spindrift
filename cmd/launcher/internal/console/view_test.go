@@ -1637,6 +1637,87 @@ func TestSidebarModalFits_BelowMinDimension_ReturnsFalse(t *testing.T) {
 	}
 }
 
+// TestView_SidebarModal_FloatsOverList_BannerStillVisible verifies opening
+// the sidebar on a terminal too narrow to dock (issue #1845's modal path,
+// not the tiny-terminal fullscreen fallback) floats the log modal over the
+// queue instead of replacing the whole screen — the banner above stays
+// visible, DetailModal_FloatsOverList_BannerStillVisible's log-modal
+// analogue (AC1).
+func TestView_SidebarModal_FloatsOverList_BannerStillVisible(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Title: "fix the thing", Activity: []ActivityLine{{Text: "hi"}}})
+
+	out := View(m)
+	if !strings.Contains(out, "spindrift") {
+		t.Errorf("View() = %q, want the banner still visible above the floating log modal instead of a fullscreen takeover", out)
+	}
+}
+
+// TestView_SidebarModal_DimsListBehind verifies the floating log modal dims
+// the queue behind it exactly like the detail modal does — the queue's own
+// styling (e.g. a running row's colored escape) is replaced by the dim
+// style while the modal is open and restored once it closes,
+// DetailModal_DimsListBehind's log-modal analogue (issue #1845 AC2).
+func TestView_SidebarModal_DimsListBehind(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "1", Title: "running one", State: PickRunning, Heartbeat: "7 turns"},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+
+	runningEscape := "\x1b[34m"
+	dimEscape := "\x1b[90m"
+
+	before := View(m)
+	if !strings.Contains(before, runningEscape) {
+		t.Fatalf("View() before opening sidebar = %q, want the running row styled with %q", before, runningEscape)
+	}
+
+	opened := Update(m, SidebarLoadedMsg{Number: "42", Title: "fix the thing", Activity: []ActivityLine{{Text: "hi"}}})
+	duringModal := View(opened)
+	if !strings.Contains(duringModal, dimEscape) {
+		t.Errorf("View() with sidebar modal open = %q, want the base layer dimmed with %q", duringModal, dimEscape)
+	}
+	if strings.Contains(duringModal, runningEscape) {
+		t.Errorf("View() with sidebar modal open = %q, want the running row's own %q replaced by the dim style", duringModal, runningEscape)
+	}
+
+	closed := Update(opened, SidebarCloseMsg{})
+	after := View(closed)
+	if !strings.Contains(after, runningEscape) {
+		t.Errorf("View() after closing sidebar modal = %q, want the running row's normal %q styling restored", after, runningEscape)
+	}
+}
+
+// TestView_SidebarModal_BorderShowsNumberAndTitle verifies the floating log
+// modal's border carries the row's "#<num> <title>" in its top edge,
+// matching the detail modal's own aesthetic — DetailModal_BorderShowsNumberAndTitle's
+// log-modal analogue (issue #1845 AC3).
+func TestView_SidebarModal_BorderShowsNumberAndTitle(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Title: "fix the thing", Activity: []ActivityLine{{Text: "hi"}}})
+
+	out := View(m)
+	found := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "╭") && strings.Contains(line, "#42 fix the thing") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("View() = %q, want the #number title set in the modal box's top border line", out)
+	}
+	if !strings.Contains(out, "╰") {
+		t.Errorf("View() = %q, want a visible bottom border on the floating log modal", out)
+	}
+}
+
 func TestDetailModalBoxSize_WideTerminal_ClampsToMax(t *testing.T) {
 	width, height := detailModalBoxSize(300, 100)
 	if width != 100 {
@@ -2303,11 +2384,11 @@ func TestView_SidebarFullscreen_RawViewLongLine_ClipsToWidth(t *testing.T) {
 }
 
 // TestView_SidebarFullscreen_ZoomedLongLine_ClipsToWidth verifies the clip
-// fix holds on the [z]-zoom fullscreen trigger, not only the too-narrow-to-
-// dock fallback — both reach the same renderSidebarFullscreen (viewBody's
-// `m.SidebarZoom || !sidebarFits(m)` branch), but a terminal wide enough to
-// dock exercises a different width value than the narrow-fallback tests
-// above (issue #1841 AC3).
+// fix holds on the [z]-zoom trigger too, not only the too-narrow-to-dock
+// fallback (issue #1841 AC3) — on a terminal this wide, zoom now renders the
+// floating log modal box (issue #1845) rather than the old
+// renderSidebarFullscreen takeover, so this also guards that the modal's own
+// clip never lets a composited line spill past the terminal's actual width.
 func TestView_SidebarFullscreen_ZoomedLongLine_ClipsToWidth(t *testing.T) {
 	const width, height = sidebarMinListWidth + sidebarWidth + dockedBorderCols, 24
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
@@ -2866,22 +2947,33 @@ func TestView_SidebarFullscreen_FooterStyledDim(t *testing.T) {
 	}
 }
 
-// TestView_SidebarZoom_WideTerminal_ForcesFullscreen verifies SidebarZoom
-// forces the fullscreen takeover even on a terminal wide enough to dock —
-// the "deep reading" zoom is an operator choice independent of sidebarFits'
-// own narrow-terminal fallback (issue #1502, ADR 0030).
-func TestView_SidebarZoom_WideTerminal_ForcesFullscreen(t *testing.T) {
+// TestView_SidebarZoom_WideTerminal_RendersModal verifies SidebarZoom takes
+// effect even on a terminal wide enough to dock — the "deep reading" zoom is
+// an operator choice independent of sidebarFits' own narrow-terminal
+// fallback (issue #1502, ADR 0030) — but since issue #1845, zoomed no longer
+// means a fullscreen takeover: on a terminal this size it renders the same
+// floating log modal box the narrow-terminal path does, dimming the list
+// behind it rather than replacing it outright.
+func TestView_SidebarZoom_WideTerminal_RendersModal(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
-	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show while zoomed"}}})
-	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Title: "fix the thing", Activity: []ActivityLine{{Text: "#42 · hi"}}})
 	m = Update(m, SidebarZoomToggleMsg{})
 
 	out := View(m)
-	if strings.Contains(out, "should not show while zoomed") {
-		t.Errorf("View() = %q, want the list hidden behind the zoomed fullscreen sidebar", out)
+	found := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "╭") && strings.Contains(line, "#42 fix the thing") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("View() = %q, want the #number title set in the zoomed modal's top border line", out)
 	}
 	if !strings.Contains(out, "activity #42") {
-		t.Errorf("View() = %q, want the fullscreen sidebar's label", out)
+		t.Errorf("View() = %q, want the modal's own activity label", out)
 	}
 }
 
