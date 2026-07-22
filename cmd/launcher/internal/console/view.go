@@ -1258,14 +1258,6 @@ func padBaseForOverlay(s string, width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-// floatModalChromeLines is the floating detail modal box's fixed,
-// non-scrollable interior row spend: the labels line plus the keystroke-hint
-// footer. Unlike detailModalChromeLines (the fullscreen renderer's three —
-// title, labels, footer), the floating box's title lives in its own top
-// border line instead of an interior content row (issue #1758 AC), so its
-// interior chrome is one line lighter.
-const floatModalChromeLines = 2
-
 // detailModalBoxTopBorder renders the floating box's top edge at exactly
 // width display columns: the corner runes, a dash lead-in, the ticket's
 // "#number title" (truncated with an ellipsis if it doesn't fit), then
@@ -1315,6 +1307,27 @@ func padDisplay(s string, width int) string {
 	return s
 }
 
+// detailModalFooterLines is the floating detail modal box's fixed
+// keystroke-hint footer row spend — shared by renderDetailModalContent's
+// own body budget and Update's Offset clamp so the two never drift apart
+// on how many rows the footer costs (issue #1772 review finding).
+const detailModalFooterLines = 1
+
+// detailModalLabelLines word-wraps a ticket's labels, joined as a single
+// comma-separated string, to width display columns — shared by
+// renderDetailModalContent (issue #1772: a labels line wider than the
+// floating box's interior must wrap onto further interior rows instead of
+// padDisplay silently truncating it) and Update's own Offset clamp, which
+// must agree on how many interior rows the labels spend before it can
+// budget the rest to the scrollable body.
+func detailModalLabelLines(labels []string, width int) []string {
+	sanitized := make([]string, len(labels))
+	for i, l := range labels {
+		sanitized[i] = SanitizeControlSequences(l)
+	}
+	return wrapText(strings.Join(sanitized, ", "), width)
+}
+
 // renderDetailModalContent renders the floating detail modal box's interior
 // — the labels line, the loading/error/body-window content, and the
 // scroll/close footer hint — as exactly innerHeight lines, word-wrapped and
@@ -1323,18 +1336,15 @@ func padDisplay(s string, width int) string {
 // of the old renderDetailModal that stays width/height-parameterized rather
 // than reading Model.Width/Model.Height directly.
 func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) []string {
-	labels := make([]string, len(s.Labels))
-	for i, l := range s.Labels {
-		labels[i] = SanitizeControlSequences(l)
-	}
-	lines := []string{strings.Join(labels, ", ")}
+	lines := detailModalLabelLines(s.Labels, innerWidth)
+	bodyBudget := innerHeight - len(lines) - detailModalFooterLines
 	switch {
 	case s.Loading:
 		lines = append(lines, "loading...")
 	case s.Err != nil:
 		lines = append(lines, fmt.Sprintf("failed to load: %s", SanitizeControlSequences(s.Err.Error())))
 	default:
-		lines = append(lines, windowDetailModalLines(s, innerHeight-floatModalChromeLines)...)
+		lines = append(lines, windowDetailModalLines(s, bodyBudget)...)
 	}
 	lines = append(lines, "[j/k] scroll · [esc] close")
 	for len(lines) < innerHeight {

@@ -866,10 +866,16 @@ func Update(m Model, msg Msg) Model {
 		// Clamped against the floating box's own interior row budget, not
 		// Model.Height/detailModalChromeLines (the fullscreen renderer's
 		// figures) — the box is shorter than the terminal (issue #1758).
-		_, innerHeight := detailModalInnerSize(m.Width, m.Height)
+		// The labels line count is folded in dynamically rather than
+		// assumed to be 1 row, since long/many labels now wrap onto further
+		// interior rows (issue #1772) — this clamp must budget the body the
+		// same way renderDetailModalContent does, or it targets a body
+		// budget the render doesn't actually have room to show.
+		innerWidth, innerHeight := detailModalInnerSize(m.Width, m.Height)
+		labelLines := detailModalLabelLines(m.DetailModal.Labels, innerWidth)
 		vp := Viewport{offset: m.DetailModal.Offset}
 		vp.Scroll(0, len(m.DetailModal.Lines))
-		vp.SetHeight(innerHeight - floatModalChromeLines)
+		vp.SetHeight(innerHeight - len(labelLines) - detailModalFooterLines)
 		m.DetailModal.Offset = vp.offset
 	}
 
