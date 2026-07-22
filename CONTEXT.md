@@ -57,10 +57,17 @@ prompt/agents/session file paths, the Driver's bin and flags, and a
 `--devshell` switch; spawns the Driver (via `nix develop --command` when
 asked), tees the stream to the Box log, filters heartbeats in-process
 (absorbing the former standalone heartbeat-filter binary), and returns the
-Driver's exit code. Owns process mechanics only — invocation data and outcome
+Driver's exit code. Owns process mechanics — invocation data and outcome
 extraction stay with the Driver's nix half (ADR 0009). Replaced
 entrypoint.sh's temp-file/eval marshalling across the devShell process
-boundary (issue #626).
+boundary (issue #626). Its `bundle-out` verb (issue #1808) extends it beyond
+process mechanics into CODE_FORGE=local's harness-owned code-out: after the
+Driver exits, it bundles the base..agent-branch range into the outbox itself
+instead of trusting the Agent to run `git bundle create` — the Agent's own
+contract there shrinks to "commit on the branch," identical to every other
+Code Forge. An empty range against a claimed `ready` outcome gets a
+corrective `status=blocked` SPINDRIFT_OUTCOME line instead of settling as a
+false ready.
 _Avoid_: runner (that is the Box isolation seam), wrapper, shim.
 
 **Filer**:
