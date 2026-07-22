@@ -659,7 +659,15 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
            │                                        is on, preflight-rebase and
            │                                        re-wait for green first
            │                                        (up to MAX_REBASE_ATTEMPTS)
-           ├─ merge conflict (immediate) → rebase the PR (up to MAX_REBASE_ATTEMPTS)
+           ├─ merge conflict (immediate) → flip the PR back to draft (a
+           │                               visible not-mergeable signal),
+           │                               rebase the PR (up to
+           │                               MAX_REBASE_ATTEMPTS), and once the
+           │                               resolved head re-reaches green,
+           │                               flip it back to ready before the
+           │                               retried merge — both flips are
+           │                               best-effort, same as the
+           │                               draft-out-at-green flip above
            └─ post an aggregate usage/cost comment to the issue
 ```
 

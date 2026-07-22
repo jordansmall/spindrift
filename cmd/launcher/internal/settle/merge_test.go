@@ -3,6 +3,7 @@ package settle
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -205,6 +206,155 @@ func TestMergeImmediate(t *testing.T) {
 	}
 }
 
+// TestMergeImmediate_ConflictDemotesToDraftAndRestoresOnGreen verifies that a
+// genuine ErrMergeConflict on the reactive conflict-retry loop's initial
+// Merge attempt flips the PR to draft before the rebase, and flips it back
+// to ready once the rebased head re-confirms green — before the retried
+// Merge that lands it (issue #1863).
+func TestMergeImmediate_ConflictDemotesToDraftAndRestoresOnGreen(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake()
+	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, nil)
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	want := []string{"Merge:" + testPR, "MarkDraft:" + testPR, "MarkReady:" + testPR, "Merge:" + testPR}
+	if !slices.Equal(fc.LandingCallLog, want) {
+		t.Errorf("LandingCallLog = %v, want %v", fc.LandingCallLog, want)
+	}
+}
+
+// TestMergeImmediate_MarkDraftFailureIsBestEffort verifies that a MarkDraft
+// error on a genuine conflict is logged to the console but never blocks the
+// rebase/merge landing path (issue #1863) — matching MarkReady's own
+// best-effort contract at green.
+func TestMergeImmediate_MarkDraftFailureIsBestEffort(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake()
+	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
+	fc.MarkDraftErr = errors.New("gh pr ready --undo: permission denied")
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	var err error
+	out := testutil.CaptureStdout(t, func() {
+		err = s.mergeImmediate("1", 0, testPR, nil)
+	})
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("Merge not called to completion; fc.Merged=%q", fc.Merged)
+	}
+	if !strings.Contains(out, "mark-draft-failed") {
+		t.Errorf("console output must log the MarkDraft failure; got: %q", out)
+	}
+}
+
+// TestMergeImmediate_MarkReadyRestoreFailureIsBestEffort verifies that a
+// MarkReady error while restoring ready-state after a conflict re-greens is
+// logged to the console but never blocks the merge (issue #1863).
+func TestMergeImmediate_MarkReadyRestoreFailureIsBestEffort(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake()
+	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
+	fc.MarkReadyErr = errors.New("gh pr ready: permission denied")
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	var err error
+	out := testutil.CaptureStdout(t, func() {
+		err = s.mergeImmediate("1", 0, testPR, nil)
+	})
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("Merge not called to completion; fc.Merged=%q", fc.Merged)
+	}
+	if !strings.Contains(out, "mark-ready-failed") {
+		t.Errorf("console output must log the MarkReady restore failure; got: %q", out)
+	}
+}
+
+// TestMergeImmediate_StaleConflictRetryDoesNotRedemoteAfterRestore verifies
+// that once a rebase-conflict resolve has restored the PR to ready, the
+// stale-mergeability-snapshot retry (skipRebase) does not demote it back to
+// draft — that would leave the final, successful Merge attempted against a
+// draft PR, violating "the subsequent merge is never attempted against a
+// draft PR" (issue #1863).
+func TestMergeImmediate_StaleConflictRetryDoesNotRedemoteAfterRestore(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake()
+	fc.MergeErrs = []error{forge.ErrMergeConflict, forge.ErrMergeConflict, nil}
+	fc.RebaseErr = forge.ErrMergeConflict
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	df := dispatch.NewFake()
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, df)
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	want := []string{
+		"Merge:" + testPR,
+		"MarkDraft:" + testPR,
+		"MarkReady:" + testPR,
+		"Merge:" + testPR,
+		"Merge:" + testPR,
+	}
+	if !slices.Equal(fc.LandingCallLog, want) {
+		t.Errorf("LandingCallLog = %v, want %v", fc.LandingCallLog, want)
+	}
+	if len(fc.MarkDraftCalls) != 1 {
+		t.Errorf("MarkDraft called %d times, want 1 (stale-snapshot retry must not re-demote); calls=%v", len(fc.MarkDraftCalls), fc.MarkDraftCalls)
+	}
+}
+
+// TestMergeImmediate_PushOnlyForgeNeverCallsMarkDraftOrMarkReady verifies
+// that a push-only Code Forge (s.pr == nil, e.g. CODE_FORGE=git/local) never
+// calls MarkDraft or MarkReady on a merge conflict — there is no draft
+// concept to demote to or restore from (issue #1863), mirroring the
+// existing rewaitAfterForcePush / MarkReady-at-green guards.
+func TestMergeImmediate_PushOnlyForgeNeverCallsMarkDraftOrMarkReady(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	fc := forge.NewFake()
+	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
+	s := New(c, fc, fc.AsPushOnly())
+
+	err := s.mergeImmediate("1", 0, testPR, nil)
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("Merge not called to completion; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.MarkDraftCalls) != 0 {
+		t.Errorf("push-only forge must never call MarkDraft; calls=%v", fc.MarkDraftCalls)
+	}
+	if len(fc.MarkReadyCalls) != 0 {
+		t.Errorf("push-only forge must never call MarkReady; calls=%v", fc.MarkReadyCalls)
+	}
+}
+
 // TestMergeImmediate_RewaitsAfterForcePush verifies that a Rebase force-push
 // resets the PR's checks, so mergeImmediate must not retry the merge until a
 // fresh gateToGreen wait confirms the new head is green (issue #567). With no
@@ -328,6 +478,9 @@ func TestMergeImmediate_BlockedByChecks(t *testing.T) {
 	}
 	if stalePRLabel.MatchString(out) {
 		t.Errorf("console output must not use the stale pr= label; got: %q", out)
+	}
+	if len(fc.MarkDraftCalls) != 0 {
+		t.Errorf("blocked-by-checks is not a content conflict and must not demote to draft; MarkDraftCalls=%v", fc.MarkDraftCalls)
 	}
 }
 
@@ -538,6 +691,99 @@ func TestMergeImmediate_StaleBaseConflictResolvesViaDispatcher(t *testing.T) {
 	}
 	if len(fc.RebasedURLs) != 1 {
 		t.Errorf("Rebase called %d times, want 1", len(fc.RebasedURLs))
+	}
+}
+
+// TestMergeImmediate_StaleBaseConflictDemotesToDraftAndRestoresOnGreen
+// verifies that a genuine ErrMergeConflict surfaced by the stale-base
+// preflight's rebase flips the PR to draft before the conflict-resolve
+// dispatch, and flips it back to ready once the resolved head re-confirms
+// green — before the merge that lands it (issue #1863).
+func TestMergeImmediate_StaleBaseConflictDemotesToDraftAndRestoresOnGreen(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	c.PreflightStaleBase = true
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	fc.RebaseErr = forge.ErrMergeConflict
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.MergeErrs = []error{nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	df := dispatch.NewFake()
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, df)
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	want := []string{"MarkDraft:" + testPR, "MarkReady:" + testPR, "Merge:" + testPR}
+	if !slices.Equal(fc.LandingCallLog, want) {
+		t.Errorf("LandingCallLog = %v, want %v", fc.LandingCallLog, want)
+	}
+}
+
+// TestMergeImmediate_StaleBaseTransientPushFailureDoesNotDemote verifies
+// that a transient push failure during the stale-base preflight's rebase —
+// not a content conflict — never demotes the PR to draft (issue #1863),
+// even though it retries and eventually succeeds.
+func TestMergeImmediate_StaleBaseTransientPushFailureDoesNotDemote(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	c.PreflightStaleBase = true
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	fc.RebaseErrs = []error{forge.ErrTransientPushFailure, nil}
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.MergeErrs = []error{nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := New(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, nil)
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("Merge not called to completion; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.MarkDraftCalls) != 0 {
+		t.Errorf("a transient push failure is not a content conflict and must not demote to draft; MarkDraftCalls=%v", fc.MarkDraftCalls)
+	}
+}
+
+// TestMergeImmediate_StaleBaseMarkDraftFailureIsBestEffort verifies that a
+// MarkDraft error on the stale-base preflight's conflict site is logged to
+// the console but never blocks the conflict-resolve/rewait/merge landing
+// path (issue #1863) — matching the reactive conflict-retry loop's own
+// best-effort contract.
+func TestMergeImmediate_StaleBaseMarkDraftFailureIsBestEffort(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	c.PreflightStaleBase = true
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	fc.RebaseErr = forge.ErrMergeConflict
+	fc.MarkDraftErr = errors.New("gh pr ready --undo: permission denied")
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.MergeErrs = []error{nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	df := dispatch.NewFake()
+	s := New(c, fc, fc)
+
+	var err error
+	out := testutil.CaptureStdout(t, func() {
+		err = s.mergeImmediate("1", 0, testPR, df)
+	})
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("Merge not called to completion; fc.Merged=%q", fc.Merged)
+	}
+	if !strings.Contains(out, "mark-draft-failed") {
+		t.Errorf("console output must log the MarkDraft failure; got: %q", out)
 	}
 }
 
