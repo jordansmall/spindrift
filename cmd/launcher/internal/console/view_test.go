@@ -2570,7 +2570,7 @@ func TestView_SidebarFooter_WideTerminal_RendersFullHintsUnclipped(t *testing.T)
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
 
 	out := View(m)
-	if !strings.Contains(out, "[t] cycle ·[h] list ·[x] close ·[z] zoom") {
+	if !strings.Contains(out, "[t] cycle ·[h] list ·[x] close ·[z] ·H/L") {
 		t.Errorf("View() = %q, want the docked footer's full, unclipped hint text at the wider computed sidebar width", out)
 	}
 }
@@ -2589,8 +2589,22 @@ func TestView_SidebarDocked_FooterStyledDim(t *testing.T) {
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
 
 	out := View(m)
-	if !strings.Contains(out, "\x1b[90m[t] cycle ·[h] list ·[x] close ·[z] zoom\x1b[0m") {
+	if !strings.Contains(out, "\x1b[90m[t] cycle ·[h] list ·[x] close ·[z] ·H/L\x1b[0m") {
 		t.Errorf("View() = %q, want the docked footer dim-styled with its compact wording/separators intact", out)
+	}
+}
+
+// TestView_SidebarDocked_FooterAdvertisesHL verifies the docked (log view)
+// footer, even at the tight 42-column floor, includes the "H/L" hint — H/L
+// closing the log and switching Section is discoverable there too, not just
+// in the fullscreen layout (issue #1846).
+func TestView_SidebarDocked_FooterAdvertisesHL(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	out := View(m)
+	if !strings.Contains(out, "[t] cycle ·[h] list ·[x] close ·[z] ·H/L") {
+		t.Errorf("View() = %q, want the docked sidebar's footer to advertise H/L within the 42-column floor", out)
 	}
 }
 
@@ -2694,11 +2708,14 @@ func TestView_SidebarDocked_BorderTitleColoredByFocus(t *testing.T) {
 }
 
 // TestView_SidebarFooter_ShowsZoomHint verifies both the docked and
-// fullscreen sidebar footers advertise the "z" zoom key (issue #1502).
+// fullscreen sidebar footers advertise the "z" zoom key — "[z]" in the
+// docked footer's compact wording (shortened from "[z] zoom" to make room
+// for the "H/L" hint within the 42-column floor, issue #1846), "[z] zoom"
+// in fullscreen's uncompacted one (issue #1502).
 func TestView_SidebarFooter_ShowsZoomHint(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
-	if !strings.Contains(View(m), "[z] zoom") {
+	if !strings.Contains(View(m), "[z]") {
 		t.Errorf("docked View() = %q, want the zoom key hint", View(m))
 	}
 
@@ -3434,6 +3451,21 @@ func TestView_SidebarFullscreen_RetainsFooterAtBoundary(t *testing.T) {
 	got := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(got) > m.Height {
 		t.Errorf("View() rendered %d lines, want at most Height (%d)", len(got), m.Height)
+	}
+}
+
+// TestView_SidebarFullscreen_FooterAdvertisesHL verifies the fullscreen
+// sidebar's (log view's) footer includes the "H/L" hint, so H/L closing the
+// log and switching Section — previously a silent no-op there — is
+// discoverable the same way the list's own H/L hint already is (issue
+// #1846).
+func TestView_SidebarFullscreen_FooterAdvertisesHL(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	out := View(m)
+	if !strings.Contains(out, "H/L") {
+		t.Errorf("View() = %q, want the fullscreen sidebar's footer to advertise H/L", out)
 	}
 }
 
