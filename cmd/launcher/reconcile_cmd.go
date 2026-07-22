@@ -1,14 +1,13 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -72,81 +71,15 @@ func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge,
 // surfaceAfterDispatch surfaces every completed broad ticket's Integration
 // branch into pwd as a local branch named after its resolved parent, once
 // every one of its seam issues is closed — CODE_FORGE=local's auto-surface
-// exit (ADR 0033, issue #1730). Each issue keys its own broad ticket from
-// its own parent: frontmatter, or its own slug when unset (local.
-// ResolveParent, issue #1734), so a mixed-parent batch may complete several
-// broad tickets in the same sweep — this iterates every distinct resolved
-// parent among the tracker's issues instead of a single run-wide parent.
-// It is a no-op for any codeForge other than "local" or a tracker with no
-// SeamLister surface (every tracker but local); a resolved parent with any
-// seam still open is skipped, not an error.
+// exit (ADR 0033, issue #1730), delegated to localloop.Wire's Surface (issue
+// #1806) so this and the composed loop test drive the identical sweep. A
+// no-op for any codeForge other than "local"; localloop.Wired.Surface itself
+// covers the tracker-has-no-SeamLister no-op (every tracker but local).
 func surfaceAfterDispatch(c config, it forge.IssueTracker, pwd string, w io.Writer) error {
 	if c.codeForge != "local" {
 		return nil
 	}
-	sl, ok := it.(forge.SeamLister)
-	if !ok {
-		return nil
-	}
-	issues, err := sl.AllIssues()
-	if err != nil {
-		return fmt.Errorf("surface: list issues: %w", err)
-	}
-	groups := map[string][]forge.Issue{}
-	var order []string
-	for _, iss := range issues {
-		parent := local.ResolveParent(iss.Number, iss.Parent)
-		if _, seen := groups[parent]; !seen {
-			order = append(order, parent)
-		}
-		groups[parent] = append(groups[parent], iss)
-	}
-	var errs []error
-	neverLanded := 0
-	for _, parent := range order {
-		allClosed := true
-		for _, s := range groups[parent] {
-			if s.State != forge.IssueClosed {
-				allClosed = false
-				break
-			}
-		}
-		if !allClosed {
-			continue
-		}
-		surfaced, skipped, err := local.SurfaceIntegrationBranch(c.codeForgeAccumulationRepoDir, pwd, parent)
-		if err != nil {
-			// Recorded, not returned immediately: one parent's genuine
-			// surface failure must not stop the sweep from attempting every
-			// other completed broad ticket in the same batch.
-			errs = append(errs, fmt.Errorf("surface %s: %w", parent, err))
-			continue
-		}
-		if skipped != "" {
-			// The "never landed" reason is the expected, permanent shape for
-			// any closed parentless issue that never went through
-			// CODE_FORGE=local (issue #1739): as a tracker's closed-issue
-			// history grows, printing one line per such parent on every
-			// sweep, forever, drowns out the two other skip reasons
-			// (checked-out / diverged) that are transient and operator-
-			// actionable. Those still print individually below; this one
-			// collapses into a single end-of-sweep count instead.
-			if skipped == local.NeverLandedSkip(parent) {
-				neverLanded++
-				continue
-			}
-			fmt.Fprintf(w, "surface: %s skipped — %s\n", parent, skipped)
-			continue
-		}
-		if surfaced {
-			fmt.Fprintf(w, "surface: broad ticket %s complete — %s's Integration branch is ready in the checkout as local branch %q.\n",
-				parent, local.IntegrationBranch(parent), parent)
-		}
-	}
-	if neverLanded > 0 {
-		fmt.Fprintf(w, "surface: %d broad ticket(s) skipped — no seam has landed yet\n", neverLanded)
-	}
-	return errors.Join(errs...)
+	return localloop.Wire(localloopConfig(c), it).Surface(pwd, w)
 }
 
 // cmdReconcile is the `reconcile` subcommand: the local-tracker bookkeeping
