@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
@@ -95,20 +94,78 @@ func activityEqual(a, b []ActivityLine) bool {
 	return true
 }
 
+// activityCacheEntry holds the persistent per-log-path parser state
+// SidebarActivityCache keeps alive across refreshes, mirroring
+// heartbeatCacheEntry: the byte offset already fed to writer, drv's own
+// stateful heartbeat Writer, the scratch buffer that pins each call's own
+// emitted output, and the full ordered feed accumulated so far.
+type activityCacheEntry struct {
+	path   string
+	offset int64
+	writer io.Writer
+	out    *bytes.Buffer
+	lines  []ActivityLine
+}
+
+// appendActivity reads the bytes appended to entry.path since entry.offset,
+// feeding only that tail to entry.writer — creating writer and out on first
+// use, exactly as appendHeartbeat does — and advances entry.offset by what
+// it read. The tail's own output collapses through collapseActivityLines
+// the same as a whole-file parse would, then merges onto entry.lines: when
+// the merged tail's first line repeats entry.lines' last line, it's dropped
+// before appending, so a narration split across two append calls by an
+// in-between refresh still collapses to one entry exactly as a single
+// whole-file parse would have (#1501 AC1). ok is false when the file can't
+// be read or written through drv's parser, mirroring appendHeartbeat's own
+// failure contract; entry.offset and entry.lines are left unmodified in
+// that case (entry.writer/out may already be lazily created, which is
+// harmless to reuse on the next call) so a transient read hiccup doesn't
+// clobber the feed accumulated so far — Refresh itself only ever commits
+// its local entry copy back to c.entry once appendActivity reports ok.
+func appendActivity(drv driver.Driver, number string, entry *activityCacheEntry) (lines []ActivityLine, ok bool) {
+	f, err := os.Open(entry.path)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	if _, err := f.Seek(entry.offset, io.SeekStart); err != nil {
+		return nil, false
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, false
+	}
+	if entry.writer == nil {
+		entry.out = &bytes.Buffer{}
+		entry.writer = drv.NewHeartbeatWriter(io.Discard, number, entry.out)
+	} else {
+		entry.out.Reset()
+	}
+	if _, err := entry.writer.Write(data); err != nil {
+		return nil, false
+	}
+	entry.offset += int64(len(data))
+	tail := collapseActivityLines(entry.out.String())
+	if len(tail) > 0 && len(entry.lines) > 0 && entry.lines[len(entry.lines)-1].Text == tail[0].Text {
+		tail = tail[1:]
+	}
+	entry.lines = append(entry.lines, tail...)
+	return entry.lines, true
+}
+
 // SidebarActivityCache remembers the open sidebar's last-refreshed Activity
-// feed, keyed by (Number, path, size, modTime) — refreshPickDecorations's
-// per-Msg refresh runs on every tea.Msg (issue #1502, ADR 0030's
-// "piggybacking the existing per-Msg sync tick"), so most calls see the
-// exact same on-disk pass log as last time; a stat match skips the
-// ReadFile+reparse and returns the cached feed, mirroring HeartbeatCache's
-// own skip (issue #731). Single-entry rather than a map: only one sidebar
-// can be open at a time, so there is never more than one Dispatch to track.
+// feed via a persistent append-tail parser, mirroring HeartbeatCache: a
+// path change or a size that fell behind the cached offset
+// (truncation/rotation, or a different Dispatch selected) starts a fresh
+// parser at offset 0, an unchanged size skips the read entirely, and a
+// grown size reads and parses only the appended tail (issue #1749) — the
+// same incremental machinery RunningHeartbeat already uses (issue #1747),
+// rather than this cache's own prior whole-file reread on every stat
+// change. Single-entry rather than a map: only one sidebar can be open at a
+// time, so there is never more than one Dispatch to track.
 type SidebarActivityCache struct {
-	number   string
-	path     string
-	size     int64
-	modTime  time.Time
-	activity []ActivityLine
+	number string
+	entry  activityCacheEntry
 }
 
 // NewSidebarActivityCache returns an empty cache ready to use.
@@ -116,12 +173,13 @@ func NewSidebarActivityCache() *SidebarActivityCache {
 	return &SidebarActivityCache{}
 }
 
-// Refresh returns number's current Activity feed — freshly re-derived, or
-// the cached one when its pass log's (path, size, modTime) match what was
-// cached last time — plus ok, false when no log exists yet for number
-// (RunningHeartbeat's own no-log contract) so the caller can skip sending a
-// refresh rather than clobbering an already-loaded feed with an empty one on
-// a claimed-but-not-yet-launched race.
+// Refresh returns number's current Activity feed — the cached one when its
+// pass log hasn't grown since the cached call, or freshly extended by
+// parsing just the appended tail when it has — plus ok, false when no log
+// exists yet for number (RunningHeartbeat's own no-log contract) so the
+// caller can skip sending a refresh rather than clobbering an
+// already-loaded feed with an empty one on a claimed-but-not-yet-launched
+// race.
 func (c *SidebarActivityCache) Refresh(drv driver.Driver, pwd, number string) ([]ActivityLine, bool) {
 	passes := dispatch.LogPaths(pwd, number)
 	if len(passes) == 0 {
@@ -132,10 +190,17 @@ func (c *SidebarActivityCache) Refresh(drv driver.Driver, pwd, number string) ([
 	if err != nil {
 		return nil, false
 	}
-	if c.number == number && c.path == path && c.size == info.Size() && c.modTime.Equal(info.ModTime()) {
-		return c.activity, true
+
+	entry := c.entry
+	if c.number != number || entry.path != path || info.Size() < entry.offset {
+		entry = activityCacheEntry{path: path}
 	}
-	activity := ActivityFeed(drv, pwd, number)
-	c.number, c.path, c.size, c.modTime, c.activity = number, path, info.Size(), info.ModTime(), activity
-	return activity, true
+
+	if info.Size() > entry.offset {
+		if _, ok := appendActivity(drv, number, &entry); !ok {
+			return nil, false
+		}
+	}
+	c.number, c.entry = number, entry
+	return entry.lines, true
 }
