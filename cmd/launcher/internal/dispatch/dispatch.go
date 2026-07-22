@@ -76,13 +76,16 @@ type Config struct {
 	OpenPRForIssue func(number string) (bool, error)
 
 	// HeartbeatOut is the human-facing sink every Box's heartbeat writer
-	// echoes to, alongside its unconditional pass-log file capture. Nil
-	// defaults to os.Stdout in box.go (every pre-#1583 caller and test). The
-	// console entry point sets this to io.Discard via Factory.SetHeartbeatOut
-	// -- Bubble Tea owns the terminal in alt-screen/raw mode there, and a
-	// bare-\n heartbeat line stairsteps down the screen instead of returning
-	// to column 0, while the sidebar activity feed already re-renders the
-	// same lines by independently re-reading the pass log from disk.
+	// echoes to, alongside its unconditional pass-log file capture, and the
+	// sink each dispatch-start announce line ("-> #NN: title" and its
+	// fix-pass/conflict-resolve variants, box.go's humanOut) writes to as
+	// well (issue #1829). Nil defaults to os.Stdout in box.go (every
+	// pre-#1583 caller and test). The console entry point sets this to
+	// io.Discard via Factory.SetHeartbeatOut -- Bubble Tea owns the terminal
+	// in alt-screen/raw mode there, and a bare-\n heartbeat line or a raw
+	// announce line both stairstep down the screen instead of returning to
+	// column 0, while the sidebar activity feed and queue view already
+	// reflect the same information from the pass log and dispatch state.
 	HeartbeatOut io.Writer
 }
 
