@@ -6,9 +6,13 @@
 // (absorbing the former standalone spindrift-heartbeat-filter binary), and
 // returns the Driver's exit code.
 //
-// It owns process mechanics only: invocation data stays registry-supplied by
+// It owns process mechanics: invocation data stays registry-supplied by
 // agent/entrypoint.sh, and outcome extraction stays the Driver's nix-half
-// shell function applied to the log path afterward.
+// shell function applied to the log path afterward. Its `bundle-out` verb
+// (issue #1808) additionally owns CODE_FORGE=local's harness-side code-out:
+// bundling the base..agent-branch range into the outbox after the Driver
+// exits, so the Agent's contract there shrinks to "commit on the branch,"
+// the same as every other Code Forge.
 package main
 
 import (
@@ -18,6 +22,13 @@ import (
 )
 
 func main() {
+	// bundle-out (issue #1808) is a distinct verb, not a top-level flag: the
+	// existing invocation always starts with "--" flags, so a bare first arg
+	// can only ever be this subcommand's name.
+	if len(os.Args) > 1 && os.Args[1] == "bundle-out" {
+		os.Exit(runBundleOut(os.Args[2:], os.Stdout))
+	}
+
 	promptFile := flag.String("prompt-file", "", "path to the assembled prompt text (required)")
 	agentsFile := flag.String("agents-file", "", "path to --agents JSON, empty to omit the flag")
 	sessionFile := flag.String("session-file", "", "path to pre-rendered session pin/resume flags, empty for none")
