@@ -74,12 +74,14 @@ func TestView_Backlog_FittingLabelsShowNoPlusN(t *testing.T) {
 		{Number: "1", Title: "x", Labels: []string{"ready-for-agent", "bug"}},
 	}})
 
+	// The exact "[ready-for-agent, bug]" match already proves clipLabels
+	// didn't truncate — a truncated cell would read "[ready-for-agent, +1]"
+	// instead. A bare strings.Contains(out, "+") check would also trip on
+	// the header's own bordered panel (issue #1756) rendering ASCII "+"
+	// corners under this test's ambient (unset) TERM.
 	out := View(m)
 	if !strings.Contains(out, "[ready-for-agent, bug]") {
 		t.Errorf("View() = %q, want the label cell rendered as \"[ready-for-agent, bug]\" with no +N suffix", out)
-	}
-	if strings.Contains(out, "+") {
-		t.Errorf("View() = %q, want no \"+N\" suffix when every label fits", out)
 	}
 }
 
@@ -268,6 +270,21 @@ func TestView_Header_Banner_ShownWhenTallCollapsedWhenShort(t *testing.T) {
 	}
 	if !strings.Contains(out, "running 0/0") {
 		t.Errorf("View() on a short terminal = %q, want the status line to remain", out)
+	}
+}
+
+// TestView_Header_RendersBordered verifies the header/status block renders
+// inside a muted rounded border — the same renderBoxedColumn look the docked
+// list/sidebar panels already use — so the header reads as its own panel
+// rather than running straight into the Section tabs below it (issue #1756).
+func TestView_Header_RendersBordered(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	out := View(m)
+	if got := strings.Count(out, "╭"); got != 1 {
+		t.Errorf("View() has %d rounded top-left corners, want 1 (the header's own bordered panel): %q", got, out)
 	}
 }
 
@@ -1361,14 +1378,16 @@ func TestView_DetailModal_LabelsUnclipped(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: labels})
 
+	// Every label present unclipped (the loop below) already proves
+	// clipLabels-style "+N" truncation didn't happen. A bare
+	// strings.Contains(out, "+") check would also trip on the header's own
+	// bordered panel (issue #1756) rendering ASCII "+" corners under this
+	// test's ambient (unset) TERM.
 	out := View(m)
 	for _, label := range labels {
 		if !strings.Contains(out, label) {
 			t.Errorf("View() = %q, want every label present unclipped, missing %q", out, label)
 		}
-	}
-	if strings.Contains(out, "+") {
-		t.Errorf("View() = %q, want no clipLabels-style \"+N\" truncation", out)
 	}
 }
 
@@ -1592,7 +1611,8 @@ func TestView_SidebarOpen_WideTerminal_DocksBesideList(t *testing.T) {
 // list and the docked sidebar each render inside a muted rounded border
 // once the sidebar is open — the bordered-panel look that replaces the bare
 // column divider, so the split reads as two distinct boxes rather than one
-// continuous surface (issue #1755).
+// continuous surface (issue #1755) — alongside the header's own bordered
+// panel (issue #1756), for 3 boxes total.
 func TestView_SidebarOpen_WideTerminal_PanelsRenderBordered(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -1602,8 +1622,8 @@ func TestView_SidebarOpen_WideTerminal_PanelsRenderBordered(t *testing.T) {
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
 
 	out := View(m)
-	if got := strings.Count(out, "╭"); got != 2 {
-		t.Errorf("View() has %d rounded top-left corners, want 2 (one bordered panel for the list, one for the sidebar): %q", got, out)
+	if got := strings.Count(out, "╭"); got != 3 {
+		t.Errorf("View() has %d rounded top-left corners, want 3 (the header, the docked list, and the sidebar each their own bordered panel): %q", got, out)
 	}
 }
 
@@ -1624,8 +1644,8 @@ func TestView_SidebarOpen_NoColor_PanelsRenderAsciiBorder(t *testing.T) {
 	if strings.Contains(out, "╭") {
 		t.Errorf("View() = %q, want no rounded border glyphs under NO_COLOR", out)
 	}
-	if got := strings.Count(out, "+"); got != 8 {
-		t.Errorf("View() has %d ASCII corner glyphs, want 8 (two panels, four corners each): %q", got, out)
+	if got := strings.Count(out, "+"); got != 12 {
+		t.Errorf("View() has %d ASCII corner glyphs, want 12 (three panels — header, docked list, sidebar — four corners each): %q", got, out)
 	}
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("View() = %q, want no escape sequences at all under NO_COLOR", out)
@@ -1648,8 +1668,8 @@ func TestView_SidebarOpen_DumbTerminal_PanelsRenderAsciiBorder(t *testing.T) {
 	if strings.Contains(out, "╭") {
 		t.Errorf("View() = %q, want no rounded border glyphs on TERM=dumb", out)
 	}
-	if got := strings.Count(out, "+"); got != 8 {
-		t.Errorf("View() has %d ASCII corner glyphs, want 8 (two panels, four corners each): %q", got, out)
+	if got := strings.Count(out, "+"); got != 12 {
+		t.Errorf("View() has %d ASCII corner glyphs, want 12 (three panels — header, docked list, sidebar — four corners each): %q", got, out)
 	}
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("View() = %q, want no escape sequences at all on TERM=dumb", out)
@@ -2855,7 +2875,10 @@ func TestView_ScrolledQueue_ReachesLastRow(t *testing.T) {
 // reflecting the visible row range and total, so the operator can see where
 // they are in a long backlog without counting rows (issue #1037 AC3).
 func TestView_BacklogSection_ShowsPositionIndicator(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	// Height 10 plus boxBorderRows pays for the header's own bordered panel
+	// (issue #1756), preserving the item budget (and so the exact position
+	// ranges below) this test was written against.
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows})
 	issues := make([]forge.Issue, 50)
 	for i := range issues {
 		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
@@ -2879,7 +2902,10 @@ func TestView_BacklogSection_ShowsPositionIndicator(t *testing.T) {
 // and that it is absent when the Section is empty rather than reading
 // "(1-0 of 0)" (issue #1037 AC3/AC4).
 func TestView_WorkSection_ShowsPositionIndicator(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	// Height 10 plus boxBorderRows pays for the header's own bordered panel
+	// (issue #1756), preserving the item budget (and so the exact position
+	// range below) this test was written against.
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10 + boxBorderRows})
 	picks := make([]Pick, 50)
 	for i := range picks {
 		picks[i] = Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued}

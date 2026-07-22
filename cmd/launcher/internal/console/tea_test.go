@@ -373,17 +373,19 @@ func TestTea_gLeader_Timeout_CancelsPendingG(t *testing.T) {
 // the cursor, revealing and restoring rows past the fold, by exactly one
 // screenful of rendered rows — derived from the live viewport rather than a
 // fixed constant (issue #1036 AC2, issue #1037 AC1/AC2). At Width 80/Height
-// 10 the backlog column's item budget is 5, but only 4 of those rows render
-// as content at offset 0 (the 5th is held back for the "N more below" line),
-// so one pgdown must land the viewport on row 4 — landing on row 5 would
-// silently skip row 4, the exact row right past the fold.
+// 12 (the extra 2 rows over a bare Height 10 pay for the header's own
+// bordered panel, issue #1756) the backlog column's item budget is 5, but
+// only 4 of those rows render as content at offset 0 (the 5th is held back
+// for the "N more below" line), so one pgdown must land the viewport on row
+// 4 — landing on row 5 would silently skip row 4, the exact row right past
+// the fold.
 func TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor(t *testing.T) {
 	f := forge.NewFake()
 	for i := 0; i < 50; i++ {
 		f.SetIssue(forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i), State: forge.IssueOpen})
 	}
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10))
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10+boxBorderRows))
 	waitForOutput(t, tm, "> #0")
 
 	sendKey(tm, "pgdown")
@@ -406,7 +408,7 @@ func TestTea_ScrollKeys_CtrlFCtrlBPageThroughBacklogWithoutMovingCursor(t *testi
 		f.SetIssue(forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i), State: forge.IssueOpen})
 	}
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10))
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10+boxBorderRows))
 	waitForOutput(t, tm, "> #0")
 
 	sendKey(tm, "ctrl+f")
@@ -430,7 +432,7 @@ func TestTea_ScrollKeys_CtrlDCtrlUHalfPageThroughBacklogWithoutMovingCursor(t *t
 		f.SetIssue(forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i), State: forge.IssueOpen})
 	}
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10))
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10+boxBorderRows))
 	waitForOutput(t, tm, "> #0")
 
 	sendKey(tm, "ctrl+d")
@@ -516,16 +518,19 @@ func TestTea_ScrollKeys_PgdownScrollsQueueOffScreenWhenContentFits(t *testing.T)
 // startup: the same pgdown that lands on row 5 at Height 10 lands on a later
 // row once the terminal is taller and the backlog column can fit more rows
 // per screen, so paging stays a full page after a resize (issue #1037 AC2).
+// Both heights below add boxBorderRows over their nominal 10/20 to pay for
+// the header's own bordered panel (issue #1756), preserving the item
+// budgets (and so the expected landing rows) this test was written against.
 func TestTea_ScrollKeys_PageSizeTracksViewportHeight(t *testing.T) {
 	f := forge.NewFake()
 	for i := 0; i < 50; i++ {
 		f.SetIssue(forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i), State: forge.IssueOpen})
 	}
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10))
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10+boxBorderRows))
 	waitForOutput(t, tm, "> #0")
 
-	tm.Send(tea.WindowSizeMsg{Width: 80, Height: 20})
+	tm.Send(tea.WindowSizeMsg{Width: 80, Height: 20 + boxBorderRows})
 	waitForOutput(t, tm, "> #0")
 
 	// A page size still stuck on the Height-10 window (landing around row 4)
@@ -551,7 +556,7 @@ func TestTea_ScrollKeys_PageDown_SkipsNoRow(t *testing.T) {
 		f.SetIssue(forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i), State: forge.IssueOpen})
 	}
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10))
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 10+boxBorderRows))
 	waitForOutput(t, tm, "> #0")
 
 	sendKey(tm, "pgdown")
@@ -596,7 +601,7 @@ func TestTea_ScrollKeys_PageThroughRunningSection(t *testing.T) {
 		launch.queue.Add(Pick{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("pick %d", i), State: PickQueued})
 	}
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 10))
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 10+boxBorderRows))
 	sendKey(tm, "2")
 	waitForOutput(t, tm, "pick 0")
 

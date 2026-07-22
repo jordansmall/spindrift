@@ -1223,7 +1223,11 @@ func TestUpdate_CursorJumpToLastMsg_MovesCursorAndDragsOffsetIntoView(t *testing
 // unreachable behind the panel border (issue #1755, the list-side
 // counterpart of the sidebar's own docked scroll-clamp fix).
 func TestUpdate_CursorJumpToLastMsg_Docked_LastRowReachable(t *testing.T) {
-	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 10})
+	// Height accounts for the header's own bordered panel (issue #1756) on
+	// top of the docked list/sidebar panel border #1755 already budgeted
+	// for — without it there's no row left for any data (just the column
+	// header).
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 10 + boxBorderRows})
 	issues := make([]forge.Issue, 50)
 	for i := range issues {
 		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}

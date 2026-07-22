@@ -167,6 +167,40 @@ func View(m Model) string {
 	return base
 }
 
+// renderBoxedHeader renders the banner/status/alert block (renderHeader),
+// wrapped in the same muted-border panel look as the docked list/sidebar
+// (issue #1756), so it reads as its own region instead of running straight
+// into the Section tabs below it. The result always ends in exactly one
+// trailing newline, matching renderHeader's own convention, so callers never
+// have to special-case the boxed-vs-unboxed cases. bodyBudget's row-budget
+// math must count exactly these rendered rows — including the 2 border rows
+// once boxed — or Update's cursor-follow scroll clamps against a taller
+// viewport than View actually has room to show, stranding the list's last
+// rows behind the border (same class of bug issue #1755 hit for the docked
+// panels); both callers therefore go through this one helper rather than
+// each computing the header's line count independently. Below
+// boxBorderCols+1 columns wide, or with less height than the boxed header
+// actually renders to, there's no room for a border at all — the header
+// then renders unboxed rather than forcing a degenerate box or overrunning
+// Height on an extremely short terminal (issue #1035 AC1/AC2's invariant).
+// Height fitness is checked against the boxed render's own line count,
+// rather than predicted from the unboxed content's newline count, because
+// renderHeader doesn't pre-wrap its content to m.Width the way the docked
+// list/sidebar's content is pre-clipped before boxing — a narrow terminal
+// can make the box's own word-wrap add lines the unboxed count wouldn't
+// predict. This is also what lets tests that never send a SizeChangedMsg
+// (m.Width's zero value) exercise header content without caring about
+// borders.
+func renderBoxedHeader(m Model) string {
+	header := renderHeader(m)
+	if headerWidth := m.Width - boxBorderCols; headerWidth > 0 {
+		if boxed := renderBoxedColumn(header, headerWidth) + "\n"; strings.Count(boxed, "\n") <= m.Height {
+			return boxed
+		}
+	}
+	return header
+}
+
 // viewBody renders everything View shows below/behind an open detail modal —
 // the header, Section tabs, and either the docked sidebar layout or the
 // plain single-list body — the same rendering the list-only path always
@@ -184,7 +218,7 @@ func viewBody(m Model) string {
 	}
 
 	var b strings.Builder
-	header := renderHeader(m)
+	header := renderBoxedHeader(m)
 	b.WriteString(header)
 	headerLines := strings.Count(header, "\n")
 	reservedLines := sectionTabsReserved(m, headerLines)
@@ -917,8 +951,7 @@ func renderHelp() string {
 // against the exact window View is about to render, rather than a second,
 // potentially-diverging calculation.
 func bodyBudget(m Model) int {
-	header := renderHeader(m)
-	headerLines := strings.Count(header, "\n")
+	headerLines := strings.Count(renderBoxedHeader(m), "\n")
 	reservedLines := sectionTabsReserved(m, headerLines)
 	if m.Mode == ModeFilterEdit {
 		reservedLines++
