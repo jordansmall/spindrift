@@ -57,3 +57,21 @@ func TestView_TerminateConfirm_ShowsConfirmPrompt(t *testing.T) {
 		t.Errorf("View = %q, want a confirm prompt naming #42", got)
 	}
 }
+
+// TestView_TerminateConfirm_FooterStyledDim verifies the terminate confirm
+// prompt's y/N/q/ctrl+c hint renders dim (RoleDim, "\x1b[90m") via the
+// shared footer renderer, the same treatment the other migrated footers
+// already got (issue #1793).
+func TestView_TerminateConfirm_FooterStyledDim(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := NewModel()
+	m.Mode = ModeTerminateConfirm
+	m.TerminateConfirm = TerminateConfirmState{Number: "42"}
+
+	got := View(m)
+	if !strings.Contains(got, "\x1b[90m[y/N/q/ctrl+c]\x1b[0m") {
+		t.Errorf("View() = %q, want the terminate-confirm hint dim-styled with its text intact", got)
+	}
+}

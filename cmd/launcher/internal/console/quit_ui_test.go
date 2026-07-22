@@ -43,3 +43,20 @@ func TestView_QuitConfirm_ShowsConfirmPrompt(t *testing.T) {
 		t.Errorf("View = %q, want a drain/terminate-all/stay confirm prompt", got)
 	}
 }
+
+// TestView_QuitConfirm_FooterStyledDim verifies the quit confirm prompt's
+// drain/terminate-all/stay hint renders dim (RoleDim, "\x1b[90m") via the
+// shared footer renderer, the same treatment the other migrated footers
+// already got (issue #1793).
+func TestView_QuitConfirm_FooterStyledDim(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := NewModel()
+	m.Mode = ModeQuitConfirm
+
+	got := View(m)
+	if !strings.Contains(got, "\x1b[90mquit with live Dispatches: drain (d, default) / terminate-all (t) / stay (s)?\x1b[0m") {
+		t.Errorf("View() = %q, want the quit-confirm hint dim-styled with its text intact", got)
+	}
+}
