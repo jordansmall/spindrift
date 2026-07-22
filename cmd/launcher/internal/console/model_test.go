@@ -1893,6 +1893,30 @@ func TestUpdate_SizeChangedMsg_RewrapsOpenDetailModal(t *testing.T) {
 	}
 }
 
+// TestUpdate_SizeChangedMsg_RewrapsFloatingModal_ToNewBoxInteriorWidth
+// verifies a resize that stays within the floating regime (both the old and
+// new terminal size clear detailModalFits) still re-wraps the body against
+// the box's new, wider interior — the box itself grows with the terminal
+// (issue #1759 AC), not just the fullscreen-to-floating crossing
+// TestUpdate_SizeChangedMsg_RewrapsOpenDetailModal covers.
+func TestUpdate_SizeChangedMsg_RewrapsFloatingModal_ToNewBoxInteriorWidth(t *testing.T) {
+	if !detailModalFits(Model{Width: 60, Height: 30}) || !detailModalFits(Model{Width: 200, Height: 30}) {
+		t.Fatalf("test setup invalid: both sizes must stay in the floating regime")
+	}
+
+	body := strings.TrimSpace(strings.Repeat("ab ", 40)) // 119 display columns unwrapped
+	m := Update(NewModel(), SizeChangedMsg{Width: 60, Height: 30})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: body})
+	narrowLines := len(m.DetailModal.Lines)
+
+	m = Update(m, SizeChangedMsg{Width: 200, Height: 30})
+
+	if len(m.DetailModal.Lines) >= narrowLines {
+		t.Errorf("Lines = %d after widening within the floating regime, want fewer than the narrower box's %d lines", len(m.DetailModal.Lines), narrowLines)
+	}
+}
+
 // TestUpdate_DetailModalLoadedMsg_WrapsToBoxInteriorNotTerminalWidth
 // verifies the modal's body wraps against the floating box's (much
 // narrower) interior width, not the raw terminal width — issue #1758

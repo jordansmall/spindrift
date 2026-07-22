@@ -148,8 +148,14 @@ func renderBoxedColumn(content string, width int) string {
 // drill-in of issue #1500. An open detail modal (m.DetailModal != nil)
 // floats as a bordered box over the still-rendered list instead of a
 // fullscreen takeover (issue #1758) — the same "keep driving while you
-// read" shape ADR 0030's sidebar already established for the transcript.
+// read" shape ADR 0030's sidebar already established for the transcript —
+// unless detailModalFits rejects the terminal as too small for a legible
+// box, in which case it falls back to the fullscreen renderer instead
+// (issue #1759).
 func View(m Model) string {
+	if m.DetailModal != nil && !detailModalFits(m) {
+		return renderDetailModal(*m.DetailModal, m.Height)
+	}
 	base := viewBody(m)
 	if m.DetailModal != nil {
 		boxWidth, boxHeight := detailModalBoxSize(m.Width, m.Height)
@@ -1180,30 +1186,98 @@ func windowDetailModalLines(s DetailModalState, budget int) []string {
 	return s.Lines[w.Start:w.End]
 }
 
-// detailModalBoxMargin is the minimum gap kept between the floating detail
-// modal box and the terminal edge on every side, so the box reads as
-// floating over the list rather than touching the frame (issue #1758).
-const detailModalBoxMargin = 2
+// detailModalBoxWidthPercent and detailModalBoxHeightPercent are the share of
+// the terminal's own dimensions the floating detail modal box targets before
+// the min/max clamps apply — the box scales with the terminal instead of
+// shrinking by a fixed margin (issue #1759 AC), the same target-percent-then-
+// clamp shape computeSidebarWidth already uses for the docked sidebar.
+const (
+	detailModalBoxWidthPercent  = 80
+	detailModalBoxHeightPercent = 80
+)
+
+// detailModalBoxMinWidth and detailModalBoxMinHeight floor the floating box
+// at a size where the border plus a line or two of body interior stays
+// legible (issue #1759 AC) — detailModalFits gates the floating layout on
+// the terminal itself being at least this large, so the clamp here never has
+// to inflate the box past the terminal's own size.
+const (
+	detailModalBoxMinWidth  = 40
+	detailModalBoxMinHeight = 10
+)
 
 // detailModalBoxMaxWidth and detailModalBoxMaxHeight cap the floating box at
 // a comfortable reading size on a wide/tall terminal instead of stretching
 // it corner to corner — "roughly centered at a sensible default size" (issue
-// #1758 AC). A terminal too narrow/short for even the margin is the small-
-// terminal fallback ticket's job, not this one's.
+// #1758 AC).
 const (
 	detailModalBoxMaxWidth  = 84
 	detailModalBoxMaxHeight = 30
 )
 
+// detailModalFits reports whether m.Width and m.Height leave room for a
+// floating detail modal box at least detailModalBoxMin{Width,Height} — the
+// gate View and the modal's own width/height-dependent routing (the Lines
+// wrap width, the scroll budget) both check before choosing the floating
+// box over the small-terminal fullscreen fallback, so the two can never
+// disagree about which one is showing (sidebarFits' detail-modal analogue,
+// issue #1759).
+func detailModalFits(m Model) bool {
+	return m.Width >= detailModalBoxMinWidth && m.Height >= detailModalBoxMinHeight
+}
+
+// detailModalWrapWidth returns the width the detail modal's body should wrap
+// against: the floating box's interior width when detailModalFits(m), the
+// same fullscreen renderer's raw m.Width otherwise — so a resize that
+// crosses the fit threshold rewraps against whichever width the render path
+// (gated by the same predicate) is actually about to show, instead of a
+// floating-box width that never fit the terminal in the first place (issue
+// #1759).
+func detailModalWrapWidth(m Model) int {
+	if !detailModalFits(m) {
+		return m.Width
+	}
+	innerWidth, _ := detailModalInnerSize(m.Width, m.Height)
+	return innerWidth
+}
+
+// detailModalScrollBudget returns the row budget the detail modal's scroll
+// clamp windows against: the floating box's interior body rows
+// (detailModalInnerSize, minus its own wrapped labels line count and
+// detailModalFooterLines — the same accounting renderDetailModalContent
+// does, since a ticket's labels wrap onto further interior rows instead of
+// spending a fixed one-row budget, issue #1772) when detailModalFits(m), or
+// the fullscreen renderer's own detailModalChromeLines-based budget
+// otherwise — detailModalWrapWidth's height analogue, gated by the same
+// predicate (issue #1759).
+func detailModalScrollBudget(m Model) int {
+	if !detailModalFits(m) {
+		return m.Height - detailModalChromeLines
+	}
+	innerWidth, innerHeight := detailModalInnerSize(m.Width, m.Height)
+	labelLines := detailModalLabelLines(m.DetailModal.Labels, innerWidth)
+	return innerHeight - len(labelLines) - detailModalFooterLines
+}
+
 // detailModalBoxSize returns the floating detail modal box's outer width and
-// height for a termWidth x termHeight terminal: the terminal size minus
-// detailModalBoxMargin on every side, capped at detailModalBoxMax{Width,Height}.
+// height for a termWidth x termHeight terminal: detailModalBox{Width,Height}
+// Percent of the terminal's own dimensions, clamped down to
+// detailModalBoxMin{Width,Height} and up to detailModalBoxMax{Width,Height}
+// (issue #1759 AC). Only meaningful when detailModalFits(m) is true — below
+// that threshold the min clamp would inflate the box past the terminal's own
+// size, which callers on the fullscreen fallback path never observe.
 func detailModalBoxSize(termWidth, termHeight int) (width, height int) {
-	width = termWidth - 2*detailModalBoxMargin
+	width = termWidth * detailModalBoxWidthPercent / 100
+	if width < detailModalBoxMinWidth {
+		width = detailModalBoxMinWidth
+	}
 	if width > detailModalBoxMaxWidth {
 		width = detailModalBoxMaxWidth
 	}
-	height = termHeight - 2*detailModalBoxMargin
+	height = termHeight * detailModalBoxHeightPercent / 100
+	if height < detailModalBoxMinHeight {
+		height = detailModalBoxMinHeight
+	}
 	if height > detailModalBoxMaxHeight {
 		height = detailModalBoxMaxHeight
 	}
