@@ -1510,6 +1510,112 @@ func TestView_SidebarOpen_NarrowTerminal_FallsBackFullscreen(t *testing.T) {
 	}
 }
 
+// TestQueueNarrowed_SidebarDocked_ReportsTrue verifies queueNarrowed reports
+// true once the sidebar is open and docked beside the list — the trigger for
+// the compact/wrapped queue-row form (issue #1752).
+func TestQueueNarrowed_SidebarDocked_ReportsTrue(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	if !queueNarrowed(m) {
+		t.Errorf("queueNarrowed(m) = false, want true once the sidebar is docked beside the list")
+	}
+}
+
+// TestQueueNarrowed_SidebarClosed_ReportsFalse verifies queueNarrowed reports
+// false with no sidebar open — the list renders at full width, unchanged from
+// today (issue #1752 AC).
+func TestQueueNarrowed_SidebarClosed_ReportsFalse(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+
+	if queueNarrowed(m) {
+		t.Errorf("queueNarrowed(m) = true, want false with no sidebar open")
+	}
+}
+
+// TestQueueNarrowed_SidebarFullscreen_ReportsFalse verifies queueNarrowed
+// reports false when the sidebar takes over fullscreen (narrow terminal) —
+// the list isn't rendered at all in that layout, so it has no queue column to
+// narrow (issue #1752).
+func TestQueueNarrowed_SidebarFullscreen_ReportsFalse(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth, Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	if queueNarrowed(m) {
+		t.Errorf("queueNarrowed(m) = true, want false while the sidebar is fullscreen, not docked")
+	}
+}
+
+// TestQueueNarrowed_SidebarZoomed_ReportsFalse verifies queueNarrowed
+// reports false once the operator zooms the sidebar to fullscreen, even on a
+// terminal wide enough to dock — View forces the fullscreen takeover on zoom
+// regardless of sidebarFits (issue #1502), hiding the list the same way the
+// too-narrow-to-dock case does, so this must never disagree (issue #1752).
+func TestQueueNarrowed_SidebarZoomed_ReportsFalse(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	m = Update(m, SidebarZoomToggleMsg{})
+
+	if queueNarrowed(m) {
+		t.Errorf("queueNarrowed(m) = true, want false while the sidebar is zoomed to fullscreen")
+	}
+}
+
+// TestCompactColumnItemBudget_ExactFit_ReturnsWholeItems verifies
+// compactColumnItemBudget returns exactly as many compact entries as fit
+// with no wasted budget: a column budget of 6 (1 header row + 5 available)
+// fits exactly 2 entries — 2*compactRowLines (4) plus 1 separator between
+// them — with none left over (issue #1752).
+func TestCompactColumnItemBudget_ExactFit_ReturnsWholeItems(t *testing.T) {
+	if got := compactColumnItemBudget(6); got != 2 {
+		t.Errorf("compactColumnItemBudget(6) = %d, want 2", got)
+	}
+}
+
+// TestCompactColumnItemBudget_TooSmallForOneEntry_ReturnsZero verifies a
+// column budget too small to fit even one compact entry's header+title
+// block returns zero rather than a negative or fractional count (issue
+// #1752).
+func TestCompactColumnItemBudget_TooSmallForOneEntry_ReturnsZero(t *testing.T) {
+	if got := compactColumnItemBudget(1); got != 0 {
+		t.Errorf("compactColumnItemBudget(1) = %d, want 0", got)
+	}
+}
+
+// TestCompactColumnItemBudget_NonPositive_ReturnsZero verifies a
+// non-positive column budget (a terminal too short to show anything past
+// the header) yields zero compact entries, matching columnItemBudget's own
+// guard (issue #1752).
+func TestCompactColumnItemBudget_NonPositive_ReturnsZero(t *testing.T) {
+	if got := compactColumnItemBudget(0); got != 0 {
+		t.Errorf("compactColumnItemBudget(0) = %d, want 0", got)
+	}
+}
+
+// TestSectionPageSize_Compact_SmallerThanClassic verifies a pgup/pgdown page
+// jump (sectionPageSize) shrinks once the sidebar docks and the compact form
+// takes over — each entry now spends more than one screen line, so a page
+// holds fewer of them — proving sectionPageSize actually picks up
+// queueItemBudget's compact branch rather than reusing the classic
+// one-line-per-item budget regardless of layout (issue #1752).
+func TestSectionPageSize_Compact_SmallerThanClassic(t *testing.T) {
+	base := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	picks := make([]Pick, 20)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i+1), Title: "t", State: PickRunning, Age: "1m"}
+	}
+	base = Update(base, QueueSnapshotMsg{Picks: picks})
+	base = Update(base, SectionJumpMsg{Section: SectionRunning})
+
+	classic := sectionPageSize(base)
+	docked := Update(base, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	compact := sectionPageSize(docked)
+
+	if compact >= classic {
+		t.Errorf("sectionPageSize() docked = %d, classic = %d, want the docked/compact page size smaller — compact rows spend more than one line each", compact, classic)
+	}
+}
+
 // TestComputeSidebarWidth_MinimumFittingWidth_ReturnsFloor verifies that at
 // the narrowest width sidebarFits still allows docking (sidebarMinListWidth +
 // sidebarWidth + 1), the computed sidebar width is exactly the sidebarWidth
@@ -1565,6 +1671,29 @@ func TestView_SidebarOpen_WideTerminal_SidebarGrowsPastFloor(t *testing.T) {
 	want := clip(long, computeSidebarWidth(width), false)
 	if !strings.Contains(out, want) {
 		t.Errorf("View() = %q, want the docked sidebar content clipped to computeSidebarWidth(%d) = %d, i.e. %q", out, width, computeSidebarWidth(width), want)
+	}
+}
+
+// TestView_SidebarOpen_CompactQueueRows_SidebarKeepsComputedWidth verifies
+// the compact/wrapped queue form doesn't claw back the width #1751's
+// rebalance granted the docked sidebar: with compact rows rendering (a work
+// pick present, log open), the sidebar's own content still clips to exactly
+// computeSidebarWidth, the same as with an empty queue (issue #1752 AC: "the
+// activity stream retains the extra width granted by the rebalanced split").
+func TestView_SidebarOpen_CompactQueueRows_SidebarKeepsComputedWidth(t *testing.T) {
+	const width = 160
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "1", Title: "a compact row", State: PickRunning, Age: "1m"},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+	long := strings.Repeat("x", 300)
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: long}}})
+
+	out := View(m)
+	want := clip(long, computeSidebarWidth(width), false)
+	if !strings.Contains(out, want) {
+		t.Errorf("View() = %q, want the docked sidebar content still clipped to computeSidebarWidth(%d) = %d with compact queue rows present, i.e. %q", out, width, computeSidebarWidth(width), want)
 	}
 }
 
@@ -1773,6 +1902,364 @@ func TestView_Section_RowsShowAge(t *testing.T) {
 	}
 }
 
+// TestView_WorkSection_Compact_ShowsTwoLineRowWithFullTitle verifies a work
+// row renders in the compact/wrapped two-line form — a "#num · state · age"
+// header line, the title unclipped on its own line — once the queue column
+// is narrowed by a docked sidebar, instead of the classic single-line
+// table's aggressive clip() truncation (issue #1752).
+func TestView_WorkSection_Compact_ShowsTwoLineRowWithFullTitle(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	long := strings.Repeat("x", 60)
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "7", Title: long, State: PickRunning, Age: "3m"},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	out := View(m)
+	if !strings.Contains(out, long) {
+		t.Errorf("View() = %q, want the full 60-char title unclipped in the compact form", out)
+	}
+	// Checked per line, not as one joined literal: the state cell styles by
+	// Role (ADR 0031), so on a color-capable profile "running" sits between
+	// ANSI escapes that would split a single "#7 · running · 3m" substring
+	// check even though every piece renders on the same line.
+	lines := strings.Split(out, "\n")
+	headerIdx, titleIdx := -1, -1
+	for i, l := range lines {
+		if strings.Contains(l, "#7 ·") && strings.Contains(l, "running") && strings.Contains(l, "3m") {
+			headerIdx = i
+		}
+		if strings.Contains(l, long) {
+			titleIdx = i
+		}
+	}
+	if headerIdx < 0 {
+		t.Fatalf("View() = %q, want a line with \"#7 ·\", \"running\", and \"3m\"", out)
+	}
+	if titleIdx < 0 || titleIdx <= headerIdx {
+		t.Fatalf("View() = %q, want the title on its own line after the header line", out)
+	}
+}
+
+// TestRenderWorkSection_Compact_LongExtrasClippedToWidth verifies a compact
+// row's header line — cursor marker, number, state, age, and any trailing
+// extras (blocker/reason/heartbeat) — never exceeds the column's width, the
+// same extrasBudget discipline the classic single-line row applies (issue
+// #1500), even though the compact header carries the extras unclipped in raw
+// Sprintf form before this fix (issue #1752).
+func TestRenderWorkSection_Compact_LongExtrasClippedToWidth(t *testing.T) {
+	const listWidth = 80
+	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "1", Title: "t", State: PickHeld, Age: "1m", BlockedBy: strings.Repeat("#99 (native), ", 20)},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionHeld})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	m.Width = listWidth
+
+	out := renderWorkSection(m, 10, true)
+	for _, l := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(l); w > listWidth {
+			t.Errorf("renderWorkSection() line %q has display width %d, want clamped to %d", l, w, listWidth)
+		}
+	}
+}
+
+// TestRenderWorkSection_Compact_LongNumberAndAgeClippedToWidth verifies a
+// compact row's header line stays within the column's width even given a
+// pathologically long Number or Age — the classic form clips both to their
+// own column widths, so the compact header applies the same defensive cap
+// rather than leaving them unbounded (issue #1752 review).
+func TestRenderWorkSection_Compact_LongNumberAndAgeClippedToWidth(t *testing.T) {
+	const listWidth = 80
+	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: strings.Repeat("9", 200), Title: "t", State: PickRunning, Age: strings.Repeat("m", 200)},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	m.Width = listWidth
+
+	out := renderWorkSection(m, 10, true)
+	for _, l := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(l); w > listWidth {
+			t.Errorf("renderWorkSection() line %q has display width %d, want clamped to %d", l, w, listWidth)
+		}
+	}
+}
+
+// TestView_SidebarOpen_AtMinimumFittingWidth_CompactRowRendersCleanly pins
+// compact-form behavior right at sidebarFits' own minimum fitting width —
+// the narrowest the queue column ever renders at while docked
+// (sidebarMinListWidth, the floor computeSidebarWidth clamps down to) — with
+// a realistic pick, not a pathological one: the row must still show its
+// number, state, age, and title with no line exceeding the column's width
+// (issue #1752 review).
+func TestView_SidebarOpen_AtMinimumFittingWidth_CompactRowRendersCleanly(t *testing.T) {
+	const width = sidebarMinListWidth + sidebarWidth + dockedBorderCols
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "7", Title: "fix the thing", State: PickRunning, Age: "3m"},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	out := View(m)
+	for _, want := range []string{"#7", "running", "3m", "fix the thing"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("View() = %q, want %q at the minimum fitting width", out, want)
+		}
+	}
+	listWidth := width - computeSidebarWidth(width) - dockedBorderCols
+	for _, l := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(l); w > width {
+			t.Errorf("View() line %q has display width %d, want clamped to the terminal width %d (listWidth %d)", l, w, width, listWidth)
+		}
+	}
+}
+
+// TestRenderBacklogSection_Compact_LongLabelsClippedToWidth verifies a
+// compact Backlog row's header line — cursor marker, number, and labels —
+// never exceeds the column's width, accounting for every literal character
+// ("#", the brackets, and their surrounding spaces) the "%s #%s [%s]\n"
+// format spends outside marker/number/labels (issue #1752).
+func TestRenderBacklogSection_Compact_LongLabelsClippedToWidth(t *testing.T) {
+	const listWidth = 80
+	longLabels := make([]string, 20)
+	for i := range longLabels {
+		longLabels[i] = "a-fairly-long-label-name"
+	}
+	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "t", Labels: longLabels}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	m.Width = listWidth
+
+	out := renderBacklogSection(m, 10, true)
+	for _, l := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(l); w > listWidth {
+			t.Errorf("renderBacklogSection() line %q has display width %d, want clamped to %d", l, w, listWidth)
+		}
+	}
+}
+
+// TestRenderBacklogSection_Compact_LongNumberClippedToWidth verifies a
+// compact Backlog row's header line stays within the column's width even
+// given a pathologically long issue number — parity with compactWorkRow's
+// own number clip and the classic row's numberColWidth clip (issue #1752
+// review).
+func TestRenderBacklogSection_Compact_LongNumberClippedToWidth(t *testing.T) {
+	const listWidth = 80
+	m := Update(NewModel(), SizeChangedMsg{Width: 300, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: strings.Repeat("9", 200), Title: "t"}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	m.Width = listWidth
+
+	out := renderBacklogSection(m, 10, true)
+	for _, l := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(l); w > listWidth {
+			t.Errorf("renderBacklogSection() line %q has display width %d, want clamped to %d", l, w, listWidth)
+		}
+	}
+}
+
+// TestCompactQueueSeparator_ZeroWidth_ClampsToOne verifies a non-positive
+// width still renders a one-glyph rule rather than an empty or negative
+// strings.Repeat count, which would panic (issue #1752).
+func TestCompactQueueSeparator_ZeroWidth_ClampsToOne(t *testing.T) {
+	got := strings.TrimSuffix(compactQueueSeparator(0), "\n")
+	// Styled through the same roleStyle call, not a bare literal: on a
+	// color-capable profile the glyph carries ANSI escapes a raw string
+	// comparison would miss (issue #1752 review's ANSI-boundary lesson).
+	if want := roleStyle(RoleDim).Render(compactQueueSeparatorGlyph); got != want {
+		t.Errorf("compactQueueSeparator(0) = %q, want the single-glyph floor %q", got, want)
+	}
+}
+
+// TestCompactWorkRow_ZeroWidth_DoesNotPanic verifies compactWorkRow clamps
+// its title column to at least one, rather than panicking or emitting a
+// pathological clip() call, at a width too small for any real column (issue
+// #1752).
+func TestCompactWorkRow_ZeroWidth_DoesNotPanic(t *testing.T) {
+	got := compactWorkRow(0, ">", Pick{Number: "1", State: PickRunning, Age: "1m"}, "title", RoleRunning, "")
+	if !strings.Contains(got, "\n") {
+		t.Errorf("compactWorkRow(0, ...) = %q, want at least the header and title lines", got)
+	}
+}
+
+// TestCompactBacklogRow_ZeroWidth_DoesNotPanic verifies compactBacklogRow
+// clamps its title column to at least one at a width too small for any real
+// column (issue #1752).
+func TestCompactBacklogRow_ZeroWidth_DoesNotPanic(t *testing.T) {
+	got := compactBacklogRow(0, ">", "1", "title", nil)
+	if !strings.Contains(got, "\n") {
+		t.Errorf("compactBacklogRow(0, ...) = %q, want at least the header and title lines", got)
+	}
+}
+
+// TestView_WorkSection_Compact_SeparatorBetweenAdjacentIssues verifies the
+// compact/wrapped form separates two adjacent issues with exactly one faint
+// delimiter row — the subtle rule the two-line stacked entries need so they
+// don't run together (issue #1752).
+func TestView_WorkSection_Compact_SeparatorBetweenAdjacentIssues(t *testing.T) {
+	const width = sidebarMinListWidth + sidebarWidth + dockedBorderCols
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "1", Title: "first", State: PickRunning, Age: "1m"},
+		{Number: "2", Title: "second", State: PickRunning, Age: "2m"},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	out := View(m)
+	listWidth := width - computeSidebarWidth(width) - dockedBorderCols
+	// lipgloss.JoinHorizontal rejoins the docked sidebar onto the same line
+	// as the separator, so its own trailing "\n" no longer directly follows
+	// the rule in the joined output — match the rule's content only.
+	sep := strings.TrimSuffix(compactQueueSeparator(listWidth), "\n")
+	if got := strings.Count(out, sep); got != 1 {
+		t.Errorf("View() = %q, want exactly one separator %q between the two issues, got %d", out, sep, got)
+	}
+}
+
+// TestView_WorkSection_Compact_CursorMarksHighlightedRow verifies the
+// compact/wrapped form still marks the row at m.Cursor — selection and
+// highlight keep working once the queue column narrows (issue #1752 AC).
+func TestView_WorkSection_Compact_CursorMarksHighlightedRow(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "1", Title: "first", State: PickRunning, Age: "1m"},
+		{Number: "2", Title: "second", State: PickRunning, Age: "2m"},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+	m = Update(m, CursorMoveMsg{Delta: 1})
+
+	out := View(m)
+	var marked, unmarked string
+	for _, l := range strings.Split(out, "\n") {
+		switch {
+		case strings.Contains(l, "#1 ·"):
+			unmarked = l
+		case strings.Contains(l, "#2 ·"):
+			marked = l
+		}
+	}
+	if !strings.Contains(marked, ">") {
+		t.Errorf("marked row = %q, want the cursor marker on #2's header line", marked)
+	}
+	if strings.Contains(unmarked, ">") {
+		t.Errorf("unmarked row = %q, want no cursor marker on #1's header line", unmarked)
+	}
+}
+
+// TestRenderWorkSection_Compact_ItemBudgetNeverOverflowsColumnBudget verifies
+// the compact/wrapped form's item budget accounts for its own multi-line,
+// separator-bearing rows rather than reusing the classic form's
+// one-line-per-item assumption — otherwise a handful of picks blows well
+// past the column's row budget instead of windowing down to what fits
+// (issue #1752).
+func TestRenderWorkSection_Compact_ItemBudgetNeverOverflowsColumnBudget(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	picks := make([]Pick, 5)
+	for i := range picks {
+		picks[i] = Pick{Number: fmt.Sprintf("%d", i+1), Title: "t", State: PickRunning, Age: "1m"}
+	}
+	m = Update(m, QueueSnapshotMsg{Picks: picks})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	const budget = 7
+	out := renderWorkSection(m, budget, true)
+	if lines := strings.Count(out, "\n"); lines > budget {
+		t.Errorf("renderWorkSection(m, %d) = %q, rendered %d lines, want at most %d (no overflow of the column budget)", budget, out, lines, budget)
+	}
+}
+
+// TestView_WorkSection_SidebarClosed_RendersClassicSingleLineForm verifies
+// that with no sidebar open — full window width — a work row renders exactly
+// as the classic single-line clip()ped table, never the compact/wrapped form
+// (issue #1752 AC: "at full window width, queue rows render unchanged from
+// today").
+func TestView_WorkSection_SidebarClosed_RendersClassicSingleLineForm(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	long := strings.Repeat("x", 300)
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "7", Title: long, State: PickRunning, Age: "3m"},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+
+	out := View(m)
+	if strings.Contains(out, long) {
+		t.Errorf("View() = %q, want the classic clip()ped title, not the full unclipped title the compact form would show", out)
+	}
+	if strings.Contains(out, "#7 · running · 3m") {
+		t.Errorf("View() = %q, want no compact-form header line with no sidebar open", out)
+	}
+}
+
+// TestView_BacklogSection_SidebarClosed_RendersClassicSingleLineForm verifies
+// that with no sidebar open — full window width — a Backlog row renders
+// exactly as the classic single-line clip()ped table, never the
+// compact/wrapped form (issue #1752 AC), the Backlog counterpart to
+// TestView_WorkSection_SidebarClosed_RendersClassicSingleLineForm.
+func TestView_BacklogSection_SidebarClosed_RendersClassicSingleLineForm(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	long := strings.Repeat("x", 300)
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: long}}})
+
+	out := View(m)
+	if strings.Contains(out, long) {
+		t.Errorf("View() = %q, want the classic clip()ped title, not the full unclipped title the compact form would show", out)
+	}
+}
+
+// TestView_BacklogSection_Compact_ShowsTwoLineRowWithFullTitle verifies a
+// Backlog row renders in the compact/wrapped two-line form — a "#num"
+// header line, the title unclipped on its own line — once the queue column
+// is narrowed by a docked sidebar, instead of the classic single-line
+// table's aggressive clip() truncation (issue #1752).
+func TestView_BacklogSection_Compact_ShowsTwoLineRowWithFullTitle(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	long := strings.Repeat("x", 60)
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: long}}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	out := View(m)
+	if !strings.Contains(out, long) {
+		t.Errorf("View() = %q, want the full 60-char title unclipped in the compact form", out)
+	}
+	idx := strings.Index(out, "#1")
+	titleIdx := strings.Index(out, long)
+	if idx < 0 || titleIdx < 0 || titleIdx <= idx {
+		t.Fatalf("View() = %q, want the header line (with #1) before the title", out)
+	}
+	between := out[idx:titleIdx]
+	if !strings.Contains(between, "\n") {
+		t.Errorf("View() header-to-title span = %q, want the title on its own line, not joined to the header", between)
+	}
+}
+
+// TestView_BacklogSection_Compact_SeparatorBetweenAdjacentIssues verifies
+// the Backlog Section's compact/wrapped form also separates two adjacent
+// issues with exactly one faint delimiter row (issue #1752).
+func TestView_BacklogSection_Compact_SeparatorBetweenAdjacentIssues(t *testing.T) {
+	const width = sidebarMinListWidth + sidebarWidth + dockedBorderCols
+	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
+	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
+		{Number: "1", Title: "first"},
+		{Number: "2", Title: "second"},
+	}})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
+
+	out := View(m)
+	listWidth := width - computeSidebarWidth(width) - dockedBorderCols
+	sep := strings.TrimSuffix(compactQueueSeparator(listWidth), "\n")
+	if got := strings.Count(out, sep); got != 1 {
+		t.Errorf("View() = %q, want exactly one separator %q between the two issues, got %d", out, sep, got)
+	}
+}
+
 // TestView_ResearchPick_ShowsMarker verifies a research-kind pick's row
 // carries a marker distinct from a work pick's row, driven off Pick.Kind
 // (issue #1710) — the console needs a way to tell an operator, at a glance,
@@ -1876,7 +2363,7 @@ func TestRenderBacklogSection_BudgetExceedsRowCount_NeverTruncates(t *testing.T)
 	}
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
-	out := renderBacklogSection(m, len(issues)+1)
+	out := renderBacklogSection(m, len(issues)+1, false)
 	if !strings.Contains(out, "issue 499") {
 		t.Errorf("renderBacklogSection(m, 501) = %q, want the last of 500 rows present, unwindowed", out)
 	}
@@ -1897,7 +2384,7 @@ func TestRenderWorkSection_BudgetExceedsRowCount_NeverTruncates(t *testing.T) {
 	m = Update(m, QueueSnapshotMsg{Picks: picks})
 	m = Update(m, SectionJumpMsg{Section: SectionRunning})
 
-	out := renderWorkSection(m, len(picks)+1)
+	out := renderWorkSection(m, len(picks)+1, false)
 	if !strings.Contains(out, "pick 499") {
 		t.Errorf("renderWorkSection(m, 501) = %q, want the last of 500 rows present, unwindowed", out)
 	}
@@ -2397,7 +2884,7 @@ func TestView_Queue_SanitizesTitleAndReasonControlSequences(t *testing.T) {
 // never asked to represent a non-positive item budget itself (issue #1540:
 // SetHeight(0) means unbounded, not zero rows).
 func TestRenderTable_NonPositiveItemBudgetRendersHeaderOnly(t *testing.T) {
-	got := renderTable("header\n", []string{"row1\n"}, Viewport{}, 1, 0)
+	got := renderTable("header\n", []string{"row1\n"}, Viewport{}, 1, 0, "")
 	if want := "header\n"; got != want {
 		t.Errorf("renderTable() with itemBudget 0 = %q, want %q", got, want)
 	}
@@ -2408,7 +2895,7 @@ func TestRenderTable_NonPositiveItemBudgetRendersHeaderOnly(t *testing.T) {
 // matching the convention renderBacklogSection/renderWorkSection applied
 // inline before extraction.
 func TestRenderTable_RendersHeaderAndWindowedRows(t *testing.T) {
-	got := renderTable("header\n", []string{"row1\n", "row2\n"}, Viewport{}, 2, 2)
+	got := renderTable("header\n", []string{"row1\n", "row2\n"}, Viewport{}, 2, 2, "")
 	want := "header\nrow1\nrow2\n"
 	if got != want {
 		t.Errorf("renderTable() = %q, want %q", got, want)
@@ -2420,7 +2907,7 @@ func TestRenderTable_RendersHeaderAndWindowedRows(t *testing.T) {
 // Section's own scroll position (m.Offset) both callers pass through.
 func TestRenderTable_PassesOffsetThroughToWindow(t *testing.T) {
 	vp := Viewport{offset: 1}
-	got := renderTable("header\n", []string{"row1\n", "row2\n", "row3\n"}, vp, 3, 2)
+	got := renderTable("header\n", []string{"row1\n", "row2\n", "row3\n"}, vp, 3, 2, "")
 	want := "header\nrow2\nrow3\n"
 	if got != want {
 		t.Errorf("renderTable() with offset 1 = %q, want %q", got, want)
@@ -2437,7 +2924,7 @@ func TestRenderTable_TruncatedWindow_HoldsBackOneRowForMoreBelow(t *testing.T) {
 	for i := range rows {
 		rows[i] = fmt.Sprintf("row%d\n", i)
 	}
-	got := renderTable("header\n", rows, Viewport{}, 50, 4)
+	got := renderTable("header\n", rows, Viewport{}, 50, 4, "")
 	want := "header\nrow0\nrow1\nrow2\n… 47 more below\n"
 	if got != want {
 		t.Errorf("renderTable() = %q, want %q", got, want)
