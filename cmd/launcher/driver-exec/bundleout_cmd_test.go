@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/seambundle"
 )
 
 func runGitCmd(t *testing.T, dir string, args ...string) string {
@@ -56,7 +56,7 @@ func TestRunBundleOut_ParsesFlagsAndDelegates(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("runBundleOut exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	if _, err := os.Stat(filepath.Join(outbox, local.BundleFileName)); err != nil {
+	if _, err := os.Stat(filepath.Join(outbox, seambundle.FileName)); err != nil {
 		t.Fatalf("bundle not created: %v", err)
 	}
 }

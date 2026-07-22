@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/bundleout"
-	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/seambundle"
 )
 
 func runGit(t *testing.T, dir string, args ...string) string {
@@ -66,7 +66,7 @@ func newRepoNoFeatureCommits(t *testing.T) (dir, base, branch string) {
 }
 
 // TestRun_NonEmptyRange_CreatesBundle verifies Run bundles base..branch into
-// outboxDir/local.BundleFileName when the range holds commits — the
+// outboxDir/seambundle.FileName when the range holds commits — the
 // harness-owned code-out step that replaces the Agent's own `git bundle
 // create` instruction under CODE_FORGE=local (issue #1808).
 func TestRun_NonEmptyRange_CreatesBundle(t *testing.T) {
@@ -85,7 +85,7 @@ func TestRun_NonEmptyRange_CreatesBundle(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	bundlePath := filepath.Join(outbox, local.BundleFileName)
+	bundlePath := filepath.Join(outbox, seambundle.FileName)
 	if _, err := os.Stat(bundlePath); err != nil {
 		t.Fatalf("bundle not created at %s: %v", bundlePath, err)
 	}
@@ -131,7 +131,7 @@ func TestRun_EmptyRangeAfterReadyClaim_AppendsCorrectiveOutcome(t *testing.T) {
 	}
 	logFile.Close()
 
-	if _, err := os.Stat(filepath.Join(outbox, local.BundleFileName)); err == nil {
+	if _, err := os.Stat(filepath.Join(outbox, seambundle.FileName)); err == nil {
 		t.Fatalf("bundle created for an empty range, want none")
 	}
 
@@ -177,7 +177,7 @@ func TestRun_EmptyRangeAfterBlockedClaim_WritesNothing(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(outbox, local.BundleFileName)); err == nil {
+	if _, err := os.Stat(filepath.Join(outbox, seambundle.FileName)); err == nil {
 		t.Fatalf("bundle created for an empty range, want none")
 	}
 	if stdout.Len() != 0 {

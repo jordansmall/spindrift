@@ -292,10 +292,14 @@ let
   # launcher commits). The fileset is intentionally tight: go.mod, driver-exec,
   # internal/driver, internal/driver/claude (the claude Driver's
   # heartbeat/transcript/classify/usage parsing), internal/usage
-  # (Driver-agnostic report types), and internal/logscan (claude's log-scan
-  # helper) only, with *_test.go excluded. If a new import is added outside
-  # this closure the build fails loudly (missing package) — that is the
-  # intended failure mode (#474).
+  # (Driver-agnostic report types), internal/logscan (claude's log-scan
+  # helper), internal/outcome (the SPINDRIFT_OUTCOME grammar/log-scan, issue
+  # #1808's bundle-out verb reads/writes it), internal/bundleout
+  # (CODE_FORGE=local's harness-owned code-out step bundle-out wraps), and
+  # internal/seambundle (the bundle filename constant bundleout and the
+  # launcher's local Code Forge both share) only, with *_test.go excluded. If
+  # a new import is added outside this closure the build fails loudly
+  # (missing package) — that is the intended failure mode (#474).
   driverExecBin = pkgs.buildGoModule {
     pname = "driver-exec";
     version = spindriftVersion;
@@ -319,6 +323,15 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/logscan)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/outcome)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/bundleout)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/seambundle)
       ];
     };
     # Same go.mod/go.sum as launcherBin above, but NOT the same vendorHash:

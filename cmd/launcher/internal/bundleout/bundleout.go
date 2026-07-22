@@ -16,8 +16,8 @@ import (
 	"strconv"
 	"strings"
 
-	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/seambundle"
 )
 
 // Config is everything Run needs to bundle one seam's code-out.
@@ -39,7 +39,7 @@ type Config struct {
 	PriorOutcomeLine string
 }
 
-// Run bundles Base..Branch from Repo into OutboxDir/local.BundleFileName.
+// Run bundles Base..Branch from Repo into OutboxDir/seambundle.FileName.
 // An empty range after the Agent's own claimed status=ready is a
 // contradiction the Box can't leave standing: no bundle is written, and a
 // corrective status=blocked SPINDRIFT_OUTCOME line is printed to w instead,
@@ -86,7 +86,7 @@ func createBundle(repo, base, branch, outboxDir string) error {
 	if err := os.MkdirAll(outboxDir, 0o755); err != nil {
 		return fmt.Errorf("bundleout: create outbox dir %s: %w", outboxDir, err)
 	}
-	bundlePath := filepath.Join(outboxDir, local.BundleFileName)
+	bundlePath := filepath.Join(outboxDir, seambundle.FileName)
 	rangeSpec := base + ".." + branch
 	if out, err := exec.Command("git", "-C", repo, "bundle", "create", bundlePath, rangeSpec).CombinedOutput(); err != nil {
 		return fmt.Errorf("bundleout: bundle create %s: %w: %s", bundlePath, err, out)
