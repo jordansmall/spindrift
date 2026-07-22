@@ -236,8 +236,28 @@ func (e *execClient) DepsOf(num string) ([]forge.Dependency, error) {
 // nativeDepsOf queries GitHub's issue-dependencies API for the issues that
 // block num.
 func (e *execClient) nativeDepsOf(num string) ([]string, error) {
+	return e.nativeDependencyIDs(num, "blocked_by")
+}
+
+// BlocksOf returns the canonical issues num blocks — DepsOf's reverse
+// direction — read from GitHub's native issue-dependencies API. Unlike
+// DepsOf there is no body-text fallback: no prose grammar declares a
+// forward "blocks" relationship, so a native lookup failure has nothing to
+// degrade to and is returned directly (issue #1744).
+func (e *execClient) BlocksOf(num string) ([]forge.Dependency, error) {
+	ids, err := e.nativeDependencyIDs(num, "blocking")
+	if err != nil {
+		return nil, err
+	}
+	return forge.WithSource(ids, forge.DepSourceNative), nil
+}
+
+// nativeDependencyIDs queries GitHub's issue-dependencies API for num's
+// relationships in the given direction ("blocked_by" or "blocking"),
+// deduplicating results in API response order.
+func (e *execClient) nativeDependencyIDs(num, direction string) ([]string, error) {
 	cmd := exec.Command("gh", "api",
-		fmt.Sprintf("repos/%s/issues/%s/dependencies/blocked_by", e.repo, num),
+		fmt.Sprintf("repos/%s/issues/%s/dependencies/%s", e.repo, num, direction),
 		"--jq", ".[].number",
 	)
 	var stderr strings.Builder
@@ -245,9 +265,9 @@ func (e *execClient) nativeDepsOf(num string) ([]string, error) {
 	out, err := cmd.Output()
 	if err != nil {
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return nil, fmt.Errorf("gh api dependencies/blocked_by %s: %w: %s", num, err, msg)
+			return nil, fmt.Errorf("gh api dependencies/%s %s: %w: %s", direction, num, err, msg)
 		}
-		return nil, fmt.Errorf("gh api dependencies/blocked_by %s: %w", num, err)
+		return nil, fmt.Errorf("gh api dependencies/%s %s: %w", direction, num, err)
 	}
 	var deps []string
 	seen := map[string]bool{}
