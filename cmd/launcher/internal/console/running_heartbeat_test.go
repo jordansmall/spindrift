@@ -1,6 +1,7 @@
 package console
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,5 +203,72 @@ func TestHeartbeatCache_ChangedStat_Reparses(t *testing.T) {
 	got := cache.RunningHeartbeat(drv, dir, "9")
 	if want := "42 turn"; !strings.Contains(got, want) {
 		t.Errorf("RunningHeartbeat() after grown log = %q, want it to contain %q (must reparse on changed stat)", got, want)
+	}
+}
+
+// byteCountingWriter wraps an io.Writer and adds every Write's length onto
+// total, so a test can assert how many bytes a parser actually consumed
+// across a series of calls.
+type byteCountingWriter struct {
+	io.Writer
+	total *int
+}
+
+func (w byteCountingWriter) Write(p []byte) (int, error) {
+	*w.total += len(p)
+	return w.Writer.Write(p)
+}
+
+// spyHeartbeatDriver wraps a driver.Driver and counts every byte its
+// heartbeat Writer is fed across every RunningHeartbeat call, so a test can
+// tell an incremental append-tail (bytes fed == bytes ever appended) apart
+// from a whole-file reparse (bytes fed grows with every call).
+type spyHeartbeatDriver struct {
+	driver.Driver
+	fed *int
+}
+
+func (d spyHeartbeatDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer) io.Writer {
+	inner := d.Driver.NewHeartbeatWriter(raw, issue, out)
+	return byteCountingWriter{Writer: inner, total: d.fed}
+}
+
+// TestRunningHeartbeat_IncrementalAppend_FeedsOnlyAppendedBytes verifies that
+// three successive appends to the same running pick's log each hand the
+// driver's heartbeat parser only the bytes appended since the last call, not
+// the whole file again — the append-tail this ticket introduces, replacing
+// the previous O(file)-per-refresh whole-file reread.
+func TestRunningHeartbeat_IncrementalAppend_FeedsOnlyAppendedBytes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "logs", "issue-9.log")
+
+	real, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	var fed int
+	drv := spyHeartbeatDriver{Driver: real, fed: &fed}
+	cache := NewHeartbeatCache()
+
+	chunks := []string{
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n",
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Grep","id":"g1","input":{}}]}}` + "\n",
+		`{"type":"result","num_turns":3,"total_cost_usd":0.01,"duration_ms":5000}` + "\n",
+	}
+
+	var written string
+	for _, chunk := range chunks {
+		written += chunk
+		if err := os.WriteFile(path, []byte(written), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cache.RunningHeartbeat(drv, dir, "9")
+	}
+
+	if fed != len(written) {
+		t.Errorf("bytes fed to heartbeat parser across 3 appends = %d, want %d (exactly the appended bytes, not a whole-file reread each call)", fed, len(written))
 	}
 }

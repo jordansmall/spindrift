@@ -5,54 +5,71 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 )
 
-// parseHeartbeat reads path and replays it through drv's heartbeat parser,
-// returning the last line it emitted plus the os.FileInfo the read saw — the
-// stat HeartbeatCache pins to detect whether a later call can skip this same
-// work. ok is false when the file can't be read or written through drv's
-// parser (the same "no heartbeat yet" cases HeartbeatCache.RunningHeartbeat
-// returns "" for).
-func parseHeartbeat(drv driver.Driver, path, number string) (line string, ok bool) {
-	data, err := os.ReadFile(path)
+// appendHeartbeat reads the bytes appended to entry.path since entry.offset,
+// feeding only that tail to entry.writer — creating writer and out on first
+// use — and advances entry.offset by what it read. writer is drv's own
+// stateful heartbeat parser (role, turn counts, phase all persist on it
+// across calls), so this replays exactly what a whole-file reparse would
+// have replayed, just without re-walking bytes already consumed. It returns
+// the last line writer has ever emitted for this path, not only what this
+// call emitted, since a call that appends no complete new line must still
+// return the prior one. ok is false when the file can't be read or written
+// through drv's parser (the same "no heartbeat yet" cases
+// HeartbeatCache.RunningHeartbeat returns "" for).
+func appendHeartbeat(drv driver.Driver, number string, entry *heartbeatCacheEntry) (line string, ok bool) {
+	f, err := os.Open(entry.path)
 	if err != nil {
 		return "", false
 	}
-	var buf bytes.Buffer
-	w := drv.NewHeartbeatWriter(io.Discard, number, &buf)
-	if _, err := w.Write(data); err != nil {
+	defer f.Close()
+	if _, err := f.Seek(entry.offset, io.SeekStart); err != nil {
 		return "", false
 	}
-	return lastLine(buf.String()), true
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", false
+	}
+	if entry.writer == nil {
+		entry.out = &bytes.Buffer{}
+		entry.writer = drv.NewHeartbeatWriter(io.Discard, number, entry.out)
+	}
+	if _, err := entry.writer.Write(data); err != nil {
+		return "", false
+	}
+	entry.offset += int64(len(data))
+	return lastLine(entry.out.String()), true
 }
 
-// heartbeatCacheEntry pins the stat HeartbeatCache last saw for one pick's
-// latest pass log, plus the line that stat's read parsed to.
+// heartbeatCacheEntry holds the persistent per-log-path parser state
+// HeartbeatCache keeps alive across refreshes: the byte offset already fed
+// to writer, drv's own stateful heartbeat Writer, and everything it has ever
+// emitted for this path.
 type heartbeatCacheEntry struct {
-	path    string
-	size    int64
-	modTime time.Time
-	line    string
+	path   string
+	offset int64
+	writer io.Writer
+	out    *bytes.Buffer
 }
 
-// HeartbeatCache remembers each running pick's last-parsed heartbeat line,
+// HeartbeatCache remembers each running pick's persistent heartbeat parser,
 // keyed by pick number. refreshPickDecorations calls RunningHeartbeat on every tea.Msg —
 // every keypress, poll tick, and refresh signal, not just a fixed render
 // cadence — so most calls see the exact same on-disk log as last time. A
-// stat (size + mtime) that matches the cached entry skips the ReadFile and
-// re-parse entirely and returns the cached line (issue #731); a changed stat
-// still pays the full reparse. This assumes the log at path is append-only:
+// size that matches the cached entry's offset means nothing new was
+// appended; RunningHeartbeat skips the read entirely and returns the cached
+// line (issue #731). A size ahead of the offset reads and parses only the
+// appended tail (issue #1747) — drv's heartbeat Writer carries its own
+// parse state (role, turn counts, phase) across that read, so this produces
+// the same result a whole-file reparse would, without re-walking bytes
+// already consumed. This assumes the log at path is append-only:
 // dispatch.LogPaths always points at the one pass log a single
 // dispatch.runOnce writes (os.Create once, then append-only for the life of
-// the pass), so identical (size, mtime) implies identical content. That's
-// not true of os.Stat in general — some filesystems only resolve mtime to
-// the second, so an in-place rewrite that lands on the same byte count
-// within that window would keep both fields identical and get served stale
-// from cache.
+// the pass), so bytes at [0, offset) never change underneath a cached entry.
 type HeartbeatCache struct {
 	entries map[string]heartbeatCacheEntry
 }
@@ -63,15 +80,19 @@ func NewHeartbeatCache() *HeartbeatCache {
 }
 
 // RunningHeartbeat returns the live status line a running pick's queue row
-// shows: it replays the on-disk log of number's most recent Dispatch pass
+// shows: it feeds the on-disk log of number's most recent Dispatch pass
 // (the initial run, or its latest fix/conflict-resolve pass) through drv's
 // own heartbeat parser — the exact machinery the live dispatch's stdout
 // heartbeat already uses (#647 AC2) — and returns the last line it emitted.
 // Returns "" when drv is nil (a launch-less session, or a Launcher built
 // without a Factory), no log exists on disk yet (claimed but not yet
 // launched), or the log carries no complete heartbeat line yet. A repeat
-// call for number whose latest pass log's path/size/mtime match what was
-// cached last time skips the ReadFile+reparse and returns the cached line.
+// call for number whose latest pass log's path is unchanged and hasn't grown
+// since the cached call skips the read entirely and returns the cached
+// line; a log that grew is read and parsed from the cached offset forward,
+// not from byte 0. A path change (a new Dispatch pass) or a size that fell
+// behind the cached offset (truncation/rotation) starts a fresh parser at
+// offset 0 rather than reuse stale state.
 func (c *HeartbeatCache) RunningHeartbeat(drv driver.Driver, pwd, number string) string {
 	if drv == nil {
 		return ""
@@ -85,16 +106,25 @@ func (c *HeartbeatCache) RunningHeartbeat(drv driver.Driver, pwd, number string)
 	if err != nil {
 		return ""
 	}
-	// (path, size, modTime) match implies same content only because the log
-	// is append-only (see HeartbeatCache doc comment above).
-	if cached, ok := c.entries[number]; ok && cached.path == path && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
-		return cached.line
+
+	entry, ok := c.entries[number]
+	if !ok || entry.path != path || info.Size() < entry.offset {
+		entry = heartbeatCacheEntry{path: path}
 	}
-	line, ok := parseHeartbeat(drv, path, number)
+
+	if info.Size() == entry.offset {
+		c.entries[number] = entry
+		if entry.out == nil {
+			return ""
+		}
+		return lastLine(entry.out.String())
+	}
+
+	line, ok := appendHeartbeat(drv, number, &entry)
 	if !ok {
 		return ""
 	}
-	c.entries[number] = heartbeatCacheEntry{path: path, size: info.Size(), modTime: info.ModTime(), line: line}
+	c.entries[number] = entry
 	return line
 }
 
