@@ -91,8 +91,9 @@ var keymap = []Binding{
 		},
 	},
 	{
-		Keys: []string{"H", "L"}, Modes: []Mode{ModeList},
-		Help:   "  H / L       switch to the previous / next Section",
+		Keys: []string{"H", "L"}, Modes: []Mode{ModeList, ModeSidebar},
+		Help: "  H / L       switch to the previous / next Section (from the\n" +
+			"              sidebar, also closes it — issue #1846)",
 		Footer: "H/L",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			if msg.String() == "H" {

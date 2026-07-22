@@ -760,6 +760,30 @@ func TestTea_SectionKeys_HLAndDigitsSwitchSections(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// TestTea_SectionKeys_HLFromSidebar_ClosesLogAndSwitchesSection verifies "L",
+// pressed while the sidebar (log view) has focus, closes it and lands on the
+// next Section — the same landing as ModeList's own "L" — rather than the
+// silent no-op it was before (issue #1846).
+func TestTea_SectionKeys_HLFromSidebar_ClosesLogAndSwitchesSection(t *testing.T) {
+	tm := sidebarOpen(t)
+
+	sendKey(tm, "L")
+	waitForOutput(t, tm, "[3] Held")
+
+	sendKey(tm, "q")
+	waitForOutput(t, tm, "quit with live Dispatches")
+	sendKey(tm, "d")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.Sidebar != nil {
+		t.Errorf("Sidebar = %+v, want nil after \"L\" from the log view", fm.m.Sidebar)
+	}
+	if fm.m.ActiveSection != SectionHeld {
+		t.Errorf("ActiveSection = %v, want SectionHeld after \"L\" from the log view", fm.m.ActiveSection)
+	}
+}
+
 // TestTea_EnterKey_OnRunningSection_DrillsRunningPick verifies Enter, on the
 // Running Section, opens the highlighted pick's sidebar when its state is
 // PickRunning — the context-sensitive Enter's work-Section drill (issue
