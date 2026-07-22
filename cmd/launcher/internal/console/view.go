@@ -226,15 +226,16 @@ func viewBody(m Model) string {
 		b.WriteString(renderSectionTabs(m))
 	}
 	if m.Mode == ModeFilterEdit {
-		fmt.Fprintf(&b, "/%s  [enter] apply · [esc] cancel\n", m.Filter)
+		fmt.Fprintf(&b, "/%s  %s · %s\n", m.Filter,
+			footerHint(ModeFilterEdit, "enter"), footerHint(ModeFilterEdit, "esc"))
 		reservedLines++
 	}
 	if m.Mode == ModeTerminateConfirm {
-		fmt.Fprintf(&b, "terminate #%s? [y/N/q/ctrl+c]\n", m.TerminateConfirm.Number)
+		fmt.Fprintf(&b, "terminate #%s? %s\n", m.TerminateConfirm.Number, footerHint(ModeTerminateConfirm, "y"))
 		reservedLines++
 	}
 	if m.Mode == ModeQuitConfirm {
-		b.WriteString("quit with live Dispatches: drain (d, default) / terminate-all (t) / stay (s)?\n")
+		fmt.Fprintf(&b, "%s\n", footerHint(ModeQuitConfirm, "d"))
 		reservedLines++
 	}
 	if m.Mode == ModePick && m.HasHighlighted() {
@@ -339,8 +340,9 @@ func roleForSection(s Section) Role {
 }
 
 // sectionTabsHint is the trailing "how to switch" hint renderSectionTabs
-// appends after the five tabs when there's room for it.
-const sectionTabsHint = " [H/L,1-5]"
+// appends after the five tabs when there's room for it — keymap's own H/L
+// and 1-5 Footer text (issue #1789), not a literal of its own.
+var sectionTabsHint = fmt.Sprintf(" [%s,%s]", footerHint(ModeList, "H"), footerHint(ModeList, "1"))
 
 // renderSectionTabs renders the fixed row of five Section tabs above the
 // body: each names its direct-jump number and Section, the four work tabs
@@ -888,81 +890,18 @@ func renderHeader(m Model) string {
 
 // renderHelp renders the "?" overlay: every key the tea layer binds,
 // replacing the backlog/queue rendering entirely while open (issue #784).
+// The lines themselves come from keymap (issue #1789) — each Binding with
+// non-empty Help contributes its own line(s), in keymap's declared order.
 func renderHelp() string {
-	return strings.Join([]string{
-		"help",
-		"  j/k, down/up  move cursor within the active Section",
-		"  G           jump to the active Section's last row, scrolling it",
-		"              into view",
-		"  gg          jump to the active Section's first row (\"g\" arms a",
-		"              pending leader, awaiting a trailing \"g\")",
-		"  H / L       switch to the previous / next Section",
-		"  1-5         jump straight to a Section (Backlog, Running, Held,",
-		"              Settled, Failed)",
-		"  ctrl+f/ctrl+b, pgup/pgdown  jump a full page of the active Section's live",
-		"              rendered rows without moving the cursor; the page",
-		"              size tracks terminal resizes",
-		"  ctrl+d/ctrl+u  jump a half page of the active Section's live",
-		"              rendered rows without moving the cursor; half of the",
-		"              ctrl+f/ctrl+b page above",
-		"  /           filter the Backlog by label substring",
-		"  enter       apply filter (while filter-editing); otherwise: open",
-		"              the highlighted row's ticket detail (Backlog Section),",
-		"              or open the highlighted pick's live-tail sidebar (a",
-		"              work Section, only when it has run)",
-		"  h/l, left/right  move focus between the list and the sidebar",
-		"              (while a sidebar is open)",
-		"  esc         cancel filter edit",
-		"  t           cycle the sidebar's activity feed -> transcript ->",
-		"              raw JSONL -> activity feed (while the sidebar has focus)",
-		"  x / esc     close the sidebar (while it has focus)",
-		"  j/k, ctrl+f/ctrl+b, pgup/pgdown  scroll the sidebar (while it has focus); its",
-		fmt.Sprintf("              pgup/pgdown page jump is fixed at %d lines, unlike the", fixedPaneScrollDelta),
-		"              body's live-viewport-derived one above; scrolling up",
-		"              detaches the running Activity feed's live follow",
-		"  ctrl+d/ctrl+u  scroll the sidebar a half page (while it has focus,",
-		fmt.Sprintf("              fixed at %d lines, half of ctrl+f/ctrl+b above)", fixedPaneScrollDelta/2),
-		"  G / end     re-attach follow and jump to the sidebar's bottom",
-		"              (while the sidebar has focus)",
-		"  gg          detach follow and jump to the sidebar's top (while it",
-		"              has focus; same \"g\" leader as the list body's gg)",
-		"  z           toggle the sidebar's fullscreen zoom (while it has",
-		"              focus)",
-		"  esc         close the ticket detail modal (while it is open)",
-		"  j/k, up/down  scroll the ticket detail modal's body (while it is",
-		"              open)",
-		"  ctrl+f/ctrl+b, pgdown/pgup  page the ticket detail modal's body",
-		"              (while it is open)",
-		"  ctrl+d/ctrl+u  scroll the ticket detail modal's body a half page",
-		"              (while it is open)",
-		"  G           jump to the ticket detail modal's last page (while it",
-		"              is open)",
-		"  gg          jump to the ticket detail modal's first page (while",
-		"              it is open; same \"g\" leader as the list body's gg)",
-		"  r           refresh the backlog",
-		"  p           pick the highlighted Backlog row (launch button)",
-		"  u           unpick the highlighted queued pick",
-		"  pa          pick all ready (bulk pick-all-ready gesture)",
-		"  pr          pick the highlighted Backlog row as a research",
-		"              dispatch (advise-only: posts one verdict comment,",
-		"              never opens a branch/PR)",
-		"  X           terminate the highlighted live Dispatch (confirm y/N,",
-		"              q/ctrl+c decline and quit)",
-		"  A           adopt the highlighted orphan-flagged Backlog row (a",
-		"              running sandbox this session didn't launch); reports",
-		"              why and changes nothing without a non-draft open PR",
-		"  +           raise the live parallelism cap",
-		"  -           lower the live parallelism cap",
-		"  b           rebuild the stale image in-session",
-		"  o           open the rebuild output pane (once a rebuild has run);",
-		"              j/k, ctrl+f/ctrl+b, pgup/pgdown scroll it, x/esc closes",
-		"              G jumps to its last page, gg to its first (\"g\" arms a",
-		"              pending leader, awaiting a trailing \"g\");",
-		"              ctrl+d/ctrl+u scroll it a half page (half of ctrl+f/ctrl+b)",
-		"  q / ctrl+c  quit",
-		"  ?           toggle this help",
-		"",
-	}, "\n")
+	lines := []string{"help"}
+	for _, b := range keymap {
+		if b.Help == "" {
+			continue
+		}
+		lines = append(lines, strings.Split(b.Help, "\n")...)
+	}
+	lines = append(lines, "")
+	return strings.Join(lines, "\n")
 }
 
 // bodyBudget returns the row budget left for the active Section's table
@@ -1517,7 +1456,7 @@ func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) [
 	if len(lines) > contentBudget {
 		lines = lines[:contentBudget]
 	}
-	lines = append(lines, "[j/k] scroll · [esc] close")
+	lines = append(lines, footerHint(ModeDetailModal, "j")+" · "+footerHint(ModeDetailModal, "esc"))
 	for len(lines) < innerHeight {
 		lines = append(lines, "")
 	}
@@ -1582,7 +1521,7 @@ func renderDetailModal(s DetailModalState, height int) string {
 			b.WriteString("\n")
 		}
 	}
-	b.WriteString("[j/k] scroll · [esc] close\n")
+	fmt.Fprintf(&b, "%s · %s\n", footerHint(ModeDetailModal, "j"), footerHint(ModeDetailModal, "esc"))
 	return b.String()
 }
 
@@ -1660,7 +1599,8 @@ func renderSidebarFullscreen(s SidebarState, height int) string {
 	if visible != "" && !strings.HasSuffix(visible, "\n") {
 		b.WriteString("\n")
 	}
-	b.WriteString("[t] cycle activity/transcript · [x] close · [z] zoom\n")
+	fmt.Fprintf(&b, "%s · %s · %s\n",
+		footerHint(ModeSidebar, "t"), footerHint(ModeSidebar, "x"), footerHint(ModeSidebar, "z"))
 	return b.String()
 }
 
@@ -1705,7 +1645,13 @@ func renderSidebarDocked(s SidebarState, width, budget int, focused bool) string
 	// joins): four hints plus full " · " separators measure 43 columns,
 	// one over sidebarWidth's 42-column budget, so the space after each
 	// "·" is dropped to fit all four without clipping the last one.
-	b.WriteString(clip("[t] cycle ·[h] list ·[x] close ·[z] zoom", width, false))
+	docked := strings.Join([]string{
+		footerHintCompact(ModeSidebar, "t"),
+		footerHint(ModeSidebar, "h"),
+		footerHint(ModeSidebar, "x"),
+		footerHint(ModeSidebar, "z"),
+	}, " ·")
+	b.WriteString(clip(docked, width, false))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -1732,6 +1678,6 @@ func renderRebuildOutputPane(m Model) string {
 	if visible != "" && !strings.HasSuffix(visible, "\n") {
 		b.WriteString("\n")
 	}
-	b.WriteString("[x] close\n")
+	fmt.Fprintf(&b, "%s\n", footerHint(ModeRebuildOutput, "x"))
 	return b.String()
 }
