@@ -1419,6 +1419,43 @@ func TestView_DetailModal_LabelsWrapOnOverflow(t *testing.T) {
 	}
 }
 
+// TestView_DetailModal_LabelOverflowShowsIndicator verifies that when
+// wrapped label lines alone would consume the box's entire interior height,
+// renderDetailModalContent caps them and appends a "+N more labels"
+// indicator instead of letting the tail-truncate at the end of the function
+// silently drop trailing label lines and/or the footer (issue #1778 — a gap
+// left by #1772/#1780's wrap-instead-of-truncate fix). Each label here is
+// longer than the box's interior width, so wrapText places exactly one
+// label per rendered line, making the overflow point (innerHeight -
+// detailModalFooterLines lines) deterministic regardless of wrapText's
+// internals.
+func TestView_DetailModal_LabelOverflowShowsIndicator(t *testing.T) {
+	labels := make([]string, 40)
+	for i := range labels {
+		labels[i] = fmt.Sprintf("label-%02d-%s", i, strings.Repeat("x", 90))
+	}
+	m := Update(NewModel(), SizeChangedMsg{Width: 200, Height: 60})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: labels})
+
+	out := View(m)
+	if !strings.Contains(out, "more labels") {
+		t.Errorf("View() = %q, want a \"+N more labels\" overflow indicator", out)
+	}
+	if !strings.Contains(out, "[j/k] scroll") {
+		t.Errorf("View() = %q, want the footer never dropped by label overflow", out)
+	}
+	// Each label is 99 columns, wider than the 82-column interior padDisplay
+	// truncates every row to — so checking for the full label string would
+	// pass whether or not it was capped (it never fits a row intact either
+	// way). The short "label-NN-" prefix does fit a row intact, so its
+	// absence actually distinguishes "dropped by the cap" from "rendered and
+	// merely wrapped/truncated".
+	lastPrefix := fmt.Sprintf("label-%02d-", len(labels)-1)
+	if strings.Contains(out, lastPrefix) {
+		t.Errorf("View() = %q, want the last label (prefix %q) dropped behind the overflow indicator, not rendered", out, lastPrefix)
+	}
+}
+
 // TestView_DetailModal_SanitizesTitleLabelsBodyAndBlockerTitles verifies the
 // ticket detail modal strips CSI/OSC escape sequences from every piece of
 // untrusted tracker text it renders — title, labels, body, and each

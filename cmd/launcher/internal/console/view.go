@@ -1282,13 +1282,17 @@ func detailModalWrapWidth(m Model) int {
 // spending a fixed one-row budget, issue #1772) when detailModalFits(m), or
 // the fullscreen renderer's own detailModalChromeLines-based budget
 // otherwise — detailModalWrapWidth's height analogue, gated by the same
-// predicate (issue #1759).
+// predicate (issue #1759). Uses detailModalLabelLinesCapped, not the bare
+// detailModalLabelLines, so a ticket with enough labels to fill the box's
+// whole content budget clamps against the same "+N more labels" row count
+// renderDetailModalContent actually renders, not the uncapped wrap it never
+// shows (issue #1778).
 func detailModalScrollBudget(m Model) int {
 	if !detailModalFits(m) {
 		return m.Height - detailModalChromeLines
 	}
 	innerWidth, innerHeight := detailModalInnerSize(m.Width, m.Height)
-	labelLines := detailModalLabelLines(m.DetailModal.Labels, innerWidth)
+	labelLines := detailModalLabelLinesCapped(m.DetailModal.Labels, innerWidth, innerHeight-detailModalFooterLines)
 	return innerHeight - len(labelLines) - detailModalFooterLines
 }
 
@@ -1441,6 +1445,30 @@ func detailModalLabelLines(labels []string, width int) []string {
 	return wrapText(strings.Join(sanitized, ", "), width)
 }
 
+// detailModalLabelLinesCapped wraps labels the same as detailModalLabelLines,
+// but caps the result at maxLines: when the wrapped labels alone would
+// exceed maxLines, it drops labels from the tail and replaces them with a
+// "+N more labels" row, the multi-row analogue of the backlog row's
+// clipLabels "+N" convention (issue #1631) — so a ticket with enough labels
+// to fill the floating box's entire interior loses its footer/body budget to
+// a visible indicator instead of renderDetailModalContent's tail-truncate
+// silently dropping trailing label lines and/or the footer row (issue #1778,
+// a gap left by #1772/#1780's wrap-instead-of-truncate fix). maxLines <= 0
+// yields the bare "+N more labels" indicator alone.
+func detailModalLabelLinesCapped(labels []string, width, maxLines int) []string {
+	lines := detailModalLabelLines(labels, width)
+	if len(labels) == 0 || len(lines) <= maxLines {
+		return lines
+	}
+	for k := len(labels) - 1; k >= 0; k-- {
+		trial := detailModalLabelLines(labels[:k], width)
+		if len(trial)+1 <= maxLines {
+			return append(trial, fmt.Sprintf("+%d more labels", len(labels)-k))
+		}
+	}
+	return []string{fmt.Sprintf("+%d more labels", len(labels))}
+}
+
 // renderDetailModalContent renders the floating detail modal box's interior
 // — the labels line, the loading/error/body-window content, and the
 // scroll/close footer hint — as exactly innerHeight lines, word-wrapped and
@@ -1449,8 +1477,9 @@ func detailModalLabelLines(labels []string, width int) []string {
 // of the old renderDetailModal that stays width/height-parameterized rather
 // than reading Model.Width/Model.Height directly.
 func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) []string {
-	lines := detailModalLabelLines(s.Labels, innerWidth)
-	bodyBudget := innerHeight - len(lines) - detailModalFooterLines
+	contentBudget := innerHeight - detailModalFooterLines
+	lines := detailModalLabelLinesCapped(s.Labels, innerWidth, contentBudget)
+	bodyBudget := contentBudget - len(lines)
 	switch {
 	case s.Loading:
 		lines = append(lines, "loading...")
@@ -1458,6 +1487,17 @@ func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) [
 		lines = append(lines, fmt.Sprintf("failed to load: %s", SanitizeControlSequences(s.Err.Error())))
 	default:
 		lines = append(lines, windowDetailModalLines(s, bodyBudget)...)
+	}
+	// Capped against contentBudget, not innerHeight, before the footer is
+	// appended below — so the footer (the one line contentBudget already set
+	// aside for it) is never among the lines a too-long labels/loading/error
+	// block pushes past the end (issue #1778). In the degenerate case where
+	// labels alone already consume all of contentBudget, this is what makes
+	// the loading/error line itself the one dropped here — the labels'
+	// visible "+N more labels" indicator takes budget precedence over the
+	// one-line status text, never the reverse.
+	if len(lines) > contentBudget {
+		lines = lines[:contentBudget]
 	}
 	lines = append(lines, "[j/k] scroll · [esc] close")
 	for len(lines) < innerHeight {
