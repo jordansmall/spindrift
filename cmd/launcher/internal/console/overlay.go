@@ -89,26 +89,37 @@ func compositeLine(baseLine, boxLine string, x int) string {
 	return line
 }
 
+// modalBoxSpec holds a floating modal box's target geometry — the
+// width/height-percent-then-min/max-clamp fields modalBoxSize consumes.
+// Passing this as a single named-field struct instead of six positional
+// ints closes the transposition foot-gun a growing list of same-typed
+// int params invites at the call site (issue #1858).
+type modalBoxSpec struct {
+	WidthPercent, HeightPercent int
+	MinWidth, MinHeight         int
+	MaxWidth, MaxHeight         int
+}
+
 // modalBoxSize returns a floating modal box's outer width and height for a
-// termWidth x termHeight terminal: widthPercent/heightPercent of the
-// terminal's own dimensions, clamped down to minWidth/minHeight and up to
-// maxWidth/maxHeight — the modal-agnostic geometry a floating box's own
-// sizing (e.g. the detail modal's detailModalBoxSize) delegates to (issue
-// #1844).
-func modalBoxSize(termWidth, termHeight, widthPercent, heightPercent, minWidth, minHeight, maxWidth, maxHeight int) (width, height int) {
-	width = termWidth * widthPercent / 100
-	if width < minWidth {
-		width = minWidth
+// termWidth x termHeight terminal: spec.WidthPercent/HeightPercent of the
+// terminal's own dimensions, clamped down to spec.MinWidth/MinHeight and up
+// to spec.MaxWidth/MaxHeight — the modal-agnostic geometry a floating box's
+// own sizing (e.g. the detail modal's detailModalBoxSize) delegates to
+// (issue #1844).
+func modalBoxSize(termWidth, termHeight int, spec modalBoxSpec) (width, height int) {
+	width = termWidth * spec.WidthPercent / 100
+	if width < spec.MinWidth {
+		width = spec.MinWidth
 	}
-	if width > maxWidth {
-		width = maxWidth
+	if width > spec.MaxWidth {
+		width = spec.MaxWidth
 	}
-	height = termHeight * heightPercent / 100
-	if height < minHeight {
-		height = minHeight
+	height = termHeight * spec.HeightPercent / 100
+	if height < spec.MinHeight {
+		height = spec.MinHeight
 	}
-	if height > maxHeight {
-		height = maxHeight
+	if height > spec.MaxHeight {
+		height = spec.MaxHeight
 	}
 	return width, height
 }

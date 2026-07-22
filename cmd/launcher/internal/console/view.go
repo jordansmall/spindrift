@@ -1451,7 +1451,14 @@ func detailModalScrollBudget(m Model) int {
 // size, which callers on the fullscreen fallback path never observe.
 // Delegates to modalBoxSize, the modal-agnostic sizer (issue #1844).
 func detailModalBoxSize(termWidth, termHeight int) (width, height int) {
-	return modalBoxSize(termWidth, termHeight, detailModalBoxWidthPercent, detailModalBoxHeightPercent, detailModalBoxMinWidth, detailModalBoxMinHeight, detailModalBoxMaxWidth, detailModalBoxMaxHeight)
+	return modalBoxSize(termWidth, termHeight, modalBoxSpec{
+		WidthPercent:  detailModalBoxWidthPercent,
+		HeightPercent: detailModalBoxHeightPercent,
+		MinWidth:      detailModalBoxMinWidth,
+		MinHeight:     detailModalBoxMinHeight,
+		MaxWidth:      detailModalBoxMaxWidth,
+		MaxHeight:     detailModalBoxMaxHeight,
+	})
 }
 
 // detailModalBoxOrigin centers a boxWidth x boxHeight box within a
