@@ -650,7 +650,7 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, cf forge.CodeForge
 			// exists at that later moment, not as it stood at process
 			// start -- and each num may resolve to a different parent's
 			// Integration branch entirely (issue #1734).
-			integrationBranch := local.IntegrationBranch(resolveIssueParent(it, num))
+			integrationBranch := local.IntegrationBranch(localloop.ResolveParent(it, num))
 			exists, err := cf.BranchExists(integrationBranch)
 			if err != nil {
 				fmt.Printf("!! BASE_BRANCH: checking %s: %v; falling back to %s\n", integrationBranch, err, c.baseBranch)
@@ -661,15 +661,6 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, cf forge.CodeForge
 		}
 		return resolveBoxEnvVar(name)
 	}
-}
-
-// resolveIssueParent resolves num's own Integration-branch key (ADR 0033,
-// issue #1734): its parent: frontmatter, sanitized, or num itself,
-// sanitized, when unset or when the lookup fails (logged rather than
-// silent -- the caller's own BranchExists fallback still keeps a lookup
-// failure from breaking the Box, same posture as a BranchExists error).
-func resolveIssueParent(it forge.IssueTracker, num string) string {
-	return localloop.ResolveParent(it, num)
 }
 
 // dispatchConfig builds the subset of config a dispatch.Factory needs.
