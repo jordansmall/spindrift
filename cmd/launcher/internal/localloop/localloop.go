@@ -74,8 +74,9 @@ func ResolveParent(it forge.IssueTracker, num string) local.SanitizedParent {
 // parent is resolved exactly once per Wired: CodeForgeForIssue, Surface, and
 // any external caller sharing w (e.g. the launcher's BASE_BRANCH forwarding)
 // all consume that one resolved value instead of independently re-deriving
-// it (issue #1810). Concurrency-safe — dispatch resolves multiple issues'
-// BASE_BRANCH concurrently across Boxes.
+// it (issue #1810). Safe under dispatch's concurrent BASE_BRANCH resolution
+// across Boxes: w.mu serializes every call, including each cache miss's own
+// it.Issue() lookup, trading a little concurrency for a lock this simple.
 func (w *Wired) ResolveParent(num string) local.SanitizedParent {
 	w.mu.Lock()
 	defer w.mu.Unlock()
