@@ -41,6 +41,10 @@ func TestLocalTracker_ImplementsSeamLister(t *testing.T) {
 	var _ forge.SeamLister = NewLocalTracker(t.TempDir(), testLabels)
 }
 
+func TestLocalTracker_ImplementsLabeledTracker(t *testing.T) {
+	var _ forge.LabeledTracker = NewLocalTracker(t.TempDir(), testLabels)
+}
+
 func TestParseLocalIssue_Frontmatter(t *testing.T) {
 	data := []byte(`---
 title: Fix the thing

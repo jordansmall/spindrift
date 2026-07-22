@@ -88,6 +88,18 @@ func TestJiraClient_DoesNotImplementLandingRecorder(t *testing.T) {
 	}
 }
 
+// TestJiraClient_DoesNotImplementLabeledTracker verifies the jira adapter
+// does not satisfy forge.LabeledTracker: a state maps through a blend of
+// StatusMapping and Labels, not a single DispatchLabels value, so
+// PickIssue's double-box guard (#1742) can't shortcut it and keeps paying
+// the ListIssues round-trip for jira.
+func TestJiraClient_DoesNotImplementLabeledTracker(t *testing.T) {
+	it := jira.NewJiraClient(jira.JiraConfig{})
+	if _, ok := it.(forge.LabeledTracker); ok {
+		t.Error("JiraClient satisfies forge.LabeledTracker, want it hidden")
+	}
+}
+
 // TestJiraClient_Probe_Success verifies Probe() confirms connectivity and
 // returns the configured project key on success.
 func TestJiraClient_Probe_Success(t *testing.T) {

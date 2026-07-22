@@ -158,6 +158,12 @@ func toIssue(num string, li localIssue) forge.Issue {
 	}
 }
 
+// StateLabels implements forge.LabeledTracker, returning the DispatchLabels
+// lt resolves DispatchState values through.
+func (lt *LocalTracker) StateLabels() forge.DispatchLabels {
+	return lt.labels
+}
+
 // ListIssues returns issues whose frontmatter state marker matches state,
 // excluding closed issues, in canonical order (ascending by the created
 // timestamp).

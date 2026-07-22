@@ -40,6 +40,14 @@ func TestExecClient_DoesNotImplementLandingRecorder(t *testing.T) {
 	}
 }
 
+// TestExecClient_ImplementsLabeledTracker verifies the github adapter
+// satisfies forge.LabeledTracker — PickIssue's double-box guard (#1742)
+// relies on this to skip a ListIssues round-trip for a state the tracker's
+// label family leaves unmapped.
+func TestExecClient_ImplementsLabeledTracker(t *testing.T) {
+	var _ forge.LabeledTracker = NewExecClient("owner/repo", testLabels, "agent/issue-")
+}
+
 // prependFakeGH writes a counting-wrapper gh script to a temp dir, prepends
 // that dir to PATH, and returns the dir. Each invocation of the fake gh
 // records its argv to call-NN.txt (zero-indexed) inside the dir.

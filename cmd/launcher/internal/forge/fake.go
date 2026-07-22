@@ -719,6 +719,12 @@ func (f *Fake) Probe() (string, error) {
 	return f.ProbeRepo, nil
 }
 
+// StateLabels implements LabeledTracker, returning the DispatchLabels the
+// Fake was constructed with.
+func (f *Fake) StateLabels() DispatchLabels {
+	return f.labels
+}
+
 func (f *Fake) ListLabels() ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
