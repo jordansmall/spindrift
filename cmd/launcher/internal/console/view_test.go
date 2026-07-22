@@ -1305,6 +1305,24 @@ func TestView_DetailModal_FullscreenFallback_FooterStyledDim(t *testing.T) {
 	}
 }
 
+// TestView_DetailModal_FullscreenFallback_LabelsStyledDim verifies the
+// tiny-terminal fullscreen fallback's pinned label row gets the identical
+// bracketed, dim-styled treatment (RoleDim, "\x1b[90m") the floating box
+// gets — the backlog row's own `[bug, console]` idiom — so the two
+// renderings stay in parity (issue #1832).
+func TestView_DetailModal_FullscreenFallback_LabelsStyledDim(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: detailModalBoxMinWidth - 1, Height: 24})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: []string{"bug", "console"}})
+
+	out := View(m)
+	if !strings.Contains(out, "\x1b[90m[bug, console]\x1b[0m") {
+		t.Errorf("View() = %q, want the fullscreen fallback's label row bracketed and dim-styled", out)
+	}
+}
+
 // TestView_DetailModal_FullscreenFallback_NarrowWidth_FooterFitsWidth
 // verifies the tiny-terminal fullscreen fallback's "[esc] close" footer
 // clips to the terminal's own width like every other footer in this file
@@ -1654,9 +1672,9 @@ func TestView_DetailModal_NoBlockersOrBlocks_ShowsNoSectionClutter(t *testing.T)
 // footer line subtracted, issue #1772) leaves bodyBudget rows, short of the
 // 8-line body so the scroll actually clips something, the same "content
 // overflows the viewport" setup the fullscreen renderer's version of this
-// test used against detailModalChromeLines.
+// test uses against its own dynamic title/label/footer budget.
 func TestView_DetailModal_ScrollOffset_HidesLinesBeforeOffset(t *testing.T) {
-	const labelLines = 1 // no Labels set below, so wrapText produces 1 empty line
+	const labelLines = 1 // no Labels set below, so the bracketed "[]" is 1 line
 	const bodyBudget = detailModalBoxMinHeight - 2 - labelLines - detailModalFooterLines
 	lines := make([]string, 8)
 	for i := range lines {
@@ -1748,6 +1766,50 @@ func TestDetailModalFits_BelowMinDimension_ReturnsFalse(t *testing.T) {
 	}
 }
 
+// TestView_DetailModal_SingleLabel_VisuallyDistinctFromBody is the issue
+// #1832 regression test: a single short label pinned atop the modal used to
+// render as bare comma-joined text — indistinguishable from a stranded line
+// of body text at a glance. It must now read as labels: bracketed like the
+// backlog row's own `[bug]` idiom, and dim-styled (RoleDim) on a
+// color-capable terminal so it visually recedes from the plain body text
+// beneath it, while degrading to plain bracketed text (no escape bytes)
+// under NO_COLOR per ADR 0031.
+func TestView_DetailModal_SingleLabel_VisuallyDistinctFromBody(t *testing.T) {
+	t.Run("color terminal: bracketed and dim-styled, distinct from body", func(t *testing.T) {
+		t.Setenv("NO_COLOR", "")
+		t.Setenv("TERM", "xterm-256color")
+
+		m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+		m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: []string{"bug"}})
+		m = Update(m, DetailModalLoadedMsg{Number: "42", Body: "plain body text"})
+
+		out := View(m)
+		wantLabel := "\x1b[90m[bug]\x1b[0m"
+		if !strings.Contains(out, wantLabel) {
+			t.Errorf("View() = %q, want the pinned label row rendered %q", out, wantLabel)
+		}
+		if strings.Contains(out, "\x1b[90mplain body text\x1b[0m") {
+			t.Errorf("View() = %q, want the body text left unstyled, not dimmed like the label row", out)
+		}
+	})
+
+	t.Run("NO_COLOR: degrades to plain bracketed text", func(t *testing.T) {
+		t.Setenv("NO_COLOR", "1")
+
+		m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+		m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: []string{"bug"}})
+		m = Update(m, DetailModalLoadedMsg{Number: "42", Body: "plain body text"})
+
+		out := View(m)
+		if !strings.Contains(out, "[bug]") {
+			t.Errorf("View() = %q, want the pinned label row bracketed even under NO_COLOR", out)
+		}
+		if strings.Contains(out, "\x1b[") {
+			t.Errorf("View() = %q, want no escape sequences at all under NO_COLOR", out)
+		}
+	})
+}
+
 // TestView_DetailModal_LabelsUnclipped verifies the detail modal shows every
 // label in full, unlike the backlog row's clipLabels "+N" truncation (issue
 // #1631) — the modal exists precisely so an operator can see what a clipped
@@ -1795,6 +1857,40 @@ func TestView_DetailModal_LabelsWrapOnOverflow(t *testing.T) {
 		if !strings.Contains(out, label) {
 			t.Errorf("View() = %q, want every label present after wrapping, missing %q", out, label)
 		}
+	}
+}
+
+// TestDetailModalLabelLinesCapped_OverflowIndicatorSharesBracket verifies
+// the "+N more labels" overflow indicator (issue #1631's multi-row analogue,
+// issue #1778) is folded into the same bracketed, dim-styled block the
+// retained labels render in — "[alpha, +3 more labels]" — rather than
+// appended as a separate unbracketed, unstyled line after the closing
+// bracket (issue #1832): the indicator is still part of the same "these are
+// labels" row, not a stray second line.
+func TestDetailModalLabelLinesCapped_OverflowIndicatorSharesBracket(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	got := detailModalLabelLinesCapped([]string{"alpha", "bravo", "charlie", "delta"}, 24, 1)
+	want := []string{"\x1b[90m[alpha, +3 more labels]\x1b[0m"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("detailModalLabelLinesCapped(...) = %v, want %v", got, want)
+	}
+}
+
+// TestDetailModalLabelLinesCapped_ZeroBudget_FallsBackToBareIndicator
+// verifies the maxLines <= 0 degenerate case — no room for even one label
+// inside a bracket — falls back to the bare, unbracketed, unstyled "+N more
+// labels" indicator documented on detailModalLabelLinesCapped, rather than
+// an empty bracket or a styled line the zero-row budget has no room to show.
+func TestDetailModalLabelLinesCapped_ZeroBudget_FallsBackToBareIndicator(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	got := detailModalLabelLinesCapped([]string{"alpha", "bravo"}, 24, 0)
+	want := []string{"+2 more labels"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("detailModalLabelLinesCapped(...) = %v, want %v", got, want)
 	}
 }
 
@@ -3813,15 +3909,26 @@ func TestPadDisplay_WidthOne_TruncatesWithoutEllipsis(t *testing.T) {
 // than silently cutting it (issue #1779): a single unbroken label wider
 // than the box's interior stands alone on its own wrapText line (issue
 // #1772's TestWrapText_WordWiderThanWidth_StandsAlone), which then hits
-// padDisplay's truncation path.
+// the label row's own clip-before-style truncation (issue #1832). The
+// pinned row's leading "[" is part of that same wrapText word — brackets
+// count toward the width budget rather than sitting on top of it — so the
+// cut lands one column earlier than the label's own text alone would.
+// Forces a color-capable terminal (rather than trusting whatever TERM the
+// test happens to inherit) so this actually exercises the styled path: a
+// dumb/unset TERM makes roleStyle a no-op, which would hide a regression
+// where the label is clipped after — not before — RoleDim wraps it in SGR
+// bytes that a runewidth-based truncate would then miscount and mangle.
 func TestView_DetailModal_OverWideLabel_ShowsEllipsis(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
 	label := "an-extremely-long-unbroken-label-token-that-overflows-the-box"
 	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 24})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: []string{label}})
 
 	out := View(m)
 	innerWidth, _ := detailModalInnerSize(40, 24)
-	want := label[:innerWidth-1] + "…"
+	want := "[" + label[:innerWidth-2] + "…"
 	if !strings.Contains(out, want) {
 		t.Errorf("View() = %q, want %q marking the over-wide label's cut", out, want)
 	}
@@ -3834,8 +3941,14 @@ func TestView_DetailModal_OverWideLabel_ShowsEllipsis(t *testing.T) {
 // floating detail modal's right-hand border rune stays in column even when
 // an over-wide CJK label straddles the truncation boundary (issue #1785):
 // every "│...│" row must measure exactly innerWidth display columns between
-// its borders, or the right border drifts (issue #1758's invariant).
+// its borders, or the right border drifts (issue #1758's invariant). Forces
+// a color-capable terminal so the label row's own RoleDim styling (issue
+// #1832) is actually in play — ansi.StringWidth must still measure the
+// styled row's plain-text width correctly, escape bytes excluded.
 func TestView_DetailModal_WideCharacterLabel_BorderStaysAligned(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
 	label := "中文标题超长测试文字标签内容溢出方框边界"
 	m := Update(NewModel(), SizeChangedMsg{Width: 40, Height: 24})
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing", Labels: []string{label}})
@@ -3896,10 +4009,17 @@ func TestWrapText_WordWiderThanWidth_StandsAlone(t *testing.T) {
 // TestDetailModalLabelLines_WrapsOntoMultipleLines verifies the labels line
 // wraps across further interior rows once it overflows width, rather than
 // staying a single unwrapped string for padDisplay to silently truncate
-// (issue #1772).
+// (issue #1772), and that the wrapped block reads as labels at a glance: the
+// backlog row's own bracketed idiom (issue #1832), dim-styled (RoleDim,
+// "\x1b[90m") the same way the footer hints already are, with the bracket
+// characters themselves counted toward the width budget rather than added on
+// top of it.
 func TestDetailModalLabelLines_WrapsOntoMultipleLines(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
 	got := detailModalLabelLines([]string{"alpha", "bravo", "charlie"}, 15)
-	want := []string{"alpha, bravo,", "charlie"}
+	want := []string{"\x1b[90m[alpha, bravo,\x1b[0m", "\x1b[90mcharlie]\x1b[0m"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("detailModalLabelLines(...) = %v, want %v", got, want)
 	}
@@ -3907,10 +4027,14 @@ func TestDetailModalLabelLines_WrapsOntoMultipleLines(t *testing.T) {
 
 // TestDetailModalLabelLines_SanitizesControlSequences verifies a label
 // carrying CSI/OSC escape sequences is stripped before wrapping — a tracker
-// label is untrusted input (issue #862).
+// label is untrusted input (issue #862) — and that the bracketed, dim-styled
+// treatment (issue #1832) still applies once sanitized.
 func TestDetailModalLabelLines_SanitizesControlSequences(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
 	got := detailModalLabelLines([]string{"evil\x1b[2Jlabel"}, 40)
-	want := []string{"evillabel"}
+	want := []string{"\x1b[90m[evillabel]\x1b[0m"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("detailModalLabelLines(...) = %v, want %v", got, want)
 	}
