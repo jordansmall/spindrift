@@ -368,6 +368,41 @@ func TestTea_gLeader_Timeout_CancelsPendingG(t *testing.T) {
 	}
 }
 
+// TestTea_DetailModal_gLeader_Timeout_CancelsPendingGAndLeavesOffsetAlone
+// verifies a lone "g" left unanswered while the ticket detail modal is open
+// cancels the pending leader on timeout without moving DetailModal.Offset —
+// the modal's own instance of TestTea_gLeader_Timeout_CancelsPendingG's
+// timeout coverage (issue #1795 AC).
+func TestTea_DetailModal_gLeader_Timeout_CancelsPendingGAndLeavesOffsetAlone(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	var lines []string
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf("bodyline%02d", i))
+	}
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Body: strings.Join(lines, "\n"), State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 10))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "bodyline00")
+
+	sendKey(tm, "g")
+	time.Sleep(gChordTimeout + 50*time.Millisecond)
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+
+	fm := tm.FinalModel(t).(teaModel)
+	if fm.m.PendingG {
+		t.Errorf("PendingG = true after the leader window timed out, want false")
+	}
+	if fm.m.DetailModal.Offset != 0 {
+		t.Errorf("DetailModal.Offset = %d after the timed-out leader, want 0 (unchanged)", fm.m.DetailModal.Offset)
+	}
+}
+
 // TestTea_ScrollKeys_PageThroughBacklogWithoutMovingCursor verifies pgdown/
 // pgup move the focused backlog column's viewport directly, independent of
 // the cursor, revealing and restoring rows past the fold, by exactly one
@@ -2597,6 +2632,175 @@ func TestTea_DetailModalKey_ScrollsBodyWithJAndArrows(t *testing.T) {
 	sendKey(tm, "esc")
 	sendKey(tm, "q")
 	waitFinished(t, tm)
+}
+
+// TestTea_DetailModal_ggAndGJumpTopAndBottom drives the ticket detail modal
+// end to end: opening it, jumping to the bottom with "G", then back to the
+// top with "gg" — the modal's own analogue of
+// TestTea_RebuildOutputPane_ggAndGJumpTopAndBottom (issue #1795).
+func TestTea_DetailModal_ggAndGJumpTopAndBottom(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	var lines []string
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf("bodyline%02d", i))
+	}
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Body: strings.Join(lines, "\n"), State: forge.IssueOpen})
+	launch := newTestLauncher(t, f)
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 10))
+	waitForOutput(t, tm, "fix the thing")
+
+	sendKey(tm, "enter")
+	waitForOutput(t, tm, "bodyline00")
+
+	sendKey(tm, "G")
+	waitForOutput(t, tm, "bodyline39")
+
+	sendKey(tm, "g")
+	sendKey(tm, "g")
+	waitForOutput(t, tm, "bodyline00")
+
+	sendKey(tm, "esc")
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// TestTea_HandleDetailModalKey_GJumpsToLastPage verifies "G" jumps
+// DetailModal.Offset to the modal's last page, the detail modal's own
+// analogue of TestTea_HandleRebuildOutputKey_GJumpsToLastPage (issue #1795).
+func TestTea_HandleDetailModalKey_GJumpsToLastPage(t *testing.T) {
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: strings.Join(lines, "\n")})
+	tm := teaModel{m: m}
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	if want := len(lines) - 26; tm.m.DetailModal.Offset != want {
+		t.Errorf("Offset = %d after \"G\", want %d (clamped to the box interior's row budget)", tm.m.DetailModal.Offset, want)
+	}
+}
+
+// TestTea_HandleDetailModalKey_ScrollsOnPgDnPgUp verifies pgdown/ctrl+f page
+// the modal's body forward by its own scroll budget, and pgup/ctrl+b page it
+// back, mirroring TestTea_HandleRebuildOutputKey_ScrollsOnCtrlFCtrlB's
+// sibling coverage for the rebuild-output pane (issue #1795).
+func TestTea_HandleDetailModalKey_ScrollsOnPgDnPgUp(t *testing.T) {
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: strings.Join(lines, "\n")})
+	tm := teaModel{m: m}
+	budget := detailModalScrollBudget(m)
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyPgDown})
+	if tm.m.DetailModal.Offset != budget {
+		t.Errorf("Offset = %d after pgdown, want %d", tm.m.DetailModal.Offset, budget)
+	}
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyCtrlF})
+	if tm.m.DetailModal.Offset != 2*budget {
+		t.Errorf("Offset = %d after ctrl+f, want %d", tm.m.DetailModal.Offset, 2*budget)
+	}
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyPgUp})
+	if tm.m.DetailModal.Offset != budget {
+		t.Errorf("Offset = %d after pgup, want %d", tm.m.DetailModal.Offset, budget)
+	}
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyCtrlB})
+	if tm.m.DetailModal.Offset != 0 {
+		t.Errorf("Offset = %d after ctrl+b, want 0", tm.m.DetailModal.Offset)
+	}
+}
+
+// TestTea_HandleDetailModalKey_ScrollsOnCtrlDCtrlU mirrors
+// TestTea_HandleDetailModalKey_ScrollsOnPgDnPgUp for the vim half-page
+// chords ctrl+d/ctrl+u, which must page DetailModal.Offset by half of
+// detailModalScrollBudget (issue #1795).
+func TestTea_HandleDetailModalKey_ScrollsOnCtrlDCtrlU(t *testing.T) {
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: strings.Join(lines, "\n")})
+	tm := teaModel{m: m}
+	half := detailModalScrollBudget(m) / 2
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	if tm.m.DetailModal.Offset != half {
+		t.Errorf("Offset = %d after ctrl+d, want %d", tm.m.DetailModal.Offset, half)
+	}
+
+	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	if tm.m.DetailModal.Offset != 0 {
+		t.Errorf("Offset = %d after ctrl+u, want 0", tm.m.DetailModal.Offset)
+	}
+}
+
+// TestTea_HandleKey_DetailModal_ggJumpsToFirstPage verifies a lone "g"
+// followed by a second "g" resets DetailModal.Offset to 0 while the ticket
+// detail modal is open — reusing the same PendingG/gChordTick machinery
+// issue #1628 introduced for the list body rather than duplicating it,
+// mirroring TestTea_HandleKey_RebuildOutput_ggJumpsToFirstPage (issue
+// #1795).
+func TestTea_HandleKey_DetailModal_ggJumpsToFirstPage(t *testing.T) {
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: strings.Join(lines, "\n")})
+	m = Update(m, DetailModalScrollMsg{Delta: 30})
+	tm := teaModel{m: m}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	if !tm.m.PendingG {
+		t.Fatal("PendingG = false after a lone \"g\", want true")
+	}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	if tm.m.PendingG {
+		t.Error("PendingG = true after the second \"g\", want false (chord resolved)")
+	}
+	if tm.m.DetailModal.Offset != 0 {
+		t.Errorf("Offset = %d after \"gg\", want 0", tm.m.DetailModal.Offset)
+	}
+}
+
+// TestTea_HandleKey_DetailModal_gLeader_NonGKey_CancelsAndStillScrolls
+// verifies a lone "g" followed by a non-"g" key in the detail modal cancels
+// the pending leader without consuming that key — its own scroll binding
+// still applies, mirroring
+// TestTea_HandleKey_RebuildOutput_gLeader_NonGKey_CancelsAndStillScrolls
+// (issue #1795).
+func TestTea_HandleKey_DetailModal_gLeader_NonGKey_CancelsAndStillScrolls(t *testing.T) {
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: strings.Join(lines, "\n")})
+	tm := teaModel{m: m}
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if tm.m.PendingG {
+		t.Error("PendingG = true after a non-g key, want false")
+	}
+	if tm.m.DetailModal.Offset != 1 {
+		t.Errorf("Offset = %d, want 1 (\"j\" still scrolled after the chord cancelled)", tm.m.DetailModal.Offset)
+	}
 }
 
 // TestTea_DetailModal_ResolvesOnlyOwnBlockersNotWholeBacklog verifies

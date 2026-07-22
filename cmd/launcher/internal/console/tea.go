@@ -621,10 +621,26 @@ func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 // handleDetailModalKey routes one keypress while ModeDetailModal owns the
 // keyboard (the ticket detail modal is open — modeActive's ModeDetailModal
 // case): "esc" closes it, "j"/"k" and the arrow keys scroll its body one
-// line at a time, and the universal quit keystroke (isQuitKey) hard-quits —
-// it must never be swallowed by the modal, same principle as every other
-// modal pane in this file (issue #1632).
+// line at a time, the scroll keys page/half-page through it — sized off
+// detailModalScrollBudget rather than the sibling panes' fixed
+// fixedPaneScrollDelta, since that's the same box-interior/label-wrapping
+// budget the render path and the Offset clamp already use, and a fixed
+// constant would drift from it — "G"/"gg" jump to the last/first page —
+// reusing Model.PendingG and gChordTick rather than a second, pane-scoped
+// leader, same as handleRebuildOutputKey and handleSidebarKey (issue #1795)
+// — and the universal quit keystroke (isQuitKey) hard-quits — it must never
+// be swallowed by the modal, same principle as every other modal pane in
+// this file (issue #1632).
 func (t teaModel) handleDetailModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if t.m.PendingG {
+		t.m = Update(t.m, GResolvedMsg{})
+		if msg.String() == "g" {
+			return Update(t.m, DetailModalJumpToFirstMsg{}), nil
+		}
+		// Any other key cancels the leader without consuming it — that key's
+		// own meaning still applies below, mirroring handleRebuildOutputKey's
+		// own PendingG fallthrough (issue #1628 AC).
+	}
 	if isQuitKey(msg.String()) {
 		return Update(t.m, QuitMsg{}), nil
 	}
@@ -635,6 +651,22 @@ func (t teaModel) handleDetailModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return Update(t.m, DetailModalScrollMsg{Delta: 1}), nil
 	case "k", "up":
 		return Update(t.m, DetailModalScrollMsg{Delta: -1}), nil
+	case "pgdown", "ctrl+f":
+		return Update(t.m, DetailModalScrollMsg{Delta: detailModalScrollBudget(t.m)}), nil
+	case "pgup", "ctrl+b":
+		return Update(t.m, DetailModalScrollMsg{Delta: -detailModalScrollBudget(t.m)}), nil
+	case "ctrl+d":
+		// Integer division rounds down: a one-row budget yields Delta 0, a
+		// no-op — same "roughly half" tradeoff the list body's own ctrl+d
+		// accepts (issue #1648).
+		return Update(t.m, DetailModalScrollMsg{Delta: detailModalScrollBudget(t.m) / 2}), nil
+	case "ctrl+u":
+		return Update(t.m, DetailModalScrollMsg{Delta: -(detailModalScrollBudget(t.m) / 2)}), nil
+	case "G":
+		return Update(t.m, DetailModalJumpToLastMsg{}), nil
+	case "g":
+		t.m = Update(t.m, GPendingMsg{})
+		return t.m, gChordTick()
 	}
 	return t.m, nil
 }

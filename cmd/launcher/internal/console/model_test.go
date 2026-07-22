@@ -1994,3 +1994,68 @@ func TestUpdate_DetailModalScroll_ClampsForWrappedLabelLines(t *testing.T) {
 		t.Errorf("Offset = %d after scrolling past the end, want %d (clamped to the box interior's row budget with 3 wrapped label lines)", m.DetailModal.Offset, want)
 	}
 }
+
+// TestUpdate_DetailModalJumpToFirstMsg_ResetsOffsetToZero verifies "gg"
+// resets DetailModal.Offset to 0 from a scrolled-down position, mirroring
+// RebuildOutputJumpToFirstMsg's own reset for the rebuild-output pane (issue
+// #1795).
+func TestUpdate_DetailModalJumpToFirstMsg_ResetsOffsetToZero(t *testing.T) {
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	body := strings.Join(lines, "\n")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: body})
+	m = Update(m, DetailModalScrollMsg{Delta: 10})
+
+	m = Update(m, DetailModalJumpToFirstMsg{})
+	if m.DetailModal.Offset != 0 {
+		t.Errorf("Offset = %d, want 0", m.DetailModal.Offset)
+	}
+}
+
+// TestUpdate_DetailModalJumpToLastMsg_JumpsToLastPage verifies "G" moves
+// DetailModal.Offset to the last page that still fills the box's scroll
+// budget — not just the last line — the same page-capped clamp the
+// DetailModal clamp block already applies on every Update, mirroring
+// TestUpdate_DetailModalScroll_ClampsToBoxInteriorHeightNotTerminalHeight
+// (issue #1795).
+func TestUpdate_DetailModalJumpToLastMsg_JumpsToLastPage(t *testing.T) {
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("l%d", i)
+	}
+	body := strings.Join(lines, "\n")
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: body})
+
+	m = Update(m, DetailModalJumpToLastMsg{})
+
+	// Same box-interior budget as TestUpdate_DetailModalScroll_
+	// ClampsToBoxInteriorHeightNotTerminalHeight: 40 lines, 26-row budget.
+	if want := len(lines) - 26; m.DetailModal.Offset != want {
+		t.Errorf("Offset = %d after \"G\", want %d (clamped to the box interior's row budget)", m.DetailModal.Offset, want)
+	}
+}
+
+// TestUpdate_DetailModalJumpMsgs_NoOpWhenNoModalOpen verifies both jump
+// messages do not panic or fabricate a DetailModal state while no modal is
+// open, mirroring TestUpdate_RebuildOutputJumpMsgs_NoOpWhenPaneClosed (issue
+// #1795).
+func TestUpdate_DetailModalJumpMsgs_NoOpWhenNoModalOpen(t *testing.T) {
+	m := NewModel()
+	m = Update(m, DetailModalJumpToFirstMsg{})
+	if m.DetailModal != nil {
+		t.Errorf("DetailModal = %+v, want nil", m.DetailModal)
+	}
+
+	m = Update(m, DetailModalJumpToLastMsg{})
+	if m.DetailModal != nil {
+		t.Errorf("DetailModal = %+v, want nil", m.DetailModal)
+	}
+}
