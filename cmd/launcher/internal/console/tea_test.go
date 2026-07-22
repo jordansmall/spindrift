@@ -368,6 +368,86 @@ func TestTea_gLeader_Timeout_CancelsPendingG(t *testing.T) {
 	}
 }
 
+// TestResolvePendingG_SecondG_FiresOnFirstAndConsumes verifies the shared
+// resolvePendingG helper — factored out of the four PendingG-checking key
+// handlers (issue #1802) — clears PendingG and fires onFirst when the
+// second key of the chord is "g", consuming the key.
+func TestResolvePendingG_SecondG_FiresOnFirstAndConsumes(t *testing.T) {
+	m := Update(NewModel(), GPendingMsg{})
+
+	got, consumed := resolvePendingG(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")}, func(m Model) Model {
+		return Update(m, CursorJumpToFirstMsg{})
+	})
+
+	if !consumed {
+		t.Error("consumed = false, want true on a resolved gg chord")
+	}
+	if got.PendingG {
+		t.Error("PendingG = true after a resolved gg chord, want false")
+	}
+}
+
+// TestResolvePendingG_OtherKey_ClearsWithoutConsuming verifies a key other
+// than "g" following the leader clears PendingG but is reported
+// unconsumed, so the caller falls through to that key's own binding
+// instead of returning early (issue #1628 AC).
+func TestResolvePendingG_OtherKey_ClearsWithoutConsuming(t *testing.T) {
+	m := Update(NewModel(), GPendingMsg{})
+	called := false
+
+	got, consumed := resolvePendingG(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")}, func(m Model) Model {
+		called = true
+		return m
+	})
+
+	if consumed {
+		t.Error("consumed = true on a non-g key, want false")
+	}
+	if got.PendingG {
+		t.Error("PendingG = true after a non-g key, want false")
+	}
+	if called {
+		t.Error("onFirst called on a non-g key, want not called")
+	}
+}
+
+// TestResolvePendingG_NotPending_IsNoop verifies resolvePendingG does
+// nothing when no leader is armed — every non-"gg" keypress reaches it
+// through the handlers' own unconditional call.
+func TestResolvePendingG_NotPending_IsNoop(t *testing.T) {
+	m := NewModel()
+	called := false
+
+	got, consumed := resolvePendingG(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")}, func(m Model) Model {
+		called = true
+		return m
+	})
+
+	if consumed {
+		t.Error("consumed = true with no leader armed, want false")
+	}
+	if called {
+		t.Error("onFirst called with no leader armed, want not called")
+	}
+	if got.PendingG {
+		t.Error("PendingG = true with no leader armed, want false")
+	}
+}
+
+// TestArmPendingG_ArmsLeaderAndReturnsTick verifies armPendingG — factored
+// out of the four handlers' identical "g" case (issue #1802) — sets
+// PendingG and returns a non-nil Cmd to arm the leader-window timeout.
+func TestArmPendingG_ArmsLeaderAndReturnsTick(t *testing.T) {
+	got, cmd := armPendingG(NewModel())
+
+	if !got.PendingG {
+		t.Error("PendingG = false after armPendingG, want true")
+	}
+	if cmd == nil {
+		t.Error("cmd = nil after armPendingG, want the gg leader-window tick")
+	}
+}
+
 // TestTea_DetailModal_gLeader_Timeout_CancelsPendingGAndLeavesOffsetAlone
 // verifies a lone "g" left unanswered while the ticket detail modal is open
 // cancels the pending leader on timeout without moving DetailModal.Offset —

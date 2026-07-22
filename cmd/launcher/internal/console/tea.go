@@ -201,6 +201,32 @@ func gChordTick() tea.Cmd {
 	return tea.Tick(gChordTimeout, func(time.Time) tea.Msg { return gChordTimeoutMsg{} })
 }
 
+// resolvePendingG resolves an armed "gg" leader against msg, factored out of
+// the four PendingG-checking key handlers (handleListKey,
+// handleRebuildOutputKey, handleDetailModalKey, handleSidebarKey — issue
+// #1802). A no-op when PendingG isn't set. Otherwise it clears the leader
+// and, if msg is the second "g", applies onFirst — the pane's own
+// jump-to-first transition — and reports the key as consumed. Any other key
+// still clears the leader but is reported unconsumed: that key's own
+// binding still applies, so the caller falls through rather than returning
+// (issue #1628 AC).
+func resolvePendingG(m Model, msg tea.KeyMsg, onFirst func(Model) Model) (Model, bool) {
+	if !m.PendingG {
+		return m, false
+	}
+	m = Update(m, GResolvedMsg{})
+	if msg.String() == "g" {
+		return onFirst(m), true
+	}
+	return m, false
+}
+
+// armPendingG arms the "gg" leader window on m, factored out of the four
+// key handlers' identical "g" case (issue #1802).
+func armPendingG(m Model) (Model, tea.Cmd) {
+	return Update(m, GPendingMsg{}), gChordTick()
+}
+
 // Init starts the initial backlog load and both async signal sources
 // (background poll, launch-refresh) as Cmds — none of them block the
 // program's own startup.
@@ -436,16 +462,12 @@ func (t teaModel) handlePickChordKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 // handleKey's switch above — they layer on top of ModeList instead (issue
 // #1543).
 func (t teaModel) handleListKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
-	if t.m.PendingG {
-		t.m = Update(t.m, GResolvedMsg{})
-		if msg.String() == "g" {
-			t.m = Update(t.m, CursorJumpToFirstMsg{})
-			return t, nil
-		}
-		// Any other key cancels the leader, same as the timeout, but — unlike
-		// handlePickChordKey's chord above — does not consume it: that key's
-		// own meaning still applies, so falls through to the switch below
-		// rather than returning here (issue #1628 AC).
+	m, consumed := resolvePendingG(t.m, msg, func(m Model) Model {
+		return Update(m, CursorJumpToFirstMsg{})
+	})
+	t.m = m
+	if consumed {
+		return t, nil
 	}
 	if t.m.QueueEnterNotice != "" {
 		t.m = Update(t.m, QueueEnterNoticeClearedMsg{})
@@ -464,8 +486,9 @@ func (t teaModel) handleListKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	case "G":
 		t.m = Update(t.m, CursorJumpToLastMsg{})
 	case "g":
-		t.m = Update(t.m, GPendingMsg{})
-		return t, gChordTick()
+		m, cmd := armPendingG(t.m)
+		t.m = m
+		return t, cmd
 	case "H":
 		t.m = Update(t.m, SectionPrevMsg{})
 	case "L":
@@ -582,14 +605,12 @@ func (t teaModel) handleListKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 // the "gg" chord's PendingG gate lives here instead — reusing Model.PendingG
 // and gChordTick rather than a second, pane-scoped leader (issue #1630 AC3).
 func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	if t.m.PendingG {
-		t.m = Update(t.m, GResolvedMsg{})
-		if msg.String() == "g" {
-			return Update(t.m, RebuildOutputJumpToFirstMsg{}), nil
-		}
-		// Any other key cancels the leader without consuming it — that key's
-		// own meaning still applies below, mirroring handleListKey's own
-		// PendingG fallthrough (issue #1628 AC).
+	m, consumed := resolvePendingG(t.m, msg, func(m Model) Model {
+		return Update(m, RebuildOutputJumpToFirstMsg{})
+	})
+	t.m = m
+	if consumed {
+		return t.m, nil
 	}
 	if isQuitKey(msg.String()) {
 		return Update(t.m, QuitMsg{}), nil
@@ -612,8 +633,9 @@ func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "G":
 		return Update(t.m, RebuildOutputJumpToLastMsg{}), nil
 	case "g":
-		t.m = Update(t.m, GPendingMsg{})
-		return t.m, gChordTick()
+		m, cmd := armPendingG(t.m)
+		t.m = m
+		return t.m, cmd
 	}
 	return t.m, nil
 }
@@ -632,14 +654,12 @@ func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 // be swallowed by the modal, same principle as every other modal pane in
 // this file (issue #1632).
 func (t teaModel) handleDetailModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	if t.m.PendingG {
-		t.m = Update(t.m, GResolvedMsg{})
-		if msg.String() == "g" {
-			return Update(t.m, DetailModalJumpToFirstMsg{}), nil
-		}
-		// Any other key cancels the leader without consuming it — that key's
-		// own meaning still applies below, mirroring handleRebuildOutputKey's
-		// own PendingG fallthrough (issue #1628 AC).
+	m, consumed := resolvePendingG(t.m, msg, func(m Model) Model {
+		return Update(m, DetailModalJumpToFirstMsg{})
+	})
+	t.m = m
+	if consumed {
+		return t.m, nil
 	}
 	if isQuitKey(msg.String()) {
 		return Update(t.m, QuitMsg{}), nil
@@ -665,8 +685,9 @@ func (t teaModel) handleDetailModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "G":
 		return Update(t.m, DetailModalJumpToLastMsg{}), nil
 	case "g":
-		t.m = Update(t.m, GPendingMsg{})
-		return t.m, gChordTick()
+		m, cmd := armPendingG(t.m)
+		t.m = m
+		return t.m, cmd
 	}
 	return t.m, nil
 }
@@ -703,16 +724,12 @@ func (t teaModel) openDetailModal(iss forge.Issue) (teaModel, tea.Cmd) {
 // (pickHighlighted) before quitting, while the sidebar quits directly with
 // no resolve step.
 func (t teaModel) handleSidebarKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	if t.m.PendingG {
-		t.m = Update(t.m, GResolvedMsg{})
-		if msg.String() == "g" {
-			t.m = Update(t.m, SidebarJumpToBeginningMsg{})
-			return t.m, nil
-		}
-		// Any other key cancels the leader, same as the timeout, but — like
-		// handleListKey's own branch — does not consume it: that key's own
-		// meaning still applies, so falls through to the switch below rather
-		// than returning here (issue #1628 AC, #1629).
+	m, consumed := resolvePendingG(t.m, msg, func(m Model) Model {
+		return Update(m, SidebarJumpToBeginningMsg{})
+	})
+	t.m = m
+	if consumed {
+		return t.m, nil
 	}
 	if isQuitKey(msg.String()) {
 		return Update(t.m, QuitMsg{}), nil
@@ -742,8 +759,9 @@ func (t teaModel) handleSidebarKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "G", "end":
 		return Update(t.m, SidebarJumpToEndMsg{}), nil
 	case "g":
-		t.m = Update(t.m, GPendingMsg{})
-		return t.m, gChordTick()
+		m, cmd := armPendingG(t.m)
+		t.m = m
+		return t.m, cmd
 	case "z":
 		return Update(t.m, SidebarZoomToggleMsg{}), nil
 	}
