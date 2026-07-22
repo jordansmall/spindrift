@@ -1497,8 +1497,9 @@ func detailModalInnerSize(termWidth, termHeight int) (width, height int) {
 
 // sidebarModalBoxWidthPercent and sidebarModalBoxHeightPercent are the log
 // modal's share of the terminal's own dimensions — the same 80%x80% target
-// the detail modal's detailModalBox{Width,Height}Percent already use, so the
-// two floating boxes read as one consistent modal treatment (issue #1845).
+// the detail modal's detailModalBox{Width,Height}Percent use (issue #1845).
+// The two modals share this target percent but diverge on the max clamp
+// (issue #1875) — see sidebarModalBoxMax{Width,Height}.
 const (
 	sidebarModalBoxWidthPercent  = 80
 	sidebarModalBoxHeightPercent = 80
@@ -1515,12 +1516,15 @@ const (
 )
 
 // sidebarModalBoxMaxWidth and sidebarModalBoxMaxHeight cap the log modal's
-// floating box at the same comfortable-reading size detailModalBoxMax{Width,
-// Height} already use, rather than stretching it corner to corner on a wide
-// terminal (issue #1845).
+// floating box at a size deliberately larger than detailModalBoxMax{Width,
+// Height} — the zoom is meant to read as visibly bigger than the detail
+// modal on a roomy terminal, not clamp to the same footprint (issue #1845
+// unified the two caps for consistency; issue #1875 reverses that call so
+// [z] actually produces a bigger box), while still pinning well short of
+// corner-to-corner on very large monitors.
 const (
-	sidebarModalBoxMaxWidth  = 100
-	sidebarModalBoxMaxHeight = 30
+	sidebarModalBoxMaxWidth  = 180
+	sidebarModalBoxMaxHeight = 54
 )
 
 // sidebarModalFits reports whether m.Width and m.Height leave room for a
