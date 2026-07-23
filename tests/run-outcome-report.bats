@@ -42,9 +42,12 @@ setup() {
   [[ "$output" == *"missing"* ]]
 }
 
-@test "malformed outcome line renders as malformed; subsequent issue is verified independently" {
+@test "malformed outcome line with no PR reports status=missing; subsequent issue is verified independently" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
-  # Issue 1: outcome line present but missing required landing= and status= tokens.
+  # Issue 1: outcome line present but missing required landing= and status=
+  # tokens, and no open PR — the same no-PR safety net as a missing outcome
+  # line runs here too (issue #1898), so it reports status=missing rather
+  # than a dead-end status=malformed.
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 note=missing-required-tokens"
   # Issue 2: well-formed outcome already merged.
   export FAKE_PODMAN_OUTCOME_2="SPINDRIFT_OUTCOME issue=2 landing=https://github.com/owner/repo/pull/2 status=merged note=ok"
@@ -53,7 +56,7 @@ setup() {
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   [[ "$output" == *"#1"* ]]
-  [[ "$output" == *"status=malformed"* ]]
+  [[ "$output" == *"status=missing"* ]]
   [[ "$output" == *"status=verified-merged"* ]]
 }
 

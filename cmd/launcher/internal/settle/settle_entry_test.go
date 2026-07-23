@@ -285,10 +285,14 @@ func TestSettle_RedCIDoesNotCloseIssue(t *testing.T) {
 	}
 }
 
-// TestSettle_MalformedOutcome_NoPanic verifies that a ParseErr result is
-// reported and returns without attempting any gate logic.
-func TestSettle_MalformedOutcome_NoPanic(t *testing.T) {
-	fc := forge.NewFake()
+// TestSettle_MalformedOutcome_NoPRDemotesToFailed verifies that a ParseErr
+// result with no adoptable PR runs the same no-PR demotion as the
+// no-outcome-found path (issue #1898): a box that mangled its outcome line
+// AND never opened a PR has produced nothing landable, so it demotes to
+// agent-failed exactly like a genuinely missing outcome line does — never a
+// silent no-op.
+func TestSettle_MalformedOutcome_NoPRDemotesToFailed(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	result := dispatch.Result{ParseErr: errFake}
 
@@ -298,8 +302,42 @@ func TestSettle_MalformedOutcome_NoPanic(t *testing.T) {
 	if len(fc.CommentCalls) != 0 {
 		t.Errorf("malformed outcome must not post a usage comment; got %+v", fc.CommentCalls)
 	}
+	iss, _ := fc.Issue("9")
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("malformed outcome with no PR must demote to agent-failed; got labels=%v", iss.Labels)
+	}
+}
+
+// TestSettle_MalformedOutcome_NonDraftPRBlocked verifies that a ParseErr
+// result (a box that exited zero but emitted an unparseable outcome line)
+// still runs the same PR-adoption check as the no-outcome-found path: an
+// open PR must be reported status=blocked, not silently dropped under
+// status=malformed with no further trace (issue #1898, observed on #1895 /
+// PR #1897 — a clean, green, mergeable PR left un-adopted by a malformed
+// outcome line).
+func TestSettle_MalformedOutcome_NonDraftPRBlocked(t *testing.T) {
+	fc := forge.NewFake()
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
+	branch := fc.AgentBranch("9")
+	fc.SetPR(branch, forge.PR{URL: testPR, IsDraft: false})
+
+	c := baseConfig()
+	s := New(c, fc, fc)
+	result := dispatch.Result{ParseErr: errFake}
+
+	out := testutil.CaptureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), "9", 0, result)
+	})
+
+	if !strings.Contains(out, "status=blocked") {
+		t.Errorf("malformed outcome with an open PR must report status=blocked; got: %q", out)
+	}
+	if strings.Contains(out, "status=malformed") {
+		t.Errorf("malformed outcome with an open PR must not be silently dropped as status=malformed; got: %q", out)
+	}
 	if len(fc.TransitionStateCalls) != 0 {
-		t.Errorf("malformed outcome must not transition state; got %+v", fc.TransitionStateCalls)
+		t.Errorf("open PR must not trigger label churn; got %v", fc.TransitionStateCalls)
 	}
 }
 
