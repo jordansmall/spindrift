@@ -903,6 +903,54 @@ Configure it via `settings.branches.mergeGuardPaths` (baked) or the
 `MERGE_GUARD_PATHS` env var (runtime) — see the [flake options
 reference](flake-options.md) for the full knob surface.
 
+#### Two-actor separation (opt-in hard mode)
+
+Under the single-token default, the GitHub token that opens a PR is the same
+token that can merge it — the Box holds it, so a fully adversarial Agent can
+run `gh pr merge` on its own green PR from inside the Box before the launcher
+ever evaluates the merge guard (see [ADR
+0016](adr/0016-merge-guard-bounds-drift-not-adversaries.md)). Two-actor
+separation is the opt-in hard mode that closes that gap: two machine GitHub
+users instead of one, with a repository ruleset barring the Box's user from
+updating the base branch. It is the only configuration in which the merge
+guard is literally uninfluenceable by the Agent, at the cost of a second
+account and a second secret to provision.
+
+**Setup:**
+
+1. Create a **second GitHub user** (or bot account) distinct from the one
+   behind your existing `GH_TOKEN`. Mint it a fine-grained PAT scoped to
+   **only the Target repository**, with the same permission set the
+   single-token default already grants (see the permission table above).
+2. Set that PAT as `BOX_GH_TOKEN` (secret, opt-in — see the [flake options
+   reference](flake-options.md)). Unset, the harness behaves exactly as the
+   single-token default, byte-for-byte; set, the Box receives this value as
+   its own `GH_TOKEN` while the launcher keeps using its own for every
+   host-side call (merges, labels, the usage comment).
+3. On the Target repo, create a **repository ruleset** (Settings → Rules →
+   Rulesets) targeting the base branch, with a "Restrict updates" rule (add
+   "Restrict deletions" too, to stop the Box's user from deleting the branch
+   outright).
+4. Set the ruleset's **bypass list to the launcher's own user only** — the
+   one behind `GH_TOKEN`. Every other actor, including the Box's user, is
+   then blocked from updating the base branch by the ruleset itself,
+   whether by a direct push or by merging a PR — GitHub enforces "restrict
+   updates" on every ref update regardless of the token's own permission
+   scope, which is why this closes the gap the merge guard cannot: no PAT
+   permission table controls it, the ruleset does.
+
+**Per-token permissions** — both tokens carry the same fine-grained scopes;
+what differs is which GitHub user each belongs to, and only one is on the
+bypass list:
+
+| token                | GitHub user            | can update the base branch? |
+| -------------------- | ----------------------- | ---------------------------- |
+| `BOX_GH_TOKEN` (Box)  | second, non-bypassed user | No — the ruleset blocks it, even via PR merge |
+| `GH_TOKEN` (launcher) | primary, bypass-listed user | Yes — the ruleset's sole bypass actor |
+
+See [SECURITY.md](../SECURITY.md) for how this changes the "Box cannot merge
+its own PR" claim.
+
 #### Stale-base preflight
 
 A green PR can still be **behind** its base: main may have advanced past a
