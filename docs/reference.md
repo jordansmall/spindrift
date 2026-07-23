@@ -1236,24 +1236,30 @@ bundle` (`seam.bundle`) written to a small, writable `/outbox` mount — the
 code-plane analog of ADR 0032's stdout comment block. The launcher relays
 that bundle host-side, fetching it into the Accumulation repo.
 
-**Landing.** The launcher merges the relayed branch onto
-`integration/<parent>` inside the Accumulation repo — one Integration branch
-per broad ticket. `<parent>` comes from *that seam's own* local issue's
+**Landing.** The launcher rebases the relayed branch onto
+`integration/<parent>`'s current tip and fast-forwards the Integration branch
+there — one Integration branch per broad ticket, always linear, never a merge
+commit (issue #1889; this is unconditional, not a knob — the remote `git`/
+`github` Code Forges keep their own merge-commit landing unchanged).
+`<parent>` comes from *that seam's own* local issue's
 `parent:` frontmatter, sanitized to a git-ref-safe token (lowercased, each
 run of non-`[a-z0-9]` characters collapsed to a single dash, leading/trailing
 dashes trimmed); an issue with no `parent:` set falls back to its own
 sanitized slug instead, so a parentless seam is its own broad ticket rather
-than sharing one collapsed branch. A clean merge **is** the landing — no PR,
-no CI, no network — and closes the seam through the same `reconcile` path
-(above); a conflicting merge leaves the seam unlanded and blocked instead.
+than sharing one collapsed branch. A clean rebase-and-fast-forward **is** the
+landing — no PR, no CI, no network — and closes the seam through the same
+`reconcile` path (above); a seam that cannot rebase cleanly onto the current
+Integration tip leaves the seam unlanded and blocked instead, the Integration
+branch untouched — there is no PR or dispatcher on this path to auto-resolve
+it, so a rebase conflict simply blocks the seam.
 `landing:` records `<integration-branch>@<sha>`, the immutable ref + commit
-the merge produced.
+the land produced.
 
 **`MERGE_MODE=immediate` only.** `CODE_FORGE=local` requires
-`MERGE_MODE=immediate` — the merge-and-close described above *is* the
+`MERGE_MODE=immediate` — the rebase-and-close described above *is* the
 "immediate" behavior. `manual` and `auto` have no meaning under `local`
 (there is no PR to leave open, no GitHub auto-merge to enqueue); either one
-would strand the relayed bundle unmerged in the outbox, so the launcher
+would strand the relayed bundle unlanded in the outbox, so the launcher
 fails fast at startup instead.
 
 **Chaining is the `## Blocked by` graph, not a knob.** How seams compose

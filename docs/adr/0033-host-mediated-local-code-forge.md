@@ -71,12 +71,16 @@ The pieces:
   block). The Launcher relays it host-side —
   `git -C .spindrift/accum.git fetch <outbox>/seam.bundle <branch>`.
 
-- **Landing — synchronous, host-side, onto an integration branch.** The Launcher
-  merges the fetched branch onto **`integration/<parent>`** (one integration
+- **Landing — synchronous, host-side, onto an integration branch, always
+  linear.** The Launcher rebases the fetched branch onto **`integration/<parent>`**'s
+  current tip and fast-forwards the integration ref there (one integration
   branch per broad ticket, keyed on *that seam's own* local issue's `parent`
   frontmatter — never a knob shared across the whole run, so a mixed-parent
-  batch lands each seam onto its own branch instead of collapsing onto one),
-  reusing the `git` adapter's temp-clone → merge → push-ref helper. `parent`
+  batch lands each seam onto its own branch instead of collapsing onto one).
+  This is unconditional, not a knob: under no circumstances does a merge
+  commit appear on a local integration branch (issue #1889) — a first seam's
+  land is a pure fast-forward, a dependent seam in a chain rebases onto the
+  now-advanced tip, and the same posture holds end-to-end. `parent`
   is opaque and operator-authored (a GitHub URL, a Jira key, another local
   issue's slug); spindrift never reaches into another tracker to resolve it,
   it only sanitizes the string into a git-ref-safe token (lowercased, each run
@@ -84,10 +88,13 @@ The pieces:
   dashes trimmed) before forming the branch name. An issue with no `parent:`
   set is its own broad ticket, keyed
   on its own sanitized slug instead — never a shared fallback branch. The
-  merge *succeeding* **is** the landing — there is no PR, no network, no
-  wait. A clean merge closes the seam-issue through the existing `reconcile`
-  path (ADR 0029); a conflicting merge leaves the seam unlanded and blocked (the
-  same failure posture ADR 0032 gives a missing/malformed comment block).
+  rebase-and-fast-forward *succeeding* **is** the landing — there is no PR, no
+  network, no wait. A clean land closes the seam-issue through the existing
+  `reconcile` path (ADR 0029); a seam that cannot rebase cleanly onto the
+  current integration tip leaves the seam unlanded and blocked, the
+  integration branch untouched (the same failure posture ADR 0032 gives a
+  missing/malformed comment block) — there is no PR/dispatcher on this path to
+  auto-resolve it, so a rebase conflict simply blocks the seam.
   `landing:` records the integration ref + commit sha — the ADR 0029 landing
   field generalizing to an immutable ref, as it already does for push-only `git`.
 
@@ -171,7 +178,7 @@ neither touches the invariant ADR 0032 protected:
   `.spindrift/accum.git` and a writable throwaway outbox exist under
   `CODE_FORGE=local`."
 - **A buggy or hostile Box cannot corrupt the endpoint.** Read-only enforces it
-  structurally; a conflicting or malformed bundle fails the host-side merge and
+  structurally; a conflicting or malformed bundle fails the host-side land and
   blocks the seam rather than damaging the accumulation repo.
 
 ## Considered Options
@@ -219,12 +226,12 @@ neither touches the invariant ADR 0032 protected:
   claim now carries a third documented exception alongside ADR 0032's `/issues`.
 - A new `git bundle` code-out grammar and a host-side relay join ADR 0032's
   comment-block extractor; `settle` wires the fetched branch to a host-side
-  merge onto `integration/<parent>`, and a missing/malformed/conflicting bundle
-  is treated as blocked.
-- `reconcile` (ADR 0029) closes a `local`-code seam by observing a *local* merge
-  onto its integration branch, not a remote PR; the `waves` blocker resolution
-  reads the on-disk closed state for `local`, so dependency scheduling needs no
-  network.
+  rebase-and-fast-forward onto `integration/<parent>`, and a
+  missing/malformed/unrebasable bundle is treated as blocked.
+- `reconcile` (ADR 0029) closes a `local`-code seam by observing a *local*
+  land onto its integration branch, not a remote PR; the `waves` blocker
+  resolution reads the on-disk closed state for `local`, so dependency
+  scheduling needs no network.
 - Each seam's integration branch is keyed on *its own* local issue's `parent`
   field (issue #1734), so `CODE_FORGE=local`'s per-ticket accumulation
   **assumes a tracker that supplies a parent/epic link** — but never
