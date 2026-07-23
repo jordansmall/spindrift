@@ -162,7 +162,8 @@ func isDigestPinned(image string) bool {
 // should trigger the container fallback; real errors must surface immediately.
 func isNoBuilderError(stderr string) bool {
 	return strings.Contains(stderr, "required to build") ||
-		strings.Contains(stderr, "no build machines")
+		strings.Contains(stderr, "no build machines") ||
+		strings.Contains(stderr, "Reason: platform mismatch")
 }
 
 func (a *ociAdapter) loadImage(archive string) error {
