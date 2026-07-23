@@ -258,6 +258,16 @@ type Fake struct {
 	// CloseIssueErr, if non-nil, is returned by every CloseIssue call.
 	CloseIssueErr error
 
+	// CloseMergedIssueCalls records the issue number argument of every
+	// CloseMergedIssue invocation in order — the optional MergeCloser
+	// surface's own call log (issue #1892), kept separate from
+	// CloseIssueCalls so a test can tell settle's post-merge backstop apart
+	// from reconcile's closed: axis write.
+	CloseMergedIssueCalls []string
+	// CloseMergedIssueErr, if non-nil, is returned by every CloseMergedIssue
+	// call.
+	CloseMergedIssueErr error
+
 	// FlagAbandonedCalls records the issue number argument of every
 	// FlagAbandoned invocation in order.
 	FlagAbandonedCalls []string
@@ -967,6 +977,27 @@ func (f *Fake) CloseIssue(num string) error {
 
 var _ IssueCloser = (*Fake)(nil)
 
+// CloseMergedIssue implements the optional MergeCloser surface (issue
+// #1892), setting the issue's State to IssueClosed and recording the call
+// (separately from CloseIssueCalls) for tests to assert against.
+func (f *Fake) CloseMergedIssue(num string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.CloseMergedIssueCalls = append(f.CloseMergedIssueCalls, num)
+	if f.CloseMergedIssueErr != nil {
+		return f.CloseMergedIssueErr
+	}
+	iss, ok := f.issues[num]
+	if !ok {
+		return fmt.Errorf("issue %s not found", num)
+	}
+	iss.State = IssueClosed
+	f.issues[num] = iss
+	return nil
+}
+
+var _ MergeCloser = (*Fake)(nil)
+
 // FlagAbandoned implements the optional AbandonedFlagger surface (ADR 0029),
 // setting the issue's Abandoned field and recording the call for tests to
 // assert against.
@@ -998,6 +1029,34 @@ type noLandingIssueTracker struct{ IssueTracker }
 // AsNoLandingRecorder returns f wrapped so it satisfies IssueTracker but
 // neither LandingRecorder nor IssueCloser.
 func (f *Fake) AsNoLandingRecorder() IssueTracker { return noLandingIssueTracker{f} }
+
+// localShapedIssueTracker adapts a Fake to expose IssueTracker plus the
+// local-only write surfaces (LandingRecorder, IssueCloser) but hides
+// MergeCloser — the real local adapter's shape (issue #1892): local
+// implements the reconcile-owned closed: axis (IssueCloser) but never
+// settle's github-only merge-driven backstop (MergeCloser), even when paired
+// with a PRForge-implementing Code Forge (ISSUE_TRACKER=local +
+// CODE_FORGE=github is a valid independent combination, main.go's
+// newIssueTracker/newCodeForge).
+type localShapedIssueTracker struct {
+	IssueTracker
+	f *Fake
+}
+
+func (l localShapedIssueTracker) RecordLanding(num, landing string) error {
+	return l.f.RecordLanding(num, landing)
+}
+
+func (l localShapedIssueTracker) CloseIssue(num string) error {
+	return l.f.CloseIssue(num)
+}
+
+// AsLocalShaped returns f wrapped so it satisfies IssueTracker,
+// LandingRecorder, and IssueCloser — the local adapter's shape — but not
+// MergeCloser, which only github implements.
+func (f *Fake) AsLocalShaped() IssueTracker {
+	return localShapedIssueTracker{IssueTracker: f, f: f}
+}
 
 // pushOnlyForge adapts a Fake to expose only the core CodeForge surface,
 // hiding its PRForge methods so a type assertion against it reports absence
