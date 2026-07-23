@@ -69,6 +69,16 @@ func TestLocalCodeForge_TwoSeamChain_LandsLinearWithNoMergeCommits(t *testing.T)
 	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
 	br := cf.(forge.BundleRelay)
 
+	// Seam 2's bundle is built off the pre-seam-1 integration tip, before
+	// seam 1 lands — mirroring a dependent seam in a chain whose own Box ran
+	// against an earlier integration tip than the one it eventually lands
+	// onto. Seeding it first, ahead of seam 1's land, is what makes seam 2's
+	// own Merge do a genuine replay onto the now-advanced tip rather than a
+	// no-op fast-forward.
+	outbox2 := t.TempDir()
+	branch2 := "agent/issue-1699"
+	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox2, branch2, "1699")
+
 	outbox1 := t.TempDir()
 	branch1 := "agent/issue-1698"
 	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox1, branch1, "1698")
@@ -79,11 +89,6 @@ func TestLocalCodeForge_TwoSeamChain_LandsLinearWithNoMergeCommits(t *testing.T)
 		t.Fatalf("Merge (seam 1): %v", err)
 	}
 
-	// Seam 2 is built on the integration branch's post-seam-1 tip, mirroring
-	// BASE_BRANCH forwarding for a dependent seam in a chain.
-	outbox2 := t.TempDir()
-	branch2 := "agent/issue-1699"
-	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox2, branch2, "1699")
 	if err := br.RelayBundle(outbox2, branch2); err != nil {
 		t.Fatalf("RelayBundle (seam 2): %v", err)
 	}

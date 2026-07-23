@@ -333,7 +333,7 @@
     env = "CODE_FORGE";
     group = "Repository & identity";
     default = "github";
-    doc = "code-landing backend: github (open PR, watch CI, merge), git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate), or local (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network; ADR 0033)";
+    doc = "code-landing backend: github (open PR, watch CI, merge), git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate), or local (host-mediated landing onto the Accumulation repo's Integration branch by rebase and fast-forward, never a merge commit; no PR, CI-watch, or network; ADR 0033, issue #1889)";
     choices = [
       "github"
       "git"

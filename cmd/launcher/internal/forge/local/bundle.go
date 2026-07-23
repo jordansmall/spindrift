@@ -73,17 +73,25 @@ func ensureIntegrationBranch(repoPath, baseBranch, integrationBranch string) err
 // #1889): unlike the shared git adapter's `git merge --no-ff`, this keeps
 // the Integration branch linear with zero merge commits. Works through a
 // throwaway clone rather than operating on repoPath directly, since a
-// rebase needs a working tree a bare repo doesn't have.
+// rebase needs a working tree a bare repo doesn't have; every command that
+// actually touches repoPath itself, though, runs directly against it
+// (`-C repoPath`, matching relayBundle/ensureIntegrationBranch above) rather
+// than via a `git push` from the clone — a push is a transport operation
+// whose receiving side is a separate `git-receive-pack` process, and
+// `-c maintenance.auto=false` given to the pushing command isn't reliably
+// honored there, leaving repoPath open to the same detached
+// `git maintenance --auto` race relayBundle's own guard exists to avoid.
 //
 // Returns forge.ErrMergeConflict, leaving integrationBranch untouched, when
 // the rebase itself cannot complete automatically — every rebase failure is
 // treated as a conflict, matching forge/git.Rebase's own precedent for a
-// fetched, well-formed ref, rather than pattern-matching stderr. The
-// fast-forward push after a successful rebase is deliberately non-forced: it
-// only ever succeeds when HEAD is genuinely a descendant of
-// integrationBranch's tip, so a would-be non-fast-forward (another seam
-// landed onto integrationBranch between this rebase's start and its push) is
-// refused outright rather than silently overwritten.
+// fetched, well-formed ref, rather than pattern-matching stderr. The final
+// integrationBranch update is an atomic compare-and-swap (`update-ref` with
+// the old value pinned to what this call started from): it only succeeds
+// when integrationBranch is still exactly where the rebase was computed
+// against, so a would-be non-fast-forward (another seam landed onto
+// integrationBranch between this rebase's start and this update) is refused
+// outright rather than silently overwritten.
 //
 // userName/userEmail configure the clone's commit identity: rebase re-commits
 // each replayed commit under the current committer, so a clone with no
@@ -93,17 +101,28 @@ func rebaseLand(repoPath, branch, integrationBranch, userName, userEmail string)
 	if branch == "" || strings.HasPrefix(branch, "-") {
 		return fmt.Errorf("local: invalid ref %q", branch)
 	}
+	integrationRef := "refs/heads/" + integrationBranch
+	out, err := exec.Command("git", "-C", repoPath, "rev-parse", integrationRef).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("local: resolve %s: %w: %s", integrationBranch, err, out)
+	}
+	oldTip := strings.TrimSpace(string(out))
+
 	dir, err := os.MkdirTemp("", "spindrift-local-forge-land-*")
 	if err != nil {
 		return fmt.Errorf("local: mkdtemp: %w", err)
 	}
 	defer os.RemoveAll(dir)
 
-	gitIn := func(args ...string) *exec.Cmd {
-		return exec.Command("git", append([]string{"-C", dir}, args...)...)
-	}
-	if out, err := exec.Command("git", "clone", repoPath, dir).CombinedOutput(); err != nil {
+	// maintenance.auto=false matches relayBundle's own guard above: cloning a
+	// repo that's crossed the loose-object threshold can fork a detached
+	// `git maintenance --auto` that's still repacking when this function's
+	// own `defer os.RemoveAll(dir)` (or a caller's t.TempDir cleanup) runs.
+	if out, err := exec.Command("git", "-c", "maintenance.auto=false", "clone", repoPath, dir).CombinedOutput(); err != nil {
 		return fmt.Errorf("local: clone %s: %w: %s", repoPath, err, out)
+	}
+	gitIn := func(args ...string) *exec.Cmd {
+		return exec.Command("git", append([]string{"-C", dir, "-c", "maintenance.auto=false"}, args...)...)
 	}
 	if out, err := gitIn("config", "user.name", userName).CombinedOutput(); err != nil {
 		return fmt.Errorf("local: config user.name: %w: %s", err, out)
@@ -118,7 +137,18 @@ func rebaseLand(repoPath, branch, integrationBranch, userName, userEmail string)
 		_ = gitIn("rebase", "--abort").Run()
 		return forge.ErrMergeConflict
 	}
-	if out, err := gitIn("push", "origin", "HEAD:refs/heads/"+integrationBranch).CombinedOutput(); err != nil {
+
+	// Bring the rebased commit(s) into repoPath under branch's own name
+	// (forced, like relayBundle's own refspec: a retry may diverge from
+	// whatever this same branch left there before), then atomically advance
+	// integrationBranch to it — a compare-and-swap against oldTip, not a
+	// blind write, so a concurrent land in between is refused rather than
+	// silently overwritten.
+	branchRefspec := "+refs/heads/" + branch + ":refs/heads/" + branch
+	if out, err := exec.Command("git", "-C", repoPath, "-c", "maintenance.auto=false", "fetch", dir, branchRefspec).CombinedOutput(); err != nil {
+		return fmt.Errorf("local: fetch rebased %s: %w: %s", branch, err, out)
+	}
+	if out, err := exec.Command("git", "-C", repoPath, "update-ref", integrationRef, "refs/heads/"+branch, oldTip).CombinedOutput(); err != nil {
 		return fmt.Errorf("local: fast-forward %s: %w: %s", integrationBranch, err, out)
 	}
 	return nil
