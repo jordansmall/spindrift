@@ -2,6 +2,7 @@ package runner
 
 import (
 	"os/exec"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -130,5 +131,64 @@ func TestBwrapKill_UnknownNameIsNoop(t *testing.T) {
 	a := &bwrapAdapter{}
 	if err := a.Kill("agent-issue-404"); err != nil {
 		t.Errorf("Kill on unknown name: want nil, got %v", err)
+	}
+}
+
+// TestResolvedRunEnv_OverridesGHTokenFromBoxEnv verifies opt-in two-actor
+// separation (ADR 0016, issue #380): the sandbox's process environment
+// substitutes box.Env's resolved GH_TOKEN in place of whatever the
+// launcher's own ambient GH_TOKEN was -- buildArgs's --setenv loop skips
+// GH_TOKEN (bwrapSecrets) to keep it off argv, and bwrap has no --clearenv,
+// so without this substitution the sandbox would silently inherit the
+// launcher's ambient value instead of the resolved (possibly
+// BOX_GH_TOKEN-overridden) one.
+func TestResolvedRunEnv_OverridesGHTokenFromBoxEnv(t *testing.T) {
+	ambient := []string{"PATH=/bin", "GH_TOKEN=launcher-token", "HOME=/root"}
+	boxEnv := map[string]string{"GH_TOKEN": "box-token"}
+
+	got := resolvedRunEnv(ambient, boxEnv)
+
+	want := []string{"PATH=/bin", "HOME=/root", "GH_TOKEN=box-token"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("resolvedRunEnv = %v, want %v", got, want)
+	}
+}
+
+// TestBwrapRun_SandboxGHTokenReflectsBoxEnvOverride verifies Run itself (not
+// just resolvedRunEnv in isolation) sets the launched bwrap process's GH_TOKEN
+// from box.Env, not from the launcher's ambient GH_TOKEN -- proving the
+// two-actor override (ADR 0016, issue #380) actually reaches the sandbox,
+// the gap a box-env-assembly test alone would miss (cmd.Env=nil previously
+// meant the sandbox inherited the launcher's ambient value regardless of
+// what buildBoxEnv computed).
+func TestBwrapRun_SandboxGHTokenReflectsBoxEnvOverride(t *testing.T) {
+	t.Setenv("GH_TOKEN", "launcher-token")
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var gotCmd *exec.Cmd
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotCmd = exec.Command(script, args...)
+		return gotCmd
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	if err := a.Run(Box{Env: map[string]string{"GH_TOKEN": "box-token"}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for _, kv := range gotCmd.Env {
+		if kv == "GH_TOKEN=launcher-token" {
+			t.Error("sandbox process env carries the launcher's ambient GH_TOKEN, want the box-resolved override")
+		}
+	}
+	found := false
+	for _, kv := range gotCmd.Env {
+		if kv == "GH_TOKEN=box-token" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("sandbox process env missing GH_TOKEN=box-token")
 	}
 }

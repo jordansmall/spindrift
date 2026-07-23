@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -184,6 +185,31 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	return args
 }
 
+// resolvedRunEnv returns the process environment the bwrap child should
+// inherit: ambient with its GH_TOKEN entry (if any) replaced by
+// box.Env["GH_TOKEN"] -- the value dispatchConfig's ResolveEnv chain
+// computed, which reflects a BOX_GH_TOKEN override (ADR 0016, issue #380)
+// when the operator set one. buildArgs's --setenv loop skips GH_TOKEN
+// (bwrapSecrets) to keep it off argv, and bwrap has no --clearenv, so
+// without this substitution the sandbox would inherit ambient's GH_TOKEN
+// unconditionally, silently ignoring any override. A missing "GH_TOKEN" key
+// in box.Env (every caller outside production, and any future BoxEnvVars
+// config that drops it) leaves ambient untouched.
+func resolvedRunEnv(ambient []string, boxEnv map[string]string) []string {
+	token, ok := boxEnv["GH_TOKEN"]
+	if !ok {
+		return ambient
+	}
+	out := make([]string, 0, len(ambient)+1)
+	for _, kv := range ambient {
+		if strings.HasPrefix(kv, "GH_TOKEN=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "GH_TOKEN="+token)
+}
+
 // Run launches a single issue into a bubblewrap sandbox.
 func (a *bwrapAdapter) Run(box Box) error {
 	etcDir, err := os.MkdirTemp("", "spindrift-etc-*")
@@ -206,10 +232,12 @@ func (a *bwrapAdapter) Run(box Box) error {
 		out = io.Discard
 	}
 
-	// cmd.Env = nil: the bwrap process inherits the launcher's full environment.
-	// Without --clearenv, the sandbox also inherits it. Secrets (GH_TOKEN, auth
-	// tokens) are therefore available inside the sandbox without appearing on argv.
+	// The bwrap process inherits the launcher's full environment (with
+	// GH_TOKEN substituted per resolvedRunEnv). Without --clearenv, the
+	// sandbox also inherits it. Secrets (GH_TOKEN, auth tokens) are
+	// therefore available inside the sandbox without appearing on argv.
 	cmd := execCommand("bwrap", a.buildArgs(etcDir, box)...)
+	cmd.Env = resolvedRunEnv(os.Environ(), box.Env)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	if err := cmd.Start(); err != nil {
