@@ -58,10 +58,18 @@ labels, but these are on you:
   live in-repo, so `pull_request` events run with repository secrets; with
   Workflows:RW an injected agent can rewrite CI to auto-pass checks or exfiltrate
   those secrets. Grant it only for an issue that edits `.github/workflows/*`.
-- **The launcher owns the merge, the Box never does.** A Box implements and
-  pushes; the host launcher makes the CI-green decision and applies `MERGE_MODE`.
-  A Box cannot approve or merge its own PR — that separation is what makes branch
-  protection meaningful.
+- **The launcher owns the merge, the Box never does — by contract, not by
+  default enforcement.** A Box implements and pushes; the host launcher makes
+  the CI-green decision and applies `MERGE_MODE`. Under the single-token
+  default the Agent must not run `gh pr merge`, but nothing stops it from
+  doing so — the token that opened the PR is the same token that can merge
+  it (see the [merge guard bypass
+  discussion](docs/reference.md#merge-guard)). **Two-actor separation** is
+  the opt-in hard mode that closes this: a second, launcher-held token whose
+  user a repository ruleset bypass-lists, barring the Box's user from
+  updating the base branch at all — the only configuration where a Box
+  genuinely cannot merge its own PR. See the [two-actor separation
+  recipe](docs/reference.md#two-actor-separation-opt-in-hard-mode).
 - **The macOS build fallback is pinned by digest.** When there's no Linux builder,
   `spindrift build` builds the image in an ephemeral Nix container with the working
   tree bind-mounted read-write; that container image is pinned by SHA-256 digest,

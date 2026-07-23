@@ -208,10 +208,11 @@ host launcher  ─▶  merge gate per issue
                            → exhausted → agent-failed (human triage, re-label to retry)
 ```
 
-The Box implements; the launcher owns the CI-green decision and the merge. A Box
-cannot approve or merge its own PR — that is what makes branch protection
-meaningful. See [How a run works](docs/reference.md#how-a-run-works) for the full
-diagram and label lifecycle.
+The Box implements; the launcher owns the CI-green decision and the merge. By
+contract the Box does not merge its own PR; two-actor separation (below) makes
+that a repository-enforced guarantee rather than a contract. See
+[How a run works](docs/reference.md#how-a-run-works) for the full diagram and
+label lifecycle.
 
 Optional behaviors, each off unless noted (see [`docs/reference.md`](docs/reference.md)
 for configuration):
@@ -220,6 +221,11 @@ for configuration):
   `**/CLAUDE.md`, `**/AGENTS.md`, `.claude/**`, `.opencode/**` by default) is
   downgraded to manual regardless of `MERGE_MODE` — see
   [Merge guard](docs/reference.md#merge-guard).
+- **Two-actor separation.** Set `BOX_GH_TOKEN` to a second machine user's PAT
+  and bar that user from the base branch with a repository ruleset — the
+  opt-in hard mode where the Box genuinely cannot merge its own PR, not just
+  by contract. See [Two-actor
+  separation](docs/reference.md#two-actor-separation-opt-in-hard-mode).
 - **Filer.** Set `FILER_MODEL` to file the non-blocking review findings the work
   loop escalates into `agent-review-finding`-labelled issues for human triage —
   see [Filer](docs/reference.md#filer).
