@@ -6,6 +6,14 @@
 # in-container script), PROMPTS_DIR (the baked prompt templates), and IMAGE_PATH
 # (the image archive store path substituted into the commands).
 
+# Prints issue-prompt.md's OUTCOME section (issue #1901): several prompt.bats
+# tests assert on this slice, so extracting it once keeps the sed anchor in
+# a single place instead of copy-pasted per test.
+issue_prompt_outcome_section() {
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  sed -n '/^# OUTCOME$/,/^# IF BLOCKED$/p' "$prompts/issue-prompt.md"
+}
+
 # Shared setup for the split entrypoint-*.bats suites (issue #518): every
 # concern file needs its own setup() hook per bats semantics, so the body
 # entrypoint.bats used to run once now lives here instead.
