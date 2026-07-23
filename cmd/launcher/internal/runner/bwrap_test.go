@@ -3,6 +3,7 @@ package runner
 import (
 	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -151,6 +152,25 @@ func TestResolvedRunEnv_OverridesGHTokenFromBoxEnv(t *testing.T) {
 	want := []string{"PATH=/bin", "HOME=/root", "GH_TOKEN=box-token"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("resolvedRunEnv = %v, want %v", got, want)
+	}
+}
+
+// TestResolvedRunEnv_StripsBoxGHTokenFromAmbient verifies BOX_GH_TOKEN never
+// reaches the sandbox under its own name (lib/env-schema.nix's boxGhToken
+// entry is deliberately boxEnv=false): bwrap's ambient-env inheritance would
+// otherwise leak it as-is, since it's a real var on the launcher's own
+// process environment whenever the operator has set it, unrelated to
+// buildBoxEnv's schema-driven forwarding.
+func TestResolvedRunEnv_StripsBoxGHTokenFromAmbient(t *testing.T) {
+	ambient := []string{"PATH=/bin", "GH_TOKEN=launcher-token", "BOX_GH_TOKEN=box-token"}
+	boxEnv := map[string]string{"GH_TOKEN": "box-token"}
+
+	got := resolvedRunEnv(ambient, boxEnv)
+
+	for _, kv := range got {
+		if strings.HasPrefix(kv, "BOX_GH_TOKEN=") {
+			t.Errorf("resolvedRunEnv leaked BOX_GH_TOKEN into the sandbox env: %v", got)
+		}
 	}
 }
 

@@ -192,22 +192,30 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 // when the operator set one. buildArgs's --setenv loop skips GH_TOKEN
 // (bwrapSecrets) to keep it off argv, and bwrap has no --clearenv, so
 // without this substitution the sandbox would inherit ambient's GH_TOKEN
-// unconditionally, silently ignoring any override. A missing "GH_TOKEN" key
-// in box.Env (every caller outside production, and any future BoxEnvVars
-// config that drops it) leaves ambient untouched.
+// unconditionally, silently ignoring any override. BOX_GH_TOKEN itself is
+// always stripped from ambient, present or not: it's a real var on the
+// launcher's own process environment whenever the operator sets one, and
+// lib/env-schema.nix's boxGhToken entry is deliberately boxEnv=false -- it
+// must never reach the Box under its own name, only ever as GH_TOKEN's
+// substituted value above. A missing "GH_TOKEN" key in box.Env (every
+// caller outside production, and any future BoxEnvVars config that drops
+// it) leaves ambient's own GH_TOKEN untouched.
 func resolvedRunEnv(ambient []string, boxEnv map[string]string) []string {
-	token, ok := boxEnv["GH_TOKEN"]
-	if !ok {
-		return ambient
-	}
+	token, hasOverride := boxEnv["GH_TOKEN"]
 	out := make([]string, 0, len(ambient)+1)
 	for _, kv := range ambient {
-		if strings.HasPrefix(kv, "GH_TOKEN=") {
+		if strings.HasPrefix(kv, "BOX_GH_TOKEN=") {
+			continue
+		}
+		if hasOverride && strings.HasPrefix(kv, "GH_TOKEN=") {
 			continue
 		}
 		out = append(out, kv)
 	}
-	return append(out, "GH_TOKEN="+token)
+	if hasOverride {
+		out = append(out, "GH_TOKEN="+token)
+	}
+	return out
 }
 
 // Run launches a single issue into a bubblewrap sandbox.
