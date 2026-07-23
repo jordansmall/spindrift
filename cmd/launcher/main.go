@@ -682,6 +682,27 @@ func localBaseBranchResolver(c config, lw *localloop.Wired, cf forge.CodeForge) 
 	}
 }
 
+// boxGHTokenResolver wraps next, overriding the "GH_TOKEN" BoxEnvVars name
+// to the operator's BOX_GH_TOKEN when set -- opt-in two-actor separation
+// (ADR 0016, issue #380): the Box then receives that value as its own
+// GH_TOKEN, while the launcher's own os.Getenv("GH_TOKEN") stays untouched
+// for merges, labels, and every other host-side forge call. Checked ahead
+// of next's own dispatch (which fans out on CODE_FORGE, e.g.
+// localBaseBranchResolver's BASE_BRANCH case) so the override applies
+// under every Code Forge, not just one. BOX_GH_TOKEN unset falls straight
+// through to next, so the single-token default stays byte-for-byte
+// unchanged.
+func boxGHTokenResolver(next func(num, name string) string) func(num, name string) string {
+	return func(num, name string) string {
+		if name == "GH_TOKEN" {
+			if v := os.Getenv("BOX_GH_TOKEN"); v != "" {
+				return v
+			}
+		}
+		return next(num, name)
+	}
+}
+
 // dispatchConfig builds the subset of config a dispatch.Factory needs.
 // OpenPRForIssue wires forge.ResolveOpenPR (issue #565), so a zero-exit
 // rate-limited retry never re-runs a box whose work already landed a PR;
@@ -690,7 +711,7 @@ func localBaseBranchResolver(c config, lw *localloop.Wired, cf forge.CodeForge) 
 func dispatchConfig(c config, lw *localloop.Wired, cf forge.CodeForge) dispatch.Config {
 	return dispatch.Config{
 		BoxEnvVars:            c.boxEnvVars,
-		ResolveEnv:            localBaseBranchResolver(c, lw, cf),
+		ResolveEnv:            boxGHTokenResolver(localBaseBranchResolver(c, lw, cf)),
 		Kind:                  c.dispatchKind,
 		CodeForge:             c.codeForge,
 		TransientRetryMax:     c.transientRetryMax,
