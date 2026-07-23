@@ -365,18 +365,27 @@ func TestPrintHelpFull_ContainsLabelEntry(t *testing.T) {
 // TestPrintHelpFull_RepoSlugAndGhTokenNoteLocalExemption verifies the full
 // reference's REPO_SLUG/GH_TOKEN doc strings, sourced from lib/env-schema.nix,
 // spell out the fully-local exemption — mirroring the existing JIRA_TOKEN
-// doc's "required when ISSUE_TRACKER=jira" precedent (issue #1895).
+// doc's "required when ISSUE_TRACKER=jira" precedent (issue #1895). Matches
+// on each line's leading env/flag token rather than a bare substring search,
+// so it targets only GH_TOKEN's own two rendered lines (env-only and its
+// --gh-token-file secret-file flag) and doesn't false-positive on a doc
+// string that merely mentions "GH_TOKEN" in prose (e.g. BOX_GH_TOKEN's,
+// issue #380).
 func TestPrintHelpFull_RepoSlugAndGhTokenNoteLocalExemption(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
 	out := buf.String()
 	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "--repo-slug") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		switch fields[0] {
+		case "--repo-slug":
 			if !strings.Contains(line, "local") {
 				t.Errorf("REPO_SLUG doc must note the fully-local exemption, got: %q", line)
 			}
-		}
-		if strings.Contains(line, "GH_TOKEN") && !strings.Contains(line, "refresh-file") {
+		case "GH_TOKEN", "--gh-token-file":
 			if !strings.Contains(line, "local") {
 				t.Errorf("GH_TOKEN doc must note the fully-local exemption, got: %q", line)
 			}
