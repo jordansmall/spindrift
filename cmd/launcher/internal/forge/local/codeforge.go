@@ -36,19 +36,22 @@ func NewLocalCodeForge(repoPath, baseBranch string, parent SanitizedParent, user
 		repoPath:   repoPath,
 		baseBranch: baseBranch,
 		parent:     parent,
+		userName:   userName,
+		userEmail:  userEmail,
 	}
 }
 
 // localCodeForge wraps the git adapter's CodeForge with the host-side hooks
 // CODE_FORGE=local needs around it (ADR 0033): relaying a Box's code-out
-// bundle in (creating the Integration branch on first use), and resolving
-// the landed Integration ref + commit sha after Merge. Every other method
-// (AgentBranch, Rebase, Probe, BranchExists, and Merge itself) is the
-// embedded git client's, unchanged.
+// bundle in (creating the Integration branch on first use), resolving the
+// landed Integration ref + commit sha after Merge, and landing itself (see
+// Merge below). Every other method (AgentBranch, Rebase, Probe,
+// BranchExists) is the embedded git client's, unchanged.
 type localCodeForge struct {
 	forge.CodeForge
 	repoPath, baseBranch string
 	parent               SanitizedParent
+	userName, userEmail  string
 }
 
 // RelayBundle imports ref from the bundle the Box left in outboxDir into the
@@ -63,6 +66,19 @@ func (l *localCodeForge) RelayBundle(outboxDir, ref string) error {
 		return err
 	}
 	return ensureIntegrationBranch(l.repoPath, l.baseBranch, IntegrationBranch(l.parent))
+}
+
+// Merge overrides the embedded git client's `git merge --no-ff` landing
+// (ADR 0033, issue #1889): the Integration branch must stay linear with zero
+// merge commits, unconditionally, unlike the remote git/github forges' own
+// --no-ff behavior, which this leaves untouched. Landing rebases branch onto
+// the Integration branch's current tip and fast-forwards it there instead of
+// merging FETCH_HEAD in. A rebase that cannot complete automatically returns
+// forge.ErrMergeConflict and leaves the Integration branch untouched — the
+// same "stays unlanded and blocked" posture ADR 0033 gives a conflicting
+// merge, reached here via a conflicting rebase instead.
+func (l *localCodeForge) Merge(branch string) error {
+	return rebaseLand(l.repoPath, branch, IntegrationBranch(l.parent), l.userName, l.userEmail)
 }
 
 // LandingRef resolves the Integration branch's current tip commit sha,
