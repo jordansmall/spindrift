@@ -922,10 +922,10 @@ account and a second secret to provision.
    behind your existing `GH_TOKEN`. Mint it a fine-grained PAT scoped to
    **only the Target repository**, with the same permission set the
    single-token default already grants (see the permission table above).
-2. Set that PAT as `BOX_GH_TOKEN` (secret, opt-in — see the [flake options
-   reference](flake-options.md)). Unset, the harness behaves exactly as the
-   single-token default, byte-for-byte; set, the Box receives this value as
-   its own `GH_TOKEN` while the launcher keeps using its own for every
+2. Set that PAT as `BOX_GH_TOKEN` — a secret, like `GH_TOKEN` itself: `harness.env`
+   or your shell, never a flake setting. Unset, the harness behaves exactly as
+   the single-token default, byte-for-byte; set, the Box receives this value
+   as its own `GH_TOKEN` while the launcher keeps using its own for every
    host-side call (merges, labels, the usage comment).
 3. On the Target repo, create a **repository ruleset** (Settings → Rules →
    Rulesets) targeting the base branch, with a "Restrict updates" rule (add
