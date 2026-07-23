@@ -17,12 +17,16 @@ import (
 // siblings.
 func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
 	if result.ParseErr != nil {
-		fmt.Printf("    #%s  status=malformed  note=unparseable outcome line\n", num)
+		// A malformed outcome line gets the same PR-adoption safety net as
+		// no outcome line at all (issue #1898): the box may still have
+		// landed a real, open, green PR before mangling its last print —
+		// that PR is no less real for the line above it being unparseable,
+		// and ADR 0012 reserves agent-failed for "never produced a green
+		// PR," not "produced one but said so badly."
+		s.settleUnresolved(num, "", fmt.Sprintf("unparseable outcome line: %v", result.ParseErr))
 		return
 	}
 	if !result.OutcomeFound {
-		branch := s.cf.AgentBranch(num)
-
 		clsNote := ""
 		if result.ClassifyErr != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: classify: %v\n", num, result.ClassifyErr)
@@ -32,26 +36,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 				clsNote += "  resetsAt=" + result.Classification.ResetAt.UTC().Format(time.RFC3339)
 			}
 		}
-
-		res, prErr := forge.ResolveOpenPR(s.cf, num)
-		if prErr != nil {
-			fmt.Printf("    #%s  status=missing%s  note=PR lookup failed: %v\n", num, clsNote, prErr)
-			return
-		}
-		if !res.Found {
-			fmt.Printf("    #%s  status=missing%s  note=no outcome in log\n", num, clsNote)
-			s.transitionState(num, forge.InProgress, forge.Failed)
-			return
-		}
-		// No transitionState here, on purpose, regardless of draft-ness
-		// (issue #1654 folded the non-draft case into this same branch): an
-		// open PR — draft or not — is a real, if unmergeable-right-now,
-		// result, and ADR 0012 reserves agent-failed for "never produced a
-		// green PR." A non-draft PR only ever got that way via this
-		// launcher's own MarkReady at green (issue #1651), so if anything
-		// it is *more* likely to have gone green than a draft one — never
-		// less deserving of the same restraint.
-		fmt.Printf("    #%s  landing=%s  status=blocked  note=no outcome line; PR on %s not adopted\n", num, res.URL, branch)
+		s.settleUnresolved(num, clsNote, "no outcome in log")
 		return
 	}
 
@@ -94,6 +79,35 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
 		s.postUsageComment(num, d)
 	}
+}
+
+// settleUnresolved is the shared safety net for a box result that carries no
+// usable outcome line — either an unparseable SPINDRIFT_OUTCOME (ParseErr)
+// or none at all (!OutcomeFound). clsNote is classification detail to log
+// alongside a confirmed-missing PR (empty for the ParseErr case, which never
+// attempts classification); missingNote explains why no outcome was usable.
+func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
+	branch := s.cf.AgentBranch(num)
+
+	res, prErr := forge.ResolveOpenPR(s.cf, num)
+	if prErr != nil {
+		fmt.Printf("    #%s  status=missing%s  note=PR lookup failed: %v\n", num, clsNote, prErr)
+		return
+	}
+	if !res.Found {
+		fmt.Printf("    #%s  status=missing%s  note=%s\n", num, clsNote, missingNote)
+		s.transitionState(num, forge.InProgress, forge.Failed)
+		return
+	}
+	// No transitionState here, on purpose, regardless of draft-ness
+	// (issue #1654 folded the non-draft case into this same branch): an
+	// open PR — draft or not — is a real, if unmergeable-right-now,
+	// result, and ADR 0012 reserves agent-failed for "never produced a
+	// green PR." A non-draft PR only ever got that way via this
+	// launcher's own MarkReady at green (issue #1651), so if anything
+	// it is *more* likely to have gone green than a draft one — never
+	// less deserving of the same restraint.
+	fmt.Printf("    #%s  landing=%s  status=blocked  note=no outcome line; PR on %s left for manual adopt\n", num, res.URL, branch)
 }
 
 // transitionState is a best-effort dispatch-state transition that logs but
