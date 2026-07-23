@@ -159,6 +159,25 @@ type IssueCloser interface {
 	CloseIssue(num string) error
 }
 
+// MergeCloser is the optional IssueTracker surface for an adapter that can
+// close an issue directly as settle's deterministic backstop (issue #1892)
+// for a Code Forge's own merge-driven auto-close — used only by settle's
+// post-merge verification, never by reconcile. It is deliberately a
+// distinctly-named method rather than reusing IssueCloser: ISSUE_TRACKER and
+// CODE_FORGE are selected independently (main.go's newIssueTracker/
+// newCodeForge), so ISSUE_TRACKER=local paired with CODE_FORGE=github is a
+// valid combination — were this surface named CloseIssue like IssueCloser,
+// the local adapter's existing method would satisfy it too, and settle would
+// drive the local closed: axis directly, a write only reconcile's sweep may
+// make. Only github implements MergeCloser. Callers discover it with a type
+// assertion — `mc, ok := it.(MergeCloser)`.
+type MergeCloser interface {
+	// CloseMergedIssue closes issue num once settle has independently
+	// confirmed a genuine merge. Idempotent: closing an already-closed issue
+	// is a successful no-op.
+	CloseMergedIssue(num string) error
+}
+
 // AbandonedFlagger is the optional IssueTracker surface for adapters with a
 // native abandoned axis reconcile can flip (ADR 0029). Only the local adapter
 // implements it — a github/jira PR closed without merging needs no further

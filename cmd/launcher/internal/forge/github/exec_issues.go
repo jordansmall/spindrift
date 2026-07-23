@@ -2,6 +2,7 @@ package github
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -291,6 +292,33 @@ func (e *execClient) TouchesOf(num string) ([]string, error) {
 		return nil, err
 	}
 	return forge.ParseTouchPaths(iss.Body), nil
+}
+
+// CloseMergedIssue implements the optional forge.MergeCloser surface (issue
+// #1892): a deterministic backstop for a merged agent PR whose body's
+// Closes #<N> keyword GitHub's own auto-close missed. Checks state before
+// shelling out so an already-closed issue (the common case — auto-close
+// already ran) is a true no-op rather than relying on gh's own exit code for
+// a redundant close.
+func (e *execClient) CloseMergedIssue(num string) error {
+	iss, err := e.Issue(num)
+	if err != nil {
+		return err
+	}
+	if iss.State == forge.IssueClosed {
+		return nil
+	}
+	var stderr bytes.Buffer
+	cmd := exec.Command("gh", "issue", "close", num, "--repo", e.repo)
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		suffix := ""
+		if s := strings.TrimSpace(stderr.String()); s != "" {
+			suffix = ": " + s
+		}
+		return fmt.Errorf("gh issue close %s: %w%s", num, err, suffix)
+	}
+	return nil
 }
 
 func (e *execClient) Comment(num, body string) error {

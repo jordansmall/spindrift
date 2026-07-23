@@ -919,3 +919,95 @@ fi
 		t.Errorf("error must surface gh's stderr, got: %v", err)
 	}
 }
+
+// TestExecClient_CloseMergedIssue_AlreadyClosedIsNoOp verifies that
+// CloseMergedIssue is a no-op — and never shells out to `gh issue close` —
+// when the issue is already closed (issue #1892: GitHub's own merged-PR
+// auto-close already ran, e.g. the PR body carried a Closes #<N> keyword). A
+// `gh issue close` call here would be a bug: the fake script exits 1 if it
+// ever sees one.
+func TestExecClient_CloseMergedIssue_AlreadyClosedIsNoOp(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
+  echo '{"number":42,"title":"t","body":"","state":"CLOSED","labels":[]}'
+  exit 0
+fi
+if [ "$1" = "issue" ] && [ "$2" = "close" ]; then
+  echo "must not be called" >&2
+  exit 1
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	if err := c.CloseMergedIssue("42"); err != nil {
+		t.Fatalf("CloseMergedIssue on an already-closed issue must be a no-op, got: %v", err)
+	}
+}
+
+// TestExecClient_CloseMergedIssue_ClosesOpenIssue verifies that
+// CloseMergedIssue shells out to `gh issue close` when the issue is still
+// open — the case GitHub's own auto-close missed because the PR body omitted
+// (or reworded) the Closes #<N> keyword.
+func TestExecClient_CloseMergedIssue_ClosesOpenIssue(t *testing.T) {
+	dir := prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
+  echo '{"number":42,"title":"t","body":"","state":"OPEN","labels":[]}'
+  exit 0
+fi
+if [ "$1" = "issue" ] && [ "$2" = "close" ]; then
+  exit 0
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	if err := c.CloseMergedIssue("42"); err != nil {
+		t.Fatalf("CloseMergedIssue on an open issue: %v", err)
+	}
+
+	calls, err := filepath.Glob(filepath.Join(dir, "call-*.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeCall, err := os.ReadFile(calls[len(calls)-1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(closeCall), "issue\nclose\n42") {
+		t.Errorf("last gh call = %q, want `gh issue close 42 ...`", closeCall)
+	}
+}
+
+// TestExecClient_CloseMergedIssue_GenuineFailureSurfaced verifies that a
+// real gh issue close failure on an open issue is returned as an error
+// rather than swallowed as if it were the idempotent already-closed case.
+func TestExecClient_CloseMergedIssue_GenuineFailureSurfaced(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
+  echo '{"number":42,"title":"t","body":"","state":"OPEN","labels":[]}'
+  exit 0
+fi
+if [ "$1" = "issue" ] && [ "$2" = "close" ]; then
+  printf 'HTTP 403: Resource not accessible by integration\n' >&2
+  exit 1
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	err := c.CloseMergedIssue("42")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error must surface gh's stderr, got: %v", err)
+	}
+}
+
+// TestExecClient_ImplementsMergeCloser verifies the github adapter satisfies
+// forge.MergeCloser (issue #1892) — settle's deterministic post-merge close
+// backstop. It must NOT satisfy forge.IssueCloser (that surface is reserved
+// for the local adapter's reconcile-owned closed: axis; a github adapter
+// implementing it too would let an ISSUE_TRACKER=local + CODE_FORGE=github
+// pairing close a local issue through the wrong path).
+func TestExecClient_ImplementsMergeCloser(t *testing.T) {
+	var _ forge.MergeCloser = NewExecClient("owner/repo", testLabels, "agent/issue-")
+	if _, ok := any(NewExecClient("owner/repo", testLabels, "agent/issue-")).(forge.IssueCloser); ok {
+		t.Error("ExecClient satisfies forge.IssueCloser, want it hidden")
+	}
+}
