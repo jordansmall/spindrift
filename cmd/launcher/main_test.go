@@ -1509,6 +1509,66 @@ func TestDispatchConfig_NonLocal_ResolveEnv_PassesThroughUnchanged(t *testing.T)
 	}
 }
 
+// TestDispatchConfig_ResolveEnv_BoxGHTokenOverridesGHToken verifies opt-in
+// two-actor separation (ADR 0016, issue #380): when BOX_GH_TOKEN is set,
+// dispatchConfig's ResolveEnv resolves the Box's GH_TOKEN to that value
+// instead of the launcher's own, while the launcher's ambient GH_TOKEN stays
+// untouched for its own host-side forge calls.
+func TestDispatchConfig_ResolveEnv_BoxGHTokenOverridesGHToken(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "github"
+	t.Setenv("GH_TOKEN", "launcher-token")
+	t.Setenv("BOX_GH_TOKEN", "box-token")
+	cf := forge.NewFake()
+
+	cfg := dispatchConfig(c, testWired(forge.NewFake()), cf)
+
+	if got := cfg.ResolveEnv("42", "GH_TOKEN"); got != "box-token" {
+		t.Errorf("ResolveEnv(42, GH_TOKEN) = %q, want %q", got, "box-token")
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "launcher-token" {
+		t.Errorf("launcher's own GH_TOKEN mutated: got %q, want %q", got, "launcher-token")
+	}
+}
+
+// TestDispatchConfig_ResolveEnv_GHTokenPassthroughWhenBoxGHTokenUnset
+// verifies the single-token default: with BOX_GH_TOKEN unset, ResolveEnv
+// resolves GH_TOKEN exactly as before this issue -- the launcher's own
+// ambient value, forwarded unchanged.
+func TestDispatchConfig_ResolveEnv_GHTokenPassthroughWhenBoxGHTokenUnset(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "github"
+	t.Setenv("GH_TOKEN", "launcher-token")
+	cf := forge.NewFake()
+
+	cfg := dispatchConfig(c, testWired(forge.NewFake()), cf)
+
+	if got := cfg.ResolveEnv("42", "GH_TOKEN"); got != "launcher-token" {
+		t.Errorf("ResolveEnv(42, GH_TOKEN) = %q, want %q", got, "launcher-token")
+	}
+}
+
+// TestDispatchConfig_Local_ResolveEnv_BoxGHTokenOverridesGHToken verifies
+// the BOX_GH_TOKEN override applies under CODE_FORGE=local too -- it is a
+// host-side control signal independent of Code Forge, unlike BASE_BRANCH's
+// local-only Integration-branch substitution.
+func TestDispatchConfig_Local_ResolveEnv_BoxGHTokenOverridesGHToken(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.baseBranch = "main"
+	t.Setenv("GH_TOKEN", "launcher-token")
+	t.Setenv("BOX_GH_TOKEN", "box-token")
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "42"})
+	cf := fc.AsLocal()
+
+	cfg := dispatchConfig(c, testWired(fc), cf)
+
+	if got := cfg.ResolveEnv("42", "GH_TOKEN"); got != "box-token" {
+		t.Errorf("ResolveEnv(42, GH_TOKEN) = %q, want %q", got, "box-token")
+	}
+}
+
 // TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchOnBranchExistsError
 // verifies that a BranchExists failure (e.g. the Accumulation repo path is
 // unreadable) falls back to the operator's real base branch rather than
