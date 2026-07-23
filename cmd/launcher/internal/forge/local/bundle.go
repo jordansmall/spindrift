@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/seambundle"
 )
 
@@ -62,6 +63,63 @@ func ensureIntegrationBranch(repoPath, baseBranch, integrationBranch string) err
 	sha := strings.TrimSpace(string(out))
 	if out, err := exec.Command("git", "-C", repoPath, "update-ref", "refs/heads/"+integrationBranch, sha).CombinedOutput(); err != nil {
 		return fmt.Errorf("local: create integration branch %s: %w: %s", integrationBranch, err, out)
+	}
+	return nil
+}
+
+// rebaseLand rebases branch onto integrationBranch's current tip inside
+// repoPath (the bare Accumulation repo) and fast-forwards integrationBranch
+// to the rebased result — localCodeForge's Merge override (ADR 0033, issue
+// #1889): unlike the shared git adapter's `git merge --no-ff`, this keeps
+// the Integration branch linear with zero merge commits. Works through a
+// throwaway clone rather than operating on repoPath directly, since a
+// rebase needs a working tree a bare repo doesn't have.
+//
+// Returns forge.ErrMergeConflict, leaving integrationBranch untouched, when
+// the rebase itself cannot complete automatically — every rebase failure is
+// treated as a conflict, matching forge/git.Rebase's own precedent for a
+// fetched, well-formed ref, rather than pattern-matching stderr. The
+// fast-forward push after a successful rebase is deliberately non-forced: it
+// only ever succeeds when HEAD is genuinely a descendant of
+// integrationBranch's tip, so a would-be non-fast-forward (another seam
+// landed onto integrationBranch between this rebase's start and its push) is
+// refused outright rather than silently overwritten.
+//
+// userName/userEmail configure the clone's commit identity: rebase re-commits
+// each replayed commit under the current committer, so a clone with no
+// ambient git config would otherwise fail outright with "please tell me who
+// you are" rather than landing cleanly.
+func rebaseLand(repoPath, branch, integrationBranch, userName, userEmail string) error {
+	if branch == "" || strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("local: invalid ref %q", branch)
+	}
+	dir, err := os.MkdirTemp("", "spindrift-local-forge-land-*")
+	if err != nil {
+		return fmt.Errorf("local: mkdtemp: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	gitIn := func(args ...string) *exec.Cmd {
+		return exec.Command("git", append([]string{"-C", dir}, args...)...)
+	}
+	if out, err := exec.Command("git", "clone", repoPath, dir).CombinedOutput(); err != nil {
+		return fmt.Errorf("local: clone %s: %w: %s", repoPath, err, out)
+	}
+	if out, err := gitIn("config", "user.name", userName).CombinedOutput(); err != nil {
+		return fmt.Errorf("local: config user.name: %w: %s", err, out)
+	}
+	if out, err := gitIn("config", "user.email", userEmail).CombinedOutput(); err != nil {
+		return fmt.Errorf("local: config user.email: %w: %s", err, out)
+	}
+	if out, err := gitIn("checkout", branch).CombinedOutput(); err != nil {
+		return fmt.Errorf("local: checkout %s: %w: %s", branch, err, out)
+	}
+	if err := gitIn("rebase", "origin/"+integrationBranch).Run(); err != nil {
+		_ = gitIn("rebase", "--abort").Run()
+		return forge.ErrMergeConflict
+	}
+	if out, err := gitIn("push", "origin", "HEAD:refs/heads/"+integrationBranch).CombinedOutput(); err != nil {
+		return fmt.Errorf("local: fast-forward %s: %w: %s", integrationBranch, err, out)
 	}
 	return nil
 }
