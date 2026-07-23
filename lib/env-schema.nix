@@ -294,6 +294,12 @@
     flakeOption = true;
     boxEnv = false;
   };
+  boxGhToken = {
+    env = "BOX_GH_TOKEN";
+    secret = true;
+    doc = "opt-in two-actor separation (ADR 0016): a second machine user's fine-grained PAT for the Box only — the launcher keeps using its own GH_TOKEN for merges, labels, and all host-side forge calls, while the Box receives this value as its GH_TOKEN instead; empty (default) leaves the single-token flow unchanged. Pair with a repository ruleset that bars this user from updating the base branch and bypass-lists only the launcher's user — see docs/reference.md's two-actor separation recipe";
+    boxEnv = false;
+  };
   claudeOAuthToken = {
     env = "CLAUDE_CODE_OAUTH_TOKEN";
     secret = true;
