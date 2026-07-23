@@ -226,3 +226,38 @@ func isMergedIntoIntegration(repoPath, sha, integrationBranch string) (bool, err
 	}
 	return false, fmt.Errorf("local: merge-base --is-ancestor %s %s: %w", sha, integrationBranch, err)
 }
+
+// patchEquivalentToIntegration reports whether every one of sha's own
+// commits is already present, patch-for-patch, on integrationBranch's
+// current tip inside repoPath — BranchMergedIntoIntegration's fallback for a
+// rebased-and-landed sha, whose replay onto integrationBranch gives every
+// commit a new, unrelated sha that raw ancestry (isMergedIntoIntegration)
+// can never see again (issue #1890). `git cherry upstream sha` lists every
+// commit reachable from sha but not upstream, prefixed "-" when an
+// equivalent patch is already on upstream and "+" when it genuinely isn't; a
+// bundle relays a branch's entire base..branch range, so sha routinely
+// carries more than one commit, and a single "+" anywhere in that list means
+// the seam as a whole hasn't landed, even if an earlier commit has. A git
+// invocation failure that isn't itself a verdict (an unknown sha, matching
+// isMergedIntoIntegration's own posture for one) is swallowed as false
+// rather than a real error.
+func patchEquivalentToIntegration(repoPath, sha, integrationBranch string) (bool, error) {
+	out, err := exec.Command("git", "-C", repoPath, "cherry", "--", "refs/heads/"+integrationBranch, sha).Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			return false, fmt.Errorf("local: cherry %s %s: %w", integrationBranch, sha, err)
+		}
+		return false, nil
+	}
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return true, nil
+	}
+	for _, line := range strings.Split(trimmed, "\n") {
+		if strings.HasPrefix(line, "+") {
+			return false, nil
+		}
+	}
+	return true, nil
+}
