@@ -66,6 +66,7 @@ var schemaFlags = []flagEntry{
 // Callers must supply these via the environment or via --<fileFlag> path flag.
 var secretKnobs = []secretKnob{
 	{env: "ANTHROPIC_API_KEY", doc: "Anthropic API key; set this or CLAUDE_CODE_OAUTH_TOKEN", fileFlag: "anthropic-api-key-file"},
+	{env: "BOX_GH_TOKEN", doc: "opt-in two-actor separation (ADR 0016): a second machine user's fine-grained PAT for the Box only — the launcher keeps using its own GH_TOKEN for merges, labels, and all host-side forge calls, while the Box receives this value as its GH_TOKEN instead; empty (default) leaves the single-token flow unchanged. Pair with a repository ruleset that bars this user from updating the base branch and bypass-lists only the launcher's user — see docs/reference.md's two-actor separation recipe", fileFlag: "box-gh-token-file"},
 	{env: "CLAUDE_CODE_OAUTH_TOKEN", doc: "Claude Code OAuth token (run 'claude setup-token'); set this or ANTHROPIC_API_KEY", fileFlag: "claude-code-oauth-token-file"},
 	{env: "GH_TOKEN", doc: "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW; required unless CODE_FORGE and ISSUE_TRACKER are both local", fileFlag: "gh-token-file"},
 	{env: "JIRA_TOKEN", doc: "Jira API token (Cloud: paired with JIRA_EMAIL for Basic auth; Server/Data Center: used alone as a Bearer PAT); required when ISSUE_TRACKER=jira", fileFlag: "jira-token-file"},
