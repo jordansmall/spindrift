@@ -178,6 +178,10 @@ func TestIsNoBuilderError(t *testing.T) {
 		{"error: no build machines available", true},
 		{"error: attribute 'nonexistent' missing", false},
 		{"", false},
+		{`error: Cannot build '/nix/store/y56hw02v3fqnirf98aabalgvparlcasr-spindrift-base.json.drv'.
+       Reason: platform mismatch
+       Required system: 'aarch64-linux'
+       Current system: 'aarch64-darwin'`, true},
 	}
 	for _, tc := range tests {
 		if got := isNoBuilderError(tc.stderr); got != tc.want {
