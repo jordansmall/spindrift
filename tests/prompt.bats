@@ -254,14 +254,64 @@ setup() {
   # issue #1653: the launcher, not the Driver, owns the draft->ready flip
   # (issue #1651) -- the Driver's OUTCOME step must print status=ready
   # without ever calling `gh pr ready`.
-  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
-  local prompt="$prompts/issue-prompt.md"
   local section
-  section="$(sed -n '/^# OUTCOME$/,/^# IF BLOCKED$/p' "$prompt")"
+  section="$(issue_prompt_outcome_section)"
   [ -n "$section" ]
   grep -q 'status=ready' <<<"$section"
   # Anchored to a bare invocation line, not the prose forbidding it below.
   ! grep -q '^gh pr ready' <<<"$section"
+}
+
+@test "OUTCOME section states the exact grammar and allowed status values" {
+  # issue #1901: an agent following the prompt must be able to see the
+  # accepted grammar and status enum, not infer it from one worked example.
+  local section
+  section="$(issue_prompt_outcome_section)"
+  [ -n "$section" ]
+  grep -qF 'SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=<status> note=<short reason>' <<<"$section"
+  grep -q 'valid `status` values here are `ready` and `blocked`' <<<"$section"
+}
+
+@test "OUTCOME section marks a trailing-colon line as invalid" {
+  # issue #1901: SPINDRIFT_OUTCOME: (colon, not space) fails the parser's
+  # literal prefix match, so the prompt must warn against it explicitly.
+  local section
+  section="$(issue_prompt_outcome_section)"
+  [ -n "$section" ]
+  grep -qF 'SPINDRIFT_OUTCOME:' <<<"$section"
+  grep -qi 'trailing colon' <<<"$section"
+}
+
+@test "OUTCOME section marks a prose-embedded line as invalid" {
+  # issue #1901: LastInLog only recognizes a line that *starts* with the
+  # prefix, so burying it inside a sentence hides the whole line.
+  local section
+  section="$(issue_prompt_outcome_section)"
+  [ -n "$section" ]
+  grep -qi 'inside a sentence' <<<"$section"
+}
+
+@test "OUTCOME section marks a freeform status as invalid, distinct from lost" {
+  # issue #1901: Parse() does not enforce a status enum -- ready/blocked is a
+  # prompt-level contract, so the prompt must call out that a freeform value
+  # like SUCCESS is wrong, not just undocumented. Unlike the colon/prose
+  # variants, this one *does* parse, so the prompt must not claim it's lost.
+  local section
+  section="$(issue_prompt_outcome_section)"
+  [ -n "$section" ]
+  grep -qF 'status=SUCCESS' <<<"$section"
+  grep -qi 'freeform status' <<<"$section"
+  grep -qi 'this parses fine' <<<"$section"
+}
+
+@test "OUTCOME section reiterates the line must be the literal final message" {
+  # issue #1901 AC3: the agent must be told, in the OUTCOME section itself,
+  # that nothing may follow the line.
+  local section
+  section="$(issue_prompt_outcome_section)"
+  [ -n "$section" ]
+  grep -qi 'literal final message' <<<"$section"
+  grep -qi 'nothing after it' <<<"$section"
 }
 
 @test "IF BLOCKED never reverts the PR to draft -- it is always already draft" {

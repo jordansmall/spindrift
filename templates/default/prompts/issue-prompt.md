@@ -214,6 +214,16 @@ backticks, a code fence, or any other markdown formatting:
 
 SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=ready note=<short reason>
 
+Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=<status> note=<short reason>`
+— one line, space-delimited fields, `note` last (it may itself contain spaces
+and `=`). The only valid `status` values here are `ready` and `blocked` — no
+other word belongs in that field.
+
+Invalid — each of these breaks the contract, whether or not it parses:
+- Trailing colon: `SPINDRIFT_OUTCOME: issue=${ISSUE_NUMBER} landing=<pr-url> status=ready note=<short reason>` — the required prefix is a literal space after `OUTCOME`, not a colon, so this never matches; the launcher never sees an outcome and treats the run as lost.
+- Embedded inside a sentence: `Done — SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=ready note=<short reason>` — only a line that starts at the prefix matches; text before it hides the whole line the same way, losing the run. Print the line on its own, starting at column one, nothing before it.
+- Freeform status: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=SUCCESS note=<short reason>` — this parses fine, but `ready` and `blocked` are the only accepted values; anything else is silently wrong rather than lost outright, and the launcher will never flip the PR ready or merge it.
+
 This must be the literal final message — nothing after it, no prose summary, no
 background task. The launcher parses this one line to learn your PR; if missing,
 the PR is never merged and the run is wasted. Grammar is validated by
