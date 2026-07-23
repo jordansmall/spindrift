@@ -62,6 +62,31 @@ func TestPreviewIssues_PrintsMergeMode(t *testing.T) {
 	}
 }
 
+// TestPreviewIssues_FullyLocal_OmitsBareRepoLine verifies that the preview
+// banner does not print a bare "repo: " with an empty slug under a fully-
+// local run (issue #1895), while still printing merge mode.
+func TestPreviewIssues_FullyLocal_OmitsBareRepoLine(t *testing.T) {
+	c := baseConfig()
+	c.repoSlug = ""
+	c.issueTracker = "local"
+	c.label = "ready-for-agent"
+	c.mergeMode = "immediate"
+	fc := forge.NewFake()
+
+	var buf bytes.Buffer
+	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
+		t.Fatalf("previewIssues: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "repo: ") {
+		t.Errorf("previewIssues output must not print a bare 'repo: ' with an empty slug; got:\n%s", out)
+	}
+	if !strings.Contains(out, "immediate") {
+		t.Errorf("previewIssues output must still include merge mode; got:\n%s", out)
+	}
+}
+
 // TestPrintPlan_AnnotatesBlockers verifies that printPlan — the single shared
 // blocker-annotation printer used by both the discovered-batch and selective
 // preview paths — prints the dispatch count and annotates only the issues

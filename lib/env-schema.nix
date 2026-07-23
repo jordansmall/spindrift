@@ -275,7 +275,7 @@
     group = "Repository & identity";
     required = true;
     placeholder = "owner/repo";
-    doc = "target GitHub repository the agents work on";
+    doc = "target GitHub repository the agents work on; required unless CODE_FORGE and ISSUE_TRACKER are both local";
     flakeOption = true;
     boxEnv = true;
   };
@@ -284,7 +284,7 @@
     required = true;
     secret = true;
     placeholder = "fake-token";
-    doc = "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW";
+    doc = "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW; required unless CODE_FORGE and ISSUE_TRACKER are both local";
     boxEnv = true;
   };
   ghTokenRefreshFile = {

@@ -96,7 +96,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `settings.repository.jiraBaseURL` | `JIRA_BASE_URL` | — | Jira site base URL (e.g. https://yourcompany.atlassian.net); required when ISSUE_TRACKER=jira |
 | `settings.repository.jiraEmail` | `JIRA_EMAIL` | — | Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; leave empty for Bearer-token auth (Jira Server/Data Center PATs) |
 | `settings.repository.jiraProjectKey` | `JIRA_PROJECT_KEY` | — | Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira |
-| `settings.repository.repoSlug` | `REPO_SLUG` | — | target GitHub repository the agents work on |
+| `settings.repository.repoSlug` | `REPO_SLUG` | — | target GitHub repository the agents work on; required unless CODE_FORGE and ISSUE_TRACKER are both local |
 
 ## Prompt & skill iteration (`settings.promptSkillIteration`)
 
