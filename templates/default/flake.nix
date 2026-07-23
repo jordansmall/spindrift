@@ -154,7 +154,7 @@
             #   jiraEmail = "";
             #   # Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira
             #   jiraProjectKey = "";
-            #   # target GitHub repository the agents work on
+            #   # target GitHub repository the agents work on; required unless CODE_FORGE and ISSUE_TRACKER are both local
             #   repoSlug = "owner/repo";
             # };
             # promptSkillIteration = {

@@ -975,6 +975,51 @@ func TestValidate_RepoSlugRequired(t *testing.T) {
 	}
 }
 
+// TestValidate_FullyLocalExemptsRepoSlugAndGhToken verifies that validate()
+// does not require REPO_SLUG or GH_TOKEN when both CODE_FORGE and
+// ISSUE_TRACKER are local (issue #1895): the github gh-exec client that
+// reads them is never constructed under that combination.
+func TestValidate_FullyLocalExemptsRepoSlugAndGhToken(t *testing.T) {
+	c := minimalValidLocalConfig()
+	c.issueTracker = "local"
+	c.repoSlug = ""
+	c.ghToken = ""
+	if err := validate(c); err != nil {
+		t.Errorf("validate() should exempt REPO_SLUG/GH_TOKEN when CODE_FORGE and ISSUE_TRACKER are both local: %v", err)
+	}
+}
+
+// TestValidate_MixedLocalStillRequiresRepoSlugAndGhToken verifies the
+// fully-local exemption does not leak into a mixed configuration where only
+// one of CODE_FORGE/ISSUE_TRACKER is local — both fields stay required.
+func TestValidate_MixedLocalStillRequiresRepoSlugAndGhToken(t *testing.T) {
+	// CODE_FORGE=local, ISSUE_TRACKER=github (default).
+	c := minimalValidLocalConfig()
+	c.repoSlug = ""
+	if err := validate(c); err == nil {
+		t.Error("validate() must still require REPO_SLUG when only CODE_FORGE is local")
+	}
+	c = minimalValidLocalConfig()
+	c.ghToken = ""
+	if err := validate(c); err == nil {
+		t.Error("validate() must still require GH_TOKEN when only CODE_FORGE is local")
+	}
+
+	// CODE_FORGE=github (default), ISSUE_TRACKER=local.
+	c = minimalValidConfig()
+	c.issueTracker = "local"
+	c.repoSlug = ""
+	if err := validate(c); err == nil {
+		t.Error("validate() must still require REPO_SLUG when only ISSUE_TRACKER is local")
+	}
+	c = minimalValidConfig()
+	c.issueTracker = "local"
+	c.ghToken = ""
+	if err := validate(c); err == nil {
+		t.Error("validate() must still require GH_TOKEN when only ISSUE_TRACKER is local")
+	}
+}
+
 // TestValidateMergeMode_RejectsUnknown verifies that validate() fails fast when
 // MERGE_MODE is set to an unrecognised value.
 func TestValidateMergeMode_RejectsUnknown(t *testing.T) {

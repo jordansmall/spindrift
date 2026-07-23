@@ -243,7 +243,7 @@ func printHelp(w io.Writer) {
 	printSubcommands(w)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Common flags:")
-	fmt.Fprintln(w, "  --repo-slug owner/repo   target GitHub repository (required)")
+	fmt.Fprintln(w, "  --repo-slug owner/repo   target GitHub repository (required unless CODE_FORGE and ISSUE_TRACKER are both local)")
 	fmt.Fprintln(w, "  --model NAME             primary implementor model")
 	fmt.Fprintln(w, "  --max-parallel N         maximum concurrent agent containers")
 	fmt.Fprintln(w, "  --merge-mode MODE        post-green merge policy: immediate | auto | manual")

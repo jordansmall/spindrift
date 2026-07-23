@@ -386,7 +386,12 @@ func loadConfig() config {
 }
 
 func validate(c config) error {
-	if c.repoSlug == "" {
+	// A fully-local run (both seams local) never constructs the github
+	// gh-exec client that reads REPO_SLUG/GH_TOKEN, so neither is required —
+	// any other combination (github, git, jira, or a mixed local pairing)
+	// keeps the unconditional requirement.
+	fullyLocal := c.codeForge == "local" && c.issueTracker == "local"
+	if !fullyLocal && c.repoSlug == "" {
 		return fmt.Errorf("set REPO_SLUG=owner/repo (the target GitHub repository)")
 	}
 	if c.gitUserName == "" {
@@ -395,7 +400,7 @@ func validate(c config) error {
 	if c.gitUserEmail == "" {
 		return fmt.Errorf("set GIT_USER_EMAIL, or configure git user.email on the host")
 	}
-	if c.ghToken == "" {
+	if !fullyLocal && c.ghToken == "" {
 		return fmt.Errorf("set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)")
 	}
 	if c.claudeOAuthToken == "" && c.anthropicAPIKey == "" {
@@ -445,6 +450,17 @@ func validate(c config) error {
 		return fmt.Errorf("CODE_FORGE=%q is not valid; must be github, git, or local", c.codeForge)
 	}
 	return nil
+}
+
+// repoBanner formats the "repo: ... merge-mode: ..." line preview and run
+// print at the top of a dispatch, omitting the repo segment when repoSlug is
+// empty — the fully-local case (CODE_FORGE=local && ISSUE_TRACKER=local)
+// where no target repo exists, so a bare "repo: " would print nothing useful.
+func repoBanner(c config) string {
+	if c.repoSlug == "" {
+		return fmt.Sprintf("merge-mode: %s", c.mergeMode)
+	}
+	return fmt.Sprintf("repo: %s  merge-mode: %s", c.repoSlug, c.mergeMode)
 }
 
 // dispatchLabels builds the DispatchLabels mapping from loaded config.
@@ -984,7 +1000,7 @@ func run(lc *launchContext) error {
 	c, it, cf, f, s, pwd := lc.config, lc.issueTracker, lc.codeForge, lc.factory, lc.settle, lc.pwd
 	lp := reconcile.NewFSProbe(pwd, lc.runner)
 
-	fmt.Printf("repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
+	fmt.Println(repoBanner(c))
 
 	if err := checkAutoMergePreflight(c, cf); err != nil {
 		return err

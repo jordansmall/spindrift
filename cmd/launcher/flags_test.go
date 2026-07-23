@@ -254,6 +254,28 @@ func TestPrintHelp_Concise_PointsToFullReference(t *testing.T) {
 	}
 }
 
+// TestPrintHelp_RepoSlugNotesLocalExemption: --repo-slug's help text must
+// flag that it's required unless the run is fully local (CODE_FORGE=local
+// and ISSUE_TRACKER=local both set), not an unconditional "(required)"
+// (issue #1895).
+func TestPrintHelp_RepoSlugNotesLocalExemption(t *testing.T) {
+	var buf bytes.Buffer
+	printHelp(&buf)
+	out := buf.String()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "--repo-slug") {
+			if strings.Contains(line, "(required)") {
+				t.Errorf("--repo-slug help must not say unconditional '(required)', got: %q", line)
+			}
+			if !strings.Contains(line, "local") {
+				t.Errorf("--repo-slug help must note the fully-local exemption, got: %q", line)
+			}
+			return
+		}
+	}
+	t.Fatal("help output missing --repo-slug line")
+}
+
 // TestPrintHelp_Concise_OmitsRareFlags: the concise help stays concise — it must
 // NOT enumerate the long tail of tuning knobs (those live in --help --all / man).
 func TestPrintHelp_Concise_OmitsRareFlags(t *testing.T) {
@@ -337,6 +359,28 @@ func TestPrintHelpFull_ContainsLabelEntry(t *testing.T) {
 	}
 	if !strings.Contains(out, "issues carrying this label are dispatchable") {
 		t.Error("full help output missing label doc string")
+	}
+}
+
+// TestPrintHelpFull_RepoSlugAndGhTokenNoteLocalExemption verifies the full
+// reference's REPO_SLUG/GH_TOKEN doc strings, sourced from lib/env-schema.nix,
+// spell out the fully-local exemption — mirroring the existing JIRA_TOKEN
+// doc's "required when ISSUE_TRACKER=jira" precedent (issue #1895).
+func TestPrintHelpFull_RepoSlugAndGhTokenNoteLocalExemption(t *testing.T) {
+	var buf bytes.Buffer
+	printHelpFull(&buf)
+	out := buf.String()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "--repo-slug") {
+			if !strings.Contains(line, "local") {
+				t.Errorf("REPO_SLUG doc must note the fully-local exemption, got: %q", line)
+			}
+		}
+		if strings.Contains(line, "GH_TOKEN") && !strings.Contains(line, "refresh-file") {
+			if !strings.Contains(line, "local") {
+				t.Errorf("GH_TOKEN doc must note the fully-local exemption, got: %q", line)
+			}
+		}
 	}
 }
 

@@ -32,7 +32,7 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Wri
 		return err
 	}
 	if origin == waves.OriginDiscovered && len(issues) == 0 {
-		fmt.Fprintf(w, "repo: %s  merge-mode: %s\nno open '%s' issues — nothing to dispatch.\n", c.repoSlug, c.mergeMode, c.label)
+		fmt.Fprintf(w, "%s\nno open '%s' issues — nothing to dispatch.\n", repoBanner(c), c.label)
 		return nil
 	}
 	result, err := waves.NewReadiness(it, toWaveIssues(issues))
@@ -43,7 +43,7 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Wri
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
+	fmt.Fprintln(w, repoBanner(c))
 	printPlan(w, plan)
 	return nil
 }
@@ -75,7 +75,7 @@ func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, w
 		fmt.Fprintln(w, n)
 	}
 
-	fmt.Fprintf(w, "repo: %s  merge-mode: %s\n", c.repoSlug, c.mergeMode)
+	fmt.Fprintln(w, repoBanner(c))
 	if len(kept) == 0 {
 		fmt.Fprintf(w, "no issues would be dispatched after eviction\n")
 		return nil
