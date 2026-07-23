@@ -76,8 +76,9 @@ func callCount(t *testing.T, dir string) int {
 }
 
 // TestEnsureReady_ImagePresentPrintsMessage verifies that EnsureReady emits
-// the "image present — no rebuild needed" line when the image is already loaded,
-// so every loop iteration records whether a rebuild was required.
+// an "already loaded" line when the image is already loaded, worded so it
+// never collides with the freshness probe's distinct "rebuild needed"
+// vocabulary (#1885).
 func TestEnsureReady_ImagePresentPrintsMessage(t *testing.T) {
 	// Fake CLI: exits 0 for any invocation (simulates "image inspect" success).
 	dir := t.TempDir()
@@ -110,11 +111,11 @@ func TestEnsureReady_ImagePresentPrintsMessage(t *testing.T) {
 		t.Fatalf("EnsureReady: %v", ensureErr)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "present") {
-		t.Errorf("expected 'present' in EnsureReady output when image loaded; got: %q", out)
+	if !strings.Contains(out, "already loaded") {
+		t.Errorf("expected 'already loaded' in EnsureReady output when image loaded; got: %q", out)
 	}
-	if !strings.Contains(out, "no rebuild needed") {
-		t.Errorf("expected 'no rebuild needed' in EnsureReady output; got: %q", out)
+	if strings.Contains(out, "rebuild") {
+		t.Errorf("EnsureReady output must not use 'rebuild' vocabulary (collides with freshness probe); got: %q", out)
 	}
 }
 
