@@ -43,6 +43,7 @@ func (s *Settle) verifyMerged(num, pr string) {
 	iss, _ := s.it.Issue(num)
 	if prState == forge.PRMerged && containsLabel(iss.Labels, s.cfg.CompleteLabel) {
 		fmt.Printf("    #%s  landing=%s  status=verified-merged\n", num, pr)
+		s.closeIssue(num)
 		return
 	}
 	var reason string

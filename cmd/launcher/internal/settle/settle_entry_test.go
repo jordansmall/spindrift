@@ -169,6 +169,122 @@ func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 	}
 }
 
+// TestSettle_ImmediateMergeClosesIssue verifies that a confirmed immediate
+// merge (issue #1892: a merged agent PR whose body may have omitted or
+// reworded the Closes #<N> keyword) closes the issue through the optional
+// forge.MergeCloser surface, as a deterministic backstop to GitHub's own
+// merged-PR auto-close.
+func TestSettle_ImmediateMergeClosesIssue(t *testing.T) {
+	const issNum = "55"
+	const prURL = "https://github.com/owner/repo/pull/55"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+	}
+
+	s := New(baseConfig(), fc, fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.CloseMergedIssueCalls) != 1 || fc.CloseMergedIssueCalls[0] != issNum {
+		t.Errorf("CloseMergedIssueCalls = %v, want [%s]", fc.CloseMergedIssueCalls, issNum)
+	}
+}
+
+// TestSettle_LocalTrackerWithPRForgeDoesNotClose verifies that
+// ISSUE_TRACKER=local paired with a PRForge-implementing Code Forge (a
+// valid, independently-configured combination — CODE_FORGE=github, say)
+// never drives the local tracker's IssueCloser through settle's post-merge
+// backstop. Only reconcile's sweep may write local's closed: axis; settle's
+// backstop is scoped to forge.MergeCloser, which the local adapter's shape
+// (AsLocalShaped) does not implement, even though it does implement
+// IssueCloser.
+func TestSettle_LocalTrackerWithPRForgeDoesNotClose(t *testing.T) {
+	const issNum = "58"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
+	}
+
+	s := New(baseConfig(), fc.AsLocalShaped(), fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.CloseIssueCalls) != 0 {
+		t.Errorf("CloseIssueCalls = %v, want none", fc.CloseIssueCalls)
+	}
+	if len(fc.CloseMergedIssueCalls) != 0 {
+		t.Errorf("CloseMergedIssueCalls = %v, want none", fc.CloseMergedIssueCalls)
+	}
+}
+
+// TestSettle_ManualModeDoesNotCloseIssue verifies that a green CI outcome
+// under manual/auto MergeMode — which leaves the PR open rather than merging
+// it (landingManual, never landingMerged) — never closes the issue: issue
+// #1892's backstop must fire only after a confirmed merge, not merely a green
+// CI run.
+func TestSettle_ManualModeDoesNotCloseIssue(t *testing.T) {
+	for _, mode := range []string{"manual", "auto"} {
+		t.Run(mode, func(t *testing.T) {
+			const issNum = "56"
+
+			fc := forge.NewFake(testDispatchLabels)
+			fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+			fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+
+			c := baseConfig()
+			c.MergeMode = mode
+			result := dispatch.Result{
+				Success:      true,
+				OutcomeFound: true,
+				Outcome:      outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
+			}
+
+			s := New(c, fc, fc)
+			s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+			if len(fc.CloseMergedIssueCalls) != 0 {
+				t.Errorf("mode=%s: CloseMergedIssueCalls = %v, want none", mode, fc.CloseMergedIssueCalls)
+			}
+		})
+	}
+}
+
+// TestSettle_RedCIDoesNotCloseIssue verifies that an outcome which never
+// reaches green CI (landingFailed) never closes the issue.
+func TestSettle_RedCIDoesNotCloseIssue(t *testing.T) {
+	const issNum = "57"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
+
+	c := baseConfig()
+	c.MaxFixAttempts = 0
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
+	}
+
+	s := New(c, fc, fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.CloseMergedIssueCalls) != 0 {
+		t.Errorf("CloseMergedIssueCalls = %v, want none", fc.CloseMergedIssueCalls)
+	}
+}
+
 // TestSettle_MalformedOutcome_NoPanic verifies that a ParseErr result is
 // reported and returns without attempting any gate logic.
 func TestSettle_MalformedOutcome_NoPanic(t *testing.T) {

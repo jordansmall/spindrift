@@ -138,3 +138,24 @@ func (s *Settle) recordLanding(num, landing string) {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not record landing: %v\n", num, err)
 	}
 }
+
+// closeIssue closes num through the tracker's optional MergeCloser surface
+// (issue #1892) once verifyMerged has confirmed a genuine merge — a
+// deterministic backstop for github's own merged-PR auto-close, which only
+// fires when the agent's PR body happens to carry a literal Closes #<N>
+// keyword. A no-op for a tracker that doesn't implement it: jira, and local
+// too (local's closed: axis is reconcile's sole write path, ADR 0029) — the
+// distinct MergeCloser surface, rather than reusing IssueCloser, is what
+// keeps this a no-op for local even when it's paired with a PRForge-backed
+// Code Forge (ISSUE_TRACKER=local + CODE_FORGE=github is a valid independent
+// combination, main.go's newIssueTracker/newCodeForge). Best-effort,
+// matching transitionState's log-but-don't-propagate contract.
+func (s *Settle) closeIssue(num string) {
+	closer, ok := s.it.(forge.MergeCloser)
+	if !ok {
+		return
+	}
+	if err := closer.CloseMergedIssue(num); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not close issue: %v\n", num, err)
+	}
+}
