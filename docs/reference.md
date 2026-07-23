@@ -885,11 +885,15 @@ opt-out; the operator owns the consequences.
 The changed-path list is read **host-side**, the same way the merge gate
 reads CI state — never from anything the Box produced — so an injected
 Agent following its normal flow cannot make the guard see a clean diff. It
-does not, however, defend against a fully adversarial Agent: the GitHub
-token that opens the PR is the same token that can merge it, so an agent
-willing to `gh pr merge` its own PR can bypass the launcher-side check
-entirely. See [ADR 0016](adr/0016-merge-guard-bounds-drift-not-adversaries.md)
-for that boundary and the two-actor-separation hard mode.
+does not, however, defend against a fully adversarial Agent. Under the
+`github` Code Forge, [the launcher — never the Agent — owns the merge
+decision](#how-a-run-works): the Agent must not run `gh pr merge`. What
+follows describes what breaks that contract, not what a cooperative Agent
+does — the GitHub token that opens the PR is the same token that can merge
+it, so an Agent that defies the contract and runs `gh pr merge` against its
+own PR bypasses the launcher-side check entirely. See
+[ADR 0016](adr/0016-merge-guard-bounds-drift-not-adversaries.md) for that
+boundary and the two-actor-separation hard mode.
 
 The guard exists **only on the `github` Code Forge merge path**. The
 push-only `git` forge has no launcher in the merge path and therefore no
