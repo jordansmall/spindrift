@@ -25,25 +25,50 @@ type Outcome struct {
 	Note    string // free text; may contain spaces and '='
 }
 
+// ErrNearMiss marks a Parse error where the SPINDRIFT_OUTCOME token is
+// present in the line but the line still fails to parse — required fields
+// missing or malformed, or the token embedded mid-sentence rather than
+// leading a standalone line. Separable from the token being entirely absent
+// so callers (e.g. a resume nudge) can react to "almost got it" differently
+// from "never tried".
+var ErrNearMiss = errors.New("outcome: near-miss")
+
+// IsNearMiss reports whether err was returned because a SPINDRIFT_OUTCOME
+// token was present but the line did not parse, as opposed to the token
+// being entirely absent.
+func IsNearMiss(err error) bool {
+	return errors.Is(err, ErrNearMiss)
+}
+
 // Parse parses a single SPINDRIFT_OUTCOME line.
 // Returns an error if the line lacks the required prefix or is missing the
-// landing or status fields.
+// landing or status fields. The latter case, and a line where the token
+// appears but not as a standalone-line prefix, are wrapped in ErrNearMiss
+// (see IsNearMiss). Parse alone doesn't require a field marker for the
+// mid-sentence case — that extra gate belongs to LastInLog, which scans
+// whole logs and needs it to avoid mistaking a bare mention in prose for an
+// attempt; a caller handing Parse a single already-selected line doesn't.
 func Parse(line string) (Outcome, error) {
-	const prefix = "SPINDRIFT_OUTCOME "
-	if !strings.HasPrefix(line, prefix) {
-		return Outcome{}, fmt.Errorf("outcome: line missing %q prefix", prefix)
+	const token = "SPINDRIFT_OUTCOME"
+	line = strings.TrimSpace(line)
+	rest, ok := stripToken(line, token)
+	if !ok {
+		if containsToken(line, token) {
+			return Outcome{}, fmt.Errorf("%w: line contains %q but does not match the standalone-line grammar", ErrNearMiss, token)
+		}
+		return Outcome{}, fmt.Errorf("outcome: line missing %q prefix", token+" ")
 	}
 	o := Outcome{
-		Issue:   tokenField(line, "issue"),
-		Landing: tokenField(line, "landing"),
-		Status:  tokenField(line, "status"),
-		Note:    tailField(line, "note"),
+		Issue:   tokenField(rest, "issue"),
+		Landing: tokenField(rest, "landing"),
+		Status:  tokenField(rest, "status"),
+		Note:    tailField(rest, "note"),
 	}
 	if o.Landing == "" {
-		return Outcome{}, errors.New("outcome: missing landing field")
+		return Outcome{}, fmt.Errorf("%w: missing landing field", ErrNearMiss)
 	}
 	if o.Status == "" {
-		return Outcome{}, errors.New("outcome: missing or empty status field")
+		return Outcome{}, fmt.Errorf("%w: missing or empty status field", ErrNearMiss)
 	}
 	return o, nil
 }
@@ -55,18 +80,35 @@ func (o Outcome) Line() string {
 		o.Issue, o.Landing, o.Status, o.Note)
 }
 
-// LastInLog scans the file at path and returns the last SPINDRIFT_OUTCOME
-// line parsed as an Outcome. Lines larger than the 4 MiB scan buffer are
-// skipped rather than aborting the scan; the last outcome line wins.
+// LastInLog scans the file at path for the SPINDRIFT_OUTCOME token and
+// parses the result via Parse, so the same colon/whitespace tolerance and
+// near-miss classification apply. It prefers the last line that leads with
+// the token (a genuine attempt at the grammar, however it fares in Parse)
+// over any line that merely carries the token mid-sentence alongside at
+// least one field marker (issue=/landing=/status=/note=) — a genuine, if
+// malformed, attempt wrapped in prose. A line that just names the token in
+// passing, with no field marker at all, is not a candidate: agent
+// reasoning routinely mentions "SPINDRIFT_OUTCOME" without attempting the
+// grammar, and treating every such mention as a near-miss would abandon
+// runs the prior no-outcome-found path handled fine. Only when no
+// leading-token line exists at all does the last field-bearing mid-sentence
+// mention become the near-miss candidate. Lines larger than the 4 MiB scan
+// buffer are skipped rather than aborting the scan.
 //
-// Returns (Outcome{}, false, nil) when no outcome line is present or the
-// file does not exist. Returns (Outcome{}, false, err) on I/O errors other
-// than file-not-found or oversized lines.
+// Returns (Outcome{}, false, nil) when no qualifying line is present, or the
+// file does not exist. Returns (Outcome{}, false, err) when the chosen
+// candidate line fails to parse — err satisfies IsNearMiss in that case —
+// or on an I/O error other than file-not-found or oversized lines.
 func LastInLog(path string) (Outcome, bool, error) {
-	var last string
+	const token = "SPINDRIFT_OUTCOME"
+	var lastLeading, lastMention string
 	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
-		if strings.HasPrefix(line, "SPINDRIFT_OUTCOME ") {
-			last = line
+		if _, ok := stripToken(strings.TrimSpace(line), token); ok {
+			lastLeading = line
+			return
+		}
+		if containsToken(line, token) && looksLikeAttempt(line) {
+			lastMention = line
 		}
 	})
 	if err != nil {
@@ -76,10 +118,14 @@ func LastInLog(path string) (Outcome, bool, error) {
 		return Outcome{}, false, err
 	}
 
-	if last == "" {
+	candidate := lastLeading
+	if candidate == "" {
+		candidate = lastMention
+	}
+	if candidate == "" {
 		return Outcome{}, false, nil
 	}
-	o, err := Parse(last)
+	o, err := Parse(candidate)
 	if err != nil {
 		return Outcome{}, false, err
 	}
@@ -128,6 +174,52 @@ func LastCommentInLog(path string) (string, bool, error) {
 		return "", false, err
 	}
 	return last, found, nil
+}
+
+// containsToken reports whether line contains token as a standalone word,
+// not merely as a substring of a longer identifier (e.g. "SPINDRIFT_OUTCOMES"
+// or "MY_SPINDRIFT_OUTCOME_THING" must not match).
+func containsToken(line, token string) bool {
+	for start := 0; ; {
+		i := strings.Index(line[start:], token)
+		if i < 0 {
+			return false
+		}
+		begin := start + i
+		end := begin + len(token)
+		if (begin == 0 || !isTokenChar(line[begin-1])) && (end == len(line) || !isTokenChar(line[end])) {
+			return true
+		}
+		start = begin + 1
+	}
+}
+
+func isTokenChar(b byte) bool {
+	return b == '_' || ('a' <= b && b <= 'z') || ('A' <= b && b <= 'Z') || ('0' <= b && b <= '9')
+}
+
+// looksLikeAttempt reports whether line carries at least one recognizable
+// outcome field marker, distinguishing a genuine (if malformed or
+// mid-sentence) attempt at the grammar from prose that merely names the
+// token.
+func looksLikeAttempt(line string) bool {
+	return tokenField(line, "issue") != "" ||
+		tokenField(line, "landing") != "" ||
+		tokenField(line, "status") != "" ||
+		tailField(line, "note") != ""
+}
+
+// stripToken reports whether line begins with token followed by a space or a
+// colon (the tolerated delimiters), and returns the remainder after the
+// delimiter for field extraction.
+func stripToken(line, token string) (string, bool) {
+	if rest, ok := strings.CutPrefix(line, token+" "); ok {
+		return rest, true
+	}
+	if rest, ok := strings.CutPrefix(line, token+":"); ok {
+		return rest, true
+	}
+	return "", false
 }
 
 // tokenField extracts the value of key=<val> from a space-delimited line.
