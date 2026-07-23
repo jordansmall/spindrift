@@ -165,10 +165,12 @@ mediates. Three values:
 - `local` — **host-mediated**, the code-plane mirror of the `local` tracker
   (ADR 0033): the Box clones from a read-only mount of the Accumulation repo and
   emits its branch as a git bundle through a writable outbox; the Launcher lands
-  it host-side by merging onto the per-ticket Integration branch. No network on
-  the code plane. Shares the `git` adapter's substrate internally (branch
-  naming, the temp-clone landing helper); differs only in the host-mediated
-  code-out channel.
+  it host-side by rebasing it onto the per-ticket Integration branch's current
+  tip and fast-forwarding — linear history, never a merge commit, unconditionally
+  (issue #1889). No network on the code plane. Shares the `git` adapter's
+  substrate for everything except landing (branch naming, `Rebase`, `Probe`,
+  `BranchExists`); `Merge` is its own rebase-and-fast-forward override, not the
+  shared adapter's `--no-ff` merge.
 
 The fully-local code path was **cut** by ADR 0013 ("a git remote is a hard
 requirement") and **reopened** by ADR 0033 on new terms: not a read-write mount
