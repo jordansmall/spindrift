@@ -23,9 +23,10 @@ moving that input to the new tag** — run the latest release.
 spindrift's job is to run a headless agent with `--dangerously-skip-permissions`
 over issue text **anyone can write**, so it treats the issue body and every
 comment as untrusted, adversarial prompt input. The design doesn't try to filter
-that input — it bounds what the agent can do with it. Two ideas carry the
-isolation; the full rationale is in
-[`docs/reference.md`](docs/reference.md#threat-model).
+that input — it bounds what the agent can do with it. The first two ideas
+below carry that isolation; the third guards against a separate risk (the
+Driver leaking its own secrets, not an adversarial issue). The full
+rationale is in [`docs/reference.md`](docs/reference.md#threat-model).
 
 - **The Box is the isolation boundary.** Each issue runs in a disposable
   container with a fresh clone, a scoped token, and no host access. That is what
@@ -38,14 +39,34 @@ isolation; the full rationale is in
   triage role. The trust boundary is the label, not the issue or comment author —
   once labeled, the body and **every comment from any GitHub user** feed the agent
   as prompt input. Treat every label-applier as a trusted operator.
-- **The Box is hardened against self-inflicted secret reads.** Two always-on,
-  Harness-enforced defaults, not operator configuration: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`
-  is baked into the Box so the Driver can't `env`-dump its own model-auth
-  credentials via a subprocess, and a `PreToolUse` hook denies any `Read`/`Bash`
-  call targeting a known credential path (`~/.claude/.credentials.json`,
-  `**/.env`, `~/.config/gh/hosts.yml`), enforced independently of
-  `--dangerously-skip-permissions`. See [self-inflicted secret reads are
-  structurally blocked](docs/reference.md#self-inflicted-secret-reads-are-structurally-blocked).
+- **Secrets can be sourced from a vault instead of left in plaintext, and
+  the Box is hardened against self-inflicted reads.** `<SECRET>_CMD` (e.g.
+  `GH_TOKEN_CMD="rbw get spindrift-pat"`) is the preferred way to supply
+  every secret — it fetches from an operator-controlled command
+  at launch and holds the value only in Launcher memory, so `harness.env` is
+  expected to hold fetch recipes rather than live credentials. Two always-on,
+  Harness-enforced defaults then close the loop inside the Box, not operator
+  configuration: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` is baked into the Box so
+  the Driver can't `env`-dump its own model-auth credentials via a subprocess,
+  and a `PreToolUse` hook denies any `Read`/`Bash` call targeting a known
+  credential path (`~/.claude/.credentials.json`, `**/.env`,
+  `~/.config/gh/hosts.yml`), enforced independently of
+  `--dangerously-skip-permissions`. See [Secret exposure
+  model](docs/reference.md#secret-exposure-model).
+
+The secrets bullet above targets a different threat than the first two:
+**self-inflicted context contamination**, not adversarial exfiltration. The
+Driver has, in observed practice, read secret-bearing files into its own
+context despite being told not to — and once a secret is in the transcript
+it is effectively leaked, because there is no output redaction. These
+controls stop the Driver from putting a secret in its own context in the
+first place; they make no claim about a compromised Box exfiltrating data
+over the network. The accepted residual is `GH_TOKEN`, which stays a live
+environment variable in the Box because the Box is a first-class GitHub
+actor; issue #380 (two-actor separation, below) caps the blast radius of a
+leaked one rather than removing it. See [Secret exposure
+model](docs/reference.md#secret-exposure-model) for the full story,
+including the fully-local, zero-GitHub-token posture.
 
 Deploying safely rests on a few operator-side prerequisites the harness cannot
 enforce for you — `spindrift doctor` preflights connectivity, token validity, and
@@ -89,9 +110,12 @@ labels, but these are on you:
   mitigation is token scope plus container isolation, not content sanitization.
   Reports that the agent "followed instructions in an issue" describe the design;
   reports that it did so *outside* the Box or *beyond* the token's scope are bugs.
-- **Operator secrets and host configuration.** `harness.env` holds live
-  credentials on the operator's host; protecting that file, the host, and the PAT
-  itself is the operator's responsibility.
+- **Operator secrets and host configuration.** `harness.env` is expected to
+  hold fetch recipes (`<SECRET>_CMD`) rather than live credentials — see
+  [Secret exposure model](docs/reference.md#secret-exposure-model) — but the
+  plaintext direct-value and `--<secret>-file` forms remain fully supported.
+  Either way, protecting that file, the host, and the credentials it
+  references or contains is the operator's responsibility.
 - **Misconfiguration the prerequisites above warn against** — an over-scoped
   token, missing branch protection, or a Workflows:RW grant to an untrusted issue.
   The harness documents and (where it can) preflights these; it cannot override an
