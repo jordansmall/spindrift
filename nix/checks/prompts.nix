@@ -596,9 +596,12 @@ in
   # and must carry the host-mediated relay instead: the blocked-note fragment
   # points at the SPINDRIFT_OUTCOME note= field (mirroring local's own
   # blocked-note relay, issue-blocked-comment-local.md), and the
-  # research-verdict fragment emits a SPINDRIFT_COMMENT_BEGIN/END block
-  # (mirroring research-verdict-local.md). Same static, eval-only grep shape
-  # as issue-read-local-fragments-never-invoke-gh-issue-view above.
+  # research-verdict fragment emits a single nonce-guarded SPINDRIFT_COMMENT
+  # line (mirroring research-verdict-local.md; issue #1940 replaced the
+  # earlier SPINDRIFT_COMMENT_BEGIN/END block form with this single-line,
+  # nonce-bearing, base64-encoded grammar so the signal survives a
+  # stream-json JSONL box log). Same static, eval-only grep shape as
+  # issue-read-local-fragments-never-invoke-gh-issue-view above.
   github-readonly-comment-fragments-never-invoke-gh-issue-comment =
     pkgs.runCommand "github-readonly-comment-fragments-never-invoke-gh-issue-comment" { }
       ''
@@ -610,8 +613,10 @@ in
           }
         done
         grep -q 'note=' ${../../templates/default/prompts/fragments/issue-blocked-comment-github-readonly.md}
-        grep -q 'SPINDRIFT_COMMENT_BEGIN' ${../../templates/default/prompts/fragments/research-verdict-github-readonly.md}
-        grep -q 'SPINDRIFT_COMMENT_END' ${../../templates/default/prompts/fragments/research-verdict-github-readonly.md}
+        for f in research-verdict-github-readonly.md research-verdict-local.md; do
+          grep -q 'SPINDRIFT_COMMENT ''${RUN_NONCE}' ${../../templates/default/prompts/fragments}/"$f"
+          ! grep -q 'SPINDRIFT_COMMENT_BEGIN' ${../../templates/default/prompts/fragments}/"$f"
+        done
         touch $out
       '';
 }
