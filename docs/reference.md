@@ -494,6 +494,30 @@ the flake); every other knob below is a flake `settings.*` value or a
 `--flag` (ADR 0020) — the env var column still works this release (deprecated,
 warns) but is no longer the primary channel:
 
+Every secret knob (`GH_TOKEN`, `BOX_GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
+`ANTHROPIC_API_KEY`, `JIRA_TOKEN`) can also be sourced from an external
+command instead of a plaintext value — **the preferred, highly encouraged
+way to supply secrets**, since it keeps live credentials out of any file at
+rest on the host. Set `<SECRET>_CMD` (e.g. `GH_TOKEN_CMD="rbw get
+spindrift-pat"`) in `harness.env`, your shell, or direnv, or pass a one-off
+`--<secret>-cmd` flag; the mechanism is tool-agnostic and works with `rbw`,
+`op`, `pass`, `vault`, or any command that prints the secret on stdout. The
+launcher execs the command and captures its trimmed stdout into memory —
+the secret never touches disk. Resolution precedence, first non-empty wins:
+`--<secret>-cmd` flag > `<SECRET>_CMD` env > `--<secret>-file` flag >
+`<SECRET>` direct env — so a `_CMD` variant overrides a direct value, and
+migrating to a vault is a matter of adding the command, not first removing
+the old value. Supplying both `--<secret>-cmd` and `--<secret>-file` for the
+same secret is a configuration error. A failing or empty command aborts the
+launch with a named, value-free error; the fetched value is never logged,
+baked into the nix store, or written to the launcher input document — only
+the command string itself (which reveals a vault item name, not the secret)
+may appear in host-side logs. The plaintext direct-value and
+`--<secret>-file` forms remain fully supported and are not deprecated; with
+this in place, `harness.env` is expected to hold fetch recipes rather than
+live credentials. See `spindrift --help --all` for the full
+`--<secret>-cmd`/`--<secret>-file` flag list.
+
 | var                       | default                | meaning                                  |
 | ------------------------- | ---------------------- | ---------------------------------------- |
 | `REPO_SLUG`               | — (required unless `CODE_FORGE` and `ISSUE_TRACKER` are both `local`; baked via `settings.repository.repoSlug`) | target repo, `owner/repo` |

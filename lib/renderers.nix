@@ -168,11 +168,24 @@ rec {
     schema:
     let
       secretSchema = filterAttrs (_: e: e.secret or false) schema;
-      renderEntry = _key: entry: "# ${entry.doc}\n${entry.env}=\n\n";
+      renderEntry =
+        _key: entry:
+        "# ${entry.doc}\n"
+        + "# Preferred: fetch this from a vault instead of the plaintext value below —\n"
+        + "# ${entry.env}_CMD=\"rbw get spindrift-pat\" (or an op/pass/vault read); the\n"
+        + "# command's stdout wins over ${entry.env} and is never baked, logged, or\n"
+        + "# written to disk.\n"
+        + "${entry.env}=\n\n";
     in
     "# Copy to harness.env (gitignored) and fill in — or export these in your shell.\n"
     + "# Secrets only: every other knob is set via the Consumer flake's `settings`\n"
-    + "# or an explicit CLI flag (see docs/reference.md and docs/flake-options.md).\n\n"
+    + "# or an explicit CLI flag (see docs/reference.md and docs/flake-options.md).\n"
+    + "#\n"
+    + "# Sourcing every secret below from an external vault via its <NAME>_CMD form\n"
+    + "# (rbw, op, pass, vault, ...) is the preferred, highly encouraged way to\n"
+    + "# supply secrets — see each entry's comment below and docs/reference.md's\n"
+    + "# Runtime configuration section. harness.env then holds fetch recipes, not\n"
+    + "# live credentials.\n\n"
     + concatStrings (mapAttrsToList renderEntry secretSchema);
 
   # cmd/launcher/internal/driver/drivernames_gen.go content. driverEntries is
@@ -311,9 +324,10 @@ rec {
 
   # share/bash-completion/completions/spindrift content: subcommand
   # completion for the first word, flag completion (incl. the --issue alias
-  # and secret --*-file flags) anywhere after it, and filename completion for
-  # a --*-file flag's argument. Tracer-bullet slice (issue #551); zsh/fish
-  # crib this structure. Rendered fresh at build time, no committed copy —
+  # and secret --*-file/--*-cmd flags) anywhere after it, and filename
+  # completion for a --*-file flag's argument. Tracer-bullet slice
+  # (issue #551); zsh/fish crib this structure. Rendered fresh at build time,
+  # no committed copy —
   # same as renderManpageRoff below.
   renderBashCompletion =
     schema: subcommandRegistry:
@@ -334,7 +348,10 @@ rec {
       knobFlags = map (e: "--" + toKebab e.env) nonSecret;
       aliasFlags = map (e: "--" + e.alias) (builtins.filter (e: e ? alias) nonSecret);
       fileFlags = map (e: "--" + toKebab e.env + "-file") secretEntries;
-      allFlags = builtins.concatStringsSep " " (knobFlags ++ aliasFlags ++ fileFlags ++ extraFlags);
+      cmdFlags = map (e: "--" + toKebab e.env + "-cmd") secretEntries;
+      allFlags = builtins.concatStringsSep " " (
+        knobFlags ++ aliasFlags ++ fileFlags ++ cmdFlags ++ extraFlags
+      );
       allSubcommands = builtins.concatStringsSep " " subcommands;
       # A `case "$prev" in ) ... esac` (empty pattern) is a syntax error, so
       # the file-flag branch is omitted entirely if the schema ever has no
@@ -425,10 +442,10 @@ rec {
 
   # share/fish/vendor_completions.d/spindrift.fish content: same coverage as
   # renderBashCompletion above (subcommands as the first word, every flag
-  # incl. --issue alias and secret --*-file flags, file completion for a
-  # --*-file flag's argument) using fish's `complete -c` syntax, with each
-  # flag's schema doc string as its `-d` description. Rendered fresh at build
-  # time, no committed copy — same as renderBashCompletion.
+  # incl. --issue alias and secret --*-file/--*-cmd flags, file completion
+  # for a --*-file flag's argument) using fish's `complete -c` syntax, with
+  # each flag's schema doc string as its `-d` description. Rendered fresh at
+  # build time, no committed copy — same as renderBashCompletion.
   renderFishCompletion =
     schema: subcommandRegistry:
     let
@@ -478,6 +495,9 @@ rec {
       fileCompletions = builtins.concatStringsSep "\n" (
         map (e: "complete -c spindrift -l ${toKebab e.env}-file -r -F -d \"${e.doc}\"") secretEntries
       );
+      cmdCompletions = builtins.concatStringsSep "\n" (
+        map (e: "complete -c spindrift -l ${toKebab e.env}-cmd -d \"${e.doc}\"") secretEntries
+      );
       extraCompletions = builtins.concatStringsSep "\n" (
         map (e: "complete -c spindrift -l ${e.flag} -d \"${e.doc}\"") extraFlags
       );
@@ -500,14 +520,16 @@ rec {
       ${knobCompletions}
       ${aliasCompletions}
       ${fileCompletions}
+      ${cmdCompletions}
       ${extraCompletions}
       ${issueCompletion}
     '';
 
   # share/zsh/site-functions/_spindrift content: same coverage as
   # renderBashCompletion (subcommand completion for the first word, flag
-  # completion incl. the --issue alias and secret --*-file flags anywhere
-  # after it, filename completion for a --*-file flag's argument), plus a
+  # completion incl. the --issue alias and secret --*-file/--*-cmd flags
+  # anywhere after it, filename completion for a --*-file flag's argument),
+  # plus a
   # per-candidate description — zsh completion carries them, bash's
   # compgen -W doesn't — sourced from each flag's schema `doc` string (the
   # same text `--help --all` prints). Rendered fresh at build time, no
@@ -530,6 +552,7 @@ rec {
       knobSpec = e: "    '--${toKebab e.env}:${zshEsc e.doc}'\n";
       aliasSpec = e: "    '--${e.alias}:${zshEsc e.doc}'\n";
       fileSpec = e: "    '--${toKebab e.env}-file:${zshEsc e.doc}'\n";
+      cmdSpec = e: "    '--${toKebab e.env}-cmd:${zshEsc e.doc}'\n";
       fileFlags = map (e: "--" + toKebab e.env + "-file") secretEntries;
       extraFlagSpecs = [
         "    '--no-build:fail fast if the image is absent instead of building it'\n"
@@ -542,6 +565,7 @@ rec {
         map knobSpec nonSecret
         ++ map aliasSpec (builtins.filter (e: e ? alias) nonSecret)
         ++ map fileSpec secretEntries
+        ++ map cmdSpec secretEntries
         ++ extraFlagSpecs
       );
       allSubcommandSpecs = concatStrings subcommandSpecs;
@@ -676,7 +700,7 @@ rec {
         if entries == [ ] then "" else ".SS ${g}\n" + concatStrings (map optionBlock entries);
       secretBlock =
         e:
-        ".TP\n.B ${e.env}\n\\&${esc e.doc}. Supply via the environment or \\-\\-${toKebab e.env}\\-file (reads the value from a file path; takes precedence over the environment).\n";
+        ".TP\n.B ${e.env}\n\\&${esc e.doc}. Supply via the environment, via \\-\\-${toKebab e.env}\\-file (reads the value from a file path), or via \\-\\-${toKebab e.env}\\-cmd / ${e.env}_CMD (fetches the value from a command's stdout \\(em the preferred, external\\-vault form). Precedence, first non\\-empty wins: \\-\\-${toKebab e.env}\\-cmd flag, then ${e.env}_CMD env, then \\-\\-${toKebab e.env}\\-file flag, then the direct ${e.env} environment variable.\n";
     in
     if unknownGroups != [ ] then
       throw "renderManpageRoff: knob group(s) absent from groupOrder: ${builtins.concatStringsSep ", " unknownGroups}"
@@ -717,9 +741,14 @@ rec {
         deprecated and warned on; the next release makes it an error.
         ${concatStrings (map groupSection groupOrder)}.SH ENVIRONMENT
         Secret knobs are never exposed as value flags; they are read from the
-        environment or from a file via their
+        environment, from a file via their
         .B \-\-<name>-file
-        flag.
+        flag, or fetched from an external command via their
+        .B \-\-<name>-cmd
+        flag or
+        .B <NAME>_CMD
+        environment variable \(em the preferred way to supply secrets, since
+        it keeps plaintext credentials off disk.
         ${concatStrings (map secretBlock secretEntries)}.SH FILES
         .TP
         .I harness.env

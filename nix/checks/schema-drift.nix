@@ -589,6 +589,7 @@ in
       flagChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}'\n") nonSecret;
       aliasChecks = concatMapStrings (e: if e ? alias then "need '--${e.alias}'\n" else "") nonSecret;
       secretChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}-file'\n") secretEntries;
+      secretCmdChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}-cmd'\n") secretEntries;
       # Subcommand names are plain English words that can legitimately show
       # up in a comment (e.g. "rendered at build time"); a per-word boundary
       # check would pass even with a subcommand missing. Require the exact
@@ -630,6 +631,7 @@ in
         ${flagChecks}
         ${aliasChecks}
         ${secretChecks}
+        ${secretCmdChecks}
         grep -qF -- '${subcommandLine}' "$completion" \
           || { echo "bash completion missing subcommand list: ${subcommandLine}" >&2; exit 1; }
         ${choicesChecks}
@@ -663,6 +665,7 @@ in
       flagChecks = concatMapStrings (e: "need '-l ${renderers.toKebab e.env}'\n") nonSecret;
       aliasChecks = concatMapStrings (e: if e ? alias then "need '-l ${e.alias}'\n" else "") nonSecret;
       secretChecks = concatMapStrings (e: "need '-l ${renderers.toKebab e.env}-file'\n") secretEntries;
+      secretCmdChecks = concatMapStrings (e: "need '-l ${renderers.toKebab e.env}-cmd'\n") secretEntries;
       # Subcommands render one per line as `-a '<name>'`; that exact quoted
       # token can't appear incidentally in a comment (unlike the bare word),
       # so a plain fixed-string search is enough — no boundary check needed.
@@ -699,6 +702,7 @@ in
         ${flagChecks}
         ${aliasChecks}
         ${secretChecks}
+        ${secretCmdChecks}
         ${subcommandChecks}
         ${choicesChecks}
         needF "${issueSeenFrom}"
@@ -731,6 +735,9 @@ in
       flagChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}:\"\n") nonSecret;
       aliasChecks = concatMapStrings (e: if e ? alias then "need \"'--${e.alias}:\"\n" else "") nonSecret;
       secretChecks = concatMapStrings (e: "need \"'--${renderers.toKebab e.env}-file:\"\n") secretEntries;
+      secretCmdChecks = concatMapStrings (
+        e: "need \"'--${renderers.toKebab e.env}-cmd:\"\n"
+      ) secretEntries;
       subcommandChecks = concatMapStrings (s: "need \"'${s}:\"\n") subcommands;
       # Pin the exact `compadd -- ...` argument list the renderer emits for
       # each choices-bearing flag (issue #554), not a per-word substring
@@ -761,6 +768,7 @@ in
         ${flagChecks}
         ${aliasChecks}
         ${secretChecks}
+        ${secretCmdChecks}
         ${subcommandChecks}
         ${choicesChecks}
         need '${issueCaseLine})'
