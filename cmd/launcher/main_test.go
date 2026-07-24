@@ -1259,6 +1259,28 @@ func TestValidateCodeForge_Local_RequiresImmediateMergeMode(t *testing.T) {
 	}
 }
 
+// TestValidateBoxForgeAndIssueAccess_RejectsUnknown verifies that validate()
+// fails fast when BOX_FORGE_AND_ISSUE_ACCESS is set to an unrecognised value.
+func TestValidateBoxForgeAndIssueAccess_RejectsUnknown(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only-ish"
+	if err := validate(c); err == nil {
+		t.Fatal("validate() should reject unrecognised BOX_FORGE_AND_ISSUE_ACCESS")
+	}
+}
+
+// TestValidateBoxForgeAndIssueAccess_AcceptsKnown verifies that validate()
+// accepts the two documented BOX_FORGE_AND_ISSUE_ACCESS values.
+func TestValidateBoxForgeAndIssueAccess_AcceptsKnown(t *testing.T) {
+	for _, mode := range []string{"read-write", "read-only"} {
+		c := minimalValidLocalConfig()
+		c.boxForgeAndIssueAccess = mode
+		if err := validate(c); err != nil {
+			t.Errorf("validate() rejected valid BOX_FORGE_AND_ISSUE_ACCESS %q: %v", mode, err)
+		}
+	}
+}
+
 // TestNewCodeForge_Git_ReturnsPushOnlyAdapter verifies that CODE_FORGE=git
 // wires newCodeForge to the push-only git adapter — one with no PRForge
 // surface at all — instead of the github gh-exec adapter.
@@ -1677,16 +1699,17 @@ func minimalValidLocalConfig() config {
 
 func minimalValidConfig() config {
 	return config{
-		repoSlug:         "owner/repo",
-		gitUserName:      "bot",
-		gitUserEmail:     "bot@example.com",
-		ghToken:          "ghp_test",
-		claudeOAuthToken: "tok",
-		runtime:          "echo", // echo is always on PATH
-		mergeMode:        "manual",
-		issueTracker:     "github",
-		codeForge:        "github",
-		overlapGate:      "defer",
+		repoSlug:               "owner/repo",
+		gitUserName:            "bot",
+		gitUserEmail:           "bot@example.com",
+		ghToken:                "ghp_test",
+		claudeOAuthToken:       "tok",
+		runtime:                "echo", // echo is always on PATH
+		mergeMode:              "manual",
+		issueTracker:           "github",
+		codeForge:              "github",
+		overlapGate:            "defer",
+		boxForgeAndIssueAccess: "read-write",
 	}
 }
 

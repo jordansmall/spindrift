@@ -179,6 +179,15 @@ type config struct {
 	// "local". Unused (and unrequired) otherwise.
 	codeForgeAccumulationRepoDir string
 
+	// boxForgeAndIssueAccess selects whether the Box writes to the Code
+	// Forge and Issue Tracker directly ("read-write", the default) or the
+	// Launcher host-mediates every write instead ("read-only") — a third
+	// axis orthogonal to codeForge and issueTracker (issue #1914). Gated at
+	// startup by checkReadOnlyCapabilityGate: "read-only" is only permitted
+	// when the selected forge/tracker pair implements the host-mediation
+	// seams it requires.
+	boxForgeAndIssueAccess string
+
 	// dispatchKind is "work" (the default, zero value) or "research" (ADR
 	// 0022). Set once by bootstrap via applyDispatchKind, never read from
 	// the environment directly — it is operator intent carried by which
@@ -382,6 +391,7 @@ func loadConfig() config {
 		codeForge:                    codeForge,
 		codeForgeRemoteURL:           getenvSchema("CODE_FORGE_REMOTE_URL"),
 		codeForgeAccumulationRepoDir: absCodeForgeAccumulationRepoDir(codeForge, getenvSchema("CODE_FORGE_ACCUMULATION_REPO_DIR")),
+		boxForgeAndIssueAccess:       getenvSchema("BOX_FORGE_AND_ISSUE_ACCESS"),
 	}
 }
 
@@ -448,6 +458,12 @@ func validate(c config) error {
 		}
 	default:
 		return fmt.Errorf("CODE_FORGE=%q is not valid; must be github, git, or local", c.codeForge)
+	}
+	switch c.boxForgeAndIssueAccess {
+	case "read-write", "read-only":
+		// valid
+	default:
+		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=%q is not valid; must be read-write or read-only", c.boxForgeAndIssueAccess)
 	}
 	return nil
 }

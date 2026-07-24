@@ -362,6 +362,18 @@
     flakeOption = true;
     boxEnv = false;
   };
+  boxForgeAndIssueAccess = {
+    env = "BOX_FORGE_AND_ISSUE_ACCESS";
+    group = "Repository & identity";
+    default = "read-write";
+    doc = "whether the Box writes to the Code Forge and Issue Tracker directly (read-write) or the launcher host-mediates every write instead (read-only), a third axis orthogonal to CODE_FORGE and ISSUE_TRACKER (issue #1914); read-only is gated at startup by capability — permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments, otherwise the launcher exits with a startup error naming the missing seam; local backends already satisfy the gate, github does not yet";
+    choices = [
+      "read-write"
+      "read-only"
+    ];
+    flakeOption = true;
+    boxEnv = false;
+  };
   # ── Operator-tunable knobs (flakeOption = true; also tune via harness.env) ─
   maxFixAttempts = {
     env = "MAX_FIX_ATTEMPTS";
