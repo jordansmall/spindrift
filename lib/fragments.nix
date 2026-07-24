@@ -199,4 +199,21 @@
     fragment = "issue-blocked-comment-local.md";
     var = "ISSUE_BLOCKED_COMMENT_LOCAL_STEP";
   }
+  # The OPEN A PULL REQUEST push step (issue #1918, BOX_FORGE_AND_ISSUE_ACCESS):
+  # a read-only github Box holds no push-capable token, so it writes its
+  # finished branch as a seam bundle to the outbox instead of git push --
+  # the launcher's BundleRelay force-pushes it host-side. BOX_ACCESS_READ_WRITE
+  # / BOX_ACCESS_READ_ONLY (agent/entrypoint.sh's phase_prompt_assembly
+  # precompute block, derived from BOX_FORGE_AND_ISSUE_ACCESS) follow the same
+  # exactly-one-on pairing as ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL above.
+  {
+    gate = "BOX_ACCESS_READ_WRITE";
+    fragment = "open-pr-push-git.md";
+    var = "OPEN_PR_PUSH_READ_WRITE_STEP";
+  }
+  {
+    gate = "BOX_ACCESS_READ_ONLY";
+    fragment = "open-pr-push-outbox.md";
+    var = "OPEN_PR_PUSH_READ_ONLY_STEP";
+  }
 ]

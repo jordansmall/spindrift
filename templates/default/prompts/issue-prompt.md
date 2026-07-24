@@ -195,8 +195,7 @@ Harness bundles your commits out of the container after you exit.
 
 # OPEN A PULL REQUEST
 
-1. `git push --force-with-lease -u origin ${BRANCH}`
-2. `gh pr create --draft --base ${BASE_BRANCH} --head ${BRANCH} --title "<conventional title>" --body "<summary>"`
+${OPEN_PR_PUSH_READ_WRITE_STEP}${OPEN_PR_PUSH_READ_ONLY_STEP}2. `gh pr create --draft --base ${BASE_BRANCH} --head ${BRANCH} --title "<conventional title>" --body "<summary>"`
 ${PR_BODY_CLOSES_STEP}${PR_BODY_LOCAL_REF_STEP}${PR_BODY_LOCAL_NOREF_STEP}The PR opens as a **draft** and stays a **draft** — the launcher flips it to
 ready once CI reaches green, immediately before it merges (the launcher
 already gates on CI green itself, so there is nothing left for you to watch

@@ -529,6 +529,24 @@ phase_prompt_assembly() {
     fi
   fi
 
+  # The OPEN A PULL REQUEST push step gate (issue #1918,
+  # open-pr-push-git.md/open-pr-push-outbox.md registry rows): read-only
+  # holds no push-capable token, so the step writes seam.bundle to the
+  # outbox instead of running git push directly. Computed independently of
+  # ISSUE_TRACKER_GITHUB above (not nested under it, unlike the write-step
+  # gates just above) -- CODE_FORGE and ISSUE_TRACKER are independent axes,
+  # so a github push step must reflect BOX_FORGE_AND_ISSUE_ACCESS regardless
+  # of which tracker is selected.
+  local BOX_ACCESS_READ_WRITE=""
+  local BOX_ACCESS_READ_ONLY=""
+  if [ "${BOX_FORGE_AND_ISSUE_ACCESS:-read-write}" = "read-only" ]; then
+    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+    BOX_ACCESS_READ_ONLY=1
+  else
+    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+    BOX_ACCESS_READ_WRITE=1
+  fi
+
   # One loop over the Conditional fragment registry (lib/fragments.nix, issue
   # #622), rendered into _FRAGMENT_ROWS by lib/mkHarness.nix's
   # fragmentRegistryPreamble: each row's gate variable (a knob env var for
