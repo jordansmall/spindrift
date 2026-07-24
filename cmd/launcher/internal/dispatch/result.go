@@ -38,6 +38,17 @@ type Result struct {
 	// present in the box's log.
 	CommentFound bool
 
+	// PRIntent is the body of the last complete SPINDRIFT_PR_INTENT_BEGIN …
+	// SPINDRIFT_PR_INTENT_END block in the box's log, populated when
+	// PRIntentFound is true (issue #1919) — the host-mediated write channel a
+	// read-only github Box hands settle its intended draft-PR title and body
+	// instead of running `gh pr create` itself.
+	PRIntent string
+
+	// PRIntentFound reports whether a complete SPINDRIFT_PR_INTENT block was
+	// present in the box's log.
+	PRIntentFound bool
+
 	// ParseErr is non-nil when the box's log contained an unparseable
 	// SPINDRIFT_OUTCOME line (as opposed to no line at all). No
 	// classification is attempted in this case.

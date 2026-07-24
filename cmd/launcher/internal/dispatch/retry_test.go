@@ -130,6 +130,35 @@ func TestDispatchWithRetry_SuccessWithCommentBlockPopulatesResult(t *testing.T) 
 	}
 }
 
+// TestDispatchWithRetry_SuccessWithPRIntentBlockPopulatesResult verifies that
+// a SPINDRIFT_PR_INTENT_BEGIN … SPINDRIFT_PR_INTENT_END block alongside the
+// outcome line in the box's log surfaces on Result.PRIntent/PRIntentFound —
+// the host-mediated draft-PR-create channel a read-only github Box's box uses
+// in place of its own `gh pr create` (issue #1919).
+func TestDispatchWithRetry_SuccessWithPRIntentBlockPopulatesResult(t *testing.T) {
+	fr := runner.NewFake()
+	fr.WriteToOutput = []byte("SPINDRIFT_PR_INTENT_BEGIN\nfeat: add widget\n\nAdds a widget.\nSPINDRIFT_PR_INTENT_END\n" +
+		"SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=ready note=ok\n")
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+
+	result := d.Run()
+
+	if !result.OutcomeFound {
+		t.Fatal("want OutcomeFound=true")
+	}
+	if !result.PRIntentFound {
+		t.Fatal("want PRIntentFound=true")
+	}
+	want := "feat: add widget\n\nAdds a widget."
+	if result.PRIntent != want {
+		t.Errorf("PRIntent: got %q, want %q", result.PRIntent, want)
+	}
+}
+
 // TestDispatchWithRetry_SuccessWithoutOutcomeClassifies verifies that a
 // zero-exit box that wrote no outcome line still gets a best-effort
 // classification, so gateIssue-style callers can explain what happened

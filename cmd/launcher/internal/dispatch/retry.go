@@ -131,7 +131,15 @@ func (d *Dispatch) successResult(logPath string) Result {
 		if commentErr != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: comment scan: %v\n", d.number, commentErr)
 		}
-		return Result{Success: true, Outcome: o, OutcomeFound: true, Comment: comment, CommentFound: commentFound}
+		prIntent, prIntentFound, prIntentErr := outcome.LastPRIntentInLog(logPath)
+		if prIntentErr != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: pr-intent scan: %v\n", d.number, prIntentErr)
+		}
+		return Result{
+			Success: true, Outcome: o, OutcomeFound: true,
+			Comment: comment, CommentFound: commentFound,
+			PRIntent: prIntent, PRIntentFound: prIntentFound,
+		}
 	}
 	cls, clsErr := d.driver.ClassifyTransient(logPath)
 	return Result{Success: true, Classification: cls, ClassifyErr: clsErr}
