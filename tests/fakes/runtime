@@ -14,22 +14,39 @@ log="${!log_var}"
 
 # bwrap: extract ISSUE_NUMBER early so each concurrent box writes its own log
 # file, eliminating concurrent-write races when multiple issues run concurrently.
+# Also extract RUN_NONCE (issue #1939): a real Box echoes back the RUN_NONCE
+# it was handed, so the fake must do the same when synthesizing an outcome
+# line below, or the launcher's nonce gate discards every fixture outcome.
 issue_num=""
+run_nonce=""
 if [ "$runtime" = "bwrap" ]; then
   _args=("$@")
   _i=0
   while [ "$_i" -lt "${#_args[@]}" ]; do
     if [ "${_args[$_i]}" = "--setenv" ]; then
-      if [ "${_args[$((_i + 1))]}" = "ISSUE_NUMBER" ]; then
-        issue_num="${_args[$((_i + 2))]}"
-        break
-      fi
+      case "${_args[$((_i + 1))]}" in
+        ISSUE_NUMBER) issue_num="${_args[$((_i + 2))]}" ;;
+        RUN_NONCE) run_nonce="${_args[$((_i + 2))]}" ;;
+      esac
       _i=$((_i + 3))
     else
       _i=$((_i + 1))
     fi
   done
 fi
+
+# Appends " nonce=$run_nonce" to a fixture outcome line if it doesn't already
+# carry one, mirroring what a well-behaved Box does with its own RUN_NONCE
+# (issue #1939) -- a test overriding FAKE_*_OUTCOME_N with its own nonce=
+# field (e.g. to exercise the spoof gate) is left untouched.
+_with_nonce() {
+  local line="$1"
+  if [ -n "$run_nonce" ] && [[ "$line" != *" nonce="* ]]; then
+    printf '%s nonce=%s' "$line" "$run_nonce"
+  else
+    printf '%s' "$line"
+  fi
+}
 
 printf '%s\n' "$*" >>"$log"
 [ -n "$issue_num" ] && printf '%s\n' "$*" >>"${log}.issue-${issue_num}"
@@ -86,6 +103,7 @@ case "$runtime" in
           case "$arg" in
             ISSUE_NUMBER=*) issue_num="${arg#ISSUE_NUMBER=}" ;;
             COMPLETE_LABEL=*) complete_label="${arg#COMPLETE_LABEL=}" ;;
+            RUN_NONCE=*) run_nonce="${arg#RUN_NONCE=}" ;;
           esac
         done
         auto_complete_var="FAKE_${rt}_AUTO_COMPLETE"
@@ -98,7 +116,8 @@ case "$runtime" in
         fi
         if [ -n "$issue_num" ]; then
           outcome_var="FAKE_${rt}_OUTCOME_${issue_num}"
-          [ -n "${!outcome_var:-}" ] && printf '%s\n' "${!outcome_var}"
+          outcome_val="${!outcome_var:-}"
+          [ -n "$outcome_val" ] && printf '%s\n' "$(_with_nonce "$outcome_val")"
         fi
         exit "${!run_exit_var:-0}"
         ;;
@@ -108,7 +127,7 @@ case "$runtime" in
     if [ -n "$issue_num" ]; then
       outcome_var="FAKE_${rt}_OUTCOME_${issue_num}"
       outcome_val="${!outcome_var:-}"
-      [ -n "$outcome_val" ] && printf '%s\n' "$outcome_val"
+      [ -n "$outcome_val" ] && printf '%s\n' "$(_with_nonce "$outcome_val")"
     fi
     run_exit_var="FAKE_${rt}_RUN_EXIT"
     exit "${!run_exit_var:-0}"

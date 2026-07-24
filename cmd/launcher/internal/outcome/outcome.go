@@ -63,7 +63,7 @@ func Parse(line string) (Outcome, error) {
 		Issue:   tokenField(rest, "issue"),
 		Landing: tokenField(rest, "landing"),
 		Status:  tokenField(rest, "status"),
-		Note:    tailField(rest, "note"),
+		Note:    noteField(rest),
 	}
 	if o.Landing == "" {
 		return Outcome{}, fmt.Errorf("%w: missing landing field", ErrNearMiss)
@@ -100,23 +100,44 @@ func (o Outcome) Line() string {
 // file does not exist. Returns (Outcome{}, false, err) when the chosen
 // candidate line fails to parse — err satisfies IsNearMiss in that case —
 // or on an I/O error other than file-not-found or oversized lines.
-func LastInLog(path string) (Outcome, bool, error) {
+//
+// expectedNonce gates candidacy (issue #1939): when non-empty, a line that
+// would otherwise qualify at either tier above but does not carry
+// expectedNonce (per LineHasNonce) is not a candidate at all — the same
+// treatment as a bare mention. This is what stops an OUTCOME-shaped line an
+// untrusted issue/comment author echoed into the log, who wrote their text
+// before this run's nonce was minted and so cannot carry it, from
+// shadowing a genuine line via last-wins. An empty expectedNonce disables
+// the gate entirely (every line is eligible regardless of nonce content),
+// for callers with no per-run nonce to check against. skipped reports
+// whether at least one line was excluded solely for failing this gate, so
+// a caller can warn that a spoof attempt or misconfigured run occurred even
+// when a valid outcome was ultimately found (or wasn't).
+func LastInLog(path string, expectedNonce string) (o Outcome, found bool, skipped bool, err error) {
 	const token = "SPINDRIFT_OUTCOME"
 	var lastLeading, lastMention string
-	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
+	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
 		if _, ok := stripToken(strings.TrimSpace(line), token); ok {
+			if expectedNonce != "" && !LineHasNonce(line, expectedNonce) {
+				skipped = true
+				return
+			}
 			lastLeading = line
 			return
 		}
 		if containsToken(line, token) && looksLikeAttempt(line) {
+			if expectedNonce != "" && !LineHasNonce(line, expectedNonce) {
+				skipped = true
+				return
+			}
 			lastMention = line
 		}
 	})
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return Outcome{}, false, nil
+	if scanErr != nil {
+		if errors.Is(scanErr, os.ErrNotExist) {
+			return Outcome{}, false, skipped, nil
 		}
-		return Outcome{}, false, err
+		return Outcome{}, false, skipped, scanErr
 	}
 
 	candidate := lastLeading
@@ -124,13 +145,13 @@ func LastInLog(path string) (Outcome, bool, error) {
 		candidate = lastMention
 	}
 	if candidate == "" {
-		return Outcome{}, false, nil
+		return Outcome{}, false, skipped, nil
 	}
-	o, err := Parse(candidate)
+	o, err = Parse(candidate)
 	if err != nil {
-		return Outcome{}, false, err
+		return Outcome{}, false, skipped, err
 	}
-	return o, true, nil
+	return o, true, skipped, nil
 }
 
 // LastCommentLineInLog scans the file at path for the last line carrying the
@@ -345,7 +366,7 @@ func looksLikeAttempt(line string) bool {
 	return tokenField(line, "issue") != "" ||
 		tokenField(line, "landing") != "" ||
 		tokenField(line, "status") != "" ||
-		tailField(line, "note") != ""
+		noteField(line) != ""
 }
 
 // stripToken reports whether line begins with token followed by a space or a
@@ -381,4 +402,24 @@ func tailField(line, key string) string {
 		return line[idx+len(marker):]
 	}
 	return ""
+}
+
+// noteField is tailField("note") with the trailing " nonce=<value>" field
+// (issue #1939) stripped back off, so it never ends up inside Note: the
+// grammar places nonce last, after note's own greedy tail, and a run's note
+// gets posted as a public comment on status=blocked (settle.postBlockedNoteComment)
+// — leaking the nonce there would let a comment author replay it against a
+// later retry of the same Dispatch, which reuses one nonce across all its
+// attempts. A trailing "nonce=<value>" only counts as the field, not as note
+// text that happens to contain it, when <value> itself has no spaces —
+// exactly the shape a genuine, single-token nonce always has.
+func noteField(line string) string {
+	v := tailField(line, "note")
+	const marker = " nonce="
+	if idx := strings.LastIndex(v, marker); idx >= 0 {
+		if nonce := v[idx+len(marker):]; nonce != "" && !strings.Contains(nonce, " ") {
+			return v[:idx]
+		}
+	}
+	return v
 }

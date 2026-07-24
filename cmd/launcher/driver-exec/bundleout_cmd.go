@@ -28,6 +28,7 @@ func runBundleOut(args []string, stdout io.Writer) int {
 	outbox := fs.String("outbox", "", "outbox directory to write the bundle into (required)")
 	issue := fs.String("issue", "", "issue number, carried into a corrective outcome line")
 	priorOutcomeLine := fs.String("prior-outcome-line", "", "the Agent's own SPINDRIFT_OUTCOME line, verbatim, or empty")
+	nonce := fs.String("nonce", "", "this run's own control nonce (RUN_NONCE), carried into a corrective outcome line")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -44,6 +45,7 @@ func runBundleOut(args []string, stdout io.Writer) int {
 		OutboxDir:        *outbox,
 		Issue:            *issue,
 		PriorOutcomeLine: *priorOutcomeLine,
+		Nonce:            *nonce,
 	}, stdout); err != nil {
 		fmt.Fprintln(fs.Output(), "driver-exec bundle-out:", err)
 		return 1

@@ -571,12 +571,16 @@ _Avoid_: heartbeat log, status log, activity log, event stream.
 The machine-readable final line a Box writes to stdout, parsed by the Launcher
 to learn where the deliverable landed and whether the Dispatch is ready for
 settle, blocked, or failed. Grammar:
-`SPINDRIFT_OUTCOME issue=<num> landing=<ref> status=<status> note=<text>`
+`SPINDRIFT_OUTCOME issue=<num> landing=<ref> status=<status> note=<text> nonce=<nonce>`
 where `note` may contain spaces and `=`. `landing` is the landing reference —
 a PR URL (`github` Code Forge), a branch ref (push-only `git`), or a
 verdict-comment URL (research dispatch); `status` values are scoped to the
 Dispatch kind (`ready`/`blocked` for work, the verdicts plus `blocked` for
-research). The line carries only what the Launcher cannot know without the
+research). `nonce` must carry this run's own per-run control nonce (`RUN_NONCE`, issue #1939):
+`LastInLog` treats an otherwise well-formed line lacking it as not a
+candidate at all, so an untrusted issue/comment author's echoed line —
+authored before the nonce existed — can never win last-wins over the Box's
+genuine line. The line carries only what the Launcher cannot know without the
 Box — never backend identity or other run config, which the Launcher already
 holds authoritatively. The `cmd/launcher/internal/outcome` package is the
 authoritative spec and implementation: `Parse` validates the grammar, `Line`
