@@ -15,6 +15,16 @@ setup() {
   grep -q "cut from" "$CLAUDE_PROMPT_FILE"
 }
 
+# RUN_NONCE (issue #1937): the launcher mints a per-run nonce and forwards it
+# as RUN_NONCE so control-signal prompt fragments can reference it; nothing
+# gates on it yet, but it must reach the rendered prompt the Box sees.
+@test "RUN_NONCE is rendered into the prompt" {
+  export RUN_NONCE="deadbeefcafe1234"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF "deadbeefcafe1234" "$CLAUDE_PROMPT_FILE"
+}
+
 @test "the configured mkHarness prompt is what reaches claude" {
   : "${PROMPT_HARNESS_DIR:?PROMPT_HARNESS_DIR must be set by the check}"
   export PROMPTS_DIR="$PROMPT_HARNESS_DIR"
