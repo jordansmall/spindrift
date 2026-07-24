@@ -241,7 +241,8 @@ rec {
           );
       secretRows = concatStrings (
         mapAttrsToList (
-          _: e: "\t{env: \"${e.env}\", doc: \"${e.doc}\", fileFlag: \"${toKebab e.env}-file\"},\n"
+          _: e:
+          "\t{env: \"${e.env}\", doc: \"${e.doc}\", fileFlag: \"${toKebab e.env}-file\", cmdFlag: \"${toKebab e.env}-cmd\"},\n"
         ) secretSchema
       );
     in

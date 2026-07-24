@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -548,12 +549,219 @@ func TestParseFlags_FileFlag_StripsNewline(t *testing.T) {
 	}
 }
 
+// TestParseFlags_CmdFlag_RunsCommand: --<name>-cmd runs the injected command
+// runner and sets the env var to its trimmed output.
+func TestParseFlags_CmdFlag_RunsCommand(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		if cmd != "rbw get spindrift-pat" {
+			t.Fatalf("secretCmdRunner called with %q, want %q", cmd, "rbw get spindrift-pat")
+		}
+		return "cmd-value\n", nil
+	}
+	t.Setenv("GH_TOKEN", "")
+	_, err := parseFlags([]string{"--gh-token-cmd", "rbw get spindrift-pat"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "cmd-value" {
+		t.Errorf("GH_TOKEN = %q, want %q", got, "cmd-value")
+	}
+}
+
+// TestParseFlags_CmdEnv_RunsCommand: <NAME>_CMD env var (no flag) runs the
+// injected command runner and sets the env var to its trimmed output.
+func TestParseFlags_CmdEnv_RunsCommand(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		if cmd != "rbw get spindrift-pat" {
+			t.Fatalf("secretCmdRunner called with %q, want %q", cmd, "rbw get spindrift-pat")
+		}
+		return "env-cmd-value\n", nil
+	}
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN_CMD", "rbw get spindrift-pat")
+	_, err := parseFlags(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "env-cmd-value" {
+		t.Errorf("GH_TOKEN = %q, want %q", got, "env-cmd-value")
+	}
+}
+
+// TestParseFlags_CmdFlag_WinsOverCmdEnv: --<name>-cmd flag takes precedence
+// over a <NAME>_CMD env var for the same secret.
+func TestParseFlags_CmdFlag_WinsOverCmdEnv(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		switch cmd {
+		case "flag-cmd":
+			return "flag-value", nil
+		case "env-cmd":
+			return "env-value", nil
+		}
+		t.Fatalf("secretCmdRunner called with unexpected cmd %q", cmd)
+		return "", nil
+	}
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN_CMD", "env-cmd")
+	_, err := parseFlags([]string{"--gh-token-cmd", "flag-cmd"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "flag-value" {
+		t.Errorf("GH_TOKEN = %q, want %q (flag must win over env)", got, "flag-value")
+	}
+}
+
+// TestParseFlags_CmdEnv_WinsOverFileFlag: <NAME>_CMD env takes precedence
+// over a --<name>-file flag for the same secret.
+func TestParseFlags_CmdEnv_WinsOverFileFlag(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		return "cmd-value", nil
+	}
+	tokenFile := filepath.Join(t.TempDir(), "token.txt")
+	if err := os.WriteFile(tokenFile, []byte("file-value"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN_CMD", "env-cmd")
+	_, err := parseFlags([]string{"--gh-token-file", tokenFile})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "cmd-value" {
+		t.Errorf("GH_TOKEN = %q, want %q (cmd env must win over file flag)", got, "cmd-value")
+	}
+}
+
+// TestParseFlags_CmdFlagAndFileFlag_IsConfigError: supplying both
+// --<name>-cmd and --<name>-file for the same secret is a configuration error.
+func TestParseFlags_CmdFlagAndFileFlag_IsConfigError(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		t.Fatal("secretCmdRunner should not be called when the flags conflict")
+		return "", nil
+	}
+	tokenFile := filepath.Join(t.TempDir(), "token.txt")
+	if err := os.WriteFile(tokenFile, []byte("file-value"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GH_TOKEN", "")
+	_, err := parseFlags([]string{"--gh-token-cmd", "some-cmd", "--gh-token-file", tokenFile})
+	if err == nil {
+		t.Fatal("expected error when both --gh-token-cmd and --gh-token-file are supplied, got nil")
+	}
+	if !strings.Contains(err.Error(), "--gh-token-cmd") || !strings.Contains(err.Error(), "--gh-token-file") {
+		t.Errorf("error should name both conflicting flags, got: %v", err)
+	}
+}
+
+// TestParseFlags_CmdFlag_EmptyOutputIsError: an empty command result aborts
+// with a named, value-free error instead of setting an empty secret.
+func TestParseFlags_CmdFlag_EmptyOutputIsError(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		return "", nil
+	}
+	t.Setenv("GH_TOKEN", "")
+	_, err := parseFlags([]string{"--gh-token-cmd", "some-cmd"})
+	if err == nil {
+		t.Fatal("expected error for empty command output, got nil")
+	}
+	if !strings.Contains(err.Error(), "GH_TOKEN") {
+		t.Errorf("error should name GH_TOKEN, got: %v", err)
+	}
+}
+
+// TestParseFlags_CmdFlag_NonZeroExitIsError: a failing command aborts with a
+// named, value-free error and never leaks the command's stderr/stdout.
+func TestParseFlags_CmdFlag_NonZeroExitIsError(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		return "partial-secret-leak", errors.New("exit status 1")
+	}
+	t.Setenv("GH_TOKEN", "")
+	_, err := parseFlags([]string{"--gh-token-cmd", "some-cmd"})
+	if err == nil {
+		t.Fatal("expected error for a failing command, got nil")
+	}
+	if !strings.Contains(err.Error(), "GH_TOKEN") {
+		t.Errorf("error should name GH_TOKEN, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "partial-secret-leak") {
+		t.Errorf("error must not leak command output, got: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "" {
+		t.Errorf("GH_TOKEN = %q, want empty after a failing command", got)
+	}
+}
+
+// TestParseFlags_CmdFlag_MissingValue: --<name>-cmd with no following arg
+// returns an error.
+func TestParseFlags_CmdFlag_MissingValue(t *testing.T) {
+	_, err := parseFlags([]string{"--gh-token-cmd"})
+	if err == nil {
+		t.Fatal("expected error when cmd flag has no command argument, got nil")
+	}
+}
+
+// TestParseFlags_NoCmdOrFile_LeavesDirectEnv: with neither a --*-cmd flag, a
+// <NAME>_CMD env var, nor a --*-file flag set, the direct env value is left
+// untouched.
+func TestParseFlags_NoCmdOrFile_LeavesDirectEnv(t *testing.T) {
+	t.Setenv("GH_TOKEN", "direct-value")
+	t.Setenv("GH_TOKEN_CMD", "")
+	_, err := parseFlags(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "direct-value" {
+		t.Errorf("GH_TOKEN = %q, want %q (direct env must be left untouched)", got, "direct-value")
+	}
+}
+
+// TestSecretCmdRunner_Default_RunsRealCommand: the production secretCmdRunner
+// (unfaked) actually shells out and returns stdout, so the injected seam has
+// a real implementation wired up, not just fakes in tests.
+func TestSecretCmdRunner_Default_RunsRealCommand(t *testing.T) {
+	out, err := secretCmdRunner("printf real-value")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "real-value" {
+		t.Errorf("secretCmdRunner(%q) = %q, want %q", "printf real-value", out, "real-value")
+	}
+}
+
 // TestPrintHelpFull_ShowsSecretFileFlags: full help lists --<name>-file flags for secret knobs.
 func TestPrintHelpFull_ShowsSecretFileFlags(t *testing.T) {
 	var buf bytes.Buffer
 	printHelpFull(&buf)
 	out := buf.String()
 	for _, want := range []string{"--gh-token-file", "--anthropic-api-key-file", "--claude-code-oauth-token-file"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help output missing %s", want)
+		}
+	}
+}
+
+// TestPrintHelpFull_ShowsSecretCmdFlags: full help lists --<name>-cmd flags
+// for secret knobs, mirroring the --<name>-file section.
+func TestPrintHelpFull_ShowsSecretCmdFlags(t *testing.T) {
+	var buf bytes.Buffer
+	printHelpFull(&buf)
+	out := buf.String()
+	for _, want := range []string{"--gh-token-cmd", "--anthropic-api-key-cmd", "--claude-code-oauth-token-cmd"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help output missing %s", want)
 		}
