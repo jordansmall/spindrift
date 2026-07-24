@@ -30,6 +30,10 @@
     mergeMode = "immediate";
     autoFormat = true;
     autoLint = true;
+    # Dogfood the host-mediated read-only path (ADR 0034, #1916-#1919): the
+    # Box makes no forge/tracker writes; the launcher relays branch, draft PR,
+    # and comment writes host-side. github satisfies the capability gate.
+    boxForgeAndIssueAccess = "read-only";
     # Opt spindrift's own dogfood run into the Filer (#393, landed
     # 2026-07-09): non-blocking review findings become tracked
     # `agent-review-finding` issues instead of staying stuck in PR bodies.
