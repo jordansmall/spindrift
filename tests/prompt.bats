@@ -242,12 +242,17 @@ setup() {
 @test "OPEN A PULL REQUEST opens the PR as a draft" {
   # issue #1614: the draft bit is the readiness signal the entrypoint
   # backstop and launcher trust, so the PR must never open non-draft.
+  # issue #1919: the concrete `gh pr create` invocation now lives in the
+  # read-write create-step fragment (open-pr-create-git.md), not inline in
+  # the template -- the section itself only carries the
+  # OPEN_PR_CREATE_READ_WRITE_STEP reference.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local section
   section="$(sed -n '/^# OPEN A PULL REQUEST$/,/^# OUTCOME$/p' "$prompt")"
   [ -n "$section" ]
-  grep -q 'gh pr create --draft' <<<"$section"
+  grep -q 'OPEN_PR_CREATE_READ_WRITE_STEP' <<<"$section"
+  grep -q 'gh pr create --draft' "$prompts/fragments/open-pr-create-git.md"
 }
 
 @test "OUTCOME leaves the PR in draft and never flips it ready" {
@@ -265,10 +270,12 @@ setup() {
 @test "OUTCOME section states the exact grammar and allowed status values" {
   # issue #1901: an agent following the prompt must be able to see the
   # accepted grammar and status enum, not infer it from one worked example.
+  # issue #1919: the placeholder generalized from <pr-url> to <landing-ref>
+  # since landing= carries a branch name, not a PR URL, under read-only.
   local section
   section="$(issue_prompt_outcome_section)"
   [ -n "$section" ]
-  grep -qF 'SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=<status> note=<short reason>' <<<"$section"
+  grep -qF 'SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<short reason>' <<<"$section"
   grep -q 'valid `status` values here are `ready` and `blocked`' <<<"$section"
 }
 

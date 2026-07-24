@@ -216,4 +216,46 @@
     fragment = "open-pr-push-outbox.md";
     var = "OPEN_PR_PUSH_READ_ONLY_STEP";
   }
+  # The OPEN A PULL REQUEST create step (issue #1919, same BOX_ACCESS_READ_
+  # WRITE/BOX_ACCESS_READ_ONLY gates as the push step above): a read-only
+  # github Box holds no PR-create-capable token either, so it emits its
+  # intended title/body as a SPINDRIFT_PR_INTENT stdout block instead of
+  # running `gh pr create` -- the launcher opens the draft PR host-side from
+  # it (forge.DraftPRCreator), the same host-mediation shape RelayBundle
+  # already gives the push step.
+  {
+    gate = "BOX_ACCESS_READ_WRITE";
+    fragment = "open-pr-create-git.md";
+    var = "OPEN_PR_CREATE_READ_WRITE_STEP";
+  }
+  {
+    gate = "BOX_ACCESS_READ_ONLY";
+    fragment = "open-pr-create-outbox.md";
+    var = "OPEN_PR_CREATE_READ_ONLY_STEP";
+  }
+  # The OUTCOME section's landing= value and "what status=ready means" close
+  # (issue #1919, same BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY gates): a
+  # read-only Box never learns a PR URL (it never opens the PR itself), so
+  # its landing= carries the branch name instead, and "status=ready" means
+  # "branch relayed, PR-intent ready to open" rather than "PR already open".
+  {
+    gate = "BOX_ACCESS_READ_WRITE";
+    fragment = "outcome-landing-git.md";
+    var = "OUTCOME_LANDING_READ_WRITE_STEP";
+  }
+  {
+    gate = "BOX_ACCESS_READ_ONLY";
+    fragment = "outcome-landing-outbox.md";
+    var = "OUTCOME_LANDING_READ_ONLY_STEP";
+  }
+  {
+    gate = "BOX_ACCESS_READ_WRITE";
+    fragment = "outcome-ready-means-git.md";
+    var = "OUTCOME_READY_MEANS_READ_WRITE_STEP";
+  }
+  {
+    gate = "BOX_ACCESS_READ_ONLY";
+    fragment = "outcome-ready-means-outbox.md";
+    var = "OUTCOME_READY_MEANS_READ_ONLY_STEP";
+  }
 ]
