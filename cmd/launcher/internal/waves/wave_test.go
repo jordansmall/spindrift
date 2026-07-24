@@ -132,17 +132,25 @@ func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.
 	cfc := &countingForge{Fake: fc, claimCount: &count}
 
 	fr := runner.NewFake()
-	fr.RunErrs = []error{boxErr, nil} // first slot: fail; second: succeed
 	// The succeeding box must still report an outcome — an empty log there
 	// would (correctly, since #1605) also demote to failedLabel, muddying
 	// this test's real target: semaphore release, not settle's missing-
-	// outcome handling. WriteToOutput has no per-call targeting, so this
-	// also lands in the failing box's log, but that box returns a non-nil
+	// outcome handling. The line lands in both boxes' logs (no per-call
+	// targeting beyond call order), but the failing box returns a non-nil
 	// Run error, which routes through classification instead of outcome
 	// parsing — so the injected line is inert there.
-	fr.WriteToOutput = []byte(fmt.Sprintf(
-		"SPINDRIFT_OUTCOME issue=2 landing=%s status=ready note=ok\n", prURL,
-	))
+	var calls int32
+	fr.RunFunc = func(box runner.Box) error {
+		n := atomic.AddInt32(&calls, 1)
+		if box.Output != nil {
+			fmt.Fprintf(box.Output, "SPINDRIFT_OUTCOME issue=2 landing=%s status=ready note=ok nonce=%s\n",
+				prURL, box.Env["RUN_NONCE"])
+		}
+		if n == 1 {
+			return boxErr // first slot: fail
+		}
+		return nil // second: succeed
+	}
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
@@ -233,9 +241,13 @@ func TestDispatchWave_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	// The fake runner writes the outcome line into the log file (via box.Output)
 	// before returning, simulating a box that ran successfully and emitted its result.
 	fr := runner.NewFake()
-	fr.WriteToOutput = []byte(fmt.Sprintf(
-		"SPINDRIFT_OUTCOME issue=1 landing=%s status=ready note=ok\n", prURL,
-	))
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Output != nil {
+			fmt.Fprintf(box.Output, "SPINDRIFT_OUTCOME issue=1 landing=%s status=ready note=ok nonce=%s\n",
+				prURL, box.Env["RUN_NONCE"])
+		}
+		return nil
+	}
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
@@ -271,9 +283,13 @@ func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	fc.PRStateErr = errors.New("PRState: not supported by the git Code Forge (push-only, no PR concept)")
 
 	fr := runner.NewFake()
-	fr.WriteToOutput = []byte(fmt.Sprintf(
-		"SPINDRIFT_OUTCOME issue=1 landing=%s status=ready note=ok\n", branch,
-	))
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Output != nil {
+			fmt.Fprintf(box.Output, "SPINDRIFT_OUTCOME issue=1 landing=%s status=ready note=ok nonce=%s\n",
+				branch, box.Env["RUN_NONCE"])
+		}
+		return nil
+	}
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
@@ -312,9 +328,13 @@ func TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 	fc.PRStateErr = errors.New("PRState: not supported by the git Code Forge (push-only, no PR concept)")
 
 	fr := runner.NewFake()
-	fr.WriteToOutput = []byte(fmt.Sprintf(
-		"SPINDRIFT_OUTCOME issue=1 landing=%s status=merged note=ok\n", branch,
-	))
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Output != nil {
+			fmt.Fprintf(box.Output, "SPINDRIFT_OUTCOME issue=1 landing=%s status=merged note=ok nonce=%s\n",
+				branch, box.Env["RUN_NONCE"])
+		}
+		return nil
+	}
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)

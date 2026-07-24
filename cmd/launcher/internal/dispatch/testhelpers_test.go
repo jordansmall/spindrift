@@ -33,6 +33,13 @@ func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
+// nonceLine appends d's per-run nonce (issue #1939) to line and a trailing
+// newline, mirroring how a genuine Box echoes RUN_NONCE on its outcome line.
+// line should have no trailing newline.
+func nonceLine(d *Dispatch, line string) []byte {
+	return []byte(line + " nonce=" + d.nonce + "\n")
+}
+
 // fakeDriver is a test double for driver.Driver. ClassifyFn, when set,
 // overrides the default Terminal/TaskFailed classification. ExtractUsage
 // delegates to the real claude subpackage's log parsing (not faked) so

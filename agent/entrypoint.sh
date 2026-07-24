@@ -733,7 +733,7 @@ emit_outcome_backstop() {
   # A research dispatch never cuts a branch (ADR 0022) -- there is nothing to
   # push best-effort, and no landing reference beyond "none".
   if _is_research_kind; then
-    echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=none status=blocked note=${note}"
+    echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=none status=blocked note=${note} nonce=${RUN_NONCE:-}"
     return
   fi
   # Nothing to preserve if BRANCH never advanced past the base -- pushing it
@@ -760,7 +760,7 @@ emit_outcome_backstop() {
     rm -f "$push_log"
   fi
 
-  echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=blocked note=${note}"
+  echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=blocked note=${note} nonce=${RUN_NONCE:-}"
 }
 
 main() {
@@ -840,7 +840,8 @@ main() {
       --branch "$BRANCH" \
       --outbox "$OUTBOX_DIR" \
       --issue "$ISSUE_NUMBER" \
-      --prior-outcome-line "$_last_outcome_line"
+      --prior-outcome-line "$_last_outcome_line" \
+      --nonce "${RUN_NONCE:-}"
   fi
 
   echo "==> entrypoint complete for issue #$ISSUE_NUMBER"

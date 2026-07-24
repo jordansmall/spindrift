@@ -120,9 +120,16 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func() error) Result {
 // unparseable line is reported via ParseErr without attempting
 // classification; a missing outcome line (a box that exited zero without
 // reporting one) falls back to a best-effort classification so the caller
-// can explain what happened.
+// can explain what happened. The scan is gated on this run's own nonce
+// (issue #1939): a SPINDRIFT_OUTCOME-shaped line that doesn't carry it is
+// not a candidate, so an untrusted issue/comment author's echoed line can't
+// win last-wins over the Box's genuine outcome. A skipped line still logs a
+// warning so a spoof attempt or misconfigured run is visible.
 func (d *Dispatch) successResult(logPath string) Result {
-	o, found, err := outcome.LastInLog(logPath)
+	o, found, skipped, err := outcome.LastInLog(logPath, d.nonce)
+	if skipped {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: outcome scan: skipped a SPINDRIFT_OUTCOME-shaped line without this run's nonce\n", d.number)
+	}
 	if err != nil {
 		return Result{Success: true, ParseErr: err}
 	}
