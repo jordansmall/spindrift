@@ -1460,7 +1460,7 @@ the Launcher to apply with its own, separately-scoped write token:
 | write            | `read-write` (default)  | `read-only`                          |
 | ---------------- | ------------------------ | ------------------------------------- |
 | land the branch   | `git push`               | `seam.bundle` written to the outbox; the Launcher relays it (ADR 0033's mechanism, reused) |
-| open the PR       | `gh pr create --draft`   | a `SPINDRIFT_PR_INTENT` stdout block; the Launcher opens the draft PR host-side |
+| open the PR       | `gh pr create --draft`   | a nonce-guarded, base64-encoded `SPINDRIFT_PR_INTENT` stdout line; the Launcher opens the draft PR host-side |
 | post a comment     | `gh issue comment`       | a single nonce-guarded `SPINDRIFT_COMMENT` line; the Launcher verifies the nonce, decodes it, and posts it host-side (ADR 0032's mechanism, reused) |
 
 This is gated at startup by capability, not by `CODE_FORGE`/`ISSUE_TRACKER`

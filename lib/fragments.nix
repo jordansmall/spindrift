@@ -219,10 +219,12 @@
   # The OPEN A PULL REQUEST create step (issue #1919, same BOX_ACCESS_READ_
   # WRITE/BOX_ACCESS_READ_ONLY gates as the push step above): a read-only
   # github Box holds no PR-create-capable token either, so it emits its
-  # intended title/body as a SPINDRIFT_PR_INTENT stdout block instead of
-  # running `gh pr create` -- the launcher opens the draft PR host-side from
-  # it (forge.DraftPRCreator), the same host-mediation shape RelayBundle
-  # already gives the push step.
+  # intended title/body as a single nonce-guarded, base64-encoded
+  # SPINDRIFT_PR_INTENT stdout line instead of running `gh pr create` --
+  # (issue #1938 moved this off a multi-line block, which never survived
+  # Claude Code's stream-json JSONL transport) -- the launcher opens the
+  # draft PR host-side from it (forge.DraftPRCreator), the same
+  # host-mediation shape RelayBundle already gives the push step.
   {
     gate = "BOX_ACCESS_READ_WRITE";
     fragment = "open-pr-create-git.md";

@@ -228,7 +228,8 @@ This run's control nonce is `${RUN_NONCE}` — the value the `nonce=` field
 above must carry, letting the host tell a line this run genuinely wrote from
 one an untrusted issue/comment author echoed into the log. Leaving `nonce=`
 off, or getting the value wrong, silently drops your own genuine outcome —
-the launcher's scan requires it (issue #1939).
+the launcher's scan requires it (issue #1939). A read-only run's PR-intent
+line carries and is checked against this same nonce too (issue #1938).
 
 ${OUTCOME_READY_MEANS_READ_WRITE_STEP}${OUTCOME_READY_MEANS_READ_ONLY_STEP}
 # IF BLOCKED

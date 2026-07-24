@@ -56,8 +56,9 @@ not to use that reachability for writes:
   branch as a `git bundle` to the writable outbox (ADR 0033's mechanism,
   unmodified); the Launcher relays it into the real remote via
   `forge.BundleRelay`.
-- **PR → intent block.** Instead of `gh pr create`, the Box emits a
-  `SPINDRIFT_PR_INTENT` stdout block (title, body, base, head); the Launcher
+- **PR → intent line.** Instead of `gh pr create`, the Box emits a
+  `SPINDRIFT_PR_INTENT` stdout signal (title, body; later reshaped
+  single-line and nonce-guarded by this ADR's #1938 amendment); the Launcher
   opens the draft PR host-side via `forge.DraftPRCreator`, a new optional
   capability discovered by type assertion the same way `PRForge` and
   `BundleRelay` are.
@@ -147,3 +148,24 @@ surprise reversal.
   fully supported.
 - A default flip and an eventual `read-only`-only posture are noted futures,
   not commitments made here.
+
+## Amendment (issue #1938): PR-intent moves to a single nonce-guarded line
+
+The `SPINDRIFT_PR_INTENT` signal described above as a multi-line
+`_BEGIN`/`_END` stdout block never survived Claude Code's stream-json JSONL
+log transport: a multi-line block collapses onto one JSON-escaped physical
+line before the launcher's exact-line marker scan ever sees it (issue
+#1921's dogfood failure — "no usable PR-intent line found in the box's
+log"). The Box now emits it as a single line instead —
+`SPINDRIFT_PR_INTENT <RUN_NONCE> <base64>` — the same shape ADR 0032's
+#1940 amendment gives `SPINDRIFT_COMMENT`, and built on the same
+`outcome.LastCommentLineInLog`-style scan: the launcher locates the last
+line carrying the token, verifies the field immediately after it against
+the run's own nonce (a line whose nonce doesn't match was written by
+someone other than this run's own Box, since an untrusted issue/comment
+author's text predates the nonce being minted, so it's ignored rather than
+allowed to shadow an earlier genuine line), and strictly base64-decodes the
+`title\n\nbody` payload that follows, rejecting any decode error outright.
+Everything else in this ADR — the write-channel shape (block → stdout,
+launcher applies host-side), the capability gate, the token scope — is
+unchanged.
