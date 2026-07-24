@@ -614,7 +614,7 @@ live credentials. See `spindrift --help --all` for the full
 | `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), or `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)) |
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
-| `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead), gated at startup by capability — `read-only` is permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments; `local` backends already satisfy the gate, `github` does not yet |
+| `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), gated at startup by capability — `read-only` is permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments; `local` and `github` both satisfy the gate today |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
 | `ISSUE_TRACKER`           | `github` (baked)       | IssueTracker backend: `github`, `local` (private Markdown + YAML frontmatter files — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)), or `jira` (see [Issue Tracker backends](#issue-tracker-backends)) |
@@ -1445,6 +1445,45 @@ locally is as far as spindrift goes — there is no `finalize` verb yet; the
 operator still publishes the team PR manually with the `git push origin
 <branch>` / `gh pr create` gestures they already know.
 
+### Read-only Box (`BOX_FORGE_AND_ISSUE_ACCESS=read-only`)
+
+`BOX_FORGE_AND_ISSUE_ACCESS=read-only` brings the `github` Code Forge and
+Issue Tracker to parity with the host-mediated model `local` has always used
+(ADR 0032, ADR 0033, and [ADR
+0034](adr/0034-host-mediated-github-forge-and-issue-access.md) for the
+`github` extension). The Box's `GH_TOKEN` collapses to
+**read-only** — Contents R, Issues R, Metadata R (see [Read-only Box
+token](#read-only-box-token) below) — and every write the Box would
+otherwise make in-box instead travels out as a stdout block or a bundle for
+the Launcher to apply with its own, separately-scoped write token:
+
+| write            | `read-write` (default)  | `read-only`                          |
+| ---------------- | ------------------------ | ------------------------------------- |
+| land the branch   | `git push`               | `seam.bundle` written to the outbox; the Launcher relays it (ADR 0033's mechanism, reused) |
+| open the PR       | `gh pr create --draft`   | a `SPINDRIFT_PR_INTENT` stdout block; the Launcher opens the draft PR host-side |
+| post a comment     | `gh issue comment`       | a `SPINDRIFT_COMMENT` stdout block; the Launcher posts it host-side (ADR 0032's mechanism, reused) |
+
+This is gated at startup by capability, not by `CODE_FORGE`/`ISSUE_TRACKER`
+value alone: the selected forge must implement bundle-relay and host-side
+draft-PR-create, and the selected tracker must implement host-posted
+comments, or the launcher exits with a startup error naming the missing
+seam. `local` satisfies the gate by construction (there is no other way for
+it to work); `github` satisfies it as of issue #1919. `read-write` is
+unaffected either way — it never inspects these capabilities.
+
+`read-only` is an **alternative route to the same guarantee** [two-actor
+separation](#two-actor-separation-opt-in-hard-mode) provides: a Box that
+cannot unilaterally land on the base branch. Two-actor separation gets there
+by capability plus an out-of-band repository ruleset (the Box's token could
+still open a PR and merge it; the ruleset is what stops it). Read-only gets
+there by capability alone — the Box's token cannot open a PR or merge one in
+the first place, because it never receives a token that can. Pick two-actor
+separation when the Box still needs to author the PR/comment content itself
+(the common case today); pick read-only for the strongest available posture,
+at the cost of the Launcher doing more host-side work per issue. The two are
+not mutually exclusive but are also not additive: `read-only` alone already
+removes the capability two-actor separation was closing off with a ruleset.
+
 ---
 
 ## Security
@@ -1525,6 +1564,30 @@ issues on the host.
 | Issues            | Read and write | read the issue; write to swap the dispatch labels (`agent-in-progress`/`agent-complete`/`agent-failed`) and post the per-issue usage/cost comment |
 | Metadata          | Read           | mandatory baseline, auto-selected            |
 | Workflows         | Read and write | **off by default** — grant only when an issue edits `.github/workflows/*`; agent branches run in-repo so `pull_request` events carry repository secrets; with this permission an injected agent can rewrite CI or exfiltrate those secrets |
+
+### Read-only Box token
+
+Under [`BOX_FORGE_AND_ISSUE_ACCESS=read-only`](#read-only-box-box_forge_and_issue_accessread-only)
+the Box's `GH_TOKEN` drops to the smallest scope that still lets it clone the
+repo and read the issue — it never opens a PR, pushes a branch, or posts a
+comment, so it needs none of the write permissions the table above grants:
+
+| permission | level | why                                       |
+| ---------- | ----- | ------------------------------------------ |
+| Contents   | Read  | clone the repo — never push                |
+| Issues     | Read  | read the issue and its comments — never write |
+| Metadata   | Read  | mandatory baseline, auto-selected          |
+
+Provision this token (a fine-grained PAT or a GitHub App installation, same
+as above) scoped to **only the Target repository**, and hand it to the Box
+the same way `BOX_GH_TOKEN` reaches it under [two-actor
+separation](#two-actor-separation-opt-in-hard-mode) — the Launcher keeps
+using its own, separately-scoped `GH_TOKEN` (the table above) for every
+host-side write the Box no longer makes. A fully injection-steered Box
+holding only this token cannot open a PR, push a branch, or comment,
+regardless of what the prompt tells it to do — the same enforcement-boundary
+property the [research token](#research-token-least-privilege-optional)
+gets from a Contents-Read-only grant.
 
 ### GitHub App installation token (recommended)
 
