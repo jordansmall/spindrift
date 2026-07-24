@@ -265,6 +265,31 @@ in
         touch $out
       '';
 
+  # The Driver cannot end up with ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN
+  # inherited into a spawned Bash subprocess's environment even under
+  # --dangerously-skip-permissions (issue #1927, spec #1907): a third
+  # PreToolUse hook, env-credential-scrub.sh, must be baked in alongside
+  # reject-background-bash.sh and credential-deny.sh and registered for the
+  # Bash matcher. Realizes the agent-files layer; Linux-gated like the other
+  # image checks.
+  env-credential-scrub-hook-baked-into-image =
+    pkgs.runCommand "env-credential-scrub-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        hook=${nonRustHarness.agentFiles}/home/agent/.claude/hooks/env-credential-scrub.sh
+        [ -x "$hook" ] || {
+          echo "env-credential-scrub.sh missing or not executable at $hook" >&2
+          exit 1
+        }
+        settings=${nonRustHarness.agentFiles}/home/agent/.claude/settings.json
+        jq -e \
+          'any(.hooks.PreToolUse[]; .matcher == "Bash" and (.hooks[0].command | endswith("env-credential-scrub.sh")))' \
+          "$settings" >/dev/null || {
+          echo "settings.json does not register a Bash-matched PreToolUse hook pointing at env-credential-scrub.sh" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # The nix.conf and store DB must be present in the image so
   # `nix flake check` reuses the baked closure instead of re-substituting.
   # Realizes the default image; Linux-gated like the other image checks.

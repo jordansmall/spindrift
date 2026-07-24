@@ -178,6 +178,20 @@ let
   # same script. Merged into one PreToolUse array below, alongside the
   # reject-background-bash entry, since the image ships a single
   # ~/.claude/settings.json.
+  #
+  # Registers the third PreToolUse hook (issue #1927, spec #1907):
+  # env-credential-scrub.sh rewrites every Bash call (via
+  # hookSpecificOutput.updatedInput) to `unset` ANTHROPIC_API_KEY and
+  # CLAUDE_CODE_OAUTH_TOKEN before it runs, and denies outright any Bash call
+  # that references a /proc/<pid>/environ path at all. Re-introduces the
+  # protection #1926 reverted -- CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 -- via a
+  # Box-controlled rewrite instead of Claude Code's own subprocess-scrub
+  # feature, which forces the Driver's permission mode to `default` and
+  # wraps every Bash subprocess in a nested bwrap sandbox that can't mount
+  # /proc inside the Box's own bwrap sandbox (reproduced directly -- see
+  # agent/env-credential-scrub.sh's header). Only a Bash matcher entry, not
+  # Read, since the threat is a spawned subprocess's environment and Read
+  # never spawns one.
   boxSettings = builtins.toJSON {
     hooks = {
       PreToolUse = [
@@ -208,6 +222,15 @@ let
             }
           ];
         }
+        {
+          matcher = "Bash";
+          hooks = [
+            {
+              type = "command";
+              command = "/home/agent/.claude/hooks/env-credential-scrub.sh";
+            }
+          ];
+        }
       ];
     };
   };
@@ -230,6 +253,8 @@ let
     chmod +x $out/home/agent/.claude/hooks/reject-background-bash.sh
     cp ${../agent/credential-deny.sh} $out/home/agent/.claude/hooks/credential-deny.sh
     chmod +x $out/home/agent/.claude/hooks/credential-deny.sh
+    cp ${../agent/env-credential-scrub.sh} $out/home/agent/.claude/hooks/env-credential-scrub.sh
+    chmod +x $out/home/agent/.claude/hooks/env-credential-scrub.sh
     cp ${pkgs.writeText "settings.json" boxSettings} $out/home/agent/.claude/settings.json
     cp ${entrypoint}/bin/entrypoint $out/agent/entrypoint.sh
     chmod +x $out/agent/entrypoint.sh

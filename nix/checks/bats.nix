@@ -29,6 +29,7 @@ in
           ${../../agent/format-transcript.sh} \
           ${../../agent/reject-background-bash.sh} \
           ${../../agent/credential-deny.sh} \
+          ${../../agent/env-credential-scrub.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/fakes/claude} \
@@ -78,6 +79,10 @@ in
         # /home/agent/.claude/hooks/credential-deny.sh (issue #1909); same
         # reasoning as REJECT_BACKGROUND_BASH_SCRIPT above.
         CREDENTIAL_DENY_HOOK_SCRIPT = ../../agent/credential-deny.sh;
+        # The PreToolUse hook script baked into the image at
+        # /home/agent/.claude/hooks/env-credential-scrub.sh (issue #1927);
+        # same reasoning as CREDENTIAL_DENY_HOOK_SCRIPT above.
+        ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT = ../../agent/env-credential-scrub.sh;
         DOGFOOD_SH = ../../dogfood.sh;
         PROMPTS_DIR = ../../templates/default/prompts;
         # The baked default prompt dir the `run` command mounts, and a
