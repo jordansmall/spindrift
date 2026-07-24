@@ -22,6 +22,13 @@ type Dispatch struct {
 	cfg           Config
 	cacheDir      string
 	cache         *cache
+
+	// nonce is this Dispatch's per-run nonce (issue #1937): minted once by
+	// Factory.New, forwarded into every Box this Dispatch launches as
+	// RUN_NONCE, and retained here so the host-side log-parsing layer
+	// (successResult, retry.go) can check a log line against the same value
+	// without re-deriving it.
+	nonce string
 }
 
 var _ Dispatcher = (*Dispatch)(nil)
@@ -69,7 +76,7 @@ func (d *Dispatch) Run() Result {
 	logPath := d.logPath()
 	return d.dispatchWithRetry(logPath, func() error {
 		fmt.Fprintf(d.humanOut(), "    -> #%s: %s\n", d.number, d.title)
-		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, 0, ""), d.cacheDir)
+		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce), d.cacheDir)
 	})
 }
 
@@ -78,7 +85,7 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 	logPath := d.fixLogPath(pass)
 	return d.dispatchWithRetry(logPath, func() error {
 		fmt.Fprintf(d.humanOut(), "    -> #%s (fix-pass-%d): %s\n", d.number, pass, d.title)
-		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary), d.cacheDir)
+		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary, d.nonce), d.cacheDir)
 	})
 }
 
@@ -90,7 +97,7 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 // no session to resume.
 func (d *Dispatch) ResolveConflict(pr string) error {
 	fmt.Fprintf(d.humanOut(), "    -> #%s (conflict-resolve): %s\n", d.number, d.title)
-	env := buildBoxEnv(d.cfg, d.number, d.title, 0, "")
+	env := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
 	env["CONFLICT_RESOLVE_PR_URL"] = pr
 	return d.runOnce(d.conflictLogPath(), env, "")
 }

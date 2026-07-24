@@ -10,7 +10,7 @@ func TestBuildBoxEnvForwardsSchemaVars(t *testing.T) {
 	t.Setenv("GH_TOKEN", "tok")
 
 	cfg := Config{BoxEnvVars: "REPO_SLUG GH_TOKEN"}
-	env := buildBoxEnv(cfg, "7", "Test issue", 0, "")
+	env := buildBoxEnv(cfg, "7", "Test issue", 0, "", "")
 
 	if env["REPO_SLUG"] != "owner/repo" {
 		t.Errorf("REPO_SLUG: got %q, want %q", env["REPO_SLUG"], "owner/repo")
@@ -47,7 +47,7 @@ func TestBuildBoxEnvUsesResolveEnv(t *testing.T) {
 			return ""
 		},
 	}
-	env := buildBoxEnv(cfg, "7", "Test issue", 0, "")
+	env := buildBoxEnv(cfg, "7", "Test issue", 0, "", "")
 	if env["MODEL"] != "from-resolver" {
 		t.Errorf("MODEL: got %q, want from-resolver", env["MODEL"])
 	}
@@ -67,7 +67,7 @@ func TestBuildBoxEnvResolveEnvReceivesIssueNumber(t *testing.T) {
 			return ""
 		},
 	}
-	buildBoxEnv(cfg, "1734", "Test issue", 0, "")
+	buildBoxEnv(cfg, "1734", "Test issue", 0, "", "")
 	if gotNum != "1734" {
 		t.Errorf("ResolveEnv num: got %q, want %q", gotNum, "1734")
 	}
@@ -76,7 +76,7 @@ func TestBuildBoxEnvResolveEnvReceivesIssueNumber(t *testing.T) {
 // TestBuildBoxEnvSetsFixPassAndSummary verifies FIX_PASS and
 // CI_FAILURE_SUMMARY are present when fixPass>0 and summary is non-empty.
 func TestBuildBoxEnvSetsFixPassAndSummary(t *testing.T) {
-	env := buildBoxEnv(Config{}, "3", "T", 2, "lint failed")
+	env := buildBoxEnv(Config{}, "3", "T", 2, "lint failed", "")
 	if env["FIX_PASS"] != "2" {
 		t.Errorf("FIX_PASS: got %q, want %q", env["FIX_PASS"], "2")
 	}
@@ -90,10 +90,19 @@ func TestBuildBoxEnvSetsFixPassAndSummary(t *testing.T) {
 // when Config.Kind is unset so every pre-existing (kind-unaware) caller
 // keeps behaving the same way.
 func TestBuildBoxEnvSetsDispatchKind(t *testing.T) {
-	if got := buildBoxEnv(Config{}, "3", "T", 0, "")["DISPATCH_KIND"]; got != "work" {
+	if got := buildBoxEnv(Config{}, "3", "T", 0, "", "")["DISPATCH_KIND"]; got != "work" {
 		t.Errorf("DISPATCH_KIND with unset Config.Kind: got %q, want %q", got, "work")
 	}
-	if got := buildBoxEnv(Config{Kind: "research"}, "3", "T", 0, "")["DISPATCH_KIND"]; got != "research" {
+	if got := buildBoxEnv(Config{Kind: "research"}, "3", "T", 0, "", "")["DISPATCH_KIND"]; got != "research" {
 		t.Errorf("DISPATCH_KIND with Config.Kind=research: got %q, want %q", got, "research")
+	}
+}
+
+// TestBuildBoxEnvSetsRunNonce verifies buildBoxEnv forwards the Dispatch's
+// per-run nonce (issue #1937) into the Box as RUN_NONCE.
+func TestBuildBoxEnvSetsRunNonce(t *testing.T) {
+	env := buildBoxEnv(Config{}, "3", "T", 0, "", "the-nonce")
+	if env["RUN_NONCE"] != "the-nonce" {
+		t.Errorf("RUN_NONCE: got %q, want %q", env["RUN_NONCE"], "the-nonce")
 	}
 }
