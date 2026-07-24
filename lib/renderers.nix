@@ -172,9 +172,9 @@ rec {
         _key: entry:
         "# ${entry.doc}\n"
         + "# Preferred: fetch this from a vault instead of the plaintext value below —\n"
-        + "# ${entry.env}_CMD=\"rbw get spindrift-pat\" (or an op/pass/vault read); the\n"
-        + "# command's stdout wins over ${entry.env} and is never baked, logged, or\n"
-        + "# written to disk.\n"
+        + "# ${entry.env}_CMD=\"rbw get spindrift-${toKebab entry.env}\" (or an op/pass/vault\n"
+        + "# read); the command's stdout wins over ${entry.env} and is never baked,\n"
+        + "# logged, or written to disk.\n"
         + "${entry.env}=\n\n";
     in
     "# Copy to harness.env (gitignored) and fill in — or export these in your shell.\n"

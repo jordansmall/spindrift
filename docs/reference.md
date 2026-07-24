@@ -502,7 +502,8 @@ rest on the host. Set `<SECRET>_CMD` (e.g. `GH_TOKEN_CMD="rbw get
 spindrift-pat"`) in `harness.env`, your shell, or direnv, or pass a one-off
 `--<secret>-cmd` flag; the mechanism is tool-agnostic and works with `rbw`,
 `op`, `pass`, `vault`, or any command that prints the secret on stdout. The
-launcher execs the command and captures its trimmed stdout into memory —
+launcher execs the command and captures its stdout into memory, trimming
+a trailing newline the same way `--<secret>-file` does —
 the secret never touches disk. Resolution precedence, first non-empty wins:
 `--<secret>-cmd` flag > `<SECRET>_CMD` env > `--<secret>-file` flag >
 `<SECRET>` direct env — so a `_CMD` variant overrides a direct value, and
