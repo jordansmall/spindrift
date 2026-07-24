@@ -798,7 +798,8 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge) settle.Conf
 			}
 			return lw.CodeForgeForIssue(num)
 		},
-		ReadOnly: c.boxForgeAndIssueAccess == "read-only",
+		ReadOnly:   c.boxForgeAndIssueAccess == "read-only",
+		BaseBranch: c.baseBranch,
 	}
 }
 

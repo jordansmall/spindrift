@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/github"
 )
 
 // TestReadOnlyCapabilityGate_ReadWriteIsNoOp verifies that
@@ -88,6 +89,22 @@ func TestReadOnlyCapabilityGate_PRForgeWithBundleRelayButNoDraftPRCreatorFails(t
 	}
 	if !strings.Contains(err.Error(), "draft-PR-create") {
 		t.Errorf("error should name the missing draft-PR-create seam, got: %v", err)
+	}
+}
+
+// TestReadOnlyCapabilityGate_GithubReadOnlyAdapterSatisfies verifies the
+// closing acceptance criterion of the read-only epic (issue #1919): the real
+// github.NewReadOnlyCodeForge adapter — not a synthetic test fixture — now
+// implements both BundleRelay (issue #1918) and DraftPRCreator (this issue),
+// so the capability gate that #1916 opened for "github + read-only" in
+// principle actually passes for the concrete adapter newCodeForge wires up.
+func TestReadOnlyCapabilityGate_GithubReadOnlyAdapterSatisfies(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	cf := github.NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	it := forge.NewFake() // HostPostedCommenter-shaped, per TestFake_ImplementsHostPostedCommenter
+	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
+		t.Errorf("checkReadOnlyCapabilityGate() with the real github read-only adapter = %v, want nil", err)
 	}
 }
 
