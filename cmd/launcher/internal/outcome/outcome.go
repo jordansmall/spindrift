@@ -4,6 +4,7 @@
 package outcome
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -132,25 +133,116 @@ func LastInLog(path string) (Outcome, bool, error) {
 	return o, true, nil
 }
 
-// LastCommentInLog scans the file at path and returns the body of the last
-// complete SPINDRIFT_COMMENT_BEGIN … SPINDRIFT_COMMENT_END block — the lines
-// between the delimiters, joined with "\n" — using the same last-wins and
-// oversized-line-skipping semantics as LastInLog. An unterminated BEGIN (no
-// matching END before EOF or before a later BEGIN) is discarded rather than
-// returned as a partial block.
+// LastCommentLineInLog scans the file at path for the last line carrying the
+// SPINDRIFT_COMMENT token and decodes its single-line grammar: SPINDRIFT_COMMENT
+// <nonce> <base64-encoded-body> (issue #1940). Unlike LastInLog, which always
+// takes the very last token-bearing line (valid or not) and surfaces its
+// parse failure as a near-miss, COMMENT prefers the last line that actually
+// verifies: an untrusted issue/comment author cannot know this run's nonce
+// (they write their text before it is minted), so a later line that merely
+// carries the token without verifying is either their echo or reasoning-
+// adjacent prose, and must not be allowed to shadow — and so suppress — an
+// earlier genuine comment.
 //
-// Returns ("", false, nil) when no complete block is present or the file
-// does not exist. Returns ("", false, err) on I/O errors other than
-// file-not-found or oversized lines.
-func LastCommentInLog(path string) (string, bool, error) {
-	return lastDelimitedBlockInLog(path, "SPINDRIFT_COMMENT_BEGIN", "SPINDRIFT_COMMENT_END")
+// A stream-json JSONL box log collapses a printed line's trailing newline
+// into a literal `\n` escape butted directly against the base64 payload with
+// no whitespace in between; the payload is taken as the longest run of valid
+// base64 characters after the nonce field, so that trailing JSON escaping
+// never reaches the decoder.
+//
+// Returns ("", false, nil) when no line carries the token at all, or the
+// file does not exist — there was never a comment to relay. Returns ("",
+// false, err) only when every token-bearing line fails to verify — a spoof
+// attempt or a corrupted line, for the caller to log; never treated as
+// no-comment. Returns (body, true, nil) from the last line that verifies,
+// even if a later, non-verifying line also carries the token — that later
+// line is dropped silently rather than reported, since the one-result
+// return contract can't carry both a successful relay and a warning at
+// once, and the successful relay is what matters.
+func LastCommentLineInLog(path, expectedNonce string) (string, bool, error) {
+	const token = "SPINDRIFT_COMMENT"
+	var lastValid string
+	var found bool
+	var rejected bool
+	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
+		if !containsToken(line, token) {
+			return
+		}
+		if body, ok := parseCommentLine(line, expectedNonce); ok {
+			lastValid = body
+			found = true
+			return
+		}
+		rejected = true
+	})
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	if found {
+		return lastValid, true, nil
+	}
+	if rejected {
+		return "", false, fmt.Errorf("comment line found but did not verify: nonce mismatch or malformed payload")
+	}
+	return "", false, nil
+}
+
+// parseCommentLine extracts and strictly decodes the payload of a single-line
+// SPINDRIFT_COMMENT control signal: SPINDRIFT_COMMENT <nonce> <base64-body>.
+// line must carry expectedNonce via LineHasNonce (word-bounded, so an
+// attacker's pre-run text can never match), and the field structurally
+// following the token must equal expectedNonce exactly, with the base64
+// payload the field after that. The payload is decoded with the standard
+// strict decoder — reject on any decode error, no whitespace-stripping or
+// best-effort decoding, mirroring the discipline OUTCOME's grammar holds
+// for its own fields.
+func parseCommentLine(line, expectedNonce string) (string, bool) {
+	const token = "SPINDRIFT_COMMENT"
+	idx := tokenIndex(line, token)
+	if idx < 0 {
+		return "", false
+	}
+	// fields[0] must equal expectedNonce exactly: strings.Fields already
+	// splits on whitespace, so this is itself a word-bounded check, and an
+	// empty expectedNonce can never match since Fields never yields an
+	// empty token -- no separate LineHasNonce gate needed.
+	fields := strings.Fields(line[idx+len(token):])
+	if len(fields) < 2 || fields[0] != expectedNonce {
+		return "", false
+	}
+	payload := base64AlphabetPrefix(fields[1])
+	decoded, err := base64.StdEncoding.Strict().DecodeString(payload)
+	if err != nil {
+		return "", false
+	}
+	return string(decoded), true
+}
+
+// base64AlphabetPrefix returns the longest prefix of s consisting solely of
+// standard-base64 alphabet characters (A-Z, a-z, 0-9, '+', '/', '=') — the
+// boundary a JSON-escaped trailing `\n` (a literal backslash followed by
+// 'n', neither a base64 character) or other JSON syntax never crosses.
+func base64AlphabetPrefix(s string) string {
+	for i := 0; i < len(s); i++ {
+		if !isBase64Char(s[i]) {
+			return s[:i]
+		}
+	}
+	return s
+}
+
+func isBase64Char(b byte) bool {
+	return ('A' <= b && b <= 'Z') || ('a' <= b && b <= 'z') || ('0' <= b && b <= '9') || b == '+' || b == '/' || b == '='
 }
 
 // LastPRIntentInLog scans the file at path and returns the body of the last
 // complete SPINDRIFT_PR_INTENT_BEGIN … SPINDRIFT_PR_INTENT_END block — the
 // draft-PR title and body a read-only Box hands the launcher in place of its
-// own `gh pr create` (issue #1919) — using the same grammar, last-wins, and
-// oversized-line-skipping semantics as LastCommentInLog. By convention the
+// own `gh pr create` (issue #1919) — using the same last-wins and
+// oversized-line-skipping semantics as LastInLog. By convention the
 // first line is the PR title and the remainder (after a blank line) is the
 // PR body, but this function returns the raw block verbatim; splitting title
 // from body is the caller's concern.
@@ -162,14 +254,13 @@ func LastPRIntentInLog(path string) (string, bool, error) {
 	return lastDelimitedBlockInLog(path, "SPINDRIFT_PR_INTENT_BEGIN", "SPINDRIFT_PR_INTENT_END")
 }
 
-// lastDelimitedBlockInLog is LastCommentInLog and LastPRIntentInLog's shared
-// implementation: scans path for the last complete beginMarker…endMarker
-// block, joining the lines between the delimiters with "\n". An unterminated
-// beginMarker (no matching endMarker before EOF or before a later
-// beginMarker) is discarded rather than returned as a partial block, and a
-// line reading exactly endMarker inside an open block closes it immediately
-// — there is no escaping mechanism, matching both callers' documented
-// truncation behavior.
+// lastDelimitedBlockInLog is LastPRIntentInLog's implementation: scans path
+// for the last complete beginMarker…endMarker block, joining the lines
+// between the delimiters with "\n". An unterminated beginMarker (no matching
+// endMarker before EOF or before a later beginMarker) is discarded rather
+// than returned as a partial block, and a line reading exactly endMarker
+// inside an open block closes it immediately — there is no escaping
+// mechanism, matching the caller's documented truncation behavior.
 func lastDelimitedBlockInLog(path, beginMarker, endMarker string) (string, bool, error) {
 	var last string
 	var found bool
@@ -220,15 +311,23 @@ func LineHasNonce(line, expected string) bool {
 // not merely as a substring of a longer identifier (e.g. "SPINDRIFT_OUTCOMES"
 // or "MY_SPINDRIFT_OUTCOME_THING" must not match).
 func containsToken(line, token string) bool {
+	return tokenIndex(line, token) >= 0
+}
+
+// tokenIndex returns the index of token's first standalone-word occurrence
+// in line, or -1 if none exists. Standalone means not preceded or followed
+// by an identifier character (see isTokenChar), so a longer identifier that
+// merely contains token as a substring never matches.
+func tokenIndex(line, token string) int {
 	for start := 0; ; {
 		i := strings.Index(line[start:], token)
 		if i < 0 {
-			return false
+			return -1
 		}
 		begin := start + i
 		end := begin + len(token)
 		if (begin == 0 || !isTokenChar(line[begin-1])) && (end == len(line) || !isTokenChar(line[end])) {
-			return true
+			return begin
 		}
 		start = begin + 1
 	}

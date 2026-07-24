@@ -1,6 +1,7 @@
 package outcome_test
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"testing"
@@ -402,105 +403,6 @@ func TestLastInLog_OversizedLineBeforeOutcome(t *testing.T) {
 	}
 }
 
-// --- LastCommentInLog tests ---
-
-func TestLastCommentInLog_Found(t *testing.T) {
-	path := writeLog(t,
-		"some output",
-		"SPINDRIFT_COMMENT_BEGIN",
-		"verdict body line one",
-		"SPINDRIFT_COMMENT_END",
-	)
-	body, found, err := outcome.LastCommentInLog(path)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !found {
-		t.Fatal("expected found=true")
-	}
-	if body != "verdict body line one" {
-		t.Errorf("body: got %q, want %q", body, "verdict body line one")
-	}
-}
-
-func TestLastCommentInLog_TakesLast(t *testing.T) {
-	path := writeLog(t,
-		"SPINDRIFT_COMMENT_BEGIN",
-		"stale verdict",
-		"SPINDRIFT_COMMENT_END",
-		"some more output",
-		"SPINDRIFT_COMMENT_BEGIN",
-		"final verdict",
-		"SPINDRIFT_COMMENT_END",
-	)
-	body, found, err := outcome.LastCommentInLog(path)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !found {
-		t.Fatal("expected found=true")
-	}
-	if body != "final verdict" {
-		t.Errorf("body: got %q, want %q", body, "final verdict")
-	}
-}
-
-func TestLastCommentInLog_PreservesMultiLineAndMarker(t *testing.T) {
-	path := writeLog(t,
-		"SPINDRIFT_COMMENT_BEGIN",
-		"**Verdict** — recommend",
-		"",
-		"<!-- spindrift-research -->",
-		"SPINDRIFT_COMMENT_END",
-	)
-	body, found, err := outcome.LastCommentInLog(path)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !found {
-		t.Fatal("expected found=true")
-	}
-	want := "**Verdict** — recommend\n\n<!-- spindrift-research -->"
-	if body != want {
-		t.Errorf("body: got %q, want %q", body, want)
-	}
-}
-
-func TestLastCommentInLog_NotFound(t *testing.T) {
-	path := writeLog(t, "some output", "no comment block here")
-	_, found, err := outcome.LastCommentInLog(path)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if found {
-		t.Fatal("expected found=false")
-	}
-}
-
-func TestLastCommentInLog_FileNotFound(t *testing.T) {
-	_, found, err := outcome.LastCommentInLog("/nonexistent/path/test.log")
-	if err != nil {
-		t.Fatalf("unexpected error for missing file: %v", err)
-	}
-	if found {
-		t.Fatal("expected found=false for missing file")
-	}
-}
-
-func TestLastCommentInLog_UnterminatedBlockDiscarded(t *testing.T) {
-	path := writeLog(t,
-		"SPINDRIFT_COMMENT_BEGIN",
-		"never closed",
-	)
-	_, found, err := outcome.LastCommentInLog(path)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if found {
-		t.Fatal("expected found=false for unterminated block")
-	}
-}
-
 // --- LastPRIntentInLog tests ---
 
 func TestLastPRIntentInLog_Found(t *testing.T) {
@@ -658,5 +560,166 @@ func TestLineHasNonce_EmptyExpectedNeverMatches(t *testing.T) {
 	line := "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=abc123"
 	if outcome.LineHasNonce(line, "") {
 		t.Error("expected an empty nonce to never match")
+	}
+}
+
+// --- LastCommentLineInLog tests ---
+
+func TestLastCommentLineInLog_Found(t *testing.T) {
+	body := "**Verdict** — recommend\n\n<!-- spindrift-research -->"
+	encoded := base64.StdEncoding.EncodeToString([]byte(body))
+	path := writeLog(t,
+		"some output",
+		"SPINDRIFT_COMMENT the-nonce "+encoded,
+	)
+	got, found, err := outcome.LastCommentLineInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if got != body {
+		t.Errorf("body: got %q, want %q", got, body)
+	}
+}
+
+func TestLastCommentLineInLog_TakesLast(t *testing.T) {
+	stale := base64.StdEncoding.EncodeToString([]byte("stale verdict"))
+	final := base64.StdEncoding.EncodeToString([]byte("final verdict"))
+	path := writeLog(t,
+		"SPINDRIFT_COMMENT the-nonce "+stale,
+		"some more output",
+		"SPINDRIFT_COMMENT the-nonce "+final,
+	)
+	got, found, err := outcome.LastCommentLineInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if got != "final verdict" {
+		t.Errorf("body: got %q, want %q", got, "final verdict")
+	}
+}
+
+// TestLastCommentLineInLog_ValidLineNotShadowedByLaterRejectedMention
+// verifies that a genuine, verified COMMENT line is not suppressed by a
+// later line that merely carries the token without verifying (e.g. an
+// untrusted issue/comment author's echoed or reasoning-adjacent mention,
+// or a stale/wrong-nonce line from a different run) — unlike LastInLog's
+// unconditional last-line-wins, the nonce-gated COMMENT signal prefers the
+// last line that actually verifies so an attacker cannot suppress a real
+// verdict/blocked-note by posting COMMENT-shaped noise after it.
+func TestLastCommentLineInLog_ValidLineNotShadowedByLaterRejectedMention(t *testing.T) {
+	genuine := base64.StdEncoding.EncodeToString([]byte("genuine verdict"))
+	path := writeLog(t,
+		"SPINDRIFT_COMMENT the-nonce "+genuine,
+		"SPINDRIFT_COMMENT wrong-nonce not-valid-base64!!!",
+	)
+	got, found, err := outcome.LastCommentLineInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true — the genuine line must not be shadowed")
+	}
+	if got != "genuine verdict" {
+		t.Errorf("body: got %q, want %q", got, "genuine verdict")
+	}
+}
+
+func TestLastCommentLineInLog_NotFound(t *testing.T) {
+	path := writeLog(t, "some output", "no comment line here")
+	_, found, err := outcome.LastCommentLineInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false")
+	}
+}
+
+func TestLastCommentLineInLog_FileNotFound(t *testing.T) {
+	_, found, err := outcome.LastCommentLineInLog("/nonexistent/path/test.log", "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error for missing file: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false for missing file")
+	}
+}
+
+// TestLastCommentLineInLog_NonceMismatchIgnoredAndWarned verifies the
+// acceptance criterion that a COMMENT line whose nonce does not match is
+// ignored (found=false) and reported via a non-nil error rather than ever
+// being posted — an untrusted issue/comment author echoing the token (or a
+// stale nonce from a different run) never verifies.
+func TestLastCommentLineInLog_NonceMismatchIgnoredAndWarned(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("attacker-controlled"))
+	path := writeLog(t, "SPINDRIFT_COMMENT wrong-nonce "+encoded)
+	_, found, err := outcome.LastCommentLineInLog(path, "the-nonce")
+	if found {
+		t.Fatal("expected found=false for a nonce mismatch")
+	}
+	if err == nil {
+		t.Fatal("expected a non-nil error to warn on a nonce mismatch")
+	}
+}
+
+// TestLastCommentLineInLog_EmptyExpectedNonceNeverMatches verifies that an
+// empty expectedNonce (the zero value a caller might pass by mistake) never
+// verifies a line, even one that happens to carry no nonce field at all —
+// mirroring LineHasNonce's own "empty never matches" invariant now that
+// parseCommentLine no longer calls it directly.
+func TestLastCommentLineInLog_EmptyExpectedNonceNeverMatches(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("verdict"))
+	path := writeLog(t, "SPINDRIFT_COMMENT "+encoded)
+	_, found, err := outcome.LastCommentLineInLog(path, "")
+	if found {
+		t.Fatal("expected found=false for an empty expectedNonce")
+	}
+	if err == nil {
+		t.Fatal("expected a non-nil error rather than a silent no-comment")
+	}
+}
+
+// TestLastCommentLineInLog_MalformedBase64Rejected verifies the strict-decoder
+// discipline: a correct nonce with a payload that fails to decode is rejected
+// outright, never best-effort decoded.
+func TestLastCommentLineInLog_MalformedBase64Rejected(t *testing.T) {
+	path := writeLog(t, "SPINDRIFT_COMMENT the-nonce not-valid-base64!!!")
+	_, found, err := outcome.LastCommentLineInLog(path, "the-nonce")
+	if found {
+		t.Fatal("expected found=false for malformed base64")
+	}
+	if err == nil {
+		t.Fatal("expected a non-nil error for malformed base64")
+	}
+}
+
+// TestLastCommentLineInLog_SurvivesJSONLShapedLog verifies the fix's core
+// property (issue #1940, #1921's twin): a stream-json JSONL box log collapses
+// the Box's printed line onto one physical file line, JSON-escaping the
+// trailing newline into a literal `\n` immediately abutting the base64
+// payload with no whitespace in between. The single-line token must still be
+// found and decode cleanly out of that shape, unlike the old exact-line
+// SPINDRIFT_COMMENT_BEGIN/END block parser it replaces.
+func TestLastCommentLineInLog_SurvivesJSONLShapedLog(t *testing.T) {
+	body := "**Verdict** — recommend"
+	encoded := base64.StdEncoding.EncodeToString([]byte(body))
+	jsonl := `{"type":"assistant","message":{"content":[{"type":"text","text":"blah SPINDRIFT_COMMENT the-nonce ` +
+		encoded + `\nSPINDRIFT_OUTCOME issue=1 landing=none status=recommend note=ok\n"}]}}`
+	path := writeLog(t, jsonl)
+	got, found, err := outcome.LastCommentLineInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true from a JSONL-shaped log")
+	}
+	if got != body {
+		t.Errorf("body: got %q, want %q", got, body)
 	}
 }
