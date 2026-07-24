@@ -153,6 +153,17 @@ let
       "AGENTS_JSON_TEMPLATE="
       + lib.escapeShellArg agentsJsonTemplate
       + "\n"
+      # Always-on structural default (issue #1909, spec #1907): Claude Code
+      # strips Anthropic/cloud-provider credentials from every subprocess it
+      # spawns, so a `env`/`printenv` from a Bash tool call can't dump
+      # ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN. Not a flakeOption schema
+      # knob -- there is no operator override -- so it's a fixed exported
+      # line here, the same way AGENTS_JSON_TEMPLATE is a baked, non-tunable
+      # value rather than a schema-derived default. `export`ed (unlike the
+      # schema-derived entrypointDefaultsPreamble lines below, which stay
+      # local bash variables) because it must survive the exec into
+      # driver-exec and reach the Driver process's own environment.
+      + "export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1\n"
       + driverPreamble
       + fragmentRegistryPreamble
       + entrypointDefaultsPreamble
