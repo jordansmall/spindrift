@@ -300,3 +300,67 @@ func TestResearchSettle_MissingOutcome(t *testing.T) {
 		t.Errorf("unexpected transition: %+v", call)
 	}
 }
+
+// TestResearchSettle_GithubReadOnly_PostsCommentBlockThenVerdict verifies
+// that a github-shaped tracker (AsNoLandingRecorder) under
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only gets the same host-mediated
+// SPINDRIFT_COMMENT relay local already gets (issue #1917) — the gate is
+// driven by the read-only mode passed to NewResearchSettle, not by the
+// LandingRecorder type-assertion TestResearchSettle_Github_NeverPostsComment
+// exercises for the read-write default.
+func TestResearchSettle_GithubReadOnly_PostsCommentBlockThenVerdict(t *testing.T) {
+	fc := newResearchFake("42")
+	ghLike := fc.AsNoLandingRecorder()
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		Comment:      "**Verdict** — recommend\n\n<!-- spindrift-research -->",
+		CommentFound: true,
+	}
+
+	s := NewResearchSettleReadOnly(ghLike)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
+	}
+	if fc.CommentCalls[0].Num != "42" || fc.CommentCalls[0].Body != result.Comment {
+		t.Errorf("unexpected comment call: %+v", fc.CommentCalls[0])
+	}
+	if len(fc.CompleteVerdictCalls) != 1 || fc.CompleteVerdictCalls[0].Verdict != forge.Recommend {
+		t.Fatalf("want 1 CompleteVerdict(Recommend) call, got %+v", fc.CompleteVerdictCalls)
+	}
+}
+
+// TestResearchSettle_GithubReadOnly_MissingCommentBlockTreatedAsBlocked
+// mirrors TestResearchSettle_Local_MissingCommentBlockTreatedAsBlocked for a
+// github-shaped tracker in read-only mode: no silent success on a missing
+// SPINDRIFT_COMMENT block (issue #1917 acceptance criterion 4).
+func TestResearchSettle_GithubReadOnly_MissingCommentBlockTreatedAsBlocked(t *testing.T) {
+	fc := newResearchFake("42")
+	ghLike := fc.AsNoLandingRecorder()
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		CommentFound: false,
+	}
+
+	s := NewResearchSettleReadOnly(ghLike)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("want no comment posted, got %+v", fc.CommentCalls)
+	}
+	if len(fc.CompleteVerdictCalls) != 0 {
+		t.Errorf("want no verdict applied, got %+v", fc.CompleteVerdictCalls)
+	}
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Fatalf("want 1 TransitionState call, got %d", len(fc.TransitionStateCalls))
+	}
+	call := fc.TransitionStateCalls[0]
+	if call.Num != "42" || call.From != forge.InProgress || call.To != forge.Failed {
+		t.Errorf("unexpected transition: %+v", call)
+	}
+}

@@ -59,6 +59,13 @@ type Config struct {
 	// non-local construction site, and every pre-#1734 test) -- there is
 	// exactly one instance to use there.
 	CodeForgeForIssue func(num string) forge.CodeForge
+
+	// ReadOnly mirrors BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1917):
+	// the Box holds no in-box write token, so its blocked-note comment
+	// travels via the outcome note= field the same way a LandingRecorder-
+	// implementing (local) tracker's always has, regardless of what it
+	// implements.
+	ReadOnly bool
 }
 
 // Settler is the seam callers depend on so tests can inject a Fake instead of
@@ -106,6 +113,8 @@ type Settle struct {
 	// 0029), resolved once at construction via a type assertion — nil for
 	// github/jira, which don't implement it.
 	landing forge.LandingRecorder
+	// readOnly mirrors Config.ReadOnly (issue #1917) — see postBlockedNoteComment.
+	readOnly bool
 	// term is checked at every CI-watch/fix-pass/merge-gate loop checkpoint
 	// so a Terminate (ADR 0024, issue #649) landing mid-settle is noticed and
 	// abandoned instead of corrupting the issue's state after Terminate
@@ -149,5 +158,5 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	if cfForNum == nil {
 		cfForNum = func(string) forge.CodeForge { return cf }
 	}
-	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, cfForNum: cfForNum}
+	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, readOnly: cfg.ReadOnly, cfForNum: cfForNum}
 }

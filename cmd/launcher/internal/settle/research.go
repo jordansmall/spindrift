@@ -24,16 +24,40 @@ type ResearchSettle struct {
 	// comment, and this Settle posts it host-side before applying the
 	// verdict label.
 	landing forge.LandingRecorder
+	// readOnly mirrors BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1917):
+	// a github (or jira) Dispatch's Box loses its in-box write token under
+	// read-only mode, so its verdict comment travels the same
+	// SPINDRIFT_COMMENT relay local's landing != nil case always gets —
+	// driven directly by the mode, not by a LandingRecorder-shaped type
+	// assertion github doesn't (and shouldn't need to) implement. Set via
+	// the dedicated NewResearchSettleReadOnly constructor below rather than
+	// a Config field like Settle.readOnly (settle.go): a one-shot research
+	// Settle has no other config to thread, so a second constructor reads
+	// clearer at each of its two call sites than a single-field Config
+	// would.
+	readOnly bool
 }
 
 var _ Settler = (*ResearchSettle)(nil)
 
 // NewResearchSettle constructs a ResearchSettle against it, the
 // research-labeled IssueTracker instance (ADR 0022's fixed
-// agent-research/agent-research-in-progress/verdict label family).
+// agent-research/agent-research-in-progress/verdict label family), for the
+// BOX_FORGE_AND_ISSUE_ACCESS=read-write (default) path.
 func NewResearchSettle(it forge.IssueTracker) *ResearchSettle {
 	landing, _ := it.(forge.LandingRecorder)
 	return &ResearchSettle{it: it, landing: landing}
+}
+
+// NewResearchSettleReadOnly constructs a ResearchSettle for a Dispatch
+// running under BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1917): it posts
+// the relayed SPINDRIFT_COMMENT via it.Comment before applying the verdict
+// label, the same as NewResearchSettle already does for a LandingRecorder-
+// implementing (local) tracker — because the read-only Box, github or not,
+// has no in-box write token to post its own comment with either.
+func NewResearchSettleReadOnly(it forge.IssueTracker) *ResearchSettle {
+	landing, _ := it.(forge.LandingRecorder)
+	return &ResearchSettle{it: it, landing: landing, readOnly: true}
 }
 
 // Settle interprets result and drives num to its terminal research label:
@@ -56,7 +80,7 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 		r.fail(num, o.Note)
 		return
 	}
-	if r.landing != nil {
+	if r.landing != nil || r.readOnly {
 		if !result.CommentFound || result.Comment == "" {
 			r.fail(num, "no verdict comment block")
 			return

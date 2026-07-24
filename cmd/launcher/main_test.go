@@ -14,11 +14,13 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/localloop"
+	"spindrift.dev/launcher/internal/outcome"
 )
 
 // TestMainRun_NoArgs_PrintsHelpAndDoesNotDispatch verifies a bare `spindrift`
@@ -1636,6 +1638,62 @@ func createIntegrationBranchForTest(t *testing.T, bare, fromBranch, newBranch st
 // instance (ADR 0033, issue #1734) — a mixed-parent batch must never
 // collapse onto a single Integration branch the way the removed
 // CODE_FORGE_INTEGRATION_PARENT knob did.
+// TestSettleConfig_ReadOnlyThreadsFromBoxForgeAndIssueAccess verifies
+// settleConfig's ReadOnly field mirrors c.boxForgeAndIssueAccess (issue
+// #1917): "read-only" threads true, and the "read-write" default (every
+// pre-existing config) threads false, so settle.Settle's blocked-note relay
+// gate sees the mode directly.
+func TestSettleConfig_ReadOnlyThreadsFromBoxForgeAndIssueAccess(t *testing.T) {
+	fc := forge.NewFake()
+
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc)
+	if !sc.ReadOnly {
+		t.Error("settleConfig(read-only).ReadOnly = false, want true")
+	}
+
+	cRW := minimalValidConfig()
+	scRW := settleConfig(cRW, localloop.Wire(localloopConfig(cRW), fc), fc)
+	if scRW.ReadOnly {
+		t.Error("settleConfig(read-write default).ReadOnly = true, want false")
+	}
+}
+
+// TestNewSettle_ResearchReadOnly_RelaysVerdictComment verifies that newSettle,
+// for the research dispatch kind under BOX_FORGE_AND_ISSUE_ACCESS=read-only,
+// wires a ResearchSettle that relays the SPINDRIFT_COMMENT verdict via
+// it.Comment for a github-shaped tracker (AsNoLandingRecorder) — the same
+// host-mediated posting local always got, now driven by the read-only mode
+// rather than the tracker's shape (issue #1917).
+func TestNewSettle_ResearchReadOnly_RelaysVerdictComment(t *testing.T) {
+	c := minimalValidConfig()
+	c.dispatchKind = dispatchKindResearch
+	c.boxForgeAndIssueAccess = "read-only"
+
+	fc := forge.NewFake(forge.ResearchDispatchLabels())
+	fc.VerdictLabels = forge.ResearchVerdictLabels()
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
+	ghLike := fc.AsNoLandingRecorder()
+
+	s := newSettle(c, ghLike, nil, nil)
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		Comment:      "**Verdict** — recommend",
+		CommentFound: true,
+	}
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("want 1 comment relayed for a github-shaped tracker under read-only, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
+	}
+	if fc.CommentCalls[0].Body != result.Comment {
+		t.Errorf("comment body: got %q, want %q", fc.CommentCalls[0].Body, result.Comment)
+	}
+}
+
 func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *testing.T) {
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
