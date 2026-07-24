@@ -226,6 +226,12 @@ for configuration):
   opt-in hard mode where the Box genuinely cannot merge its own PR, not just
   by contract. See [Two-actor
   separation](docs/reference.md#two-actor-separation-opt-in-hard-mode).
+- **Read-only Box.** Set `BOX_FORGE_AND_ISSUE_ACCESS=read-only` to hand the
+  Box a read-only token instead: it cannot push, open a PR, or comment at
+  all, and the launcher relays its branch, opens its draft PR, and posts its
+  comment host-side — a second, alternative route to the guarantee two-actor
+  separation provides, without a second GitHub user. See [Read-only
+  Box](docs/reference.md#read-only-box-box_forge_and_issue_accessread-only).
 - **Filer.** Set `FILER_MODEL` to file the non-blocking review findings the work
   loop escalates into `agent-review-finding`-labelled issues for human triage —
   see [Filer](docs/reference.md#filer).

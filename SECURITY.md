@@ -99,6 +99,16 @@ labels, but these are on you:
   updating the base branch at all — the only configuration where a Box
   genuinely cannot merge its own PR. See the [two-actor separation
   recipe](docs/reference.md#two-actor-separation-opt-in-hard-mode).
+- **Read-only Box is the second route to that same guarantee.** Two-actor
+  separation caps the blast radius of a write-capable token with an
+  out-of-band ruleset; `BOX_FORGE_AND_ISSUE_ACCESS=read-only` removes the
+  write capability itself — the Box's token can clone and read only
+  (Contents R, Issues R, Metadata R), so it cannot push, open a PR, or
+  comment regardless of what a repository ruleset does or doesn't enforce.
+  The launcher performs those writes host-side instead, with its own token,
+  the same host-mediated model `CODE_FORGE=local`/`ISSUE_TRACKER=local`
+  already use. See [Read-only
+  Box](docs/reference.md#read-only-box-box_forge_and_issue_accessread-only).
 - **The macOS build fallback is pinned by digest.** When there's no Linux builder,
   `spindrift build` builds the image in an ephemeral Nix container with the working
   tree bind-mounted read-write; that container image is pinned by SHA-256 digest,
