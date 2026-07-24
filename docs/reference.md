@@ -363,6 +363,45 @@ explanation, not enforcement):
   both deny a call that was actually safe, since the parser isn't
   `$((...))`- or line-aware.
 
+#### Self-inflicted secret reads are structurally blocked
+
+Spec #1907's problem statement: an operator's direct experience is that the
+Driver has read secret-bearing files into its own context despite being told
+not to, and once a secret is in the transcript there is no output redaction
+— it's effectively leaked into per-issue logs, PR bodies, and issue comments.
+Issue #1909 closes this with two Harness-enforced, always-on defaults inside
+the Box — no operator configuration, no opt-out:
+
+- **Subprocess environment scrub.** `lib/image.nix` bakes
+  `export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` as a fixed line in the
+  entrypoint text (the same "baked, not a schema knob" treatment as
+  `AGENTS_JSON_TEMPLATE`), so Claude Code strips Anthropic and cloud-provider
+  credentials from every subprocess it spawns. A `Bash` tool call running
+  `env` or `printenv` can no longer dump `ANTHROPIC_API_KEY` /
+  `CLAUDE_CODE_OAUTH_TOKEN` this way.
+- **Credential-read deny hook.** A second `PreToolUse` hook,
+  `agent/credential-deny.sh`, is baked in and registered in the image's
+  `~/.claude/settings.json` alongside `reject-background-bash.sh` (issue
+  #1609) — one `Read`-matched entry and one `Bash`-matched entry, both
+  pointing at the same script, since a Bash call can `cat` a credential path
+  the same way a Read call can open it directly. Matching is boundary-aware,
+  not a full-string suffix check, so it catches the path anywhere in a Bash
+  command — piped, redirected, or passed to `cp` — not just when the
+  command ends with it. It denies a `Read`/`Bash` call naming
+  `.claude/.credentials.json`, `.config/gh/hosts.yml`, or a `.env`/
+  `.env.<variant>` dotenv file, home-wide (not gated to any one Driver
+  invocation, since every pass sharing the Box's `$HOME` — main run,
+  conflict-resolve, fix — should be equally unable to read these paths).
+  Implemented as a hook, not a
+  `permissions.deny` rule, for the same reason `reject-background-bash.sh`
+  is: the Box invokes the Driver with `--dangerously-skip-permissions`,
+  which bypasses the permission-rule system entirely, but hooks are their
+  own enforcement layer and still fire under that flag.
+
+Neither control breaks legitimate agent work: `gh`, `git`, and the Driver
+authenticate via environment variables already forwarded into the Box, so
+they never need to *read* these files.
+
 ### Cold-run toolchain nudge
 
 When a Box runs **without a configured `prefetch`** and the cloned Target
