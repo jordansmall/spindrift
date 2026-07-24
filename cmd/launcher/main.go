@@ -546,6 +546,14 @@ func newCodeForge(c config, parent local.SanitizedParent) forge.CodeForge {
 	case "local":
 		return local.NewLocalCodeForge(c.codeForgeAccumulationRepoDir, c.baseBranch, parent, c.gitUserName, c.gitUserEmail, c.branchPrefix)
 	default:
+		// BOX_FORGE_AND_ISSUE_ACCESS=read-only swaps in the BundleRelay-
+		// capable wrapper (issue #1918): the Box no longer pushes in-box, so
+		// settle's generic relay-before-merge (ready.go) needs the adapter
+		// itself to satisfy forge.BundleRelay. read-write (the default) keeps
+		// the plain adapter, which never satisfies it, byte-for-byte.
+		if c.boxForgeAndIssueAccess == "read-only" {
+			return github.NewReadOnlyCodeForge(c.repoSlug, dispatchLabels(c), c.branchPrefix)
+		}
 		return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix)
 	}
 }

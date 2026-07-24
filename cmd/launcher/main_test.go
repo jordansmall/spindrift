@@ -1333,6 +1333,66 @@ func TestNewCodeForge_Github_ImplementsPRForge(t *testing.T) {
 	}
 }
 
+// TestNewCodeForge_GithubReadOnly_ImplementsBundleRelay verifies that
+// CODE_FORGE=github with BOX_FORGE_AND_ISSUE_ACCESS=read-only wires
+// newCodeForge to an adapter satisfying forge.BundleRelay in addition to
+// PRForge (issue #1918) -- the Box no longer pushes in-box, so the launcher
+// needs the bundle-relay hand-off settle's merge gate already knows to look
+// for via type assertion.
+func TestNewCodeForge_GithubReadOnly_ImplementsBundleRelay(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "github"
+	c.boxForgeAndIssueAccess = "read-only"
+
+	cf := newCodeForge(c, local.SanitizedParent{})
+
+	if _, ok := cf.(forge.BundleRelay); !ok {
+		t.Error("newCodeForge(CODE_FORGE=github, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.BundleRelay")
+	}
+	if _, ok := cf.(forge.PRForge); !ok {
+		t.Error("newCodeForge(CODE_FORGE=github, BOX_FORGE_AND_ISSUE_ACCESS=read-only) does not satisfy forge.PRForge")
+	}
+}
+
+// TestNewCodeForge_GithubReadWrite_DoesNotImplementBundleRelay verifies the
+// default BOX_FORGE_AND_ISSUE_ACCESS=read-write keeps today's github adapter
+// byte-for-byte: it must never satisfy forge.BundleRelay, or settle's
+// generic relay-before-merge (ready.go) would try to relay a bundle a
+// read-write Box never wrote.
+func TestNewCodeForge_GithubReadWrite_DoesNotImplementBundleRelay(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "github"
+	c.boxForgeAndIssueAccess = "read-write"
+
+	cf := newCodeForge(c, local.SanitizedParent{})
+
+	if _, ok := cf.(forge.BundleRelay); ok {
+		t.Error("newCodeForge(CODE_FORGE=github, BOX_FORGE_AND_ISSUE_ACCESS=read-write) satisfies forge.BundleRelay, want it hidden")
+	}
+}
+
+// TestNewCodeForge_GithubReadOnly_StillFailsCapabilityGate verifies that
+// wiring the real github adapter's BundleRelay (issue #1918) does not, by
+// itself, flip checkReadOnlyCapabilityGate for CODE_FORGE=github: the real
+// adapter is still PR-shaped and still lacks forge.DraftPRCreator (a
+// separate, not-yet-landed seam), so read-only stays rejected for github end
+// to end until that seam lands too.
+func TestNewCodeForge_GithubReadOnly_StillFailsCapabilityGate(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "github"
+	c.boxForgeAndIssueAccess = "read-only"
+	cf := newCodeForge(c, local.SanitizedParent{})
+	fc := forge.NewFake() // stands in for the tracker; only cf's shape is under test here
+
+	err := checkReadOnlyCapabilityGate(c, cf, fc)
+	if err == nil {
+		t.Fatal("checkReadOnlyCapabilityGate() = nil, want an error naming the missing draft-PR-create seam")
+	}
+	if !strings.Contains(err.Error(), "draft-PR-create") {
+		t.Errorf("error should name the missing draft-PR-create seam, got: %v", err)
+	}
+}
+
 // TestDispatchCompletionBanner_Github verifies that CODE_FORGE=github keeps
 // the "branches pushed and PRs opened" wording, since it's the only forge
 // that opens PRs (issue #1733).
