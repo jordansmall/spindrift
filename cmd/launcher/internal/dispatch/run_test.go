@@ -45,6 +45,37 @@ func TestRun_CallsRunnerWithCorrectBox(t *testing.T) {
 	}
 }
 
+// TestRun_ForwardsRunNonceIntoBoxEnv verifies Run forwards the Dispatch's
+// own per-run nonce (issue #1937) as Box.Env["RUN_NONCE"], and that a
+// second Dispatch built by the same Factory gets a different nonce.
+func TestRun_ForwardsRunNonceIntoBoxEnv(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d1 := f.New("42", "My issue")
+	d1.Run()
+	d2 := f.New("43", "Another issue")
+	d2.Run()
+
+	if len(fr.RunCalls) != 2 {
+		t.Fatalf("RunCalls: got %d, want 2", len(fr.RunCalls))
+	}
+	nonce1 := fr.RunCalls[0].Env["RUN_NONCE"]
+	nonce2 := fr.RunCalls[1].Env["RUN_NONCE"]
+	if nonce1 == "" {
+		t.Error("Box.Env[RUN_NONCE]: got empty, want a minted nonce")
+	}
+	if nonce1 == nonce2 {
+		t.Errorf("two Dispatch values got the same nonce: %q", nonce1)
+	}
+}
+
 // TestRun_TerminalFailurePropagates verifies that a terminal box failure is
 // reported as Result.Success=false without retry.
 func TestRun_TerminalFailurePropagates(t *testing.T) {

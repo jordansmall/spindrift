@@ -97,8 +97,10 @@ type Config struct {
 
 // buildBoxEnv assembles the env map forwarded into a Box. It combines the
 // schema boxEnv=true vars (read from the ambient env by name) with per-issue
-// vars.
-func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary string) map[string]string {
+// vars. nonce is the dispatching Dispatch's per-run nonce (issue #1937,
+// empty in tests that don't need it), forwarded as RUN_NONCE so
+// control-signal prompt fragments can reference it.
+func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary string, nonce string) map[string]string {
 	resolve := cfg.ResolveEnv
 	if resolve == nil {
 		resolve = func(_, name string) string { return os.Getenv(name) }
@@ -120,5 +122,6 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	if ciFailureSummary != "" {
 		env["CI_FAILURE_SUMMARY"] = ciFailureSummary
 	}
+	env["RUN_NONCE"] = nonce
 	return env
 }

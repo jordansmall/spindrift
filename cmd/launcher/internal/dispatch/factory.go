@@ -1,6 +1,8 @@
 package dispatch
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"io"
 	"sync/atomic"
 	"time"
@@ -50,7 +52,8 @@ func NewFactory(cfg Config, pwd string, r runner.Runner, drv driver.Driver, cloc
 }
 
 // New constructs a Dispatch for one issue, claiming its per-issue
-// driver-cache directory up front.
+// driver-cache directory up front and minting its per-run nonce (issue
+// #1937).
 func (f *Factory) New(number, title string) *Dispatch {
 	f.newCalled.Store(true)
 	return &Dispatch{
@@ -63,7 +66,27 @@ func (f *Factory) New(number, title string) *Dispatch {
 		cfg:      f.cfg,
 		cacheDir: f.cache.dirFor(number),
 		cache:    f.cache,
+		nonce:    newNonce(),
 	}
+}
+
+// newNonce mints a fresh, unpredictable per-run nonce (issue #1937): 16
+// bytes read from the OS's cryptographic random source, hex-encoded. Two
+// calls never return the same value. The nonce is what lets the host tell a
+// control-signal line genuinely produced by this run's own Box from one an
+// untrusted issue/comment author -- who wrote their text before this nonce
+// was minted -- echoed into the log; a predictable or reused value would
+// defeat that. crypto/rand.Read only fails when the OS's entropy source is
+// broken, a host condition no caller can recover from, so newNonce panics
+// rather than threading an error through Factory.New's unchanged signature
+// and every one of its call sites for a failure mode that never happens in
+// practice.
+func newNonce() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic("dispatch: crypto/rand.Read failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }
 
 // Cleanup removes the whole driver-cache root. Called once, on exit, by
