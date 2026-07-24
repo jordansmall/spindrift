@@ -267,13 +267,15 @@ setup() {
   ! grep -qF 'SPINDRIFT_PR_INTENT_BEGIN' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "OPEN A PULL REQUEST create step: read-only emits a SPINDRIFT_PR_INTENT block, never gh pr create" {
+@test "OPEN A PULL REQUEST create step: read-only emits a nonce-guarded SPINDRIFT_PR_INTENT line, never gh pr create" {
   export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-read-only"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'SPINDRIFT_PR_INTENT_BEGIN' "$CLAUDE_PROMPT_FILE"
-  grep -qF 'SPINDRIFT_PR_INTENT_END' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'SPINDRIFT_PR_INTENT deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_PR_INTENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_PR_INTENT_END' "$CLAUDE_PROMPT_FILE"
 
   # Not the bare substring: the read-only fragment itself explains "do NOT
   # `gh pr create`" (naming the forbidden command, same pattern
@@ -287,19 +289,30 @@ setup() {
 # the branch name, not a PR URL -- the Box never opens the PR itself, so it
 # never learns a URL to report. ISSUE_NUMBER=7/BRANCH_PREFIX=agent/issue- from
 # helper.bash/box_env_gen.bash together fix BRANCH at agent/issue-7.
+#
+# Both variants must also carry nonce=${RUN_NONCE} (issue #1939): the
+# launcher's LastInLog scan now gates every SPINDRIFT_OUTCOME line's
+# candidacy on this run's own nonce, so a rendered line missing it -- read-
+# write's own outcome-landing-git.md fragment, or read-only's
+# outcome-landing-outbox.md fragment -- would have every genuine outcome
+# line silently dropped, regardless of what the Box's log otherwise says.
 @test "OUTCOME landing step: read-write keeps the pr-url placeholder unchanged" {
+  export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-outcome-landing-read-write"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'landing=<pr-url> status=ready' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'status=ready note=<short reason> nonce=deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
 }
 
 @test "OUTCOME landing step: read-only reports the branch, never a pr-url placeholder" {
   export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-outcome-landing-read-only"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'landing=agent/issue-7 status=ready' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'status=ready note=<short reason> nonce=deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
 
   # Scoped to the OUTCOME section itself -- OPEN A PULL REQUEST's own
   # PR-intent fragment legitimately mentions "the launcher opens the draft
