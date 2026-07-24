@@ -1371,25 +1371,24 @@ func TestNewCodeForge_GithubReadWrite_DoesNotImplementBundleRelay(t *testing.T) 
 	}
 }
 
-// TestNewCodeForge_GithubReadOnly_StillFailsCapabilityGate verifies that
-// wiring the real github adapter's BundleRelay (issue #1918) does not, by
-// itself, flip checkReadOnlyCapabilityGate for CODE_FORGE=github: the real
-// adapter is still PR-shaped and still lacks forge.DraftPRCreator (a
-// separate, not-yet-landed seam), so read-only stays rejected for github end
-// to end until that seam lands too.
-func TestNewCodeForge_GithubReadOnly_StillFailsCapabilityGate(t *testing.T) {
+// TestNewCodeForge_GithubReadOnly_SatisfiesCapabilityGate verifies that
+// newCodeForge's production wiring for CODE_FORGE=github +
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only passes checkReadOnlyCapabilityGate end
+// to end: the real adapter now implements both BundleRelay (issue #1918) and
+// DraftPRCreator (issue #1919), closing the gate #1916 declared open in
+// principle for "github + read-only". Supersedes
+// TestNewCodeForge_GithubReadOnly_StillFailsCapabilityGate, which pinned the
+// opposite (still-rejected) expectation while DraftPRCreator was
+// unimplemented.
+func TestNewCodeForge_GithubReadOnly_SatisfiesCapabilityGate(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "github"
 	c.boxForgeAndIssueAccess = "read-only"
 	cf := newCodeForge(c, local.SanitizedParent{})
-	fc := forge.NewFake() // stands in for the tracker; only cf's shape is under test here
+	fc := forge.NewFake() // HostPostedCommenter-shaped; stands in for the tracker
 
-	err := checkReadOnlyCapabilityGate(c, cf, fc)
-	if err == nil {
-		t.Fatal("checkReadOnlyCapabilityGate() = nil, want an error naming the missing draft-PR-create seam")
-	}
-	if !strings.Contains(err.Error(), "draft-PR-create") {
-		t.Errorf("error should name the missing draft-PR-create seam, got: %v", err)
+	if err := checkReadOnlyCapabilityGate(c, cf, fc); err != nil {
+		t.Errorf("checkReadOnlyCapabilityGate() with newCodeForge's github read-only wiring = %v, want nil", err)
 	}
 }
 
@@ -1717,6 +1716,22 @@ func TestSettleConfig_ReadOnlyThreadsFromBoxForgeAndIssueAccess(t *testing.T) {
 	scRW := settleConfig(cRW, localloop.Wire(localloopConfig(cRW), fc), fc)
 	if scRW.ReadOnly {
 		t.Error("settleConfig(read-write default).ReadOnly = true, want false")
+	}
+}
+
+// TestSettleConfig_BaseBranchThreadsFromConfig verifies settleConfig's
+// BaseBranch field mirrors c.baseBranch (issue #1919): settle's
+// hostMediateDraftPR needs the target branch to open a read-only Box's
+// host-mediated draft PR against, the same base the Box's own in-box
+// `gh pr create` would otherwise have passed as --base.
+func TestSettleConfig_BaseBranchThreadsFromConfig(t *testing.T) {
+	fc := forge.NewFake()
+
+	c := minimalValidConfig()
+	c.baseBranch = "main"
+	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc)
+	if sc.BaseBranch != "main" {
+		t.Errorf("settleConfig(baseBranch=main).BaseBranch = %q, want %q", sc.BaseBranch, "main")
 	}
 }
 
