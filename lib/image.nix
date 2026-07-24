@@ -181,7 +181,15 @@ let
   # Driver exists today and this is Claude Code's own hook mechanism, but the
   # restriction applies to every pass sharing this $HOME (main run,
   # conflict-resolve, fix), not to any one Driver invocation's flags.
-  rejectBackgroundBashSettings = builtins.toJSON {
+  # Registers the second PreToolUse hook (issue #1909, spec #1907):
+  # credential-deny.sh rejects a Read/Bash call targeting a known credential
+  # path (~/.claude/.credentials.json, **/.env, ~/.config/gh/hosts.yml). Two
+  # matcher entries, not one -- Claude Code's PreToolUse matcher is per-tool,
+  # so Read and Bash each need their own entry even though both point at the
+  # same script. Merged into one PreToolUse array below, alongside the
+  # reject-background-bash entry, since the image ships a single
+  # ~/.claude/settings.json.
+  boxSettings = builtins.toJSON {
     hooks = {
       PreToolUse = [
         {
@@ -190,6 +198,24 @@ let
             {
               type = "command";
               command = "/home/agent/.claude/hooks/reject-background-bash.sh";
+            }
+          ];
+        }
+        {
+          matcher = "Read";
+          hooks = [
+            {
+              type = "command";
+              command = "/home/agent/.claude/hooks/credential-deny.sh";
+            }
+          ];
+        }
+        {
+          matcher = "Bash";
+          hooks = [
+            {
+              type = "command";
+              command = "/home/agent/.claude/hooks/credential-deny.sh";
             }
           ];
         }
@@ -213,7 +239,9 @@ let
     mkdir -p $out/home/agent/.claude/hooks
     cp ${../agent/reject-background-bash.sh} $out/home/agent/.claude/hooks/reject-background-bash.sh
     chmod +x $out/home/agent/.claude/hooks/reject-background-bash.sh
-    cp ${pkgs.writeText "settings.json" rejectBackgroundBashSettings} $out/home/agent/.claude/settings.json
+    cp ${../agent/credential-deny.sh} $out/home/agent/.claude/hooks/credential-deny.sh
+    chmod +x $out/home/agent/.claude/hooks/credential-deny.sh
+    cp ${pkgs.writeText "settings.json" boxSettings} $out/home/agent/.claude/settings.json
     cp ${entrypoint}/bin/entrypoint $out/agent/entrypoint.sh
     chmod +x $out/agent/entrypoint.sh
     # A sibling of prompts/, not inside it, so a SPINDRIFT_PROMPT_DIR mount

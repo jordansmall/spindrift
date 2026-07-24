@@ -259,6 +259,33 @@ in
         touch $out
       '';
 
+  # The Driver cannot Read/Bash its own way to a credential file even under
+  # --dangerously-skip-permissions (issue #1909, spec #1907): a second
+  # PreToolUse hook, credential-deny.sh, must be baked in alongside
+  # reject-background-bash.sh and registered for both the Read and Bash
+  # matchers (a Bash call can shell-cat a credential path the same way a
+  # Read call can open it directly). Realizes the agent-files layer;
+  # Linux-gated like the other image checks.
+  credential-deny-hook-baked-into-image =
+    pkgs.runCommand "credential-deny-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        hook=${nonRustHarness.agentFiles}/home/agent/.claude/hooks/credential-deny.sh
+        [ -x "$hook" ] || {
+          echo "credential-deny.sh missing or not executable at $hook" >&2
+          exit 1
+        }
+        settings=${nonRustHarness.agentFiles}/home/agent/.claude/settings.json
+        for matcher in Read Bash; do
+          jq -e --arg matcher "$matcher" \
+            'any(.hooks.PreToolUse[]; .matcher == $matcher and (.hooks[0].command | endswith("credential-deny.sh")))' \
+            "$settings" >/dev/null || {
+            echo "settings.json does not register a $matcher-matched PreToolUse hook pointing at credential-deny.sh" >&2
+            exit 1
+          }
+        done
+        touch $out
+      '';
+
   # The nix.conf and store DB must be present in the image so
   # `nix flake check` reuses the baked closure instead of re-substituting.
   # Realizes the default image; Linux-gated like the other image checks.

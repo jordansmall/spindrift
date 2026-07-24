@@ -28,6 +28,7 @@ in
           ${../../agent/entrypoint.sh} \
           ${../../agent/format-transcript.sh} \
           ${../../agent/reject-background-bash.sh} \
+          ${../../agent/credential-deny.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/fakes/claude} \
@@ -73,6 +74,10 @@ in
         # exercised here directly against its own source, not the baked copy,
         # since it takes no dependency on the Box environment.
         REJECT_BACKGROUND_BASH_SCRIPT = ../../agent/reject-background-bash.sh;
+        # The PreToolUse hook script baked into the image at
+        # /home/agent/.claude/hooks/credential-deny.sh (issue #1909); same
+        # reasoning as REJECT_BACKGROUND_BASH_SCRIPT above.
+        CREDENTIAL_DENY_HOOK_SCRIPT = ../../agent/credential-deny.sh;
         DOGFOOD_SH = ../../dogfood.sh;
         PROMPTS_DIR = ../../templates/default/prompts;
         # The baked default prompt dir the `run` command mounts, and a
