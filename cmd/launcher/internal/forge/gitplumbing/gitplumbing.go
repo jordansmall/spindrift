@@ -34,6 +34,13 @@ func IsMergeConflict(stderr string) bool {
 // through wrapForcePushError's stale-lease/transient classification, which
 // needs git's own stderr markers to work from.
 //
+// extraArgs is appended after --force-with-lease, e.g. "-u", "origin", ref —
+// needed by github's RelayBundle (issue #1918), whose local branch comes
+// from a bundle fetch rather than a checkout of an existing remote branch
+// and so has no upstream for a bare `push --force-with-lease` to target.
+// Every other caller (Rebase, the git adapter's own force-push) pushes an
+// already-tracked current branch and passes none.
+//
 // stderr is captured to a temp file rather than an in-memory io.Writer:
 // pushing to a local (non-network) remote forks git-receive-pack, which
 // forks the pre-receive hook, both inheriting the write end of the stderr
@@ -42,7 +49,7 @@ func IsMergeConflict(stderr string) bool {
 // can't produce while a hung grandchild (the hook) still holds the pipe
 // open. A plain *os.File has no such copy goroutine, so cmd.Run still
 // returns as soon as the context deadline kills the direct child.
-func GitForcePush(ctx context.Context, dir string) error {
+func GitForcePush(ctx context.Context, dir string, extraArgs ...string) error {
 	stderrFile, err := os.CreateTemp("", "spindrift-force-push-stderr-*")
 	if err != nil {
 		return fmt.Errorf("git push --force-with-lease: create stderr temp file: %w", err)
@@ -50,7 +57,8 @@ func GitForcePush(ctx context.Context, dir string) error {
 	defer os.Remove(stderrFile.Name())
 	defer stderrFile.Close()
 
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "push", "--force-with-lease")
+	args := append([]string{"-C", dir, "push", "--force-with-lease"}, extraArgs...)
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Stderr = stderrFile
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
