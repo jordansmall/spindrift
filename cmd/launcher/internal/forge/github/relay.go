@@ -1,6 +1,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -95,4 +96,31 @@ func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 	// upstream for a bare force-with-lease to target -- an explicit
 	// destination is required, first push or retried force-update alike.
 	return gitplumbing.GitForcePush(ctx, dir, "-u", "origin", ref)
+}
+
+// CreateDraftPR opens a draft PR from head onto base via `gh pr create` --
+// the host-side counterpart to the Box's own in-box `gh pr create` under
+// read-write (issue #1919), only reachable here because
+// NewReadOnlyCodeForge wraps execClient with it: NewExecClient must never
+// satisfy forge.DraftPRCreator, the same isolation RelayBundle has, or a
+// read-write github land would call an unneeded, possibly-conflicting
+// host-side create. Runs cwd-independently (no local clone required): head
+// and base are branch names in c.repo itself, never a fork's owner:branch
+// form, matching every agent PR branch's own in-repo convention.
+func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (string, error) {
+	var stderr bytes.Buffer
+	cmd := exec.Command("gh", "pr", "create",
+		"--repo", c.repo,
+		"--draft",
+		"--base", base,
+		"--head", head,
+		"--title", title,
+		"--body", body,
+	)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("github: create draft PR: gh pr create: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(string(out)), nil
 }

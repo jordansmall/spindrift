@@ -151,6 +151,54 @@ func TestReadOnlyCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	}
 }
 
+// TestReadOnlyCodeForge_CreateDraftPR_ReturnsURL asserts CreateDraftPR opens
+// a draft PR via `gh pr create` and returns its URL — the host-side
+// counterpart to the Box's own in-box `gh pr create` under read-write (issue
+// #1919).
+func TestReadOnlyCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
+	newRelayHarness(t)
+
+	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	dpc, ok := cf.(forge.DraftPRCreator)
+	if !ok {
+		t.Fatal("github read-only CodeForge does not implement forge.DraftPRCreator")
+	}
+
+	url, err := dpc.CreateDraftPR("feat: add widget", "Adds a widget.", "main", "agent/issue-1919")
+	if err != nil {
+		t.Fatalf("CreateDraftPR: %v", err)
+	}
+	want := "https://github.com/owner/repo/pull/1919"
+	if url != want {
+		t.Errorf("CreateDraftPR url = %q, want %q", url, want)
+	}
+}
+
+// TestReadOnlyCodeForge_CreateDraftPR_Errors asserts a `gh pr create`
+// failure surfaces as an error rather than a blank URL.
+func TestReadOnlyCodeForge_CreateDraftPR_Errors(t *testing.T) {
+	newRelayHarness(t)
+
+	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	dpc := cf.(forge.DraftPRCreator)
+
+	if _, err := dpc.CreateDraftPR("feat: add widget", "body", "main", "fail-head"); err == nil {
+		t.Fatal("CreateDraftPR with a failing gh pr create: got nil error, want one")
+	}
+}
+
+// TestExecClient_DoesNotImplementDraftPRCreator guards read-write's own
+// contract: NewExecClient must never satisfy forge.DraftPRCreator, mirroring
+// TestExecClient_DoesNotImplementBundleRelay — a read-write Box already
+// opens its own PR in-box, so settle must never call a host-side create for
+// it.
+func TestExecClient_DoesNotImplementDraftPRCreator(t *testing.T) {
+	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	if _, ok := cf.(forge.DraftPRCreator); ok {
+		t.Error("NewExecClient satisfies forge.DraftPRCreator, want it hidden for read-write")
+	}
+}
+
 // TestReadOnlyCodeForge_RelayBundle_ReRelayForceUpdatesRef asserts a fix-pass
 // retry -- a rebuilt bundle whose branch tip diverged from what an earlier
 // pass already relayed -- overwrites the remote ref rather than being
