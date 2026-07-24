@@ -155,6 +155,67 @@ func TestRun_NoOutboxDirForNonLocalCodeForge(t *testing.T) {
 	}
 }
 
+// TestRun_PopulatesBoxOutboxDir_GithubReadOnly verifies Run provisions the
+// same writable per-issue outbox for CODE_FORGE=github under
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1918) as it already does for
+// CODE_FORGE=local: the Box writes seam.bundle there instead of pushing, so
+// the launcher's github BundleRelay needs a real mounted directory to find
+// it in.
+func TestRun_PopulatesBoxOutboxDir_GithubReadOnly(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{CodeForge: "github", BoxForgeAndIssueAccess: "read-only"}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("79", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	outboxDir := fr.RunCalls[0].OutboxDir
+	if outboxDir == "" {
+		t.Fatal("Box.OutboxDir: got empty, want the per-issue outbox dir")
+	}
+	info, err := os.Stat(outboxDir)
+	if err != nil || !info.IsDir() {
+		t.Errorf("Box.OutboxDir %q: want an existing directory, stat err=%v", outboxDir, err)
+	}
+}
+
+// TestRun_NoOutboxDirForGithubReadWrite verifies a github Box dispatched
+// under the default BOX_FORGE_AND_ISSUE_ACCESS=read-write gets no outbox
+// directory at all, exactly like today -- read-write pushes in-box and never
+// consults an outbox.
+func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{CodeForge: "github", BoxForgeAndIssueAccess: "read-write"}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("80", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if got := fr.RunCalls[0].OutboxDir; got != "" {
+		t.Errorf("Box.OutboxDir: got %q, want empty for github read-write", got)
+	}
+}
+
 // TestNewFactory_NoDriverSessionCacheDir_NoCacheCreated verifies that a
 // Driver declaring no session-cache dir (Config.DriverSessionCacheDir
 // empty) makes the Factory skip creating a per-issue cache directory

@@ -27,13 +27,18 @@ type MountParams struct {
 	DriverSkillsDir       string
 	DriverSessionCacheDir string
 
-	// CodeForge is the CODE_FORGE knob value; the Accumulation-repo and
-	// outbox mounts below apply only when it is "local" (ADR 0033).
+	// CodeForge is the CODE_FORGE knob value; the Accumulation-repo mount
+	// below applies only when it is "local" (ADR 0033). The outbox mount
+	// applies when it is "local", or "github" with BoxForgeAndIssueAccess
+	// "read-only" (issue #1918).
 	CodeForge string
 	// AccumulationRepoDir is the host path to the bare Accumulation repo
 	// (.spindrift/accum.git by default, issue #1726) mounted read-only at
 	// /repo under CODE_FORGE=local.
 	AccumulationRepoDir string
+	// BoxForgeAndIssueAccess is the BOX_FORGE_AND_ISSUE_ACCESS knob value
+	// ("read-write" or "read-only") — see CodeForge's doc comment above.
+	BoxForgeAndIssueAccess string
 
 	// IssueTracker and LocalIssuesDir gate the read-only /issues mount
 	// (ADR 0032): only ISSUE_TRACKER=local reads its issues from the Box, so
@@ -81,6 +86,8 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 		if spec, ok := candidateMount(p.AccumulationRepoDir, "/repo", true); ok {
 			specs = append(specs, spec)
 		}
+	}
+	if p.CodeForge == "local" || (p.CodeForge == "github" && p.BoxForgeAndIssueAccess == "read-only") {
 		if spec, ok := candidateMount(box.OutboxDir, "/outbox", false); ok {
 			specs = append(specs, spec)
 		}

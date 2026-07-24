@@ -139,12 +139,13 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	}
 	defer logFile.Close()
 
-	// Only CODE_FORGE=local ever mounts an outbox (ADR 0033); every other
-	// value skips creating .spindrift/outbox/<num> entirely rather than
-	// leaving a harmless but pointless empty directory behind on every
-	// dispatch.
+	// CODE_FORGE=local always needs an outbox (ADR 0033); CODE_FORGE=github
+	// needs one only under BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue
+	// #1918) — every other combination skips creating
+	// .spindrift/outbox/<num> entirely rather than leaving a harmless but
+	// pointless empty directory behind on every dispatch.
 	var outboxDir string
-	if d.cfg.CodeForge == "local" {
+	if needsOutbox(d.cfg) {
 		outboxDir = OutboxDirFor(d.pwd, d.number)
 		if err := resetOutboxDir(outboxDir); err != nil {
 			return fmt.Errorf("reset outbox dir: %w", err)
@@ -160,6 +161,16 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		OutboxDir:      outboxDir,
 	}
 	return d.runner.Run(box)
+}
+
+// needsOutbox reports whether cfg's dispatch needs a writable per-issue
+// outbox directory at all: CODE_FORGE=local unconditionally (ADR 0033), or
+// CODE_FORGE=github under BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue
+// #1918) — the Box writes its finished branch as seam.bundle there instead
+// of pushing it, for the launcher's BundleRelay to pick up.
+func needsOutbox(cfg Config) bool {
+	return cfg.CodeForge == "local" ||
+		(cfg.CodeForge == "github" && cfg.BoxForgeAndIssueAccess == "read-only")
 }
 
 // resetOutboxDir removes any bundle a previous attempt at this issue may

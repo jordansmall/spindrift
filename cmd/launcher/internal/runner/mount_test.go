@@ -210,6 +210,52 @@ func TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount(t *testing.T) {
 	}
 }
 
+// TestBuildMountSpecs_GithubReadOnly_OutboxMountedWritable verifies that
+// CODE_FORGE=github plus BoxForgeAndIssueAccess="read-only" plus a present
+// Box.OutboxDir produces a writable /outbox mount, exactly like
+// CODE_FORGE=local (issue #1918): the Box writes seam.bundle there instead
+// of pushing, since its token can't push under read-only. It gets no /repo
+// mount, though -- unlike local, github clones over the network in-box, not
+// from a locally mounted Accumulation repo.
+func TestBuildMountSpecs_GithubReadOnly_OutboxMountedWritable(t *testing.T) {
+	dir := t.TempDir()
+	specs := buildMountSpecs(MountParams{CodeForge: "github", BoxForgeAndIssueAccess: "read-only"}, Box{OutboxDir: dir})
+
+	var found *MountSpec
+	for i := range specs {
+		if specs[i].Target == "/outbox" {
+			found = &specs[i]
+		}
+		if specs[i].Target == "/repo" {
+			t.Errorf("unexpected /repo spec for CODE_FORGE=github: %+v", specs[i])
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected an /outbox spec in %+v", specs)
+	}
+	if found.Source != dir {
+		t.Errorf("Source = %q, want %q", found.Source, dir)
+	}
+	if found.ReadOnly {
+		t.Errorf("outbox mount must be writable, not read-only")
+	}
+}
+
+// TestBuildMountSpecs_GithubReadWrite_NoOutboxMount verifies that
+// CODE_FORGE=github under the default read-write access produces no /outbox
+// mount even with a present Box.OutboxDir -- read-write pushes in-box and
+// never consults an outbox.
+func TestBuildMountSpecs_GithubReadWrite_NoOutboxMount(t *testing.T) {
+	dir := t.TempDir()
+	specs := buildMountSpecs(MountParams{CodeForge: "github", BoxForgeAndIssueAccess: "read-write"}, Box{OutboxDir: dir})
+
+	for _, s := range specs {
+		if s.Target == "/outbox" {
+			t.Errorf("unexpected /outbox spec for CODE_FORGE=github read-write: %+v", specs)
+		}
+	}
+}
+
 // TestBuildMountSpecs_IssuesDirMounted verifies that ISSUE_TRACKER=local plus
 // a present LocalIssuesDir produce a read-only MountSpec targeting the
 // top-level /issues path (issue #1691, ADR 0032) — computed once, independent
@@ -374,6 +420,45 @@ func TestLocalCodeForgeMounts_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	}
 	if !strings.Contains(bwrapArgs, "--bind "+outboxDir+" /outbox") {
 		t.Errorf("bwrap missing writable /outbox mount in args: %s", bwrapArgs)
+	}
+}
+
+// TestGithubReadOnlyOutboxMount_RenderedIdenticallyAcrossBackends verifies
+// the writable /outbox mount reaches both backends under CODE_FORGE=github
+// plus BoxForgeAndIssueAccess="read-only" (issue #1918), the same way it
+// does for CODE_FORGE=local — but with no /repo mount, since github clones
+// over the network in-box rather than from a locally mounted Accumulation
+// repo.
+func TestGithubReadOnlyOutboxMount_RenderedIdenticallyAcrossBackends(t *testing.T) {
+	outboxDir := t.TempDir()
+
+	oci := &ociAdapter{
+		cli:                    "podman",
+		image:                  "spindrift:test",
+		codeForge:              "github",
+		boxForgeAndIssueAccess: "read-only",
+	}
+	bwrap := &bwrapAdapter{
+		agentFiles:             t.TempDir(),
+		agentEnv:               "/fake/env",
+		bakedPrefetch:          "echo ok",
+		codeForge:              "github",
+		boxForgeAndIssueAccess: "read-only",
+	}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
+
+	ociArgSlice := oci.buildRunArgs(box)
+	ociArgs := strings.Join(ociArgSlice, " ")
+	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+
+	if !slices.Contains(ociArgSlice, outboxDir+":/outbox") {
+		t.Errorf("OCI missing writable /outbox mount in args: %s", ociArgs)
+	}
+	if !strings.Contains(bwrapArgs, "--bind "+outboxDir+" /outbox") {
+		t.Errorf("bwrap missing writable /outbox mount in args: %s", bwrapArgs)
+	}
+	if strings.Contains(ociArgs, "/repo") || strings.Contains(bwrapArgs, "/repo") {
+		t.Errorf("unexpected /repo mount for CODE_FORGE=github: oci=%s bwrap=%s", ociArgs, bwrapArgs)
 	}
 }
 
