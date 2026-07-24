@@ -195,8 +195,7 @@ Harness bundles your commits out of the container after you exit.
 
 # OPEN A PULL REQUEST
 
-${OPEN_PR_PUSH_READ_WRITE_STEP}${OPEN_PR_PUSH_READ_ONLY_STEP}2. `gh pr create --draft --base ${BASE_BRANCH} --head ${BRANCH} --title "<conventional title>" --body "<summary>"`
-${PR_BODY_CLOSES_STEP}${PR_BODY_LOCAL_REF_STEP}${PR_BODY_LOCAL_NOREF_STEP}The PR opens as a **draft** and stays a **draft** — the launcher flips it to
+${OPEN_PR_PUSH_READ_WRITE_STEP}${OPEN_PR_PUSH_READ_ONLY_STEP}${OPEN_PR_CREATE_READ_WRITE_STEP}${OPEN_PR_CREATE_READ_ONLY_STEP}${PR_BODY_CLOSES_STEP}${PR_BODY_LOCAL_REF_STEP}${PR_BODY_LOCAL_NOREF_STEP}The PR opens as a **draft** and stays a **draft** — the launcher flips it to
 ready once CI reaches green, immediately before it merges (the launcher
 already gates on CI green itself, so there is nothing left for you to watch
 or confirm here). Do NOT merge and do NOT flip it yourself; the LAUNCHER
@@ -208,31 +207,22 @@ rebase-merge, and the complete-label swap.
 (`CODE_FORGE=github` only — `CODE_FORGE=git` and `CODE_FORGE=local` already
 printed their outcome line and stopped under LAND THE CHANGE above.)
 
-Print exactly one line as your final output — raw plain text, not wrapped in
-backticks, a code fence, or any other markdown formatting:
-
-SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=ready note=<short reason>
-
-Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=<status> note=<short reason>`
+${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<short reason>`
 — one line, space-delimited fields, `note` last (it may itself contain spaces
 and `=`). The only valid `status` values here are `ready` and `blocked` — no
 other word belongs in that field.
 
 Invalid — each of these breaks the contract, whether or not it parses:
-- Trailing colon: `SPINDRIFT_OUTCOME: issue=${ISSUE_NUMBER} landing=<pr-url> status=ready note=<short reason>` — the required prefix is a literal space after `OUTCOME`, not a colon, so this never matches; the launcher never sees an outcome and treats the run as lost.
-- Embedded inside a sentence: `Done — SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=ready note=<short reason>` — only a line that starts at the prefix matches; text before it hides the whole line the same way, losing the run. Print the line on its own, starting at column one, nothing before it.
-- Freeform status: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=SUCCESS note=<short reason>` — this parses fine, but `ready` and `blocked` are the only accepted values; anything else is silently wrong rather than lost outright, and the launcher will never flip the PR ready or merge it.
+- Trailing colon: `SPINDRIFT_OUTCOME: issue=${ISSUE_NUMBER} landing=<landing-ref> status=ready note=<short reason>` — the required prefix is a literal space after `OUTCOME`, not a colon, so this never matches; the launcher never sees an outcome and treats the run as lost.
+- Embedded inside a sentence: `Done — SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=ready note=<short reason>` — only a line that starts at the prefix matches; text before it hides the whole line the same way, losing the run. Print the line on its own, starting at column one, nothing before it.
+- Freeform status: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=SUCCESS note=<short reason>` — this parses fine, but `ready` and `blocked` are the only accepted values; anything else is silently wrong rather than lost outright, and the launcher will never flip the PR ready or merge it.
 
 This must be the literal final message — nothing after it, no prose summary, no
 background task. The launcher parses this one line to learn your PR; if missing,
 the PR is never merged and the run is wasted. Grammar is validated by
 `cmd/launcher/internal/outcome` (`Parse`, `Line`, `LastInLog`).
 
-`status=ready` = branch pushed, PR open, left in draft. The launcher flips it
-to ready once CI reaches green, immediately before it merges.
-Do NOT run `gh pr ready`, `gh issue edit ... --add-label ${COMPLETE_LABEL}`,
-or `gh pr merge`.
-
+${OUTCOME_READY_MEANS_READ_WRITE_STEP}${OUTCOME_READY_MEANS_READ_ONLY_STEP}
 # IF BLOCKED
 
 If you can't finish (review never clears, CI stays red after repeated fixes,

@@ -127,10 +127,13 @@ in
     # fix-prompt.md's fix-specific preamble is baked as-is, but the shared
     # outcome contract (LAND THE CHANGE onward) only ever reaches it via
     # injection (issue #455) — proof the baked image, not just the eval-only
-    # promptDir, carries it. `gh pr create --draft` is OPEN A PULL REQUEST's
-    # own text, distinct from fix-prompt.md's hand-written preamble (which
-    # explicitly skips `gh pr create` on a fix pass).
-    grep -q 'gh pr create --draft' \
+    # promptDir, carries it. OPEN_PR_CREATE_READ_WRITE_STEP is OPEN A PULL
+    # REQUEST's own reference (issue #1919: the `gh pr create --draft`
+    # invocation itself moved into a fragment file, rendered at runtime, so
+    # the un-rendered baked template carries the placeholder, not the
+    # literal command), distinct from fix-prompt.md's hand-written preamble
+    # (which explicitly skips `gh pr create` on a fix pass).
+    grep -q 'OPEN_PR_CREATE_READ_WRITE_STEP' \
       ${promptHarness.agentFiles}/agent/prompts/fix-prompt.md
     touch $out
   '';

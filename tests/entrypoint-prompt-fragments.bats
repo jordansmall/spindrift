@@ -249,6 +249,62 @@ setup() {
   ! grep -q 'attempt\.2\. `gh pr create' "$CLAUDE_PROMPT_FILE"
 }
 
+# issue #1919: the OPEN A PULL REQUEST create step's BOX_ACCESS_READ_WRITE/
+# BOX_ACCESS_READ_ONLY gates -- the counterpart to #1918's push-step gates
+# above, this time for `gh pr create` itself. box_env_gen.bash already
+# exports BOX_FORGE_AND_ISSUE_ACCESS=read-write (the schema default), so the
+# first case needs no override.
+@test "OPEN A PULL REQUEST create step: read-write keeps gh pr create unchanged" {
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-read-write"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'gh pr create --draft' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_PR_INTENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "OPEN A PULL REQUEST create step: read-only emits a SPINDRIFT_PR_INTENT block, never gh pr create" {
+  export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-read-only"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'SPINDRIFT_PR_INTENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'SPINDRIFT_PR_INTENT_END' "$CLAUDE_PROMPT_FILE"
+
+  # Not the bare substring: the read-only fragment itself explains "do NOT
+  # `gh pr create`" (naming the forbidden command, same pattern
+  # outcome-ready-means-outbox.md and CODE_FORGE=git's LAND THE CHANGE use)
+  # -- pin the concrete invocation form instead, which only the read-write
+  # fragment ever renders.
+  ! grep -qF 'gh pr create --draft --base' "$CLAUDE_PROMPT_FILE"
+}
+
+# issue #1919: the OUTCOME section's landing= value under read-only carries
+# the branch name, not a PR URL -- the Box never opens the PR itself, so it
+# never learns a URL to report. ISSUE_NUMBER=7/BRANCH_PREFIX=agent/issue- from
+# helper.bash/box_env_gen.bash together fix BRANCH at agent/issue-7.
+@test "OUTCOME landing step: read-write keeps the pr-url placeholder unchanged" {
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-outcome-landing-read-write"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'landing=<pr-url> status=ready' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "OUTCOME landing step: read-only reports the branch, never a pr-url placeholder" {
+  export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-outcome-landing-read-only"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'landing=agent/issue-7 status=ready' "$CLAUDE_PROMPT_FILE"
+
+  # Scoped to the OUTCOME section itself -- OPEN A PULL REQUEST's own
+  # PR-intent fragment legitimately mentions "the launcher opens the draft
+  # PR" prose, so a whole-file grep for the pr-url placeholder could
+  # false-positive on unrelated read-only prose elsewhere.
+  local outcome_section
+  outcome_section="$(awk '/^# OUTCOME/,/^# IF BLOCKED/' "$CLAUDE_PROMPT_FILE")"
+  ! grep -qF 'landing=<pr-url>' <<<"$outcome_section"
+}
+
 # A scout/reviewer-only template (no "filer" key) must not require
 # filer-prompt.md to exist -- the file read has to be gated on the template
 # actually carrying a filer entry, same as the FILE_ISSUES_STEP gate above.
