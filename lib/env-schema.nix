@@ -366,18 +366,22 @@
     env = "BOX_FORGE_AND_ISSUE_ACCESS";
     group = "Repository & identity";
     default = "read-write";
-    doc = "whether the Box writes to the Code Forge and Issue Tracker directly (read-write) or the launcher host-mediates every write instead (read-only), a third axis orthogonal to CODE_FORGE and ISSUE_TRACKER (issue #1914); read-only is gated at startup by capability — permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments, otherwise the launcher exits with a startup error naming the missing seam; local backends already satisfy the gate, github does not yet";
+    doc = "whether the Box writes to the Code Forge and Issue Tracker directly (read-write) or the launcher host-mediates every write instead (read-only), a third axis orthogonal to CODE_FORGE and ISSUE_TRACKER (issue #1914); read-only is gated at startup by capability — permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments, otherwise the launcher exits with a startup error naming the missing seam; local backends already satisfy the gate, github's comment-relay (#1917) and bundle-relay (#1918) halves have landed but it still fails the gate pending host-side draft-PR-create";
     choices = [
       "read-write"
       "read-only"
     ];
     flakeOption = true;
-    # Forwarded into the Box (issue #1917): the github issue-blocked-comment
-    # and research-verdict prompt fragments (lib/fragments.nix) branch on
-    # this value directly, alongside ISSUE_TRACKER, to pick the in-box `gh
-    # issue comment` form (read-write) or the host-mediated SPINDRIFT_COMMENT
-    # relay form (read-only) -- the same pattern ISSUE_TRACKER's own boxEnv
-    # forwarding uses for its PR-body ticket-reference gate.
+    # Forwarded into the Box: the github issue-blocked-comment and
+    # research-verdict prompt fragments (issue #1917) branch on this value
+    # directly, alongside ISSUE_TRACKER, to pick the in-box `gh issue
+    # comment` form (read-write) or the host-mediated SPINDRIFT_COMMENT relay
+    # form (read-only); the github push prompt fragment (issue #1918) does
+    # the same to pick between writing seam.bundle to the outbox and running
+    # git push directly. Still read directly by the launcher too (main.go's
+    # newCodeForge/checkReadOnlyCapabilityGate), so no boxEnvOnly here --
+    # mirrors ISSUE_TRACKER's own boxEnv forwarding for its PR-body
+    # ticket-reference gate.
     boxEnv = true;
   };
   # ── Operator-tunable knobs (flakeOption = true; also tune via harness.env) ─
