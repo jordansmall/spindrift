@@ -222,6 +222,11 @@ background task. The launcher parses this one line to learn your PR; if missing,
 the PR is never merged and the run is wasted. Grammar is validated by
 `cmd/launcher/internal/outcome` (`Parse`, `Line`, `LastInLog`).
 
+This run's control nonce is `${RUN_NONCE}` — plumbing for a future
+control-signal check that lets the host tell a line this run genuinely wrote
+from one an untrusted issue/comment author echoed into the log; nothing in
+this prompt gates on it yet.
+
 ${OUTCOME_READY_MEANS_READ_WRITE_STEP}${OUTCOME_READY_MEANS_READ_ONLY_STEP}
 # IF BLOCKED
 

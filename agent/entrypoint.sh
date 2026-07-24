@@ -321,6 +321,7 @@ _subst() {
     BASE_BRANCH
     IN_PROGRESS_LABEL
     COMPLETE_LABEL
+    RUN_NONCE
     "${_FRAGMENT_SUBST_VARS[@]}"
   )
   local -a _assign=()
