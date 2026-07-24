@@ -73,4 +73,36 @@ api-graphql)
 	done
 	cat "$STATE_DIR/prs/$num/mergeable" 2>/dev/null
 	;;
+pr-create)
+	shift 2
+	head=""
+	base=""
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--head)
+			head="$2"
+			shift 2
+			;;
+		--base)
+			base="$2"
+			shift 2
+			;;
+		*)
+			shift
+			;;
+		esac
+	done
+	if [ "$head" = "fail-head" ]; then
+		printf 'could not create pull request\n' >&2
+		exit 1
+	fi
+	# head is a branch name (e.g. "agent/issue-1919"), not a PR URL -- pr_num
+	# above only strips a URL's trailing path segment, so derive the fake
+	# issue number from head's own trailing "-<num>" suffix instead.
+	num=${head##*-}
+	mkdir -p "$STATE_DIR/prs/$num"
+	printf '%s' "$head" >"$STATE_DIR/prs/$num/head"
+	printf '%s' "$base" >"$STATE_DIR/prs/$num/base"
+	printf 'https://github.com/owner/repo/pull/%s\n' "$num"
+	;;
 esac

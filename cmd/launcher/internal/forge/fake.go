@@ -40,6 +40,11 @@ type RelayBundleCall struct {
 	OutboxDir, Ref string
 }
 
+// CreateDraftPRCall records a single CreateDraftPR invocation.
+type CreateDraftPRCall struct {
+	Title, Body, Base, Head string
+}
+
 // Fake is an in-memory Client for unit tests. All methods are safe for
 // concurrent use. CheckState pops from a scripted RollupState queue so polling
 // tests need no real sleeps.
@@ -139,6 +144,15 @@ type Fake struct {
 	RelayBundleErr error
 	// RelayBundleCalls records all RelayBundle invocations in order.
 	RelayBundleCalls []RelayBundleCall
+
+	// CreateDraftPRURL is returned by every CreateDraftPR call on success —
+	// scripts the URL of the draft PR the github read-only adapter opens
+	// host-side (issue #1919). Only reachable through AsGithubReadOnly().
+	CreateDraftPRURL string
+	// CreateDraftPRErr, if non-nil, is returned by every CreateDraftPR call.
+	CreateDraftPRErr error
+	// CreateDraftPRCalls records all CreateDraftPR invocations in order.
+	CreateDraftPRCalls []CreateDraftPRCall
 	// LandingRefValue is returned by LandingRef on success.
 	LandingRefValue string
 	// LandingRefErr, if non-nil, is returned by every LandingRef call.
@@ -845,6 +859,22 @@ func (f *Fake) relayBundle(outboxDir, ref string) error {
 	return f.RelayBundleErr
 }
 
+// createDraftPR backs the optional DraftPRCreator surface (issue #1919),
+// recording each call for tests to assert against. Deliberately unexported,
+// the same reasoning as relayBundle: only githubReadOnlyForge's own exported
+// CreateDraftPR (reachable exclusively through AsGithubReadOnly()) calls it,
+// so a bare *Fake used as a github-shaped CodeForge in every other settle
+// test never silently starts satisfying forge.DraftPRCreator.
+func (f *Fake) createDraftPR(title, body, base, head string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.CreateDraftPRCalls = append(f.CreateDraftPRCalls, CreateDraftPRCall{Title: title, Body: body, Base: base, Head: head})
+	if f.CreateDraftPRErr != nil {
+		return "", f.CreateDraftPRErr
+	}
+	return f.CreateDraftPRURL, nil
+}
+
 // landingRef backs the optional LandingRef surface (ADR 0033), the same
 // AsLocal()-only restriction as relayBundle above, for the same reason.
 func (f *Fake) landingRef() (string, error) {
@@ -1094,6 +1124,31 @@ func (l localForge) IntegrationTip(parent string) (string, error) { return l.f.i
 
 var _ CodeForge = localForge{}
 var _ BundleRelay = localForge{}
+
+// githubReadOnlyForge adapts a Fake to the github read-only adapter's shape
+// (issue #1919): the full CodeForge+PRForge surface *Fake already exposes
+// directly (unlike localForge/pushOnlyForge, nothing here needs hiding) plus
+// BundleRelay and DraftPRCreator — mirroring github.readOnlyCodeForge, which
+// wraps execClient (already PRForge-shaped) with the same two host-mediated
+// hooks.
+type githubReadOnlyForge struct{ *Fake }
+
+// AsGithubReadOnly returns f wrapped so it satisfies CodeForge, PRForge,
+// BundleRelay, and DraftPRCreator — the github read-only adapter's shape.
+func (f *Fake) AsGithubReadOnly() CodeForge { return githubReadOnlyForge{f} }
+
+func (g githubReadOnlyForge) RelayBundle(outboxDir, ref string) error {
+	return g.Fake.relayBundle(outboxDir, ref)
+}
+
+func (g githubReadOnlyForge) CreateDraftPR(title, body, base, head string) (string, error) {
+	return g.Fake.createDraftPR(title, body, base, head)
+}
+
+var _ CodeForge = githubReadOnlyForge{}
+var _ PRForge = githubReadOnlyForge{}
+var _ BundleRelay = githubReadOnlyForge{}
+var _ DraftPRCreator = githubReadOnlyForge{}
 var _ LandingRef = localForge{}
 var _ LandingVerifier = localForge{}
 var _ LandingRepair = localForge{}
