@@ -27,15 +27,20 @@ type Result struct {
 	// the box's log.
 	OutcomeFound bool
 
-	// Comment is the body of the last complete SPINDRIFT_COMMENT_BEGIN …
-	// SPINDRIFT_COMMENT_END block in the box's log, populated when
-	// CommentFound is true (ADR 0032, issue #1692) — the host-mediated
-	// write channel a local Dispatch's Box uses to hand settle its verdict
-	// or blocked-note comment instead of posting it in-box.
+	// Comment is the decoded body of the box log's last verified
+	// SPINDRIFT_COMMENT line — a single nonce-bearing, base64-encoded
+	// control signal (issue #1940) — populated when CommentFound is true
+	// (ADR 0032, issue #1692). This is the host-mediated write channel a
+	// local Dispatch's Box uses to hand settle its verdict or blocked-note
+	// comment instead of posting it in-box; the nonce lets the host tell a
+	// line the Box genuinely wrote from one an untrusted issue/comment
+	// author echoed into the log.
 	Comment string
 
-	// CommentFound reports whether a complete SPINDRIFT_COMMENT block was
-	// present in the box's log.
+	// CommentFound reports whether a SPINDRIFT_COMMENT line verified
+	// against this run's own nonce was present in the box's log. A line
+	// carrying the token with a mismatched nonce, or an undecodable
+	// payload, is ignored rather than surfaced here.
 	CommentFound bool
 
 	// PRIntent is the body of the last complete SPINDRIFT_PR_INTENT_BEGIN …

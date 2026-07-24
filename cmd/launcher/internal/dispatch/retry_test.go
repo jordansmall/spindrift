@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"encoding/base64"
 	"io"
 	"strings"
 	"testing"
@@ -102,20 +103,22 @@ func TestDispatchWithRetry_SuccessOnFirstRun(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_SuccessWithCommentBlockPopulatesResult verifies that
-// a SPINDRIFT_COMMENT_BEGIN … SPINDRIFT_COMMENT_END block alongside the
-// outcome line in the box's log surfaces on Result.Comment/CommentFound —
-// the host-mediated write channel for a local Dispatch's verdict/blocked
-// comment (ADR 0032, issue #1692).
-func TestDispatchWithRetry_SuccessWithCommentBlockPopulatesResult(t *testing.T) {
+// TestDispatchWithRetry_SuccessWithCommentLinePopulatesResult verifies that a
+// single-line, nonce-guarded SPINDRIFT_COMMENT alongside the outcome line in
+// the box's log surfaces on Result.Comment/CommentFound — the host-mediated
+// write channel for a local Dispatch's verdict/blocked comment (ADR 0032,
+// issue #1692), now carried as one nonce-bearing base64 line instead of a
+// multi-line block (issue #1940).
+func TestDispatchWithRetry_SuccessWithCommentLinePopulatesResult(t *testing.T) {
 	fr := runner.NewFake()
-	fr.WriteToOutput = []byte("SPINDRIFT_COMMENT_BEGIN\nverdict body\nSPINDRIFT_COMMENT_END\n" +
-		"SPINDRIFT_OUTCOME issue=1 landing=none status=recommend note=ok\n")
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
 		return driver.Classification{}, nil
 	}}
 	var sleeps []time.Duration
 	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+	encoded := base64.StdEncoding.EncodeToString([]byte("verdict body"))
+	fr.WriteToOutput = []byte("SPINDRIFT_COMMENT " + d.nonce + " " + encoded + "\n" +
+		"SPINDRIFT_OUTCOME issue=1 landing=none status=recommend note=ok\n")
 
 	result := d.Run()
 
@@ -127,6 +130,34 @@ func TestDispatchWithRetry_SuccessWithCommentBlockPopulatesResult(t *testing.T) 
 	}
 	if result.Comment != "verdict body" {
 		t.Errorf("Comment: got %q, want %q", result.Comment, "verdict body")
+	}
+}
+
+// TestDispatchWithRetry_CommentLineWithWrongNonceNotFound verifies that a
+// SPINDRIFT_COMMENT line carrying a nonce that doesn't match this run's own
+// is ignored — never surfaced on Result.Comment — the same guarantee
+// LastCommentLineInLog documents (issue #1940).
+func TestDispatchWithRetry_CommentLineWithWrongNonceNotFound(t *testing.T) {
+	fr := runner.NewFake()
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+	encoded := base64.StdEncoding.EncodeToString([]byte("attacker-controlled"))
+	fr.WriteToOutput = []byte("SPINDRIFT_COMMENT not-this-runs-nonce " + encoded + "\n" +
+		"SPINDRIFT_OUTCOME issue=1 landing=none status=recommend note=ok\n")
+
+	result := d.Run()
+
+	if !result.OutcomeFound {
+		t.Fatal("want OutcomeFound=true")
+	}
+	if result.CommentFound {
+		t.Fatal("want CommentFound=false for a nonce mismatch")
+	}
+	if result.Comment != "" {
+		t.Errorf("Comment: got %q, want empty", result.Comment)
 	}
 }
 

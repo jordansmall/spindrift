@@ -127,7 +127,7 @@ func (d *Dispatch) successResult(logPath string) Result {
 		return Result{Success: true, ParseErr: err}
 	}
 	if found {
-		comment, commentFound, commentErr := outcome.LastCommentInLog(logPath)
+		comment, commentFound, commentErr := outcome.LastCommentLineInLog(logPath, d.nonce)
 		if commentErr != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: comment scan: %v\n", d.number, commentErr)
 		}
