@@ -243,31 +243,28 @@ func parseFlags(args []string) ([]string, error) {
 			return nil, fmt.Errorf("--%s and --%s are mutually exclusive", knob.cmdFlag, knob.fileFlag)
 		}
 
+		var value string
+		var err error
 		switch {
 		case hasCmdFlag:
-			value, err := resolveSecretCmd(knob.env, cmdStrings[knob.env])
-			if err != nil {
-				return nil, err
-			}
-			if err := os.Setenv(knob.env, value); err != nil {
-				return nil, err
-			}
+			value, err = resolveSecretCmd(knob.env, cmdStrings[knob.env])
 		case os.Getenv(knob.env+"_CMD") != "":
-			value, err := resolveSecretCmd(knob.env, os.Getenv(knob.env+"_CMD"))
-			if err != nil {
-				return nil, err
-			}
-			if err := os.Setenv(knob.env, value); err != nil {
-				return nil, err
-			}
+			value, err = resolveSecretCmd(knob.env, os.Getenv(knob.env+"_CMD"))
 		case hasFileFlag:
-			data, err := os.ReadFile(filePaths[knob.env])
+			var data []byte
+			data, err = os.ReadFile(filePaths[knob.env])
 			if err != nil {
 				return nil, fmt.Errorf("--%s: cannot read file %s: %w", knob.fileFlag, filePaths[knob.env], err)
 			}
-			if err := os.Setenv(knob.env, strings.TrimRight(string(data), "\r\n")); err != nil {
-				return nil, err
-			}
+			value = strings.TrimRight(string(data), "\r\n")
+		default:
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := os.Setenv(knob.env, value); err != nil {
+			return nil, err
 		}
 	}
 
