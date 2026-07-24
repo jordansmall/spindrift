@@ -145,3 +145,25 @@ The read-only mount clears the isolation bar:
   a read-only mount of `LOCAL_ISSUES_DIR` under `ISSUE_TRACKER=local`.
 - `gitlab`/`bitbucket`/`jira` join the remote path (in-box client, read and
   write) as their adapters land; none needs the mount or the comment block.
+
+## Amendment (issue #1940): single-line, nonce-guarded SPINDRIFT_COMMENT
+
+The `SPINDRIFT_COMMENT_BEGIN … SPINDRIFT_COMMENT_END` block above shared the
+exact-line-marker parsing that #1921 found broken for the read-only PR-intent
+block (#1938's twin fix): a stream-json JSONL box log joins a printed
+multi-line block onto one physical file line (real newlines become a literal
+`\n` escape inside the JSON string), so a parser scanning for a `BEGIN` line
+and an `END` line never finds either — the block always looks unterminated.
+The multi-line grammar and its `lastDelimitedBlockInLog` scanner are retired
+for COMMENT in favor of one line: `SPINDRIFT_COMMENT <nonce> <base64-body>`.
+The nonce is this run's own `RUN_NONCE` (ADR extending #1937's prefactor),
+rendered into the prompt and forwarded to the log-parsing layer, so the host
+can tell a line the Box genuinely wrote from one an untrusted issue/comment
+author echoed into the log (they wrote their text before the nonce existed).
+The body is base64-encoded so it survives as one unbroken, whitespace-free
+token regardless of internal newlines or markdown, and a single-line
+substring search — the same technique `SPINDRIFT_OUTCOME` already relies on
+— finds it inside a JSONL-collapsed line where an exact-line marker pair
+cannot. `outcome.LastCommentLineInLog` replaces `LastCommentInLog`; a line
+whose nonce does not verify, or whose payload fails strict base64 decoding,
+is ignored and warned rather than posted.
