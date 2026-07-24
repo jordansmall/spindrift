@@ -134,6 +134,27 @@ type BlockersLister interface {
 	BlocksOf(num string) ([]Dependency, error)
 }
 
+// HostPostedCommenter is the optional IssueTracker surface for adapters
+// whose Comment call is safe to invoke host-side, from the Launcher's own
+// credential, without the Box ever needing to post the comment itself
+// (issue #1914): under BOX_FORGE_AND_ISSUE_ACCESS=read-only, the Box holds
+// no write token, so its blocked/verdict comment travels as a
+// SPINDRIFT_COMMENT stdout block for the Launcher to post via Comment
+// instead of an in-box `gh issue comment`. Every current adapter (github,
+// local, jira) already implements the base IssueTracker.Comment method the
+// Launcher calls host-side today for merge-guard/landing notes, so this
+// marker is trivially satisfied by all of them now; it exists so the
+// read-only capability gate (issue #1916) has a named seam to type-assert
+// against, matching the pattern PRForge/BundleRelay/LandingRecorder use, in
+// case a future adapter's Comment needs the Box's own credential and can't
+// be called host-side.
+type HostPostedCommenter interface {
+	// Comment posts a comment on the issue — identical to the base
+	// IssueTracker.Comment, restated here as a distinct, discoverable
+	// capability.
+	Comment(num, body string) error
+}
+
 // LandingRecorder is the optional IssueTracker surface for adapters that can
 // persist where a Dispatch's work landed (ADR 0029). Only the local adapter
 // implements it — github/jira issues close through the forge's own

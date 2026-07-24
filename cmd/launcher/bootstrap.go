@@ -92,6 +92,9 @@ func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 
 	it := newIssueTracker(c)
 	cf := newCodeForge(c, local.SanitizedParent{})
+	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
+		return nil, err
+	}
 	lw := localloop.Wire(localloopConfig(c), it)
 	f := newDispatchFactory(c, pwd, r, lw, cf)
 	s := newSettle(c, it, lw, cf)

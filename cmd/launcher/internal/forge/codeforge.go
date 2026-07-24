@@ -145,3 +145,19 @@ type PRForge interface {
 	// rather than reporting a failure.
 	MarkDraft(prURL string) error
 }
+
+// DraftPRCreator is the optional Code Forge surface for host-side draft-PR
+// creation (issue #1914): under BOX_FORGE_AND_ISSUE_ACCESS=read-only, the Box
+// holds no write token, so it cannot `gh pr create` itself; the Launcher
+// opens the draft PR host-side instead, from a title/body/base/head the Box
+// supplies. Only meaningful for a PR-shaped forge (one that also implements
+// PRForge) — a forge with no PR concept at all (local) needs no such
+// capability. Discovered via type assertion, like PRForge/BundleRelay. No
+// adapter implements it yet; a later issue lands the github implementation.
+// Declaring it now lets BOX_FORGE_AND_ISSUE_ACCESS=read-only's startup
+// capability gate (issue #1916) name it as the missing seam.
+type DraftPRCreator interface {
+	// CreateDraftPR opens a draft PR from head onto base with the given
+	// title and body, and returns its URL.
+	CreateDraftPR(title, body, base, head string) (url string, err error)
+}

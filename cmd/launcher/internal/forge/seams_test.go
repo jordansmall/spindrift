@@ -99,6 +99,14 @@ func TestFake_ImplementsIssueCloser(t *testing.T) {
 	var _ forge.IssueCloser = forge.NewFake()
 }
 
+// TestFake_ImplementsHostPostedCommenter asserts that *Fake satisfies the
+// optional HostPostedCommenter surface (issue #1914/#1916) — trivially true
+// today since it shares Comment's exact signature with the base IssueTracker
+// interface every tracker (github, local, jira) already implements.
+func TestFake_ImplementsHostPostedCommenter(t *testing.T) {
+	var _ forge.HostPostedCommenter = forge.NewFake()
+}
+
 // TestFake_ImplementsLabeledTracker asserts that *Fake satisfies the
 // optional LabeledTracker surface, matching the github/local adapters'
 // shape — PickIssue's double-box guard (#1742) relies on this to skip a

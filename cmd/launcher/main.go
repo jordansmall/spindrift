@@ -898,6 +898,38 @@ func checkAutoMergePreflight(c config, cf forge.CodeForge) error {
 	return nil
 }
 
+// checkReadOnlyCapabilityGate enforces BOX_FORGE_AND_ISSUE_ACCESS=read-only's
+// startup capability gate (issue #1916, ADR extending 0032/0033's
+// host-mediated model to the github backends): the Box may only be denied a
+// write token when the Launcher can perform every write it would otherwise
+// make, on both axes. read-write (the default) is a no-op — it never
+// inspects cf/it, so it changes nothing about today's flows.
+//
+// The forge must implement BundleRelay (the pre-merge branch hand-off);
+// DraftPRCreator (host-side draft-PR creation) is additionally required only
+// when the forge is PR-shaped (implements PRForge) — a forge with no PR
+// concept at all (local) has nothing for DraftPRCreator to create. The
+// tracker must implement HostPostedCommenter. A missing capability is a
+// startup error naming the axis and the specific seam absent, rather than a
+// silently-degraded read-only deployment.
+func checkReadOnlyCapabilityGate(c config, cf forge.CodeForge, it forge.IssueTracker) error {
+	if c.boxForgeAndIssueAccess != "read-only" {
+		return nil
+	}
+	if _, ok := cf.(forge.BundleRelay); !ok {
+		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only requires CODE_FORGE=%q to implement bundle-relay (forge.BundleRelay) for the Box's finished branch hand-off; only CODE_FORGE=local implements it today", c.codeForge)
+	}
+	if _, isPRForge := cf.(forge.PRForge); isPRForge {
+		if _, ok := cf.(forge.DraftPRCreator); !ok {
+			return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only requires CODE_FORGE=%q to implement host-side draft-PR-create (forge.DraftPRCreator); not yet available on CODE_FORGE=github", c.codeForge)
+		}
+	}
+	if _, ok := it.(forge.HostPostedCommenter); !ok {
+		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only requires ISSUE_TRACKER=%q to implement host-posted comments (forge.HostPostedCommenter)", c.issueTracker)
+	}
+	return nil
+}
+
 // Sentinel error translated to a specific exit code so callers like
 // dogfood.sh can distinguish termination reasons without a separate gh
 // probe.
