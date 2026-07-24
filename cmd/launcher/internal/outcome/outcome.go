@@ -213,33 +213,10 @@ func LastCommentLineInLog(path, expectedNonce string) (string, bool, error) {
 
 // parseCommentLine extracts and strictly decodes the payload of a single-line
 // SPINDRIFT_COMMENT control signal: SPINDRIFT_COMMENT <nonce> <base64-body>.
-// line must carry expectedNonce via LineHasNonce (word-bounded, so an
-// attacker's pre-run text can never match), and the field structurally
-// following the token must equal expectedNonce exactly, with the base64
-// payload the field after that. The payload is decoded with the standard
-// strict decoder — reject on any decode error, no whitespace-stripping or
-// best-effort decoding, mirroring the discipline OUTCOME's grammar holds
-// for its own fields.
+// Thin wrapper over parseSignalLine, the same grammar PR-intent's
+// parsePRIntentLine shares.
 func parseCommentLine(line, expectedNonce string) (string, bool) {
-	const token = "SPINDRIFT_COMMENT"
-	idx := tokenIndex(line, token)
-	if idx < 0 {
-		return "", false
-	}
-	// fields[0] must equal expectedNonce exactly: strings.Fields already
-	// splits on whitespace, so this is itself a word-bounded check, and an
-	// empty expectedNonce can never match since Fields never yields an
-	// empty token -- no separate LineHasNonce gate needed.
-	fields := strings.Fields(line[idx+len(token):])
-	if len(fields) < 2 || fields[0] != expectedNonce {
-		return "", false
-	}
-	payload := base64AlphabetPrefix(fields[1])
-	decoded, err := base64.StdEncoding.Strict().DecodeString(payload)
-	if err != nil {
-		return "", false
-	}
-	return string(decoded), true
+	return parseSignalLine(line, "SPINDRIFT_COMMENT", expectedNonce)
 }
 
 // base64AlphabetPrefix returns the longest prefix of s consisting solely of
@@ -259,50 +236,51 @@ func isBase64Char(b byte) bool {
 	return ('A' <= b && b <= 'Z') || ('a' <= b && b <= 'z') || ('0' <= b && b <= '9') || b == '+' || b == '/' || b == '='
 }
 
-// LastPRIntentInLog scans the file at path and returns the body of the last
-// complete SPINDRIFT_PR_INTENT_BEGIN … SPINDRIFT_PR_INTENT_END block — the
-// draft-PR title and body a read-only Box hands the launcher in place of its
-// own `gh pr create` (issue #1919) — using the same last-wins and
-// oversized-line-skipping semantics as LastInLog. By convention the
-// first line is the PR title and the remainder (after a blank line) is the
-// PR body, but this function returns the raw block verbatim; splitting title
-// from body is the caller's concern.
+// LastPRIntentInLog scans the file at path for the last line carrying the
+// SPINDRIFT_PR_INTENT token and decodes its single-line grammar:
+// SPINDRIFT_PR_INTENT <nonce> <base64-payload> (issue #1938) — the draft-PR
+// title and body a read-only Box hands the launcher in place of its own
+// `gh pr create` (issue #1919), replacing the retired
+// SPINDRIFT_PR_INTENT_BEGIN/END block the same way LastCommentLineInLog
+// replaced LastCommentInLog: a stream-json JSONL box log collapses a
+// multi-line block onto one physical line, so an exact-line marker scan
+// never finds it (issue #1921's dogfood failure).
 //
-// Returns ("", false, nil) when no complete block is present or the file
-// does not exist. Returns ("", false, err) on I/O errors other than
-// file-not-found or oversized lines.
-func LastPRIntentInLog(path string) (string, bool, error) {
-	return lastDelimitedBlockInLog(path, "SPINDRIFT_PR_INTENT_BEGIN", "SPINDRIFT_PR_INTENT_END")
-}
-
-// lastDelimitedBlockInLog is LastPRIntentInLog's implementation: scans path
-// for the last complete beginMarker…endMarker block, joining the lines
-// between the delimiters with "\n". An unterminated beginMarker (no matching
-// endMarker before EOF or before a later beginMarker) is discarded rather
-// than returned as a partial block, and a line reading exactly endMarker
-// inside an open block closes it immediately — there is no escaping
-// mechanism, matching the caller's documented truncation behavior.
-func lastDelimitedBlockInLog(path, beginMarker, endMarker string) (string, bool, error) {
-	var last string
+// Mirrors LastCommentLineInLog's verify-then-prefer semantics: among lines
+// carrying the token, the last one that actually verifies (right nonce,
+// valid strict base64) wins, rather than always taking the very last
+// token-bearing line the way LastInLog does for SPINDRIFT_OUTCOME — a later
+// line that merely carries the token without verifying (an untrusted
+// issue/comment author's echo, since they wrote their text before this
+// run's nonce was minted) must not be able to shadow an earlier genuine
+// PR-intent line.
+//
+// The decoded payload is the same "title\n\nbody" shape the retired block
+// held: the first line is the PR title and the remainder, after a blank
+// line, is the PR body; splitting title from body remains the caller's
+// concern.
+//
+// Returns ("", false, nil) when no line carries the token at all, or the
+// file does not exist — there was never a PR-intent to relay. Returns ("",
+// false, err) only when every token-bearing line fails to verify — a spoof
+// attempt or a corrupted line, for the caller to log; never conflated with
+// no-PR-intent-found. Returns (payload, true, nil) from the last line that
+// verifies, even if a later, non-verifying line also carries the token.
+func LastPRIntentInLog(path, expectedNonce string) (string, bool, error) {
+	const token = "SPINDRIFT_PR_INTENT"
+	var lastValid string
 	var found bool
-	var open bool
-	var buf []string
-
+	var rejected bool
 	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
-		switch {
-		case line == beginMarker:
-			open = true
-			buf = nil
-		case line == endMarker:
-			if open {
-				last = strings.Join(buf, "\n")
-				found = true
-			}
-			open = false
-			buf = nil
-		case open:
-			buf = append(buf, line)
+		if !containsToken(line, token) {
+			return
 		}
+		if body, ok := parsePRIntentLine(line, expectedNonce); ok {
+			lastValid = body
+			found = true
+			return
+		}
+		rejected = true
 	})
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -310,7 +288,50 @@ func lastDelimitedBlockInLog(path, beginMarker, endMarker string) (string, bool,
 		}
 		return "", false, err
 	}
-	return last, found, nil
+	if found {
+		return lastValid, true, nil
+	}
+	if rejected {
+		return "", false, fmt.Errorf("PR-intent line found but did not verify: nonce mismatch or malformed payload")
+	}
+	return "", false, nil
+}
+
+// parsePRIntentLine extracts and strictly decodes the payload of a
+// single-line SPINDRIFT_PR_INTENT control signal: SPINDRIFT_PR_INTENT
+// <nonce> <base64-payload>. Thin wrapper over parseSignalLine, the same
+// grammar SPINDRIFT_COMMENT's parseCommentLine shares.
+func parsePRIntentLine(line, expectedNonce string) (string, bool) {
+	return parseSignalLine(line, "SPINDRIFT_PR_INTENT", expectedNonce)
+}
+
+// parseSignalLine extracts and strictly decodes the payload of a
+// single-line "<token> <nonce> <base64-payload>" control signal — the
+// shared grammar parseCommentLine and parsePRIntentLine each pin to one
+// token. line must carry expectedNonce as the field structurally following
+// the token (word-bounded via strings.Fields, so an empty expectedNonce can
+// never match), and the base64 payload — the field after that — is decoded
+// with the standard strict decoder, rejecting any decode error outright
+// rather than stripping whitespace or best-effort decoding.
+func parseSignalLine(line, token, expectedNonce string) (string, bool) {
+	idx := tokenIndex(line, token)
+	if idx < 0 {
+		return "", false
+	}
+	// fields[0] must equal expectedNonce exactly: strings.Fields already
+	// splits on whitespace, so this is itself a word-bounded check, and an
+	// empty expectedNonce can never match since Fields never yields an
+	// empty token -- no separate LineHasNonce gate needed.
+	fields := strings.Fields(line[idx+len(token):])
+	if len(fields) < 2 || fields[0] != expectedNonce {
+		return "", false
+	}
+	payload := base64AlphabetPrefix(fields[1])
+	decoded, err := base64.StdEncoding.Strict().DecodeString(payload)
+	if err != nil {
+		return "", false
+	}
+	return string(decoded), true
 }
 
 // LineHasNonce reports whether line carries expected as a standalone token
@@ -338,7 +359,16 @@ func containsToken(line, token string) bool {
 // tokenIndex returns the index of token's first standalone-word occurrence
 // in line, or -1 if none exists. Standalone means not preceded or followed
 // by an identifier character (see isTokenChar), so a longer identifier that
-// merely contains token as a substring never matches.
+// merely contains token as a substring never matches. A literal `\n`
+// (backslash then 'n') immediately before the token counts as a left
+// boundary too, alongside a genuine non-token-char: it's JSON's escaping of
+// a real newline the Box's own text wrote right before the token — e.g. a
+// line of narration flowing straight into a control-signal line within the
+// same stream-json text field — and a real newline is unambiguously a
+// boundary, so its escaped form must be too. Without this, the escaped
+// sequence's trailing 'n' (itself a token char) would look like it extends
+// the token into a longer identifier and reject a placement no different
+// from the token simply starting its own physical line.
 func tokenIndex(line, token string) int {
 	for start := 0; ; {
 		i := strings.Index(line[start:], token)
@@ -347,7 +377,10 @@ func tokenIndex(line, token string) int {
 		}
 		begin := start + i
 		end := begin + len(token)
-		if (begin == 0 || !isTokenChar(line[begin-1])) && (end == len(line) || !isTokenChar(line[end])) {
+		leftOK := begin == 0 || !isTokenChar(line[begin-1]) ||
+			(line[begin-1] == 'n' && begin >= 2 && line[begin-2] == '\\')
+		rightOK := end == len(line) || !isTokenChar(line[end])
+		if leftOK && rightOK {
 			return begin
 		}
 		start = begin + 1

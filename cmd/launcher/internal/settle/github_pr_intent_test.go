@@ -10,6 +10,29 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
+// TestParsePRIntent_PreservesInternalNewlinesInBody verifies a body
+// spanning several lines (a real PR description, not a one-liner) survives
+// parsePRIntent's title/body split intact — the split only consumes the
+// first "\n" (title) and the blank-line separator immediately after, never
+// touching newlines further into the body.
+func TestParsePRIntent_PreservesInternalNewlinesInBody(t *testing.T) {
+	body := "First paragraph of the summary.\n\nSecond paragraph with more detail.\n- a bullet\n- another bullet"
+	result := dispatch.Result{
+		PRIntentFound: true,
+		PRIntent:      "feat: add widget\n\n" + body,
+	}
+	title, gotBody, ok := parsePRIntent(result)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if title != "feat: add widget" {
+		t.Errorf("title: got %q, want %q", title, "feat: add widget")
+	}
+	if gotBody != body {
+		t.Errorf("body: got %q, want %q", gotBody, body)
+	}
+}
+
 // TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges asserts
 // the full read-only github "ready" hand-off (issue #1919): the Box's
 // outcome line carries the branch name (not a PR URL, since it never opened
@@ -64,11 +87,11 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges(t *testin
 }
 
 // TestSettle_GithubReadOnly_MissingPRIntentBlocksNotFails asserts a
-// status=ready Box that left no PR-intent block blocks the hand-off before
+// status=ready Box that left no PR-intent line blocks the hand-off before
 // any real host write — no bundle relay (a real force-push to origin), no
 // draft PR created, CI never watched — with the same blocked-not-failed
 // posture RelayBundle's own missing-bundle case has (never demoted to
-// agent-failed). Parsing the PR-intent block first, ahead of the relay,
+// agent-failed). Parsing the PR-intent line first, ahead of the relay,
 // matters here: relaying is a genuine side effect against the remote, and a
 // box that left no PR-intent has nothing worth relaying a branch for.
 func TestSettle_GithubReadOnly_MissingPRIntentBlocksNotFails(t *testing.T) {
@@ -83,7 +106,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentBlocksNotFails(t *testing.T) {
 		Success:      true,
 		OutcomeFound: true,
 		Outcome:      outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
-		// PRIntentFound left false: the box's log had no PR-intent block.
+		// PRIntentFound left false: the box's log had no PR-intent line.
 	}
 
 	c := baseConfig()
@@ -94,10 +117,10 @@ func TestSettle_GithubReadOnly_MissingPRIntentBlocksNotFails(t *testing.T) {
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 0 {
-		t.Errorf("RelayBundle must not be called with no PR-intent block, got %+v", fc.RelayBundleCalls)
+		t.Errorf("RelayBundle must not be called with no PR-intent line, got %+v", fc.RelayBundleCalls)
 	}
 	if len(fc.CreateDraftPRCalls) != 0 {
-		t.Errorf("CreateDraftPR must not be called with no PR-intent block, got %+v", fc.CreateDraftPRCalls)
+		t.Errorf("CreateDraftPR must not be called with no PR-intent line, got %+v", fc.CreateDraftPRCalls)
 	}
 	if fc.Merged != "" {
 		t.Errorf("Merge must not be called when no PR was ever opened; fc.Merged=%q", fc.Merged)

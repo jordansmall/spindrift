@@ -43,15 +43,18 @@ type Result struct {
 	// payload, is ignored rather than surfaced here.
 	CommentFound bool
 
-	// PRIntent is the body of the last complete SPINDRIFT_PR_INTENT_BEGIN …
-	// SPINDRIFT_PR_INTENT_END block in the box's log, populated when
-	// PRIntentFound is true (issue #1919) — the host-mediated write channel a
-	// read-only github Box hands settle its intended draft-PR title and body
-	// instead of running `gh pr create` itself.
+	// PRIntent is the decoded "title\n\nbody" payload of the box log's last
+	// nonce-verified SPINDRIFT_PR_INTENT line, populated when PRIntentFound
+	// is true (issue #1919, single-line nonce-guarded form since issue
+	// #1938) — the host-mediated write channel a read-only github Box hands
+	// settle its intended draft-PR title and body instead of running
+	// `gh pr create` itself.
 	PRIntent string
 
-	// PRIntentFound reports whether a complete SPINDRIFT_PR_INTENT block was
-	// present in the box's log.
+	// PRIntentFound reports whether a nonce-verified SPINDRIFT_PR_INTENT line
+	// was present in the box's log. A line carrying the token with a
+	// mismatched nonce, or an undecodable payload, is ignored rather than
+	// surfaced here.
 	PRIntentFound bool
 
 	// ParseErr is non-nil when the box's log contained an unparseable
