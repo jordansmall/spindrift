@@ -110,6 +110,7 @@
               ;
             skills = dogfoodSkills;
             settings.branches.mergeMode = dogfoodDefaults.defaults.mergeMode;
+            settings.repository.boxForgeAndIssueAccess = dogfoodDefaults.defaults.boxForgeAndIssueAccess;
             settings.promptSkillIteration.autoFormat = dogfoodDefaults.defaults.autoFormat;
             settings.promptSkillIteration.autoLint = dogfoodDefaults.defaults.autoLint;
             settings.models.filerModel = dogfoodDefaults.defaults.filerModel;
