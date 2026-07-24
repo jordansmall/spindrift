@@ -1405,6 +1405,57 @@ operator still publishes the team PR manually with the `git push origin
 
 ## Security
 
+### Secret exposure model
+
+The pieces below — two structural controls, the residual they don't close,
+and the strongest posture available today — compose into the
+operator-facing secret posture. Together they target a specific threat:
+**self-inflicted context contamination** — the
+Driver reading a secret into its own transcript, which then leaks out through
+a legitimate sink (a per-issue log, a PR body, an issue comment) because
+there is no output redaction. None of them claim to defend a compromised Box
+against an attacker exfiltrating data over the network — that is a different
+threat; see [Threat model](#threat-model) below for what the isolation
+boundary does and does not promise.
+
+1. **External-vault sourcing is the preferred, highly encouraged way to
+   supply secrets.** `<SECRET>_CMD` / `--<secret>-cmd` (see [Runtime
+   configuration](#runtime-configuration)) fetches a secret from an
+   operator-controlled command — `rbw`, `op`, `pass`, `vault`, or anything
+   that prints a value to stdout — at launch time, and holds it only in
+   Launcher memory; the fetched value itself never lands on the host disk.
+   The plaintext direct-value and `--<secret>-file` forms remain fully
+   supported for operators without a vault and are not deprecated. Once a
+   secret has a `_CMD` variant set, `harness.env` is expected to hold a
+   fetch *recipe* (a vault item reference) rather than a live credential.
+2. **The Box can't read its own credentials.** `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`
+   strips the Driver's own model-auth token from every subprocess it spawns,
+   and a `PreToolUse` hook denies any `Read`/`Bash` call targeting a known
+   credential path. Both are always-on Harness defaults, no operator
+   configuration — see [Self-inflicted secret reads are structurally
+   blocked](#self-inflicted-secret-reads-are-structurally-blocked).
+3. **`GH_TOKEN` is the accepted residual.** `GH_TOKEN` is vault-sourceable
+   like any other secret (point 1 above), but sourcing only controls how it
+   *reaches* the Box — once there, it stays a live environment variable for
+   the run's duration, because the Box is a first-class GitHub actor: it runs
+   `git push`, `gh pr create`, `gh issue view`/`comment`/`create`/`list`,
+   `gh label create`, and CI-log inspection during the fix pass, all
+   authenticated by that variable. None of the controls above remove it —
+   env-based auth is exactly why `git`/`gh` never need to *read* a credential
+   file, but the token itself is still visible to a `Bash(env)` call. **#380**
+   (two-actor separation) is the recommended companion: it doesn't remove the
+   token from the Box, but it caps the blast radius of a leaked one by
+   barring the Box's user from ever updating the base branch — see
+   [Two-actor separation](#two-actor-separation-opt-in-hard-mode).
+4. **The strongest available posture is zero GitHub token in the Box.**
+   `CODE_FORGE=local` + `ISSUE_TRACKER=local` (ADR 0033, ADR 0032) mean the
+   Box never receives a GitHub token at all: the repo and issue content
+   arrive as read-only mounts, commits leave as a bundle the host relays,
+   and every GitHub call happens Launcher-side. Available today for the
+   private, fully offline loop — see [Local issue
+   tracker](#local-issue-tracker-issue_trackerlocal) and [Local code
+   forge](#local-code-forge-code_forgelocal).
+
 ### GitHub token permissions
 
 The `agent-dispatch.yml` and `agent-recover.yml` workflows now authenticate via
