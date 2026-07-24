@@ -143,9 +143,34 @@ func LastInLog(path string) (Outcome, bool, error) {
 // does not exist. Returns ("", false, err) on I/O errors other than
 // file-not-found or oversized lines.
 func LastCommentInLog(path string) (string, bool, error) {
-	const beginMarker = "SPINDRIFT_COMMENT_BEGIN"
-	const endMarker = "SPINDRIFT_COMMENT_END"
+	return lastDelimitedBlockInLog(path, "SPINDRIFT_COMMENT_BEGIN", "SPINDRIFT_COMMENT_END")
+}
 
+// LastPRIntentInLog scans the file at path and returns the body of the last
+// complete SPINDRIFT_PR_INTENT_BEGIN … SPINDRIFT_PR_INTENT_END block — the
+// draft-PR title and body a read-only Box hands the launcher in place of its
+// own `gh pr create` (issue #1919) — using the same grammar, last-wins, and
+// oversized-line-skipping semantics as LastCommentInLog. By convention the
+// first line is the PR title and the remainder (after a blank line) is the
+// PR body, but this function returns the raw block verbatim; splitting title
+// from body is the caller's concern.
+//
+// Returns ("", false, nil) when no complete block is present or the file
+// does not exist. Returns ("", false, err) on I/O errors other than
+// file-not-found or oversized lines.
+func LastPRIntentInLog(path string) (string, bool, error) {
+	return lastDelimitedBlockInLog(path, "SPINDRIFT_PR_INTENT_BEGIN", "SPINDRIFT_PR_INTENT_END")
+}
+
+// lastDelimitedBlockInLog is LastCommentInLog and LastPRIntentInLog's shared
+// implementation: scans path for the last complete beginMarker…endMarker
+// block, joining the lines between the delimiters with "\n". An unterminated
+// beginMarker (no matching endMarker before EOF or before a later
+// beginMarker) is discarded rather than returned as a partial block, and a
+// line reading exactly endMarker inside an open block closes it immediately
+// — there is no escaping mechanism, matching both callers' documented
+// truncation behavior.
+func lastDelimitedBlockInLog(path, beginMarker, endMarker string) (string, bool, error) {
 	var last string
 	var found bool
 	var open bool

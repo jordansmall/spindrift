@@ -501,6 +501,114 @@ func TestLastCommentInLog_UnterminatedBlockDiscarded(t *testing.T) {
 	}
 }
 
+// --- LastPRIntentInLog tests ---
+
+func TestLastPRIntentInLog_Found(t *testing.T) {
+	path := writeLog(t,
+		"some output",
+		"SPINDRIFT_PR_INTENT_BEGIN",
+		"feat: add widget",
+		"",
+		"Adds a widget. Closes #42",
+		"SPINDRIFT_PR_INTENT_END",
+	)
+	body, found, err := outcome.LastPRIntentInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	want := "feat: add widget\n\nAdds a widget. Closes #42"
+	if body != want {
+		t.Errorf("body: got %q, want %q", body, want)
+	}
+}
+
+func TestLastPRIntentInLog_NotFound(t *testing.T) {
+	path := writeLog(t, "some output", "no pr-intent block here")
+	_, found, err := outcome.LastPRIntentInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false")
+	}
+}
+
+func TestLastPRIntentInLog_TakesLast(t *testing.T) {
+	path := writeLog(t,
+		"SPINDRIFT_PR_INTENT_BEGIN",
+		"stale title",
+		"stale body",
+		"SPINDRIFT_PR_INTENT_END",
+		"some more output",
+		"SPINDRIFT_PR_INTENT_BEGIN",
+		"final title",
+		"final body",
+		"SPINDRIFT_PR_INTENT_END",
+	)
+	body, found, err := outcome.LastPRIntentInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	want := "final title\nfinal body"
+	if body != want {
+		t.Errorf("body: got %q, want %q", body, want)
+	}
+}
+
+func TestLastPRIntentInLog_EndMarkerInsideBodyTruncates(t *testing.T) {
+	// A body that (against instructions) writes the literal end marker
+	// closes the block early, exactly as SPINDRIFT_COMMENT does — the
+	// grammar has no escaping mechanism, so the agent-facing prompt fragment
+	// is the only thing warning against it.
+	path := writeLog(t,
+		"SPINDRIFT_PR_INTENT_BEGIN",
+		"feat: add widget",
+		"SPINDRIFT_PR_INTENT_END",
+		"trailing text that would have been truncated body",
+		"SPINDRIFT_PR_INTENT_END",
+	)
+	body, found, err := outcome.LastPRIntentInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if body != "feat: add widget" {
+		t.Errorf("body: got %q, want %q", body, "feat: add widget")
+	}
+}
+
+func TestLastPRIntentInLog_UnterminatedBlockDiscarded(t *testing.T) {
+	path := writeLog(t,
+		"SPINDRIFT_PR_INTENT_BEGIN",
+		"never closed",
+	)
+	_, found, err := outcome.LastPRIntentInLog(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false for unterminated block")
+	}
+}
+
+func TestLastPRIntentInLog_FileNotFound(t *testing.T) {
+	_, found, err := outcome.LastPRIntentInLog("/nonexistent/path/test.log")
+	if err != nil {
+		t.Fatalf("unexpected error for missing file: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false for missing file")
+	}
+}
+
 func TestLastInLog_OversizedLine_TakesLast(t *testing.T) {
 	const fiveMiB = 5 * 1024 * 1024
 	path := writeBigLog(t,
