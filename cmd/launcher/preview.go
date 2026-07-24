@@ -118,6 +118,9 @@ func preview(issueNums []string) error {
 	}
 	it := newIssueTracker(c)
 	cf := newCodeForge(c, local.SanitizedParent{})
+	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
+		return err
+	}
 	pwd, err := os.Getwd()
 	if err != nil {
 		return err
