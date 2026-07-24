@@ -49,16 +49,39 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		s.postBlockedNoteComment(num, o.Note)
 		s.postUsageComment(num, d)
 	case "ready":
-		switch s.selfHeal(d, num, gen, o.Landing) {
+		pr := o.Landing
+		// A read-only PR-shaped Code Forge (github, issue #1919) never opens
+		// its own PR in-box, so o.Landing carries the branch name, not a PR
+		// URL — resolve the real one host-side before selfHeal can watch CI
+		// on it. Push-only forges under read-only (s.pr == nil) need no such
+		// step: landPushOnly's own RelayBundle call (ready.go) already
+		// covers them.
+		if s.readOnly && s.pr != nil {
+			var ok bool
+			pr, ok = s.hostMediateDraftPR(num, o.Landing, result)
+			if !ok {
+				s.postUsageComment(num, d)
+				return
+			}
+			// Upgrade the placeholder branch-name landing recorded above to
+			// the real PR URL just resolved — a no-op for every tracker but
+			// local's (only implementor of LandingRecorder), and local never
+			// reaches this branch (s.pr is nil for its push-only forge).
+			s.recordLanding(num, pr)
+		}
+		switch s.selfHeal(d, num, gen, pr) {
 		case landingMerged:
 			// verifyMerged reads PR state, which a push-only Code Forge
 			// does not have — landPushOnly's own cf.Merge success already
 			// confirms the push landed, so there is nothing left to verify.
+			// pr (not o.Landing) so a host-mediated landing verifies against
+			// the PR settle itself just created, not the Box's placeholder
+			// branch-name landing= value.
 			if s.pr != nil {
-				s.verifyMerged(num, o.Landing)
+				s.verifyMerged(num, pr)
 			}
 		case landingFailed:
-			fmt.Printf("    #%s  landing=%s  status=failed  !! CI or merge failed\n", num, o.Landing)
+			fmt.Printf("    #%s  landing=%s  status=failed  !! CI or merge failed\n", num, pr)
 		case landingAbandoned:
 			// Terminate already recorded its own comment and log line; a
 			// usage comment here would be noise on an issue it reclaimed.

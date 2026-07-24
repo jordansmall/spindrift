@@ -66,6 +66,14 @@ type Config struct {
 	// implementing (local) tracker's always has, regardless of what it
 	// implements.
 	ReadOnly bool
+
+	// BaseBranch is the target branch a host-mediated draft PR is opened
+	// against (issue #1919): under BOX_FORGE_AND_ISSUE_ACCESS=read-only, the
+	// Box never runs `gh pr create` itself, so settle's own
+	// hostMediateDraftPR call supplies the base the Box would otherwise have
+	// passed as --base. Unused outside that path (every read-write PR is
+	// opened in-box, already against the right base).
+	BaseBranch string
 }
 
 // Settler is the seam callers depend on so tests can inject a Fake instead of

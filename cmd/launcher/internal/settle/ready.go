@@ -379,7 +379,13 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 	// bundle in first, once, so the loop below's Merge(pr) attempts find the
 	// ref (ADR 0033). A relay failure (missing/malformed bundle) is returned
 	// directly: there is nothing to retry, unlike a merge conflict below.
-	if br, ok := cf.(forge.BundleRelay); ok {
+	// Only the push-only path (s.pr == nil, e.g. CODE_FORGE=local) relays
+	// here: pr is a ref/branch name in that case, the same value RelayBundle
+	// expects. A PR-shaped read-only forge (github, issue #1919) is already
+	// relayed by hostMediateDraftPR before its draft PR (and this pr URL)
+	// ever exists — relaying again here with pr (a URL, not a ref) would be
+	// both redundant and wrong.
+	if br, ok := cf.(forge.BundleRelay); ok && s.pr == nil {
 		if s.cfg.OutboxDir == nil {
 			return fmt.Errorf("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay — every CODE_FORGE=local construction site must supply an OutboxDir resolver")
 		}
