@@ -36,27 +36,6 @@ in
     touch $out
   '';
 
-  # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 must be baked into the entrypoint so
-  # Claude Code strips Anthropic/cloud-provider credentials from every
-  # subprocess it spawns (issue #1909, spec #1907) -- an always-on structural
-  # default, not a Consumer-tunable knob, so it's a fixed line in the
-  # entrypoint text (mirroring AGENTS_JSON_TEMPLATE) rather than a
-  # flakeOption schema entry. Exported, not a bare assignment: it must
-  # survive the entrypoint's exec of driver-exec and reach the Driver
-  # process's own environment, not just this script's local variables.
-  # Realizes the agent-files layer; Linux-gated like the other image checks.
-  subprocess-env-scrub-baked-into-image =
-    pkgs.runCommand "subprocess-env-scrub-baked-into-image" { }
-      ''
-        grep -qF 'export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1' \
-          ${nonRustHarness.agentFiles}/agent/entrypoint.sh \
-          || {
-            echo "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 not exported in baked entrypoint" >&2
-            exit 1
-          }
-        touch $out
-      '';
-
   # AGENTS_JSON_TEMPLATE baked into the entrypoint by nix (ADR 0007): each
   # subagent is composed independently by its own model knob (issue #392), so
   # the template carries whichever of scout/reviewer have a model configured,
