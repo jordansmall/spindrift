@@ -6,4 +6,4 @@
 
    A fix pass rewrites this same file — re-running the command above after
    a rebase is enough, the launcher force-relays whatever it finds there
-   at exit.
+   before the next merge attempt.

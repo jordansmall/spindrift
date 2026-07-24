@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/gitplumbing"
@@ -41,8 +42,12 @@ func NewReadOnlyCodeForge(repo string, labels forge.DispatchLabels, branchPrefix
 // broken hand-off blocks the seam instead of landing nothing (mirroring
 // local's own bundle-relay failure posture).
 func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
-	if ref == "" {
-		return fmt.Errorf("github: relay bundle: ref is empty")
+	// Defense in depth, matching local's own relayBundle: ref is
+	// launcher-controlled today (AgentBranch's own naming), but this method
+	// interpolates it directly into a refspec and a checkout argument, so
+	// guard it the same way regardless.
+	if ref == "" || strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("github: relay bundle: invalid ref %q", ref)
 	}
 	bundlePath := filepath.Join(outboxDir, seambundle.FileName)
 	if _, err := os.Stat(bundlePath); err != nil {
@@ -55,8 +60,8 @@ func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 	}
 	defer os.RemoveAll(dir)
 
-	if err := exec.Command("gh", "repo", "clone", c.repo, dir, "--", "--no-single-branch").Run(); err != nil {
-		return fmt.Errorf("github: relay bundle: gh repo clone: %w", err)
+	if out, err := exec.Command("gh", "repo", "clone", c.repo, dir, "--", "--no-single-branch").CombinedOutput(); err != nil {
+		return fmt.Errorf("github: relay bundle: gh repo clone: %w: %s", err, out)
 	}
 
 	gitIn := func(args ...string) *exec.Cmd {
@@ -76,11 +81,11 @@ func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 	// The forced refspec (matching local's own relayBundle) lets a retried
 	// fix-pass's rebuilt bundle overwrite the branch this clone may already
 	// know about from `gh repo clone`'s own initial fetch.
-	if err := gitIn("fetch", bundlePath, "+"+ref+":refs/heads/"+ref).Run(); err != nil {
-		return fmt.Errorf("github: relay bundle: git fetch bundle: %w", err)
+	if out, err := gitIn("fetch", bundlePath, "+"+ref+":refs/heads/"+ref).CombinedOutput(); err != nil {
+		return fmt.Errorf("github: relay bundle: git fetch bundle: %w: %s", err, out)
 	}
-	if err := gitIn("checkout", ref).Run(); err != nil {
-		return fmt.Errorf("github: relay bundle: git checkout %s: %w", ref, err)
+	if out, err := gitIn("checkout", ref).CombinedOutput(); err != nil {
+		return fmt.Errorf("github: relay bundle: git checkout %s: %w: %s", ref, err, out)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), rebaseForcePushTimeout)
