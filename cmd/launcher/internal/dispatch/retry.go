@@ -138,7 +138,7 @@ func (d *Dispatch) successResult(logPath string) Result {
 		if commentErr != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: comment scan: %v\n", d.number, commentErr)
 		}
-		prIntent, prIntentFound, prIntentErr := outcome.LastPRIntentInLog(logPath)
+		prIntent, prIntentFound, prIntentErr := outcome.LastPRIntentInLog(logPath, d.nonce)
 		if prIntentErr != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: pr-intent scan: %v\n", d.number, prIntentErr)
 		}

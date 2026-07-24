@@ -560,16 +560,20 @@ func TestLastInLog_NonceGate_GenuineLineNotShadowedByEchoedSpoof(t *testing.T) {
 
 // --- LastPRIntentInLog tests ---
 
+// encodePRIntent base64-encodes title and body the same way a read-only
+// Box's prompt fragment instructs it to: title, a blank line, then body.
+func encodePRIntent(t *testing.T, title, body string) string {
+	t.Helper()
+	return base64.StdEncoding.EncodeToString([]byte(title + "\n\n" + body))
+}
+
 func TestLastPRIntentInLog_Found(t *testing.T) {
+	payload := encodePRIntent(t, "feat: add widget", "Adds a widget. Closes #42")
 	path := writeLog(t,
 		"some output",
-		"SPINDRIFT_PR_INTENT_BEGIN",
-		"feat: add widget",
-		"",
-		"Adds a widget. Closes #42",
-		"SPINDRIFT_PR_INTENT_END",
+		"SPINDRIFT_PR_INTENT the-nonce "+payload,
 	)
-	body, found, err := outcome.LastPRIntentInLog(path)
+	body, found, err := outcome.LastPRIntentInLog(path, "the-nonce")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -582,9 +586,32 @@ func TestLastPRIntentInLog_Found(t *testing.T) {
 	}
 }
 
+// TestLastPRIntentInLog_PreservesShellAndMarkdownMetacharacters verifies a
+// body containing shell/markdown metacharacters ($(), backticks, quotes)
+// decodes back byte-for-byte: base64 is transparent to them, but since
+// CreateDraftPR passes title/body as argv (never through a shell), this
+// grammar must hand them through intact rather than escaping or stripping
+// anything.
+func TestLastPRIntentInLog_PreservesShellAndMarkdownMetacharacters(t *testing.T) {
+	body := "Runs `rm -rf /tmp/x`; also handles $(whoami) and \"quoted\" text."
+	payload := encodePRIntent(t, "feat: widget", body)
+	path := writeLog(t, "SPINDRIFT_PR_INTENT the-nonce "+payload)
+	got, found, err := outcome.LastPRIntentInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	want := "feat: widget\n\n" + body
+	if got != want {
+		t.Errorf("body: got %q, want %q", got, want)
+	}
+}
+
 func TestLastPRIntentInLog_NotFound(t *testing.T) {
-	path := writeLog(t, "some output", "no pr-intent block here")
-	_, found, err := outcome.LastPRIntentInLog(path)
+	path := writeLog(t, "some output", "no pr-intent line here")
+	_, found, err := outcome.LastPRIntentInLog(path, "the-nonce")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -594,70 +621,184 @@ func TestLastPRIntentInLog_NotFound(t *testing.T) {
 }
 
 func TestLastPRIntentInLog_TakesLast(t *testing.T) {
+	stale := encodePRIntent(t, "stale title", "stale body")
+	final := encodePRIntent(t, "final title", "final body")
 	path := writeLog(t,
-		"SPINDRIFT_PR_INTENT_BEGIN",
-		"stale title",
-		"stale body",
-		"SPINDRIFT_PR_INTENT_END",
+		"SPINDRIFT_PR_INTENT the-nonce "+stale,
 		"some more output",
-		"SPINDRIFT_PR_INTENT_BEGIN",
-		"final title",
-		"final body",
-		"SPINDRIFT_PR_INTENT_END",
+		"SPINDRIFT_PR_INTENT the-nonce "+final,
 	)
-	body, found, err := outcome.LastPRIntentInLog(path)
+	body, found, err := outcome.LastPRIntentInLog(path, "the-nonce")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !found {
 		t.Fatal("expected found=true")
 	}
-	want := "final title\nfinal body"
+	want := "final title\n\nfinal body"
 	if body != want {
 		t.Errorf("body: got %q, want %q", body, want)
 	}
 }
 
-func TestLastPRIntentInLog_EndMarkerInsideBodyTruncates(t *testing.T) {
-	// A body that (against instructions) writes the literal end marker
-	// closes the block early, exactly as SPINDRIFT_COMMENT does — the
-	// grammar has no escaping mechanism, so the agent-facing prompt fragment
-	// is the only thing warning against it.
+// TestLastPRIntentInLog_ValidLineNotShadowedByLaterRejectedMention verifies
+// that a genuine, verified PR-intent line is not suppressed by a later line
+// that merely carries the token without verifying — an untrusted
+// issue/comment author's echoed or reasoning-adjacent mention, or a
+// stale/wrong-nonce line from a different run — mirroring
+// LastCommentLineInLog's same guarantee (unlike LastInLog's unconditional
+// last-line-wins, which SPINDRIFT_OUTCOME isn't nonce-gated against yet).
+func TestLastPRIntentInLog_ValidLineNotShadowedByLaterRejectedMention(t *testing.T) {
+	genuine := encodePRIntent(t, "real title", "real body")
 	path := writeLog(t,
-		"SPINDRIFT_PR_INTENT_BEGIN",
-		"feat: add widget",
-		"SPINDRIFT_PR_INTENT_END",
-		"trailing text that would have been truncated body",
-		"SPINDRIFT_PR_INTENT_END",
+		"SPINDRIFT_PR_INTENT the-nonce "+genuine,
+		"SPINDRIFT_PR_INTENT wrong-nonce not-valid-base64!!!",
 	)
-	body, found, err := outcome.LastPRIntentInLog(path)
+	body, found, err := outcome.LastPRIntentInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true — the genuine line must not be shadowed")
+	}
+	want := "real title\n\nreal body"
+	if body != want {
+		t.Errorf("body: got %q, want %q", body, want)
+	}
+}
+
+// TestLastPRIntentInLog_ValidLineNotShadowedByEarlierRejectedMention
+// verifies the same non-shadowing guarantee in the opposite order: a
+// rejected line preceding the genuine one must not prevent it from being
+// found either — the scan doesn't short-circuit or otherwise treat an
+// earlier rejection as disqualifying a later, distinct verified line.
+func TestLastPRIntentInLog_ValidLineNotShadowedByEarlierRejectedMention(t *testing.T) {
+	genuine := encodePRIntent(t, "real title", "real body")
+	path := writeLog(t,
+		"SPINDRIFT_PR_INTENT wrong-nonce not-valid-base64!!!",
+		"SPINDRIFT_PR_INTENT the-nonce "+genuine,
+	)
+	body, found, err := outcome.LastPRIntentInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true — the genuine line must still be found")
+	}
+	want := "real title\n\nreal body"
+	if body != want {
+		t.Errorf("body: got %q, want %q", body, want)
+	}
+}
+
+// TestLastPRIntentInLog_NonceMismatchIgnoredAndWarned verifies that a
+// candidate line whose nonce doesn't match this run's own nonce — the shape
+// an untrusted issue/comment author's echoed text would take, since they
+// wrote it before the nonce was minted — is never used to open a PR, and
+// surfaces as an error the caller can warn on rather than silently vanishing.
+func TestLastPRIntentInLog_NonceMismatchIgnoredAndWarned(t *testing.T) {
+	payload := encodePRIntent(t, "spoofed title", "spoofed body")
+	path := writeLog(t, "SPINDRIFT_PR_INTENT wrong-nonce "+payload)
+	body, found, err := outcome.LastPRIntentInLog(path, "the-nonce")
+	if found {
+		t.Fatal("expected found=false for a nonce mismatch")
+	}
+	if body != "" {
+		t.Errorf("body: got %q, want empty", body)
+	}
+	if err == nil {
+		t.Fatal("expected a warnable error for a nonce mismatch, got nil")
+	}
+}
+
+// TestLastPRIntentInLog_EmptyExpectedNonceNeverMatches mirrors
+// LastCommentLineInLog's own invariant: an empty expectedNonce (the zero
+// value a caller might pass by mistake) must never verify a line, even one
+// that happens to carry no real nonce field at all.
+func TestLastPRIntentInLog_EmptyExpectedNonceNeverMatches(t *testing.T) {
+	payload := encodePRIntent(t, "title", "body")
+	path := writeLog(t, "SPINDRIFT_PR_INTENT "+payload)
+	_, found, err := outcome.LastPRIntentInLog(path, "")
+	if found {
+		t.Fatal("expected found=false for an empty expectedNonce")
+	}
+	if err == nil {
+		t.Fatal("expected a non-nil error rather than a silent no-PR-intent")
+	}
+}
+
+// TestLastPRIntentInLog_StrictDecodeRejectsMalformedPayload verifies the
+// pinned strict decoder rejects a malformed payload outright rather than
+// best-effort- or whitespace-stripped-decoding it.
+func TestLastPRIntentInLog_StrictDecodeRejectsMalformedPayload(t *testing.T) {
+	path := writeLog(t, "SPINDRIFT_PR_INTENT the-nonce not-valid-base64!!!")
+	body, found, err := outcome.LastPRIntentInLog(path, "the-nonce")
+	if found {
+		t.Fatal("expected found=false for a malformed payload")
+	}
+	if body != "" {
+		t.Errorf("body: got %q, want empty", body)
+	}
+	if err == nil {
+		t.Fatal("expected a decode error, got nil")
+	}
+}
+
+// TestLastPRIntentInLog_SurvivesStreamJSONCollapse verifies the line is
+// found inside a real Claude Code stream-json JSONL log shape, where a
+// multi-line block would collapse onto one JSON-escaped physical line and
+// never match an exact-line marker scan (issue #1921's dogfood failure,
+// the reason this signal moved to a single line at all).
+func TestLastPRIntentInLog_SurvivesStreamJSONCollapse(t *testing.T) {
+	payload := encodePRIntent(t, "feat: add widget", "Adds a widget. Closes #42")
+	path := writeLog(t,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"some reasoning\n"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"SPINDRIFT_PR_INTENT the-nonce `+payload+`\n"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=ready note=ok\n"}]}}`,
+	)
+	body, found, err := outcome.LastPRIntentInLog(path, "the-nonce")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !found {
 		t.Fatal("expected found=true")
 	}
-	if body != "feat: add widget" {
-		t.Errorf("body: got %q, want %q", body, "feat: add widget")
+	want := "feat: add widget\n\nAdds a widget. Closes #42"
+	if body != want {
+		t.Errorf("body: got %q, want %q", body, want)
 	}
 }
 
-func TestLastPRIntentInLog_UnterminatedBlockDiscarded(t *testing.T) {
+// TestLastPRIntentInLog_MarkerAfterNarrationInSameTextField verifies the
+// marker is still found when the Box's own preceding narration shares the
+// same assistant-message text field, separated only by a real newline —
+// which stream-json JSON-encodes as a literal backslash-n, landing the 'n'
+// of that escape directly against the token's first letter with no real
+// whitespace between them. This is the same physical-line-collapse class
+// issue #1921 is about, just for a token that isn't already at the very
+// start of its JSON text field (the placement TestLastPRIntentInLog_
+// SurvivesStreamJSONCollapse's fixture uses, which doesn't exercise this
+// boundary).
+func TestLastPRIntentInLog_MarkerAfterNarrationInSameTextField(t *testing.T) {
+	payload := encodePRIntent(t, "feat: add widget", "Adds a widget. Closes #42")
 	path := writeLog(t,
-		"SPINDRIFT_PR_INTENT_BEGIN",
-		"never closed",
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Wrapping up now.\nSPINDRIFT_PR_INTENT the-nonce `+payload+`\n"}]}}`,
 	)
-	_, found, err := outcome.LastPRIntentInLog(path)
+	body, found, err := outcome.LastPRIntentInLog(path, "the-nonce")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if found {
-		t.Fatal("expected found=false for unterminated block")
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	want := "feat: add widget\n\nAdds a widget. Closes #42"
+	if body != want {
+		t.Errorf("body: got %q, want %q", body, want)
 	}
 }
 
 func TestLastPRIntentInLog_FileNotFound(t *testing.T) {
-	_, found, err := outcome.LastPRIntentInLog("/nonexistent/path/test.log")
+	_, found, err := outcome.LastPRIntentInLog("/nonexistent/path/test.log", "the-nonce")
 	if err != nil {
 		t.Fatalf("unexpected error for missing file: %v", err)
 	}
