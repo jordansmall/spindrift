@@ -201,6 +201,21 @@ func lastDelimitedBlockInLog(path, beginMarker, endMarker string) (string, bool,
 	return last, found, nil
 }
 
+// LineHasNonce reports whether line carries expected as a standalone token
+// (issue #1937) — the shared check a caller uses to tell a genuine
+// control-signal line, produced by this run's own Box, from one an
+// untrusted issue/comment author echoed into the log verbatim: the author
+// writes their text before the per-run nonce is minted, so they cannot know
+// its value. Word-bounded via containsToken, so a longer token that merely
+// contains expected as a substring does not false-positive. An empty
+// expected never matches.
+func LineHasNonce(line, expected string) bool {
+	if expected == "" {
+		return false
+	}
+	return containsToken(line, expected)
+}
+
 // containsToken reports whether line contains token as a standalone word,
 // not merely as a substring of a longer identifier (e.g. "SPINDRIFT_OUTCOMES"
 // or "MY_SPINDRIFT_OUTCOME_THING" must not match).
