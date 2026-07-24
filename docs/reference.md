@@ -370,15 +370,58 @@ Driver has read secret-bearing files into its own context despite being told
 not to, and once a secret is in the transcript there is no output redaction
 — it's effectively leaked into per-issue logs, PR bodies, and issue comments.
 Issue #1909 closes this with two Harness-enforced, always-on defaults inside
-the Box — no operator configuration, no opt-out:
+the Box — no operator configuration, no opt-out. Issue #1927 replaces the
+first of the two after a production regression:
 
-- **Subprocess environment scrub.** `lib/image.nix` bakes
-  `export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` as a fixed line in the
-  entrypoint text (the same "baked, not a schema knob" treatment as
-  `AGENTS_JSON_TEMPLATE`), so Claude Code strips Anthropic and cloud-provider
-  credentials from every subprocess it spawns. A `Bash` tool call running
-  `env` or `printenv` can no longer dump `ANTHROPIC_API_KEY` /
-  `CLAUDE_CODE_OAUTH_TOKEN` this way.
+- **Env-credential scrub hook (issue #1927; supersedes the
+  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` approach below).** Issue #1909
+  originally baked `export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` into the
+  entrypoint so Claude Code's own subprocess isolation would strip
+  `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` from every subprocess it
+  spawns. Issue #1926 found that feature bundles two effects that make it
+  unusable inside the Box: it forces the Driver's permission mode to
+  `default` (every Bash call then "requires approval", and a headless Box
+  has no interactive approver to give it), and it wraps every Bash
+  subprocess in Claude Code's own nested bwrap sandbox — which cannot mount
+  `/proc` inside the Box's own outer bwrap sandbox. That second failure was
+  reproduced directly (not just inferred from the production postmortem):
+  invoking bubblewrap for a nested `--proc /proc` mount inside this
+  harness's own bwrap-sandboxed build environment fails with the identical
+  `bwrap: Can't mount proc on /newroot/proc: Operation not permitted`,
+  across every `--unshare-user`/`--disable-userns` combination tried — the
+  constraint is a kernel/capability boundary on nested mount-namespace
+  `/proc` mounts, not a bwrap flag this harness can tune away. #1926
+  reverted the baked export; #1927 replaces it with a third `PreToolUse`
+  hook, `agent/env-credential-scrub.sh`, registered for the `Bash` matcher
+  only (the threat is a spawned subprocess's environment, and `Read` never
+  spawns one). It rewrites every Bash call, via
+  `hookSpecificOutput.updatedInput` — a documented PreToolUse capability,
+  independent of `permissionDecision` in Claude Code's own hook-output
+  schema, that lets a hook replace a tool call's input before it runs — to
+  `unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN` ahead of the Driver's
+  original command, and asserts no `permissionDecision` of its own on that
+  path (the same silent, no-explicit-opinion posture `reject-background-bash.sh`
+  and `credential-deny.sh` use for a call they don't deny — three hooks
+  share the `Bash` matcher, and an explicit `allow` here could read as this
+  hook's opinion overriding a sibling's `deny` on the same call). The
+  rewrite is an actual removal from the subprocess's environment, not a
+  denylist of dump commands: `env`/`printenv`/`set`/`export -p`/a direct
+  `$VAR` expansion all come up empty as a structural consequence, with no
+  per-command list to maintain or route around. Two vectors the rewrite
+  alone can't close are denied outright instead: reading a *different*
+  process's `/proc/<pid>/environ` (most plausibly the Driver's own, which
+  legitimately still holds the credential for its own API auth — no
+  rewrite of the current call can scrub another process's memory), and
+  reading the *current* shell's own `/proc/<pid>/environ` via a pid form
+  other than `self`/`thread-self` (`$$`, `$BASHPID`, `$PPID`, a glob) —
+  confirmed empirically that `unset` clears what a subprocess forked
+  *after* it sees at `/proc/self/environ`, but not the still-alive
+  original shell's own environ region for its own lifetime, and the hook
+  can't resolve which pid a piece of static command text refers to, so
+  every `/proc/.../environ` reference is denied rather than parsed. Unlike
+  the reverted mechanism, this hook never touches the Driver's permission
+  mode or bash sandbox, so it structurally cannot reproduce either #1926
+  failure mode.
 - **Credential-read deny hook.** A second `PreToolUse` hook,
   `agent/credential-deny.sh`, is baked in and registered in the image's
   `~/.claude/settings.json` alongside `reject-background-bash.sh` (issue
@@ -398,9 +441,10 @@ the Box — no operator configuration, no opt-out:
   which bypasses the permission-rule system entirely, but hooks are their
   own enforcement layer and still fire under that flag.
 
-Neither control breaks legitimate agent work: `gh`, `git`, and the Driver
-authenticate via environment variables already forwarded into the Box, so
-they never need to *read* these files.
+None of the three controls break legitimate agent work: `gh`, `git`, and the
+Driver authenticate via environment variables already forwarded into the
+Box, so they never need to *read* these files or *dump* their own
+environment.
 
 ### Cold-run toolchain nudge
 
@@ -1428,11 +1472,14 @@ boundary does and does not promise.
    supported for operators without a vault and are not deprecated. Once a
    secret has a `_CMD` variant set, `harness.env` is expected to hold a
    fetch *recipe* (a vault item reference) rather than a live credential.
-2. **The Box can't read its own credentials.** `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`
-   strips the Driver's own model-auth token from every subprocess it spawns,
-   and a `PreToolUse` hook denies any `Read`/`Bash` call targeting a known
-   credential path. Both are always-on Harness defaults, no operator
-   configuration — see [Self-inflicted secret reads are structurally
+2. **The Box can't read its own credentials.** A `PreToolUse` hook
+   (`env-credential-scrub.sh`, issue #1927) rewrites every Bash call to
+   `unset` `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` before it runs,
+   so a spawned subprocess never inherits either credential, and a second
+   `PreToolUse` hook (`credential-deny.sh`) denies any `Read`/`Bash` call
+   targeting a known credential path. Both are always-on Harness defaults,
+   no operator configuration — see [Self-inflicted secret reads are
+   structurally
    blocked](#self-inflicted-secret-reads-are-structurally-blocked).
 3. **`GH_TOKEN` is the accepted residual.** `GH_TOKEN` is vault-sourceable
    like any other secret (point 1 above), but sourcing only controls how it

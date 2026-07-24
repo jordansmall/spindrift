@@ -45,14 +45,14 @@ rationale is in [`docs/reference.md`](docs/reference.md#threat-model).
   every secret — it fetches from an operator-controlled command
   at launch and holds the value only in Launcher memory, so `harness.env` is
   expected to hold fetch recipes rather than live credentials. Two always-on,
-  Harness-enforced defaults then close the loop inside the Box, not operator
-  configuration: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` is baked into the Box so
-  the Driver can't `env`-dump its own model-auth credentials via a subprocess,
-  and a `PreToolUse` hook denies any `Read`/`Bash` call targeting a known
-  credential path (`~/.claude/.credentials.json`, `**/.env`,
-  `~/.config/gh/hosts.yml`), enforced independently of
-  `--dangerously-skip-permissions`. See [Secret exposure
-  model](docs/reference.md#secret-exposure-model).
+  Harness-enforced `PreToolUse` hooks then close the loop inside the Box, not
+  operator configuration: one rewrites every Bash call to `unset`
+  `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` before it runs, so a
+  spawned subprocess never inherits either credential in the first place,
+  and the other denies any `Read`/`Bash` call targeting a known credential
+  path (`~/.claude/.credentials.json`, `**/.env`, `~/.config/gh/hosts.yml`)
+  — both enforced independently of `--dangerously-skip-permissions`. See
+  [Secret exposure model](docs/reference.md#secret-exposure-model).
 
 The secrets bullet above targets a different threat than the first two:
 **self-inflicted context contamination**, not adversarial exfiltration. The
