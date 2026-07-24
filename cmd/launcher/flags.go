@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -110,6 +111,33 @@ type secretKnob struct {
 	env      string
 	doc      string
 	fileFlag string // flag name for --<name>-file path variant (kebab-case, no dashes prefix)
+	cmdFlag  string // flag name for --<name>-cmd command variant (kebab-case, no dashes prefix)
+}
+
+// secretCmdRunner executes a secret-fetch command string (from a --<name>-cmd
+// flag or a <NAME>_CMD env var) through the OS shell and returns its raw
+// stdout. A package var so tests can substitute a fake instead of spawning a
+// real process (mirrors gitConfigLookup in inputdoc.go).
+var secretCmdRunner = func(cmd string) (string, error) {
+	out, err := exec.Command("sh", "-c", cmd).Output()
+	return string(out), err
+}
+
+// resolveSecretCmd runs a secret-fetch command via secretCmdRunner and
+// returns its trimmed stdout. A non-zero exit or empty output is reported
+// with a named, value-free error — the command's stdout/stderr, which may
+// carry a partial secret or vault diagnostics, never reaches the error
+// message or a log.
+func resolveSecretCmd(env, cmd string) (string, error) {
+	out, err := secretCmdRunner(cmd)
+	if err != nil {
+		return "", fmt.Errorf("%s: command failed", env)
+	}
+	trimmed := strings.TrimRight(out, "\r\n")
+	if trimmed == "" {
+		return "", fmt.Errorf("%s: command produced no output", env)
+	}
+	return trimmed, nil
 }
 
 // subcommandEntry is one row of the subcommand listing.
@@ -139,11 +167,22 @@ func parseFlags(args []string) ([]string, error) {
 	}
 
 	byFileFlag := make(map[string]*secretKnob, len(secretKnobs))
+	byCmdFlag := make(map[string]*secretKnob, len(secretKnobs))
 	for i := range secretKnobs {
 		if secretKnobs[i].fileFlag != "" {
 			byFileFlag["--"+secretKnobs[i].fileFlag] = &secretKnobs[i]
 		}
+		if secretKnobs[i].cmdFlag != "" {
+			byCmdFlag["--"+secretKnobs[i].cmdFlag] = &secretKnobs[i]
+		}
 	}
+
+	// filePaths/cmdStrings collect --<name>-file/-cmd flag arguments during
+	// the scan below without acting on them yet, so a conflicting pair can
+	// be rejected before either side effect (file read, command exec) runs,
+	// regardless of which flag appears first on the command line.
+	filePaths := make(map[string]string, len(secretKnobs))
+	cmdStrings := make(map[string]string, len(secretKnobs))
 
 	remaining := make([]string, 0, len(args))
 	i := 0
@@ -180,19 +219,58 @@ func parseFlags(args []string) ([]string, error) {
 			if i >= len(args) {
 				return nil, fmt.Errorf("flag %s requires a path", arg)
 			}
-			path := args[i]
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return nil, fmt.Errorf("%s: cannot read file %s: %w", arg, path, err)
+			filePaths[knob.env] = args[i]
+			i++
+			continue
+		}
+		if knob, ok := byCmdFlag[arg]; ok {
+			i++
+			if i >= len(args) {
+				return nil, fmt.Errorf("flag %s requires a command", arg)
 			}
-			if err := os.Setenv(knob.env, strings.TrimRight(string(data), "\r\n")); err != nil {
-				return nil, err
-			}
+			cmdStrings[knob.env] = args[i]
 			i++
 			continue
 		}
 		return nil, fmt.Errorf("unknown flag: %s", arg)
 	}
+
+	for i := range secretKnobs {
+		knob := &secretKnobs[i]
+		_, hasFileFlag := filePaths[knob.env]
+		_, hasCmdFlag := cmdStrings[knob.env]
+		if hasFileFlag && hasCmdFlag {
+			return nil, fmt.Errorf("--%s and --%s are mutually exclusive", knob.cmdFlag, knob.fileFlag)
+		}
+
+		switch {
+		case hasCmdFlag:
+			value, err := resolveSecretCmd(knob.env, cmdStrings[knob.env])
+			if err != nil {
+				return nil, err
+			}
+			if err := os.Setenv(knob.env, value); err != nil {
+				return nil, err
+			}
+		case os.Getenv(knob.env+"_CMD") != "":
+			value, err := resolveSecretCmd(knob.env, os.Getenv(knob.env+"_CMD"))
+			if err != nil {
+				return nil, err
+			}
+			if err := os.Setenv(knob.env, value); err != nil {
+				return nil, err
+			}
+		case hasFileFlag:
+			data, err := os.ReadFile(filePaths[knob.env])
+			if err != nil {
+				return nil, fmt.Errorf("--%s: cannot read file %s: %w", knob.fileFlag, filePaths[knob.env], err)
+			}
+			if err := os.Setenv(knob.env, strings.TrimRight(string(data), "\r\n")); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	return remaining, nil
 }
 
@@ -306,6 +384,14 @@ func printHelpFull(w io.Writer) {
 		for _, s := range secretKnobs {
 			if s.fileFlag != "" {
 				fmt.Fprintf(w, "  --%-30s  path  %s\n", s.fileFlag, s.doc)
+			}
+		}
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Secret command flags (fetch value from a command's stdout; sibling <NAME>_CMD")
+		fmt.Fprintln(w, "env var; highest precedence — preferred for external-vault sourcing):")
+		for _, s := range secretKnobs {
+			if s.cmdFlag != "" {
+				fmt.Fprintf(w, "  --%-30s  cmd   %s\n", s.cmdFlag, s.doc)
 			}
 		}
 	}
