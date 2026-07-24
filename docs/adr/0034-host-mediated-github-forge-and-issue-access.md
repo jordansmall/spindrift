@@ -61,12 +61,13 @@ not to use that reachability for writes:
   opens the draft PR host-side via `forge.DraftPRCreator`, a new optional
   capability discovered by type assertion the same way `PRForge` and
   `BundleRelay` are.
-- **Comment → comment block.** Instead of `gh issue comment`, the Box emits
-  a `SPINDRIFT_COMMENT` stdout block (ADR 0032's mechanism, unmodified); the
-  Launcher posts it via `forge.HostPostedCommenter` — trivially satisfied by
-  every tracker's existing `Comment` method, since posting host-side needs
-  no new client, only the discipline of calling it from the Launcher instead
-  of the Box.
+- **Comment → comment line.** Instead of `gh issue comment`, the Box emits a
+  `SPINDRIFT_COMMENT` stdout signal (ADR 0032's mechanism, later reshaped
+  single-line and nonce-guarded by ADR 0032's #1940 amendment); the Launcher
+  posts it via `forge.HostPostedCommenter` — trivially satisfied by every
+  tracker's existing `Comment` method, since posting host-side needs no new
+  client, only the discipline of calling it from the Launcher instead of the
+  Box.
 
 **The gate is capability, not backend name.** `checkReadOnlyCapabilityGate`
 type-asserts the selected forge against `BundleRelay` (and `DraftPRCreator`
