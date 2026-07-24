@@ -97,6 +97,12 @@ setup() {
   echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 }
 
+@test "denies a Read of a .env.example template (deliberate over-block, issue #1921)" {
+  run bash "$CREDENTIAL_DENY_HOOK_SCRIPT" <<<'{"tool_name":"Read","tool_input":{"file_path":"/work/.env.example"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
 @test "allows a Bash call over a file that merely ends in .env as part of a longer name" {
   run bash "$CREDENTIAL_DENY_HOOK_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"cat config.env"}}'
   [ "$status" -eq 0 ]

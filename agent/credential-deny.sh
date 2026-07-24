@@ -31,6 +31,17 @@ set -euo pipefail
 # suffix (.env.local, .env.production, ...) -- real-world dotenv tooling
 # splits secrets across those files the same way it does .env itself.
 #
+# Decision (issue #1921): this variant match also denies safe, committed
+# dotenv templates that share the naming convention (.env.example,
+# .env.sample, ...), which is a deliberate over-block, not an oversight.
+# Distinguishing "safe" suffixes from "secret" ones needs either a
+# hardcoded allowlist (guesses at real-world conventions, easy to miss one)
+# or dropping the variant match back to bare .env (reopens the #1907 gap
+# this match was added to close). Auth in this harness is environment-based,
+# so the Driver never strictly needs to read any dotenv file, safe or not --
+# the residual cost of over-blocking is an occasional unhelpful denial, not
+# a security gap. Kept as deny-all.
+#
 # Purely a text match against a single path/command argument: it doesn't
 # reconstruct shell state, so a path split across two Bash arguments (`cd
 # ~/.claude && cat .credentials.json`, or one built from a variable) isn't
