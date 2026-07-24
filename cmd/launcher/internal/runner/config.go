@@ -46,9 +46,13 @@ type Config struct {
 
 	// CodeForge is the CODE_FORGE knob value; AccumulationRepoDir is the host
 	// path to the bare Accumulation repo mounted read-only at /repo when it
-	// is "local" (ADR 0033, issue #1697).
-	CodeForge           string
-	AccumulationRepoDir string
+	// is "local" (ADR 0033, issue #1697). BoxForgeAndIssueAccess is the
+	// BOX_FORGE_AND_ISSUE_ACCESS knob value ("read-write" or "read-only"),
+	// which alongside CodeForge gates the writable /outbox mount (issue
+	// #1918).
+	CodeForge              string
+	AccumulationRepoDir    string
+	BoxForgeAndIssueAccess string
 
 	// IssueTracker and LocalIssuesDir gate the read-only /issues mount
 	// (ADR 0032): only ISSUE_TRACKER=local reads its issues from the Box.

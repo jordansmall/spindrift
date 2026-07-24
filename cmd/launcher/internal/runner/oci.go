@@ -32,9 +32,11 @@ type ociAdapter struct {
 	driverSessionCacheDir string
 	// codeForge is the CODE_FORGE knob value; accumulationRepoDir is the host
 	// path to the bare Accumulation repo bound read-only at /repo when it is
-	// "local" (ADR 0033, issue #1697).
-	codeForge           string
-	accumulationRepoDir string
+	// "local" (ADR 0033, issue #1697). boxForgeAndIssueAccess is the
+	// BOX_FORGE_AND_ISSUE_ACCESS knob value; see MountParams.
+	codeForge              string
+	accumulationRepoDir    string
+	boxForgeAndIssueAccess string
 	// issueTracker and localIssuesDir gate the read-only /issues mount
 	// (ADR 0032); see MountParams.
 	issueTracker   string
@@ -61,26 +63,27 @@ func runtimeCLI(runtime string) string {
 // dependency passed separately from cfg.
 func NewOCI(cfg Config, pwd string) Runner {
 	return &ociAdapter{
-		cli:                   runtimeCLI(cfg.Runtime),
-		image:                 cfg.Image,
-		imageArchive:          cfg.ImageArchive,
-		imageDrv:              cfg.ImageDrv,
-		imageTag:              cfg.ImageTag,
-		nixBuilderImage:       cfg.NixBuilderImage,
-		nixVolume:             cfg.NixVolume,
-		flakeImageAttr:        cfg.FlakeImageAttr,
-		pwd:                   pwd,
-		promptDir:             cfg.PromptDir,
-		skillsDir:             cfg.SkillsDir,
-		driverSkillsDir:       cfg.DriverSkillsDir,
-		driverSessionCacheDir: cfg.DriverSessionCacheDir,
-		codeForge:             cfg.CodeForge,
-		accumulationRepoDir:   cfg.AccumulationRepoDir,
-		issueTracker:          cfg.IssueTracker,
-		localIssuesDir:        cfg.LocalIssuesDir,
-		podmanNetwork:         cfg.PodmanNetwork,
-		pidsLimit:             cfg.PidsLimit,
-		memoryLimit:           cfg.MemoryLimit,
+		cli:                    runtimeCLI(cfg.Runtime),
+		image:                  cfg.Image,
+		imageArchive:           cfg.ImageArchive,
+		imageDrv:               cfg.ImageDrv,
+		imageTag:               cfg.ImageTag,
+		nixBuilderImage:        cfg.NixBuilderImage,
+		nixVolume:              cfg.NixVolume,
+		flakeImageAttr:         cfg.FlakeImageAttr,
+		pwd:                    pwd,
+		promptDir:              cfg.PromptDir,
+		skillsDir:              cfg.SkillsDir,
+		driverSkillsDir:        cfg.DriverSkillsDir,
+		driverSessionCacheDir:  cfg.DriverSessionCacheDir,
+		codeForge:              cfg.CodeForge,
+		accumulationRepoDir:    cfg.AccumulationRepoDir,
+		boxForgeAndIssueAccess: cfg.BoxForgeAndIssueAccess,
+		issueTracker:           cfg.IssueTracker,
+		localIssuesDir:         cfg.LocalIssuesDir,
+		podmanNetwork:          cfg.PodmanNetwork,
+		pidsLimit:              cfg.PidsLimit,
+		memoryLimit:            cfg.MemoryLimit,
 	}
 }
 
@@ -251,14 +254,15 @@ func (a *ociAdapter) ListRunning() ([]string, error) {
 // the bwrap adapter (buildMountSpecs); only the rendering below differs.
 func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
 	return buildMountSpecs(MountParams{
-		PromptDir:             a.promptDir,
-		SkillsDir:             a.skillsDir,
-		DriverSkillsDir:       a.driverSkillsDir,
-		DriverSessionCacheDir: a.driverSessionCacheDir,
-		CodeForge:             a.codeForge,
-		AccumulationRepoDir:   a.accumulationRepoDir,
-		IssueTracker:          a.issueTracker,
-		LocalIssuesDir:        a.localIssuesDir,
+		PromptDir:              a.promptDir,
+		SkillsDir:              a.skillsDir,
+		DriverSkillsDir:        a.driverSkillsDir,
+		DriverSessionCacheDir:  a.driverSessionCacheDir,
+		CodeForge:              a.codeForge,
+		AccumulationRepoDir:    a.accumulationRepoDir,
+		BoxForgeAndIssueAccess: a.boxForgeAndIssueAccess,
+		IssueTracker:           a.issueTracker,
+		LocalIssuesDir:         a.localIssuesDir,
 	}, box)
 }
 
