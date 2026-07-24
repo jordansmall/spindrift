@@ -203,6 +203,28 @@ setup() {
   ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
 }
 
+# issue #1918: the OPEN A PULL REQUEST push step's BOX_ACCESS_READ_WRITE/
+# BOX_ACCESS_READ_ONLY gates (agent/entrypoint.sh's phase_prompt_assembly
+# precompute block, derived from BOX_FORGE_AND_ISSUE_ACCESS). box_env_gen.bash
+# already exports BOX_FORGE_AND_ISSUE_ACCESS=read-write (the schema default),
+# so the first case needs no override.
+@test "OPEN A PULL REQUEST push step: read-write keeps git push unchanged" {
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-push-read-write"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'git push --force-with-lease -u origin' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'seam.bundle' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "OPEN A PULL REQUEST push step: read-only writes seam.bundle to the outbox, never git push" {
+  export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-push-read-only"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF '/outbox/seam.bundle' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'git push --force-with-lease -u origin' "$CLAUDE_PROMPT_FILE"
+}
+
 # A scout/reviewer-only template (no "filer" key) must not require
 # filer-prompt.md to exist -- the file read has to be gated on the template
 # actually carrying a filer entry, same as the FILE_ISSUES_STEP gate above.
