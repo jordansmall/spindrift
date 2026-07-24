@@ -630,3 +630,33 @@ func TestLastInLog_OversizedLine_TakesLast(t *testing.T) {
 		t.Errorf("Note: got %q, want %q", o.Note, "final")
 	}
 }
+
+// --- LineHasNonce tests ---
+
+func TestLineHasNonce_Match(t *testing.T) {
+	line := "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=abc123"
+	if !outcome.LineHasNonce(line, "abc123") {
+		t.Error("expected line to carry the nonce")
+	}
+}
+
+func TestLineHasNonce_Missing(t *testing.T) {
+	line := "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"
+	if outcome.LineHasNonce(line, "abc123") {
+		t.Error("expected line without any nonce mention to not match")
+	}
+}
+
+func TestLineHasNonce_Mismatched(t *testing.T) {
+	line := "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=deadbeef"
+	if outcome.LineHasNonce(line, "abc123") {
+		t.Error("expected line carrying a different nonce to not match")
+	}
+}
+
+func TestLineHasNonce_EmptyExpectedNeverMatches(t *testing.T) {
+	line := "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=abc123"
+	if outcome.LineHasNonce(line, "") {
+		t.Error("expected an empty nonce to never match")
+	}
+}
