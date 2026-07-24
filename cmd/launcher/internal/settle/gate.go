@@ -118,17 +118,23 @@ func (s *Settle) transitionState(num string, from, to forge.DispatchState) {
 	}
 }
 
-// postBlockedNoteComment posts note as a comment via the optional local
-// content plane (ADR 0032, issue #1692): a local Dispatch's Box has no
-// in-box tracker client, so its issue-prompt cannot post the blocked-note
-// comment github's Box posts via gh issue comment — settle posts it
-// host-side instead, mirroring recordLanding's "s.landing != nil" test for
-// a tracker that implements the optional LandingRecorder surface (only the
-// local adapter). A no-op for github/jira, whose Box already posted its own
-// blocked-note comment in-box, and for an empty note. Best-effort, matching
+// postBlockedNoteComment posts note as a comment when s.landing != nil
+// (local's LandingRecorder shape) or s.readOnly (Config.ReadOnly) is true —
+// a no-op otherwise, or when note is empty. Best-effort, matching
 // postUsageComment's log-but-don't-propagate contract.
+//
+// Both conditions mean the same thing: the Box's issue-prompt has no way to
+// post the blocked-note comment in-box, so settle posts it host-side
+// instead — via the optional local content plane (ADR 0032, issue #1692) or,
+// under BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1917), the equivalent
+// relay for a github/jira Box stripped of its write token. This Go-level
+// gate is tracker-shape-agnostic (readOnly fires for github and jira alike);
+// the entrypoint's prompt-fragment selection (lib/fragments.nix,
+// agent/entrypoint.sh) folds jira into the same ISSUE_TRACKER_GITHUB(_
+// READONLY) gate github uses, since jira shares github's in-box
+// reachability.
 func (s *Settle) postBlockedNoteComment(num, note string) {
-	if s.landing == nil || note == "" {
+	if (s.landing == nil && !s.readOnly) || note == "" {
 		return
 	}
 	if err := s.it.Comment(num, note); err != nil {

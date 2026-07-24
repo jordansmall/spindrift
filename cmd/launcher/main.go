@@ -787,6 +787,7 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge) settle.Conf
 			}
 			return lw.CodeForgeForIssue(num)
 		},
+		ReadOnly: c.boxForgeAndIssueAccess == "read-only",
 	}
 }
 
@@ -810,6 +811,9 @@ func localloopConfig(c config) localloop.Config {
 // ResearchSettle, or work's full merge-gate Settle.
 func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) settle.Settler {
 	if c.dispatchKind == dispatchKindResearch {
+		if c.boxForgeAndIssueAccess == "read-only" {
+			return settle.NewResearchSettleReadOnly(it)
+		}
 		return settle.NewResearchSettle(it)
 	}
 	return settle.New(settleConfig(c, lw, cf), it, cf)
