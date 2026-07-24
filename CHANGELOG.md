@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.6.2](https://github.com/jordansmall/spindrift/compare/v0.6.1...v0.6.2) (2026-07-24)
+
+
+### Features
+
+* **agent:** add credential-read-deny PreToolUse hook ([748e268](https://github.com/jordansmall/spindrift/commit/748e268e14b16d2a594c3b6909be32a6b6b88488))
+* **agent:** add env-credential-scrub PreToolUse hook ([b2594a6](https://github.com/jordansmall/spindrift/commit/b2594a623efa6cf3862a03e84e4d322a657875e2))
+* **github:** implement forge.BundleRelay ([cb59727](https://github.com/jordansmall/spindrift/commit/cb59727f3bb33681257272db231967953b94bddd))
+* **image:** bake subprocess env scrub default ([d238600](https://github.com/jordansmall/spindrift/commit/d238600a751922f8a4c5bca29b9a7e74226f288f))
+* **launcher:** gate read-only by forge/tracker capability ([edf7543](https://github.com/jordansmall/spindrift/commit/edf754387c0081bc0accfc8576302b1ffcea540f))
+* **launcher:** provision outbox for github read-only ([110856e](https://github.com/jordansmall/spindrift/commit/110856e7024a4a1fe1a7bf133d8fa50e8afa7e53))
+* **launcher:** source secrets from an external command ([084ca65](https://github.com/jordansmall/spindrift/commit/084ca65552f36648fa50e40d7d7b4e13d092a17c))
+* **launcher:** wire github BundleRelay by access mode ([328d7a3](https://github.com/jordansmall/spindrift/commit/328d7a380016f3e80e02cfaae1d9a1652f8b5893))
+* **nix:** derive --&lt;secret&gt;-cmd across completions and docs ([136f454](https://github.com/jordansmall/spindrift/commit/136f4545d84b85543e6a59b7bbf470791f391711))
+* **prompt:** github read-only writes seam.bundle, not push ([2043c5f](https://github.com/jordansmall/spindrift/commit/2043c5f425305d09135321da1808638b400798ca))
+* **prompts:** host-mediate github comments read-only ([6ed9079](https://github.com/jordansmall/spindrift/commit/6ed90790f49063b83fd7082f9b974b4e9135c164))
+* **schema:** add BOX_FORGE_AND_ISSUE_ACCESS axis ([2d8c252](https://github.com/jordansmall/spindrift/commit/2d8c25241e42adbbffcb6543b8372092c7346b86))
+* **schema:** forward BOX_FORGE_AND_ISSUE_ACCESS into the Box ([37d0228](https://github.com/jordansmall/spindrift/commit/37d022876dc9e81bf5ba4fb794b7823ed32235fb))
+* **settle:** gate comment relay by read-only mode ([b285fba](https://github.com/jordansmall/spindrift/commit/b285fba355546301de8bb3b6c57f709bafc24b8c))
+
+
+### Bug Fixes
+
+* **github:** tighten RelayBundle error handling and docs ([a62dad4](https://github.com/jordansmall/spindrift/commit/a62dad4608cff646f32fe3ae754b7fe556f79d99))
+* **image:** drop env-scrub that broke Box bash ([bbe858f](https://github.com/jordansmall/spindrift/commit/bbe858fcec802c6bc2793112cb73e9a0fed67197)), closes [#1926](https://github.com/jordansmall/spindrift/issues/1926) [#1927](https://github.com/jordansmall/spindrift/issues/1927)
+
+
+### Documentation
+
+* **security:** document env-credential-scrub hook ([83be59f](https://github.com/jordansmall/spindrift/commit/83be59f1c2e2dde7c97c302287b481d487bdd2f1))
+* **security:** document secret exposure model ([93298c4](https://github.com/jordansmall/spindrift/commit/93298c4deb0f8e7bb75dd77e36e83cc08380799b))
+* **security:** document self-inflicted secret read hardening ([8a89599](https://github.com/jordansmall/spindrift/commit/8a8959963acaa953c416c149b79c09c12b0dea0a))
+
+
+### Code Refactoring
+
+* **launcher:** fold secret-cmd resolution into one branch ([d0cbd04](https://github.com/jordansmall/spindrift/commit/d0cbd049cae5cd0a7a9e9a88fdf02866a9508594))
+
 ## [0.6.1](https://github.com/jordansmall/spindrift/compare/v0.6.0...v0.6.1) (2026-07-24)
 
 
