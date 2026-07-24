@@ -38,6 +38,14 @@ isolation; the full rationale is in
   triage role. The trust boundary is the label, not the issue or comment author —
   once labeled, the body and **every comment from any GitHub user** feed the agent
   as prompt input. Treat every label-applier as a trusted operator.
+- **The Box is hardened against self-inflicted secret reads.** Two always-on,
+  Harness-enforced defaults, not operator configuration: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`
+  is baked into the Box so the Driver can't `env`-dump its own model-auth
+  credentials via a subprocess, and a `PreToolUse` hook denies any `Read`/`Bash`
+  call targeting a known credential path (`~/.claude/.credentials.json`,
+  `**/.env`, `~/.config/gh/hosts.yml`), enforced independently of
+  `--dangerously-skip-permissions`. See [self-inflicted secret reads are
+  structurally blocked](docs/reference.md#self-inflicted-secret-reads-are-structurally-blocked).
 
 Deploying safely rests on a few operator-side prerequisites the harness cannot
 enforce for you — `spindrift doctor` preflights connectivity, token validity, and
