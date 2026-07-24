@@ -12,6 +12,7 @@ set_box_env() {
   export AUTO_FORMAT=""
   export AUTO_LINT=""
   export BASE_BRANCH="main"
+  export BOX_FORGE_AND_ISSUE_ACCESS="read-write"
   export BRANCH_PREFIX="agent/issue-"
   export CLAUDE_CODE_OAUTH_TOKEN="fake-oauth"
   export CODE_FORGE="github"

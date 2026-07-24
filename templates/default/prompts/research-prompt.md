@@ -35,7 +35,7 @@ Render exactly one of three verdicts:
 
 # POST THE VERDICT
 
-${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_LOCAL_STEP}
+${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_STEP}${RESEARCH_VERDICT_LOCAL_STEP}
 Structure the verdict in this order:
 
 1. **Verdict** — `recommend` / `reject` / `unclear`, plus a one-line rationale.

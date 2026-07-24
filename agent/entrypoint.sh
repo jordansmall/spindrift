@@ -510,6 +510,25 @@ phase_prompt_assembly() {
     ISSUE_TRACKER_GITHUB=1
   fi
 
+  # The issue-blocked-comment/research-verdict write-step gates (issue #1917):
+  # a read-only Box (BOX_FORGE_AND_ISSUE_ACCESS=read-only) holds no write
+  # token, so a github/jira Dispatch's blocked-note and verdict comment need
+  # the same host-mediated relay form local's write step always renders --
+  # distinct from ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL above, which stay
+  # unaffected by read-only mode (a read-only token still permits
+  # gh issue view for the read step those gate).
+  local ISSUE_TRACKER_GITHUB_READWRITE=""
+  local ISSUE_TRACKER_GITHUB_READONLY=""
+  if [ -n "$ISSUE_TRACKER_GITHUB" ]; then
+    if [ "${BOX_FORGE_AND_ISSUE_ACCESS:-read-write}" = "read-only" ]; then
+      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+      ISSUE_TRACKER_GITHUB_READONLY=1
+    else
+      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+      ISSUE_TRACKER_GITHUB_READWRITE=1
+    fi
+  fi
+
   # One loop over the Conditional fragment registry (lib/fragments.nix, issue
   # #622), rendered into _FRAGMENT_ROWS by lib/mkHarness.nix's
   # fragmentRegistryPreamble: each row's gate variable (a knob env var for

@@ -576,4 +576,42 @@ in
         done
         touch $out
       '';
+
+  # The read-write write-step fragments (issue #1917) must keep
+  # `gh issue comment` unchanged -- byte-for-byte the same in-box write these
+  # two steps always rendered before BOX_FORGE_AND_ISSUE_ACCESS existed. Same
+  # static, eval-only grep shape as issue-read-github-fragments-* above.
+  github-readwrite-comment-fragments-keep-gh-issue-comment-unchanged =
+    pkgs.runCommand "github-readwrite-comment-fragments-keep-gh-issue-comment-unchanged" { }
+      ''
+        for f in issue-blocked-comment-github.md research-verdict-github.md; do
+          grep -q 'gh issue comment' ${../../templates/default/prompts/fragments}/"$f"
+        done
+        touch $out
+      '';
+
+  # The read-only counterpart (issue #1917): a read-only Box holds no write
+  # token, so its blocked-note/verdict-comment fragments must never invoke
+  # `gh issue comment` -- the exact footgun a read-only token can't satisfy --
+  # and must carry the host-mediated relay instead: the blocked-note fragment
+  # points at the SPINDRIFT_OUTCOME note= field (mirroring local's own
+  # blocked-note relay, issue-blocked-comment-local.md), and the
+  # research-verdict fragment emits a SPINDRIFT_COMMENT_BEGIN/END block
+  # (mirroring research-verdict-local.md). Same static, eval-only grep shape
+  # as issue-read-local-fragments-never-invoke-gh-issue-view above.
+  github-readonly-comment-fragments-never-invoke-gh-issue-comment =
+    pkgs.runCommand "github-readonly-comment-fragments-never-invoke-gh-issue-comment" { }
+      ''
+        for f in issue-blocked-comment-github-readonly.md research-verdict-github-readonly.md; do
+          n=$(grep -c 'gh issue comment' ${../../templates/default/prompts/fragments}/"$f" || true)
+          [ "$n" -eq 0 ] || {
+            echo "$f: expected no 'gh issue comment', found $n occurrence(s)" >&2
+            exit 1
+          }
+        done
+        grep -q 'note=' ${../../templates/default/prompts/fragments/issue-blocked-comment-github-readonly.md}
+        grep -q 'SPINDRIFT_COMMENT_BEGIN' ${../../templates/default/prompts/fragments/research-verdict-github-readonly.md}
+        grep -q 'SPINDRIFT_COMMENT_END' ${../../templates/default/prompts/fragments/research-verdict-github-readonly.md}
+        touch $out
+      '';
 }

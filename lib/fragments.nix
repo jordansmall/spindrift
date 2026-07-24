@@ -155,12 +155,29 @@
   # gh issue comment itself -- the research verdict travels as a
   # SPINDRIFT_COMMENT block on stdout instead, and the work blocked-note
   # rides the outcome line's own note= field; settle posts both host-side.
-  # Reuses ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL (declared once above) --
-  # no new gate, just two more render sites sharing the same computation.
+  # Reuses ISSUE_TRACKER_LOCAL (declared once above) for the local case.
+  #
+  # The github (and jira) case splits further on BOX_FORGE_AND_ISSUE_ACCESS
+  # (issue #1917): ISSUE_TRACKER_GITHUB_READWRITE keeps the unconditional
+  # in-box `gh issue comment` these two steps always rendered before this
+  # split existed; ISSUE_TRACKER_GITHUB_READONLY is new -- a read-only Box
+  # holds no write token, so it gets the same host-mediated relay form local
+  # always has (settle's ResearchSettle.readOnly / Settle.readOnly gates,
+  # generalized off the mode directly, not a LandingRecorder-shaped type
+  # assertion). Distinct gates from ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL
+  # on purpose: the other github/local fragment pairs above (issue-read,
+  # scout-issue-read, research-issue-read, review-issue-read) are unaffected
+  # by read-only mode -- a read-only token still permits `gh issue view` --
+  # so their gate must stay exactly ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL.
   {
-    gate = "ISSUE_TRACKER_GITHUB";
+    gate = "ISSUE_TRACKER_GITHUB_READWRITE";
     fragment = "research-verdict-github.md";
     var = "RESEARCH_VERDICT_GITHUB_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_GITHUB_READONLY";
+    fragment = "research-verdict-github-readonly.md";
+    var = "RESEARCH_VERDICT_GITHUB_READONLY_STEP";
   }
   {
     gate = "ISSUE_TRACKER_LOCAL";
@@ -168,9 +185,14 @@
     var = "RESEARCH_VERDICT_LOCAL_STEP";
   }
   {
-    gate = "ISSUE_TRACKER_GITHUB";
+    gate = "ISSUE_TRACKER_GITHUB_READWRITE";
     fragment = "issue-blocked-comment-github.md";
     var = "ISSUE_BLOCKED_COMMENT_GITHUB_STEP";
+  }
+  {
+    gate = "ISSUE_TRACKER_GITHUB_READONLY";
+    fragment = "issue-blocked-comment-github-readonly.md";
+    var = "ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP";
   }
   {
     gate = "ISSUE_TRACKER_LOCAL";

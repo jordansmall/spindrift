@@ -164,6 +164,45 @@ setup() {
   grep -qF 'the launcher posts the SPINDRIFT_OUTCOME' "$CLAUDE_PROMPT_FILE"
 }
 
+# issue #1917: BOX_FORGE_AND_ISSUE_ACCESS=read-only strips the Box's write
+# token, so a github tracker's write-step gate (ISSUE_TRACKER_GITHUB_READONLY,
+# distinct from the ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL gates the
+# issue-read tests above exercise) must render the same host-mediated relay
+# form local always gets, never the in-box gh issue comment invocation.
+@test "research verdict step: github tracker under read-only relays via SPINDRIFT_COMMENT, never gh issue comment" {
+  export DISPATCH_KIND="research"
+  export BOX_FORGE_AND_ISSUE_ACCESS="read-only"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github-readonly"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'SPINDRIFT_COMMENT_END' "$CLAUDE_PROMPT_FILE"
+  # Not the bare substring: research-prompt.md's unconditional OUTCOME
+  # section names `gh issue comment` (with no issue number) to explain
+  # github's URL source for contrast, same reason the local variant's test
+  # above pins the invocation shape rather than the bare phrase.
+  ! grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "issue blocked-comment step: github tracker under read-only never runs gh issue comment" {
+  export BOX_FORGE_AND_ISSUE_ACCESS="read-only"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-github-readonly"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -qF 'gh issue comment' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'the launcher posts it as the issue comment' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "research verdict step: github tracker under read-write is unaffected by the new gate" {
+  export DISPATCH_KIND="research"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github-readwrite-explicit"
+  export BOX_FORGE_AND_ISSUE_ACCESS="read-write"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+}
+
 # A scout/reviewer-only template (no "filer" key) must not require
 # filer-prompt.md to exist -- the file read has to be gated on the template
 # actually carrying a filer entry, same as the FILE_ISSUES_STEP gate above.

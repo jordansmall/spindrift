@@ -372,7 +372,13 @@
       "read-only"
     ];
     flakeOption = true;
-    boxEnv = false;
+    # Forwarded into the Box (issue #1917): the github issue-blocked-comment
+    # and research-verdict prompt fragments (lib/fragments.nix) branch on
+    # this value directly, alongside ISSUE_TRACKER, to pick the in-box `gh
+    # issue comment` form (read-write) or the host-mediated SPINDRIFT_COMMENT
+    # relay form (read-only) -- the same pattern ISSUE_TRACKER's own boxEnv
+    # forwarding uses for its PR-body ticket-reference gate.
+    boxEnv = true;
   };
   # ── Operator-tunable knobs (flakeOption = true; also tune via harness.env) ─
   maxFixAttempts = {
