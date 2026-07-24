@@ -1,11 +1,11 @@
 This is a local issue: you have no tracker client to post a comment with.
-Print the verdict as a single delimited block on stdout instead — the
-launcher posts it to the issue file, host-side, once you exit:
+Print the verdict as a single line on stdout instead — the launcher finds
+it by this run's nonce, decodes it, and posts it to the issue file,
+host-side, once you exit:
 
-SPINDRIFT_COMMENT_BEGIN
-<verdict comment body, structured per below>
-SPINDRIFT_COMMENT_END
+SPINDRIFT_COMMENT ${RUN_NONCE} <base64-encoded verdict comment body,
+structured per below>
 
-Print exactly ONE such block, before the SPINDRIFT_OUTCOME line below.
-Never write a line reading exactly `SPINDRIFT_COMMENT_END` inside the body
-itself — it would close the block early and truncate your verdict.
+Base64-encode the entire verdict body (e.g. `base64 -w0`) into one unbroken
+token with no embedded newlines or spaces. Print exactly ONE such line,
+before the SPINDRIFT_OUTCOME line below.

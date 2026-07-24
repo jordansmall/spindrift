@@ -121,9 +121,10 @@ setup() {
 
 # issue #1692/ADR 0032: the local content-plane write step. A local
 # Dispatch's Box has no in-box tracker client, so the research verdict
-# travels as a SPINDRIFT_COMMENT block on stdout instead of a direct
-# gh issue comment, and the work blocked-note step is a no-op in-box
-# (settle posts the outcome note= host-side instead).
+# travels as a single nonce-guarded SPINDRIFT_COMMENT line on stdout
+# (issue #1940) instead of a direct gh issue comment, and the work
+# blocked-note step is a no-op in-box (settle posts the outcome note=
+# host-side instead).
 @test "research verdict step: github tracker keeps gh issue comment unchanged" {
   export DISPATCH_KIND="research"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github"
@@ -133,14 +134,16 @@ setup() {
   ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "research verdict step: local tracker emits a SPINDRIFT_COMMENT block, never gh issue comment" {
+@test "research verdict step: local tracker emits a nonce-guarded SPINDRIFT_COMMENT line, never gh issue comment" {
   export DISPATCH_KIND="research"
   export ISSUE_TRACKER=local
+  export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-local"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
-  grep -qF 'SPINDRIFT_COMMENT_END' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'SPINDRIFT_COMMENT deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_COMMENT_END' "$CLAUDE_PROMPT_FILE"
   # Not the bare substring: the unconditional OUTCOME section still
   # explains the github-side `gh issue comment` URL source for contrast.
   # It's the invocation shape (issue number immediately after) that must
@@ -169,14 +172,16 @@ setup() {
 # distinct from the ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL gates the
 # issue-read tests above exercise) must render the same host-mediated relay
 # form local always gets, never the in-box gh issue comment invocation.
-@test "research verdict step: github tracker under read-only relays via SPINDRIFT_COMMENT, never gh issue comment" {
+@test "research verdict step: github tracker under read-only relays via a nonce-guarded SPINDRIFT_COMMENT line, never gh issue comment" {
   export DISPATCH_KIND="research"
   export BOX_FORGE_AND_ISSUE_ACCESS="read-only"
+  export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github-readonly"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
-  grep -qF 'SPINDRIFT_COMMENT_END' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'SPINDRIFT_COMMENT deadbeefcafe1234' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_COMMENT_BEGIN' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'SPINDRIFT_COMMENT_END' "$CLAUDE_PROMPT_FILE"
   # Not the bare substring: research-prompt.md's unconditional OUTCOME
   # section names `gh issue comment` (with no issue number) to explain
   # github's URL source for contrast, same reason the local variant's test
