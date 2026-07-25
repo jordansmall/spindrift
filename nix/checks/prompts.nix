@@ -272,6 +272,19 @@ in
         touch $out
       '';
 
+  # Issue #1990: the CHECK section must not regrow the redundant manual
+  # output-routing advice the bash-output interceptor (#1988) now handles,
+  # and must keep the explicit no-cat-a-whole-log rule plus the
+  # scoped-check-target steering. Same CHECK-section scoping as the
+  # never-background/vanished-marker/git-add checks above.
+  mkharness-prompt-check-no-cat-log-and-scoped-target =
+    pkgs.runCommand "mkharness-prompt-check-no-cat-log-and-scoped-target" { }
+      ''
+        grep -qi 'never `cat`' ${checkSectionSlices}/issue-check.txt
+        grep -qi 'scoped check target' ${checkSectionSlices}/issue-check.txt
+        touch $out
+      '';
+
   mkharness-prompt-fix-outcome-no-drift =
     pkgs.runCommand "mkharness-prompt-fix-outcome-no-drift" { }
       ''
