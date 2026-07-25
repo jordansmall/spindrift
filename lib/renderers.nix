@@ -185,7 +185,13 @@ rec {
     + "# (rbw, op, pass, vault, ...) is the preferred, highly encouraged way to\n"
     + "# supply secrets — see each entry's comment below and docs/reference.md's\n"
     + "# Runtime configuration section. harness.env then holds fetch recipes, not\n"
-    + "# live credentials.\n\n"
+    + "# live credentials.\n"
+    + "#\n"
+    + "# One vault under a uniform naming scheme? SECRET_CMD (or --secret-cmd) sets a\n"
+    + "# single templated fetch command for every secret below that has no <NAME>_CMD\n"
+    + "# of its own — {name} substitutes the secret's kebab-case env name, e.g.\n"
+    + "# SECRET_CMD=\"rbw get spindrift-{name}\" reproduces every per-secret example\n"
+    + "# below in one line. A per-secret <NAME>_CMD still wins over this fallback.\n\n"
     + concatStrings (mapAttrsToList renderEntry secretSchema);
 
   # cmd/launcher/internal/driver/drivernames_gen.go content. driverEntries is
@@ -344,6 +350,7 @@ rec {
         "--force"
         "--help"
         "--version"
+        "--secret-cmd"
       ];
       knobFlags = map (e: "--" + toKebab e.env) nonSecret;
       aliasFlags = map (e: "--" + e.alias) (builtins.filter (e: e ? alias) nonSecret);
@@ -474,6 +481,10 @@ rec {
           flag = "version";
           doc = "show version and exit";
         }
+        {
+          flag = "secret-cmd";
+          doc = "templated fetch command for any secret with none of its own set; {name} substitutes the secret's kebab-case env name (sibling SECRET_CMD env var; lowest precedence)";
+        }
       ];
       subcommandCompletions = builtins.concatStringsSep "\n" (
         map (s: "complete -c spindrift -n '__fish_use_subcommand' -f -a '${s}'") subcommands
@@ -560,6 +571,7 @@ rec {
         "    '--force:alias for --yes'\n"
         "    '--help:show usage'\n"
         "    '--version:show version'\n"
+        "    '--secret-cmd:templated secret-fetch command; {name} substitutes the kebab-case env name (lowest precedence)'\n"
       ];
       allFlagSpecs = concatStrings (
         map knobSpec nonSecret
@@ -748,7 +760,23 @@ rec {
         flag or
         .B <NAME>_CMD
         environment variable \(em the preferred way to supply secrets, since
-        it keeps plaintext credentials off disk.
+        it keeps plaintext credentials off disk. A single
+        .B \-\-secret\-cmd
+        flag or
+        .B SECRET_CMD
+        environment variable sets a templated fetch command tried as a
+        lowest\-precedence fallback for any secret above with none of its
+        own forms set;
+        .I {name}
+        substitutes that secret's kebab\-case env name (e.g.
+        .B GH_TOKEN
+        becomes
+        .BR gh\-token ),
+        so
+        .B SECRET_CMD=\(dqrbw get spindrift\-{name}\(dq
+        covers every secret whose vault item follows that one uniform
+        naming scheme; a per\-secret form still wins over it, and it is
+        tried only for a secret the run actually needs.
         ${concatStrings (map secretBlock secretEntries)}.SH FILES
         .TP
         .I harness.env
