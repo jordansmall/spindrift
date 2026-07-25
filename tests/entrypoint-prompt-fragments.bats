@@ -102,11 +102,13 @@ setup() {
 # the one CLAUDE_PROMPT_FILE captures directly; the other three prompts share
 # the same gates and are covered at the fragment-content level by
 # nix/checks/prompts.nix.
-@test "issue-read step: github tracker keeps gh issue view unchanged" {
+@test "issue-read step: github tracker reads the issue with bounded comments" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-github"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh issue view 7 --comments' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'gh issue view 7 --json body,comments --jq' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'comments[-10:]' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'gh issue view 7 --comments`' "$CLAUDE_PROMPT_FILE"
   ! grep -qF '/issues/7.md' "$CLAUDE_PROMPT_FILE"
 }
 
