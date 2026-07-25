@@ -106,3 +106,24 @@ func TestBuildBoxEnvSetsRunNonce(t *testing.T) {
 		t.Errorf("RUN_NONCE: got %q, want %q", env["RUN_NONCE"], "the-nonce")
 	}
 }
+
+// TestBuildBoxEnvSetsWriteEnabledSignal verifies buildBoxEnv resolves the
+// write-enabled-vs-not decision once, host-side, and forwards it as a single
+// explicit positive signal (BOX_WRITE_ENABLED, issue #1951): present under
+// read-write, absent under read-only, so the Box never has to re-derive it
+// from a defaultable BOX_FORGE_AND_ISSUE_ACCESS string.
+func TestBuildBoxEnvSetsWriteEnabledSignal(t *testing.T) {
+	if _, ok := buildBoxEnv(Config{BoxForgeAndIssueAccess: "read-write"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; !ok {
+		t.Error("BOX_WRITE_ENABLED should be set when BoxForgeAndIssueAccess=read-write")
+	}
+	if _, ok := buildBoxEnv(Config{BoxForgeAndIssueAccess: "read-only"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; ok {
+		t.Error("BOX_WRITE_ENABLED should be absent when BoxForgeAndIssueAccess=read-only")
+	}
+	// The fail-closed property this signal exists for: an empty/malformed
+	// Config.BoxForgeAndIssueAccess (unreachable in production once
+	// validate() rejects it, but the property must hold in this function
+	// itself, not depend on an upstream caller) renders no-write too.
+	if _, ok := buildBoxEnv(Config{}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; ok {
+		t.Error("BOX_WRITE_ENABLED should be absent when BoxForgeAndIssueAccess is empty/malformed")
+	}
+}
