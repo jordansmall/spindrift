@@ -285,6 +285,93 @@ setup() {
   ! grep -qF 'gh pr create --draft --base' "$CLAUDE_PROMPT_FILE"
 }
 
+# issue #1933: the IF BLOCKED section's push step (step 1) has the same
+# BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY gate need as the OPEN A PULL
+# REQUEST push step above -- a read-only Box holds no push-capable token
+# whether it reaches the happy path or the failure path, so "Push what you
+# have" must not render unconditionally.
+@test "IF BLOCKED push step: read-write keeps push-what-you-have unchanged" {
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-push-read-write"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'Push what you have (or note if even that is impossible)' "$CLAUDE_PROMPT_FILE"
+  local if_blocked_section
+  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  ! grep -qF 'seam.bundle' <<<"$if_blocked_section"
+}
+
+@test "IF BLOCKED push step: read-only writes seam.bundle to the outbox, never pushes directly" {
+  export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-push-read-only"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  local if_blocked_section
+  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  grep -qF '/outbox/seam.bundle' <<<"$if_blocked_section"
+  ! grep -qF 'Push what you have (or note if even that is impossible)' <<<"$if_blocked_section"
+}
+
+# issue #1933: the IF BLOCKED section's PR check/create step (step 2) has the
+# same BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY gate need as the OPEN A
+# PULL REQUEST create step above -- a read-only Box holds no PR-create-
+# capable token in the failure path any more than in the happy path.
+@test "IF BLOCKED PR step: read-write keeps gh pr view/create unchanged" {
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-pr-read-write"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local if_blocked_section
+  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  grep -qF 'gh pr view --json url' <<<"$if_blocked_section"
+  ! grep -qF 'SPINDRIFT_PR_INTENT' <<<"$if_blocked_section"
+}
+
+@test "IF BLOCKED PR step: read-only emits a nonce-guarded SPINDRIFT_PR_INTENT line, never gh pr view or gh pr create" {
+  export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  export RUN_NONCE="deadbeefcafe1234"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-pr-read-only"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local if_blocked_section
+  if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  grep -qF 'SPINDRIFT_PR_INTENT deadbeefcafe1234' <<<"$if_blocked_section"
+  ! grep -qF 'gh pr view --json url' <<<"$if_blocked_section"
+
+  # Not the bare substring: the read-only fragment itself explains "do NOT
+  # `gh pr create`" (naming the forbidden command, same pattern the OPEN A
+  # PULL REQUEST create step's own read-only test above uses) -- pin the
+  # concrete invocation form instead, which only the read-write fragment
+  # ever renders.
+  ! grep -qF 'gh pr create --draft' <<<"$if_blocked_section"
+}
+
+# issue #1933: the IF BLOCKED section's own final SPINDRIFT_OUTCOME line
+# carries the same landing=<pr-url> placeholder as the ready-path OUTCOME
+# section did before #1919 gated it -- a read-only Box never opens a PR
+# in-box on the blocked path either, so it never learns a URL to report and
+# must print the branch name instead, same gate as OUTCOME's own landing=
+# step above.
+@test "IF BLOCKED outcome line: read-write keeps the pr-url placeholder unchanged" {
+  export RUN_NONCE="deadbeefcafe1234"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-outcome-read-write"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'landing=<pr-url> status=blocked' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "IF BLOCKED outcome line: read-only reports the branch, never a pr-url placeholder" {
+  export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  export RUN_NONCE="deadbeefcafe1234"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-outcome-read-only"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'landing=agent/issue-7 status=blocked' "$CLAUDE_PROMPT_FILE"
+
+  local if_blocked_section
+  if_blocked_section="$(awk '/^# IF BLOCKED/,0' "$CLAUDE_PROMPT_FILE")"
+  ! grep -qF 'landing=<pr-url>' <<<"$if_blocked_section"
+}
+
 # issue #1919: the OUTCOME section's landing= value under read-only carries
 # the branch name, not a PR URL -- the Box never opens the PR itself, so it
 # never learns a URL to report. ISSUE_NUMBER=7/BRANCH_PREFIX=agent/issue- from

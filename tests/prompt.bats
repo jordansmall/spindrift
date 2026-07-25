@@ -324,10 +324,16 @@ setup() {
 @test "IF BLOCKED never reverts the PR to draft -- it is always already draft" {
   # issue #1653: the Driver never flips a PR to ready (only the launcher
   # does, at green -- issue #1651), so a blocked run has nothing to revert.
+  # issue #1933: the closing SPINDRIFT_OUTCOME line now renders from a
+  # read-write/read-only fragment pair (${IF_BLOCKED_OUTCOME_LANDING_
+  # READ_WRITE_STEP}/READ_ONLY_STEP) instead of living inline, so the raw
+  # section text alone no longer carries it -- fold both fragments in.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local section
   section="$(sed -n '/^# IF BLOCKED$/,$p' "$prompt")"
+  section+="$(cat "$prompts/fragments/if-blocked-outcome-landing-git.md" \
+    "$prompts/fragments/if-blocked-outcome-landing-outbox.md")"
   [ -n "$section" ]
   grep -q 'SPINDRIFT_OUTCOME.*status=blocked' <<<"$section"
   ! grep -q -- '--undo' <<<"$section"
