@@ -293,6 +293,48 @@ in
         touch $out
       '';
 
+  # The Bash command-output interceptor (issue #1988) must be baked in as a
+  # pair: bash-output-tee.sh (PreToolUse, Bash matcher) tees every Bash
+  # call's output to a per-command log file; bash-output-summary.sh
+  # (PostToolUse, Bash matcher) replaces the tool result with a bounded tail
+  # once that log crosses the inline bound. Realizes the agent-files layer;
+  # Linux-gated like the other image checks.
+  bash-output-tee-hook-baked-into-image =
+    pkgs.runCommand "bash-output-tee-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        hook=${nonRustHarness.agentFiles}/home/agent/.claude/hooks/bash-output-tee.sh
+        [ -x "$hook" ] || {
+          echo "bash-output-tee.sh missing or not executable at $hook" >&2
+          exit 1
+        }
+        settings=${nonRustHarness.agentFiles}/home/agent/.claude/settings.json
+        jq -e \
+          'any(.hooks.PreToolUse[]; .matcher == "Bash" and (.hooks[0].command | endswith("bash-output-tee.sh")))' \
+          "$settings" >/dev/null || {
+          echo "settings.json does not register a Bash-matched PreToolUse hook pointing at bash-output-tee.sh" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
+  bash-output-summary-hook-baked-into-image =
+    pkgs.runCommand "bash-output-summary-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        hook=${nonRustHarness.agentFiles}/home/agent/.claude/hooks/bash-output-summary.sh
+        [ -x "$hook" ] || {
+          echo "bash-output-summary.sh missing or not executable at $hook" >&2
+          exit 1
+        }
+        settings=${nonRustHarness.agentFiles}/home/agent/.claude/settings.json
+        jq -e \
+          'any(.hooks.PostToolUse[]; .matcher == "Bash" and (.hooks[0].command | endswith("bash-output-summary.sh")))' \
+          "$settings" >/dev/null || {
+          echo "settings.json does not register a Bash-matched PostToolUse hook pointing at bash-output-summary.sh" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # The nix.conf and store DB must be present in the image so
   # `nix flake check` reuses the baked closure instead of re-substituting.
   # Realizes the default image; Linux-gated like the other image checks.

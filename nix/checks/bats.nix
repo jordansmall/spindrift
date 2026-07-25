@@ -30,6 +30,8 @@ in
           ${../../agent/reject-background-bash.sh} \
           ${../../agent/credential-deny.sh} \
           ${../../agent/env-credential-scrub.sh} \
+          ${../../agent/bash-output-tee.sh} \
+          ${../../agent/bash-output-summary.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/fakes/claude} \
@@ -83,6 +85,11 @@ in
         # /home/agent/.claude/hooks/env-credential-scrub.sh (issue #1927);
         # same reasoning as CREDENTIAL_DENY_HOOK_SCRIPT above.
         ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT = ../../agent/env-credential-scrub.sh;
+        # The PreToolUse/PostToolUse hook pair baked into the image at
+        # /home/agent/.claude/hooks/bash-output-{tee,summary}.sh (issue
+        # #1988); same reasoning as ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT above.
+        BASH_OUTPUT_TEE_SCRIPT = ../../agent/bash-output-tee.sh;
+        BASH_OUTPUT_SUMMARY_SCRIPT = ../../agent/bash-output-summary.sh;
         DOGFOOD_SH = ../../dogfood.sh;
         PROMPTS_DIR = ../../templates/default/prompts;
         # The baked default prompt dir the `run` command mounts, and a

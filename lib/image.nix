@@ -192,6 +192,19 @@ let
   # agent/env-credential-scrub.sh's header). Only a Bash matcher entry, not
   # Read, since the threat is a spawned subprocess's environment and Read
   # never spawns one.
+  #
+  # Registers the fourth PreToolUse hook and the first PostToolUse hook
+  # (issue #1988): bash-output-tee.sh rewrites every Bash call, via the same
+  # updatedInput mechanism as env-credential-scrub.sh, to tee its combined
+  # stdout+stderr to a per-command log file while the real exit code still
+  # propagates; bash-output-summary.sh (PostToolUse, Bash matcher) then
+  # replaces the tool result with exit code + log path + a bounded,
+  # error-oriented tail once that log file crosses the inline bound, via
+  # hookSpecificOutput.updatedToolOutput. Together they subsume the earlier
+  # "run-check wrapper"/"truncating post-hook" ideas into one uniform
+  # interceptor: full output always lands on disk, only a bounded tail ever
+  # enters the model's context, uniformly for every Bash call -- not just
+  # the overflow case BASH_MAX_OUTPUT_LENGTH (issue #1987) already covers.
   boxSettings = builtins.toJSON {
     hooks = {
       PreToolUse = [
@@ -231,6 +244,26 @@ let
             }
           ];
         }
+        {
+          matcher = "Bash";
+          hooks = [
+            {
+              type = "command";
+              command = "/home/agent/.claude/hooks/bash-output-tee.sh";
+            }
+          ];
+        }
+      ];
+      PostToolUse = [
+        {
+          matcher = "Bash";
+          hooks = [
+            {
+              type = "command";
+              command = "/home/agent/.claude/hooks/bash-output-summary.sh";
+            }
+          ];
+        }
       ];
     };
   };
@@ -255,6 +288,10 @@ let
     chmod +x $out/home/agent/.claude/hooks/credential-deny.sh
     cp ${../agent/env-credential-scrub.sh} $out/home/agent/.claude/hooks/env-credential-scrub.sh
     chmod +x $out/home/agent/.claude/hooks/env-credential-scrub.sh
+    cp ${../agent/bash-output-tee.sh} $out/home/agent/.claude/hooks/bash-output-tee.sh
+    chmod +x $out/home/agent/.claude/hooks/bash-output-tee.sh
+    cp ${../agent/bash-output-summary.sh} $out/home/agent/.claude/hooks/bash-output-summary.sh
+    chmod +x $out/home/agent/.claude/hooks/bash-output-summary.sh
     cp ${pkgs.writeText "settings.json" boxSettings} $out/home/agent/.claude/settings.json
     cp ${entrypoint}/bin/entrypoint $out/agent/entrypoint.sh
     chmod +x $out/agent/entrypoint.sh
