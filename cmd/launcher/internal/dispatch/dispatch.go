@@ -123,5 +123,17 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 		env["CI_FAILURE_SUMMARY"] = ciFailureSummary
 	}
 	env["RUN_NONCE"] = nonce
+	// The write-enabled-vs-not decision, resolved once here and forwarded as
+	// a single explicit positive signal (issue #1951): present only when
+	// cfg.BoxForgeAndIssueAccess is exactly "read-write", absent under
+	// read-only or any other/malformed value, so an unset, typo'd, or
+	// forwarding-glitched value inside the Box can never fall open into the
+	// write-capable prompt path the way branching on
+	// BOX_FORGE_AND_ISSUE_ACCESS with a `:-read-write` fallback did. A
+	// `!= "read-only"` test would put the fallback right back here, just
+	// moved host-side.
+	if cfg.BoxForgeAndIssueAccess == "read-write" {
+		env["BOX_WRITE_ENABLED"] = "1"
+	}
 	return env
 }
