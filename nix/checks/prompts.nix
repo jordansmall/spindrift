@@ -590,6 +590,27 @@ in
         touch $out
       '';
 
+  # Issue #1990: unbounded `--comments` pulls a meta-issue's entire comment
+  # history into the agent's context on every turn. Each of the four github
+  # variants must cap intake to the last 10 comments (`comments[-10:]`)
+  # instead of the bare `--comments` flag.
+  issue-read-github-fragments-cap-comment-intake =
+    pkgs.runCommand "issue-read-github-fragments-cap-comment-intake" { }
+      ''
+        for f in issue-read-github.md research-issue-read-github.md \
+          scout-issue-read-github.md review-issue-read-github.md; do
+          grep -q 'comments\[-10:\]' ${../../templates/default/prompts/fragments}/"$f" || {
+            echo "$f: expected a bounded comments[-10:] read" >&2
+            exit 1
+          }
+          ! grep -qE -- '--comments\b' ${../../templates/default/prompts/fragments}/"$f" || {
+            echo "$f: still uses the unbounded --comments flag" >&2
+            exit 1
+          }
+        done
+        touch $out
+      '';
+
   # The read-write write-step fragments (issue #1917) must keep
   # `gh issue comment` unchanged -- byte-for-byte the same in-box write these
   # two steps always rendered before BOX_FORGE_AND_ISSUE_ACCESS existed. Same
