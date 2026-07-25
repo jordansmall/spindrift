@@ -99,11 +99,11 @@ neither depends on the other:
 | | two-actor separation (ADR 0016) | read-only Box (this ADR) |
 | --- | --- | --- |
 | what changes | a second GitHub user + a repository ruleset | the Box's own token scope |
-| where the guarantee lives | GitHub's ruleset config (out-of-band, operator-configured) | spindrift's startup capability gate (in-code, self-checking) |
+| where the guarantee lives | GitHub's ruleset config (out-of-band, operator-configured) | spindrift's startup capability gate and token gate (in-code, self-checking) |
 | Box can open a PR? | yes — the ruleset only blocks the *base branch* | no — the token has no `Pull requests` scope |
 | Box can comment? | yes, unaffected | no — the Launcher posts every comment |
-| cost | a second machine account + a second secret | more host-side work per issue; requires the selected forge/tracker to implement the three capabilities above |
-| enforcement point | GitHub, at ref-update time | spindrift, at token-mint time — there is nothing for the Box to bypass because it never receives the capability |
+| cost | a second machine account + a second secret | more host-side work per issue; requires the selected forge/tracker to implement the three capabilities above, plus a second, reduced-scope `BOX_GH_TOKEN` |
+| enforcement point | GitHub, at ref-update time | spindrift, at startup — the capability gate refuses to run without the host-mediation seams, and the token gate (issue #1950) refuses to start unless the Box's own token is distinct from the Launcher's and, where introspectable, carries no write scope |
 
 Read-only is not two-actor separation with extra steps — a Box under
 read-only can still be paired with `BOX_GH_TOKEN` and a ruleset for
@@ -209,3 +209,47 @@ for any reason — renders the no-write path. `BOX_FORGE_AND_ISSUE_ACCESS`
 itself is still forwarded into the Box (the launcher's own
 `newCodeForge`/`checkReadOnlyCapabilityGate` still read it directly), but the
 Box's prompt fragments no longer branch on it.
+
+## Amendment (issue #1950): a startup token gate, sibling to the capability gate
+
+The capability gate this ADR introduced (`checkReadOnlyCapabilityGate`)
+checks the *shape* of the selected forge/tracker — does it implement
+`BundleRelay`/`DraftPRCreator`/`HostPostedCommenter` — never the *token* the
+Box is actually handed. Nothing stopped an operator from setting
+`BOX_FORGE_AND_ISSUE_ACCESS=read-only` while the Box still received the
+Launcher's own full-access `GH_TOKEN`: every write channel would be
+host-mediated in the happy path, but the Box's own credential could still
+`git push`/`gh pr create` directly if anything ever called it outside those
+mediated paths. "The Box's `GH_TOKEN` collapses to Contents R + Issues R +
+Metadata R" (above) described the intended provisioning, not an enforced one.
+
+`checkReadOnlyTokenGate` closes that gap: under `read-only`, startup now
+aborts with a named error unless `BOX_GH_TOKEN` is set **and** differs
+byte-for-byte from the Launcher's `GH_TOKEN`. Where the Box token can be
+introspected — a classic/OAuth PAT via the `X-OAuth-Scopes` response header,
+a GitHub App installation token via the repo endpoint's `permissions.push`
+field — it is rejected outright if it carries write access. A fine-grained
+PAT exposes neither signal reliably (GitHub has no endpoint that reports its
+own restricted grant), so it is accepted with a loud, printed warning rather
+than a silent pass; the residual there rests on the operator's own
+provisioning, same as the capability gate has always assumed for `github`'s
+`Pull requests`/`Workflows` scopes. `read-write` remains an untouched no-op:
+neither `BOX_GH_TOKEN` nor the introspection call is ever consulted outside
+`read-only`.
+
+Requiring a distinct Box token also closes a quieter leak: `boxGHTokenResolver`
+already short-circuits to `BOX_GH_TOKEN` ahead of `GH_TOKEN` whenever it's
+set, so once the gate makes a distinct `BOX_GH_TOKEN` mandatory under
+`read-only`, `GH_TOKEN_REFRESH_FILE`'s rotation loop only ever rewrites the
+Launcher's own credential — the value it re-mints never reaches the Box.
+Before this gate, an operator who left `BOX_GH_TOKEN` unset under
+`read-only` (no distinct token provisioned at all) would have the resolver
+fall through to `GH_TOKEN` instead, handing the Box the Launcher's own
+full-access, freshly-rotated token on every dispatch — the exact silent
+collapse to full access this gate now refuses to start under.
+
+`spindrift doctor` reports this gate's outcome alongside the existing
+forge/label checks — a no-op line under `read-write`, and under `read-only`
+either the same success/warning the gate prints at dispatch time or its
+fail-closed error, so a misconfigured deployment fails `doctor` the same way
+it would fail a live dispatch at bootstrap.
