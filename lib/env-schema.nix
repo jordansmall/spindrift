@@ -372,13 +372,16 @@
       "read-only"
     ];
     flakeOption = true;
-    # Forwarded into the Box: the github issue-blocked-comment and
-    # research-verdict prompt fragments (issue #1917) branch on this value
-    # directly, alongside ISSUE_TRACKER, to pick the in-box `gh issue
-    # comment` form (read-write) or the host-mediated SPINDRIFT_COMMENT relay
-    # form (read-only); the github push prompt fragment (issue #1918) does
-    # the same to pick between writing seam.bundle to the outbox and running
-    # git push directly. Still read directly by the launcher too (main.go's
+    # Forwarded into the Box, but the Box's prompt fragments no longer branch
+    # on this raw value (issue #1951): dispatch.buildBoxEnv resolves the
+    # write-enabled-vs-not decision once, host-side, from this value and
+    # forwards a single explicit positive signal, BOX_WRITE_ENABLED, only
+    # when writes are permitted. The github issue-blocked-comment and
+    # research-verdict prompt fragments (issue #1917), and the github push
+    # prompt fragment (issue #1918), gate on BOX_WRITE_ENABLED's presence
+    # instead, so an unset, typo'd, or forwarding-glitched value can never
+    # fall open into the write-capable path. This knob is still read
+    # directly by the launcher too (main.go's
     # newCodeForge/checkReadOnlyCapabilityGate), so no boxEnvOnly here --
     # mirrors ISSUE_TRACKER's own boxEnv forwarding for its PR-body
     # ticket-reference gate.

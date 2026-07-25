@@ -512,21 +512,29 @@ phase_prompt_assembly() {
   fi
 
   # The issue-blocked-comment/research-verdict write-step gates (issue #1917):
-  # a read-only Box (BOX_FORGE_AND_ISSUE_ACCESS=read-only) holds no write
+  # a read-only Box (BOX_WRITE_ENABLED absent, issue #1951) holds no write
   # token, so a github/jira Dispatch's blocked-note and verdict comment need
   # the same host-mediated relay form local's write step always renders --
   # distinct from ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL above, which stay
   # unaffected by read-only mode (a read-only token still permits
   # gh issue view for the read step those gate).
+  #
+  # BOX_WRITE_ENABLED is the single explicit write-enable signal the
+  # launcher resolves once, host-side, from BOX_FORGE_AND_ISSUE_ACCESS
+  # (dispatch.buildBoxEnv, issue #1951) and forwards into the Box only when
+  # writes are permitted. Its *presence*, not a string comparison against a
+  # defaultable BOX_FORGE_AND_ISSUE_ACCESS, is the gate below -- an unset,
+  # typo'd, or forwarding-glitched value renders the no-write path, never
+  # the write-capable one.
   local ISSUE_TRACKER_GITHUB_READWRITE=""
   local ISSUE_TRACKER_GITHUB_READONLY=""
   if [ -n "$ISSUE_TRACKER_GITHUB" ]; then
-    if [ "${BOX_FORGE_AND_ISSUE_ACCESS:-read-write}" = "read-only" ]; then
-      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-      ISSUE_TRACKER_GITHUB_READONLY=1
-    else
+    if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
       # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
       ISSUE_TRACKER_GITHUB_READWRITE=1
+    else
+      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+      ISSUE_TRACKER_GITHUB_READONLY=1
     fi
   fi
 
@@ -536,16 +544,16 @@ phase_prompt_assembly() {
   # outbox instead of running git push directly. Computed independently of
   # ISSUE_TRACKER_GITHUB above (not nested under it, unlike the write-step
   # gates just above) -- CODE_FORGE and ISSUE_TRACKER are independent axes,
-  # so a github push step must reflect BOX_FORGE_AND_ISSUE_ACCESS regardless
-  # of which tracker is selected.
+  # so a github push step must reflect BOX_WRITE_ENABLED regardless of which
+  # tracker is selected.
   local BOX_ACCESS_READ_WRITE=""
   local BOX_ACCESS_READ_ONLY=""
-  if [ "${BOX_FORGE_AND_ISSUE_ACCESS:-read-write}" = "read-only" ]; then
-    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
-    BOX_ACCESS_READ_ONLY=1
-  else
+  if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
     # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
     BOX_ACCESS_READ_WRITE=1
+  else
+    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+    BOX_ACCESS_READ_ONLY=1
   fi
 
   # One loop over the Conditional fragment registry (lib/fragments.nix, issue
