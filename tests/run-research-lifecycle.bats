@@ -34,7 +34,11 @@ setup() {
   run "$SPINDRIFT_CMD" research
   [ "$status" -eq 0 ]
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-research-reject --remove-label agent-research-in-progress' "$GH_LOG"
-  ! grep -q -- 'agent-research-failed' "$GH_LOG"
+  # The initial claim (agent-research -> agent-research-in-progress) now
+  # unconditionally strips a stale agent-research-failed (#1985), so it
+  # legitimately appears as a --remove-label; only an --add-label would
+  # mean this run actually escalated to failed.
+  ! grep -q -- '--add-label agent-research-failed' "$GH_LOG"
 }
 
 @test "an unclear verdict swaps agent-research-in-progress -> agent-research-unclear" {

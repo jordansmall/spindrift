@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -560,6 +561,141 @@ esac
 	calls, _ := filepath.Glob(filepath.Join(dir, "call-*.txt"))
 	if len(calls) != 2 {
 		t.Errorf("gh call count = %d, want 2 (view + exactly one edit)", len(calls))
+	}
+}
+
+// TestExecClient_TransitionState_ClaimStripsStaleFailedLabel verifies a claim
+// (Dispatchable -> InProgress) removes a stale agent-failed label left behind
+// by a prior run, not just the from-state label — matching the dispatch
+// workflow's claim-remove-labels set (#1985).
+func TestExecClient_TransitionState_ClaimStripsStaleFailedLabel(t *testing.T) {
+	dir := prependFakeGH(t, "")
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	if err := c.TransitionState("10", forge.Dispatchable, forge.InProgress); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatalf("call-00.txt (gh issue edit) not written: %v", err)
+	}
+	argv := string(raw)
+	if !strings.Contains(argv, "--remove-label\nagent-failed") {
+		t.Errorf("argv = %q, want --remove-label agent-failed", argv)
+	}
+}
+
+// TestExecClient_TransitionState_ClaimStripsStaleCompleteLabel verifies a
+// claim (Dispatchable -> InProgress) also removes a stale agent-complete
+// label — the re-research/re-trigger-after-complete case (#1985).
+func TestExecClient_TransitionState_ClaimStripsStaleCompleteLabel(t *testing.T) {
+	dir := prependFakeGH(t, "")
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	if err := c.TransitionState("10", forge.Dispatchable, forge.InProgress); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatalf("call-00.txt (gh issue edit) not written: %v", err)
+	}
+	argv := string(raw)
+	if !strings.Contains(argv, "--remove-label\nagent-complete") {
+		t.Errorf("argv = %q, want --remove-label agent-complete", argv)
+	}
+}
+
+// TestExecClient_TransitionState_NonClaimTransitionUnchanged verifies a
+// transition that does not land on InProgress (e.g. InProgress -> Complete)
+// still emits exactly the prior one --add-label/--remove-label pair — the
+// stale-terminal-label strip is a claim-only behavior (#1985).
+func TestExecClient_TransitionState_NonClaimTransitionUnchanged(t *testing.T) {
+	dir := prependFakeGH(t, "")
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	if err := c.TransitionState("10", forge.InProgress, forge.Complete); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatalf("call-00.txt (gh issue edit) not written: %v", err)
+	}
+	argv := string(raw)
+	if strings.Count(argv, "--remove-label") != 1 {
+		t.Errorf("argv = %q, want exactly one --remove-label", argv)
+	}
+	if !strings.Contains(argv, "--remove-label\nagent-in-progress") {
+		t.Errorf("argv = %q, want --remove-label agent-in-progress", argv)
+	}
+}
+
+// TestExecClient_TransitionState_NormalClaimUnchanged verifies criterion 4 of
+// #1985 end to end: a claim on an issue with no stale terminal label present
+// still ends up with exactly agent-in-progress — the stale-label strip must
+// not perturb the ordinary claim path. Uses the stateful fakeGHState harness
+// (contract_test.go) rather than prependFakeGH so it can assert the
+// resulting label set, not just the argv of the edit call.
+func TestExecClient_TransitionState_NormalClaimUnchanged(t *testing.T) {
+	h := newGithubHarness(t)
+	h.SeedIssue(forge.Issue{Number: "55", Title: "normal claim", Labels: []string{"ready-for-agent"}})
+
+	if err := h.Tracker().TransitionState("55", forge.Dispatchable, forge.InProgress); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+
+	iss, err := h.Tracker().Issue("55")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if len(iss.Labels) != 1 || iss.Labels[0] != "agent-in-progress" {
+		t.Errorf("labels = %v, want exactly [agent-in-progress]", iss.Labels)
+	}
+}
+
+// TestExecClient_TransitionState_ClaimRemoveLabelsMatchDispatchWorkflow
+// guards the parity a bare code comment can't enforce: every label a claim
+// (Dispatchable -> InProgress) removes must be in agent-dispatch.yml's own
+// claim-remove-labels list, read straight from the workflow file, so the two
+// can never silently drift apart (#1985). The reverse isn't asserted:
+// agent-trigger and agent-recover are pure GitHub Actions trigger gestures
+// with no forge.DispatchState equivalent, so they're outside what the Go
+// claim can strip.
+func TestExecClient_TransitionState_ClaimRemoveLabelsMatchDispatchWorkflow(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "..", ".github", "workflows", "agent-dispatch.yml"))
+	if err != nil {
+		t.Fatalf("read agent-dispatch.yml: %v", err)
+	}
+	line := regexp.MustCompile(`claim-remove-labels:\s*(\S.*)`)
+	m := line.FindStringSubmatch(string(raw))
+	if m == nil {
+		t.Fatal("agent-dispatch.yml is missing a claim-remove-labels: line")
+	}
+	workflowSet := map[string]bool{}
+	for _, l := range strings.Fields(m[1]) {
+		workflowSet[l] = true
+	}
+
+	dir := prependFakeGH(t, "")
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	if err := c.TransitionState("10", forge.Dispatchable, forge.InProgress); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	callRaw, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatalf("call-00.txt (gh issue edit) not written: %v", err)
+	}
+	argv := strings.Split(strings.TrimRight(string(callRaw), "\n"), "\n")
+	for i := 0; i < len(argv)-1; i++ {
+		if argv[i] != "--remove-label" {
+			continue
+		}
+		label := argv[i+1]
+		if !workflowSet[label] {
+			t.Errorf("claim removes label %q, not in agent-dispatch.yml's claim-remove-labels %q", label, m[1])
+		}
 	}
 }
 

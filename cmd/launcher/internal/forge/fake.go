@@ -514,7 +514,11 @@ func (f *Fake) Issue(num string) (Issue, error) {
 }
 
 // TransitionState swaps the from-state label for the to-state label on issue
-// num. Best-effort on missing issues (no error), matching gh CLI behavior.
+// num. Best-effort on missing issues (no error), matching gh CLI behavior. A
+// claim (to == InProgress) also strips any stale Complete/Failed terminal
+// label the issue still carries from a prior run, mirroring the github
+// adapter's TransitionState (exec_issues.go) so a launcher-level test built
+// on the Fake can't pass while the real adapter still misbehaves (#1985).
 func (f *Fake) TransitionState(num string, from, to DispatchState) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -527,10 +531,14 @@ func (f *Fake) TransitionState(num string, from, to DispatchState) error {
 		return nil // best-effort
 	}
 	add := f.labels.Label(to)
-	remove := f.labels.Label(from)
+	remove := map[string]bool{f.labels.Label(from): true}
+	if to == InProgress {
+		remove[f.labels.Complete] = true
+		remove[f.labels.Failed] = true
+	}
 	var next []string
 	for _, l := range iss.Labels {
-		if l != remove {
+		if !remove[l] {
 			next = append(next, l)
 		}
 	}

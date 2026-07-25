@@ -53,7 +53,10 @@ setup() {
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q -- '--add-label agent-in-progress' "$GH_LOG"
-  ! grep -q -- 'agent-failed' "$GH_LOG"
+  # The claim itself now unconditionally strips stale agent-failed (#1985),
+  # so it legitimately appears as a --remove-label; only an --add-label
+  # would mean this run actually escalated to failed.
+  ! grep -q -- '--add-label agent-failed' "$GH_LOG"
 }
 
 @test "IN_PROGRESS_LABEL and FAILED_LABEL env vars override the baked defaults" {
