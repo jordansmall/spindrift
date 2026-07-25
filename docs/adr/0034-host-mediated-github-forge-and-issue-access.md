@@ -188,3 +188,24 @@ it never learns. Settle's `blocked` outcome case now also relays that bundle
 `hostMediateDraftPR` does for `ready` — without this, a blocked-but-real
 bundle/PR-intent the Box left behind would be silently dropped the moment the
 container exits, rather than reaching the host at all.
+
+## Amendment (issue #1951): the Box-side gate fails closed
+
+Every write-step gate this ADR added — the tracker-comment gate (#1917), the
+push-step gate (#1918), the PR-create gate (#1919), and `IF BLOCKED`'s copy
+of the last two (#1933) — read `BOX_FORGE_AND_ISSUE_ACCESS` inside the Box
+with a `${BOX_FORGE_AND_ISSUE_ACCESS:-read-write}` fallback. An unset,
+typo'd, or forwarding-glitched value therefore fell open into the
+write-capable prompt path, the opposite of what `read-only` promises.
+
+`dispatch.buildBoxEnv` now resolves the write-enabled-vs-not decision once,
+host-side, from `BOX_FORGE_AND_ISSUE_ACCESS`, and forwards it as a single
+explicit positive signal, `BOX_WRITE_ENABLED`, present only when writes are
+permitted. `agent/entrypoint.sh`'s precompute block gates
+`BOX_ACCESS_READ_WRITE`/`BOX_ACCESS_READ_ONLY` and
+`ISSUE_TRACKER_GITHUB_READWRITE`/`ISSUE_TRACKER_GITHUB_READONLY` on
+`BOX_WRITE_ENABLED`'s presence instead, with no fallback default: absence —
+for any reason — renders the no-write path. `BOX_FORGE_AND_ISSUE_ACCESS`
+itself is still forwarded into the Box (the launcher's own
+`newCodeForge`/`checkReadOnlyCapabilityGate` still read it directly), but the
+Box's prompt fragments no longer branch on it.
