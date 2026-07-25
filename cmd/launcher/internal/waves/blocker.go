@@ -103,15 +103,16 @@ func NewReadiness(it forge.IssueTracker, issues []Issue) (Readiness, error) {
 }
 
 // Status reports num's blocker readiness against r.Edges without
-// transitioning any tracker state — the seam the Console (#650) reuses to
-// hold a pick rather than the headless engine's own cascade-to-Failed
-// (which moves the dependent issue itself to Failed when a blocker's failed
-// set is non-empty). ready is true when every declared blocker is
-// satisfied (Ready) and none carries cfg.FailedLabel; unready names every
-// blocker not yet satisfied, in edge order. failed scans all of
-// r.Edges[num], not just unready — a blocker can be closed (so Ready's
-// fallback calls it satisfied) and still carry cfg.FailedLabel, which must
-// never be satisfiable regardless of readiness.
+// transitioning any tracker state — the seam the Console (#650) and the
+// headless engine (drainMaxJobs, nextReady) both reuse to hold a pick or
+// dependent rather than transition it; neither ever cascades the dependent
+// itself to Failed on account of a blocker's label or state (#1984). ready
+// is true when every declared blocker is satisfied (Ready) and none carries
+// cfg.FailedLabel; unready names every blocker not yet satisfied, in edge
+// order. failed scans all of r.Edges[num], not just unready — a blocker can
+// be closed (so Ready's fallback calls it satisfied) and still carry
+// cfg.FailedLabel, which the Console still surfaces as a held Reason even
+// though the dependent proceeds once every blocker is satisfied.
 // failed is reported separately from unready rather than folded into it:
 // unready drives the console's BlockedBy badge and failed drives Reason
 // (queue.go's setHeld), and collapsing the two would reintroduce the
