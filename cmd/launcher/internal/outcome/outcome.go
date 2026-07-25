@@ -156,14 +156,9 @@ func LastInLog(path string, expectedNonce string) (o Outcome, found bool, skippe
 
 // LastCommentLineInLog scans the file at path for the last line carrying the
 // SPINDRIFT_COMMENT token and decodes its single-line grammar: SPINDRIFT_COMMENT
-// <nonce> <base64-encoded-body> (issue #1940). Unlike LastInLog, which always
-// takes the very last token-bearing line (valid or not) and surfaces its
-// parse failure as a near-miss, COMMENT prefers the last line that actually
-// verifies: an untrusted issue/comment author cannot know this run's nonce
-// (they write their text before it is minted), so a later line that merely
-// carries the token without verifying is either their echo or reasoning-
-// adjacent prose, and must not be allowed to shadow — and so suppress — an
-// earlier genuine comment.
+// <nonce> <base64-encoded-body> (issue #1940). See lastVerifiedSignalInLog for
+// the verify-then-prefer selection semantics, which differ from LastInLog's
+// always-take-the-last-line behavior for SPINDRIFT_OUTCOME.
 //
 // A stream-json JSONL box log collapses a printed line's trailing newline
 // into a literal `\n` escape butted directly against the base64 payload with
@@ -181,42 +176,8 @@ func LastInLog(path string, expectedNonce string) (o Outcome, found bool, skippe
 // return contract can't carry both a successful relay and a warning at
 // once, and the successful relay is what matters.
 func LastCommentLineInLog(path, expectedNonce string) (string, bool, error) {
-	const token = "SPINDRIFT_COMMENT"
-	var lastValid string
-	var found bool
-	var rejected bool
-	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
-		if !containsToken(line, token) {
-			return
-		}
-		if body, ok := parseCommentLine(line, expectedNonce); ok {
-			lastValid = body
-			found = true
-			return
-		}
-		rejected = true
-	})
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", false, nil
-		}
-		return "", false, err
-	}
-	if found {
-		return lastValid, true, nil
-	}
-	if rejected {
-		return "", false, fmt.Errorf("comment line found but did not verify: nonce mismatch or malformed payload")
-	}
-	return "", false, nil
-}
-
-// parseCommentLine extracts and strictly decodes the payload of a single-line
-// SPINDRIFT_COMMENT control signal: SPINDRIFT_COMMENT <nonce> <base64-body>.
-// Thin wrapper over parseSignalLine, the same grammar PR-intent's
-// parsePRIntentLine shares.
-func parseCommentLine(line, expectedNonce string) (string, bool) {
-	return parseSignalLine(line, "SPINDRIFT_COMMENT", expectedNonce)
+	return lastVerifiedSignalInLog(path, "SPINDRIFT_COMMENT", expectedNonce,
+		"comment line found but did not verify: nonce mismatch or malformed payload")
 }
 
 // base64AlphabetPrefix returns the longest prefix of s consisting solely of
@@ -246,14 +207,8 @@ func isBase64Char(b byte) bool {
 // multi-line block onto one physical line, so an exact-line marker scan
 // never finds it (issue #1921's dogfood failure).
 //
-// Mirrors LastCommentLineInLog's verify-then-prefer semantics: among lines
-// carrying the token, the last one that actually verifies (right nonce,
-// valid strict base64) wins, rather than always taking the very last
-// token-bearing line the way LastInLog does for SPINDRIFT_OUTCOME — a later
-// line that merely carries the token without verifying (an untrusted
-// issue/comment author's echo, since they wrote their text before this
-// run's nonce was minted) must not be able to shadow an earlier genuine
-// PR-intent line.
+// See lastVerifiedSignalInLog for the verify-then-prefer selection semantics,
+// shared with LastCommentLineInLog.
 //
 // The decoded payload is the same "title\n\nbody" shape the retired block
 // held: the first line is the PR title and the remainder, after a blank
@@ -267,7 +222,20 @@ func isBase64Char(b byte) bool {
 // no-PR-intent-found. Returns (payload, true, nil) from the last line that
 // verifies, even if a later, non-verifying line also carries the token.
 func LastPRIntentInLog(path, expectedNonce string) (string, bool, error) {
-	const token = "SPINDRIFT_PR_INTENT"
+	return lastVerifiedSignalInLog(path, "SPINDRIFT_PR_INTENT", expectedNonce,
+		"PR-intent line found but did not verify: nonce mismatch or malformed payload")
+}
+
+// lastVerifiedSignalInLog is the shared "last verifying signal wins" scanner
+// backing both LastCommentLineInLog and LastPRIntentInLog: among lines
+// carrying token, the last one that actually verifies (right nonce, valid
+// strict base64, via parseSignalLine) wins over a later line that merely
+// carries the token without verifying — an untrusted issue/comment author's
+// echo of either channel's token, since they wrote their text before this
+// run's nonce was minted, must not be able to shadow an earlier genuine
+// line. notVerifiedErr is the per-channel error text returned when at least
+// one token-bearing line was found but none verified.
+func lastVerifiedSignalInLog(path, token, expectedNonce, notVerifiedErr string) (string, bool, error) {
 	var lastValid string
 	var found bool
 	var rejected bool
@@ -275,7 +243,7 @@ func LastPRIntentInLog(path, expectedNonce string) (string, bool, error) {
 		if !containsToken(line, token) {
 			return
 		}
-		if body, ok := parsePRIntentLine(line, expectedNonce); ok {
+		if body, ok := parseSignalLine(line, token, expectedNonce); ok {
 			lastValid = body
 			found = true
 			return
@@ -292,23 +260,16 @@ func LastPRIntentInLog(path, expectedNonce string) (string, bool, error) {
 		return lastValid, true, nil
 	}
 	if rejected {
-		return "", false, fmt.Errorf("PR-intent line found but did not verify: nonce mismatch or malformed payload")
+		return "", false, errors.New(notVerifiedErr)
 	}
 	return "", false, nil
 }
 
-// parsePRIntentLine extracts and strictly decodes the payload of a
-// single-line SPINDRIFT_PR_INTENT control signal: SPINDRIFT_PR_INTENT
-// <nonce> <base64-payload>. Thin wrapper over parseSignalLine, the same
-// grammar SPINDRIFT_COMMENT's parseCommentLine shares.
-func parsePRIntentLine(line, expectedNonce string) (string, bool) {
-	return parseSignalLine(line, "SPINDRIFT_PR_INTENT", expectedNonce)
-}
-
 // parseSignalLine extracts and strictly decodes the payload of a
 // single-line "<token> <nonce> <base64-payload>" control signal — the
-// shared grammar parseCommentLine and parsePRIntentLine each pin to one
-// token. line must carry expectedNonce as the field structurally following
+// shared grammar lastVerifiedSignalInLog pins to one token per call, on
+// behalf of both LastCommentLineInLog and LastPRIntentInLog. line must
+// carry expectedNonce as the field structurally following
 // the token (word-bounded via strings.Fields, so an empty expectedNonce can
 // never match), and the base64 payload — the field after that — is decoded
 // with the standard strict decoder, rejecting any decode error outright

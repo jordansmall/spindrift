@@ -968,7 +968,7 @@ func TestLastCommentLineInLog_NonceMismatchIgnoredAndWarned(t *testing.T) {
 // empty expectedNonce (the zero value a caller might pass by mistake) never
 // verifies a line, even one that happens to carry no nonce field at all —
 // mirroring LineHasNonce's own "empty never matches" invariant now that
-// parseCommentLine no longer calls it directly.
+// parseSignalLine no longer calls it directly.
 func TestLastCommentLineInLog_EmptyExpectedNonceNeverMatches(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("verdict"))
 	path := writeLog(t, "SPINDRIFT_COMMENT "+encoded)
