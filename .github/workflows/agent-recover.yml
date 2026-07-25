@@ -97,6 +97,7 @@ jobs:
         id: recover
         run: |
           nix run . -- recover "${{ github.event.issue.number }}" \
+            --box-forge-and-issue-access read-write \
             --repo-slug "${{ github.repository }}" \
             --base-branch "${{ github.event.repository.default_branch }}" \
             --git-user-name "${{ steps.setup.outputs.git-user-name }}" \
