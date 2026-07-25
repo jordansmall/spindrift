@@ -2354,7 +2354,7 @@ func TestDoctor_ReadOnlyTokenGate_NonIntrospectableTokenDoesNotClaimVerified(t *
 	if !strings.Contains(out, "WARNING") {
 		t.Fatalf("want the gate's warning printed, got %q", out)
 	}
-	if strings.Contains(out, "distinct, and not write-capable") {
+	if strings.Contains(out, "confirmed not write-capable") {
 		t.Errorf("doctor claimed write-capability was confirmed for a non-introspectable token, got %q", out)
 	}
 }
