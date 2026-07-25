@@ -59,9 +59,10 @@ func TestSelfHeal_LocalForge_MergeConflictThenRebaseSucceedsRetriesWithoutPanic(
 	c.MaxRebaseAttempts = 3
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
-	branch := "agent/issue-1"
+	branch := fc.AgentBranch("1")
 	s := New(c, fc, fc.AsLocal())
 
 	landing := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
@@ -120,9 +121,10 @@ func TestSelfHeal_LocalForge_RelaysBundleBeforeMergeAndRecordsLandingRef(t *test
 	c.MergeMode = "immediate"
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.LandingRefValue = "integration/1694@abc123"
-	branch := "agent/issue-1"
+	branch := fc.AgentBranch("1")
 	s := New(c, fc, fc.AsLocal())
 
 	landing := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
@@ -161,13 +163,14 @@ func TestSelfHeal_LocalForge_UsesPerIssueCodeForgeForMerge(t *testing.T) {
 	sharedFC := forge.NewFake(testDispatchLabels)
 	sharedFC.SetIssue(forge.Issue{Number: "10", Labels: []string{"agent-in-progress"}})
 	ownFC := forge.NewFake()
+	ownFC.BranchPrefix = "agent/issue-"
 	c.CodeForgeForIssue = func(num string) forge.CodeForge {
 		if num == "10" {
 			return ownFC.AsLocal()
 		}
 		return sharedFC.AsLocal()
 	}
-	branch := "agent/issue-10"
+	branch := ownFC.AgentBranch("10")
 	s := New(c, sharedFC, sharedFC.AsLocal())
 
 	landing := s.selfHeal(dispatch.NewFake(), "10", 0, branch)
@@ -200,9 +203,10 @@ func TestSelfHeal_LocalForge_LandingRefErrorStaysMergedWithoutRecording(t *testi
 	c.MergeMode = "immediate"
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.LandingRefErr = errors.New("integration branch vanished")
-	branch := "agent/issue-1"
+	branch := fc.AgentBranch("1")
 	s := New(c, fc, fc.AsLocal())
 
 	landing := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
@@ -273,5 +277,43 @@ func TestSelfHeal_LocalForge_MissingBundleBlocksNotFails(t *testing.T) {
 	}
 	if len(fc.CommentCalls) != 1 {
 		t.Fatalf("expected exactly one merge-blocked comment, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
+	}
+}
+
+// TestSettle_LocalForge_HostileLandingIgnored_UsesAgentBranch asserts issue
+// #1949's fix on the push-only local landing path: a bundle carrying a
+// hostile landing=main (or any ref not the issue's own AgentBranch) must
+// never steer RelayBundle or Merge — both are derived host-side from
+// cf.AgentBranch(num), the same rule the read-only github draft-PR path now
+// follows, so a malicious outcome line can, at worst, land on the issue's
+// own branch inside the Accumulation repo (still gated behind the normal
+// rebase/merge path), never a ref of the Box's choosing.
+func TestSettle_LocalForge_HostileLandingIgnored_UsesAgentBranch(t *testing.T) {
+	const issNum = "1"
+	const hostileLanding = "main"
+
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	agentBranch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: hostileLanding, Status: "ready", Note: "ok"},
+	}
+
+	s := New(c, fc, fc.AsLocal())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0].Ref != agentBranch {
+		t.Fatalf("RelayBundleCalls = %+v, want one call with ref=%s (never the hostile landing=%s)", fc.RelayBundleCalls, agentBranch, hostileLanding)
+	}
+	if fc.Merged != agentBranch {
+		t.Fatalf("fc.Merged = %q, want %q (never the hostile landing=%s)", fc.Merged, agentBranch, hostileLanding)
 	}
 }
