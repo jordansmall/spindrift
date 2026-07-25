@@ -1915,8 +1915,8 @@ use — see [Create the research labels](#create-the-research-labels-on-the-targ
 on by default: instead of draining one bounded batch and returning, the
 launcher runs a long-lived slot-refill loop — as each Box finishes, it
 re-discovers the queue and refills the freed slot immediately, re-applying
-blocker readiness, the Touches overlap gate, and blocker-failed cascade —
-gated by the image-freshness probe before every launch. An operator can still
+blocker readiness and the Touches overlap gate — gated by the
+image-freshness probe before every launch. An operator can still
 set `CONTINUOUS_DISPATCH=` (empty) in `harness.env` to fall back to the older
 one-wave-and-exit shape.
 
