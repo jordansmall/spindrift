@@ -55,7 +55,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// failure here never changes the blocked outcome already recorded
 		// above.
 		if s.readOnly && s.pr != nil {
-			s.relayBlockedWork(num, o.Landing, result)
+			s.relayBlockedWork(num, result)
 		}
 		s.postBlockedNoteComment(num, o.Note)
 		s.postUsageComment(num, d)
@@ -69,7 +69,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// covers them.
 		if s.readOnly && s.pr != nil {
 			var ok bool
-			pr, ok = s.hostMediateDraftPR(num, o.Landing, result)
+			pr, ok = s.hostMediateDraftPR(num, result)
 			if !ok {
 				s.postUsageComment(num, d)
 				return
