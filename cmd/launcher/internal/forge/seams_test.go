@@ -199,6 +199,35 @@ func TestFake_TransitionState_InProgressToComplete(t *testing.T) {
 	}
 }
 
+// TestFake_TransitionState_ClaimStripsStaleTerminalLabels mirrors the github
+// adapter's behavior (exec_issues.go): a claim (Dispatchable -> InProgress)
+// strips any stale terminal label (agent-failed, agent-complete) the issue
+// still carries from a prior run, not just the from-state label — the Fake
+// must match the real adapter here or a launcher-level test using the Fake
+// could pass while the real GitHub backend still misbehaves (#1985).
+func TestFake_TransitionState_ClaimStripsStaleTerminalLabels(t *testing.T) {
+	f := forge.NewFake(testLabels)
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent", "agent-failed"}})
+
+	if err := f.TransitionState("42", forge.Dispatchable, forge.InProgress); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+
+	iss, err := f.Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !containsLabel(iss.Labels, "agent-in-progress") {
+		t.Error("want agent-in-progress label, not present")
+	}
+	if containsLabel(iss.Labels, "ready-for-agent") {
+		t.Error("want ready-for-agent removed, still present")
+	}
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Error("want stale agent-failed removed on claim, still present")
+	}
+}
+
 func TestFake_TransitionState_MissingIssueIsNoOp(t *testing.T) {
 	f := forge.NewFake()
 	// Best-effort: unknown issue number must not error.

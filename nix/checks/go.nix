@@ -81,7 +81,10 @@ in
   # the same reason as launcher-go-vet above.
   # docs/ is copied alongside cmd/launcher, mirroring the repo layout,
   # so TestReferenceDocLabelSnippetMatchesTriageDefaults can resolve its
-  # ../../docs/reference.md path (#611).
+  # ../../docs/reference.md path (#611). .github/ is copied the same way so
+  # TestExecClient_TransitionState_ClaimRemoveLabelsMatchDispatchWorkflow can
+  # resolve its ../../../../../.github/workflows/agent-dispatch.yml path
+  # (#1985).
   launcher-go-test =
     pkgs.runCommand "launcher-go-test"
       {
@@ -94,6 +97,7 @@ in
         mkdir -p src/cmd
         cp -r ${../../cmd/launcher} src/cmd/launcher
         cp -r ${../../docs} src/docs
+        cp -r ${../../.github} src/.github
         chmod -R +w src
         cp -r ${launcherGoModules} src/cmd/launcher/vendor
         export GOPROXY=off

@@ -47,3 +47,28 @@ func (d DispatchLabels) Label(s DispatchState) string {
 func (d DispatchLabels) AllLabels() []string {
 	return []string{d.Dispatchable, d.InProgress, d.Complete, d.Failed}
 }
+
+// ClaimRemoveLabels returns the labels a from -> to TransitionState call
+// should remove: ordinarily just the from-state label, but a claim (to ==
+// InProgress) also strips any stale Complete/Failed terminal label the issue
+// might still carry from a prior run — matching the dispatch workflow's
+// claim-remove-labels set (.github/workflows/agent-dispatch.yml) for the
+// subset of labels this DispatchState model tracks (#1985). Empty labels are
+// skipped and the result is deduplicated, so both the github adapter and
+// forge.Fake can call this instead of each re-deriving the same rule.
+func (d DispatchLabels) ClaimRemoveLabels(from, to DispatchState) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(l string) {
+		if l != "" && !seen[l] {
+			seen[l] = true
+			out = append(out, l)
+		}
+	}
+	add(d.Label(from))
+	if to == InProgress {
+		add(d.Complete)
+		add(d.Failed)
+	}
+	return out
+}

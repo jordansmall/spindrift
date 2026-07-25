@@ -89,11 +89,12 @@ issue-view)
 issue-edit)
 	num="$3"
 	shift 3
-	add=""; remove=""
+	add=""; removes=""
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--add-label) add="$2"; shift 2 ;;
-		--remove-label) remove="$2"; shift 2 ;;
+		--remove-label) removes="$removes
+$2"; shift 2 ;;
 		*) shift ;;
 		esac
 	done
@@ -102,7 +103,9 @@ issue-edit)
 	if [ -f "$DIR/$num/labels" ]; then
 		while IFS= read -r l; do
 			[ -z "$l" ] && continue
-			[ "$l" = "$remove" ] && continue
+			if printf '%s\n' "$removes" | grep -qxF "$l"; then
+				continue
+			fi
 			echo "$l" >> "$tmp"
 		done < "$DIR/$num/labels"
 	fi

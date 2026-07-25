@@ -138,12 +138,17 @@ func (e *execClient) StateLabels() forge.DispatchLabels {
 }
 
 // TransitionState swaps the from-state label for the to-state label on issue
-// num. It emits exactly one --add-label and one --remove-label, matching the
-// prior SwapLabel(add, remove) call contract with typed state identifiers.
+// num. It emits exactly one --add-label and, ordinarily, one --remove-label,
+// matching the prior SwapLabel(add, remove) call contract with typed state
+// identifiers. A claim (to == InProgress) additionally strips any stale
+// terminal label (Complete, Failed) the issue might still carry from a prior
+// run, matching the dispatch workflow's claim-remove-labels set (#1985) —
+// otherwise a re-triggered or recovered issue could run while still labeled
+// agent-failed or agent-complete.
 func (e *execClient) TransitionState(num string, from, to forge.DispatchState) error {
 	add := e.labels.Label(to)
 	args := []string{"issue", "edit", num, "--repo", e.repo, "--add-label", add}
-	if remove := e.labels.Label(from); remove != "" {
+	for _, remove := range e.labels.ClaimRemoveLabels(from, to) {
 		args = append(args, "--remove-label", remove)
 	}
 	cmd := exec.Command("gh", args...)
