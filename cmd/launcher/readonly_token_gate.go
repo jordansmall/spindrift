@@ -52,7 +52,7 @@ func checkReadOnlyTokenGate(c config, introspect tokenIntrospector, w io.Writer)
 		return false, fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: introspecting BOX_GH_TOKEN failed: %w", err)
 	}
 	if !result.Introspectable {
-		fmt.Fprintln(w, "WARNING: BOX_GH_TOKEN looks like a fine-grained PAT — GitHub exposes no endpoint to introspect its granted permissions. read-only trusts that it was provisioned with read-only scope; verify this yourself before relying on it.")
+		fmt.Fprintln(w, "WARNING: BOX_GH_TOKEN's write capability could not be determined (e.g. a fine-grained PAT, whose granted permissions GitHub exposes no endpoint to introspect). read-only trusts that it was provisioned with read-only scope; verify this yourself before relying on it.")
 		return false, nil
 	}
 	if result.WriteCapable {

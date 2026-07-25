@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -71,6 +72,15 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 			expectIntrospectCall: true,
 			wantWarning:          true,
 		},
+		{
+			name:                 "introspect error aborts startup",
+			access:               "read-only",
+			launcherToken:        "launcher-token",
+			boxToken:             "box-token",
+			introspectErr:        errors.New("gh api -i user: exit status 1"),
+			expectIntrospectCall: true,
+			wantErrSubstr:        "introspecting BOX_GH_TOKEN failed",
+		},
 	}
 
 	for _, tc := range cases {
@@ -115,5 +125,29 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 				t.Errorf("introspect(%q, %q), want (%q, %q)", gotToken, gotRepoSlug, tc.boxToken, c.repoSlug)
 			}
 		})
+	}
+}
+
+// TestCheckReadOnlyTokenGate_NonIntrospectableWarningDoesNotClaimFineGrainedPAT
+// verifies the non-introspectable warning doesn't assert a specific token
+// shape: Introspectable is also false for an unrecognized/unknown-prefix
+// token (ghTokenIntrospector's safe default), not only a fine-grained PAT, so
+// a warning that names "fine-grained PAT" specifically would mislabel that
+// case.
+func TestCheckReadOnlyTokenGate_NonIntrospectableWarningDoesNotClaimFineGrainedPAT(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.ghToken = "launcher-token"
+	t.Setenv("BOX_GH_TOKEN", "box-token")
+	introspect := func(token, repoSlug string) (tokenIntrospectionResult, error) {
+		return tokenIntrospectionResult{Introspectable: false}, nil
+	}
+
+	var buf bytes.Buffer
+	if _, err := checkReadOnlyTokenGate(c, introspect, &buf); err != nil {
+		t.Fatalf("checkReadOnlyTokenGate() error = %v, want nil", err)
+	}
+	if strings.Contains(buf.String(), "looks like a fine-grained PAT") {
+		t.Errorf("warning asserts a specific token shape it can't actually determine, got %q", buf.String())
 	}
 }

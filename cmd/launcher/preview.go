@@ -121,6 +121,9 @@ func preview(issueNums []string) error {
 	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
 		return err
 	}
+	if _, err := checkReadOnlyTokenGate(c, ghTokenIntrospector, os.Stdout); err != nil {
+		return err
+	}
 	pwd, err := os.Getwd()
 	if err != nil {
 		return err
