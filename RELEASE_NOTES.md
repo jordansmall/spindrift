@@ -10,6 +10,38 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.7.0 — 2026-07-25
+
+The sandboxed agent can now run against GitHub with no write access at all, plus
+a safer way to hand it secrets.
+
+No breaking changes.
+
+- **Read-only Box for GitHub (`BOX_FORGE_AND_ISSUE_ACCESS`).** The agent no
+  longer needs push or write access to GitHub. It writes its work as a git
+  bundle and emits comments and PR requests as tamper-checked log lines; the
+  host relays them to the forge and lands the branch. A compromised or
+  misbehaving agent can't push, comment, or open a PR on its own. This brings
+  GitHub to parity with the local-forge runs added in 0.6.1.
+- **Startup token gate, fail closed.** In read-only mode the launcher inspects
+  the GitHub token before it does anything and refuses to start if that token
+  can actually push. `spindrift doctor` reports the result. If the write-enable
+  signal never reaches the Box, the Box assumes read-only rather than guessing
+  it can write.
+- **Secrets from an external command (`--secret-cmd`).** Instead of passing
+  tokens as flags or environment variables, point spindrift at a command that
+  prints the secret (a keychain or password-manager lookup, say). It only runs
+  when attached to a terminal, gives an unlock hint when the command fails, and
+  has a per-secret templated fallback.
+- **Credentials kept out of the agent's reach.** Two new pre-tool hooks: one
+  blocks the agent from reading credential files, the other scrubs secrets from
+  the environment of any subprocess it spawns. The image bakes that subprocess
+  scrub on by default.
+- **Fix: no more wasted fix passes.** A fix pass that changes nothing no longer
+  burns one of the run's limited fix attempts.
+
+---
+
 ## 0.6.1 — 2026-07-24
 
 Run spindrift against a plain local git repo with no GitHub in the loop, plus a
