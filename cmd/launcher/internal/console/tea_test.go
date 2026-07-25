@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -56,21 +57,26 @@ import (
 // the launch-backed pick tests further down this file.
 const teatestTimeout = 30 * time.Second
 
+// waitForOutputAttempts bounds how many teatestTimeout windows waitForOutput
+// gives a stalled render before failing. CPU contention on a loaded CI
+// runner (issue #1981) can delay a single frame past one window even though
+// the program hasn't hung; retrying buys the scheduler a second window
+// before calling it a hang. A program that's actually stuck still fails,
+// just after attempts*teatestTimeout instead of one window — still bounded,
+// matching teatestTimeout's existing "still fails, just later" philosophy.
+const waitForOutputAttempts = 2
+
 // waitForOutput blocks until tm's output contains every one of want, failing
-// the test if it never does within teatestTimeout. tm.Output() drains as
-// it's read, so every substring a caller needs from one render must be
-// awaited together in a single call — a second call only ever sees bytes
-// written after the first call's read, not the full history.
+// the test if it never does within waitForOutputAttempts windows of
+// teatestTimeout. tm.Output() drains as it's read, so every substring a
+// caller needs from one render must be awaited together in a single call —
+// a second call only ever sees bytes written after the first call's read,
+// not the full history.
 func waitForOutput(t *testing.T, tm *teatest.TestModel, want ...string) {
 	t.Helper()
-	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
-		for _, w := range want {
-			if !strings.Contains(string(b), w) {
-				return false
-			}
-		}
-		return true
-	}, teatest.WithDuration(teatestTimeout), teatest.WithCheckInterval(5*time.Millisecond))
+	if err := waitForOutputRetry(tm.Output(), want, teatestTimeout, 5*time.Millisecond, waitForOutputAttempts); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // waitFinished blocks until tm's program has fully shut down, failing the test
@@ -79,6 +85,92 @@ func waitForOutput(t *testing.T, tm *teatest.TestModel, want ...string) {
 func waitFinished(t *testing.T, tm *teatest.TestModel) {
 	t.Helper()
 	tm.WaitFinished(t, teatest.WithFinalTimeout(teatestTimeout))
+}
+
+// TestWaitForOutputRetry_SucceedsWhenDelayedContentArrivesInARetryWindow
+// pins that a stalled first attempt doesn't fail the wait outright: content
+// that only becomes available after the first window elapses (as CPU
+// contention on a loaded CI runner can delay a render past one window, per
+// issue #1981) still succeeds within a later attempt, rather than the
+// caller seeing a spurious timeout.
+func TestWaitForOutputRetry_SucceedsWhenDelayedContentArrivesInARetryWindow(t *testing.T) {
+	r := newDelayedReader(15*time.Millisecond, "ready")
+	if err := waitForOutputRetry(r, []string{"ready"}, 10*time.Millisecond, time.Millisecond, 2); err != nil {
+		t.Fatalf("waitForOutputRetry() = %v, want nil once the delayed content lands within the retry window", err)
+	}
+}
+
+// TestWaitForOutputRetry_FailsWhenContentNeverArrivesWithinAnyAttempt pins
+// the retry's own bound: a program that has genuinely hung still fails,
+// just after the full attempts*budget window, matching teatestTimeout's
+// existing hang-detector philosophy.
+func TestWaitForOutputRetry_FailsWhenContentNeverArrivesWithinAnyAttempt(t *testing.T) {
+	r := bytes.NewReader(nil)
+	if err := waitForOutputRetry(r, []string{"ready"}, 5*time.Millisecond, time.Millisecond, 2); err == nil {
+		t.Fatal("waitForOutputRetry() = nil, want an error when the wanted content never arrives")
+	}
+}
+
+// delayedReader mimics teatest's draining output buffer: it yields nothing
+// (io.EOF, like an empty bytes.Buffer) until deadline, then yields payload
+// — across as many Reads as a small p forces — then EOF forever after,
+// modeling a frame that renders late under CPU contention rather than one
+// that never renders at all.
+type delayedReader struct {
+	deadline time.Time
+	payload  []byte
+	sent     int
+}
+
+func newDelayedReader(delay time.Duration, payload string) *delayedReader {
+	return &delayedReader{deadline: time.Now().Add(delay), payload: []byte(payload)}
+}
+
+func (d *delayedReader) Read(p []byte) (int, error) {
+	if time.Now().Before(d.deadline) || d.sent >= len(d.payload) {
+		return 0, io.EOF
+	}
+	n := copy(p, d.payload[d.sent:])
+	d.sent += n
+	return n, nil
+}
+
+// waitForOutputRetry polls r for want, retrying up to attempts times with a
+// fresh budget each time before giving up — see waitForOutput for why a
+// stalled render gets a second window instead of failing outright.
+func waitForOutputRetry(r io.Reader, want []string, budget, checkInterval time.Duration, attempts int) error {
+	var err error
+	for i := 0; i < attempts; i++ {
+		if err = waitForOutputOnce(r, want, budget, checkInterval); err == nil {
+			return nil
+		}
+	}
+	return err
+}
+
+// waitForOutputOnce is the single-attempt polling loop waitForOutputRetry
+// retries — equivalent to teatest.WaitFor's own loop, reimplemented because
+// WaitFor calls t.Fatal on timeout and so can't be retried.
+func waitForOutputOnce(r io.Reader, want []string, budget, checkInterval time.Duration) error {
+	var b bytes.Buffer
+	start := time.Now()
+	for time.Since(start) <= budget {
+		if _, err := io.ReadAll(io.TeeReader(r, &b)); err != nil {
+			return fmt.Errorf("waitForOutput: %w", err)
+		}
+		ok := true
+		for _, w := range want {
+			if !strings.Contains(b.String(), w) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return nil
+		}
+		time.Sleep(checkInterval)
+	}
+	return fmt.Errorf("waitForOutput: condition not met after %s. Last output:\n%s", budget, b.String())
 }
 
 // rowNumberCell returns the exact padded number cell a Section table row
@@ -2358,26 +2450,74 @@ func TestTea_LaunchRefreshSignal_RefreshesWithoutOperatorInput(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// waitGoroutine polls the goroutine dump for name, failing the test if its
-// presence doesn't match want within a second. Matches by name rather than a
-// raw runtime.NumGoroutine() diff, since unrelated Cmd goroutines (e.g.
-// pollTick) would conflate with the one under test.
-func waitGoroutine(t *testing.T, name string, want bool) {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
+// pollGoroutinePresence polls dump() until its presence of name matches
+// want or deadline passes, returning an error on timeout rather than
+// failing a test directly — extracted from waitGoroutine so the deadline
+// sizing can be exercised without a real pprof dump.
+func pollGoroutinePresence(deadline time.Time, checkInterval time.Duration, dump func() string, name string, want bool) error {
 	for {
-		var buf bytes.Buffer
-		_ = pprof.Lookup("goroutine").WriteTo(&buf, 1)
-		if strings.Contains(buf.String(), name) == want {
-			return
+		buf := dump()
+		if strings.Contains(buf, name) == want {
+			return nil
 		}
 		if time.Now().After(deadline) {
 			if want {
-				t.Fatalf("%s goroutine never started:\n%s", name, buf.String())
+				return fmt.Errorf("%s goroutine never started:\n%s", name, buf)
 			}
-			t.Fatalf("%s goroutine leaked after quit:\n%s", name, buf.String())
+			return fmt.Errorf("%s goroutine leaked after quit:\n%s", name, buf)
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(checkInterval)
+	}
+}
+
+// waitGoroutine polls the goroutine dump for name, failing the test if its
+// presence doesn't match want within teatestTimeout. Matches by name rather
+// than a raw runtime.NumGoroutine() diff, since unrelated Cmd goroutines
+// (e.g. pollTick) would conflate with the one under test. The deadline
+// shares teatestTimeout rather than a bespoke bound (formerly a hardcoded
+// second) because the same CPU contention on a loaded CI runner that delays
+// a render (issue #1981) also delays how quickly a goroutine starts,
+// exits, or shows up in a pprof dump.
+func waitGoroutine(t *testing.T, name string, want bool) {
+	t.Helper()
+	dump := func() string {
+		var buf bytes.Buffer
+		_ = pprof.Lookup("goroutine").WriteTo(&buf, 1)
+		return buf.String()
+	}
+	if err := pollGoroutinePresence(time.Now().Add(teatestTimeout), 5*time.Millisecond, dump, name, want); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestPollGoroutinePresence_SucceedsWhenDumpChangesAfterDelay pins that a
+// dump reflecting the wanted presence only after some delay (as a
+// contention-starved goroutine start/exit or pprof scan can under CI load)
+// still succeeds within the deadline, rather than the caller seeing a
+// spurious timeout the way the old hardcoded one-second bound did.
+func TestPollGoroutinePresence_SucceedsWhenDumpChangesAfterDelay(t *testing.T) {
+	start := time.Now()
+	dump := func() string {
+		if time.Since(start) < 15*time.Millisecond {
+			return "goroutine 1 [running]:\nother.func1()"
+		}
+		return "goroutine 1 [chan receive]:\nwaitRefreshSignal.func1()"
+	}
+	err := pollGoroutinePresence(start.Add(30*time.Millisecond), time.Millisecond, dump, "waitRefreshSignal.func1", true)
+	if err != nil {
+		t.Fatalf("pollGoroutinePresence() = %v, want nil once the dump reflects the goroutine within the deadline", err)
+	}
+}
+
+// TestPollGoroutinePresence_FailsWhenDumpNeverMatchesWantWithinDeadline pins
+// the poll's own bound: a goroutine that never (dis)appears still fails,
+// just once deadline passes, matching teatestTimeout's hang-detector
+// philosophy.
+func TestPollGoroutinePresence_FailsWhenDumpNeverMatchesWantWithinDeadline(t *testing.T) {
+	dump := func() string { return "goroutine 1 [running]:\nother.func1()" }
+	err := pollGoroutinePresence(time.Now().Add(5*time.Millisecond), time.Millisecond, dump, "waitRefreshSignal.func1", true)
+	if err == nil {
+		t.Fatal("pollGoroutinePresence() = nil, want an error when the wanted goroutine never appears")
 	}
 }
 
