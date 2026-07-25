@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"errors"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -141,5 +142,81 @@ func TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 	}
 	if len(fc.CreateDraftPRCalls) != 0 {
 		t.Errorf("CreateDraftPR must not be called under read-write, got %+v", fc.CreateDraftPRCalls)
+	}
+}
+
+// TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked
+// asserts a RelayBundle failure during the blocked hand-off logs and moves
+// on, never attempting CreateDraftPR (a real force-push failed, so a branch
+// that isn't there is nothing to open a PR against) and never changing the
+// blocked/agent-failed outcome the caller already recorded.
+func TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked(t *testing.T) {
+	const issNum = "1933"
+	branch := "agent/issue-1933"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.RelayBundleErr = errors.New("bundle missing")
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:       true,
+		OutcomeFound:  true,
+		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.CreateDraftPRCalls) != 0 {
+		t.Errorf("CreateDraftPR must not be called when the relay fails, got %+v", fc.CreateDraftPRCalls)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must still carry agent-failed after a failed relay; labels=%v", iss.Labels)
+	}
+}
+
+// TestSettle_GithubReadOnly_BlockedDraftPRFailureStillReportsBlocked asserts
+// a CreateDraftPR failure (e.g. a draft already exists for this branch from
+// an earlier fix pass) logs and moves on without changing the blocked/
+// agent-failed outcome the caller already recorded — settle never retries or
+// looks up the existing PR itself.
+func TestSettle_GithubReadOnly_BlockedDraftPRFailureStillReportsBlocked(t *testing.T) {
+	const issNum = "1933"
+	branch := "agent/issue-1933"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRErr = errors.New("gh pr create: a pull request already exists")
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:       true,
+		OutcomeFound:  true,
+		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Errorf("RelayBundle must still run ahead of the failed CreateDraftPR, got %+v", fc.RelayBundleCalls)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must still carry agent-failed after a failed draft-PR create; labels=%v", iss.Labels)
 	}
 }

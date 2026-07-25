@@ -169,3 +169,22 @@ allowed to shadow an earlier genuine line), and strictly base64-decodes the
 Everything else in this ADR — the write-channel shape (block → stdout,
 launcher applies host-side), the capability gate, the token scope — is
 unchanged.
+
+## Amendment (issue #1933): IF BLOCKED gets the same host-mediation
+
+Issues #1917–#1919 host-mediated the three write channels above for the
+happy path only — `OPEN A PULL REQUEST` and the tracker-comment steps. The
+`IF BLOCKED` fallback (review never clears, CI stays red, push fails) still
+rendered its push and PR-check/create steps unconditionally, so a `read-only`
+Box that reached it would attempt `git push`/`gh pr view`/`gh pr create` with
+a token that holds none of those capabilities.
+
+`IF BLOCKED` now branches on the same `BOX_ACCESS_READ_WRITE`/
+`BOX_ACCESS_READ_ONLY` gate the push/create steps above use: under
+`read-only`, the Box writes the outbox bundle and a `SPINDRIFT_PR_INTENT`
+line instead, and reports `landing=` as the branch name rather than a PR URL
+it never learns. Settle's `blocked` outcome case now also relays that bundle
+(and opens the draft PR, if a PR-intent line was left) the same way
+`hostMediateDraftPR` does for `ready` — without this, a blocked-but-real
+bundle/PR-intent the Box left behind would be silently dropped the moment the
+container exits, rather than reaching the host at all.
