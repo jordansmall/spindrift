@@ -1506,6 +1506,13 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		}
 		loadedDoc = doc
 	}
+	// Runs after loadedDoc is in place (see applySecretCmdFallback's doc
+	// comment): CODE_FORGE/ISSUE_TRACKER may be set only via the document.
+	if err := applySecretCmdFallback(); err != nil {
+		stderr.Write(ambientWarnings.Bytes())
+		fmt.Fprintf(stderr, "%s\n", err)
+		return 1
+	}
 	flushAmbientWarnings(stderr, &ambientWarnings)
 	if args[0] == "__complete-issues" {
 		return cmdCompleteIssues()
