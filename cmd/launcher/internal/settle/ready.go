@@ -161,6 +161,20 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				s.transitionState(num, forge.InProgress, forge.Failed)
 				return landingFailed
 			}
+			// A read-only Box holds no push-capable token (issue #1979): its
+			// fix agent bundled its work to the outbox instead of pushing
+			// directly, so s.pr.HeadCommitSHA below never reflects real work
+			// until this relay lands it. Must run before the no-op check
+			// just below — a read-only Box never pushes directly whether or
+			// not the fix pass did real work, so checking head SHAs first
+			// would misread every read-only fix pass as a no-op and abort on
+			// the very first attempt. Best-effort: a failure here (a crashed
+			// box that left no bundle, say) is logged and the no-op check
+			// below runs against whatever head is actually current, rather
+			// than being treated as a distinct terminal condition.
+			if err := s.relayBoxBundle(num); err != nil {
+				fmt.Printf("    #%s  landing=%s  status=fix-relay-failed  !! %v\n", num, pr, err)
+			}
 			// A fix pass that exits zero but never pushes a new commit
 			// leaves CI's rollup exactly as it was — the next gateToGreen
 			// poll would read the identical terminal FAILURE and mistake it
@@ -622,7 +636,36 @@ func (s *Settle) resolveConflict(num, pr string, d dispatch.Dispatcher) error {
 		fmt.Printf("    #%s  landing=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
 		return fmt.Errorf("%w: conflict-resolve dispatch failed: %v", errLandingNeverGreen, crErr)
 	}
+	// A read-only Box holds no push-capable token (issue #1979): its
+	// entrypoint bundled the resolved branch to the outbox instead of
+	// force-pushing it directly, and — unlike the reactive loop's own
+	// rebase force-push — nothing else ever relays this bundle in, so
+	// without this the caller's rewaitAfterForcePush below would poll CI on
+	// the still-conflicted pre-resolve head forever.
+	if err := s.relayBoxBundle(num); err != nil {
+		return fmt.Errorf("%w: relay after conflict-resolve failed: %v", errLandingNeverGreen, err)
+	}
 	return nil
+}
+
+// relayBoxBundle relays num's outbox bundle in via the resolved Code Forge's
+// optional forge.BundleRelay hook (issue #1919), for any caller whose Box
+// may have bundled instead of pushed directly: resolveConflict above, and
+// selfHealGate's fix-pass retry loop. A read-write Code Forge never
+// implements forge.BundleRelay, so this is a no-op there — its Box already
+// pushed directly during its own run, matching the same gate
+// mergeImmediate's own pre-Merge-loop relay and
+// hostMediateDraftPR/relayBlockedWork (pr_intent.go) already use.
+func (s *Settle) relayBoxBundle(num string) error {
+	cf := s.cfForNum(num)
+	br, ok := cf.(forge.BundleRelay)
+	if !ok {
+		return nil
+	}
+	if s.cfg.OutboxDir == nil {
+		return fmt.Errorf("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay")
+	}
+	return br.RelayBundle(s.cfg.OutboxDir(num), cf.AgentBranch(num))
 }
 
 // rewaitAfterForcePush blocks for CI to reach green on the PR's current head

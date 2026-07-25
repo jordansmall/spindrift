@@ -2,10 +2,12 @@ package settle
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 func fixConfig(maxFixAttempts int) Config {
@@ -138,6 +140,104 @@ func TestSelfHeal_GenuineRedFixSucceeds(t *testing.T) {
 	}
 	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Complete {
 		t.Errorf("last transition To=%v, want Complete", last.To)
+	}
+}
+
+// TestSelfHeal_ReadOnlyFixPassRelaysBundleBeforeRecheck verifies that after
+// a fix pass, the box's outbox bundle is relayed in (forge.BundleRelay)
+// before the loop re-polls CI, for a Code Forge that implements it (the
+// github read-only adapter's shape, issue #1919). Under
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only the fix Box holds no push-capable
+// token — its own agent bundles its work to the outbox instead of pushing
+// directly (issue #1979) — so without this relay the PR's head never
+// actually changes and CI would just re-report the same failure forever.
+func TestSelfHeal_ReadOnlyFixPassRelaysBundleBeforeRecheck(t *testing.T) {
+	c := fixConfig(3)
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
+	cf := fc.AsGithubReadOnly()
+	s := New(c, fc, cf)
+
+	d := dispatch.NewFake()
+	landing := s.selfHeal(d, "1", 0, testPR)
+
+	if landing != landingMerged {
+		t.Fatalf("selfHeal = %v, want landingMerged after one fix pass", landing)
+	}
+	if passes := fixPasses(d); len(passes) != 1 || passes[0] != 1 {
+		t.Errorf("expected exactly fix-pass-1, got %v", passes)
+	}
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Fatalf("RelayBundle called %d times, want 1: %+v", len(fc.RelayBundleCalls), fc.RelayBundleCalls)
+	}
+	want := forge.RelayBundleCall{OutboxDir: "/outbox/1", Ref: cf.AgentBranch("1")}
+	if fc.RelayBundleCalls[0] != want {
+		t.Errorf("RelayBundle call = %+v, want %+v", fc.RelayBundleCalls[0], want)
+	}
+}
+
+// TestSelfHeal_ReadOnlyFixPassRelaysBeforeNoOpCheck verifies that the relay
+// (issue #1979) runs before the no-op fix-pass detection (issue #1980) gets
+// to compare head SHAs. A read-only Box never pushes directly — ever,
+// whether its fix pass was a genuine no-op or real work — so
+// s.pr.HeadCommitSHA(pr) never visibly moves until the relay lands the
+// bundle. If the no-op check ran first, it would misread every read-only
+// fix pass as a no-op and abort self-heal on the very first attempt,
+// regardless of MaxFixAttempts, defeating the whole point of #1979.
+func TestSelfHeal_ReadOnlyFixPassRelaysBeforeNoOpCheck(t *testing.T) {
+	c := fixConfig(3)
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
+	// Scripted constant: models the read-only Box's own direct-push
+	// visibility, which never moves regardless of what the fix pass did —
+	// only the relay call (not exercised by this Fake's HeadCommitSHA model)
+	// actually lands new work in production.
+	fc.SetHeadCommitSHAs(testPR, []string{"sha-1", "sha-1", "sha-1", "sha-1"})
+	cf := fc.AsGithubReadOnly()
+	s := New(c, fc, cf)
+
+	d := dispatch.NewFake()
+	s.selfHeal(d, "1", 0, testPR)
+
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Fatalf("RelayBundle called %d times, want 1 — it must run every read-only fix pass regardless of the no-op check's own head-SHA snapshot, or a genuine fix's PR head would never actually move", len(fc.RelayBundleCalls))
+	}
+}
+
+// TestSelfHeal_ReadOnlyFixPassRelayFailureIsNonFatal verifies that a
+// RelayBundle failure after a fix pass (a crashed Box that left no bundle,
+// say) is logged but never blocks or crashes the retry loop — it falls
+// through to the next gateToGreen poll like any other fix pass that didn't
+// change the outcome, exhausting normally rather than being treated as its
+// own distinct terminal condition.
+func TestSelfHeal_ReadOnlyFixPassRelayFailureIsNonFatal(t *testing.T) {
+	c := fixConfig(1)
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateFailure})
+	fc.RelayBundleErr = errors.New("bundle missing")
+	cf := fc.AsGithubReadOnly()
+	s := New(c, fc, cf)
+
+	d := dispatch.NewFake()
+	var landing landingResult
+	out := testutil.CaptureStdout(t, func() {
+		landing = s.selfHeal(d, "1", 0, testPR)
+	})
+
+	if landing != landingFailed {
+		t.Fatalf("selfHeal = %v, want landingFailed (still red after the relay failure)", landing)
+	}
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Errorf("RelayBundle called %d times, want 1: %+v", len(fc.RelayBundleCalls), fc.RelayBundleCalls)
+	}
+	if !strings.Contains(out, "fix-relay-failed") {
+		t.Errorf("console output must log the relay failure; got: %q", out)
 	}
 }
 
