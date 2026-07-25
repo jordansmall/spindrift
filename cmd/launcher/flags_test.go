@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -704,6 +705,108 @@ func TestParseFlags_CmdFlag_NonZeroExitIsError(t *testing.T) {
 	}
 	if got := os.Getenv("GH_TOKEN"); got != "" {
 		t.Errorf("GH_TOKEN = %q, want empty after a failing command", got)
+	}
+}
+
+// TestResolveSecretCmd_NonZeroExit_NamesExitCodeAndUnlockHint: a failing
+// secret command's error names the knob, the real exit code, and a generic,
+// tool-agnostic unlock hint (issue #1972) — never the command string, stdout,
+// or stderr.
+func TestResolveSecretCmd_NonZeroExit_NamesExitCodeAndUnlockHint(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		err := exec.Command("sh", "-c", "exit 42").Run()
+		return "", err
+	}
+	_, err := resolveSecretCmd("GH_TOKEN", "rbw get spindrift-gh-token")
+	if err == nil {
+		t.Fatal("expected error for a failing command, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "GH_TOKEN") {
+		t.Errorf("error should name GH_TOKEN, got: %v", msg)
+	}
+	if !strings.Contains(msg, "42") {
+		t.Errorf("error should include the exit code 42, got: %v", msg)
+	}
+	if !strings.Contains(msg, "unlock") {
+		t.Errorf("error should include the unlock remediation hint, got: %v", msg)
+	}
+}
+
+// TestResolveSecretCmd_EmptyOutput_NamesUnlockHint: an empty secret command
+// result's error names the knob and a generic, tool-agnostic unlock hint
+// (issue #1972).
+func TestResolveSecretCmd_EmptyOutput_NamesUnlockHint(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		return "", nil
+	}
+	_, err := resolveSecretCmd("GH_TOKEN", "rbw get spindrift-gh-token")
+	if err == nil {
+		t.Fatal("expected error for empty command output, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "GH_TOKEN") {
+		t.Errorf("error should name GH_TOKEN, got: %v", msg)
+	}
+	if !strings.Contains(msg, "unlock") {
+		t.Errorf("error should include the unlock remediation hint, got: %v", msg)
+	}
+}
+
+// TestResolveSecretCmd_NonZeroExit_NeverLeaksCommandOrOutput: the unlock-hint
+// error never carries the command string or its captured stdout, even though
+// both are available to resolveSecretCmd when building the message (issue
+// #1972's exposure-model constraint).
+func TestResolveSecretCmd_NonZeroExit_NeverLeaksCommandOrOutput(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		return "partial-secret-leak", errors.New("exit status 1: some vault diagnostic on stderr")
+	}
+	_, err := resolveSecretCmd("GH_TOKEN", "rbw get spindrift-gh-token --verbose")
+	if err == nil {
+		t.Fatal("expected error for a failing command, got nil")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "partial-secret-leak") {
+		t.Errorf("error must not leak captured stdout, got: %v", msg)
+	}
+	if strings.Contains(msg, "rbw get spindrift-gh-token --verbose") {
+		t.Errorf("error must not leak the command string, got: %v", msg)
+	}
+	if strings.Contains(msg, "vault diagnostic on stderr") {
+		t.Errorf("error must not leak stderr diagnostics, got: %v", msg)
+	}
+}
+
+// TestResolveSecretCmd_SignalKilled_OmitsFabricatedExitCode: a command
+// terminated by a signal reports ExitCode() == -1 (not a real exit code);
+// the error must not print that sentinel as if it were one, since -1 would
+// mislead the operator (issue #1972 review finding).
+func TestResolveSecretCmd_SignalKilled_OmitsFabricatedExitCode(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		err := exec.Command("sh", "-c", "kill -9 $$").Run()
+		return "", err
+	}
+	_, err := resolveSecretCmd("GH_TOKEN", "rbw get spindrift-gh-token")
+	if err == nil {
+		t.Fatal("expected error for a signal-killed command, got nil")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "-1") {
+		t.Errorf("error must not print the ExitCode() sentinel -1 as a real exit code, got: %v", msg)
+	}
+	if !strings.Contains(msg, "GH_TOKEN") {
+		t.Errorf("error should name GH_TOKEN, got: %v", msg)
+	}
+	if !strings.Contains(msg, "unlock") {
+		t.Errorf("error should include the unlock remediation hint, got: %v", msg)
 	}
 }
 
