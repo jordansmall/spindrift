@@ -1478,6 +1478,16 @@ fragments render the no-write path whenever it is absent, for any reason
 (issue #1951) — an unset, typo'd, or forwarding-glitched value can never
 fall open into the write-capable path.
 
+A second startup gate (issue #1950) checks the *token*, not just the forge/
+tracker shape: `read-only` also aborts unless `BOX_GH_TOKEN` is set and
+differs from the Launcher's own `GH_TOKEN`. Where the Box token can be
+introspected — a classic/OAuth PAT (`X-OAuth-Scopes`) or a GitHub App
+installation token (the repo endpoint's `permissions.push` field) — it's
+rejected if it carries write access; a fine-grained PAT can't be introspected
+reliably, so it's accepted with a loud warning instead. `spindrift doctor`
+reports this gate's outcome the same way it reports labels and forge
+connectivity. `read-write` never inspects `BOX_GH_TOKEN` either way.
+
 `read-only` is an **alternative route to the same guarantee** [two-actor
 separation](#two-actor-separation-opt-in-hard-mode) provides: a Box that
 cannot unilaterally land on the base branch. Two-actor separation gets there
