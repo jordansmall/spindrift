@@ -15,9 +15,7 @@ import (
 // #1919): the Box holds no push or PR-create token, so before selfHeal can
 // watch CI on a PR, settle must relay the Box's finished branch (its
 // forge.BundleRelay hook) and open the draft PR itself (its
-// forge.DraftPRCreator hook) from the Box's PR-intent line. branch is the
-// outcome line's own landing= field, which under read-only carries the
-// branch name (the Box has no PR URL to report) rather than a PR URL.
+// forge.DraftPRCreator hook) from the Box's PR-intent line.
 //
 // Returns the resolved PR URL and true on success. Any failure along the
 // way — a missing/malformed bundle, a missing/malformed PR-intent line, or
@@ -26,8 +24,16 @@ import (
 // is a blocked hand-off, never a demotion to agent-failed), and returns
 // ok=false so the caller skips CI-watch entirely rather than polling a PR
 // that was never opened.
-func (s *Settle) hostMediateDraftPR(num, branch string, result dispatch.Result) (string, bool) {
+//
+// branch is derived from cf.AgentBranch(num), never from the outcome line's
+// own landing= field (issue #1949): a prompt-injected read-only Box holds no
+// write token, but it does control both landing= and its own bundle's ref
+// names, so trusting landing= here would let it steer the Launcher's
+// force-push and draft-PR head at will. Deriving branch host-side pins both
+// to the one ref the Box's PR is actually expected to hand off on.
+func (s *Settle) hostMediateDraftPR(num string, result dispatch.Result) (string, bool) {
 	cf := s.cfForNum(num)
+	branch := cf.AgentBranch(num)
 	br, ok := cf.(forge.BundleRelay)
 	if !ok {
 		// The startup capability gate (main.go, issue #1916) guarantees a
@@ -67,18 +73,20 @@ func (s *Settle) hostMediateDraftPR(num, branch string, result dispatch.Result) 
 
 // relayBlockedWork gives a read-only Box's finished-but-blocked branch the
 // same host-mediated relay hostMediateDraftPR gives the "ready" path (issue
-// #1933): branch is the outcome line's own landing= field, which under
-// read-only carries the branch name rather than a PR URL. Relays the outbox
-// bundle so the branch itself is never lost, then opens a draft PR from a
-// PR-intent line if the Box left one — a blocked run may reach here before
-// ever printing one (e.g. review never cleared), in which case only the
-// relay runs.
+// #1933). Relays the outbox bundle so the branch itself is never lost, then
+// opens a draft PR from a PR-intent line if the Box left one — a blocked run
+// may reach here before ever printing one (e.g. review never cleared), in
+// which case only the relay runs.
 //
 // Unlike hostMediateDraftPR, every failure here just logs: the caller's
 // "blocked" transition and comment already recorded the real outcome, so
 // there is nothing to downgrade and no CI to skip watching.
-func (s *Settle) relayBlockedWork(num, branch string, result dispatch.Result) {
+//
+// branch is derived from cf.AgentBranch(num), never o.Landing, for the same
+// reason hostMediateDraftPR derives it (issue #1949).
+func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
 	cf := s.cfForNum(num)
+	branch := cf.AgentBranch(num)
 	br, ok := cf.(forge.BundleRelay)
 	if !ok || s.cfg.OutboxDir == nil {
 		return

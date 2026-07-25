@@ -19,10 +19,11 @@ import (
 // never opens a PR itself under read-only.
 func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR(t *testing.T) {
 	const issNum = "1933"
-	branch := "agent/issue-1933"
 	const prURL = "https://github.com/owner/repo/pull/1933"
 
 	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 
@@ -78,9 +79,10 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR(t *testing.T
 // title/body to open one with.
 func TestSettle_GithubReadOnly_BlockedRelaysBundleWithoutPRIntent(t *testing.T) {
 	const issNum = "1933"
-	branch := "agent/issue-1933"
 
 	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	d := dispatch.NewFake()

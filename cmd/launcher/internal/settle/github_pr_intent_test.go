@@ -43,10 +43,11 @@ func TestParsePRIntent_PreservesInternalNewlinesInBody(t *testing.T) {
 // the read-write path does — proving the Box made no host write at all.
 func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges(t *testing.T) {
 	const issNum = "1919"
-	branch := "agent/issue-1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
 
 	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = prURL
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
@@ -211,5 +212,47 @@ func TestSettle_GithubReadWrite_UnaffectedByHostMediation(t *testing.T) {
 	}
 	if fc.Merged != prURL {
 		t.Errorf("expected Merge(%q) to have run against the box's own PR; fc.Merged=%q", prURL, fc.Merged)
+	}
+}
+
+// TestSettle_GithubReadOnly_HostileLandingIgnored_UsesAgentBranch asserts
+// issue #1949's fix for a confirmed live exploit: a prompt-injected read-only
+// Box can print landing=main (or any other ref) on its outcome line. settle
+// must never trust that value as the relay/force-push destination or the
+// draft-PR head — both are derived host-side from the Code Forge's own
+// canonical AgentBranch for the issue, regardless of what landing= says.
+func TestSettle_GithubReadOnly_HostileLandingIgnored_UsesAgentBranch(t *testing.T) {
+	const issNum = "1919"
+	const hostileLanding = "main"
+	const prURL = "https://github.com/owner/repo/pull/1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	agentBranch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:       true,
+		OutcomeFound:  true,
+		Outcome:       outcome.Outcome{Issue: issNum, Landing: hostileLanding, Status: "ready", Note: "ok"},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0].Ref != agentBranch {
+		t.Fatalf("RelayBundleCalls = %+v, want one call with ref=%s (never the hostile landing=%s)", fc.RelayBundleCalls, agentBranch, hostileLanding)
+	}
+	if len(fc.CreateDraftPRCalls) != 1 || fc.CreateDraftPRCalls[0].Head != agentBranch {
+		t.Fatalf("CreateDraftPRCalls = %+v, want one call with head=%s (never the hostile landing=%s)", fc.CreateDraftPRCalls, agentBranch, hostileLanding)
 	}
 }
