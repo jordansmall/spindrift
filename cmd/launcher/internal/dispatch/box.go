@@ -91,10 +91,12 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 
 // ResolveConflict dispatches a conflict-resolution box against pr. The box
 // receives CONFLICT_RESOLVE_PR_URL so the entrypoint enters conflict-resolve
-// mode: it resolves the rebase conflict, pushes the branch, and exits
-// without running the main agent prompt. Not subject to retry, and does not
-// mount the driver cache -- it never runs the main agent prompt, so there is
-// no session to resume.
+// mode: it resolves the rebase conflict, publishes the branch -- pushed
+// directly under a write-capable token, bundled to the outbox for the
+// launcher to relay otherwise (issue #1979) -- and exits without running the
+// main agent prompt. Not subject to retry, and does not mount the driver
+// cache -- it never runs the main agent prompt, so there is no session to
+// resume.
 func (d *Dispatch) ResolveConflict(pr string) error {
 	fmt.Fprintf(d.humanOut(), "    -> #%s (conflict-resolve): %s\n", d.number, d.title)
 	env := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)

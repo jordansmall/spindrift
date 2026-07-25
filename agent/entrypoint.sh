@@ -187,13 +187,39 @@ phase_branch_recovery() {
     else
       echo "==> stale remote branch $BRANCH found (no open PR); force-resetting to ${BASE_BRANCH:-}"
       git checkout -b "$BRANCH" "origin/${BASE_BRANCH:-}"
-      git push --force-with-lease origin "$BRANCH" || {
-        echo "==> force-with-lease push failed on $BRANCH; concurrent Box may be ahead"
+      publish_rebased_branch "$BRANCH" || {
+        echo "==> publishing reset branch failed on $BRANCH; concurrent Box may be ahead"
         exit 1
       }
     fi
   else
     git checkout -b "$BRANCH" "origin/${BASE_BRANCH:-}"
+  fi
+}
+
+# publish_rebased_branch lands a just-rebased branch so a later step never
+# sees the stale pre-rebase state: the agent's own incremental push in
+# read-write mode, or CONFLICT_RESOLVE_PR_URL's no-agent exit in read-only
+# mode, where this is the only chance to land it at all. A read-only Box
+# holds no push-capable token (issue #1979: a direct force-push here 403s
+# before the agent ever runs), so it relays via the outbox bundle instead --
+# the same BOX_WRITE_ENABLED fail-closed gate the OPEN A PULL REQUEST
+# contract's own outbox step uses (open-pr-push-outbox.md, issue #1918).
+# Delegates the bundle itself to driver-exec's bundle-out verb (issue #1808)
+# rather than a second hand-rolled `git bundle create` -- the same
+# empty-range-is-a-no-op guard and outbox filename this Box's post-driver
+# CODE_FORGE=local bundle-out call below already share, one implementation
+# instead of two that could drift.
+publish_rebased_branch() {
+  local branch="$1"
+  if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
+    git push --force-with-lease origin "$branch"
+  else
+    driver-exec bundle-out \
+      --repo "$WORK_DIR" \
+      --base "origin/${BASE_BRANCH:-}" \
+      --branch "$branch" \
+      --outbox "$OUTBOX_DIR"
   fi
 }
 
@@ -216,8 +242,8 @@ phase_prework_rebase() {
   # publication is deferred until after the conflict-resolve agent runs below.
   if [ -z "${_had_rebase_conflict:-}" ] && [ -n "${_rebase_and_publish:-}" ]; then
     echo "==> publishing rebased $BRANCH"
-    git push --force-with-lease origin "$BRANCH" || {
-      echo "==> force-with-lease push after pre-work rebase failed on $BRANCH"
+    publish_rebased_branch "$BRANCH" || {
+      echo "==> publishing rebased branch failed after pre-work rebase on $BRANCH"
       exit 1
     }
   fi
@@ -386,8 +412,8 @@ phase_conflict_resolve() {
     echo "==> pre-work rebase conflict resolved by agent"
     if [ -n "${_rebase_and_publish:-}" ]; then
       echo "==> publishing rebased $BRANCH (post-conflict-resolve)"
-      git push --force-with-lease origin "$BRANCH" || {
-        echo "==> force-with-lease push after conflict resolution failed on $BRANCH"
+      publish_rebased_branch "$BRANCH" || {
+        echo "==> publishing rebased branch failed after conflict resolution on $BRANCH"
         exit 1
       }
     fi

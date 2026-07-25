@@ -52,6 +52,76 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "entrypoint bundles rebased branch to outbox instead of force-pushing when read-only" {
+  # Same prior-work/main-advance setup as the read-write case above, but with
+  # BOX_WRITE_ENABLED unset (issue #1979): the box holds no push-capable
+  # token, so publishing the rebased branch must relay via the outbox bundle
+  # instead of a direct force-push that would 403.
+  local prior="$BATS_TEST_TMPDIR/prior"
+  git clone -q "https://github.com/owner/repo.git" "$prior"
+  git -C "$prior" checkout -b "agent/issue-7" "origin/main"
+  echo "branch work" > "$prior/branch.txt"
+  git -C "$prior" add branch.txt
+  git -C "$prior" commit -q -m "feat: prior run work"
+  git -C "$prior" push -q origin "agent/issue-7"
+
+  local advance="$BATS_TEST_TMPDIR/advance"
+  git clone -q "https://github.com/owner/repo.git" "$advance"
+  echo "main advance" > "$advance/main_advance.txt"
+  git -C "$advance" add main_advance.txt
+  git -C "$advance" commit -q -m "chore: advance main"
+  git -C "$advance" push -q origin HEAD:main
+
+  export FAKE_GH_PR_LIST_7="https://github.com/owner/repo/pull/7"
+  unset BOX_WRITE_ENABLED
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+
+  local before_sha
+  before_sha="$(git -C "$prior" rev-parse "agent/issue-7")"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  # The remote branch must be untouched -- no direct push in read-only mode.
+  local after_sha
+  after_sha="$(git --git-dir="$REMOTE_ROOT/owner/repo.git" rev-parse "refs/heads/agent/issue-7")"
+  [ "$before_sha" = "$after_sha" ]
+
+  # The rebased tree must instead be relayed via the outbox bundle.
+  [ -f "$OUTBOX_DIR/seam.bundle" ]
+  run git -C "$WORK_DIR" bundle verify "$OUTBOX_DIR/seam.bundle"
+  [ "$status" -eq 0 ]
+}
+
+@test "entrypoint bundling a rebase with no commits ahead of base is a no-op, not a failure" {
+  # The adopted branch has no work of its own yet (its tip already equals
+  # origin/main) -- the rebase is a no-op fast-forward, so the outbox range
+  # origin/BASE_BRANCH..BRANCH is empty. `git bundle create` refuses to write
+  # an empty bundle and exits non-zero; the read-write push path already
+  # tolerates this (a force-with-lease push of an unchanged ref no-ops), so
+  # the read-only bundle path must tolerate it the same way rather than
+  # failing the whole box over nothing to relay (issue #1979).
+  local prior="$BATS_TEST_TMPDIR/prior"
+  git clone -q "https://github.com/owner/repo.git" "$prior"
+  git -C "$prior" checkout -b "agent/issue-7" "origin/main"
+  git -C "$prior" push -q origin "agent/issue-7"
+
+  local advance="$BATS_TEST_TMPDIR/advance"
+  git clone -q "https://github.com/owner/repo.git" "$advance"
+  echo "main advance" > "$advance/main_advance.txt"
+  git -C "$advance" add main_advance.txt
+  git -C "$advance" commit -q -m "chore: advance main"
+  git -C "$advance" push -q origin HEAD:main
+
+  export FAKE_GH_PR_LIST_7="https://github.com/owner/repo/pull/7"
+  unset BOX_WRITE_ENABLED
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ ! -e "$OUTBOX_DIR/seam.bundle" ]
+}
+
 @test "entrypoint fails fast when pre-work rebase conflicts with latest main" {
   # Simulate a prior run that modified README.md on the branch, then main
   # landed a conflicting change to the same file.
@@ -143,6 +213,33 @@ setup_rebase_conflict() {
   [ "$status" -eq 0 ]
   # Main agent must NOT have been invoked — the issue prompt should be absent.
   ! grep -q "Implement GitHub issue #7" "$CLAUDE_PROMPT_FILE"
+}
+
+@test "CONFLICT_RESOLVE_PR_URL read-only: bundles resolved branch to outbox instead of force-pushing" {
+  # This box never reaches phase_prework_rebase's own publish step (a
+  # conflict was hit) and exits without running the main agent afterward
+  # (line 396-401), so this publish is the only chance to land the resolved
+  # branch at all -- it must relay via the outbox the same way the read-only
+  # pre-work-rebase case does (issue #1979).
+  setup_rebase_conflict
+  export FAKE_CLAUDE_RESOLVE_CONFLICT=1
+  export CONFLICT_RESOLVE_PR_URL="https://github.com/owner/repo/pull/7"
+  unset BOX_WRITE_ENABLED
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+
+  local before_sha
+  before_sha="$(git --git-dir="$REMOTE_ROOT/owner/repo.git" rev-parse "refs/heads/agent/issue-7")"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  local after_sha
+  after_sha="$(git --git-dir="$REMOTE_ROOT/owner/repo.git" rev-parse "refs/heads/agent/issue-7")"
+  [ "$before_sha" = "$after_sha" ]
+
+  [ -f "$OUTBOX_DIR/seam.bundle" ]
+  run git -C "$WORK_DIR" bundle verify "$OUTBOX_DIR/seam.bundle"
+  [ "$status" -eq 0 ]
 }
 
 # --- pre-work rebase conflict on a generated file (issue #403) ---------------

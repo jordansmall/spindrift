@@ -45,6 +45,37 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "re-dispatched box read-only: never force-pushes the stale-branch reset" {
+  # Same stale-branch-no-open-PR setup as above, but read-only (issue #1979):
+  # the box holds no push-capable token, so even this housekeeping reset must
+  # never force-push the remote directly. The reset branch matches base
+  # exactly (nothing ahead), so there is nothing to relay either -- the
+  # empty-bundle no-op in publish_rebased_branch covers this the same way it
+  # covers a no-op pre-work rebase.
+  local prior="$BATS_TEST_TMPDIR/prior"
+  git clone -q "https://github.com/owner/repo.git" "$prior"
+  git -C "$prior" checkout -b "agent/issue-7" "origin/main"
+  echo "stale content from prior run" > "$prior/stale.txt"
+  git -C "$prior" add -A
+  git -C "$prior" commit -q -m "feat: prior run commit"
+  git -C "$prior" push -q origin "agent/issue-7"
+  # No FAKE_GH_PR_LIST_7 → gh pr list returns empty → no open PR
+
+  unset BOX_WRITE_ENABLED
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+
+  local before_sha
+  before_sha="$(git -C "$prior" rev-parse "agent/issue-7")"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  local after_sha
+  after_sha="$(git --git-dir="$REMOTE_ROOT/owner/repo.git" rev-parse "refs/heads/agent/issue-7")"
+  [ "$before_sha" = "$after_sha" ]
+  [ ! -e "$OUTBOX_DIR/seam.bundle" ]
+}
+
 @test "re-dispatched box skips force-reset when an open PR exists on the stale branch" {
   # Simulate a prior run that pushed commits AND opened a PR, then died before
   # printing SPINDRIFT_OUTCOME.  The entrypoint must not destroy the branch so

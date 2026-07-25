@@ -231,6 +231,48 @@ func TestMergeImmediate_ConflictDemotesToDraftAndRestoresOnGreen(t *testing.T) {
 	}
 }
 
+// TestMergeImmediate_ConflictResolveRelaysBundleWhenReadOnly verifies that
+// once the reactive conflict-retry loop's conflict-resolve dispatch
+// succeeds, the resolved branch is relayed in from the outbox before the
+// retried Merge, for a Code Forge that implements forge.BundleRelay (the
+// github read-only adapter's shape, issue #1919). Under
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only the conflict-resolve Box exits
+// without ever running the main agent (issue #1979), so this relay is the
+// only chance to land its resolved work at all — without it the retried
+// Merge would see the same pre-resolve conflict forever.
+func TestMergeImmediate_ConflictResolveRelaysBundleWhenReadOnly(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	fc := forge.NewFake()
+	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
+	fc.RebaseErr = forge.ErrMergeConflict
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	df := dispatch.NewFake()
+	cf := fc.AsGithubReadOnly()
+	s := New(c, fc, cf)
+
+	err := s.mergeImmediate("1", 0, testPR, df)
+
+	if err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if len(df.ResolveConflictCalls) != 1 {
+		t.Errorf("ResolveConflict called %d times, want 1", len(df.ResolveConflictCalls))
+	}
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Fatalf("RelayBundle called %d times, want 1: %+v", len(fc.RelayBundleCalls), fc.RelayBundleCalls)
+	}
+	want := forge.RelayBundleCall{OutboxDir: "/outbox/1", Ref: cf.AgentBranch("1")}
+	if fc.RelayBundleCalls[0] != want {
+		t.Errorf("RelayBundle call = %+v, want %+v", fc.RelayBundleCalls[0], want)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("Merge not called after conflict-resolve; fc.Merged=%q", fc.Merged)
+	}
+}
+
 // TestMergeImmediate_MarkDraftFailureIsBestEffort verifies that a MarkDraft
 // error on a genuine conflict is logged to the console but never blocks the
 // rebase/merge landing path (issue #1863) — matching MarkReady's own
