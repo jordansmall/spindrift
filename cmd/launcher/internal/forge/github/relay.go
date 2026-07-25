@@ -43,10 +43,12 @@ func NewReadOnlyCodeForge(repo string, labels forge.DispatchLabels, branchPrefix
 // broken hand-off blocks the seam instead of landing nothing (mirroring
 // local's own bundle-relay failure posture).
 func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
-	// Defense in depth, matching local's own relayBundle: ref is
-	// launcher-controlled today (AgentBranch's own naming), but this method
-	// interpolates it directly into a refspec and a checkout argument, so
-	// guard it the same way regardless.
+	// Defense in depth, matching local's own relayBundle: settle derives ref
+	// from cf.AgentBranch(num) host-side (issue #1949) and never forwards the
+	// outcome line's own landing= field here, so ref is launcher-controlled
+	// by the time it reaches this method. It still interpolates directly into
+	// a refspec and a checkout argument, so guard it the same way regardless
+	// of that guarantee holding upstream.
 	if ref == "" || strings.HasPrefix(ref, "-") {
 		return fmt.Errorf("github: relay bundle: invalid ref %q", ref)
 	}
