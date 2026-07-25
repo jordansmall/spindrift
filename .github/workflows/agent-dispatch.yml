@@ -86,6 +86,7 @@ jobs:
       - name: Dispatch the labeled issue
         run: |
           nix run . -- dispatch \
+            --box-forge-and-issue-access read-write \
             --issue-number "${{ github.event.issue.number }}" \
             --label agent-in-progress \
             --max-jobs 1 \

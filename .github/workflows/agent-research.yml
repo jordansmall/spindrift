@@ -84,6 +84,7 @@ jobs:
       - name: Research the labeled issue
         run: |
           nix run . -- research \
+            --box-forge-and-issue-access read-write \
             --issue-number "${{ github.event.issue.number }}" \
             --max-jobs 1 \
             --repo-slug "${{ github.repository }}" \
