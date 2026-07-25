@@ -2330,6 +2330,35 @@ func TestDoctor_ReadOnlyTokenGate_MissingBoxTokenFails(t *testing.T) {
 	}
 }
 
+// TestDoctor_ReadOnlyTokenGate_NonIntrospectableTokenDoesNotClaimVerified
+// verifies runDoctor's success line never claims a fine-grained PAT's write
+// capability was confirmed (it wasn't -- the gate just accepted it on trust
+// and printed a warning). A prior version printed a fixed "confirmed
+// not write-capable" success line unconditionally, contradicting the
+// warning it had just printed for exactly this case.
+func TestDoctor_ReadOnlyTokenGate_NonIntrospectableTokenDoesNotClaimVerified(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	c := defaultLabelConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.ghToken = "launcher-token"
+	c.repoSlug = "owner/repo"
+	t.Setenv("BOX_GH_TOKEN", "github_pat_boxtoken")
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, c, &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "WARNING") {
+		t.Fatalf("want the gate's warning printed, got %q", out)
+	}
+	if strings.Contains(out, "distinct, and not write-capable") {
+		t.Errorf("doctor claimed write-capability was confirmed for a non-introspectable token, got %q", out)
+	}
+}
+
 func contains(ss []string, s string) bool {
 	for _, v := range ss {
 		if v == s {

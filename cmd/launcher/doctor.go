@@ -39,9 +39,14 @@ func reportReadOnlyTokenGate(c config, w io.Writer) error {
 		fmt.Fprintln(w, "ok: BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op")
 		return nil
 	}
-	if err := checkReadOnlyTokenGate(c, ghTokenIntrospector, w); err != nil {
+	verified, err := checkReadOnlyTokenGate(c, ghTokenIntrospector, w)
+	if err != nil {
 		return err
 	}
-	fmt.Fprintln(w, "ok: read-only token gate satisfied — BOX_GH_TOKEN is set, distinct, and not write-capable")
+	if verified {
+		fmt.Fprintln(w, "ok: read-only token gate satisfied — BOX_GH_TOKEN is set, distinct, and confirmed not write-capable")
+		return nil
+	}
+	fmt.Fprintln(w, "ok: read-only token gate satisfied — BOX_GH_TOKEN is set and distinct (see warning above: its write capability could not be verified)")
 	return nil
 }

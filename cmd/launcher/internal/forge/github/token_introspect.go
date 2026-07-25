@@ -53,12 +53,15 @@ func TokenRepoPushPermission(token, repoSlug string) (bool, error) {
 		return false, fmt.Errorf("gh api repos/%s: %w", repoSlug, err)
 	}
 	var resp struct {
-		Permissions struct {
-			Push bool `json:"push"`
+		Permissions *struct {
+			Push *bool `json:"push"`
 		} `json:"permissions"`
 	}
 	if err := json.Unmarshal(out, &resp); err != nil {
 		return false, fmt.Errorf("parse repo permissions for %s: %w", repoSlug, err)
 	}
-	return resp.Permissions.Push, nil
+	if resp.Permissions == nil || resp.Permissions.Push == nil {
+		return false, fmt.Errorf("repo permissions field missing or incomplete for %s; cannot determine write capability", repoSlug)
+	}
+	return *resp.Permissions.Push, nil
 }
