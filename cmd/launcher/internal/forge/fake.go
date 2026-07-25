@@ -531,10 +531,9 @@ func (f *Fake) TransitionState(num string, from, to DispatchState) error {
 		return nil // best-effort
 	}
 	add := f.labels.Label(to)
-	remove := map[string]bool{f.labels.Label(from): true}
-	if to == InProgress {
-		remove[f.labels.Complete] = true
-		remove[f.labels.Failed] = true
+	remove := map[string]bool{}
+	for _, l := range f.labels.ClaimRemoveLabels(from, to) {
+		remove[l] = true
 	}
 	var next []string
 	for _, l := range iss.Labels {
