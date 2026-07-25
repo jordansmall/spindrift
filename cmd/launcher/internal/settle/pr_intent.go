@@ -3,6 +3,7 @@ package settle
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -62,6 +63,42 @@ func (s *Settle) hostMediateDraftPR(num, branch string, result dispatch.Result) 
 		return s.blockHandoff(num, branch, fmt.Errorf("draft PR create: %w", err))
 	}
 	return url, true
+}
+
+// relayBlockedWork gives a read-only Box's finished-but-blocked branch the
+// same host-mediated relay hostMediateDraftPR gives the "ready" path (issue
+// #1933): branch is the outcome line's own landing= field, which under
+// read-only carries the branch name rather than a PR URL. Relays the outbox
+// bundle so the branch itself is never lost, then opens a draft PR from a
+// PR-intent line if the Box left one — a blocked run may reach here before
+// ever printing one (e.g. review never cleared), in which case only the
+// relay runs.
+//
+// Unlike hostMediateDraftPR, every failure here just logs: the caller's
+// "blocked" transition and comment already recorded the real outcome, so
+// there is nothing to downgrade and no CI to skip watching.
+func (s *Settle) relayBlockedWork(num, branch string, result dispatch.Result) {
+	cf := s.cfForNum(num)
+	br, ok := cf.(forge.BundleRelay)
+	if !ok || s.cfg.OutboxDir == nil {
+		return
+	}
+	if err := br.RelayBundle(s.cfg.OutboxDir(num), branch); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not relay blocked-hand-off bundle: %v\n", num, err)
+		return
+	}
+
+	title, body, ok := parsePRIntent(result)
+	if !ok {
+		return
+	}
+	dpc, ok := cf.(forge.DraftPRCreator)
+	if !ok {
+		return
+	}
+	if _, err := dpc.CreateDraftPR(title, body, s.cfg.BaseBranch, branch); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not create draft PR for blocked hand-off: %v\n", num, err)
+	}
 }
 
 // blockHandoff posts a merge-blocked comment and marks num agent-complete —
