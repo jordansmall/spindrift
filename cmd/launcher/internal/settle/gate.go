@@ -46,15 +46,18 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	case "blocked":
 		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
 		s.transitionState(num, forge.InProgress, forge.Failed)
-		// A read-only PR-shaped Code Forge's Box never pushes or opens a PR
-		// in-box (issue #1933, same reasoning as the "ready" case's
-		// hostMediateDraftPR call below): without this, a bundle it wrote to
-		// the outbox and a PR-intent line it printed on its way to IF
-		// BLOCKED would otherwise be silently stranded once the container
-		// exits. Best-effort and additive only -- unlike hostMediateDraftPR,
-		// failure here never changes the blocked outcome already recorded
-		// above.
-		if s.readOnly && s.pr != nil {
+		// A read-only Box never pushes or opens a PR in-box (issue #1933,
+		// same reasoning as the "ready" case's hostMediateDraftPR call
+		// below): without this, a bundle it wrote to the outbox and a
+		// PR-intent line it printed on its way to IF BLOCKED would
+		// otherwise be silently stranded once the container exits. This
+		// applies under any read-only Code Forge, PR-shaped or push-only
+		// (issue #1946) -- relayBlockedWork's own cf.(forge.BundleRelay)/
+		// cf.(forge.DraftPRCreator) assertions already decide what a given
+		// forge supports. Best-effort and additive only -- unlike
+		// hostMediateDraftPR, failure here never changes the blocked
+		// outcome already recorded above.
+		if s.readOnly {
 			s.relayBlockedWork(num, result)
 		}
 		s.postBlockedNoteComment(num, o.Note)

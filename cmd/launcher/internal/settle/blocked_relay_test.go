@@ -112,6 +112,59 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleWithoutPRIntent(t *testing.T) 
 	}
 }
 
+// TestSettle_LocalReadOnly_BlockedRelaysBundleWithoutDraftPR asserts issue
+// #1946's fix: a read-only CODE_FORGE=local Box that reaches IF BLOCKED gets
+// its outbox bundle relayed too, not just the PR-shaped github/jira case
+// #1933 originally covered -- gate.go's blocked-path condition gated the
+// relay on s.pr != nil, which is always nil for local's push-only forge, so
+// the relay never ran for it. local doesn't implement DraftPRCreator, so no
+// draft PR gets attempted even though the box printed a PR-intent line.
+func TestSettle_LocalReadOnly_BlockedRelaysBundleWithoutDraftPR(t *testing.T) {
+	const issNum = "1946"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:       true,
+		OutcomeFound:  true,
+		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc, fc.AsLocal())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != (forge.RelayBundleCall{OutboxDir: "/outbox/1946", Ref: branch}) {
+		t.Fatalf("RelayBundleCalls = %+v, want one call with outbox=/outbox/1946 ref=%s", fc.RelayBundleCalls, branch)
+	}
+	if len(fc.CreateDraftPRCalls) != 0 {
+		t.Errorf("CreateDraftPR must not be called; local doesn't implement DraftPRCreator, got %+v", fc.CreateDraftPRCalls)
+	}
+
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must carry agent-failed after a blocked outcome; labels=%v", iss.Labels)
+	}
+	var noteCalls []forge.CommentCall
+	for _, call := range fc.CommentCalls {
+		if call.Body == result.Outcome.Note {
+			noteCalls = append(noteCalls, call)
+		}
+	}
+	if len(noteCalls) != 1 {
+		t.Fatalf("want 1 comment posting the blocked note, got %d (all calls: %+v)", len(noteCalls), fc.CommentCalls)
+	}
+}
+
 // TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation asserts the
 // read-write path (Config.ReadOnly false) never consults BundleRelay or
 // DraftPRCreator on a blocked outcome, even when the Code Forge happens to
@@ -147,6 +200,40 @@ func TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 	}
 }
 
+// TestSettle_LocalReadWrite_BlockedUnaffectedByHostMediation asserts the
+// read-write path (Config.ReadOnly false) never consults BundleRelay on a
+// blocked outcome under CODE_FORGE=local either -- the Box already pushed
+// (or tried to) in-box under read-write, so there is nothing here for
+// settle to relay. Mirrors
+// TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation for the
+// push-only forge shape.
+func TestSettle_LocalReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
+	const issNum = "1946"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:       true,
+		OutcomeFound:  true,
+		Outcome:       outcome.Outcome{Issue: issNum, Landing: fc.AgentBranch(issNum), Status: "blocked", Note: "push rejected"},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
+
+	c := baseConfig() // Config.ReadOnly defaults false
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc, fc.AsLocal())
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.RelayBundleCalls) != 0 {
+		t.Errorf("RelayBundle must not be called under read-write, got %+v", fc.RelayBundleCalls)
+	}
+}
+
 // TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked
 // asserts a RelayBundle failure during the blocked hand-off logs and moves
 // on, never attempting CreateDraftPR (a real force-push failed, so a branch
@@ -179,6 +266,41 @@ func TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked(t 
 	if len(fc.CreateDraftPRCalls) != 0 {
 		t.Errorf("CreateDraftPR must not be called when the relay fails, got %+v", fc.CreateDraftPRCalls)
 	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must still carry agent-failed after a failed relay; labels=%v", iss.Labels)
+	}
+}
+
+// TestSettle_LocalReadOnly_BlockedRelayFailureStaysBlocked asserts a
+// RelayBundle failure during the blocked hand-off logs and moves on under
+// CODE_FORGE=local too, never changing the blocked/agent-failed outcome the
+// caller already recorded. Mirrors
+// TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked
+// for the push-only forge shape (local has no CreateDraftPR to skip).
+func TestSettle_LocalReadOnly_BlockedRelayFailureStaysBlocked(t *testing.T) {
+	const issNum = "1946"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.RelayBundleErr = errors.New("bundle missing")
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc, fc.AsLocal())
+	s.Settle(d, issNum, 0, result)
+
 	iss, _ := fc.Issue(issNum)
 	if !containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must still carry agent-failed after a failed relay; labels=%v", iss.Labels)
