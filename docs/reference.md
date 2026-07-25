@@ -594,12 +594,16 @@ variant overrides a direct value, and migrating to a vault is a matter of
 adding the command, not first removing the old value. Supplying both
 `--<secret>-cmd` and `--<secret>-file` for the same secret is a configuration
 error. A failing or empty command aborts the launch with a named, value-free
-error; the fetched value is never logged, baked into the nix store, or
-written to the launcher input document — only the command string itself
-(which reveals a vault item name, not the secret) may appear in host-side
-logs. The plaintext direct-value and `--<secret>-file` forms remain fully
-supported and are not deprecated; with this in place, `harness.env` is
-expected to hold fetch recipes rather than live credentials. See
+error: the message names the knob and, on a non-zero exit, the exit code,
+plus a generic, tool-agnostic remediation hint ("your vault may be locked;
+unlock it (e.g. `rbw unlock`) and re-run") — never the command string, its
+captured stdout, or its captured stderr. The fetched value is never logged,
+baked into the nix store, or written to the launcher input document — only
+the command string itself (which reveals a vault item name, not the
+secret) may appear in host-side logs. The plaintext direct-value and
+`--<secret>-file` forms remain fully supported and are not deprecated;
+with this in place, `harness.env` is expected to hold fetch recipes
+rather than live credentials. See
 `spindrift --help --all` for the full `--<secret>-cmd`/`--<secret>-file`
 flag list. When the launcher's own stdin and stderr are both TTYs, an
 interactive vault unlock prompt passes through instead of being discarded —
@@ -1557,7 +1561,13 @@ boundary does and does not promise.
    as the secret and never printed. Non-interactively (CI, a pipe, a
    redirect), behaviour is unchanged from before this gate existed — stderr
    discarded, stdin not attached, so a vault tool can't block the run
-   waiting on input that will never come.
+   waiting on input that will never come. A command that still fails —
+   non-zero exit, or empty stdout — aborts the launch with a message that
+   names the knob, the exit code (non-zero exit only), and a generic,
+   tool-agnostic remediation hint ("your vault may be locked; unlock it
+   (e.g. `rbw unlock`) and re-run"); the command string, its captured
+   stdout, and its captured stderr never appear in that message or in a
+   log.
 2. **The Box can't read its own credentials.** A `PreToolUse` hook
    (`env-credential-scrub.sh`, issue #1927) rewrites every Bash call to
    `unset` `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` before it runs,
