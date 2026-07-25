@@ -34,8 +34,14 @@ func NewGitRepoFixture(t *testing.T, base string) *GitRepoFixture {
 	// Disable auto-gc: git forks a detached `git gc --auto` after a push
 	// crosses the loose-object threshold, and that background process can
 	// still be repacking objects.git when t.TempDir()'s cleanup runs
-	// RemoveAll on the fixture, failing with "directory not empty".
+	// RemoveAll on the fixture, failing with "directory not empty". gc.auto
+	// only suppresses this for commands run directly against bare; every
+	// push into it (SeedBranch, AdvanceBase, ConflictBase, the production
+	// Rebase's force-push) goes through git-receive-pack instead, which
+	// runs its own post-receive `git gc --auto` gated by the separate
+	// receive.autogc setting (default on) — so both need disabling.
 	g.run(bare, "config", "gc.auto", "0")
+	g.run(bare, "config", "receive.autogc", "false")
 	g.run("", "clone", bare, work)
 	g.run(work, "checkout", "-B", base)
 	g.writeFile(filepath.Join(work, "base.txt"), "base\n")
