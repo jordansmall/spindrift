@@ -182,6 +182,34 @@ EOF
               "${!headvar:-agent/issue-${pr_num}}" \
               "${!basevar:-main}"
             ;;
+          headRefOid)
+            # Advance a per-PR call counter (enables sequence tests, mirroring
+            # the graphql-count-N counter above).
+            counter_key="headsha-count-${pr_num}"
+            count=0
+            if [ -f "$GH_STATE" ]; then
+              while IFS=$'\t' read -r k v; do
+                [ "$k" = "$counter_key" ] && count="$v"
+              done < "$GH_STATE"
+            fi
+            count=$((count + 1))
+            printf '%s\t%s\n' "$counter_key" "$count" >> "$GH_STATE"
+            # FAKE_GH_PR_HEAD_SHA_SEQ_N is a comma-separated list of SHAs
+            # returned in order, sticking on the last element once exhausted —
+            # script this to model a no-op fix pass (repeat the same SHA).
+            # Unscripted, each call returns a fresh, always-distinct value —
+            # modeling the common case where a push genuinely advanced the
+            # head — mirroring forge.Fake.HeadCommitSHA's default (#1980).
+            seqvar="FAKE_GH_PR_HEAD_SHA_SEQ_${pr_num}"
+            if [ -n "${!seqvar:-}" ]; then
+              IFS=',' read -ra seq <<< "${!seqvar}"
+              idx=$((count - 1))
+              [ "$idx" -ge "${#seq[@]}" ] && idx=$(( ${#seq[@]} - 1 ))
+              printf '%s\n' "${seq[$idx]}"
+            else
+              printf 'fake-head-sha-%s\n' "$count"
+            fi
+            ;;
         esac
         ;;
       checks)

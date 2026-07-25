@@ -177,6 +177,100 @@ func TestSelfHeal_ExhaustsAllPasses(t *testing.T) {
 	}
 }
 
+// TestSelfHeal_FixFailureStopsImmediately verifies that when d.Fix reports
+// !Success, selfHeal lands failed right away instead of re-polling the same
+// (unchanged) head and burning the rest of the fix-pass budget against the
+// identical cached rollup (issue #1980). The rollup is scripted FAILURE on
+// every poll — standing in for a head that never advances because the fix
+// box never pushed — so a buggy loop that keeps retrying would burn all 3
+// passes instead of stopping after the first.
+func TestSelfHeal_FixFailureStopsImmediately(t *testing.T) {
+	c := fixConfig(3)
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{
+		forge.StateFailure, forge.StateFailure, forge.StateFailure, forge.StateFailure,
+	})
+	s := New(c, fc, fc)
+
+	d := dispatch.NewFake()
+	d.FixResult = dispatch.Result{Success: false}
+	landing := s.selfHeal(d, "1", 0, testPR)
+
+	if landing != landingFailed {
+		t.Errorf("selfHeal = %v, want landingFailed after a failed fix pass", landing)
+	}
+	if len(d.FixCalls) != 1 {
+		t.Errorf("expected exactly 1 fix call (no retry against the same failed head), got %+v", d.FixCalls)
+	}
+	if len(fc.TransitionStateCalls) == 0 {
+		t.Fatal("expected TransitionState call for Failed")
+	}
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
+		t.Errorf("last transition To=%v, want Failed", last.To)
+	}
+}
+
+// TestSelfHeal_FixNoOpUnchangedHead verifies that when d.Fix reports
+// Success but leaves the PR's head commit SHA unchanged, selfHeal lands
+// failed right away instead of re-polling the identical cached rollup as a
+// fresh genuine red (issue #1980). The rollup is scripted FAILURE on every
+// poll — standing in for a head that never advances — so a buggy loop that
+// trusts the stale rollup would burn all 3 passes instead of stopping after
+// the first.
+func TestSelfHeal_FixNoOpUnchangedHead(t *testing.T) {
+	c := fixConfig(3)
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{
+		forge.StateFailure, forge.StateFailure, forge.StateFailure, forge.StateFailure,
+	})
+	// Same SHA before, immediately after, and on the confirm re-read: the
+	// fix box exited zero but never pushed a new commit.
+	fc.SetHeadCommitSHAs(testPR, []string{"sha-unchanged", "sha-unchanged", "sha-unchanged"})
+	s := New(c, fc, fc)
+
+	d := dispatch.NewFake()
+	landing := s.selfHeal(d, "1", 0, testPR)
+
+	if landing != landingFailed {
+		t.Errorf("selfHeal = %v, want landingFailed after a no-op fix pass", landing)
+	}
+	if len(d.FixCalls) != 1 {
+		t.Errorf("expected exactly 1 fix call (no retry against the unchanged head), got %+v", d.FixCalls)
+	}
+	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
+		t.Errorf("last transition To=%v, want Failed", last.To)
+	}
+}
+
+// TestSelfHeal_FixAdvanceConfirmedAfterTransientSameRead verifies that a
+// head-SHA read landing back the same value right after Fix returns (GitHub
+// API replication lag momentarily serving the pre-push snapshot) is not
+// mistaken for a no-op fix pass: a confirm re-read showing the head did
+// advance must let the loop proceed to green, mirroring gateToGreen's own
+// confirm-poll pattern for a SUCCESS rollup (issue #1980).
+func TestSelfHeal_FixAdvanceConfirmedAfterTransientSameRead(t *testing.T) {
+	c := fixConfig(3)
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
+	// before, immediate-after (stale read, same as before), confirm re-read
+	// (shows the real advance).
+	fc.SetHeadCommitSHAs(testPR, []string{"sha-a", "sha-a", "sha-b"})
+	s := New(c, fc, fc)
+
+	d := dispatch.NewFake()
+	landing := s.selfHeal(d, "1", 0, testPR)
+
+	if landing != landingMerged {
+		t.Errorf("selfHeal = %v, want landingMerged (a transient same-read must not abort as no-op)", landing)
+	}
+	if len(d.FixCalls) != 1 {
+		t.Errorf("expected exactly 1 fix call, got %+v", d.FixCalls)
+	}
+}
+
 func TestSelfHeal_ErrorStateTriggersFixPass(t *testing.T) {
 	c := fixConfig(1)
 	fc := forge.NewFake()

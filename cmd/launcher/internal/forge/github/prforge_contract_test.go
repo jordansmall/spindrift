@@ -154,3 +154,41 @@ func writeFile(t *testing.T, path, contents string) {
 func TestExecClient_PRForgeContract(t *testing.T) {
 	forgetest.RunPRForgeContract(t, newPRForgeHarness(t))
 }
+
+// TestExecClient_HeadCommitSHA verifies the real adapter's HeadCommitSHA
+// (gh pr view --json headRefOid) reports the branch's actual current tip,
+// and that the value changes once a new commit genuinely lands on it — the
+// signal settle's selfHealGate compares before and after a fix pass to tell
+// a real push apart from a no-op fix (issue #1980). Kept outside the shared
+// forgetest.RunPRForgeContract suite: forge.Fake's own HeadCommitSHA
+// deliberately synthesizes a fresh value on every unscripted call (so
+// settle's untouched fix-pass tests keep modeling "the push advanced the
+// head" without scripting a SHA), which would make the "stays the same
+// without a push" half of this test meaningless for that harness.
+func TestExecClient_HeadCommitSHA(t *testing.T) {
+	h := newPRForgeHarness(t)
+	const num = "210"
+	url := h.SeedOpenPR(num)
+	branch := h.branchName(num)
+
+	sha1, err := h.Forge().HeadCommitSHA(url)
+	if err != nil {
+		t.Fatalf("HeadCommitSHA(%q): %v", url, err)
+	}
+	if want := h.repo.BranchSHA(branch); sha1 != want {
+		t.Fatalf("HeadCommitSHA(%q) = %q, want the branch's real head %q", url, sha1, want)
+	}
+
+	h.repo.AdvanceBranch(branch, num)
+
+	sha2, err := h.Forge().HeadCommitSHA(url)
+	if err != nil {
+		t.Fatalf("HeadCommitSHA(%q) after advance: %v", url, err)
+	}
+	if sha2 == sha1 {
+		t.Fatalf("HeadCommitSHA(%q) = %q, want it to change after a new commit landed on %s", url, sha2, branch)
+	}
+	if want := h.repo.BranchSHA(branch); sha2 != want {
+		t.Fatalf("HeadCommitSHA(%q) after advance = %q, want the branch's real head %q", url, sha2, want)
+	}
+}

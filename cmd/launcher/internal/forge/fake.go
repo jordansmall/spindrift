@@ -78,6 +78,11 @@ type Fake struct {
 	checkQ          map[string][]RollupState
 	checkErrQ       map[string][]error  // per-call error queue; nil entry = consult checkQ
 	prFiles         map[string][]string // URL → scripted ListPRFiles result
+	headSHAQ        map[string][]string // URL → scripted HeadCommitSHA queue
+	headSHACounter  int                 // used to synthesize a fresh SHA once headSHAQ[url] is exhausted
+
+	// HeadCommitSHAErr, if non-nil, is returned by every HeadCommitSHA call.
+	HeadCommitSHAErr error
 
 	failureDetail map[string]string // URL → scripted FailureDetail result
 	// FailureDetailErr, if non-nil, is returned by every FailureDetail call.
@@ -310,6 +315,7 @@ func NewFake(labels ...DispatchLabels) *Fake {
 		checkQ:          map[string][]RollupState{},
 		checkErrQ:       map[string][]error{},
 		prFiles:         map[string][]string{},
+		headSHAQ:        map[string][]string{},
 
 		failureDetail: map[string]string{},
 	}
@@ -707,6 +713,35 @@ func (f *Fake) CheckState(url string) (RollupState, error) {
 	s := q[0]
 	f.checkQ[url] = q[1:]
 	return s, nil
+}
+
+// SetHeadCommitSHAs scripts the sequence of head-commit SHAs returned by
+// successive HeadCommitSHA calls for the given PR URL. Once the queue is
+// exhausted (including when nothing was ever scripted), each call returns a
+// fresh, always-distinct value — modeling the common case where a push
+// genuinely advanced the head — so only a test that explicitly repeats a SHA
+// models a no-op fix pass that left the head unchanged.
+func (f *Fake) SetHeadCommitSHAs(url string, shas []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.headSHAQ[url] = append([]string(nil), shas...)
+}
+
+// HeadCommitSHA pops the next scripted entry for url, or synthesizes a fresh,
+// always-distinct value once the queue is exhausted.
+func (f *Fake) HeadCommitSHA(url string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.HeadCommitSHAErr != nil {
+		return "", f.HeadCommitSHAErr
+	}
+	if q := f.headSHAQ[url]; len(q) > 0 {
+		s := q[0]
+		f.headSHAQ[url] = q[1:]
+		return s, nil
+	}
+	f.headSHACounter++
+	return fmt.Sprintf("fake-sha-%d", f.headSHACounter), nil
 }
 
 // SetFailureDetail scripts the FailureDetail result for the given PR URL.

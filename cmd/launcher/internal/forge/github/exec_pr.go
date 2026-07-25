@@ -135,6 +135,15 @@ func (e *execClient) CheckState(url string) (forge.RollupState, error) {
 	return forge.RollupState(s), nil
 }
 
+// HeadCommitSHA returns the PR's current head commit SHA via `gh pr view`.
+func (e *execClient) HeadCommitSHA(url string) (string, error) {
+	out, err := exec.Command("gh", "pr", "view", url, "--json", "headRefOid", "--jq", ".headRefOid").Output()
+	if err != nil {
+		return "", fmt.Errorf("gh pr view %s headRefOid: %w", url, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // Mergeable queries the PR's content-mergeability state via GraphQL — the
 // `mergeable` field, distinct from the statusCheckRollup CheckState queries —
 // so Merge can tell a genuine conflict (CONFLICTING) apart from a PR that is
