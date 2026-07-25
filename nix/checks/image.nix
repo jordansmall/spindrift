@@ -401,6 +401,24 @@ in
         touch $out
       '';
 
+  # BASH_MAX_OUTPUT_LENGTH / MAX_MCP_OUTPUT_TOKENS -- see "Claude Code output
+  # caps" in docs/reference.md for the values and rationale (issue #1987).
+  output-cap-env-marker =
+    pkgs.runCommand "output-cap-env-marker" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        mkdir off && tar -xf ${nonRustHarness.image} -C off
+        cfg=$(jq -r '.[0].Config' off/manifest.json)
+        jq -e '.config.Env | any(. == "BASH_MAX_OUTPUT_LENGTH=8192")' "off/$cfg" >/dev/null || {
+          echo "default harness must bake BASH_MAX_OUTPUT_LENGTH=8192" >&2
+          exit 1
+        }
+        jq -e '.config.Env | any(. == "MAX_MCP_OUTPUT_TOKENS=2000")' "off/$cfg" >/dev/null || {
+          echo "default harness must bake MAX_MCP_OUTPUT_TOKENS=2000" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # /nix/store itself (not its existing contents) must become agent-writable
   # -- non-recursively, so baked paths stay root-owned -- only when
   # nixStoreWritable is opted in; the default image must never show uid 1000

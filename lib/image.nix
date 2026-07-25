@@ -382,6 +382,11 @@ let
         "PKG_CONFIG_PATH=/lib/pkgconfig"
         "PREFETCH=${prefetch}"
         "NIX_STORE_WRITABLE=${lib.boolToString nixStoreWritable}"
+        # Lower Claude Code's own output-cap knobs so its built-in
+        # file-spillover engages early -- see "Claude Code output caps" in
+        # docs/reference.md for the values and rationale (issue #1987).
+        "BASH_MAX_OUTPUT_LENGTH=8192"
+        "MAX_MCP_OUTPUT_TOKENS=2000"
       ];
     };
   };
