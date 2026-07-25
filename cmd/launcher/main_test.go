@@ -2291,6 +2291,45 @@ func TestTriageLabelMeta_ColorsAreDistinct(t *testing.T) {
 	}
 }
 
+// TestDoctor_ReadOnlyTokenGate_ReadWriteReportsNoOp verifies runDoctor
+// surfaces checkReadOnlyTokenGate's outcome (issue #1950): under read-write,
+// it prints an explicit no-op line rather than staying silent, so an
+// operator scanning doctor output isn't left wondering whether the gate ran.
+func TestDoctor_ReadOnlyTokenGate_ReadWriteReportsNoOp(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	c := defaultLabelConfig()
+	c.boxForgeAndIssueAccess = "read-write"
+
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, c, &buf, strings.NewReader(""), false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "read-only token gate is a no-op") {
+		t.Errorf("want a no-op line under read-write, got %q", buf.String())
+	}
+}
+
+// TestDoctor_ReadOnlyTokenGate_MissingBoxTokenFails verifies runDoctor fails
+// under read-only when BOX_GH_TOKEN is unset, the same fail-closed outcome a
+// live dispatch would hit at bootstrap.
+func TestDoctor_ReadOnlyTokenGate_MissingBoxTokenFails(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	c := defaultLabelConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.ghToken = "launcher-token"
+	t.Setenv("BOX_GH_TOKEN", "")
+
+	var buf bytes.Buffer
+	err := runDoctor(f, f, c, &buf, strings.NewReader(""), false)
+	if err == nil || !strings.Contains(err.Error(), "BOX_GH_TOKEN") {
+		t.Fatalf("runDoctor() error = %v, want a BOX_GH_TOKEN error", err)
+	}
+}
+
 func contains(ss []string, s string) bool {
 	for _, v := range ss {
 		if v == s {
