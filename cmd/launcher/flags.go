@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/charmbracelet/x/term"
 )
 
 // version and revision are injected at build time via -ldflags.
@@ -123,12 +125,33 @@ func toKebab(env string) string {
 	return strings.ToLower(strings.ReplaceAll(env, "_", "-"))
 }
 
+// isInteractiveTTY reports whether the launcher's own stdin and stderr are
+// both real terminals. A package var so tests can force either branch
+// without a real TTY (issue #1971).
+var isInteractiveTTY = func() bool {
+	return term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stderr.Fd())
+}
+
 // secretCmdRunner executes a secret-fetch command string (from a --<name>-cmd
 // flag or a <NAME>_CMD env var) through the OS shell and returns its raw
 // stdout. A package var so tests can substitute a fake instead of spawning a
 // real process (mirrors gitConfigLookup in inputdoc.go).
+//
+// When the launcher's own stdin and stderr are both TTYs, the command
+// inherits them as raw file descriptors — no PTY allocation, no stream
+// proxying — so a vault tool's own unlock prompt (stderr) and password
+// entry (stdin) pass straight through to the operator's terminal. Stdout is
+// always captured as the secret and never printed. Non-interactively, the
+// command gets neither: Stdin defaults to /dev/null (so a blocking read
+// fails fast instead of hanging the run) and Stderr is discarded, exactly as
+// before this gate existed.
 var secretCmdRunner = func(cmd string) (string, error) {
-	out, err := exec.Command("sh", "-c", cmd).Output()
+	c := exec.Command("sh", "-c", cmd)
+	if isInteractiveTTY() {
+		c.Stdin = os.Stdin
+		c.Stderr = os.Stderr
+	}
+	out, err := c.Output()
 	return string(out), err
 }
 

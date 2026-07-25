@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestModelDefault_IsSonnet5 asserts that the primary implementor model default
@@ -1130,6 +1131,103 @@ func TestSecretCmdRunner_Default_RunsRealCommand(t *testing.T) {
 	}
 	if out != "real-value" {
 		t.Errorf("secretCmdRunner(%q) = %q, want %q", "printf real-value", out, "real-value")
+	}
+}
+
+// TestSecretCmdRunner_Interactive_PassesStdinAndStderr: when the launcher's
+// own stdin and stderr are TTYs (issue #1971), the secret command inherits
+// them as raw file descriptors, so a vault tool's stderr prompt and stdin
+// read both work, while stdout is still captured as the secret.
+func TestSecretCmdRunner_Interactive_PassesStdinAndStderr(t *testing.T) {
+	origInteractive := isInteractiveTTY
+	isInteractiveTTY = func() bool { return true }
+	t.Cleanup(func() { isInteractiveTTY = origInteractive })
+
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stdinW.WriteString("unlock-me\n"); err != nil {
+		t.Fatal(err)
+	}
+	stdinW.Close()
+	origStdin := os.Stdin
+	os.Stdin = stdinR
+	t.Cleanup(func() { os.Stdin = origStdin })
+
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = stderrFile
+	t.Cleanup(func() { os.Stderr = origStderr })
+
+	out, err := secretCmdRunner(`read line; printf "vault prompt\n" >&2; printf "secret-for-%s" "$line"`)
+	stderrFile.Close()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "secret-for-unlock-me" {
+		t.Errorf("secretCmdRunner output = %q, want %q", out, "secret-for-unlock-me")
+	}
+
+	stderrOut, err := os.ReadFile(stderrFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stderrOut), "vault prompt") {
+		t.Errorf("stderr passthrough missing prompt, got %q", stderrOut)
+	}
+	if strings.Contains(string(stderrOut), "secret-for") {
+		t.Errorf("secret leaked into passed-through stderr, got %q", stderrOut)
+	}
+}
+
+// TestSecretCmdRunner_NonInteractive_NoStdinAttached_NoHang: when not
+// interactive, a command that tries to read stdin gets an immediate EOF
+// instead of blocking the run, and its stderr never reaches the launcher's
+// own stderr (issue #1971 non-interactive regression: behaviour must stay
+// exactly as it was before the TTY gate existed).
+func TestSecretCmdRunner_NonInteractive_NoStdinAttached_NoHang(t *testing.T) {
+	origInteractive := isInteractiveTTY
+	isInteractiveTTY = func() bool { return false }
+	t.Cleanup(func() { isInteractiveTTY = origInteractive })
+
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = stderrFile
+	t.Cleanup(func() { os.Stderr = origStderr })
+
+	done := make(chan struct{})
+	var out string
+	var runErr error
+	go func() {
+		out, runErr = secretCmdRunner(`read line; printf "vault diagnostic\n" >&2; printf "value"`)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("secretCmdRunner hung waiting on stdin in non-interactive mode")
+	}
+	stderrFile.Close()
+
+	if runErr != nil {
+		t.Fatalf("unexpected error: %v", runErr)
+	}
+	if out != "value" {
+		t.Errorf("secretCmdRunner output = %q, want %q", out, "value")
+	}
+	stderrOut, err := os.ReadFile(stderrFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stderrOut) != 0 {
+		t.Errorf("command stderr leaked to launcher stderr, got %q", stderrOut)
 	}
 }
 
