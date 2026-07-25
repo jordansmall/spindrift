@@ -257,13 +257,8 @@ git diff origin/${BASE_BRANCH} -- '.github/workflows/'
 
 Then:
 
-1. Push what you have (or note if even that is impossible).
-2. Check whether a PR already exists on this branch (`gh pr view --json url`).
-   If not, open one as a draft (`--draft`). If it does, leave it as-is — the
-   Driver never flips a PR to ready, so it is already draft and there is
-   nothing to revert.
-3. Leave the issue in-progress — do NOT close it.
+${IF_BLOCKED_PUSH_READ_WRITE_STEP}${IF_BLOCKED_PUSH_READ_ONLY_STEP}${IF_BLOCKED_PR_READ_WRITE_STEP}${IF_BLOCKED_PR_READ_ONLY_STEP}3. Leave the issue in-progress — do NOT close it.
 ${ISSUE_BLOCKED_COMMENT_GITHUB_STEP}${ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP}${ISSUE_BLOCKED_COMMENT_LOCAL_STEP}5. Print exactly one line and stop — raw plain text, not wrapped in
    backticks, a code fence, or any other markdown formatting:
 
-   SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<pr-url> status=blocked note=<short reason> nonce=${RUN_NONCE}
+${IF_BLOCKED_OUTCOME_LANDING_READ_WRITE_STEP}${IF_BLOCKED_OUTCOME_LANDING_READ_ONLY_STEP}

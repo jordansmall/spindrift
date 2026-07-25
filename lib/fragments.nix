@@ -260,4 +260,49 @@
     fragment = "outcome-ready-means-outbox.md";
     var = "OUTCOME_READY_MEANS_READ_ONLY_STEP";
   }
+  # The IF BLOCKED section's push step (issue #1933, same BOX_ACCESS_READ_
+  # WRITE/BOX_ACCESS_READ_ONLY gates as the OPEN A PULL REQUEST push step
+  # above): a read-only Box holds no push-capable token whether it reaches
+  # the happy path or the failure path, so the unconditional "Push what you
+  # have" step must not attempt a `git push` under read-only either.
+  {
+    gate = "BOX_ACCESS_READ_WRITE";
+    fragment = "if-blocked-push-git.md";
+    var = "IF_BLOCKED_PUSH_READ_WRITE_STEP";
+  }
+  {
+    gate = "BOX_ACCESS_READ_ONLY";
+    fragment = "if-blocked-push-outbox.md";
+    var = "IF_BLOCKED_PUSH_READ_ONLY_STEP";
+  }
+  # The IF BLOCKED section's PR check/create step (issue #1933, same
+  # BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY gates as the push step just
+  # above and the OPEN A PULL REQUEST create step): a read-only Box holds no
+  # PR-create-capable token in the failure path either, so it emits a
+  # SPINDRIFT_PR_INTENT line instead of running `gh pr view`/`gh pr create`.
+  {
+    gate = "BOX_ACCESS_READ_WRITE";
+    fragment = "if-blocked-pr-git.md";
+    var = "IF_BLOCKED_PR_READ_WRITE_STEP";
+  }
+  {
+    gate = "BOX_ACCESS_READ_ONLY";
+    fragment = "if-blocked-pr-outbox.md";
+    var = "IF_BLOCKED_PR_READ_ONLY_STEP";
+  }
+  # The IF BLOCKED section's own closing SPINDRIFT_OUTCOME line (issue
+  # #1933, same BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY gates as OUTCOME's
+  # own landing= step above): a read-only Box never opens a PR on the
+  # blocked path either, so it never learns a URL and must report the
+  # branch name instead.
+  {
+    gate = "BOX_ACCESS_READ_WRITE";
+    fragment = "if-blocked-outcome-landing-git.md";
+    var = "IF_BLOCKED_OUTCOME_LANDING_READ_WRITE_STEP";
+  }
+  {
+    gate = "BOX_ACCESS_READ_ONLY";
+    fragment = "if-blocked-outcome-landing-outbox.md";
+    var = "IF_BLOCKED_OUTCOME_LANDING_READ_ONLY_STEP";
+  }
 ]
