@@ -1,5 +1,97 @@
 # Changelog
 
+## [0.7.0](https://github.com/jordansmall/spindrift/compare/v0.6.1...v0.7.0) (2026-07-25)
+
+
+### Features
+
+* **agent:** add credential-read-deny PreToolUse hook ([748e268](https://github.com/jordansmall/spindrift/commit/748e268e14b16d2a594c3b6909be32a6b6b88488))
+* **agent:** add env-credential-scrub PreToolUse hook ([b2594a6](https://github.com/jordansmall/spindrift/commit/b2594a623efa6cf3862a03e84e4d322a657875e2))
+* **dispatch:** forward a single write-enable signal to the Box ([0b44752](https://github.com/jordansmall/spindrift/commit/0b44752f18e88fc3507149fdc73e65c5b4bd1a3f))
+* **dispatch:** mint per-run nonce, forward as RUN_NONCE ([2f208ab](https://github.com/jordansmall/spindrift/commit/2f208ab38598e88daa4d1efd8636c219525ca11c))
+* **dispatch:** wire retry to nonce-guarded line ([7ae2121](https://github.com/jordansmall/spindrift/commit/7ae21210c2190fc4dddd8517f54605d47a0d9258))
+* **doctor:** report the read-only token gate outcome ([1a5f872](https://github.com/jordansmall/spindrift/commit/1a5f872341315ad54859916c339e5ce5c2dd97f8))
+* **dogfood:** run box in read-only forge mode ([60a93b3](https://github.com/jordansmall/spindrift/commit/60a93b3c5ccdb701375b88cbb83d4ac67c9464db)), closes [#1916](https://github.com/jordansmall/spindrift/issues/1916)
+* **github:** implement forge.BundleRelay ([cb59727](https://github.com/jordansmall/spindrift/commit/cb59727f3bb33681257272db231967953b94bddd))
+* **github:** implement forge.DraftPRCreator ([c8911c4](https://github.com/jordansmall/spindrift/commit/c8911c44a09c38605c34f79f613064d7da460109))
+* **image:** bake subprocess env scrub default ([d238600](https://github.com/jordansmall/spindrift/commit/d238600a751922f8a4c5bca29b9a7e74226f288f))
+* **launcher:** add read-only startup token gate ([2978589](https://github.com/jordansmall/spindrift/commit/2978589695db54184d9ef4152699fd2e49d0135d))
+* **launcher:** add templated --secret-cmd fallback ([1b33a20](https://github.com/jordansmall/spindrift/commit/1b33a20c1a299ecba21809bafcb01e4e2a4c5793))
+* **launcher:** add unlock hint to secret cmd failures ([e03d79d](https://github.com/jordansmall/spindrift/commit/e03d79d4f68496ac30edcc1506620972d9e48509))
+* **launcher:** close the read-only gate for github ([8ef4f63](https://github.com/jordansmall/spindrift/commit/8ef4f63f94fb628670ed9ec11959a4cbbe30f146))
+* **launcher:** gate read-only by forge/tracker capability ([edf7543](https://github.com/jordansmall/spindrift/commit/edf754387c0081bc0accfc8576302b1ffcea540f))
+* **launcher:** gate secret cmd passthrough on TTY ([515ee4b](https://github.com/jordansmall/spindrift/commit/515ee4b026788ec89ac2dc407aa1a541a4a8154d))
+* **launcher:** provision outbox for github read-only ([110856e](https://github.com/jordansmall/spindrift/commit/110856e7024a4a1fe1a7bf133d8fa50e8afa7e53))
+* **launcher:** source secrets from an external command ([084ca65](https://github.com/jordansmall/spindrift/commit/084ca65552f36648fa50e40d7d7b4e13d092a17c))
+* **launcher:** wire github BundleRelay by access mode ([328d7a3](https://github.com/jordansmall/spindrift/commit/328d7a380016f3e80e02cfaae1d9a1652f8b5893))
+* **nix:** derive --&lt;secret&gt;-cmd across completions and docs ([136f454](https://github.com/jordansmall/spindrift/commit/136f4545d84b85543e6a59b7bbf470791f391711))
+* **outcome:** add LineHasNonce log-line check ([558391b](https://github.com/jordansmall/spindrift/commit/558391bbd46b7c0a6c6860572cc8d0d29214d458))
+* **outcome:** comment survives log as one line ([c615898](https://github.com/jordansmall/spindrift/commit/c615898e0ec354a4adf50254c9cb04bda9ba979b))
+* **outcome:** gate outcome parsing on run's nonce ([d1bb4e3](https://github.com/jordansmall/spindrift/commit/d1bb4e355160a29a06f71b0e3e0bdb526f17379a))
+* **outcome:** parse SPINDRIFT_PR_INTENT stdout block ([7ae18fe](https://github.com/jordansmall/spindrift/commit/7ae18feb702a0b627a1f6c953912340026c24182))
+* **outcome:** PR-intent as one nonce-guarded line ([c017fcf](https://github.com/jordansmall/spindrift/commit/c017fcf40eec9c0f1d5ee46402c7a0d6100916f3))
+* **prompt:** emit comment as nonce-guarded line ([62bf777](https://github.com/jordansmall/spindrift/commit/62bf777d77d2fb43116857e8e978bdf3ecf0322b))
+* **prompt:** github read-only emits PR-intent, not gh pr create ([131b2a0](https://github.com/jordansmall/spindrift/commit/131b2a0250ca3a4880876820f1cb51bb045272e5))
+* **prompt:** github read-only writes seam.bundle, not push ([2043c5f](https://github.com/jordansmall/spindrift/commit/2043c5f425305d09135321da1808638b400798ca))
+* **prompt:** render RUN_NONCE into the Box's prompt ([429d7a1](https://github.com/jordansmall/spindrift/commit/429d7a1168cc800ab9215437bb016d29289488ce))
+* **prompts:** host-mediate github comments read-only ([6ed9079](https://github.com/jordansmall/spindrift/commit/6ed90790f49063b83fd7082f9b974b4e9135c164))
+* **schema:** add BOX_FORGE_AND_ISSUE_ACCESS axis ([2d8c252](https://github.com/jordansmall/spindrift/commit/2d8c25241e42adbbffcb6543b8372092c7346b86))
+* **schema:** forward BOX_FORGE_AND_ISSUE_ACCESS into the Box ([37d0228](https://github.com/jordansmall/spindrift/commit/37d022876dc9e81bf5ba4fb794b7823ed32235fb))
+* **settle:** gate comment relay by read-only mode ([b285fba](https://github.com/jordansmall/spindrift/commit/b285fba355546301de8bb3b6c57f709bafc24b8c))
+* **settle:** host-mediate draft PR creation for read-only github ([40efda9](https://github.com/jordansmall/spindrift/commit/40efda92c5b2665b71b9eed9e6c54f36ccd9b870))
+
+
+### Bug Fixes
+
+* **box:** bundle rebased branch when read-only ([31872e6](https://github.com/jordansmall/spindrift/commit/31872e691d6a8ef3af05578c21ea1f0ce9d283db))
+* **entrypoint:** fail closed when the write signal is absent ([403af38](https://github.com/jordansmall/spindrift/commit/403af382cb3bbe4fba565758599172c75c4ce38d))
+* **github:** tighten RelayBundle error handling and docs ([a62dad4](https://github.com/jordansmall/spindrift/commit/a62dad4608cff646f32fe3ae754b7fe556f79d99))
+* **image:** drop env-scrub that broke Box bash ([bbe858f](https://github.com/jordansmall/spindrift/commit/bbe858fcec802c6bc2793112cb73e9a0fed67197)), closes [#1926](https://github.com/jordansmall/spindrift/issues/1926) [#1927](https://github.com/jordansmall/spindrift/issues/1927)
+* **launcher:** stop fix-pass burn on a no-op fix pass ([a31329e](https://github.com/jordansmall/spindrift/commit/a31329e374f1b2283c6628c448d0efdf85e640b4))
+* **launcher:** test token introspection, fail closed on push ([7f55105](https://github.com/jordansmall/spindrift/commit/7f55105c8e82c98ab8f79ec39f28066445c60aa7))
+* **launcher:** tighten token gate wording and preview parity ([a108f0f](https://github.com/jordansmall/spindrift/commit/a108f0f347bbdc978c36c296aa7f3b65b963a555))
+* **prompt:** gate IF BLOCKED on read-only access ([08645fa](https://github.com/jordansmall/spindrift/commit/08645fa26ab6bb7357c487bc160fac9713b73e4b))
+* **settle:** pin draft-PR ref to AgentBranch ([42ba05e](https://github.com/jordansmall/spindrift/commit/42ba05ecf51a01e64b850f2bdec772e2aacc5726))
+* **settle:** pin local landing ref to AgentBranch ([199332a](https://github.com/jordansmall/spindrift/commit/199332ab51d6cd316bdcddc9553108558047a556))
+* **settle:** relay blocked bundle for local forge ([5f80bae](https://github.com/jordansmall/spindrift/commit/5f80baed6a6c2ff4a1b8497c1e78966e625fe25c)), closes [#1946](https://github.com/jordansmall/spindrift/issues/1946)
+* **settle:** relay blocked read-only work to the host ([3ebf1b5](https://github.com/jordansmall/spindrift/commit/3ebf1b5afbd7d3b8cfa2855589fd24840b9a7d96))
+
+
+### Documentation
+
+* add 0.7.0 release-notes highlights ([57d8efe](https://github.com/jordansmall/spindrift/commit/57d8efea65ba730ea9b919dc5954519365dacfd9))
+* add curated RELEASE_NOTES.md with per-version highlights ([c392e45](https://github.com/jordansmall/spindrift/commit/c392e4552335a3e568708f20514e68f78bb43db7))
+* **adr:** reconcile 0034 with the token gate's enforcement ([7806100](https://github.com/jordansmall/spindrift/commit/7806100f0b1deb1757c94d7f39ef0f1200e4223b))
+* **adr:** record IF BLOCKED read-only amendment ([3bd2971](https://github.com/jordansmall/spindrift/commit/3bd2971168257a7626a93493133e1b519a2df5e5))
+* **adr:** record the Box-side fail-closed write signal ([653fddf](https://github.com/jordansmall/spindrift/commit/653fddfa453bd1bcebf36e892d834b29485ba7fb))
+* **credential-deny:** keep deny-all env scope ([5ae07a9](https://github.com/jordansmall/spindrift/commit/5ae07a9863c2f19295cdffade8451be2b7ee5d07))
+* document read-only box for github ([afcc23e](https://github.com/jordansmall/spindrift/commit/afcc23e170658a71d6f40909cb0aba65853063ae)), closes [#1920](https://github.com/jordansmall/spindrift/issues/1920)
+* **forge:** correct stale ref-control note ([2e01ee2](https://github.com/jordansmall/spindrift/commit/2e01ee2f68b7ab5cf3b992d80f9ef930f2d249aa))
+* **launcher:** document the templated --secret-cmd fallback ([b33d8ee](https://github.com/jordansmall/spindrift/commit/b33d8eeb6871ec22046b8ce8f711e8a54c95d432))
+* **prompt:** render PR-intent as a single line ([bc555dc](https://github.com/jordansmall/spindrift/commit/bc555dc5ad9f6bcab991a92f818062d7adc20d5a))
+* record single-line comment signal in ADRs ([d2b81ff](https://github.com/jordansmall/spindrift/commit/d2b81ff5e279a296058ab6a95805169f6a952784))
+* **reference:** document secret cmd unlock hint ([83cedfe](https://github.com/jordansmall/spindrift/commit/83cedfed9bf9ca0d468636839f05547f9e85ecaa))
+* **reference:** document TTY-gated secret cmd ([6bfc7ed](https://github.com/jordansmall/spindrift/commit/6bfc7ed64575c2d0a153eece1265a61f80d05d8e))
+* **security:** document env-credential-scrub hook ([83be59f](https://github.com/jordansmall/spindrift/commit/83be59f1c2e2dde7c97c302287b481d487bdd2f1))
+* **security:** document secret exposure model ([93298c4](https://github.com/jordansmall/spindrift/commit/93298c4deb0f8e7bb75dd77e36e83cc08380799b))
+* **security:** document self-inflicted secret read hardening ([8a89599](https://github.com/jordansmall/spindrift/commit/8a8959963acaa953c416c149b79c09c12b0dea0a))
+
+
+### Code Refactoring
+
+* **launcher:** fold secret-cmd resolution into one branch ([d0cbd04](https://github.com/jordansmall/spindrift/commit/d0cbd049cae5cd0a7a9e9a88fdf02866a9508594))
+* **outcome:** share comment/PR-intent scan ([38dd997](https://github.com/jordansmall/spindrift/commit/38dd997477c3198301c80be005580d3219804632)), closes [#1952](https://github.com/jordansmall/spindrift/issues/1952)
+
+
+### Tests
+
+* **console:** retry stalled teatest waits under load ([7a8ad90](https://github.com/jordansmall/spindrift/commit/7a8ad90632e164709d47994819a34de595899ea5))
+
+
+### Continuous Integration
+
+* run dogfood box in read-write forge mode ([4255c31](https://github.com/jordansmall/spindrift/commit/4255c313c7c6268a7abd44db77a4aa54a01533fc))
+
 ## [0.6.1](https://github.com/jordansmall/spindrift/compare/v0.6.0...v0.6.1) (2026-07-24)
 
 
