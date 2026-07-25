@@ -738,6 +738,52 @@ Both are asserted directly on the built image's `config.Env` by
 `nix/checks/image.nix`'s `output-cap-env-marker` check, the same
 way `nix-store-writable-env-marker` verifies `NIX_STORE_WRITABLE` above.
 
+### Bash command-output interceptor
+
+The output caps above are a start-only preview that only engages once a
+command's output crosses the threshold. Issue #1988 adds a uniform,
+error-oriented interceptor on top: a PreToolUse/PostToolUse hook pair, baked
+into the image alongside `reject-background-bash.sh` and the other hooks
+described in [Self-inflicted secret reads are structurally
+blocked](#self-inflicted-secret-reads-are-structurally-blocked), that applies
+to *every* Bash call, not just the ones that overflow, and hands back a **tail**
+of the output rather than a head — build/test failures sit near the end.
+
+- **`agent/bash-output-tee.sh`** (`PreToolUse`, `Bash` matcher) rewrites
+  every Bash call, via the same `hookSpecificOutput.updatedInput` mechanism
+  `env-credential-scrub.sh` uses, to wrap the original command in a group
+  that tees its combined stdout+stderr to a per-command log file under
+  `/tmp/spindrift-bash-output/`, then re-exits with the original command's
+  own status (captured via `PIPESTATUS` before `tee`'s own exit status would
+  otherwise shadow it) — both back to Claude Code and into a `<log>.exit`
+  sidecar file for the PostToolUse hook to read. The log directory lives
+  under `/tmp`, so it doesn't outlive the Box container itself; a single
+  run's total log volume is bounded by however many Bash calls that run
+  makes, not by anything longer-lived.
+- **`agent/bash-output-summary.sh`** (`PostToolUse`, `Bash` matcher) recovers
+  the log path by parsing the `} 2>&1 | tee -- "<path>"` line out of
+  `tool_input.command` (the two hooks are separate processes with no shared
+  state, so the rewritten command text is the only channel between them) —
+  anchored on that full line, and on the last match, so a user command that
+  happens to contain its own `tee -- "..."` text can't be mistaken for the
+  wrapper's own marker. A log under the inline bound (default 4096 bytes) is
+  left untouched — no needless round-trip to read a file back for output
+  that already fits. Past the bound, the hook replaces the tool result via
+  `hookSpecificOutput.updatedToolOutput` with the exit code, the log file
+  path, and the last N bytes of the log — the full output stays on disk the
+  whole time; the agent greps/reads the file directly for anything the tail
+  doesn't cover.
+
+One other PreToolUse hook already shares the `Bash` matcher and rewrites
+`tool_input` independently (`env-credential-scrub.sh`; `credential-deny.sh`
+only ever denies, it never rewrites). Claude Code does not document how
+multiple hooks' `updatedInput` responses for the same call compose when more
+than one rewrites it, so rather than risk `env-credential-scrub.sh`'s own
+`unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN` rewrite silently losing to
+this one, `bash-output-tee.sh` duplicates that same `unset` as the first line
+inside its own wrapped command — redundant if both hooks' rewrites do compose,
+but correct either way.
+
 ### Declared touch-set overlap
 
 An issue body may declare the paths it expects to change in a `## Touches`
