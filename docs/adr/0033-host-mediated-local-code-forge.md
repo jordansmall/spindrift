@@ -227,7 +227,11 @@ neither touches the invariant ADR 0032 protected:
 - A new `git bundle` code-out grammar and a host-side relay join ADR 0032's
   comment-block extractor; `settle` wires the fetched branch to a host-side
   rebase-and-fast-forward onto `integration/<parent>`, and a
-  missing/malformed/unrebasable bundle is treated as blocked.
+  missing/malformed/unrebasable bundle is treated as blocked. The same relay
+  also fires on a Box's IF BLOCKED path (issue #1946), symmetric with the
+  ready path above: a Box that never reaches `ready` still wrote its
+  finished branch to the outbox, so `settle` relays it on both the ready and
+  blocked outcomes as long as the Box has read-only access.
 - `reconcile` (ADR 0029) closes a `local`-code seam by observing a *local*
   land onto its integration branch, not a remote PR; the `waves` blocker
   resolution reads the on-disk closed state for `local`, so dependency
