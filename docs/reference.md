@@ -601,7 +601,10 @@ logs. The plaintext direct-value and `--<secret>-file` forms remain fully
 supported and are not deprecated; with this in place, `harness.env` is
 expected to hold fetch recipes rather than live credentials. See
 `spindrift --help --all` for the full `--<secret>-cmd`/`--<secret>-file`
-flag list.
+flag list. When the launcher's own stdin and stderr are both TTYs, an
+interactive vault unlock prompt passes through instead of being discarded —
+see [Secret exposure model](#secret-exposure-model) for the TTY-gated
+exception.
 
 One vault under a uniform item-naming scheme (e.g. every item named
 `spindrift-<kebab-case-env>`, the convention `harness.env.example` already
@@ -1545,6 +1548,16 @@ boundary does and does not promise.
    supported for operators without a vault and are not deprecated. Once a
    secret has a `_CMD` variant set, `harness.env` is expected to hold a
    fetch *recipe* (a vault item reference) rather than a live credential.
+   A locked vault or a pinentry prompt needs somewhere to put its prompt and
+   read its unlock input, so this is TTY-gated: when the launcher's own
+   stdin and stderr are both real terminals, the secret command inherits
+   them as raw file descriptors — no PTY allocation, no stream proxying —
+   so a master password flows terminal → vault tool without transiting
+   Launcher memory. Stdout is unaffected either way: it is always captured
+   as the secret and never printed. Non-interactively (CI, a pipe, a
+   redirect), behaviour is unchanged from before this gate existed — stderr
+   discarded, stdin not attached, so a vault tool can't block the run
+   waiting on input that will never come.
 2. **The Box can't read its own credentials.** A `PreToolUse` hook
    (`env-credential-scrub.sh`, issue #1927) rewrites every Bash call to
    `unset` `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` before it runs,
