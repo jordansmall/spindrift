@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -155,19 +156,29 @@ var secretCmdRunner = func(cmd string) (string, error) {
 	return string(out), err
 }
 
+// secretCmdUnlockHint is a generic, tool-agnostic remediation hint appended
+// to a resolveSecretCmd failure — it names no specific vault tool's exit
+// codes or diagnostics, since the command is opaque to the launcher (rbw,
+// op, pass, vault, or anything else that prints a secret to stdout).
+const secretCmdUnlockHint = "your vault may be locked; unlock it (e.g. `rbw unlock`) and re-run"
+
 // resolveSecretCmd runs a secret-fetch command via secretCmdRunner and
 // returns its trimmed stdout. A non-zero exit or empty output is reported
-// with a named, value-free error — the command's stdout/stderr, which may
-// carry a partial secret or vault diagnostics, never reaches the error
-// message or a log.
+// with a named, value-free error plus secretCmdUnlockHint — the command's
+// stdout/stderr, which may carry a partial secret or vault diagnostics,
+// never reaches the error message or a log.
 func resolveSecretCmd(env, cmd string) (string, error) {
 	out, err := secretCmdRunner(cmd)
 	if err != nil {
-		return "", fmt.Errorf("%s: command failed", env)
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() >= 0 {
+			return "", fmt.Errorf("%s: command failed (exit %d) — %s", env, exitErr.ExitCode(), secretCmdUnlockHint)
+		}
+		return "", fmt.Errorf("%s: command failed — %s", env, secretCmdUnlockHint)
 	}
 	trimmed := strings.TrimRight(out, "\r\n")
 	if trimmed == "" {
-		return "", fmt.Errorf("%s: command produced no output", env)
+		return "", fmt.Errorf("%s: command produced no output — %s", env, secretCmdUnlockHint)
 	}
 	return trimmed, nil
 }
