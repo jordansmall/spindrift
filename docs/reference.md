@@ -700,6 +700,44 @@ the authoritative list.
 | `PODMAN_NETWORK`       | —       | `sandbox`          | `--network` value for podman run; set `pasta` to restrict egress |
 | `BWRAP_UNSHARE_NET`    | —       | `sandbox`          | non-empty adds `--unshare-net` to the bwrap runner      |
 
+### Claude Code output caps
+
+Unlike every knob above, `BASH_MAX_OUTPUT_LENGTH` and `MAX_MCP_OUTPUT_TOKENS`
+are fixed constants baked straight into the image's `config.Env`
+(`lib/image.nix`) — Claude Code's own output-cap knobs, not a spindrift
+`settings.*` surface: there is no spindrift `--flag` for either, only the
+container runtime's own `-e`/`--env` override of a baked `config.Env` entry,
+same as any other OCI image env var (issue #1987).
+
+Cost of a dispatch run is ~99% cache-read, and cache-read scales with
+context size times turn count: every token in the conversation is re-read on
+every later turn. The bulk of that context is verbose tool output (`nix
+build`, `nix flake check`, `go test`, `git log`) accumulating inline. Claude
+Code already has a built-in fix for this — past `BASH_MAX_OUTPUT_LENGTH`
+chars, a Bash command's full output is written to a file in the session
+directory and the model gets back only a path plus a short preview, with
+nothing lost on disk — but the stock default (30,000 chars / 25,000 tokens)
+is high enough that it rarely engages. The Box lowers both knobs so the
+file-spillover behavior kicks in early instead:
+
+- `BASH_MAX_OUTPUT_LENGTH=8192` — bash tool output past ~8 KB spills to a
+  file. High enough that a short `git log`/`git status` still returns
+  inline, low enough to catch the `nix build`/`go test` firehoses this
+  ticket's cost data (see #1987) flags as the dominant cache-read cost.
+- `MAX_MCP_OUTPUT_TOKENS=2000` — the same file-plus-preview spillover for MCP
+  tool output, not an error, once a result exceeds the threshold (a
+  server-declared `anthropic/maxResultSizeChars` tool still overrides this
+  per-tool). Spindrift has no MCP server configured today, so there's no
+  live traffic to size this against; picked deliberately far below the
+  25,000-token default since a future MCP addition should default to
+  file-based inspection for a large result rather than growing the
+  transcript, with headroom to raise it per-server via the annotation above
+  if a legitimate large-result tool shows up.
+
+Both are asserted directly on the built image's `config.Env` by
+`nix/checks/image.nix`'s `output-cap-env-marker` check, the same
+way `nix-store-writable-env-marker` verifies `NIX_STORE_WRITABLE` above.
+
 ### Declared touch-set overlap
 
 An issue body may declare the paths it expects to change in a `## Touches`
