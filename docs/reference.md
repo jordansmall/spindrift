@@ -1471,6 +1471,13 @@ seam. `local` satisfies the gate by construction (there is no other way for
 it to work); `github` satisfies it as of issue #1919. `read-write` is
 unaffected either way — it never inspects these capabilities.
 
+Inside the Box, the write-enabled-vs-not decision is resolved once,
+host-side, and forwarded as a single explicit positive signal
+(`BOX_WRITE_ENABLED`, present only under `read-write`); the Box's prompt
+fragments render the no-write path whenever it is absent, for any reason
+(issue #1951) — an unset, typo'd, or forwarding-glitched value can never
+fall open into the write-capable path.
+
 `read-only` is an **alternative route to the same guarantee** [two-actor
 separation](#two-actor-separation-opt-in-hard-mode) provides: a Box that
 cannot unilaterally land on the base branch. Two-actor separation gets there
