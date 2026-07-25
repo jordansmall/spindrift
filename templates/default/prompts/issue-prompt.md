@@ -50,10 +50,11 @@ One failing test, one change, at a time.
 # CHECK
 
 Before each commit, run the repo's own checks green. Use what the project
-defines (package scripts, Makefile, CI config). Route bulk output to a file,
-load only failures:
-
-  go test ./... > /tmp/test.log 2>&1 || tail -50 /tmp/test.log
+defines (package scripts, Makefile, CI config). Every Bash command's output
+is already teed to a file and returned to you as a bounded tail, so no
+manual redirect is needed — but never `cat` a whole build/test log into
+context; grep or tail the log file on disk for anything the bounded tail
+didn't cover.
 
 Nix flakes only evaluate git-tracked files — `git add` any new file (e.g.
 `git add -A`) before the first `nix build`/`nix flake check` that touches it,
@@ -62,7 +63,12 @@ or the build aborts with "is not tracked by Git" and burns a checks cycle.
 If the repo has a `flake.nix` devShell, prefer its pinned toolchain:
 
   nix develop -c <check-command>   # run any check inside the devShell
-  nix flake check                  # validate the full flake
+
+Prefer a scoped check target (e.g. `checks-inbox`) over a bare
+`nix flake check` in-box, if the flake exposes one — a full flake check also
+evaluates checks that build/inspect the box's own image, which are heavy and
+unreliable to re-run from inside the box itself. Fall back to `nix flake
+check` only if no scoped target exists.
 
 If `nix develop` is unavailable or fails, fall back to the baked toolchain and
 log the fallback. Go module without a devShell:
