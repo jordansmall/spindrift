@@ -385,10 +385,19 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 	// relayed by hostMediateDraftPR before its draft PR (and this pr URL)
 	// ever exists — relaying again here with pr (a URL, not a ref) would be
 	// both redundant and wrong.
+	//
+	// pr is overwritten with cf.AgentBranch(num) here rather than trusted as
+	// passed in (issue #1949): this branch only runs for a Code Forge that
+	// host-mediates the landing (CODE_FORGE=local today, the only adapter
+	// both BundleRelay-implementing and push-only), so pr traces back to the
+	// outcome line's own landing= field, Agent-controlled input. Deriving it
+	// host-side, once, before either RelayBundle or the Merge loop below sees
+	// it, pins both to the one ref this hand-off is meant to use.
 	if br, ok := cf.(forge.BundleRelay); ok && s.pr == nil {
 		if s.cfg.OutboxDir == nil {
 			return fmt.Errorf("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay — every CODE_FORGE=local construction site must supply an OutboxDir resolver")
 		}
+		pr = cf.AgentBranch(num)
 		if err := br.RelayBundle(s.cfg.OutboxDir(num), pr); err != nil {
 			return err
 		}
