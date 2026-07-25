@@ -94,10 +94,12 @@ func TestDrainMaxJobs_SkipsTouchOverlapDispatchesNext(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_FailsDependentWhenBlockerFails verifies that drain mode
-// transitions an issue to failed when an in-batch blocker has already failed,
-// matching the wave path's cascade semantics so the ready queue converges.
-func TestDrainMaxJobs_FailsDependentWhenBlockerFails(t *testing.T) {
+// TestDrainMaxJobs_HoldsDependentWhenBlockerFails verifies that drain mode
+// holds (rather than cascade-fails) an issue whose in-batch blocker has
+// already reached the failed label: agent-failed is recoverable
+// (agent-recover retries it), so the dependent must wait across retries
+// instead of being mislabeled failed itself (#1984, incident #1972).
+func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 	c := baseConfig()
 	c.Label = "agent-trigger"
 	c.MaxParallel = 2
@@ -116,20 +118,28 @@ func TestDrainMaxJobs_FailsDependentWhenBlockerFails(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
-	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
-		{Number: "1", Title: "dependent"},
-		{Number: "2", Title: "unblocked"},
-	}, edges, nil, nil, OriginDiscovered); err != nil {
-		t.Fatalf("drainMaxJobs: %v", err)
-	}
+	out := testutil.CaptureStdout(t, func() {
+		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+			{Number: "1", Title: "dependent"},
+			{Number: "2", Title: "unblocked"},
+		}, edges, nil, nil, OriginDiscovered); err != nil {
+			t.Fatalf("drainMaxJobs: %v", err)
+		}
+	})
 
-	// Issue #1 must have been transitioned to failed.
+	// Issue #1 must be held, not transitioned to failed.
 	iss1, err := fc.Issue("1")
 	if err != nil {
 		t.Fatalf("Issue(1): %v", err)
 	}
-	if !containsLabel(iss1.Labels, c.FailedLabel) {
-		t.Errorf("issue 1 must have %q when blocker failed; labels=%v", c.FailedLabel, iss1.Labels)
+	if containsLabel(iss1.Labels, c.FailedLabel) {
+		t.Errorf("issue 1 must not gain %q when blocker failed; labels=%v", c.FailedLabel, iss1.Labels)
+	}
+	if !containsLabel(iss1.Labels, c.Label) {
+		t.Errorf("issue 1 must keep %q while held; labels=%v", c.Label, iss1.Labels)
+	}
+	if !strings.Contains(out, "~~ #1 blocked by #3; skipping") {
+		t.Errorf("output must hold with the standard blocked-skip line; got:\n%s", out)
 	}
 
 	// Issue #2 (unblocked) must still be dispatched.
@@ -455,40 +465,60 @@ func TestDrainMaxJobs_BlockedLineNamesBlockers(t *testing.T) {
 	}
 }
 
-// TestDrainMaxJobs_FailedBlockerLineNamesBlockers verifies that the
-// failed-blocker skip line names the specific failed blocker issue
-// number(s), comma-joined, rather than the generic "a dependency failed"
-// message.
-func TestDrainMaxJobs_FailedBlockerLineNamesBlockers(t *testing.T) {
+// TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries reproduces the #1972
+// incident on the batch drain path: a blocker fails, gets retried via
+// agent-recover, and fails again before finally recovering. The dependent
+// must stay held (never gain FailedLabel) through every failed round, then
+// dispatch cleanly the moment the blocker reaches a satisfied state.
+func TestDrainMaxJobs_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	c := baseConfig()
 	c.Label = "agent-trigger"
 	c.MaxParallel = 2
 	c.MaxJobs = 2
 
 	fc := forge.NewFake(dispatchLabels(c))
-	// Issue #1 is blocked by both #3 and #4, which have already failed.
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}})
-	fc.SetIssue(forge.Issue{Number: "4", Labels: []string{c.FailedLabel}})
 
 	fr := runner.NewFake()
 
-	edges := map[string][]string{"1": {"3", "4"}}
+	edges := map[string][]string{"1": {"3"}}
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	out := testutil.CaptureStdout(t, func() {
+	// Round 1 and round 2 (agent-recover retried #3, failed again): #1 must
+	// never be cascade-failed, only held (ErrOpenNoneDispatchable signals
+	// the whole batch is held, not an error worth failing the test on).
+	for round := 1; round <= 2; round++ {
 		if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
 			{Number: "1", Title: "dependent"},
-		}, edges, nil, nil, OriginDiscovered); err != nil {
-			t.Fatalf("drainMaxJobs: %v", err)
+		}, edges, nil, nil, OriginDiscovered); err != ErrOpenNoneDispatchable {
+			t.Fatalf("round %d: drainMaxJobs: got %v, want ErrOpenNoneDispatchable", round, err)
 		}
-	})
+	}
 
-	if !strings.Contains(out, "!! #1  status=blocker-failed  note=#3, #4 failed; skipping") {
-		t.Errorf("output must name the failed blockers; got:\n%s", out)
+	iss1, err := fc.Issue("1")
+	if err != nil {
+		t.Fatalf("Issue(1): %v", err)
+	}
+	if containsLabel(iss1.Labels, c.FailedLabel) {
+		t.Errorf("issue 1 must never gain %q across retries; labels=%v", c.FailedLabel, iss1.Labels)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("RunCalls: got %d, want 0 before the blocker recovers", len(fr.RunCalls))
+	}
+
+	// Round 3: #3 finally recovers and completes -- close it out.
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}, State: "CLOSED"})
+	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+		{Number: "1", Title: "dependent"},
+	}, edges, nil, nil, OriginDiscovered); err != nil {
+		t.Fatalf("round 3: drainMaxJobs: %v", err)
+	}
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
+		t.Fatalf("round 3: RunCalls: got %v, want a single dispatch of #1", fr.RunCalls)
 	}
 }
 

@@ -99,16 +99,12 @@ func dispatchWave(cfg Config, it forge.IssueTracker, f *dispatch.Factory, s sett
 	wg.Wait()
 }
 
-// heldIssues returns the issues from the batch that were neither selected
-// for this wave nor cascade-failed — the ones a later invocation (or, for
-// OriginSelective, an operator re-run) could still dispatch. Order matches
-// issues.
-func heldIssues(issues, selected, blockerFailed []Issue) []Issue {
-	dispatched := make(map[string]bool, len(selected)+len(blockerFailed))
+// heldIssues returns the issues from the batch that were not selected for
+// this wave — the ones a later invocation (or, for OriginSelective, an
+// operator re-run) could still dispatch. Order matches issues.
+func heldIssues(issues, selected []Issue) []Issue {
+	dispatched := make(map[string]bool, len(selected))
 	for _, iss := range selected {
-		dispatched[iss.Number] = true
-	}
-	for _, iss := range blockerFailed {
 		dispatched[iss.Number] = true
 	}
 	var held []Issue
@@ -147,42 +143,30 @@ func printSelectiveRerunHint(cfg Config, held []Issue) {
 // in-batch dependency graph is assumed already cycle-checked by NewPlan.
 func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool, origin Origin) error {
 	checkOverlap := waveOverlapCheck(cfg, it, cf)
-	var selected, blockerFailed []Issue
-	failedBlockersByIssue := map[string][]string{}
+	var selected []Issue
 outer:
 	for _, iss := range issues {
 		// An issue named in depsOfFailed had its own NewReadiness/DepsOf call
 		// error — a transient tracker hiccup indistinguishable from
 		// "confirmed zero blockers" in edges alone (#752, #1103). Hold it
 		// for a later invocation rather than reading the missing edges
-		// entry as ready, and never cascade-fail it: the failure is the
-		// lookup itself, not a dependency.
+		// entry as ready, and never fail it: the failure is the lookup
+		// itself, not a dependency.
 		if !cfg.PreResolved && !cfg.IgnoreBlockers && depsOfFailed[iss.Number] {
 			fmt.Printf("    ~~ #%s blocker check failed; will retry\n", iss.Number)
 			continue
 		}
-		// The failed scan only matters for the cascade-fail case below
-		// (origin != OriginClaimed), so OriginClaimed skips it and fetches
-		// only what unreadyBlockers needs -- matching the fetch profile the
-		// two-helper-function version had before this reused blockerStatus.
-		var failed, unready []string
-		switch {
-		case cfg.PreResolved, cfg.IgnoreBlockers:
-		case origin != OriginClaimed:
-			_, failed, unready = blockerStatus(cfg, it, cf, iss.Number, edges)
-		default:
+		var unready []string
+		if !cfg.PreResolved && !cfg.IgnoreBlockers {
 			unready = unreadyBlockers(it, cf, iss.Number, edges)
 		}
 		switch {
-		// Cascade-fail only in the multi-issue drain path (origin !=
-		// OriginClaimed). The claimed single-issue path swaps the issue onto
-		// in-progress before calling here; cascading it would add Failed on
-		// top of in-progress, leaving the issue double-labeled. That path
-		// has its own blocked-marker signaling via the writeBlockedMarker
-		// call below.
-		case origin != OriginClaimed && len(failed) > 0:
-			blockerFailed = append(blockerFailed, iss)
-			failedBlockersByIssue[iss.Number] = failed
+		// A blocker bearing FailedLabel is held here too (unreadyBlockers
+		// never treats it as satisfied): agent-failed is a recoverable
+		// state (agent-recover retries it), so a dependent must never be
+		// cascade-failed as a consequence of a blocker's label or state
+		// (#1984, incident #1972) — it waits, the same as any other unmet
+		// blocker, until the blocker reaches a satisfied state.
 		case len(unready) > 0:
 			fmt.Printf("    ~~ #%s blocked by #%s; skipping\n", iss.Number, strings.Join(unready, ", #"))
 		default:
@@ -195,10 +179,6 @@ outer:
 				break outer
 			}
 		}
-	}
-	for _, iss := range blockerFailed {
-		fmt.Printf("    !! #%s  status=blocker-failed  note=#%s failed; skipping\n", iss.Number, strings.Join(failedBlockersByIssue[iss.Number], ", #"))
-		transitionState(it, iss.Number, forge.Dispatchable, forge.Failed)
 	}
 	if len(selected) == 0 {
 		// Claimed single-issue path: the caller already swapped this issue
@@ -233,10 +213,9 @@ outer:
 			fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", cfg.Label)
 			return nil
 		}
-		// Unattended drain path: if issues remain after cascade-failing blockers,
-		// signal callers with ErrOpenNoneDispatchable so they stop instead of
-		// hot-looping.
-		held := heldIssues(issues, selected, blockerFailed)
+		// Unattended drain path: if issues remain held, signal callers with
+		// ErrOpenNoneDispatchable so they stop instead of hot-looping.
+		held := heldIssues(issues, selected)
 		if len(held) > 0 {
 			if origin == OriginSelective {
 				printSelectiveRerunHint(cfg, held)
@@ -250,7 +229,7 @@ outer:
 	}
 	fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), cfg.MaxJobs)
 	dispatchWave(cfg, it, f, s, selected)
-	if held := heldIssues(issues, selected, blockerFailed); len(held) > 0 {
+	if held := heldIssues(issues, selected); len(held) > 0 {
 		if origin == OriginSelective {
 			printSelectiveRerunHint(cfg, held)
 		} else {
