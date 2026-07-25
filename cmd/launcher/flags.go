@@ -114,6 +114,15 @@ type secretKnob struct {
 	cmdFlag  string // flag name for --<name>-cmd command variant (kebab-case, no dashes prefix)
 }
 
+// toKebab lowercases an env-var name and replaces underscores with hyphens,
+// mirroring lib/renderers.nix's toKebab — the same transform that already
+// names each secret's example vault item in harness.env.example (e.g.
+// GH_TOKEN -> gh-token), reused here as the {name} substitution for a
+// templated --secret-cmd.
+func toKebab(env string) string {
+	return strings.ToLower(strings.ReplaceAll(env, "_", "-"))
+}
+
 // secretCmdRunner executes a secret-fetch command string (from a --<name>-cmd
 // flag or a <NAME>_CMD env var) through the OS shell and returns its raw
 // stdout. A package var so tests can substitute a fake instead of spawning a
@@ -184,6 +193,11 @@ func parseFlags(args []string) ([]string, error) {
 	filePaths := make(map[string]string, len(secretKnobs))
 	cmdStrings := make(map[string]string, len(secretKnobs))
 
+	// globalSecretCmdTemplate (package-level, reset here) captures --secret-cmd
+	// for applySecretCmdFallback, called later by main() — see that function's
+	// doc comment for why the global template can't be resolved here inline.
+	globalSecretCmdTemplate = ""
+
 	remaining := make([]string, 0, len(args))
 	i := 0
 	for i < len(args) {
@@ -200,6 +214,15 @@ func parseFlags(args []string) ([]string, error) {
 		// Dispatch-only boolean flags: pass through to the verb handler.
 		if arg == "--no-build" || arg == "--yes" || arg == "--force" {
 			remaining = append(remaining, arg)
+			i++
+			continue
+		}
+		if arg == "--secret-cmd" {
+			i++
+			if i >= len(args) {
+				return nil, fmt.Errorf("flag --secret-cmd requires a command")
+			}
+			globalSecretCmdTemplate = args[i]
 			i++
 			continue
 		}
@@ -268,7 +291,92 @@ func parseFlags(args []string) ([]string, error) {
 		}
 	}
 
+	// --secret-cmd flag wins over a SECRET_CMD env var, mirroring the
+	// flag-over-env precedence every per-secret form already uses.
+	if globalSecretCmdTemplate == "" {
+		globalSecretCmdTemplate = os.Getenv("SECRET_CMD")
+	}
+
 	return remaining, nil
+}
+
+// globalSecretCmdTemplate is the templated --secret-cmd/SECRET_CMD fallback
+// captured by parseFlags, consumed by applySecretCmdFallback. A package
+// var, not a parseFlags return value, so applySecretCmdFallback can run
+// later in main() without changing parseFlags' signature (see that
+// function's own doc comment for why it must run later at all). Reset to
+// "" at the top of every parseFlags call so repeated calls in the same
+// process (tests) never see a stale value from an earlier call.
+var globalSecretCmdTemplate string
+
+// applySecretCmdFallback resolves globalSecretCmdTemplate for every secret
+// knob that still has no value and that this run actually requires,
+// substituting {name} with the knob's kebab-case env name. Called by main()
+// after loadInputDocument populates loadedDoc (or after establishing there
+// is none) — deliberately not inlined into parseFlags' own resolution loop,
+// because secretRequiredThisRun's CODE_FORGE/ISSUE_TRACKER checks read
+// getenvSchema, which consults loadedDoc (ADR 0020: those two knobs may be
+// set only via the Consumer flake's settings, not env or flag); loadedDoc is
+// still nil while parseFlags runs, so gating there would see only the
+// schema default and could both wrongly skip a knob the document requires
+// and wrongly fetch one it doesn't. Running as a second, later pass also
+// means every per-secret form (file/cmd/env, all resolved by parseFlags
+// above) is already reflected in the environment, so a knob's own
+// -cmd/-file/_CMD override is never raced by the fallback for its
+// Claude/Anthropic sibling.
+func applySecretCmdFallback() error {
+	if globalSecretCmdTemplate == "" {
+		return nil
+	}
+	for i := range secretKnobs {
+		knob := &secretKnobs[i]
+		if os.Getenv(knob.env) != "" || !secretRequiredThisRun(knob.env) {
+			continue
+		}
+		cmd := strings.ReplaceAll(globalSecretCmdTemplate, "{name}", toKebab(knob.env))
+		value, err := resolveSecretCmd(knob.env, cmd)
+		if err != nil {
+			return err
+		}
+		if err := os.Setenv(knob.env, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// secretRequiredThisRun reports whether a secret knob is actually needed by
+// this run, gating applySecretCmdFallback so it never invokes the global
+// template for a secret the run doesn't use (mirrors the ad hoc
+// requiredness checks validate() already applies in main.go — deliberately
+// hardcoded per env name here too, rather than a schema-driven flag, since
+// there is no single uniform "required" rule across these five secrets).
+// The four higher-precedence per-secret forms carry no such gate: those are
+// explicit operator opt-ins, honored regardless of requiredness; only the
+// implicit, uniform template needs this check, so it never forces an unused
+// vault lookup (e.g. JIRA_TOKEN when ISSUE_TRACKER isn't jira). Reads
+// CODE_FORGE/ISSUE_TRACKER via getenvSchema, not a bare os.Getenv, so a
+// value set only through the Consumer flake's settings (ADR 0020) is seen
+// the same as one set by flag or ambient env.
+func secretRequiredThisRun(env string) bool {
+	switch env {
+	case "GH_TOKEN":
+		fullyLocal := getenvSchema("CODE_FORGE") == "local" && getenvSchema("ISSUE_TRACKER") == "local"
+		return !fullyLocal
+	case "JIRA_TOKEN":
+		return getenvSchema("ISSUE_TRACKER") == "jira"
+	case "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY":
+		// Either satisfies validate()'s check; only attempt the template for
+		// one when neither already has a value (parseFlags' own loop above
+		// has already resolved every per-secret form by the time this runs,
+		// so a sibling's explicit override already shows up here).
+		return os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" && os.Getenv("ANTHROPIC_API_KEY") == ""
+	default:
+		// BOX_GH_TOKEN (ADR 0016 two-actor separation) is opt-in with no
+		// requiredness signal of its own — never auto-sourced by the
+		// template; set it via its own --box-gh-token-cmd/-file/env form.
+		return false
+	}
 }
 
 // groupOrder is the display order of flag-group headings in the full reference
@@ -391,5 +499,11 @@ func printHelpFull(w io.Writer) {
 				fmt.Fprintf(w, "  --%-30s  cmd   %s\n", s.cmdFlag, s.doc)
 			}
 		}
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Global secret command template (lowest precedence; sibling SECRET_CMD env")
+		fmt.Fprintln(w, "var; a fallback below every per-secret form above, for a secret with none of")
+		fmt.Fprintln(w, "its own set): --secret-cmd CMD, where {name} substitutes the secret's")
+		fmt.Fprintln(w, "kebab-case env name (e.g. GH_TOKEN -> gh-token), e.g. --secret-cmd 'rbw get")
+		fmt.Fprintln(w, "spindrift-{name}'; only tried for a secret this run actually needs.")
 	}
 }

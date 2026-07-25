@@ -715,6 +715,396 @@ func TestParseFlags_CmdFlag_MissingValue(t *testing.T) {
 	}
 }
 
+// TestToKebab_ReplacesUnderscoresAndLowercases: toKebab mirrors lib/renderers.nix's
+// toKebab, mapping a SCREAMING_SNAKE_CASE env name to its kebab-case vault-item form.
+func TestToKebab_ReplacesUnderscoresAndLowercases(t *testing.T) {
+	cases := map[string]string{
+		"GH_TOKEN":                "gh-token",
+		"CLAUDE_CODE_OAUTH_TOKEN": "claude-code-oauth-token",
+		"ANTHROPIC_API_KEY":       "anthropic-api-key",
+	}
+	for env, want := range cases {
+		if got := toKebab(env); got != want {
+			t.Errorf("toKebab(%q) = %q, want %q", env, got, want)
+		}
+	}
+}
+
+// resolveGlobalSecretCmd runs parseFlags then applySecretCmdFallback, the
+// same two-step sequence main() runs (applySecretCmdFallback must run after
+// loadedDoc is in place, so it is not folded into parseFlags itself — see
+// applySecretCmdFallback's doc comment). Callers that need a document in
+// place must set loadedDoc (and t.Cleanup it back to nil) before calling
+// this.
+func resolveGlobalSecretCmd(t *testing.T, args []string) error {
+	t.Helper()
+	if _, err := parseFlags(args); err != nil {
+		return err
+	}
+	return applySecretCmdFallback()
+}
+
+// TestParseFlags_GlobalSecretCmd_RunsTemplate: --secret-cmd is a templated
+// fallback below every per-secret form — {name} substitutes toKebab(env), and
+// it fires only for a secret the run actually requires (GH_TOKEN here; the
+// Claude/Anthropic pair is pre-satisfied and Jira/Box tokens aren't needed by
+// default, so neither should reach secretCmdRunner).
+func TestParseFlags_GlobalSecretCmd_RunsTemplate(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		if cmd != "rbw get spindrift-gh-token" {
+			t.Fatalf("secretCmdRunner called with %q, want %q", cmd, "rbw get spindrift-gh-token")
+		}
+		return "templated-value\n", nil
+	}
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN_CMD", "")
+	t.Setenv("BOX_GH_TOKEN", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "existing-value")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JIRA_TOKEN", "")
+	t.Setenv("ISSUE_TRACKER", "")
+	t.Setenv("CODE_FORGE", "")
+	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "templated-value" {
+		t.Errorf("GH_TOKEN = %q, want %q", got, "templated-value")
+	}
+}
+
+// TestParseFlags_GlobalSecretCmd_LosesToPerSecretCmdFlag: a per-secret
+// --<name>-cmd flag pre-empts the global template — highest precedence wins.
+func TestParseFlags_GlobalSecretCmd_LosesToPerSecretCmdFlag(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		if cmd != "per-secret-cmd" {
+			t.Fatalf("secretCmdRunner called with %q, want %q", cmd, "per-secret-cmd")
+		}
+		return "per-secret-value", nil
+	}
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN_CMD", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "existing-value")
+	if err := resolveGlobalSecretCmd(t, []string{"--gh-token-cmd", "per-secret-cmd", "--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "per-secret-value" {
+		t.Errorf("GH_TOKEN = %q, want %q (per-secret --gh-token-cmd must win over --secret-cmd)", got, "per-secret-value")
+	}
+}
+
+// TestParseFlags_GlobalSecretCmd_LosesToCmdEnv: a per-secret <NAME>_CMD env
+// var pre-empts the global template.
+func TestParseFlags_GlobalSecretCmd_LosesToCmdEnv(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		if cmd != "per-secret-env-cmd" {
+			t.Fatalf("secretCmdRunner called with %q, want %q", cmd, "per-secret-env-cmd")
+		}
+		return "per-secret-env-value", nil
+	}
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN_CMD", "per-secret-env-cmd")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "existing-value")
+	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "per-secret-env-value" {
+		t.Errorf("GH_TOKEN = %q, want %q (GH_TOKEN_CMD must win over --secret-cmd)", got, "per-secret-env-value")
+	}
+}
+
+// TestParseFlags_GlobalSecretCmd_LosesToFileFlag: a per-secret --<name>-file
+// flag pre-empts the global template.
+func TestParseFlags_GlobalSecretCmd_LosesToFileFlag(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		t.Fatal("secretCmdRunner should not be called when --gh-token-file is set")
+		return "", nil
+	}
+	tokenFile := filepath.Join(t.TempDir(), "token.txt")
+	if err := os.WriteFile(tokenFile, []byte("file-value"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN_CMD", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "existing-value")
+	if err := resolveGlobalSecretCmd(t, []string{"--gh-token-file", tokenFile, "--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "file-value" {
+		t.Errorf("GH_TOKEN = %q, want %q (--gh-token-file must win over --secret-cmd)", got, "file-value")
+	}
+}
+
+// TestParseFlags_GlobalSecretCmd_LosesToDirectEnv: a direct env value
+// pre-empts the global template — the lowest of the four existing forms
+// still outranks the new, fifth one.
+func TestParseFlags_GlobalSecretCmd_LosesToDirectEnv(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		t.Fatal("secretCmdRunner should not be called when GH_TOKEN is already set directly")
+		return "", nil
+	}
+	t.Setenv("GH_TOKEN", "direct-value")
+	t.Setenv("GH_TOKEN_CMD", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "existing-value")
+	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "direct-value" {
+		t.Errorf("GH_TOKEN = %q, want %q (direct env must win over --secret-cmd)", got, "direct-value")
+	}
+}
+
+// TestParseFlags_GlobalSecretCmdEnv_RunsTemplate: SECRET_CMD (no flag) is the
+// env-var form of the same global template.
+func TestParseFlags_GlobalSecretCmdEnv_RunsTemplate(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		if cmd != "rbw get spindrift-gh-token" {
+			t.Fatalf("secretCmdRunner called with %q, want %q", cmd, "rbw get spindrift-gh-token")
+		}
+		return "env-templated-value", nil
+	}
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN_CMD", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "existing-value")
+	t.Setenv("SECRET_CMD", "rbw get spindrift-{name}")
+	if err := resolveGlobalSecretCmd(t, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "env-templated-value" {
+		t.Errorf("GH_TOKEN = %q, want %q", got, "env-templated-value")
+	}
+}
+
+// TestParseFlags_GlobalSecretCmdFlag_WinsOverEnv: --secret-cmd flag takes
+// precedence over a SECRET_CMD env var, same as every other flag-over-env form.
+func TestParseFlags_GlobalSecretCmdFlag_WinsOverEnv(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		switch cmd {
+		case "rbw get flag-spindrift-gh-token":
+			return "flag-templated-value", nil
+		case "rbw get env-spindrift-gh-token":
+			t.Fatal("SECRET_CMD env template must not run when --secret-cmd flag is set")
+		}
+		t.Fatalf("secretCmdRunner called with unexpected cmd %q", cmd)
+		return "", nil
+	}
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN_CMD", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "existing-value")
+	t.Setenv("SECRET_CMD", "rbw get env-spindrift-{name}")
+	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get flag-spindrift-{name}"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "flag-templated-value" {
+		t.Errorf("GH_TOKEN = %q, want %q (--secret-cmd flag must win over SECRET_CMD env)", got, "flag-templated-value")
+	}
+}
+
+// TestParseFlags_GlobalSecretCmd_SkipsJiraWhenTrackerNotJira: the template
+// fallback is gated per knob — JIRA_TOKEN is only required when
+// ISSUE_TRACKER=jira, so it must not be sourced by the template otherwise.
+func TestParseFlags_GlobalSecretCmd_SkipsJiraWhenTrackerNotJira(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		if strings.Contains(cmd, "jira") {
+			t.Fatalf("secretCmdRunner should not be called for JIRA_TOKEN when ISSUE_TRACKER is not jira, got %q", cmd)
+		}
+		return "value", nil
+	}
+	t.Setenv("JIRA_TOKEN", "")
+	t.Setenv("ISSUE_TRACKER", "github")
+	t.Setenv("GH_TOKEN", "already-set")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "already-set")
+	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("JIRA_TOKEN"); got != "" {
+		t.Errorf("JIRA_TOKEN = %q, want empty (not required when ISSUE_TRACKER != jira)", got)
+	}
+}
+
+// TestParseFlags_GlobalSecretCmd_AppliesToJiraWhenTrackerIsJira: the same
+// knob is fetched once the run actually requires it.
+func TestParseFlags_GlobalSecretCmd_AppliesToJiraWhenTrackerIsJira(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		if cmd == "rbw get spindrift-jira-token" {
+			return "jira-value", nil
+		}
+		return "value", nil
+	}
+	t.Setenv("JIRA_TOKEN", "")
+	t.Setenv("ISSUE_TRACKER", "jira")
+	t.Setenv("GH_TOKEN", "already-set")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "already-set")
+	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("JIRA_TOKEN"); got != "jira-value" {
+		t.Errorf("JIRA_TOKEN = %q, want %q", got, "jira-value")
+	}
+}
+
+// TestApplySecretCmdFallback_UsesDocumentSettings: CODE_FORGE/ISSUE_TRACKER
+// may be set only via the Consumer flake's settings (ADR 0020), which the
+// Launcher input document carries as loadedDoc — not via env or flag. The
+// fallback must see that value, not just the ambient default, or an
+// otherwise valid run set up entirely through the document either misses a
+// secret it needs (this test: JIRA_TOKEN) or forces an unwanted vault lookup
+// for one it doesn't (a fully-local run still fetching GH_TOKEN).
+func TestApplySecretCmdFallback_UsesDocumentSettings(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{Settings: map[string]string{"ISSUE_TRACKER": "jira"}}
+
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		if cmd == "rbw get spindrift-jira-token" {
+			return "jira-value", nil
+		}
+		return "value", nil
+	}
+	t.Setenv("JIRA_TOKEN", "")
+	t.Setenv("ISSUE_TRACKER", "")
+	t.Setenv("GH_TOKEN", "already-set")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "already-set")
+	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("JIRA_TOKEN"); got != "jira-value" {
+		t.Errorf("JIRA_TOKEN = %q, want %q (ISSUE_TRACKER=jira set only via the document)", got, "jira-value")
+	}
+}
+
+// TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal: the
+// inverse of the above — CODE_FORGE=local/ISSUE_TRACKER=local set only via
+// the document must not force a GH_TOKEN vault lookup for an offline run.
+func TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{Settings: map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"}}
+
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		if strings.Contains(cmd, "gh-token") {
+			t.Fatalf("secretCmdRunner should not be called for GH_TOKEN in a fully-local run, got %q", cmd)
+		}
+		return "value", nil
+	}
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("CODE_FORGE", "")
+	t.Setenv("ISSUE_TRACKER", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "already-set")
+	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "" {
+		t.Errorf("GH_TOKEN = %q, want empty (not required when CODE_FORGE and ISSUE_TRACKER are both local)", got)
+	}
+}
+
+// TestParseFlags_GlobalSecretCmd_SkipsBoxGhToken: BOX_GH_TOKEN (ADR 0016
+// two-actor separation) is opt-in with no requiredness signal of its own, so
+// the template must never auto-source it.
+func TestParseFlags_GlobalSecretCmd_SkipsBoxGhToken(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		if strings.Contains(cmd, "box-gh-token") {
+			t.Fatalf("secretCmdRunner should not be called for BOX_GH_TOKEN, got %q", cmd)
+		}
+		return "value", nil
+	}
+	t.Setenv("BOX_GH_TOKEN", "")
+	t.Setenv("GH_TOKEN", "already-set")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "already-set")
+	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("BOX_GH_TOKEN"); got != "" {
+		t.Errorf("BOX_GH_TOKEN = %q, want empty (never auto-sourced by the template)", got)
+	}
+}
+
+// TestParseFlags_GlobalSecretCmd_ExplicitClaudeCmdPreemptsAnthropicFallback:
+// an explicit --claude-code-oauth-token-cmd must stop the template from
+// also fetching ANTHROPIC_API_KEY, regardless of secretKnobs' table order
+// (ANTHROPIC_API_KEY sorts before CLAUDE_CODE_OAUTH_TOKEN) — the fallback
+// pass must see every per-secret resolution parseFlags already made.
+func TestParseFlags_GlobalSecretCmd_ExplicitClaudeCmdPreemptsAnthropicFallback(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		if cmd == "claude-cmd" {
+			return "claude-value", nil
+		}
+		if strings.Contains(cmd, "anthropic-api-key") {
+			t.Fatalf("secretCmdRunner should not be called for ANTHROPIC_API_KEY when --claude-code-oauth-token-cmd already satisfies the pair, got %q", cmd)
+		}
+		return "value", nil
+	}
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("GH_TOKEN", "already-set")
+	args := []string{"--claude-code-oauth-token-cmd", "claude-cmd", "--secret-cmd", "rbw get spindrift-{name}"}
+	if err := resolveGlobalSecretCmd(t, args); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != "claude-value" {
+		t.Errorf("CLAUDE_CODE_OAUTH_TOKEN = %q, want %q", got, "claude-value")
+	}
+	if got := os.Getenv("ANTHROPIC_API_KEY"); got != "" {
+		t.Errorf("ANTHROPIC_API_KEY = %q, want empty (CLAUDE_CODE_OAUTH_TOKEN already satisfies the pair)", got)
+	}
+}
+
+// TestParseFlags_GlobalSecretCmd_FailureIsError: a failing templated command
+// aborts with a named, value-free error, same as a failing per-secret command.
+func TestParseFlags_GlobalSecretCmd_FailureIsError(t *testing.T) {
+	orig := secretCmdRunner
+	t.Cleanup(func() { secretCmdRunner = orig })
+	secretCmdRunner = func(cmd string) (string, error) {
+		return "partial-secret-leak", errors.New("exit status 1")
+	}
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN_CMD", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "existing-value")
+	err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"})
+	if err == nil {
+		t.Fatal("expected error for a failing templated command, got nil")
+	}
+	if !strings.Contains(err.Error(), "GH_TOKEN") {
+		t.Errorf("error should name GH_TOKEN, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "partial-secret-leak") {
+		t.Errorf("error must not leak command output, got: %v", err)
+	}
+}
+
+// TestParseFlags_GlobalSecretCmd_MissingValue: --secret-cmd with no following
+// arg returns an error.
+func TestParseFlags_GlobalSecretCmd_MissingValue(t *testing.T) {
+	_, err := parseFlags([]string{"--secret-cmd"})
+	if err == nil {
+		t.Fatal("expected error when --secret-cmd has no command argument, got nil")
+	}
+}
+
 // TestParseFlags_NoCmdOrFile_LeavesDirectEnv: with neither a --*-cmd flag, a
 // <NAME>_CMD env var, nor a --*-file flag set, the direct env value is left
 // untouched.
@@ -764,6 +1154,20 @@ func TestPrintHelpFull_ShowsSecretCmdFlags(t *testing.T) {
 	for _, want := range []string{"--gh-token-cmd", "--anthropic-api-key-cmd", "--claude-code-oauth-token-cmd"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help output missing %s", want)
+		}
+	}
+}
+
+// TestPrintHelpFull_ShowsGlobalSecretCmd: the singleton --secret-cmd/SECRET_CMD
+// template fallback is documented in the full reference, alongside the
+// per-secret cmd/file forms it sits below.
+func TestPrintHelpFull_ShowsGlobalSecretCmd(t *testing.T) {
+	var buf bytes.Buffer
+	printHelpFull(&buf)
+	out := buf.String()
+	for _, want := range []string{"--secret-cmd", "SECRET_CMD", "{name}"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help output missing %s, got:\n%s", want, out)
 		}
 	}
 }
