@@ -23,10 +23,12 @@ import (
 // attempt already left at the same ref, even when the new history diverges
 // from it.
 func relayBundle(repoPath, outboxDir, ref string) error {
-	// Defense in depth, matching the git adapter's own validateGitRef: ref is
-	// launcher-controlled today (AgentBranch's own naming), but this method
-	// interpolates it directly into a refspec, so guard it the same way
-	// regardless.
+	// Defense in depth, matching the git adapter's own validateGitRef: settle
+	// derives ref from cf.AgentBranch(num) host-side (issue #1949) and never
+	// forwards the outcome line's own landing= field here, so ref is
+	// launcher-controlled by the time it reaches this function. It still
+	// interpolates directly into a refspec, so guard it the same way
+	// regardless of that guarantee holding upstream.
 	if ref == "" || strings.HasPrefix(ref, "-") {
 		return fmt.Errorf("local: invalid ref %q", ref)
 	}
