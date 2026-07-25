@@ -52,9 +52,9 @@ type FreshnessChecker func() (applicable, fresh bool, message string)
 
 // nextReady scans issues in order for the first one ready to dispatch,
 // applying the same selection drainMaxJobs does for a whole batch —
-// blocker-failed cascade, blocked skip, touch-overlap defer — but returns
-// after the first match rather than collecting a whole wave, since a
-// refill only ever needs to fill one freed slot. sources carries each
+// blocked skip, touch-overlap defer — but returns after the first match
+// rather than collecting a whole wave, since a refill only ever needs to
+// fill one freed slot. sources carries each
 // blocker's provenance alongside edges, mirroring drainMaxJobs' own
 // parameter (engine.go) — like that function's general blocked-skip line,
 // nextReady's does not render it: the only current Sources consumer,
@@ -93,19 +93,16 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 		}
 	}
 	for _, iss := range issues {
-		var failed, unready []string
+		var unready []string
 		if !cfg.PreResolved {
-			_, failed, unready = blockerStatus(cfg, it, cf, iss.Number, edges)
+			unready = unreadyBlockers(it, cf, iss.Number, edges)
 		}
 		switch {
 		case !cfg.PreResolved && !cfg.IgnoreBlockers && depsOfFailed[iss.Number]:
 			// Own DepsOf call failed (#752, #1103) -- edges[iss.Number] is
 			// unreliable, not a confirmed zero-blocker result. Hold rather
-			// than launch or cascade-fail; the next refill retries.
+			// than launch; the next refill retries.
 			skip(iss.Number, fmt.Sprintf("    ~~ #%s blocker check failed; will retry\n", iss.Number))
-		case len(failed) > 0:
-			skip(iss.Number, fmt.Sprintf("    !! #%s  status=blocker-failed  note=#%s failed; skipping\n", iss.Number, strings.Join(failed, ", #")))
-			transitionState(it, iss.Number, forge.Dispatchable, forge.Failed)
 		case len(unready) > 0:
 			skip(iss.Number, fmt.Sprintf("    ~~ #%s blocked by #%s; skipping\n", iss.Number, strings.Join(unready, ", #")))
 		default:
@@ -139,8 +136,8 @@ func dropClaimed(issues []Issue, claimed map[string]bool) []Issue {
 // RunContinuous runs the opt-in slot-refill dispatch mode (#527): it fills
 // up to cfg.MaxParallel slots from discover's result, then, as each Box
 // finishes, consults fresh before refilling the slot it freed. A fresh
-// result re-runs discover (blocker readiness, touch overlap, and cascade
-// failure — the same selection nextReady applies) and claims and launches
+// result re-runs discover (blocker readiness, touch overlap — the same
+// selection nextReady applies) and claims and launches
 // the next unblocked issue; a rebuild-needed result stops refilling — the
 // slot stays empty and in-flight Boxes still run to completion — and
 // RunContinuous returns ErrImageStale once every Box has finished. Claim

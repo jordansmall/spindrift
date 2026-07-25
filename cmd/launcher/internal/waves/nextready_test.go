@@ -8,11 +8,12 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// TestNextReady_FailedBlockerCascadesToFailed verifies that nextReady skips
-// an issue whose in-batch blocker carries the failed label and transitions
-// the dependent from Dispatchable to Failed, matching drainMaxJobs' cascade
-// semantics on the single-slot refill path.
-func TestNextReady_FailedBlockerCascadesToFailed(t *testing.T) {
+// TestNextReady_FailedBlockerHoldsDependent verifies that nextReady holds
+// (rather than cascade-fails) an issue whose in-batch blocker carries the
+// failed label: agent-failed is a recoverable state (agent-recover retries
+// it), so a dependent must wait across retries instead of being mislabeled
+// failed itself (#1984, incident #1972).
+func TestNextReady_FailedBlockerHoldsDependent(t *testing.T) {
 	c := baseConfig()
 	c.Label = "agent-trigger"
 
@@ -24,20 +25,27 @@ func TestNextReady_FailedBlockerCascadesToFailed(t *testing.T) {
 	edges := map[string][]string{"1": {"3"}}
 	checkOverlap := func(string) (string, bool) { return "", false }
 
-	iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
-		{Number: "1", Title: "dependent"},
-	}, edges, nil, nil, nil)
-
-	if ok {
-		t.Fatalf("nextReady: got (%v, true), want ok=false", iss)
-	}
+	out := testutil.CaptureStdout(t, func() {
+		iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
+			{Number: "1", Title: "dependent"},
+		}, edges, nil, nil, nil)
+		if ok {
+			t.Fatalf("nextReady: got (%v, true), want ok=false", iss)
+		}
+	})
 
 	iss1, err := fc.Issue("1")
 	if err != nil {
 		t.Fatalf("Issue(1): %v", err)
 	}
-	if !containsLabel(iss1.Labels, c.FailedLabel) {
-		t.Errorf("issue 1 must have %q when blocker failed; labels=%v", c.FailedLabel, iss1.Labels)
+	if containsLabel(iss1.Labels, c.FailedLabel) {
+		t.Errorf("issue 1 must not gain %q when blocker failed; labels=%v", c.FailedLabel, iss1.Labels)
+	}
+	if !containsLabel(iss1.Labels, c.Label) {
+		t.Errorf("issue 1 must keep %q while held; labels=%v", c.Label, iss1.Labels)
+	}
+	if !strings.Contains(out, "~~ #1 blocked by #3; skipping") {
+		t.Errorf("output must hold with the standard blocked-skip line; got:\n%s", out)
 	}
 }
 
@@ -108,34 +116,52 @@ func TestNextReady_BlockedLineLogsOncePerState(t *testing.T) {
 	}
 }
 
-// TestNextReady_FailedBlockerLineNamesBlockers verifies that nextReady's
-// failed-blocker skip line names the specific failed blocker issue
-// number(s), comma-joined, rather than the generic "a dependency failed"
-// message.
-func TestNextReady_FailedBlockerLineNamesBlockers(t *testing.T) {
+// TestNextReady_Issue1972_HeldAcrossBlockerRetries reproduces the #1972
+// incident: a blocker fails, gets retried via agent-recover, and fails again
+// before finally recovering. The dependent must stay held (never gain
+// FailedLabel) through every failed round, then dispatch cleanly the moment
+// the blocker reaches a satisfied state.
+func TestNextReady_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	c := baseConfig()
 	c.Label = "agent-trigger"
 
 	fc := forge.NewFake(dispatchLabels(c))
-	// Issue #1 is blocked by both #3 and #4, which have already failed.
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}})
-	fc.SetIssue(forge.Issue{Number: "4", Labels: []string{c.FailedLabel}})
 
-	edges := map[string][]string{"1": {"3", "4"}}
+	edges := map[string][]string{"1": {"3"}}
 	checkOverlap := func(string) (string, bool) { return "", false }
 
-	out := testutil.CaptureStdout(t, func() {
-		iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
-			{Number: "1", Title: "dependent"},
-		}, edges, nil, nil, nil)
-		if ok {
-			t.Fatalf("nextReady: got (%v, true), want ok=false", iss)
-		}
-	})
+	// Round 1: blocker #3 just failed.
+	if iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
+		{Number: "1", Title: "dependent"},
+	}, edges, nil, nil, nil); ok {
+		t.Fatalf("round 1: nextReady got (%v, true), want ok=false", iss)
+	}
 
-	if !strings.Contains(out, "!! #1  status=blocker-failed  note=#3, #4 failed; skipping") {
-		t.Errorf("output must name the failed blockers; got:\n%s", out)
+	// Round 2: agent-recover retried #3 and it failed again -- still
+	// labeled failed, dependent must still be held, not cascaded.
+	if iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
+		{Number: "1", Title: "dependent"},
+	}, edges, nil, nil, nil); ok {
+		t.Fatalf("round 2: nextReady got (%v, true), want ok=false", iss)
+	}
+
+	iss1, err := fc.Issue("1")
+	if err != nil {
+		t.Fatalf("Issue(1): %v", err)
+	}
+	if containsLabel(iss1.Labels, c.FailedLabel) {
+		t.Errorf("issue 1 must never gain %q across retries; labels=%v", c.FailedLabel, iss1.Labels)
+	}
+
+	// Round 3: #3 finally recovers and completes -- close it out.
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}, State: "CLOSED"})
+	iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
+		{Number: "1", Title: "dependent"},
+	}, edges, nil, nil, nil)
+	if !ok || iss.Number != "1" {
+		t.Fatalf("round 3: nextReady got (%v, %v), want (#1, true) once blocker is satisfied", iss, ok)
 	}
 }
 
