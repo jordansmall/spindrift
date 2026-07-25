@@ -167,14 +167,14 @@ setup() {
   grep -qF 'the launcher posts the SPINDRIFT_OUTCOME' "$CLAUDE_PROMPT_FILE"
 }
 
-# issue #1917: BOX_FORGE_AND_ISSUE_ACCESS=read-only strips the Box's write
-# token, so a github tracker's write-step gate (ISSUE_TRACKER_GITHUB_READONLY,
+# issue #1917: read-only (BOX_WRITE_ENABLED absent, issue #1951) strips the
+# Box's write token, so a github tracker's write-step gate (ISSUE_TRACKER_GITHUB_READONLY,
 # distinct from the ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL gates the
 # issue-read tests above exercise) must render the same host-mediated relay
 # form local always gets, never the in-box gh issue comment invocation.
 @test "research verdict step: github tracker under read-only relays via a nonce-guarded SPINDRIFT_COMMENT line, never gh issue comment" {
   export DISPATCH_KIND="research"
-  export BOX_FORGE_AND_ISSUE_ACCESS="read-only"
+  unset BOX_WRITE_ENABLED
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github-readonly"
   run bash "$ENTRYPOINT"
@@ -190,7 +190,7 @@ setup() {
 }
 
 @test "issue blocked-comment step: github tracker under read-only never runs gh issue comment" {
-  export BOX_FORGE_AND_ISSUE_ACCESS="read-only"
+  unset BOX_WRITE_ENABLED
   export WORK_DIR="$BATS_TEST_TMPDIR/work-blocked-comment-github-readonly"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -201,7 +201,9 @@ setup() {
 @test "research verdict step: github tracker under read-write is unaffected by the new gate" {
   export DISPATCH_KIND="research"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-research-verdict-github-readwrite-explicit"
-  export BOX_FORGE_AND_ISSUE_ACCESS="read-write"
+  # helper.bash's setup_entrypoint_env already exports BOX_WRITE_ENABLED=1
+  # (mirroring the BOX_FORGE_AND_ISSUE_ACCESS=read-write schema default), so
+  # this case needs no override.
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'gh issue comment 7' "$CLAUDE_PROMPT_FILE"
@@ -210,9 +212,10 @@ setup() {
 
 # issue #1918: the OPEN A PULL REQUEST push step's BOX_ACCESS_READ_WRITE/
 # BOX_ACCESS_READ_ONLY gates (agent/entrypoint.sh's phase_prompt_assembly
-# precompute block, derived from BOX_FORGE_AND_ISSUE_ACCESS). box_env_gen.bash
-# already exports BOX_FORGE_AND_ISSUE_ACCESS=read-write (the schema default),
-# so the first case needs no override.
+# precompute block, derived from BOX_WRITE_ENABLED, issue #1951).
+# helper.bash's setup_entrypoint_env already exports BOX_WRITE_ENABLED=1
+# (mirroring the BOX_FORGE_AND_ISSUE_ACCESS=read-write schema default), so
+# the first case needs no override.
 @test "OPEN A PULL REQUEST push step: read-write keeps git push unchanged" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-push-read-write"
   run bash "$ENTRYPOINT"
@@ -222,7 +225,7 @@ setup() {
 }
 
 @test "OPEN A PULL REQUEST push step: read-only writes seam.bundle to the outbox, never git push" {
-  export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  unset BOX_WRITE_ENABLED
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-push-read-only"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -247,7 +250,7 @@ setup() {
   [ "$status" -eq 0 ]
   ! grep -q '`2\. `gh pr create' "$CLAUDE_PROMPT_FILE"
 
-  export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  unset BOX_WRITE_ENABLED
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-push-sep-ro"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -256,9 +259,10 @@ setup() {
 
 # issue #1919: the OPEN A PULL REQUEST create step's BOX_ACCESS_READ_WRITE/
 # BOX_ACCESS_READ_ONLY gates -- the counterpart to #1918's push-step gates
-# above, this time for `gh pr create` itself. box_env_gen.bash already
-# exports BOX_FORGE_AND_ISSUE_ACCESS=read-write (the schema default), so the
-# first case needs no override.
+# above, this time for `gh pr create` itself. helper.bash's
+# setup_entrypoint_env already exports BOX_WRITE_ENABLED=1 (mirroring the
+# BOX_FORGE_AND_ISSUE_ACCESS=read-write schema default), so the first case
+# needs no override.
 @test "OPEN A PULL REQUEST create step: read-write keeps gh pr create unchanged" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-read-write"
   run bash "$ENTRYPOINT"
@@ -268,7 +272,7 @@ setup() {
 }
 
 @test "OPEN A PULL REQUEST create step: read-only emits a nonce-guarded SPINDRIFT_PR_INTENT line, never gh pr create" {
-  export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  unset BOX_WRITE_ENABLED
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-create-read-only"
   run bash "$ENTRYPOINT"
@@ -301,7 +305,7 @@ setup() {
 }
 
 @test "IF BLOCKED push step: read-only writes seam.bundle to the outbox, never pushes directly" {
-  export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  unset BOX_WRITE_ENABLED
   export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-push-read-only"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -327,7 +331,7 @@ setup() {
 }
 
 @test "IF BLOCKED PR step: read-only emits a nonce-guarded SPINDRIFT_PR_INTENT line, never gh pr view or gh pr create" {
-  export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  unset BOX_WRITE_ENABLED
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-pr-read-only"
   run bash "$ENTRYPOINT"
@@ -360,7 +364,7 @@ setup() {
 }
 
 @test "IF BLOCKED outcome line: read-only reports the branch, never a pr-url placeholder" {
-  export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  unset BOX_WRITE_ENABLED
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-outcome-read-only"
   run bash "$ENTRYPOINT"
@@ -393,7 +397,7 @@ setup() {
 }
 
 @test "OUTCOME landing step: read-only reports the branch, never a pr-url placeholder" {
-  export BOX_FORGE_AND_ISSUE_ACCESS=read-only
+  unset BOX_WRITE_ENABLED
   export RUN_NONCE="deadbeefcafe1234"
   export WORK_DIR="$BATS_TEST_TMPDIR/work-outcome-landing-read-only"
   run bash "$ENTRYPOINT"

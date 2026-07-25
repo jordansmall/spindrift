@@ -21,6 +21,13 @@ setup_entrypoint_env() {
   setup_fakes
   setup_bare_repo
   set_box_env
+  # BOX_WRITE_ENABLED is not a schema knob (issue #1951): dispatch.buildBoxEnv
+  # computes it host-side from BOX_FORGE_AND_ISSUE_ACCESS and forwards it only
+  # when writes are enabled, so box_env_gen.bash's codegen (boxEnv=true knobs
+  # only) never exports it. Set it here to mirror what a real Box receives at
+  # set_box_env's BOX_FORGE_AND_ISSUE_ACCESS=read-write default; individual
+  # read-only tests unset it instead of overriding BOX_FORGE_AND_ISSUE_ACCESS.
+  export BOX_WRITE_ENABLED=1
   # Pinned away from the schema default (claude-sonnet-5) so the MODEL-flag
   # assertions below stay stable regardless of what the schema defaults to.
   export MODEL="claude-opus-4-8"
