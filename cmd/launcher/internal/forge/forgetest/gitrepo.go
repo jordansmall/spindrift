@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -71,6 +72,32 @@ func (g *GitRepoFixture) SeedBranch(branch, num string) {
 	g.run(work, "add", "feature-"+num+".txt")
 	g.run(work, "commit", "-m", "feature "+num)
 	g.run(work, "push", "-u", "origin", branch)
+}
+
+// AdvanceBranch adds a new commit onto branch's current tip and pushes it —
+// simulating a fix pass that genuinely advances a PR's head, as opposed to
+// AdvanceBase's advance of the base branch underneath an already-seeded one.
+func (g *GitRepoFixture) AdvanceBranch(branch, marker string) {
+	g.t.Helper()
+	work := g.t.TempDir()
+	g.run("", "clone", g.Bare, work)
+	g.run(work, "checkout", branch)
+	g.writeFile(filepath.Join(work, "advance-"+marker+".txt"), "advance\n")
+	g.run(work, "add", "advance-"+marker+".txt")
+	g.run(work, "commit", "-m", "advance "+marker)
+	g.run(work, "push", "origin", branch)
+}
+
+// BranchSHA returns the commit SHA branch currently points to in the bare
+// repo — the independent ground truth a HeadCommitSHA implementation's
+// result is checked against.
+func (g *GitRepoFixture) BranchSHA(branch string) string {
+	g.t.Helper()
+	out, err := exec.Command("git", "-C", g.Bare, "rev-parse", branch).Output()
+	if err != nil {
+		g.t.Fatalf("git -C %s rev-parse %s: %v", g.Bare, branch, err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // AdvanceBase adds a new commit to the base branch, so every already-seeded

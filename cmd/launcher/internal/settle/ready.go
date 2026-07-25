@@ -147,8 +147,40 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				fmt.Printf("    #%s  landing=%s  status=failure-detail-unavailable  !! %v\n", num, pr, detailErr)
 				detail = ""
 			}
+			// Best-effort: a failure to fetch the pre-fix head SHA must never
+			// block the fix pass — headErr suppresses the no-op check below
+			// rather than aborting the pass outright, matching detailErr's
+			// own fallback above.
+			headBefore, headErr := s.pr.HeadCommitSHA(pr)
+			if headErr != nil {
+				fmt.Printf("    #%s  landing=%s  status=head-sha-unavailable  !! %v\n", num, pr, headErr)
+			}
 			if result := d.Fix(attempt+1, detail); !result.Success {
-				fmt.Printf("    !! #%s fix-pass-%d exited non-zero\n", num, attempt+1)
+				fmt.Printf("    #%s  landing=%s  status=fix-failed  !! fix pass %d exited non-zero — aborting self-heal\n", num, pr, attempt+1)
+				s.it.Comment(num, fmt.Sprintf("fix pass %d exited non-zero — aborting self-heal", attempt+1))
+				s.transitionState(num, forge.InProgress, forge.Failed)
+				return landingFailed
+			}
+			// A fix pass that exits zero but never pushes a new commit
+			// leaves CI's rollup exactly as it was — the next gateToGreen
+			// poll would read the identical terminal FAILURE and mistake it
+			// for a fresh genuine red (issue #1980). Caught here instead,
+			// while the pre-fix SHA is still in hand.
+			if headErr == nil {
+				if headAfter, err := s.pr.HeadCommitSHA(pr); err == nil && headAfter == headBefore {
+					// Confirm before concluding no-op: the forge's API can
+					// briefly still serve the pre-push snapshot right after a
+					// genuine push (replication lag), mirroring gateToGreen's
+					// own confirm-poll pattern for a SUCCESS rollup above.
+					time.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
+					confirmed, confirmErr := s.pr.HeadCommitSHA(pr)
+					if confirmErr == nil && confirmed == headBefore {
+						fmt.Printf("    #%s  landing=%s  status=fix-no-op  !! fix pass %d produced no new commit — aborting self-heal\n", num, pr, attempt+1)
+						s.it.Comment(num, fmt.Sprintf("fix pass %d produced no new commit — aborting self-heal", attempt+1))
+						s.transitionState(num, forge.InProgress, forge.Failed)
+						return landingFailed
+					}
+				}
 			}
 		}
 	}

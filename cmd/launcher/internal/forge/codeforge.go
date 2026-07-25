@@ -119,6 +119,12 @@ type PRForge interface {
 	Mergeable(url string) (MergeableState, error)
 	// CheckState returns the aggregate CI rollup state for the PR's head commit.
 	CheckState(url string) (RollupState, error)
+	// HeadCommitSHA returns the PR's current head commit SHA — the signal
+	// selfHealGate compares before and after a fix pass to tell a genuine
+	// push (CI restarts on a new commit) from a no-op fix pass that left the
+	// head unchanged, so a stale terminal rollup is never mistaken for a
+	// fresh genuine red (issue #1980).
+	HeadCommitSHA(url string) (string, error)
 	// NeedsUpdate reports whether the PR's base branch has commits its head
 	// branch has not yet incorporated — a pure git-ancestry fact, distinct
 	// from Mergeable's conflict check: a PR can need updating (its tested

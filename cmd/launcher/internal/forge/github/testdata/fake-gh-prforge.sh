@@ -62,6 +62,10 @@ pr-view)
 	isDraft)
 		printf 'false\n'
 		;;
+	headRefOid)
+		head=$(cat "$STATE_DIR/prs/$num/head")
+		git -C "$REMOTE" rev-parse "refs/heads/$head"
+		;;
 	esac
 	;;
 pr-merge)
