@@ -139,6 +139,17 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				s.transitionState(num, forge.InProgress, forge.Failed)
 				return landingFailed
 			}
+			// Before launching another fix pass, check cumulative spend
+			// against the budget caps (issue #2001) — a sibling governor to
+			// the attempt-count cap just above, distinct so a runaway
+			// token/cost run stops even while MaxFixAttempts would still
+			// allow more passes.
+			if exceeded, reason := budgetExceeded(s.cfg, d.CumulativeUsage()); exceeded {
+				fmt.Printf("    #%s  landing=%s  status=budget-exhausted  !! %s\n", num, pr, reason)
+				s.it.Comment(num, fmt.Sprintf("budget exhausted (%s) — stopping self-heal before another fix pass", reason))
+				s.transitionState(num, forge.InProgress, forge.Failed)
+				return landingFailed
+			}
 			fmt.Printf("    #%s  landing=%s  fix-pass=%d/%d\n", num, pr, attempt+1, s.cfg.MaxFixAttempts)
 			// Best-effort: a failure to fetch the CI failure detail must
 			// never block the fix pass — fall back to an empty summary.
