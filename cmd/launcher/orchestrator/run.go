@@ -157,9 +157,14 @@ func run(cfg config, stdout io.Writer) (int, error) {
 // seedPromptFromState composes a fresh prompt file carrying promptFile's own
 // content plus a summary of state -- last verdict, done/remaining slices,
 // scout-brief path -- so each pass is "seeded from the run-state artifact"
-// (issue #1998 AC1), not handed the same static prompt on every pass. When
-// state is the zero value (the common cold-start pass, nothing carried
-// forward yet) this returns promptFile unchanged and creates no temp file.
+// (issue #1998 AC1), not handed the same static prompt on every pass. This is
+// also the "precision between-iteration instruction injection" issue #1999
+// asks for: the explicit, inspectable "what is done, what the reviewer said"
+// brief, composed from the handoff artifact rather than an implicit resumed
+// session -- TestRunSeedsFixBriefWithDoneWorkAndVerdictAfterBlock asserts
+// AC2's exact shape. When state is the zero value (the common cold-start
+// pass, nothing carried forward yet) this returns promptFile unchanged and
+// creates no temp file.
 func seedPromptFromState(promptFile string, state RunState) (string, error) {
 	if state.LastVerdict == "" && len(state.DoneSlices) == 0 && len(state.RemainingSlices) == 0 && state.ScoutBriefPath == "" {
 		return promptFile, nil

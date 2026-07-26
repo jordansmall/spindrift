@@ -51,6 +51,25 @@ func streamJSONOutcomeLine(text string) string {
 	return `{"type":"assistant","message":{"content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
 }
 
+// blockThenApproveFakeDriverBody returns a writeFakeDriverExec body scripting
+// a fake driver-exec to BLOCK its first pass and APPROVE-with-outcome every
+// pass after, keyed off callLog's own line count (its own invocation tally)
+// rather than an in-process counter, so the same script works whether it
+// runs once or is reused verbatim by more than one test.
+func blockThenApproveFakeDriverBody(callLog string) string {
+	return fmt.Sprintf(`n=$(wc -l < "%s")
+if [ "$n" -eq 1 ]; then
+  printf '%%s' '%s' >> "$DRIVER_LOG_PATH"
+else
+  printf '%%s%%s' '%s' '%s' >> "$DRIVER_LOG_PATH"
+fi
+exit 0
+`, callLog,
+		streamJSONVerdictLine("VERDICT: BLOCK"),
+		streamJSONVerdictLine("VERDICT: APPROVE"),
+		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+}
+
 // TestRunInvokesDriverExecOnceForwardingFlags verifies the orchestrator's S1
 // tracer-bullet behaviour (issue #1996): exactly one driver-exec invocation,
 // carrying every flag entrypoint.sh's own direct call passes today, and the
@@ -367,18 +386,7 @@ func TestRunDevshellFlagsForwardedOnlyWhenSet(t *testing.T) {
 func TestRunLoopsOnBlockThenApproveWithFreshSessionPerPass(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
-	body := fmt.Sprintf(`n=$(wc -l < %s)
-if [ "$n" -eq 1 ]; then
-  printf '%%s' '%s' >> "$DRIVER_LOG_PATH"
-else
-  printf '%%s%%s' '%s' '%s' >> "$DRIVER_LOG_PATH"
-fi
-exit 0
-`, callLog,
-		streamJSONVerdictLine("VERDICT: BLOCK"),
-		streamJSONVerdictLine("VERDICT: APPROVE"),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
-	writeFakeDriverExec(t, dir, callLog, body)
+	writeFakeDriverExec(t, dir, callLog, blockThenApproveFakeDriverBody(callLog))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -462,18 +470,7 @@ func flagValue(argvLine, flag string) string {
 func TestRunSeedsSubsequentPassPromptFromRunState(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
-	body := fmt.Sprintf(`n=$(wc -l < %s)
-if [ "$n" -eq 1 ]; then
-  printf '%%s' '%s' >> "$DRIVER_LOG_PATH"
-else
-  printf '%%s%%s' '%s' '%s' >> "$DRIVER_LOG_PATH"
-fi
-exit 0
-`, callLog,
-		streamJSONVerdictLine("VERDICT: BLOCK"),
-		streamJSONVerdictLine("VERDICT: APPROVE"),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
-	writeFakeDriverExec(t, dir, callLog, body)
+	writeFakeDriverExec(t, dir, callLog, blockThenApproveFakeDriverBody(callLog))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -523,6 +520,69 @@ exit 0
 	}
 	if !strings.Contains(string(seeded), "BLOCK") {
 		t.Errorf("pass 2 prompt = %q, want it to carry pass 1's BLOCK verdict from the run-state artifact", seeded)
+	}
+}
+
+// TestRunSeedsFixBriefWithDoneWorkAndVerdictAfterBlock verifies AC2 (issue
+// #1999): after a scripted BLOCK, the next pass's own seeded prompt carries
+// the scoped fix brief -- both what is already done (a DoneSlices list this
+// fixture seeds into the run-state artifact up front, standing in for
+// whatever an earlier pass in the same run would have left behind) and the
+// verdict that triggered the fix pass -- not just the bare verdict word alone
+// (that narrower claim is #1998's own TestRunSeedsSubsequentPassPromptFromRunState).
+func TestRunSeedsFixBriefWithDoneWorkAndVerdictAfterBlock(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, blockThenApproveFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stateFile := filepath.Join(dir, "run-state.json")
+	if err := WriteRunState(stateFile, RunState{DoneSlices: []string{"scout", "implement seam A"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:      promptFile,
+		driverBin:       "claude",
+		issue:           "7",
+		logPath:         filepath.Join(dir, "stream.log"),
+		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
+		stateFile:       stateFile,
+		maxReviewRounds: 3,
+		maxSlices:       5,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("driver-exec invocation count = %d, want 2 (log: %q)", len(lines), calls)
+	}
+
+	pass2PromptFile := flagValue(lines[1], "--prompt-file")
+	if pass2PromptFile == "" || pass2PromptFile == promptFile {
+		t.Fatalf("pass 2 --prompt-file = %q, want a fresh seeded file distinct from %q", pass2PromptFile, promptFile)
+	}
+	seeded, err := os.ReadFile(pass2PromptFile)
+	if err != nil {
+		t.Fatalf("read seeded pass 2 prompt file: %v", err)
+	}
+	for _, want := range []string{"Done slices: scout, implement seam A", "Last reviewer verdict: BLOCK"} {
+		if !strings.Contains(string(seeded), want) {
+			t.Errorf("pass 2 prompt = %q, want the scoped fix brief to carry %q", seeded, want)
+		}
 	}
 }
 
