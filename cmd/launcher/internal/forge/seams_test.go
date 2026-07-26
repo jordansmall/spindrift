@@ -107,6 +107,32 @@ func TestFake_ImplementsHostPostedCommenter(t *testing.T) {
 	var _ forge.HostPostedCommenter = forge.NewFake()
 }
 
+// TestFake_DoesNotImplementHostPostedIssueFilerByDefault verifies a bare
+// *Fake (unwrapped) does not satisfy the optional HostPostedIssueFiler
+// surface (issue #2018), matching every real adapter's shape today — no
+// adapter implements host-posted issue filing yet, mirroring
+// forge.DraftPRCreator's own "no adapter implements it yet" posture.
+func TestFake_DoesNotImplementHostPostedIssueFilerByDefault(t *testing.T) {
+	f := forge.NewFake()
+	if _, ok := any(f).(forge.HostPostedIssueFiler); ok {
+		t.Fatal("bare *Fake unexpectedly satisfies HostPostedIssueFiler")
+	}
+}
+
+// TestFake_AsIssueFiler_ImplementsHostPostedIssueFiler asserts that
+// AsIssueFiler wraps a Fake so it satisfies the optional
+// HostPostedIssueFiler surface — the read-only issue-filing relay channel
+// (issue #2018). Discovered by type assertion the same way DraftPRCreator
+// is; only reachable through this wrapper, matching createDraftPR's
+// AsGithubReadOnly()-only restriction.
+func TestFake_AsIssueFiler_ImplementsHostPostedIssueFiler(t *testing.T) {
+	f := forge.NewFake()
+	it := f.AsIssueFiler()
+	if _, ok := it.(forge.HostPostedIssueFiler); !ok {
+		t.Fatal("AsIssueFiler() does not satisfy HostPostedIssueFiler")
+	}
+}
+
 // TestFake_ImplementsLabeledTracker asserts that *Fake satisfies the
 // optional LabeledTracker surface, matching the github/local adapters'
 // shape — PickIssue's double-box guard (#1742) relies on this to skip a
