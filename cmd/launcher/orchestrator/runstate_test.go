@@ -33,6 +33,34 @@ func TestRunStateRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRunStateRoundTripIncludesBudgetGovernorFields verifies the budget
+// governor's own handoff fields (issue #2002) -- cumulative spend across
+// every pass so far, and how many times this run has already decomposed --
+// round-trip through WriteRunState/ReadRunState alongside the S2 fields,
+// since the governor's checks depend on reading them back on the very next
+// pass just like LastVerdict already does.
+func TestRunStateRoundTripIncludesBudgetGovernorFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run-state.json")
+	want := RunState{
+		LastVerdict:        "BLOCK",
+		DecompositionDepth: 2,
+	}
+	want.CumulativeUsage.InputTokens = 1000
+	want.CumulativeUsage.OutputTokens = 2000
+	want.CumulativeUsage.TotalCostUSD = 1.25
+
+	if err := WriteRunState(path, want); err != nil {
+		t.Fatalf("WriteRunState: %v", err)
+	}
+	got, err := ReadRunState(path)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("round trip = %+v, want %+v", got, want)
+	}
+}
+
 // TestReadRunStateNoFileYetReturnsZeroValue verifies the actual pass-one
 // production path (issue #1997): --state-file defaults to a fixed tmp path
 // that has never been written, and ReadRunState must treat that as "no
