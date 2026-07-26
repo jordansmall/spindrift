@@ -125,6 +125,33 @@ func TestCumulativeUsage_SumsAcrossInitialAndFixPasses(t *testing.T) {
 	}
 }
 
+// TestCumulativeUsage_PassWithNoResultEventContributesNothing verifies that
+// a fix-pass log with no result event (a crashed or still-running pass)
+// degrades to contributing zero rather than aborting the whole sum — the
+// initial run's own usage still comes through (issue #2001).
+func TestCumulativeUsage_PassWithNoResultEventContributesNothing(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("10", "test issue")
+
+	writeRunLog(t, d, `{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":100,"output_tokens":50}}`)
+	if err := writeFile(d.fixLogPath(1), `{"type":"assistant","message":{"content":[]}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := d.CumulativeUsage()
+	if diff := got.TotalCostUSD - 0.10; diff > 0.0001 || diff < -0.0001 {
+		t.Errorf("TotalCostUSD = %v, want ~0.10 (fix-pass with no result event contributes nothing)", got.TotalCostUSD)
+	}
+	if got.InputTokens != 100 {
+		t.Errorf("InputTokens = %d, want 100 (fix-pass with no result event contributes nothing)", got.InputTokens)
+	}
+}
+
 // TestUsageReport_WithBreakdown verifies that when the log contains scout
 // and reviewer subagent messages, the report includes a per-role breakdown
 // table.
