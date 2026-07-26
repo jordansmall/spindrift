@@ -40,6 +40,13 @@ printf '%s' "$prompt" >"${CLAUDE_PROMPT_FILE:-/dev/null}"
 printf '%s' "$agents" >"${CLAUDE_AGENTS_FILE:-/dev/null}"
 printf 'claude invoked for issue #%s model=%s\n' "${ISSUE_NUMBER:-?}" "$model" >>"$CLAUDE_LOG"
 
+# Real claude reads CLAUDE_CODE_DISABLE_BACKGROUND_TASKS from its own process
+# environment (issue #2011) to omit run_in_background from the Bash/Agent/
+# Task/PowerShell tools' schema; this fake logs whatever it actually
+# inherited so a test can assert the var reaches it identically regardless of
+# which in-box binary (driver-exec or the orchestrator) spawned this process.
+printf 'env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=%s\n' "${CLAUDE_CODE_DISABLE_BACKGROUND_TASKS:-}" >>"$CLAUDE_LOG"
+
 # Report any skills discoverable at the path Claude Code scans. Real claude -p
 # discovers a skill only as a directory holding a SKILL.md
 # ($HOME/.claude/skills/<name>/SKILL.md), never a flat <name>.md file; this

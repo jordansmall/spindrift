@@ -211,6 +211,26 @@ EOF
 # outcome.Parse would still reject as a near miss (missing landing=). No
 # commits or staged work here, so a plain "no work to preserve" backstop
 # firing is itself the proof the extractor rejected the stray marker.
+# Issue #2011: a Driver that backgrounds work or parks its turn awaiting a
+# subagent notification a headless `claude -p` session can never receive
+# ends its turn the same way any other forgetful driver does -- no
+# SPINDRIFT_OUTCOME line, rc=0 -- so it must land on this same backstop
+# regardless of which invoker (driver-exec directly, or the orchestrator)
+# ran the Driver. FAKE_CLAUDE_NO_OUTCOME stands in for that parked turn:
+# CLAUDE_CODE_DISABLE_BACKGROUND_TASKS (this issue's structural fix) closes
+# the parking vector itself, but this test is the last-resort net for
+# whatever still gets through it -- a run must never exit silently.
+@test "orchestrator path: driver parks with no outcome line -> entrypoint still emits a synthetic blocked outcome" {
+  export ORCHESTRATOR_ENABLED=1
+  export FAKE_CLAUDE_COMMIT=1
+  export FAKE_CLAUDE_NO_OUTCOME=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
+  git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
+}
+
 @test "prose with one stray field marker (#2012) -> extractor still leaves it unmatched" {
   export FAKE_CLAUDE_WRAP_OUTCOME=stray-field
   run bash "$ENTRYPOINT"
