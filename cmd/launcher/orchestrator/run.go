@@ -210,6 +210,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			// up.
 			reviewRounds = 0
 			if cfg.maxSlices > 0 && pass >= cfg.maxSlices {
+				fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: "stop", Reason: "max slices reached"}))
 				break
 			}
 			continue
@@ -492,6 +493,9 @@ func accumulatePassUsage(state *RunState, logPath string) {
 	state.CumulativeUsage.CacheReadInputTokens += r.CacheReadInputTokens
 	state.CumulativeUsage.CacheCreationInputTokens += r.CacheCreationInputTokens
 	state.CumulativeUsage.TotalCostUSD += r.TotalCostUSD
+	state.CumulativeUsage.DurationMs += r.DurationMs
+	state.CumulativeUsage.DurationApiMs += r.DurationApiMs
+	state.CumulativeUsage.NumTurns += r.NumTurns
 }
 
 // findVerdict reports whether line carries a "VERDICT: APPROVE" or
