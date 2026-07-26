@@ -36,6 +36,11 @@
   # filters heartbeats in-process (absorbing the former standalone
   # spindrift-heartbeat-filter binary, #183).
   driverExecBin,
+  # In-box orchestrator (#1996), built for Linux by mkHarness: the binary
+  # entrypoint.sh hands the implementor pass off to instead of driver-exec
+  # when ORCHESTRATOR_ENABLED is set; forwards to driverExecBin itself for
+  # this tracer-bullet slice's single-pass loop.
+  orchestratorBin,
   # --agents JSON, rendered by the selected Driver (ADR 0009).
   agentsJsonTemplate,
   # The Driver's in-box half rendered into agent/entrypoint.sh's
@@ -112,6 +117,7 @@ let
       (driverEntry.package pkgs)
       cacert
       driverExecBin # in-box Driver runner (#626)
+      orchestratorBin # in-box orchestrator (#1996)
     ])
     # The nix CLI is included by default so `nix flake check` / `nix develop`
     # work inside the box. Omitted only when the Consumer opts into the lean image.
@@ -144,6 +150,7 @@ let
       coreutils
       jq # extracts the outcome from the stream-json transcript
       driverExecBin # in-box Driver runner (#626)
+      orchestratorBin # in-box orchestrator (#1996)
     ];
     # Prepend the schema-derived defaults block so the entrypoint carries the
     # baked values without hardcoding them in the source script.

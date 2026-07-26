@@ -344,6 +344,30 @@ let
     meta.license = lib.licenses.mit;
   };
 
+  # In-box orchestrator (issue #1996, ADR 0007): the Go binary entrypoint.sh
+  # hands the implementor pass off to when ORCHESTRATOR_ENABLED is set,
+  # instead of calling driver-exec directly. This tracer-bullet slice's
+  # orchestrator is a pure forwarder -- stdlib only, no internal/ imports --
+  # so its fileset is just go.mod/go.sum plus its own package, tighter even
+  # than driverExecBin's.
+  orchestratorBin = pkgs.buildGoModule {
+    pname = "orchestrator";
+    version = spindriftVersion;
+    src = lib.fileset.toSource {
+      root = ../cmd/launcher;
+      fileset = lib.fileset.unions [
+        ../cmd/launcher/go.mod
+        ../cmd/launcher/go.sum
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/orchestrator)
+      ];
+    };
+    vendorHash = "sha256-uaAaQReAf8PCq/TNWetYyYinj+BeUaiaL4zm/fpJPBA=";
+    subPackages = [ "orchestrator" ];
+    meta.license = lib.licenses.mit;
+  };
+
   # The harness plumbing package set, agent environment, agent files,
   # passwd/group files, and the layered OCI image build itself — extracted to
   # lib/image.nix (issue #514) as a pure code move; the image derivation must
@@ -360,6 +384,7 @@ let
       extraClosures
       driverEntry
       driverExecBin
+      orchestratorBin
       agentsJsonTemplate
       driverPreamble
       fragmentRegistryPreamble

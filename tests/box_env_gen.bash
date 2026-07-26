@@ -28,6 +28,7 @@ set_box_env() {
   export ISSUE_TRACKER="github"
   export LOCAL_ISSUE_REFERENCE=""
   export MODEL="claude-sonnet-5"
+  export ORCHESTRATOR_ENABLED=""
   export REPO_SLUG="owner/repo"
   export REVIEW_MODEL="claude-opus-4-8"
   export SCOUT_MODEL="claude-haiku-4-5-20251001"

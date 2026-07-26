@@ -105,4 +105,5 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 |---|---|---|---|
 | `settings.promptSkillIteration.autoFormat` | `AUTO_FORMAT` | `` | when non-empty, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found |
 | `settings.promptSkillIteration.autoLint` | `AUTO_LINT` | `` | when non-empty, the implementor auto-detects and runs the project's linter on changed files before each commit, applying auto-fix then resolving remaining findings; skips silently when no linter is found |
+| `settings.promptSkillIteration.orchestratorEnabled` | `ORCHESTRATOR_ENABLED` | `` | when non-empty, entrypoint.sh hands the implementor pass off to the in-box Go orchestrator instead of calling driver-exec directly (issue #1996); off by default, the direct driver-exec path is unchanged |
 
