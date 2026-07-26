@@ -45,6 +45,12 @@ type CreateDraftPRCall struct {
 	Title, Body, Base, Head string
 }
 
+// PostIssueCall records a single PostIssue invocation.
+type PostIssueCall struct {
+	Title, Body string
+	Labels      []string
+}
+
 // Fake is an in-memory Client for unit tests. All methods are safe for
 // concurrent use. CheckState pops from a scripted RollupState queue so polling
 // tests need no real sleeps.
@@ -158,6 +164,15 @@ type Fake struct {
 	CreateDraftPRErr error
 	// CreateDraftPRCalls records all CreateDraftPR invocations in order.
 	CreateDraftPRCalls []CreateDraftPRCall
+
+	// PostIssueURL is returned by every PostIssue call on success — scripts
+	// the URL of the issue the Launcher files host-side (issue #2018). Only
+	// reachable through AsIssueFiler().
+	PostIssueURL string
+	// PostIssueErr, if non-nil, is returned by every PostIssue call.
+	PostIssueErr error
+	// PostIssueCalls records all PostIssue invocations in order.
+	PostIssueCalls []PostIssueCall
 	// LandingRefValue is returned by LandingRef on success.
 	LandingRefValue string
 	// LandingRefErr, if non-nil, is returned by every LandingRef call.
@@ -916,6 +931,41 @@ func (f *Fake) createDraftPR(title, body, base, head string) (string, error) {
 	}
 	return f.CreateDraftPRURL, nil
 }
+
+// postIssue backs the optional HostPostedIssueFiler surface (issue #2018),
+// recording each call for tests to assert against. Deliberately unexported,
+// the same reasoning as createDraftPR: only issueFilerTracker's own exported
+// PostIssue (reachable exclusively through AsIssueFiler()) calls it, so a
+// bare *Fake used as an IssueTracker in every other test never silently
+// starts satisfying forge.HostPostedIssueFiler.
+func (f *Fake) postIssue(title, body string, labels []string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.PostIssueCalls = append(f.PostIssueCalls, PostIssueCall{Title: title, Body: body, Labels: labels})
+	if f.PostIssueErr != nil {
+		return "", f.PostIssueErr
+	}
+	return f.PostIssueURL, nil
+}
+
+// issueFilerTracker adapts a Fake to expose IssueTracker plus
+// HostPostedIssueFiler — a shape no real adapter has yet (issue #2018's
+// plumbing lands ahead of any adapter implementation, mirroring
+// githubReadOnlyForge's own DraftPRCreator staging).
+type issueFilerTracker struct {
+	IssueTracker
+	f *Fake
+}
+
+// AsIssueFiler returns f wrapped so it satisfies IssueTracker and
+// HostPostedIssueFiler.
+func (f *Fake) AsIssueFiler() IssueTracker { return issueFilerTracker{IssueTracker: f, f: f} }
+
+func (i issueFilerTracker) PostIssue(title, body string, labels []string) (string, error) {
+	return i.f.postIssue(title, body, labels)
+}
+
+var _ HostPostedIssueFiler = issueFilerTracker{}
 
 // landingRef backs the optional LandingRef surface (ADR 0033), the same
 // AsLocal()-only restriction as relayBundle above, for the same reason.

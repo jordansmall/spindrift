@@ -155,6 +155,26 @@ type HostPostedCommenter interface {
 	Comment(num, body string) error
 }
 
+// HostPostedIssueFiler is the optional IssueTracker surface for host-side
+// issue filing (issue #2018): under BOX_FORGE_AND_ISSUE_ACCESS=read-only,
+// the Box holds no write token, so it cannot `gh issue create` itself; the
+// Launcher files the issue host-side instead, from a title/body/labels a
+// read-only Box hands it as a SPINDRIFT_ISSUE_INTENT stdout signal — the
+// fourth host-mediated write channel alongside branch→bundle, PR→intent
+// line, and comment→comment line (ADR 0034). Discovered via type assertion,
+// like DraftPRCreator/HostPostedCommenter. The destination repo is implicit
+// in which IssueTracker instance the Launcher holds — there is no repo
+// argument for a payload to redirect — and labels are always supplied by the
+// caller, never read back out of the Box's own payload (issue #1949's
+// do-not-trust-the-agent-target invariant, extended from destination repo to
+// labels). No adapter implements it yet; a later issue lands the github
+// implementation.
+type HostPostedIssueFiler interface {
+	// PostIssue files a new issue with the given title, body, and labels,
+	// and returns its URL.
+	PostIssue(title, body string, labels []string) (url string, err error)
+}
+
 // LandingRecorder is the optional IssueTracker surface for adapters that can
 // persist where a Dispatch's work landed (ADR 0029). Only the local adapter
 // implements it — github/jira issues close through the forge's own
