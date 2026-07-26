@@ -191,6 +191,26 @@ func TestIsNoBuilderError(t *testing.T) {
 	}
 }
 
+func TestIsTransientRegistryError(t *testing.T) {
+	tests := []struct {
+		stderr string
+		want   bool
+	}{
+		{"Trying to pull docker.io/library/busybox:stable...\nError: pinging container registry registry-1.docker.io: Get \"https://registry-1.docker.io/v2/\": dial tcp: i/o timeout", true},
+		{"Error: initializing source docker://busybox:stable: pinging container registry registry-1.docker.io: read tcp: i/o timeout", true},
+		{"Error: initializing source docker://busybox:stable: dial tcp: lookup registry-1.docker.io: no such host", true},
+		{"Error: pulling image: connection refused", true},
+		{"Error: pulling image: TLS handshake timeout", true},
+		{"Error: creating build container: no such image", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := isTransientRegistryError(tc.stderr); got != tc.want {
+			t.Errorf("isTransientRegistryError(%q) = %v, want %v", tc.stderr, got, tc.want)
+		}
+	}
+}
+
 func TestBuildRunArgsIncludesHardeningFlags(t *testing.T) {
 	a := &ociAdapter{
 		cli:         "podman",

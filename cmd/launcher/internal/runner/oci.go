@@ -169,6 +169,27 @@ func isNoBuilderError(stderr string) bool {
 		strings.Contains(stderr, "Reason: platform mismatch")
 }
 
+// isTransientRegistryError reports whether stderr indicates a network hiccup
+// reaching the registry (DNS, dial/TLS, or read/i/o timeout) rather than a
+// genuine failure. Callers use this to retry or skip instead of failing hard
+// on a blip (issue #2015). It only has a caller in oci_integration_test.go
+// (//go:build integration) but lives here, untagged, so it still gets a
+// plain unit test (TestIsTransientRegistryError in oci_test.go) that
+// checks-inbox runs without needing a real container runtime on PATH.
+func isTransientRegistryError(stderr string) bool {
+	for _, s := range []string{
+		"i/o timeout",
+		"no such host",
+		"connection refused",
+		"TLS handshake timeout",
+	} {
+		if strings.Contains(stderr, s) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *ociAdapter) loadImage(archive string) error {
 	fmt.Printf("==> loading spindrift image from %s\n", archive)
 	load := exec.Command(a.cli, "load", "-i", archive)
