@@ -1124,6 +1124,18 @@ exit 0
 	if !strings.Contains(string(pass3Seeded), "Remaining slices: fix seam A, fix seam B") {
 		t.Errorf("pass 3 prompt = %q, want it seeded from the decomposed slice list", pass3Seeded)
 	}
+
+	// The spindrift_op markers (issue #2027) must say "decompose", never
+	// "stop", for the trigger that leads into a decompose pass -- the loop
+	// isn't stopping, it's continuing into pass 2 -- and pass 2's own
+	// pass_start must carry role "decompose" so a marker consumer can tell
+	// it apart from an ordinary implementor pass.
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"decision","decision":"decompose"`) {
+		t.Errorf("stdout = %q, want a decision marker saying \"decompose\", not \"stop\"", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":2,"role":"decompose"}`) {
+		t.Errorf("stdout = %q, want pass 2's pass_start marker to carry role \"decompose\"", stdout.String())
+	}
 }
 
 // TestRunTerminatesAtMaxDecompositionDepth verifies the governor's runaway
