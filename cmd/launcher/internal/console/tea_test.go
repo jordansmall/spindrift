@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime/pprof"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -2389,97 +2388,62 @@ func TestTea_LaunchRefreshSignal_RefreshesWithoutOperatorInput(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// pollGoroutinePresence polls dump() until its presence of name matches
-// want or deadline passes, returning an error on timeout rather than
-// failing a test directly — extracted from waitGoroutine so the deadline
-// sizing can be exercised without a real pprof dump.
-func pollGoroutinePresence(deadline time.Time, checkInterval time.Duration, dump func() string, name string, want bool) error {
-	for {
-		buf := dump()
-		if strings.Contains(buf, name) == want {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			if want {
-				return fmt.Errorf("%s goroutine never started:\n%s", name, buf)
-			}
-			return fmt.Errorf("%s goroutine leaked after quit:\n%s", name, buf)
-		}
-		time.Sleep(checkInterval)
-	}
-}
-
-// waitGoroutine polls the goroutine dump for name, failing the test if its
-// presence doesn't match want within teatestTimeout. Matches by name rather
-// than a raw runtime.NumGoroutine() diff, since unrelated Cmd goroutines
-// (e.g. pollTick) would conflate with the one under test. The deadline
-// shares teatestTimeout rather than a bespoke bound (formerly a hardcoded
-// second) because the same CPU contention on a loaded CI runner that delays
-// a render (issue #1981) also delays how quickly a goroutine starts,
-// exits, or shows up in a pprof dump.
-func waitGoroutine(t *testing.T, name string, want bool) {
-	t.Helper()
-	dump := func() string {
-		var buf bytes.Buffer
-		_ = pprof.Lookup("goroutine").WriteTo(&buf, 1)
-		return buf.String()
-	}
-	if err := pollGoroutinePresence(time.Now().Add(teatestTimeout), 5*time.Millisecond, dump, name, want); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestPollGoroutinePresence_SucceedsWhenDumpChangesAfterDelay pins that a
-// dump reflecting the wanted presence only after some delay (as a
-// contention-starved goroutine start/exit or pprof scan can under CI load)
-// still succeeds within the deadline, rather than the caller seeing a
-// spurious timeout the way the old hardcoded one-second bound did.
-func TestPollGoroutinePresence_SucceedsWhenDumpChangesAfterDelay(t *testing.T) {
-	start := time.Now()
-	dump := func() string {
-		if time.Since(start) < 15*time.Millisecond {
-			return "goroutine 1 [running]:\nother.func1()"
-		}
-		return "goroutine 1 [chan receive]:\nwaitRefreshSignal.func1()"
-	}
-	err := pollGoroutinePresence(start.Add(30*time.Millisecond), time.Millisecond, dump, "waitRefreshSignal.func1", true)
-	if err != nil {
-		t.Fatalf("pollGoroutinePresence() = %v, want nil once the dump reflects the goroutine within the deadline", err)
-	}
-}
-
-// TestPollGoroutinePresence_FailsWhenDumpNeverMatchesWantWithinDeadline pins
-// the poll's own bound: a goroutine that never (dis)appears still fails,
-// just once deadline passes, matching teatestTimeout's hang-detector
-// philosophy.
-func TestPollGoroutinePresence_FailsWhenDumpNeverMatchesWantWithinDeadline(t *testing.T) {
-	dump := func() string { return "goroutine 1 [running]:\nother.func1()" }
-	err := pollGoroutinePresence(time.Now().Add(5*time.Millisecond), time.Millisecond, dump, "waitRefreshSignal.func1", true)
-	if err == nil {
-		t.Fatal("pollGoroutinePresence() = nil, want an error when the wanted goroutine never appears")
-	}
-}
-
-// TestTea_QuitKey_CancelsWaitRefreshSignalGoroutine verifies quitting a
-// session with a live launch that never signals a refresh doesn't leak the
-// waitRefreshSignal goroutine blocked on Launcher.Refreshes() (issue #823) —
-// bubbletea can't cancel a Cmd goroutine itself (it's parked on <-ch forever
-// by design), so teaModel must cancel it on the way out. Two-phase check:
-// confirms the goroutine exists before quit (otherwise a regression that
-// skips arming it would pass vacuously — there'd be nothing to cancel), then
-// confirms it's gone after.
-func TestTea_QuitKey_CancelsWaitRefreshSignalGoroutine(t *testing.T) {
+// TestWaitRefreshSignal_BlocksUntilDoneCloses_ThenReturnsNil verifies
+// waitRefreshSignal's actual cancellation contract directly, against a
+// test-local done channel only — no process-global goroutine dump (issue
+// #2013). Replaces the old TestTea_QuitKey_CancelsWaitRefreshSignalGoroutine,
+// which matched the leaked/absent goroutine by function name in a
+// process-global pprof.Lookup("goroutine") dump; since every launch-backed
+// teaModel in the package arms a goroutine under that same name, a sibling
+// test's still-draining instance could satisfy or fail the assertion
+// regardless of this test's own goroutine, making the check flaky rather
+// than a leak detector (issue #823 for the original cancel guarantee this
+// pins).
+func TestWaitRefreshSignal_BlocksUntilDoneCloses_ThenReturnsNil(t *testing.T) {
 	f := forge.NewFake()
-	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
 	launch := &Launcher{CodeForge: f, queue: NewQueue(), pollInterval: time.Hour}
+	done := make(chan struct{})
+	res := make(chan tea.Msg, 1)
 
-	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "first")
-	waitGoroutine(t, "waitRefreshSignal.func1", true)
+	go func() { res <- waitRefreshSignal(launch, done)() }()
 
-	sendKey(tm, "q")
-	waitFinished(t, tm)
-	waitGoroutine(t, "waitRefreshSignal.func1", false)
+	select {
+	case m := <-res:
+		t.Fatalf("waitRefreshSignal returned %v before done closed, want it still blocked", m)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(done)
+
+	select {
+	case m := <-res:
+		if m != nil {
+			t.Errorf("waitRefreshSignal()() = %v, want nil once done closes", m)
+		}
+	case <-time.After(teatestTimeout):
+		t.Fatal("waitRefreshSignal did not return within teatestTimeout after done closed")
+	}
+}
+
+// TestTeaUpdate_QuitKey_ClosesDoneChannel verifies the other half of the
+// cancellation contract TestWaitRefreshSignal_BlocksUntilDoneCloses_ThenReturnsNil
+// pins: reaching Update's Quitting choke point closes teaModel.done, the
+// channel waitRefreshSignal's Cmd selects on to unblock (issue #823, issue
+// #2013). Drives Update directly with the same "q" tea.KeyMsg the real quit
+// key sends, rather than a full teatest run, so this test needs neither the
+// program's own event loop nor any process-global goroutine inspection.
+func TestTeaUpdate_QuitKey_ClosesDoneChannel(t *testing.T) {
+	f := forge.NewFake()
+	tm := newTeaModel(f, t.TempDir(), nil)
+
+	updated, _ := tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	tm = updated.(teaModel)
+
+	select {
+	case <-tm.done:
+	default:
+		t.Fatal("done not closed after the quit key reaches Update's Quitting choke point")
+	}
 }
 
 // TestTea_WithLauncher_RendersCapAndLive verifies the session's live
