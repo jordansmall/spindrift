@@ -146,6 +146,11 @@ func (w *Writer) parseLine(line string) {
 		}
 		w.emit()
 		return
+	case "spindrift_op":
+		if ev.SpindriftOp != nil {
+			fmt.Fprintln(w.out, FormatSpindriftOp(w.issue, *ev.SpindriftOp))
+		}
+		return
 	}
 }
 

@@ -853,3 +853,115 @@ func TestWriterCountLineOnNarration(t *testing.T) {
 		t.Errorf("narration missing: %q", out)
 	}
 }
+
+// TestWriterEmitsSpindriftOpVerdict verifies the Writer recognizes a
+// "spindrift_op" stream-json event carrying a verdict op and surfaces it as
+// a status row (issue #2027), interleaved with ordinary narration.
+func TestWriterEmitsSpindriftOpVerdict(t *testing.T) {
+	var status bytes.Buffer
+	w := claude.New(&bytes.Buffer{}, "7", &status)
+
+	opEv := `{"type":"spindrift_op","spindrift_op":{"op":"verdict","verdict":"BLOCK"}}` + "\n"
+	fmt.Fprint(w, opEv)
+
+	out := status.String()
+	if !strings.Contains(out, "#7") {
+		t.Errorf("status missing issue tag: %q", out)
+	}
+	if !strings.Contains(out, "verdict: BLOCK") {
+		t.Errorf("status missing verdict text: %q", out)
+	}
+}
+
+// TestFormatSpindriftOpDecision verifies FormatSpindriftOp renders a
+// decision op's decision and reason together, and omits the trailing
+// separator when reason is empty (issue #2027).
+func TestFormatSpindriftOpDecision(t *testing.T) {
+	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "decision", Decision: "stop", Reason: "max review rounds reached"})
+	if !strings.Contains(got, "stop: max review rounds reached") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "stop: max review rounds reached")
+	}
+
+	gotNoReason := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "decision", Decision: "continue"})
+	if !strings.Contains(gotNoReason, "continue") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", gotNoReason, "continue")
+	}
+	if strings.Contains(gotNoReason, ":") {
+		t.Errorf("FormatSpindriftOp = %q, want no trailing separator when reason is empty", gotNoReason)
+	}
+}
+
+// TestEncodeSpindriftOpFeedsWriter verifies EncodeSpindriftOp produces a
+// single newline-terminated stream-json line that the Writer parses back
+// into the expected status row -- the exact seam the orchestrator uses to
+// emit its own operations onto the same stdout stream driver-exec's raw
+// output already flows through (issue #2027).
+func TestEncodeSpindriftOpFeedsWriter(t *testing.T) {
+	line := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: 3})
+	if !strings.HasSuffix(line, "\n") {
+		t.Fatalf("EncodeSpindriftOp = %q, want a trailing newline", line)
+	}
+	if strings.Count(line, "\n") != 1 {
+		t.Fatalf("EncodeSpindriftOp = %q, want exactly one newline", line)
+	}
+
+	var status bytes.Buffer
+	w := claude.New(&bytes.Buffer{}, "3", &status)
+	fmt.Fprint(w, line)
+
+	if !strings.Contains(status.String(), "pass 3 started") {
+		t.Errorf("status = %q, want it to contain %q", status.String(), "pass 3 started")
+	}
+}
+
+// TestWriterIgnoresUnrecognizedEventTypesAndNonJSONLines verifies the parser
+// still silently drops an unrecognized JSON event type and a bare non-JSON
+// line -- adding the "spindrift_op" case must not disturb that fallback
+// (issue #2027 AC).
+func TestWriterIgnoresUnrecognizedEventTypesAndNonJSONLines(t *testing.T) {
+	var status bytes.Buffer
+	w := claude.New(&bytes.Buffer{}, "9", &status)
+
+	fmt.Fprint(w, `{"type":"system","session_id":"s1"}`+"\n")
+	fmt.Fprint(w, "not json at all\n")
+
+	if status.String() != "" {
+		t.Errorf("status = %q, want empty (unrecognized type and non-JSON line both silently dropped)", status.String())
+	}
+}
+
+// TestFormatSpindriftOpRunStateError verifies FormatSpindriftOp renders a
+// run_state_error op's phase (read/write) and error text (issue #2027).
+func TestFormatSpindriftOpRunStateError(t *testing.T) {
+	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: "permission denied"})
+	if !strings.Contains(got, "run-state write failed: permission denied") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "run-state write failed: permission denied")
+	}
+}
+
+// TestFormatSpindriftOpSanitizesDynamicFields verifies control characters,
+// newlines, and CSI/OSC escape sequences embedded in a decision's reason or
+// a run_state_error's error text cannot break the single-line row (issue
+// #2027 AC: "Operation rows are sanitized to a single line").
+func TestFormatSpindriftOpSanitizesDynamicFields(t *testing.T) {
+	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "run_state_error", Phase: "read", Error: "bad\x1b[2J\nfake-row"})
+	if strings.Contains(got, "\n") {
+		t.Errorf("FormatSpindriftOp = %q, want no embedded newline", got)
+	}
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("FormatSpindriftOp = %q, want no embedded escape sequence", got)
+	}
+}
+
+// TestFormatSpindriftOpPassStart verifies FormatSpindriftOp renders a
+// pass_start op as a single status row carrying the issue tag and pass
+// number (issue #2027).
+func TestFormatSpindriftOpPassStart(t *testing.T) {
+	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_start", Pass: 2})
+	if !strings.HasPrefix(got, "#42 ") {
+		t.Errorf("FormatSpindriftOp = %q, want it to start with issue tag %q", got, "#42 ")
+	}
+	if !strings.Contains(got, "pass 2 started") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "pass 2 started")
+	}
+}

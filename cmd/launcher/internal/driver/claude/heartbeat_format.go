@@ -121,6 +121,32 @@ func FormatCountLine(issue, role, phase string, counts map[string]int) string {
 	return sb.String()
 }
 
+// FormatSpindriftOp returns a single status line for one orchestrator
+// operation (issue #2027), marked with "○" so it reads as an orchestrator
+// operation rather than implementor narration.
+// Example: "#42 ○ pass 2 started"
+func FormatSpindriftOp(issue string, op SpindriftOp) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "#%s \xe2\x97\x8b ", issue)
+	switch op.Op {
+	case "pass_start":
+		fmt.Fprintf(&sb, "pass %d started", op.Pass)
+	case "verdict":
+		fmt.Fprintf(&sb, "verdict: %s", sanitizeRole(op.Verdict))
+	case "decision":
+		if op.Reason != "" {
+			fmt.Fprintf(&sb, "%s: %s", sanitizeRole(op.Decision), sanitizeRole(op.Reason))
+		} else {
+			sb.WriteString(sanitizeRole(op.Decision))
+		}
+	case "run_state_error":
+		fmt.Fprintf(&sb, "run-state %s failed: %s", sanitizeRole(op.Phase), sanitizeRole(op.Error))
+	default:
+		sb.WriteString(sanitizeRole(op.Op))
+	}
+	return sb.String()
+}
+
 // ModelFamily shortens a full model ID to its family label.
 // "claude-haiku-…" → "haiku", "claude-sonnet-…" → "sonnet", "claude-opus-…" → "opus".
 // Returns the id unchanged if no known family matches; returns "" for empty input.
