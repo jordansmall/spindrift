@@ -59,7 +59,16 @@ func streamJSONOutcomeLine(text string) string {
 // driver-exec body can script a specific pass's own token/cost spend for the
 // budget governor (issue #2002) to read back.
 func streamJSONResultLine(inputTokens, outputTokens int, costUSD float64) string {
-	return fmt.Sprintf(`{"type":"result","total_cost_usd":%g,"usage":{"input_tokens":%d,"output_tokens":%d}}`, costUSD, inputTokens, outputTokens) + "\n"
+	return streamJSONResultLineFull(inputTokens, outputTokens, costUSD, 0, 0, 0)
+}
+
+// streamJSONResultLineFull is streamJSONResultLine's full-fidelity twin,
+// additionally carrying duration_ms/duration_api_ms/num_turns -- the
+// dimensions of usage.Usage that streamJSONResultLine's callers don't
+// otherwise need to script.
+func streamJSONResultLineFull(inputTokens, outputTokens int, costUSD float64, durationMs, durationApiMs int64, numTurns int) string {
+	return fmt.Sprintf(`{"type":"result","total_cost_usd":%g,"duration_ms":%d,"duration_api_ms":%d,"num_turns":%d,"usage":{"input_tokens":%d,"output_tokens":%d}}`,
+		costUSD, durationMs, durationApiMs, numTurns, inputTokens, outputTokens) + "\n"
 }
 
 // blockThenApproveFakeDriverBody returns a writeFakeDriverExec body scripting
@@ -867,10 +876,10 @@ fi
 exit 0
 `, callLog,
 		streamJSONVerdictLine("VERDICT: BLOCK"),
-		streamJSONResultLine(100, 50, 0.01),
+		streamJSONResultLineFull(100, 50, 0.01, 1000, 800, 3),
 		streamJSONVerdictLine("VERDICT: APPROVE"),
 		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"),
-		streamJSONResultLine(200, 75, 0.02))
+		streamJSONResultLineFull(200, 75, 0.02, 2000, 1500, 5))
 	writeFakeDriverExec(t, dir, callLog, body)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -908,6 +917,15 @@ exit 0
 	}
 	if got.CumulativeUsage.TotalCostUSD < 0.0299 || got.CumulativeUsage.TotalCostUSD > 0.0301 {
 		t.Errorf("CumulativeUsage.TotalCostUSD = %v, want ~0.03 (0.01+0.02 summed across both passes)", got.CumulativeUsage.TotalCostUSD)
+	}
+	if got.CumulativeUsage.DurationMs != 3000 {
+		t.Errorf("CumulativeUsage.DurationMs = %d, want 3000 (1000+2000 summed across both passes)", got.CumulativeUsage.DurationMs)
+	}
+	if got.CumulativeUsage.DurationApiMs != 2300 {
+		t.Errorf("CumulativeUsage.DurationApiMs = %d, want 2300 (800+1500 summed across both passes)", got.CumulativeUsage.DurationApiMs)
+	}
+	if got.CumulativeUsage.NumTurns != 8 {
+		t.Errorf("CumulativeUsage.NumTurns = %d, want 8 (3+5 summed across both passes)", got.CumulativeUsage.NumTurns)
 	}
 }
 
