@@ -33,6 +33,17 @@ type Config struct {
 	MaxFixAttempts    int
 	MaxRebaseAttempts int
 
+	// MaxBudgetTokens and MaxBudgetUSD cap cumulative usage (issue #2001) —
+	// summed across the initial run and every fix pass dispatched so far,
+	// via Dispatcher.CumulativeUsage — before selfHealGate launches another
+	// fix pass. Either reaching or exceeding its cap stops the run with a
+	// distinct budget-exhausted status, never merging partial work. Zero
+	// means "no cap" for that dimension, mirroring MaxFixAttempts' own
+	// 0-disables convention; the two knobs are independent, so a run can
+	// exhaust either cap first.
+	MaxBudgetTokens int
+	MaxBudgetUSD    float64
+
 	// PreflightStaleBase opts into ADR 0026's proactive stale-base rebase:
 	// when true, mergeImmediate rebases a green PR that is behind its base
 	// (no textual conflict) and re-waits for CI before merging. When false
