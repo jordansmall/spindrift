@@ -336,3 +336,26 @@ func (e *execClient) Comment(num, body string) error {
 	}
 	return nil
 }
+
+// PostIssue implements forge.HostPostedIssueFiler (issue #2028): it files a
+// new issue against this adapter's own repo — never a caller-suppliable
+// repo, per the do-not-trust-the-agent-target invariant (issue #1949) — and
+// returns the created issue's URL, which `gh issue create` writes to stdout.
+func (e *execClient) PostIssue(title, body string, labels []string) (string, error) {
+	args := []string{"issue", "create",
+		"--repo", e.repo,
+		"--title", title,
+		"--body", body,
+	}
+	for _, label := range labels {
+		args = append(args, "--label", label)
+	}
+	var stderr bytes.Buffer
+	cmd := exec.Command("gh", args...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("gh issue create: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(string(out)), nil
+}

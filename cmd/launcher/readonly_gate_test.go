@@ -136,6 +136,23 @@ func TestReadOnlyCapabilityGate_GithubReadOnlyAdapterSatisfies(t *testing.T) {
 	}
 }
 
+// TestReadOnlyCapabilityGate_GithubTrackerSatisfiesHostPostedIssueFiler
+// verifies the closing acceptance criterion of issue #2028: the real github
+// tracker (github.NewExecClient, ISSUE_TRACKER=github) — not a synthetic
+// fake — now implements forge.HostPostedIssueFiler, so the gate's
+// issue-filing axis passes for the concrete tracker newIssueTracker wires
+// up, not just for forge.Fake.
+func TestReadOnlyCapabilityGate_GithubTrackerSatisfiesHostPostedIssueFiler(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.issueTracker = "github"
+	cf := github.NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	it := github.NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
+		t.Errorf("checkReadOnlyCapabilityGate() with the real github tracker = %v, want nil", err)
+	}
+}
+
 // TestReadOnlyCapabilityGate_PushOnlyForgeFails verifies that read-only is
 // rejected for a push-only Code Forge (git's shape: no PRForge, no
 // BundleRelay either) — git is out of scope until it implements the seams.

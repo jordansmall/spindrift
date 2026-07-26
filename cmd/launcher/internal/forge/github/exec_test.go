@@ -1135,6 +1135,13 @@ fi
 	}
 }
 
+// TestExecClient_ImplementsHostPostedIssueFiler verifies the github adapter
+// satisfies forge.HostPostedIssueFiler (issue #2028) — the read-only
+// capability gate's issue-filing axis, closed by this adapter method.
+func TestExecClient_ImplementsHostPostedIssueFiler(t *testing.T) {
+	var _ forge.HostPostedIssueFiler = NewExecClient("owner/repo", testLabels, "agent/issue-")
+}
+
 // TestExecClient_ImplementsMergeCloser verifies the github adapter satisfies
 // forge.MergeCloser (issue #1892) — settle's deterministic post-merge close
 // backstop. It must NOT satisfy forge.IssueCloser (that surface is reserved
@@ -1145,5 +1152,81 @@ func TestExecClient_ImplementsMergeCloser(t *testing.T) {
 	var _ forge.MergeCloser = NewExecClient("owner/repo", testLabels, "agent/issue-")
 	if _, ok := any(NewExecClient("owner/repo", testLabels, "agent/issue-")).(forge.IssueCloser); ok {
 		t.Error("ExecClient satisfies forge.IssueCloser, want it hidden")
+	}
+}
+
+// TestExecClient_PostIssue_ReturnsURL verifies PostIssue shells out to `gh
+// issue create` and returns the created issue's URL parsed from stdout.
+func TestExecClient_PostIssue_ReturnsURL(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "create" ]; then
+  echo "https://github.com/owner/repo/issues/99"
+  exit 0
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	url, err := c.PostIssue("a title", "a body", []string{"ready-for-agent"})
+	if err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+	if url != "https://github.com/owner/repo/issues/99" {
+		t.Errorf("PostIssue url = %q, want %q", url, "https://github.com/owner/repo/issues/99")
+	}
+}
+
+// TestExecClient_PostIssue_ArgsCarryTitleBodyAndOneLabelFlagPerLabel
+// verifies PostIssue passes title, body, and one --label per label to `gh
+// issue create` against the adapter's own repo — labels are exactly what the
+// caller passed, and there is no repo argument for a payload to redirect
+// (issue #1949's do-not-trust-the-agent-target invariant).
+func TestExecClient_PostIssue_ArgsCarryTitleBodyAndOneLabelFlagPerLabel(t *testing.T) {
+	dir := prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "create" ]; then
+  echo "https://github.com/owner/repo/issues/1"
+  exit 0
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	if _, err := c.PostIssue("a title", "a body", []string{"ready-for-agent", "agent-review-finding"}); err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+
+	calls, err := filepath.Glob(filepath.Join(dir, "call-*.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("gh call count = %d, want 1", len(calls))
+	}
+	got, err := os.ReadFile(calls[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "issue\ncreate\n--repo\nowner/repo\n--title\na title\n--body\na body\n--label\nready-for-agent\n--label\nagent-review-finding\n"
+	if string(got) != want {
+		t.Errorf("gh call = %q, want %q", got, want)
+	}
+}
+
+// TestExecClient_PostIssue_GenuineFailureSurfaced verifies a non-nil `gh
+// issue create` failure is returned as a wrapped error naming the operation,
+// parity with Comment.
+func TestExecClient_PostIssue_GenuineFailureSurfaced(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "create" ]; then
+  printf 'HTTP 403: Resource not accessible by integration\n' >&2
+  exit 1
+fi
+`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	_, err := c.PostIssue("a title", "a body", nil)
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "gh issue create") {
+		t.Errorf("error should name the operation, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error should surface gh's stderr, got: %v", err)
 	}
 }
