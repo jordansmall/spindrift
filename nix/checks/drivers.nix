@@ -1,7 +1,7 @@
 # Eval-level pins for lib/drivers/default.nix (issue #624): the registry's
 # required-attribute shape assertion, on top of nix/checks/bats.nix's use of
 # the same renderPreamble output the image bakes in.
-{ pkgs, ... }:
+{ pkgs, nixpkgs, system, ... }:
 let
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   inherit (pkgs.lib)
@@ -11,6 +11,7 @@ let
     concatStringsSep
     splitString
     imap0
+    escapeShellArg
     ;
   # Shared stub-cli fixture (issue #1144): drivers-render-preamble-shape
   # consumes it as-is; drivers-assert-shape-succeeds extends it with the
@@ -61,6 +62,54 @@ in
     assert assertMsg (hasInfix "_driver_session_flags() {\necho stub-session" out)
       "renderPreamble must fold in the Driver entry's sessionFlagsFnBody, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-shape" { } "touch $out";
+
+  # Issue #2011: a Driver entry may declare envCommon, a set of env vars
+  # renderPreamble must export into entrypoint.sh's own shell process so a
+  # child it execs (driver-exec/orchestrator, and beyond that claude itself,
+  # via plain os/exec env inheritance) sees them too -- envCommon is the
+  # generic seam a claude-specific var like CLAUDE_CODE_DISABLE_BACKGROUND_TASKS
+  # rides in on, optional (omitted here) so a Driver with no env vars of its
+  # own, or a future opencode.nix, needn't declare it.
+  drivers-render-preamble-env-common =
+    let
+      out = driverRegistry.renderPreamble (
+        stubDriverBase
+        // {
+          envCommon = {
+            STUB_ENV_ONE = "1";
+            STUB_ENV_TWO = "two words";
+          };
+        }
+      );
+    in
+    assert assertMsg (hasInfix "export STUB_ENV_ONE=1" out)
+      "renderPreamble must export each envCommon entry, got: ${out}";
+    assert assertMsg (hasInfix "export STUB_ENV_TWO='two words'" out)
+      "renderPreamble must shell-escape each envCommon value, got: ${out}";
+    pkgs.runCommand "drivers-render-preamble-env-common" { } "touch $out";
+
+  # envCommon keys splice unquoted onto the left of `export NAME=`, so a
+  # non-identifier key (unlike the value, which is shell-escaped above)
+  # would render broken/unquoted shell rather than merely fail safe -- assert
+  # eval-time instead of trusting every Driver entry's data to already be a
+  # valid shell identifier.
+  drivers-render-preamble-env-common-rejects-bad-key =
+    let
+      result = builtins.tryEval (
+        driverRegistry.renderPreamble (
+          stubDriverBase
+          // {
+            envCommon = {
+              "not an identifier" = "1";
+            };
+          }
+        )
+      );
+    in
+    assert assertMsg (
+      !result.success
+    ) "renderPreamble must reject an envCommon key that isn't a valid shell identifier";
+    pkgs.runCommand "drivers-render-preamble-env-common-rejects-bad-key" { } "touch $out";
 
   drivers-assert-shape-succeeds =
     let
@@ -115,4 +164,71 @@ in
     assert assertMsg (missing == [ ])
       "claude Driver's flagsCommon --disallowedTools must deny ${concatStringsSep ", " missing}, got: ${claudeEntry.flagsCommon}";
     pkgs.runCommand "drivers-claude-blocks-loop-background-affordances" { } "touch $out";
+
+  # Issue #2011: --disallowedTools (above) can't strip run_in_background --
+  # it's a parameter of the Bash/Agent/Task/PowerShell tool calls, not a tool
+  # name of its own -- and reject-background-bash.sh (agent/reject-background-bash.sh)
+  # only ever covers the Bash tool, leaving the async Agent/Task subagent
+  # launch tool free to background and park a headless run's turn. claude
+  # itself honors CLAUDE_CODE_DISABLE_BACKGROUND_TASKS by omitting
+  # run_in_background from every one of those tools' own input schema, so the
+  # model can never request async in the first place -- exported here via the
+  # generic envCommon renderPreamble seam (see drivers-render-preamble-env-common)
+  # rather than a per-tool hook, since it closes every current and future
+  # async-capable tool at once, not just Bash's.
+  drivers-claude-disables-background-tasks =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+    in
+    assert assertMsg (
+      (claudeEntry.envCommon or { }).CLAUDE_CODE_DISABLE_BACKGROUND_TASKS or null == "1"
+    ) "claude Driver's envCommon must set CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1, got: ${builtins.toJSON (claudeEntry.envCommon or { })}";
+    pkgs.runCommand "drivers-claude-disables-background-tasks" { } "touch $out";
+
+  # drivers-claude-disables-background-tasks (above) only pins that this repo
+  # *sets* CLAUDE_CODE_DISABLE_BACKGROUND_TASKS -- it says nothing about
+  # whether the pinned claude-code build still honors it. Confirmed by
+  # reading the pinned 2.1.204 binary directly (no public doc names this var):
+  # `strings bin/.claude-wrapped | grep -o 'CLAUDE_CODE_DISABLE_BACKGROUND_TASKS'`
+  # finds it read once (`Te.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`) and gating
+  # `.omit({run_in_background:!0})` on three separate tool schemas (Bash,
+  # Agent/Task, PowerShell). A future claude-code bump could rename or drop
+  # the var silently -- this check greps the actual pinned binary on every
+  # run so that drift fails loudly here instead of leaving envCommon's export
+  # inert in a live Box.
+  drivers-claude-cli-knows-disable-background-tasks-env =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+      # claude-code carries an unfree license; the plain `pkgs` above (no
+      # config override) refuses to evaluate it, so this one check -- the
+      # only one in this file that needs the real package rather than just
+      # its registry data -- builds its own allowUnfree-enabled pkgs, the
+      # same way mkHarness.nix (lib/mkHarness.nix:118) does for the actual
+      # image bake.
+      unfreePkgs = import nixpkgs {
+        inherit system;
+        config.allowUnfree = true;
+      };
+      claudePackage = claudeEntry.package unfreePkgs;
+      # Named explicitly, not derived from envCommon's keys -- envCommon may
+      # grow a second entry later, and attrNames' alphabetical head would
+      # then silently start pinning the wrong one instead of this var.
+      envVarName = "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS";
+    in
+    assert assertMsg (
+      (claudeEntry.envCommon or { }) ? ${envVarName}
+    ) "envVarName must name a key claudeEntry.envCommon actually sets, got: ${envVarName}";
+    pkgs.runCommand "drivers-claude-cli-knows-disable-background-tasks-env"
+      { nativeBuildInputs = [ pkgs.gnugrep ]; }
+      ''
+        # Grepped over the whole package output, not just bin/, since the
+        # string's exact location inside claude-code's packaging is an
+        # upstream implementation detail this check shouldn't assume.
+        if grep -aqr ${escapeShellArg envVarName} ${claudePackage}; then
+          touch $out
+        else
+          echo "pinned claude-code no longer references ${envVarName} -- lib/drivers/claude.nix's envCommon relies on it to omit run_in_background from the Bash/Agent/Task/PowerShell tool schemas (issue #2011); re-verify against the new build and update the Driver" >&2
+          exit 1
+        fi
+      '';
 }

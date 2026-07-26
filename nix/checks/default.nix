@@ -50,6 +50,10 @@ let
     "bats-baked-in-dogfood"
     "shellcheck-baked-in-dogfood"
     "caveman-baked-in-dogfood"
+    # Realizes the real (unfree) claude-code package to grep its own binary
+    # (issue #2011) -- a fact about the box's own baked toolchain, same
+    # exclusion reasoning as the rest of this list.
+    "drivers-claude-cli-knows-disable-background-tasks-env"
   ];
 
   checksInboxSet = removeAttrs sourceChecks imageOnlyCheckNames;
