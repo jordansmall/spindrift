@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // RunState is the compact run-state handoff artifact the orchestrator owns
@@ -56,6 +57,16 @@ func ReadRunState(path string) (RunState, error) {
 
 // WriteRunState writes s to path as indented JSON, for the next implementor
 // pass (or a human) to inspect. A no-op when path is empty.
+//
+// It writes to a temp file in the same directory as path and renames it into
+// place, rather than truncating path directly: once the multi-pass loop
+// lands (S3+ of #1627), DoneSlices/RemainingSlices/LastVerdict carry real
+// handoff data between passes, and a kill mid-write (OOM, SIGKILL, host
+// preemption) against an in-place truncate would leave invalid JSON at path,
+// silently discarding a prior pass's progress. The temp-file-then-rename
+// pattern keeps a kill mid-write from ever producing a half-written file at
+// path: it either leaves the old valid file untouched (killed before rename)
+// or an orphaned temp file (killed after the temp write but before rename).
 func WriteRunState(path string, s RunState) error {
 	if path == "" {
 		return nil
@@ -64,8 +75,29 @@ func WriteRunState(path string, s RunState) error {
 	if err != nil {
 		return fmt.Errorf("marshal run state: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write run state %s: %w", path, err)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".run-state-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp run state: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("chmod temp run state %s: %w", tmp.Name(), err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp run state %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("sync temp run state %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp run state %s: %w", tmp.Name(), err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return fmt.Errorf("rename temp run state into %s: %w", path, err)
 	}
 	return nil
 }
