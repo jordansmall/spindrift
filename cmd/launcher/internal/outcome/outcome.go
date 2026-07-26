@@ -81,6 +81,28 @@ func (o Outcome) Line() string {
 		o.Issue, o.Landing, o.Status, o.Note)
 }
 
+// ParseAnywhere finds the SPINDRIFT_OUTCOME token anywhere in line -- not
+// only as a leading prefix, per Parse's own stricter grammar -- and parses
+// the outcome starting there. For a caller scanning already-rendered
+// transcript text rather than a raw box log (issue #1998's orchestrator,
+// reading a pass's own log through the claude Driver's RenderTranscript,
+// which prefixes every line with a "[role] " tag): the token is genuinely
+// present but never leads the line the way a Box's own bare final-message
+// line does, so Parse alone would always report ErrNearMiss. Returns
+// (Outcome{}, false) when the token is absent, or the text from that point
+// on fails to parse.
+func ParseAnywhere(line string) (Outcome, bool) {
+	idx := tokenIndex(line, "SPINDRIFT_OUTCOME")
+	if idx < 0 {
+		return Outcome{}, false
+	}
+	o, err := Parse(line[idx:])
+	if err != nil {
+		return Outcome{}, false
+	}
+	return o, true
+}
+
 // LastInLog scans the file at path for the SPINDRIFT_OUTCOME token and
 // parses the result via Parse, so the same colon/whitespace tolerance and
 // near-miss classification apply. It prefers the last line that leads with

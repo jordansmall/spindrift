@@ -1,12 +1,11 @@
 // Command orchestrator sits above driver-exec (issue #1996, ADR 0007): a Go
 // binary that owns the implementor loop's control flow instead of leaving it
-// to entrypoint.sh. For this tracer-bullet slice the loop is exactly one
-// pass — it invokes driver-exec once, forwarding the same flags
-// entrypoint.sh's direct call already uses (--prompt-file / --agents-file /
-// --session-file / --log-path, per ADR 0009 -- no CLI-specific assumptions),
-// streams its raw stdout unchanged, and returns its exit code. Later slices
-// (S2-S5) extend run's loop of length one into a real multi-pass loop without
-// changing this flag surface.
+// to entrypoint.sh. It loops driver-exec for as many passes as the
+// implementor's own review verdicts and its numeric caps call for (issue
+// #1998), each pass forwarding the same flags entrypoint.sh's direct call
+// already uses (--prompt-file / --agents-file / --session-file / --log-path,
+// per ADR 0009 -- no CLI-specific assumptions) and streaming its raw stdout
+// unchanged, and returns the last pass's exit code.
 package main
 
 import (
@@ -29,6 +28,8 @@ func main() {
 	heartbeatLog := flag.String("heartbeat-log", "/tmp/heartbeat.log", "path to write coarse heartbeat status lines")
 	stateFile := flag.String("state-file", "/tmp/run-state.json", "path to the run-state handoff artifact (issue #1997); empty disables it")
 	scoutBriefPath := flag.String("scout-brief-path", "/tmp/brief.md", "path to the scout brief, recorded into the run-state artifact")
+	maxReviewRounds := flag.Int("max-review-rounds", 3, "cap on additional fresh-session passes a BLOCK verdict may trigger; 0 disables the cap")
+	maxSlices := flag.Int("max-slices", 5, "cap on total driver-exec invocations this run makes; 0 disables the cap")
 	flag.Parse()
 
 	if *issue == "" {
@@ -48,19 +49,21 @@ func main() {
 	}
 
 	rc, err := run(config{
-		promptFile:     *promptFile,
-		agentsFile:     *agentsFile,
-		sessionFile:    *sessionFile,
-		driverBin:      *driverBin,
-		driverFlags:    *driverFlags,
-		model:          *model,
-		devshell:       *devshell,
-		devshellName:   *devshellName,
-		issue:          *issue,
-		logPath:        *logPath,
-		heartbeatLog:   *heartbeatLog,
-		stateFile:      *stateFile,
-		scoutBriefPath: *scoutBriefPath,
+		promptFile:      *promptFile,
+		agentsFile:      *agentsFile,
+		sessionFile:     *sessionFile,
+		driverBin:       *driverBin,
+		driverFlags:     *driverFlags,
+		model:           *model,
+		devshell:        *devshell,
+		devshellName:    *devshellName,
+		issue:           *issue,
+		logPath:         *logPath,
+		heartbeatLog:    *heartbeatLog,
+		stateFile:       *stateFile,
+		scoutBriefPath:  *scoutBriefPath,
+		maxReviewRounds: *maxReviewRounds,
+		maxSlices:       *maxSlices,
 	}, os.Stdout)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator:", err)

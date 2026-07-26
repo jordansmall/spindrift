@@ -346,10 +346,13 @@ let
 
   # In-box orchestrator (issue #1996, ADR 0007): the Go binary entrypoint.sh
   # hands the implementor pass off to when ORCHESTRATOR_ENABLED is set,
-  # instead of calling driver-exec directly. This tracer-bullet slice's
-  # orchestrator is a pure forwarder -- stdlib only, no internal/ imports --
-  # so its fileset is just go.mod/go.sum plus its own package, tighter even
-  # than driverExecBin's.
+  # instead of calling driver-exec directly. Its multi-pass loop (issue
+  # #1998) scans each pass's own raw stream-json log via the claude Driver's
+  # own RenderTranscript strategy (internal/driver + internal/driver/claude,
+  # which pulls internal/usage) to turn it back into readable text, then
+  # internal/outcome (which pulls internal/logscan) for the
+  # SPINDRIFT_OUTCOME grammar -- the same import closure driverExecBin
+  # already needs, for the same reason (it also calls driver.New("claude")).
   orchestratorBin = pkgs.buildGoModule {
     pname = "orchestrator";
     version = spindriftVersion;
@@ -361,6 +364,21 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/orchestrator)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/driver)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/driver/claude)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/usage)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/outcome)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/logscan)
       ];
     };
     vendorHash = "sha256-uaAaQReAf8PCq/TNWetYyYinj+BeUaiaL4zm/fpJPBA=";

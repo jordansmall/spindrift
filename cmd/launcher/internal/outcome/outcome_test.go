@@ -148,6 +148,42 @@ func TestParse_WrongPrefix(t *testing.T) {
 	}
 }
 
+// --- ParseAnywhere tests ---
+
+func TestParseAnywhere_TokenMidLineStillParses(t *testing.T) {
+	line := "[implementor] SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"
+	o, ok := outcome.ParseAnywhere(line)
+	if !ok {
+		t.Fatal("ParseAnywhere: got ok=false, want true")
+	}
+	if o.Issue != "7" || o.Status != "ready" {
+		t.Errorf("ParseAnywhere = %+v, want issue=7 status=ready", o)
+	}
+}
+
+func TestParseAnywhere_MarkdownWrappedTokenStillParses(t *testing.T) {
+	line := "[implementor] `SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc`"
+	o, ok := outcome.ParseAnywhere(line)
+	if !ok {
+		t.Fatal("ParseAnywhere: got ok=false, want true")
+	}
+	if o.Issue != "7" || o.Status != "ready" {
+		t.Errorf("ParseAnywhere = %+v, want issue=7 status=ready", o)
+	}
+}
+
+func TestParseAnywhere_NoTokenReturnsNotFound(t *testing.T) {
+	if _, ok := outcome.ParseAnywhere("[implementor] Investigating the failing test."); ok {
+		t.Error("ParseAnywhere: got ok=true, want false (no token present)")
+	}
+}
+
+func TestParseAnywhere_TokenPresentButUnparsableReturnsNotFound(t *testing.T) {
+	if _, ok := outcome.ParseAnywhere("[implementor] SPINDRIFT_OUTCOME issue=7 (missing landing/status)"); ok {
+		t.Error("ParseAnywhere: got ok=true, want false (missing required fields)")
+	}
+}
+
 func TestParse_EmptyLine(t *testing.T) {
 	_, err := outcome.Parse("")
 	if err == nil {
