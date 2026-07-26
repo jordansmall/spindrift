@@ -8,10 +8,11 @@ import "encoding/json"
 // both in this package. A future second Driver carries its own transcript
 // shape rather than inheriting this one (ADR 0009).
 type Event struct {
-	Type            string   `json:"type"`
-	Message         *Message `json:"message,omitempty"`
-	NumTurns        int      `json:"num_turns,omitempty"`
-	ParentToolUseID string   `json:"parent_tool_use_id,omitempty"`
+	Type            string       `json:"type"`
+	Message         *Message     `json:"message,omitempty"`
+	NumTurns        int          `json:"num_turns,omitempty"`
+	ParentToolUseID string       `json:"parent_tool_use_id,omitempty"`
+	SpindriftOp     *SpindriftOp `json:"spindrift_op,omitempty"`
 }
 
 // Message is the "message" object of an assistant stream event. It is a
@@ -51,6 +52,40 @@ type TokenUsage struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+}
+
+// SpindriftOp is the payload of a synthetic "spindrift_op" stream-json event
+// (issue #2027): the orchestrator prints one of these, JSON-encoded, to its
+// own stdout at each discrete operation it performs (pass start, reviewer
+// verdict observed, loop/stop decision, run-state read/write failure) so the
+// heartbeat Writer can surface it live, interleaved with driver-exec's own
+// stream-json lines forwarded unchanged.
+type SpindriftOp struct {
+	// Op names the operation kind: "pass_start", "verdict", "decision", or
+	// "run_state_error".
+	Op       string `json:"op"`
+	Pass     int    `json:"pass,omitempty"`
+	Verdict  string `json:"verdict,omitempty"`
+	Decision string `json:"decision,omitempty"` // "continue" or "stop"
+	Reason   string `json:"reason,omitempty"`
+	Phase    string `json:"phase,omitempty"` // "read" or "write", for run_state_error
+	Error    string `json:"error,omitempty"`
+}
+
+// EncodeSpindriftOp returns a single newline-terminated stream-json line
+// encoding op as a synthetic "spindrift_op" event, ready to write directly
+// onto the same stdout stream driver-exec's own raw output flows through
+// (issue #2027) -- the Writer's parseLine recognizes it via Event.Type.
+func EncodeSpindriftOp(op SpindriftOp) string {
+	b, err := json.Marshal(Event{Type: "spindrift_op", SpindriftOp: &op})
+	if err != nil {
+		// SpindriftOp's fields are all plain strings and ints, so marshaling
+		// them can't practically fail -- but this is a heartbeat/observability
+		// path, not a real one, so a failure here degrades to "no marker
+		// emitted" rather than crashing the orchestrator's own loop.
+		return ""
+	}
+	return string(b) + "\n"
 }
 
 // ImplementorRole is the role attributed to any message with no
