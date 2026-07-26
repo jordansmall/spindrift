@@ -851,8 +851,16 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
           └─ /agent/entrypoint.sh
              ├─ git clone <REPO_SLUG>  +  git checkout -b agent/issue-N
              ├─ run PREFETCH (optional cache warm-up)
-             └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
-                └─ implement → check → commit → push → self-review (reviewer subagent)
+             └─ run_driver_in_env  (assembles the prompt/--agents JSON, mounts
+                the session cache, then hands off to one of:)
+                ├─ driver-exec                 (default: one Driver pass)
+                │  └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
+                └─ orchestrator                (ORCHESTRATOR_ENABLED=1: N passes)
+                   └─ driver-exec × N, one fresh Driver session per pass,
+                      seeded from a run-state handoff file — see [In-box
+                      orchestrator](#in-box-orchestrator)
+                (either path, inside the Driver pass itself:)
+                implement → check → commit → push → self-review (reviewer subagent)
                    → open PR as a draft
                    → print  SPINDRIFT_OUTCOME issue=N landing=<url> status=ready
         │
@@ -926,6 +934,50 @@ needs its own push credentials for that remote (e.g. an SSH key or
 credential helper covering `CODE_FORGE_REMOTE_URL`) — separate from the
 Box's `GH_TOKEN`, which only covers the Issue Tracker. A push auth failure
 surfaces as a `merge-blocked` comment on the issue, not a crash.
+
+### In-box orchestrator
+
+`ORCHESTRATOR_ENABLED` (default off, `boxEnv`-only — see `lib/env-schema.nix`)
+swaps which binary `run_driver_in_env` hands the assembled prompt/`--agents`/
+session flags to. Off, `entrypoint.sh` calls `driver-exec` directly and the
+box makes exactly one Driver pass, as it always has. On, the identical flag
+set goes to `orchestrator` (`cmd/launcher/orchestrator`) instead — a second
+in-box Go binary, built the same hermetic way as the launcher itself
+([ADR 0007](adr/0007-runtime-logic-is-a-nix-built-go-binary.md)) — which loops
+`driver-exec` for as many passes as the implementor's own review verdicts and
+two numeric caps call for
+([ADR 0035](adr/0035-the-in-box-orchestrator-loop-is-a-go-program-above-driver-exec-not-entrypoint-prose.md)).
+`entrypoint.sh`'s own job — prompt/`--agents` assembly, session-cache
+mounting — is unchanged either way.
+
+Each pass after the first runs the Driver **sessionless** (no `--resume`,
+ever) — only the very first pass carries the box's initial session pin
+verbatim — so continuity across passes comes from a compact run-state
+artifact, not a growing transcript:
+
+- **Run-state handoff.** A JSON file (`/tmp/run-state.json` by default,
+  outside the repo like `/tmp/brief.md`) records done slices, remaining
+  slices, the last reviewer verdict, and the scout-brief path. Each pass reads
+  it before running and writes it back after, through a temp-file-then-rename
+  so a mid-write kill can never leave a half-written file behind. A missing or
+  corrupt file degrades to a cold start, never an error.
+- **Seeded prompts.** Before any pass whose run-state carries prior data (in
+  practice every pass after the first, though a warm-started state file would
+  seed pass 1 too), the orchestrator prepends a "Run-state handoff" section —
+  last verdict, done/remaining slices, scout-brief path — to the original
+  prompt, so a fresh implementor pass knows where a prior pass left off
+  without reading its transcript.
+- **Code-owned caps.** `--max-review-rounds` (default 3) caps additional
+  passes a `BLOCK` verdict may trigger; `--max-slices` (default 5) caps the
+  total `driver-exec` invocation count regardless of verdict; either set to
+  `0` disables that cap. The loop stops the instant a pass's log carries a
+  terminal `SPINDRIFT_OUTCOME` line — unconditionally, ahead of either cap —
+  or as soon as a pass's verdict is anything but `BLOCK`.
+
+The Driver stays pluggable ([ADR 0009](adr/0009-agent-cli-is-a-pluggable-driver.md)):
+the orchestrator only ever talks to `driver-exec` through the same
+`--prompt-file`/`--agents-file`/`--session-file`/`--log-path` surface (plus
+the devshell pair) `entrypoint.sh`'s direct call already used.
 
 ### Hermetic git config
 
