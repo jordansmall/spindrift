@@ -783,6 +783,26 @@ emit_outcome_backstop() {
     echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=none status=blocked note=${note} nonce=${RUN_NONCE:-}"
     return
   fi
+  # A Driver that completed real work but only staged it (or left unstaged
+  # edits) never advances commit_count below -- indistinguishable, until now,
+  # from a Driver that produced nothing at all (issue #2012: the #1998
+  # dogfood run's resume pass left a complete implementation staged but
+  # never committed, and lost it here). Salvage any dirty index/working tree
+  # into one commit before the commit_count check runs, so that check sees
+  # the salvaged state too. Never let a salvage failure abort this function
+  # under `set -e` -- same reasoning as the commit_count fallback below: a
+  # needless note beats skipping the always-emit outcome invariant (#593).
+  # Commits onto the current HEAD, then the push below sends BRANCH by name
+  # -- correct exactly when HEAD is BRANCH, which every phase before the
+  # Driver runs (phase_prework_rebase et al) already guarantees by the time
+  # main() reaches here.
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    if git add -A && git commit -m "chore: salvage uncommitted work before exiting without an outcome" >/dev/null 2>&1; then
+      note="${note}; salvaged uncommitted work into a commit"
+    else
+      note="${note}; failed to salvage uncommitted work"
+    fi
+  fi
   # Nothing to preserve if BRANCH never advanced past the base -- pushing it
   # anyway would publish an empty branch that looks like lost work (#1606).
   # Fall back to "assume there is work" rather than let a resolution failure

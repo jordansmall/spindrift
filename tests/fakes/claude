@@ -97,6 +97,15 @@ if [ "${FAKE_CLAUDE_COMMIT:-0}" = "1" ]; then
   printf 'stub agent change for issue #%s\n' "${ISSUE_NUMBER:-0}" >agent-change.txt
   git add -A
 fi
+# FAKE_CLAUDE_STAGE_ONLY=1 simulates a driver that completed real work and
+# staged it, but never committed (issue #2012's #1998 dogfood shape) --
+# deliberately never followed by a `git commit`, unlike FAKE_CLAUDE_COMMIT
+# above, so the outcome backstop's own commit/push salvage is what's under
+# test, not this fake's.
+if [ "${FAKE_CLAUDE_STAGE_ONLY:-0}" = "1" ]; then
+  printf 'stub agent change for issue #%s (staged only)\n' "${ISSUE_NUMBER:-0}" >agent-change.txt
+  git add -A
+fi
 # A resume call (issue #1607's recovery pass) re-invokes this fake against a
 # tree the first call already committed and pushed -- staging the identical
 # fixture content leaves nothing to commit, so skip straight past the rest of

@@ -38,6 +38,22 @@ setup() {
   [ -z "$output" ]
 }
 
+# The Driver completed real work and staged it, but never committed (issue
+# #2012's #1998 dogfood shape: the resume pass's implementation was left
+# staged-but-uncommitted). commit_count alone would read 0 here, same as the
+# genuinely-empty case above -- but a dirty index is not "no work to
+# preserve": the backstop must salvage it into a commit and push it.
+@test "driver stages work but never commits + no outcome line -> backstop salvages a commit and pushes" {
+  export FAKE_CLAUDE_STAGE_ONLY=1
+  export FAKE_CLAUDE_NO_OUTCOME=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*salvaged uncommitted work' <<<"$output"
+  ! grep -q 'no work to preserve' <<<"$output"
+  git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
+}
+
 # A driver that already printed its own outcome is passed through unchanged --
 # no second/synthetic line is appended.
 @test "driver exits with its own outcome line -> passed through, no synthetic line appended" {
@@ -167,6 +183,24 @@ EOF
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   ! grep -q 'status=blocked' <<<"$output"
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready note=fake$' <<<"$output"
+}
+
+# End-to-end regression for the exact #1998 dogfood shape that opened issue
+# #2012: a sign-off with no issue=/landing=/status= fields at all ("Complete —
+# implemented issue #1998 …") is genuinely not machine-recoverable, so the
+# extractor correctly leaves it unmatched -- but the Driver's staged
+# implementation must still survive: the backstop it falls through to salvages
+# the dirty index into a commit and pushes it, rather than discarding it as
+# "no work to preserve".
+@test "prose-only outcome sign-off (#2012, #1998 shape) + staged work -> backstop salvages the work" {
+  export FAKE_CLAUDE_STAGE_ONLY=1
+  export FAKE_CLAUDE_WRAP_OUTCOME=prose
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*salvaged uncommitted work' <<<"$output"
+  ! grep -q 'no work to preserve' <<<"$output"
+  git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
 
 # A prose sign-off can contain one stray field-marker word mid-sentence
