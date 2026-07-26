@@ -404,6 +404,29 @@
     flakeOption = true;
     boxEnv = false;
   };
+  maxBudgetTokens = {
+    env = "MAX_BUDGET_TOKENS";
+    group = "Self-healing & retries";
+    default = 0;
+    doc = "cumulative tokens across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the token budget cap";
+    flakeOption = true;
+    boxEnv = false;
+  };
+  maxBudgetUSD = {
+    # default is a float, not the bare int 0 (unlike every other numeric knob
+    # here): lib/flakeModule.nix's mkKnobOption infers a knob's Consumer-
+    # facing option type from builtins.isInt (entry.default), so an int
+    # default would type settings.selfHealing.maxBudgetUSD as types.int —
+    # rejecting the very fractional caps ($4.44, $17.66) this knob exists
+    # for. Falling through to types.str instead means a Consumer flake sets
+    # it quoted, e.g. maxBudgetUSD = "4.44";.
+    env = "MAX_BUDGET_USD";
+    group = "Self-healing & retries";
+    default = 0.0;
+    doc = "cumulative cost in USD across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the cost budget cap; give it as a quoted string in flake settings since it may be fractional, e.g. 4.44";
+    flakeOption = true;
+    boxEnv = false;
+  };
   preflightStaleBase = {
     env = "PREFLIGHT_STALE_BASE";
     group = "Self-healing & retries";

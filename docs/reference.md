@@ -686,6 +686,8 @@ the authoritative list.
 | `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the image-freshness probe before every launch; exits with a new documented code when the probe finds the loaded image stale (see the [exit-code table](#dogfood-loop)) |
 | `MAX_FIX_ATTEMPTS`     | `3`     | `selfHealing`      | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
 | `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge (`0` disables rebase retries); also caps the opt-in [Stale-base preflight](#stale-base-preflight)'s rebase budget |
+| `MAX_BUDGET_TOKENS`    | `0`     | `selfHealing`      | cumulative tokens (initial run + fix passes) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the token budget cap) |
+| `MAX_BUDGET_USD`       | `0`     | `selfHealing`      | cumulative cost in USD (initial run + fix passes) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the cost budget cap); quote fractional values in flake settings, e.g. `"4.44"` |
 | `PREFLIGHT_STALE_BASE` | `` (off) | `selfHealing`    | opt-in: proactively rebase a green-but-behind PR (no conflict) and re-green it before merging — see [Stale-base preflight](#stale-base-preflight); off by default merges a green-but-behind PR as-is |
 | `MERGE_POLL_INTERVAL`  | `30`    | `branches`         | seconds between CI-status polls in the merge gate      |
 | `MERGE_POLL_TIMEOUT`   | `1800`  | `branches`         | seconds to wait for CI green before abandoning the merge |

@@ -53,11 +53,14 @@ func (d *Dispatch) UsageReport() string {
 }
 
 // CumulativeUsage sums token and cost usage across every pass log this
-// issue's Dispatch has produced so far — the initial run plus each fix pass
-// — so selfHealGate's budget gate (issue #2001) reads the run's total spend,
-// not just its initial pass. A pass log that fails to parse, or has no
-// result event, contributes nothing rather than aborting the sum, matching
-// ExtractUsage's own best-effort degrade.
+// issue's Dispatch has produced so far — the initial run, each fix pass,
+// and (via LogPaths) a conflict-resolve pass if one ran — so selfHealGate's
+// budget gate (issue #2001) reads the run's total spend, not just its
+// initial pass. A pass log that fails to parse, or has no result event,
+// contributes nothing rather than aborting the sum, matching ExtractUsage's
+// own best-effort degrade — the same as a log LogPaths omits outright
+// because it was rotated aside (issue #561): the sum simply undercounts
+// rather than erroring, acceptable for a best-effort spend governor.
 func (d *Dispatch) CumulativeUsage() usage.Usage {
 	var total usage.Usage
 	for _, pl := range LogPaths(d.pwd, d.number) {
