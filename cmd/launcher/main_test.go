@@ -1386,8 +1386,9 @@ func TestNewCodeForge_GithubReadOnly_SatisfiesCapabilityGate(t *testing.T) {
 	c.boxForgeAndIssueAccess = "read-only"
 	cf := newCodeForge(c, local.SanitizedParent{})
 	fc := forge.NewFake() // HostPostedCommenter-shaped; stands in for the tracker
+	it := fc.AsIssueFiler()
 
-	if err := checkReadOnlyCapabilityGate(c, cf, fc); err != nil {
+	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
 		t.Errorf("checkReadOnlyCapabilityGate() with newCodeForge's github read-only wiring = %v, want nil", err)
 	}
 }

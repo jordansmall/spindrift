@@ -952,7 +952,8 @@ func checkAutoMergePreflight(c config, cf forge.CodeForge) error {
 // DraftPRCreator (host-side draft-PR creation) is additionally required only
 // when the forge is PR-shaped (implements PRForge) — a forge with no PR
 // concept at all (local) has nothing for DraftPRCreator to create. The
-// tracker must implement HostPostedCommenter. A missing capability is a
+// tracker must implement HostPostedCommenter and HostPostedIssueFiler
+// (issue #2018's issue-filing relay channel). A missing capability is a
 // startup error naming the axis and the specific seam absent, rather than a
 // silently-degraded read-only deployment.
 func checkReadOnlyCapabilityGate(c config, cf forge.CodeForge, it forge.IssueTracker) error {
@@ -969,6 +970,9 @@ func checkReadOnlyCapabilityGate(c config, cf forge.CodeForge, it forge.IssueTra
 	}
 	if _, ok := it.(forge.HostPostedCommenter); !ok {
 		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only requires ISSUE_TRACKER=%q to implement host-posted comments (forge.HostPostedCommenter)", c.issueTracker)
+	}
+	if _, ok := it.(forge.HostPostedIssueFiler); !ok {
+		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only requires ISSUE_TRACKER=%q to implement host-posted issue-filing (forge.HostPostedIssueFiler)", c.issueTracker)
 	}
 	return nil
 }
