@@ -486,6 +486,15 @@
     boxEnv = true;
     boxEnvOnly = true;
   };
+  orchestratorEnabled = {
+    env = "ORCHESTRATOR_ENABLED";
+    group = "Prompt & skill iteration";
+    default = false;
+    doc = "when non-empty, entrypoint.sh hands the implementor pass off to the in-box Go orchestrator instead of calling driver-exec directly (issue #1996); off by default, the direct driver-exec path is unchanged";
+    flakeOption = true;
+    boxEnv = true;
+    boxEnvOnly = true;
+  };
   issueNumber = {
     env = "ISSUE_NUMBER";
     group = "Issue discovery";

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Fake orchestrator for bats tests (issue #1996). Stands in for the real
+# Go binary closely enough to prove agent/entrypoint.sh's ORCHESTRATOR_ENABLED
+# branch hands the pass off to it instead of calling driver-exec directly:
+# this tracer-bullet slice's real orchestrator forwards every flag verbatim to
+# driver-exec and returns its exit code unchanged, so the fake logs its own
+# invocation (for the bats suite to assert a hand-off happened) and does
+# exactly that -- no separate behaviour to fake beyond the hand-off itself,
+# unlike tests/fakes/driver-exec, which stands in for the actual Driver
+# invocation logic.
+set -euo pipefail
+
+: "${ORCHESTRATOR_LOG:?ORCHESTRATOR_LOG must be set}"
+echo "$@" >>"$ORCHESTRATOR_LOG"
+
+exec driver-exec "$@"

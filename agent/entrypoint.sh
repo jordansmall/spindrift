@@ -680,6 +680,14 @@ phase_prompt_assembly() {
 # (_use_dev_shell, read via bash's dynamic scoping like every other phase
 # function), tees the stream to a log path, filters heartbeats in-process,
 # and returns the Driver's exit status.
+#
+# ORCHESTRATOR_ENABLED (default off, issue #1996) swaps which binary receives
+# that exact flag set: off takes today's direct driver-exec path unchanged;
+# on hands the same invocation to the in-box Go orchestrator, which forwards
+# it to driver-exec itself for its own single-pass tracer bullet. Neither
+# branch changes the flags built below -- this is the reusable seam the
+# orchestrator drives, so a later multi-pass loop only ever touches the
+# orchestrator side of it.
 run_driver_in_env() {
   local prompt="$1" agents_json="$2" session_mode="$3"
 
@@ -712,9 +720,14 @@ run_driver_in_env() {
     _devshell_flags=(--devshell --devshell-name "${DEV_SHELL_NAME:-default}")
   fi
 
+  local _driver_invoker=driver-exec
+  if [ -n "${ORCHESTRATOR_ENABLED:-}" ]; then
+    _driver_invoker=orchestrator
+  fi
+
   local claude_rc=0
   set +e
-  driver-exec \
+  "$_driver_invoker" \
     --prompt-file "$_prompt_file" \
     --agents-file "$_agents_file" \
     --session-file "$_session_file" \

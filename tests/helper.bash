@@ -54,7 +54,7 @@ setup_fakes() {
   cp "$FAKES_DIR/runtime" "$FAKE_BIN/docker"
   cp "$FAKES_DIR/runtime" "$FAKE_BIN/bwrap"
   cp "$FAKES_DIR/gh" "$FAKES_DIR/claude" "$FAKES_DIR/nix" \
-     "$FAKES_DIR/driver-exec" "$FAKE_BIN/"
+     "$FAKES_DIR/driver-exec" "$FAKES_DIR/orchestrator" "$FAKE_BIN/"
   chmod +x "$FAKE_BIN"/*
   export PATH="$FAKE_BIN:$PATH"
 
@@ -65,6 +65,7 @@ setup_fakes() {
   export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
   export CLAUDE_LOG="$BATS_TEST_TMPDIR/claude.log"
   export NIX_LOG="$BATS_TEST_TMPDIR/nix.log"
+  export ORCHESTRATOR_LOG="$BATS_TEST_TMPDIR/orchestrator.log"
   export CLAUDE_PROMPT_FILE="$BATS_TEST_TMPDIR/claude-prompt.txt"
   export CLAUDE_AGENTS_FILE="$BATS_TEST_TMPDIR/claude-agents.json"
   : >"$PODMAN_LOG"
@@ -73,6 +74,7 @@ setup_fakes() {
   : >"$GH_LOG"
   : >"$CLAUDE_LOG"
   : >"$NIX_LOG"
+  : >"$ORCHESTRATOR_LOG"
 
   # The nix check derivation exports OUTCOME_CONTRACT_FILE (the real
   # mkHarness-built canonical contract); a bare `bats` run outside nix has no

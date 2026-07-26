@@ -164,6 +164,8 @@
             #   autoFormat = false;
             #   # when non-empty, the implementor auto-detects and runs the project's linter on changed files before each commit, applying auto-fix then resolving remaining findings; skips silently when no linter is found
             #   autoLint = false;
+            #   # when non-empty, entrypoint.sh hands the implementor pass off to the in-box Go orchestrator instead of calling driver-exec directly (issue #1996); off by default, the direct driver-exec path is unchanged
+            #   orchestratorEnabled = false;
             # };
             # };
             # END GENERATED SETTINGS EXAMPLE

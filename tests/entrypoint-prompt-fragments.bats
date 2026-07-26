@@ -601,8 +601,14 @@ SKILL
 # driver-exec's own --devshell switch (not a second hand-copied pipeline)
 # tells it which (the direct-path and devShell behavioural tests above
 # already prove both paths still work).
-@test "driver-exec is invoked exactly once in entrypoint.sh source" {
-  count=$(grep -c '^  driver-exec \\$' "$ENTRYPOINT")
+#
+# issue #1996: the call site itself became the reusable seam the in-box
+# orchestrator drives -- $_driver_invoker picks driver-exec or orchestrator
+# at runtime (ORCHESTRATOR_ENABLED), so the source no longer names
+# driver-exec literally at the call site; it still invokes exactly one
+# binary once.
+@test "the driver invocation is called exactly once in entrypoint.sh source" {
+  count=$(grep -c '^  "\$_driver_invoker" \\$' "$ENTRYPOINT")
   [ "$count" -eq 1 ]
 }
 
