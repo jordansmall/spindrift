@@ -43,18 +43,45 @@ func TestReadOnlyCapabilityGate_GitHubShapedForgeFails(t *testing.T) {
 
 // TestReadOnlyCapabilityGate_LocalShapedForgeSatisfies verifies that
 // read-only is permitted for a local-shaped Code Forge (BundleRelay, no
-// PRForge) paired with a tracker that implements HostPostedCommenter — the
-// acceptance criterion "local backends satisfy the gate (inherently
-// read-only)". A local-shaped forge has no PR concept at all, so it needs no
-// DraftPRCreator to pass.
+// PRForge) paired with a tracker that implements HostPostedCommenter and
+// HostPostedIssueFiler — the acceptance criterion "local backends satisfy
+// the gate (inherently read-only)". A local-shaped forge has no PR concept
+// at all, so it needs no DraftPRCreator to pass.
 func TestReadOnlyCapabilityGate_LocalShapedForgeSatisfies(t *testing.T) {
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only"
 	c.codeForge = "local"
 	fc := forge.NewFake()
 	cf := fc.AsLocal()
-	if err := checkReadOnlyCapabilityGate(c, cf, fc); err != nil {
+	it := fc.AsIssueFiler()
+	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
 		t.Errorf("checkReadOnlyCapabilityGate() with local-shaped forge = %v, want nil", err)
+	}
+}
+
+// TestReadOnlyCapabilityGate_TrackerWithoutHostPostedIssueFilerFails
+// verifies that a tracker implementing HostPostedCommenter but not
+// HostPostedIssueFiler still fails the gate — the acceptance criterion
+// "read-only startup gate fails fast if the selected tracker lacks
+// HostPostedIssueFiler" (issue #2018). A local-shaped Code Forge is paired
+// here specifically so the Code Forge side of the gate is already
+// satisfied, isolating the failure to the tracker's missing seam.
+func TestReadOnlyCapabilityGate_TrackerWithoutHostPostedIssueFilerFails(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.codeForge = "local"
+	fc := forge.NewFake()
+	cf := fc.AsLocal()
+	if _, ok := any(fc).(forge.HostPostedIssueFiler); ok {
+		t.Fatal("test fixture unexpectedly implements HostPostedIssueFiler")
+	}
+
+	err := checkReadOnlyCapabilityGate(c, cf, fc)
+	if err == nil {
+		t.Fatal("checkReadOnlyCapabilityGate() = nil, want an error naming the missing seam")
+	}
+	if !strings.Contains(err.Error(), "issue-filing") {
+		t.Errorf("error should name the missing issue-filing seam, got: %v", err)
 	}
 }
 
@@ -102,7 +129,8 @@ func TestReadOnlyCapabilityGate_GithubReadOnlyAdapterSatisfies(t *testing.T) {
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only"
 	cf := github.NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	it := forge.NewFake() // HostPostedCommenter-shaped, per TestFake_ImplementsHostPostedCommenter
+	fc := forge.NewFake() // HostPostedCommenter-shaped, per TestFake_ImplementsHostPostedCommenter
+	it := fc.AsIssueFiler()
 	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
 		t.Errorf("checkReadOnlyCapabilityGate() with the real github read-only adapter = %v, want nil", err)
 	}
