@@ -363,6 +363,63 @@ explanation, not enforcement):
   both deny a call that was actually safe, since the parser isn't
   `$((...))`- or line-aware.
 
+Issue #2011 found a second, unclosed vector for the same failure mode:
+the async `Agent`/`Task` subagent-launch tool backgrounds *by default*
+(unlike Bash, which backgrounds only when explicitly told to) and is covered
+by neither of the two controls above — `--disallowedTools` can't strip
+`run_in_background` (a parameter, not a tool name, same as Bash's own), and
+`reject-background-bash.sh`'s `PreToolUse` matcher is Bash-only. A Driver
+launching its own scout/reviewer/filer subagents (the harness's own
+prompt-directed workflow) could park its turn awaiting a notification a
+one-shot `claude -p` session never receives, exactly like the `#1542`
+`ScheduleWakeup` shape. Investigation ruled out the issue's other working
+hypothesis — that `reject-background-bash.sh` was somehow inert specifically
+under `ORCHESTRATOR_ENABLED` (`cmd/launcher/orchestrator`): the orchestrator
+loops `driver-exec` for additional passes, but every pass — direct or
+orchestrator-invoked — spawns the same `claude` binary with the same
+`$HOME`, the same `--driver-flags` (`DRIVER_FLAGS_COMMON`, byte-identical
+across both paths), and no `Env` override in either Go binary's
+`exec.Command` call, so `~/.claude/settings.json`'s hooks were never
+reachable by one path and not the other. The `#1998` dogfood run's park was
+gap (b) alone.
+
+The fix closes gap (b) at the tool-schema level rather than adding a third
+`PreToolUse` hook: `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, a `claude`-native
+env var with no public doc naming it as of this writing — confirmed instead
+by reading the pinned `claude-code` 2.1.204 binary directly (`strings
+bin/.claude-wrapped | grep CLAUDE_CODE_DISABLE_BACKGROUND_TASKS` finds it
+gating `.omit({run_in_background: true})` on the Bash, Agent/Task, and
+PowerShell tool schemas each). That reading is a snapshot, not the durable
+guard: `nix/checks/drivers.nix`'s
+`drivers-claude-cli-knows-disable-background-tasks-env` re-greps whichever
+`claude-code` build is actually pinned, on every run, so a future version
+that renames or drops the var fails CI loudly there instead of leaving the
+Driver's export silently inert.
+
+Setting it makes the CLI omit `run_in_background` from the `Bash`, `Agent`/
+`Task`, and PowerShell tools'
+own input schema entirely, so the Driver can never *request* async
+execution from any of them — stronger than a deny hook, which still
+requires the model to notice and correctly act on a denial after already
+committing to the async framing mid-turn. `lib/drivers/
+default.nix`'s `renderPreamble` grew a generic `envCommon` seam (an optional
+per-Driver attrset of env vars, alongside `flagsCommon`'s CLI args) so
+`claude.nix` can declare this one var without leaking a claude-specific
+literal into the shared `lib/image.nix`; it renders as an `export` line in
+the same `driverPreamble` text `flagsCommon` already flows through, so it
+reaches `claude` under both the direct and orchestrator invocation paths
+identically, and reaches both the OCI and bwrap runners identically (the
+export lands in `entrypoint.sh`'s own shell process, inherited by every
+child it execs, rather than a runner-specific `Config.Env`/`--setenv` list).
+Disallowing `Agent`/`Task` outright via `--disallowedTools` was rejected —
+scout/reviewer/filer subagent delegation is core to the harness's own
+prompt-directed workflow, not a re-invocation promise like `ScheduleWakeup`.
+`reject-background-bash.sh` is unchanged and still needed: it's the only
+control over a Bash call that self-backgrounds at the shell level (a
+trailing `&`, `nohup`, `setsid`, `coproc`), a vector
+`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS` doesn't reach since it only ever
+governs the structured `run_in_background` parameter.
+
 #### Self-inflicted secret reads are structurally blocked
 
 Spec #1907's problem statement: an operator's direct experience is that the
