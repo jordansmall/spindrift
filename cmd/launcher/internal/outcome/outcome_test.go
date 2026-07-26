@@ -1055,3 +1055,99 @@ func TestLastCommentLineInLog_SurvivesJSONLShapedLog(t *testing.T) {
 		t.Errorf("body: got %q, want %q", got, body)
 	}
 }
+
+// --- AllIssueIntentLinesInLog tests ---
+
+func TestAllIssueIntentLinesInLog_Found(t *testing.T) {
+	payload := base64.StdEncoding.EncodeToString([]byte(`{"title":"bug: widget breaks"}`))
+	path := writeLog(t,
+		"some output",
+		"SPINDRIFT_ISSUE_INTENT the-nonce "+payload,
+	)
+	got, err := outcome.AllIssueIntentLinesInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{`{"title":"bug: widget breaks"}`}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// TestAllIssueIntentLinesInLog_CollectsAll verifies the 1-to-many contract
+// (issue #2018's acceptance criterion): several distinct verifying lines in
+// one run's log must each contribute their payload, in encounter order —
+// unlike LastPRIntentInLog/LastCommentLineInLog's singleton last-wins
+// scanners, issue filing is not a single overwritable slot.
+func TestAllIssueIntentLinesInLog_CollectsAll(t *testing.T) {
+	first := base64.StdEncoding.EncodeToString([]byte(`{"title":"first"}`))
+	second := base64.StdEncoding.EncodeToString([]byte(`{"title":"second"}`))
+	path := writeLog(t,
+		"SPINDRIFT_ISSUE_INTENT the-nonce "+first,
+		"some more output",
+		"SPINDRIFT_ISSUE_INTENT the-nonce "+second,
+	)
+	got, err := outcome.AllIssueIntentLinesInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{`{"title":"first"}`, `{"title":"second"}`}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// TestAllIssueIntentLinesInLog_NotFound verifies a log with no
+// SPINDRIFT_ISSUE_INTENT line at all yields an empty result, not an error.
+func TestAllIssueIntentLinesInLog_NotFound(t *testing.T) {
+	path := writeLog(t, "some output", "no issue-intent line here")
+	got, err := outcome.AllIssueIntentLinesInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %v, want empty", got)
+	}
+}
+
+// TestAllIssueIntentLinesInLog_NonceMismatchDroppedSilently verifies a
+// pre-nonce or mismatched-nonce line (issue #1939's shape: an untrusted
+// issue/comment author's echoed token, written before this run's nonce was
+// minted) is dropped from the collected result rather than surfaced as an
+// error — a caller has no single result slot to attach a per-line warning
+// to the way the singleton scanners' notVerifiedErr does.
+func TestAllIssueIntentLinesInLog_NonceMismatchDroppedSilently(t *testing.T) {
+	genuine := base64.StdEncoding.EncodeToString([]byte(`{"title":"genuine"}`))
+	spoofed := base64.StdEncoding.EncodeToString([]byte(`{"title":"spoofed"}`))
+	path := writeLog(t,
+		"SPINDRIFT_ISSUE_INTENT the-nonce "+genuine,
+		"SPINDRIFT_ISSUE_INTENT wrong-nonce "+spoofed,
+	)
+	got, err := outcome.AllIssueIntentLinesInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{`{"title":"genuine"}`}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// TestAllIssueIntentLinesInLog_MalformedBase64DroppedSilently verifies a
+// line carrying the token with an undecodable payload is dropped rather than
+// aborting the scan or erroring the whole call.
+func TestAllIssueIntentLinesInLog_MalformedBase64DroppedSilently(t *testing.T) {
+	genuine := base64.StdEncoding.EncodeToString([]byte(`{"title":"genuine"}`))
+	path := writeLog(t,
+		"SPINDRIFT_ISSUE_INTENT the-nonce not-valid-base64!!!",
+		"SPINDRIFT_ISSUE_INTENT the-nonce "+genuine,
+	)
+	got, err := outcome.AllIssueIntentLinesInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{`{"title":"genuine"}`}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
