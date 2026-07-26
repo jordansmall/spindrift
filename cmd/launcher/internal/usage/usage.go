@@ -31,16 +31,18 @@ type RoleUsage struct {
 	CacheCreationInputTokens int
 }
 
-// Usage holds the aggregate statistics from a result event.
+// Usage holds the aggregate statistics from a result event. Tagged for JSON
+// (issue #2002: RunState.CumulativeUsage persists one of these) even though
+// this package otherwise only ever formats Usage for Markdown display.
 type Usage struct {
-	InputTokens              int
-	OutputTokens             int
-	CacheReadInputTokens     int
-	CacheCreationInputTokens int
-	TotalCostUSD             float64
-	DurationMs               int64
-	DurationApiMs            int64
-	NumTurns                 int
+	InputTokens              int     `json:"input_tokens"`
+	OutputTokens             int     `json:"output_tokens"`
+	CacheReadInputTokens     int     `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int     `json:"cache_creation_input_tokens"`
+	TotalCostUSD             float64 `json:"total_cost_usd"`
+	DurationMs               int64   `json:"duration_ms"`
+	DurationApiMs            int64   `json:"duration_api_ms"`
+	NumTurns                 int     `json:"num_turns"`
 }
 
 // Report combines a Box run's aggregate Usage with its per-role breakdown, as
