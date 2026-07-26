@@ -3,6 +3,7 @@ package dispatch
 import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 // Result is what Run and Fix return: the parsed Outcome line on success (or
@@ -89,6 +90,12 @@ type Dispatcher interface {
 	// UsageReport returns the Markdown usage-summary comment body for this
 	// issue's initial run.
 	UsageReport() string
+
+	// CumulativeUsage sums token and cost usage across every pass log this
+	// issue's Dispatch has produced so far (initial run plus each fix
+	// pass) — selfHealGate's budget gate (issue #2001) reads this before
+	// dispatching another fix pass.
+	CumulativeUsage() usage.Usage
 
 	// Close evicts this issue's driver-cache entry. Deferred by the
 	// per-issue caller once the Dispatch is done with all its work.

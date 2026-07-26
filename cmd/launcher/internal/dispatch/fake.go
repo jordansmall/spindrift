@@ -1,6 +1,10 @@
 package dispatch
 
-import "sync"
+import (
+	"sync"
+
+	"spindrift.dev/launcher/internal/usage"
+)
 
 // FixCall records one Fix invocation.
 type FixCall struct {
@@ -44,6 +48,9 @@ type Fake struct {
 
 	// UsageReportBody is returned by UsageReport.
 	UsageReportBody string
+
+	// CumulativeUsageResult is returned by CumulativeUsage.
+	CumulativeUsageResult usage.Usage
 
 	// CloseCalls counts how many times Close was called.
 	CloseCalls int
@@ -102,6 +109,13 @@ func (f *Fake) UsageReport() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.UsageReportBody
+}
+
+// CumulativeUsage returns CumulativeUsageResult.
+func (f *Fake) CumulativeUsage() usage.Usage {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.CumulativeUsageResult
 }
 
 // Close records the call.

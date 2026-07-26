@@ -94,6 +94,37 @@ func TestUsageReport_MissingResultEvent_ReportsUnavailable(t *testing.T) {
 	}
 }
 
+// TestCumulativeUsage_SumsAcrossInitialAndFixPasses verifies CumulativeUsage
+// adds token counts and cost across the initial run's log and every fix-pass
+// log on disk, rather than reporting only the initial pass's own usage
+// (issue #2001 — selfHealGate's budget gate needs the run's total spend, not
+// just its first pass).
+func TestCumulativeUsage_SumsAcrossInitialAndFixPasses(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("9", "test issue")
+
+	writeRunLog(t, d, `{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":100,"output_tokens":50}}`)
+	if err := writeFile(d.fixLogPath(1), `{"type":"result","num_turns":1,"total_cost_usd":0.20,"usage":{"input_tokens":200,"output_tokens":75}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := d.CumulativeUsage()
+	if diff := got.TotalCostUSD - 0.30; diff > 0.0001 || diff < -0.0001 {
+		t.Errorf("TotalCostUSD = %v, want ~0.30", got.TotalCostUSD)
+	}
+	if got.InputTokens != 300 {
+		t.Errorf("InputTokens = %d, want 300", got.InputTokens)
+	}
+	if got.OutputTokens != 125 {
+		t.Errorf("OutputTokens = %d, want 125", got.OutputTokens)
+	}
+}
+
 // TestUsageReport_WithBreakdown verifies that when the log contains scout
 // and reviewer subagent messages, the report includes a per-role breakdown
 // table.

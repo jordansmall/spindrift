@@ -52,6 +52,28 @@ func (d *Dispatch) UsageReport() string {
 	return body
 }
 
+// CumulativeUsage sums token and cost usage across every pass log this
+// issue's Dispatch has produced so far — the initial run plus each fix pass
+// — so selfHealGate's budget gate (issue #2001) reads the run's total spend,
+// not just its initial pass. A pass log that fails to parse, or has no
+// result event, contributes nothing rather than aborting the sum, matching
+// ExtractUsage's own best-effort degrade.
+func (d *Dispatch) CumulativeUsage() usage.Usage {
+	var total usage.Usage
+	for _, pl := range LogPaths(d.pwd, d.number) {
+		r, err := d.driver.ExtractUsage(pl.Path)
+		if err != nil || !r.Found {
+			continue
+		}
+		total.InputTokens += r.InputTokens
+		total.OutputTokens += r.OutputTokens
+		total.CacheReadInputTokens += r.CacheReadInputTokens
+		total.CacheCreationInputTokens += r.CacheCreationInputTokens
+		total.TotalCostUSD += r.TotalCostUSD
+	}
+	return total
+}
+
 // breakdownSection returns a Markdown per-role breakdown section, or empty
 // string if roles is empty.
 func breakdownSection(roles []usage.RoleUsage) string {
