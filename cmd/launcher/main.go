@@ -111,6 +111,12 @@ type config struct {
 	maxFixAttempts    int
 	maxRebaseAttempts int
 
+	// maxBudgetTokens and maxBudgetUSD cap cumulative usage (issue #2001)
+	// before selfHealGate dispatches another fix pass; 0 means "no cap" for
+	// that dimension.
+	maxBudgetTokens int
+	maxBudgetUSD    float64
+
 	// preflightStaleBase opts into ADR 0026's proactive stale-base rebase:
 	// a green PR that is behind its base (no textual conflict) is rebased and
 	// re-greened before merging. Off by default — a green-but-behind PR
@@ -300,6 +306,23 @@ func atoiNonnegSchema(key string) int {
 	return atoiNonneg(os.Getenv(key), intSchemaDefault(key))
 }
 
+// floatSchemaDefault parses key's schema default as a float64; a
+// non-numeric or absent default parses to 0.
+func floatSchemaDefault(key string) float64 {
+	n, _ := strconv.ParseFloat(schemaDefault(key), 64)
+	return n
+}
+
+// floatNonnegSchema parses key's env value as a non-negative float64 (the
+// USD-budget counterpart to atoiNonnegSchema), falling back to its schema
+// default; a negative or unparseable value also falls back to the default.
+func floatNonnegSchema(key string) float64 {
+	if n, err := strconv.ParseFloat(os.Getenv(key), 64); err == nil && n >= 0 {
+		return n
+	}
+	return floatSchemaDefault(key)
+}
+
 // gitIdentityField resolves a commit-identity knob (GIT_USER_NAME/
 // GIT_USER_EMAIL) via the normal document/flag/env chain, falling back to
 // the host git config when none of those supply a value — the in-process
@@ -363,6 +386,8 @@ func loadConfig() config {
 		mergePollTimeout:   atoiNonnegSchema("MERGE_POLL_TIMEOUT"),
 		maxFixAttempts:     atoiNonnegSchema("MAX_FIX_ATTEMPTS"),
 		maxRebaseAttempts:  atoiNonnegSchema("MAX_REBASE_ATTEMPTS"),
+		maxBudgetTokens:    atoiNonnegSchema("MAX_BUDGET_TOKENS"),
+		maxBudgetUSD:       floatNonnegSchema("MAX_BUDGET_USD"),
 		preflightStaleBase: getenvSchema("PREFLIGHT_STALE_BASE") != "",
 
 		ghToken:            os.Getenv("GH_TOKEN"),
@@ -790,6 +815,8 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge) settle.Conf
 		MergePollTimeout:   c.mergePollTimeout,
 		MaxFixAttempts:     c.maxFixAttempts,
 		MaxRebaseAttempts:  c.maxRebaseAttempts,
+		MaxBudgetTokens:    c.maxBudgetTokens,
+		MaxBudgetUSD:       c.maxBudgetUSD,
 		PreflightStaleBase: c.preflightStaleBase,
 		OutboxDir:          lw.OutboxDir,
 		CodeForgeForIssue: func(num string) forge.CodeForge {

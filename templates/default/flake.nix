@@ -110,6 +110,10 @@
             # selfHealing = {
             #   # jitter seconds added to 429 hold duration to spread re-dispatch
             #   holdJitterSecs = 5;
+            #   # cumulative tokens across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the token budget cap
+            #   maxBudgetTokens = 0;
+            #   # cumulative cost in USD across the initial run and every fix pass before selfHealGate stops dispatching further fix passes (issue #2001); 0 disables the cost budget cap; give it as a quoted string in flake settings since it may be fractional, e.g. 4.44
+            #   maxBudgetUSD = "0.000000";
             #   # fix-agent passes when CI is genuinely red before marking agent-failed; 0 disables self-healing
             #   maxFixAttempts = 3;
             #   # rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries
