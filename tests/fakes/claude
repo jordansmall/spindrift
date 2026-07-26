@@ -158,6 +158,30 @@ else
       printf '{"type":"result","subtype":"success","is_error":false,"result":"   SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake   "}\n' \
         "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
       ;;
+    colon)
+      # A well-formed key=value line, but with the delimiter after the token
+      # mis-typed as a colon instead of the required space (issue #2012) --
+      # still machine-recoverable, unlike the "prose" case below.
+      printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME: issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake"}\n' \
+        "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
+      ;;
+    prose)
+      # A colon-prefixed sign-off with no issue=/landing=/status= fields at
+      # all (the #1998 dogfood shape, issue #2012) -- genuinely not
+      # machine-recoverable, so the extractor must leave it unmatched rather
+      # than guess a status from the prose.
+      printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME: Complete \xe2\x80\x94 implemented issue #%s"}\n' \
+        "${ISSUE_NUMBER:-0}"
+      ;;
+    stray-field)
+      # A colon-prefixed prose sign-off that happens to contain one stray
+      # field marker mid-sentence, with no landing= alongside it (issue
+      # #2012) -- still not a genuine key=value line, so the extractor's
+      # field check must require landing= and status= together, not just any
+      # one of the three markers appearing anywhere.
+      printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME: I think status=done for issue #%s"}\n' \
+        "${ISSUE_NUMBER:-0}"
+      ;;
     *)
       printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake"}\n' \
         "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"

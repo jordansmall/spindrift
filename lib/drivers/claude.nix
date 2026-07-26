@@ -50,13 +50,32 @@
   # anchor is tested, so the launcher's grep and outcome.Parse both see the
   # line bare. Stripping runs before grep -- grepping the raw wrapped line
   # first would never match.
+  #
+  # A near-miss sign-off that mis-types the delimiter as a colon instead of
+  # the required space (issue #2012, seen on the #1998 dogfood run) is still
+  # genuinely machine-recoverable, so the token match tolerates either
+  # delimiter and normalizes a colon back to the canonical space before
+  # anything downstream sees the line -- the same space/colon tolerance
+  # outcome.Parse's stripToken already applies launcher-side. The final pair
+  # of field-marker greps is what keeps this from over-reaching: they require
+  # both landing= and status= (outcome.Parse's own two required fields, not
+  # just any one of issue=/landing=/status= appearing anywhere) so a bare
+  # prose sign-off -- either no field markers at all ("SPINDRIFT_OUTCOME:
+  # Complete — ...") or a single stray one caught mid-sentence -- has no
+  # status this extractor can safely infer. Left unmatched, it falls through
+  # to the backstop, which salvages any uncommitted work regardless of why
+  # the outcome line was unusable.
   outcomeExtractFnBody = ''
     # The backtick below is a literal char in a single-quoted sed script, not
     # an unexpanded command substitution.
     # shellcheck disable=SC2016
     jq -r 'select(.type == "result") | .result // empty' "$1" 2>/dev/null \
       | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' \
-      | grep '^SPINDRIFT_OUTCOME ' | tail -1 || true
+      | grep -E '^SPINDRIFT_OUTCOME[: ]' \
+      | sed -E 's/^SPINDRIFT_OUTCOME:[[:space:]]*/SPINDRIFT_OUTCOME /' \
+      | grep -E '(^| )landing=' \
+      | grep -E '(^| )status=' \
+      | tail -1 || true
   '';
 
   # Shell function body computing the claude-specific session pin/resume

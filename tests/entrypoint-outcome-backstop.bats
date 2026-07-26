@@ -154,3 +154,33 @@ EOF
   ! grep -q 'status=blocked' <<<"$output"
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready' <<<"$output"
 }
+
+# Regression for the #1998 dogfood shape (issue #2012): the driver's own
+# outcome line was well-formed but used a colon instead of the required space
+# delimiter after the token. That is genuinely machine-recoverable -- the
+# extractor normalizes the delimiter and surfaces it, so the backstop never
+# runs at all.
+@test "colon-delimited outcome line (#2012) -> extractor salvages it, no synthetic blocked line" {
+  export FAKE_CLAUDE_WRAP_OUTCOME=colon
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  ! grep -q 'status=blocked' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready note=fake$' <<<"$output"
+}
+
+# A prose sign-off can contain one stray field-marker word mid-sentence
+# without becoming a genuine key=value line (issue #2012) -- the extractor
+# must require landing= and status= together, not treat any single marker as
+# proof of a well-formed line, or this would surface as a synthetic outcome
+# and skip the resume/backstop safety net over a line the launcher's own
+# outcome.Parse would still reject as a near miss (missing landing=). No
+# commits or staged work here, so a plain "no work to preserve" backstop
+# firing is itself the proof the extractor rejected the stray marker.
+@test "prose with one stray field marker (#2012) -> extractor still leaves it unmatched" {
+  export FAKE_CLAUDE_WRAP_OUTCOME=stray-field
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*no work to preserve' <<<"$output"
+}
