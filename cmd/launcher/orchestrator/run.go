@@ -127,7 +127,11 @@ func run(cfg config, stdout io.Writer) (int, error) {
 	prevSeededPromptFile := ""
 	decomposeNext := false
 	for pass := 1; ; pass++ {
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass}))
+		passRole := ""
+		if decomposeNext {
+			passRole = "decompose"
+		}
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: passRole}))
 
 		passCfg := cfg
 		if pass > 1 {
@@ -198,6 +202,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			}
 			if writeErr := WriteRunState(cfg.stateFile, state); writeErr != nil {
 				fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
+				fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
 			}
 			// The smaller slices the decompose pass just produced get a
 			// fresh non-convergence budget of their own, rather than
@@ -263,9 +268,19 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			decision, reason = "stop", "max review rounds reached"
 			decomposeEligible = true
 		}
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decision, Reason: reason}))
+		// A decompose-eligible "stop" that can actually decompose isn't a
+		// stop at all -- the loop continues into a decompose pass next --
+		// so the emitted marker says "decompose", not "stop", or a marker
+		// consumer would see a surprise pass_start right after being told
+		// the run stopped.
+		willDecompose := decision == "stop" && decomposeEligible && canDecompose(cfg, state)
+		emittedDecision := decision
+		if willDecompose {
+			emittedDecision = "decompose"
+		}
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: emittedDecision, Reason: reason}))
 		if decision == "stop" {
-			if decomposeEligible && canDecompose(cfg, state) {
+			if willDecompose {
 				decomposeNext = true
 				continue
 			}

@@ -130,7 +130,11 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 	fmt.Fprintf(&sb, "#%s \xe2\x97\x8b ", issue)
 	switch op.Op {
 	case "pass_start":
-		fmt.Fprintf(&sb, "pass %d started", op.Pass)
+		if op.Role != "" {
+			fmt.Fprintf(&sb, "pass %d started (%s)", op.Pass, sanitizeRole(op.Role))
+		} else {
+			fmt.Fprintf(&sb, "pass %d started", op.Pass)
+		}
 	case "verdict":
 		fmt.Fprintf(&sb, "verdict: %s", sanitizeRole(op.Verdict))
 	case "decision":
