@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -109,6 +110,165 @@ func TestRunPropagatesDriverExecExitCode(t *testing.T) {
 	}
 	if rc != 3 {
 		t.Errorf("exit code = %d, want 3", rc)
+	}
+}
+
+// TestRunReadsAndWritesRunState verifies run reads whatever run-state a prior
+// pass left at cfg.stateFile, carries its done/remaining slices and last
+// verdict forward unchanged (issue #1997: on this tracer-bullet single pass
+// there is no new slice/verdict information to add), and writes back the
+// current pass's scout-brief path -- establishing the read/write seam a
+// later multi-pass loop extends, without changing this pass's own behaviour.
+func TestRunReadsAndWritesRunState(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stateFile := filepath.Join(dir, "run-state.json")
+	prior := RunState{
+		DoneSlices:      []string{"scout"},
+		RemainingSlices: []string{"implement"},
+		LastVerdict:     "BLOCK",
+	}
+	if err := WriteRunState(stateFile, prior); err != nil {
+		t.Fatalf("seed WriteRunState: %v", err)
+	}
+
+	cfg := config{
+		promptFile:     filepath.Join(dir, "prompt.txt"),
+		driverBin:      "claude",
+		logPath:        filepath.Join(dir, "stream.log"),
+		heartbeatLog:   filepath.Join(dir, "heartbeat.log"),
+		stateFile:      stateFile,
+		scoutBriefPath: filepath.Join(dir, "brief.md"),
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if !reflect.DeepEqual(got.DoneSlices, prior.DoneSlices) {
+		t.Errorf("DoneSlices = %v, want carried forward unchanged %v", got.DoneSlices, prior.DoneSlices)
+	}
+	if !reflect.DeepEqual(got.RemainingSlices, prior.RemainingSlices) {
+		t.Errorf("RemainingSlices = %v, want carried forward unchanged %v", got.RemainingSlices, prior.RemainingSlices)
+	}
+	if got.LastVerdict != prior.LastVerdict {
+		t.Errorf("LastVerdict = %q, want carried forward unchanged %q", got.LastVerdict, prior.LastVerdict)
+	}
+	if got.ScoutBriefPath != cfg.scoutBriefPath {
+		t.Errorf("ScoutBriefPath = %q, want %q", got.ScoutBriefPath, cfg.scoutBriefPath)
+	}
+}
+
+// TestRunPreservesDriverExitCodeWhenRunStateWriteFails verifies a run-state
+// persistence failure never masks the Driver's own exit code (issue #1997
+// review): the handoff artifact is a side channel to the pass's real
+// outcome, not a gate on it, so a --state-file whose parent directory
+// doesn't exist -- ReadRunState treats it as "no prior state" like any other
+// missing file, but WriteRunState genuinely fails writing it back -- must
+// not turn a real driver exit code into a different, misleading one.
+func TestRunPreservesDriverExitCodeWhenRunStateWriteFails(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 3\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config{
+		promptFile:   filepath.Join(dir, "prompt.txt"),
+		driverBin:    "claude",
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		stateFile:    filepath.Join(dir, "missing-parent", "run-state.json"),
+	}
+
+	rc, err := run(cfg, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if rc != 3 {
+		t.Errorf("exit code = %d, want 3 (the Driver's own exit code)", rc)
+	}
+}
+
+// TestRunProceedsOnCorruptRunState verifies a corrupt --state-file (a
+// partial write from a killed prior pass, or hand-edited garbage) never
+// blocks the Driver from running (issue #1997 review): the handoff artifact
+// is a side channel to the pass's real outcome on the write side already, so
+// the read side must honor the same "never gate the pass" contract instead
+// of aborting before driver-exec ever runs.
+func TestRunProceedsOnCorruptRunState(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stateFile := filepath.Join(dir, "run-state.json")
+	if err := os.WriteFile(stateFile, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:   filepath.Join(dir, "prompt.txt"),
+		driverBin:    "claude",
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		stateFile:    stateFile,
+	}
+
+	rc, err := run(cfg, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if rc != 0 {
+		t.Errorf("exit code = %d, want 0", rc)
+	}
+	if _, err := os.Stat(callLog); err != nil {
+		t.Errorf("driver-exec was never invoked despite the corrupt state file: %v", err)
+	}
+}
+
+// TestRunKeepsPriorScoutBriefPathWhenConfigOmitsIt verifies an empty
+// cfg.scoutBriefPath never clobbers a prior pass's recorded scout-brief path
+// with an empty string (issue #1997 review) -- only a caller that actually
+// supplies a new path updates the field.
+func TestRunKeepsPriorScoutBriefPathWhenConfigOmitsIt(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stateFile := filepath.Join(dir, "run-state.json")
+	prior := RunState{ScoutBriefPath: "/tmp/brief.md"}
+	if err := WriteRunState(stateFile, prior); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:   filepath.Join(dir, "prompt.txt"),
+		driverBin:    "claude",
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		stateFile:    stateFile,
+		// scoutBriefPath intentionally left unset.
+	}
+
+	if _, err := run(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.ScoutBriefPath != "/tmp/brief.md" {
+		t.Errorf("ScoutBriefPath = %q, want prior value %q preserved", got.ScoutBriefPath, "/tmp/brief.md")
 	}
 }
 

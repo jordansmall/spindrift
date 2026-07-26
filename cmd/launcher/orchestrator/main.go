@@ -27,6 +27,8 @@ func main() {
 	issue := flag.String("issue", os.Getenv("ISSUE_NUMBER"), "issue number, for the heartbeat log prefix")
 	logPath := flag.String("log-path", "", "path to tee the raw Driver stream to, for outcome extraction (required)")
 	heartbeatLog := flag.String("heartbeat-log", "/tmp/heartbeat.log", "path to write coarse heartbeat status lines")
+	stateFile := flag.String("state-file", "/tmp/run-state.json", "path to the run-state handoff artifact (issue #1997); empty disables it")
+	scoutBriefPath := flag.String("scout-brief-path", "/tmp/brief.md", "path to the scout brief, recorded into the run-state artifact")
 	flag.Parse()
 
 	if *issue == "" {
@@ -46,17 +48,19 @@ func main() {
 	}
 
 	rc, err := run(config{
-		promptFile:   *promptFile,
-		agentsFile:   *agentsFile,
-		sessionFile:  *sessionFile,
-		driverBin:    *driverBin,
-		driverFlags:  *driverFlags,
-		model:        *model,
-		devshell:     *devshell,
-		devshellName: *devshellName,
-		issue:        *issue,
-		logPath:      *logPath,
-		heartbeatLog: *heartbeatLog,
+		promptFile:     *promptFile,
+		agentsFile:     *agentsFile,
+		sessionFile:    *sessionFile,
+		driverBin:      *driverBin,
+		driverFlags:    *driverFlags,
+		model:          *model,
+		devshell:       *devshell,
+		devshellName:   *devshellName,
+		issue:          *issue,
+		logPath:        *logPath,
+		heartbeatLog:   *heartbeatLog,
+		stateFile:      *stateFile,
+		scoutBriefPath: *scoutBriefPath,
 	}, os.Stdout)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator:", err)
