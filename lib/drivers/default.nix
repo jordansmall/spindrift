@@ -59,6 +59,26 @@ let
   # HOME (see lib/image.nix's passwdFile), so the skills dir is baked as an
   # absolute path rather than depending on $HOME at run time -- byte-identical
   # to what mkHarness.nix used to string-build inline for all three vars.
+  # Renders driverEntry.envCommon (a Driver-specific attrset of env vars, e.g.
+  # claude.nix's CLAUDE_CODE_DISABLE_BACKGROUND_TASKS, issue #2011) as one
+  # `export KEY=value` line per entry -- `export`, unlike the plain DRIVER_*
+  # assignments above, since the point is reaching a child process (claude,
+  # via driver-exec/orchestrator's unmodified os/exec env inheritance), not
+  # entrypoint.sh's own interpolation. Optional: a Driver entry that omits
+  # envCommon renders no lines at all, so a Driver with nothing to export
+  # (or a future one that never adds this attribute) needn't declare it.
+  renderEnvCommon =
+    driverEntry:
+    lib.concatStrings (
+      lib.mapAttrsToList (
+        name: value:
+        if builtins.match "[A-Za-z_][A-Za-z0-9_]*" name == null then
+          throw "Driver envCommon key '${name}' is not a valid shell identifier"
+        else
+          "export ${name}=" + lib.escapeShellArg value + "\n"
+      ) (driverEntry.envCommon or { })
+    );
+
   renderPreamble =
     driverEntry:
     "DRIVER_BIN="
@@ -70,6 +90,7 @@ let
     + "DRIVER_SKILLS_DIR="
     + lib.escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
     + "\n"
+    + renderEnvCommon driverEntry
     + renderFunctions driverEntry;
 in
 {

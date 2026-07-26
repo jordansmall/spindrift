@@ -31,6 +31,27 @@
   # strings.Fields) never breaks it into separate argv elements.
   flagsCommon = "--verbose --output-format stream-json --dangerously-skip-permissions --disallowedTools ScheduleWakeup,CronCreate,CronDelete,CronList,RemoteTrigger,Monitor";
 
+  # Env vars every claude invocation needs in its process environment (issue
+  # #2011, distinct from flagsCommon's CLI args): CLAUDE_CODE_DISABLE_BACKGROUND_TASKS
+  # makes claude itself omit the run_in_background parameter from the Bash,
+  # Agent/Task, and PowerShell tools' own input schema, so none of them can
+  # ever be called asynchronously in the first place -- --disallowedTools
+  # above can't reach this, since run_in_background is a parameter of those
+  # tool calls, not a tool name of its own, and reject-background-bash.sh
+  # (agent/reject-background-bash.sh) only ever covered Bash, leaving the
+  # Agent/Task subagent-launch tool (which backgrounds by default, unlike
+  # Bash) free to park a headless run's turn awaiting a notification a
+  # one-shot `claude -p` session can never receive. Schema-level omission is
+  # strictly stronger than a PreToolUse deny hook here: the model can't even
+  # attempt the call, rather than attempting it and having to correctly act
+  # on a denial mid-turn. reject-background-bash.sh stays as defense in depth
+  # for the vector this env var doesn't reach -- a Bash command that
+  # self-backgrounds at the shell level (a trailing `&`, `nohup`, `setsid`,
+  # `coproc`) rather than through the structured parameter.
+  envCommon = {
+    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
+  };
+
   # Directory Claude Code scans for skill files, relative to $HOME.
   skillsDirRelative = ".claude/skills";
 
