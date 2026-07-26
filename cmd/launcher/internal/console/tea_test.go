@@ -1964,180 +1964,119 @@ func TestTea_SidebarToggleKey_CyclesActivityTranscriptRaw(t *testing.T) {
 	waitFinished(t, tm)
 }
 
+// newSidebarScrollTestModel builds a teaModel with a 50-line "line-NN"
+// Activity feed already open and following at the bottom (fresh-open-while-
+// following, ADR 0030, issue #1502) — the shared fixture the three
+// TestTea_SidebarScrollKeys_* tests below page through.
+func newSidebarScrollTestModel(t *testing.T) teaModel {
+	t.Helper()
+	activity := make([]ActivityLine, 50)
+	for i := range activity {
+		activity[i] = ActivityLine{Text: fmt.Sprintf("line-%02d", i)}
+	}
+	m := NewModel()
+	m = Update(m, SizeChangedMsg{Width: 80, Height: 32})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Title: "fix the thing", Activity: activity})
+	top := len(m.Sidebar.Lines) - sidebarModalScrollBudget(m)
+	if m.Sidebar.Offset != top {
+		t.Fatalf("test setup: Offset = %d, want %d (a fresh open while following starts at the bottom)", m.Sidebar.Offset, top)
+	}
+	return teaModel{m: m}
+}
+
 // TestTea_SidebarScrollKeys_PageThroughContent verifies pgdown/pgup move the
-// sidebar's scroll offset, hiding and restoring the leading lines (issue
-// #786). The content has to outrun the 24-row test terminal's fullscreen
-// budget, or clampSidebarOffset's viewport cap (issue #829) pins Offset at 0
-// as a real no-op and pgdown never produces a fresh frame. A fresh open
-// starts at the bottom while following (ADR 0030, issue #1502) rather than
-// at line-00, so the sequence pages all the way to the top first — three
-// pgups guarantee reaching Offset 0 from a max Offset of 28 (50 lines, a
-// 22-line budget) — before exercising the original pgdown/pgup mechanics
-// from that known point.
+// sidebar's scroll offset by a full fixedPaneScrollDelta-sized page (issue
+// #786), driven directly through teaModel.handleKey rather than a
+// teatest.TestModel scraping rendered "line-NN" text: the render-scraping
+// version could time out waiting on a render that was merely slow, not
+// hung, under CI's CPU contention (both waitForOutput retry windows
+// elapsing at 60s+, issue #2014). Asserting Sidebar.Offset directly needs no
+// render at all, so it can't flake on render latency. The clamp/Follow-detach
+// arithmetic itself is already pinned by TestUpdate_SidebarScrollMsg_* in
+// model_test.go; this test's own job is only confirming pgdown/pgup route
+// to a full fixedPaneScrollDelta SidebarScrollMsg through the real keymap
+// dispatch. A fresh open starts at the bottom while following (ADR 0030,
+// issue #1502) rather than at Offset 0, so the sequence pages all the way
+// to the top first — three pgups guarantee reaching Offset 0 from the
+// fresh-open bottom offset (50 lines, comfortably more than 3 pgups' worth
+// of a 22-line budget) — before exercising the original pgdown/pgup
+// mechanics from that known point.
 func TestTea_SidebarScrollKeys_PageThroughContent(t *testing.T) {
-	f := forge.NewFake()
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	tm := newSidebarScrollTestModel(t)
 
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
-		t.Fatal(err)
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyPgUp})
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyPgUp})
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyPgUp}) // detaches Follow along the way
+	if tm.m.Sidebar.Offset != 0 {
+		t.Errorf("Offset = %d after 3 pgups, want 0 (top)", tm.m.Sidebar.Offset)
 	}
-	var lines strings.Builder
-	for i := 0; i < 50; i++ {
-		fmt.Fprintf(&lines, `{"type":"assistant","message":{"content":[{"type":"text","text":"line-%02d"}]}}`+"\n", i)
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyPgDown})
+	if tm.m.Sidebar.Offset != fixedPaneScrollDelta {
+		t.Errorf("Offset = %d after pgdown, want %d", tm.m.Sidebar.Offset, fixedPaneScrollDelta)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(lines.String()), 0o644); err != nil {
-		t.Fatal(err)
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyPgUp})
+	if tm.m.Sidebar.Offset != 0 {
+		t.Errorf("Offset = %d after pgup, want 0", tm.m.Sidebar.Offset)
 	}
-	launch := newTestLauncher(t, f)
-	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
-
-	// Taller than the default 24 rows so the floating log modal's content
-	// budget (issue #1845) matches what this test's fixed pgup/pgdown counts
-	// were calibrated against pre-modal — width 80 keeps it below sidebarFits'
-	// docked threshold, so the sidebar still opens through the same
-	// modal/narrow-terminal path this test means to exercise.
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 32))
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "2")
-	waitForOutput(t, tm, "running")
-
-	sendKey(tm, "enter")
-	waitForOutput(t, tm, "line-49") // fresh open while following starts at the bottom
-
-	sendKey(tm, "pgup")
-	sendKey(tm, "pgup")
-	sendKey(tm, "pgup") // detaches Follow along the way
-	waitForOutput(t, tm, "line-00")
-
-	sendKey(tm, "pgdown")
-	waitForOutput(t, tm, "line-19")
-
-	sendKey(tm, "pgup")
-	waitForOutput(t, tm, "line-00")
-
-	sendKey(tm, "x")
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "q")
-	waitForOutput(t, tm, "quit with live Dispatches")
-	sendKey(tm, "d")
-	waitFinished(t, tm)
 }
 
 // TestTea_SidebarScrollKeys_CtrlFCtrlBPageThroughContent mirrors
 // TestTea_SidebarScrollKeys_PageThroughContent for the vim page chords
 // ctrl+f/ctrl+b, which must page the sidebar identically to pgdown/pgup
-// (issue #1647).
+// (issue #1647). Driven directly through teaModel.handleKey rather than a
+// teatest.TestModel — see TestTea_SidebarScrollKeys_PageThroughContent's
+// doc comment for why (issue #2014).
 func TestTea_SidebarScrollKeys_CtrlFCtrlBPageThroughContent(t *testing.T) {
-	f := forge.NewFake()
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	tm := newSidebarScrollTestModel(t)
 
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
-		t.Fatal(err)
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyCtrlB})
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyCtrlB})
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyCtrlB}) // detaches Follow along the way
+	if tm.m.Sidebar.Offset != 0 {
+		t.Errorf("Offset = %d after 3 ctrl+b, want 0 (top)", tm.m.Sidebar.Offset)
 	}
-	var lines strings.Builder
-	for i := 0; i < 50; i++ {
-		fmt.Fprintf(&lines, `{"type":"assistant","message":{"content":[{"type":"text","text":"line-%02d"}]}}`+"\n", i)
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyCtrlF})
+	if tm.m.Sidebar.Offset != fixedPaneScrollDelta {
+		t.Errorf("Offset = %d after ctrl+f, want %d", tm.m.Sidebar.Offset, fixedPaneScrollDelta)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(lines.String()), 0o644); err != nil {
-		t.Fatal(err)
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyCtrlB})
+	if tm.m.Sidebar.Offset != 0 {
+		t.Errorf("Offset = %d after ctrl+b, want 0", tm.m.Sidebar.Offset)
 	}
-	launch := newTestLauncher(t, f)
-	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
-
-	// Taller than the default 24 rows so the floating log modal's content
-	// budget (issue #1845) matches what this test's fixed page counts were
-	// calibrated against pre-modal — width 80 keeps it below sidebarFits'
-	// docked threshold, so the sidebar still opens through the same
-	// modal/narrow-terminal path this test means to exercise.
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 32))
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "2")
-	waitForOutput(t, tm, "running")
-
-	sendKey(tm, "enter")
-	waitForOutput(t, tm, "line-49") // fresh open while following starts at the bottom
-
-	sendKey(tm, "ctrl+b")
-	sendKey(tm, "ctrl+b")
-	sendKey(tm, "ctrl+b") // detaches Follow along the way
-	waitForOutput(t, tm, "line-00")
-
-	sendKey(tm, "ctrl+f")
-	waitForOutput(t, tm, "line-19")
-
-	sendKey(tm, "ctrl+b")
-	waitForOutput(t, tm, "line-00")
-
-	sendKey(tm, "x")
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "q")
-	waitForOutput(t, tm, "quit with live Dispatches")
-	sendKey(tm, "d")
-	waitFinished(t, tm)
 }
 
 // TestTea_SidebarScrollKeys_CtrlDCtrlUHalfPageThroughContent mirrors
 // TestTea_SidebarScrollKeys_CtrlFCtrlBPageThroughContent for the vim
 // half-page chords ctrl+d/ctrl+u, which must move the sidebar by half of
-// what ctrl+f/ctrl+b move it (issue #1648).
+// what ctrl+f/ctrl+b move it (issue #1648). Driven directly through
+// teaModel.handleKey rather than a teatest.TestModel — see
+// TestTea_SidebarScrollKeys_PageThroughContent's doc comment for why (issue
+// #2014).
 func TestTea_SidebarScrollKeys_CtrlDCtrlUHalfPageThroughContent(t *testing.T) {
-	f := forge.NewFake()
-	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
-
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	var lines strings.Builder
-	for i := 0; i < 50; i++ {
-		fmt.Fprintf(&lines, `{"type":"assistant","message":{"content":[{"type":"text","text":"line-%02d"}]}}`+"\n", i)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(lines.String()), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	launch := newTestLauncher(t, f)
-	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
-
-	// Taller than the default 24 rows so the floating log modal's content
-	// budget (issue #1845) matches what this test's fixed half-page counts
-	// were calibrated against pre-modal — width 80 keeps it below sidebarFits'
-	// docked threshold, so the sidebar still opens through the same
-	// modal/narrow-terminal path this test means to exercise.
-	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 32))
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "2")
-	waitForOutput(t, tm, "running")
-
-	sendKey(tm, "enter")
-	waitForOutput(t, tm, "line-49") // fresh open while following starts at the bottom
+	tm := newSidebarScrollTestModel(t)
 
 	for i := 0; i < 6; i++ {
-		sendKey(tm, "ctrl+u") // 6 half-pages (-5 each) detaches Follow, clamps to the top
+		tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyCtrlU}) // 6 half-pages (-5 each) detaches Follow, clamps to the top
 	}
-	waitForOutput(t, tm, "line-00")
+	if tm.m.Sidebar.Offset != 0 {
+		t.Errorf("Offset = %d after 6 ctrl+u, want 0 (top)", tm.m.Sidebar.Offset)
+	}
 
-	sendKey(tm, "ctrl+d")
-	sendKey(tm, "ctrl+d") // two half-pages (+5 each) match one ctrl+f
-	waitForOutput(t, tm, "line-19")
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD}) // two half-pages (+5 each) match one ctrl+f
+	if tm.m.Sidebar.Offset != fixedPaneScrollDelta {
+		t.Errorf("Offset = %d after 2 ctrl+d, want %d", tm.m.Sidebar.Offset, fixedPaneScrollDelta)
+	}
 
-	sendKey(tm, "ctrl+u")
-	sendKey(tm, "ctrl+u") // two half-pages (-5 each) match one ctrl+b
-	waitForOutput(t, tm, "line-00")
-
-	sendKey(tm, "x")
-	waitForOutput(t, tm, "fix the thing")
-
-	sendKey(tm, "q")
-	waitForOutput(t, tm, "quit with live Dispatches")
-	sendKey(tm, "d")
-	waitFinished(t, tm)
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyCtrlU}) // two half-pages (-5 each) match one ctrl+b
+	if tm.m.Sidebar.Offset != 0 {
+		t.Errorf("Offset = %d after 2 ctrl+u, want 0", tm.m.Sidebar.Offset)
+	}
 }
 
 // TestTea_SidebarKey_NoDriver_ShowsGracefulMessage verifies opening the
