@@ -248,6 +248,47 @@ func LastPRIntentInLog(path, expectedNonce string) (string, bool, error) {
 		"PR-intent line found but did not verify: nonce mismatch or malformed payload")
 }
 
+// AllIssueIntentLinesInLog scans the file at path for every line carrying
+// the SPINDRIFT_ISSUE_INTENT token and decodes each verifying line's
+// single-line grammar: SPINDRIFT_ISSUE_INTENT <nonce> <base64-payload>
+// (issue #2018) — a read-only Box's file-an-issue request, host-mediated the
+// same way LastCommentLineInLog/LastPRIntentInLog relay a comment or
+// draft-PR intent. Unlike those two singleton "last verifying line wins"
+// scanners, issue filing is 1-to-many — a run may want to file several
+// issues — so every verifying line's decoded payload is collected, in the
+// order encountered, rather than only the last surviving. A line carrying
+// the token that fails to verify (wrong nonce, malformed base64) is silently
+// dropped from the result, exactly as a non-verifying PR-intent/comment line
+// is dropped from those scanners' single result — an untrusted
+// issue/comment author's echo of the token must never be mistaken for a
+// genuine filed-issue request.
+//
+// Returns (nil, nil) when no line carries the token at all, or the file does
+// not exist — there was never an issue to file. Returns (nil, err) only on a
+// genuine I/O error other than file-not-found or an oversized skipped line;
+// a token-bearing line that fails to verify is dropped, not reported as an
+// error, since a caller has no single result to attach a warning to the way
+// the singleton scanners do.
+func AllIssueIntentLinesInLog(path, expectedNonce string) ([]string, error) {
+	const token = "SPINDRIFT_ISSUE_INTENT"
+	var payloads []string
+	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
+		if !containsToken(line, token) {
+			return
+		}
+		if body, ok := parseSignalLine(line, token, expectedNonce); ok {
+			payloads = append(payloads, body)
+		}
+	})
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return payloads, nil
+}
+
 // lastVerifiedSignalInLog is the shared "last verifying signal wins" scanner
 // backing both LastCommentLineInLog and LastPRIntentInLog: among lines
 // carrying token, the last one that actually verifies (right nonce, valid
