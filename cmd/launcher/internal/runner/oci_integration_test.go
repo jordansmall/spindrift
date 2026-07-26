@@ -4,6 +4,7 @@ package runner
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -19,6 +20,24 @@ import (
 // daemon, so it only ever pulls in an environment that already has real
 // container tooling and network access (a genuine CI runner).
 const integrationTestImage = "docker.io/library/busybox:stable"
+
+// runProbeAttemptTimeout bounds a single runProbe attempt, covering the
+// implicit image pull on first run — so a registry hang gets killed well
+// inside the test's own 10m timeout instead of riding it out to a panic
+// (issue #2015). Three tests in this package call runProbe, each retrying up
+// to runProbeMaxAttempts times, so the worst case across the whole package is
+// 3 * runProbeMaxAttempts * runProbeAttemptTimeout (plus backoff) — keep that
+// comfortably under the 10m default `go test` timeout (ci.yml has no
+// explicit -timeout), not just under it per-attempt.
+const runProbeAttemptTimeout = 45 * time.Second
+
+// runProbeMaxAttempts bounds how many times runProbe retries a transient
+// registry failure before giving up and skipping (issue #2015).
+const runProbeMaxAttempts = 2
+
+// runProbeRetryBackoff is a short pause between retries so a retry doesn't
+// hammer a registry that just failed.
+const runProbeRetryBackoff = 3 * time.Second
 
 // requireRealOCI returns the CLI name ("podman" or "docker") for the first
 // runtime on PATH with a reachable daemon, skipping cleanly when neither is
@@ -67,15 +86,39 @@ func ociProbeArgs(a *ociAdapter, box Box, script string) []string {
 // progress ("Trying to pull...", "Copying blob...") and any warnings go to
 // stderr, so we must keep the two apart — CombinedOutput would fold the pull
 // progress into the parse and break it on whichever probe runs first.
+//
+// Each attempt is bounded by runProbeAttemptTimeout so a registry hang on the
+// implicit image pull doesn't ride out to the 10m Go test timeout. A
+// transient registry failure (isTransientRegistryError, or the context
+// deadline itself) is retried up to runProbeMaxAttempts before the test
+// skips rather than fails — a genuine failure (bad args, real capability
+// regression) surfaces immediately on the first attempt, no retry, no skip
+// (issue #2015).
 func runProbe(t *testing.T, cli string, args []string) []byte {
 	t.Helper()
-	var stdout, stderr bytes.Buffer
-	cmd := exec.Command(cli, args...)
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("%s run failed: %v: %s", cli, err, stderr.String())
+	var lastErr error
+	var lastStderr string
+	for attempt := 1; attempt <= runProbeMaxAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), runProbeAttemptTimeout)
+		var stdout, stderr bytes.Buffer
+		cmd := exec.CommandContext(ctx, cli, args...)
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		cancel()
+		if err == nil {
+			return stdout.Bytes()
+		}
+		lastErr, lastStderr = err, stderr.String()
+		if ctx.Err() != context.DeadlineExceeded && !isTransientRegistryError(lastStderr) {
+			t.Fatalf("%s run failed: %v: %s", cli, err, lastStderr)
+		}
+		t.Logf("%s run attempt %d/%d hit a transient registry error, retrying: %v: %s", cli, attempt, runProbeMaxAttempts, err, lastStderr)
+		if attempt < runProbeMaxAttempts {
+			time.Sleep(runProbeRetryBackoff)
+		}
 	}
-	return stdout.Bytes()
+	t.Skipf("registry pull unavailable after %d attempts: %v: %s", runProbeMaxAttempts, lastErr, lastStderr)
+	return nil
 }
 
 // statusField returns the sole value of the /proc/self/status line beginning
