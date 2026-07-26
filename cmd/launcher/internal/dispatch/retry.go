@@ -142,10 +142,15 @@ func (d *Dispatch) successResult(logPath string) Result {
 		if prIntentErr != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: pr-intent scan: %v\n", d.number, prIntentErr)
 		}
+		issueIntents, issueIntentsErr := outcome.AllIssueIntentLinesInLog(logPath, d.nonce)
+		if issueIntentsErr != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent scan: %v\n", d.number, issueIntentsErr)
+		}
 		return Result{
 			Success: true, Outcome: o, OutcomeFound: true,
 			Comment: comment, CommentFound: commentFound,
 			PRIntent: prIntent, PRIntentFound: prIntentFound,
+			IssueIntents: issueIntents, IssueIntentsFound: len(issueIntents) > 0,
 		}
 	}
 	cls, clsErr := d.driver.ClassifyTransient(logPath)

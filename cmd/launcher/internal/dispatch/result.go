@@ -58,6 +58,20 @@ type Result struct {
 	// surfaced here.
 	PRIntentFound bool
 
+	// IssueIntents holds the decoded payload of every nonce-verified
+	// SPINDRIFT_ISSUE_INTENT line in the box log, in encounter order —
+	// populated when IssueIntentsFound is true (issue #2018). Unlike
+	// Comment/PRIntent's singleton "last verifying line wins" slot, issue
+	// filing is 1-to-many: a run may want to file several issues, so every
+	// verifying line contributes its own entry rather than only the last.
+	IssueIntents []string
+
+	// IssueIntentsFound reports whether at least one nonce-verified
+	// SPINDRIFT_ISSUE_INTENT line was present in the box's log. A line
+	// carrying the token with a mismatched nonce, or an undecodable payload,
+	// is dropped rather than surfaced here.
+	IssueIntentsFound bool
+
 	// ParseErr is non-nil when the box's log contained an unparseable
 	// SPINDRIFT_OUTCOME line (as opposed to no line at all). No
 	// classification is attempted in this case.
