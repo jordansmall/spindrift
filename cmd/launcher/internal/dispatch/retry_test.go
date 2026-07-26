@@ -193,6 +193,67 @@ func TestDispatchWithRetry_SuccessWithPRIntentLinePopulatesResult(t *testing.T) 
 	}
 }
 
+// TestDispatchWithRetry_SuccessWithIssueIntentLinesPopulatesResult verifies
+// that multiple single-line, nonce-guarded SPINDRIFT_ISSUE_INTENT control
+// signals alongside the outcome line in the box's log all surface on
+// Result.IssueIntents/IssueIntentsFound — the host-mediated issue-filing
+// relay channel (issue #2018). Unlike PR-intent/comment, this is 1-to-many:
+// every verifying line contributes its own payload.
+func TestDispatchWithRetry_SuccessWithIssueIntentLinesPopulatesResult(t *testing.T) {
+	fr := runner.NewFake()
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+
+	first := base64.StdEncoding.EncodeToString([]byte(`{"title":"first"}`))
+	second := base64.StdEncoding.EncodeToString([]byte(`{"title":"second"}`))
+	fr.WriteToOutput = append([]byte("SPINDRIFT_ISSUE_INTENT "+d.nonce+" "+first+"\n"),
+		append([]byte("SPINDRIFT_ISSUE_INTENT "+d.nonce+" "+second+"\n"),
+			nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=ready note=ok")...)...)
+
+	result := d.Run()
+
+	if !result.OutcomeFound {
+		t.Fatal("want OutcomeFound=true")
+	}
+	if !result.IssueIntentsFound {
+		t.Fatal("want IssueIntentsFound=true")
+	}
+	want := []string{`{"title":"first"}`, `{"title":"second"}`}
+	if len(result.IssueIntents) != len(want) || result.IssueIntents[0] != want[0] || result.IssueIntents[1] != want[1] {
+		t.Errorf("IssueIntents: got %v, want %v", result.IssueIntents, want)
+	}
+}
+
+// TestDispatchWithRetry_NoIssueIntentLinesLeavesResultEmpty verifies a run
+// with no SPINDRIFT_ISSUE_INTENT line at all leaves IssueIntentsFound false
+// and IssueIntents nil — read-write/read-only runs today emit no such
+// signal, so this must be the default shape (issue #2018's "no existing run
+// path changes" acceptance criterion).
+func TestDispatchWithRetry_NoIssueIntentLinesLeavesResultEmpty(t *testing.T) {
+	fr := runner.NewFake()
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+	fr.WriteToOutput = nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=ready note=ok")
+
+	result := d.Run()
+
+	if !result.OutcomeFound {
+		t.Fatal("want OutcomeFound=true")
+	}
+	if result.IssueIntentsFound {
+		t.Fatal("want IssueIntentsFound=false")
+	}
+	if len(result.IssueIntents) != 0 {
+		t.Errorf("IssueIntents: got %v, want empty", result.IssueIntents)
+	}
+}
+
 // TestDispatchWithRetry_PRIntentLineWithWrongNonceNotFound verifies that a
 // SPINDRIFT_PR_INTENT line carrying a nonce that doesn't match this run's
 // own is ignored — never surfaced on Result.PRIntent — mirroring
