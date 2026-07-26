@@ -104,9 +104,12 @@ exit 0
 		t.Fatalf("exit code = %d, want 0", rc)
 	}
 
+	// stdout also now carries the orchestrator's own pass_start marker
+	// (issue #2027), interleaved ahead of the pass's own output -- the
+	// outcome line itself must still reach stdout byte-for-byte unchanged.
 	want := "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc\n"
-	if stdout.String() != want {
-		t.Errorf("stdout = %q, want %q", stdout.String(), want)
+	if !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
 	}
 
 	calls, err := os.ReadFile(callLog)
@@ -132,6 +135,41 @@ exit 0
 		if !bytes.Contains([]byte(got), []byte(want)) {
 			t.Errorf("driver-exec argv = %q, want it to contain %q", got, want)
 		}
+	}
+}
+
+// TestRunEmitsPassStartMarkerOnStdout verifies run prints a machine-readable
+// "spindrift_op" pass_start marker to stdout before invoking driver-exec for
+// each pass (issue #2027), so the heartbeat parser can surface the
+// orchestrator's own operations live -- not just reconstruct them from the
+// raw log afterward. The marker must reach stdout alongside the pass's own
+// (here scripted) outcome line, not replace it.
+func TestRunEmitsPassStartMarkerOnStdout(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, `printf 'SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc\n'
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config{
+		promptFile:   filepath.Join(dir, "prompt.txt"),
+		driverBin:    "claude",
+		issue:        "7",
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":1}`) {
+		t.Errorf("stdout = %q, want a pass_start marker for pass 1", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") {
+		t.Errorf("stdout = %q, want the pass's own outcome line still present unchanged", stdout.String())
 	}
 }
 
@@ -218,6 +256,69 @@ func TestRunReadsAndWritesRunState(t *testing.T) {
 	}
 	if got.ScoutBriefPath != cfg.scoutBriefPath {
 		t.Errorf("ScoutBriefPath = %q, want %q", got.ScoutBriefPath, cfg.scoutBriefPath)
+	}
+}
+
+// TestRunEmitsRunStateErrorMarkerOnWriteFailure verifies run prints a
+// "spindrift_op" run_state_error marker to stdout when WriteRunState fails
+// (issue #2027) -- the failure already degrades gracefully (the pass's own
+// exit code is untouched), but today it was only visible in stderr/the raw
+// log, never in the live heartbeat stream.
+func TestRunEmitsRunStateErrorMarkerOnWriteFailure(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 3\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config{
+		promptFile:   filepath.Join(dir, "prompt.txt"),
+		driverBin:    "claude",
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		stateFile:    filepath.Join(dir, "missing-parent", "run-state.json"),
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"run_state_error","phase":"write"`) {
+		t.Errorf("stdout = %q, want a run_state_error write marker", stdout.String())
+	}
+}
+
+// TestRunEmitsRunStateErrorMarkerOnReadFailure verifies run prints a
+// "spindrift_op" run_state_error marker to stdout when ReadRunState fails on
+// a corrupt --state-file (issue #2027) -- the read failure already degrades
+// to a cold start rather than blocking the pass, but was previously silent
+// outside stderr/the raw log.
+func TestRunEmitsRunStateErrorMarkerOnReadFailure(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stateFile := filepath.Join(dir, "run-state.json")
+	if err := os.WriteFile(stateFile, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:   filepath.Join(dir, "prompt.txt"),
+		driverBin:    "claude",
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		stateFile:    stateFile,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"run_state_error","phase":"read"`) {
+		t.Errorf("stdout = %q, want a run_state_error read marker", stdout.String())
 	}
 }
 
@@ -373,6 +474,158 @@ func TestRunDevshellFlagsForwardedOnlyWhenSet(t *testing.T) {
 	}
 	if !bytes.Contains(calls, []byte("--devshell --devshell-name ci")) {
 		t.Errorf("driver-exec argv = %q, want it to contain %q", calls, "--devshell --devshell-name ci")
+	}
+}
+
+// TestRunEmitsVerdictMarkerOnStdout verifies run prints a "spindrift_op"
+// verdict marker to stdout for each pass whose scanned log carries a
+// VERDICT line (issue #2027), reflecting the same verdict the loop itself
+// reacted to (BLOCK then APPROVE here) -- not just the raw log's own
+// buried marker, which never surfaces live.
+func TestRunEmitsVerdictMarkerOnStdout(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, blockThenApproveFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:      promptFile,
+		driverBin:       "claude",
+		issue:           "7",
+		logPath:         filepath.Join(dir, "stream.log"),
+		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
+		stateFile:       filepath.Join(dir, "run-state.json"),
+		maxReviewRounds: 3,
+		maxSlices:       5,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, `"spindrift_op":{"op":"verdict","verdict":"BLOCK"}`) {
+		t.Errorf("stdout = %q, want a BLOCK verdict marker", out)
+	}
+	if !strings.Contains(out, `"spindrift_op":{"op":"verdict","verdict":"APPROVE"}`) {
+		t.Errorf("stdout = %q, want an APPROVE verdict marker", out)
+	}
+}
+
+// TestRunEmitsDecisionMarkerOnStdout verifies run prints a "spindrift_op"
+// decision marker to stdout at the end of every pass, carrying "continue"
+// when the loop runs another pass and "stop" with a reason when it halts
+// (issue #2027) -- here a BLOCK pass continues, then the terminal outcome on
+// the APPROVE pass stops.
+func TestRunEmitsDecisionMarkerOnStdout(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, blockThenApproveFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:      promptFile,
+		driverBin:       "claude",
+		issue:           "7",
+		logPath:         filepath.Join(dir, "stream.log"),
+		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
+		stateFile:       filepath.Join(dir, "run-state.json"),
+		maxReviewRounds: 3,
+		maxSlices:       5,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, `"spindrift_op":{"op":"decision","decision":"continue"}`) {
+		t.Errorf("stdout = %q, want a continue decision marker after pass 1's BLOCK", out)
+	}
+	if !strings.Contains(out, `"decision":"stop","reason":"outcome reached"`) {
+		t.Errorf("stdout = %q, want a stop decision marker with reason after pass 2's terminal outcome", out)
+	}
+}
+
+// TestRunEmitsNoVerdictStopReason verifies the decision marker's reason
+// distinguishes "no verdict at all" (the S1 single-pass shape, review
+// finding on issue #2027) from "verdict was APPROVE/BLOCK-but-not-BLOCK" --
+// a bare pass with neither a VERDICT line nor a terminal outcome stops the
+// loop the same way verdict != "BLOCK" always has, but the surfaced reason
+// must not claim a verdict existed when none did.
+func TestRunEmitsNoVerdictStopReason(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONOutcomeLine("Just narration, no verdict or outcome.")+`' > "$DRIVER_LOG_PATH"
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config{
+		promptFile:   filepath.Join(dir, "prompt.txt"),
+		driverBin:    "claude",
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"no verdict"`) {
+		t.Errorf("stdout = %q, want the no-verdict stop reason", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "verdict not BLOCK") {
+		t.Errorf("stdout = %q, want no misleading 'verdict not BLOCK' reason when no verdict was ever seen", stdout.String())
+	}
+}
+
+// TestRunEmitsCapReachedStopReasonOnStdout verifies the decision marker's
+// reason distinguishes which numeric cap stopped the loop (issue #2027):
+// maxReviewRounds here, so a never-converging BLOCK reviewer's final marker
+// names that cap rather than a generic "stop".
+func TestRunEmitsCapReachedStopReasonOnStdout(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONVerdictLine("VERDICT: BLOCK")+`' > "$DRIVER_LOG_PATH"
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:      promptFile,
+		driverBin:       "claude",
+		logPath:         filepath.Join(dir, "stream.log"),
+		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
+		maxReviewRounds: 2,
+		maxSlices:       0,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"max review rounds reached"`) {
+		t.Errorf("stdout = %q, want the cap-reached stop reason", stdout.String())
 	}
 }
 

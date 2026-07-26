@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/outcome"
 )
 
@@ -76,6 +77,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 	state, err := ReadRunState(cfg.stateFile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: read run state:", err)
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "read", Error: err.Error()}))
 		state = RunState{}
 	}
 
@@ -83,6 +85,8 @@ func run(cfg config, stdout io.Writer) (int, error) {
 	reviewRounds := 0
 	prevSeededPromptFile := ""
 	for pass := 1; ; pass++ {
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass}))
+
 		passCfg := cfg
 		if pass > 1 {
 			passCfg.sessionFile = ""
@@ -134,18 +138,28 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		verdict, hasOutcome := scanPassLog(passCfg.logPath)
 		if verdict != "" {
 			state.LastVerdict = verdict
+			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: verdict}))
 		}
 		if writeErr := WriteRunState(cfg.stateFile, state); writeErr != nil {
 			fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
+			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
 		}
 
-		if hasOutcome || verdict != "BLOCK" {
-			break
+		decision, reason := "continue", ""
+		switch {
+		case hasOutcome:
+			decision, reason = "stop", "outcome reached"
+		case verdict == "":
+			decision, reason = "stop", "no verdict"
+		case verdict != "BLOCK":
+			decision, reason = "stop", "verdict not BLOCK"
+		case cfg.maxReviewRounds > 0 && reviewRounds >= cfg.maxReviewRounds:
+			decision, reason = "stop", "max review rounds reached"
+		case cfg.maxSlices > 0 && pass >= cfg.maxSlices:
+			decision, reason = "stop", "max slices reached"
 		}
-		if cfg.maxReviewRounds > 0 && reviewRounds >= cfg.maxReviewRounds {
-			break
-		}
-		if cfg.maxSlices > 0 && pass >= cfg.maxSlices {
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decision, Reason: reason}))
+		if decision == "stop" {
 			break
 		}
 		reviewRounds++
