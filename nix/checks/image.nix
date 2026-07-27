@@ -10,6 +10,7 @@ let
     scoutOnlyHarness
     reviewerOnlyHarness
     filerOnlyHarness
+    workerOnlyHarness
     promptHarness
     batsHarness
     skillsHarness
@@ -78,6 +79,18 @@ in
       || { echo "filer-only harness unexpectedly bakes a scout entry" >&2; exit 1; }
     ! grep -q '"reviewer"' <<<"$filer_line" \
       || { echo "filer-only harness unexpectedly bakes a reviewer entry" >&2; exit 1; }
+
+    # The worker-only mirror (issue #2054): composed independently like
+    # scout/reviewer/filer, no other agent keys alongside it.
+    worker_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${workerOnlyHarness.agentFiles}/agent/entrypoint.sh)
+    grep -q 'solo-worker' <<<"$worker_line" \
+      || { echo "worker-only harness missing worker model in baked template" >&2; exit 1; }
+    ! grep -q '"scout"' <<<"$worker_line" \
+      || { echo "worker-only harness unexpectedly bakes a scout entry" >&2; exit 1; }
+    ! grep -q '"reviewer"' <<<"$worker_line" \
+      || { echo "worker-only harness unexpectedly bakes a reviewer entry" >&2; exit 1; }
+    ! grep -q '"filer"' <<<"$worker_line" \
+      || { echo "worker-only harness unexpectedly bakes a filer entry" >&2; exit 1; }
 
     # The dogfood harness itself opts into the Filer (issue #616): the
     # baked template must carry a filer entry at the recommended model.
