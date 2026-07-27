@@ -486,6 +486,22 @@ phase_prompt_assembly() {
   local CODE_REVIEW_BAKED=""
   # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
   [ -f "${DRIVER_SKILLS_DIR}/code-review/SKILL.md" ] && CODE_REVIEW_BAKED=1
+
+  # ORCHESTRATOR (issue #2047, ADR 0035 amendment): the single canonical
+  # master-switch gate every orchestrator-conditioned prompt/--agents fork
+  # reads -- the filer-relay compound condition just below and
+  # run_driver_in_env's driver-invoker binary swap -- instead of each site
+  # testing the launcher-delivered ORCHESTRATOR_ENABLED env var
+  # independently. This is the one line that reads it; every fork
+  # downstream reads $ORCHESTRATOR. Assigned here by plain (non-local)
+  # assignment, not `local` like the gates below it, so it escapes to
+  # run_driver_in_env via main's cross-phase sentinel -- the same
+  # dynamic-scoping shape _use_dev_shell already uses (issue #515) -- since
+  # that function, unlike the fragment loop's `"${!_fgate}"` gates, runs
+  # outside phase_prompt_assembly's own call frame.
+  ORCHESTRATOR=""
+  [ -n "${ORCHESTRATOR_ENABLED:-}" ] && ORCHESTRATOR=1
+
   local FILER_ENABLED=""
   if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
     # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
@@ -493,18 +509,21 @@ phase_prompt_assembly() {
   fi
 
   # The filer's write-mechanism gates (issue #2019): relay only activates on
-  # read-only (BOX_WRITE_ENABLED absent) + ORCHESTRATOR_ENABLED -- every
+  # read-only (BOX_WRITE_ENABLED absent) + the orchestrator gate -- every
   # other combination (read-write regardless of orchestrator, or read-only
   # with the orchestrator off) keeps today's direct `gh issue create` path,
   # unchanged, so the read-only+orchestrator-off case still degrades to the
   # pre-existing PR-body paste on filer failure rather than gaining a new
   # relay behavior. Both stay off (no FILE ISSUES step at all) when the
   # filer isn't configured -- the same "off means off" shape FILER_ENABLED
-  # alone gave this step before this ticket.
+  # alone gave this step before this ticket. Reads $ORCHESTRATOR (computed
+  # once above), not ORCHESTRATOR_ENABLED directly -- this compound
+  # condition keeps its exact pre-#2047 truth table, only the predicate's
+  # source changes.
   local FILER_FILE_DIRECT=""
   local FILER_FILE_RELAY=""
   if [ -n "$FILER_ENABLED" ]; then
-    if [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "${ORCHESTRATOR_ENABLED:-}" ]; then
+    if [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "$ORCHESTRATOR" ]; then
       # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
       FILER_FILE_RELAY=1
     else
@@ -702,13 +721,16 @@ phase_prompt_assembly() {
 # function), tees the stream to a log path, filters heartbeats in-process,
 # and returns the Driver's exit status.
 #
-# ORCHESTRATOR_ENABLED (default off, issue #1996) swaps which binary receives
-# that exact flag set: off takes today's direct driver-exec path unchanged;
-# on hands the same invocation to the in-box Go orchestrator, which forwards
-# it to driver-exec itself for its own single-pass tracer bullet. Neither
-# branch changes the flags built below -- this is the reusable seam the
-# orchestrator drives, so a later multi-pass loop only ever touches the
-# orchestrator side of it.
+# The $ORCHESTRATOR gate (default off, issue #1996; canonicalized #2047)
+# swaps which binary receives that exact flag set: off takes today's direct
+# driver-exec path unchanged; on hands the same invocation to the in-box Go
+# orchestrator, which forwards it to driver-exec itself for its own
+# single-pass tracer bullet. Neither branch changes the flags built below --
+# this is the reusable seam the orchestrator drives, so a later multi-pass
+# loop only ever touches the orchestrator side of it. Reads the same
+# $ORCHESTRATOR local phase_prompt_assembly computed (main's cross-phase
+# sentinel, issue #515's dynamic-scoping shape), not ORCHESTRATOR_ENABLED
+# directly -- the one authority for orchestrator-conditioned divergence.
 run_driver_in_env() {
   local prompt="$1" agents_json="$2" session_mode="$3"
 
@@ -741,9 +763,11 @@ run_driver_in_env() {
     _devshell_flags=(--devshell --devshell-name "${DEV_SHELL_NAME:-default}")
   fi
 
-  local _driver_invoker=driver-exec
-  if [ -n "${ORCHESTRATOR_ENABLED:-}" ]; then
+  local _driver_invoker
+  if [ -n "$ORCHESTRATOR" ]; then
     _driver_invoker=orchestrator
+  else
+    _driver_invoker=driver-exec
   fi
 
   local claude_rc=0
@@ -903,6 +927,7 @@ main() {
   local _use_dev_shell _harness_path
   local prompt agents_json _driver_session_mode
   local _last_outcome_line _recovery_attempted
+  local ORCHESTRATOR
 
   configure_env
   clone_repo

@@ -436,6 +436,52 @@ in
     touch $out
   '';
 
+  # ORCHESTRATOR master-switch fork-well-formedness (issue #2047, ADR 0035
+  # amendment): ORCHESTRATOR_ENABLED is a master feature-flag switch that
+  # forks the rendered prompt/--agents, not a scatter of ad-hoc checks --
+  # so exactly one line in agent/entrypoint.sh may test the raw
+  # ORCHESTRATOR_ENABLED env var (the canonical `local ORCHESTRATOR=`
+  # computation itself); every fork downstream (the filer-relay compound
+  # condition, the driver-invoker binary swap) must read that one computed
+  # $ORCHESTRATOR gate instead of testing the env var independently. Every
+  # conditional that branches on $ORCHESTRATOR must also declare both an
+  # on-row and an off-row -- an explicit `else`, never a bare `if` whose off
+  # case is left merely implicit -- so a segment added later with only one
+  # side fails here instead of silently rendering the same fork for every
+  # input. Same grep-based, eval-only shape as fragment-gate-parity above.
+  orchestrator-fork-well-formed = pkgs.runCommand "orchestrator-fork-well-formed" { } ''
+    entrypoint=${../../agent/entrypoint.sh}
+
+    # Excludes comment-only lines (prose is free to name the env var) so this
+    # doesn't pin one exact bash parameter-expansion form -- any variant
+    # (default-value, alternate-value, ...) counts as the one code reference
+    # this guards.
+    gate_computations=$(awk '/ORCHESTRATOR_ENABLED/ && $0 !~ /^[[:space:]]*#/' "$entrypoint" | wc -l)
+    [ "$gate_computations" -eq 1 ] || {
+      echo "expected exactly one ORCHESTRATOR_ENABLED test (the canonical gate computation) in agent/entrypoint.sh, got $gate_computations" >&2
+      grep -n 'ORCHESTRATOR_ENABLED' "$entrypoint" >&2
+      exit 1
+    }
+
+    sites=$(grep -n 'if .*\$ORCHESTRATOR\b' "$entrypoint" | cut -d: -f1)
+    [ -n "$sites" ] || {
+      echo "expected at least one \$ORCHESTRATOR conditional in agent/entrypoint.sh, found none" >&2
+      exit 1
+    }
+    for start in $sites; do
+      branch=$(awk -v start="$start" '
+        NR <= start { next }
+        /^[[:space:]]*else[[:space:]]*$/ { print "else"; exit }
+        /^[[:space:]]*fi[[:space:]]*$/ { exit }
+      ' "$entrypoint")
+      [ "$branch" = "else" ] || {
+        echo "agent/entrypoint.sh:$start -- \$ORCHESTRATOR conditional has no else (off-row) before its closing fi" >&2
+        exit 1
+      }
+    done
+    touch $out
+  '';
+
   # Grep pin (issue #908 acceptance criteria): the filer's dedup step must
   # search open issues beyond the `agent-review-finding` label -- a
   # regression back to the old `--label agent-review-finding --state all`
