@@ -653,4 +653,40 @@ in
         done
         touch $out
       '';
+
+  # The filer write-mechanism split (issue #2019): the direct-mode fragments
+  # must keep `gh label create`/`gh issue create` unchanged -- byte-for-byte
+  # the same in-box writes filer-prompt.md's steps always rendered before
+  # this split existed. Same static, eval-only grep shape as the
+  # github-readwrite-comment-fragments-* check above.
+  filer-direct-fragments-keep-gh-write-unchanged =
+    pkgs.runCommand "filer-direct-fragments-keep-gh-write-unchanged" { }
+      ''
+        grep -q 'gh label create agent-review-finding' ${../../templates/default/prompts/fragments/filer-label-direct.md}
+        grep -q 'gh issue create' ${../../templates/default/prompts/fragments/filer-file-direct.md}
+        touch $out
+      '';
+
+  # The read-only counterpart (issue #2019): a read-only Box under
+  # ORCHESTRATOR_ENABLED holds no write token, so the filer's relay
+  # fragments must never invoke `gh label create`/`gh issue create` -- the
+  # exact footgun a read-only token can't satisfy -- and must carry the
+  # host-mediated SPINDRIFT_ISSUE_INTENT relay instead (mirroring
+  # open-pr-create-outbox.md's SPINDRIFT_PR_INTENT form). Same static,
+  # eval-only grep shape as github-readonly-comment-fragments-* above.
+  filer-relay-fragments-never-invoke-gh-write =
+    pkgs.runCommand "filer-relay-fragments-never-invoke-gh-write" { }
+      ''
+        for f in filer-label-relay.md filer-file-relay.md file-issues-relay.md; do
+          for cmd in 'gh label create' 'gh issue create'; do
+            n=$(grep -c -- "$cmd" ${../../templates/default/prompts/fragments}/"$f" || true)
+            [ "$n" -eq 0 ] || {
+              echo "$f: expected no '$cmd', found $n occurrence(s)" >&2
+              exit 1
+            }
+          done
+        done
+        grep -q 'SPINDRIFT_ISSUE_INTENT ''${RUN_NONCE}' ${../../templates/default/prompts/fragments/filer-file-relay.md}
+        touch $out
+      '';
 }

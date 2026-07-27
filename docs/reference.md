@@ -1409,6 +1409,24 @@ Filing is strictly best-effort: a filer failure or timeout never blocks the
 PR or changes the outcome line — the main agent falls back to pasting the
 escalated findings into the PR body, exactly as when the filer is off.
 
+Under [`BOX_FORGE_AND_ISSUE_ACCESS=read-only`](#read-only-box-box_forge_and_issue_accessread-only)
+with `ORCHESTRATOR_ENABLED` set (issue #2019), the filer's write mechanism
+swaps: instead of `gh label create`/`gh issue create` (both writes a
+read-only token can't make), it prints one nonce-guarded, base64-encoded
+`SPINDRIFT_ISSUE_INTENT` stdout line per issue to file, and reports `QUEUED`
+rather than `FILED <url>` — the issue isn't filed until the Launcher relays
+it, host-side, once the Box exits, so no URL is known yet. The Launcher
+re-derives the destination repo (implicit in its own tracker instance) and
+always applies the fixed `agent-review-finding` label itself, never the
+payload's own `labels` field (the same do-not-trust-the-agent-target
+invariant issue #1949 established for the PR-intent/comment-intent
+channels). Everything upstream of the write mechanism — dedup search,
+conventional-commit titling, merge-vs-split judgment — is unchanged; only
+how the filed issue actually reaches GitHub differs. Every other
+combination (`read-write` regardless of `ORCHESTRATOR_ENABLED`, or
+`read-only` with the orchestrator off) keeps the direct `gh issue create`
+path above, unchanged.
+
 Override the filer's system prompt the same way as `scoutPrompt`/
 `reviewPrompt`: the `filerPrompt` `mkHarness` argument (image rebuild), or
 `SPINDRIFT_PROMPT_DIR` at runtime (zero-rebuild, works regardless of which
@@ -1703,6 +1721,14 @@ the Launcher to apply with its own, separately-scoped write token:
 | land the branch   | `git push`               | `seam.bundle` written to the outbox; the Launcher relays it (ADR 0033's mechanism, reused) |
 | open the PR       | `gh pr create --draft`   | a nonce-guarded, base64-encoded `SPINDRIFT_PR_INTENT` stdout line; the Launcher opens the draft PR host-side |
 | post a comment     | `gh issue comment`       | a single nonce-guarded `SPINDRIFT_COMMENT` line; the Launcher verifies the nonce, decodes it, and posts it host-side (ADR 0032's mechanism, reused) |
+| file an issue (Filer, opt-in) | `gh label create` / `gh issue create` | one nonce-guarded, base64-encoded `SPINDRIFT_ISSUE_INTENT` stdout line per issue; the Launcher files each one host-side (issue #2018) — see [Filer](#filer) |
+
+The issue-filing row is additionally gated on `ORCHESTRATOR_ENABLED` (issue
+#2019), unlike the three rows above it: `read-only` with the orchestrator off
+keeps the Filer's pre-existing degraded behavior (it still attempts `gh issue
+create`, fails, and the main agent falls back to pasting the findings into
+the PR body) rather than switching to the relay — the relay only activates
+once `read-only` and `ORCHESTRATOR_ENABLED` are both true.
 
 This is gated at startup by capability, not by `CODE_FORGE`/`ISSUE_TRACKER`
 value alone: the selected forge must implement bundle-relay and host-side

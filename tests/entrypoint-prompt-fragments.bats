@@ -735,3 +735,53 @@ EOF
   [ "$status" -eq 0 ]
   grep -q 'FIXTURE-ROW-MARKER' "$CLAUDE_PROMPT_FILE"
 }
+
+# issue #2019: the filer's write-mechanism gates (FILER_FILE_DIRECT/
+# FILER_FILE_RELAY, agent/entrypoint.sh's phase_prompt_assembly precompute
+# block) pick the host-mediated SPINDRIFT_ISSUE_INTENT relay only on
+# read-only (BOX_WRITE_ENABLED absent) + ORCHESTRATOR_ENABLED -- every other
+# combination keeps today's direct `gh issue create`/`gh label create` path,
+# byte-for-byte unchanged. helper.bash's setup_entrypoint_env already
+# exports BOX_WRITE_ENABLED=1 (read-write); tests below unset it for the
+# read-only cases. CLAUDE_AGENTS_FILE (the fake claude driver's own copy of
+# the rendered --agents JSON) is where the filer's own prompt text lands,
+# not CLAUDE_PROMPT_FILE (the top-level agent's prompt).
+FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+
+@test "filer write step: read-write keeps gh issue create unchanged regardless of ORCHESTRATOR_ENABLED" {
+  export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
+  export ORCHESTRATOR_ENABLED=1
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readwrite-orch-on"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'gh issue create' "$CLAUDE_AGENTS_FILE"
+  grep -qF 'gh label create' "$CLAUDE_AGENTS_FILE"
+  ! grep -qF 'SPINDRIFT_ISSUE_INTENT' "$CLAUDE_AGENTS_FILE"
+  grep -qF "the filer's returned issue URLs" "$CLAUDE_PROMPT_FILE"
+}
+
+@test "filer write step: read-only with orchestrator off keeps today's degraded direct-file path unchanged" {
+  export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
+  unset BOX_WRITE_ENABLED
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readonly-orch-off"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'gh issue create' "$CLAUDE_AGENTS_FILE"
+  ! grep -qF 'SPINDRIFT_ISSUE_INTENT' "$CLAUDE_AGENTS_FILE"
+  grep -qF "the filer's returned issue URLs" "$CLAUDE_PROMPT_FILE"
+}
+
+@test "filer write step: read-only with orchestrator on emits SPINDRIFT_ISSUE_INTENT, never gh issue create" {
+  export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
+  unset BOX_WRITE_ENABLED
+  export ORCHESTRATOR_ENABLED=1
+  export RUN_NONCE="deadbeefcafe1234"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readonly-orch-on"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'SPINDRIFT_ISSUE_INTENT deadbeefcafe1234' "$CLAUDE_AGENTS_FILE"
+  ! grep -qF 'gh issue create' "$CLAUDE_AGENTS_FILE"
+  ! grep -qF 'gh label create' "$CLAUDE_AGENTS_FILE"
+  grep -qF 'queued for filing' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF "the filer's returned issue URLs" "$CLAUDE_PROMPT_FILE"
+}
