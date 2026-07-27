@@ -807,6 +807,41 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
 # findings" prose unchanged; orchestrator on replaces it with a deferral to
 # the orchestrator's own code-owned review pass -- never both, and never
 # neither, in the rendered prompt.
+# The coordinator fork (issue #2056): a `worker` subagent provisioned in
+# AGENTS_JSON_TEMPLATE (WORKER_MODEL set, issue #2054) turns the main
+# session's IMPLEMENT section into a coordinator that delegates each slice to
+# the worker; with no worker the section is byte-identical to today's
+# single-implementor prompt (the same conditional-residue guarantee every
+# registry row shares). Gated on worker presence alone, orthogonal to
+# ORCHESTRATOR.
+WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]}}'
+
+@test "IMPLEMENT section: a provisioned worker turns the section into a coordinator that delegates slices" {
+  export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-on"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'coordinator' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'delegate each slice' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "IMPLEMENT section: no worker leaves the single-implementor prompt unchanged" {
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-off"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -qF 'delegate each slice' "$CLAUDE_PROMPT_FILE"
+  # The single-implementor test-first rule still leads the section verbatim.
+  grep -qF 'Work test-first, one slice at a time. Hard rule:' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "coordinator step stays separated from the test-first rule below it" {
+  export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-coordinator-sep"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q 'commits\.Work test-first' "$CLAUDE_PROMPT_FILE"
+}
+
 @test "REVIEW section: orchestrator off keeps the inline reviewer-subagent loop" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-review-loop-off"
   run bash "$ENTRYPOINT"
