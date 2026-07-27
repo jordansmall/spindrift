@@ -996,3 +996,16 @@ func TestFormatSpindriftOpPassStart(t *testing.T) {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "pass 2 started")
 	}
 }
+
+// TestFormatSpindriftOpPassStartWithRole verifies FormatSpindriftOp names the
+// pass's role (issue #2037: "implement", "review", "fix") inline when Role is
+// set, so #2027's telemetry can tell a code-owned review pass's pass_start
+// apart from an implement/fix pass's -- both of which, unlike a legacy
+// single-pass run, may legitimately end with no SPINDRIFT_OUTCOME of their
+// own.
+func TestFormatSpindriftOpPassStartWithRole(t *testing.T) {
+	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"})
+	if !strings.Contains(got, "pass 2 (review) started") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "pass 2 (review) started")
+	}
+}

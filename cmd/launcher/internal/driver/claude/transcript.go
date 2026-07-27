@@ -63,8 +63,14 @@ type TokenUsage struct {
 type SpindriftOp struct {
 	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
 	// "decision", or "run_state_error".
-	Op       string `json:"op"`
-	Pass     int    `json:"pass,omitempty"`
+	Op   string `json:"op"`
+	Pass int    `json:"pass,omitempty"`
+	// Role names the pass's own role on a pass_start op (issue #2037):
+	// "implement" for the first pass, "review" for a code-owned review
+	// pass, "fix" for an implement/fix pass a review's BLOCK (or APPROVE,
+	// to land) triggered. Empty on every other op kind, and on a pass_start
+	// from the legacy single-loop path that never distinguishes roles.
+	Role     string `json:"role,omitempty"`
 	Verdict  string `json:"verdict,omitempty"`
 	Decision string `json:"decision,omitempty"` // "continue" or "stop"
 	Reason   string `json:"reason,omitempty"`
