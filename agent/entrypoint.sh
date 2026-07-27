@@ -1035,6 +1035,25 @@ _scan_pr_intent_in_log() {
 # condition the SPINDRIFT_OUTCOME row above already uses.
 _scan_pr_intent() { printf '%s' "$_last_pr_intent_line"; }
 
+# _emit_pr_intent_giveup_op prints a single heartbeat "decision" op (issue
+# #2046) recording that the read-only PR-intent nudge gave up after $1
+# attempt(s) without ever yielding a usable SPINDRIFT_PR_INTENT line. It is an
+# ordinary stream-json line on the Box's own stdout -- the very stream
+# driver-exec and the orchestrator already write their own #2027 spindrift_op
+# events onto -- so the host heartbeat Writer (cmd/launcher/internal/driver/
+# claude) parses and renders it identically, giving an operator a visible
+# reason the run ended blocked rather than the unexplained state behind #2036.
+# The JSON mirrors that package's Event/SpindriftOp shape; a "decision" op
+# with decision=stop is exactly how the orchestrator's own give-up decisions
+# are encoded. The reason text deliberately omits the literal
+# SPINDRIFT_PR_INTENT token so no downstream scan mistakes it for a genuine
+# marker attempt (_scan_pr_intent_in_log and the launcher's
+# outcome.LastPRIntentInLog both key off the bare token).
+_emit_pr_intent_giveup_op() {
+  local attempts="$1"
+  printf '{"type":"spindrift_op","spindrift_op":{"op":"decision","decision":"stop","reason":"read-only PR-intent nudge exhausted after %s attempt; no marker line, handing off blocked"}}\n' "$attempts"
+}
+
 main() {
   # Cross-phase sentinels: declared local here so bash's dynamic scoping lets
   # each phase function assign them by plain (non-local) assignment while
@@ -1133,6 +1152,20 @@ main() {
     local _original_ready_outcome_line="$_last_outcome_line"
     local pr_intent_recovery_prompt="Your last message ended with a status=ready SPINDRIFT_OUTCOME line but printed no SPINDRIFT_PR_INTENT line, so the launcher has no draft PR to open. Print exactly one SPINDRIFT_PR_INTENT line, grammar: SPINDRIFT_PR_INTENT ${RUN_NONCE:-} <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: ${_last_outcome_line}"
     required_marker_gate _scan_pr_intent "$pr_intent_recovery_prompt" _require_nonempty
+    # The nudge is exhausted: required_marker_gate resumed the session once
+    # and the resumed pass still left no usable PR-intent line, so settle's
+    # host-mediated draft-PR step will find nothing to relay and report this
+    # run merge-blocked. Record that give-up as a heartbeat op (issue #2046)
+    # so the terminal state is visibly explained -- an operator sees the nudge
+    # ran and gave up, rather than an unexplained blocked hand-off (the #2036
+    # confusion). Fires only on the genuinely-exhausted path: a resume that
+    # supplied the marker leaves $_last_pr_intent_line non-empty and skips it,
+    # and this whole block is already gated on read-only + github +
+    # status=ready, so a run that landed a PR never reaches here. The single
+    # attempt is required_marker_gate's own one-resume contract.
+    if [ -z "$_last_pr_intent_line" ]; then
+      _emit_pr_intent_giveup_op 1
+    fi
     # Belt-and-braces beyond the "repeat this exact line" instruction above:
     # the resumed pass is still a fresh LLM turn that could garble or drop
     # the outcome line despite being told not to, and unlike the

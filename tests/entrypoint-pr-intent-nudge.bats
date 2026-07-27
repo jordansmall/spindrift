@@ -91,6 +91,37 @@ EOF
   [ "$output" = "[]" ]
 }
 
+# --- _emit_pr_intent_giveup_op ---------------------------------------------
+# When the PR-intent nudge is exhausted (issue #2046) the gate records the
+# give-up as a heartbeat "decision" op (issue #2027's spindrift_op stream) --
+# an ordinary stream-json line on the Box's own stdout, parsed by the host
+# heartbeat Writer exactly like the orchestrator's own ops -- so an operator
+# sees why the run ended blocked rather than an unexplained state.
+
+@test "_emit_pr_intent_giveup_op: prints one well-formed spindrift_op decision line" {
+  local harness="$BATS_TEST_TMPDIR/op_harness.sh"
+  sed '$d' "$ENTRYPOINT" >"$harness"
+  cat >>"$harness" <<'EOF'
+_emit_pr_intent_giveup_op 1
+EOF
+  run bash "$harness"
+  [ "$status" -eq 0 ]
+
+  # Exactly one line, and valid JSON the Go heartbeat Writer's Event/
+  # SpindriftOp shape (cmd/launcher/internal/driver/claude) unmarshals.
+  [ "$(printf '%s' "$output" | grep -c .)" -eq 1 ]
+  echo "$output" | jq -e '.type == "spindrift_op"' >/dev/null
+  echo "$output" | jq -e '.spindrift_op.op == "decision"' >/dev/null
+  echo "$output" | jq -e '.spindrift_op.decision == "stop"' >/dev/null
+
+  # The give-up reason names the single nudge attempt behind it.
+  echo "$output" | jq -e '.spindrift_op.reason | test("nudge exhausted after 1 attempt")' >/dev/null
+
+  # Never carries the literal marker token -- it must not be mistaken for a
+  # genuine SPINDRIFT_PR_INTENT attempt by any downstream scan.
+  ! [[ "$output" == *"SPINDRIFT_PR_INTENT"* ]]
+}
+
 # --- end-to-end: the required-marker gate's PR-intent row ------------------
 # The #2036 dogfood failure reproduced: a read-only github run reaches
 # status=ready but the Driver never printed SPINDRIFT_PR_INTENT, so the
@@ -121,6 +152,11 @@ EOF
   # blocked backstop fired despite the extra resume pass.
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready note=fake$' <<<"$output"
   ! grep -q 'driver produced no SPINDRIFT_OUTCOME line' <<<"$output"
+
+  # The nudge succeeded, so no exhausted-nudge give-up op is emitted (issue
+  # #2046) -- that op fires only on the genuinely-blocked, nudge-exhausted
+  # path, never when the resumed pass supplies the marker.
+  ! grep -q '"op":"decision"' <<<"$output"
 }
 
 @test "PR-intent gate: a second consecutive miss falls through unchanged, no loop" {
@@ -138,6 +174,27 @@ EOF
   # launcher's own hostMediateDraftPR/blockHandoff to classify.
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready note=fake$' <<<"$output"
   ! grep -q 'SPINDRIFT_PR_INTENT' <<<"$output"
+}
+
+# When the nudge is exhausted (issue #2046), the gate emits a heartbeat op
+# (issue #2027's spindrift_op stream) recording the attempt count and the
+# give-up decision, so an operator can see *why* the run ended blocked rather
+# than an unexplained state. The op is a plain stream-json line on the box's
+# own stdout, parsed by the host heartbeat Writer exactly like the
+# orchestrator's own ops.
+@test "PR-intent gate: an exhausted nudge emits a heartbeat give-up op" {
+  export RUN_NONCE="deadbeefcafe1234"
+  unset BOX_WRITE_ENABLED
+  export FAKE_CLAUDE_NO_PR_INTENT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  # A well-formed spindrift_op decision line (issue #2027's Event shape),
+  # recording the give-up and the single nudge attempt behind it.
+  grep -q '"type":"spindrift_op"' <<<"$output"
+  grep -q '"op":"decision"' <<<"$output"
+  grep -q '"decision":"stop"' <<<"$output"
+  grep -q 'nudge exhausted after 1 attempt' <<<"$output"
 }
 
 @test "PR-intent gate: never fires on a read-write run" {
