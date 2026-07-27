@@ -714,11 +714,15 @@ phase_prompt_assembly() {
   # whichever agents it actually carries and forward the completed JSON;
   # otherwise omit the flag entirely.
   if [ -n "${AGENTS_JSON_TEMPLATE:-}" ]; then
-    local scout_prompt filer_prompt
+    local scout_prompt filer_prompt worker_prompt
     scout_prompt="$(_subst "${PROMPTS_DIR}/scout-prompt.md")"
     filer_prompt=""
     if printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
       filer_prompt="$(_subst "${PROMPTS_DIR}/filer-prompt.md")"
+    fi
+    worker_prompt=""
+    if printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("worker")' >/dev/null 2>&1; then
+      worker_prompt="$(_subst "${PROMPTS_DIR}/worker-prompt.md")"
     fi
     if [ -n "$ORCHESTRATOR" ]; then
       # The code-owned review pass replaces the implementor's own inline
@@ -729,10 +733,12 @@ phase_prompt_assembly() {
         --argjson template "$AGENTS_JSON_TEMPLATE" \
         --arg scout_prompt "$scout_prompt" \
         --arg filer_prompt "$filer_prompt" \
+        --arg worker_prompt "$worker_prompt" \
         '$template
          | del(.reviewer)
          | if has("scout") then .scout.prompt = $scout_prompt else . end
-         | if has("filer") then .filer.prompt = $filer_prompt else . end')"
+         | if has("filer") then .filer.prompt = $filer_prompt else . end
+         | if has("worker") then .worker.prompt = $worker_prompt else . end')"
     else
       local review_prompt
       review_prompt="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
@@ -741,10 +747,12 @@ phase_prompt_assembly() {
         --arg scout_prompt "$scout_prompt" \
         --arg review_prompt "$review_prompt" \
         --arg filer_prompt "$filer_prompt" \
+        --arg worker_prompt "$worker_prompt" \
         '$template
          | if has("scout") then .scout.prompt = $scout_prompt else . end
          | if has("reviewer") then .reviewer.prompt = $review_prompt else . end
-         | if has("filer") then .filer.prompt = $filer_prompt else . end')"
+         | if has("filer") then .filer.prompt = $filer_prompt else . end
+         | if has("worker") then .worker.prompt = $worker_prompt else . end')"
     fi
   else
     agents_json=""

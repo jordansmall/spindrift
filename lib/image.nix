@@ -60,6 +60,7 @@
   scoutPrompt,
   reviewPrompt,
   filerPrompt,
+  workerPrompt,
   conflictResolvePrompt,
   fixPrompt,
   # Driven instead of `prompt` when DISPATCH_KIND=research (ADR 0022, issue #640).
@@ -313,6 +314,7 @@ let
     cp ${pkgs.writeText "scout-prompt.md" scoutPrompt} $out/agent/prompts/scout-prompt.md
     cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md
     cp ${pkgs.writeText "filer-prompt.md" filerPrompt} $out/agent/prompts/filer-prompt.md
+    cp ${pkgs.writeText "worker-prompt.md" workerPrompt} $out/agent/prompts/worker-prompt.md
     cp ${pkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
     cp ${pkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/agent/prompts/fix-prompt.md
     cp ${pkgs.writeText "research-prompt.md" (injectResearchOutcomeContract researchPrompt)} $out/agent/prompts/research-prompt.md

@@ -29,6 +29,9 @@
   reviewPrompt ? builtins.readFile ../templates/default/prompts/review-prompt.md,
   # Opt-in: provisioned only when filerModel is non-empty (see agentsJsonTemplate).
   filerPrompt ? builtins.readFile ../templates/default/prompts/filer-prompt.md,
+  # Provisioned by default (workerModel defaults to claude-sonnet-5, issue
+  # #2054); empty only when workerModel is set to "" (see agentsJsonTemplate).
+  workerPrompt ? builtins.readFile ../templates/default/prompts/worker-prompt.md,
   conflictResolvePrompt ? builtins.readFile ../templates/default/prompts/conflict-resolve-prompt.md,
   # Driven instead of `prompt` on a fix box (FIX_PASS>0, ADR: selfHeal/runFix
   # in cmd/launcher): the branch is already checked out, so this warm-fix
@@ -248,6 +251,7 @@ let
     scoutModel = mergedDefaults.scoutModel or "";
     reviewModel = mergedDefaults.reviewModel or "";
     filerModel = mergedDefaults.filerModel or "";
+    workerModel = mergedDefaults.workerModel or "";
   };
 
   # The Driver's in-box half, rendered by the registry (issue #624) into
@@ -410,6 +414,7 @@ let
       scoutPrompt
       reviewPrompt
       filerPrompt
+      workerPrompt
       conflictResolvePrompt
       fixPrompt
       researchPrompt
@@ -464,6 +469,7 @@ let
     cp ${hostPkgs.writeText "scout-prompt.md" scoutPrompt} $out/scout-prompt.md
     cp ${hostPkgs.writeText "review-prompt.md" reviewPrompt} $out/review-prompt.md
     cp ${hostPkgs.writeText "filer-prompt.md" filerPrompt} $out/filer-prompt.md
+    cp ${hostPkgs.writeText "worker-prompt.md" workerPrompt} $out/worker-prompt.md
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/conflict-resolve-prompt.md
     cp ${hostPkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/fix-prompt.md
     cp ${hostPkgs.writeText "research-prompt.md" (injectResearchOutcomeContract researchPrompt)} $out/research-prompt.md
