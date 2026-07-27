@@ -1030,28 +1030,6 @@ artifact, not a growing transcript:
   `0` disables that cap. The loop stops the instant a pass's log carries a
   terminal `SPINDRIFT_OUTCOME` line — unconditionally, ahead of either cap —
   or as soon as a pass's verdict is anything but `BLOCK`.
-- **Budget governor and decompose trigger.** After every pass returns, the
-  orchestrator reads that pass's own token/cost usage (via the claude
-  Driver's `ExtractUsage`) and sums it into the run-state artifact's
-  `CumulativeUsage`. Three deterministic Go-owned conditions can trip while a
-  pass is still `BLOCK`-ing: crossing `--max-budget-tokens`/`--max-budget-usd`
-  (both default `0`, disabled), an implementor's own machine-readable
-  `status=oversized` self-report, or exhausting `--max-review-rounds` without
-  an `APPROVE`. The budget/oversized pair is only live at all once an
-  operator has set at least one governor knob (`--max-budget-tokens`,
-  `--max-budget-usd`, `--max-decomposition-depth`, or
-  `--decompose-prompt-file`) — a run that has only ever set
-  `ORCHESTRATOR_ENABLED` never has its behavior changed by an incidental
-  `status=oversized` substring landing in a transcript; `--max-review-rounds`
-  exhaustion is unaffected by this gate, since it is pre-existing behavior.
-  With `--decompose-prompt-file` set and
-  `--max-decomposition-depth` (default `0`, disabled — unlike the caps above,
-  `0` here means decomposition never runs, not "uncapped") not yet exhausted,
-  a trip invokes the decompose pass instead of stopping: seeded the same way
-  as any other pass but from its own distinct prompt, its `SLICE: `-prefixed
-  output lines become the run's new `RemainingSlices`, and the loop continues
-  over them. Otherwise, or once the depth cap is used up, a trip hard-stops
-  the run.
 
 The Driver stays pluggable ([ADR 0009](adr/0009-agent-cli-is-a-pluggable-driver.md)):
 the orchestrator only ever talks to `driver-exec` through the same
