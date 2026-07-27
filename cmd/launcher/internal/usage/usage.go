@@ -31,9 +31,7 @@ type RoleUsage struct {
 	CacheCreationInputTokens int
 }
 
-// Usage holds the aggregate statistics from a result event. Tagged for JSON
-// (issue #2002: RunState.CumulativeUsage persists one of these) even though
-// this package otherwise only ever formats Usage for Markdown display.
+// Usage holds the aggregate statistics from a result event.
 type Usage struct {
 	InputTokens              int     `json:"input_tokens"`
 	OutputTokens             int     `json:"output_tokens"`
