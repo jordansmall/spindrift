@@ -32,6 +32,12 @@ type RunState struct {
 	// small and the brief stays the single source of truth for scout
 	// findings.
 	ScoutBriefPath string `json:"scout_brief_path"`
+	// ReviewFindings is the code-owned review pass's own final message --
+	// the "VERDICT: ..." line plus its Blocking/Non-blocking sections,
+	// verbatim -- recorded here (distinct from the bare LastVerdict word)
+	// so the next fix pass's seeded prompt can carry the reviewer's actual
+	// findings, not just the fact that it blocked (issue #2037).
+	ReviewFindings string `json:"review_findings"`
 }
 
 // ReadRunState reads and parses the run-state artifact at path. An empty

@@ -851,6 +851,40 @@ func TestRunSeedsSubsequentPassPromptFromRunState(t *testing.T) {
 	}
 }
 
+// TestSeedPromptFromStateIncludesReviewFindings verifies seedPromptFromState
+// (issue #2037) renders state.ReviewFindings -- the code-owned review pass's
+// own Blocking/Non-blocking findings text -- into the seeded prompt, not just
+// the bare LastVerdict word (that narrower claim is #1998/#1999's own
+// TestRunSeedsFixBriefWithDoneWorkAndVerdictAfterBlock below), so a fix pass
+// knows exactly what to fix rather than only that something blocked.
+func TestSeedPromptFromStateIncludesReviewFindings(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := RunState{
+		LastVerdict:    "BLOCK",
+		ReviewFindings: "VERDICT: BLOCK\n\n## Blocking\n- run.go:42 -- missing nil check",
+	}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	if seeded == promptFile {
+		t.Fatalf("seedPromptFromState returned the original file unchanged, want a fresh seeded file")
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	if !strings.Contains(string(got), "## Blocking\n- run.go:42 -- missing nil check") {
+		t.Errorf("seeded prompt = %q, want it to carry the reviewer's findings verbatim", got)
+	}
+}
+
 // TestRunSeedsFixBriefWithDoneWorkAndVerdictAfterBlock verifies AC2 (issue
 // #1999): after a scripted BLOCK, the next pass's own seeded prompt carries
 // the scoped fix brief -- both what is already done (a DoneSlices list this
