@@ -84,7 +84,9 @@ in
   # ../../docs/reference.md path (#611). .github/ is copied the same way so
   # TestExecClient_TransitionState_ClaimRemoveLabelsMatchDispatchWorkflow can
   # resolve its ../../../../../.github/workflows/agent-dispatch.yml path
-  # (#1985).
+  # (#1985). templates/ is copied the same way so
+  # TestPromptMarkersMatchScanner can resolve its own
+  # ../../../templates/default/prompts path (#2038).
   launcher-go-test =
     pkgs.runCommand "launcher-go-test"
       {
@@ -98,6 +100,7 @@ in
         cp -r ${../../cmd/launcher} src/cmd/launcher
         cp -r ${../../docs} src/docs
         cp -r ${../../.github} src/.github
+        cp -r ${../../templates} src/templates
         chmod -R +w src
         cp -r ${launcherGoModules} src/cmd/launcher/vendor
         export GOPROXY=off
