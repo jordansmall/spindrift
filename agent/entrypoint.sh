@@ -793,6 +793,11 @@ run_driver_in_env() {
   # main's post-return backstop (issue #593) can tell whether the Driver
   # actually emitted one.
   _last_outcome_line="$(_driver_extract_outcome "$stream_log")"
+  # _scan_pr_intent_in_log's own read, ahead of the stream_log removal below
+  # -- the SPINDRIFT_PR_INTENT required-marker gate row (issue #2045) needs
+  # to know whether this pass attempted the marker at all, the same way the
+  # outcome capture just above feeds that gate's SPINDRIFT_OUTCOME row.
+  _last_pr_intent_line="$(_scan_pr_intent_in_log "$stream_log")"
   rm -f "$stream_log"
   if [ -n "$_last_outcome_line" ]; then
     printf '%s\n' "$_last_outcome_line"
@@ -919,6 +924,43 @@ required_marker_gate() {
 _scan_outcome() { printf '%s' "$_last_outcome_line"; }
 _require_nonempty() { [ -n "$1" ]; }
 
+# _scan_pr_intent_in_log reports (via stdout) the last line in $1 (a raw
+# stream_log a driver-exec pass just teed, still on disk at the point
+# run_driver_in_env calls this) that carries a genuine SPINDRIFT_PR_INTENT
+# attempt, or nothing if none is present -- the SPINDRIFT_PR_INTENT row's
+# scanner (issue #2045, the #2036 fix).
+#
+# Unlike _driver_extract_outcome, this needs no jq-filtered, markdown-
+# stripped bare-line reprint: driver-exec already tees the raw stream
+# verbatim to the container's own stdout (issue #626), and the launcher's
+# own outcome.LastPRIntentInLog already tolerates the token embedded
+# mid-JSON-string (see that function's doc comment) -- so nothing downstream
+# needs a cleaned-up copy of the line the way OUTCOME's LastInLog does.
+#
+# A bash regex has no reliable way to tell a genuine base64 payload from
+# ordinary prose by character class alone -- both are letters -- so instead
+# of guessing at the payload's shape, this anchors on this run's own
+# $RUN_NONCE (issue #1937's reasoning, applied in-box): a line that merely
+# mentions the token in passing essentially never also carries this run's
+# nonce verbatim, the same way an untrusted comment/issue-body author's echo
+# of the token can't. An empty RUN_NONCE (e.g. a research dispatch, which
+# never reaches this gate anyway -- required_marker_gate's own
+# _is_research_kind check short-circuits first) matches nothing, never
+# everything.
+_scan_pr_intent_in_log() {
+  local log="$1" nonce="${RUN_NONCE:-}"
+  [ -n "$nonce" ] || return 0
+  grep -F -- "SPINDRIFT_PR_INTENT ${nonce} " "$log" 2>/dev/null \
+    | grep -oE "SPINDRIFT_PR_INTENT[[:space:]]+[^[:space:]\"]+[[:space:]]+[^[:space:]\"]+" \
+    | tail -1
+}
+
+# The SPINDRIFT_PR_INTENT row on the required-marker gate above (issue
+# #2045, the #2036 fix): the scanner reads back main's captured PR-intent
+# line, reusing _require_nonempty as its predicate -- the same bare-presence
+# condition the SPINDRIFT_OUTCOME row above already uses.
+_scan_pr_intent() { printf '%s' "$_last_pr_intent_line"; }
+
 main() {
   # Cross-phase sentinels: declared local here so bash's dynamic scoping lets
   # each phase function assign them by plain (non-local) assignment while
@@ -926,7 +968,7 @@ main() {
   local _rebase_and_publish _had_rebase_conflict
   local _use_dev_shell _harness_path
   local prompt agents_json _driver_session_mode
-  local _last_outcome_line _recovery_attempted
+  local _last_outcome_line _last_pr_intent_line _recovery_attempted
   local ORCHESTRATOR
 
   configure_env
@@ -971,6 +1013,64 @@ main() {
   fi
 
   [ "$claude_rc" -eq 0 ] || exit "$claude_rc"
+
+  # The SPINDRIFT_PR_INTENT row on the required-marker gate (issue #2045,
+  # the #2036 fix): a read-only github Box that reaches status=ready but
+  # never printed a PR-intent line leaves the launcher's hostMediateDraftPR
+  # with nothing to relay -- it posts "merge blocked" and strands the
+  # otherwise-finished branch. Scoped tighter than the SPINDRIFT_OUTCOME row
+  # above: only when read-only (BOX_WRITE_ENABLED absent, so a push-capable
+  # token was never issued and this marker is the Box's only way to hand off
+  # a PR), the github Code Forge (git/local never reach OPEN A PULL REQUEST
+  # at all, so they never emit this marker either -- ADR 0034), and the
+  # outcome itself parsed as status=ready (a blocked/failed run never opens
+  # a PR, so a missing PR-intent there is expected, not a bug to nudge).
+  # $_last_outcome_line may already be the SPINDRIFT_OUTCOME row's own
+  # resumed line, not the first pass's -- read after that gate above, same
+  # as every other post-gate use of it in this function. Matched against the
+  # line's own issue=/landing=/status= prefix only (everything up to the
+  # first " note="), not the whole line -- the free-text note field can
+  # itself contain the substring "status=ready" (e.g. an agent explaining
+  # why a status=blocked run couldn't reach status=ready), and a bare
+  # grep across the full line would false-positive on that.
+  local _outcome_fields_before_note="${_last_outcome_line%% note=*}"
+  if [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ] \
+    && [[ " $_outcome_fields_before_note " == *" status=ready "* ]]; then
+    # Carries this run's nonce (so the resumed pass can emit a line
+    # _scan_pr_intent_in_log will actually match) and repeats the exact
+    # SPINDRIFT_OUTCOME line already captured above verbatim: run_driver_in_env
+    # recaptures $_last_outcome_line from whatever this resumed pass prints,
+    # so without an instruction to repeat it, a resume that prints only the
+    # PR-intent line would blank that var out and trip the no-outcome
+    # backstop above on a run that already genuinely finished ready.
+    #
+    # The grammar spelled out below is free-text LLM instruction, not a
+    # machine-parsed contract -- only the bare SPINDRIFT_PR_INTENT token
+    # (outcome.PRIntentToken) is load-bearing for _scan_pr_intent_in_log and
+    # the launcher's own outcome.LastPRIntentInLog, and that literal is what
+    # TestPromptMarkersMatchScanner pins against
+    # open-pr-create-outbox.md/if-blocked-pr-outbox.md. A reworded sentence
+    # here is harmless as long as it still leads the agent to print the
+    # token, the nonce, and a base64 payload in that order.
+    local _original_ready_outcome_line="$_last_outcome_line"
+    local pr_intent_recovery_prompt="Your last message ended with a status=ready SPINDRIFT_OUTCOME line but printed no SPINDRIFT_PR_INTENT line, so the launcher has no draft PR to open. Print exactly one SPINDRIFT_PR_INTENT line, grammar: SPINDRIFT_PR_INTENT ${RUN_NONCE:-} <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: ${_last_outcome_line}"
+    required_marker_gate _scan_pr_intent "$pr_intent_recovery_prompt" _require_nonempty
+    # Belt-and-braces beyond the "repeat this exact line" instruction above:
+    # the resumed pass is still a fresh LLM turn that could garble or drop
+    # the outcome line despite being told not to, and unlike the
+    # SPINDRIFT_OUTCOME row's own resume (which only ever replaces "nothing"
+    # with something), this row's resume has a known-good line to fall back
+    # on. Restoring it here fixes both entrypoint.sh's own bookkeeping (so
+    # the no-outcome backstop below never fires on a run that already
+    # genuinely finished ready) and the container log the launcher's own
+    # last-line-wins outcome.LastInLog scans (so a garbled resumed line
+    # never shadows the good one there either).
+    if [ "$_last_outcome_line" != "$_original_ready_outcome_line" ]; then
+      echo "==> resumed pass did not repeat the original SPINDRIFT_OUTCOME line — restoring it"
+      _last_outcome_line="$_original_ready_outcome_line"
+      printf '%s\n' "$_last_outcome_line"
+    fi
+  fi
 
   # CODE_FORGE=local's harness-owned code-out (ADR 0033, issue #1808): the
   # Harness, not the Agent, bundles the seam after the Driver exits. An empty
