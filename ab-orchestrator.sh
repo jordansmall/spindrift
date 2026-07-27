@@ -96,6 +96,14 @@ fi
 : "${AB_REMOTE:?set AB_REMOTE to a THROWAWAY remote URL (CODE_FORGE_REMOTE_URL)}"
 : "${AB_REPO_SLUG:?set AB_REPO_SLUG to owner/name the launcher reads issues from}"
 
+# The tracker slug must name the same repo the branches are pushed to, or the
+# A/B reads/mutates one repo (the tracker) while pushing work to another — the
+# subtle way you end up A/B-ing against the real repo. Compare and refuse.
+remote_slug="$(sed -E 's#^(git@github\.com:|https?://github\.com/)##; s#\.git$##' <<<"$AB_REMOTE")"
+if [ "$remote_slug" != "$AB_REPO_SLUG" ] && [ -z "${AB_ALLOW_SLUG_MISMATCH:-}" ]; then
+  die "AB_REPO_SLUG ('$AB_REPO_SLUG') does not match the repo in AB_REMOTE ('$remote_slug') -- these must be the same repo, or the experiment targets a different tracker than it pushes to. Fix AB_REPO_SLUG, or set AB_ALLOW_SLUG_MISMATCH=1 if that split is deliberate."
+fi
+
 command -v jq  >/dev/null || die "jq not found on PATH"
 command -v git >/dev/null || die "git not found on PATH"
 command -v nix >/dev/null || die "nix not found on PATH"
@@ -177,18 +185,25 @@ run_arm() { # $1=issue $2=arm(off|on) $3=orch_value $4=branch_prefix
   local -a nb=(); [ "$AB_NO_BUILD" = "1" ] && nb=(--no-build)
 
   info "issue #$issue [$arm] ORCHESTRATOR_ENABLED='${orch}' prefix='$prefix'"
+  # Pass every knob as a --flag, not an env var: flags are set via os.Setenv
+  # before the launcher's ambient-knob check, so they beat whatever harness.env
+  # exported (which is how a read-only harness.env or a stray REPO_SLUG would
+  # otherwise leak in). --box-forge-and-issue-access read-write is forced for
+  # the same reason: a read-only harness.env is incompatible with CODE_FORGE=git.
+  # --orchestrator-enabled "" (empty) on the OFF arm overrides harness.env=1.
   local -a cmd=(
-    env
-    "ORCHESTRATOR_ENABLED=${orch}"
-    "CODE_FORGE=git"
-    "CODE_FORGE_REMOTE_URL=${AB_REMOTE}"
-    "MERGE_MODE=manual"
-    "BASE_BRANCH=${AB_BASE}"
-    "BRANCH_PREFIX=${prefix}"
-    "MODEL=${AB_MODEL}"
-    "REPO_SLUG=${AB_REPO_SLUG}"
-    "ISSUE_TRACKER=${tracker}"
-    nix run ".#" -- dispatch "${nb[@]}" --yes "$issue"
+    nix run ".#" -- dispatch "${nb[@]}" --yes
+    --repo-slug "$AB_REPO_SLUG"
+    --code-forge git
+    --code-forge-remote-url "$AB_REMOTE"
+    --base-branch "$AB_BASE"
+    --branch-prefix "$prefix"
+    --merge-mode manual
+    --model "$AB_MODEL"
+    --issue-tracker "$tracker"
+    --box-forge-and-issue-access read-write
+    --orchestrator-enabled "$orch"
+    "$issue"
   )
   if [ -n "${AB_DRY_RUN:-}" ]; then
     printf '   DRY-RUN:' >&2; printf ' %q' "${cmd[@]}" >&2; printf '\n' >&2
