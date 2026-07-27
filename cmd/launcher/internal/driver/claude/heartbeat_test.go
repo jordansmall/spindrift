@@ -996,24 +996,3 @@ func TestFormatSpindriftOpPassStart(t *testing.T) {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "pass 2 started")
 	}
 }
-
-// TestFormatSpindriftOpPassStartWithRole verifies FormatSpindriftOp names a
-// pass_start's Role inline (issue #2002), so the budget governor's decompose
-// pass reads distinctly from an ordinary implementor pass in the rendered
-// heartbeat stream.
-func TestFormatSpindriftOpPassStartWithRole(t *testing.T) {
-	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "decompose"})
-	if !strings.Contains(got, "pass 2 started (decompose)") {
-		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "pass 2 started (decompose)")
-	}
-}
-
-// TestFormatSpindriftOpDecisionDecompose verifies FormatSpindriftOp renders
-// the "decompose" decision value (issue #2002) the same way it already
-// renders "stop"/"continue" -- a free-form string, not a fixed enum.
-func TestFormatSpindriftOpDecisionDecompose(t *testing.T) {
-	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "decision", Decision: "decompose", Reason: "budget exceeded or oversized report"})
-	if !strings.Contains(got, "decompose: budget exceeded or oversized report") {
-		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "decompose: budget exceeded or oversized report")
-	}
-}

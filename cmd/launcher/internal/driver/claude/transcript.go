@@ -63,14 +63,10 @@ type TokenUsage struct {
 type SpindriftOp struct {
 	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
 	// "decision", or "run_state_error".
-	Op   string `json:"op"`
-	Pass int    `json:"pass,omitempty"`
-	// Role distinguishes a "pass_start" for the budget governor's decompose
-	// pass (issue #2002) from an ordinary implementor pass: "decompose", or
-	// empty for an implementor pass.
-	Role     string `json:"role,omitempty"`
+	Op       string `json:"op"`
+	Pass     int    `json:"pass,omitempty"`
 	Verdict  string `json:"verdict,omitempty"`
-	Decision string `json:"decision,omitempty"` // "continue", "decompose", or "stop"
+	Decision string `json:"decision,omitempty"` // "continue" or "stop"
 	Reason   string `json:"reason,omitempty"`
 	Phase    string `json:"phase,omitempty"` // "read" or "write", for run_state_error
 	Error    string `json:"error,omitempty"`
