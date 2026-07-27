@@ -127,3 +127,50 @@ Concretely:
 - Default is off (`ORCHESTRATOR_ENABLED=false`); every existing dispatch
   keeps its current single-pass `driver-exec` behavior unchanged until an
   operator opts in.
+
+## Amendment (issue #2047): `ORCHESTRATOR_ENABLED` is a master feature-flag switch, not merely a binary swap
+
+"The entrypoint is a swap" (above) undersold what the flag was already
+doing. By the time #2019 landed the filer's read-only write-mechanism split,
+`ORCHESTRATOR_ENABLED` gated two independent things — which binary receives
+the pass, and (in a compound condition with `BOX_WRITE_ENABLED`) whether the
+filer relays issue-filing host-side instead of calling `gh issue create`
+in-box — each tested ad hoc at its own call site, with no single place
+declaring "this segment differs when the orchestrator is on." That shape
+would only have gotten worse: #2037 (next) needs to drop the review-loop
+prose and the `reviewer` subagent from the on-path prompt entirely once the
+orchestrator's own code-owned review pass replaces it, which means the
+prompt itself — not just the invoked binary — has to fork on this flag.
+
+`ORCHESTRATOR_ENABLED` is therefore amended to **master feature-flag switch**
+semantics: a single canonical `ORCHESTRATOR` gate local, computed once at the
+top of `entrypoint.sh`'s prompt assembly, is the one authority every
+orchestrator-conditioned prompt/`--agents` fork reads — expressed through the
+repo's existing gate/registry-row idiom (the same shape
+`FILER_FILE_DIRECT`/`FILER_FILE_RELAY`, `ISSUE_TRACKER_GITHUB`/`_LOCAL`, and
+`BOX_ACCESS_READ_WRITE`/`_READ_ONLY` already use) rather than each fork
+testing the raw env var independently. Issue #2047 lands this seam
+behavior-preserving — the rendered prompt and `--agents` JSON stay
+byte-identical to today for every input combination, and the review-loop
+prose/`reviewer` subagent are untouched; only the predicate's plumbing
+changes. A fork-well-formedness parity check (`orchestrator-fork-well-formed`,
+`nix/checks/prompts.nix`, run in `checks-inbox`) now fails pre-merge if a
+future orchestrator-gated segment is added with only an on-row or only an
+off-row, or with more than one rendering for a given input — the same
+drift-guard shape `fragment-gate-parity` already gives the fragment registry.
+
+**Migration stance.** `ORCHESTRATOR_ENABLED` is a migration flag, not a
+permanent configuration axis: orchestrator-on is the destination, and the
+orchestrator-off path (direct `driver-exec`, the prose review loop) is
+legacy, kept alive only until the on-path fully subsumes it. The prompt fork
+this amendment introduces is built to be *collapsed*, not curated forever —
+when the off-path is deleted, its registry rows and gate come out together,
+not maintained in parallel indefinitely.
+
+**Demolition trigger.** The orchestrator-off path is deleted once both hold:
+`ORCHESTRATOR_ENABLED` defaults to *on* in production, and the live A/B
+harness (`ab-orchestrator.sh`) shows the on-arm performing at least as well
+as the off-arm across a sustained default-on run (the exact dispatch-count/
+duration threshold for "sustained" is fixed when the flag is actually
+flipped to default-on, not speculatively here). The tracking issue for that
+deletion is filed only once the condition is observed to hold, not now.
