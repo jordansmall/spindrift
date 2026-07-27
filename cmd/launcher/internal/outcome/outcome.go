@@ -86,8 +86,8 @@ func Parse(line string) (Outcome, error) {
 // Line returns the canonical SPINDRIFT_OUTCOME representation of o.
 // Parse(o.Line()) == o for all valid Outcomes.
 func (o Outcome) Line() string {
-	return fmt.Sprintf(Token+" issue=%s landing=%s status=%s note=%s",
-		o.Issue, o.Landing, o.Status, o.Note)
+	return fmt.Sprintf("%s issue=%s landing=%s status=%s note=%s",
+		Token, o.Issue, o.Landing, o.Status, o.Note)
 }
 
 // ParseAnywhere finds the SPINDRIFT_OUTCOME token anywhere in line -- not
