@@ -17,7 +17,7 @@ setup() {
 @test "entrypoint passes MODEL env var to claude" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- "--model claude-opus-4-8" "$CLAUDE_LOG"
+  grep -q -- "--model claude-test-model" "$CLAUDE_LOG"
 }
 
 @test "MODEL env overrides the baked default model at runtime" {
@@ -25,7 +25,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -q -- "--model claude-sonnet-4-6" "$CLAUDE_LOG"
-  ! grep -q -- "--model claude-opus-4-8" "$CLAUDE_LOG"
+  ! grep -q -- "--model claude-test-model" "$CLAUDE_LOG"
 }
 
 # Observability (#113): text --print emits nothing until the end, so the box
