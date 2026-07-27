@@ -275,12 +275,16 @@ func LastPRIntentInLog(path, expectedNonce string) (string, bool, error) {
 // draft-PR intent. Unlike those two singleton "last verifying line wins"
 // scanners, issue filing is 1-to-many — a run may want to file several
 // issues — so every verifying line's decoded payload is collected, in the
-// order encountered, rather than only the last surviving. A line carrying
-// the token that fails to verify (wrong nonce, malformed base64) is silently
-// dropped from the result, exactly as a non-verifying PR-intent/comment line
-// is dropped from those scanners' single result — an untrusted
-// issue/comment author's echo of the token must never be mistaken for a
-// genuine filed-issue request.
+// order encountered, rather than only the last surviving. Payloads are
+// deduped by their decoded byte identity (issue #2068): a Filer subagent
+// echoes its one intent line twice into the raw stream-json log — once as its
+// own `assistant` event, once in the parent's `tool_result` event — and the
+// two decode identically, so the second is dropped rather than filed as a
+// duplicate issue. A line carrying the token that fails to verify (wrong
+// nonce, malformed base64) is silently dropped from the result, exactly as a
+// non-verifying PR-intent/comment line is dropped from those scanners' single
+// result — an untrusted issue/comment author's echo of the token must never
+// be mistaken for a genuine filed-issue request.
 //
 // Returns (nil, nil) when no line carries the token at all, or the file does
 // not exist — there was never an issue to file. Returns (nil, err) only on a
@@ -291,11 +295,21 @@ func LastPRIntentInLog(path, expectedNonce string) (string, bool, error) {
 func AllIssueIntentLinesInLog(path, expectedNonce string) ([]string, error) {
 	const token = "SPINDRIFT_ISSUE_INTENT"
 	var payloads []string
+	// seen dedups by the host-side decoded payload's byte identity — see the
+	// doc comment above for why the subagent Filer echoes each intent line
+	// twice (issue #2068). The key is the host-decoded payload itself, never
+	// the Box-supplied DedupTerms field, which stays untrusted and
+	// parsed-but-ignored downstream.
+	seen := make(map[string]bool)
 	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
 		if !containsToken(line, token) {
 			return
 		}
 		if body, ok := parseSignalLine(line, token, expectedNonce); ok {
+			if seen[body] {
+				return
+			}
+			seen[body] = true
 			payloads = append(payloads, body)
 		}
 	})

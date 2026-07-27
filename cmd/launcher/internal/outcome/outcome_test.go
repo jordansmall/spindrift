@@ -1133,6 +1133,31 @@ func TestAllIssueIntentLinesInLog_NonceMismatchDroppedSilently(t *testing.T) {
 	}
 }
 
+// TestAllIssueIntentLinesInLog_DedupsSubagentEcho covers the subagent-echo
+// case (issue #2068): when the Filer runs as a subagent, its single
+// SPINDRIFT_ISSUE_INTENT line appears twice in the raw stream-json log — once
+// as the subagent's own `assistant` event and once echoed in the parent
+// implementor's `tool_result` event. Both decode to a byte-identical payload
+// and both verify, so a no-dedup scan would collect the same finding twice and
+// file two issues. The scan must collapse identical decoded payloads to one so
+// one finding files exactly one issue.
+func TestAllIssueIntentLinesInLog_DedupsSubagentEcho(t *testing.T) {
+	payload := base64.StdEncoding.EncodeToString([]byte(`{"title":"bug: widget breaks","body":"details"}`))
+	line := "SPINDRIFT_ISSUE_INTENT the-nonce " + payload
+	path := writeLog(t,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"`+line+`"}]}}`,
+		`{"type":"tool_result","content":[{"type":"text","text":"`+line+`"}]}`,
+	)
+	got, err := outcome.AllIssueIntentLinesInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{`{"title":"bug: widget breaks","body":"details"}`}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 // TestAllIssueIntentLinesInLog_MalformedBase64DroppedSilently verifies a
 // line carrying the token with an undecodable payload is dropped rather than
 // aborting the scan or erroring the whole call.
