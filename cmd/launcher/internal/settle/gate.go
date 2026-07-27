@@ -42,6 +42,12 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 
 	o := result.Outcome
 	s.recordLanding(num, o.Landing)
+	// Best-effort, ahead of the status switch so it runs on every outcome
+	// status alike (issue #2019, wiring #2018's dormant fileIssueIntents into
+	// this entry point): a run's own findings are worth tracking whether that
+	// run itself landed ready or blocked, and a filing failure must never
+	// change the switch below's own landing decision.
+	s.fileIssueIntents(num, result)
 	switch o.Status {
 	case "blocked":
 		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)

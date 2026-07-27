@@ -5,6 +5,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/outcome"
 )
 
 // TestFileIssueIntents_FilesEachIntentWithHostDerivedLabels verifies the
@@ -101,5 +102,127 @@ func TestFileIssueIntents_TrackerWithoutHostPostedIssueFilerNoOps(t *testing.T) 
 	}
 	if len(urls) != 0 {
 		t.Errorf("urls = %v, want none", urls)
+	}
+}
+
+// TestSettle_FilesIssueIntents_OnReadyOutcome verifies the full Settle entry
+// point -- not just the standalone fileIssueIntents helper above -- actually
+// drives the host-mediated issue-filing relay (issue #2019, wiring #2018's
+// dormant fileIssueIntents into Settle.Settle) on the "ready" outcome path.
+func TestSettle_FilesIssueIntents_OnReadyOutcome(t *testing.T) {
+	const issNum = "2019"
+	const prURL = "https://github.com/owner/repo/pull/2019"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/77"
+
+	result := dispatch.Result{
+		Success:           true,
+		OutcomeFound:      true,
+		Outcome:           outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"fix(auth): validate token expiry","body":"body"}`,
+		},
+	}
+
+	s := New(baseConfig(), fc.AsIssueFiler(), fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.PostIssueCalls) != 1 || fc.PostIssueCalls[0].Title != "fix(auth): validate token expiry" {
+		t.Errorf("PostIssueCalls = %+v, want exactly the one intent filed", fc.PostIssueCalls)
+	}
+}
+
+// TestSettle_FilesIssueIntents_OnBlockedOutcome verifies filing fires on the
+// "blocked" path too, not only "ready" -- the relay is best-effort and
+// orthogonal to whether this run's own PR ever went green.
+func TestSettle_FilesIssueIntents_OnBlockedOutcome(t *testing.T) {
+	const issNum = "2019"
+	const prURL = "https://github.com/owner/repo/pull/2019"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/78"
+
+	result := dispatch.Result{
+		Success:           true,
+		OutcomeFound:      true,
+		Outcome:           outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"fix(auth): validate token expiry","body":"body"}`,
+		},
+	}
+
+	s := New(baseConfig(), fc.AsIssueFiler(), fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Errorf("PostIssueCalls = %+v, want exactly 1", fc.PostIssueCalls)
+	}
+}
+
+// TestSettle_NoIssueIntentsFound_NoFilingAttempted verifies the common
+// read-write path (the Filer files directly via `gh issue create` in-box, so
+// the box log carries no SPINDRIFT_ISSUE_INTENT line at all) drives no
+// PostIssue call through Settle -- byte-for-byte the pre-#2019 behavior.
+func TestSettle_NoIssueIntentsFound_NoFilingAttempted(t *testing.T) {
+	const issNum = "2019"
+	const prURL = "https://github.com/owner/repo/pull/2019"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+	}
+
+	s := New(baseConfig(), fc.AsIssueFiler(), fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.PostIssueCalls) != 0 {
+		t.Errorf("PostIssueCalls = %+v, want none", fc.PostIssueCalls)
+	}
+}
+
+// TestSettle_IssueIntentFilingFailure_DoesNotBlockOutcome verifies a filing
+// failure (PostIssue error) never changes the run's own landing decision --
+// AC5's best-effort guarantee: the "ready" outcome still merges through
+// selfHeal even though the relay itself failed.
+func TestSettle_IssueIntentFilingFailure_DoesNotBlockOutcome(t *testing.T) {
+	const issNum = "2019"
+	const prURL = "https://github.com/owner/repo/pull/2019"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.PostIssueErr = errFake
+
+	result := dispatch.Result{
+		Success:           true,
+		OutcomeFound:      true,
+		Outcome:           outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"fix(auth): validate token expiry","body":"body"}`,
+		},
+	}
+
+	d := dispatch.NewFake()
+	d.UsageReportBody = "## Run usage\n\ncost: 0.10"
+	s := New(baseConfig(), fc.AsIssueFiler(), fc)
+	s.Settle(d, issNum, 0, result)
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Errorf("PostIssueCalls = %+v, want the failed attempt recorded", fc.PostIssueCalls)
+	}
+	if len(fc.CommentCalls) != 1 || fc.CommentCalls[0].Body != d.UsageReportBody {
+		t.Errorf("a failed issue-intent file must not block the run's own ready/merge flow; CommentCalls = %+v", fc.CommentCalls)
 	}
 }
