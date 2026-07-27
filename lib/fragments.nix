@@ -71,6 +71,21 @@
     fragment = "review-loop-orchestrator.md";
     var = "REVIEW_LOOP_ORCHESTRATOR_STEP";
   }
+  # The IMPLEMENT coordinator step (issue #2056): when a `worker` subagent is
+  # provisioned (WORKER_MODEL set, issue #2054, detected by
+  # agent/entrypoint.sh's phase_prompt_assembly WORKER_PROVISIONED precompute
+  # as a "worker" key in AGENTS_JSON_TEMPLATE), the main session runs IMPLEMENT
+  # as a coordinator that delegates each slice to the worker instead of
+  # implementing them itself. A single on/off gate, not a paired fork like the
+  # review-loop rows above: with no worker the step renders empty (the
+  # conditional-residue mechanism) so the section is byte-identical to today's
+  # single-implementor prompt. Orthogonal to ORCHESTRATOR -- a worker can be
+  # provisioned with the orchestrator on or off.
+  {
+    gate = "WORKER_PROVISIONED";
+    fragment = "coordinator.md";
+    var = "COORDINATOR_STEP";
+  }
   # The write-mechanism split (issue #2019): a filer configured under
   # read-only + ORCHESTRATOR_ENABLED holds no write token, so its FILE
   # ISSUES step (this pair) and its own in-agent label/file steps (the two

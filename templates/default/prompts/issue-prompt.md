@@ -37,7 +37,7 @@ elsewhere.
 
 # IMPLEMENT
 
-${SKILL_PREAMBLE}${TDD_STEP}Work test-first, one slice at a time. Hard rule:
+${COORDINATOR_STEP}${SKILL_PREAMBLE}${TDD_STEP}Work test-first, one slice at a time. Hard rule:
 
 1. RED: write ONE failing test, run it, confirm it fails for the right reason.
    Never write implementation code before a failing test exists.
