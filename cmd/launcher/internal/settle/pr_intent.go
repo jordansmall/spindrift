@@ -19,11 +19,11 @@ import (
 //
 // Returns the resolved PR URL and true on success. Any failure along the
 // way — a missing/malformed bundle, a missing/malformed PR-intent line, or
-// the draft-PR-create call itself failing — posts a comment, marks the issue
-// agent-complete (mirroring RelayBundle's own missing-bundle posture: this
-// is a blocked hand-off, never a demotion to agent-failed), and returns
-// ok=false so the caller skips CI-watch entirely rather than polling a PR
-// that was never opened.
+// the draft-PR-create call itself failing — posts a comment and leaves the
+// issue in-progress (blockHandoff: a blocked hand-off, visibly not-done,
+// never demoted to agent-failed and never mistakable for agent-complete —
+// see issue #2046), then returns ok=false so the caller skips CI-watch
+// entirely rather than polling a PR that was never opened.
 //
 // branch is derived from cf.AgentBranch(num), never from the outcome line's
 // own landing= field (issue #1949): a prompt-injected read-only Box holds no
@@ -109,13 +109,29 @@ func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
 	}
 }
 
-// blockHandoff posts a merge-blocked comment and marks num agent-complete —
-// the shared "blocked, not failed" outcome for every hostMediateDraftPR
-// failure mode.
+// blockHandoff posts a merge-blocked comment and leaves num visibly not-done
+// — the shared outcome for every hostMediateDraftPR failure mode, the most
+// common being a read-only Box whose PR-intent nudge (issue #2045) was
+// exhausted without ever yielding a usable SPINDRIFT_PR_INTENT line.
+//
+// The issue is deliberately left in-progress rather than transitioned
+// anywhere (issue #2046). Three terminal states were on the table and each is
+// wrong here but the one chosen:
+//
+//   - agent-complete (the pre-#2046 posture) reads as "merged and green" to
+//     an operator, so a run where nothing landed looks done — the exact #2036
+//     confusion of an OPEN issue wearing agent-complete with no PR.
+//   - agent-failed (ADR 0012) is reserved for a Box that exited non-zero and
+//     needs crash triage; this Box exited cleanly at status=ready and did
+//     real work (its branch was even relayed to the outbox), so demoting it
+//     to the crash queue mis-files it.
+//   - agent-in-progress — left untouched — is the honest "blocked, not
+//     failed, and certainly not complete" state: the merge-blocked comment
+//     just posted explains why the run stopped, and the issue stays visibly
+//     unfinished for a human to pick up rather than masquerading as done.
 func (s *Settle) blockHandoff(num, branch string, err error) (string, bool) {
 	fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
 	s.it.Comment(num, fmt.Sprintf("merge blocked: %v", err))
-	s.transitionState(num, forge.InProgress, forge.Complete)
 	return "", false
 }
 
