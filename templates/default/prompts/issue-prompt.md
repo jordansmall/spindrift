@@ -164,7 +164,7 @@ resolve them here, in this loop:
    scope, or a change too large to fold in without derailing the slice. When
    unsure whether a finding clears that bar, fix it rather than file it.
 
-${FILE_ISSUES_STEP}# LAND THE CHANGE
+${FILE_ISSUES_DIRECT_STEP}${FILE_ISSUES_RELAY_STEP}# LAND THE CHANGE
 
 Check `$CODE_FORGE` (already in your environment — run `echo $CODE_FORGE` if
 unsure):

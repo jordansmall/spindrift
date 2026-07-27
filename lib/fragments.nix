@@ -52,10 +52,49 @@
     fragment = "code-review-default.md";
     var = "CODE_REVIEW_STEP";
   }
+  # The write-mechanism split (issue #2019): a filer configured under
+  # read-only + ORCHESTRATOR_ENABLED holds no write token, so its FILE
+  # ISSUES step (this pair) and its own in-agent label/file steps (the two
+  # pairs below) emit the host-mediated SPINDRIFT_ISSUE_INTENT relay instead
+  # of gh label create/gh issue create. FILER_FILE_DIRECT/FILER_FILE_RELAY
+  # (agent/entrypoint.sh's phase_prompt_assembly precompute block) are off
+  # together whenever the filer isn't configured at all -- the same "no
+  # trace when off" shape FILER_ENABLED alone gave this step before this
+  # ticket -- and otherwise pick exactly one, mirroring the
+  # BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY pairing style above. The
+  # filer's own authoring judgment (dedup search, conventional-commit
+  # titling, merge-vs-split) stays in the unconditional dedup/title/body
+  # steps filer-prompt.md keeps outside this split -- only the write
+  # mechanism itself is gated.
   {
-    gate = "FILER_ENABLED";
-    fragment = "file-issues.md";
-    var = "FILE_ISSUES_STEP";
+    gate = "FILER_FILE_DIRECT";
+    fragment = "file-issues-direct.md";
+    var = "FILE_ISSUES_DIRECT_STEP";
+  }
+  {
+    gate = "FILER_FILE_RELAY";
+    fragment = "file-issues-relay.md";
+    var = "FILE_ISSUES_RELAY_STEP";
+  }
+  {
+    gate = "FILER_FILE_DIRECT";
+    fragment = "filer-label-direct.md";
+    var = "FILER_LABEL_DIRECT_STEP";
+  }
+  {
+    gate = "FILER_FILE_RELAY";
+    fragment = "filer-label-relay.md";
+    var = "FILER_LABEL_RELAY_STEP";
+  }
+  {
+    gate = "FILER_FILE_DIRECT";
+    fragment = "filer-file-direct.md";
+    var = "FILER_FILE_DIRECT_STEP";
+  }
+  {
+    gate = "FILER_FILE_RELAY";
+    fragment = "filer-file-relay.md";
+    var = "FILER_FILE_RELAY_STEP";
   }
   {
     gate = "AUTO_FORMAT";

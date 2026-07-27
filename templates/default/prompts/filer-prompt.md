@@ -13,12 +13,7 @@ open).
 
 Steps:
 
-1. Ensure the `agent-review-finding` label exists — idempotent, never fail if
-   it already does:
-     gh label create agent-review-finding --color d4c5f9 \
-       --description "Filed from a non-blocking review finding" 2>/dev/null || true
-
-2. Dedup — a finding must not already be tracked, or already dismissed:
+${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_RELAY_STEP}2. Dedup — a finding must not already be tracked, or already dismissed:
    - Search ALL open issues, regardless of label — an open issue describing
      the same problem means it's already tracked, whether human-filed,
      `ready-for-agent`, filed via `/to-tickets`, or from a prior Filer run:
@@ -38,11 +33,7 @@ Steps:
    Skip any finding that matches an existing issue in either search by
    subject.
 
-3. File one issue per surviving finding. Merge findings into a single issue
-   only when they are the same change (e.g. the same file/function/fix) —
-   never merge unrelated findings just to reduce issue count.
-
-4. Each filed issue:
+${FILER_FILE_DIRECT_STEP}${FILER_FILE_RELAY_STEP}4. Each filed issue:
    - Title: a conventional-commit-style title scoped to the fix itself (e.g.
      `fix(auth): validate token expiry before use`) — never a meta-title like
      "review finding".
@@ -61,9 +52,14 @@ given:
 
 ```
 FILED <url> — <title>
+QUEUED — <title>
 SKIPPED (duplicate of <url>) — <title>
 FAILED — <title>: <reason>
 ```
+
+`FILED <url>` is for a direct `gh issue create`; `QUEUED` is for a
+`SPINDRIFT_ISSUE_INTENT` line, whose issue isn't filed until the launcher
+relays it after this run exits, so no URL is known yet.
 
 If you were given no findings, or every finding was skipped, output exactly:
 

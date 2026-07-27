@@ -492,6 +492,27 @@ phase_prompt_assembly() {
     FILER_ENABLED=1
   fi
 
+  # The filer's write-mechanism gates (issue #2019): relay only activates on
+  # read-only (BOX_WRITE_ENABLED absent) + ORCHESTRATOR_ENABLED -- every
+  # other combination (read-write regardless of orchestrator, or read-only
+  # with the orchestrator off) keeps today's direct `gh issue create` path,
+  # unchanged, so the read-only+orchestrator-off case still degrades to the
+  # pre-existing PR-body paste on filer failure rather than gaining a new
+  # relay behavior. Both stay off (no FILE ISSUES step at all) when the
+  # filer isn't configured -- the same "off means off" shape FILER_ENABLED
+  # alone gave this step before this ticket.
+  local FILER_FILE_DIRECT=""
+  local FILER_FILE_RELAY=""
+  if [ -n "$FILER_ENABLED" ]; then
+    if [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "${ORCHESTRATOR_ENABLED:-}" ]; then
+      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+      FILER_FILE_RELAY=1
+    else
+      # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+      FILER_FILE_DIRECT=1
+    fi
+  fi
+
   # The PR-body ticket-reference gates the pr-body-closes/pr-body-local-ref/
   # pr-body-local-noref registry rows name (issue #1429, ADR 0029): exactly
   # one is ever on, picked from ISSUE_TRACKER x LOCAL_ISSUE_REFERENCE (both
