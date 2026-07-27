@@ -134,6 +134,7 @@
       scoutModel,
       reviewModel,
       filerModel,
+      workerModel,
     }:
     let
       agents =
@@ -175,6 +176,22 @@
               "WebFetch"
             ];
             model = filerModel;
+          };
+        }
+        // lib.optionalAttrs (workerModel != "") {
+          worker = {
+            description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
+            prompt = "";
+            tools = [
+              "Read"
+              "Bash"
+              "Edit"
+              "Write"
+              "Glob"
+              "Grep"
+              "WebFetch"
+            ];
+            model = workerModel;
           };
         };
     in
