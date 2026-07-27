@@ -1015,22 +1015,44 @@ artifact, not a growing transcript:
 
 - **Run-state handoff.** A JSON file (`/tmp/run-state.json` by default,
   outside the repo like `/tmp/brief.md`) records done slices, remaining
-  slices, the last reviewer verdict, and the scout-brief path. Each pass reads
-  it before running and writes it back after, through a temp-file-then-rename
-  so a mid-write kill can never leave a half-written file behind. A missing or
-  corrupt file degrades to a cold start, never an error.
+  slices, the last reviewer verdict, the reviewer's own findings text, and
+  the scout-brief path. Each pass reads it before running and writes it back
+  after, through a temp-file-then-rename so a mid-write kill can never leave
+  a half-written file behind. A missing or corrupt file degrades to a cold
+  start, never an error.
 - **Seeded prompts.** Before any pass whose run-state carries prior data (in
   practice every pass after the first, though a warm-started state file would
   seed pass 1 too), the orchestrator prepends a "Run-state handoff" section —
-  last verdict, done/remaining slices, scout-brief path — to the original
-  prompt, so a fresh implementor pass knows where a prior pass left off
-  without reading its transcript.
+  last verdict, done/remaining slices, reviewer findings, scout-brief path —
+  to the original prompt, so a fresh implementor pass knows where a prior
+  pass left off without reading its transcript.
 - **Code-owned caps.** `--max-review-rounds` (default 3) caps additional
   passes a `BLOCK` verdict may trigger; `--max-slices` (default 5) caps the
   total `driver-exec` invocation count regardless of verdict; either set to
   `0` disables that cap. The loop stops the instant a pass's log carries a
-  terminal `SPINDRIFT_OUTCOME` line — unconditionally, ahead of either cap —
-  or as soon as a pass's verdict is anything but `BLOCK`.
+  terminal `SPINDRIFT_OUTCOME` line — unconditionally, ahead of either cap.
+
+**Code-owned review pass (issue #2037).** `--review-prompt-file` names a
+distinct prompt (`review-prompt.md`) the orchestrator invokes as its own
+fresh-session pass, in between implement/fix passes, instead of the
+implementor spawning a `reviewer` subagent inline. `entrypoint.sh` sets the
+flag only on the ORCHESTRATOR-on work-dispatch path — never for research or a
+warm `FIX_PASS` box — so this is a consumer of ADR 0035's master switch, not a
+separate sub-knob: turning the orchestrator on always drives the review pass.
+An implement/fix pass's own REVIEW section is stripped to a short deferral
+(`review-loop-orchestrator.md`) that stops the turn right after COMMIT unless
+the seeded run-state above it already shows an `APPROVE` verdict, and the
+`reviewer` entry is dropped from `--agents` entirely (verdict authority moves
+fully to the review pass). The loop this drives is implement → review →
+(`BLOCK`) fix → review → … → (`APPROVE`) land, where "land" is just another
+fix-role pass that finds nothing left to do — `scanReviewLog` (not
+`scanPassLog`) reads the review pass's own verdict and Blocking/Non-blocking
+findings text, both carried into the next fix pass's seeded prompt via
+run-state. Each pass's `pass_start` marker carries its role (`implement`,
+`review`, or `fix`) so telemetry can tell them apart. Cost is not assumed
+lower than the inline loop — a review pass re-reads the diff cold instead of
+sharing the implementor's warm cache — the win this pass is scoped for is
+review quality and code-owned termination, measured via the A/B harness.
 
 The Driver stays pluggable ([ADR 0009](adr/0009-agent-cli-is-a-pluggable-driver.md)):
 the orchestrator only ever talks to `driver-exec` through the same
