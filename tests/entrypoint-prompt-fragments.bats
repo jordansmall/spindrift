@@ -418,7 +418,8 @@ setup() {
 
 # A scout/reviewer-only template (no "filer" key) must not require
 # filer-prompt.md to exist -- the file read has to be gated on the template
-# actually carrying a filer entry, same as the FILE_ISSUES_STEP gate above.
+# actually carrying a filer entry, same as the FILE_ISSUES_DIRECT_STEP/
+# FILE_ISSUES_RELAY_STEP gates above.
 @test "entrypoint does not require filer-prompt.md when the template omits filer" {
   local prompt_dir="$BATS_TEST_TMPDIR/prompts"
   mkdir -p "$prompt_dir"
@@ -452,10 +453,10 @@ setup() {
 }
 
 # issue #463: the conditional prompt steps above (SKILL_PREAMBLE,
-# FILE_ISSUES_STEP, AUTO_FORMAT_STEP, AUTO_LINT_STEP, CI_FAILURE_STEP) must be
-# read from fragment files under PROMPTS_DIR, not authored as heredocs in the
-# script -- a markdown heading string-literal in entrypoint.sh means prose
-# leaked back into bash.
+# FILE_ISSUES_DIRECT_STEP/FILE_ISSUES_RELAY_STEP, AUTO_FORMAT_STEP,
+# AUTO_LINT_STEP, CI_FAILURE_STEP) must be read from fragment files under
+# PROMPTS_DIR, not authored as heredocs in the script -- a markdown heading
+# string-literal in entrypoint.sh means prose leaked back into bash.
 @test "entrypoint source contains no prompt-prose markdown headings" {
   run grep -E '# (FILE ISSUES|AUTO-FORMAT|AUTO-LINT|CI FAILURE)' "$ENTRYPOINT"
   [ "$status" -ne 0 ]
@@ -756,6 +757,21 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   [ "$status" -eq 0 ]
   grep -qF 'gh issue create' "$CLAUDE_AGENTS_FILE"
   grep -qF 'gh label create' "$CLAUDE_AGENTS_FILE"
+  ! grep -qF 'SPINDRIFT_ISSUE_INTENT' "$CLAUDE_AGENTS_FILE"
+  grep -qF "the filer's returned issue URLs" "$CLAUDE_PROMPT_FILE"
+}
+
+# AC2's own wording (issue #2019): read-write with the orchestrator OFF (no
+# ORCHESTRATOR_ENABLED at all, byte-for-byte the pre-#2019 default) must
+# emit no SPINDRIFT_ISSUE_INTENT line either -- distinct from the
+# orchestrator-on case above, which proves ORCHESTRATOR_ENABLED alone can't
+# flip the gate without read-only too.
+@test "filer write step: read-write with orchestrator off emits no SPINDRIFT_ISSUE_INTENT" {
+  export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readwrite-orch-off"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'gh issue create' "$CLAUDE_AGENTS_FILE"
   ! grep -qF 'SPINDRIFT_ISSUE_INTENT' "$CLAUDE_AGENTS_FILE"
   grep -qF "the filer's returned issue URLs" "$CLAUDE_PROMPT_FILE"
 }
