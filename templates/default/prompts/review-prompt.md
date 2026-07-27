@@ -68,6 +68,11 @@ VERDICT: APPROVE | BLOCK
 - file:line — nit, smell, or suggestion
 ```
 
+The first line must be exactly `VERDICT: APPROVE` or `VERDICT: BLOCK` — the
+in-box orchestrator's scanPassLog greps this literal verbatim (ADR 0035);
+reword it and the multi-pass loop silently collapses to single-pass on
+ORCHESTRATOR_ENABLED runs.
+
 List every finding you actually found; do not truncate to look clean. Cap each
 finding at one line — do not wrap an explanation across multiple lines. If a
 section is genuinely empty, write `- none`. APPROVE only when the Blocking
