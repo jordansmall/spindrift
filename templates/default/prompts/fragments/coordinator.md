@@ -15,4 +15,6 @@ slice before moving on.
 
 You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
 implements each slice; the coordinator keeps the checks green, reviews, and
-commits.
+commits. The one-slice, test-first Hard rule below is what each delegated
+slice must satisfy — you enforce it; the worker performs each
+red-green-refactor cycle.
