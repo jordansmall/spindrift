@@ -525,6 +525,20 @@ phase_prompt_assembly() {
     FILER_ENABLED=1
   fi
 
+  # The IMPLEMENT coordinator gate (issue #2056): a `worker` subagent baked
+  # into AGENTS_JSON_TEMPLATE (WORKER_MODEL set, issue #2054) turns the main
+  # session's IMPLEMENT section into a coordinator that delegates each slice to
+  # the worker (coordinator.md). Detected the same way FILER_ENABLED is -- a
+  # "worker" key in the nix-baked template -- so it stays orthogonal to
+  # $ORCHESTRATOR: a worker can be provisioned with the orchestrator on or off,
+  # and with none provisioned the step renders empty and the section is
+  # byte-identical to today's single-implementor prompt.
+  local WORKER_PROVISIONED=""
+  if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("worker")' >/dev/null 2>&1; then
+    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+    WORKER_PROVISIONED=1
+  fi
+
   # The filer's write-mechanism gates (issue #2019): relay only activates on
   # read-only (BOX_WRITE_ENABLED absent) + the orchestrator gate -- every
   # other combination (read-write regardless of orchestrator, or read-only
