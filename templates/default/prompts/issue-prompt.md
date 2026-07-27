@@ -135,7 +135,10 @@ Before the PR, spawn a fresh `reviewer` subagent on the branch diff vs
 halfway gate; delegating returns a result to act on. The `reviewer` is
 pre-provisioned via `--agents`; pass only the issue number.
 
-Its final message starts `VERDICT: APPROVE` or `VERDICT: BLOCK`. On BLOCK:
+Its final message starts `VERDICT: APPROVE` or `VERDICT: BLOCK`. This exact
+wording is load-bearing (ADR 0035): the in-box orchestrator's scanPassLog
+greps for it verbatim, and rewording it silently collapses the multi-pass
+loop to single-pass on ORCHESTRATOR_ENABLED runs. On BLOCK:
 
 1. Fix on this branch, run checks, then commit. Unless the fix is a
    reasonably different change, fold it into the existing commit where it
@@ -218,6 +221,11 @@ ${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}Grammar: `SPI
 itself contain spaces and `=`). The only valid `status` values here are `ready` and `blocked` — no other word belongs in that field.
 `nonce` must be exactly `${RUN_NONCE}`, this run's own control nonce (below)
 — it is not optional.
+
+This grammar's leading token is load-bearing (ADR 0035): the in-box
+orchestrator's scanPassLog greps for it verbatim (via
+`outcome.ParseAnywhere`), and rewording it silently collapses the multi-pass
+loop to single-pass on ORCHESTRATOR_ENABLED runs.
 
 Invalid — each of these breaks the contract, whether or not it parses:
 - Trailing colon: `SPINDRIFT_OUTCOME: issue=${ISSUE_NUMBER} landing=<landing-ref> status=ready note=<short reason> nonce=${RUN_NONCE}` — the required prefix is a literal space after `OUTCOME`, not a colon, so this never matches; the launcher never sees an outcome and treats the run as lost.
