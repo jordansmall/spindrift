@@ -1598,6 +1598,31 @@ func TestScanReviewLogExtractsVerdictAndFindings(t *testing.T) {
 	}
 }
 
+// TestScanReviewLogStopsFindingsAtTheNextRenderedEvent verifies scanReviewLog
+// (issue #2037 review) bounds findings to the verdict message itself: a
+// review pass that keeps talking after its final verdict message (a
+// misbehaving turn, or a rendering quirk) gets a second, separate rendered
+// line of its own -- distinguishable from the verdict message's own embedded
+// newlines by carrying a fresh "[role] " prefix -- and that trailing content
+// must not leak into the seeded fix-pass brief.
+func TestScanReviewLogStopsFindingsAtTheNextRenderedEvent(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:42 -- missing nil check") +
+		streamJSONOutcomeLine("unrelated trailing narration")
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, findings := scanReviewLog(logPath)
+	if strings.Contains(findings, "unrelated trailing narration") {
+		t.Errorf("findings = %q, want it to stop before the next rendered event", findings)
+	}
+	if !strings.Contains(findings, "## Blocking") {
+		t.Errorf("findings = %q, want the verdict message's own findings still present", findings)
+	}
+}
+
 // TestScanReviewLogFindsNothingInPlainNarration verifies a review pass log
 // with no VERDICT marker at all scans as empty rather than a false positive
 // -- the orchestrator's own "no verdict" stop reason relies on this.

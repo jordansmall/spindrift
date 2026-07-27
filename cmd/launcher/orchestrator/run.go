@@ -101,34 +101,16 @@ func run(cfg config, stdout io.Writer) (int, error) {
 	for pass := 1; ; pass++ {
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass}))
 
-		passCfg := cfg
-		if pass > 1 {
-			passCfg.sessionFile = ""
-		}
-
-		seededPromptFile, err := seedPromptFromState(cfg.promptFile, state)
+		// The very last pass's seeded file is deliberately left on disk by
+		// seedAndInvokePass: this is a short-lived, per-box tmp file, and
+		// the box's own filesystem is destroyed with the container
+		// regardless.
+		var seededPromptFile string
+		rc, seededPromptFile, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
 		if err != nil {
 			return 0, err
-		}
-		// The previous pass's own seeded file (if any) is no longer needed
-		// once this pass has its own -- removed now rather than left for
-		// the whole run, so a long-running loop doesn't accumulate one temp
-		// file per pass. The very last pass's file is deliberately left on
-		// disk: this is a short-lived, per-box tmp file, and the box's own
-		// filesystem is destroyed with the container regardless. Checked
-		// against cfg.promptFile itself, not just any temp file: a
-		// zero-state pass's "seeded" file is cfg.promptFile itself unchanged
-		// (seedPromptFromState's own no-op case).
-		if prevSeededPromptFile != "" && prevSeededPromptFile != cfg.promptFile {
-			os.Remove(prevSeededPromptFile)
 		}
 		prevSeededPromptFile = seededPromptFile
-		passCfg.promptFile = seededPromptFile
-
-		rc, err = invokeDriverExec(passCfg, stdout)
-		if err != nil {
-			return 0, err
-		}
 
 		// An empty cfg.scoutBriefPath means the caller didn't supply one
 		// this pass, not that the prior path is now unknown, so it leaves
@@ -136,12 +118,12 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		if cfg.scoutBriefPath != "" {
 			state.ScoutBriefPath = cfg.scoutBriefPath
 		}
-		// driver-exec (re-)creates passCfg.logPath fresh for this one pass
+		// driver-exec (re-)creates cfg.logPath fresh for this one pass
 		// (issue #626's run.go: os.Create truncates), so by the time it
 		// returns the file holds exactly this pass's own raw stream -- the
 		// same file --log-path already pointed driver-exec at, read back
 		// here instead of tapped from cmd.Stdout directly.
-		verdict, hasOutcome := scanPassLog(passCfg.logPath)
+		verdict, hasOutcome := scanPassLog(cfg.logPath)
 		if verdict != "" {
 			state.LastVerdict = verdict
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: verdict}))
@@ -225,36 +207,24 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		pass++
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: implRole}))
 
-		seededPromptFile, err := seedPromptFromState(cfg.promptFile, state)
+		var seededPromptFile string
+		rc, seededPromptFile, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
 		if err != nil {
 			return 0, err
-		}
-		if prevSeededPromptFile != "" && prevSeededPromptFile != cfg.promptFile {
-			os.Remove(prevSeededPromptFile)
 		}
 		prevSeededPromptFile = seededPromptFile
-
-		implCfg := cfg
-		implCfg.promptFile = seededPromptFile
-		if pass > 1 {
-			implCfg.sessionFile = ""
-		}
-
-		rc, err = invokeDriverExec(implCfg, stdout)
-		if err != nil {
-			return 0, err
-		}
 
 		if cfg.scoutBriefPath != "" {
 			state.ScoutBriefPath = cfg.scoutBriefPath
 		}
-		verdict, hasOutcome := scanPassLog(implCfg.logPath)
-		if verdict != "" {
-			state.LastVerdict = verdict
-			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: verdict}))
-		}
+		// Verdict authority belongs solely to the review pass below under
+		// this loop -- an implement/fix pass's own prompt has the
+		// self-review loop stripped, so its log is scanned only for
+		// hasOutcome; any VERDICT-shaped text it happens to contain is not
+		// state.LastVerdict's source of truth here.
+		_, hasOutcome := scanPassLog(cfg.logPath)
 		if !hasOutcome {
-			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: pass, Verdict: verdict, Reason: fmt.Sprintf("exit %d", rc)}))
+			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: pass, Reason: fmt.Sprintf("exit %d", rc)}))
 		}
 		if writeErr := WriteRunState(cfg.stateFile, state); writeErr != nil {
 			fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
@@ -286,7 +256,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			return 0, err
 		}
 
-		reviewVerdict, findings := scanReviewLog(reviewCfg.logPath)
+		reviewVerdict, findings := scanReviewLog(cfg.logPath)
 		if reviewVerdict != "" {
 			state.LastVerdict = reviewVerdict
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: reviewVerdict}))
@@ -474,7 +444,23 @@ func scanReviewLog(logPath string) (verdict, findings string) {
 	if i := strings.Index(first, "] "); i != -1 && strings.HasPrefix(first, "[") {
 		first = first[i+2:]
 	}
-	findingsLines := append([]string{first}, lines[verdictLine+1:]...)
+	findingsLines := []string{first}
+	// Every subsequent physical line belongs to this same message only until
+	// the next "[role] "-prefixed line -- a fresh rendered event, not a
+	// continuation of the verdict message's own embedded newlines (see
+	// RenderTranscript: every event gets its own "lines" entry, but only a
+	// multi-line entry's own first line carries the prefix). Stopping there
+	// keeps a well-behaved review pass's findings exactly what its final
+	// message contained, not whatever content RenderTranscript happens to
+	// render afterward (review-prompt.md's own contract says there should be
+	// none, but a rendering quirk or a misbehaving turn shouldn't corrupt the
+	// seeded fix-pass brief).
+	for _, l := range lines[verdictLine+1:] {
+		if strings.HasPrefix(l, "[") {
+			break
+		}
+		findingsLines = append(findingsLines, l)
+	}
 	findings = strings.TrimSpace(strings.Join(findingsLines, "\n"))
 	return verdict, findings
 }
@@ -519,6 +505,37 @@ func invokeDriverExec(cfg config, stdout io.Writer) (int, error) {
 		return 0, runErr
 	}
 	return 0, nil
+}
+
+// seedAndInvokePass seeds cfg.promptFile from state (removing the previous
+// pass's own seeded file first, per seedPromptFromState's caller contract --
+// prevSeededPromptFile is "" on the first pass, and left alone by
+// seedPromptFromState's own no-op case when state carries nothing new to
+// seed), pins cfg.sessionFile verbatim only for pass 1 and runs every pass
+// after it sessionless, and invokes driver-exec. Returns the pass's exit
+// code and its own seeded prompt file, for the caller to track as its next
+// prevSeededPromptFile. Shared by run's legacy single loop and
+// runWithReviewPass's implement/fix pass -- the one piece of per-pass
+// bookkeeping identical between them; each keeps its own scan-and-decide
+// logic afterward, since a legacy pass's own verdict drives its loop while
+// an implement/fix pass's does not.
+func seedAndInvokePass(cfg config, state RunState, prevSeededPromptFile string, pass int, stdout io.Writer) (rc int, seededPromptFile string, err error) {
+	seededPromptFile, err = seedPromptFromState(cfg.promptFile, state)
+	if err != nil {
+		return 0, "", err
+	}
+	if prevSeededPromptFile != "" && prevSeededPromptFile != cfg.promptFile {
+		os.Remove(prevSeededPromptFile)
+	}
+
+	passCfg := cfg
+	passCfg.promptFile = seededPromptFile
+	if pass > 1 {
+		passCfg.sessionFile = ""
+	}
+
+	rc, err = invokeDriverExec(passCfg, stdout)
+	return rc, seededPromptFile, err
 }
 
 // buildDriverExecCmd resolves driver-exec on PATH and returns it invoked with
