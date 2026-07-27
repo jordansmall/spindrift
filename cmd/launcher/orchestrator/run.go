@@ -48,6 +48,16 @@ type config struct {
 	// makes, across every pass regardless of verdict (issue #1998) -- the
 	// coarser backstop on top of maxReviewRounds. Zero means no cap.
 	maxSlices int
+	// reviewPromptFile is the code-owned review pass's own prompt file
+	// (issue #2037): a distinct driver-exec invocation against
+	// reviewPromptFile, scanned by scanReviewLog rather than scanPassLog,
+	// replaces the implementor's own inline "spawn a reviewer subagent,
+	// loop until no blocking findings" prose. Empty disables the review
+	// pass entirely -- run keeps its pre-#2037 single-loop behavior,
+	// unchanged bit-for-bit -- so entrypoint.sh sets it only on the
+	// ORCHESTRATOR-on work-dispatch path (ADR 0035's master switch; there
+	// is no separate review-pass sub-knob).
+	reviewPromptFile string
 }
 
 // run loops driver-exec for as many passes as the implementor's own

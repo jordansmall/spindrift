@@ -30,6 +30,7 @@ func main() {
 	scoutBriefPath := flag.String("scout-brief-path", "/tmp/brief.md", "path to the scout brief, recorded into the run-state artifact")
 	maxReviewRounds := flag.Int("max-review-rounds", 3, "cap on additional fresh-session passes a BLOCK verdict may trigger; 0 disables the cap")
 	maxSlices := flag.Int("max-slices", 5, "cap on total driver-exec invocations this run makes; 0 disables the cap")
+	reviewPromptFile := flag.String("review-prompt-file", "", "path to the code-owned review pass's own prompt text; empty disables the review pass")
 	flag.Parse()
 
 	if *issue == "" {
@@ -49,21 +50,22 @@ func main() {
 	}
 
 	rc, err := run(config{
-		promptFile:      *promptFile,
-		agentsFile:      *agentsFile,
-		sessionFile:     *sessionFile,
-		driverBin:       *driverBin,
-		driverFlags:     *driverFlags,
-		model:           *model,
-		devshell:        *devshell,
-		devshellName:    *devshellName,
-		issue:           *issue,
-		logPath:         *logPath,
-		heartbeatLog:    *heartbeatLog,
-		stateFile:       *stateFile,
-		scoutBriefPath:  *scoutBriefPath,
-		maxReviewRounds: *maxReviewRounds,
-		maxSlices:       *maxSlices,
+		promptFile:       *promptFile,
+		agentsFile:       *agentsFile,
+		sessionFile:      *sessionFile,
+		driverBin:        *driverBin,
+		driverFlags:      *driverFlags,
+		model:            *model,
+		devshell:         *devshell,
+		devshellName:     *devshellName,
+		issue:            *issue,
+		logPath:          *logPath,
+		heartbeatLog:     *heartbeatLog,
+		stateFile:        *stateFile,
+		scoutBriefPath:   *scoutBriefPath,
+		maxReviewRounds:  *maxReviewRounds,
+		maxSlices:        *maxSlices,
+		reviewPromptFile: *reviewPromptFile,
 	}, os.Stdout)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator:", err)
