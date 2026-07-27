@@ -13,6 +13,16 @@ import (
 	"spindrift.dev/launcher/internal/logscan"
 )
 
+// Token is the exact SPINDRIFT_OUTCOME marker literal. ADR 0035: the
+// orchestrator's scanPassLog greps a rendered pass log for this literal via
+// ParseAnywhere, and issue-prompt.md's OUTCOME contract must keep emitting it
+// verbatim -- rewording either side without the other silently collapses the
+// multi-pass loop to single-pass on ORCHESTRATOR_ENABLED runs. Exported so
+// that guard (cmd/launcher/orchestrator's TestPromptMarkersMatchScanner) and
+// this package's own Parse/ParseAnywhere/LastInLog share one literal instead
+// of each redeclaring it.
+const Token = "SPINDRIFT_OUTCOME"
+
 // Outcome is the machine-readable result written by a Box as its final line.
 // Grammar: SPINDRIFT_OUTCOME issue=<num> landing=<landing-ref> status=<status> note=<text>
 // Note may contain spaces and '='; all other fields are space-delimited tokens.
@@ -50,14 +60,13 @@ func IsNearMiss(err error) bool {
 // whole logs and needs it to avoid mistaking a bare mention in prose for an
 // attempt; a caller handing Parse a single already-selected line doesn't.
 func Parse(line string) (Outcome, error) {
-	const token = "SPINDRIFT_OUTCOME"
 	line = strings.TrimSpace(line)
-	rest, ok := stripToken(line, token)
+	rest, ok := stripToken(line, Token)
 	if !ok {
-		if containsToken(line, token) {
-			return Outcome{}, fmt.Errorf("%w: line contains %q but does not match the standalone-line grammar", ErrNearMiss, token)
+		if containsToken(line, Token) {
+			return Outcome{}, fmt.Errorf("%w: line contains %q but does not match the standalone-line grammar", ErrNearMiss, Token)
 		}
-		return Outcome{}, fmt.Errorf("outcome: line missing %q prefix", token+" ")
+		return Outcome{}, fmt.Errorf("outcome: line missing %q prefix", Token+" ")
 	}
 	o := Outcome{
 		Issue:   tokenField(rest, "issue"),
@@ -77,7 +86,7 @@ func Parse(line string) (Outcome, error) {
 // Line returns the canonical SPINDRIFT_OUTCOME representation of o.
 // Parse(o.Line()) == o for all valid Outcomes.
 func (o Outcome) Line() string {
-	return fmt.Sprintf("SPINDRIFT_OUTCOME issue=%s landing=%s status=%s note=%s",
+	return fmt.Sprintf(Token+" issue=%s landing=%s status=%s note=%s",
 		o.Issue, o.Landing, o.Status, o.Note)
 }
 
@@ -92,7 +101,7 @@ func (o Outcome) Line() string {
 // (Outcome{}, false) when the token is absent, or the text from that point
 // on fails to parse.
 func ParseAnywhere(line string) (Outcome, bool) {
-	idx := tokenIndex(line, "SPINDRIFT_OUTCOME")
+	idx := tokenIndex(line, Token)
 	if idx < 0 {
 		return Outcome{}, false
 	}
@@ -136,10 +145,9 @@ func ParseAnywhere(line string) (Outcome, bool) {
 // a caller can warn that a spoof attempt or misconfigured run occurred even
 // when a valid outcome was ultimately found (or wasn't).
 func LastInLog(path string, expectedNonce string) (o Outcome, found bool, skipped bool, err error) {
-	const token = "SPINDRIFT_OUTCOME"
 	var lastLeading, lastMention string
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
-		if _, ok := stripToken(strings.TrimSpace(line), token); ok {
+		if _, ok := stripToken(strings.TrimSpace(line), Token); ok {
 			if expectedNonce != "" && !LineHasNonce(line, expectedNonce) {
 				skipped = true
 				return
@@ -147,7 +155,7 @@ func LastInLog(path string, expectedNonce string) (o Outcome, found bool, skippe
 			lastLeading = line
 			return
 		}
-		if containsToken(line, token) && looksLikeAttempt(line) {
+		if containsToken(line, Token) && looksLikeAttempt(line) {
 			if expectedNonce != "" && !LineHasNonce(line, expectedNonce) {
 				skipped = true
 				return
