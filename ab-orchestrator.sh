@@ -148,7 +148,7 @@ printf 'issue\tarm\toutcome\tcost_usd\tin_tok\tout_tok\tcache_read\tcache_create
 # launcher's own comment keeps only the last, so summing is the honest total).
 # jq -Rn + fromjson? tolerates the log's bare non-JSON lines (==>, SPINDRIFT_*).
 parse_usage() { # $1=log  -> "cost in out cread ccreate turns ms"
-  jq -Rn '
+  jq -Rnr '
     [inputs | fromjson?] | map(select(.type=="result")) as $r
     | [ ($r|map(.total_cost_usd // 0)|add // 0),
         ($r|map(.usage.input_tokens // 0)|add // 0),
