@@ -60,6 +60,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `settings.models.model` | `MODEL` | `claude-opus-4-8` | main/coordinator Claude model for the agent (zero-rebuild runtime switch); worker-tier defaults are unaffected |
 | `settings.models.reviewModel` | `REVIEW_MODEL` | `claude-opus-4-8` | reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set |
 | `settings.models.scoutModel` | `SCOUT_MODEL` | `claude-haiku-4-5-20251001` | scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set |
+| `settings.models.workerModel` | `WORKER_MODEL` | `claude-sonnet-5` | implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable |
 
 ## Self-healing & retries (`settings.selfHealing`)
 
