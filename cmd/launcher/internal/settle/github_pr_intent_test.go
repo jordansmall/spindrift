@@ -90,11 +90,13 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges(t *testin
 // TestSettle_GithubReadOnly_MissingPRIntentBlocksNotFails asserts a
 // status=ready Box that left no PR-intent line blocks the hand-off before
 // any real host write — no bundle relay (a real force-push to origin), no
-// draft PR created, CI never watched — with the same blocked-not-failed
-// posture RelayBundle's own missing-bundle case has (never demoted to
-// agent-failed). Parsing the PR-intent line first, ahead of the relay,
-// matters here: relaying is a genuine side effect against the remote, and a
-// box that left no PR-intent has nothing worth relaying a branch for.
+// draft PR created, CI never watched. The nudge-exhausted hand-off is left
+// visibly not-done (#2046): the issue stays agent-in-progress rather than
+// being marked agent-complete, which reads as merged/green to an operator
+// (the exact #2036 confusion), yet is never demoted to agent-failed either.
+// Parsing the PR-intent line first, ahead of the relay, matters here:
+// relaying is a genuine side effect against the remote, and a box that left
+// no PR-intent has nothing worth relaying a branch for.
 func TestSettle_GithubReadOnly_MissingPRIntentBlocksNotFails(t *testing.T) {
 	const issNum = "1919"
 	branch := "agent/issue-1919"
@@ -127,8 +129,11 @@ func TestSettle_GithubReadOnly_MissingPRIntentBlocksNotFails(t *testing.T) {
 		t.Errorf("Merge must not be called when no PR was ever opened; fc.Merged=%q", fc.Merged)
 	}
 	iss, _ := fc.Issue(issNum)
-	if !containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("issue must carry agent-complete after a blocked hand-off; labels=%v", iss.Labels)
+	if containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("a nudge-exhausted blocked hand-off must NOT carry agent-complete — it reads as merged/done to an operator (#2046, the #2036 confusion); labels=%v", iss.Labels)
+	}
+	if !containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("a nudge-exhausted blocked hand-off is left in-progress, visibly not-done; labels=%v", iss.Labels)
 	}
 	if containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must NOT carry agent-failed after a blocked hand-off; labels=%v", iss.Labels)
@@ -175,8 +180,11 @@ func TestSettle_GithubReadOnly_RelayFailureBlocksBeforeCreatingPR(t *testing.T) 
 		t.Errorf("CreateDraftPR must not be called when the relay fails, got %+v", fc.CreateDraftPRCalls)
 	}
 	iss, _ := fc.Issue(issNum)
-	if !containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("issue must carry agent-complete after a blocked relay; labels=%v", iss.Labels)
+	if containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("a blocked relay must NOT carry agent-complete — it reads as merged/done (#2046); labels=%v", iss.Labels)
+	}
+	if !containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("a blocked relay is left in-progress, visibly not-done; labels=%v", iss.Labels)
 	}
 }
 
