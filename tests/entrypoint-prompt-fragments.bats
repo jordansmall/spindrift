@@ -840,6 +840,10 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice 
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! grep -q 'commits\.Work test-first' "$CLAUDE_PROMPT_FILE"
+  # The coordinator step still renders ahead of the retained Hard rule prose.
+  coord_line=$(grep -nF 'coordinator' "$CLAUDE_PROMPT_FILE" | head -1 | cut -d: -f1)
+  rule_line=$(grep -nF 'Work test-first, one slice' "$CLAUDE_PROMPT_FILE" | head -1 | cut -d: -f1)
+  [ "$coord_line" -lt "$rule_line" ]
 }
 
 @test "REVIEW section: orchestrator off keeps the inline reviewer-subagent loop" {
