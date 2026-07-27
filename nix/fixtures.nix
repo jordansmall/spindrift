@@ -76,9 +76,12 @@ let
     inherit nixpkgs system;
     # Empty subagent tiers keep this a genuine no-model harness so the
     # agents-json-baked check can assert an empty AGENTS_JSON_TEMPLATE.
+    # workerModel must be pinned to empty too — its schema default is
+    # non-empty (claude-sonnet-5, issue #2054), unlike scout/reviewer/filer.
     defaults = {
       scoutModel = "";
       reviewModel = "";
+      workerModel = "";
     };
     packages = p: [ p.hello ];
   };
@@ -112,11 +115,15 @@ let
   # A scout-only Consumer: only the scout model is configured, proving each
   # subagent is baked into --agents independently rather than as an
   # all-or-nothing pair. Eval-only, consumed by agents-json-baked.
+  # workerModel is pinned to empty on each single-agent fixture below too —
+  # its schema default (unlike scout/reviewer/filer) is non-empty, so leaving
+  # it unset would bake a worker entry alongside the one under test.
   scoutOnlyHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     defaults = {
       scoutModel = "solo-scout";
       reviewModel = "";
+      workerModel = "";
     };
     packages = p: [ p.hello ];
   };
@@ -127,6 +134,7 @@ let
     defaults = {
       scoutModel = "";
       reviewModel = "solo-reviewer";
+      workerModel = "";
     };
     packages = p: [ p.hello ];
   };
@@ -141,6 +149,23 @@ let
       scoutModel = "";
       reviewModel = "";
       filerModel = "solo-filer";
+      workerModel = "";
+    };
+    packages = p: [ p.hello ];
+  };
+
+  # A worker-only Consumer: only the worker model is configured, proving it
+  # is composed independently like scout/reviewer/filer (issue #2054). Unlike
+  # filer, WORKER_MODEL defaults to a non-empty model (claude-sonnet-5) — this
+  # fixture pins scout/reviewer/filer to empty so the worker entry is the only
+  # one baked. Eval-only, consumed by agents-json-baked.
+  workerOnlyHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      scoutModel = "";
+      reviewModel = "";
+      filerModel = "";
+      workerModel = "solo-worker";
     };
     packages = p: [ p.hello ];
   };
@@ -331,6 +356,7 @@ in
     scoutOnlyHarness
     reviewerOnlyHarness
     filerOnlyHarness
+    workerOnlyHarness
     customHarness
     dockerHarness
     rancherHarness

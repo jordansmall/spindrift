@@ -94,3 +94,14 @@ setup() {
   jq -e '.filer.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
 }
 
+# The worker (issue #2054) is provisioned by default (WORKER_MODEL defaults to
+# claude-sonnet-5), composed independently exactly like scout/reviewer/filer.
+@test "entrypoint passes --agents with only worker when the template carries worker alone" {
+  export AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement-capable worker subagent","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]}}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -s "$CLAUDE_AGENTS_FILE" ]
+  jq -e 'has("worker") and (has("scout") | not) and (has("reviewer") | not) and (has("filer") | not)' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.worker.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+}
+
