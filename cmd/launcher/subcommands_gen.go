@@ -5,8 +5,8 @@ package main
 // Regenerate with `nix run .#regen` after editing lib/subcommands.nix.
 var subcommandRegistry = []subcommandEntry{
 	{name: "console", usage: "", doc: "browse the open backlog interactively (read-only)"},
-	{name: "dispatch", usage: "[--no-build] [--yes] [issue...]", doc: "dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)"},
-	{name: "research", usage: "[--no-build] [--yes] [issue...]", doc: "advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes"},
+	{name: "dispatch", usage: "[--no-build] [--yes] [--continuous] [issue...]", doc: "dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)"},
+	{name: "research", usage: "[--no-build] [--yes] [--continuous] [issue...]", doc: "advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes"},
 	{name: "preview", usage: "[issue...]", doc: "dry-run: show what dispatch would pick up, in order"},
 	{name: "build", usage: "", doc: "realize the agent image without running any agent"},
 	{name: "recover", usage: "<issue>", doc: "run the merge gate for a single issue"},

@@ -72,6 +72,23 @@ func dispatchYesArgs(args []string) (yes bool, remaining []string) {
 	return
 }
 
+// dispatchContinuousArgs extracts the --continuous flag from the args
+// following the "dispatch"/"research" verb — a bare-flag alias for
+// --continuous-dispatch 1 (issue #2033), following the dispatchNoBuildArgs/
+// dispatchYesArgs hand-rolled pattern rather than a schema kind: "bool"
+// change, so the schema-backed --continuous-dispatch <val> form keeps
+// working unchanged (deprecated, to be removed in a later release).
+func dispatchContinuousArgs(args []string) (continuous bool, remaining []string) {
+	for _, a := range args {
+		if a == "--continuous" {
+			continuous = true
+		} else {
+			remaining = append(remaining, a)
+		}
+	}
+	return
+}
+
 // extractInputFlag pulls "--input <path>" out of args — the nix-rendered
 // wrapper's sole nix-computed argument (ADR 0020): the Launcher input
 // document's store path. Not a schema knob, so it is extracted before
@@ -246,7 +263,7 @@ func parseFlags(args []string) ([]string, error) {
 			continue
 		}
 		// Dispatch-only boolean flags: pass through to the verb handler.
-		if arg == "--no-build" || arg == "--yes" || arg == "--force" {
+		if arg == "--no-build" || arg == "--yes" || arg == "--force" || arg == "--continuous" {
 			remaining = append(remaining, arg)
 			i++
 			continue
@@ -440,11 +457,12 @@ func printSubcommands(w io.Writer) {
 		if e.usage != "" {
 			left += " " + e.usage
 		}
-		// 42 = len("dispatch [--no-build] [--yes] [issue...]"), the widest
-		// name+usage in subcommandRegistry, plus a 2-space gap before doc.
-		// TestPrintSubcommands_ExactOutput pins the result; widen this if a
-		// future entry's name+usage exceeds that length.
-		fmt.Fprintf(w, "  %-42s%s\n", left, e.doc)
+		// 57 = 55 (len of "dispatch [--no-build] [--yes] [--continuous]
+		// [issue...]", the widest name+usage in subcommandRegistry) + a
+		// 2-space gap before doc. TestPrintSubcommands_ExactOutput pins the
+		// result; widen this if a future entry's name+usage exceeds that
+		// length.
+		fmt.Fprintf(w, "  %-57s%s\n", left, e.doc)
 	}
 }
 
@@ -483,8 +501,9 @@ func printHelpFull(w io.Writer) {
 	printSubcommands(w)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Dispatch flags:")
-	fmt.Fprintln(w, "  --no-build  fail fast if the image is absent instead of building; pair with 'spindrift build' for split build/run flows")
-	fmt.Fprintln(w, "  --yes       skip confirmation prompt when dispatching unlabeled issues (alias: --force)")
+	fmt.Fprintln(w, "  --no-build    fail fast if the image is absent instead of building; pair with 'spindrift build' for split build/run flows")
+	fmt.Fprintln(w, "  --yes         skip confirmation prompt when dispatching unlabeled issues (alias: --force)")
+	fmt.Fprintln(w, "  --continuous  bare-flag alias for --continuous-dispatch 1 (which stays available, deprecated)")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Flags (flag > flake setting > default precedence; a knob env var still")
 	fmt.Fprintln(w, "wins this release but is deprecated and warns — ADR 0020):")

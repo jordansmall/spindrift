@@ -43,13 +43,13 @@
   }
   {
     name = "dispatch";
-    usage = "[--no-build] [--yes] [issue...]";
+    usage = "[--no-build] [--yes] [--continuous] [issue...]";
     doc = "dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)";
     dynamicIssueCompletion = true;
   }
   {
     name = "research";
-    usage = "[--no-build] [--yes] [issue...]";
+    usage = "[--no-build] [--yes] [--continuous] [issue...]";
     doc = "advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes";
   }
   {

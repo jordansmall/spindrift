@@ -1447,7 +1447,14 @@ var verbHandlers = map[string]verbHandler{
 	"dispatch": func(args []string, stderr io.Writer) int {
 		noBuild, dispatchArgs := dispatchNoBuildArgs(args)
 		forceYes, dispatchArgs := dispatchYesArgs(dispatchArgs)
+		continuous, dispatchArgs := dispatchContinuousArgs(dispatchArgs)
 		nums := dispatchIssueArgs(dispatchArgs)
+		if continuous {
+			if err := os.Setenv("CONTINUOUS_DISPATCH", "1"); err != nil {
+				fmt.Fprintf(stderr, "%s\n", err)
+				return 1
+			}
+		}
 		lc, err := bootstrap(!noBuild, dispatchKindWork)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
@@ -1461,7 +1468,14 @@ var verbHandlers = map[string]verbHandler{
 	"research": func(args []string, stderr io.Writer) int {
 		noBuild, researchArgs := dispatchNoBuildArgs(args)
 		forceYes, researchArgs := dispatchYesArgs(researchArgs)
+		continuous, researchArgs := dispatchContinuousArgs(researchArgs)
 		nums := dispatchIssueArgs(researchArgs)
+		if continuous {
+			if err := os.Setenv("CONTINUOUS_DISPATCH", "1"); err != nil {
+				fmt.Fprintf(stderr, "%s\n", err)
+				return 1
+			}
+		}
 		lc, err := bootstrap(!noBuild, dispatchKindResearch)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
