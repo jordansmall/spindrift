@@ -194,7 +194,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 // pass, nothing carried forward yet) this returns promptFile unchanged and
 // creates no temp file.
 func seedPromptFromState(promptFile string, state RunState) (string, error) {
-	if state.LastVerdict == "" && len(state.DoneSlices) == 0 && len(state.RemainingSlices) == 0 && state.ScoutBriefPath == "" {
+	if state.LastVerdict == "" && len(state.DoneSlices) == 0 && len(state.RemainingSlices) == 0 && state.ScoutBriefPath == "" && state.ReviewFindings == "" {
 		return promptFile, nil
 	}
 
@@ -218,6 +218,9 @@ func seedPromptFromState(promptFile string, state RunState) (string, error) {
 	}
 	if state.ScoutBriefPath != "" {
 		fmt.Fprintf(&b, "- Scout brief: %s\n", state.ScoutBriefPath)
+	}
+	if state.ReviewFindings != "" {
+		fmt.Fprintf(&b, "- Reviewer findings:\n\n%s\n", state.ReviewFindings)
 	}
 	b.WriteString("\n---\n\n")
 	b.Write(original)

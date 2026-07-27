@@ -33,6 +33,29 @@ func TestRunStateRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRunStateRoundTripIncludesReviewFindings verifies ReviewFindings (issue
+// #2037: the code-owned review pass's own Blocking/Non-blocking findings
+// text, distinct from the bare LastVerdict word) survives a
+// WriteRunState/ReadRunState round trip like every other field.
+func TestRunStateRoundTripIncludesReviewFindings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run-state.json")
+	want := RunState{
+		LastVerdict:    "BLOCK",
+		ReviewFindings: "## Blocking\n- run.go:42 -- missing nil check\n\n## Non-blocking\n- none",
+	}
+
+	if err := WriteRunState(path, want); err != nil {
+		t.Fatalf("WriteRunState: %v", err)
+	}
+	got, err := ReadRunState(path)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.ReviewFindings != want.ReviewFindings {
+		t.Errorf("ReviewFindings = %q, want %q", got.ReviewFindings, want.ReviewFindings)
+	}
+}
+
 // TestReadRunStateNoFileYetReturnsZeroValue verifies the actual pass-one
 // production path (issue #1997): --state-file defaults to a fixed tmp path
 // that has never been written, and ReadRunState must treat that as "no
