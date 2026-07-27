@@ -50,3 +50,21 @@ setup() {
   [ "$status" -eq 0 ]
   grep -q '^env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1$' "$CLAUDE_LOG"
 }
+
+# The code-owned review pass (issue #2037): entrypoint.sh renders
+# review-prompt.md and threads it to the orchestrator's own
+# --review-prompt-file, only on this fresh-issue work-dispatch path.
+@test "orchestrator path forwards --review-prompt-file carrying a real path" {
+  export ORCHESTRATOR_ENABLED=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- '--review-prompt-file' "$ORCHESTRATOR_LOG"
+  local review_prompt_file
+  review_prompt_file="$(grep -oE -- '--review-prompt-file [^ ]+' "$ORCHESTRATOR_LOG" | awk '{print $2}')"
+  # run_driver_in_env removes its own temp files once the pass returns, so the
+  # path itself no longer exists by the time bats inspects it here -- assert
+  # it was a real, non-empty flag value (not an omitted/empty flag), which is
+  # what proves entrypoint.sh actually rendered and threaded review-prompt.md
+  # through, rather than skipping the flag or passing it empty.
+  [ -n "$review_prompt_file" ]
+}
