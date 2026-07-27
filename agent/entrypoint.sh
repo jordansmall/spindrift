@@ -502,6 +502,23 @@ phase_prompt_assembly() {
   ORCHESTRATOR=""
   [ -n "${ORCHESTRATOR_ENABLED:-}" ] && ORCHESTRATOR=1
 
+  # The REVIEW section gate (issue #2037): off, the implementor still spawns
+  # a fresh `reviewer` subagent inline and loops until no blocking findings
+  # remain, exactly as before. On, that review runs as the orchestrator's own
+  # code-owned pass instead -- this pass's own prompt stops after COMMIT
+  # unless a prior review pass's APPROVE is already visible in the seeded
+  # run-state handoff (agent's REVIEW step, review-loop-orchestrator.md). No
+  # separate sub-knob (ADR 0035): reads $ORCHESTRATOR, the one computed gate.
+  local REVIEW_LOOP_INLINE=""
+  local REVIEW_LOOP_ORCHESTRATOR=""
+  if [ -n "$ORCHESTRATOR" ]; then
+    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+    REVIEW_LOOP_ORCHESTRATOR=1
+  else
+    # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
+    REVIEW_LOOP_INLINE=1
+  fi
+
   local FILER_ENABLED=""
   if [ -n "${AGENTS_JSON_TEMPLATE:-}" ] && printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
     # shellcheck disable=SC2034 # read indirectly via "${!_fgate}" in the loop below
@@ -654,6 +671,13 @@ phase_prompt_assembly() {
   # red on an already-open PR, ADR: selfHeal/runFix in cmd/launcher). A warm fix
   # pass already has the branch checked out and prior work in place, so it runs
   # a dedicated fix-prompt instead of the cold issue-prompt a fresh run uses.
+  # review_prompt_rendered is the code-owned review pass's own prompt text
+  # (issue #2037), threaded through run_driver_in_env to the orchestrator's
+  # --review-prompt-file below -- only for this fresh-issue work dispatch,
+  # and only when $ORCHESTRATOR is on: a research dispatch never reviews
+  # (ADR 0022), and a warm FIX_PASS box already has its own pre-existing,
+  # review-less warm-fix flow (fix-prompt.md), orthogonal to this loop.
+  review_prompt_rendered=""
   if _is_research_kind; then
     prompt="$(_subst "${PROMPTS_DIR}/research-prompt.md")"
     _driver_session_mode="initial"
@@ -663,6 +687,11 @@ phase_prompt_assembly() {
   else
     prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"
     _driver_session_mode="initial"
+    if [ -n "$ORCHESTRATOR" ]; then
+      review_prompt_rendered="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
+    else
+      review_prompt_rendered=""
+    fi
   fi
   # Applied in COMMS, CHECK, OUTCOME order so a prompt missing all three (e.g.
   # fix-prompt.md's fix-specific-preamble-only default) ends up with them in
@@ -685,32 +714,53 @@ phase_prompt_assembly() {
   # whichever agents it actually carries and forward the completed JSON;
   # otherwise omit the flag entirely.
   if [ -n "${AGENTS_JSON_TEMPLATE:-}" ]; then
-    local scout_prompt review_prompt filer_prompt
+    local scout_prompt filer_prompt
     scout_prompt="$(_subst "${PROMPTS_DIR}/scout-prompt.md")"
-    review_prompt="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
     filer_prompt=""
     if printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
       filer_prompt="$(_subst "${PROMPTS_DIR}/filer-prompt.md")"
     fi
-    agents_json="$(jq -n \
-      --argjson template "$AGENTS_JSON_TEMPLATE" \
-      --arg scout_prompt "$scout_prompt" \
-      --arg review_prompt "$review_prompt" \
-      --arg filer_prompt "$filer_prompt" \
-      '$template
-       | if has("scout") then .scout.prompt = $scout_prompt else . end
-       | if has("reviewer") then .reviewer.prompt = $review_prompt else . end
-       | if has("filer") then .filer.prompt = $filer_prompt else . end')"
+    if [ -n "$ORCHESTRATOR" ]; then
+      # The code-owned review pass replaces the implementor's own inline
+      # reviewer subagent entirely on this path (issue #2037) -- drop it
+      # from the template so it's never provisioned into --agents at all,
+      # not merely muted; verdict authority moves fully to the review pass.
+      agents_json="$(jq -n \
+        --argjson template "$AGENTS_JSON_TEMPLATE" \
+        --arg scout_prompt "$scout_prompt" \
+        --arg filer_prompt "$filer_prompt" \
+        '$template
+         | del(.reviewer)
+         | if has("scout") then .scout.prompt = $scout_prompt else . end
+         | if has("filer") then .filer.prompt = $filer_prompt else . end')"
+    else
+      local review_prompt
+      review_prompt="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
+      agents_json="$(jq -n \
+        --argjson template "$AGENTS_JSON_TEMPLATE" \
+        --arg scout_prompt "$scout_prompt" \
+        --arg review_prompt "$review_prompt" \
+        --arg filer_prompt "$filer_prompt" \
+        '$template
+         | if has("scout") then .scout.prompt = $scout_prompt else . end
+         | if has("reviewer") then .reviewer.prompt = $review_prompt else . end
+         | if has("filer") then .filer.prompt = $filer_prompt else . end')"
+    fi
   else
     agents_json=""
   fi
 }
 
 # run_driver_in_env runs the Driver against $1 (the assembled prompt), with
-# $2 (--agents JSON, or "" to omit the flag) and $3 (session mode, forwarded
+# $2 (--agents JSON, or "" to omit the flag), $3 (session mode, forwarded
 # verbatim to the nix-supplied _driver_session_flags — "initial"/"resume" pin
 # or resume the issue's session id; any other value, e.g. "" for the
-# conflict-resolve pass, yields no session flags). Delegates to driver-exec
+# conflict-resolve pass, yields no session flags), and $4 (the code-owned
+# review pass's own rendered prompt text, issue #2037; "" to omit
+# --review-prompt-file, the only case driver-exec itself ever sees since it
+# declares no such flag -- only $ORCHESTRATOR's orchestrator invoker below
+# understands it, and entrypoint.sh only ever renders $4 non-empty when
+# $ORCHESTRATOR is already on). Delegates to driver-exec
 # (issue #626), the in-box Go unit that owns "run the Driver, optionally
 # inside the Project devShell" as one code path: it takes the prompt/agents/
 # session as file paths (a compiled binary crosses the devShell process
@@ -732,7 +782,7 @@ phase_prompt_assembly() {
 # sentinel, issue #515's dynamic-scoping shape), not ORCHESTRATOR_ENABLED
 # directly -- the one authority for orchestrator-conditioned divergence.
 run_driver_in_env() {
-  local prompt="$1" agents_json="$2" session_mode="$3"
+  local prompt="$1" agents_json="$2" session_mode="$3" review_prompt="${4:-}"
 
   # An unrecognized session_mode (e.g. "" for the conflict-resolve pass, which
   # pins/resumes no session) falls through _driver_session_flags' case with no
@@ -753,6 +803,12 @@ run_driver_in_env() {
   _session_file="$(mktemp)"
   printf '%s' "$_driver_session_flags_rendered" > "$_session_file"
 
+  local _review_prompt_file=""
+  if [ -n "$review_prompt" ]; then
+    _review_prompt_file="$(mktemp)"
+    printf '%s' "$review_prompt" > "$_review_prompt_file"
+  fi
+
   # stream_log is driver-exec's teed copy of the Driver's raw stdout, read
   # below by _driver_extract_outcome -- the launcher's own capture of stdout
   # (logs/issue-<n>.log, byte-exact, unchanged) is separate and untouched.
@@ -770,6 +826,15 @@ run_driver_in_env() {
     _driver_invoker=driver-exec
   fi
 
+  # --review-prompt-file only ever means something to the orchestrator
+  # binary (driver-exec declares no such flag, and would hard-fail on an
+  # unknown one) -- guarded on $_driver_invoker, itself already derived from
+  # $ORCHESTRATOR just above, rather than a second raw test of the gate.
+  local -a _review_prompt_flags=()
+  if [ "$_driver_invoker" = orchestrator ] && [ -n "$_review_prompt_file" ]; then
+    _review_prompt_flags=(--review-prompt-file "$_review_prompt_file")
+  fi
+
   local claude_rc=0
   set +e
   "$_driver_invoker" \
@@ -781,10 +846,11 @@ run_driver_in_env() {
     --model "${MODEL:-}" \
     --issue "$ISSUE_NUMBER" \
     --log-path "$stream_log" \
-    "${_devshell_flags[@]}"
+    "${_devshell_flags[@]}" \
+    "${_review_prompt_flags[@]}"
   claude_rc=$?
   set -e
-  rm -f "$_prompt_file" "$_agents_file" "$_session_file"
+  rm -f "$_prompt_file" "$_agents_file" "$_session_file" "$_review_prompt_file"
 
   # The launcher greps '^SPINDRIFT_OUTCOME ' from the container log, but the
   # Driver's raw transcript format buries it (claude wraps it in a stream-json
@@ -967,7 +1033,7 @@ main() {
   # keeping them out of true global scope (issue #515).
   local _rebase_and_publish _had_rebase_conflict
   local _use_dev_shell _harness_path
-  local prompt agents_json _driver_session_mode
+  local prompt agents_json _driver_session_mode review_prompt_rendered
   local _last_outcome_line _last_pr_intent_line _recovery_attempted
   local ORCHESTRATOR
 
@@ -991,7 +1057,7 @@ main() {
   fi
   local claude_rc=0
   _recovery_attempted=""
-  run_driver_in_env "$prompt" "$agents_json" "$_driver_session_mode" || claude_rc=$?
+  run_driver_in_env "$prompt" "$agents_json" "$_driver_session_mode" "$review_prompt_rendered" || claude_rc=$?
 
   # Resume-once-then-fall-through via the required-marker gate (issue
   # #2044). The same --agents JSON as the first pass rides along on any
