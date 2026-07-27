@@ -52,6 +52,25 @@
     fragment = "code-review-default.md";
     var = "CODE_REVIEW_STEP";
   }
+  # The REVIEW section itself (issue #2037, ADR 0035): off, the implementor
+  # still spawns a fresh `reviewer` subagent inline and loops until no
+  # blocking findings remain, exactly as before. On, the orchestrator drives
+  # that review as its own code-owned pass (agent/entrypoint.sh's
+  # phase_prompt_assembly precompute block derives REVIEW_LOOP_INLINE /
+  # REVIEW_LOOP_ORCHESTRATOR together from $ORCHESTRATOR, the same
+  # exactly-one-on pairing style as ISSUE_TRACKER_GITHUB/LOCAL above), so this
+  # pass's own prompt stops after COMMIT unless a prior review pass's
+  # APPROVE is already visible in the seeded run-state handoff.
+  {
+    gate = "REVIEW_LOOP_INLINE";
+    fragment = "review-loop-inline.md";
+    var = "REVIEW_LOOP_INLINE_STEP";
+  }
+  {
+    gate = "REVIEW_LOOP_ORCHESTRATOR";
+    fragment = "review-loop-orchestrator.md";
+    var = "REVIEW_LOOP_ORCHESTRATOR_STEP";
+  }
   # The write-mechanism split (issue #2019): a filer configured under
   # read-only + ORCHESTRATOR_ENABLED holds no write token, so its FILE
   # ISSUES step (this pair) and its own in-agent label/file steps (the two
