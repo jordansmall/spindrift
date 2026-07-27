@@ -32,4 +32,5 @@ set_box_env() {
   export REPO_SLUG="owner/repo"
   export REVIEW_MODEL="claude-opus-4-8"
   export SCOUT_MODEL="claude-haiku-4-5-20251001"
+  export WORKER_MODEL="claude-sonnet-5"
 }

@@ -182,6 +182,15 @@
     boxEnv = true;
     boxEnvOnly = true;
   };
+  workerModel = {
+    env = "WORKER_MODEL";
+    group = "Models";
+    default = "claude-sonnet-5";
+    doc = "implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable";
+    flakeOption = true;
+    boxEnv = true;
+    boxEnvOnly = true;
+  };
   devShellName = {
     env = "DEV_SHELL_NAME";
     group = "Sandbox & resources";

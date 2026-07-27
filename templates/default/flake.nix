@@ -106,6 +106,8 @@
             #   reviewModel = "claude-opus-4-8";
             #   # scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set
             #   scoutModel = "claude-haiku-4-5-20251001";
+            #   # implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable
+            #   workerModel = "claude-sonnet-5";
             # };
             # selfHealing = {
             #   # jitter seconds added to 429 hold duration to spread re-dispatch

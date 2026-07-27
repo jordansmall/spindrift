@@ -64,6 +64,7 @@ var schemaFlags = []flagEntry{
 	{env: "SPINDRIFT_SKILLS_DIR", flag: "spindrift-skills-dir", group: "Prompt & skill iteration", kind: "string", doc: "host directory mounted read-only over /home/agent/.claude/skills so the headless agent can load operator-provided skills", dflt: "", settingsPath: ""},
 	{env: "TRANSIENT_BACKOFF_SECS", flag: "transient-backoff-secs", group: "Self-healing & retries", kind: "int", doc: "base backoff seconds per retry for 529/overloaded and network transients", dflt: "30", settingsPath: "settings.selfHealing.transientBackoffSecs"},
 	{env: "TRANSIENT_RETRY_MAX", flag: "transient-retry-max", group: "Self-healing & retries", kind: "int", doc: "max retries for transient exits (529/network backoff; consecutive 429 holds)", dflt: "3", settingsPath: "settings.selfHealing.transientRetryMax"},
+	{env: "WORKER_MODEL", flag: "worker-model", group: "Models", kind: "string", doc: "implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable", dflt: "claude-sonnet-5", settingsPath: "settings.models.workerModel"},
 }
 
 // secretKnobs lists secret knobs that have no value flag.
