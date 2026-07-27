@@ -289,6 +289,59 @@ func scanPassLog(logPath string) (verdict string, hasOutcome bool) {
 	return verdict, hasOutcome
 }
 
+// scanReviewLog scans a code-owned review pass's own rendered log (issue
+// #2037) -- a distinct driver-exec invocation against cfg.reviewPromptFile,
+// never a subagent nested inside an implement/fix pass -- for its verdict and
+// the findings text (the "VERDICT: ..." line plus its own Blocking/Non-
+// blocking sections) that message carries. Unlike scanPassLog's callers,
+// where the verdict only ever reaches the transcript as a subagent's
+// tool_result (RenderTranscript collapses that block's internal newlines
+// behind "[role]   -> "), a review pass's verdict is its own top-level final
+// assistant message: RenderTranscript's "text" case only TrimSpaces it, so
+// its internal newlines survive into the rendered transcript verbatim, and
+// findings can be sliced out from the verdict line onward.
+//
+// Returns ("", "") when no verdict line is found at all. Mirrors findVerdict's
+// last-wins, fail-unsafe-toward-BLOCK resolution when more than one verdict
+// line appears (review-prompt.md's own contract only ever emits one, but nothing
+// stops a rendering quirk from producing more).
+func scanReviewLog(logPath string) (verdict, findings string) {
+	d, err := driver.New("claude")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: scan review log:", err)
+		return "", ""
+	}
+	rendered, err := d.RenderTranscript(logPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: scan review log:", err)
+		return "", ""
+	}
+
+	lines := strings.Split(rendered, "\n")
+	verdictLine := -1
+	for i, line := range lines {
+		if v, ok := findVerdict(strings.TrimSpace(line)); ok {
+			verdict = v
+			verdictLine = i
+		}
+	}
+	if verdictLine == -1 {
+		return "", ""
+	}
+
+	// RenderTranscript prefixes only the first physical line of a multi-line
+	// assistant message with "[role] " (see scanPassLog's own comment) --
+	// strip it here so the seeded fix-pass brief carries the reviewer's
+	// findings text alone, not a rendering artifact.
+	first := lines[verdictLine]
+	if i := strings.Index(first, "] "); i != -1 && strings.HasPrefix(first, "[") {
+		first = first[i+2:]
+	}
+	findingsLines := append([]string{first}, lines[verdictLine+1:]...)
+	findings = strings.TrimSpace(strings.Join(findingsLines, "\n"))
+	return verdict, findings
+}
+
 // findVerdict reports whether line carries a "VERDICT: APPROVE" or
 // "VERDICT: BLOCK" marker anywhere in it, per review-prompt.md's documented
 // output contract -- a substring match, not a bare-line prefix match, since
