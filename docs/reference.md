@@ -16,6 +16,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift dispatch 42 57`       | dispatch exactly these issues, bypassing the label/barrier gates                |
 | `spindrift dispatch --no-build`  | fail fast if the image is absent instead of building it first (split build/run) |
 | `spindrift dispatch --yes`       | skip the confirmation prompt when dispatching unlabeled issues (alias `--force`)|
+| `spindrift dispatch --continuous`| bare-flag alias for `--continuous-dispatch 1` (issue #2033); the older `--continuous-dispatch <val>` form still works, deprecated |
 | `spindrift research`             | advise-only research dispatch: launch one container per `agent-research` issue, post a verdict comment, apply the terminal label — see [Research dispatch](#research-dispatch) |
 | `spindrift research 42 57`       | research exactly these issues, same selective semantics as `dispatch <nums>`    |
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
@@ -2179,7 +2180,11 @@ guaranteed correct for your config.
 
 Set `CONTINUOUS_DISPATCH=1` to opt into the slot-refill dispatch mode in a
 driving loop other than `dogfood.sh`; see `lib/env-schema.nix`'s
-`continuousDispatch` entry for the full behavior.
+`continuousDispatch` entry for the full behavior. `spindrift dispatch
+--continuous` (and `spindrift research --continuous`) is a bare-flag alias
+for `--continuous-dispatch 1` (issue #2033); the older
+`--continuous-dispatch <val>` form keeps working, deprecated, to be removed
+in a later release.
 
 **Research.** `dogfood.sh` drives `spindrift dispatch` (the work kind) by
 default; set `DOGFOOD_KIND=research` to drive `spindrift research` instead —

@@ -348,6 +348,7 @@ rec {
         "--no-build"
         "--yes"
         "--force"
+        "--continuous"
         "--help"
         "--version"
         "--secret-cmd"
@@ -474,6 +475,10 @@ rec {
           doc = "skip confirmation prompt when dispatching unlabeled issues (alias: --yes)";
         }
         {
+          flag = "continuous";
+          doc = "bare-flag alias for --continuous-dispatch 1 (which stays available, deprecated)";
+        }
+        {
           flag = "help";
           doc = "show usage and exit";
         }
@@ -569,6 +574,7 @@ rec {
         "    '--no-build:fail fast if the image is absent instead of building it'\n"
         "    '--yes:skip the confirmation prompt when dispatching unlabeled issues'\n"
         "    '--force:alias for --yes'\n"
+        "    '--continuous:bare-flag alias for --continuous-dispatch 1 (which stays available, deprecated)'\n"
         "    '--help:show usage'\n"
         "    '--version:show version'\n"
         "    '--secret-cmd:templated secret-fetch command; {name} substitutes the kebab-case env name (lowest precedence)'\n"
@@ -746,6 +752,11 @@ rec {
         .B \-\-yes
         Skip the confirmation prompt when dispatching unlabeled issues. Alias:
         .BR \-\-force .
+        .TP
+        .B \-\-continuous
+        Bare-flag alias for
+        .B \-\-continuous-dispatch 1
+        (which stays available, deprecated).
         .SH OPTIONS
         Flags take precedence over the Consumer flake's settings (carried by the
         Launcher input document, ADR 0020), which take precedence over baked

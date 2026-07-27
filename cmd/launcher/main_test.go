@@ -74,6 +74,7 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 		{"research", "42"},
 		{"research", "--no-build", "42"},
 		{"research", "--yes", "42"},
+		{"research", "--continuous", "42"},
 	}
 	for _, argv := range cases {
 		var stdout, stderr bytes.Buffer
@@ -84,6 +85,41 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 		if !strings.Contains(stderr.String(), "REPO_SLUG") {
 			t.Errorf("mainRun(%v) stderr = %q, want a REPO_SLUG validation error", argv, stderr.String())
 		}
+	}
+}
+
+// TestMainRun_Dispatch_ContinuousSetsEnv verifies the bare `--continuous`
+// flag (issue #2033) sets CONTINUOUS_DISPATCH the same way
+// `--continuous-dispatch 1` does, reaching loadConfig via bootstrap before
+// validate fails fast on the missing REPO_SLUG.
+func TestMainRun_Dispatch_ContinuousSetsEnv(t *testing.T) {
+	t.Setenv("REPO_SLUG", "")
+	t.Setenv("CONTINUOUS_DISPATCH", "")
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"dispatch", "--continuous"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("mainRun(dispatch --continuous) code = %d, want 1", code)
+	}
+	if got := os.Getenv("CONTINUOUS_DISPATCH"); got != "1" {
+		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
+	}
+}
+
+// TestMainRun_Research_ContinuousSetsEnv verifies `--continuous` on the
+// `research` verb also sets CONTINUOUS_DISPATCH (issue #2033), mirroring
+// TestMainRun_Dispatch_ContinuousSetsEnv.
+func TestMainRun_Research_ContinuousSetsEnv(t *testing.T) {
+	t.Setenv("REPO_SLUG", "")
+	t.Setenv("CONTINUOUS_DISPATCH", "")
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"research", "--continuous"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("mainRun(research --continuous) code = %d, want 1", code)
+	}
+	if got := os.Getenv("CONTINUOUS_DISPATCH"); got != "1" {
+		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
 	}
 }
 

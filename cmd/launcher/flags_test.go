@@ -319,20 +319,32 @@ func TestPrintSubcommands_ConsoleFirst(t *testing.T) {
 	}
 }
 
+// TestParseFlags_ContinuousPassthrough: --continuous passes through like
+// --no-build, rather than erroring as an unknown flag (issue #2033).
+func TestParseFlags_ContinuousPassthrough(t *testing.T) {
+	remaining, err := parseFlags([]string{"dispatch", "--continuous"})
+	if err != nil {
+		t.Fatalf("parseFlags with --continuous: unexpected error: %v", err)
+	}
+	if len(remaining) != 2 || remaining[0] != "dispatch" || remaining[1] != "--continuous" {
+		t.Errorf("remaining = %v, want [dispatch --continuous]", remaining)
+	}
+}
+
 // TestPrintSubcommands_ExactOutput pins the rendered subcommand listing
 // byte-for-byte so a future subcommandRegistry-vs-format change (e.g. the
 // column-width constant in printSubcommands) can't silently misalign the
 // output the way a hand-picked width once did (issue #1575 review).
 func TestPrintSubcommands_ExactOutput(t *testing.T) {
 	want := "Subcommands:\n" +
-		"  console                                   browse the open backlog interactively (read-only)\n" +
-		"  dispatch [--no-build] [--yes] [issue...]  dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)\n" +
-		"  research [--no-build] [--yes] [issue...]  advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes\n" +
-		"  preview [issue...]                        dry-run: show what dispatch would pick up, in order\n" +
-		"  build                                     realize the agent image without running any agent\n" +
-		"  recover <issue>                           run the merge gate for a single issue\n" +
-		"  doctor                                    check forge credentials, repository connectivity, and label presence (triage fatal, research advisory)\n" +
-		"  reconcile                                 local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)\n"
+		"  console                                                  browse the open backlog interactively (read-only)\n" +
+		"  dispatch [--no-build] [--yes] [--continuous] [issue...]  dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)\n" +
+		"  research [--no-build] [--yes] [--continuous] [issue...]  advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes\n" +
+		"  preview [issue...]                                       dry-run: show what dispatch would pick up, in order\n" +
+		"  build                                                    realize the agent image without running any agent\n" +
+		"  recover <issue>                                          run the merge gate for a single issue\n" +
+		"  doctor                                                   check forge credentials, repository connectivity, and label presence (triage fatal, research advisory)\n" +
+		"  reconcile                                                local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)\n"
 
 	var buf bytes.Buffer
 	printSubcommands(&buf)
@@ -1448,6 +1460,29 @@ func TestDispatchIssueArgs_SkipsNonNumeric(t *testing.T) {
 	}
 }
 
+// TestDispatchContinuousArgs: dispatch --continuous arg extraction.
+func TestDispatchContinuousArgs(t *testing.T) {
+	continuous, rest := dispatchContinuousArgs([]string{"--continuous", "123"})
+	if !continuous {
+		t.Error("want continuous=true, got false")
+	}
+	if len(rest) != 1 || rest[0] != "123" {
+		t.Errorf("rest = %v, want [123]", rest)
+	}
+}
+
+// TestDispatchContinuousArgs_AbsentFlag: no --continuous flag leaves
+// continuous false.
+func TestDispatchContinuousArgs_AbsentFlag(t *testing.T) {
+	continuous, rest := dispatchContinuousArgs([]string{"42"})
+	if continuous {
+		t.Error("want continuous=false, got true")
+	}
+	if len(rest) != 1 || rest[0] != "42" {
+		t.Errorf("rest = %v, want [42]", rest)
+	}
+}
+
 // TestDispatchYesArgs_YesFlag: --yes sets yes=true and is removed from remaining.
 func TestDispatchYesArgs_YesFlag(t *testing.T) {
 	yes, rest := dispatchYesArgs([]string{"--yes", "42"})
@@ -1506,5 +1541,20 @@ func TestPrintHelp_ShowsNoBuildFlag(t *testing.T) {
 	printHelp(&buf)
 	if !strings.Contains(buf.String(), "--no-build") {
 		t.Error("help output missing --no-build flag")
+	}
+}
+
+// TestPrintHelpFull_ShowsContinuousFlag: the full reference documents
+// --continuous as the bare-flag alias for --continuous-dispatch 1
+// (issue #2033).
+func TestPrintHelpFull_ShowsContinuousFlag(t *testing.T) {
+	var buf bytes.Buffer
+	printHelpFull(&buf)
+	out := buf.String()
+	if !strings.Contains(out, "--continuous ") {
+		t.Error("full help output missing --continuous flag")
+	}
+	if !strings.Contains(out, "--continuous-dispatch") {
+		t.Error("full help output's --continuous doc missing a pointer to --continuous-dispatch")
 	}
 }
