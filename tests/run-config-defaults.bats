@@ -53,7 +53,9 @@ EOF
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  grep -q 'MODEL=claude-sonnet-5' "$PODMAN_LOG"
+  # Anchored on a non-word char before MODEL= so this can't false-match
+  # REVIEW_MODEL's own baked default, which is also claude-opus-4-8.
+  grep -qE '(^| )MODEL=claude-opus-4-8' "$PODMAN_LOG"
 }
 
 @test "run passes the baked default SCOUT_MODEL and REVIEW_MODEL into the container" {
@@ -66,11 +68,13 @@ EOF
 
 @test "MODEL env overrides the baked default into the container" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
-  export MODEL=claude-opus-4-8
+  export MODEL=claude-test-model
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  grep -q 'MODEL=claude-opus-4-8' "$PODMAN_LOG"
-  ! grep -q 'MODEL=claude-sonnet-5' "$PODMAN_LOG"
+  grep -q 'MODEL=claude-test-model' "$PODMAN_LOG"
+  # Anchored (see above) so REVIEW_MODEL's own claude-opus-4-8 default
+  # doesn't make this negative assertion a false failure.
+  ! grep -qE '(^| )MODEL=claude-opus-4-8' "$PODMAN_LOG"
 }
 
 @test "a non-default baked label changes which issues run queries" {

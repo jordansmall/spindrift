@@ -149,8 +149,8 @@
   model = {
     env = "MODEL";
     group = "Models";
-    default = "claude-sonnet-5";
-    doc = "primary (implementor) Claude model for the agent (zero-rebuild runtime switch)";
+    default = "claude-opus-4-8";
+    doc = "main/coordinator Claude model for the agent (zero-rebuild runtime switch); worker-tier defaults are unaffected";
     flakeOption = true;
     boxEnv = true;
     boxEnvOnly = true;

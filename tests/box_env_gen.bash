@@ -27,7 +27,7 @@ set_box_env() {
   export IN_PROGRESS_LABEL="agent-in-progress"
   export ISSUE_TRACKER="github"
   export LOCAL_ISSUE_REFERENCE=""
-  export MODEL="claude-sonnet-5"
+  export MODEL="claude-opus-4-8"
   export ORCHESTRATOR_ENABLED=""
   export REPO_SLUG="owner/repo"
   export REVIEW_MODEL="claude-opus-4-8"

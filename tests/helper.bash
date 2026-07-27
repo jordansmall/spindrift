@@ -28,9 +28,10 @@ setup_entrypoint_env() {
   # set_box_env's BOX_FORGE_AND_ISSUE_ACCESS=read-write default; individual
   # read-only tests unset it instead of overriding BOX_FORGE_AND_ISSUE_ACCESS.
   export BOX_WRITE_ENABLED=1
-  # Pinned away from the schema default (claude-sonnet-5) so the MODEL-flag
-  # assertions below stay stable regardless of what the schema defaults to.
-  export MODEL="claude-opus-4-8"
+  # Pinned to a value distinct from the schema default (issue #2055: now
+  # claude-opus-4-8) so the MODEL-flag assertions below stay stable
+  # regardless of what the schema defaults to.
+  export MODEL="claude-test-model"
   export ISSUE_NUMBER="7"
   export ISSUE_TITLE="Do the thing"
   export WORK_DIR="$BATS_TEST_TMPDIR/work"
