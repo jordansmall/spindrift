@@ -296,9 +296,9 @@ func scanPassLog(logPath string) (verdict string, hasOutcome bool) {
 // -- it costs another fix pass, never a premature merge.
 func findVerdict(line string) (string, bool) {
 	switch {
-	case strings.Contains(line, "VERDICT: BLOCK"):
+	case strings.Contains(line, VerdictBlock):
 		return "BLOCK", true
-	case strings.Contains(line, "VERDICT: APPROVE"):
+	case strings.Contains(line, VerdictApprove):
 		return "APPROVE", true
 	default:
 		return "", false
