@@ -195,6 +195,12 @@ EOF
   grep -q '"op":"decision"' <<<"$output"
   grep -q '"decision":"stop"' <<<"$output"
   grep -q 'nudge exhausted after 1 attempt' <<<"$output"
+
+  # The op line never carries the literal marker token in the full-run
+  # context either -- a real downstream scan (_scan_pr_intent_in_log, the
+  # launcher's outcome.LastPRIntentInLog) runs over this whole stream, so
+  # the give-up reason must not be mistaken for a genuine PR-intent attempt.
+  ! grep -q 'SPINDRIFT_PR_INTENT' <<<"$output"
 }
 
 @test "PR-intent gate: never fires on a read-write run" {
