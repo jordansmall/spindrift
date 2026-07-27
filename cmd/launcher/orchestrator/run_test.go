@@ -704,6 +704,379 @@ exit 0
 	}
 }
 
+// reviewPassFakeDriverBody returns a writeFakeDriverExec body scripting a
+// fake driver-exec for the #2037 review-pass loop: implement/fix passes (odd
+// calls) never emit a verdict or outcome of their own -- self-review is
+// stripped from their prompt under the orchestrator, so this fixture mirrors
+// that -- while review passes (even calls) BLOCK on the first review and
+// APPROVE on the second; the pass after that APPROVE (call 5, a "land" pass
+// seeded with the APPROVE verdict) emits the run's only terminal outcome.
+func reviewPassFakeDriverBody(callLog string) string {
+	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "%s")
+case "$n" in
+  2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  5) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+esac
+exit 0
+`, callLog,
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+}
+
+// TestRunWithReviewPassSequenceOnBlockThenApprove verifies the #2037
+// implement -> review -> (BLOCK) fix -> review -> (APPROVE) land loop end to
+// end against a fake driver-exec: 5 invocations (implement, review-BLOCK,
+// fix, review-APPROVE, land), each review pass a distinct fresh-session
+// invocation against cfg.reviewPromptFile (never the implementor's own
+// promptFile), the fix pass seeded with the review's own findings, and the
+// run's own terminal SPINDRIFT_OUTCOME reached only once a review pass has
+// APPROVEd.
+func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	rc, err := run(cfg, &stdout)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if rc != 0 {
+		t.Errorf("exit code = %d, want 0", rc)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
+	}
+
+	if !strings.Contains(lines[0], "--session-file "+sessionFile) {
+		t.Errorf("pass 1 (implement) argv = %q, want the pinned --session-file %q", lines[0], sessionFile)
+	}
+	if got := flagValue(lines[0], "--prompt-file"); got != promptFile {
+		t.Errorf("pass 1 --prompt-file = %q, want the original %q (no prior state to seed from)", got, promptFile)
+	}
+
+	if got := flagValue(lines[1], "--prompt-file"); got != reviewPromptFile {
+		t.Errorf("pass 2 (review) --prompt-file = %q, want cfg.reviewPromptFile %q unseeded", got, reviewPromptFile)
+	}
+	if !strings.Contains(lines[1], "--session-file  --driver-bin") {
+		t.Errorf("pass 2 (review) argv = %q, want an empty --session-file (always fresh)", lines[1])
+	}
+
+	fixPromptFile := flagValue(lines[2], "--prompt-file")
+	if fixPromptFile == "" || fixPromptFile == promptFile || fixPromptFile == reviewPromptFile {
+		t.Fatalf("pass 3 (fix) --prompt-file = %q, want a fresh seeded file", fixPromptFile)
+	}
+	if !strings.Contains(lines[2], "--session-file  --driver-bin") {
+		t.Errorf("pass 3 (fix) argv = %q, want an empty --session-file (fresh session)", lines[2])
+	}
+
+	if got := flagValue(lines[3], "--prompt-file"); got != reviewPromptFile {
+		t.Errorf("pass 4 (review) --prompt-file = %q, want cfg.reviewPromptFile %q unseeded", got, reviewPromptFile)
+	}
+
+	landPromptFile := flagValue(lines[4], "--prompt-file")
+	if landPromptFile == "" || landPromptFile == promptFile || landPromptFile == reviewPromptFile {
+		t.Fatalf("pass 5 (land) --prompt-file = %q, want a fresh seeded file", landPromptFile)
+	}
+	landSeeded, err := os.ReadFile(landPromptFile)
+	if err != nil {
+		t.Fatalf("read seeded land prompt: %v", err)
+	}
+	if !strings.Contains(string(landSeeded), "Last reviewer verdict: APPROVE") {
+		t.Errorf("pass 5 (land) seeded prompt = %q, want it to carry the APPROVE verdict", landSeeded)
+	}
+
+	if !strings.Contains(stdout.String(), "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") {
+		t.Errorf("stdout = %q, want the final pass's own outcome line present unchanged", stdout.String())
+	}
+
+	for _, want := range []string{
+		`"spindrift_op":{"op":"pass_start","pass":1,"role":"implement"}`,
+		`"spindrift_op":{"op":"pass_start","pass":2,"role":"review"}`,
+		`"spindrift_op":{"op":"pass_start","pass":3,"role":"fix"}`,
+		`"spindrift_op":{"op":"pass_start","pass":4,"role":"review"}`,
+		`"spindrift_op":{"op":"pass_start","pass":5,"role":"fix"}`,
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
+		}
+	}
+
+	got, err := ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.LastVerdict != "APPROVE" {
+		t.Errorf("LastVerdict = %q, want %q", got.LastVerdict, "APPROVE")
+	}
+}
+
+// TestRunWithReviewPassSeedsFixPassWithReviewFindings verifies AC (issue
+// #2037): the fix pass the orchestrator runs after a review pass's BLOCK is
+// seeded not just with the bare verdict word (that narrower claim is
+// TestRunWithReviewPassSequenceOnBlockThenApprove above) but with the review
+// pass's own findings text. Stops at 3 calls (implement, review-BLOCK, fix)
+// by having the fix pass itself emit the terminal outcome, so its own seeded
+// --prompt-file -- the run's last pass -- is the one run deliberately leaves
+// on disk to inspect afterward.
+func TestRunWithReviewPassSeedsFixPassWithReviewFindings(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	body := fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "%s")
+case "$n" in
+  2) printf '%%s' '%s' >> "$DRIVER_LOG_PATH" ;;
+  3) printf '%%s' '%s' >> "$DRIVER_LOG_PATH" ;;
+esac
+exit 0
+`, callLog,
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug"),
+		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        filepath.Join(dir, "run-state.json"),
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("driver-exec invocation count = %d, want 3 (log: %q)", len(lines), calls)
+	}
+
+	fixPromptFile := flagValue(lines[2], "--prompt-file")
+	seeded, err := os.ReadFile(fixPromptFile)
+	if err != nil {
+		t.Fatalf("read seeded fix prompt: %v", err)
+	}
+	for _, want := range []string{"ORIGINAL PROMPT TEXT", "Last reviewer verdict: BLOCK", "## Blocking", "run.go:1 -- bug"} {
+		if !strings.Contains(string(seeded), want) {
+			t.Errorf("fix pass seeded prompt = %q, want it to contain %q", seeded, want)
+		}
+	}
+}
+
+// TestRunWithReviewPassTerminatesOnMaxReviewRoundsCap verifies maxReviewRounds
+// (issue #2037) bounds the review-pass loop the same way it already bounds
+// the legacy single loop: a review pass that BLOCKs every time stops once
+// that many additional BLOCK-triggered fix passes have run, each still
+// paired with its own review pass.
+func TestRunWithReviewPassTerminatesOnMaxReviewRoundsCap(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	body := `: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "` + callLog + `")
+if [ $((n % 2)) -eq 0 ]; then
+  printf '%s' '` + streamJSONOutcomeLine("VERDICT: BLOCK") + `' | tee -a "$DRIVER_LOG_PATH"
+fi
+exit 0
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("review prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		maxReviewRounds:  2,
+		maxSlices:        0,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	// implement1, review1(BLOCK), fix2, review2(BLOCK), fix3, review3(BLOCK, cap hit)
+	if len(lines) != 6 {
+		t.Fatalf("driver-exec invocation count = %d, want 6 (log: %q)", len(lines), calls)
+	}
+	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"max review rounds reached"`) {
+		t.Errorf("stdout = %q, want the cap-reached stop reason", stdout.String())
+	}
+}
+
+// TestRunWithReviewPassTerminatesOnMaxSlicesCap verifies maxSlices (issue
+// #2037) is a coarser backstop on the review-pass loop too, counted across
+// both implement/fix and review invocations -- not reset or doubled by the
+// new pass kind.
+func TestRunWithReviewPassTerminatesOnMaxSlicesCap(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	body := `: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "` + callLog + `")
+if [ $((n % 2)) -eq 0 ]; then
+  printf '%s' '` + streamJSONOutcomeLine("VERDICT: BLOCK") + `' | tee -a "$DRIVER_LOG_PATH"
+fi
+exit 0
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("review prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		maxReviewRounds:  0,
+		maxSlices:        3,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("driver-exec invocation count = %d, want 3 (maxSlices cap, log: %q)", len(lines), calls)
+	}
+	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"max slices reached"`) {
+		t.Errorf("stdout = %q, want the cap-reached stop reason", stdout.String())
+	}
+}
+
+// TestRunWithReviewPassStopsWithNoVerdictStopReason verifies a review pass
+// that produces no VERDICT line at all (a malfunctioning or truncated review
+// session) stops the loop immediately with a "no verdict" reason, the same
+// fail-stop the legacy loop gives an implementor pass with no verdict --
+// rather than looping forever or silently treating it as an APPROVE.
+func TestRunWithReviewPassStopsWithNoVerdictStopReason(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, `: > "$DRIVER_LOG_PATH"
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("review prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		driverBin:        "claude",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("driver-exec invocation count = %d, want 2 (implement, review), log: %q", len(lines), calls)
+	}
+	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"no verdict"`) {
+		t.Errorf("stdout = %q, want the no-verdict stop reason", stdout.String())
+	}
+}
+
 // TestRunLoopsOnBlockThenApproveWithFreshSessionPerPass verifies the S3
 // multi-pass loop (issue #1998): a fake driver-exec that BLOCKs its first
 // pass and APPROVEs (with a terminal outcome) its second drives the

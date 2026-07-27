@@ -84,6 +84,10 @@ type config struct {
 // (APPROVE, or no verdict at all -- the S1 single-pass shape), or either
 // numeric cap is reached.
 func run(cfg config, stdout io.Writer) (int, error) {
+	if cfg.reviewPromptFile != "" {
+		return runWithReviewPass(cfg, stdout)
+	}
+
 	state, err := ReadRunState(cfg.stateFile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: read run state:", err)
@@ -121,20 +125,9 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		prevSeededPromptFile = seededPromptFile
 		passCfg.promptFile = seededPromptFile
 
-		cmd, err := buildDriverExecCmd(passCfg)
+		rc, err = invokeDriverExec(passCfg, stdout)
 		if err != nil {
 			return 0, err
-		}
-		cmd.Stdout = stdout
-		cmd.Stderr = os.Stderr
-		runErr := cmd.Run()
-
-		if exitErr, ok := runErr.(*exec.ExitError); ok {
-			rc = exitErr.ExitCode()
-		} else if runErr != nil {
-			return 0, runErr
-		} else {
-			rc = 0
 		}
 
 		// An empty cfg.scoutBriefPath means the caller didn't supply one
@@ -187,6 +180,140 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			break
 		}
 		reviewRounds++
+	}
+
+	return rc, nil
+}
+
+// runWithReviewPass implements the #2037 code-owned review pass: instead of
+// one pass looping on its own inline "spawn a reviewer subagent, repeat until
+// no blocking findings" prose, the orchestrator alternates two structurally
+// different fresh-session invocations -- an implement/fix pass against
+// cfg.promptFile, and a review pass against the distinct
+// cfg.reviewPromptFile -- with the review pass's own verdict, scanned from
+// its own log via scanReviewLog, driving the loop instead of the implement/
+// fix pass's. Only run (cfg.reviewPromptFile != "") calls this; entrypoint.sh
+// sets that field exactly when ORCHESTRATOR is on (ADR 0035's master switch
+// -- no separate review-pass sub-knob), so run's pre-#2037 callers are
+// unaffected.
+//
+// An implement/fix pass's prompt is stripped of the self-review loop under
+// the orchestrator (agent/entrypoint.sh, issue-prompt.md's REVIEW section):
+// it stops after COMMIT unless the seeded run-state above it already shows
+// an APPROVE verdict, in which case it proceeds straight to landing the
+// change and its own terminal SPINDRIFT_OUTCOME. So the sequence this loop
+// drives is implement -> review -> (BLOCK) fix -> review -> ... -> (APPROVE)
+// land, where "land" is just another fix-role pass that happens to find
+// nothing left to fix. The loop's own hasOutcome check (unchanged from run's
+// legacy loop) is what actually stops it, once that land pass reaches its
+// own outcome -- there is no separate "land" pass kind in the Go code.
+func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
+	state, err := ReadRunState(cfg.stateFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: read run state:", err)
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "read", Error: err.Error()}))
+		state = RunState{}
+	}
+
+	rc := 0
+	reviewRounds := 0
+	pass := 0
+	implRole := "implement"
+	prevSeededPromptFile := ""
+	for {
+		// ---- implement/fix pass: cfg.promptFile, seeded from state ----
+		pass++
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: implRole}))
+
+		seededPromptFile, err := seedPromptFromState(cfg.promptFile, state)
+		if err != nil {
+			return 0, err
+		}
+		if prevSeededPromptFile != "" && prevSeededPromptFile != cfg.promptFile {
+			os.Remove(prevSeededPromptFile)
+		}
+		prevSeededPromptFile = seededPromptFile
+
+		implCfg := cfg
+		implCfg.promptFile = seededPromptFile
+		if pass > 1 {
+			implCfg.sessionFile = ""
+		}
+
+		rc, err = invokeDriverExec(implCfg, stdout)
+		if err != nil {
+			return 0, err
+		}
+
+		if cfg.scoutBriefPath != "" {
+			state.ScoutBriefPath = cfg.scoutBriefPath
+		}
+		verdict, hasOutcome := scanPassLog(implCfg.logPath)
+		if verdict != "" {
+			state.LastVerdict = verdict
+			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: verdict}))
+		}
+		if !hasOutcome {
+			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: pass, Verdict: verdict, Reason: fmt.Sprintf("exit %d", rc)}))
+		}
+		if writeErr := WriteRunState(cfg.stateFile, state); writeErr != nil {
+			fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
+			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
+		}
+
+		decision, reason := "continue", ""
+		switch {
+		case hasOutcome:
+			decision, reason = "stop", "outcome reached"
+		case cfg.maxSlices > 0 && pass >= cfg.maxSlices:
+			decision, reason = "stop", "max slices reached"
+		}
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decision, Reason: reason}))
+		if decision == "stop" {
+			break
+		}
+
+		// ---- review pass: cfg.reviewPromptFile, always a fresh session ----
+		pass++
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: "review"}))
+
+		reviewCfg := cfg
+		reviewCfg.promptFile = cfg.reviewPromptFile
+		reviewCfg.sessionFile = ""
+
+		rc, err = invokeDriverExec(reviewCfg, stdout)
+		if err != nil {
+			return 0, err
+		}
+
+		reviewVerdict, findings := scanReviewLog(reviewCfg.logPath)
+		if reviewVerdict != "" {
+			state.LastVerdict = reviewVerdict
+			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: reviewVerdict}))
+		}
+		state.ReviewFindings = findings
+		if writeErr := WriteRunState(cfg.stateFile, state); writeErr != nil {
+			fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
+			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
+		}
+
+		decision, reason = "continue", ""
+		switch {
+		case reviewVerdict == "":
+			decision, reason = "stop", "no verdict"
+		case cfg.maxSlices > 0 && pass >= cfg.maxSlices:
+			decision, reason = "stop", "max slices reached"
+		case reviewVerdict == "BLOCK" && cfg.maxReviewRounds > 0 && reviewRounds >= cfg.maxReviewRounds:
+			decision, reason = "stop", "max review rounds reached"
+		}
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decision, Reason: reason}))
+		if decision == "stop" {
+			break
+		}
+		if reviewVerdict == "BLOCK" {
+			reviewRounds++
+		}
+		implRole = "fix"
 	}
 
 	return rc, nil
@@ -369,6 +496,29 @@ func findVerdict(line string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// invokeDriverExec runs one driver-exec pass against cfg, streaming its raw
+// stdout to stdout unchanged, and returns its exit code -- 0 for a clean
+// exit, or the process's own code when it exited non-zero. Shared by both
+// run's legacy single-loop and runWithReviewPass's implement/review/fix
+// loop, so exit-code translation lives in exactly one place.
+func invokeDriverExec(cfg config, stdout io.Writer) (int, error) {
+	cmd, err := buildDriverExecCmd(cfg)
+	if err != nil {
+		return 0, err
+	}
+	cmd.Stdout = stdout
+	cmd.Stderr = os.Stderr
+	runErr := cmd.Run()
+
+	if exitErr, ok := runErr.(*exec.ExitError); ok {
+		return exitErr.ExitCode(), nil
+	}
+	if runErr != nil {
+		return 0, runErr
+	}
+	return 0, nil
 }
 
 // buildDriverExecCmd resolves driver-exec on PATH and returns it invoked with
