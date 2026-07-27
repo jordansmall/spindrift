@@ -68,3 +68,31 @@ setup() {
   # through, rather than skipping the flag or passing it empty.
   [ -n "$review_prompt_file" ]
 }
+
+# Issue #2065: the corrective resume the SPINDRIFT_OUTCOME required-marker gate
+# fires (issue #2044) deliberately omits run_driver_in_env's 4th arg
+# (review_prompt), so under the orchestrator that nudge-and-retry stays a
+# narrow single pass rather than re-entering the full implement/review/fix loop
+# a second time from whatever cap or park stopped the first attempt. The design
+# decision recorded there is "keep the single-pass fallback": each
+# run_driver_in_env call spawns a fresh orchestrator whose
+# --max-review-rounds/--max-slices budgets reset to their defaults, so
+# re-attaching --review-prompt-file would hand the last-resort nudge a
+# brand-new full review budget and re-trigger the exact
+# bounded-but-large loop the original run just exhausted. This test locks that
+# downgrade: the first pass forwards --review-prompt-file (asserted above), the
+# resume must not.
+@test "orchestrator path omits --review-prompt-file on the corrective resume" {
+  export ORCHESTRATOR_ENABLED=1
+  # First pass forgets its outcome; the SPINDRIFT_OUTCOME gate resumes once,
+  # so the orchestrator is invoked exactly twice -- one line per invocation in
+  # ORCHESTRATOR_LOG (the fake echoes its argv there, issue #1996).
+  export FAKE_CLAUDE_NO_OUTCOME_FIRST_CALL_ONLY=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c . "$ORCHESTRATOR_LOG")" -eq 2 ]
+  # The initial pass carries the review-prompt flag ...
+  head -1 "$ORCHESTRATOR_LOG" | grep -q -- '--review-prompt-file'
+  # ... and the corrective resume (the second, last line) does not.
+  ! tail -1 "$ORCHESTRATOR_LOG" | grep -q -- '--review-prompt-file'
+}
