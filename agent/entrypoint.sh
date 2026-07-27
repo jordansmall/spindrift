@@ -1108,7 +1108,16 @@ main() {
   # is omitted, so it's always empty): under the orchestrator, this one
   # corrective nudge stays a narrow single-pass resume rather than
   # re-entering the full implement/review/fix loop (issue #2037) a second
-  # time from whatever cap or park stopped the first attempt.
+  # time from whatever cap or park stopped the first attempt. Issue #2065
+  # reviewed this deliberate downgrade and kept the single-pass fallback:
+  # each run_driver_in_env call spawns a fresh orchestrator process whose
+  # --max-review-rounds/--max-slices budgets reset to their binary defaults
+  # (entrypoint.sh threads neither), so re-attaching --review-prompt-file
+  # here would hand the last-resort nudge a brand-new full review budget and
+  # re-trigger the exact bounded-but-large loop the original attempt just
+  # exhausted -- the deterministic checks/gates the recovery_prompt already
+  # asks for still run, only the code-owned review pass is skipped. A
+  # regression test pins this omission (tests/entrypoint-orchestrator-handoff.bats).
   local recovery_prompt="The run ended without printing a SPINDRIFT_OUTCOME line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required SPINDRIFT_OUTCOME line as your final message."
   required_marker_gate _scan_outcome "$recovery_prompt" _require_nonempty
 
