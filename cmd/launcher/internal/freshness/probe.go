@@ -89,6 +89,12 @@ func Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evalu
 				Message:    fmt.Sprintf("not applicable (%s has no %s branch on origin; freshness cannot be checked here)", pwd, baseBranch),
 			}
 		}
+		if isNoOriginRemote(err) {
+			return Result{
+				Applicable: false,
+				Message:    fmt.Sprintf("not applicable (%s has no reachable origin remote; freshness cannot be checked here)", pwd),
+			}
+		}
 		return Result{
 			Applicable: true,
 			Fresh:      false,
@@ -188,4 +194,16 @@ func isRemoteRefMissing(err error) bool {
 // caller should proceed rather than treat it as rebuild-needed (#1754).
 func isImageAttrMissing(err error) bool {
 	return strings.Contains(err.Error(), "does not provide attribute")
+}
+
+// isNoOriginRemote reports whether err (as returned by fetchBaseTip) is
+// git's own "does not appear to be a git repository" diagnostic — no
+// "origin" remote is configured, or origin points somewhere unreachable —
+// rather than a transient failure (network, DNS) against a remote that
+// could plausibly answer. This is definitive, not transient: a fully local
+// repo (e.g. CODE_FORGE=local with no live remote) has nothing to fetch, so
+// freshness cannot be checked here, and the caller should proceed rather
+// than treat it as rebuild-needed (#2034).
+func isNoOriginRemote(err error) bool {
+	return strings.Contains(err.Error(), "does not appear to be a git repository")
 }

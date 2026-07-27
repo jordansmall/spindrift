@@ -199,12 +199,16 @@ func TestProbe_EvalFailureFailsClosed(t *testing.T) {
 	}
 }
 
-// TestProbe_FetchFailureFailsClosed verifies that a git fetch error (e.g. no
-// "origin" remote reachable) reports rebuild-needed with a loud message,
-// without ever calling the evaluator.
+// TestProbe_FetchFailureFailsClosed verifies that a git fetch error against a
+// configured, name-resolvable-looking origin (e.g. a transient network
+// failure) reports rebuild-needed with a loud message, without ever calling
+// the evaluator — distinct from the definitive, not-applicable cases
+// (TestProbe_NotAGitRepo, TestProbe_MissingRemoteRefNotApplicable,
+// TestProbe_NoOriginRemoteNotApplicable) where proceeding is safe.
 func TestProbe_FetchFailureFailsClosed(t *testing.T) {
 	pwd := t.TempDir()
 	gitRun(t, pwd, "init")
+	gitRun(t, pwd, "remote", "add", "origin", "https://example.invalid/nope.git")
 	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
 
 	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
@@ -270,6 +274,33 @@ func TestProbe_MissingRemoteRefNotApplicable(t *testing.T) {
 	}
 }
 
+// TestProbe_NoOriginRemoteNotApplicable verifies that a repo with no
+// "origin" remote configured at all — git's own "does not appear to be a
+// git repository" diagnostic — reports not-applicable rather than
+// fail-closed: a fully local repo (e.g. CODE_FORGE=local, no live remote)
+// has nothing to fetch, so freshness cannot be checked here, and continuous
+// dispatch must not treat it as rebuild-needed (#2034).
+func TestProbe_NoOriginRemoteNotApplicable(t *testing.T) {
+	pwd := t.TempDir()
+	gitRun(t, pwd, "init")
+	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+
+	if res.Applicable {
+		t.Errorf("Applicable = true, want false when the repo has no origin remote")
+	}
+	if !strings.Contains(res.Message, "origin") {
+		t.Errorf("Message %q does not name the missing origin remote", res.Message)
+	}
+	if res.Rev != "" {
+		t.Errorf("Rev = %q, want empty when Applicable is false", res.Rev)
+	}
+	if len(eval.Calls) != 0 {
+		t.Errorf("Eval called %d times, want 0 when there is no origin remote", len(eval.Calls))
+	}
+}
+
 // TestProbe_ImageAttrMissingNotApplicable verifies that an Eval failure
 // because the flake simply does not define flakeImageAttr — nix's own "does
 // not provide attribute" diagnostic — reports not-applicable rather than
@@ -300,13 +331,13 @@ func TestProbe_ImageAttrMissingNotApplicable(t *testing.T) {
 func TestProbe_FetchFailure_MessageIncludesGitStderr(t *testing.T) {
 	pwd := t.TempDir()
 	gitRun(t, pwd, "init")
-	gitRun(t, pwd, "remote", "add", "origin", filepath.Join(pwd, "does-not-exist.git"))
+	gitRun(t, pwd, "remote", "add", "origin", "https://example.invalid/nope.git")
 	eval := &Fake{OutPath: "/nix/store/" + sameHash + "-agent-image"}
 
 	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
 
-	if strings.Contains(res.Message, "exit status") && !strings.Contains(res.Message, "does-not-exist") {
-		t.Errorf("Message %q looks like a bare exit code, want git's stderr detail", res.Message)
+	if !strings.Contains(res.Message, "example.invalid") {
+		t.Errorf("Message %q does not surface git's stderr detail", res.Message)
 	}
 }
 
