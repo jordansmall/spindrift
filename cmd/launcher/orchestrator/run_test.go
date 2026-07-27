@@ -1196,6 +1196,55 @@ func TestScanPassLogFindsNothingInPlainStreamJSONNarration(t *testing.T) {
 	}
 }
 
+// TestScanReviewLogExtractsVerdictAndFindings verifies scanReviewLog (issue
+// #2037) reads a standalone review pass's own rendered transcript -- unlike
+// scanPassLog's implement/fix-pass callers, which only ever see a verdict
+// collapsed into a subagent's tool_result, a code-owned review pass's verdict
+// is its own top-level final assistant message, so RenderTranscript preserves
+// its internal newlines verbatim (transcript_render.go's TrimSpace-only
+// handling of a "text" block, as opposed to a tool_result's own
+// newline-collapsing). scanReviewLog must return both the verdict word and
+// the message's own Blocking/Non-blocking findings text, not just the verdict.
+func TestScanReviewLogExtractsVerdictAndFindings(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "stream.log")
+	verdictMessage := "VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:42 -- missing nil check\\n\\n## Non-blocking\\n- none"
+	content := streamJSONOutcomeLine(verdictMessage)
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	verdict, findings := scanReviewLog(logPath)
+	if verdict != "BLOCK" {
+		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
+	}
+	for _, want := range []string{"VERDICT: BLOCK", "## Blocking", "run.go:42 -- missing nil check", "## Non-blocking"} {
+		if !strings.Contains(findings, want) {
+			t.Errorf("findings = %q, want it to contain %q", findings, want)
+		}
+	}
+}
+
+// TestScanReviewLogFindsNothingInPlainNarration verifies a review pass log
+// with no VERDICT marker at all scans as empty rather than a false positive
+// -- the orchestrator's own "no verdict" stop reason relies on this.
+func TestScanReviewLogFindsNothingInPlainNarration(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "stream.log")
+	content := streamJSONOutcomeLine("Investigating the diff.")
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	verdict, findings := scanReviewLog(logPath)
+	if verdict != "" {
+		t.Errorf("verdict = %q, want empty", verdict)
+	}
+	if findings != "" {
+		t.Errorf("findings = %q, want empty", findings)
+	}
+}
+
 // TestFindVerdictPrefersBLOCKOnTie verifies findVerdict resolves a line
 // carrying both marker words to BLOCK -- the fail-unsafe direction (another
 // fix pass, never a premature stop) -- rather than whichever happens to
