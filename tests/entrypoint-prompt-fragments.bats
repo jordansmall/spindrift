@@ -801,3 +801,25 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   grep -qF 'queued for filing' "$CLAUDE_PROMPT_FILE"
   ! grep -qF "the filer's returned issue URLs" "$CLAUDE_PROMPT_FILE"
 }
+
+# The REVIEW section fork (issue #2037, ADR 0035): orchestrator off keeps the
+# implementor's own inline "spawn a reviewer subagent, loop until no blocking
+# findings" prose unchanged; orchestrator on replaces it with a deferral to
+# the orchestrator's own code-owned review pass -- never both, and never
+# neither, in the rendered prompt.
+@test "REVIEW section: orchestrator off keeps the inline reviewer-subagent loop" {
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-review-loop-off"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'spawn a fresh `reviewer` subagent' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'Review is handled by the orchestrator as a separate' "$CLAUDE_PROMPT_FILE"
+}
+
+@test "REVIEW section: orchestrator on defers to the code-owned review pass" {
+  export ORCHESTRATOR_ENABLED=1
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-review-loop-on"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'Review is handled by the orchestrator as a separate' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF 'spawn a fresh `reviewer` subagent' "$CLAUDE_PROMPT_FILE"
+}

@@ -69,6 +69,21 @@ setup() {
   jq -e '.filer.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
 }
 
+@test "entrypoint drops reviewer from --agents when the orchestrator is on, even if the template carries it" {
+  # The code-owned review pass (issue #2037) replaces the implementor's own
+  # inline reviewer subagent entirely on this path -- the template still
+  # carries reviewer (baked independently of ORCHESTRATOR_ENABLED), but the
+  # composed --agents JSON forwarded to the Driver must not.
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
+  export ORCHESTRATOR_ENABLED=1
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-agents-reviewer-orch-on"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -s "$CLAUDE_AGENTS_FILE" ]
+  jq -e 'has("scout") and (has("reviewer") | not)' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.scout.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+}
+
 @test "entrypoint passes --agents with scout, reviewer, and filer all present" {
   export AGENTS_JSON_TEMPLATE='{"scout":{"description":"scout","model":"opus","prompt":"","tools":["Read"]},"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read"]},"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read"]}}'
   run bash "$ENTRYPOINT"
