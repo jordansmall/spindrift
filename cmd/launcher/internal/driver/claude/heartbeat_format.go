@@ -137,6 +137,12 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 		}
 	case "verdict":
 		fmt.Fprintf(&sb, "verdict: %s", sanitizeRole(op.Verdict))
+	case "pass_no_outcome":
+		if op.Verdict != "" {
+			fmt.Fprintf(&sb, "pass %d ended with no outcome (last verdict %s, %s)", op.Pass, sanitizeRole(op.Verdict), sanitizeRole(op.Reason))
+		} else {
+			fmt.Fprintf(&sb, "pass %d ended with no outcome (%s)", op.Pass, sanitizeRole(op.Reason))
+		}
 	case "decision":
 		if op.Reason != "" {
 			fmt.Fprintf(&sb, "%s: %s", sanitizeRole(op.Decision), sanitizeRole(op.Reason))

@@ -57,12 +57,12 @@ type TokenUsage struct {
 // SpindriftOp is the payload of a synthetic "spindrift_op" stream-json event
 // (issue #2027): the orchestrator prints one of these, JSON-encoded, to its
 // own stdout at each discrete operation it performs (pass start, reviewer
-// verdict observed, loop/stop decision, run-state read/write failure) so the
-// heartbeat Writer can surface it live, interleaved with driver-exec's own
-// stream-json lines forwarded unchanged.
+// verdict observed, a pass ending with no outcome line, loop/stop decision,
+// run-state read/write failure) so the heartbeat Writer can surface it live,
+// interleaved with driver-exec's own stream-json lines forwarded unchanged.
 type SpindriftOp struct {
-	// Op names the operation kind: "pass_start", "verdict", "decision", or
-	// "run_state_error".
+	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
+	// "decision", or "run_state_error".
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
 	// Role distinguishes a "pass_start" for the budget governor's decompose

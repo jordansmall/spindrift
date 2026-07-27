@@ -220,6 +220,50 @@ func TestRunPropagatesDriverExecExitCode(t *testing.T) {
 	}
 }
 
+// TestRunSurfacesNoOutcomeMarkerAndPropagatesExitCodeWhenPassStalls covers
+// the other #2036 fixture the issue asks for alongside a clean no-outcome
+// exit: a pass that stalled mid-turn and was killed out from under it by
+// something outside the orchestrator's own control (a signal-terminated
+// process reports a 128+signal exit code by convention; 137 is SIGKILL),
+// modeled here as driver-exec exiting 137 immediately rather than an actual
+// hang -- the orchestrator has no per-pass timeout of its own and this test
+// does not add one, so it only proves run reacts deterministically once the
+// pass *has* ended, not that a genuinely wedged driver-exec is bounded.
+// run must still return a deterministic (rc, nil) and still emit the same
+// pass_no_outcome marker TestRunEmitsNoOutcomeMarkerOnStdout asserts for a
+// clean exit, so a killed pass is exactly as visible in the heartbeat
+// stream as one that simply forgot to print its outcome. The raw exit code
+// is deliberately left to propagate unchanged here, same as
+// TestRunPropagatesDriverExecExitCode above: a non-zero exit is the
+// launcher's own signal to retry the whole run (agent/entrypoint.sh's
+// comment on this exact point, main()), a decision this issue does not
+// revisit -- only the missing visibility into *why* did.
+func TestRunSurfacesNoOutcomeMarkerAndPropagatesExitCodeWhenPassStalls(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 137\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config{
+		promptFile:   filepath.Join(dir, "prompt.txt"),
+		driverBin:    "claude",
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+	}
+
+	var stdout bytes.Buffer
+	rc, err := run(cfg, &stdout)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if rc != 137 {
+		t.Errorf("exit code = %d, want 137 propagated unchanged", rc)
+	}
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_no_outcome","pass":1,"reason":"exit 137"}`) {
+		t.Errorf("stdout = %q, want a pass_no_outcome marker even though the pass never wrote a log at all", stdout.String())
+	}
+}
+
 // TestRunReadsAndWritesRunState verifies run reads whatever run-state a prior
 // pass left at cfg.stateFile, carries its done/remaining slices and last
 // verdict forward unchanged (issue #1997: on this tracer-bullet single pass
@@ -610,6 +654,37 @@ exit 0
 	}
 	if strings.Contains(stdout.String(), "verdict not BLOCK") {
 		t.Errorf("stdout = %q, want no misleading 'verdict not BLOCK' reason when no verdict was ever seen", stdout.String())
+	}
+}
+
+// TestRunEmitsNoOutcomeMarkerOnStdout verifies run prints a distinct
+// "pass_no_outcome" spindrift_op marker whenever a pass's own log carries no
+// terminal SPINDRIFT_OUTCOME line (issue #2036) -- a mid-turn cutoff or park
+// must be individually visible in the heartbeat stream for that exact pass,
+// not just inferable from the final decision's reason once the whole loop
+// stops.
+func TestRunEmitsNoOutcomeMarkerOnStdout(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONOutcomeLine("Just narration, no verdict or outcome.")+`' > "$DRIVER_LOG_PATH"
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config{
+		promptFile:   filepath.Join(dir, "prompt.txt"),
+		driverBin:    "claude",
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_no_outcome","pass":1`) {
+		t.Errorf("stdout = %q, want a pass_no_outcome marker for pass 1", stdout.String())
 	}
 }
 
@@ -1312,6 +1387,67 @@ exit 0
 	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
 	if len(lines) != 3 {
 		t.Fatalf("driver-exec invocation count = %d, want 3 (the first pass plus maxReviewRounds=2 additional, log: %q)", len(lines), calls)
+	}
+}
+
+// TestRunSurfacesNoOutcomePatternAcrossEveryPassUntilCapReached is the #2019
+// attempt-1 regression fixture (issue #2036): a dogfood run where the
+// orchestrator path was active, the reviewer never converged, and the run
+// ended without ever printing a SPINDRIFT_OUTCOME line -- lost as
+// agent-failed even though #2011/#2012 were meant to close exactly this
+// class of failure. Every pass here BLOCKs without ever reaching a terminal
+// outcome, the same shape a systemically parking Driver would produce.
+// Asserts three things the #2019 shape needs, none of which
+// TestRunTerminatesOnMaxReviewRoundsCap itself checks: (1) every single pass
+// -- not just the run's final one -- gets its own "pass_no_outcome" marker,
+// so an operator watching the heartbeat stream sees the no-outcome pattern
+// recur pass over pass rather than only a generic cap-reached line at the
+// very end; (2) the loop still stops deterministically once the cap is hit
+// (never a silent mid-turn death); (3) the run's own exit code is 0 -- the
+// same "driver exited cleanly, just never signaled" contract
+// agent/entrypoint.sh's resume-nudge and backstop (#1607, #2012) already
+// key off of -- so committed/staged work from this run remains reachable by
+// that salvage path instead of being discarded by a propagated failure exit.
+func TestRunSurfacesNoOutcomePatternAcrossEveryPassUntilCapReached(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONVerdictLine("VERDICT: BLOCK")+`' > "$DRIVER_LOG_PATH"
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:      promptFile,
+		driverBin:       "claude",
+		logPath:         filepath.Join(dir, "stream.log"),
+		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
+		maxReviewRounds: 2,
+		maxSlices:       0,
+	}
+
+	var stdout bytes.Buffer
+	rc, err := run(cfg, &stdout)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if rc != 0 {
+		t.Errorf("rc = %d, want 0 so entrypoint.sh's resume-nudge/backstop can still salvage committed work", rc)
+	}
+
+	out := stdout.String()
+	for pass := 1; pass <= 3; pass++ {
+		want := fmt.Sprintf(`"spindrift_op":{"op":"pass_no_outcome","pass":%d,"verdict":"BLOCK","reason":"exit 0"}`, pass)
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout = %q, want a pass_no_outcome marker for pass %d", out, pass)
+		}
+	}
+	if !strings.Contains(out, `"decision":"stop","reason":"max review rounds reached"`) {
+		t.Errorf("stdout = %q, want the cap-reached stop reason", out)
 	}
 }
 

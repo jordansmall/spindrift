@@ -232,6 +232,15 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			state.LastVerdict = verdict
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: verdict}))
 		}
+		// A pass that never printed a terminal SPINDRIFT_OUTCOME line is
+		// recorded on its own, distinct marker (issue #2036) -- whatever the
+		// loop's decision below turns out to be (continue into a fresh pass,
+		// or stop), so a mid-turn cutoff/park is visible for the exact pass
+		// it happened on, rather than only inferable from the run's own final
+		// decision reason once every pass is done.
+		if !hasOutcome {
+			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: pass, Verdict: verdict, Reason: fmt.Sprintf("exit %d", rc)}))
+		}
 		if writeErr := WriteRunState(cfg.stateFile, state); writeErr != nil {
 			fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))

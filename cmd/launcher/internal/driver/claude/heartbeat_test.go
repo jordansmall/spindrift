@@ -939,6 +939,29 @@ func TestFormatSpindriftOpRunStateError(t *testing.T) {
 	}
 }
 
+// TestFormatSpindriftOpPassNoOutcome verifies FormatSpindriftOp renders a
+// pass_no_outcome op (issue #2036) as a single status row naming the pass
+// number, with the last verdict seen (if any) named inline so an operator
+// can tell a mid-turn cutoff after a BLOCK apart from one with no verdict at
+// all.
+func TestFormatSpindriftOpPassNoOutcome(t *testing.T) {
+	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_no_outcome", Pass: 3, Verdict: "BLOCK", Reason: "exit 0"})
+	if !strings.Contains(got, "pass 3 ended with no outcome") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "pass 3 ended with no outcome")
+	}
+	if !strings.Contains(got, "BLOCK") {
+		t.Errorf("FormatSpindriftOp = %q, want the last verdict named inline", got)
+	}
+
+	gotNoVerdict := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_no_outcome", Pass: 1, Reason: "exit 137"})
+	if !strings.Contains(gotNoVerdict, "pass 1 ended with no outcome") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", gotNoVerdict, "pass 1 ended with no outcome")
+	}
+	if strings.Contains(gotNoVerdict, "last verdict") {
+		t.Errorf("FormatSpindriftOp = %q, want no misleading 'last verdict' text when none was ever seen", gotNoVerdict)
+	}
+}
+
 // TestFormatSpindriftOpSanitizesDynamicFields verifies control characters,
 // newlines, and CSI/OSC escape sequences embedded in a decision's reason or
 // a run_state_error's error text cannot break the single-line row (issue
@@ -950,6 +973,14 @@ func TestFormatSpindriftOpSanitizesDynamicFields(t *testing.T) {
 	}
 	if strings.Contains(got, "\x1b") {
 		t.Errorf("FormatSpindriftOp = %q, want no embedded escape sequence", got)
+	}
+
+	gotNoOutcome := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_no_outcome", Pass: 1, Verdict: "bad\x1b[2J\nfake-row", Reason: "bad\x1b[2J\nfake-row"})
+	if strings.Contains(gotNoOutcome, "\n") {
+		t.Errorf("FormatSpindriftOp = %q, want no embedded newline", gotNoOutcome)
+	}
+	if strings.Contains(gotNoOutcome, "\x1b") {
+		t.Errorf("FormatSpindriftOp = %q, want no embedded escape sequence", gotNoOutcome)
 	}
 }
 
