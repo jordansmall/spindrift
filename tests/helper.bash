@@ -34,6 +34,16 @@ setup_entrypoint_env() {
   export ISSUE_NUMBER="7"
   export ISSUE_TITLE="Do the thing"
   export WORK_DIR="$BATS_TEST_TMPDIR/work"
+  # RUN_NONCE is not a schema knob either (same reasoning as BOX_WRITE_ENABLED
+  # above): a real Box always receives one, so default it here rather than
+  # leaving it unset -- fakes/claude's default SPINDRIFT_PR_INTENT emission,
+  # and entrypoint.sh's own PR-intent required-marker gate row (issue #2045)
+  # that scans for it, both key off this run's own nonce, so an unset one
+  # here would make every read-only+github+status=ready fixture in this
+  # suite look like a genuine #2036 repro and eat an unwanted resume pass.
+  # Individual tests needing a specific value (e.g. to assert it's rendered
+  # into the prompt) still override this before invoking $ENTRYPOINT.
+  export RUN_NONCE="test-run-nonce-0001"
 }
 
 # Shared setup for the split run-*.bats suites (issue #519): every concern

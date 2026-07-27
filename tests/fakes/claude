@@ -149,6 +149,31 @@ fi
 # line before the real one, simulating a multi-turn transcript with more than
 # one result event -- the extractor's tail -1 semantics must keep picking the
 # last outcome line, not the first.
+#
+# A well-behaved agent prints SPINDRIFT_PR_INTENT immediately before its
+# final SPINDRIFT_OUTCOME line (issue #1919), so the default result text
+# below carries one too -- otherwise every existing read-only+status=ready
+# fixture in this suite would spuriously trip the PR-intent required-marker
+# gate row (issue #2045) and eat its second (resumed) invocation's own
+# rendered prompt.
+#
+# FAKE_CLAUDE_NO_PR_INTENT=1 simulates a driver that forgot the PR-intent
+# line (issue #2036) -- the scenario that gate exists to nudge past.
+#
+# FAKE_CLAUDE_NO_PR_INTENT_FIRST_CALL_ONLY=1 simulates the same only on this
+# fake's first invocation within a test, then emits a real one on every call
+# after -- for exercising the gate's resume-once recovery pass, mirroring
+# FAKE_CLAUDE_NO_OUTCOME_FIRST_CALL_ONLY above.
+pr_intent_line=""
+if [ "${FAKE_CLAUDE_NO_PR_INTENT:-0}" != "1" ] && \
+   { [ "${FAKE_CLAUDE_NO_PR_INTENT_FIRST_CALL_ONLY:-0}" != "1" ] || [ "${call_index:-0}" != "0" ]; }; then
+  pr_intent_payload="$(printf 'feat: fake title\n\nfake body' | base64 -w0)"
+  # The trailing \\n\\n are literal two-char backslash-n escapes, JSON's own
+  # newline encoding within the "result" string value below -- not real
+  # newlines -- matching the blank-line separator the real grammar puts
+  # between the PR-intent line and the SPINDRIFT_OUTCOME line after it.
+  pr_intent_line="$(printf 'SPINDRIFT_PR_INTENT %s %s\\n\\n' "${RUN_NONCE:-fake-nonce}" "$pr_intent_payload")"
+fi
 printf '{"type":"system","subtype":"init","session_id":"fake"}\n'
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"implementing #%s"}]}}\n' "${ISSUE_NUMBER:-0}"
 if [ "${FAKE_CLAUDE_MULTI_RESULT:-0}" = "1" ]; then
@@ -199,8 +224,12 @@ else
         "${ISSUE_NUMBER:-0}"
       ;;
     *)
-      printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake"}\n' \
-        "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
+      # FAKE_CLAUDE_OUTCOME_STATUS overrides the status field (default
+      # "ready") -- e.g. exercising the PR-intent required-marker gate row
+      # (issue #2045), which must fire only on status=ready and never on a
+      # blocked run.
+      printf '{"type":"result","subtype":"success","is_error":false,"result":"%sSPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=%s note=fake"}\n' \
+        "$pr_intent_line" "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}" "${FAKE_CLAUDE_OUTCOME_STATUS:-ready}"
       ;;
   esac
 fi
