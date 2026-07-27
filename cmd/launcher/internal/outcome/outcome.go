@@ -23,6 +23,17 @@ import (
 // of each redeclaring it.
 const Token = "SPINDRIFT_OUTCOME"
 
+// PRIntentToken is the exact SPINDRIFT_PR_INTENT marker literal (issue
+// #2045, the #2036 fix): a read-only Box's draft-PR title/body hand-off,
+// scanned host-side by LastPRIntentInLog below and, in-box, by
+// entrypoint.sh's own required-marker-gate row that resumes the session
+// once when this marker never showed up on a status=ready run. Exported so
+// the marker-contract parity guard (cmd/launcher/orchestrator's
+// TestPromptMarkersMatchScanner) can pin the two PR-intent-emitting
+// fragments (open-pr-create-outbox.md, if-blocked-pr-outbox.md) against
+// this one literal instead of a hardcoded string of its own.
+const PRIntentToken = "SPINDRIFT_PR_INTENT"
+
 // Outcome is the machine-readable result written by a Box as its final line.
 // Grammar: SPINDRIFT_OUTCOME issue=<num> landing=<landing-ref> status=<status> note=<text>
 // Note may contain spaces and '='; all other fields are space-delimited tokens.
@@ -252,7 +263,7 @@ func isBase64Char(b byte) bool {
 // no-PR-intent-found. Returns (payload, true, nil) from the last line that
 // verifies, even if a later, non-verifying line also carries the token.
 func LastPRIntentInLog(path, expectedNonce string) (string, bool, error) {
-	return lastVerifiedSignalInLog(path, "SPINDRIFT_PR_INTENT", expectedNonce,
+	return lastVerifiedSignalInLog(path, PRIntentToken, expectedNonce,
 		"PR-intent line found but did not verify: nonce mismatch or malformed payload")
 }
 

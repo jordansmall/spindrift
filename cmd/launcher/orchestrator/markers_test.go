@@ -40,6 +40,21 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 	if !strings.Contains(issuePrompt, outcome.Token) {
 		t.Errorf("issue-prompt.md no longer emits %q, the exact literal scanPassLog's outcome.ParseAnywhere greps for", outcome.Token)
 	}
+
+	// The read-only PR-intent hand-off (issue #2045, the #2036 fix): unlike
+	// outcome.Token above, this marker never appears in issue-prompt.md
+	// itself -- it's written by the two Conditional fragments the
+	// BOX_ACCESS_READ_ONLY gate selects (lib/fragments.nix), so each is
+	// checked against outcome.PRIntentToken directly.
+	for _, fragment := range []string{
+		filepath.Join("fragments", "open-pr-create-outbox.md"),
+		filepath.Join("fragments", "if-blocked-pr-outbox.md"),
+	} {
+		rendered := readPromptFile(t, repoRoot, fragment)
+		if !strings.Contains(rendered, outcome.PRIntentToken) {
+			t.Errorf("%s no longer emits %q, the exact literal outcome.LastPRIntentInLog and entrypoint.sh's PR-intent gate both scan for", fragment, outcome.PRIntentToken)
+		}
+	}
 }
 
 // verdictContractShape is "VERDICT: APPROVE | BLOCK": VerdictApprove and
