@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"spindrift.dev/launcher/internal/driver"
@@ -441,8 +442,8 @@ func scanReviewLog(logPath string) (verdict, findings string) {
 	// strip it here so the seeded fix-pass brief carries the reviewer's
 	// findings text alone, not a rendering artifact.
 	first := lines[verdictLine]
-	if i := strings.Index(first, "] "); i != -1 && strings.HasPrefix(first, "[") {
-		first = first[i+2:]
+	if loc := renderedEventPrefix.FindStringIndex(first); loc != nil {
+		first = first[loc[1]:]
 	}
 	findingsLines := []string{first}
 	// Every subsequent physical line belongs to this same message only until
@@ -456,7 +457,7 @@ func scanReviewLog(logPath string) (verdict, findings string) {
 	// none, but a rendering quirk or a misbehaving turn shouldn't corrupt the
 	// seeded fix-pass brief).
 	for _, l := range lines[verdictLine+1:] {
-		if strings.HasPrefix(l, "[") {
+		if renderedEventPrefix.MatchString(l) {
 			break
 		}
 		findingsLines = append(findingsLines, l)
@@ -464,6 +465,13 @@ func scanReviewLog(logPath string) (verdict, findings string) {
 	findings = strings.TrimSpace(strings.Join(findingsLines, "\n"))
 	return verdict, findings
 }
+
+// renderedEventPrefix matches RenderTranscript's own "[role] " event prefix
+// (transcript_render.go) at the start of a line: a bracketed, non-empty,
+// non-whitespace role name followed by a space -- tighter than a bare "["
+// prefix, which a finding's own text (review-prompt.md's contract never
+// starts one with "[", but nothing enforces that) could otherwise trip.
+var renderedEventPrefix = regexp.MustCompile(`^\[\S+\] `)
 
 // findVerdict reports whether line carries a "VERDICT: APPROVE" or
 // "VERDICT: BLOCK" marker anywhere in it, per review-prompt.md's documented

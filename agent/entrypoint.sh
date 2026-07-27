@@ -1061,9 +1061,13 @@ main() {
 
   # Resume-once-then-fall-through via the required-marker gate (issue
   # #2044). The same --agents JSON as the first pass rides along on any
-  # resume -- the run may still need to reach the scout/reviewer/filer step
-  # it never got to, and the pinned session has no other way to learn about
-  # them.
+  # resume -- the run may still need to reach the scout/filer step it never
+  # got to, and the pinned session has no other way to learn about them.
+  # Carries no review_prompt_rendered (this call's 4th run_driver_in_env arg
+  # is omitted, so it's always empty): under the orchestrator, this one
+  # corrective nudge stays a narrow single-pass resume rather than
+  # re-entering the full implement/review/fix loop (issue #2037) a second
+  # time from whatever cap or park stopped the first attempt.
   local recovery_prompt="The run ended without printing a SPINDRIFT_OUTCOME line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required SPINDRIFT_OUTCOME line as your final message."
   required_marker_gate _scan_outcome "$recovery_prompt" _require_nonempty
 
