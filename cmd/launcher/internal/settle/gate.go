@@ -46,7 +46,11 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	// status alike (issue #2019, wiring #2018's dormant fileIssueIntents into
 	// this entry point): a run's own findings are worth tracking whether that
 	// run itself landed ready or blocked, and a filing failure must never
-	// change the switch below's own landing decision.
+	// change the switch below's own landing decision. Only reachable once a
+	// SPINDRIFT_OUTCOME line was actually parsed (the ParseErr/!OutcomeFound
+	// branches above both return first) -- a crashed or outcome-less run
+	// never reaches FILE ISSUES in its own prompt either, so there is
+	// nothing for this call to find in that case.
 	s.fileIssueIntents(num, result)
 	switch o.Status {
 	case "blocked":
