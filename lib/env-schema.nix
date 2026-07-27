@@ -513,7 +513,7 @@
     env = "ORCHESTRATOR_ENABLED";
     group = "Prompt & skill iteration";
     default = false;
-    doc = "when non-empty, entrypoint.sh hands the implementor pass off to the in-box Go orchestrator instead of calling driver-exec directly (issue #1996); off by default, the direct driver-exec path is unchanged";
+    doc = "master feature-flag switch (issue #1996; canonicalized #2047): when non-empty, forks entrypoint.sh's rendered prompt/--agents JSON onto the orchestrator-on path -- the implementor pass hands off to the in-box Go orchestrator instead of calling driver-exec directly, and every other orchestrator-conditioned fork (e.g. the filer's write-mechanism gate) reads this same switch; off by default, the direct driver-exec path is unchanged; the off-path is legacy, slated for demolition once this defaults on in production with a sustained A/B win (ADR 0035 amendment)";
     flakeOption = true;
     boxEnv = true;
     boxEnvOnly = true;
