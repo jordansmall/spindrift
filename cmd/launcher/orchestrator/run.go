@@ -11,7 +11,6 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/outcome"
-	"spindrift.dev/launcher/internal/usage"
 )
 
 // config is the data one implementor pass needs to hand off to driver-exec
@@ -49,46 +48,6 @@ type config struct {
 	// makes, across every pass regardless of verdict (issue #1998) -- the
 	// coarser backstop on top of maxReviewRounds. Zero means no cap.
 	maxSlices int
-	// maxBudgetTokens caps the run's cumulative token spend (issue #2002):
-	// input + output + both cache token classes, summed across every pass's
-	// own ExtractUsage report via RunState.CumulativeUsage. Once crossed, the
-	// budget governor triggers a decompose pass if one is configured
-	// (decomposePromptFile), or hard-stops the run otherwise. Zero disables
-	// this dimension (no cap) -- independent of settle/budget.go's own
-	// MaxBudgetTokens (issue #2001), a host-side sibling this ticket does not
-	// touch.
-	maxBudgetTokens int
-	// maxBudgetUSD is maxBudgetTokens' dollar-cost twin. Zero disables it.
-	maxBudgetUSD float64
-	// maxDecompositionDepth caps how many times this run may invoke the
-	// decompose pass (issue #2002). Unlike maxReviewRounds/maxSlices, zero
-	// here means decomposition is disabled outright, not "no cap" -- the
-	// safe default, since an unbounded decompose knob would defeat its own
-	// purpose of guaranteeing termination.
-	maxDecompositionDepth int
-	// decomposePromptFile is the decompose/planner pass's own prompt (issue
-	// #2002), distinct from cfg.promptFile: a decompose pass's only job is
-	// rewriting the run-state artifact's slice list, not implementing
-	// anything. Empty disables decomposition entirely, no matter what
-	// maxBudgetTokens/maxBudgetUSD/maxDecompositionDepth say.
-	decomposePromptFile string
-}
-
-// exceedsBudget reports whether u has crossed either of cfg's budget caps
-// (issue #2002) -- the same threshold-crossing shape settle/budget.go's own
-// budgetExceeded uses for its independent, host-side cap, reimplemented here
-// rather than imported: the two governors are deliberately separate (the
-// motivating issue names the host-side fix-pass cap as "tracked separately
-// and independent of this ticket").
-func exceedsBudget(cfg config, u usage.Usage) bool {
-	tokens := u.InputTokens + u.OutputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
-	if cfg.maxBudgetTokens > 0 && tokens >= cfg.maxBudgetTokens {
-		return true
-	}
-	if cfg.maxBudgetUSD > 0 && u.TotalCostUSD >= cfg.maxBudgetUSD {
-		return true
-	}
-	return false
 }
 
 // run loops driver-exec for as many passes as the implementor's own
@@ -125,30 +84,15 @@ func run(cfg config, stdout io.Writer) (int, error) {
 	rc := 0
 	reviewRounds := 0
 	prevSeededPromptFile := ""
-	decomposeNext := false
 	for pass := 1; ; pass++ {
-		passRole := ""
-		if decomposeNext {
-			passRole = "decompose"
-		}
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: passRole}))
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass}))
 
 		passCfg := cfg
 		if pass > 1 {
 			passCfg.sessionFile = ""
 		}
 
-		// A triggered decompose pass (issue #2002) is seeded from its own
-		// distinct prompt (rewriting the slice list, not implementing
-		// anything), never from cfg.promptFile; every other pass -- the
-		// first, and every ordinary fix pass -- seeds from cfg.promptFile as
-		// before.
-		basePromptFile := cfg.promptFile
-		if decomposeNext {
-			basePromptFile = cfg.decomposePromptFile
-		}
-
-		seededPromptFile, err := seedPromptFromState(basePromptFile, state)
+		seededPromptFile, err := seedPromptFromState(cfg.promptFile, state)
 		if err != nil {
 			return 0, err
 		}
@@ -158,12 +102,10 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// file per pass. The very last pass's file is deliberately left on
 		// disk: this is a short-lived, per-box tmp file, and the box's own
 		// filesystem is destroyed with the container regardless. Checked
-		// against both real base files, not just this pass's own
-		// basePromptFile: a zero-state pass's "seeded" file is cfg.promptFile
-		// or cfg.decomposePromptFile itself unchanged (seedPromptFromState's
-		// own no-op case), and a later pass with a *different* base must
-		// still never delete that real base file out from under the run.
-		if prevSeededPromptFile != "" && prevSeededPromptFile != cfg.promptFile && prevSeededPromptFile != cfg.decomposePromptFile {
+		// against cfg.promptFile itself, not just any temp file: a
+		// zero-state pass's "seeded" file is cfg.promptFile itself unchanged
+		// (seedPromptFromState's own no-op case).
+		if prevSeededPromptFile != "" && prevSeededPromptFile != cfg.promptFile {
 			os.Remove(prevSeededPromptFile)
 		}
 		prevSeededPromptFile = seededPromptFile
@@ -185,37 +127,6 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			rc = 0
 		}
 
-		accumulatePassUsage(&state, passCfg.logPath)
-
-		if decomposeNext {
-			decomposeNext = false
-			state.DecompositionDepth++
-			// A decompose pass that produced no parseable slice list at all
-			// degrades to keeping the prior RemainingSlices rather than
-			// discarding it -- the same best-effort shape every other
-			// RunState field already follows -- but DecompositionDepth still
-			// advances regardless, since a decompose pass that always fails
-			// to produce output must still be bounded by the depth cap
-			// rather than retried forever.
-			if slices := scanDecomposeLog(passCfg.logPath); len(slices) > 0 {
-				state.RemainingSlices = slices
-			}
-			if writeErr := WriteRunState(cfg.stateFile, state); writeErr != nil {
-				fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
-				fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
-			}
-			// The smaller slices the decompose pass just produced get a
-			// fresh non-convergence budget of their own, rather than
-			// inheriting whatever count the too-large slice had already run
-			// up.
-			reviewRounds = 0
-			if cfg.maxSlices > 0 && pass >= cfg.maxSlices {
-				fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: "stop", Reason: "max slices reached"}))
-				break
-			}
-			continue
-		}
-
 		// An empty cfg.scoutBriefPath means the caller didn't supply one
 		// this pass, not that the prior path is now unknown, so it leaves
 		// the carried-forward value alone rather than clobbering it with "".
@@ -227,7 +138,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// returns the file holds exactly this pass's own raw stream -- the
 		// same file --log-path already pointed driver-exec at, read back
 		// here instead of tapped from cmd.Stdout directly.
-		verdict, hasOutcome, oversized := scanPassLog(passCfg.logPath)
+		verdict, hasOutcome := scanPassLog(passCfg.logPath)
 		if verdict != "" {
 			state.LastVerdict = verdict
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: verdict}))
@@ -246,19 +157,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
 		}
 
-		// governorActive gates the budget/oversized cases below on the
-		// operator having opted into at least one #2002 knob -- without it,
-		// a run that only ever set ORCHESTRATOR_ENABLED (S1) and never
-		// touched a budget/decompose flag must behave byte-for-byte as it
-		// did before this ticket, even if an implementor's own transcript
-		// happens to contain the literal substring "status=oversized"
-		// somewhere incidental (code, logs, quoted text). Exhausted
-		// maxReviewRounds is deliberately NOT gated by this: it's
-		// pre-existing behavior, unchanged either way.
-		governorActive := cfg.decomposePromptFile != "" || cfg.maxBudgetTokens > 0 || cfg.maxBudgetUSD > 0 || cfg.maxDecompositionDepth > 0
-
 		decision, reason := "continue", ""
-		decomposeEligible := false
 		switch {
 		case hasOutcome:
 			decision, reason = "stop", "outcome reached"
@@ -268,50 +167,19 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			decision, reason = "stop", "verdict not BLOCK"
 		case cfg.maxSlices > 0 && pass >= cfg.maxSlices:
 			// The coarser backstop on top of every other cap (issue #1998):
-			// checked ahead of the budget/review-round cases below so it can
-			// never be evaded by decompose -- reaching it always hard-stops.
+			// reaching it always hard-stops.
 			decision, reason = "stop", "max slices reached"
-		case governorActive && (exceedsBudget(cfg, state.CumulativeUsage) || oversized):
-			decision, reason = "stop", "budget exceeded or oversized report"
-			decomposeEligible = true
 		case cfg.maxReviewRounds > 0 && reviewRounds >= cfg.maxReviewRounds:
 			decision, reason = "stop", "max review rounds reached"
-			decomposeEligible = true
 		}
-		// A decompose-eligible "stop" that can actually decompose isn't a
-		// stop at all -- the loop continues into a decompose pass next --
-		// so the emitted marker says "decompose", not "stop", or a marker
-		// consumer would see a surprise pass_start right after being told
-		// the run stopped.
-		willDecompose := decision == "stop" && decomposeEligible && canDecompose(cfg, state)
-		emittedDecision := decision
-		if willDecompose {
-			emittedDecision = "decompose"
-		}
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: emittedDecision, Reason: reason}))
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decision, Reason: reason}))
 		if decision == "stop" {
-			if willDecompose {
-				decomposeNext = true
-				continue
-			}
 			break
 		}
 		reviewRounds++
 	}
 
 	return rc, nil
-}
-
-// canDecompose reports whether the budget governor (issue #2002) may still
-// invoke a decompose pass: one is configured at all (decomposePromptFile),
-// and this run hasn't already exhausted its decomposition-depth cap. Unlike
-// maxReviewRounds/maxSlices, maxDecompositionDepth of zero means
-// decomposition is disabled outright rather than uncapped -- an unbounded
-// decompose knob would defeat its own purpose of guaranteeing termination.
-func canDecompose(cfg config, state RunState) bool {
-	return cfg.decomposePromptFile != "" &&
-		cfg.maxDecompositionDepth > 0 &&
-		state.DecompositionDepth < cfg.maxDecompositionDepth
 }
 
 // seedPromptFromState composes a fresh prompt file carrying promptFile's own
@@ -390,22 +258,18 @@ func seedPromptFromState(promptFile string, state RunState) (string, error) {
 // own final-message line (issue #1611) landing harmlessly in the discarded
 // nonce suffix once the token itself is found.
 //
-// Also scans for the budget governor's third trigger (issue #2002): an
-// implementor's own machine-readable "status=oversized" self-report,
-// reported back as oversized.
-//
-// Returns the last verdict seen ("" if none), whether a valid outcome line
-// was present at all, and whether an oversized self-report was present.
-func scanPassLog(logPath string) (verdict string, hasOutcome bool, oversized bool) {
+// Returns the last verdict seen ("" if none) and whether a valid outcome
+// line was present at all.
+func scanPassLog(logPath string) (verdict string, hasOutcome bool) {
 	d, err := driver.New("claude")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan pass log:", err)
-		return "", false, false
+		return "", false
 	}
 	rendered, err := d.RenderTranscript(logPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan pass log:", err)
-		return "", false, false
+		return "", false
 	}
 
 	sc := bufio.NewScanner(strings.NewReader(rendered))
@@ -418,93 +282,8 @@ func scanPassLog(logPath string) (verdict string, hasOutcome bool, oversized boo
 		if _, ok := outcome.ParseAnywhere(line); ok {
 			hasOutcome = true
 		}
-		if findOversized(line) {
-			oversized = true
-		}
 	}
-	return verdict, hasOutcome, oversized
-}
-
-// findOversized reports whether line carries the implementor's own
-// structured "too large" self-report (issue #2002): a "status=oversized"
-// marker, the same machine-readable-signal shape SPINDRIFT_OUTCOME's own
-// key=value pairs use, so the budget governor's non-convergence/oversized
-// trigger reads a deterministic marker rather than judging prose. A
-// substring match, not a bare-line prefix match, for the same
-// RenderTranscript-collapsing reason findVerdict's own doc comment gives.
-func findOversized(line string) bool {
-	return strings.Contains(line, "status=oversized")
-}
-
-// scanDecomposeLog scans a decompose pass's own log for its "SLICE: "
-// lines -- the decompose pass's only output (issue #2002): each one names
-// one new, smaller slice, in the order the decompose pass wrote them, and
-// together they become the run's new RemainingSlices. Located the same way
-// findVerdict locates "VERDICT: " -- a substring search through
-// RenderTranscript's rendered lines, since a bare-line prefix match would
-// never see past RenderTranscript's own "[role] " prefix.
-//
-// Returns nil if the log carries no "SLICE: " line at all (a crashed or
-// malformed decompose pass), the same "produced nothing usable" shape
-// scanPassLog's own zero-value return already follows.
-func scanDecomposeLog(logPath string) []string {
-	d, err := driver.New("claude")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: scan decompose log:", err)
-		return nil
-	}
-	rendered, err := d.RenderTranscript(logPath)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: scan decompose log:", err)
-		return nil
-	}
-
-	const marker = "SLICE: "
-	var slices []string
-	sc := bufio.NewScanner(strings.NewReader(rendered))
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if idx := strings.Index(line, marker); idx >= 0 {
-			if slice := strings.TrimSpace(line[idx+len(marker):]); slice != "" {
-				slices = append(slices, slice)
-			}
-		}
-	}
-	return slices
-}
-
-// accumulatePassUsage reads logPath's own token/cost usage (the same
-// ExtractUsage a Driver's dispatch-side usage report already reads,
-// cmd/launcher/internal/driver/claude/usage.go) and adds it into state's
-// CumulativeUsage -- the budget governor's (issue #2002) running total
-// across every pass so far this run. Hardcoded to the "claude" Driver
-// strategy, the same known, narrow ADR 0009 gap scanPassLog documents (ADR
-// 0035): a missing result event or a scan error contributes nothing rather
-// than aborting the pass, mirroring dispatch.CumulativeUsage's own
-// best-effort degrade.
-func accumulatePassUsage(state *RunState, logPath string) {
-	d, err := driver.New("claude")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: accumulate pass usage:", err)
-		return
-	}
-	r, err := d.ExtractUsage(logPath)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: accumulate pass usage:", err)
-		return
-	}
-	if !r.Found {
-		return
-	}
-	state.CumulativeUsage.InputTokens += r.InputTokens
-	state.CumulativeUsage.OutputTokens += r.OutputTokens
-	state.CumulativeUsage.CacheReadInputTokens += r.CacheReadInputTokens
-	state.CumulativeUsage.CacheCreationInputTokens += r.CacheCreationInputTokens
-	state.CumulativeUsage.TotalCostUSD += r.TotalCostUSD
-	state.CumulativeUsage.DurationMs += r.DurationMs
-	state.CumulativeUsage.DurationApiMs += r.DurationApiMs
-	state.CumulativeUsage.NumTurns += r.NumTurns
+	return verdict, hasOutcome
 }
 
 // findVerdict reports whether line carries a "VERDICT: APPROVE" or

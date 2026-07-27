@@ -30,10 +30,6 @@ func main() {
 	scoutBriefPath := flag.String("scout-brief-path", "/tmp/brief.md", "path to the scout brief, recorded into the run-state artifact")
 	maxReviewRounds := flag.Int("max-review-rounds", 3, "cap on additional fresh-session passes a BLOCK verdict may trigger; 0 disables the cap")
 	maxSlices := flag.Int("max-slices", 5, "cap on total driver-exec invocations this run makes; 0 disables the cap")
-	maxBudgetTokens := flag.Int("max-budget-tokens", 0, "cap on cumulative token spend across every pass (issue #2002); 0 disables this dimension")
-	maxBudgetUSD := flag.Float64("max-budget-usd", 0, "cap on cumulative dollar cost across every pass (issue #2002); 0 disables this dimension")
-	maxDecompositionDepth := flag.Int("max-decomposition-depth", 0, "cap on how many times this run may invoke the decompose pass (issue #2002); 0 disables decomposition outright, unlike the other caps' 0-means-uncapped convention")
-	decomposePromptFile := flag.String("decompose-prompt-file", "", "path to the decompose/planner pass's own prompt (issue #2002); empty disables decomposition outright")
 	flag.Parse()
 
 	if *issue == "" {
@@ -53,25 +49,21 @@ func main() {
 	}
 
 	rc, err := run(config{
-		promptFile:            *promptFile,
-		agentsFile:            *agentsFile,
-		sessionFile:           *sessionFile,
-		driverBin:             *driverBin,
-		driverFlags:           *driverFlags,
-		model:                 *model,
-		devshell:              *devshell,
-		devshellName:          *devshellName,
-		issue:                 *issue,
-		logPath:               *logPath,
-		heartbeatLog:          *heartbeatLog,
-		stateFile:             *stateFile,
-		scoutBriefPath:        *scoutBriefPath,
-		maxReviewRounds:       *maxReviewRounds,
-		maxSlices:             *maxSlices,
-		maxBudgetTokens:       *maxBudgetTokens,
-		maxBudgetUSD:          *maxBudgetUSD,
-		maxDecompositionDepth: *maxDecompositionDepth,
-		decomposePromptFile:   *decomposePromptFile,
+		promptFile:      *promptFile,
+		agentsFile:      *agentsFile,
+		sessionFile:     *sessionFile,
+		driverBin:       *driverBin,
+		driverFlags:     *driverFlags,
+		model:           *model,
+		devshell:        *devshell,
+		devshellName:    *devshellName,
+		issue:           *issue,
+		logPath:         *logPath,
+		heartbeatLog:    *heartbeatLog,
+		stateFile:       *stateFile,
+		scoutBriefPath:  *scoutBriefPath,
+		maxReviewRounds: *maxReviewRounds,
+		maxSlices:       *maxSlices,
 	}, os.Stdout)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator:", err)

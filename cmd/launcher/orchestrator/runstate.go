@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"spindrift.dev/launcher/internal/usage"
 )
 
 // RunState is the compact run-state handoff artifact the orchestrator owns
@@ -34,15 +32,6 @@ type RunState struct {
 	// small and the brief stays the single source of truth for scout
 	// findings.
 	ScoutBriefPath string `json:"scout_brief_path"`
-	// CumulativeUsage sums every pass's own ExtractUsage report so far this
-	// run (issue #2002) -- the budget governor's own running total, read
-	// back and compared against cfg's budget caps after every pass.
-	CumulativeUsage usage.Usage `json:"cumulative_usage"`
-	// DecompositionDepth counts how many times this run has already invoked
-	// the decompose pass (issue #2002), so the governor's depth cap can bound
-	// it regardless of how many times budget pressure or non-convergence
-	// keeps re-tripping.
-	DecompositionDepth int `json:"decomposition_depth"`
 }
 
 // ReadRunState reads and parses the run-state artifact at path. An empty
