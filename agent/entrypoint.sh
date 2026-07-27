@@ -851,6 +851,50 @@ emit_outcome_backstop() {
   echo "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=blocked note=${note} nonce=${RUN_NONCE:-}"
 }
 
+# required_marker_gate is the reusable shape issue #1607 hardwired to
+# SPINDRIFT_OUTCOME: a Driver pass that exits cleanly but leaves a required
+# marker missing most often just ended its turn early (issue #1542) rather
+# than actually failing, so before any caller-owned backstop runs, resume the
+# same pinned session exactly once with a corrective nudge and re-scan. Never
+# loops past that one resume -- a second miss falls through for the caller to
+# handle. A research dispatch pins no session worth resuming (ADR 0022), so
+# it always falls through untouched. Registering a second marker (e.g.
+# SPINDRIFT_PR_INTENT, issue #2036) means one more call at the call site
+# below, not a second copy of this function (issue #2044).
+#
+# Args:
+#   $1 - name of a scanner function: called with no arguments, echoes the
+#        marker's current value (or empty) by inspecting whatever state the
+#        just-completed pass left behind
+#   $2 - corrective prompt to resume the session with, sent only on a miss
+#   $3 - name of a required-predicate function: called with the scanned
+#        value as $1, returns success if the gate is already satisfied
+#
+# Reads/writes claude_rc, agents_json, and _recovery_attempted by dynamic
+# scoping from main, the same idiom every other phase function here uses
+# (issue #515) -- there is no separate return value; a caller re-scans its
+# own marker after this returns to see whether the resume changed anything.
+required_marker_gate() {
+  local _scanner="$1" _corrective_prompt="$2" _predicate="$3"
+
+  if [ "$claude_rc" -ne 0 ] || _is_research_kind; then
+    return
+  fi
+  if "$_predicate" "$("$_scanner")"; then
+    return
+  fi
+
+  echo "==> required marker missing — resuming the session once with a nudge"
+  _recovery_attempted=1
+  run_driver_in_env "$_corrective_prompt" "$agents_json" "resume" || claude_rc=$?
+}
+
+# The SPINDRIFT_OUTCOME row on the required-marker gate above -- the scanner
+# reads back main's captured outcome line, and the predicate is bare
+# presence, the same condition the pre-#2044 inline check tested.
+_scan_outcome() { printf '%s' "$_last_outcome_line"; }
+_require_nonempty() { [ -n "$1" ]; }
+
 main() {
   # Cross-phase sentinels: declared local here so bash's dynamic scoping lets
   # each phase function assign them by plain (non-local) assignment while
@@ -882,22 +926,13 @@ main() {
   _recovery_attempted=""
   run_driver_in_env "$prompt" "$agents_json" "$_driver_session_mode" || claude_rc=$?
 
-  # A driver that exited cleanly yet told us nothing most often just ended
-  # its turn early (issue #1542: ~15 minutes of scouting thrown away because
-  # the run ended "waiting" on a backgrounded task) rather than actually
-  # failing. Before falling back to the synthetic backstop, resume the same
-  # pinned session exactly once with a corrective nudge (issue #1607).
-  # Research dispatches pin no session worth resuming (ADR 0022) so they skip
-  # straight to the backstop below, same as before. The same --agents JSON as
-  # the first pass rides along too -- the run may still need to reach the
-  # scout/reviewer/filer step it never got to, and the pinned session has no
-  # other way to learn about them.
-  if [ "$claude_rc" -eq 0 ] && [ -z "$_last_outcome_line" ] && ! _is_research_kind; then
-    echo "==> driver produced no SPINDRIFT_OUTCOME line — resuming the session once with a nudge"
-    _recovery_attempted=1
-    local recovery_prompt="The run ended without printing a SPINDRIFT_OUTCOME line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required SPINDRIFT_OUTCOME line as your final message."
-    run_driver_in_env "$recovery_prompt" "$agents_json" "resume" || claude_rc=$?
-  fi
+  # Resume-once-then-fall-through via the required-marker gate (issue
+  # #2044). The same --agents JSON as the first pass rides along on any
+  # resume -- the run may still need to reach the scout/reviewer/filer step
+  # it never got to, and the pinned session has no other way to learn about
+  # them.
+  local recovery_prompt="The run ended without printing a SPINDRIFT_OUTCOME line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required SPINDRIFT_OUTCOME line as your final message."
+  required_marker_gate _scan_outcome "$recovery_prompt" _require_nonempty
 
   # Only a driver that exited cleanly yet told us nothing gets the synthetic
   # backstop. A non-zero exit is left to propagate untouched -- the
