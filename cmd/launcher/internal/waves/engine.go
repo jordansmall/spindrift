@@ -46,7 +46,7 @@ func writeBlockedMarker(pwd string, blockers []string, sources map[string]forge.
 	for i, b := range blockers {
 		refs[i] = forge.Ref(b, sources[b])
 	}
-	path := filepath.Join(pwd, "logs", blockedMarker)
+	path := filepath.Join(dispatch.HostLogDirFor(pwd), blockedMarker)
 	return os.WriteFile(path, []byte(strings.Join(refs, ", ")), 0o644)
 }
 
@@ -56,7 +56,7 @@ func writeBlockedMarker(pwd string, blockers []string, sources map[string]forge.
 // workflow's release-the-claim step still fires and interpolates a
 // human-readable reason into its comment.
 func writeDepsOfFailedMarker(pwd string) error {
-	path := filepath.Join(pwd, "logs", blockedMarker)
+	path := filepath.Join(dispatch.HostLogDirFor(pwd), blockedMarker)
 	return os.WriteFile(path, []byte("a transient blocker check failure (will retry)"), 0o644)
 }
 
@@ -252,7 +252,7 @@ outer:
 // hasn't reached CompleteLabel holds its dependent for a later invocation
 // rather than looping waves in-process.
 func run(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, plan Plan) error {
-	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 		return err
 	}
 	return drainMaxJobs(cfg, it, cf, pwd, f, s, plan.Issues, plan.Edges, plan.Sources, plan.Failed, plan.Origin)

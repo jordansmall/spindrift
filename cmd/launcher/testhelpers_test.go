@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -74,7 +73,7 @@ func TestWithSchemaFlags_SwapsAndRestores(t *testing.T) {
 func tempLogDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(dispatch.HostLogDirFor(dir), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return dir

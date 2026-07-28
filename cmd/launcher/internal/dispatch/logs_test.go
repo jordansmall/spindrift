@@ -84,6 +84,35 @@ func TestLogPaths_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
 	}
 }
 
+// TestHostLogDirFor verifies HostLogDirFor is the single source of truth for
+// a pwd's log directory, and that logPathFor, fixLogPathFor, and
+// conflictLogPathFor all place their files inside it — so the directory can
+// never drift between the naming functions and any other host-side site
+// that reads or creates it.
+func TestHostLogDirFor(t *testing.T) {
+	pwd := filepath.Join(string(filepath.Separator), "tmp", "x")
+	number := "42"
+
+	want := filepath.Join(pwd, "logs")
+	if got := HostLogDirFor(pwd); got != want {
+		t.Errorf("HostLogDirFor(%q) = %q, want %q", pwd, got, want)
+	}
+
+	cases := []struct {
+		name string
+		got  string
+	}{
+		{"logPathFor", logPathFor(pwd, number)},
+		{"fixLogPathFor", fixLogPathFor(pwd, number, 1)},
+		{"conflictLogPathFor", conflictLogPathFor(pwd, number)},
+	}
+	for _, c := range cases {
+		if dir := filepath.Dir(c.got); dir != want {
+			t.Errorf("%s(%q, %q) dir = %q, want %q", c.name, pwd, number, dir, want)
+		}
+	}
+}
+
 // TestFactory_Driver_ReturnsConfiguredDriver verifies Factory exposes the
 // Driver strategy it was constructed with, so a Console drill-in can render
 // a Dispatch's logs without the Factory growing a second rendering path

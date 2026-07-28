@@ -1167,7 +1167,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 		fmt.Printf("    #%s  landing=%s  status=skipped  note=draft PR; recover operates on non-draft PRs only\n", issueNum, res.URL)
 		return fmt.Errorf("issue %s: draft PR", issueNum)
 	}
-	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 		return fmt.Errorf("mkdir logs: %w", err)
 	}
 	d := f.New(iss.number, iss.title)

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -149,7 +148,7 @@ func dropClaimed(issues []Issue, claimed map[string]bool) []Issue {
 // can still see the just-claimed issue as dispatchable; the in-run record
 // is what actually stops a second Box from launching for it.
 func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, discover Discoverer, fresh FreshnessChecker) error {
-	if err := os.MkdirAll(filepath.Join(pwd, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 		return err
 	}
 
