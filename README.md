@@ -31,6 +31,12 @@ Run headless [Claude Code](https://claude.com/claude-code) agents in
 - A **fine-grained single-repo GitHub PAT** — scoped to the Target repo only
   (see [Before you deploy](#before-you-deploy)).
 - **Claude Code auth**: run `claude setup-token` on the host, or an API key.
+- Using the **opencode** Driver's `github-copilot` Provider instead: run
+  `opencode auth login -p github-copilot` on the host (one-time device flow),
+  export the resulting auth slice into `OPENCODE_AUTH_CONTENT`, and set
+  `MODEL=github-copilot/<model>` — see [opencode Driver: github-copilot Provider
+  credential](docs/reference.md#opencode-driver-github-copilot-provider-credential)
+  for the exact `jq` recipe.
 
 ## Quick start
 

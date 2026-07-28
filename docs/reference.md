@@ -737,6 +737,54 @@ identity is **required**: an override wins, else the host's `git config
 user.name`/`user.email` is inherited; if neither is set, `spindrift dispatch`
 exits rather than committing under an arbitrary identity.
 
+### opencode Driver: github-copilot Provider credential
+
+The opencode Driver's `github-copilot` Provider is OAuth-only (ADR 0009
+amendment, issue #260, empirically validated on opencode 1.17.15): there is
+no API-key form, and the credential is a single long-lived GitHub OAuth
+token (`gho_…`) minted once by opencode's device flow, stored verbatim in
+both the `refresh` and `access` fields of opencode's auth store with
+`expires: 0`. That device flow is interactive and cannot run headless
+inside the Box — the `github-copilot` analogue of `claude setup-token` — so
+it is a one-time **host** step:
+
+```sh
+opencode auth login -p github-copilot
+```
+
+This writes `~/.local/share/opencode/auth.json` on the host, keyed by
+Provider. opencode itself never reads that file inside the Box: it loads
+its whole auth store from the `OPENCODE_AUTH_CONTENT` env var (parsed by
+`Auth.all()` before opencode ever touches `auth.json`), so no file mount is
+needed — only the `github-copilot` slice of the store, extracted with:
+
+```sh
+OPENCODE_AUTH_CONTENT=$(jq -c '{"github-copilot": .["github-copilot"]}' ~/.local/share/opencode/auth.json)
+```
+
+`OPENCODE_AUTH_CONTENT` is a secret knob like `CLAUDE_CODE_OAUTH_TOKEN` above
+— set it in `harness.env`, source it from a vault via
+`OPENCODE_AUTH_CONTENT_CMD`/`--opencode-auth-content-cmd` (the preferred
+route — see [Runtime configuration](#runtime-configuration)), or pass
+`--opencode-auth-content-file`; it never belongs on argv, and the launcher
+threads it into the Box the same way it does every other secret
+(`bwrapSecrets` on the bwrap runner, `-e`/`--env` on the OCI runners).
+
+Point `MODEL` (and any per-tier `*_MODEL`) at a Provider-namespaced model id
+to select `github-copilot`, e.g. `MODEL=github-copilot/claude-opus-4-8` or
+`MODEL=github-copilot/gpt-4o`. The launcher's `validate()` requires
+`OPENCODE_AUTH_CONTENT` only when `DRIVER=opencode` *and* the top-level
+`MODEL` carries the `github-copilot/` prefix; it does **not** inspect the
+per-tier `*_MODEL` knobs, so a config that points only a subagent tier (e.g.
+`REVIEW_MODEL=github-copilot/…`) at the Provider while leaving `MODEL` on a
+non-Copilot model passes validation yet still needs `OPENCODE_AUTH_CONTENT`
+set to run un-broken — set the credential whenever *any* selected tier
+resolves to `github-copilot`. Under the opencode Driver, the claude
+credentials (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`) are not
+required at all — the claude Driver and the opencode Driver's
+`github-copilot` Provider each own their own credential, and validation
+never demands both at once.
+
 ### Advanced tuning
 
 These knobs are rarely changed. All except `SPINDRIFT_PROMPT_DIR`,
