@@ -48,6 +48,15 @@
   orchestratorBin,
   # --agents JSON, rendered by the selected Driver (ADR 0009).
   agentsJsonTemplate,
+  # Nix-baked map (name -> prompt file basename under agent/prompts, JSON
+  # string) from the roster (issue #264): drives entrypoint.sh's generic
+  # per-agent prompt injection loop, so a custom Nth agent's prompt resolves
+  # the same way as the four built-in names.
+  agentsPromptFilesJson,
+  # Custom roster entries with their own prompt (issue #264): a list of
+  # { promptFile; prompt; } to bake under agent/prompts/, alongside the four
+  # fixed prompt files below (which are always baked regardless of roster).
+  customRosterPromptFiles,
   # On-disk subagent files (AC4), rendered by the selected Driver: an attrset
   # mapping a HOME-relative path to its file content. A Driver with no
   # on-disk agent-config mechanism (claude.nix) supplies { }, so this bakes
@@ -171,6 +180,9 @@ let
     text =
       "AGENTS_JSON_TEMPLATE="
       + lib.escapeShellArg agentsJsonTemplate
+      + "\n"
+      + "AGENTS_PROMPT_FILES="
+      + lib.escapeShellArg agentsPromptFilesJson
       + "\n"
       + driverPreamble
       + fragmentRegistryPreamble
@@ -326,6 +338,9 @@ let
     cp ${pkgs.writeText "review-prompt.md" reviewPrompt} $out/agent/prompts/review-prompt.md
     cp ${pkgs.writeText "filer-prompt.md" filerPrompt} $out/agent/prompts/filer-prompt.md
     cp ${pkgs.writeText "worker-prompt.md" workerPrompt} $out/agent/prompts/worker-prompt.md
+    ${lib.concatMapStrings (
+      e: "cp ${pkgs.writeText e.promptFile e.prompt} $out/agent/prompts/${e.promptFile}\n"
+    ) customRosterPromptFiles}
     cp ${pkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
     cp ${pkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/agent/prompts/fix-prompt.md
     cp ${pkgs.writeText "research-prompt.md" (injectResearchOutcomeContract researchPrompt)} $out/agent/prompts/research-prompt.md

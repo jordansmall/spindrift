@@ -32,6 +32,12 @@ setup_entrypoint_env() {
   # claude-opus-4-8) so the MODEL-flag assertions below stay stable
   # regardless of what the schema defaults to.
   export MODEL="claude-test-model"
+  # Nix-baked from the roster (lib/mkHarness.nix): maps each --agents JSON
+  # entry name to its prompt file under PROMPTS_DIR, so entrypoint.sh's
+  # generic per-name injection loop (issue #264) resolves the same four
+  # built-in prompt files it always has. Individual tests override this
+  # to exercise a custom Nth agent or the "<name>-prompt.md" fallback.
+  export AGENTS_PROMPT_FILES='{"scout":"scout-prompt.md","reviewer":"review-prompt.md","filer":"filer-prompt.md","worker":"worker-prompt.md"}'
   export ISSUE_NUMBER="7"
   export ISSUE_TITLE="Do the thing"
   export WORK_DIR="$BATS_TEST_TMPDIR/work"

@@ -150,74 +150,32 @@
   '';
 
   # --agents JSON rendered at eval time via builtins.toJSON (ADR 0007 tier-1):
-  # model names are never string-interpolated in bash. Each subagent is
-  # composed independently by its own model knob; the flag is omitted when no
-  # subagent model is configured (empty string return).
+  # model names are never string-interpolated in bash. Takes the first-class
+  # roster (issue #264, lib/roster.nix) rather than four fixed model-knob
+  # args, so an arbitrary N-agent roster -- including a custom agent beyond
+  # the historical scout/reviewer/filer/worker set -- renders the same way.
+  # Each roster entry with a non-empty model becomes one key; an entry with
+  # an empty model is dropped entirely (#392 semantics), and the flag is
+  # omitted (empty string return) when every entry is dropped. `prompt` is
+  # always "" here -- entrypoint.sh injects each agent's rendered prompt at
+  # runtime, never at eval time. Deliberately NO `mode` key: claude's
+  # --agents schema has none (contrast opencode.nix's agentFilesTemplate,
+  # which does emit `mode` in its YAML frontmatter).
   agentsJsonTemplate =
-    {
-      scoutModel,
-      reviewModel,
-      filerModel,
-      workerModel,
-    }:
+    { roster }:
     let
-      agents =
-        lib.optionalAttrs (scoutModel != "") {
-          scout = {
-            description = "Map relevant files, seams, and tests; return a structured brief";
+      present = lib.filter (e: (e.model or "") != "") roster;
+      agents = lib.listToAttrs (
+        map (e: {
+          name = e.name;
+          value = {
+            description = e.description or "";
             prompt = "";
-            tools = [
-              "Read"
-              "Bash"
-              "WebFetch"
-              "WebSearch"
-              "Glob"
-              "Grep"
-            ];
-            model = scoutModel;
+            tools = e.tools or [ ];
+            model = e.model;
           };
-        }
-        // lib.optionalAttrs (reviewModel != "") {
-          reviewer = {
-            description = "Review the branch diff for spec compliance and coding standards";
-            prompt = "";
-            tools = [
-              "Read"
-              "Bash"
-              "WebFetch"
-              "Agent"
-            ];
-            model = reviewModel;
-          };
-        }
-        // lib.optionalAttrs (filerModel != "") {
-          filer = {
-            description = "File issues from a review's non-blocking findings, best-effort";
-            prompt = "";
-            tools = [
-              "Read"
-              "Bash"
-              "WebFetch"
-            ];
-            model = filerModel;
-          };
-        }
-        // lib.optionalAttrs (workerModel != "") {
-          worker = {
-            description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
-            prompt = "";
-            tools = [
-              "Read"
-              "Bash"
-              "Edit"
-              "Write"
-              "Glob"
-              "Grep"
-              "WebFetch"
-            ];
-            model = workerModel;
-          };
-        };
+        }) present
+      );
     in
     if agents == { } then "" else builtins.toJSON agents;
 

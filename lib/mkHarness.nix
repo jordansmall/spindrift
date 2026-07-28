@@ -32,6 +32,16 @@
   # Provisioned by default (workerModel defaults to claude-sonnet-5, issue
   # #2054); empty only when workerModel is set to "" (see agentsJsonTemplate).
   workerPrompt ? builtins.readFile ../templates/default/prompts/worker-prompt.md,
+  # The first-class N-agent roster (issue #264, lib/roster.nix), rendered by
+  # the selected Driver into --agents JSON (claude) or on-disk agents/*.md
+  # (opencode) below. `null` (the default) resolves to
+  # `rosterLib.defaultRoster` built from the four legacy model knobs
+  # (scoutModel/reviewModel/filerModel/workerModel, deprecated -- see
+  # mergedDefaults/resolvedRoster below), so an existing Consumer that has
+  # never heard of `roster` keeps building the exact same four agents it
+  # always has. A Consumer that sets `roster` explicitly takes over agent
+  # composition entirely; the legacy knobs are then ignored.
+  roster ? null,
   conflictResolvePrompt ? builtins.readFile ../templates/default/prompts/conflict-resolve-prompt.md,
   # Driven instead of `prompt` on a fix box (FIX_PASS>0, ADR: selfHeal/runFix
   # in cmd/launcher): the branch is already checked out, so this warm-fix
@@ -252,26 +262,51 @@ let
   # would otherwise be silently ignored, never baked, never surfaced.
   unknownDefaultKeys = lib.filter (k: !(lib.hasAttr k flakeOptionEntries)) (lib.attrNames defaults);
 
-  # --agents JSON, rendered by the selected Driver (ADR 0009) so a future
-  # Driver with a different agent-config shape (e.g. opencode's agents/*.md)
-  # can supply its own renderer without touching mkHarness.
-  agentsJsonTemplate = driverEntry.agentsJsonTemplate {
-    scoutModel = mergedDefaults.scoutModel or "";
-    reviewModel = mergedDefaults.reviewModel or "";
-    filerModel = mergedDefaults.filerModel or "";
-    workerModel = mergedDefaults.workerModel or "";
-  };
+  # The first-class N-agent roster (issue #264, lib/roster.nix): an explicit
+  # `roster` arg always wins; otherwise it's resolved from the four legacy
+  # per-agent model knobs (scoutModel/reviewModel/filerModel/workerModel,
+  # deprecated -- see the lib.warnIf below) so an existing Consumer keeps
+  # building the exact same four agents it always has.
+  rosterLib = import ./roster.nix { inherit lib; };
+  resolvedRoster =
+    if roster != null then
+      roster
+    else
+      rosterLib.defaultRoster {
+        scoutModel = mergedDefaults.scoutModel or "";
+        reviewModel = mergedDefaults.reviewModel or "";
+        filerModel = mergedDefaults.filerModel or "";
+        workerModel = mergedDefaults.workerModel or "";
+      };
+
+  # --agents JSON, rendered by the selected Driver (ADR 0009) from the
+  # resolved roster above, so a future Driver with a different agent-config
+  # shape (e.g. opencode's agents/*.md) can supply its own renderer without
+  # touching mkHarness.
+  agentsJsonTemplate = driverEntry.agentsJsonTemplate { roster = resolvedRoster; };
 
   # On-disk subagent files (AC4), rendered by the selected Driver the same
   # way agentsJsonTemplate is above: a Driver with no on-disk agent-config
   # mechanism (claude.nix) returns { } here, since its subagents ride
   # agentsJsonTemplate's --agents JSON flag instead.
-  driverAgentFiles = driverEntry.agentFilesTemplate {
-    scoutModel = mergedDefaults.scoutModel or "";
-    reviewModel = mergedDefaults.reviewModel or "";
-    filerModel = mergedDefaults.filerModel or "";
-    workerModel = mergedDefaults.workerModel or "";
-  };
+  driverAgentFiles = driverEntry.agentFilesTemplate { roster = resolvedRoster; };
+
+  # Nix-baked name -> prompt file map (issue #264), read at runtime by
+  # entrypoint.sh's generic per-agent prompt injection loop so a custom Nth
+  # agent's prompt resolves the same way as the four built-in names.
+  agentsPromptFilesJson = builtins.toJSON (
+    lib.listToAttrs (
+      map (e: {
+        name = e.name;
+        value = e.promptFile;
+      }) resolvedRoster
+    )
+  );
+
+  # Roster entries carrying their own prompt (a custom agent, as opposed to
+  # the four built-in ones whose prompt is always baked separately below) --
+  # baked into the image alongside the four fixed prompt files.
+  customRosterPromptFiles = lib.filter (e: e.prompt != null) resolvedRoster;
 
   # The Driver's in-box half, rendered by the registry (issue #624) into
   # agent/entrypoint.sh's DRIVER_* vars and function definitions (ADR 0009),
@@ -434,6 +469,8 @@ let
       driverExecBin
       orchestratorBin
       agentsJsonTemplate
+      agentsPromptFilesJson
+      customRosterPromptFiles
       driverAgentFiles
       driverPreamble
       fragmentRegistryPreamble
@@ -497,6 +534,9 @@ let
     cp ${hostPkgs.writeText "review-prompt.md" reviewPrompt} $out/review-prompt.md
     cp ${hostPkgs.writeText "filer-prompt.md" filerPrompt} $out/filer-prompt.md
     cp ${hostPkgs.writeText "worker-prompt.md" workerPrompt} $out/worker-prompt.md
+    ${lib.concatMapStrings (
+      e: "cp ${hostPkgs.writeText e.promptFile e.prompt} $out/${e.promptFile}\n"
+    ) customRosterPromptFiles}
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/conflict-resolve-prompt.md
     cp ${hostPkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/fix-prompt.md
     cp ${hostPkgs.writeText "research-prompt.md" (injectResearchOutcomeContract researchPrompt)} $out/research-prompt.md
@@ -809,11 +849,27 @@ let
   # reference its path) are always available. `nix flake check` on darwin thus
   # never forces a Linux build.
   isLinux = system == linuxSystem;
+
+  # Deprecation warning (issue #264): the four per-agent model knobs are
+  # superseded by `roster` above. Checked against the Consumer's own
+  # `defaults` arg (not mergedDefaults, which always carries every schema
+  # key via schemaDefaults) so the warning fires only when the Consumer
+  # actually set one of these knobs, never merely because the schema has
+  # defaults for them. stderr-only (nix's builtins.trace/warnIf), so it never
+  # changes a derivation's output hash -- a Consumer on the legacy knobs and
+  # one on an equivalent `roster` still produce byte-identical images.
+  legacyKnobsSet = lib.filter (k: defaults ? ${k}) [
+    "scoutModel"
+    "reviewModel"
+    "filerModel"
+    "workerModel"
+  ];
+  deprecationMsg = "spindrift: the per-agent model knobs (${lib.concatStringsSep ", " legacyKnobsSet}) are deprecated and will be removed; migrate to the `roster` option (see docs/reference.md).";
 in
 if unknownDefaultKeys != [ ] then
   throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
 else
-  {
+  lib.warnIf (legacyKnobsSet != [ ]) deprecationMsg {
     inherit
       image
       agentEnv

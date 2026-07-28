@@ -257,10 +257,38 @@ in
     let
       opencodeEntry = driverRegistry.entries.opencode;
       rendered = opencodeEntry.agentFilesTemplate {
-        scoutModel = "solo-scout-model";
-        reviewModel = "";
-        filerModel = "";
-        workerModel = "";
+        roster = [
+          {
+            name = "scout";
+            model = "solo-scout-model";
+            mode = "subagent";
+            description = "Map relevant files, seams, and tests; return a structured brief";
+            tools = [
+              "Read"
+              "Bash"
+              "WebFetch"
+              "WebSearch"
+              "Glob"
+              "Grep"
+            ];
+            promptFile = "scout-prompt.md";
+            prompt = null;
+          }
+          {
+            name = "reviewer";
+            model = "";
+            mode = "subagent";
+            description = "Review the branch diff for spec compliance and coding standards";
+            tools = [
+              "Read"
+              "Bash"
+              "WebFetch"
+              "Agent"
+            ];
+            promptFile = "review-prompt.md";
+            prompt = null;
+          }
+        ];
       };
       scoutFile = rendered.".config/opencode/agents/scout.md" or "";
     in
@@ -282,10 +310,44 @@ in
     let
       opencodeEntry = driverRegistry.entries.opencode;
       rendered = opencodeEntry.agentFilesTemplate {
-        scoutModel = "solo-scout-model";
-        reviewModel = "";
-        filerModel = "";
-        workerModel = "";
+        roster = [
+          {
+            name = "scout";
+            model = "solo-scout-model";
+            mode = "subagent";
+            description = "Map relevant files, seams, and tests; return a structured brief";
+            tools = [ "Read" ];
+            promptFile = "scout-prompt.md";
+            prompt = null;
+          }
+          {
+            name = "reviewer";
+            model = "";
+            mode = "subagent";
+            description = "Review the branch diff for spec compliance and coding standards";
+            tools = [ "Read" ];
+            promptFile = "review-prompt.md";
+            prompt = null;
+          }
+          {
+            name = "filer";
+            model = "";
+            mode = "subagent";
+            description = "File issues from a review's non-blocking findings, best-effort";
+            tools = [ "Read" ];
+            promptFile = "filer-prompt.md";
+            prompt = null;
+          }
+          {
+            name = "worker";
+            model = "";
+            mode = "subagent";
+            description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
+            tools = [ "Read" ];
+            promptFile = "worker-prompt.md";
+            prompt = null;
+          }
+        ];
       };
     in
     assert assertMsg (!(rendered ? ".config/opencode/agents/reviewer.md"))
@@ -303,15 +365,153 @@ in
     let
       opencodeEntry = driverRegistry.entries.opencode;
       rendered = opencodeEntry.agentFilesTemplate {
-        scoutModel = "";
-        reviewModel = "";
-        filerModel = "";
-        workerModel = "";
+        roster = [
+          {
+            name = "scout";
+            model = "";
+            mode = "subagent";
+            description = "Map relevant files, seams, and tests; return a structured brief";
+            tools = [ "Read" ];
+            promptFile = "scout-prompt.md";
+            prompt = null;
+          }
+          {
+            name = "reviewer";
+            model = "";
+            mode = "subagent";
+            description = "Review the branch diff for spec compliance and coding standards";
+            tools = [ "Read" ];
+            promptFile = "review-prompt.md";
+            prompt = null;
+          }
+          {
+            name = "filer";
+            model = "";
+            mode = "subagent";
+            description = "File issues from a review's non-blocking findings, best-effort";
+            tools = [ "Read" ];
+            promptFile = "filer-prompt.md";
+            prompt = null;
+          }
+          {
+            name = "worker";
+            model = "";
+            mode = "subagent";
+            description = "Implement a scoped slice of work delegated to it, with full implement-capable tools";
+            tools = [ "Read" ];
+            promptFile = "worker-prompt.md";
+            prompt = null;
+          }
+        ];
       };
     in
     assert assertMsg (rendered == { })
       "opencode agentFilesTemplate must return {} when every model is empty, got: ${builtins.toJSON rendered}";
     pkgs.runCommand "drivers-opencode-agent-files-all-empty-returns-empty-set" { } "touch $out";
+
+  # Issue #264: claude's agentsJsonTemplate now takes a roster list rather
+  # than four fixed model-knob args -- a custom 5th agent ("auditor", not one
+  # of scout/reviewer/filer/worker) must render into the --agents JSON the
+  # same as any built-in entry, an empty-model entry (reviewer here) must be
+  # dropped (#392 semantics), and the rendered JSON must never gain a `mode`
+  # key (claude's --agents schema has none; opencode.nix's agentFilesTemplate
+  # is the only Driver that emits mode).
+  drivers-claude-agents-json-roster =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+      rendered = claudeEntry.agentsJsonTemplate {
+        roster = [
+          {
+            name = "scout";
+            model = "solo-scout-model";
+            mode = "subagent";
+            description = "Map relevant files, seams, and tests; return a structured brief";
+            tools = [
+              "Read"
+              "Bash"
+              "WebFetch"
+              "WebSearch"
+              "Glob"
+              "Grep"
+            ];
+            promptFile = "scout-prompt.md";
+            prompt = null;
+          }
+          {
+            name = "reviewer";
+            model = "";
+            mode = "subagent";
+            description = "Review the branch diff for spec compliance and coding standards";
+            tools = [
+              "Read"
+              "Bash"
+              "WebFetch"
+              "Agent"
+            ];
+            promptFile = "review-prompt.md";
+            prompt = null;
+          }
+          {
+            name = "auditor";
+            model = "audit-model";
+            mode = "subagent";
+            description = "Audit stuff";
+            tools = [ "Read" ];
+            promptFile = "auditor-prompt.md";
+            prompt = null;
+          }
+        ];
+      };
+      parsed = builtins.fromJSON rendered;
+    in
+    assert assertMsg (parsed ? scout)
+      "claude agentsJsonTemplate must render a roster entry with a non-empty model, got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
+    assert assertMsg (parsed ? auditor)
+      "claude agentsJsonTemplate must render a custom roster entry (auditor), got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
+    assert assertMsg (!(parsed ? reviewer))
+      "claude agentsJsonTemplate must omit a roster entry with an empty model (reviewer), got keys: ${concatStringsSep ", " (builtins.attrNames parsed)}";
+    assert assertMsg (parsed.auditor.model or "" == "audit-model")
+      "claude agentsJsonTemplate's auditor entry must carry the roster model verbatim, got: ${builtins.toJSON (parsed.auditor or { })}";
+    assert assertMsg (parsed.auditor.tools or [ ] == [ "Read" ])
+      "claude agentsJsonTemplate's auditor entry must carry the roster tools verbatim, got: ${builtins.toJSON (parsed.auditor or { })}";
+    assert assertMsg (
+      filter (name: (parsed.${name} or { }) ? mode) (builtins.attrNames parsed) == [ ]
+    ) "claude agentsJsonTemplate must never emit a `mode` key on any agent (claude's --agents schema has none), got: ${rendered}";
+    pkgs.runCommand "drivers-claude-agents-json-roster" { } "touch $out";
+
+  # AC#4: a single roster containing a custom agent not in the historical
+  # scout/reviewer/filer/worker set must render into BOTH Drivers' output --
+  # claude's --agents JSON and opencode's on-disk agents/*.md -- from the same
+  # roster list, since the roster (not per-Driver hardcoding) is now the
+  # single source of agent identity.
+  drivers-roster-custom-agent-both-drivers =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+      opencodeEntry = driverRegistry.entries.opencode;
+      roster = [
+        {
+          name = "auditor";
+          model = "audit-model";
+          mode = "subagent";
+          description = "Audit stuff";
+          tools = [ "Read" ];
+        }
+      ];
+      claudeRendered = builtins.fromJSON (claudeEntry.agentsJsonTemplate { inherit roster; });
+      opencodeRendered = opencodeEntry.agentFilesTemplate { inherit roster; };
+      opencodeAuditorFile = opencodeRendered.".config/opencode/agents/auditor.md" or "";
+    in
+    assert assertMsg (claudeRendered ? auditor)
+      "claude agentsJsonTemplate must render a custom roster entry (auditor), got keys: ${concatStringsSep ", " (builtins.attrNames claudeRendered)}";
+    assert assertMsg (claudeRendered.auditor.model or "" == "audit-model")
+      "claude agentsJsonTemplate's auditor entry must carry the roster model verbatim, got: ${builtins.toJSON (claudeRendered.auditor or { })}";
+    assert assertMsg (opencodeRendered ? ".config/opencode/agents/auditor.md")
+      "opencode agentFilesTemplate must render a custom roster entry (auditor.md), got keys: ${concatStringsSep ", " (builtins.attrNames opencodeRendered)}";
+    assert assertMsg (hasInfix "model: audit-model" opencodeAuditorFile)
+      "opencode agentFilesTemplate's auditor.md must carry the roster model verbatim, got: ${opencodeAuditorFile}";
+    assert assertMsg (hasInfix "mode: subagent" opencodeAuditorFile)
+      "opencode agentFilesTemplate's auditor.md must carry the roster mode, got: ${opencodeAuditorFile}";
+    pkgs.runCommand "drivers-roster-custom-agent-both-drivers" { } "touch $out";
 
   # opencode reads .claude/skills/ directly (ADR 0009) rather than a
   # opencode-specific skills directory -- pin the exact value so a future
