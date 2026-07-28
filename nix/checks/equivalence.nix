@@ -481,6 +481,79 @@ in
         touch $out
       '';
 
+  # The `roster` knob (issue #264, lib/roster.nix) must be reachable through
+  # the flakeModule Consumer surface, not only via a raw `mkHarness` call — a
+  # Consumer that sets `perSystem.spindrift.roster` must get byte-identical
+  # outputs to a direct `mkHarness` call with the same `roster`.
+  flakemodule-roster =
+    let
+      testRoster = [
+        {
+          name = "scout";
+          model = "claude-haiku-4-5-20251001";
+          mode = "subagent";
+          description = "Map relevant files, seams, and tests; return a structured brief";
+          tools = [
+            "Read"
+            "Bash"
+            "WebFetch"
+            "WebSearch"
+            "Glob"
+            "Grep"
+          ];
+          promptFile = "scout-prompt.md";
+          prompt = null;
+        }
+        {
+          name = "auditor";
+          model = "claude-opus-4-5-20251101";
+          mode = "subagent";
+          description = "Independently audit the diff for correctness before merge";
+          tools = [
+            "Read"
+            "Bash"
+            "WebFetch"
+          ];
+          promptFile = "auditor-prompt.md";
+          prompt = null;
+        }
+      ];
+      consumer106 =
+        flake-parts.lib.mkFlake
+          {
+            inputs = {
+              inherit nixpkgs;
+              self = {
+                outPath = ../../.;
+              };
+            };
+          }
+          {
+            systems = [ system ];
+            imports = [ ../../lib/flakeModule.nix ];
+            perSystem.spindrift = {
+              packages = p: [ p.hello ];
+              roster = testRoster;
+            };
+          };
+      direct106 = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        roster = testRoster;
+      };
+      consumerPkgs106 = consumer106.packages.${system};
+    in
+    pkgs.runCommand "flakemodule-roster"
+      {
+        moduleSpindrift = consumerPkgs106.spindrift;
+        directSpindrift = direct106.spindrift;
+      }
+      ''
+        [ "$moduleSpindrift" = "$directSpindrift" ] \
+          || { echo "spindrift mismatch: $moduleSpindrift != $directSpindrift" >&2; exit 1; }
+        touch $out
+      '';
+
   # Unknown section or knob keys in `settings` must throw at eval time; the
   # NixOS module system rejects undeclared option names.  We force evaluation
   # down to `.packages.${system}.spindrift` so the module config is actually

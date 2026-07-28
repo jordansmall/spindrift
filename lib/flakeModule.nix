@@ -196,6 +196,22 @@ in
         '';
       };
 
+      roster = mkOption {
+        type = types.nullOr (types.listOf types.attrs);
+        default = null;
+        description = ''
+          The first-class N-agent roster (issue #264, lib/roster.nix): a list of
+          `{ name; model; mode; description; tools; promptFile; prompt }`
+          attrsets that both Drivers render subagents from, replacing the four
+          hardcoded scout/reviewer/filer/worker model knobs. An explicit
+          `roster` always wins over the legacy per-agent model knobs
+          (scoutModel/reviewModel/filerModel/workerModel), the same precedence
+          `mkHarness.nix` applies to a raw call. Untyped (`types.attrs`
+          elements, not a submodule) so the forwarded list matches the
+          Consumer's input verbatim, byte-for-byte, with no default-injection.
+        '';
+      };
+
       extraClosures = mkOption {
         type = types.nullOr (types.functionTo (types.listOf types.package));
         default = null;
@@ -236,6 +252,7 @@ in
       // lib.optionalAttrs (cfg.prefetch != null) { inherit (cfg) prefetch; }
       // lib.optionalAttrs (cfg.prompt != null) { inherit (cfg) prompt; }
       // lib.optionalAttrs (cfg.skills != null) { inherit (cfg) skills; }
+      // lib.optionalAttrs (cfg.roster != null) { inherit (cfg) roster; }
       // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; }
       // lib.optionalAttrs (cfg.runtime != null) { inherit (cfg) runtime; }
       // lib.optionalAttrs (cfg.driver != null) { inherit (cfg) driver; }
