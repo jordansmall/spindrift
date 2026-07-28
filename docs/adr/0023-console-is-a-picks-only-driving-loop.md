@@ -33,7 +33,7 @@ seconds rather than reconciled against a stale intent file.
 The Console is a peer of the headless loops, not their replacement:
 dogfood.sh and CI keep draining the label queue AFK, `dispatch <nums>` stays
 the scriptable one-shot, and coexistence is already safe because claims are
-atomic label swaps — the Console just surfaces a live `.dogfood.pid` at
+atomic label swaps — the Console just surfaces a live `.spindrift/dogfood.pid` at
 startup so a competing drain loop is visible. Quit drains by default
 (terminate-all is an explicit escalation); a hard death leaves orphans to the
 existing recover path, offered on next start.
