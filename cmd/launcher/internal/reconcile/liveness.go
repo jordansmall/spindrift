@@ -16,7 +16,7 @@ import (
 const staleAfter = 3 * time.Hour
 
 // FSProbe is LivenessProbe's real implementation (issue #1432): Box log
-// staleness read from pwd's logs/ dir, container presence read from r.
+// staleness read from pwd's .spindrift/logs dir, container presence read from r.
 // Construct one per `reconcile` invocation with NewFSProbe.
 type FSProbe struct {
 	pwd string

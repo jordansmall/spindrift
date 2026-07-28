@@ -40,10 +40,10 @@ func TestReconcileWatches_NilWatcher_IsNoOp(t *testing.T) {
 // criterion (issue #1748).
 func TestReconcileWatches_AddsRunningPickLogPath(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, "logs", "issue-9.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
 	if err := os.WriteFile(logPath, []byte("first line\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -78,10 +78,10 @@ func TestReconcileWatches_AddsRunningPickLogPath(t *testing.T) {
 // stops" half of the same acceptance criterion (issue #1748).
 func TestReconcileWatches_RemovesWatchWhenPickStopsRunning(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, "logs", "issue-9.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
 	if err := os.WriteFile(logPath, []byte("first line\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -119,10 +119,10 @@ func TestReconcileWatches_RemovesWatchWhenPickStopsRunning(t *testing.T) {
 // watched", issue #1748 AC).
 func TestReconcileWatches_NewPassPath_WatchesNewDropsOld(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	initialPath := filepath.Join(dir, "logs", "issue-9.log")
+	initialPath := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
 	if err := os.WriteFile(initialPath, []byte("first line\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestReconcileWatches_NewPassPath_WatchesNewDropsOld(t *testing.T) {
 	tm.m.Picks = []Pick{{Number: "9", State: PickRunning}}
 	tm = tm.reconcileWatches()
 
-	fixPath := filepath.Join(dir, "logs", "issue-9-fix-1.log")
+	fixPath := filepath.Join(dir, ".spindrift", "logs", "issue-9-fix-1.log")
 	if err := os.WriteFile(fixPath, []byte("fix pass line\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -221,10 +221,10 @@ func TestTea_LogWrite_RefreshesRunningRowHeartbeat_NotPoll(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	first := `{"type":"result","num_turns":17,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)

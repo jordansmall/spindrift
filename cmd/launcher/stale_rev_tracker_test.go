@@ -46,7 +46,7 @@ func TestStaleRevTracker_RecordCreatesMissingLogsDir(t *testing.T) {
 	pwd := t.TempDir()
 	tracker := newStaleRevTracker(pwd)
 
-	logsDir := filepath.Join(pwd, "logs")
+	logsDir := filepath.Join(pwd, ".spindrift", "logs")
 	if _, err := os.Stat(logsDir); !os.IsNotExist(err) {
 		t.Fatalf("logs dir already exists before record(): %v", err)
 	}

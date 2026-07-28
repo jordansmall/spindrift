@@ -10,7 +10,7 @@ import (
 // log, labeled "initial", when no fix or conflict-resolve pass ever ran.
 func TestLogPaths_InitialOnly(t *testing.T) {
 	dir := tempLogDir(t)
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-1.log"), []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(HostLogDirFor(dir), "issue-1.log"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -21,7 +21,7 @@ func TestLogPaths_InitialOnly(t *testing.T) {
 	if got[0].Label != "initial" {
 		t.Errorf("Label = %q, want %q", got[0].Label, "initial")
 	}
-	if got[0].Path != filepath.Join(dir, "logs", "issue-1.log") {
+	if got[0].Path != filepath.Join(HostLogDirFor(dir), "issue-1.log") {
 		t.Errorf("Path = %q, want the initial log path", got[0].Path)
 	}
 }
@@ -31,7 +31,7 @@ func TestLogPaths_InitialOnly(t *testing.T) {
 // initial, each fix pass by number, then conflict-resolve.
 func TestLogPaths_OrdersInitialFixesAndConflictResolve(t *testing.T) {
 	dir := tempLogDir(t)
-	logsDir := filepath.Join(dir, "logs")
+	logsDir := HostLogDirFor(dir)
 	for _, name := range []string{
 		"issue-1.log",
 		"issue-1-fix-1.log",
@@ -60,7 +60,7 @@ func TestLogPaths_OrdersInitialFixesAndConflictResolve(t *testing.T) {
 // probe at the gap rather than skipping over it — fix-3 never appears.
 func TestLogPaths_StopsAtFirstMissingFixPass(t *testing.T) {
 	dir := tempLogDir(t)
-	logsDir := filepath.Join(dir, "logs")
+	logsDir := HostLogDirFor(dir)
 	for _, name := range []string{"issue-1.log", "issue-1-fix-1.log", "issue-1-fix-3.log"} {
 		if err := os.WriteFile(filepath.Join(logsDir, name), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
@@ -93,7 +93,7 @@ func TestHostLogDirFor(t *testing.T) {
 	pwd := filepath.Join(string(filepath.Separator), "tmp", "x")
 	number := "42"
 
-	want := filepath.Join(pwd, "logs")
+	want := filepath.Join(pwd, ".spindrift", "logs")
 	if got := HostLogDirFor(pwd); got != want {
 		t.Errorf("HostLogDirFor(%q) = %q, want %q", pwd, got, want)
 	}

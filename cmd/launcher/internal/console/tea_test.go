@@ -1022,11 +1022,11 @@ func sidebarOpen(t *testing.T) *teatest.TestModel {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	launch := newTestLauncher(t, f)
@@ -1053,10 +1053,10 @@ func TestTea_PollTick_AdvancesOpenSidebarActivityFeed(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -1143,18 +1143,18 @@ func TestTea_Sidebar_RetainsPositionAcrossDispatchSwitch(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "43", Title: "second thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	var lines strings.Builder
 	for i := 0; i < 50; i++ {
 		fmt.Fprintf(&lines, `{"type":"assistant","message":{"content":[{"type":"text","text":"line-%02d"}]}}`+"\n", i)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(lines.String()), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(lines.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	other := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-43.log"), []byte(other), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-43.log"), []byte(other), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	launch := newTestLauncher(t, f)
@@ -1209,10 +1209,10 @@ func TestTea_PollTick_DoesNotRefreshSettledSidebar(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -1261,10 +1261,10 @@ func TestTea_SidebarActivityTick_AdvancesWithoutKeypressOrPoll(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -1302,10 +1302,10 @@ func TestTea_SidebarActivityTick_AdvancesTranscriptView(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -1345,10 +1345,10 @@ func TestTea_SidebarActivityTick_AdvancesTranscriptViewWhileZoomed(t *testing.T)
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -1390,10 +1390,10 @@ func TestTea_SidebarActivityTick_AdvancesRawTranscriptView(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -1439,10 +1439,10 @@ func TestTea_SidebarActivityTick_AdvancesWhileZoomed(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -1483,10 +1483,10 @@ func TestTea_SidebarActivityTick_FollowAutoScrollsToNewLines(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	var lines strings.Builder
 	for i := 0; i < 50; i++ {
 		fmt.Fprintf(&lines, `{"type":"assistant","message":{"content":[{"type":"text","text":"line-%02d"}]}}`+"\n", i)
@@ -1669,11 +1669,11 @@ func TestTea_FocusKeys_MoveBetweenListAndDockedSidebar(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "43", Title: "second thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	launch := newTestLauncher(t, f)
@@ -1729,11 +1729,11 @@ func TestTea_SidebarKey_ClosesFromDockedListFocus(t *testing.T) {
 			f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 			dir := t.TempDir()
-			if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
-			if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			launch := newTestLauncher(t, f)
@@ -1813,11 +1813,11 @@ func TestTea_EnterKey_OnStaticRow_OpensSidebar(t *testing.T) {
 			f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 			dir := t.TempDir()
-			if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
-			if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			launch := newTestLauncher(t, f)
@@ -1932,11 +1932,11 @@ func TestTea_SidebarToggleKey_CyclesActivityTranscriptRaw(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	launch := newTestLauncher(t, f)
@@ -2592,7 +2592,7 @@ func TestTea_SettleTriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
 		return nil
 	}
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -4159,7 +4159,7 @@ func markStale(launch *Launcher, msg string) {
 func newTestLauncher(t *testing.T, cf forge.CodeForge) *Launcher {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -4194,10 +4194,10 @@ func TestTea_Update_ReusesHeartbeatCacheAcrossCalls(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "logs", "issue-42.log")
+	path := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	first := `{"type":"result","num_turns":17,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -4253,10 +4253,10 @@ func TestTea_Update_RefreshesOpenTranscriptView_WhenPassLogGrows(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "logs", "issue-42.log")
+	path := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -4293,10 +4293,10 @@ func TestTea_Update_DoesNotRefreshTranscript_ForSettledSidebar(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "logs", "issue-42.log")
+	path := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -4458,7 +4458,7 @@ func TestTea_Init_DetectsOrphanedIssuesWithoutAdopting(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -4513,11 +4513,11 @@ func TestTea_EnterOnOrphanRow_OpensSidebarReadOnly(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4588,11 +4588,11 @@ func TestTea_OrphanRow_ShowsLiveHeartbeat(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	line := `{"type":"result","num_turns":17,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4629,11 +4629,11 @@ func TestTea_OrphanAdopted_ClearsOrphanHeartbeats(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	line := `{"type":"result","num_turns":17,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4675,10 +4675,10 @@ func TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Deliberately no logs/issue-42.log -- the race/remote-dispatch case
+	// Deliberately no .spindrift/logs/issue-42.log -- the race/remote-dispatch case
 	// this test targets.
 
 	drv, err := driver.New("")
@@ -4725,10 +4725,10 @@ func TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive(t *testing.T)
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Deliberately no logs/issue-42.log yet -- the sidebar opens on the
+	// Deliberately no .spindrift/logs/issue-42.log yet -- the sidebar opens on the
 	// graceful-notice path this test then races against a real log write.
 
 	drv, err := driver.New("")
@@ -4754,7 +4754,7 @@ func TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive(t *testing.T)
 	waitForOutput(t, tm, "no local logs for this dispatch")
 
 	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"box is alive"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	waitForOutput(t, tm, "box is alive")
@@ -4781,10 +4781,10 @@ func TestTea_ReopenOrphanSidebar_PicksUpTranscriptGrowth(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first pass"}]}}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -4839,10 +4839,10 @@ func TestTea_PollTick_AdvancesOpenOrphanSidebarActivityFeed(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -4885,7 +4885,7 @@ func TestTea_PollTick_AdvancesOpenOrphanSidebarActivityFeed(t *testing.T) {
 // no RecoverFn call of its own (issue #1619).
 func TestOrphanDetectCmd_ReturnsDetectedNumbers(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -4921,7 +4921,7 @@ func TestOrphanDetectCmd_ReturnsDetectedNumbers(t *testing.T) {
 // failed") this lookup used to feed.
 func TestOrphanDetectCmd_OrphanedIssuesErr_ReportsNoOrphans(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -4952,7 +4952,7 @@ func TestTea_AdoptOrphanKey_NoOpenPR_SurfacesReasonWithNoAdoption(t *testing.T) 
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -4993,7 +4993,7 @@ func TestTea_AdoptOrphanKey_DraftPR_SurfacesReasonWithNoAdoption(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -5035,7 +5035,7 @@ func TestTea_AdoptOrphanKey_Success_ClearsFlagPreventingRepeatAdopt(t *testing.T
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -5103,7 +5103,7 @@ func TestTea_AdoptOrphanKey_SecondPressWhileInFlight_NeverFiresTwice(t *testing.
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -5169,7 +5169,7 @@ func TestTea_AdoptOrphanKey_NonOrphanRow_NoAdopt(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -5218,7 +5218,7 @@ func TestTea_AdoptOrphanKey_OutsideBacklogSection_NoAdopt(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -5269,7 +5269,7 @@ func TestTea_Init_OrphanedIssuesErr_NeverWarnsAtStartup(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")

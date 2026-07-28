@@ -31,7 +31,7 @@ func claimIssue(cfg Config, it forge.IssueTracker, num string) {
 	transitionState(it, num, forge.Dispatchable, forge.InProgress)
 }
 
-// blockedMarker is the file the launcher drops under logs/ when a claimed
+// blockedMarker is the file the launcher drops under .spindrift/logs/ when a claimed
 // single issue cannot start because a blocker is unmet. The dispatching
 // pipeline reads it to release the claim and comment; detection stays here so
 // the two blocker formats are parsed once, in one place.
@@ -88,10 +88,10 @@ func dispatchWave(cfg Config, it forge.IssueTracker, f *dispatch.Factory, s sett
 				// untouched (issue #562).
 				fmt.Printf("    ~~ #%s already in flight; skipping (live run continues)\n", iss.Number)
 			case !result.Success:
-				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.Number, iss.Number)
+				fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 				transitionState(it, iss.Number, forge.InProgress, forge.Failed)
 			default:
-				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.Number, iss.Number)
+				fmt.Printf("    <- #%s done  (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 				s.Settle(d, iss.Number, iss.Generation, result)
 			}
 		}()
@@ -200,13 +200,13 @@ outer:
 					if err := writeDepsOfFailedMarker(pwd); err != nil {
 						return err
 					}
-					fmt.Printf("==> #%s blocker check failed; wrote logs/%s for the pipeline to release the claim\n", num, blockedMarker)
+					fmt.Printf("==> #%s blocker check failed; wrote .spindrift/logs/%s for the pipeline to release the claim\n", num, blockedMarker)
 				default:
 					if blockers := unreadyBlockers(it, cf, num, edges, cfg.ParentOf); len(blockers) > 0 {
 						if err := writeBlockedMarker(pwd, blockers, sources[num]); err != nil {
 							return err
 						}
-						fmt.Printf("==> #%s blocked; wrote logs/%s for the pipeline to release the claim\n", num, blockedMarker)
+						fmt.Printf("==> #%s blocked; wrote .spindrift/logs/%s for the pipeline to release the claim\n", num, blockedMarker)
 					}
 				}
 			}
@@ -242,7 +242,7 @@ outer:
 // run executes plan: the claim/dispatch/settle loop per issue, the
 // MAX_PARALLEL semaphore within a wave, MAX_JOBS drain concurrency, and the
 // Touches overlap check between concurrent Dispatches. pwd is the working
-// directory; run creates its logs/ subdirectory before dispatching any
+// directory; run creates its .spindrift/logs subdirectory before dispatching any
 // issue.
 //
 // ModeDrain (ADR 0019) is the only mode NewPlan ever selects, for every

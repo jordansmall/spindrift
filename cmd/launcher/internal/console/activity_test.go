@@ -16,7 +16,7 @@ import (
 // (#1501 AC1).
 func TestActivityFeed_ReplaysLatestPassLog_ReturnsOrderedDistinctLines(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	log := strings.Join([]string{
@@ -24,7 +24,7 @@ func TestActivityFeed_ReplaysLatestPassLog_ReturnsOrderedDistinctLines(t *testin
 		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","id":"e1","input":{}}]}}`,
 		`{"type":"result","num_turns":3,"total_cost_usd":0.01,"duration_ms":5000}`,
 	}, "\n") + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -60,10 +60,10 @@ func TestActivityFeed_ReplaysLatestPassLog_ReturnsOrderedDistinctLines(t *testin
 // last time (issue #1502, mirroring HeartbeatCache's own skip, issue #731).
 func TestSidebarActivityCache_UnchangedStat_SkipsReparse(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "logs", "issue-9.log")
+	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"aaaaa"}]}}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -105,10 +105,10 @@ func TestSidebarActivityCache_UnchangedStat_SkipsReparse(t *testing.T) {
 // not the stale cached feed (issue #1502).
 func TestSidebarActivityCache_ChangedStat_Reparses(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "logs", "issue-9.log")
+	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
 	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -156,13 +156,13 @@ func TestSidebarActivityCache_ChangedStat_Reparses(t *testing.T) {
 // feed onto a freshly selected one (issue #1502).
 func TestSidebarActivityCache_NumberChange_Reparses(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	writeLog := func(number, text string) {
 		t.Helper()
 		line := `{"type":"assistant","message":{"content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
-		if err := os.WriteFile(filepath.Join(dir, "logs", "issue-"+number+".log"), []byte(line), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-"+number+".log"), []byte(line), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -209,10 +209,10 @@ func TestSidebarActivityCache_NumberChange_Reparses(t *testing.T) {
 // (issue #1749 AC3 parity).
 func TestSidebarActivityCache_DuplicateNarrationAcrossIncrementalBoundary_CollapsesToOneLine(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "logs", "issue-9.log")
+	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
 	narration := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the config file."}]}}` + "\n"
 
 	drv, err := driver.New("")
@@ -259,10 +259,10 @@ func TestSidebarActivityCache_DuplicateNarrationAcrossIncrementalBoundary_Collap
 // TestRunningHeartbeat_FileShorterThanOffset_ResetsAndReparses.
 func TestSidebarActivityCache_FileShorterThanOffset_ResetsAndReparses(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "logs", "issue-9.log")
+	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
 	long := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n" +
 		`{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
 	if err := os.WriteFile(path, []byte(long), 0o644); err != nil {
@@ -311,10 +311,10 @@ func TestSidebarActivityCache_FileShorterThanOffset_ResetsAndReparses(t *testing
 // parser RunningHeartbeat already uses (issue #1749).
 func TestSidebarActivityCache_IncrementalAppend_FeedsOnlyAppendedBytes(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "logs", "issue-9.log")
+	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
 
 	real, err := driver.New("")
 	if err != nil {
@@ -371,7 +371,7 @@ func TestSidebarActivityCache_NoLogsOnDisk_ReturnsFalse(t *testing.T) {
 // distinct step rather than a literal per-event replay (#1501 AC1).
 func TestActivityFeed_ConsecutiveIdenticalNarration_CollapsesToOneLine(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	log := strings.Join([]string{
@@ -379,7 +379,7 @@ func TestActivityFeed_ConsecutiveIdenticalNarration_CollapsesToOneLine(t *testin
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the config file."}]}}`,
 		`{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":5000}`,
 	}, "\n") + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -421,7 +421,7 @@ func TestActivityFeed_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
 // (#1501 AC1).
 func TestActivityFeed_UnreadableLog_ReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
-	logDir := filepath.Join(dir, "logs")
+	logDir := filepath.Join(dir, ".spindrift", "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -31,7 +31,7 @@ func TestRunContinuous_DrainsScriptedQueue_LaunchesOneDispatchEndToEnd(t *testin
 
 	fr := runner.NewFake()
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -150,7 +150,7 @@ func TestLauncher_MaxParallel_CapsConcurrency_RefillsOnSettle(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -208,7 +208,7 @@ func TestQueue_Discover_HeldPickLaunchesOnceBlockerClears(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -278,7 +278,7 @@ func setupForgeQueueFactory(t *testing.T) (f *forge.Fake, dir string, factory *d
 
 	fr := runner.NewFake()
 	dir = t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -333,7 +333,7 @@ func TestQueue_Discover_AlreadyInProgressPick_NeverLaunches(t *testing.T) {
 
 	fr := runner.NewFake()
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -398,7 +398,7 @@ func TestQueue_Discover_AlreadyCompletePick_NeverLaunches(t *testing.T) {
 
 	fr := runner.NewFake()
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")

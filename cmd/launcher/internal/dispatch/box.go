@@ -56,11 +56,11 @@ func OutboxDirFor(pwd, number string) string {
 }
 
 // HostLogDirFor returns the host-side log directory for a working dir —
-// the single source of truth for `<pwd>/logs`, shared by the log-naming
-// functions below and every host-side site that reads or creates it, so
-// the directory can never drift.
+// the single source of truth for `<pwd>/.spindrift/logs`, shared by the
+// log-naming functions below and every host-side site that reads or
+// creates it, so the directory can never drift.
 func HostLogDirFor(pwd string) string {
-	return filepath.Join(pwd, "logs")
+	return filepath.Join(pwd, ".spindrift", "logs")
 }
 
 // logPathFor, fixLogPathFor, and conflictLogPathFor are the single source of

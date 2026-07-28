@@ -39,7 +39,7 @@ func TestRun_HeartbeatRawLogExact(t *testing.T) {
 		t.Fatalf("Run: want Success=true, got %+v", result)
 	}
 
-	logPath := filepath.Join(dir, "logs", "issue-55.log")
+	logPath := filepath.Join(HostLogDirFor(dir), "issue-55.log")
 	got, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("read log: %v", err)
@@ -154,7 +154,7 @@ func TestRun_HeartbeatSuppressedWhenDiscardConfigured(t *testing.T) {
 		t.Errorf("stdout should carry no dispatch-start announce line when discarded, got %q", out)
 	}
 
-	logPath := filepath.Join(dir, "logs", "issue-99.log")
+	logPath := filepath.Join(HostLogDirFor(dir), "issue-99.log")
 	got, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("read log: %v", err)

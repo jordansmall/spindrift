@@ -106,7 +106,7 @@ func TestLauncher_Wait_BlocksUntilBackgroundDrainFinishes(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -192,7 +192,7 @@ func TestLauncher_TryLaunch_HeldPickLaunchesAfterBlockerClearsOutOfBand(t *testi
 	f.NativeDeps = map[string][]string{"42": {"41"}}
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -241,7 +241,7 @@ func TestLauncher_TryLaunch_ResearchPick_UsesResearchFactoryAndSettle(t *testing
 	researchTracker.SetIssue(forge.Issue{Number: "42", Title: "research this", Labels: []string{"agent-research"}})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -313,7 +313,7 @@ func TestLauncher_Pick_ResearchKind_UntriagedIssue_LaunchesAndSettles(t *testing
 	researchTracker.SetIssue(forge.Issue{Number: "42", Title: "research this"}) // untriaged: no labels
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -432,7 +432,7 @@ func TestLauncher_TryLaunch_BoxFailureReachesPickFailed(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -487,7 +487,7 @@ func TestLauncher_TryLaunch_RacingAddNeverStrands(t *testing.T) {
 		f.SetIssue(forge.Issue{Number: "43", Title: "second", Labels: []string{"ready-for-agent"}})
 
 		dir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		drv, err := driver.New("")

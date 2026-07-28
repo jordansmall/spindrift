@@ -43,7 +43,7 @@ func newTermTestLauncher(t *testing.T) (launch *Launcher, fc *forge.Fake, fr *ru
 	fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
 
 	dir = t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -126,7 +126,7 @@ func TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-complete"}})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")
@@ -178,7 +178,7 @@ func TestLauncher_Terminate_PropagatesKillError(t *testing.T) {
 		t.Errorf("CommentCalls: want 1 despite kill error, got %+v", fc.CommentCalls)
 	}
 
-	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	got, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +223,7 @@ func TestLauncher_Terminate_NoOpenPR_CommentNotesNone(t *testing.T) {
 // a terminal line recording the operator's action.
 func TestLauncher_Terminate_AppendsBoxLogTerminalLine(t *testing.T) {
 	launch, fc, _, dir := newTermTestLauncher(t)
-	logPath := filepath.Join(dir, "logs", "issue-42.log")
+	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	if err := os.WriteFile(logPath, []byte("initial run output\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	drv, err := driver.New("")

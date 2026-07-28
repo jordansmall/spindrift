@@ -115,7 +115,7 @@ func TestDrainMaxJobs_Selective_RerunHint_UsesConfigVerb(t *testing.T) {
 }
 
 // TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueWritesNoBlockedMarker verifies
-// that the OriginClaimed single-issue path never writes logs/blocked.txt
+// that the OriginClaimed single-issue path never writes .spindrift/logs/blocked.txt
 // when IgnoreBlockers is set — research is dispatched instead of held.
 func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueWritesNoBlockedMarker(t *testing.T) {
 	c := baseConfig()
@@ -139,7 +139,7 @@ func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueWritesNoBlockedMarker(t *testin
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, "logs", blockedMarker)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, ".spindrift", "logs", blockedMarker)); !os.IsNotExist(err) {
 		t.Errorf("blocked marker must not be written when IgnoreBlockers is set; stat err = %v", err)
 	}
 	if len(fr.RunCalls) != 1 {

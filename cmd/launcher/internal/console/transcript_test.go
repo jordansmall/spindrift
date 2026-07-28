@@ -14,11 +14,11 @@ import (
 // single pass boundary — the base case before any fix/conflict pass exists.
 func TestDrillIn_SinglePass_RendersWithBoundary(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,7 +49,7 @@ func TestDrillIn_SinglePass_RendersWithBoundary(t *testing.T) {
 // stripped, while the raw byte-exact copy keeps them intact (#721).
 func TestDrillIn_ControlSequences_StrippedFromRendered(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	text := "\x1b[31mred\x1b[0m text\x07"
@@ -58,7 +58,7 @@ func TestDrillIn_ControlSequences_StrippedFromRendered(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := `{"type":"assistant","message":{"content":[{"type":"text","text":` + string(textJSON) + `}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -89,15 +89,15 @@ func TestDrillIn_ControlSequences_StrippedFromRendered(t *testing.T) {
 // chronological order, each with its own boundary marker (#648 AC3).
 func TestDrillIn_MultiplePasses_ConcatenatesInOrderWithBoundaries(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	initial := `{"type":"assistant","message":{"content":[{"type":"text","text":"first pass"}]}}` + "\n"
 	fix := `{"type":"assistant","message":{"content":[{"type":"text","text":"fix pass"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(initial), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(initial), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42-fix-1.log"), []byte(fix), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42-fix-1.log"), []byte(fix), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -122,11 +122,11 @@ func TestDrillIn_MultiplePasses_ConcatenatesInOrderWithBoundaries(t *testing.T) 
 // SidebarActivityCache's own stat-based skip (issue #1736).
 func TestSidebarTranscriptCache_UnchangedStat_SkipsReDrillIn(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

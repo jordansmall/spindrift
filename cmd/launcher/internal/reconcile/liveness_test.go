@@ -85,7 +85,7 @@ func TestFSProbe_ContainerLive_Unreachable(t *testing.T) {
 
 func writeLog(t *testing.T, pwd, number string) {
 	t.Helper()
-	dir := filepath.Join(pwd, "logs")
+	dir := filepath.Join(pwd, ".spindrift", "logs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}

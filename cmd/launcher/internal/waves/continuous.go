@@ -252,11 +252,11 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				// nor a Settle call belongs here now.
 				fmt.Printf("    ~~ #%s terminated by operator; abandoning\n", iss.Number)
 			case !result.Success:
-				fmt.Printf("    !! #%s FAILED (logs/issue-%s.log)\n", iss.Number, iss.Number)
+				fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 				transitionState(it, iss.Number, forge.InProgress, forge.Failed)
 				s.Fail(iss.Number, iss.Generation, result)
 			default:
-				fmt.Printf("    <- #%s done  (logs/issue-%s.log)\n", iss.Number, iss.Number)
+				fmt.Printf("    <- #%s done  (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 				s.Settle(d, iss.Number, iss.Generation, result)
 			}
 			limiter.Release()
