@@ -992,6 +992,11 @@ emit_outcome_backstop() {
     backoff="${TRANSIENT_BACKOFF_SECS:-30}"
     jitter="${HOLD_JITTER_SECS:-5}"
     [ "$attempts" -lt 1 ] && attempts=1
+    # A misconfigured negative backoff/jitter would make the `sleep` below
+    # reject its argument and, under `set -e`, abort before the always-emit
+    # outcome line (#593) -- clamp both to zero, same guard as attempts above.
+    [ "$backoff" -lt 0 ] && backoff=0
+    [ "$jitter" -lt 0 ] && jitter=0
     attempt=1
     while true; do
       if git push --force-with-lease origin "$BRANCH" 2>"$push_log"; then
