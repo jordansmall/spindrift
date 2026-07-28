@@ -149,6 +149,16 @@ fi
 # outcome on every call after — for exercising the resume-once recovery pass
 # (issue #1607), which must see the second (resumed) call succeed.
 #
+# FAKE_CLAUDE_NEAR_MISS=1 simulates a driver that emits a "near-miss" outcome
+# line -- the SPINDRIFT_OUTCOME token present as a leading line but missing
+# both landing= and status= (issue #1900): parses nowhere, so the entrypoint's
+# recovery nudge must quote it back verbatim rather than treat it as absent.
+#
+# FAKE_CLAUDE_NEAR_MISS_FIRST_CALL_ONLY=1 simulates the same only on this
+# fake's first invocation within a test, then emits a real outcome on every
+# call after — for exercising the resume-once recovery pass's near-miss-aware
+# prompt (issue #1900), mirroring FAKE_CLAUDE_NO_OUTCOME_FIRST_CALL_ONLY above.
+#
 # FAKE_CLAUDE_WRAP_OUTCOME selects a markdown-wrapped outcome line (issue
 # #1611's #1582 repro): claude's own stream-json result text sometimes wraps
 # the line in inline backticks, bold markers, or pads it with whitespace, so
@@ -189,7 +199,12 @@ if [ "${FAKE_CLAUDE_MULTI_RESULT:-0}" = "1" ]; then
   printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/0 status=blocked note=stale"}\n' \
     "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
 fi
-if [ "${FAKE_CLAUDE_NO_OUTCOME:-0}" = "1" ] || { [ "${FAKE_CLAUDE_NO_OUTCOME_FIRST_CALL_ONLY:-0}" = "1" ] && [ "${call_index:-0}" = "0" ]; }; then
+if [ "${FAKE_CLAUDE_NEAR_MISS:-0}" = "1" ] || { [ "${FAKE_CLAUDE_NEAR_MISS_FIRST_CALL_ONLY:-0}" = "1" ] && [ "${call_index:-0}" = "0" ]; }; then
+  # A line that leads with the SPINDRIFT_OUTCOME token but carries no
+  # landing=/status= fields (issue #1900): parses nowhere, so it is a
+  # near-miss the recovery nudge must quote back, not a valid outcome.
+  printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME: SUCCESS"}\n'
+elif [ "${FAKE_CLAUDE_NO_OUTCOME:-0}" = "1" ] || { [ "${FAKE_CLAUDE_NO_OUTCOME_FIRST_CALL_ONLY:-0}" = "1" ] && [ "${call_index:-0}" = "0" ]; }; then
   printf '{"type":"result","subtype":"success","is_error":false,"result":"done, but forgot to report back"}\n'
 else
   case "${FAKE_CLAUDE_WRAP_OUTCOME:-}" in
