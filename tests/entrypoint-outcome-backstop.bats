@@ -238,3 +238,46 @@ EOF
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*no work to preserve' <<<"$output"
 }
+
+# Issue #2094: a read-only github Box (BOX_WRITE_ENABLED unset) holds no push
+# token by design, so the backstop's own `git push --force-with-lease` here
+# could only ever 403 -- a structural failure, not a transient one. Instead
+# the branch must be relayed via the harness-owned bundle-out step (issue
+# #1808/#2082), the same outbox seam.bundle a read-only status=ready hand-off
+# already uses.
+@test "read-only github + no outcome line -> branch relayed via outbox bundle, no force-push" {
+  unset BOX_WRITE_ENABLED     # read-only Box: no push token
+  unset CODE_FORGE            # default github
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+  export FAKE_CLAUDE_COMMIT=1
+  export FAKE_CLAUDE_NO_OUTCOME=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*relayed via outbox bundle' <<<"$output"
+  ! grep -q 'push failed' <<<"$output"
+  # The branch was relayed through the outbox bundle, never force-pushed.
+  [ -f "$OUTBOX_DIR/seam.bundle" ]
+  run git -C "$WORK_DIR" bundle verify "$OUTBOX_DIR/seam.bundle"
+  [ "$status" -eq 0 ]
+  # A read-only Box holds no push token -- the branch must never reach the remote.
+  run git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7"
+  [ -z "$output" ]
+}
+
+# CODE_FORGE=local's read-only-style no-writable-remote note (issue #1808)
+# must stay exactly as it was before this change: no bundle is written on
+# this no-outcome backstop path (only a genuine status=ready claim triggers
+# the harness-owned bundle-out step at the bottom of main()).
+@test "CODE_FORGE=local + no outcome line -> unchanged: no bundle, no-writable-remote note" {
+  export CODE_FORGE=local
+  export REPO_MOUNT_DIR="$REMOTE_ROOT/owner/repo.git"
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+  export FAKE_CLAUDE_COMMIT=1
+  export FAKE_CLAUDE_NO_OUTCOME=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*no writable remote under CODE_FORGE=local' <<<"$output"
+  [ ! -f "$OUTBOX_DIR/seam.bundle" ]
+}
