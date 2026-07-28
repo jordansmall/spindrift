@@ -542,7 +542,11 @@ let
     cp ${hostPkgs.writeText "filer-prompt.md" filerPrompt} $out/filer-prompt.md
     cp ${hostPkgs.writeText "worker-prompt.md" workerPrompt} $out/worker-prompt.md
     ${lib.concatMapStrings (
-      e: "cp ${hostPkgs.writeText e.promptFile e.prompt} $out/${e.promptFile}\n"
+      e:
+      let
+        pf = e.promptFile or "${e.name}-prompt.md";
+      in
+      "cp ${hostPkgs.writeText pf e.prompt} $out/${pf}\n"
     ) customRosterPromptFiles}
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/conflict-resolve-prompt.md
     cp ${hostPkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/fix-prompt.md

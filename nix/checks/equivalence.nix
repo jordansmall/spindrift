@@ -731,4 +731,35 @@ in
     assert pkgs.lib.assertMsg result.success
       "mkHarness must not throw when a custom roster entry omits promptFile/prompt (issue #264 review finding)";
     pkgs.runCommand "mkharness-roster-custom-entry-missing-prompt-fields" { } "touch $out";
+
+  # The other AC4 shape: a custom roster entry carrying an inline `prompt` but
+  # NO `promptFile`. Unlike the missing-both case above (dropped by
+  # customRosterPromptFiles' `prompt != null` filter, so its bake line never
+  # runs), this entry survives the filter and IS baked -- exercising the one
+  # code path customRosterPromptFiles exists to serve. The bake `cp` must
+  # resolve its target filename from `e.promptFile or "${e.name}-prompt.md"`,
+  # matching agentsPromptFilesJson's own fallback; a bare `e.promptFile` read
+  # would throw a missing-attribute error here (issue #264 review finding).
+  mkharness-roster-custom-entry-inline-prompt-no-file =
+    let
+      inlineRoster = [
+        {
+          name = "auditor";
+          model = "claude-sonnet-5";
+          description = "";
+          tools = [ ];
+          mode = "subagent";
+          prompt = "You are the auditor. Review the diff.";
+        }
+      ];
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        roster = inlineRoster;
+      };
+      result = builtins.tryEval (builtins.toString direct.spindrift);
+    in
+    assert pkgs.lib.assertMsg result.success
+      "mkHarness must not throw when a custom roster entry sets an inline prompt but omits promptFile (issue #264 review finding)";
+    pkgs.runCommand "mkharness-roster-custom-entry-inline-prompt-no-file" { } "touch $out";
 }
