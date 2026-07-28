@@ -91,3 +91,39 @@ pinned_session_id() {
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 0 ]
   [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 1 ]
 }
+
+# A near-miss outcome (the SPINDRIFT_OUTCOME token present but the line
+# unparseable, e.g. "SPINDRIFT_OUTCOME: SUCCESS") on the first call must make
+# the single corrective resume quote that offending text back and restate the
+# grammar/allowed status values (issue #1900), rather than the generic nudge.
+# The resumed call then emits a real outcome, so the run settles on it.
+@test "near-miss outcome -> resume prompt quotes the offending line and restates the grammar" {
+  export FAKE_CLAUDE_NEAR_MISS_FIRST_CALL_ONLY=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready note=fake$' <<<"$output"
+  # Exactly two Driver invocations: the initial near-miss pass and one resume.
+  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 2 ]
+  # The resume pass's rendered prompt (the last one written) quotes the
+  # offending near-miss text verbatim and restates the grammar + status values.
+  grep -q 'SPINDRIFT_OUTCOME: SUCCESS' "$CLAUDE_PROMPT_FILE"
+  grep -q 'valid status values are ready and blocked' "$CLAUDE_PROMPT_FILE"
+}
+
+# A near-miss on every call: the single corrective resume still fires exactly
+# once (quoting the offending line), and because the resumed pass also leaves
+# only a near-miss, the run falls through to the synthetic status=blocked
+# backstop unchanged -- proving the near-miss path loops no more than the bare
+# absence path does (issue #1900).
+@test "near-miss outcome on every call -> resumes once then falls through to the backstop" {
+  export FAKE_CLAUDE_NEAR_MISS=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked' <<<"$output"
+  # Exactly two Driver invocations: the initial pass and the one resume pass.
+  [ "$(grep -c '^claude invoked for issue' "$CLAUDE_LOG")" -eq 2 ]
+  # The one resume it did fire quoted the offending near-miss text.
+  grep -q 'SPINDRIFT_OUTCOME: SUCCESS' "$CLAUDE_PROMPT_FILE"
+}
