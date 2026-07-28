@@ -127,8 +127,17 @@ type config struct {
 	ghToken          string
 	claudeOAuthToken string
 	anthropicAPIKey  string
-	gitUserName      string
-	gitUserEmail     string
+	// opencodeAuthContent carries the opencode Driver's github-copilot
+	// Provider credential (OAuth-only, ADR 0009 amendment #260): opencode
+	// reads it from OPENCODE_AUTH_CONTENT rather than an apiKey.
+	opencodeAuthContent string
+	gitUserName         string
+	gitUserEmail        string
+
+	// model mirrors the MODEL knob (Provider-namespaced, e.g.
+	// "github-copilot/claude-opus-4-8") so validate() can detect which
+	// Provider is selected under the opencode Driver.
+	model string
 
 	// ghTokenRefreshFile, when set, names a file the launcher polls for the
 	// remainder of the run, swapping its trimmed contents into GH_TOKEN
@@ -390,12 +399,14 @@ func loadConfig() config {
 		maxBudgetUSD:       floatNonnegSchema("MAX_BUDGET_USD"),
 		preflightStaleBase: getenvSchema("PREFLIGHT_STALE_BASE") != "",
 
-		ghToken:            os.Getenv("GH_TOKEN"),
-		claudeOAuthToken:   os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
-		anthropicAPIKey:    os.Getenv("ANTHROPIC_API_KEY"),
-		gitUserName:        gitIdentityField("GIT_USER_NAME", "user.name"),
-		gitUserEmail:       gitIdentityField("GIT_USER_EMAIL", "user.email"),
-		ghTokenRefreshFile: getenvSchema("GH_TOKEN_REFRESH_FILE"),
+		ghToken:             os.Getenv("GH_TOKEN"),
+		claudeOAuthToken:    os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
+		anthropicAPIKey:     os.Getenv("ANTHROPIC_API_KEY"),
+		opencodeAuthContent: os.Getenv("OPENCODE_AUTH_CONTENT"),
+		model:               getenvSchema("MODEL"),
+		gitUserName:         gitIdentityField("GIT_USER_NAME", "user.name"),
+		gitUserEmail:        gitIdentityField("GIT_USER_EMAIL", "user.email"),
+		ghTokenRefreshFile:  getenvSchema("GH_TOKEN_REFRESH_FILE"),
 
 		spindriftPromptDir: getenvSchema("SPINDRIFT_PROMPT_DIR"),
 		spindriftSkillsDir: getenvSchema("SPINDRIFT_SKILLS_DIR"),
@@ -438,8 +449,19 @@ func validate(c config) error {
 	if !fullyLocal && c.ghToken == "" {
 		return fmt.Errorf("set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)")
 	}
-	if c.claudeOAuthToken == "" && c.anthropicAPIKey == "" {
-		return fmt.Errorf("set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY")
+	switch c.driver {
+	case "", "claude":
+		if c.claudeOAuthToken == "" && c.anthropicAPIKey == "" {
+			return fmt.Errorf("set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY")
+		}
+	case "opencode":
+		// The github-copilot Provider is OAuth-only (ADR 0009 amendment, #260):
+		// opencode reads the credential from OPENCODE_AUTH_CONTENT. Require it only
+		// when the Copilot Provider is actually selected (MODEL github-copilot/…);
+		// other opencode Providers carry their own apiKey via the {env:} config leg.
+		if strings.HasPrefix(c.model, "github-copilot/") && c.opencodeAuthContent == "" {
+			return fmt.Errorf("set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver")
+		}
 	}
 	if err := runner.ValidateRuntime(c.runtime); err != nil {
 		return err

@@ -372,11 +372,14 @@ func TestSubcommandRegistry_MatchesVerbHandlers(t *testing.T) {
 	}
 }
 
-// TestConfigHasNoModelFields enforces that model/scoutModel/reviewModel were
-// removed from the config struct; models forward via BOX_ENV_VARS instead.
+// TestConfigHasNoModelFields enforces that scoutModel/reviewModel stay out of
+// the config struct; those models forward via BOX_ENV_VARS instead. model
+// itself is the one exception (ADR 0009 amendment, #260): validate() reads it
+// to detect the opencode Driver's github-copilot Provider prefix, but it
+// still must not be threaded any further than that gate.
 func TestConfigHasNoModelFields(t *testing.T) {
 	ct := reflect.TypeOf(config{})
-	for _, name := range []string{"model", "scoutModel", "reviewModel"} {
+	for _, name := range []string{"scoutModel", "reviewModel"} {
 		if _, ok := ct.FieldByName(name); ok {
 			t.Errorf("config has field %q; remove it — models forward via BOX_ENV_VARS", name)
 		}
@@ -1104,6 +1107,49 @@ func TestValidate_JiraFieldsOptionalForGitHub(t *testing.T) {
 	c := minimalValidConfig()
 	if err := validate(c); err != nil {
 		t.Fatalf("github default must not require jira fields: %v", err)
+	}
+}
+
+// TestValidate_OpencodeCopilotCredential verifies that validate() gates
+// credential required-ness on the Driver: the opencode Driver's
+// github-copilot Provider is OAuth-only and needs OPENCODE_AUTH_CONTENT (not
+// the claude credentials), other opencode Providers need neither, and the
+// default claude Driver still requires a claude credential (ADR 0009
+// amendment, #260).
+func TestValidate_OpencodeCopilotCredential(t *testing.T) {
+	c := minimalValidConfig()
+	c.driver = "opencode"
+	c.model = "github-copilot/claude-opus-4-8"
+	c.opencodeAuthContent = ""
+	if err := validate(c); err == nil {
+		t.Fatal("validate() should require OPENCODE_AUTH_CONTENT for the github-copilot Provider")
+	}
+
+	c = minimalValidConfig()
+	c.driver = "opencode"
+	c.model = "github-copilot/claude-opus-4-8"
+	c.opencodeAuthContent = "gho_test"
+	c.claudeOAuthToken = ""
+	c.anthropicAPIKey = ""
+	if err := validate(c); err != nil {
+		t.Errorf("validate() should not require claude credentials under the opencode Driver: %v", err)
+	}
+
+	c = minimalValidConfig()
+	c.driver = "opencode"
+	c.model = "anthropic/claude-opus-4-8"
+	c.opencodeAuthContent = ""
+	c.claudeOAuthToken = ""
+	c.anthropicAPIKey = ""
+	if err := validate(c); err != nil {
+		t.Errorf("validate() should only require OPENCODE_AUTH_CONTENT for the github-copilot Provider: %v", err)
+	}
+
+	c = minimalValidConfig()
+	c.claudeOAuthToken = ""
+	c.anthropicAPIKey = ""
+	if err := validate(c); err == nil {
+		t.Fatal("validate() should still require a claude credential under the default (claude) Driver")
 	}
 }
 
