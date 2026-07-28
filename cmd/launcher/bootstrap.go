@@ -99,7 +99,7 @@ func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 		return nil, err
 	}
 	lw := localloop.Wire(localloopConfig(c), it)
-	f := newDispatchFactory(c, pwd, r, lw, cf)
+	f := newDispatchFactory(c, pwd, r, it, lw, cf)
 	s := newSettle(c, it, lw, cf)
 
 	return &launchContext{
@@ -146,7 +146,7 @@ func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Facto
 	rc := applyDispatchKind(lc.config, dispatchKindResearch)
 	it := newIssueTracker(rc)
 	lw := localloop.Wire(localloopConfig(rc), it)
-	f := newDispatchFactory(rc, lc.pwd, lc.runner, lw, lc.codeForge)
+	f := newDispatchFactory(rc, lc.pwd, lc.runner, it, lw, lc.codeForge)
 	s := newSettle(rc, it, lw, lc.codeForge)
 	return it, f, s
 }

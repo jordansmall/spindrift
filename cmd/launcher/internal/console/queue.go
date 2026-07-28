@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/waves"
 )
 
@@ -129,7 +130,11 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			q.setState(pick.Number, PickHeld, "blocker check failed, will retry")
 			continue
 		}
-		ready, failed, unready := readiness.Status(waves.Config{FailedLabel: failedLabel}, tracker, cf, pick.Number)
+		cfg := waves.Config{FailedLabel: failedLabel}
+		if _, ok := cf.(forge.LandingContainmentQuery); ok {
+			cfg.ParentOf = func(num string) string { return localloop.ResolveParent(tracker, num).String() }
+		}
+		ready, failed, unready := readiness.Status(cfg, tracker, cf, pick.Number)
 		if !ready {
 			q.setHeld(pick.Number, unready, failed, readiness.Sources[pick.Number])
 			continue

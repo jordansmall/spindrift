@@ -499,6 +499,64 @@ func TestEvictUnmetBlockers_KeepsMergedBlocker(t *testing.T) {
 	}
 }
 
+// TestEvictUnmetBlockers_LocalForge_SameParentBlockerLandingReleases verifies
+// the real seed-branch wiring (#2130, not a stubbed Config.ParentOf): under
+// CODE_FORGE=local, evictUnmetBlockers resolves the dependent's own
+// seedParentResolver(it, cf) live, so an external blocker whose landing has
+// already reached the dependent's own integration/<parent> seed branch
+// satisfies the edge -- no eviction.
+func TestEvictUnmetBlockers_LocalForge_SameParentBlockerLandingReleases(t *testing.T) {
+	fc := forge.NewFake()
+	landing := "integration/999@shaXYZ"
+	// #15 (the dependent) shares #99's own parent: frontmatter.
+	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Parent: "shared-parent"})
+	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: landing})
+	fc.SetIntegrationContainsLanding(landing, "shared-parent", true, nil)
+	cf := fc.AsLocal()
+
+	issues := []issue{{number: "15", title: "needs 99"}}
+	edges := map[string][]string{"15": {"99"}}
+
+	kept, notices := evictUnmetBlockers(fc, cf, waves.Readiness{Edges: edges}, issues)
+
+	if len(kept) != 1 {
+		t.Errorf("kept = %v, want [#15] (blocker's landing reached the dependent's own seed branch)", kept)
+	}
+	if len(notices) != 0 {
+		t.Errorf("notices = %v, want none", notices)
+	}
+}
+
+// TestEvictUnmetBlockers_LocalForge_CrossParentBlockerLandingHolds is the
+// mirror of the above: the blocker's landing reached a *different* parent's
+// seed branch than the dependent's own, so the real wiring must still evict
+// -- the dependent's own containment check, not any parent's, gates it.
+func TestEvictUnmetBlockers_LocalForge_CrossParentBlockerLandingHolds(t *testing.T) {
+	fc := forge.NewFake()
+	landing := "integration/999@shaXYZ"
+	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Parent: "dependents-own-parent"})
+	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: landing})
+	// The landing reached "some-other-parent"'s seed branch, not #15's own.
+	fc.SetIntegrationContainsLanding(landing, "some-other-parent", true, nil)
+	fc.SetIntegrationContainsLanding(landing, "dependents-own-parent", false, nil)
+	cf := fc.AsLocal()
+
+	issues := []issue{{number: "15", title: "needs 99"}}
+	edges := map[string][]string{"15": {"99"}}
+
+	kept, notices := evictUnmetBlockers(fc, cf, waves.Readiness{Edges: edges}, issues)
+
+	if len(kept) != 0 {
+		t.Errorf("kept = %v, want empty (blocker's landing never reached #15's own seed branch)", kept)
+	}
+	if len(notices) != 1 {
+		t.Fatalf("notices = %v, want 1 notice", notices)
+	}
+	if !strings.Contains(notices[0], "15") || !strings.Contains(notices[0], "99") {
+		t.Errorf("notice should mention #15 and #99, got: %s", notices[0])
+	}
+}
+
 // TestEvictUnmetBlockers_CascadingEviction verifies that when A is evicted
 // because of an unmet external blocker, B (which depends on A) is also evicted.
 func TestEvictUnmetBlockers_CascadingEviction(t *testing.T) {

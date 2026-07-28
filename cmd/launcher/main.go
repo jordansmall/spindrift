@@ -725,8 +725,13 @@ func newDriver(c config) driver.Driver {
 // leaves no error to propagate to its dispatch.Config caller). c.baseBranch
 // itself still reaches newCodeForge unchanged either way, since
 // ensureIntegrationBranch needs the real base branch to seed
-// integration/<parent> the first time a parent's seam lands.
-func localBaseBranchResolver(c config, lw *localloop.Wired, cf forge.CodeForge) func(num, name string) string {
+// integration/<parent> the first time a parent's seam lands. A missing
+// Integration branch is only silently expected for a blocker-free seam; a
+// seam it (via DepsOf) reports has blockers should have been held by the
+// #2130 readiness gate until its blocker landed onto this very branch, so
+// that combination is logged loudly rather than silently seeded onto bare
+// base (issue #2130 complementary hardening).
+func localBaseBranchResolver(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) func(num, name string) string {
 	if c.codeForge != "local" {
 		return func(_, name string) string { return resolveBoxEnvVar(name) }
 	}
@@ -743,11 +748,24 @@ func localBaseBranchResolver(c config, lw *localloop.Wired, cf forge.CodeForge) 
 			// not an independent derivation of its own.
 			integrationBranch := local.IntegrationBranch(lw.ResolveParent(num))
 			exists, err := cf.BranchExists(integrationBranch)
-			if err != nil {
-				fmt.Printf("!! BASE_BRANCH: checking %s: %v; falling back to %s\n", integrationBranch, err, c.baseBranch)
-			}
-			if err == nil && exists {
+			switch {
+			case err == nil && exists:
 				return integrationBranch
+			case err != nil:
+				fmt.Printf("!! BASE_BRANCH: checking %s: %v; falling back to %s\n", integrationBranch, err, c.baseBranch)
+			default:
+				// integration/<parent> does not exist yet. A blocker-free
+				// first (or wholly independent) seam legitimately seeds
+				// from base on first dispatch -- stay silent. But a seam
+				// that HAS blockers should have been held by the #2130
+				// readiness gate until its blocker's work landed onto this
+				// very branch; reaching the resolver with the branch still
+				// missing means a blocked seam slipped through onto bare
+				// base. Make that loud rather than silently seeding the
+				// operator base branch.
+				if deps, derr := it.DepsOf(num); derr == nil && len(deps) > 0 {
+					fmt.Printf("!! BASE_BRANCH: seam #%s has %d blocker(s) but its integration branch %s does not exist; falling back to %s -- the #2130 readiness gate should have held this seam rather than seeding it onto bare base\n", num, len(deps), integrationBranch, c.baseBranch)
+				}
 			}
 		}
 		return resolveBoxEnvVar(name)
@@ -780,10 +798,10 @@ func boxGHTokenResolver(next func(num, name string) string) func(num, name strin
 // rate-limited retry never re-runs a box whose work already landed a PR;
 // ResolveOpenPR itself resolves to Found: false, nil for a push-only Code
 // Forge, so the retry proceeds unguarded there without any guard here.
-func dispatchConfig(c config, lw *localloop.Wired, cf forge.CodeForge) dispatch.Config {
+func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) dispatch.Config {
 	return dispatch.Config{
 		BoxEnvVars:             c.boxEnvVars,
-		ResolveEnv:             boxGHTokenResolver(localBaseBranchResolver(c, lw, cf)),
+		ResolveEnv:             boxGHTokenResolver(localBaseBranchResolver(c, it, lw, cf)),
 		Kind:                   c.dispatchKind,
 		CodeForge:              c.codeForge,
 		BoxForgeAndIssueAccess: c.boxForgeAndIssueAccess,
@@ -803,8 +821,8 @@ func dispatchConfig(c config, lw *localloop.Wired, cf forge.CodeForge) dispatch.
 // recover). A driver-cache creation failure is logged and degrades to no
 // cache (fix boxes cold-start) rather than failing the dispatch -- the cache
 // is a resume optimization, not a correctness requirement (issue #427).
-func newDispatchFactory(c config, pwd string, r runner.Runner, lw *localloop.Wired, cf forge.CodeForge) *dispatch.Factory {
-	f, err := dispatch.NewFactory(dispatchConfig(c, lw, cf), pwd, r, newDriver(c), dispatch.RealClock())
+func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) *dispatch.Factory {
+	f, err := dispatch.NewFactory(dispatchConfig(c, it, lw, cf), pwd, r, newDriver(c), dispatch.RealClock())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "==> driver cache unavailable (%v) -- fix boxes will cold-start\n", err)
 	}
@@ -917,6 +935,19 @@ func selectiveWavesConfig(c config) waves.Config {
 	cfg := wavesConfig(c)
 	cfg.MaxJobs = 0
 	return cfg
+}
+
+// seedParentResolver returns the waves.Config.ParentOf resolver for the
+// local blocker gate (#2130): a dependent num -> the sanitized parent token
+// keying its own integration/<parent> seed branch. Non-nil only when cf is
+// CODE_FORGE=local's containment-query surface; nil for every other forge,
+// where the seed-branch gate never fires and the blocker gate keeps its
+// pre-#2130 landing-verification behavior.
+func seedParentResolver(it forge.IssueTracker, cf forge.CodeForge) func(string) string {
+	if _, ok := cf.(forge.LandingContainmentQuery); !ok {
+		return nil
+	}
+	return func(num string) string { return localloop.ResolveParent(it, num).String() }
 }
 
 // toWaveIssues converts main's local issue type to waves.Issue for a call
@@ -1183,7 +1214,9 @@ func run(lc *launchContext) error {
 		return err
 	}
 	in := waves.Input{Origin: origin, Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}
-	if err := waves.Dispatch(wavesConfig(c), it, cf, pwd, f, s, in); err != nil {
+	cfg := wavesConfig(c)
+	cfg.ParentOf = seedParentResolver(it, cf)
+	if err := waves.Dispatch(cfg, it, cf, pwd, f, s, in); err != nil {
 		return err
 	}
 
@@ -1262,7 +1295,9 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return res.Applicable, res.Fresh, res.Message
 	}
 
-	if err := waves.RunContinuous(wavesConfig(c), nil, it, cf, pwd, f, s, discover, fresh); err != nil {
+	cfg := wavesConfig(c)
+	cfg.ParentOf = seedParentResolver(it, cf)
+	if err := waves.RunContinuous(cfg, nil, it, cf, pwd, f, s, discover, fresh); err != nil {
 		// refill swallows every discover error to stderr and retries on the
 		// next trigger (a transient-tracker-hiccup tolerance that's fine for
 		// refill 2+, but the first call has no next trigger to retry on once
