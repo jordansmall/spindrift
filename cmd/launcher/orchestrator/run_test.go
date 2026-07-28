@@ -138,6 +138,31 @@ exit 0
 	}
 }
 
+// TestBuildDriverExecCmdForwardsDriverFlag verifies buildDriverExecCmd
+// forwards cfg.driver as driver-exec's own --driver flag (issue #262 slice
+// 4) -- driver-exec resolves its own argv shape and exit-code handling from
+// this, so the orchestrator's own configured Driver name must reach every
+// pass it invokes, not just --driver-bin/--driver-flags.
+func TestBuildDriverExecCmdForwardsDriverFlag(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config{
+		driver:    "opencode",
+		driverBin: "opencode",
+	}
+	cmd, err := buildDriverExecCmd(cfg)
+	if err != nil {
+		t.Fatalf("buildDriverExecCmd: %v", err)
+	}
+	got := strings.Join(cmd.Args, " ")
+	if !strings.Contains(got, "--driver opencode") {
+		t.Errorf("driver-exec argv = %q, want it to contain %q", got, "--driver opencode")
+	}
+}
+
 // TestRunEmitsPassStartMarkerOnStdout verifies run prints a machine-readable
 // "spindrift_op" pass_start marker to stdout before invoking driver-exec for
 // each pass (issue #2027), so the heartbeat parser can surface the
@@ -1639,7 +1664,7 @@ func TestScanPassLogDetectsOutcomeThroughStreamJSONAndMarkdownWrap(t *testing.T)
 		t.Fatal(err)
 	}
 
-	verdict, hasOutcome := scanPassLog(logPath)
+	verdict, hasOutcome := scanPassLog(logPath, "claude")
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -1659,7 +1684,7 @@ func TestScanPassLogFindsNothingInPlainStreamJSONNarration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, hasOutcome := scanPassLog(logPath)
+	verdict, hasOutcome := scanPassLog(logPath, "claude")
 	if verdict != "" {
 		t.Errorf("verdict = %q, want empty", verdict)
 	}
@@ -1686,7 +1711,7 @@ func TestScanReviewLogExtractsVerdictAndFindings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, findings := scanReviewLog(logPath)
+	verdict, findings := scanReviewLog(logPath, "claude")
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -1713,7 +1738,7 @@ func TestScanReviewLogStopsFindingsAtTheNextRenderedEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, findings := scanReviewLog(logPath)
+	_, findings := scanReviewLog(logPath, "claude")
 	if strings.Contains(findings, "unrelated trailing narration") {
 		t.Errorf("findings = %q, want it to stop before the next rendered event", findings)
 	}
@@ -1733,7 +1758,7 @@ func TestScanReviewLogFindsNothingInPlainNarration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, findings := scanReviewLog(logPath)
+	verdict, findings := scanReviewLog(logPath, "claude")
 	if verdict != "" {
 		t.Errorf("verdict = %q, want empty", verdict)
 	}

@@ -75,6 +75,27 @@ func TestRunDirectModePropagatesExitCode(t *testing.T) {
 	}
 }
 
+// TestRunUsesConfiguredDriverNotHardcodedClaude verifies run resolves
+// cfg.driver via driver.New instead of the former hardcoded
+// driver.New("claude") (issue #262 slice 4): an unknown driver name must
+// surface as an error from run itself, proving cfg.driver actually reaches
+// the driver.New call rather than being silently ignored in favor of claude.
+func TestRunUsesConfiguredDriverNotHardcodedClaude(t *testing.T) {
+	dir := t.TempDir()
+	bin := writeFakeDriver(t, dir, "fake-driver", "echo hi\nexit 0\n")
+	cfg := execConfig{
+		driver:       "not-a-real-driver",
+		driverBin:    bin,
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		issue:        "7",
+	}
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err == nil {
+		t.Error("run: want an error for an unknown cfg.driver, got nil")
+	}
+}
+
 // TestRunTeesRawStreamToStdoutAndLogPath verifies the Driver's raw stdout
 // reaches both driver-exec's own stdout (the launcher's byte-exact capture
 // channel) and cfg.logPath (which the Driver's outcome-extraction pass reads

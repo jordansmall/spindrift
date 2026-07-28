@@ -15,6 +15,7 @@ import (
 )
 
 func main() {
+	driverName := flag.String("driver", "claude", "the Driver's registry name (ADR 0009), forwarded to every driver-exec pass this run invokes")
 	promptFile := flag.String("prompt-file", "", "path to the assembled prompt text (required)")
 	agentsFile := flag.String("agents-file", "", "path to --agents JSON, empty to omit the flag")
 	sessionFile := flag.String("session-file", "", "path to pre-rendered session pin/resume flags, empty for none")
@@ -50,6 +51,7 @@ func main() {
 	}
 
 	rc, err := run(config{
+		driver:           *driverName,
 		promptFile:       *promptFile,
 		agentsFile:       *agentsFile,
 		sessionFile:      *sessionFile,

@@ -19,6 +19,13 @@ import (
 // multi-pass loop (issue #1998) reuses the same config across every pass it
 // invokes, only ever overriding sessionFile per pass.
 type config struct {
+	// driver is the Driver's registry name (ADR 0009, e.g. "claude" or
+	// "opencode"), forwarded verbatim as driver-exec's own --driver flag on
+	// every pass this run invokes, and used by scanPassLog/scanReviewLog to
+	// resolve the same Driver's RenderTranscript strategy rather than a
+	// hardcoded "claude". Empty defaults to "claude", matching driver.New's
+	// own convention.
+	driver       string
 	promptFile   string
 	agentsFile   string
 	sessionFile  string
@@ -124,7 +131,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// returns the file holds exactly this pass's own raw stream -- the
 		// same file --log-path already pointed driver-exec at, read back
 		// here instead of tapped from cmd.Stdout directly.
-		verdict, hasOutcome := scanPassLog(cfg.logPath)
+		verdict, hasOutcome := scanPassLog(cfg.logPath, cfg.driver)
 		if verdict != "" {
 			state.LastVerdict = verdict
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: verdict}))
@@ -223,7 +230,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// self-review loop stripped, so its log is scanned only for
 		// hasOutcome; any VERDICT-shaped text it happens to contain is not
 		// state.LastVerdict's source of truth here.
-		_, hasOutcome := scanPassLog(cfg.logPath)
+		_, hasOutcome := scanPassLog(cfg.logPath, cfg.driver)
 		if !hasOutcome {
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: pass, Reason: fmt.Sprintf("exit %d", rc)}))
 		}
@@ -269,7 +276,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			return 0, err
 		}
 
-		reviewVerdict, findings := scanReviewLog(cfg.logPath)
+		reviewVerdict, findings := scanReviewLog(cfg.logPath, cfg.driver)
 		if reviewVerdict != "" {
 			state.LastVerdict = reviewVerdict
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: reviewVerdict}))
@@ -387,9 +394,11 @@ func seedPromptFromState(promptFile string, state RunState) (string, error) {
 // nonce suffix once the token itself is found.
 //
 // Returns the last verdict seen ("" if none) and whether a valid outcome
-// line was present at all.
-func scanPassLog(logPath string) (verdict string, hasOutcome bool) {
-	d, err := driver.New("claude")
+// line was present at all. driverName selects the RenderTranscript strategy
+// (issue #262 slice 4) -- the same Driver name this run's own cfg.driver
+// carries, not a hardcoded "claude".
+func scanPassLog(logPath, driverName string) (verdict string, hasOutcome bool) {
+	d, err := driver.New(driverName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan pass log:", err)
 		return "", false
@@ -429,9 +438,11 @@ func scanPassLog(logPath string) (verdict string, hasOutcome bool) {
 // Returns ("", "") when no verdict line is found at all. Mirrors findVerdict's
 // last-wins, fail-unsafe-toward-BLOCK resolution when more than one verdict
 // line appears (review-prompt.md's own contract only ever emits one, but nothing
-// stops a rendering quirk from producing more).
-func scanReviewLog(logPath string) (verdict, findings string) {
-	d, err := driver.New("claude")
+// stops a rendering quirk from producing more). driverName selects the
+// RenderTranscript strategy (issue #262 slice 4), the same as scanPassLog's
+// own parameter.
+func scanReviewLog(logPath, driverName string) (verdict, findings string) {
+	d, err := driver.New(driverName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan review log:", err)
 		return "", ""
@@ -572,6 +583,7 @@ func buildDriverExecCmd(cfg config) (*exec.Cmd, error) {
 		return nil, err
 	}
 	args := []string{
+		"--driver", cfg.driver,
 		"--prompt-file", cfg.promptFile,
 		"--agents-file", cfg.agentsFile,
 		"--session-file", cfg.sessionFile,

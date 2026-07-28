@@ -191,3 +191,12 @@ FAKE
   [ "$status" -ne 0 ]
   [[ "$output" == *"DRIVER_SKILLS_DIR"* ]]
 }
+
+# issue #262: the Driver NAME the launcher selects its host-side strategy by
+# is baked into the same preamble; a Box missing it must die naming it, not
+# fall back to impersonating claude.
+@test "entrypoint fails fast naming DRIVER_NAME when only it is unset" {
+  run env -u DRIVER_NAME DRIVER_BIN=claude DRIVER_FLAGS_COMMON=--verbose DRIVER_SKILLS_DIR=/home/agent/.claude/skills bash "$ENTRYPOINT_SRC"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"DRIVER_NAME"* ]]
+}
