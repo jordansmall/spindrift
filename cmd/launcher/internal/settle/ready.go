@@ -516,6 +516,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			pushRetries++
 			fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
 				num, pr, pushRetries, s.cfg.MaxRebaseAttempts, rbErr)
+			s.rebasePushBackoff(pushRetries)
 			rbErr = cf.Rebase(pr)
 		}
 		if rbErr != nil {
@@ -602,6 +603,7 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 	for pushRetries := 0; rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && pushRetries < s.cfg.MaxRebaseAttempts; pushRetries++ {
 		fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
 			num, pr, pushRetries+1, s.cfg.MaxRebaseAttempts, rbErr)
+		s.rebasePushBackoff(pushRetries + 1)
 		rbErr = cf.Rebase(pr)
 	}
 	if rbErr != nil {
@@ -632,6 +634,19 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 		return rbErr
 	}
 	return s.rewaitAfterForcePush(num, gen, pr)
+}
+
+// rebasePushBackoff sleeps a jittered linear backoff between rebase-push
+// retries on forge.ErrTransientPushFailure (issue #2095), shared by
+// mergeImmediate's reactive conflict-retry loop and preflightStaleBase's own
+// push-retry loop. attempt is 1-based (the Nth retry): the sleep duration is
+// TransientBackoffSecs*attempt + HoldJitterSecs, mirroring
+// dispatch.Config's own TransientBackoffSecs/HoldJitterSecs semantics.
+// Routed through s.clock so tests can inject a recording Clock instead of a
+// real sleep.
+func (s *Settle) rebasePushBackoff(attempt int) {
+	d := time.Duration(s.cfg.TransientBackoffSecs)*time.Second*time.Duration(attempt) + time.Duration(s.cfg.HoldJitterSecs)*time.Second
+	s.clock.Sleep(d)
 }
 
 // resolveConflict dispatches a Box to resolve a genuine ErrMergeConflict
