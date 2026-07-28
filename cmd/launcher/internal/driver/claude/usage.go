@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"spindrift.dev/launcher/internal/logscan"
@@ -151,6 +152,92 @@ func breakdownByRoleFile(path string) ([]usage.RoleUsage, error) {
 // and the lastInLog scan.
 var breakdownByRole = breakdownByRoleFile
 
+// breakdownByModelFile scans the file at path and returns per-model-family
+// token breakdowns, split into the five billable categories, by parsing
+// assistant message events.
+//
+// Per-message usage in claude-code stream-json is PER-CALL: each assistant
+// event is one API response, so its input_tokens is already that call's
+// uncached input, and its cache_read/cache_creation figures are that call's
+// own cache tokens — none of it is cumulative across a turn or a run.
+// Aggregation is therefore a SUM across every assistant event, across every
+// turn and every subagent, keyed by ModelFamily(message.model). This is
+// deliberately not a read of the result event's own "usage" header: that
+// header is a non-cumulative snapshot of only its own call and does not
+// reconcile against a sum over the transcript.
+//
+// Returns (nil, nil) when the file does not exist.
+func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
+	buckets := make(map[string]*usage.ModelUsage)
+	ensure := func(model string) *usage.ModelUsage {
+		if b, ok := buckets[model]; ok {
+			return b
+		}
+		b := &usage.ModelUsage{Model: model}
+		buckets[model] = b
+		return b
+	}
+
+	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
+		if !strings.Contains(line, `"type":"assistant"`) {
+			return
+		}
+		var ev Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Type != "assistant" {
+			return
+		}
+		if ev.Message == nil {
+			return
+		}
+		family := ModelFamily(ev.Message.Model)
+		if family == "" {
+			family = "unknown"
+		}
+		b := ensure(family)
+		b.UncachedInputTokens += ev.Message.Usage.InputTokens
+		b.OutputTokens += ev.Message.Usage.OutputTokens
+		b.CacheReadInputTokens += ev.Message.Usage.CacheReadInputTokens
+		if cc := ev.Message.Usage.CacheCreation; cc != nil {
+			b.CacheWrite5mTokens += cc.Ephemeral5mInputTokens
+			b.CacheWrite1hTokens += cc.Ephemeral1hInputTokens
+		}
+	})
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	// Deterministic order: opus, haiku, sonnet first (when present), then
+	// any remaining families (including "unknown") sorted for stability.
+	priority := []string{"opus", "haiku", "sonnet"}
+	seen := make(map[string]bool, len(priority))
+	var result []usage.ModelUsage
+	for _, model := range priority {
+		if b, ok := buckets[model]; ok {
+			result = append(result, *b)
+			seen[model] = true
+		}
+	}
+	var rest []string
+	for model := range buckets {
+		if !seen[model] {
+			rest = append(rest, model)
+		}
+	}
+	sort.Strings(rest)
+	for _, model := range rest {
+		result = append(result, *buckets[model])
+	}
+	return result, nil
+}
+
+// breakdownByModel indirects to breakdownByModelFile so tests can simulate a
+// breakdownByModelFile I/O error without a real filesystem race between it
+// and the lastInLog scan.
+var breakdownByModel = breakdownByModelFile
+
 // ExtractUsage scans logPath for its result event and, separately, its
 // per-role breakdown, returning both in one usage.Report — the claude
 // Driver's implementation of the Driver interface's ExtractUsage method.
@@ -169,5 +256,12 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by role failed for %s: %v\n", logPath, err)
 		roles = nil
 	}
-	return usage.Report{Usage: u, Found: true, Roles: roles}, nil
+	// A breakdownByModel I/O error likewise degrades only the per-model
+	// section, not the aggregate totals or the per-role breakdown above.
+	models, err := breakdownByModel(logPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: breakdown by model failed for %s: %v\n", logPath, err)
+		models = nil
+	}
+	return usage.Report{Usage: u, Found: true, Roles: roles, Models: models}, nil
 }
