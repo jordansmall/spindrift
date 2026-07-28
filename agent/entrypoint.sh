@@ -895,6 +895,11 @@ run_driver_in_env() {
   # main's post-return backstop (issue #593) can tell whether the Driver
   # actually emitted one.
   _last_outcome_line="$(_driver_extract_outcome "$stream_log")"
+  # The offending near-miss line, if any (issue #1900): a line that led with
+  # the SPINDRIFT_OUTCOME token but lacked landing=/status=, captured off the
+  # same still-on-disk stream_log so the recovery nudge below can quote it
+  # back. Empty whenever _last_outcome_line above already found a valid line.
+  _last_near_miss_line="$(_driver_extract_near_miss_outcome "$stream_log")"
   # _scan_pr_intent_in_log's own read, ahead of the stream_log removal below
   # -- the SPINDRIFT_PR_INTENT required-marker gate row (issue #2045) needs
   # to know whether this pass attempted the marker at all, the same way the
@@ -1122,7 +1127,7 @@ main() {
   local _rebase_and_publish _had_rebase_conflict
   local _use_dev_shell _harness_path
   local prompt agents_json _driver_session_mode review_prompt_rendered
-  local _last_outcome_line _last_pr_intent_line _recovery_attempted
+  local _last_outcome_line _last_near_miss_line _last_pr_intent_line _recovery_attempted
   local ORCHESTRATOR
 
   configure_env
@@ -1165,7 +1170,19 @@ main() {
   # exhausted -- the deterministic checks/gates the recovery_prompt already
   # asks for still run, only the code-owned review pass is skipped. A
   # regression test pins this omission (tests/entrypoint-orchestrator-handoff.bats).
-  local recovery_prompt="The run ended without printing a SPINDRIFT_OUTCOME line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required SPINDRIFT_OUTCOME line as your final message."
+  # When the just-completed pass left a near-miss outcome line -- the token
+  # present but the line unparseable (issue #1900) -- quote that offending
+  # text back and restate the canonical grammar and the allowed status
+  # values, mirroring the PR-intent nudge's grammar-rich shape below, rather
+  # than the bare "print the required line" wording. A bare absence (no
+  # near-miss line captured) still gets the generic nudge unchanged.
+  local recovery_prompt
+  if [ -n "$_last_near_miss_line" ]; then
+    recovery_prompt="Your last message printed a line that looks like a SPINDRIFT_OUTCOME marker but does not parse, so the run has no usable outcome: ${_last_near_miss_line}
+Print the required line exactly once as your final message, using this grammar -- one line, space-delimited fields, note then nonce last: SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER:-} landing=<landing-ref> status=<status> note=<short reason> nonce=${RUN_NONCE:-}. The only valid status values are ready and blocked. Run any remaining checks/gates in the foreground first, then print that line."
+  else
+    recovery_prompt="The run ended without printing a SPINDRIFT_OUTCOME line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required SPINDRIFT_OUTCOME line as your final message."
+  fi
   required_marker_gate _scan_outcome "$recovery_prompt" _require_nonempty
 
   # Only a driver that exited cleanly yet told us nothing gets the synthetic
