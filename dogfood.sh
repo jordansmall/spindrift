@@ -196,6 +196,11 @@ while :; do
     continue
   fi
 
+  if [ "$nix_exit" -eq 5 ]; then
+    echo "==> dogfood: halting — non-converging (host-tainted) image divergence, a rebuild cannot fix this."
+    break
+  fi
+
   if [ "$nix_exit" -eq 4 ]; then
     echo "==> dogfood: image stale — rebuilding and re-invoking"
   elif [ "$nix_exit" -ne 0 ]; then
