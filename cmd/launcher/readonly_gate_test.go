@@ -6,6 +6,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/github"
+	"spindrift.dev/launcher/internal/forge/local"
 )
 
 // TestReadOnlyCapabilityGate_ReadWriteIsNoOp verifies that
@@ -168,6 +169,27 @@ func TestReadOnlyCapabilityGate_GithubTrackerSatisfiesHostPostedIssueFiler(t *te
 	it := github.NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
 		t.Errorf("checkReadOnlyCapabilityGate() with the real github tracker = %v, want nil", err)
+	}
+}
+
+// TestReadOnlyCapabilityGate_LocalTrackerSatisfiesHostPostedIssueFiler
+// verifies the closing acceptance criterion of issue #2117: the real local
+// tracker (local.NewLocalTracker, ISSUE_TRACKER=local) — not a synthetic
+// fake — now implements forge.HostPostedIssueFiler (landed alongside
+// forge.HostPostedCommenter, which it already satisfied via its base
+// Comment method), so the gate's issue-filing axis passes for the concrete
+// tracker newIssueTracker wires up for local, not just for forge.Fake or
+// the github tracker (#2028).
+func TestReadOnlyCapabilityGate_LocalTrackerSatisfiesHostPostedIssueFiler(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.codeForge = "local"
+	c.issueTracker = "local"
+	fc := forge.NewFake()
+	cf := fc.AsLocal()
+	it := local.NewLocalTracker(t.TempDir(), dispatchLabels(c))
+	if err := checkReadOnlyCapabilityGate(c, cf, it); err != nil {
+		t.Errorf("checkReadOnlyCapabilityGate() with the real local tracker = %v, want nil", err)
 	}
 }
 
