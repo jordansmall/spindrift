@@ -439,7 +439,10 @@ func (lt *LocalTracker) PostIssue(title, body string, labels []string) (string, 
 
 // uniqueSlug returns base, or base with a "-2", "-3", ... suffix appended,
 // whichever is the first that has no existing issue file — so PostIssue
-// never clobbers an issue that already occupies base's slug path.
+// never clobbers an issue that already occupies base's slug path. The
+// stat-then-write is TOCTOU-racy and so only collision-safe under the
+// single-process, sequential settle relay that drives it, not concurrent
+// callers.
 func (lt *LocalTracker) uniqueSlug(base string) (string, error) {
 	slug := base
 	for n := 2; ; n++ {
@@ -517,6 +520,10 @@ func (li localIssue) render() string {
 	b.WriteString(frontmatterDelim + "\n")
 	fmt.Fprintf(&b, "title: %s\n", renderScalar(li.frontmatter.Title))
 	fmt.Fprintf(&b, "state: %s\n", renderScalar(li.frontmatter.State))
+	// Labels join un-escaped: a comma or newline in a label would fragment
+	// the flow-list, unlike the renderScalar-escaped scalars above. Safe
+	// because the only caller (the settle relay) hard-codes issueIntentLabels;
+	// escape here too if labels ever become caller-supplied.
 	fmt.Fprintf(&b, "labels: [%s]\n", strings.Join(li.frontmatter.Labels, ", "))
 	fmt.Fprintf(&b, "created: %s\n", renderScalar(li.frontmatter.Created))
 	if li.frontmatter.Parent != "" {
@@ -543,6 +550,11 @@ func (li localIssue) render() string {
 // injection this guards against), or a leading quote character that would
 // otherwise be misread as opening a quoted scalar. Plain values like "Fix
 // the Thing" and RFC3339 timestamps stay bare, unchanged from before.
+//
+// Scope: this guards only parseLocalIssue's own re-read vectors, not a
+// general YAML reader. A value with a leading "#", "[", or ":" stays bare
+// and would mis-parse under a real YAML parser — acceptable because the
+// custom parser here reads the whole "key: value" line verbatim.
 func scalarNeedsQuoting(s string) bool {
 	return s != strings.TrimSpace(s) ||
 		strings.ContainsAny(s, "\n\r") ||
