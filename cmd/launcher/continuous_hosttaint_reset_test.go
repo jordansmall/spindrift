@@ -12,33 +12,80 @@ import (
 )
 
 // TestRunContinuousDispatch_IssueCloseResetsHostTaintGuard_ForcesRebuild is a
-// CHARACTERIZATION test for issue #2127: it pins the exact mechanism by which
-// a fully-local (ISSUE_TRACKER=local, CODE_FORGE=local) continuous-dispatch
-// run that closes an issue mid-stream silently discards the host-taint
-// non-convergence guard (issue #2113's classifyStaleOutcome/staleRevTracker),
-// forcing every subsequent same-rev stale verdict to re-enter the
-// rebuild-and-retry path (exit 4) instead of ever reaching the halt path
-// (exit 5) — even though, from the freshness probe's point of view, nothing
-// about the divergence changed.
+// CHARACTERIZATION test AND the written verdict for issue #2127 — adjudicate
+// why a fully-local (ISSUE_TRACKER=local, CODE_FORGE=local) issue-close forces
+// a macOS image rebuild on the next continuous-dispatch run.
 //
-// The mechanism (Theory A) is exactly one line: runContinuousDispatch's
-// success path at cmd/launcher/main.go:1291,
+// # VERDICT: Theory A is the root cause; Theory B is ruled out
+//
+// Theory A — guard reset on success — CONFIRMED, and it is the exact code
+// path this test pins. runContinuousDispatch's success path at
+// cmd/launcher/main.go:1291,
 //
 //	_ = tracker.clear()
 //
-// runs on EVERY nil-error return from waves.RunContinuous — including the
-// completely unrelated case where a run dispatched and settled an issue
-// (closing it) with no freshness involvement at all — because tracker.clear()
-// is unconditional on the success path, not scoped to "the divergence this
-// tracker recorded actually resolved." A prior run's recorded stale rev (the
-// guard armed by classifyStaleOutcome's tracker.record call, guarding against
-// exactly this rev recurring) is wiped by the next run for the unrelated
-// reason that an issue happened to close, resetting the host-taint detector's
-// only state.
+// runs on EVERY nil-error return from waves.RunContinuous, unconditionally.
+// It is NOT scoped to "the divergence this tracker recorded actually
+// resolved," so the host-taint non-convergence guard (issue #2113's
+// classifyStaleOutcome/staleRevTracker) armed by a prior stale run is wiped
+// by the very next successful run, whatever that run did. That wipe forces
+// the following same-rev stale verdict to be reclassified as fresh content
+// staleness (exit 4 → rebuild) instead of non-converging host-taint
+// (exit 5 → halt + diagnostic) — the observed perpetual rebuild loop.
 //
-// This test proves that mechanism deterministically, in-process, with three
-// direct runContinuousDispatch calls sharing one pwd and one persisted
-// tracker file, no macOS host and no real image build:
+// Precision on the trigger (do not overclaim "close"): the guard is cleared
+// at main.go:1291 BEFORE reconcileAfterDispatch (main.go:1293) runs, on ANY
+// successful RunContinuous return. The issue-close of the reported scenario is
+// merely one instance of such a success — this run genuinely prints
+// "reconcile: no issues closed," yet the guard is already gone, because the
+// clearing fires on the dispatch success, not on a close per se. The defect is
+// therefore broader and more precise than "closing an issue resets it": any
+// clean continuous run resets it.
+//
+// Theory B — probe oblivious to local forge — RULED OUT as a cause, and it
+// cannot even partially contribute ("both contribute" is excluded). The
+// freshness probe's signature is
+//
+//	freshness.Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evaluator)
+//
+// at cmd/launcher/internal/freshness/probe.go:91 — it takes NO codeForge
+// argument, so it behaves identically under CODE_FORGE=local and
+// CODE_FORGE=github; there is no local-forge-specific branch that could emit a
+// spurious "rebuild needed." Worse for Theory B, its only local-specific
+// effect runs the WRONG direction: in a fully-local checkout with no reachable
+// origin, fetchBaseTip fails isNoOriginRemote and Probe returns
+// Applicable=false (probe.go:114-119), which SUPPRESSES the rebuild rather
+// than causing it. That suppression is pinned deterministically by the
+// existing freshness.TestProbe_NoOriginRemoteNotApplicable. A rebuild verdict
+// only ever arises when origin IS reachable and the evaluator's tag diverges —
+// i.e. content-staleness / host-taint, which is Theory A's domain, forge-
+// agnostic. So Theory B cannot produce the loop.
+//
+// # What this test proves deterministically vs. what needs macOS hardware
+//
+// Deterministic (this test, in-process, no macOS host, no real image build):
+// the guard-reset mechanism itself — that a clean success at main.go:1291
+// wipes the staleRevTracker and thereby downgrades a subsequent same-rev
+// host-taint signature (exit 5) to a rebuild verdict (exit 4).
+//
+// LIMITATION — why Theory B is adjudicated statically, not by this test: the
+// three calls below inject a freshness.Fake evaluator, which short-circuits
+// Probe's real fetchBaseTip/tag-comparison path entirely. This test therefore
+// does NOT and CANNOT exercise probe.go's forge-oblivious code path, so it
+// cannot by itself observe or refute Theory B. Theory B is ruled out above by
+// static signature analysis (no codeForge param) plus the separately-pinning
+// TestProbe_NoOriginRemoteNotApplicable — not by anything asserted here.
+//
+// Still needs a real macOS run to confirm: that the production dogfood image
+// graph is genuinely host-tainted in exactly this same-rev-perpetual-staleness
+// way — i.e. that after a real rebuild the evaluator's tag still diverges at
+// the unchanged rev R. This test pins the guard's in-process reset, not that
+// production divergence.
+//
+// # How the three calls demonstrate Theory A
+//
+// Three direct runContinuousDispatch calls share one pwd and one persisted
+// tracker file:
 //
 //  1. A stale probe (staleEval's tag never matches the loaded image) with no
 //     prior recorded rev is content staleness by definition (issue #2113):
@@ -47,30 +94,26 @@ import (
 //     exactly the signal that drives a rebuild attempt against R.
 //  2. A FRESH probe on the same pwd lets refill dispatch and settle the one
 //     open issue; RunContinuous returns nil, so runContinuousDispatch takes
-//     its success path and unconditionally clears the tracker
-//     (main.go:1291) before reconcileAfterDispatch even runs. The guard
-//     armed in step 1 is gone — with no rebuild ever having happened.
-//  3. A stale probe again, at the SAME rev R (the origin repo never moved
-//     between calls) — the same signature a genuinely host-tainted image
-//     produces after a real rebuild attempt failed to converge. But because
-//     step 2 wiped the guard, tracker.prior() is "" again here, so
-//     classifyStaleOutcome's NonConverging(R, "") check is false: it
-//     misclassifies this same-rev repeat as fresh content staleness (again
-//     exit 4) instead of the host-taint halt (exit 5) it would have reported
-//     had the guard survived. Contrast
-//     TestClassifyStaleOutcome_NonConverging_DiagsAndHalts, which drives the
-//     same same-rev-repeat shape directly against classifyStaleOutcome (no
-//     intervening issue-close) and correctly gets errImageHostTainted.
+//     its success path and unconditionally clears the tracker (main.go:1291)
+//     before reconcileAfterDispatch even runs. The guard armed in step 1 is
+//     gone — with no rebuild ever having happened.
+//  3. A stale probe again, at the SAME rev R (the origin repo never moved) —
+//     the signature a genuinely host-tainted image produces after a rebuild
+//     attempt fails to converge. Because step 2 wiped the guard,
+//     tracker.prior() is "" here, so classifyStaleOutcome's NonConverging(R,
+//     "") check is false and it misclassifies this same-rev repeat as content
+//     staleness (again exit 4) instead of the host-taint halt (exit 5).
+//     Contrast TestClassifyStaleOutcome_NonConverging_DiagsAndHalts, which
+//     drives the identical same-rev-repeat shape directly against
+//     classifyStaleOutcome (no intervening success) and correctly gets
+//     errImageHostTainted.
 //
 // Call 3 asserting exit 4 (rather than 5) is the CURRENT, WRONG behavior this
-// test pins — issue #2127's fix must flip that assertion to 5 once the
-// guard-reset is scoped away from an unrelated issue-close success path
-// (e.g. tracker.clear() only firing when the run's own freshness check, not
-// merely its dispatch outcome, was clean). Until then this test must stay
-// green as the CI-safe reproduction; whether the real macOS dogfood image is
-// genuinely host-tainted in exactly this same-rev-perpetual-staleness way
-// still needs a real macOS run to confirm — this test only pins the guard's
-// in-process reset mechanism, not the production divergence itself.
+// test pins. Per acceptance criterion 4 no fix is applied here, so the
+// assertion is written green against today's defective behavior rather than
+// red-failing (a red test would break CI); #2127's fix must scope
+// tracker.clear() away from an unrelated success path and then flip this
+// assertion to 5.
 func TestRunContinuousDispatch_IssueCloseResetsHostTaintGuard_ForcesRebuild(t *testing.T) {
 	const freshHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" // 32 chars
 	const staleHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" // 32 chars, distinct
@@ -134,9 +177,11 @@ func TestRunContinuousDispatch_IssueCloseResetsHostTaintGuard_ForcesRebuild(t *t
 		t.Fatalf("call 1: tracker.prior() = %q, want a non-empty recorded rev (guard armed)", rev)
 	}
 
-	// --- call 2: fresh -- refill dispatches and settles issue #1, closing it;
-	// the success path's unconditional tracker.clear() (main.go:1291) wipes
-	// the guard armed above, for a reason wholly unrelated to freshness. ---
+	// --- call 2: fresh -- refill dispatches and settles issue #1; RunContinuous
+	// returns nil, so the success path's unconditional tracker.clear()
+	// (main.go:1291) wipes the guard armed above BEFORE reconcile even runs, for
+	// a reason wholly unrelated to freshness -- ANY clean success clears it, the
+	// reported issue-close being just one such success. ---
 	err2 := runContinuousDispatch(c, it, cf, dir, f, s, freshEval, lp)
 	if err2 != nil {
 		t.Fatalf("call 2: runContinuousDispatch = %v, want nil (fresh probe + one dispatchable issue settles cleanly)", err2)
@@ -145,7 +190,7 @@ func TestRunContinuousDispatch_IssueCloseResetsHostTaintGuard_ForcesRebuild(t *t
 		t.Fatalf("call 2: fr.RunCalls = %v, want exactly one Run call for issue #1", fr.RunCalls)
 	}
 	if got := newStaleRevTracker(dir).prior(); got != "" {
-		t.Fatalf("call 2: tracker.prior() = %q, want empty -- THE BUG under test: an unrelated issue-close reset the host-taint guard armed by call 1 (main.go:1291's tracker.clear() is unconditional on the success path, not scoped to a resolved divergence)", got)
+		t.Fatalf("call 2: tracker.prior() = %q, want empty -- THE BUG under test: an unrelated clean success reset the host-taint guard armed by call 1 (main.go:1291's tracker.clear() is unconditional on the success path, not scoped to a resolved divergence)", got)
 	}
 
 	// --- call 3: stale again, at the SAME rev R -- a real host-taint
