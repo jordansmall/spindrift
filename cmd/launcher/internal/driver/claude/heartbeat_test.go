@@ -668,6 +668,45 @@ func TestWriterSwitchHeader(t *testing.T) {
 	})
 }
 
+// TestWriterSwitchHeader_AgentToolName verifies that a spawn block using the
+// confirmed real tool name "Agent" (not the fallback "Task") still resolves
+// the subagent_type to a named role header — "reviewer" here — rather than
+// falling back to the generic "subagent" label (#2078).
+func TestWriterSwitchHeader_AgentToolName(t *testing.T) {
+	var status bytes.Buffer
+	w := claude.New(&bytes.Buffer{}, "284", &status)
+
+	implTool := func(name, id string) string {
+		return `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"` + name + `","id":"` + id + `","input":{}}]}}` + "\n"
+	}
+	implAgent := func(id, subagentType string) string {
+		return `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Agent","id":"` + id + `","input":{"subagent_type":"` + subagentType + `"}}]}}` + "\n"
+	}
+	subRead := func(parentID string) string {
+		return `{"type":"assistant","parent_tool_use_id":"` + parentID + `","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n"
+	}
+	implNar := func(text string) string {
+		return `{"type":"assistant","message":{"content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
+	}
+
+	// Implementor does a read then launches a reviewer via the "Agent" tool name.
+	fmt.Fprint(w, implTool("Read", "r0"))
+	fmt.Fprint(w, implAgent("tu_r1", "reviewer"))
+	// Reviewer does a read (counts should be separate from implementor's).
+	fmt.Fprint(w, subRead("tu_r1"))
+	// Implementor resumes with narration.
+	fmt.Fprint(w, implNar("Back to work."))
+
+	out := status.String()
+	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
+	if !strings.Contains(out, rule+" reviewer ") {
+		t.Errorf("missing reviewer role header for Agent-named spawn block: %q", out)
+	}
+	if strings.Contains(out, rule+" subagent ") {
+		t.Errorf("Agent-named spawn block with known subagent_type must not fall back to the bare \"subagent\" role header: %q", out)
+	}
+}
+
 // TestWriterResultLineNamesActingRole verifies that when a result event
 // fires while a subagent is still the acting role (the log ends mid-scout,
 // no narration or tool call ever hands control back to the implementor),
