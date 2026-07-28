@@ -98,7 +98,7 @@ nix run github:jordansmall/spindrift -- research   # advise-only: one container 
 
 Every verb is a `nix run github:jordansmall/spindrift -- <verb>` away: the
 binary comes from this flake, while the Consumer flake, `harness.env`, and
-per-issue `logs/` are read from `$PWD`. The unpinned `github:` ref tracks
+per-issue `.spindrift/logs/` are read from `$PWD`. The unpinned `github:` ref tracks
 `main`; pin spindrift in your own `flake.lock` (see [Adding spindrift to your
 flake](#adding-spindrift-to-your-flake)) for a fixed, reproducible version.
 
@@ -114,7 +114,7 @@ spindrift dispatch
 Run commands **from your Consumer flake's directory**: `spindrift build` reads
 the flake from `$PWD` for its container fallback, and `spindrift dispatch` reads
 `harness.env` from `$PWD` for secrets. Per-issue logs land in
-`logs/issue-<n>.log`.
+`.spindrift/logs/issue-<n>.log`.
 
 `spindrift` ships bash, fish, and zsh tab-completion — subcommands, every flag,
 `--*-file` path arguments, and enumerable flag values — generated from the same
