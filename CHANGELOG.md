@@ -1,5 +1,134 @@
 # Changelog
 
+## [0.7.1](https://github.com/jordansmall/spindrift/compare/v0.7.0...v0.7.1) (2026-07-28)
+
+
+### Features
+
+* **ab:** add orchestrator on/off A/B harness ([6dd2e98](https://github.com/jordansmall/spindrift/commit/6dd2e982a0fc4f33ccb2e526a3969d776538fe1c))
+* **ab:** measure worker on/off cost per model with delta ([502ef25](https://github.com/jordansmall/spindrift/commit/502ef25ea45f9f14501adbe2e7cd22a1c8d851d2))
+* **box:** add Bash command-output tee/summary hooks ([8210ece](https://github.com/jordansmall/spindrift/commit/8210ecea1ab9acfdd10d36aac4a21523778a9b43))
+* **box:** add in-box orchestrator behind a knob ([#1996](https://github.com/jordansmall/spindrift/issues/1996)) ([7a81f0d](https://github.com/jordansmall/spindrift/commit/7a81f0de57137dcc75e468589d517162adac822a))
+* **box:** add orchestrator run-state artifact ([c8d7f88](https://github.com/jordansmall/spindrift/commit/c8d7f88d9a349039213cf7a64c441e24150d0d0b))
+* **box:** bake the bash-output interceptor into the image ([e4f7b60](https://github.com/jordansmall/spindrift/commit/e4f7b60e689f25c1c61a542e13d330c0e08d24f1))
+* **box:** lower Claude Code output caps ([3fe50ed](https://github.com/jordansmall/spindrift/commit/3fe50ed31105ab1944426447c312a19b369b9e85)), closes [#1987](https://github.com/jordansmall/spindrift/issues/1987)
+* **claude:** add Role to SpindriftOp pass_start ([2c673ef](https://github.com/jordansmall/spindrift/commit/2c673ef40438a99c567b7c01c0efdd69422290fa))
+* **claude:** add spindrift_op heartbeat marker type ([c4470b2](https://github.com/jordansmall/spindrift/commit/c4470b2ccafd4a45df9c651f6746d117cbb86302))
+* **cli:** add bare --continuous dispatch flag ([743b7ee](https://github.com/jordansmall/spindrift/commit/743b7ee41fd03ab3efd4fbf60950eaac0e00a2ec)), closes [#2033](https://github.com/jordansmall/spindrift/issues/2033)
+* **dispatch:** sum usage across a Dispatch's own pass logs ([61ed8c7](https://github.com/jordansmall/spindrift/commit/61ed8c7208e24ff62677a39cb017caba1ed9f268))
+* **dispatch:** surface issue-intents on Result ([cea701d](https://github.com/jordansmall/spindrift/commit/cea701d34088e9fa4dfc6422ca9d94a17104c6ed))
+* **driver:** disable claude's async background tasks ([4f455da](https://github.com/jordansmall/spindrift/commit/4f455da65b9085fcbb75fa91dee21b340bb65c48))
+* **entrypoint:** emit a give-up op when the PR-intent nudge is exhausted ([e6168d6](https://github.com/jordansmall/spindrift/commit/e6168d60db8af5bb50fa7f52c1fc4c8edb7c93a0)), closes [#2046](https://github.com/jordansmall/spindrift/issues/2046)
+* **entrypoint:** fork REVIEW on the orchestrator switch ([7bb0411](https://github.com/jordansmall/spindrift/commit/7bb0411b6dc6a33ff3efac16ab2509ab3d5bffc4))
+* **entrypoint:** nudge a missing read-only PR-intent ([2407749](https://github.com/jordansmall/spindrift/commit/240774964dc71fa6f021b9564d9d281ba222dbec))
+* **env-schema:** add WORKER_MODEL knob ([11e805d](https://github.com/jordansmall/spindrift/commit/11e805d1bf1d5abc07c3895cd4f54f66e92d124a))
+* **filer:** relay issue-filing on read-only + orchestrator ([54f97c0](https://github.com/jordansmall/spindrift/commit/54f97c00a2592e1299e1c4a7673c8665e3641a04))
+* **forge:** add HostPostedIssueFiler capability ([8c0be2c](https://github.com/jordansmall/spindrift/commit/8c0be2cf515b2554873db6189649b64f48c26526))
+* **github:** implement PostIssue via gh issue create ([22cafdb](https://github.com/jordansmall/spindrift/commit/22cafdb62fc92858d2d64ca6e2c543eb8ce7d5f1)), closes [#2028](https://github.com/jordansmall/spindrift/issues/2028)
+* **launcher:** add MAX_BUDGET_TOKENS/MAX_BUDGET_USD knobs ([b48e879](https://github.com/jordansmall/spindrift/commit/b48e879f4cf53e7ec4159b13bf59a042bed60a19))
+* **launcher:** gate read-only on HostPostedIssueFiler ([a84d76c](https://github.com/jordansmall/spindrift/commit/a84d76c989365e2847b3da55fa963acb4a1fbfcc))
+* **orchestrator:** add reviewPromptFile config and flag ([0e4f6f5](https://github.com/jordansmall/spindrift/commit/0e4f6f5f1d31cc1826ffcad1b6d3441323045b61))
+* **orchestrator:** add scanReviewLog for the review pass ([84b1102](https://github.com/jordansmall/spindrift/commit/84b1102106336ab2640bd18b923518b4bc72e5c6))
+* **orchestrator:** budget governor and decompose trigger ([5cf4152](https://github.com/jordansmall/spindrift/commit/5cf4152002a77833d5a03e365c446fa37b3775b0))
+* **orchestrator:** canonicalize the master-switch gate ([4a7f014](https://github.com/jordansmall/spindrift/commit/4a7f014ca95cbdea5f24ebf762f79e8dcd46654f))
+* **orchestrator:** carry reviewer findings in run-state ([f69bb8f](https://github.com/jordansmall/spindrift/commit/f69bb8fa1c03c4addf409dd428ecc5405c1e801a))
+* **orchestrator:** default main/coordinator model to Opus 4.8 ([d93615e](https://github.com/jordansmall/spindrift/commit/d93615e0509c78c64831d0fac8e04d7e8beec67b)), closes [#2055](https://github.com/jordansmall/spindrift/issues/2055)
+* **orchestrator:** drive a code-owned review pass ([b226887](https://github.com/jordansmall/spindrift/commit/b22688782e5a1876919c45234b37c7f66dc46db8))
+* **orchestrator:** emit spindrift_op markers per pass ([a1c3977](https://github.com/jordansmall/spindrift/commit/a1c39775866b0c7b5d3279ff15f1e2d65f334d5e))
+* **orchestrator:** gate coordinator step on worker presence ([2daeb82](https://github.com/jordansmall/spindrift/commit/2daeb828fb43fd8c8370e33e64990bca20af564d)), closes [#2056](https://github.com/jordansmall/spindrift/issues/2056)
+* **orchestrator:** loop driver-exec across multiple passes ([ac87edf](https://github.com/jordansmall/spindrift/commit/ac87edfa64819e2d06feb2ba869788dda712af93))
+* **orchestrator:** mark passes with no outcome ([a36a8e6](https://github.com/jordansmall/spindrift/commit/a36a8e62c9d0b5ff6a18f7e0d1a018a4315d0240))
+* **orchestrator:** pin prompt-scanner marker contract ([e3a7394](https://github.com/jordansmall/spindrift/commit/e3a73948628df62d2b7d156084e03c0c8acf3ad1))
+* **orchestrator:** provision worker subagent ([f3c5b5f](https://github.com/jordansmall/spindrift/commit/f3c5b5febde1028e8e1b6bc23fe5ac43e0ee7291))
+* **outcome:** collect all SPINDRIFT_ISSUE_INTENT lines ([d5411e1](https://github.com/jordansmall/spindrift/commit/d5411e11393da32e32876620088bc1fc4372281d))
+* **outcome:** pin PR-intent marker constant ([03450bb](https://github.com/jordansmall/spindrift/commit/03450bb9cf4f9a3dfb09a1039771917bd4823f25))
+* **settle:** file host-mediated issue intents ([f20fa83](https://github.com/jordansmall/spindrift/commit/f20fa83692b63c6d1ad2189cdf00c0f8e78c67c0))
+* **settle:** gate fix passes on a token/cost budget ([a552829](https://github.com/jordansmall/spindrift/commit/a552829583c6fa9bbe2f5d4ef51e8e08c72f38b0))
+
+
+### Bug Fixes
+
+* **ab:** emit raw tabs from parse_usage (jq -r) ([a95b7f4](https://github.com/jordansmall/spindrift/commit/a95b7f4544545a8192847747a53b768b8dfba4c3))
+* **ab:** pass knobs as flags to beat harness.env ([e810e02](https://github.com/jordansmall/spindrift/commit/e810e0208524fbe270db8c2af47d594cdacfba4e))
+* **ab:** scope main() vars local and pin test outdir ([f92a117](https://github.com/jordansmall/spindrift/commit/f92a117a4ee78bb63d948b5f8d472d532dc6db8c))
+* **claude:** drop pass_start Role, now dead with decompose gone ([89b61e1](https://github.com/jordansmall/spindrift/commit/89b61e14b6e2f303c84b0c95f2ca3933e4df5a49))
+* **driver:** salvage colon-delimited near-miss outcome lines ([0139a13](https://github.com/jordansmall/spindrift/commit/0139a136ce084984b1c8fbb7f9628c3e63a48a9d))
+* **entrypoint:** preserve dirty tree before no-outcome backstop ([6f76ac2](https://github.com/jordansmall/spindrift/commit/6f76ac2dd13e4d28b7159c6a400b320117dc3ee6))
+* **forge:** disable receive-side auto-gc in the test fixture ([fc8eb40](https://github.com/jordansmall/spindrift/commit/fc8eb403a911c4a974891ffb9a6e89b486c0d641))
+* **forge:** mirror stale-label strip in the Fake tracker ([053154c](https://github.com/jordansmall/spindrift/commit/053154c71ac5b605fea30ddafa7cbc16ff8973e6))
+* **forge:** strip stale terminal labels on github claim ([760e1c6](https://github.com/jordansmall/spindrift/commit/760e1c6da0e3768489a33c898d634596cc34311f)), closes [#1985](https://github.com/jordansmall/spindrift/issues/1985)
+* **freshness:** treat no-origin-remote as not applicable ([8aa1a76](https://github.com/jordansmall/spindrift/commit/8aa1a761b782e0af5ae09544b403cffeb5fc2e83)), closes [#2034](https://github.com/jordansmall/spindrift/issues/2034)
+* **launcher:** hold dependents of failed blocker in drain ([0a46674](https://github.com/jordansmall/spindrift/commit/0a46674c3789ceef588c81ef6fc0972116895fd2))
+* **launcher:** hold dependents of failed blocker in refill ([2b9cf59](https://github.com/jordansmall/spindrift/commit/2b9cf5933c8f0cb62c42f1bf2e2b83cd4129d1bf))
+* **orchestrator:** distinguish decompose passes in spindrift_op markers ([9254824](https://github.com/jordansmall/spindrift/commit/9254824e8377abd8194b2aebea9634d3da22ab9a))
+* **orchestrator:** fill out usage accumulation and marker coverage ([abc2c77](https://github.com/jordansmall/spindrift/commit/abc2c77d011708d9c514f7bb99a42128037411c6))
+* **orchestrator:** land once on APPROVE, don't re-loop the Filer ([943993e](https://github.com/jordansmall/spindrift/commit/943993e63e790b1863b041909f22b0682bf695f4))
+* **orchestrator:** remove inert budget/decompose governor ([0d01c1d](https://github.com/jordansmall/spindrift/commit/0d01c1d12b5c8543632428e7f60e976610d1bdcc))
+* **orchestrator:** tighten review-pass loop per review ([f55daa8](https://github.com/jordansmall/spindrift/commit/f55daa80416a9a6b2b76a1747d7bbabbb2c659ed))
+* **orchestrator:** tighten scanReviewLog's event boundary ([b591092](https://github.com/jordansmall/spindrift/commit/b59109260006a3be7217f009c5be98431dbcd0b6))
+* **orchestrator:** write run-state via temp file + rename ([cea14db](https://github.com/jordansmall/spindrift/commit/cea14db0e3315d917c2a06a45dcd745c78b670e6)), closes [#2008](https://github.com/jordansmall/spindrift/issues/2008)
+* **outcome:** export shared SPINDRIFT_OUTCOME token constant ([f99a32a](https://github.com/jordansmall/spindrift/commit/f99a32a108f3027e4af70908feefaae4a8ec1d97))
+* **relay:** dedup issue-intent payloads by decoded identity ([bd0b728](https://github.com/jordansmall/spindrift/commit/bd0b7289050e49513e2bd84b4e01daad06b06cdf)), closes [#2068](https://github.com/jordansmall/spindrift/issues/2068)
+* **settle:** leave a nudge-exhausted bail visibly not-done ([05bca22](https://github.com/jordansmall/spindrift/commit/05bca22368cecf7cc7313432a6e7d8c15bbb087e)), closes [#2046](https://github.com/jordansmall/spindrift/issues/2046)
+* **settle:** review fixups for issue-intent relay wiring ([990fac2](https://github.com/jordansmall/spindrift/commit/990fac271d749efb0ffc379fc75f10eb47896b48))
+* **settle:** wire issue-intent relay into Settle ([d01913a](https://github.com/jordansmall/spindrift/commit/d01913a257e1d17708280797b946023dcf52fe01))
+* **usage:** drop stale CumulativeUsage doc reference ([863ecb4](https://github.com/jordansmall/spindrift/commit/863ecb455279a82810c3dabe529e1a672dc2b015))
+
+
+### Performance Improvements
+
+* **settle:** skip usage read when no budget cap is set ([430aee8](https://github.com/jordansmall/spindrift/commit/430aee86dc063d4eb50f66239c273e7f934dd066))
+
+
+### Documentation
+
+* **adr:** add ADR 0035 for the in-box orchestrator loop ([e6d3dfd](https://github.com/jordansmall/spindrift/commit/e6d3dfd8f94d29bae2177f1bd3e3239bd3da29ea)), closes [#2000](https://github.com/jordansmall/spindrift/issues/2000)
+* **adr:** amend ADR 0035 with master-switch semantics ([6f3cbfe](https://github.com/jordansmall/spindrift/commit/6f3cbfe7de85de4027ca771987bb1a5d4b172c13))
+* **entrypoint:** record single-pass corrective-resume decision ([6b5da69](https://github.com/jordansmall/spindrift/commit/6b5da6926177e5515849a1d264309f105a0ae56d)), closes [#2065](https://github.com/jordansmall/spindrift/issues/2065)
+* **launcher:** update Status doc for the dropped cascade ([3f3b26a](https://github.com/jordansmall/spindrift/commit/3f3b26a9a2decda1dec50790f73dc4f74be5f228))
+* **orchestrator:** describe the flag as a master switch ([b83aad3](https://github.com/jordansmall/spindrift/commit/b83aad39c4369fe431db2923edad9a8c1aad7ebc))
+* **prompt:** cap gh issue view comment intake to last 10 ([91e39bf](https://github.com/jordansmall/spindrift/commit/91e39bf79fb2c76000b82f5220d6f2c817fd92c9))
+* **prompt:** simplify CHECK now that output is teed ([c2f42db](https://github.com/jordansmall/spindrift/commit/c2f42db0fce06c05a6decd4c4a100db5a06b5b7f))
+* **prompts:** mark VERDICT/SPINDRIFT_OUTCOME as load-bearing ([89de6ef](https://github.com/jordansmall/spindrift/commit/89de6ef52f0070be61288d04a5da08e6152d0dfd))
+* **reference:** document the background-tasks env var fix ([6cec4c1](https://github.com/jordansmall/spindrift/commit/6cec4c107e681b4553988f6a78e646693f22785a))
+* **reference:** document the budget governor and decompose trigger ([39599c7](https://github.com/jordansmall/spindrift/commit/39599c70f66836d370738f904fafadce61af6874))
+* **reference:** document the code-owned review pass ([907dbc5](https://github.com/jordansmall/spindrift/commit/907dbc53a57980ff7db4b348e8fed8c49aa6960b))
+* **reference:** drop budget-governor/decompose section ([614a3b1](https://github.com/jordansmall/spindrift/commit/614a3b1dc8172c6ebad9005b1aed791dc2a7dd6e))
+* **reference:** drop stale blocker-failed cascade mention ([a6e63b7](https://github.com/jordansmall/spindrift/commit/a6e63b714eb5c8fbf63dc1a2a773eb7b591b356a))
+* **release-notes:** add 0.7.1 highlights ([a70cc3f](https://github.com/jordansmall/spindrift/commit/a70cc3fbdccf76947627a9de25e104afc2b500d4))
+
+
+### Code Refactoring
+
+* **entrypoint:** extract required-marker gate helper ([87f9594](https://github.com/jordansmall/spindrift/commit/87f9594a748172b2d2b04c52658feb06b4828e57))
+* **orchestrator:** sharpen coordinator prompt and test ([2a85614](https://github.com/jordansmall/spindrift/commit/2a85614db17c1ffea626bb96c7687904994b5815))
+
+
+### Tests
+
+* **ab:** cover per-model breakdown, compare, and delta ([b05c3bd](https://github.com/jordansmall/spindrift/commit/b05c3bdab467cffd305b2d9c0c4471b123d37c03))
+* **console:** de-flake quit-cancel goroutine test ([60774f6](https://github.com/jordansmall/spindrift/commit/60774f6f41f77a36950424b0300869306e974496))
+* **console:** drive sidebar scroll keys sync, not teatest ([e1f0496](https://github.com/jordansmall/spindrift/commit/e1f04960b909b5417bdac61a30697f80198f1c06)), closes [#2014](https://github.com/jordansmall/spindrift/issues/2014)
+* **entrypoint:** assert give-up op omits marker token e2e ([e79bd3e](https://github.com/jordansmall/spindrift/commit/e79bd3ed641c23f885cfa68dba7b5b79d541e439))
+* **entrypoint:** cover the review-loop fork end to end ([5aea75b](https://github.com/jordansmall/spindrift/commit/5aea75bc49ad11ef94dedc2bfaeb064d655c423e))
+* **entrypoint:** lock corrective resume omits review flag ([0f55137](https://github.com/jordansmall/spindrift/commit/0f551374dc772301fc5ee270769f9d0500c4c3b3)), closes [#2065](https://github.com/jordansmall/spindrift/issues/2065)
+* **entrypoint:** pin background-tasks env var and orchestrator park ([399a7d7](https://github.com/jordansmall/spindrift/commit/399a7d7d10a4350f4c4982d5655495757df1e7b0))
+* **fakes:** default the fake claude to a real nonce ([aca4a6c](https://github.com/jordansmall/spindrift/commit/aca4a6c12b83ffca4f9c393d71d9ac3082510871))
+* **orchestrator:** cover the coordinator worker gate ([1d2bede](https://github.com/jordansmall/spindrift/commit/1d2bede3f65699a85fed827d6fca283f8959f40e)), closes [#2056](https://github.com/jordansmall/spindrift/issues/2056)
+* **orchestrator:** cover worker roster composition ([e569c72](https://github.com/jordansmall/spindrift/commit/e569c7204c9110b4f0fb61ed601481c69b1fc1b6))
+* **orchestrator:** lock in AC2 scoped fix brief after BLOCK ([c08af68](https://github.com/jordansmall/spindrift/commit/c08af68b73c8d0db47a0a2c754c19eb9d4776eae))
+* **runner:** bound OCI probe pull on registry timeout ([591d63b](https://github.com/jordansmall/spindrift/commit/591d63bbb0e1dbff4c47e42ac3a97899eaeb1189))
+
+
+### Build System
+
+* **ci:** check the A/B harness under shellcheck and bats ([9482f2f](https://github.com/jordansmall/spindrift/commit/9482f2fe860394a3d1fd906713c6a72e8dbf6665))
+
+
+### Styles
+
+* **outcome:** inline Token as a Sprintf arg, not concatenation ([50b9d05](https://github.com/jordansmall/spindrift/commit/50b9d05d376847eb2902d767f44f84e221b4b544))
+
 ## [0.7.0](https://github.com/jordansmall/spindrift/compare/v0.6.1...v0.7.0) (2026-07-25)
 
 
