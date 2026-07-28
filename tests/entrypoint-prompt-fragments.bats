@@ -226,12 +226,13 @@ setup() {
   ! grep -qF 'seam.bundle' "$CLAUDE_PROMPT_FILE"
 }
 
-@test "OPEN A PULL REQUEST push step: read-only writes seam.bundle to the outbox, never git push" {
+@test "OPEN A PULL REQUEST push step: read-only takes no bundle/push action -- harness lands the committed branch" {
   unset BOX_WRITE_ENABLED
   export WORK_DIR="$BATS_TEST_TMPDIR/work-open-pr-push-read-only"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF '/outbox/seam.bundle' "$CLAUDE_PROMPT_FILE"
+  ! grep -qF '/outbox/seam.bundle' "$CLAUDE_PROMPT_FILE"
+  grep -qF 'harness relays your committed branch out' "$CLAUDE_PROMPT_FILE"
 
   # Scoped to the OPEN A PULL REQUEST section itself -- the earlier COMMIT
   # section's generic rebase-then-push guidance (unrelated to this gate,
@@ -306,7 +307,7 @@ setup() {
   ! grep -qF 'seam.bundle' <<<"$if_blocked_section"
 }
 
-@test "IF BLOCKED push step: read-only writes seam.bundle to the outbox, never pushes directly" {
+@test "IF BLOCKED push step: read-only takes no bundle/push action -- harness lands the committed branch" {
   unset BOX_WRITE_ENABLED
   export WORK_DIR="$BATS_TEST_TMPDIR/work-if-blocked-push-read-only"
   run bash "$ENTRYPOINT"
@@ -314,7 +315,8 @@ setup() {
 
   local if_blocked_section
   if_blocked_section="$(awk '/^# IF BLOCKED/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
-  grep -qF '/outbox/seam.bundle' <<<"$if_blocked_section"
+  ! grep -qF '/outbox/seam.bundle' <<<"$if_blocked_section"
+  grep -qF 'harness relays your committed branch out' <<<"$if_blocked_section"
   ! grep -qF 'Push what you have (or note if even that is impossible)' <<<"$if_blocked_section"
 }
 

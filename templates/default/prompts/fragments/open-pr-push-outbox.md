@@ -1,9 +1,4 @@
-1. Your token is read-only — do NOT `git push`. Write your finished branch
-   as a bundle to the outbox instead; the launcher relays it in and pushes
-   it host-side with its own token:
-
-   `git bundle create /outbox/seam.bundle origin/${BASE_BRANCH}..${BRANCH}`
-
-   A fix pass rewrites this same file — re-running the command above after
-   a rebase is enough, the launcher force-relays whatever it finds there
-   before the next merge attempt.
+1. Your token is read-only and you take no code-out action yourself — do NOT
+   `git push` and do NOT run `git bundle create`. Leave your work committed on
+   the branch: after you exit the harness relays your committed branch out and
+   the launcher pushes it host-side with its own token.
