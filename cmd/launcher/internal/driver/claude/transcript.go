@@ -48,10 +48,19 @@ type TaskInput struct {
 
 // TokenUsage is the per-message token accounting embedded in assistant events.
 type TokenUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	InputTokens              int            `json:"input_tokens"`
+	OutputTokens             int            `json:"output_tokens"`
+	CacheReadInputTokens     int            `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int            `json:"cache_creation_input_tokens"`
+	CacheCreation            *CacheCreation `json:"cache_creation,omitempty"`
+}
+
+// CacheCreation splits CacheCreationInputTokens by cache TTL. It is nil when
+// the stream-json event predates the split (or a consumer doesn't care about
+// the breakdown) — callers must nil-check before dereferencing.
+type CacheCreation struct {
+	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
 }
 
 // SpindriftOp is the payload of a synthetic "spindrift_op" stream-json event
