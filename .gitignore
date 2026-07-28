@@ -5,8 +5,6 @@ result-*
 # per-run agent logs
 logs/
 
-# dogfood loop PID file (written by dogfood.sh for `dogfood-stop`)
-.dogfood.pid
 .claude
 
 # local config + secrets

@@ -309,3 +309,39 @@ EOF
   [[ "$output" != *"arithmetic syntax error"* ]]
 }
 
+@test "dogfood writes the pidfile under .spindrift/ and cleans it up on exit" {
+  local probe="$BATS_TEST_TMPDIR/pidfile-probe"
+  local shebang
+  shebang="$(head -n1 "$FAKE_BIN/nix")"
+  {
+    printf '%s\n' "$shebang"
+    cat <<EOF
+: "\${NIX_LOG:?NIX_LOG must point at a log file}"
+printf '%s\n' "\$*" >>"\$NIX_LOG"
+if printf '%s ' "\$@" | grep -q -- '-- dispatch'; then
+  if [ -f "$WORK/.spindrift/dogfood.pid" ]; then
+    echo spindrift=yes >>"$probe"
+  else
+    echo spindrift=no >>"$probe"
+  fi
+  if [ -f "$WORK/.dogfood.pid" ]; then
+    echo top=yes >>"$probe"
+  else
+    echo top=no >>"$probe"
+  fi
+  exit 2
+fi
+exit 0
+EOF
+  } >"$FAKE_BIN/nix.tmp"
+  mv "$FAKE_BIN/nix.tmp" "$FAKE_BIN/nix"
+  chmod +x "$FAKE_BIN/nix"
+
+  run env BASE_BRANCH=main bash "$WORK/dogfood.sh"
+  [ "$status" -eq 0 ]
+  grep -q "^spindrift=yes$" "$probe"
+  grep -q "^top=no$" "$probe"
+  [ ! -f "$WORK/.spindrift/dogfood.pid" ]
+  [ ! -f "$WORK/.dogfood.pid" ]
+}
+
