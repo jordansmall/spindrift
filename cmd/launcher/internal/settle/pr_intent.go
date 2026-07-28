@@ -80,7 +80,10 @@ func (s *Settle) hostMediateDraftPR(num string, result dispatch.Result) (string,
 //
 // Unlike hostMediateDraftPR, every failure here just logs: the caller's
 // "blocked" transition and comment already recorded the real outcome, so
-// there is nothing to downgrade and no CI to skip watching.
+// there is nothing to downgrade and no CI to skip watching. A RelayBundle
+// failure wrapping forge.ErrBundleNotFound is doubly benign — an empty
+// branch range left nothing in the outbox to relay in the first place — so
+// it logs informationally rather than as a warning (issue #2096).
 //
 // branch is derived from cf.AgentBranch(num), never o.Landing, for the same
 // reason hostMediateDraftPR derives it (issue #1949).
@@ -92,6 +95,16 @@ func (s *Settle) relayBlockedWork(num string, result dispatch.Result) {
 		return
 	}
 	if err := br.RelayBundle(s.cfg.OutboxDir(num), branch); err != nil {
+		if errors.Is(err, forge.ErrBundleNotFound) {
+			// An absent outbox bundle on the blocked path means the branch
+			// range was empty — there was simply no work to preserve (issue
+			// #2096). Benign: report it informationally, not as a relay
+			// failure. A blocked run with nothing to hand off also has no
+			// branch to open a draft PR against, so stop here as the error
+			// path does.
+			fmt.Fprintf(os.Stderr, "    .. #%s: no blocked-hand-off bundle to relay (empty branch range; nothing to preserve)\n", num)
+			return
+		}
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not relay blocked-hand-off bundle: %v\n", num, err)
 		return
 	}
