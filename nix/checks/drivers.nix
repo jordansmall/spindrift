@@ -1,7 +1,12 @@
 # Eval-level pins for lib/drivers/default.nix (issue #624): the registry's
 # required-attribute shape assertion, on top of nix/checks/bats.nix's use of
 # the same renderPreamble output the image bakes in.
-{ pkgs, nixpkgs, system, ... }:
+{
+  pkgs,
+  nixpkgs,
+  system,
+  ...
+}:
 let
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   inherit (pkgs.lib)
@@ -184,9 +189,11 @@ in
     let
       claudeEntry = driverRegistry.entries.claude;
     in
-    assert assertMsg (
-      (claudeEntry.envCommon or { }).CLAUDE_CODE_DISABLE_BACKGROUND_TASKS or null == "1"
-    ) "claude Driver's envCommon must set CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1, got: ${builtins.toJSON (claudeEntry.envCommon or { })}";
+    assert assertMsg
+      ((claudeEntry.envCommon or { }).CLAUDE_CODE_DISABLE_BACKGROUND_TASKS or null == "1")
+      "claude Driver's envCommon must set CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1, got: ${
+        builtins.toJSON (claudeEntry.envCommon or { })
+      }";
     pkgs.runCommand "drivers-claude-disables-background-tasks" { } "touch $out";
 
   # drivers-claude-disables-background-tasks (above) only pins that this repo
@@ -258,9 +265,9 @@ in
       "opencode agentFilesTemplate's scout.md must set mode: subagent, got: ${scoutFile}";
     assert assertMsg (hasInfix "model: solo-scout-model" scoutFile)
       "opencode agentFilesTemplate's scout.md must carry the scout model verbatim, got: ${scoutFile}";
-    assert assertMsg (
-      hasInfix "Map relevant files, seams, and tests; return a structured brief" scoutFile
-    ) "opencode agentFilesTemplate's scout.md must carry the scout description, got: ${scoutFile}";
+    assert assertMsg
+      (hasInfix "Map relevant files, seams, and tests; return a structured brief" scoutFile)
+      "opencode agentFilesTemplate's scout.md must carry the scout description, got: ${scoutFile}";
     pkgs.runCommand "drivers-opencode-agent-files-scout-frontmatter" { } "touch $out";
 
   # An empty model for an agent must omit that agent's file entirely (not
@@ -299,9 +306,8 @@ in
         workerModel = "";
       };
     in
-    assert assertMsg (
-      rendered == { }
-    ) "opencode agentFilesTemplate must return {} when every model is empty, got: ${builtins.toJSON rendered}";
+    assert assertMsg (rendered == { })
+      "opencode agentFilesTemplate must return {} when every model is empty, got: ${builtins.toJSON rendered}";
     pkgs.runCommand "drivers-opencode-agent-files-all-empty-returns-empty-set" { } "touch $out";
 
   # opencode reads .claude/skills/ directly (ADR 0009) rather than a

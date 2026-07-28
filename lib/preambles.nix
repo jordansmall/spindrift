@@ -183,31 +183,37 @@ rec {
         skillsDirRelative = "dummy";
         sessionCacheDirRelative = "dummy";
       };
-      dummyRunArtifacts = runnerKind: runArtifacts {
-        inherit runnerKind;
-        driverEntry = dummyDriverEntry;
-        agentFilesPath = "dummy";
-        agentEnvPath = "dummy";
-        prefetch = "dummy";
-        imagePath = "dummy";
-        imageHash = "dummy";
-        runtime = "dummy";
-        imageDrv = "dummy";
-        nixBuilderImage = "dummy";
-        linuxSystem = "dummy";
-        boxEnvVars = "dummy";
-      };
-      dummyBuildArtifacts = runnerKind: buildArtifacts {
-        inherit runnerKind;
-        agentFilesDrv = "dummy";
-        agentEnvDrv = "dummy";
-        runtime = "dummy";
-        imagePath = "dummy";
-        imageHash = "dummy";
-        imageDrv = "dummy";
-        nixBuilderImage = "dummy";
-        linuxSystem = "dummy";
-      };
+      dummyRunArtifacts =
+        runnerKind:
+        runArtifacts {
+          inherit runnerKind;
+          driverEntry = dummyDriverEntry;
+          agentFilesPath = "dummy";
+          agentEnvPath = "dummy";
+          prefetch = "dummy";
+          imagePath = "dummy";
+          imageHash = "dummy";
+          imageName = "dummy";
+          runtime = "dummy";
+          imageDrv = "dummy";
+          nixBuilderImage = "dummy";
+          linuxSystem = "dummy";
+          boxEnvVars = "dummy";
+        };
+      dummyBuildArtifacts =
+        runnerKind:
+        buildArtifacts {
+          inherit runnerKind;
+          agentFilesDrv = "dummy";
+          agentEnvDrv = "dummy";
+          runtime = "dummy";
+          imagePath = "dummy";
+          imageHash = "dummy";
+          imageName = "dummy";
+          imageDrv = "dummy";
+          nixBuilderImage = "dummy";
+          linuxSystem = "dummy";
+        };
       allKeys =
         builtins.concatMap (runnerKind: builtins.attrNames (dummyRunArtifacts runnerKind)) [
           "bwrap"

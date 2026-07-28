@@ -160,12 +160,10 @@ in
   # image realization needed): the default claude Driver keeps the historical
   # `spindrift` name, opencode gets `spindrift-opencode`.
   drivers-image-name-scoped-by-driver =
-    assert pkgs.lib.assertMsg (
-      nonRustHarness.image.imageName == "spindrift"
-    ) "the claude Driver image must keep the historical name spindrift, got: ${nonRustHarness.image.imageName}";
-    assert pkgs.lib.assertMsg (
-      opencodeHarness.image.imageName == "spindrift-opencode"
-    ) "the opencode Driver image must be named spindrift-opencode, got: ${opencodeHarness.image.imageName}";
+    assert pkgs.lib.assertMsg (nonRustHarness.image.imageName == "spindrift")
+      "the claude Driver image must keep the historical name spindrift, got: ${nonRustHarness.image.imageName}";
+    assert pkgs.lib.assertMsg (opencodeHarness.image.imageName == "spindrift-opencode")
+      "the opencode Driver image must be named spindrift-opencode, got: ${opencodeHarness.image.imageName}";
     pkgs.runCommand "drivers-image-name-scoped-by-driver" { } "touch $out";
 
   # The Box must run unprivileged: Claude Code refuses
