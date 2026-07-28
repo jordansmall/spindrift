@@ -8,6 +8,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // TestParsePRIntent_PreservesInternalNewlinesInBody verifies a body
@@ -297,7 +298,9 @@ func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranc
 	c := baseConfig()
 	c.ReadOnly = true
 	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
-	s.Settle(d, issNum, 0, result)
+	out := testutil.CaptureStdout(t, func() {
+		s.Settle(d, issNum, 0, result)
+	})
 
 	iss, _ := fc.Issue(issNum)
 	if containsLabel(iss.Labels, "agent-failed") {
@@ -305,5 +308,16 @@ func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranc
 	}
 	if !containsLabel(iss.Labels, "agent-in-progress") {
 		t.Fatalf("issue must remain agent-in-progress after a successful host-derived merge verification; labels=%v", iss.Labels)
+	}
+	// Positive proof verifyMerged actually ran and confirmed MERGED against the
+	// host-derived PR — without it a future refactor that skipped verifyMerged
+	// entirely would still satisfy the negative label assertions above, a
+	// vacuous pass. The verified-merged line must name the real PR URL, never
+	// the hostile landing="main".
+	if want := "landing=" + prURL + "  status=verified-merged"; !strings.Contains(out, want) {
+		t.Fatalf("verifyMerged must confirm the host-derived PR merged; want %q in output; got: %q", want, out)
+	}
+	if bad := "landing=" + hostileLanding + "  status=verified-merged"; strings.Contains(out, bad) {
+		t.Fatalf("verifyMerged must never verify against the hostile landing=%s; got: %q", hostileLanding, out)
 	}
 }

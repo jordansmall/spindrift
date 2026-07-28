@@ -123,8 +123,8 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// SettleAdopted already follow. PRForBranch resolves the branch to a
 		// real PR URL, so verifyMerged's PRState call keeps its documented
 		// full-URL contract (no bare-ref/--repo ambiguity).
+		branch := s.cf.AgentBranch(num)
 		if s.pr != nil {
-			branch := s.cf.AgentBranch(num)
 			pr, ok, err := s.pr.PRForBranch(branch)
 			if err != nil || !ok {
 				fmt.Printf("    #%s  landing=%s  status=failed  !! no PR found on branch to verify merge\n", num, branch)
@@ -134,8 +134,10 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			}
 		} else {
 			// verifyMerged reads PR state, which a push-only Code Forge does
-			// not have — log the status line instead.
-			fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
+			// not have — log the status line instead. Print the host-derived
+			// branch, never the Agent-controlled o.Landing, so the landing=
+			// label carries the same provenance-clean ref across both arms.
+			fmt.Printf("    #%s  landing=%s  status=%s\n", num, branch, o.Status)
 		}
 		s.postUsageComment(num, d)
 	default:
