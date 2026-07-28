@@ -3,4 +3,4 @@ package driver
 
 // nixDriverNames is the key list of the Nix Driver registry (lib/drivers/default.nix).
 // Regenerate with `nix run .#regen` after editing lib/drivers/default.nix.
-var nixDriverNames = []string{"claude"}
+var nixDriverNames = []string{"claude", "opencode"}
