@@ -19,9 +19,10 @@ func Refresh(tracker forge.IssueTracker) Msg {
 	return IssuesLoadedMsg{Issues: issues, Err: err}
 }
 
-// dogfoodPidFile is the pid-file dogfood.sh writes at repo root for the
-// duration of its run (`echo $$ > .dogfood.pid`, removed by an EXIT trap).
-const dogfoodPidFile = ".dogfood.pid"
+// dogfoodPidFile is the pid-file dogfood.sh writes under .spindrift/ for the
+// duration of its run (`echo $$ > .spindrift/dogfood.pid`, removed by an
+// EXIT trap).
+const dogfoodPidFile = ".spindrift/dogfood.pid"
 
 // isProcessAlive is DogfoodNotice's liveness probe, a package-level seam so
 // tests can stub a dead pid without racing the OS's pid allocator (#952)

@@ -1005,7 +1005,7 @@ func renderHeader(m Model) string {
 		b.WriteString("\n")
 	}
 	if m.DogfoodLive {
-		b.WriteString(roleStyle(RoleDim).Render(glyphNotice + " notice: a live dogfood loop (.dogfood.pid) is competing for the same queue"))
+		b.WriteString(roleStyle(RoleDim).Render(glyphNotice + " notice: a live dogfood loop (.spindrift/dogfood.pid) is competing for the same queue"))
 		b.WriteString("\n")
 	}
 	return b.String()

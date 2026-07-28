@@ -158,7 +158,7 @@
             # wave (see the USR1/TERM trap in dogfood.sh) instead of Ctrl-C, which
             # would abort the wave mid-flight.
             shellHook = ''
-              alias dogfood-stop='pid=$(cat "$(git rev-parse --show-toplevel 2>/dev/null)/.dogfood.pid" 2>/dev/null) && kill -USR1 "$pid" && echo "dogfood: will stop after the current wave (pid $pid)" || echo "dogfood: no running loop (.dogfood.pid not found)"'
+              alias dogfood-stop='pid=$(cat "$(git rev-parse --show-toplevel 2>/dev/null)/.spindrift/dogfood.pid" 2>/dev/null) && kill -USR1 "$pid" && echo "dogfood: will stop after the current wave (pid $pid)" || echo "dogfood: no running loop (.spindrift/dogfood.pid not found)"'
             '';
           };
         };
