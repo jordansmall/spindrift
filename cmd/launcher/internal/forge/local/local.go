@@ -102,6 +102,8 @@ type LocalTracker struct {
 	verdictLabels forge.VerdictLabels
 }
 
+var _ forge.HostPostedIssueFiler = (*LocalTracker)(nil)
+
 // NewLocalTracker returns a forge.IssueTracker backed by Markdown + YAML
 // frontmatter files in dir. verdictLabels configures CompleteVerdict (the
 // research dispatch kind's Complete transition); omitted for work-kind
@@ -398,6 +400,83 @@ func (lt *LocalTracker) FlagAbandoned(num string) error {
 		return fmt.Errorf("write local issue %s: %w", num, err)
 	}
 	return nil
+}
+
+// PostIssue implements forge.HostPostedIssueFiler: it files a new issue as a
+// Markdown+frontmatter file slugified from title, with State left empty (an
+// untriaged issue carries no dispatch-state marker until a human — or the
+// filing convention itself — applies one via labels), Labels set from the
+// labels arg, and Created stamped with the current time. If the derived slug
+// already exists, it appends a "-2", "-3", ... suffix (never overwriting an
+// existing issue file). It returns a "local:<slug>" reference, mirroring the
+// filename-based identifier every other LocalTracker method takes as num.
+func (lt *LocalTracker) PostIssue(title, body string, labels []string) (string, error) {
+	if err := os.MkdirAll(lt.dir, 0o755); err != nil {
+		return "", fmt.Errorf("create local issues dir %s: %w", lt.dir, err)
+	}
+	slug, err := lt.uniqueSlug(slugify(title))
+	if err != nil {
+		return "", err
+	}
+	li := localIssue{
+		frontmatter: localFrontmatter{
+			Title:   title,
+			Labels:  labels,
+			Created: time.Now().Format(time.RFC3339),
+		},
+		body: body,
+	}
+	if err := os.WriteFile(lt.slugPath(slug), []byte(li.render()), 0o644); err != nil {
+		return "", fmt.Errorf("write local issue %s: %w", slug, err)
+	}
+	return "local:" + slug, nil
+}
+
+// uniqueSlug returns base, or base with a "-2", "-3", ... suffix appended,
+// whichever is the first that has no existing issue file — so PostIssue
+// never clobbers an issue that already occupies base's slug path.
+func (lt *LocalTracker) uniqueSlug(base string) (string, error) {
+	slug := base
+	for n := 2; ; n++ {
+		_, err := os.Stat(lt.slugPath(slug))
+		if os.IsNotExist(err) {
+			return slug, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("stat local issue %s: %w", slug, err)
+		}
+		slug = fmt.Sprintf("%s-%d", base, n)
+	}
+}
+
+// slugify derives a filename-safe slug from an issue title: lowercase,
+// runs of whitespace/underscore/hyphen collapse to a single hyphen, any
+// remaining character outside [a-z0-9-] is stripped, and leading/trailing
+// hyphens are trimmed.
+func slugify(title string) string {
+	var b strings.Builder
+	prevHyphen := false
+	for _, r := range strings.ToLower(title) {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevHyphen = false
+		case r == ' ' || r == '_' || r == '-' || r == '\t' || r == '\n':
+			if !prevHyphen {
+				b.WriteByte('-')
+				prevHyphen = true
+			}
+		default:
+			// stripped
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		// A title with no [a-z0-9] characters (e.g. all punctuation)
+		// slugifies to empty; fall back so we never write a bare ".md".
+		return "issue"
+	}
+	return slug
 }
 
 // Probe ensures the local issues directory exists and returns its absolute
