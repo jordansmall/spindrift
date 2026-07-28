@@ -20,5 +20,8 @@ harness.env
 # direnv
 .direnv/
 
+# ab-orchestrator.sh experiment output (issue #2057)
+ab-results/
+
 # OS
 .DS_Store
