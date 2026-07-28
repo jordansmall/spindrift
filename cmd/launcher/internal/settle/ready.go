@@ -636,12 +636,15 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 	return s.rewaitAfterForcePush(num, gen, pr)
 }
 
-// rebasePushBackoff sleeps a jittered linear backoff between rebase-push
-// retries on forge.ErrTransientPushFailure (issue #2095), shared by
-// mergeImmediate's reactive conflict-retry loop and preflightStaleBase's own
-// push-retry loop. attempt is 1-based (the Nth retry): the sleep duration is
-// TransientBackoffSecs*attempt + HoldJitterSecs, mirroring
-// dispatch.Config's own TransientBackoffSecs/HoldJitterSecs semantics.
+// rebasePushBackoff sleeps a linear backoff between rebase-push retries on
+// forge.ErrTransientPushFailure (issue #2095), shared by mergeImmediate's
+// reactive conflict-retry loop and preflightStaleBase's own push-retry loop.
+// attempt is 1-based (the Nth retry): the sleep duration is
+// TransientBackoffSecs*attempt -- the same linear schedule
+// dispatch/retry.go's transient-retry path uses -- plus a fixed
+// HoldJitterSecs-second offset. That offset reuses dispatch.Config's
+// HoldJitterSecs knob, which dispatch only adds on its rate-limit-hold path,
+// not this linear one, so here it is a constant nudge, not randomized jitter.
 // Routed through s.clock so tests can inject a recording Clock instead of a
 // real sleep.
 func (s *Settle) rebasePushBackoff(attempt int) {
