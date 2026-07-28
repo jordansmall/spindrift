@@ -59,6 +59,9 @@ func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 	}
 	bundlePath := filepath.Join(outboxDir, seambundle.FileName)
 	if _, err := os.Stat(bundlePath); err != nil {
+		// An absent outbox directory collapses into this same case: a missing
+		// dir also yields os.IsNotExist, and "no dir" means "nothing to relay"
+		// just as "no bundle file" does -- both are the benign empty-range case.
 		if os.IsNotExist(err) {
 			return fmt.Errorf("github: relay bundle: %w: %s", forge.ErrBundleNotFound, bundlePath)
 		}
