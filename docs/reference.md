@@ -162,6 +162,45 @@ emptying one drops only that subagent, never both. `filerModel` is the same
 shape but opt-in — empty by default, so the filer is not provisioned at all
 until a model is set; see [Filer](#filer).
 
+#### Subagent roster
+
+`roster` is a `mkHarness` argument (issue #264) — not a `settings` knob, so it
+never appears in [`docs/flake-options.md`](flake-options.md) — that takes a
+list of subagent entries, each shaped `{ name; model; mode; description;
+tools; promptFile; prompt }`. It supersedes the four fixed
+`scoutModel`/`reviewModel`/`filerModel`/`workerModel` args: instead of one
+knob per hardcoded agent, a Consumer flake can pass any number of roster
+entries, including a custom Nth agent beyond the historical four. When
+`roster` is omitted, `mkHarness` falls back to `lib/roster.nix`'s
+`defaultRoster`, built from the four legacy model args (or their `settings`
+defaults) and reproducing today's scout/reviewer/filer/worker composition
+exactly.
+
+An entry with an empty (or absent) `model` is dropped from both Drivers'
+rendered config, the same per-agent omission the four legacy knobs give today
+(#392). `lib/drivers/claude.nix` renders the roster into the `--agents` JSON
+flag (one key per non-empty-model entry); `lib/drivers/opencode.nix` renders
+it into `.config/opencode/agents/<name>.md` files instead, one per
+non-empty-model entry, each with `description`/`mode`/`model` frontmatter.
+
+The legacy knobs map onto the default roster's entry names:
+
+| Legacy knob    | Roster entry `name` |
+| -------------- | -------------------- |
+| `SCOUT_MODEL`  | `scout`               |
+| `REVIEW_MODEL` | `reviewer`            |
+| `FILER_MODEL`  | `filer`               |
+| `WORKER_MODEL` | `worker`              |
+
+`scoutModel`/`reviewModel`/`filerModel`/`workerModel` are **deprecated**: they
+still work — the default roster derives from them unchanged — but a `nix
+eval` warning fires whenever any of them is set, whether via the `mkHarness`
+`defaults` argument or a Consumer's `settings.models.*`, pointing at this
+section. Unlike those knobs, which retier or add/drop a subagent with no
+image rebuild (`SCOUT_MODEL=...` at dispatch time, no `spindrift build`),
+adding an arbitrary Nth custom agent via `roster` is a `mkHarness`/image-time
+decision and requires a rebuild.
+
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
 requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR`
 at any directory to override it at runtime for zero-rebuild iteration.
@@ -272,12 +311,13 @@ Driver entry declares:
 - `skillsDirRelative` — where the agent CLI scans for skill files, relative
   to `$HOME`. Required; the harness bakes skill files there and the runner
   adapters mount `SPINDRIFT_SKILLS_DIR` overrides over the same path.
-- `agentFilesTemplate` — a `{ scoutModel, reviewModel, filerModel, workerModel }`
-  function returning an attrset of HOME-relative path → file content, for a
-  Driver whose subagents land as on-disk files rather than a `--agents` flag
-  (opencode renders `.config/opencode/agents/<name>.md`, one per non-empty
+- `agentFilesTemplate` — a `{ roster }` function (see [Subagent
+  roster](#subagent-roster)) returning an attrset of HOME-relative path →
+  file content, for a Driver whose subagents land as on-disk files rather
+  than a `--agents` flag (opencode renders
+  `.config/opencode/agents/<name>.md`, one per roster entry with a non-empty
   model). Required; `claude` returns `{ }` and composes subagents via
-  `agentsJsonTemplate` instead.
+  `agentsJsonTemplate` instead, which also takes `{ roster }`.
 - `sessionCacheDirRelative` — where the agent CLI's session transcripts
   live, relative to `$HOME`. Optional; a Driver that omits it has no
   resumable session state (see above).
@@ -717,10 +757,10 @@ exceptions.
 | `MERGE_MODE`              | `manual` (baked)       | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue GitHub native auto-merge — repo must have *Allow auto-merge* on). Under `CODE_FORGE=git`, `manual`/`immediate` map to remote pushes instead (leave the pushed branch / push straight to the target branch); `auto` has no meaning off `github` and fails fast at startup. Under `CODE_FORGE=local`, only `immediate` relays the seam bundle into the Accumulation repo — `manual`/`auto` have no meaning under `local` and fail fast at startup. |
 | `MERGE_GUARD_PATHS`       | `.github/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` (baked) | comma-separated globs; a green PR touching a matched path downgrades to manual regardless of `MERGE_MODE` (`github` Code Forge only; empty disables — see [Merge guard](#merge-guard)) |
 | `MODEL`                   | `claude-opus-4-8` (baked) | main/coordinator Claude model the in-container agent runs (worker-tier defaults are unaffected) |
-| `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` (baked) | scout subagent model tier (empty drops the scout entry from `--agents`) |
-| `REVIEW_MODEL`            | `claude-opus-4-8` (baked) | reviewer subagent model tier (empty drops the reviewer entry from `--agents`) |
-| `FILER_MODEL`             | `` (baked)             | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: `claude-haiku-4-5-20251001`); see [Filer](#filer) |
-| `WORKER_MODEL`            | `claude-sonnet-5` (baked) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); the implementor prompt does not delegate to it yet |
+| `SCOUT_MODEL`             | `claude-haiku-4-5-20251001` (baked) | scout subagent model tier (empty drops the scout entry from `--agents`). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
+| `REVIEW_MODEL`            | `claude-opus-4-8` (baked) | reviewer subagent model tier (empty drops the reviewer entry from `--agents`). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
+| `FILER_MODEL`             | `` (baked)             | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: `claude-haiku-4-5-20251001`); see [Filer](#filer). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
+| `WORKER_MODEL`            | `claude-sonnet-5` (baked) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); the implementor prompt does not delegate to it yet. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
 | `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | hot-override the mounted prompt dir (not bakeable) |
 | `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override the mounted skills dir (not bakeable) |
