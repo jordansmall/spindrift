@@ -2,6 +2,9 @@ package settle
 
 import (
 	"errors"
+	"io"
+	"os"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -271,6 +274,75 @@ func TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked(t 
 	iss, _ := fc.Issue(issNum)
 	if !containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must still carry agent-failed after a failed relay; labels=%v", iss.Labels)
+	}
+}
+
+// TestSettle_GithubReadOnly_BlockedRelayAbsentBundleLogsBenign asserts issue
+// #2096's fix: when RelayBundle fails with forge.ErrBundleNotFound during
+// the blocked hand-off -- an empty branch range left nothing in the outbox
+// to relay -- settle logs an informational ".." line, not the alarming "??
+// ... could not relay ..." one. CreateDraftPR still never runs (no branch to
+// open a PR against) and the blocked/agent-failed outcome the caller
+// already recorded stays untouched, mirroring
+// TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked
+// for the benign case.
+func TestSettle_GithubReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) {
+	const issNum = "1933"
+	branch := "agent/issue-1933"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.RelayBundleErr = forge.ErrBundleNotFound
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:       true,
+		OutcomeFound:  true,
+		Outcome:       outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	s.Settle(d, issNum, 0, result)
+	w.Close()
+	os.Stderr = old
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+	stderr := string(captured)
+
+	if strings.Contains(stderr, "could not relay blocked-hand-off bundle") {
+		t.Errorf("stderr must not contain the alarming relay-failure phrase, got: %s", stderr)
+	}
+	if strings.Contains(stderr, "?? #"+issNum) {
+		t.Errorf("stderr must not contain a ?? warning line for #%s, got: %s", issNum, stderr)
+	}
+	if !strings.Contains(stderr, ".. #"+issNum+":") {
+		t.Errorf("stderr must contain an informational .. line for #%s, got: %s", issNum, stderr)
+	}
+	if !strings.Contains(stderr, "no blocked-hand-off bundle to relay") {
+		t.Errorf("stderr must contain the benign no-bundle-to-relay phrase, got: %s", stderr)
+	}
+
+	if len(fc.CreateDraftPRCalls) != 0 {
+		t.Errorf("CreateDraftPR must not be called when there is no bundle to relay, got %+v", fc.CreateDraftPRCalls)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must still carry agent-failed after an absent-bundle relay; labels=%v", iss.Labels)
 	}
 }
 
