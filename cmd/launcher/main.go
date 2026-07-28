@@ -1018,6 +1018,10 @@ func checkReadOnlyCapabilityGate(c config, cf forge.CodeForge, it forge.IssueTra
 //	  image-freshness probe found the loaded image would be rebuilt against
 //	  the current base-branch tip; in-flight Boxes finished, no new ones
 //	  launched, and the driving loop should rebuild and re-invoke.
+//	exit 5 (errImageHostTainted): CONTINUOUS_DISPATCH mode only — a stale
+//	  divergence persisted after a rebuild to the base tip (a host-system
+//	  derivation reached the image graph through a consumer flake); the
+//	  driving loop must halt, not rebuild-and-retry (issue #2113).
 var errQueueEmpty = errors.New("queue empty")
 
 func containsLabel(labels []string, target string) bool {
@@ -1242,8 +1246,19 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return waveIssues, result.Edges, result.Sources, result.Failed, nil
 	}
 
+	tracker := newStaleRevTracker(pwd)
+	var staleRev, staleTipTag string
+
 	fresh := func() (bool, bool, string) {
 		res := freshness.Probe(c.runtime, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, eval)
+		// fresh() is called under RunContinuous's mutex (see its doc
+		// comment), so these plain writes are serialized — no separate
+		// locking needed, mirroring the firstQuery*/firstQueryEmpty comment
+		// above.
+		if res.Applicable && !res.Fresh {
+			staleRev = res.Rev
+			staleTipTag = res.TipTag
+		}
 		return res.Applicable, res.Fresh, res.Message
 	}
 
@@ -1263,10 +1278,17 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			if err := reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout); err != nil {
 				return err
 			}
+			_ = tracker.clear()
 			return errQueueEmpty
+		}
+		if errors.Is(err, waves.ErrImageStale) {
+			return classifyStaleOutcome(staleRev, tracker, func() string {
+				return freshness.HostTaintDiagnostic(c.baseBranch, staleRev, c.flakeImageAttr, staleTipTag, c.imageTag)
+			}, os.Stdout)
 		}
 		return err
 	}
+	_ = tracker.clear()
 	fmt.Print(dispatchCompletionBanner(c))
 	return reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout)
 }
@@ -1396,28 +1418,42 @@ func cmdDispatchSelective(lc *launchContext, nums []string, forceYes bool) int {
 	return selectiveDispatchExitCode(lc, nums, forceYes)
 }
 
+// exitCodeFor translates a run/runContinuousDispatch error into the
+// launcher's process exit code: 2 for an empty dispatch queue, 3 for open
+// issues that exist but none are dispatchable, 4 for CONTINUOUS_DISPATCH
+// mode stopping on a stale image (a rebuild-and-retry signal), 5 for
+// CONTINUOUS_DISPATCH mode halting on a non-converging, host-tainted stale
+// image (issue #2113 — a rebuild cannot fix this, so the driving loop must
+// stop instead of looping on exit 4 forever), 1 for any other error, 0 on
+// success. Pure and side-effect-free so it's unit-testable in isolation from
+// run's own I/O.
+func exitCodeFor(err error) int {
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, errQueueEmpty):
+		return 2
+	case errors.Is(err, waves.ErrOpenNoneDispatchable):
+		return 3
+	case errors.Is(err, waves.ErrImageStale):
+		return 4
+	case errors.Is(err, errImageHostTainted):
+		return 5
+	default:
+		return 1
+	}
+}
+
 // runExitCode translates run's result into the launcher's process exit
-// code: 2 for an empty dispatch queue, 3 for open issues that exist but
-// none are dispatchable, 4 for CONTINUOUS_DISPATCH mode stopping on a stale
-// image, 1 for any other error, 0 on success. Split out from cmdDispatch so
-// it's unit-testable against a fake-populated launchContext without going
-// through bootstrap.
+// code via exitCodeFor. Split out from cmdDispatch so it's unit-testable
+// against a fake-populated launchContext without going through bootstrap.
 func runExitCode(lc *launchContext) int {
 	err := run(lc)
-	if err == nil {
-		return 0
+	code := exitCodeFor(err)
+	if code == 1 && err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
 	}
-	if errors.Is(err, errQueueEmpty) {
-		return 2
-	}
-	if errors.Is(err, waves.ErrOpenNoneDispatchable) {
-		return 3
-	}
-	if errors.Is(err, waves.ErrImageStale) {
-		return 4
-	}
-	fmt.Fprintf(os.Stderr, "%s\n", err)
-	return 1
+	return code
 }
 
 // cmdDispatch is the `dispatch` subcommand: drain the labeled queue. lc is
