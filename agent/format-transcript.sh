@@ -3,10 +3,11 @@
 # each event as human-readable terminal output. Silently skips unknown event
 # types and non-JSON lines, and never aborts on malformed input.
 #
-# Deliberately NOT in the entrypoint's live pipe: logs/issue-<n>.log must stay
-# byte-exact raw stream-json because the launcher's outcome.Classify scans it for
-# transient-failure markers (see #123). Run this on the host over the saved log:
-#   format-transcript.sh < logs/issue-<n>.log
+# Deliberately NOT in the entrypoint's live pipe: .spindrift/logs/issue-<n>.log
+# must stay byte-exact raw stream-json because the launcher's outcome.Classify
+# scans it for transient-failure markers (see #123). Run this on the host over
+# the saved log:
+#   format-transcript.sh < .spindrift/logs/issue-<n>.log
 set -euo pipefail
 
 BOLD=$'\033[1m'
