@@ -35,7 +35,7 @@ type Driver interface {
 	NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer) io.Writer
 
 	// ExtractUsage scans the box log at logPath and returns its aggregate and
-	// per-role usage in one report, in this Driver's own log format.
+	// per-model usage in one report, in this Driver's own log format.
 	ExtractUsage(logPath string) (usage.Report, error)
 
 	// RenderTranscript scans the box log at logPath and returns a readable
