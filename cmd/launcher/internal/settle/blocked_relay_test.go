@@ -381,6 +381,71 @@ func TestSettle_LocalReadOnly_BlockedRelayFailureStaysBlocked(t *testing.T) {
 	}
 }
 
+// TestSettle_LocalReadOnly_BlockedRelayAbsentBundleLogsBenign asserts issue
+// #2096's fix under CODE_FORGE=local: when RelayBundle fails with
+// forge.ErrBundleNotFound during the blocked hand-off -- an empty branch
+// range left nothing in the outbox to relay -- settle logs an informational
+// ".." line, not the alarming "?? ... could not relay ..." one, and the
+// blocked/agent-failed outcome the caller already recorded stays untouched.
+// The benign log lives at the shared relayBlockedWork call site, so this
+// mirrors TestSettle_GithubReadOnly_BlockedRelayAbsentBundleLogsBenign for
+// the push-only forge shape (local has no CreateDraftPR to skip).
+func TestSettle_LocalReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) {
+	const issNum = "1946"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.RelayBundleErr = forge.ErrBundleNotFound
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := New(c, fc, fc.AsLocal())
+
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	s.Settle(d, issNum, 0, result)
+	w.Close()
+	os.Stderr = old
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+	stderr := string(captured)
+
+	if strings.Contains(stderr, "could not relay blocked-hand-off bundle") {
+		t.Errorf("stderr must not contain the alarming relay-failure phrase, got: %s", stderr)
+	}
+	if strings.Contains(stderr, "?? #"+issNum) {
+		t.Errorf("stderr must not contain a ?? warning line for #%s, got: %s", issNum, stderr)
+	}
+	if !strings.Contains(stderr, ".. #"+issNum+":") {
+		t.Errorf("stderr must contain an informational .. line for #%s, got: %s", issNum, stderr)
+	}
+	if !strings.Contains(stderr, "no blocked-hand-off bundle to relay") {
+		t.Errorf("stderr must contain the benign no-bundle-to-relay phrase, got: %s", stderr)
+	}
+
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must still carry agent-failed after an absent-bundle relay; labels=%v", iss.Labels)
+	}
+}
+
 // TestSettle_GithubReadOnly_BlockedDraftPRFailureStillReportsBlocked asserts
 // a CreateDraftPR failure (e.g. a draft already exists for this branch from
 // an earlier fix pass) logs and moves on without changing the blocked/
