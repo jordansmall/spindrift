@@ -128,6 +128,29 @@ func TestBreakdownByModel_UnknownModel(t *testing.T) {
 	}
 }
 
+// TestBreakdownByModel_CacheCreationCollapsed confirms a pre-TTL-split
+// stream-json log — where the nested cache_creation object is absent but the
+// flat cache_creation_input_tokens total is set — attributes that collapsed
+// total to the 5-minute bucket rather than dropping it.
+func TestBreakdownByModel_CacheCreationCollapsed(t *testing.T) {
+	line := `{"type":"assistant","message":{"model":"claude-opus-4","content":[],"usage":{"input_tokens":5,"output_tokens":2,"cache_creation_input_tokens":123}}}`
+	path := WriteLog(t, line)
+
+	got, err := breakdownByModel(path)
+	if err != nil {
+		t.Fatalf("breakdownByModel: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
+	}
+	if got[0].CacheWrite5mTokens != 123 {
+		t.Errorf("got[0].CacheWrite5mTokens = %d, want 123", got[0].CacheWrite5mTokens)
+	}
+	if got[0].CacheWrite1hTokens != 0 {
+		t.Errorf("got[0].CacheWrite1hTokens = %d, want 0", got[0].CacheWrite1hTokens)
+	}
+}
+
 // TestBreakdownByModel_FileNotFound confirms a missing log file degrades to
 // (nil, nil), matching breakdownByRoleFile's contract.
 func TestBreakdownByModel_FileNotFound(t *testing.T) {
