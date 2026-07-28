@@ -17,7 +17,7 @@ func TestClassifyStaleOutcome_ContentDivergence_RecordsAndRebuilds(t *testing.T)
 	var out bytes.Buffer
 	diag := func() string { return "should not be called" }
 
-	err := classifyStaleOutcome("revA", tracker, diag, &out)
+	err := classifyStaleOutcome("revA", "spindrift:hash", tracker, diag, &out)
 
 	if !errors.Is(err, waves.ErrImageStale) {
 		t.Errorf("err = %v, want waves.ErrImageStale", err)
@@ -44,7 +44,7 @@ func TestClassifyStaleOutcome_NonConverging_DiagsAndHalts(t *testing.T) {
 	const diagText = "sentinel diagnostic"
 	diag := func() string { return diagText }
 
-	err := classifyStaleOutcome("revA", tracker, diag, &out)
+	err := classifyStaleOutcome("revA", "spindrift:hash", tracker, diag, &out)
 
 	if !errors.Is(err, errImageHostTainted) {
 		t.Errorf("err = %v, want errImageHostTainted", err)
@@ -70,7 +70,7 @@ func TestClassifyStaleOutcome_DifferentRevAfterPrior_RecordsAndRebuilds(t *testi
 	var out bytes.Buffer
 	diag := func() string { return "should not be called" }
 
-	err := classifyStaleOutcome("revB", tracker, diag, &out)
+	err := classifyStaleOutcome("revB", "spindrift:hash", tracker, diag, &out)
 
 	if !errors.Is(err, waves.ErrImageStale) {
 		t.Errorf("err = %v, want waves.ErrImageStale", err)
@@ -92,13 +92,42 @@ func TestClassifyStaleOutcome_EmptyStaleRev_NeverHostTainted(t *testing.T) {
 	var out bytes.Buffer
 	diag := func() string { return "should not be called" }
 
-	err := classifyStaleOutcome("", tracker, diag, &out)
+	err := classifyStaleOutcome("", "spindrift:hash", tracker, diag, &out)
 
 	if !errors.Is(err, waves.ErrImageStale) {
 		t.Errorf("err = %v, want waves.ErrImageStale", err)
 	}
 	if out.Len() != 0 {
 		t.Errorf("out = %q, want empty", out.String())
+	}
+}
+
+// TestClassifyStaleOutcome_SameRevEmptyTipTag_RebuildsNotHostTaint verifies
+// that a stale verdict at the SAME rev as the prior recorded run, but with
+// an empty staleTipTag, is NOT classified as host-tainted: it's a stuck
+// eval/tag-derivation failure repeating at the same rev, not a genuine
+// host-taint divergence (which always has a derived tip tag). It returns
+// waves.ErrImageStale, writes nothing to out, and records the rev so the
+// loop keeps rebuilding and retrying.
+func TestClassifyStaleOutcome_SameRevEmptyTipTag_RebuildsNotHostTaint(t *testing.T) {
+	pwd := t.TempDir()
+	tracker := newStaleRevTracker(pwd)
+	if err := tracker.record("revA"); err != nil {
+		t.Fatalf("tracker.record: %v", err)
+	}
+	var out bytes.Buffer
+	diag := func() string { return "should not be called" }
+
+	err := classifyStaleOutcome("revA", "", tracker, diag, &out)
+
+	if !errors.Is(err, waves.ErrImageStale) {
+		t.Errorf("err = %v, want waves.ErrImageStale", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("out = %q, want empty", out.String())
+	}
+	if got := tracker.prior(); got != "revA" {
+		t.Errorf("tracker.prior() = %q, want %q", got, "revA")
 	}
 }
 
