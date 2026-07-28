@@ -17,6 +17,7 @@ let
     nixStoreWritableHarness
     extraClosuresHarness
     harness
+    opencodeHarness
     ;
   fragmentRows = import ../../lib/fragments.nix;
   fragmentBasenames = map (row: pkgs.lib.removeSuffix ".md" row.fragment) fragmentRows;
@@ -104,6 +105,52 @@ in
       || { echo "dogfood harness missing filer entry in baked template" >&2; exit 1; }
     grep -q 'claude-haiku-4-5-20251001' <<<"$filer_entry" \
       || { echo "dogfood harness filer entry missing the configured model" >&2; exit 1; }
+
+    touch $out
+  '';
+
+  # opencode has no --agents JSON flag; it discovers subagents from
+  # HOME-relative agents/*.md files instead (issue #262 slice 5, AC4). The
+  # image-baking half of that contract: opencodeHarness's agentFiles layer
+  # must carry scout.md/reviewer.md/worker.md (each model-gated model set)
+  # with the frontmatter's mode/model fields baked in, and must NOT carry
+  # filer.md at all (filerModel left empty), mirroring agents-json-baked's
+  # per-agent omission proof above but for the on-disk file mechanism.
+  # Realizes the agent-files layer, so it is Linux-gated like the other image
+  # checks -- but only agentFiles, not the OCI image itself, so it stays
+  # light (no dockerTools.buildLayeredImage).
+  opencode-agent-files = pkgs.runCommand "opencode-agent-files" { } ''
+    scout=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/scout.md
+    [ -f "$scout" ] || {
+      echo "opencode agentFiles missing scout.md" >&2
+      exit 1
+    }
+    grep -q 'mode: subagent' "$scout" \
+      || { echo "opencode scout.md missing mode: subagent" >&2; exit 1; }
+    grep -q 'model: anthropic/claude-x' "$scout" \
+      || { echo "opencode scout.md missing its configured model" >&2; exit 1; }
+
+    reviewer=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/reviewer.md
+    [ -f "$reviewer" ] || {
+      echo "opencode agentFiles missing reviewer.md" >&2
+      exit 1
+    }
+    grep -q 'model: anthropic/claude-y' "$reviewer" \
+      || { echo "opencode reviewer.md missing its configured model" >&2; exit 1; }
+
+    worker=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/worker.md
+    [ -f "$worker" ] || {
+      echo "opencode agentFiles missing worker.md" >&2
+      exit 1
+    }
+    grep -q 'model: anthropic/claude-z' "$worker" \
+      || { echo "opencode worker.md missing its configured model" >&2; exit 1; }
+
+    filer=${opencodeHarness.agentFiles}/home/agent/.config/opencode/agents/filer.md
+    [ ! -e "$filer" ] || {
+      echo "opencode agentFiles unexpectedly bakes filer.md (filerModel is empty)" >&2
+      exit 1
+    }
 
     touch $out
   '';

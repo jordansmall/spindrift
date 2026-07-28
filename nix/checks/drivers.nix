@@ -15,7 +15,7 @@ let
     ;
   # Shared stub-cli fixture (issue #1144): drivers-render-preamble-shape
   # consumes it as-is; drivers-assert-shape-succeeds extends it with the
-  # three attrs renderPreamble doesn't read but assertShape requires.
+  # four attrs renderPreamble doesn't read but assertShape requires.
   stubDriverBase = {
     name = "stub";
     bin = "stub-cli";
@@ -120,6 +120,7 @@ in
         name = "stub";
         package = pkgs: pkgs.hello;
         agentsJsonTemplate = "{}";
+        agentFilesTemplate = _: { };
       };
       result = builtins.tryEval (driverRegistry.assertShape "stub" complete);
     in
@@ -234,4 +235,84 @@ in
           exit 1
         fi
       '';
+
+  # Issue #262 slice 5 (AC4): opencode has no --agents JSON flag, so it
+  # composes subagents from on-disk agents/*.md files under $HOME instead
+  # (agentFilesTemplate). Rendering scout with a model must produce YAML
+  # frontmatter carrying `mode: subagent`, the model verbatim, and the same
+  # description claude.nix's agentsJsonTemplate uses for scout -- so the two
+  # Drivers present identical subagent framing regardless of which mechanism
+  # composes it.
+  drivers-opencode-agent-files-scout-frontmatter =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+      rendered = opencodeEntry.agentFilesTemplate {
+        scoutModel = "solo-scout-model";
+        reviewModel = "";
+        filerModel = "";
+        workerModel = "";
+      };
+      scoutFile = rendered.".config/opencode/agents/scout.md" or "";
+    in
+    assert assertMsg (hasInfix "mode: subagent" scoutFile)
+      "opencode agentFilesTemplate's scout.md must set mode: subagent, got: ${scoutFile}";
+    assert assertMsg (hasInfix "model: solo-scout-model" scoutFile)
+      "opencode agentFilesTemplate's scout.md must carry the scout model verbatim, got: ${scoutFile}";
+    assert assertMsg (
+      hasInfix "Map relevant files, seams, and tests; return a structured brief" scoutFile
+    ) "opencode agentFilesTemplate's scout.md must carry the scout description, got: ${scoutFile}";
+    pkgs.runCommand "drivers-opencode-agent-files-scout-frontmatter" { } "touch $out";
+
+  # An empty model for an agent must omit that agent's file entirely (not
+  # bake a modelless stub), mirroring agentsJsonTemplate's per-agent
+  # lib.optionalAttrs omission (drivers-render-preamble-shape's neighbors
+  # above, and nix/checks/image.nix's agents-json-baked, pin the JSON side of
+  # this same contract).
+  drivers-opencode-agent-files-omits-empty-model =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+      rendered = opencodeEntry.agentFilesTemplate {
+        scoutModel = "solo-scout-model";
+        reviewModel = "";
+        filerModel = "";
+        workerModel = "";
+      };
+    in
+    assert assertMsg (!(rendered ? ".config/opencode/agents/reviewer.md"))
+      "opencode agentFilesTemplate must omit reviewer.md when reviewModel is empty, got keys: ${concatStringsSep ", " (builtins.attrNames rendered)}";
+    assert assertMsg (!(rendered ? ".config/opencode/agents/filer.md"))
+      "opencode agentFilesTemplate must omit filer.md when filerModel is empty, got keys: ${concatStringsSep ", " (builtins.attrNames rendered)}";
+    assert assertMsg (!(rendered ? ".config/opencode/agents/worker.md"))
+      "opencode agentFilesTemplate must omit worker.md when workerModel is empty, got keys: ${concatStringsSep ", " (builtins.attrNames rendered)}";
+    pkgs.runCommand "drivers-opencode-agent-files-omits-empty-model" { } "touch $out";
+
+  # All-empty-models call must return the empty attrset -- no stray keys, no
+  # empty-string values -- mirroring agentsJsonTemplate's own all-empty ""
+  # return (nonRustHarness / agents-json-baked in nix/checks/image.nix).
+  drivers-opencode-agent-files-all-empty-returns-empty-set =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+      rendered = opencodeEntry.agentFilesTemplate {
+        scoutModel = "";
+        reviewModel = "";
+        filerModel = "";
+        workerModel = "";
+      };
+    in
+    assert assertMsg (
+      rendered == { }
+    ) "opencode agentFilesTemplate must return {} when every model is empty, got: ${builtins.toJSON rendered}";
+    pkgs.runCommand "drivers-opencode-agent-files-all-empty-returns-empty-set" { } "touch $out";
+
+  # opencode reads .claude/skills/ directly (ADR 0009) rather than a
+  # opencode-specific skills directory -- pin the exact value so a future
+  # edit to lib/drivers/opencode.nix can't silently change the Driver's
+  # skills-discovery path without this check catching it.
+  drivers-opencode-skills-dir-pinned =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+    in
+    assert assertMsg (opencodeEntry.skillsDirRelative == ".claude/skills")
+      "opencode Driver's skillsDirRelative must stay .claude/skills, got: ${opencodeEntry.skillsDirRelative}";
+    pkgs.runCommand "drivers-opencode-skills-dir-pinned" { } "touch $out";
 }

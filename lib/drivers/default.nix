@@ -24,6 +24,7 @@ let
     "outcomeExtractFnBody"
     "sessionFlagsFnBody"
     "agentsJsonTemplate"
+    "agentFilesTemplate"
   ];
 
   # Fails eval naming both the Driver and the missing attribute(s), so an

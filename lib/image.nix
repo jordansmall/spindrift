@@ -43,6 +43,12 @@
   orchestratorBin,
   # --agents JSON, rendered by the selected Driver (ADR 0009).
   agentsJsonTemplate,
+  # On-disk subagent files (AC4), rendered by the selected Driver: an attrset
+  # mapping a HOME-relative path to its file content. A Driver with no
+  # on-disk agent-config mechanism (claude.nix) supplies { }, so this bakes
+  # nothing for it -- byte-identical to the image before this attribute
+  # existed.
+  driverAgentFiles,
   # The Driver's in-box half rendered into agent/entrypoint.sh's
   # ${DRIVER_*:-<default>} vars and the Driver function definitions.
   driverPreamble,
@@ -345,6 +351,12 @@ let
           ''
       ) skills}
     ''}
+    ${lib.concatStrings (
+      lib.mapAttrsToList (relPath: content: ''
+        mkdir -p "$(dirname $out/home/agent/${relPath})"
+        cp ${pkgs.writeText (baseNameOf relPath) content} $out/home/agent/${relPath}
+      '') driverAgentFiles
+    )}
   '';
 
   # A non-root `agent` user (uid/gid 1000). Claude Code refuses
