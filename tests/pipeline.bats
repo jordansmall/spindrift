@@ -9,6 +9,12 @@ setup() {
   setup_fakes
   setup_bare_repo
   export FAKE_CLAUDE_COMMIT=1
+  # This fixture's stub agent pushes and opens the PR itself (the read-write
+  # agent-owned code-out flow), so it is a read-write Box: set the same
+  # BOX_WRITE_ENABLED signal a real read-write Box receives (issue #1951).
+  # Without it the read-only harness-owned bundle-out gate (issue #2082)
+  # fires post-driver and dies writing to a nonexistent /outbox.
+  export BOX_WRITE_ENABLED=1
   export REPO_SLUG="owner/repo"
   export GH_TOKEN="fake-token"
   export GIT_USER_NAME="Bot"

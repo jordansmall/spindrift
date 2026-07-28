@@ -32,8 +32,40 @@ setup() {
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=none status=blocked note=.*ready.*no commits exist on agent/issue-7' <<<"$output"
 }
 
-@test "CODE_FORGE=github never invokes bundle-out" {
+@test "read-write github never invokes bundle-out" {
+  unset CODE_FORGE            # default github
+  # BOX_WRITE_ENABLED=1 from setup_entrypoint_env: a push-capable Box bundles
+  # nothing itself -- the launcher merges its pushed branch. Read-only github
+  # (BOX_WRITE_ENABLED unset) is the case that now DOES bundle-out, below.
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ ! -e "$OUTBOX_DIR" ]
+}
+
+@test "read-only github with real commits writes a seam bundle to the outbox" {
+  unset CODE_FORGE            # default github
+  unset BOX_WRITE_ENABLED     # read-only
+  export FAKE_CLAUDE_COMMIT=1
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -f "$OUTBOX_DIR/seam.bundle" ]
+  run git -C "$WORK_DIR" bundle verify "$OUTBOX_DIR/seam.bundle"
+  [ "$status" -eq 0 ]
+}
+
+@test "read-only github with no commits after a ready claim appends a corrective blocked outcome" {
   unset CODE_FORGE
+  unset BOX_WRITE_ENABLED
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ ! -f "$OUTBOX_DIR/seam.bundle" ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=none status=blocked note=.*ready.*no commits exist on agent/issue-7' <<<"$output"
+}
+
+@test "read-only github research dispatch never invokes bundle-out" {
+  unset CODE_FORGE            # default github
+  unset BOX_WRITE_ENABLED     # read-only
+  export DISPATCH_KIND=research
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ ! -e "$OUTBOX_DIR" ]

@@ -1210,12 +1210,21 @@ main() {
   # Harness, not the Agent, bundles the seam after the Driver exits. An empty
   # base..BRANCH range against a claimed status=ready prints a corrective
   # SPINDRIFT_OUTCOME line, picked up by the launcher's own last-line-wins
-  # log scan with no launcher changes. Deliberately left unguarded under
-  # set -e: a bundle-out failure (e.g. a transient git error) is a genuine
-  # container failure, not a judgment call, so it belongs on the launcher's
-  # own ClassifyTransient/retry path like any other non-zero exit here,
-  # rather than a caught-and-noted best-effort step.
-  if [ "${CODE_FORGE:-github}" = "local" ]; then
+  # log scan with no launcher changes. A read-only CODE_FORGE=github Box
+  # (issue #2082) is harness-owned code-out too, for the same reason:
+  # BOX_WRITE_ENABLED unset means the Box never pushed anything itself, so
+  # nothing else bundles the seam. Same read-only detection as the
+  # PR-intent nudge gate above. Guarded on !_is_research_kind, mirroring the
+  # branch-recovery/rebase gate in main() above: a research dispatch never
+  # cuts $BRANCH at all, so a bundle-out attempt there would fail resolving
+  # it, not just find it empty. Deliberately left unguarded under set -e
+  # otherwise: a bundle-out failure (e.g. a transient git error) is a
+  # genuine container failure, not a judgment call, so it belongs on the
+  # launcher's own ClassifyTransient/retry path like any other non-zero
+  # exit here, rather than a caught-and-noted best-effort step.
+  if ! _is_research_kind \
+    && { [ "${CODE_FORGE:-github}" = "local" ] \
+      || { [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ]; }; }; then
     driver-exec bundle-out \
       --repo "$WORK_DIR" \
       --base "origin/${BASE_BRANCH:-}" \
