@@ -50,9 +50,12 @@ func TestUsageReport_HumanReadableDurations(t *testing.T) {
 	}
 }
 
-// TestUsageReport_ContainsCostAndTokens verifies the report surfaces cost,
-// tokens, and turn count.
-func TestUsageReport_ContainsCostAndTokens(t *testing.T) {
+// TestUsageReport_OmitsCostAndHeaderTokens verifies the report surfaces
+// Model/Wall time/API time/Turns, but no longer surfaces a cost figure or
+// the aggregate header token rows (Input tokens / Output tokens / Cache
+// read tokens / Cache creation tokens) — those are superseded by the
+// per-model token table.
+func TestUsageReport_OmitsCostAndHeaderTokens(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
 	if err != nil {
@@ -65,14 +68,28 @@ func TestUsageReport_ContainsCostAndTokens(t *testing.T) {
 	writeRunLog(t, d, resultEvent)
 
 	body := d.UsageReport()
-	if !strings.Contains(body, "0.25") {
-		t.Errorf("report should contain cost 0.25; got: %q", body)
+	if strings.Contains(body, "$") {
+		t.Errorf("report should NOT contain a cost figure; got: %q", body)
 	}
-	if !strings.Contains(body, "500") {
-		t.Errorf("report should contain input_tokens 500; got: %q", body)
+	if strings.Contains(body, "Cost") {
+		t.Errorf("report should NOT contain a Cost row; got: %q", body)
 	}
-	if !strings.Contains(body, "5") {
-		t.Errorf("report should contain num_turns 5; got: %q", body)
+	for _, label := range []string{"Input tokens", "Output tokens", "Cache read tokens", "Cache creation tokens"} {
+		if strings.Contains(body, label) {
+			t.Errorf("report should NOT contain aggregate header row %q; got: %q", label, body)
+		}
+	}
+	if !strings.Contains(body, "| Model |") {
+		t.Errorf("report should contain Model row; got: %q", body)
+	}
+	if !strings.Contains(body, "| Wall time |") {
+		t.Errorf("report should contain Wall time row; got: %q", body)
+	}
+	if !strings.Contains(body, "| API time |") {
+		t.Errorf("report should contain API time row; got: %q", body)
+	}
+	if !strings.Contains(body, "| Turns | 5 |") {
+		t.Errorf("report should contain Turns row with 5; got: %q", body)
 	}
 }
 
@@ -153,37 +170,55 @@ func TestCumulativeUsage_PassWithNoResultEventContributesNothing(t *testing.T) {
 	}
 }
 
-// TestUsageReport_WithBreakdown verifies that when the log contains scout
-// and reviewer subagent messages, the report includes a per-role breakdown
-// table.
-func TestUsageReport_WithBreakdown(t *testing.T) {
+// TestUsageReport_FullFormatLocksExactMarkdown locks the exact Markdown
+// UsageReport renders for a log carrying two model families (opus and
+// haiku) plus a result event: the metadata table (Model/Wall time/API
+// time/Turns only — no Cost row, no aggregate header token rows) followed
+// by the per-model token table, joined the same way modelBreakdownSection
+// joins onto its caller (blank line, then the "### Per-model token usage"
+// heading).
+func TestUsageReport_FullFormatLocksExactMarkdown(t *testing.T) {
+	t.Setenv("MODEL", "claude-opus-4-8")
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
 	defer f.Cleanup()
-	d := f.New("55", "test issue")
+	d := f.New("300", "test issue")
 
-	resultEvent := `{"type":"result","num_turns":5,"total_cost_usd":0.50,"duration_ms":4000,"duration_api_ms":3000,"usage":{"input_tokens":600,"output_tokens":200}}`
-	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_scout","name":"Task","input":{"subagent_type":"scout"}}],"usage":{"input_tokens":100,"output_tokens":30}}}`
-	scoutMsg := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":200,"output_tokens":60}},"parent_tool_use_id":"toolu_scout"}`
-	implMain2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_reviewer","name":"Task","input":{"subagent_type":"reviewer"}}],"usage":{"input_tokens":150,"output_tokens":50}}}`
-	reviewerMsg := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":150,"output_tokens":60}},"parent_tool_use_id":"toolu_reviewer"}`
-	writeRunLog(t, d, resultEvent, implMain1, scoutMsg, implMain2, reviewerMsg)
+	opus1 := `{"type":"assistant","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":1000,"cache_creation_input_tokens":300,"cache_creation":{"ephemeral_5m_input_tokens":200,"ephemeral_1h_input_tokens":100}}}}`
+	haiku1 := `{"type":"assistant","message":{"model":"claude-haiku-4-5-20251001","content":[],"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":500,"cache_creation_input_tokens":50,"cache_creation":{"ephemeral_5m_input_tokens":50,"ephemeral_1h_input_tokens":0}}}}`
+	opus2 := `{"type":"assistant","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":40,"output_tokens":20,"cache_read_input_tokens":2000,"cache_creation_input_tokens":100,"cache_creation":{"ephemeral_5m_input_tokens":60,"ephemeral_1h_input_tokens":40}}}}`
+	resultEvent := `{"type":"result","num_turns":3,"total_cost_usd":0.30,"duration_ms":3665000,"duration_api_ms":65000,"usage":{"input_tokens":40,"output_tokens":20}}`
+	writeRunLog(t, d, opus1, haiku1, opus2, resultEvent)
 
 	body := d.UsageReport()
-	if !strings.Contains(body, "breakdown") && !strings.Contains(body, "Breakdown") {
-		t.Errorf("report should contain breakdown section; got: %q", body)
+
+	want := "## Run usage\n\n" +
+		"| Field | Value |\n" +
+		"| --- | --- |\n" +
+		"| Model | `claude-opus-4-8` |\n" +
+		"| Wall time | 1h 1m 5s |\n" +
+		"| API time | 1m 5s |\n" +
+		"| Turns | 3 |\n\n" +
+		"### Per-model token usage\n\n" +
+		"| Model | Uncached input | Output | Cache read | Cache write (5m) | Cache write (1h) |\n" +
+		"| --- | --- | --- | --- | --- | --- |\n" +
+		"| opus | 140 | 70 | 3000 | 260 | 140 |\n" +
+		"| haiku | 10 | 5 | 500 | 50 | 0 |\n"
+
+	if body != want {
+		t.Errorf("UsageReport() =\n%q\nwant:\n%q", body, want)
 	}
-	if !strings.Contains(body, "scout") {
-		t.Errorf("report should contain scout row; got: %q", body)
+	if strings.Contains(body, "$") {
+		t.Errorf("report should NOT contain a cost figure; got: %q", body)
 	}
-	if !strings.Contains(body, "reviewer") {
-		t.Errorf("report should contain reviewer row; got: %q", body)
+	if strings.Contains(body, "Cost") {
+		t.Errorf("report should NOT contain a Cost row; got: %q", body)
 	}
-	if !strings.Contains(body, "implementor") {
-		t.Errorf("report should contain implementor row; got: %q", body)
+	if strings.Contains(body, "Per-role") {
+		t.Errorf("report should NOT contain a per-role breakdown section; got: %q", body)
 	}
 }
 
