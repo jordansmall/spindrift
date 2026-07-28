@@ -49,6 +49,7 @@ func (d *Dispatch) UsageReport() string {
 		r.NumTurns,
 	)
 	body += breakdownSection(r.Roles)
+	body += modelBreakdownSection(r.Models)
 	return body
 }
 
@@ -91,6 +92,24 @@ func breakdownSection(roles []usage.RoleUsage) string {
 		fmt.Fprintf(&sb, "| %s | %d | %d | %d | %d |\n",
 			r.Role, r.InputTokens, r.OutputTokens,
 			r.CacheReadInputTokens, r.CacheCreationInputTokens)
+	}
+	return sb.String()
+}
+
+// modelBreakdownSection returns a Markdown per-model token breakdown
+// section, or empty string if models is empty.
+func modelBreakdownSection(models []usage.ModelUsage) string {
+	if len(models) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\n### Per-model token usage\n\n")
+	sb.WriteString("| Model | Uncached input | Output | Cache read | Cache write (5m) | Cache write (1h) |\n")
+	sb.WriteString("| --- | --- | --- | --- | --- | --- |\n")
+	for _, m := range models {
+		fmt.Fprintf(&sb, "| %s | %d | %d | %d | %d | %d |\n",
+			m.Model, m.UncachedInputTokens, m.OutputTokens,
+			m.CacheReadInputTokens, m.CacheWrite5mTokens, m.CacheWrite1hTokens)
 	}
 	return sb.String()
 }
