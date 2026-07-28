@@ -159,7 +159,7 @@
     env = "SCOUT_MODEL";
     group = "Models";
     default = "claude-haiku-4-5-20251001";
-    doc = "scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set";
+    doc = "scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
     boxEnv = true;
     boxEnvOnly = true;
@@ -168,7 +168,7 @@
     env = "REVIEW_MODEL";
     group = "Models";
     default = "claude-opus-4-8";
-    doc = "reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set";
+    doc = "reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
     boxEnv = true;
     boxEnvOnly = true;
@@ -177,7 +177,7 @@
     env = "FILER_MODEL";
     group = "Models";
     default = "";
-    doc = "filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-4-5-20251001)";
+    doc = "filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-4-5-20251001). DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
     boxEnv = true;
     boxEnvOnly = true;
@@ -186,7 +186,7 @@
     env = "WORKER_MODEL";
     group = "Models";
     default = "claude-sonnet-5";
-    doc = "implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable";
+    doc = "implement-capable worker subagent model tier; empty omits the worker entry from --agents; the implementor prompt does not delegate to it yet — this only provisions the subagent so it is invokable. DEPRECATED: superseded by the roster option (see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
     boxEnv = true;
     boxEnvOnly = true;
