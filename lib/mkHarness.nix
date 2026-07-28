@@ -294,8 +294,8 @@ let
   # INVARIANT: the agent image drvPath must not change when host-side launcher
   # code outside this binary's import closure is modified (e.g. test-only
   # launcher commits). The fileset is intentionally tight: go.mod, driver-exec,
-  # internal/driver, internal/driver/claude (the claude Driver's
-  # heartbeat/transcript/classify/usage parsing), internal/usage
+  # internal/driver, internal/driver/claude and internal/driver/opencode (each
+  # Driver's own heartbeat/transcript/classify/usage parsing), internal/usage
   # (Driver-agnostic report types), internal/logscan (claude's log-scan
   # helper), internal/outcome (the SPINDRIFT_OUTCOME grammar/log-scan, issue
   # #1808's bundle-out verb reads/writes it), internal/bundleout
@@ -321,6 +321,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/driver/claude)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/driver/opencode)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/usage)
@@ -351,12 +354,12 @@ let
   # In-box orchestrator (issue #1996, ADR 0007): the Go binary entrypoint.sh
   # hands the implementor pass off to when ORCHESTRATOR_ENABLED is set,
   # instead of calling driver-exec directly. Its multi-pass loop (issue
-  # #1998) scans each pass's own raw stream-json log via the claude Driver's
-  # own RenderTranscript strategy (internal/driver + internal/driver/claude,
-  # which pulls internal/usage) to turn it back into readable text, then
-  # internal/outcome (which pulls internal/logscan) for the
+  # #1998) scans each pass's own raw stream-json log via the selected Driver's
+  # own RenderTranscript strategy (internal/driver + internal/driver/claude and
+  # internal/driver/opencode, which pull internal/usage) to turn it back into
+  # readable text, then internal/outcome (which pulls internal/logscan) for the
   # SPINDRIFT_OUTCOME grammar -- the same import closure driverExecBin
-  # already needs, for the same reason (it also calls driver.New("claude")).
+  # already needs, for the same reason (it also calls driver.New).
   orchestratorBin = pkgs.buildGoModule {
     pname = "orchestrator";
     version = spindriftVersion;
@@ -374,6 +377,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/driver/claude)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/driver/opencode)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/usage)
