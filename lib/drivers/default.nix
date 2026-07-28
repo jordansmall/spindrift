@@ -82,7 +82,10 @@ let
 
   renderPreamble =
     driverEntry:
-    "DRIVER_BIN="
+    "DRIVER_NAME="
+    + lib.escapeShellArg driverEntry.name
+    + "\n"
+    + "DRIVER_BIN="
     + lib.escapeShellArg driverEntry.bin
     + "\n"
     + "DRIVER_FLAGS_COMMON="

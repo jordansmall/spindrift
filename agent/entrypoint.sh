@@ -74,14 +74,16 @@ configure_env() {
   RESEARCH_OUTCOME_CONTRACT_MARKER="# POST THE VERDICT"
   RESEARCH_OUTCOME_CONTRACT_FILE="${RESEARCH_OUTCOME_CONTRACT_FILE:-/agent/research-outcome-contract.md}"
 
-  # DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are baked by the
-  # selected Driver's lib/drivers/<name>.nix registry entry (ADR 0009, issue
-  # #624) via the nix-rendered preamble prepended ahead of this file at image
-  # build time. No fallback literal lives here: a Box built without that
-  # preamble dies loudly instead of silently impersonating the claude Driver.
+  # DRIVER_NAME, DRIVER_BIN, DRIVER_FLAGS_COMMON, and DRIVER_SKILLS_DIR are
+  # baked by the selected Driver's lib/drivers/<name>.nix registry entry (ADR
+  # 0009, issue #624) via the nix-rendered preamble prepended ahead of this
+  # file at image build time. No fallback literal lives here: a Box built
+  # without that preamble dies loudly instead of silently impersonating the
+  # claude Driver.
   : "${DRIVER_BIN:?DRIVER_BIN not set -- the nix-rendered Driver preamble did not run}"
   : "${DRIVER_FLAGS_COMMON:?DRIVER_FLAGS_COMMON not set -- the nix-rendered Driver preamble did not run}"
   : "${DRIVER_SKILLS_DIR:?DRIVER_SKILLS_DIR not set -- the nix-rendered Driver preamble did not run}"
+  : "${DRIVER_NAME:?DRIVER_NAME not set -- the nix-rendered Driver preamble did not run}"
 
   # _driver_extract_outcome and _driver_session_flags are defined by the Driver
   # registry (lib/drivers/<name>.nix); a nix-built image prepends them via
@@ -863,6 +865,7 @@ run_driver_in_env() {
     --prompt-file "$_prompt_file" \
     --agents-file "$_agents_file" \
     --session-file "$_session_file" \
+    --driver "$DRIVER_NAME" \
     --driver-bin "$DRIVER_BIN" \
     --driver-flags "$DRIVER_FLAGS_COMMON" \
     --model "${MODEL:-}" \

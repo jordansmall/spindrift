@@ -19,6 +19,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+
+	"spindrift.dev/launcher/internal/driver"
 )
 
 func main() {
@@ -26,6 +28,7 @@ func main() {
 		os.Exit(runBundleOut(os.Args[2:], os.Stdout))
 	}
 
+	driverName := flag.String("driver", "claude", "the Driver's registry name (ADR 0009), selecting its argv shape and exit-code handling")
 	promptFile := flag.String("prompt-file", "", "path to the assembled prompt text (required)")
 	agentsFile := flag.String("agents-file", "", "path to --agents JSON, empty to omit the flag")
 	sessionFile := flag.String("session-file", "", "path to pre-rendered session pin/resume flags, empty for none")
@@ -55,7 +58,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	d, err := driver.New(*driverName)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "driver-exec:", err)
+		os.Exit(1)
+	}
+
 	args, err := buildDriverArgs(driverInput{
+		driver:      *driverName,
 		promptFile:  *promptFile,
 		model:       *model,
 		agentsFile:  *agentsFile,
@@ -68,6 +78,7 @@ func main() {
 	}
 
 	rc, err := run(execConfig{
+		driver:       *driverName,
 		driverBin:    *driverBin,
 		args:         args,
 		devshell:     *devshell,
@@ -80,5 +91,30 @@ func main() {
 		fmt.Fprintln(os.Stderr, "driver-exec:", err)
 		os.Exit(1)
 	}
+
+	rc = applyExitSynth(d, rc, *logPath)
 	os.Exit(rc)
+}
+
+// applyExitSynth replaces rc with d's SynthesizeExit result when d
+// implements the optional ExitSynthesizer interface (issue #262 slice 4):
+// opencode's own process exit code is not on its own trustworthy (see
+// driver/opencode/exitsynth.go's doc comment), so its synthesized code --
+// derived from the log's own outcome/error markers -- replaces it here,
+// after run has already produced the final log. claude does not implement
+// ExitSynthesizer, so this is a no-op for it; rc passes through untouched,
+// exactly as before this Driver-selection slice existed. A SynthesizeExit
+// error is reported to stderr and degrades safely to the original rc rather
+// than masking a real (possibly successful) run behind a synthesis failure.
+func applyExitSynth(d driver.Driver, rc int, logPath string) int {
+	es, ok := d.(driver.ExitSynthesizer)
+	if !ok {
+		return rc
+	}
+	synthesized, err := es.SynthesizeExit(logPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "driver-exec: synthesize exit code:", err)
+		return rc
+	}
+	return synthesized
 }

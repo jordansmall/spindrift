@@ -85,6 +85,59 @@ func TestBuildDriverArgsEmptyAgentsFileOmitsFlag(t *testing.T) {
 	}
 }
 
+// TestBuildDriverArgsOpencodeShapeIsRunLeadingPromptTrailing verifies
+// driverInput{driver: "opencode"} builds opencode's own argv shape (issue
+// #262 slice 4): the `run` subcommand from driverFlags leads, followed by
+// -m <model> when model is non-empty, then any session-file content, with
+// the prompt spliced in as one positional argument last -- never -p, never
+// --agents.
+func TestBuildDriverArgsOpencodeShapeIsRunLeadingPromptTrailing(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("implement the thing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in := driverInput{
+		driver:      "opencode",
+		promptFile:  promptFile,
+		model:       "opencode/gpt-5",
+		driverFlags: "run --format json --auto",
+	}
+	got, err := buildDriverArgs(in)
+	if err != nil {
+		t.Fatalf("buildDriverArgs: %v", err)
+	}
+	want := []string{"run", "--format", "json", "--auto", "-m", "opencode/gpt-5", "implement the thing"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildDriverArgs = %q, want %q", got, want)
+	}
+}
+
+// TestBuildDriverArgsOpencodeEmptyModelOmitsDashM verifies an empty model
+// omits -m entirely for opencode -- unlike claude's --model, which is always
+// present even empty.
+func TestBuildDriverArgsOpencodeEmptyModelOmitsDashM(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in := driverInput{
+		driver:      "opencode",
+		promptFile:  promptFile,
+		model:       "",
+		driverFlags: "run --format json --auto",
+	}
+	got, err := buildDriverArgs(in)
+	if err != nil {
+		t.Fatalf("buildDriverArgs: %v", err)
+	}
+	want := []string{"run", "--format", "json", "--auto", "do it"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildDriverArgs = %q, want %q", got, want)
+	}
+}
+
 // TestBuildDriverArgsSessionAndFlagsAreWordSplit verifies the session file's
 // content is word-split into separate argv elements (matching the shell's
 // prior `read -ra` behaviour) and driverFlags (a space-separated common-flags

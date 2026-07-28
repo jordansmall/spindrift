@@ -17,6 +17,7 @@ let
   # consumes it as-is; drivers-assert-shape-succeeds extends it with the
   # three attrs renderPreamble doesn't read but assertShape requires.
   stubDriverBase = {
+    name = "stub";
     bin = "stub-cli";
     flagsCommon = "--stub-flag --two";
     skillsDirRelative = ".stub/skills";
@@ -51,6 +52,8 @@ in
     let
       out = driverRegistry.renderPreamble stubDriverBase;
     in
+    assert assertMsg (hasInfix "DRIVER_NAME=stub" out)
+      "renderPreamble must bake DRIVER_NAME from the Driver entry's name, got: ${out}";
     assert assertMsg (hasInfix "DRIVER_BIN=stub-cli" out)
       "renderPreamble must bake DRIVER_BIN from the Driver entry's bin, got: ${out}";
     assert assertMsg (hasInfix "DRIVER_FLAGS_COMMON='--stub-flag --two'" out)

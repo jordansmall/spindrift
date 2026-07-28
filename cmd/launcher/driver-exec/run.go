@@ -14,6 +14,12 @@ import (
 // the devShell switch/name, where to tee the raw stream for the Driver's own
 // outcome-extraction pass afterward, and the heartbeat file path.
 type execConfig struct {
+	// driver is the Driver's registry name (ADR 0009, e.g. "claude" or
+	// "opencode"), threaded from entrypoint.sh's baked DRIVER_NAME into
+	// driver.New so run's heartbeat writer (and main's exit-synthesis pass)
+	// vary by the actual Driver a Box is running, not a hardcoded "claude".
+	// Empty defaults to "claude", matching driver.New's own convention.
+	driver       string
 	driverBin    string
 	args         []string
 	devshell     bool
@@ -39,7 +45,7 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 	}
 	defer heartbeatFile.Close()
 
-	d, err := driver.New("claude")
+	d, err := driver.New(cfg.driver)
 	if err != nil {
 		return 0, err
 	}
