@@ -67,8 +67,8 @@
   runtime ? "podman",
   # The agent CLI Driver (ADR 0009): a build-time choice selecting one entry
   # from the lib/drivers/ registry, baked into the image (in-box half) and
-  # threaded to the Go launcher as DRIVER (host-side half). "claude" is the
-  # only Driver today.
+  # threaded to the Go launcher as DRIVER (host-side half). "claude" (default)
+  # and "opencode" are the Drivers today (ADR 0009, issues #261/#262).
   driver ? "claude",
   # Fallback Linux builder for when the host can't realize the Linux image itself
   # (the stock-mac case). Fully qualified so podman needs no default registry.
@@ -254,6 +254,17 @@ let
     workerModel = mergedDefaults.workerModel or "";
   };
 
+  # On-disk subagent files (AC4), rendered by the selected Driver the same
+  # way agentsJsonTemplate is above: a Driver with no on-disk agent-config
+  # mechanism (claude.nix) returns { } here, since its subagents ride
+  # agentsJsonTemplate's --agents JSON flag instead.
+  driverAgentFiles = driverEntry.agentFilesTemplate {
+    scoutModel = mergedDefaults.scoutModel or "";
+    reviewModel = mergedDefaults.reviewModel or "";
+    filerModel = mergedDefaults.filerModel or "";
+    workerModel = mergedDefaults.workerModel or "";
+  };
+
   # The Driver's in-box half, rendered by the registry (issue #624) into
   # agent/entrypoint.sh's DRIVER_* vars and function definitions (ADR 0009),
   # shared between the image preamble and the bats harness file (issue #433)
@@ -414,6 +425,7 @@ let
       driverExecBin
       orchestratorBin
       agentsJsonTemplate
+      driverAgentFiles
       driverPreamble
       fragmentRegistryPreamble
       prompt

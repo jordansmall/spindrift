@@ -170,6 +170,23 @@ let
     packages = p: [ p.hello ];
   };
 
+  # The opencode Driver's on-disk agent-files fixture (issue #262 slice 5,
+  # AC4): scout/review/worker models set, filerModel left at its default
+  # empty so the filer file's omission is provable too, mirroring
+  # scoutOnlyHarness/etc's per-agent model-gating. Eval-only, consumed by the
+  # opencode-agent-files image check.
+  opencodeHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    driver = "opencode";
+    defaults = {
+      scoutModel = "anthropic/claude-x";
+      reviewModel = "anthropic/claude-y";
+      filerModel = "";
+      workerModel = "anthropic/claude-z";
+    };
+    packages = p: [ p.hello ];
+  };
+
   # Exercise the run knobs (#3): non-default baked `defaults` and a
   # docker `runtime`. Eval-only, consumed by the checks below.
   customHarness = import ../lib/mkHarness.nix {
@@ -357,6 +374,7 @@ in
     reviewerOnlyHarness
     filerOnlyHarness
     workerOnlyHarness
+    opencodeHarness
     customHarness
     dockerHarness
     rancherHarness

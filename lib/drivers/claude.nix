@@ -196,4 +196,11 @@
         };
     in
     if agents == { } then "" else builtins.toJSON agents;
+
+  # opencode composes subagents from on-disk agents/*.md files under $HOME
+  # (lib/drivers/opencode.nix's agentFilesTemplate); claude declines that
+  # on-disk mechanism entirely -- its subagents ride agentsJsonTemplate's
+  # --agents JSON flag above instead. Always returns the empty attrset, so
+  # lib/image.nix's agentFiles bakes no per-agent files for this Driver.
+  agentFilesTemplate = _: { };
 }
