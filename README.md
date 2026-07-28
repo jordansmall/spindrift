@@ -98,9 +98,9 @@ nix run github:jordansmall/spindrift -- research   # advise-only: one container 
 
 Every verb is a `nix run github:jordansmall/spindrift -- <verb>` away: the
 binary comes from this flake, while the Consumer flake, `harness.env`, and
-per-issue `.spindrift/logs/` are read from `$PWD`. The unpinned `github:` ref tracks
-`main`; pin spindrift in your own `flake.lock` (see [Adding spindrift to your
-flake](#adding-spindrift-to-your-flake)) for a fixed, reproducible version.
+per-issue `.spindrift/logs/` are read from `$PWD`. The unpinned `github:` ref
+tracks `main`; pin spindrift in your own `flake.lock` (see [Adding spindrift to
+your flake](#adding-spindrift-to-your-flake)) for a fixed, reproducible version.
 
 Prefer a persistent shell with `spindrift` on `PATH`? `nix develop` puts it
 there, along with tab-completion and the `dogfood-stop` alias:
