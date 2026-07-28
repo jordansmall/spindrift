@@ -45,6 +45,22 @@ func TestCollectTaskRoles_RecordsSubagentTypeFromTaskInput(t *testing.T) {
 	}
 }
 
+func TestCollectTaskRoles_RecordsSubagentTypeFromAgentInput(t *testing.T) {
+	ev := Event{
+		Type: "assistant",
+		Message: &Message{
+			Content: []ContentBlock{
+				{Type: "tool_use", Name: "Agent", ID: "toolu_1", Input: []byte(`{"subagent_type":"reviewer"}`)},
+			},
+		},
+	}
+	taskRole := map[string]string{}
+	CollectTaskRoles(ev, taskRole)
+	if got := taskRole["toolu_1"]; got != "reviewer" {
+		t.Errorf("taskRole[toolu_1] = %q, want %q", got, "reviewer")
+	}
+}
+
 func TestCollectTaskRoles_EmptySubagentTypeDefaultsToSubagent(t *testing.T) {
 	ev := Event{
 		Type: "assistant",

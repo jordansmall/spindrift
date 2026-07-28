@@ -136,19 +136,19 @@ func toolTarget(name string, input json.RawMessage) string {
 		return ""
 	}
 	field := ""
-	switch name {
-	case "Read", "Edit", "Write", "NotebookEdit":
-		field = "file_path"
-	case "Grep", "Glob":
-		field = "pattern"
-	case "Bash":
-		field = "command"
-	case "WebFetch":
-		field = "url"
-	case "WebSearch":
-		field = "query"
-	case "Task", "Agent":
+	switch {
+	case isSubagentSpawnTool(name):
 		field = "subagent_type"
+	case name == "Read", name == "Edit", name == "Write", name == "NotebookEdit":
+		field = "file_path"
+	case name == "Grep", name == "Glob":
+		field = "pattern"
+	case name == "Bash":
+		field = "command"
+	case name == "WebFetch":
+		field = "url"
+	case name == "WebSearch":
+		field = "query"
 	}
 	if field == "" {
 		return ""

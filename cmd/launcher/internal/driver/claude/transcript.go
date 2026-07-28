@@ -103,8 +103,18 @@ const ImplementorRole = "implementor"
 // match a Task ID collected so far.
 const DefaultRole = "subagent"
 
+// isSubagentSpawnTool reports whether a tool-use block with this name
+// spawns a subagent. "Task" is the legacy name; "Agent" is the current
+// Box `claude` name — a confirmed real --output-format stream-json sample
+// carries subagent spawns as "Agent" blocks (issue #2078). This is the
+// single source of truth shared by CollectTaskRoles, toolToPhase, and
+// toolKind.
+func isSubagentSpawnTool(name string) bool {
+	return name == "Task" || name == "Agent"
+}
+
 // CollectTaskRoles scans an implementor event (ParentToolUseID == "") for
-// Task tool-use blocks and records each one's subagent role — from its
+// Task/Agent tool-use blocks and records each one's subagent role — from its
 // subagent_type input field, defaulting to DefaultRole — into taskRole, keyed
 // by the tool-use ID. Events with a non-empty ParentToolUseID are ignored:
 // only the implementor issues Task calls.
@@ -113,7 +123,7 @@ func CollectTaskRoles(ev Event, taskRole map[string]string) {
 		return
 	}
 	for _, block := range ev.Message.Content {
-		if block.Type != "tool_use" || block.Name != "Task" || block.ID == "" {
+		if block.Type != "tool_use" || !isSubagentSpawnTool(block.Name) || block.ID == "" {
 			continue
 		}
 		var ti TaskInput

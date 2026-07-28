@@ -174,6 +174,9 @@ func ModelFamily(id string) string {
 
 // toolKind maps a tool name to its human-readable count kind.
 func toolKind(name string) string {
+	if isSubagentSpawnTool(name) {
+		return "subagent"
+	}
 	switch name {
 	case "Read":
 		return "read"
@@ -183,8 +186,6 @@ func toolKind(name string) string {
 		return "grep"
 	case "WebSearch", "WebFetch":
 		return "search"
-	case "Agent":
-		return "subagent"
 	default:
 		return strings.ToLower(name)
 	}
@@ -256,12 +257,7 @@ func trimNarration(text string) string {
 // toolToPhase maps a tool name and its input to the current work phase.
 // The mapping is the single authoritative place for phase heuristics.
 func toolToPhase(name string, input json.RawMessage) string {
-	switch name {
-	case "Edit", "Write", "NotebookEdit":
-		return "edit"
-	case "Grep", "Glob", "WebSearch", "WebFetch":
-		return "search"
-	case "Task", "Agent":
+	if isSubagentSpawnTool(name) {
 		var ti TaskInput
 		if len(input) > 0 {
 			_ = json.Unmarshal(input, &ti)
@@ -273,6 +269,12 @@ func toolToPhase(name string, input json.RawMessage) string {
 			return "plan"
 		}
 		return "explore"
+	}
+	switch name {
+	case "Edit", "Write", "NotebookEdit":
+		return "edit"
+	case "Grep", "Glob", "WebSearch", "WebFetch":
+		return "search"
 	case "Bash":
 		var m map[string]interface{}
 		if len(input) > 0 {
