@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 // writeRunLog writes lines directly to a Dispatch's run log path, simulating
@@ -183,5 +184,48 @@ func TestUsageReport_WithBreakdown(t *testing.T) {
 	}
 	if !strings.Contains(body, "implementor") {
 		t.Errorf("report should contain implementor row; got: %q", body)
+	}
+}
+
+// TestModelBreakdownSection verifies the per-model token breakdown table
+// renders one row per model with all six token categories, and that an
+// empty models slice renders no section at all.
+func TestModelBreakdownSection(t *testing.T) {
+	models := []usage.ModelUsage{
+		{
+			Model:                "opus",
+			UncachedInputTokens:  140,
+			OutputTokens:         70,
+			CacheReadInputTokens: 3000,
+			CacheWrite5mTokens:   260,
+			CacheWrite1hTokens:   140,
+		},
+		{
+			Model:                "haiku",
+			UncachedInputTokens:  18,
+			OutputTokens:         9,
+			CacheReadInputTokens: 800,
+			CacheWrite5mTokens:   70,
+			CacheWrite1hTokens:   0,
+		},
+	}
+
+	body := modelBreakdownSection(models)
+
+	if !strings.Contains(body, "### Per-model token usage") {
+		t.Errorf("report should contain per-model header; got: %q", body)
+	}
+	if !strings.Contains(body, "| Model | Uncached input | Output | Cache read | Cache write (5m) | Cache write (1h) |") {
+		t.Errorf("report should contain per-model table header row; got: %q", body)
+	}
+	if !strings.Contains(body, "| opus | 140 | 70 | 3000 | 260 | 140 |") {
+		t.Errorf("report should contain opus row; got: %q", body)
+	}
+	if !strings.Contains(body, "| haiku | 18 | 9 | 800 | 70 | 0 |") {
+		t.Errorf("report should contain haiku row; got: %q", body)
+	}
+
+	if got := modelBreakdownSection(nil); got != "" {
+		t.Errorf("modelBreakdownSection(nil) = %q, want empty string", got)
 	}
 }
