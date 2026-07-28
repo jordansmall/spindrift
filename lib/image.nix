@@ -339,7 +339,11 @@ let
     cp ${pkgs.writeText "filer-prompt.md" filerPrompt} $out/agent/prompts/filer-prompt.md
     cp ${pkgs.writeText "worker-prompt.md" workerPrompt} $out/agent/prompts/worker-prompt.md
     ${lib.concatMapStrings (
-      e: "cp ${pkgs.writeText e.promptFile e.prompt} $out/agent/prompts/${e.promptFile}\n"
+      e:
+      let
+        pf = e.promptFile or "${e.name}-prompt.md";
+      in
+      "cp ${pkgs.writeText pf e.prompt} $out/agent/prompts/${pf}\n"
     ) customRosterPromptFiles}
     cp ${pkgs.writeText "conflict-resolve-prompt.md" conflictResolvePrompt} $out/agent/prompts/conflict-resolve-prompt.md
     cp ${pkgs.writeText "fix-prompt.md" (injectFixSharedBlocks fixPrompt)} $out/agent/prompts/fix-prompt.md
