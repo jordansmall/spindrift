@@ -2,9 +2,6 @@
 result
 result-*
 
-# per-run agent logs
-logs/
-
 # local config + secrets — never commit this
 harness.env
 
