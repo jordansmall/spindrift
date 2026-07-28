@@ -135,6 +135,30 @@ func TestRenderTranscript_SubagentNarration_AgentToolName_PrefixesReviewerRole(t
 	}
 }
 
+func TestRenderTranscript_NestedSubagent_PrefixesOwnRole(t *testing.T) {
+	lines := []string{
+		// Implementor spawns A (subagent_type "researcher").
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_A","name":"Agent","input":{"subagent_type":"researcher"}}]}}`,
+		// A's own message spawns B (subagent_type "worker"); this event carries
+		// parent_tool_use_id "toolu_A" (A is the actor) AND B's spawn block.
+		`{"type":"assistant","parent_tool_use_id":"toolu_A","message":{"content":[{"type":"tool_use","id":"toolu_B","name":"Agent","input":{"subagent_type":"worker"}}]}}`,
+		// B's own message, nested two levels deep under the implementor.
+		`{"type":"assistant","parent_tool_use_id":"toolu_B","message":{"content":[{"type":"text","text":"Deep result."}]}}`,
+	}
+	path := claude.WriteLog(t, lines...)
+
+	got, err := claude.RenderTranscript(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "[worker] Deep result.") {
+		t.Errorf("RenderTranscript = %q, want it to contain %q (B's own role, not the generic fallback)", got, "[worker] Deep result.")
+	}
+	if strings.Contains(got, "[subagent] Deep result.") {
+		t.Errorf("RenderTranscript = %q, nested subagent B must not fall back to the generic \"subagent\" role", got)
+	}
+}
+
 func TestRenderTranscript_MissingFile_ReturnsEmpty(t *testing.T) {
 	got, err := claude.RenderTranscript(filepath.Join(t.TempDir(), "missing.log"))
 	if err != nil {
