@@ -1,6 +1,9 @@
 package claude
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestResolveRole_ImplementorHasNoParent(t *testing.T) {
 	ev := Event{Type: "assistant", ParentToolUseID: ""}
@@ -125,5 +128,31 @@ func TestCollectTaskRoles_NestedSpawnEmptySubagentTypeDefaultsToSubagent(t *test
 	CollectTaskRoles(ev, taskRole)
 	if got := taskRole["toolu_C"]; got != DefaultRole {
 		t.Errorf("taskRole[toolu_C] = %q, want %q", got, DefaultRole)
+	}
+}
+
+func TestTokenUsage_CacheCreationTTLSplit(t *testing.T) {
+	const withSplit = `{"content":null,"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":100,"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":20,"ephemeral_1h_input_tokens":10}}}`
+	var m Message
+	if err := json.Unmarshal([]byte(withSplit), &m); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if m.Usage.CacheCreation == nil {
+		t.Fatal("Usage.CacheCreation = nil, want non-nil")
+	}
+	if got := m.Usage.CacheCreation.Ephemeral5mInputTokens; got != 20 {
+		t.Errorf("Ephemeral5mInputTokens = %d, want 20", got)
+	}
+	if got := m.Usage.CacheCreation.Ephemeral1hInputTokens; got != 10 {
+		t.Errorf("Ephemeral1hInputTokens = %d, want 10", got)
+	}
+
+	const withoutSplit = `{"content":null,"usage":{"input_tokens":10,"output_tokens":5}}`
+	var m2 Message
+	if err := json.Unmarshal([]byte(withoutSplit), &m2); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if m2.Usage.CacheCreation != nil {
+		t.Errorf("Usage.CacheCreation = %+v, want nil", m2.Usage.CacheCreation)
 	}
 }
