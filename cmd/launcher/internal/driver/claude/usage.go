@@ -118,14 +118,8 @@ func breakdownByRoleFile(path string) ([]usage.RoleUsage, error) {
 	}
 
 	for _, line := range lines {
-		if !strings.Contains(line, `"type":"assistant"`) {
-			continue
-		}
-		var ev Event
-		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Type != "assistant" {
-			continue
-		}
-		if ev.Message == nil {
+		ev, ok := assistantEvent(line)
+		if !ok {
 			continue
 		}
 		role := ResolveRole(ev, taskRole)
@@ -145,6 +139,24 @@ func breakdownByRoleFile(path string) ([]usage.RoleUsage, error) {
 		}
 	}
 	return result, nil
+}
+
+// assistantEvent decodes line as a claude-code stream-json assistant message
+// event, returning the parsed Event and true only when line is an assistant
+// event carrying a non-nil Message. It is the shared decode preamble of
+// breakdownByRoleFile's usage pass and breakdownByModelFile.
+func assistantEvent(line string) (Event, bool) {
+	if !strings.Contains(line, `"type":"assistant"`) {
+		return Event{}, false
+	}
+	var ev Event
+	if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Type != "assistant" {
+		return Event{}, false
+	}
+	if ev.Message == nil {
+		return Event{}, false
+	}
+	return ev, true
 }
 
 // breakdownByRole indirects to breakdownByRoleFile so tests can simulate a
@@ -183,14 +195,8 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 	}
 
 	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
-		if !strings.Contains(line, `"type":"assistant"`) {
-			return
-		}
-		var ev Event
-		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Type != "assistant" {
-			return
-		}
-		if ev.Message == nil {
+		ev, ok := assistantEvent(line)
+		if !ok {
 			return
 		}
 		family := ModelFamily(ev.Message.Model)
