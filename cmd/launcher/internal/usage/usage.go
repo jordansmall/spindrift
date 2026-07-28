@@ -43,12 +43,27 @@ type Usage struct {
 	NumTurns                 int     `json:"num_turns"`
 }
 
+// ModelUsage holds token usage aggregated across every turn and subagent for
+// one model family (opus/haiku/sonnet), split into the five billable
+// categories. Tokens only, never dollars — counts are exact from the API,
+// whereas any cost figure needs pricing spindrift does not own (issue #2085).
+type ModelUsage struct {
+	Model                string // model family: "opus", "haiku", "sonnet", or raw id
+	UncachedInputTokens  int
+	OutputTokens         int
+	CacheReadInputTokens int
+	CacheWrite5mTokens   int // cache_creation.ephemeral_5m_input_tokens, summed
+	CacheWrite1hTokens   int // cache_creation.ephemeral_1h_input_tokens, summed
+}
+
 // Report combines a Box run's aggregate Usage with its per-role breakdown, as
 // extracted by a Driver's ExtractUsage from one pass over a Box log. Found is
 // false when the log contains no result event (or does not exist), in which
-// case Usage and Roles are both zero-valued.
+// case Usage and Roles are both zero-valued. Models is the per-model,
+// per-category token breakdown (ModelUsage).
 type Report struct {
 	Usage
-	Found bool
-	Roles []RoleUsage
+	Found  bool
+	Roles  []RoleUsage
+	Models []ModelUsage
 }
