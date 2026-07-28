@@ -19,7 +19,7 @@ type staleRevTracker struct {
 	path string
 }
 
-// newStaleRevTracker returns a tracker backed by <pwd>/logs/freshness-stale-rev.
+// newStaleRevTracker returns a tracker backed by <pwd>/.spindrift/logs/freshness-stale-rev.
 func newStaleRevTracker(pwd string) staleRevTracker {
 	return staleRevTracker{path: filepath.Join(dispatch.HostLogDirFor(pwd), "freshness-stale-rev")}
 }

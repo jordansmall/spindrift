@@ -17,11 +17,11 @@ import (
 // emitted (#647 AC2).
 func TestRunningHeartbeat_ReplaysLatestPassLog_ReturnsLastEmittedLine(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	log := `{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -48,7 +48,7 @@ func TestRunningHeartbeat_ReplaysLatestPassLog_ReturnsLastEmittedLine(t *testing
 // implementor's (#732).
 func TestRunningHeartbeat_RoleSwitchMidLog_ReturnsRoleContext(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	log := strings.Join([]string{
@@ -56,7 +56,7 @@ func TestRunningHeartbeat_RoleSwitchMidLog_ReturnsRoleContext(t *testing.T) {
 		`{"type":"assistant","parent_tool_use_id":"tu_s1","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}`,
 		`{"type":"result","num_turns":3,"total_cost_usd":0.01,"duration_ms":5000}`,
 	}, "\n") + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -82,7 +82,7 @@ func TestRunningHeartbeat_RoleSwitchMidLog_ReturnsRoleContext(t *testing.T) {
 // context (#732).
 func TestRunningHeartbeat_LogEndsOnScoutCountLine_ReturnsRoleContext(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	log := strings.Join([]string{
@@ -90,7 +90,7 @@ func TestRunningHeartbeat_LogEndsOnScoutCountLine_ReturnsRoleContext(t *testing.
 		`{"type":"assistant","parent_tool_use_id":"tu_s1","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}`,
 		`{"type":"assistant","parent_tool_use_id":"tu_s1","message":{"content":[{"type":"tool_use","name":"Grep","id":"g1","input":{}}]}}`,
 	}, "\n") + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -128,10 +128,10 @@ func TestRunningHeartbeat_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
 // showing the stale cached line comes back rather than the new content's.
 func TestHeartbeatCache_UnchangedStat_SkipsReparse(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "logs", "issue-9.log")
+	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
 	first := `{"type":"result","num_turns":17,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -175,10 +175,10 @@ func TestHeartbeatCache_UnchangedStat_SkipsReparse(t *testing.T) {
 // new content, not the stale cached line.
 func TestHeartbeatCache_ChangedStat_Reparses(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "logs", "issue-9.log")
+	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
 	first := `{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
@@ -240,10 +240,10 @@ func (d spyHeartbeatDriver) NewHeartbeatWriter(raw io.Writer, issue string, out 
 // the previous O(file)-per-refresh whole-file reread.
 func TestRunningHeartbeat_IncrementalAppend_FeedsOnlyAppendedBytes(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "logs", "issue-9.log")
+	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
 
 	real, err := driver.New("")
 	if err != nil {
@@ -283,10 +283,10 @@ func TestRunningHeartbeat_IncrementalAppend_FeedsOnlyAppendedBytes(t *testing.T)
 // the file's new end and mis-parsing.
 func TestRunningHeartbeat_FileShorterThanOffset_ResetsAndReparses(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "logs", "issue-9.log")
+	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
 	long := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n" +
 		`{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
 	if err := os.WriteFile(path, []byte(long), 0o644); err != nil {
@@ -328,11 +328,11 @@ func TestRunningHeartbeat_FileShorterThanOffset_ResetsAndReparses(t *testing.T) 
 // the parse rather than merely fail to reset.
 func TestRunningHeartbeat_NewPassPath_ResetsOffsetAndReparses(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	initial := `{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-9.log"), []byte(initial), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(initial), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -352,7 +352,7 @@ func TestRunningHeartbeat_NewPassPath_ResetsOffsetAndReparses(t *testing.T) {
 	if len(fix1) <= len(initial) {
 		t.Fatalf("test setup: fix-1 log must be longer than the initial pass log, got %d want > %d", len(fix1), len(initial))
 	}
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-9-fix-1.log"), []byte(fix1), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9-fix-1.log"), []byte(fix1), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

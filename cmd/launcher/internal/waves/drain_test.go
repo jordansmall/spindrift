@@ -551,7 +551,7 @@ func TestDrainMaxJobs_ClaimedIssue_MarkerAnnotatesSource(t *testing.T) {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
-	b, err := os.ReadFile(filepath.Join(dir, "logs", blockedMarker))
+	b, err := os.ReadFile(filepath.Join(dir, ".spindrift", "logs", blockedMarker))
 	if err != nil {
 		t.Fatalf("reading blocked marker: %v", err)
 	}
@@ -654,7 +654,7 @@ func TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue(t *testing.T) {
 
 // TestDrainMaxJobs_ClaimedIssue_DepsOfFailedWritesRetryMarker verifies that
 // when the OriginClaimed single-issue path's own DepsOf call failed (#1103),
-// drainMaxJobs writes logs/blocked.txt so the release workflow reverts the
+// drainMaxJobs writes .spindrift/logs/blocked.txt so the release workflow reverts the
 // claim and retries later, instead of silently doing nothing (edges[num]
 // being empty from the failed lookup must never read as "confirmed zero
 // blockers").
@@ -679,7 +679,7 @@ func TestDrainMaxJobs_ClaimedIssue_DepsOfFailedWritesRetryMarker(t *testing.T) {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
-	b, err := os.ReadFile(filepath.Join(dir, "logs", blockedMarker))
+	b, err := os.ReadFile(filepath.Join(dir, ".spindrift", "logs", blockedMarker))
 	if err != nil {
 		t.Fatalf("reading blocked marker: %v", err)
 	}

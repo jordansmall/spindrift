@@ -69,7 +69,7 @@ func TestWithSchemaFlags_SwapsAndRestores(t *testing.T) {
 	}
 }
 
-// tempLogDir creates a temp dir with a logs/ subdirectory.
+// tempLogDir creates a temp dir with a .spindrift/logs subdirectory.
 func tempLogDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

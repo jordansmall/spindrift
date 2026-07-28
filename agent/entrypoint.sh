@@ -842,7 +842,7 @@ run_driver_in_env() {
 
   # stream_log is driver-exec's teed copy of the Driver's raw stdout, read
   # below by _driver_extract_outcome -- the launcher's own capture of stdout
-  # (logs/issue-<n>.log, byte-exact, unchanged) is separate and untouched.
+  # (.spindrift/logs/issue-<n>.log, byte-exact, unchanged) is separate and untouched.
   stream_log="$(mktemp)"
 
   local -a _devshell_flags=()

@@ -109,10 +109,10 @@ func largeHeartbeatLog(minBytes int) string {
 func newHeartbeatBenchFixture(b *testing.B) (pwd string, drv driver.Driver) {
 	b.Helper()
 	dir := b.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		b.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "logs", "issue-9.log"), []byte(largeHeartbeatLog(10<<20)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(largeHeartbeatLog(10<<20)), 0o644); err != nil {
 		b.Fatal(err)
 	}
 	drv, err := driver.New("")

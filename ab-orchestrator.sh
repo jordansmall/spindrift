@@ -268,7 +268,7 @@ run_arm() { # $1=issue $2=arm $3=orch $4=branch_prefix $5=worker_model
   local wm="$5"
   local armdir="$AB_OUTDIR/$issue/$arm"
   mkdir -p "$armdir"
-  local host_log="logs/issue-${issue}.log"
+  local host_log=".spindrift/logs/issue-${issue}.log"
   # Clear any prior host log so we capture only this arm's stream.
   rm -f "$host_log"
 
@@ -309,7 +309,7 @@ run_arm() { # $1=issue $2=arm $3=orch $4=branch_prefix $5=worker_model
   # Capture the host log before the next arm's run rotates it away.
   [ -f "$host_log" ] && cp "$host_log" "$armdir/box.log"
   # Also grab fix-pass logs if any.
-  for fx in logs/issue-"${issue}"-*.log; do
+  for fx in .spindrift/logs/issue-"${issue}"-*.log; do
     [ -e "$fx" ] && cp "$fx" "$armdir/"
   done
 

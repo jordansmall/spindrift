@@ -116,7 +116,7 @@ func TestFactory_OrphanedIssues(t *testing.T) {
 // Box was actually writing when Terminate reaped it.
 func TestFactory_AppendTerminalLine_AppendsToMostRecentPassLog(t *testing.T) {
 	dir := tempLogDir(t)
-	logsDir := filepath.Join(dir, "logs")
+	logsDir := HostLogDirFor(dir)
 	initial := filepath.Join(logsDir, "issue-1.log")
 	fix1 := filepath.Join(logsDir, "issue-1-fix-1.log")
 	for _, p := range []string{initial, fix1} {
@@ -164,7 +164,7 @@ func TestFactory_AppendTerminalLine_NoPassesYetCreatesInitialLog(t *testing.T) {
 		t.Fatalf("AppendTerminalLine: %v", err)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, "logs", "issue-2.log"))
+	got, err := os.ReadFile(filepath.Join(HostLogDirFor(dir), "issue-2.log"))
 	if err != nil {
 		t.Fatal(err)
 	}

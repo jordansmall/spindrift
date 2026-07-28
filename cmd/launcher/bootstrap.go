@@ -59,6 +59,12 @@ func bootstrap(ensureReady bool, kind string) (*launchContext, error) {
 	if err := validate(c); err != nil {
 		return nil, err
 	}
+	// One-time relocation (issue #2138): fold any legacy top-level logs/
+	// left by an earlier spindrift into the new .spindrift/logs before any
+	// host-side site reads or creates a log path this run.
+	if err := dispatch.MigrateLegacyLogDir(pwd); err != nil {
+		return nil, err
+	}
 	if err := seedAccumulationRepoIfLocal(c, pwd); err != nil {
 		return nil, err
 	}
