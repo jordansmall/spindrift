@@ -1288,7 +1288,13 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		}
 		return err
 	}
-	_ = tracker.clear()
+	// Do NOT clear the tracker here. Clearing it on every clean success
+	// (issue #2128) wiped the #2113 non-convergence guard armed by a prior
+	// stale run, downgrading a same-rev host-taint repeat (exit 5 halt) to
+	// a perpetual rebuild (exit 4). The guard is scoped to actual stale
+	// outcomes and cleared only where that's correct: the
+	// ErrOpenNoneDispatchable path above and classifyStaleOutcome's own
+	// host-taint-halt path (continuous_freshness.go).
 	fmt.Print(dispatchCompletionBanner(c))
 	return reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout)
 }
