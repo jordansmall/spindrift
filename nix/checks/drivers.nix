@@ -27,6 +27,7 @@ let
     flagsCommon = "--stub-flag --two";
     skillsDirRelative = ".stub/skills";
     outcomeExtractFnBody = "echo stub-outcome\n";
+    outcomeExtractNearMissFnBody = "echo stub-near-miss\n";
     sessionFlagsFnBody = "echo stub-session\n";
   };
 in
@@ -67,6 +68,8 @@ in
       "renderPreamble must bake DRIVER_SKILLS_DIR under /home/agent, got: ${out}";
     assert assertMsg (hasInfix "_driver_extract_outcome() {\necho stub-outcome" out)
       "renderPreamble must fold in the Driver entry's outcomeExtractFnBody, got: ${out}";
+    assert assertMsg (hasInfix "_driver_extract_near_miss_outcome() {\necho stub-near-miss" out)
+      "renderPreamble must fold in the Driver entry's outcomeExtractNearMissFnBody, got: ${out}";
     assert assertMsg (hasInfix "_driver_session_flags() {\necho stub-session" out)
       "renderPreamble must fold in the Driver entry's sessionFlagsFnBody, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-shape" { } "touch $out";
