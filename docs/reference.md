@@ -90,7 +90,7 @@ would.
 | `skills`    | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at `/home/agent/.claude/skills`, each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `SPINDRIFT_SKILLS_DIR` mounts over them at runtime |
 | `settings`  | shared         | submodule, grouped by section (see below) | `{}` | non-secret run defaults baked into the `spindrift` CLI |
 | `runtime`   | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
-| `driver`    | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` is the only Driver today |
+| `driver`    | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide |
 | `nixInBox`  | shared         | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
 | `nixStoreWritable` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; OCI runners only, the bwrap runner keeps its read-only store bind |
 | `extraClosures` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
@@ -272,6 +272,12 @@ Driver entry declares:
 - `skillsDirRelative` — where the agent CLI scans for skill files, relative
   to `$HOME`. Required; the harness bakes skill files there and the runner
   adapters mount `SPINDRIFT_SKILLS_DIR` overrides over the same path.
+- `agentFilesTemplate` — a `{ scoutModel, reviewModel, filerModel, workerModel }`
+  function returning an attrset of HOME-relative path → file content, for a
+  Driver whose subagents land as on-disk files rather than a `--agents` flag
+  (opencode renders `.config/opencode/agents/<name>.md`, one per non-empty
+  model). Required; `claude` returns `{ }` and composes subagents via
+  `agentsJsonTemplate` instead.
 - `sessionCacheDirRelative` — where the agent CLI's session transcripts
   live, relative to `$HOME`. Optional; a Driver that omits it has no
   resumable session state (see above).
@@ -286,8 +292,9 @@ stays name-only by design (ADR 0009) — each half enforces its own entries'
 completeness independently.
 
 The registry also owns rendering: `renderPreamble` turns a validated entry
-into the `DRIVER_*` variable block (`DRIVER_BIN`, `DRIVER_FLAGS_COMMON`,
-`DRIVER_SKILLS_DIR` — the last baked as an absolute path under
+into the `DRIVER_*` variable block (`DRIVER_NAME` — the launcher selects its
+host-side strategy by it — plus `DRIVER_BIN`, `DRIVER_FLAGS_COMMON`,
+`DRIVER_SKILLS_DIR`, the last baked as an absolute path under
 `/home/agent`, the image's fixed `HOME`) and the
 `_driver_extract_outcome`/`_driver_session_flags` function definitions
 `mkHarness` bakes into `agent/entrypoint.sh` ahead of its own body, instead
