@@ -811,10 +811,15 @@ threads it into the Box the same way it does every other secret
 (`bwrapSecrets` on the bwrap runner, `-e`/`--env` on the OCI runners).
 
 Point `MODEL` (and any per-tier `*_MODEL`) at a Provider-namespaced model id
-to select `github-copilot`, e.g. `MODEL=github-copilot/claude-opus-4-8` or
-`MODEL=github-copilot/gpt-4o`. The launcher's `validate()` requires
-`OPENCODE_AUTH_CONTENT` only when `DRIVER=opencode` *and* the top-level
-`MODEL` carries the `github-copilot/` prefix; it does **not** inspect the
+to select `github-copilot`, e.g. `MODEL=github-copilot/<model>`. Copilot
+serves its own drifting catalog (`claude-sonnet-4`, `claude-opus-4`,
+`gpt-4o`, …) that is disjoint from the Anthropic-API model ids and shifts
+over time, so obtain a currently-served `<model>` from Copilot's live
+catalog — `opencode models`, filtered to the `github-copilot` provider —
+rather than copying a literal id that will rot. The launcher's
+`validate()` requires `OPENCODE_AUTH_CONTENT` only when `DRIVER=opencode`
+*and* the top-level `MODEL` carries the `github-copilot/` prefix; it does
+**not** inspect the
 per-tier `*_MODEL` knobs, so a config that points only a subagent tier (e.g.
 `REVIEW_MODEL=github-copilot/…`) at the Provider while leaving `MODEL` on a
 non-Copilot model passes validation yet still needs `OPENCODE_AUTH_CONTENT`
@@ -824,6 +829,15 @@ credentials (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`) are not
 required at all — the claude Driver and the opencode Driver's
 `github-copilot` Provider each own their own credential, and validation
 never demands both at once.
+
+A `github-copilot` model id that Copilot no longer serves — an unsupported or
+deprecated id — is rejected without a distinct signal: opencode collapses it
+into the **same** opaque `{"type":"error",…,"name":"UnknownError"}` /
+"Unexpected server error. Check server logs for details." envelope a
+missing or expired credential produces, with no "model not found" in the
+NDJSON stream. So if a Copilot run fails with that bare envelope, check the
+`<model>` against the live catalog above — it is a distinct failure mode from
+a missing/expired `OPENCODE_AUTH_CONTENT`, not just an auth problem.
 
 ### Advanced tuning
 
