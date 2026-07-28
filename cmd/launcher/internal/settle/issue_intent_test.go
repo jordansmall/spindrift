@@ -1,10 +1,12 @@
 package settle
 
 import (
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/outcome"
 )
 
@@ -102,6 +104,74 @@ func TestFileIssueIntents_TrackerWithoutHostPostedIssueFilerNoOps(t *testing.T) 
 	}
 	if len(urls) != 0 {
 		t.Errorf("urls = %v, want none", urls)
+	}
+}
+
+// TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk exercises the relay
+// path (issue #2018) end-to-end against a real *local.LocalTracker as the
+// HostPostedIssueFiler, not just the interface-satisfaction assertion the
+// fake-backed tests above cover: fileIssueIntents type-asserts s.it, and a
+// real adapter is the only way to prove that assertion actually reaches a
+// tracker that writes to disk.
+func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	lt := local.NewLocalTracker(dir, testDispatchLabels)
+
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"first bug","body":"first body","labels":["evil-label"]}`,
+			`{"title":"second bug","body":"second body"}`,
+		},
+	}
+
+	c := baseConfig()
+	s := New(c, lt, forge.NewFake(testDispatchLabels).AsPushOnly())
+	urls := s.fileIssueIntents("1", result)
+
+	if len(urls) != 2 {
+		t.Fatalf("urls = %v, want 2", urls)
+	}
+	wantSlugs := []string{"local:first-bug", "local:second-bug"}
+	for i, want := range wantSlugs {
+		if urls[i] != want {
+			t.Errorf("urls[%d] = %q, want %q", i, urls[i], want)
+		}
+	}
+
+	// Read each filed issue back through the tracker's own read path,
+	// proving the relay actually landed a file on disk with the expected
+	// title/body and host-derived labels -- never the payload's own
+	// "labels" field (issue #1949).
+	iss0, err := lt.Issue(strings.TrimPrefix(urls[0], "local:"))
+	if err != nil {
+		t.Fatalf("Issue(%s): %v", urls[0], err)
+	}
+	if iss0.Title != "first bug" || iss0.Body != "first body" {
+		t.Errorf("iss0 = %+v, want title %q body %q", iss0, "first bug", "first body")
+	}
+	foundLabel, leakedLabel := false, false
+	for _, l := range iss0.Labels {
+		if l == "agent-review-finding" {
+			foundLabel = true
+		}
+		if l == "evil-label" {
+			leakedLabel = true
+		}
+	}
+	if !foundLabel {
+		t.Errorf("iss0.Labels = %v, want %q", iss0.Labels, "agent-review-finding")
+	}
+	if leakedLabel {
+		t.Errorf("iss0.Labels = %v, leaked the payload's own label", iss0.Labels)
+	}
+
+	iss1, err := lt.Issue(strings.TrimPrefix(urls[1], "local:"))
+	if err != nil {
+		t.Fatalf("Issue(%s): %v", urls[1], err)
+	}
+	if iss1.Title != "second bug" || iss1.Body != "second body" {
+		t.Errorf("iss1 = %+v, want title %q body %q", iss1, "second bug", "second body")
 	}
 }
 

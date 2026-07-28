@@ -949,6 +949,108 @@ func TestLocalTracker_Comment_MultilineUsageReportRendersAsBlock(t *testing.T) {
 	}
 }
 
+// TestLocalTracker_PostIssue_WritesFileWithFrontmatterAndBody verifies
+// PostIssue writes a new Markdown+frontmatter file, slugified from title,
+// with the given body and labels, and returns a "local:<slug>" reference.
+func TestLocalTracker_PostIssue_WritesFileWithFrontmatterAndBody(t *testing.T) {
+	dir := t.TempDir()
+	lt := NewLocalTracker(dir, testLabels)
+
+	ref, err := lt.PostIssue("Fix the Thing", "## What to build\n\nDo the thing.\n", []string{"bug", "agent-review-finding"})
+	if err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+	if ref != "local:fix-the-thing" {
+		t.Errorf("ref = %q, want %q", ref, "local:fix-the-thing")
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "fix-the-thing.md"))
+	if err != nil {
+		t.Fatalf("read issue file: %v", err)
+	}
+	li, err := parseLocalIssue(data)
+	if err != nil {
+		t.Fatalf("parseLocalIssue: %v", err)
+	}
+	if li.frontmatter.Title != "Fix the Thing" {
+		t.Errorf("Title = %q, want %q", li.frontmatter.Title, "Fix the Thing")
+	}
+	if !reflect.DeepEqual(li.frontmatter.Labels, []string{"bug", "agent-review-finding"}) {
+		t.Errorf("Labels = %v, want %v", li.frontmatter.Labels, []string{"bug", "agent-review-finding"})
+	}
+	if li.frontmatter.Created == "" {
+		t.Error("Created is empty, want a timestamp")
+	}
+	if li.body != "## What to build\n\nDo the thing.\n" {
+		t.Errorf("body = %q, want %q", li.body, "## What to build\n\nDo the thing.\n")
+	}
+}
+
+// TestLocalTracker_ImplementsHostPostedIssueFiler asserts *LocalTracker
+// satisfies the optional forge.HostPostedIssueFiler surface (issue #2018).
+func TestLocalTracker_ImplementsHostPostedIssueFiler(t *testing.T) {
+	var _ forge.HostPostedIssueFiler = NewLocalTracker(t.TempDir(), testLabels)
+}
+
+// TestLocalTracker_PostIssue_SlugCollision_AppendsSuffix verifies PostIssue
+// never overwrites an existing issue file: when the derived slug already
+// exists, it retries with a "-2" (then "-3", ...) suffix.
+func TestLocalTracker_PostIssue_SlugCollision_AppendsSuffix(t *testing.T) {
+	dir := t.TempDir()
+	writeLocalIssue(t, dir, "fix-the-thing", localIssue{frontmatter: localFrontmatter{
+		Title: "Fix the Thing (original)", Created: "2026-07-09T12:00:00Z",
+	}})
+
+	lt := NewLocalTracker(dir, testLabels)
+	ref, err := lt.PostIssue("Fix the Thing", "new body", nil)
+	if err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+	if ref != "local:fix-the-thing-2" {
+		t.Errorf("ref = %q, want %q", ref, "local:fix-the-thing-2")
+	}
+
+	// The original file must be untouched.
+	orig, err := lt.Issue("fix-the-thing")
+	if err != nil {
+		t.Fatalf("Issue(fix-the-thing): %v", err)
+	}
+	if orig.Title != "Fix the Thing (original)" {
+		t.Errorf("original Title = %q, want unchanged %q", orig.Title, "Fix the Thing (original)")
+	}
+
+	newIss, err := lt.Issue("fix-the-thing-2")
+	if err != nil {
+		t.Fatalf("Issue(fix-the-thing-2): %v", err)
+	}
+	if newIss.Body != "new body" {
+		t.Errorf("new Body = %q, want %q", newIss.Body, "new body")
+	}
+}
+
+// TestLocalTracker_PostIssue_PunctuationTitle_FallsBackToIssueSlug verifies a
+// title with no [a-z0-9] characters slugifies to a usable "issue" slug rather
+// than a bare ".md" file.
+func TestLocalTracker_PostIssue_PunctuationTitle_FallsBackToIssueSlug(t *testing.T) {
+	dir := t.TempDir()
+	lt := NewLocalTracker(dir, testLabels)
+
+	ref, err := lt.PostIssue("!!! ???", "body", nil)
+	if err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+	if ref != "local:issue" {
+		t.Errorf("ref = %q, want %q", ref, "local:issue")
+	}
+	iss, err := lt.Issue("issue")
+	if err != nil {
+		t.Fatalf("Issue(issue): %v", err)
+	}
+	if iss.Title != "!!! ???" {
+		t.Errorf("Title = %q, want %q", iss.Title, "!!! ???")
+	}
+}
+
 func TestLocalTracker_Probe_CreatesDirAndReturnsPath(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "issues")
 	lt := NewLocalTracker(dir, testLabels)
