@@ -378,3 +378,246 @@ func TestLocalCodeForge_IntegrationTip_ResolvesNamedParentsBranch(t *testing.T) 
 		t.Errorf("IntegrationTip(%q) via a differently-parented instance = %q, want %q", parent2, got, wantLanding)
 	}
 }
+
+// TestLocalCodeForge_IntegrationContainsLanding_TrueForSameBranchLand asserts
+// IntegrationContainsLanding reports contained=true for a landing whose
+// integration branch is exactly the parent passed in — the base case of the
+// parent-agnostic containment query (issue #2129, issue #1734, ADR 0033),
+// checked before any cross-parent or rebase-aware scenario.
+func TestLocalCodeForge_IntegrationContainsLanding_TrueForSameBranchLand(t *testing.T) {
+	setGitIdentityEnv(t)
+
+	parent := ResolveParent("1694", "")
+	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
+	outbox := t.TempDir()
+	branch := "agent/issue-1698"
+	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox, branch, "1698")
+
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	br := cf.(forge.BundleRelay)
+	if err := br.RelayBundle(outbox, branch); err != nil {
+		t.Fatalf("RelayBundle: %v", err)
+	}
+	if err := cf.Merge(branch); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	landing, err := cf.(forge.LandingRef).LandingRef()
+	if err != nil {
+		t.Fatalf("LandingRef: %v", err)
+	}
+
+	contained, err := cf.(forge.LandingContainmentQuery).IntegrationContainsLanding(landing, parent.String())
+	if err != nil {
+		t.Fatalf("IntegrationContainsLanding: %v", err)
+	}
+	if !contained {
+		t.Error("IntegrationContainsLanding for a same-branch land = false, want true")
+	}
+}
+
+// TestLocalCodeForge_IntegrationContainsLanding_FalseWhenBranchMissing
+// asserts IntegrationContainsLanding reports contained=false, no error, when
+// parent's own integration branch was never created — a mixed-batch query
+// against a parent whose seams have never landed anywhere yet, the same
+// "not ready" posture a genuine containment miss gets (issue #2129).
+func TestLocalCodeForge_IntegrationContainsLanding_FalseWhenBranchMissing(t *testing.T) {
+	setGitIdentityEnv(t)
+
+	parentA := ResolveParent("1694", "")
+	parentB := ResolveParent("2200", "")
+	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parentA))
+	outbox := t.TempDir()
+	branch := "agent/issue-1698"
+	seedBundleBranch(t, repo.Bare, IntegrationBranch(parentA), outbox, branch, "1698")
+
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parentA), parentA, "Test Bot", "bot@example.com", "agent/issue-")
+	br := cf.(forge.BundleRelay)
+	if err := br.RelayBundle(outbox, branch); err != nil {
+		t.Fatalf("RelayBundle: %v", err)
+	}
+	if err := cf.Merge(branch); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	landing, err := cf.(forge.LandingRef).LandingRef()
+	if err != nil {
+		t.Fatalf("LandingRef: %v", err)
+	}
+
+	contained, err := cf.(forge.LandingContainmentQuery).IntegrationContainsLanding(landing, parentB.String())
+	if err != nil {
+		t.Fatalf("IntegrationContainsLanding: %v", err)
+	}
+	if contained {
+		t.Error("IntegrationContainsLanding against a never-created integration branch = true, want false")
+	}
+}
+
+// TestLocalCodeForge_IntegrationContainsLanding_TrueForRebasedLanding asserts
+// IntegrationContainsLanding reports contained=true for a landing whose
+// recorded sha is the seam's pre-rebase tip — not an ancestor of integration
+// once a since-advanced integration branch forces a rebase to land (issue
+// #1889) — via the same patch-equivalence fallback
+// BranchMergedIntoIntegration uses (issue #1890), mirroring
+// TestLocalCodeForge_BranchMergedIntoIntegration_TrueForRebasedLanding's
+// fixture shape (issue #2129).
+func TestLocalCodeForge_IntegrationContainsLanding_TrueForRebasedLanding(t *testing.T) {
+	setGitIdentityEnv(t)
+
+	parent := ResolveParent("1694", "")
+	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
+	outbox := t.TempDir()
+	branch := "agent/issue-1698"
+	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox, branch, "1698")
+
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	br := cf.(forge.BundleRelay)
+	if err := br.RelayBundle(outbox, branch); err != nil {
+		t.Fatalf("RelayBundle: %v", err)
+	}
+	preLandSHA := revParse(t, repo.Bare, "refs/heads/"+branch)
+
+	// Advance the integration branch with an unrelated commit, so replaying
+	// branch's own commit onto it is a genuine rebase (a new sha), not a
+	// no-op fast-forward — mirroring land_test.go's own two-seam setup.
+	other := t.TempDir()
+	run(t, "", "clone", repo.Bare, other)
+	run(t, other, "checkout", IntegrationBranch(parent))
+	if err := os.WriteFile(filepath.Join(other, "other.txt"), []byte("other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, other, "add", "other.txt")
+	run(t, other, "config", "user.email", "test@example.com")
+	run(t, other, "config", "user.name", "Test")
+	run(t, other, "commit", "-m", "other seam")
+	run(t, other, "push", "origin", IntegrationBranch(parent))
+
+	// Land branch by rebasing it onto the now-advanced integration tip and
+	// fast-forwarding integration to the result directly, deliberately
+	// bypassing cf.Merge — which would resync refs/heads/branch to the
+	// rebased result and defeat the point of this test — standing in for a
+	// landing whose recorded sha is the seam's stale pre-rebase tip.
+	rebaseWork := t.TempDir()
+	run(t, "", "clone", repo.Bare, rebaseWork)
+	run(t, rebaseWork, "checkout", branch)
+	run(t, rebaseWork, "rebase", "origin/"+IntegrationBranch(parent))
+	run(t, rebaseWork, "push", "origin", "HEAD:refs/heads/"+IntegrationBranch(parent))
+
+	if err := exec.Command("git", "-C", repo.Bare, "merge-base", "--is-ancestor", preLandSHA, "refs/heads/"+IntegrationBranch(parent)).Run(); err == nil {
+		t.Fatal("branch's pre-rebase tip is an ancestor of integration branch, want not (test setup didn't force a rebase)")
+	}
+
+	landing := branch + "@" + preLandSHA
+	contained, err := cf.(forge.LandingContainmentQuery).IntegrationContainsLanding(landing, parent.String())
+	if err != nil {
+		t.Fatalf("IntegrationContainsLanding: %v", err)
+	}
+	if !contained {
+		t.Error("IntegrationContainsLanding for a rebased landing's pre-rebase sha = false, want true")
+	}
+}
+
+// TestLocalCodeForge_IntegrationContainsLanding_FalseForUnrelatedCommit
+// asserts IntegrationContainsLanding reports contained=false, no error, for a
+// sha integration has never seen — neither an ancestor nor patch-equivalent —
+// distinct from the rebased-landing case above where the sha's content did
+// reach integration under a different sha (issue #2129).
+func TestLocalCodeForge_IntegrationContainsLanding_FalseForUnrelatedCommit(t *testing.T) {
+	setGitIdentityEnv(t)
+
+	parent := ResolveParent("1694", "")
+	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
+	outbox := t.TempDir()
+	branch := "agent/issue-1698"
+	seedBundleBranch(t, repo.Bare, IntegrationBranch(parent), outbox, branch, "1698")
+
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+	br := cf.(forge.BundleRelay)
+	if err := br.RelayBundle(outbox, branch); err != nil {
+		t.Fatalf("RelayBundle: %v", err)
+	}
+	if err := cf.Merge(branch); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	// Create an unrelated commit on a throwaway clone of the seam branch that
+	// never lands anywhere — its sha and content are unknown to integration.
+	other := t.TempDir()
+	run(t, "", "clone", repo.Bare, other)
+	run(t, other, "checkout", branch)
+	run(t, other, "config", "user.email", "test@example.com")
+	run(t, other, "config", "user.name", "Test")
+	writeAndCommit(t, other, "unrelated.txt", "unrelated")
+	unrelatedSHA := revParse(t, other, "HEAD")
+
+	landing := branch + "@" + unrelatedSHA
+	contained, err := cf.(forge.LandingContainmentQuery).IntegrationContainsLanding(landing, parent.String())
+	if err != nil {
+		t.Fatalf("IntegrationContainsLanding: %v", err)
+	}
+	if contained {
+		t.Error("IntegrationContainsLanding for an unrelated never-landed commit = true, want false")
+	}
+}
+
+// TestLocalCodeForge_IntegrationContainsLanding_AnswersForOtherParent asserts
+// IntegrationContainsLanding correctly answers for a parent other than the
+// adapter's own construction-time parent — mirroring
+// TestLocalCodeForge_IntegrationTip_ResolvesNamedParentsBranch's mixed-batch
+// fixture shape (issue #1734, issue #2129): a single shared reconcile-time
+// instance must answer every parent's containment query correctly, not just
+// the one it was built with.
+func TestLocalCodeForge_IntegrationContainsLanding_AnswersForOtherParent(t *testing.T) {
+	setGitIdentityEnv(t)
+
+	parentA, parentB := ResolveParent("1694", ""), ResolveParent("2200", "")
+	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parentA))
+	cf1 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parentA), parentA, "Test Bot", "bot@example.com", "agent/issue-")
+
+	cf2 := NewLocalCodeForge(repo.Bare, IntegrationBranch(parentA), parentB, "Test Bot", "bot@example.com", "agent/issue-")
+	outbox := t.TempDir()
+	branch := "agent/issue-2201"
+	seedBundleBranch(t, repo.Bare, IntegrationBranch(parentA), outbox, branch, "2201")
+	if err := cf2.(forge.BundleRelay).RelayBundle(outbox, branch); err != nil {
+		t.Fatalf("RelayBundle: %v", err)
+	}
+	if err := cf2.Merge(branch); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	landing, err := cf2.(forge.LandingRef).LandingRef()
+	if err != nil {
+		t.Fatalf("LandingRef: %v", err)
+	}
+
+	contained, err := cf1.(forge.LandingContainmentQuery).IntegrationContainsLanding(landing, parentB.String())
+	if err != nil {
+		t.Fatalf("IntegrationContainsLanding: %v", err)
+	}
+	if !contained {
+		t.Error("IntegrationContainsLanding via a differently-parented instance = false, want true")
+	}
+}
+
+// TestLocalCodeForge_IntegrationContainsLanding_FalseForMalformedLanding
+// asserts IntegrationContainsLanding reports contained=false, no error, for a
+// landing ref parseLandingRef can't decode — a value with no "<branch>@<sha>"
+// shape (never relayed, or a since-abandoned attempt). It reports the same
+// "not ready" posture a genuine containment miss gets, and returns before ever
+// touching git, mirroring BranchMergedIntoIntegration's own early-out for a
+// missing branch tip (issue #2129).
+func TestLocalCodeForge_IntegrationContainsLanding_FalseForMalformedLanding(t *testing.T) {
+	setGitIdentityEnv(t)
+
+	parent := ResolveParent("1694", "")
+	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
+	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
+
+	contained, err := cf.(forge.LandingContainmentQuery).IntegrationContainsLanding("no-at-sign-sha", parent.String())
+	if err != nil {
+		t.Fatalf("IntegrationContainsLanding: %v", err)
+	}
+	if contained {
+		t.Error("IntegrationContainsLanding for a malformed landing ref = true, want false")
+	}
+}

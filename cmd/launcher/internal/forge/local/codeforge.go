@@ -143,3 +143,26 @@ func (l *localCodeForge) BranchMergedIntoIntegration(branch, parent string) (boo
 func (l *localCodeForge) IntegrationTip(parent string) (string, error) {
 	return landingRef(l.repoPath, IntegrationBranch(SanitizedParent{token: parent}))
 }
+
+// IntegrationContainsLanding implements the optional
+// forge.LandingContainmentQuery surface (issue #2129, issue #1734, ADR
+// 0033) — a parent-agnostic check of whether parent's own Integration
+// branch (explicit, not l's own construction-time parent) already contains
+// landing's commit, either as a plain git ancestor or — mirroring
+// BranchMergedIntoIntegration's rebase-aware fallback — by
+// patch-equivalence, since a rebase-based land (issue #1889) replays
+// commits under new shas an ancestry check alone can't see. A malformed
+// landing reports contained=false, nil, the same "not ready" posture a
+// genuine containment miss gets.
+func (l *localCodeForge) IntegrationContainsLanding(landing, parent string) (bool, error) {
+	_, sha, ok := parseLandingRef(landing)
+	if !ok {
+		return false, nil
+	}
+	integrationBranch := IntegrationBranch(SanitizedParent{token: parent})
+	contained, err := isMergedIntoIntegration(l.repoPath, sha, integrationBranch)
+	if err != nil || contained {
+		return contained, err
+	}
+	return patchEquivalentToIntegration(l.repoPath, sha, integrationBranch)
+}

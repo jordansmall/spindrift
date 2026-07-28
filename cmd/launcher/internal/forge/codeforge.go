@@ -101,6 +101,27 @@ type LandingRepair interface {
 	IntegrationTip(parent string) (string, error)
 }
 
+// LandingContainmentQuery is CODE_FORGE=local's optional parent-agnostic
+// containment surface (issue #2129, issue #1734, ADR 0033): like
+// LandingRepair, the target parent is an explicit argument rather than the
+// adapter's own construction-time one, so a single shared Code Forge
+// instance can answer the question for any parent in a mixed batch. It
+// reports whether integration/<parent> already contains landing's commit,
+// either as a plain git ancestor or — mirroring
+// BranchMergedIntoIntegration's rebase-aware fallback — by
+// patch-equivalence, since a rebase-based land (issue #1889) replays commits
+// under new shas that a pure ancestry check can no longer see. A malformed
+// landing (not this adapter's "<branch>@<sha>" shape) and a landing whose
+// integration branch doesn't exist or doesn't yet contain it both report
+// contained=false, nil — the same "not ready" posture VerifyLanding and
+// BranchMergedIntoIntegration give their own not-yet-landed cases; a
+// non-nil error is reserved for a genuine local-git failure.
+type LandingContainmentQuery interface {
+	// IntegrationContainsLanding reports whether parent's own Integration
+	// branch already contains landing's commit.
+	IntegrationContainsLanding(landing, parent string) (bool, error)
+}
+
 // PRForge is the optional PR, CI-rollup, and auto-merge surface. Only
 // adapters that open pull requests and watch CI implement it (github); the
 // push-only git adapter does not. Callers discover it with a type assertion —
