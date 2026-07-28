@@ -990,18 +990,18 @@ func checkReadOnlyCapabilityGate(c config, cf forge.CodeForge, it forge.IssueTra
 		return nil
 	}
 	if _, ok := cf.(forge.BundleRelay); !ok {
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only requires CODE_FORGE=%q to implement bundle-relay (forge.BundleRelay) for the Box's finished branch hand-off; only CODE_FORGE=local implements it today", c.codeForge)
+		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement bundle-relay (forge.BundleRelay) for the Box's finished branch hand-off; only CODE_FORGE=local implements it today", c.codeForge)
 	}
 	if _, isPRForge := cf.(forge.PRForge); isPRForge {
 		if _, ok := cf.(forge.DraftPRCreator); !ok {
-			return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only requires CODE_FORGE=%q to implement host-side draft-PR-create (forge.DraftPRCreator); not yet available on CODE_FORGE=github", c.codeForge)
+			return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement host-side draft-PR-create (forge.DraftPRCreator); not yet available on CODE_FORGE=github", c.codeForge)
 		}
 	}
 	if _, ok := it.(forge.HostPostedCommenter); !ok {
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only requires ISSUE_TRACKER=%q to implement host-posted comments (forge.HostPostedCommenter)", c.issueTracker)
+		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=%q does not implement host-posted comments (forge.HostPostedCommenter)", c.issueTracker)
 	}
 	if _, ok := it.(forge.HostPostedIssueFiler); !ok {
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only requires ISSUE_TRACKER=%q to implement host-posted issue-filing (forge.HostPostedIssueFiler)", c.issueTracker)
+		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=%q does not implement host-posted issue-filing (forge.HostPostedIssueFiler)", c.issueTracker)
 	}
 	return nil
 }

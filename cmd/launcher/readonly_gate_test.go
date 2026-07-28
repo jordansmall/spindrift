@@ -39,6 +39,12 @@ func TestReadOnlyCapabilityGate_GitHubShapedForgeFails(t *testing.T) {
 	if !strings.Contains(err.Error(), "bundle-relay") {
 		t.Errorf("error should name the missing bundle-relay seam, got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "does not implement") {
+		t.Errorf("error should say the selected backend does not implement the seam, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "the selected CODE_FORGE=") {
+		t.Errorf("error should phrase the failure as the selected CODE_FORGE=, got: %v", err)
+	}
 }
 
 // TestReadOnlyCapabilityGate_LocalShapedForgeSatisfies verifies that
@@ -83,6 +89,12 @@ func TestReadOnlyCapabilityGate_TrackerWithoutHostPostedIssueFilerFails(t *testi
 	if !strings.Contains(err.Error(), "issue-filing") {
 		t.Errorf("error should name the missing issue-filing seam, got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "does not implement") {
+		t.Errorf("error should say the selected backend does not implement the seam, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "the selected ISSUE_TRACKER=") {
+		t.Errorf("error should phrase the failure as the selected ISSUE_TRACKER=, got: %v", err)
+	}
 }
 
 // prForgeWithBundleRelay wraps *forge.Fake (promoting its full CodeForge and
@@ -116,6 +128,12 @@ func TestReadOnlyCapabilityGate_PRForgeWithBundleRelayButNoDraftPRCreatorFails(t
 	}
 	if !strings.Contains(err.Error(), "draft-PR-create") {
 		t.Errorf("error should name the missing draft-PR-create seam, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "does not implement") {
+		t.Errorf("error should say the selected backend does not implement the seam, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "the selected CODE_FORGE=") {
+		t.Errorf("error should phrase the failure as the selected CODE_FORGE=, got: %v", err)
 	}
 }
 
@@ -168,5 +186,11 @@ func TestReadOnlyCapabilityGate_PushOnlyForgeFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "bundle-relay") {
 		t.Errorf("error should name the missing bundle-relay seam, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "does not implement") {
+		t.Errorf("error should say the selected backend does not implement the seam, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "the selected CODE_FORGE=") {
+		t.Errorf("error should phrase the failure as the selected CODE_FORGE=, got: %v", err)
 	}
 }
