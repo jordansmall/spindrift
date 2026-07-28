@@ -232,15 +232,18 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! grep -qF '/outbox/seam.bundle' "$CLAUDE_PROMPT_FILE"
-  grep -qF 'harness relays your committed branch out' "$CLAUDE_PROMPT_FILE"
 
   # Scoped to the OPEN A PULL REQUEST section itself -- the earlier COMMIT
   # section's generic rebase-then-push guidance (unrelated to this gate,
   # issue #1918's scope is the push-step fragment only) also contains the
   # literal string 'git push --force-with-lease -u origin', so a whole-file
-  # grep would false-positive on it.
+  # grep would false-positive on it. The 'harness relays' note is likewise
+  # scoped: the IF BLOCKED read-only fragment shares that phrase, so a
+  # whole-file grep could false-pass on it even if this section's fragment
+  # failed to render.
   local open_pr_section
   open_pr_section="$(awk '/^# OPEN A PULL REQUEST/,/^# OUTCOME/' "$CLAUDE_PROMPT_FILE")"
+  grep -qF 'harness relays your committed branch out' <<<"$open_pr_section"
   ! grep -qF 'git push --force-with-lease -u origin' <<<"$open_pr_section"
 }
 
