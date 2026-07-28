@@ -54,6 +54,40 @@ setup() {
   git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
 
+# A misconfigured negative backoff/jitter must not make the retry loop's
+# `sleep "$(( backoff * attempt + jitter ))"` reject its argument and abort
+# emit_outcome_backstop under `set -e` before the always-emit outcome line
+# (#593): both are clamped to zero, so the bounded retry loop still runs to
+# exhaustion and exactly one synthetic outcome line is emitted.
+@test "negative backoff/jitter is clamped so the backstop still emits an outcome" {
+  local real_git
+  real_git="$(command -v git)"
+  local shim="$BATS_TEST_TMPDIR/gitshim"
+  mkdir -p "$shim"
+  cat >"$shim/git" <<EOF
+#!$BASH
+if [ "\$1" = "push" ] && [ "\$2" = "--force-with-lease" ] && [ "\$3" = "origin" ]; then
+  echo "! [rejected] simulated push failure" >&2
+  exit 1
+fi
+exec "$real_git" "\$@"
+EOF
+  chmod +x "$shim/git"
+  export PATH="$shim:$PATH"
+
+  export FAKE_CLAUDE_COMMIT=1
+  export FAKE_CLAUDE_NO_OUTCOME=1
+  # Negative values would otherwise reach `sleep -7` on the first retry and,
+  # under `set -e`, abort before the synthetic outcome line ever prints.
+  export TRANSIENT_BACKOFF_SECS=-5
+  export HOLD_JITTER_SECS=-2
+  export MAX_REBASE_ATTEMPTS=2
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*push failed' <<<"$output"
+}
+
 # A driver that already printed its own outcome is passed through unchanged --
 # no second/synthetic line is appended.
 @test "driver exits with its own outcome line -> passed through, no synthetic line appended" {
