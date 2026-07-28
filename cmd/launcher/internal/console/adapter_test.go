@@ -48,9 +48,10 @@ func TestRefresh_TrackerErr_WrapsErr(t *testing.T) {
 }
 
 // TestDogfoodNotice_PresentVsAbsent verifies DogfoodNotice reports Live true
-// when .dogfood.pid names a running process under the given directory, and
-// false when the file doesn't exist — the pair dogfood.sh's
-// `echo $$ > .dogfood.pid` / `trap 'rm -f .dogfood.pid' EXIT` leaves behind.
+// when .spindrift/dogfood.pid names a running process under the given
+// directory, and false when the file doesn't exist — the pair dogfood.sh's
+// `echo $$ > .spindrift/dogfood.pid` / `trap 'rm -f .spindrift/dogfood.pid'
+// EXIT` leaves behind.
 func TestDogfoodNotice_PresentVsAbsent(t *testing.T) {
 	dir := t.TempDir()
 
@@ -59,7 +60,10 @@ func TestDogfoodNotice_PresentVsAbsent(t *testing.T) {
 	}
 
 	pid := strconv.Itoa(os.Getpid())
-	if err := os.WriteFile(filepath.Join(dir, ".dogfood.pid"), []byte(pid+"\n"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "dogfood.pid"), []byte(pid+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); !msg.Live {
@@ -88,7 +92,10 @@ func TestDogfoodNotice_StalePidReportsNotLive(t *testing.T) {
 	}
 	t.Cleanup(func() { isProcessAlive = orig })
 
-	if err := os.WriteFile(filepath.Join(dir, ".dogfood.pid"), []byte(strconv.Itoa(deadPid)+"\n"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "dogfood.pid"), []byte(strconv.Itoa(deadPid)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); msg.Live {
@@ -102,7 +109,10 @@ func TestDogfoodNotice_StalePidReportsNotLive(t *testing.T) {
 func TestDogfoodNotice_MalformedPidReportsNotLive(t *testing.T) {
 	dir := t.TempDir()
 
-	if err := os.WriteFile(filepath.Join(dir, ".dogfood.pid"), []byte("not-a-pid\n"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "dogfood.pid"), []byte("not-a-pid\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); msg.Live {
@@ -117,7 +127,10 @@ func TestDogfoodNotice_MalformedPidReportsNotLive(t *testing.T) {
 func TestDogfoodNotice_ZeroPidReportsNotLive(t *testing.T) {
 	dir := t.TempDir()
 
-	if err := os.WriteFile(filepath.Join(dir, ".dogfood.pid"), []byte("0\n"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "dogfood.pid"), []byte("0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); msg.Live {
@@ -133,7 +146,10 @@ func TestDogfoodNotice_ZeroPidReportsNotLive(t *testing.T) {
 func TestDogfoodNotice_NegativePidReportsNotLive(t *testing.T) {
 	dir := t.TempDir()
 
-	if err := os.WriteFile(filepath.Join(dir, ".dogfood.pid"), []byte("-1\n"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "dogfood.pid"), []byte("-1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if msg := DogfoodNotice(dir).(DogfoodNoticeMsg); msg.Live {
