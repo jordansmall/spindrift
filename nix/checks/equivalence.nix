@@ -684,6 +684,160 @@ in
         aarch64-darwin: ${harnessDarwin.image.drvPath}'';
     pkgs.runCommand "skills-content-form-drvpath-host-independent" { } "touch $out";
 
+  # The function-of-pkgs `packages` knob (like `extraClosures`, issue #469)
+  # receives the image's own (always-Linux) pkgs as its argument — a Consumer
+  # flake writes `packages = p: [ p.hello ];` and gets the Linux `hello`
+  # regardless of host. If a future refactor instead closed the function over
+  # the Consumer's host pkgs (e.g. via `nixpkgs.legacyPackages.${system}`),
+  # the built derivations — and therefore the image drvPath — would diverge
+  # between a linux and darwin Consumer host, reintroducing the ADR
+  # 0019/issue #597 freshness-probe bug this file's other host-independence
+  # checks guard against (issue #2114). Same cross-system-at-pure-eval-time
+  # technique as skills-content-form-drvpath-host-independent above.
+  packages-function-form-drvpath-host-independent =
+    let
+      inherit (pkgs.lib) assertMsg;
+      packages = p: [ p.hello ];
+      harnessLinux = import ../../lib/mkHarness.nix {
+        inherit nixpkgs packages;
+        system = "aarch64-linux";
+      };
+      harnessDarwin = import ../../lib/mkHarness.nix {
+        inherit nixpkgs packages;
+        system = "aarch64-darwin";
+      };
+    in
+    assert assertMsg (harnessLinux.image.drvPath == harnessDarwin.image.drvPath) ''
+      agent-image drvPath depends on the Consumer's host system via the
+      `packages` knob (issue #597 / #2114):
+        aarch64-linux:  ${harnessLinux.image.drvPath}
+        aarch64-darwin: ${harnessDarwin.image.drvPath}'';
+    pkgs.runCommand "packages-function-form-drvpath-host-independent" { } "touch $out";
+
+  # The function-of-pkgs `extraClosures` knob (issue #469) receives the
+  # image's own (always-Linux) pkgs as its argument, same contract as the
+  # `packages` knob above. If a future refactor instead closed the function
+  # over the Consumer's host pkgs, the built closure -- and therefore the
+  # image drvPath -- would diverge between a linux and darwin Consumer host,
+  # reintroducing the ADR 0019/issue #597 freshness-probe bug this file's
+  # other host-independence checks guard against (issue #2114). Same
+  # cross-system-at-pure-eval-time technique as
+  # packages-function-form-drvpath-host-independent above.
+  extraclosures-function-form-drvpath-host-independent =
+    let
+      inherit (pkgs.lib) assertMsg;
+      extraClosures = p: [ p.cowsay ];
+      harnessLinux = import ../../lib/mkHarness.nix {
+        inherit nixpkgs extraClosures;
+        system = "aarch64-linux";
+      };
+      harnessDarwin = import ../../lib/mkHarness.nix {
+        inherit nixpkgs extraClosures;
+        system = "aarch64-darwin";
+      };
+    in
+    assert assertMsg (harnessLinux.image.drvPath == harnessDarwin.image.drvPath) ''
+      agent-image drvPath depends on the Consumer's host system via the
+      `extraClosures` knob (issue #597 / #2114):
+        aarch64-linux:  ${harnessLinux.image.drvPath}
+        aarch64-darwin: ${harnessDarwin.image.drvPath}'';
+    pkgs.runCommand "extraclosures-function-form-drvpath-host-independent" { } "touch $out";
+
+  # The `skills` knob's path/derivation form (lib/image.nix:352-376) is copied
+  # verbatim via `cp -r ${f}` rather than re-realized with the image's own
+  # pkgs, unlike the `{ name; src; }` content form covered above. A plain
+  # source path is content-addressed and host-independent, so pointing
+  # `skills` at one must not tag the image drvPath with the consumer host
+  # system either — but a derivation realized with the consumer's *host*
+  # pkgs would (issue #597 / #2114); this locks in the path-form half of that
+  # invariant. Same cross-system-at-pure-eval-time technique as
+  # skills-content-form-drvpath-host-independent above.
+  skills-path-form-drvpath-host-independent =
+    let
+      inherit (pkgs.lib) assertMsg;
+      skills = [ ../fixtures/skill-path-form ];
+      harnessLinux = import ../../lib/mkHarness.nix {
+        inherit nixpkgs skills;
+        system = "aarch64-linux";
+      };
+      harnessDarwin = import ../../lib/mkHarness.nix {
+        inherit nixpkgs skills;
+        system = "aarch64-darwin";
+      };
+    in
+    assert assertMsg (harnessLinux.image.drvPath == harnessDarwin.image.drvPath) ''
+      agent-image drvPath depends on the Consumer's host system via the
+      `skills` knob's path form (issue #597 / #2114):
+        aarch64-linux:  ${harnessLinux.image.drvPath}
+        aarch64-darwin: ${harnessDarwin.image.drvPath}'';
+    pkgs.runCommand "skills-path-form-drvpath-host-independent" { } "touch $out";
+
+  # Negative counterpart to the three host-independence checks above: proof
+  # that they have teeth. Each of those checks asserts `==` between a
+  # linux-consumer and darwin-consumer image drvPath for a knob that
+  # correctly receives the image's own (always-Linux) pkgs. Here we
+  # deliberately reintroduce the regression those checks guard against — a
+  # knob closing over a derivation realized with the *Consumer's host* pkgs
+  # (`import nixpkgs { system = <consumer system>; }`) rather than the
+  # image's own — and assert the drvPaths DO diverge between a linux and
+  # darwin consumer `system`. A host-realized derivation is expected to tag
+  # the image drvPath with the consumer host system (issue #597 / #2114): if
+  # this ever stopped diverging, the positive `==` checks above would have
+  # gone vacuous (always passing regardless of whether the regression they
+  # name is present). Covers all three knobs (`packages`, `extraClosures`,
+  # `skills`) with one small harness-building helper.
+  consumer-knob-host-realized-derivation-tags-drvpath =
+    let
+      inherit (pkgs.lib) assertMsg;
+      hostPkgs = s: import nixpkgs { system = s; };
+      regHarness =
+        { knob, sys }:
+        import ../../lib/mkHarness.nix (
+          {
+            inherit nixpkgs;
+            system = sys;
+          }
+          // knob sys
+        );
+      diverges =
+        knob:
+        (regHarness {
+          inherit knob;
+          sys = "aarch64-linux";
+        }).image.drvPath != (regHarness {
+          inherit knob;
+          sys = "aarch64-darwin";
+        }).image.drvPath;
+      pkgsKnob = sys: {
+        packages = _: [ (hostPkgs sys).hello ];
+      };
+      extraClosuresKnob = sys: {
+        extraClosures = _: [ (hostPkgs sys).cowsay ];
+      };
+      skillsKnob = sys: {
+        skills = [ (hostPkgs sys).emptyDirectory ];
+      };
+    in
+    assert assertMsg (diverges pkgsKnob) ''
+      regression sanity check failed: a `packages` knob closing over a
+      *host*-realized derivation (issue #597 / #2114) was expected to tag the
+      image drvPath with the consumer host system, but linux and darwin
+      drvPaths matched anyway -- the positive host-independence check above
+      would not catch this regression.'';
+    assert assertMsg (diverges extraClosuresKnob) ''
+      regression sanity check failed: an `extraClosures` knob closing over a
+      *host*-realized derivation (issue #597 / #2114) was expected to tag the
+      image drvPath with the consumer host system, but linux and darwin
+      drvPaths matched anyway -- the positive host-independence check above
+      would not catch this regression.'';
+    assert assertMsg (diverges skillsKnob) ''
+      regression sanity check failed: a `skills` knob closing over a
+      *host*-realized derivation (issue #597 / #2114) was expected to tag the
+      image drvPath with the consumer host system, but linux and darwin
+      drvPaths matched anyway -- the positive host-independence check above
+      would not catch this regression.'';
+    pkgs.runCommand "consumer-knob-host-realized-derivation-tags-drvpath" { } "touch $out";
+
   # The `run`/`build` app-style aliases promised gone in v0.2.0 (MIGRATING.md)
   # must stay gone from the flake-output surface: a Consumer invoking
   # `nix run .#run` or `nix run .#build` should get an unknown-output error,
