@@ -44,7 +44,7 @@ list) toggles a help overlay listing every binding across every view.
 | `q`/`ctrl+c` | quit |
 | `?` | toggle the help overlay |
 
-If a `.dogfood.pid` file is present at startup — a headless loop
+If a `.spindrift/dogfood.pid` file is present at startup — a headless loop
 (`dogfood.sh`) already draining the same queue — the Console prints an
 informational notice and keeps going; it never blocks or refuses to start,
 and the two are safe to run side by side (claims are atomic label swaps).
