@@ -1,0 +1,7 @@
+{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}
+{"type":"step_finish","timestamp":1500,"part":{"messageID":"msg_1","tokens":{"input":100,"output":50,"reasoning":10,"cache":{"write":20,"read":200}},"cost":0.01}}
+{"type":"text","part":{"messageID":"msg_1","text":"turn 1 done"}}
+{"type":"step_start","timestamp":2000,"part":{"messageID":"msg_2"}}
+{"type":"step_finish","timestamp":2500,"part":{"messageID":"msg_2","tokens":{"input":200,"output":100,"reasoning":0,"cache":{"write":30,"read":300}},"cost":0.02}}
+{"type":"step_start","timestamp":3000,"part":{"messageID":"msg_3"}}
+{"type":"step_finish","timestamp":4000,"part":{"messageID":"msg_3","tokens":{"input":300,"output":150,"reasoning":5,"cache":{"write":50,"read":500}},"cost":0.03}}
