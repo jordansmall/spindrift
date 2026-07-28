@@ -17,9 +17,11 @@ type Event struct {
 
 // Message is the "message" object of an assistant stream event. It is a
 // union of every field a consumer needs: Model is heartbeat-only (narration
-// headers), Usage is usage-only (token accounting) — neither consumer
-// requires both to be populated.
+// headers), Usage is usage-only (token accounting), ID is usage-dedup-only
+// (breakdownByModelFile collapses re-emitted same-id lines) — no consumer
+// requires every field to be populated.
 type Message struct {
+	ID      string         `json:"id,omitempty"`
 	Content []ContentBlock `json:"content"`
 	Model   string         `json:"model,omitempty"`
 	Usage   TokenUsage     `json:"usage"`

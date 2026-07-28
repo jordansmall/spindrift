@@ -95,15 +95,23 @@ func assistantEvent(line string) (Event, bool) {
 // event is one API response, so its input_tokens is already that call's
 // uncached input, and its cache_read/cache_creation figures are that call's
 // own cache tokens — none of it is cumulative across a turn or a run.
-// Aggregation is therefore a SUM across every assistant event, across every
-// turn and every subagent, keyed by ModelFamily(message.model). This is
-// deliberately not a read of the result event's own "usage" header: that
-// header is a non-cumulative snapshot of only its own call and does not
-// reconcile against a sum over the transcript. The per-call vs cumulative
-// determination is settled by evidence — the Messages API per-request usage
-// contract and the real #2078 dispatch figures — in
-// TestBreakdownByModel_Fixture; the ~9x #2078 discrepancy is the header
-// snapshot vs the transcript sum, not a summing bug.
+// Aggregation is therefore a SUM across every DISTINCT message.id, across
+// every turn and every subagent, keyed by ModelFamily(message.model) — not a
+// sum over every event. A multi-content-block assistant message is
+// re-emitted by claude-code once per content block, each line carrying the
+// SAME message.id and byte-identical usage; summing every such line would
+// double- or triple-count that one call's usage. The first occurrence of a
+// non-empty message.id wins and every later line sharing that id is
+// skipped; a line with an empty or missing id (older stream-json, or any
+// shape that doesn't carry the field) is always counted, since there is
+// nothing to dedup it against. This is deliberately not a read of the
+// result event's own "usage" header: that header is a non-cumulative
+// snapshot of only its own call and does not reconcile against a sum over
+// the transcript. The per-call vs cumulative determination is settled by
+// evidence — the Messages API per-request usage contract and the real #2078
+// dispatch figures — in TestBreakdownByModel_Fixture; the ~9x #2078
+// discrepancy is the header snapshot vs the transcript sum, not a summing
+// bug.
 //
 // Returns (nil, nil) when the file does not exist.
 func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
@@ -116,11 +124,18 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 		buckets[model] = b
 		return b
 	}
+	seenIDs := make(map[string]bool)
 
 	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
 		ev, ok := assistantEvent(line)
 		if !ok {
 			return
+		}
+		if id := ev.Message.ID; id != "" {
+			if seenIDs[id] {
+				return
+			}
+			seenIDs[id] = true
 		}
 		family := ModelFamily(ev.Message.Model)
 		if family == "" {
