@@ -2,9 +2,6 @@
 result
 result-*
 
-# per-run agent logs
-logs/
-
 .claude
 
 # local config + secrets

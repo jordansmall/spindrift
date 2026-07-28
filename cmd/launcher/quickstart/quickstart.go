@@ -435,8 +435,8 @@ const quickstartGitignore = `# nix build output
 result
 result-*
 
-# per-run agent logs
-logs/
+# spindrift artifacts (per-run logs, outbox, accumulation repo, issues)
+.spindrift/
 
 # local config + secrets — never commit this
 harness.env
