@@ -15,7 +15,7 @@ import (
 // show the work instead of raw stream-json.
 //
 // Returns ("", nil) when logPath does not exist, matching lastInLog and
-// breakdownByRole's not-found contract.
+// breakdownByModelFile's not-found contract.
 func RenderTranscript(logPath string) (string, error) {
 	var lines []string
 	taskRole := make(map[string]string)

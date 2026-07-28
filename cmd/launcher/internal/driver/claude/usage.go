@@ -69,82 +69,10 @@ func lastInLog(path string) (usage.Usage, bool, error) {
 	return *last, true, nil
 }
 
-// breakdownByRoleFile scans the file at path and returns per-role token
-// breakdowns by parsing assistant message events. Messages with no
-// parent_tool_use_id are attributed to the implementor. Task tool-use IDs are
-// mapped to roles via the subagent_type field in each Task's input (e.g.
-// "scout", "reviewer").
-//
-// Returns (nil, nil) when the file does not exist.
-func breakdownByRoleFile(path string) ([]usage.RoleUsage, error) {
-	var lines []string
-	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
-		if s := strings.TrimSpace(line); s != "" {
-			lines = append(lines, s)
-		}
-	})
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	// Pass 1: collect Task tool-use IDs → role name from implementor messages.
-	// The subagent_type field in each Task's input (e.g. "scout", "reviewer")
-	// is the ground-truth role, so re-invocations of the same role accumulate
-	// correctly rather than being mis-attributed by position.
-	taskRole := make(map[string]string)
-	for _, line := range lines {
-		if !strings.Contains(line, `"type":"assistant"`) {
-			continue
-		}
-		var ev Event
-		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Type != "assistant" {
-			continue
-		}
-		CollectTaskRoles(ev, taskRole)
-	}
-
-	// Pass 2: accumulate usage per role.
-	buckets := make(map[string]*usage.RoleUsage)
-	ensure := func(role string) *usage.RoleUsage {
-		if b, ok := buckets[role]; ok {
-			return b
-		}
-		b := &usage.RoleUsage{Role: role}
-		buckets[role] = b
-		return b
-	}
-
-	for _, line := range lines {
-		ev, ok := assistantEvent(line)
-		if !ok {
-			continue
-		}
-		role := ResolveRole(ev, taskRole)
-		b := ensure(role)
-		b.InputTokens += ev.Message.Usage.InputTokens
-		b.OutputTokens += ev.Message.Usage.OutputTokens
-		b.CacheReadInputTokens += ev.Message.Usage.CacheReadInputTokens
-		b.CacheCreationInputTokens += ev.Message.Usage.CacheCreationInputTokens
-	}
-
-	// Return in deterministic order: implementor, scout, reviewer, filer, then others.
-	order := []string{"implementor", "scout", "reviewer", "filer", "subagent"}
-	var result []usage.RoleUsage
-	for _, role := range order {
-		if b, ok := buckets[role]; ok {
-			result = append(result, *b)
-		}
-	}
-	return result, nil
-}
-
 // assistantEvent decodes line as a claude-code stream-json assistant message
 // event, returning the parsed Event and true only when line is an assistant
 // event carrying a non-nil Message. It is the shared decode preamble of
-// breakdownByRoleFile's usage pass and breakdownByModelFile.
+// breakdownByModelFile's usage pass.
 func assistantEvent(line string) (Event, bool) {
 	if !strings.Contains(line, `"type":"assistant"`) {
 		return Event{}, false
@@ -158,11 +86,6 @@ func assistantEvent(line string) (Event, bool) {
 	}
 	return ev, true
 }
-
-// breakdownByRole indirects to breakdownByRoleFile so tests can simulate a
-// breakdownByRoleFile I/O error without a real filesystem race between it
-// and the lastInLog scan.
-var breakdownByRole = breakdownByRoleFile
 
 // breakdownByModelFile scans the file at path and returns per-model-family
 // token breakdowns, split into the five billable categories, by parsing
@@ -257,7 +180,7 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 var breakdownByModel = breakdownByModelFile
 
 // ExtractUsage scans logPath for its result event and, separately, its
-// per-role breakdown, returning both in one usage.Report — the claude
+// per-model breakdown, returning both in one usage.Report — the claude
 // Driver's implementation of the Driver interface's ExtractUsage method.
 func ExtractUsage(logPath string) (usage.Report, error) {
 	u, found, err := lastInLog(logPath)
@@ -267,19 +190,12 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 	if !found {
 		return usage.Report{}, nil
 	}
-	// A breakdownByRole I/O error degrades the per-role section, not the
+	// A breakdownByModel I/O error degrades the per-model section, not the
 	// aggregate totals already parsed above — see issue #674.
-	roles, err := breakdownByRole(logPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: breakdown by role failed for %s: %v\n", logPath, err)
-		roles = nil
-	}
-	// A breakdownByModel I/O error likewise degrades only the per-model
-	// section, not the aggregate totals or the per-role breakdown above.
 	models, err := breakdownByModel(logPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by model failed for %s: %v\n", logPath, err)
 		models = nil
 	}
-	return usage.Report{Usage: u, Found: true, Roles: roles, Models: models}, nil
+	return usage.Report{Usage: u, Found: true, Models: models}, nil
 }

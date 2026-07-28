@@ -22,15 +22,6 @@ func FormatDuration(ms int64) string {
 	return fmt.Sprintf("%ds", sec)
 }
 
-// RoleUsage holds the aggregated token usage attributed to one subagent role.
-type RoleUsage struct {
-	Role                     string
-	InputTokens              int
-	OutputTokens             int
-	CacheReadInputTokens     int
-	CacheCreationInputTokens int
-}
-
 // Usage holds the aggregate statistics from a result event.
 type Usage struct {
 	InputTokens              int     `json:"input_tokens"`
@@ -56,14 +47,13 @@ type ModelUsage struct {
 	CacheWrite1hTokens   int // cache_creation.ephemeral_1h_input_tokens, summed
 }
 
-// Report combines a Box run's aggregate Usage with its per-role breakdown, as
-// extracted by a Driver's ExtractUsage from one pass over a Box log. Found is
-// false when the log contains no result event (or does not exist), in which
-// case Usage and Roles are both zero-valued. Models is the per-model,
-// per-category token breakdown (ModelUsage).
+// Report combines a Box run's aggregate Usage with its per-model breakdown,
+// as extracted by a Driver's ExtractUsage from one pass over a Box log. Found
+// is false when the log contains no result event (or does not exist), in
+// which case Usage is zero-valued. Models is the per-model, per-category
+// token breakdown (ModelUsage).
 type Report struct {
 	Usage
 	Found  bool
-	Roles  []RoleUsage
 	Models []ModelUsage
 }
