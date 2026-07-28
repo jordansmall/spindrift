@@ -24,6 +24,7 @@ var bwrapSecrets = map[string]bool{
 	"GH_TOKEN":                true,
 	"CLAUDE_CODE_OAUTH_TOKEN": true,
 	"ANTHROPIC_API_KEY":       true,
+	"OPENCODE_AUTH_CONTENT":   true,
 }
 
 // bwrapAdapter implements Runner for the daemonless bubblewrap sandbox.
