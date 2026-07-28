@@ -10,6 +10,48 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.7.1 — 2026-07-27
+
+An opt-in multi-pass orchestrator that runs the whole work-review-fix loop
+inside the Box, plus a spend cap and issue-filing for read-only runs.
+
+No breaking changes.
+
+- **In-box orchestrator loop (`ORCHESTRATOR_ENABLED`).** Opt in and the Box
+  drives its own loop across multiple passes instead of a single shot: a
+  coordinator plans the work, hands it to a worker, and keeps going until the
+  task is done or gives up cleanly. It writes a run-state artifact and emits a
+  heartbeat marker per pass so you can see where a run is. Off by default; the
+  existing single-pass behavior is unchanged.
+- **Coordinator and worker models.** The orchestrator runs the coordinator on
+  Opus 4.8 by default and lets you point the worker at a different model with
+  `WORKER_MODEL`, so you can spend the big model where the planning happens and a
+  cheaper one on the grind.
+- **Code-owned review pass.** The orchestrator can run a review pass over the
+  agent's own work and feed the findings back into the next fix pass, driven by
+  the harness rather than left to the agent to remember.
+- **Spend cap per run (`MAX_BUDGET_TOKENS` / `MAX_BUDGET_USD`).** Set a token or
+  dollar ceiling and fix passes stop once the run hits it. Usage is summed across
+  a run's own passes, and the check is skipped entirely when no cap is set.
+- **Read-only Box can file issues now.** Closing the gap from 0.7.0's read-only
+  mode: an agent with no write access emits its issue-filing requests as
+  tamper-checked log lines and the host files them on GitHub, the same relay
+  pattern already used for comments and PRs.
+- **Read-only runs get nudged to declare their PR.** If a read-only agent
+  finishes without emitting its PR intent, it gets one reminder to do so, and if
+  it still doesn't, the run bails visibly instead of looking done.
+- **Quieter, cheaper Box.** Bash output is teed and summarized instead of dumped
+  in full, Claude Code's output caps are lower, and the agent's async background
+  tasks are off, all of which cuts noise and wasted tokens in a run.
+- **Fix: failed blockers no longer cascade.** When a blocking issue fails, its
+  dependents are held rather than dragged down with it, so one bad blocker
+  doesn't sink an otherwise-fine queue.
+- **Fix: stale labels cleared on GitHub claim.** Claiming a GitHub issue strips
+  leftover terminal labels, so a re-run doesn't start out wearing a stale
+  completed/failed state.
+
+---
+
 ## 0.7.0 — 2026-07-25
 
 The sandboxed agent can now run against GitHub with no write access at all, plus
