@@ -232,6 +232,14 @@ let
     driverRegistry.entries.${driver}
       or (throw "mkHarness: unknown driver '${driver}'; known drivers: ${lib.concatStringsSep ", " (lib.attrNames driverRegistry.entries)}");
 
+  # The OCI image name, scoped to the selected Driver (issue #262 AC1): the
+  # default claude Driver keeps the historical `spindrift` name so existing
+  # tags and bats fixtures are unchanged, while any other Driver realises its
+  # own `spindrift-<driver>` artifact. Threaded through image.nix (the
+  # buildLayeredImage name) and preambles (the baked IMAGE_TAG) so the built
+  # image, its content-hash tag, and the launcher's load/re-tag all agree.
+  imageName = if driver == "claude" then "spindrift" else "spindrift-${driver}";
+
   # flakeOption entries are the Consumer-tunable subset.
   flakeOptionEntries = lib.filterAttrs (_: e: e.flakeOption or false) schema;
 
@@ -422,6 +430,7 @@ let
       nixStoreWritable
       extraClosures
       driverEntry
+      imageName
       driverExecBin
       orchestratorBin
       agentsJsonTemplate
@@ -585,6 +594,7 @@ let
       prefetch
       imagePath
       imageHash
+      imageName
       runtime
       imageDrv
       nixBuilderImage
@@ -601,6 +611,7 @@ let
       runtime
       imagePath
       imageHash
+      imageName
       imageDrv
       nixBuilderImage
       linuxSystem
