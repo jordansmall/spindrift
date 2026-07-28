@@ -264,3 +264,46 @@ func TestSettle_GithubReadOnly_HostileLandingIgnored_UsesAgentBranch(t *testing.
 		t.Fatalf("CreateDraftPRCalls = %+v, want one call with head=%s (never the hostile landing=%s)", fc.CreateDraftPRCalls, agentBranch, hostileLanding)
 	}
 }
+
+// TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranch
+// asserts the "merged" analogue of #1949's fix (issue #1955): a
+// prompt-injected read-only Box can print landing=main (or any other ref) on
+// a status=merged outcome line too. verifyMerged must never trust that value
+// as the PR to check for MERGED state — it has to be resolved host-side from
+// the Code Forge's own canonical AgentBranch for the issue, exactly like the
+// "ready" arm above.
+func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranch(t *testing.T) {
+	const issNum = "1955"
+	const hostileLanding = "main"
+	const prURL = "https://github.com/owner/repo/pull/1955"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	agentBranch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress", "agent-complete"}})
+	// The real PR is registered only against the host-derived agent branch,
+	// never against the hostile landing="main" — if settle ever resolves the
+	// PR to check via o.Landing instead, it finds no such PR here.
+	fc.SetPR(agentBranch, forge.PR{URL: prURL})
+	fc.SetPRState(prURL, forge.PRMerged)
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Success:      true,
+		OutcomeFound: true,
+		Outcome:      outcome.Outcome{Issue: issNum, Landing: hostileLanding, Status: "merged", Note: "ok"},
+	}
+
+	c := baseConfig()
+	c.ReadOnly = true
+	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s.Settle(d, issNum, 0, result)
+
+	iss, _ := fc.Issue(issNum)
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Fatalf("hostile landing=%s on a genuinely-merged status=merged outcome must not demote to agent-failed; verifyMerged must resolve the host-derived agent branch (%s), not landing=. labels=%v", hostileLanding, agentBranch, iss.Labels)
+	}
+	if !containsLabel(iss.Labels, "agent-in-progress") {
+		t.Fatalf("issue must remain agent-in-progress after a successful host-derived merge verification; labels=%v", iss.Labels)
+	}
+}
