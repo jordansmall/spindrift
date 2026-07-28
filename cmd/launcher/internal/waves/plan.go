@@ -130,6 +130,14 @@ type Config struct {
 	// matching every pre-existing (kind-unaware) construction site.
 	Verb string
 
+	// ParentOf resolves a dependent issue number to the sanitized parent
+	// token keying its own Integration branch (integration/<parent>) — the
+	// seam's own seed branch the local blocker gate (#2130) checks a blocker's
+	// landed work against. Set only under CODE_FORGE=local; nil for every
+	// other forge, where the seed-branch containment gate never fires and the
+	// blocker gate keeps its pre-#2130 landing-verification behavior.
+	ParentOf func(num string) string
+
 	// pollInterval overrides RunContinuous's background refill-poll cadence
 	// (issue #1637) — zero (every production construction site) means "use
 	// defaultPollInterval"; only same-package tests shrink it so the poll
