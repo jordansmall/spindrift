@@ -145,12 +145,13 @@ check_podman_machine_memory
 # defers a trapped signal until the in-flight `nix run` returns, so the wave
 # always finishes cleanly; the loop then breaks at the next boundary. Ctrl-C
 # (SIGINT to the whole process group) stays the hard-abort escape hatch.
-# Written after the dirty-tree check above: the pid file is untracked, and
-# writing it first would trip that very check.
+# Written after the dirty-tree check above: .spindrift/dogfood.pid is
+# untracked, and writing it first would trip that very check.
 stop_requested=0
 trap 'stop_requested=1; echo "==> dogfood: stop requested — will exit after the current wave"' USR1 TERM
-echo $$ > .dogfood.pid
-trap 'rm -f .dogfood.pid' EXIT
+mkdir -p .spindrift
+echo $$ > .spindrift/dogfood.pid
+trap 'rm -f .spindrift/dogfood.pid' EXIT
 
 iteration=0
 
