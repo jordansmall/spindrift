@@ -845,7 +845,11 @@ func TestLastPRIntentInLog_NonceMismatchIgnoredAndWarned(t *testing.T) {
 // TestLastPRIntentInLog_EmptyExpectedNonceNeverMatches mirrors
 // LastCommentLineInLog's own invariant: an empty expectedNonce (the zero
 // value a caller might pass by mistake) must never verify a line, even one
-// that happens to carry no real nonce field at all.
+// that happens to carry no real nonce field at all. The fixture line has
+// only one field after the token, so under issue #2089 it also looks like a
+// one-field doc example rather than a genuine signal attempt: it must stay
+// silently non-matched (err == nil) rather than warn, while still preserving
+// the empty-nonce-never-verifies invariant via found == false.
 func TestLastPRIntentInLog_EmptyExpectedNonceNeverMatches(t *testing.T) {
 	payload := encodePRIntent(t, "title", "body")
 	path := writeLog(t, "SPINDRIFT_PR_INTENT "+payload)
@@ -853,8 +857,8 @@ func TestLastPRIntentInLog_EmptyExpectedNonceNeverMatches(t *testing.T) {
 	if found {
 		t.Fatal("expected found=false for an empty expectedNonce")
 	}
-	if err == nil {
-		t.Fatal("expected a non-nil error rather than a silent no-PR-intent")
+	if err != nil {
+		t.Errorf("unexpected error for a one-field non-attempt line: %v", err)
 	}
 }
 
@@ -872,6 +876,35 @@ func TestLastPRIntentInLog_StrictDecodeRejectsMalformedPayload(t *testing.T) {
 	}
 	if err == nil {
 		t.Fatal("expected a decode error, got nil")
+	}
+}
+
+// TestLastPRIntentInLog_BareProseMentionDoesNotWarn verifies that a line
+// merely naming the token in prose — not leading with it — is not treated as
+// a signal attempt at all, so it neither verifies nor warns (issue #2089).
+func TestLastPRIntentInLog_BareProseMentionDoesNotWarn(t *testing.T) {
+	path := writeLog(t, "the SPINDRIFT_PR_INTENT line, please relay it")
+	_, found, err := outcome.LastPRIntentInLog(path, "the-nonce")
+	if found {
+		t.Fatal("expected found=false for a bare prose mention")
+	}
+	if err != nil {
+		t.Errorf("unexpected error for a bare prose mention: %v", err)
+	}
+}
+
+// TestLastPRIntentInLog_DocExampleDoesNotWarn verifies that a line leading
+// with the token but carrying only one field after it (a doc example missing
+// the base64 payload field) is not treated as a signal attempt, so it neither
+// verifies nor warns (issue #2089).
+func TestLastPRIntentInLog_DocExampleDoesNotWarn(t *testing.T) {
+	path := writeLog(t, "SPINDRIFT_PR_INTENT deadbeefcafe1234")
+	_, found, err := outcome.LastPRIntentInLog(path, "the-nonce")
+	if found {
+		t.Fatal("expected found=false for a one-field doc example")
+	}
+	if err != nil {
+		t.Errorf("unexpected error for a one-field doc example: %v", err)
 	}
 }
 
@@ -1099,7 +1132,11 @@ func TestLastCommentLineInLog_NonceMismatchIgnoredAndWarned(t *testing.T) {
 // empty expectedNonce (the zero value a caller might pass by mistake) never
 // verifies a line, even one that happens to carry no nonce field at all —
 // mirroring LineHasNonce's own "empty never matches" invariant now that
-// parseSignalLine no longer calls it directly.
+// parseSignalLine no longer calls it directly. The fixture line has only one
+// field after the token, so under issue #2089 it also looks like a one-field
+// doc example rather than a genuine signal attempt: it must stay silently
+// non-matched (err == nil) rather than warn, while still preserving the
+// empty-nonce-never-verifies invariant via found == false.
 func TestLastCommentLineInLog_EmptyExpectedNonceNeverMatches(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("verdict"))
 	path := writeLog(t, "SPINDRIFT_COMMENT "+encoded)
@@ -1107,8 +1144,8 @@ func TestLastCommentLineInLog_EmptyExpectedNonceNeverMatches(t *testing.T) {
 	if found {
 		t.Fatal("expected found=false for an empty expectedNonce")
 	}
-	if err == nil {
-		t.Fatal("expected a non-nil error rather than a silent no-comment")
+	if err != nil {
+		t.Errorf("unexpected error for a one-field non-attempt line: %v", err)
 	}
 }
 
@@ -1123,6 +1160,35 @@ func TestLastCommentLineInLog_MalformedBase64Rejected(t *testing.T) {
 	}
 	if err == nil {
 		t.Fatal("expected a non-nil error for malformed base64")
+	}
+}
+
+// TestLastCommentLineInLog_BareProseMentionDoesNotWarn verifies that a line
+// merely naming the token in prose — not leading with it — is not treated as
+// a signal attempt at all, so it neither verifies nor warns (issue #2089).
+func TestLastCommentLineInLog_BareProseMentionDoesNotWarn(t *testing.T) {
+	path := writeLog(t, "the SPINDRIFT_COMMENT line, please relay it")
+	_, found, err := outcome.LastCommentLineInLog(path, "the-nonce")
+	if found {
+		t.Fatal("expected found=false for a bare prose mention")
+	}
+	if err != nil {
+		t.Errorf("unexpected error for a bare prose mention: %v", err)
+	}
+}
+
+// TestLastCommentLineInLog_DocExampleDoesNotWarn verifies that a line leading
+// with the token but carrying only one field after it (a doc example missing
+// the base64 payload field) is not treated as a signal attempt, so it neither
+// verifies nor warns (issue #2089).
+func TestLastCommentLineInLog_DocExampleDoesNotWarn(t *testing.T) {
+	path := writeLog(t, "SPINDRIFT_COMMENT deadbeefcafe1234")
+	_, found, err := outcome.LastCommentLineInLog(path, "the-nonce")
+	if found {
+		t.Fatal("expected found=false for a one-field doc example")
+	}
+	if err != nil {
+		t.Errorf("unexpected error for a one-field doc example: %v", err)
 	}
 }
 

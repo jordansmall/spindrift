@@ -353,7 +353,9 @@ func lastVerifiedSignalInLog(path, token, expectedNonce, notVerifiedErr string) 
 			found = true
 			return
 		}
-		rejected = true
+		if looksLikeSignalAttempt(line, token) {
+			rejected = true
+		}
 	})
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -368,6 +370,25 @@ func lastVerifiedSignalInLog(path, token, expectedNonce, notVerifiedErr string) 
 		return "", false, errors.New(notVerifiedErr)
 	}
 	return "", false, nil
+}
+
+// looksLikeSignalAttempt reports whether line is a genuine (if malformed or
+// spoofed) attempt at the "<token> <nonce> <base64-payload>" grammar rather
+// than prose that merely names the token or a one-field doc example: the token
+// must lead the line (nothing but whitespace, or a stream-json-escaped newline,
+// before it) and be followed by at least the two fields a real signal carries.
+// Only such a line, when it fails to verify, is the echo/spoof case worth
+// warning about (issue #2089).
+func looksLikeSignalAttempt(line, token string) bool {
+	idx := tokenIndex(line, token)
+	if idx < 0 {
+		return false
+	}
+	prefix := strings.TrimSpace(line[:idx])
+	if prefix != "" && !strings.HasSuffix(prefix, "\\n") {
+		return false
+	}
+	return len(strings.Fields(line[idx+len(token):])) >= 2
 }
 
 // parseSignalLine extracts and strictly decodes the payload of a
