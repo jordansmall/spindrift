@@ -3,7 +3,6 @@ package waves
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -46,7 +45,7 @@ func dispatchLabels(cfg Config) forge.DispatchLabels {
 func tempLogDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(dispatch.HostLogDirFor(dir), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return dir

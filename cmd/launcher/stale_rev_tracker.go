@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"spindrift.dev/launcher/internal/dispatch"
 )
 
 // staleRevTracker persists, across separate launcher process invocations,
@@ -19,7 +21,7 @@ type staleRevTracker struct {
 
 // newStaleRevTracker returns a tracker backed by <pwd>/logs/freshness-stale-rev.
 func newStaleRevTracker(pwd string) staleRevTracker {
-	return staleRevTracker{path: filepath.Join(pwd, "logs", "freshness-stale-rev")}
+	return staleRevTracker{path: filepath.Join(dispatch.HostLogDirFor(pwd), "freshness-stale-rev")}
 }
 
 // prior returns the rev recorded by the previous run, or "" if none is

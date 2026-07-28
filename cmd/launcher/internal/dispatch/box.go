@@ -55,20 +55,28 @@ func OutboxDirFor(pwd, number string) string {
 	return filepath.Join(pwd, ".spindrift", "outbox", number)
 }
 
+// HostLogDirFor returns the host-side log directory for a working dir —
+// the single source of truth for `<pwd>/logs`, shared by the log-naming
+// functions below and every host-side site that reads or creates it, so
+// the directory can never drift.
+func HostLogDirFor(pwd string) string {
+	return filepath.Join(pwd, "logs")
+}
+
 // logPathFor, fixLogPathFor, and conflictLogPathFor are the single source of
 // truth for a Dispatch's log naming, shared with LogPaths (logs.go) so a
 // drill-in's pass discovery can never drift from the paths a Dispatch itself
-// writes.
+// writes. All three derive their directory from HostLogDirFor.
 func logPathFor(pwd, number string) string {
-	return filepath.Join(pwd, "logs", "issue-"+number+".log")
+	return filepath.Join(HostLogDirFor(pwd), "issue-"+number+".log")
 }
 
 func fixLogPathFor(pwd, number string, pass int) string {
-	return filepath.Join(pwd, "logs", fmt.Sprintf("issue-%s-fix-%d.log", number, pass))
+	return filepath.Join(HostLogDirFor(pwd), fmt.Sprintf("issue-%s-fix-%d.log", number, pass))
 }
 
 func conflictLogPathFor(pwd, number string) string {
-	return filepath.Join(pwd, "logs", fmt.Sprintf("issue-%s-conflict-resolve.log", number))
+	return filepath.Join(HostLogDirFor(pwd), fmt.Sprintf("issue-%s-conflict-resolve.log", number))
 }
 
 // Run dispatches the initial box for this issue.
