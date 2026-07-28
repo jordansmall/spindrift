@@ -99,6 +99,30 @@
       | tail -1 || true
   '';
 
+  # Shell function body extracting a *near-miss* SPINDRIFT_OUTCOME line from
+  # claude's stream-json result event (issue #1900); called as
+  # `_driver_extract_near_miss_outcome "$stream_log"`. The complement of
+  # outcomeExtractFnBody above: a line that leads with the SPINDRIFT_OUTCOME
+  # token (colon- or space-delimited, markdown wrapping stripped the same way)
+  # but does NOT carry both landing= and status= -- outcome.Parse's own two
+  # required fields (cmd/launcher/internal/outcome/outcome.go), whose absence
+  # is exactly what it classifies as ErrNearMiss. Unlike the extractor above
+  # this deliberately does not normalize the colon delimiter back to a space:
+  # the recovery nudge quotes this line back to the agent verbatim, so it must
+  # read as the agent actually typed it. Emits nothing when the only lines
+  # present are valid outcomes (handled by the extractor above) or carry the
+  # token in prose with no field markers at all.
+  outcomeExtractNearMissFnBody = ''
+    # The backtick below is a literal char in a single-quoted sed script, not
+    # an unexpanded command substitution.
+    # shellcheck disable=SC2016
+    jq -r 'select(.type == "result") | .result // empty' "$1" 2>/dev/null \
+      | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' \
+      | grep -E '^SPINDRIFT_OUTCOME[: ]' \
+      | grep -vE '(^| )landing=.*(^| )status=|(^| )status=.*(^| )landing=' \
+      | tail -1 || true
+  '';
+
   # Shell function body computing the claude-specific session pin/resume
   # flags (issue #427/ADR 0009): a deterministic per-issue session id (so no
   # state beyond ISSUE_NUMBER/REPO_SLUG is needed to recompute it) plus the

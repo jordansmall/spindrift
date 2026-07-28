@@ -22,6 +22,7 @@ let
     "flagsCommon"
     "skillsDirRelative"
     "outcomeExtractFnBody"
+    "outcomeExtractNearMissFnBody"
     "sessionFlagsFnBody"
     "agentsJsonTemplate"
     "agentFilesTemplate"
@@ -51,6 +52,9 @@ let
     driverEntry:
     "_driver_extract_outcome() {\n"
     + driverEntry.outcomeExtractFnBody
+    + "}\n"
+    + "_driver_extract_near_miss_outcome() {\n"
+    + driverEntry.outcomeExtractNearMissFnBody
     + "}\n"
     + "_driver_session_flags() {\n"
     + driverEntry.sessionFlagsFnBody

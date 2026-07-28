@@ -58,6 +58,22 @@
       | tail -1 || true
   '';
 
+  # Shell function body extracting a *near-miss* SPINDRIFT_OUTCOME line from
+  # opencode's NDJSON text events (issue #1900). Mirrors claude.nix's
+  # outcomeExtractNearMissFnBody exactly (see that file's comment for the full
+  # rationale) over opencode's `type:"text"`/`.part.text` event stream, the
+  # same way this file's outcomeExtractFnBody mirrors its claude.nix sibling.
+  outcomeExtractNearMissFnBody = ''
+    # The backtick below is a literal char in a single-quoted sed script, not
+    # an unexpanded command substitution.
+    # shellcheck disable=SC2016
+    jq -r 'select(.type == "text") | .part.text // empty' "$1" 2>/dev/null \
+      | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' \
+      | grep -E '^SPINDRIFT_OUTCOME[: ]' \
+      | grep -vE '(^| )landing=.*(^| )status=|(^| )status=.*(^| )landing=' \
+      | tail -1 || true
+  '';
+
   # Shell function body computing opencode-specific session pin/resume flags.
   # opencode wires no session resume (contrast claude.nix's deterministic
   # --session-id/--resume pinning), so this is a defined no-op body -- the
