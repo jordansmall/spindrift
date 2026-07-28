@@ -40,6 +40,7 @@ let
 
   entries = {
     claude = assertShape "claude" (import ./claude.nix { inherit lib; });
+    opencode = assertShape "opencode" (import ./opencode.nix { inherit lib; });
   };
 
   # The Driver's function definitions, shared verbatim between the image
