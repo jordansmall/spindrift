@@ -236,6 +236,18 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		switch {
 		case hasOutcome:
 			decision, reason = "stop", "outcome reached"
+		// After an APPROVE verdict the land pass above runs exactly once (see
+		// the review decision block below): a land pass cut off before its
+		// own terminal SPINDRIFT_OUTCOME is recovered by the within-pass
+		// required_marker_gate session-resume nudge (issue #2044,
+		// agent/entrypoint.sh) inside that single land driver-exec, not by
+		// re-entering the review->land cycle here -- a fresh land pass would
+		// re-invoke the Filer / FILE ISSUES step on every extra lap,
+		// bounded only by the coarse maxSlices (issue #2069). This stop is
+		// the bound; it emits the existing decision op so an operator sees
+		// why the run ended.
+		case state.LastVerdict == "APPROVE":
+			decision, reason = "stop", "land pass reached no terminal outcome after APPROVE"
 		case cfg.maxSlices > 0 && pass >= cfg.maxSlices:
 			decision, reason = "stop", "max slices reached"
 		}
@@ -268,6 +280,11 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
 		}
 
+		// An APPROVE verdict deliberately falls through to "continue" here
+		// (none of the cases below matches it), entering the land pass at
+		// the top of the loop exactly once -- see the land-block comment
+		// above for why that single land pass is terminal on APPROVE (issue
+		// #2069).
 		decision, reason = "continue", ""
 		switch {
 		case reviewVerdict == "":
