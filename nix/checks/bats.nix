@@ -32,6 +32,7 @@ in
           ${../../agent/env-credential-scrub.sh} \
           ${../../agent/bash-output-tee.sh} \
           ${../../agent/bash-output-summary.sh} \
+          ${../../ab-orchestrator.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/fakes/claude} \
@@ -91,6 +92,11 @@ in
         BASH_OUTPUT_TEE_SCRIPT = ../../agent/bash-output-tee.sh;
         BASH_OUTPUT_SUMMARY_SCRIPT = ../../agent/bash-output-summary.sh;
         DOGFOOD_SH = ../../dogfood.sh;
+        # The worker/coordinator A/B harness (issue #2057). tests/ is copied
+        # into the sandbox but its parent ab-orchestrator.sh is not, so
+        # tests/ab-orchestrator.bats resolves the script through this env var
+        # rather than $BATS_TEST_DIRNAME/../ab-orchestrator.sh.
+        AB_ORCHESTRATOR_SH = ../../ab-orchestrator.sh;
         PROMPTS_DIR = ../../templates/default/prompts;
         # The baked default prompt dir the `run` command mounts, and a
         # Consumer-configured one whose rendered content flows through
