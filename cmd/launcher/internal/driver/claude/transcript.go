@@ -113,13 +113,14 @@ func isSubagentSpawnTool(name string) bool {
 	return name == "Task" || name == "Agent"
 }
 
-// CollectTaskRoles scans an implementor event (ParentToolUseID == "") for
+// CollectTaskRoles scans an event — whether issued by the implementor
+// (ParentToolUseID == "") or by a subagent at any nesting depth — for
 // Task/Agent tool-use blocks and records each one's subagent role — from its
 // subagent_type input field, defaulting to DefaultRole — into taskRole, keyed
-// by the tool-use ID. Events with a non-empty ParentToolUseID are ignored:
-// only the implementor issues Task calls.
+// globally by the spawn block's tool-use ID. Keying globally lets a nested
+// spawn's role resolve correctly instead of falling back to DefaultRole.
 func CollectTaskRoles(ev Event, taskRole map[string]string) {
-	if ev.ParentToolUseID != "" || ev.Message == nil {
+	if ev.Message == nil {
 		return
 	}
 	for _, block := range ev.Message.Content {

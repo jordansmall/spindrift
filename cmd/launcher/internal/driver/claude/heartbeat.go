@@ -78,9 +78,13 @@ func (w *Writer) parseLine(line string) {
 	switch ev.Type {
 	case "assistant":
 		if ev.Message != nil {
-			// Collect Task tool-use IDs → subagent role from implementor messages,
-			// online as events stream in (breakdownByRole does the same
-			// resolution buffered, over a full log, via the same helpers).
+			// Collect Task/Agent tool-use IDs → subagent role from every
+			// message — implementor and nested subagents alike — online as
+			// events stream in. Single-pass resolution relies on a spawn
+			// block streaming before its child's messages (the parent must
+			// emit the Agent block first, which holds in practice);
+			// breakdownByRole does the same resolution buffered, over a full
+			// log, via the same helpers.
 			CollectTaskRoles(ev, w.taskRole)
 
 			// Resolve acting role from parent_tool_use_id.

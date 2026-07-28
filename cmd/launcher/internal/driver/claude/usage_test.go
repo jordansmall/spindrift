@@ -225,6 +225,53 @@ func TestBreakdownByRole_AgentToolName(t *testing.T) {
 	}
 }
 
+func TestBreakdownByRole_NestedSubagent(t *testing.T) {
+	// Implementor spawns A (subagent_type "scout").
+	implMain := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_A","name":"Agent","input":{"subagent_type":"scout"}}],"usage":{"input_tokens":10,"output_tokens":5}}}`
+	// A's own message spawns B (subagent_type "reviewer") — this event carries
+	// parent_tool_use_id "toolu_A" (A is the actor) AND the spawn block for B.
+	aSpawnsB := `{"type":"assistant","parent_tool_use_id":"toolu_A","message":{"content":[{"type":"tool_use","id":"toolu_B","name":"Agent","input":{"subagent_type":"reviewer"}}],"usage":{"input_tokens":400,"output_tokens":140}}}`
+	// B's own message, nested two levels deep under the implementor.
+	bMsg := `{"type":"assistant","parent_tool_use_id":"toolu_B","message":{"content":[],"usage":{"input_tokens":700,"output_tokens":250}}}`
+
+	path := WriteLog(t, implMain, aSpawnsB, bMsg)
+
+	breakdown, err := breakdownByRole(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	roles := map[string]usage.RoleUsage{}
+	for _, r := range breakdown {
+		roles[r.Role] = r
+	}
+
+	reviewer, ok := roles["reviewer"]
+	if !ok {
+		t.Fatal("want a reviewer role bucket for nested subagent B, got none")
+	}
+	if reviewer.InputTokens != 700 {
+		t.Errorf("reviewer input tokens: got %d, want 700", reviewer.InputTokens)
+	}
+	if reviewer.OutputTokens != 250 {
+		t.Errorf("reviewer output tokens: got %d, want 250", reviewer.OutputTokens)
+	}
+
+	scout, ok := roles["scout"]
+	if !ok {
+		t.Fatal("want a scout role bucket for subagent A, got none")
+	}
+	if scout.InputTokens != 400 {
+		t.Errorf("scout input tokens: got %d, want 400", scout.InputTokens)
+	}
+	if scout.OutputTokens != 140 {
+		t.Errorf("scout output tokens: got %d, want 140", scout.OutputTokens)
+	}
+
+	if _, ok := roles["subagent"]; ok {
+		t.Error("want no subagent bucket; nested subagent B's own subagent_type must resolve, not fall back to the generic label")
+	}
+}
+
 func TestBreakdownByRole_ReviewerReinvoked(t *testing.T) {
 	// First reviewer invocation
 	implMain1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_rev1","name":"Task","input":{"subagent_type":"reviewer","prompt":"review diff"}}],"usage":{"input_tokens":100,"output_tokens":30}}}`

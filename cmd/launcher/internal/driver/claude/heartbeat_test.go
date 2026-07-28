@@ -707,6 +707,39 @@ func TestWriterSwitchHeader_AgentToolName(t *testing.T) {
 	}
 }
 
+// TestWriterSwitchHeader_NestedSubagent verifies that a subagent B spawned by
+// another subagent A — two levels below the implementor — is labeled with
+// B's own subagent_type in the switch header, not the generic "subagent"
+// fallback (issue #2079).
+func TestWriterSwitchHeader_NestedSubagent(t *testing.T) {
+	var status bytes.Buffer
+	w := claude.New(&bytes.Buffer{}, "2079", &status)
+
+	// Implementor spawns A (subagent_type "researcher").
+	implAgent := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Agent","id":"toolu_A","input":{"subagent_type":"researcher"}}]}}` + "\n"
+	// A's own message spawns B (subagent_type "worker"); this event carries
+	// parent_tool_use_id "toolu_A" (A is the actor) AND B's spawn block.
+	aSpawnsB := `{"type":"assistant","parent_tool_use_id":"toolu_A","message":{"content":[{"type":"tool_use","name":"Agent","id":"toolu_B","input":{"subagent_type":"worker"}}]}}` + "\n"
+	// B's own message, nested two levels deep under the implementor.
+	bRead := `{"type":"assistant","parent_tool_use_id":"toolu_B","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n"
+	// Implementor resumes with narration, flushing B's pending counts.
+	implNar := `{"type":"assistant","message":{"content":[{"type":"text","text":"Back to work."}]}}` + "\n"
+
+	fmt.Fprint(w, implAgent)
+	fmt.Fprint(w, aSpawnsB)
+	fmt.Fprint(w, bRead)
+	fmt.Fprint(w, implNar)
+
+	out := status.String()
+	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
+	if !strings.Contains(out, rule+" worker ") {
+		t.Errorf("missing worker role header for nested subagent B: %q", out)
+	}
+	if strings.Contains(out, rule+" subagent ") {
+		t.Errorf("nested subagent B must not fall back to the generic \"subagent\" role header: %q", out)
+	}
+}
+
 // TestWriterResultLineNamesActingRole verifies that when a result event
 // fires while a subagent is still the acting role (the log ends mid-scout,
 // no narration or tool call ever hands control back to the implementor),

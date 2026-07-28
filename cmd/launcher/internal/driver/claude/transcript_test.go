@@ -77,7 +77,7 @@ func TestCollectTaskRoles_EmptySubagentTypeDefaultsToSubagent(t *testing.T) {
 	}
 }
 
-func TestCollectTaskRoles_IgnoresEventsWithParent(t *testing.T) {
+func TestCollectTaskRoles_RecordsSpawnFromNestedEvent(t *testing.T) {
 	ev := Event{
 		Type:            "assistant",
 		ParentToolUseID: "toolu_1",
@@ -89,7 +89,41 @@ func TestCollectTaskRoles_IgnoresEventsWithParent(t *testing.T) {
 	}
 	taskRole := map[string]string{}
 	CollectTaskRoles(ev, taskRole)
-	if _, ok := taskRole["toolu_2"]; ok {
-		t.Errorf("taskRole[toolu_2] should not be recorded for a subagent event")
+	if got := taskRole["toolu_2"]; got != "scout" {
+		t.Errorf("taskRole[toolu_2] = %q, want %q", got, "scout")
+	}
+}
+
+func TestCollectTaskRoles_RecordsNestedSpawnFromChildEvent(t *testing.T) {
+	ev := Event{
+		Type:            "assistant",
+		ParentToolUseID: "toolu_A",
+		Message: &Message{
+			Content: []ContentBlock{
+				{Type: "tool_use", Name: "Agent", ID: "toolu_B", Input: []byte(`{"subagent_type":"worker"}`)},
+			},
+		},
+	}
+	taskRole := map[string]string{}
+	CollectTaskRoles(ev, taskRole)
+	if got := taskRole["toolu_B"]; got != "worker" {
+		t.Errorf("taskRole[toolu_B] = %q, want %q", got, "worker")
+	}
+}
+
+func TestCollectTaskRoles_NestedSpawnEmptySubagentTypeDefaultsToSubagent(t *testing.T) {
+	ev := Event{
+		Type:            "assistant",
+		ParentToolUseID: "toolu_A",
+		Message: &Message{
+			Content: []ContentBlock{
+				{Type: "tool_use", Name: "Task", ID: "toolu_C", Input: []byte(`{}`)},
+			},
+		},
+	}
+	taskRole := map[string]string{}
+	CollectTaskRoles(ev, taskRole)
+	if got := taskRole["toolu_C"]; got != DefaultRole {
+		t.Errorf("taskRole[toolu_C] = %q, want %q", got, DefaultRole)
 	}
 }
