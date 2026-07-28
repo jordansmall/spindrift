@@ -8,30 +8,55 @@ import (
 )
 
 // TestBreakdownByModel_Fixture locks the per-call SUM rule against a real-
-// shaped stream-json log: testdata/run-usage-sample.jsonl. The fixture is
-// modeled on the confirmed real claude-code stream-json shape — issue #2078
-// confirmed both the "Agent" spawn-block shape (rather than the legacy
-// "Task" name) and the nested cache_creation object splitting
-// cache_creation_input_tokens by TTL. A live per-dispatch capture of an
-// actual run's stream-json log, to confirm no further shape drift, remains a
-// human out-of-band step per issue #2085 — this fixture is not itself that
-// capture.
+// shaped stream-json log: testdata/run-usage-sample.jsonl.
 //
-// Per-message usage in claude-code stream-json is PER-CALL: each assistant
-// event is one API response, so Anthropic's input_tokens is already the
-// uncached input for that call, and cache_read/cache_creation are that
-// call's own cache tokens — nothing here is cumulative across a turn or a
-// run. Aggregation is therefore a SUM across every assistant event, across
-// every turn and every subagent, keyed by the calling model's family. The
-// assertions below lock that SUM rule: two models (opus, sonnet) appear as
-// the implementor's own turns (no parent_tool_use_id) interleaved with a
+// The summation rule — per-call (sum across turns) vs cumulative (take the
+// final snapshot) — is the crux the issue demanded be settled with evidence
+// before implementing, precisely to rule out the ~9x inflation on #2078.
+// Two independent lines of real evidence settle it as PER-CALL:
+//
+//  1. The Anthropic Messages API usage contract. Per-response `usage` is
+//     reported per request: `input_tokens` is the uncached-input remainder
+//     for that one call; `cache_read_input_tokens` and
+//     `cache_creation_input_tokens` are that call's own cache tokens; and
+//     `cache_creation` splits the creation total by TTL into
+//     `ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens` (the
+//     `cache_control` default TTL is 5m). Claude Code's
+//     `--output-format stream-json` emits exactly one `assistant` event per
+//     API response, so each event's `usage` is one call's per-request usage
+//     — never a running total. Correct aggregation is therefore a SUM.
+//
+//  2. The real #2078 dispatch run-usage figures (produced by the launcher
+//     parsing an actual dispatch's stream-json log — 15 turns). Its
+//     result-event header `usage` snapshot reports input_tokens 3564 and
+//     cache_read 502183; the per-role SUM over the same run's assistant
+//     messages reports input_tokens 32165 and cache_read 4,615,090
+//     (~9.2x the header). The header is the *final* call's snapshot. Were
+//     per-message usage cumulative, that final message — and thus the
+//     header — would already carry the whole-run running total (~32165
+//     input), not 3564; the header being an order of magnitude *smaller*
+//     than the 15-turn sum falsifies the cumulative hypothesis. The ~9x
+//     cache_read gap is what per-call reads accumulated over ~15
+//     growing-context turns look like, not double-summed running totals.
+//
+// The fixture is modeled on the confirmed real claude-code stream-json shape
+// — #2080 confirmed the "Agent" spawn-block shape (rather than the legacy
+// "Task" name) and the nested cache_creation TTL split. It is not a raw
+// per-message capture of a live run: this box is read-only with no `claude`
+// CLI and no network, so a live dispatch cannot be recorded in-box. The
+// issue's optional out-of-band API-key reconciliation against the Usage &
+// Cost Admin API remains the human confirmation step; the two evidence
+// lines above are what settle the summation rule here.
+//
+// The assertions below lock that SUM rule: two models (opus, sonnet) appear
+// as the implementor's own turns (no parent_tool_use_id) interleaved with a
 // scout subagent's haiku turns and an unrelated worker's sonnet turn, and
 // the totals must reflect the sum across all of them regardless of role or
 // turn boundary. The result event's own "usage" is a non-cumulative
-// snapshot of only its own call and must contribute nothing to the sums —
-// verified implicitly below, since the opus totals equal the sum of the two
-// opus assistant lines only, not double-counted against the result line's
-// (also-opus-shaped) numbers.
+// snapshot of only its own call and must contribute nothing to the sums:
+// opus.UncachedInputTokens is 140 (the two opus assistant lines, 100+40),
+// not 180 — the result line's also-opus-shaped input (40) is excluded, so a
+// regression that read or summed the header snapshot would fail this test.
 func TestBreakdownByModel_Fixture(t *testing.T) {
 	path := filepath.Join("testdata", "run-usage-sample.jsonl")
 

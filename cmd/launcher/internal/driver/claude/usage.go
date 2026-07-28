@@ -164,7 +164,11 @@ var breakdownByRole = breakdownByRoleFile
 // turn and every subagent, keyed by ModelFamily(message.model). This is
 // deliberately not a read of the result event's own "usage" header: that
 // header is a non-cumulative snapshot of only its own call and does not
-// reconcile against a sum over the transcript.
+// reconcile against a sum over the transcript. The per-call vs cumulative
+// determination is settled by evidence — the Messages API per-request usage
+// contract and the real #2078 dispatch figures — in
+// TestBreakdownByModel_Fixture; the ~9x #2078 discrepancy is the header
+// snapshot vs the transcript sum, not a summing bug.
 //
 // Returns (nil, nil) when the file does not exist.
 func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
