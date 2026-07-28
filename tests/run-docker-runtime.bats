@@ -29,6 +29,9 @@ setup() {
   export FAKE_DOCKER_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tSingle'
   export FAKE_DOCKER_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=merged note=ok"
+  # verifyMerged host-derives the ref from the branch (#1955), so the merged
+  # arm resolves the PR via `gh pr list --head`, not the Agent's landing=.
+  export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
   export FAKE_GH_PR_STATE_1="MERGED"
   export FAKE_GH_ISSUE_LABELS_1="agent-complete"
   run "$DOCKER_RUN_CMD"

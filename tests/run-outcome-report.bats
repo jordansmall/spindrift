@@ -13,6 +13,10 @@ setup() {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=merged note=ok"
   export FAKE_PODMAN_OUTCOME_2="SPINDRIFT_OUTCOME issue=2 landing=https://github.com/owner/repo/pull/2 status=merged note=ok"
+  # verifyMerged host-derives the ref from the branch (#1955), so the merged
+  # arm resolves the PR via `gh pr list --head`, not the Agent's landing=.
+  export FAKE_GH_PR_LIST_1="https://github.com/owner/repo/pull/1"
+  export FAKE_GH_PR_LIST_2="https://github.com/owner/repo/pull/2"
   export FAKE_GH_PR_STATE_1="MERGED"
   export FAKE_GH_PR_STATE_2="MERGED"
   export FAKE_GH_ISSUE_LABELS_1="agent-complete"
@@ -51,6 +55,7 @@ setup() {
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 note=missing-required-tokens"
   # Issue 2: well-formed outcome already merged.
   export FAKE_PODMAN_OUTCOME_2="SPINDRIFT_OUTCOME issue=2 landing=https://github.com/owner/repo/pull/2 status=merged note=ok"
+  export FAKE_GH_PR_LIST_2="https://github.com/owner/repo/pull/2"
   export FAKE_GH_PR_STATE_2="MERGED"
   export FAKE_GH_ISSUE_LABELS_2="agent-complete"
   run "$RUN_CMD"

@@ -113,12 +113,28 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		}
 		s.postUsageComment(num, d)
 	case "merged":
-		// verifyMerged reads PR state, which a push-only Code Forge does
-		// not have — unlike the "ready" case above, this branch logs a
-		// status line via the else when s.pr is nil.
+		// status=merged is off-script — no prompt fragment instructs a Box
+		// to print it (issue-prompt.md documents only "ready"/"blocked"), so
+		// o.Landing here carries Agent-controlled input with no legitimate
+		// provenance. Resolve the ref verifyMerged reads host-side from the
+		// Code Forge's own AgentBranch (issue #1955) rather than forwarding
+		// o.Landing straight into a forge read — the same host-derived-ref
+		// discipline #1949 gave the "ready" arm and settleUnresolved/
+		// SettleAdopted already follow. PRForBranch resolves the branch to a
+		// real PR URL, so verifyMerged's PRState call keeps its documented
+		// full-URL contract (no bare-ref/--repo ambiguity).
 		if s.pr != nil {
-			s.verifyMerged(num, o.Landing)
+			branch := s.cf.AgentBranch(num)
+			pr, ok, err := s.pr.PRForBranch(branch)
+			if err != nil || !ok {
+				fmt.Printf("    #%s  landing=%s  status=failed  !! no PR found on branch to verify merge\n", num, branch)
+				s.transitionState(num, forge.InProgress, forge.Failed)
+			} else {
+				s.verifyMerged(num, pr)
+			}
 		} else {
+			// verifyMerged reads PR state, which a push-only Code Forge does
+			// not have — log the status line instead.
 			fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
 		}
 		s.postUsageComment(num, d)
