@@ -848,6 +848,105 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 	}
 }
 
+// noOutcomeAfterApproveFakeDriverBody returns a writeFakeDriverExec body
+// scripting a fake driver-exec for issue #2069: the implement pass (call 1)
+// and the land pass (call 3, seeded with the review's own APPROVE verdict)
+// each emit nothing of their own -- no verdict, no terminal outcome -- while
+// the review pass (call 2) APPROVEs outright on its first round. This is the
+// "land pass cut off before its own terminal SPINDRIFT_OUTCOME" shape the
+// orchestrator must stop on rather than re-entering the review->land cycle.
+func noOutcomeAfterApproveFakeDriverBody(callLog string) string {
+	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "%s")
+case "$n" in
+  2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+esac
+exit 0
+`, callLog,
+		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"))
+}
+
+// TestRunWithReviewPassStopsWhenLandPassProducesNoOutcomeAfterApprove
+// verifies issue #2069: once a review pass APPROVEs, the land pass the
+// orchestrator runs next (seeded with that APPROVE verdict) runs exactly
+// once. If that land pass is cut off before printing its own terminal
+// SPINDRIFT_OUTCOME, the loop must stop with a plain "decision" stop op
+// instead of re-entering the review->land cycle (which would re-invoke the Filer /
+// FILE ISSUES step on every extra lap, bounded only by the coarse
+// maxSlices). Exactly 3 driver-exec invocations: implement, review-APPROVE,
+// land-with-no-outcome -- and critically no 4th pass_start (no re-loop into
+// another review pass).
+func TestRunWithReviewPassStopsWhenLandPassProducesNoOutcomeAfterApprove(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, noOutcomeAfterApproveFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		driverBin:        "claude",
+		issue:            "7",
+		logPath:          filepath.Join(dir, "stream.log"),
+		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	rc, err := run(cfg, &stdout)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if rc != 0 {
+		t.Errorf("exit code = %d, want 0", rc)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("driver-exec invocation count = %d, want 3 (log: %q)", len(lines), calls)
+	}
+
+	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"land pass reached no terminal outcome after APPROVE"`) {
+		t.Errorf("stdout = %q, want the land-pass-no-outcome stop reason", stdout.String())
+	}
+
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":3,"role":"fix"}`) {
+		t.Errorf("stdout = %q, want the land pass's own pass_start", stdout.String())
+	}
+	if strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":4`) {
+		t.Errorf("stdout = %q, want no pass 4 (no re-loop into another review pass)", stdout.String())
+	}
+
+	got, err := ReadRunState(stateFile)
+	if err != nil {
+		t.Fatalf("ReadRunState: %v", err)
+	}
+	if got.LastVerdict != "APPROVE" {
+		t.Errorf("LastVerdict = %q, want %q", got.LastVerdict, "APPROVE")
+	}
+}
+
 // TestRunWithReviewPassSeedsFixPassWithReviewFindings verifies AC (issue
 // #2037): the fix pass the orchestrator runs after a review pass's BLOCK is
 // seeded not just with the bare verdict word (that narrower claim is
