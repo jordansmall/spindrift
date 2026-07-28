@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/reconcile"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/waves"
 )
 
 const testBaseBranch = "main"
@@ -80,6 +82,25 @@ func newOperatorCheckout(t *testing.T) string {
 // has no issue-creation API of its own.
 func writeLocalIssue(t *testing.T, dir, num, title, parent, state string) {
 	t.Helper()
+	writeLocalIssueBody(t, dir, num, title, parent, state, "body\n")
+}
+
+// writeLocalIssueWithBlocker is writeLocalIssue plus a "## Blocked by"
+// section naming blockerNum by its own filename slug — the local tracker's
+// body-sourced dependency grammar (forge.DepSourceBody, since the local
+// tracker has no native blocker relationship), so DepsOf(num) resolves
+// blockerNum as num's declared blocker.
+func writeLocalIssueWithBlocker(t *testing.T, dir, num, title, parent, state, blockerNum string) {
+	t.Helper()
+	writeLocalIssueBody(t, dir, num, title, parent, state, "body\n\n## Blocked by\n- "+blockerNum+"\n")
+}
+
+// writeLocalIssueBody writes num's issue file under dir in the local
+// tracker's frontmatter grammar (ADR 0013) with an explicit body — the
+// shared core of writeLocalIssue and writeLocalIssueWithBlocker, which differ
+// only in the body they supply.
+func writeLocalIssueBody(t *testing.T, dir, num, title, parent, state, body string) {
+	t.Helper()
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "title: %s\n", title)
@@ -90,7 +111,7 @@ func writeLocalIssue(t *testing.T, dir, num, title, parent, state string) {
 		fmt.Fprintf(&b, "parent: %s\n", parent)
 	}
 	b.WriteString("---\n")
-	b.WriteString("body\n")
+	b.WriteString(body)
 	writeFile(t, filepath.Join(dir, num+".md"), b.String())
 }
 
@@ -728,5 +749,382 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 		if err := exec.Command("git", "-C", operatorDir, "merge-base", "--is-ancestor", fixtureSHA, "refs/heads/"+num).Run(); err != nil {
 			t.Errorf("fixture commit for issue %s not reachable from surfaced branch %s", branch, num)
 		}
+	}
+}
+
+// TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun drives the
+// #2130 seed-branch containment gate through the full composed loop rather
+// than a scripted Fake. Blocker #01 and dependent #02 share parent "Calc
+// Engine" (#02's body declares #01 as its blocker via local tracker
+// body-sourced DepsOf); #01 lands via settle — merged onto
+// integration/calc-engine — but is deliberately left OPEN (reconcile never
+// runs on it yet), standing in for the same-run window #1850 closes. #02
+// then unblocks in that SAME run via the #2130 seed-branch containment
+// gate: waves.Readiness.Status finds #01's landing already present on
+// integration/calc-engine, #02's own seed branch. #02 then genuinely seeds
+// from that integration branch (the Box would have cloned it, carrying
+// #01's commit forward) and lands its own commit on top, and both close in
+// one reconcile.Run + Surface pass.
+//
+// The load-bearing pre-#2130 discriminator here is the RELEASED-REASON
+// string blockerReady prints to stdout (blocker.go:236): "landing present
+// on integration/<parent> (this seam's own integration branch)". Pre-#2130
+// the LandingVerifier fallback releases too, but prints a different reason
+// ("landing verified merged into Integration") — so asserting this exact
+// string goes red if #2130's containment gate is reverted. The release-gate
+// *result* (ready=true) is NOT itself a discriminator: in this same-parent
+// geometry it is identical pre- and post-#2130 (the cross-parent companion
+// test, TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly, is the
+// release-gate's own pre-#2130 regression guard).
+//
+// #01 staying OPEN through the readiness assertion is a SUPPORTING check
+// only: it rules out the trivial IssueClosed/IssueMerged shortcut (which
+// would also release, but for a non-#2130 reason), so combined with the
+// released-reason string it pins the release specifically to the #2130
+// containment path. It does NOT, by itself, distinguish pre-#2130 behavior
+// — the pre-#2130 LandingVerifier fallback also releases with the blocker
+// still open.
+func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	const blockerNum, dependentNum = "01", "02"
+	writeLocalIssue(t, issuesDir, blockerNum, "seam 01", "Calc Engine", testLabels.InProgress)
+	writeLocalIssueWithBlocker(t, issuesDir, dependentNum, "seam 02", "Calc Engine", testLabels.InProgress, blockerNum)
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+
+	// Land the blocker #01.
+	cf01 := lw.CodeForgeForIssue(blockerNum)
+	branch01 := cf01.AgentBranch(blockerNum)
+	sha01 := bundleFixtureCommit(t, accumDir, testBaseBranch, branch01, blockerNum, lw.OutboxDir(blockerNum))
+
+	cfg01 := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+	}
+	s01 := settle.New(cfg01, it, cf01)
+	s01.Settle(dispatch.NewFake(), blockerNum, 0, dispatch.Result{
+		Success: true, OutcomeFound: true,
+		Outcome: outcome.Outcome{Issue: blockerNum, Landing: branch01, Status: "ready"},
+	})
+
+	// Sanity: the blocker's commit really is on the shared parent's
+	// Integration branch in the Accumulation repo, so the readiness
+	// assertion below tests the containment gate specifically, not a
+	// "never landed" false negative.
+	parent01 := lw.ResolveParent(blockerNum)
+	if got := parent01.String(); got != "calc-engine" {
+		t.Fatalf("ResolveParent(%s) = %q, want %q", blockerNum, got, "calc-engine")
+	}
+	integ := local.IntegrationBranch(parent01)
+	if err := exec.Command("git", "-C", accumDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+integ).Run(); err != nil {
+		t.Fatalf("Integration branch %s missing from Accumulation repo after blocker settled", integ)
+	}
+	if err := exec.Command("git", "-C", accumDir, "merge-base", "--is-ancestor", sha01, "refs/heads/"+integ).Run(); err != nil {
+		t.Fatalf("blocker commit %s not reachable from %s", sha01, integ)
+	}
+
+	// The dependent unblocks in-run via the seed-branch containment gate
+	// (#2130) while the blocker's issue is still OPEN — proving it is the
+	// seed-branch gate, not the IssueClosed fallback, doing the releasing.
+	rdy, err := waves.NewReadiness(it, []waves.Issue{{Number: dependentNum}})
+	if err != nil {
+		t.Fatalf("waves.NewReadiness: %v", err)
+	}
+	cf02 := lw.CodeForgeForIssue(dependentNum)
+	wcfg := waves.Config{
+		InProgressLabel: testLabels.InProgress,
+		FailedLabel:     testLabels.Failed,
+		CompleteLabel:   testLabels.Complete,
+		ParentOf:        func(num string) string { return lw.ResolveParent(num).String() },
+	}
+	var ready bool
+	var failed, unready []string
+	output := captureStdout(t, func() {
+		ready, failed, unready = rdy.Status(wcfg, it, cf02, dependentNum)
+	})
+	if !ready {
+		t.Errorf("waves.Readiness.Status(%s) ready = false, want true (blocker's landing already reaches this seam's own %s)", dependentNum, integ)
+	}
+	if len(unready) != 0 {
+		t.Errorf("waves.Readiness.Status(%s) unready = %v, want none", dependentNum, unready)
+	}
+	if len(failed) != 0 {
+		t.Errorf("waves.Readiness.Status(%s) failed = %v, want none", dependentNum, failed)
+	}
+
+	wantReleaseReason := fmt.Sprintf("landing present on integration/%s (this seam's own integration branch)", lw.ResolveParent(dependentNum).String())
+	if !strings.Contains(output, wantReleaseReason) {
+		t.Errorf("captured stdout = %q, want it to contain the #2130 released-via-containment reason %q -- pre-#2130 would print the LandingVerifier \"verified merged into Integration\" reason instead", output, wantReleaseReason)
+	}
+
+	iss01, err := it.Issue(blockerNum)
+	if err != nil {
+		t.Fatalf("Issue(%s): %v", blockerNum, err)
+	}
+	if iss01.State == forge.IssueClosed {
+		t.Fatalf("issue %s state = closed, want still open -- readiness above must come from the seed-branch containment gate, not the IssueClosed fallback", blockerNum)
+	}
+
+	// The dependent's own seed branch (integration/calc-engine) already
+	// exists and carries the blocker's work -- the Box would clone it, so
+	// build #02's fixture commit on top of it, then land and close both.
+	seedBase := local.IntegrationBranch(lw.ResolveParent(dependentNum))
+	if seedBase != integ {
+		t.Fatalf("dependent's seed base = %q, want %q (shared parent)", seedBase, integ)
+	}
+	exists, err := cf02.BranchExists(seedBase)
+	if err != nil {
+		t.Fatalf("BranchExists(%s): %v", seedBase, err)
+	}
+	if !exists {
+		t.Fatalf("seed branch %s does not exist -- want it to carry the blocker's landed commit", seedBase)
+	}
+
+	branch02 := cf02.AgentBranch(dependentNum)
+	sha02 := bundleFixtureCommit(t, accumDir, seedBase, branch02, dependentNum, lw.OutboxDir(dependentNum))
+
+	cfg02 := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+	}
+	s02 := settle.New(cfg02, it, cf02)
+	s02.Settle(dispatch.NewFake(), dependentNum, 0, dispatch.Result{
+		Success: true, OutcomeFound: true,
+		Outcome: outcome.Outcome{Issue: dependentNum, Landing: branch02, Status: "ready"},
+	})
+
+	res, err := reconcile.Run(it, cf02, nil, func(num string) string { return lw.ResolveParent(num).String() })
+	if err != nil {
+		t.Fatalf("reconcile.Run: %v", err)
+	}
+	if len(res.Closed) != 2 {
+		t.Fatalf("reconcile.Run closed = %v, want both %s and %s", res.Closed, blockerNum, dependentNum)
+	}
+	closed := map[string]bool{}
+	for _, n := range res.Closed {
+		closed[n] = true
+	}
+	if !closed[blockerNum] || !closed[dependentNum] {
+		t.Fatalf("reconcile.Run closed = %v, want both %s and %s", res.Closed, blockerNum, dependentNum)
+	}
+
+	var out strings.Builder
+	if err := lw.Surface(operatorDir, &out, res.Stuck); err != nil {
+		t.Fatalf("Surface: %v", err)
+	}
+
+	// The surfaced branch is title-derived from the shared parent, "Calc
+	// Engine" -> "calc-engine" (issue #1811) -- both commits must be
+	// reachable from it, the end-to-end proof the dependent's work landed
+	// on top of the blocker's on the shared Integration branch.
+	const wantBranch = "calc-engine"
+	if err := exec.Command("git", "-C", operatorDir, "merge-base", "--is-ancestor", sha01, "refs/heads/"+wantBranch).Run(); err != nil {
+		t.Errorf("blocker commit %s not reachable from surfaced branch %s", sha01, wantBranch)
+	}
+	if err := exec.Command("git", "-C", operatorDir, "merge-base", "--is-ancestor", sha02, "refs/heads/"+wantBranch).Run(); err != nil {
+		t.Errorf("dependent commit %s not reachable from surfaced branch %s", sha02, wantBranch)
+	}
+}
+
+// captureStdout redirects os.Stdout to a pipe for the duration of fn, then
+// restores it and returns everything fn wrote — the harness
+// TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly uses to observe
+// blockerReady's held-reason fmt.Printf line (waves/blocker.go), which has
+// no other externally observable surface. The reader goroutine is started
+// before fn runs so a write larger than the pipe's kernel buffer can never
+// deadlock fn against an unread pipe.
+// captureStdout swaps the global os.Stdout for a pipe while fn runs and
+// returns what fn wrote. Because it mutates process-global os.Stdout, callers
+// must not run under t.Parallel().
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+
+	done := make(chan string, 1)
+	go func() {
+		out, _ := io.ReadAll(r)
+		done <- string(out)
+	}()
+
+	fn()
+
+	os.Stdout = orig
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe writer: %v", err)
+	}
+	out := <-done
+	if err := r.Close(); err != nil {
+		t.Fatalf("close pipe reader: %v", err)
+	}
+	return out
+}
+
+// TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly is #2131's regression
+// test for #2130's landed-behavior: a dependent whose blocker landed, but
+// only onto an Integration branch the dependent does NOT itself seed from
+// (a different parent), must stay HELD with the distinct #2130 held reason
+// — never released the way a same-parent blocker chain is (see
+// TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun, right above,
+// for that companion case) — and must never be dispatched onto the bare
+// base branch as a result.
+//
+// Before #2130, the local forge satisfied forge.LandingVerifier, and
+// blockerReady's fallback called VerifyLanding(issue.Landing), which merge-
+// base-checks the blocker's landing against the blocker's OWN Integration
+// branch (integration/alpha-engine here) — not the dependent's seed branch
+// (integration/beta-engine). A blocker merged onto ANY Integration branch
+// therefore read as "verified merged into Integration" and released every
+// waiting dependent, regardless of which seam it actually seeded from — the
+// cross-parent leak #2130 closes. This test drives that exact setup (a
+// blocker landed on a DIFFERENT parent's Integration branch than the
+// dependent's own) through the composed wiring and asserts the gate now
+// holds instead of releasing: it fails against the pre-#2130
+// LandingVerifier fallback (ready would come back true there) and passes
+// against current HEAD, where forge/local's LandingContainmentQuery checks
+// containment against the dependent's own seed-branch parent
+// (seedParent, from cfg.ParentOf) instead.
+func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	const blockerNum, dependentNum = "11", "12"
+	writeLocalIssue(t, issuesDir, blockerNum, "seam 11", "Alpha Engine", testLabels.InProgress)
+	writeLocalIssueWithBlocker(t, issuesDir, dependentNum, "seam 12", "Beta Engine", testLabels.InProgress, blockerNum)
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+
+	// Land ONLY the blocker #11, onto its own parent's Integration branch,
+	// integration/alpha-engine -- a seam the dependent (parent "Beta
+	// Engine") never seeds from.
+	cf11 := lw.CodeForgeForIssue(blockerNum)
+	branch11 := cf11.AgentBranch(blockerNum)
+	sha11 := bundleFixtureCommit(t, accumDir, testBaseBranch, branch11, blockerNum, lw.OutboxDir(blockerNum))
+
+	cfg11 := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+	}
+	s11 := settle.New(cfg11, it, cf11)
+	s11.Settle(dispatch.NewFake(), blockerNum, 0, dispatch.Result{
+		Success: true, OutcomeFound: true,
+		Outcome: outcome.Outcome{Issue: blockerNum, Landing: branch11, Status: "ready"},
+	})
+
+	// Sanity: the blocker really did land on ITS OWN Integration branch in
+	// the Accumulation repo, so the assertion below tests the cross-parent
+	// containment gate specifically, not a "never landed" false negative.
+	parent11 := lw.ResolveParent(blockerNum)
+	if got := parent11.String(); got != "alpha-engine" {
+		t.Fatalf("ResolveParent(%s) = %q, want %q", blockerNum, got, "alpha-engine")
+	}
+	integ11 := local.IntegrationBranch(parent11)
+	if err := exec.Command("git", "-C", accumDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+integ11).Run(); err != nil {
+		t.Fatalf("Integration branch %s missing from Accumulation repo after blocker settled", integ11)
+	}
+	if err := exec.Command("git", "-C", accumDir, "merge-base", "--is-ancestor", sha11, "refs/heads/"+integ11).Run(); err != nil {
+		t.Fatalf("blocker commit %s not reachable from %s", sha11, integ11)
+	}
+
+	// The dependent must stay HELD: its own seed branch,
+	// integration/beta-engine, never received the blocker's commit, so
+	// #2130's LandingContainmentQuery reports not-contained rather than
+	// falling back to IssueClosed (the blocker is still open) or a
+	// cross-branch LandingVerifier check.
+	rdy, err := waves.NewReadiness(it, []waves.Issue{{Number: dependentNum}})
+	if err != nil {
+		t.Fatalf("waves.NewReadiness: %v", err)
+	}
+	cf12 := lw.CodeForgeForIssue(dependentNum)
+	wcfg := waves.Config{
+		InProgressLabel: testLabels.InProgress,
+		FailedLabel:     testLabels.Failed,
+		CompleteLabel:   testLabels.Complete,
+		ParentOf:        func(num string) string { return lw.ResolveParent(num).String() },
+	}
+
+	var ready bool
+	var failed, unready []string
+	output := captureStdout(t, func() {
+		ready, failed, unready = rdy.Status(wcfg, it, cf12, dependentNum)
+	})
+
+	if ready {
+		t.Errorf("waves.Readiness.Status(%s) ready = true, want false (blocker landed on a different parent's integration branch)", dependentNum)
+	}
+	if want := []string{blockerNum}; !reflect.DeepEqual(unready, want) {
+		t.Errorf("waves.Readiness.Status(%s) unready = %v, want %v", dependentNum, unready, want)
+	}
+	if len(failed) != 0 {
+		t.Errorf("waves.Readiness.Status(%s) failed = %v, want none", dependentNum, failed)
+	}
+
+	seedParent := lw.ResolveParent(dependentNum).String()
+	if got := seedParent; got != "beta-engine" {
+		t.Fatalf("ResolveParent(%s) = %q, want %q", dependentNum, got, "beta-engine")
+	}
+	wantReason := fmt.Sprintf("landed but not yet on this seam's integration branch (integration/%s); holding", seedParent)
+	if !strings.Contains(output, wantReason) {
+		t.Errorf("captured stdout = %q, want it to contain the #2130 held reason %q", output, wantReason)
+	}
+
+	iss11, err := it.Issue(blockerNum)
+	if err != nil {
+		t.Fatalf("Issue(%s): %v", blockerNum, err)
+	}
+	if iss11.State == forge.IssueClosed {
+		t.Fatalf("issue %s state = closed, want still open -- the hold above must come from the seed-branch containment gate, not an IssueClosed fallback", blockerNum)
+	}
+
+	// Never dispatched onto bare base: the dependent's own Integration
+	// branch, integration/beta-engine, must never have come into being --
+	// the gate held rather than letting #12 seed from the bare base branch.
+	integ12 := local.IntegrationBranch(lw.ResolveParent(dependentNum))
+	exists, err := cf12.BranchExists(integ12)
+	if err != nil {
+		t.Fatalf("BranchExists(%s): %v", integ12, err)
+	}
+	if exists {
+		t.Errorf("Integration branch %s exists, want it absent -- the dependent must never have been dispatched/landed while held", integ12)
 	}
 }
