@@ -138,6 +138,22 @@ func TestProbe_RebuildNeededWhenImageHashDiffers(t *testing.T) {
 	}
 }
 
+// TestProbe_RebuildNeededSetsTipTag verifies that a rebuild-needed verdict
+// populates Result.TipTag with the freshly evaluated "<repo>:<hash>" tag — the
+// tag a rebuild would load — so the non-convergence diagnostic (issue #2113)
+// can name it alongside the loaded tag.
+func TestProbe_RebuildNeededSetsTipTag(t *testing.T) {
+	pwd := newCloneWithOrigin(t, "main")
+	eval := &Fake{OutPath: "/nix/store/" + diffHash + "-agent-image"}
+
+	res := Probe("podman", pwd, "main", ".#packages.x86_64-linux.agent-image", "spindrift:"+sameHash, eval)
+
+	want := "spindrift:" + diffHash
+	if res.TipTag != want {
+		t.Errorf("TipTag = %q, want %q", res.TipTag, want)
+	}
+}
+
 // TestProbe_LivelockRegression_FreshWhenTagMatchesDespiteOutPathNameDrift
 // reproduces the #587 livelock: a loaded image whose output identity
 // (content-hash tag) matches the base tip must report fresh even when the

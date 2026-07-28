@@ -41,6 +41,12 @@ type Result struct {
 	// issue #652) can recognize "already rebuilt this tip" against Rev
 	// without re-parsing Message.
 	Rev string
+	// TipTag is the "<repo>:<hash>" image tag freshly evaluated at the base
+	// tip — the tag a rebuild would load. Empty when the probe never got far
+	// enough to derive it. The non-convergence diagnostic (issue #2113) names
+	// it alongside the loaded tag so an operator sees the two tags that will
+	// never converge.
+	TipTag string
 }
 
 // storeHashPrefixLen and storeHashLen locate the 32-char base32 content
@@ -151,6 +157,7 @@ func Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evalu
 			Fresh:      true,
 			Message:    fmt.Sprintf("fresh (%s tip %s matches the loaded image %s)", baseBranch, rev, imageTag),
 			Rev:        rev,
+			TipTag:     tipTag,
 		}
 	}
 	return Result{
@@ -158,6 +165,7 @@ func Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag string, eval Evalu
 		Fresh:      false,
 		Message:    fmt.Sprintf("rebuild needed (%s tip %s produces %s, loaded image is %s)", baseBranch, rev, tipTag, imageTag),
 		Rev:        rev,
+		TipTag:     tipTag,
 	}
 }
 
