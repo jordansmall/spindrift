@@ -59,9 +59,8 @@ func TestClaudeDriverClassifyTransientDelegatesToClaudeClassify(t *testing.T) {
 }
 
 // TestClaudeDriverExtractUsage verifies the claude Driver's fourth method
-// extracts the aggregate result-event usage and the per-role breakdown from
-// a Box log in one report, replacing the former claude.lastInLog +
-// claude.breakdownByRole two-call dance at the dispatch call site.
+// extracts the aggregate result-event usage from a Box log in one report at
+// the dispatch call site.
 func TestClaudeDriverExtractUsage(t *testing.T) {
 	d, err := New("claude")
 	if err != nil {
@@ -91,28 +90,6 @@ func TestClaudeDriverExtractUsage(t *testing.T) {
 	}
 	if report.TotalCostUSD != 0.25 {
 		t.Errorf("TotalCostUSD: got %f, want 0.25", report.TotalCostUSD)
-	}
-
-	var scout, implementor bool
-	for _, r := range report.Roles {
-		if r.Role == "scout" {
-			scout = true
-			if r.InputTokens != 200 {
-				t.Errorf("scout InputTokens: got %d, want 200", r.InputTokens)
-			}
-		}
-		if r.Role == "implementor" {
-			implementor = true
-			if r.InputTokens != 100 {
-				t.Errorf("implementor InputTokens: got %d, want 100", r.InputTokens)
-			}
-		}
-	}
-	if !scout {
-		t.Error("Roles: missing scout bucket")
-	}
-	if !implementor {
-		t.Error("Roles: missing implementor bucket")
 	}
 }
 

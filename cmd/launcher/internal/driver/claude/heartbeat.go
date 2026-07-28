@@ -82,9 +82,7 @@ func (w *Writer) parseLine(line string) {
 			// message — implementor and nested subagents alike — online as
 			// events stream in. Single-pass resolution relies on a spawn
 			// block streaming before its child's messages (the parent must
-			// emit the Agent block first, which holds in practice);
-			// breakdownByRole does the same resolution buffered, over a full
-			// log, via the same helpers.
+			// emit the Agent block first, which holds in practice).
 			CollectTaskRoles(ev, w.taskRole)
 
 			// Resolve acting role from parent_tool_use_id.

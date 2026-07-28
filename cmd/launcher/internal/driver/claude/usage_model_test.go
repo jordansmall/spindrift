@@ -177,7 +177,7 @@ func TestBreakdownByModel_CacheCreationCollapsed(t *testing.T) {
 }
 
 // TestBreakdownByModel_FileNotFound confirms a missing log file degrades to
-// (nil, nil), matching breakdownByRoleFile's contract.
+// (nil, nil), matching lastInLog's contract.
 func TestBreakdownByModel_FileNotFound(t *testing.T) {
 	got, err := breakdownByModel("/nonexistent/x.log")
 	if err != nil {
