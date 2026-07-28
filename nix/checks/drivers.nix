@@ -513,6 +513,34 @@ in
       "opencode agentFilesTemplate's auditor.md must carry the roster mode, got: ${opencodeAuditorFile}";
     pkgs.runCommand "drivers-roster-custom-agent-both-drivers" { } "touch $out";
 
+  # A description containing a colon (e.g. "Audit: colon") must not break the
+  # YAML frontmatter's `description:` scalar -- a raw, unquoted colon splits
+  # the line into two mapping keys and yields malformed YAML (issue #264
+  # review finding). agentFilesTemplate must JSON-encode the description in
+  # the frontmatter (JSON is a valid YAML scalar), so the rendered file
+  # carries the quoted form rather than the raw, unquoted text.
+  drivers-opencode-agent-files-description-colon-frontmatter =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+      rendered = opencodeEntry.agentFilesTemplate {
+        roster = [
+          {
+            name = "auditor";
+            model = "audit-model";
+            mode = "subagent";
+            description = "Audit: colon";
+            tools = [ "Read" ];
+            promptFile = "auditor-prompt.md";
+            prompt = null;
+          }
+        ];
+      };
+      auditorFile = rendered.".config/opencode/agents/auditor.md" or "";
+    in
+    assert assertMsg (hasInfix ''description: "Audit: colon"'' auditorFile)
+      "opencode agentFilesTemplate's frontmatter description must be JSON-quoted so an embedded colon can't break YAML, got: ${auditorFile}";
+    pkgs.runCommand "drivers-opencode-agent-files-description-colon-frontmatter" { } "touch $out";
+
   # opencode reads .claude/skills/ directly (ADR 0009) rather than a
   # opencode-specific skills directory -- pin the exact value so a future
   # edit to lib/drivers/opencode.nix can't silently change the Driver's

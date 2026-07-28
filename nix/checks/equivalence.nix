@@ -700,4 +700,35 @@ in
     ) "packages.build must not exist (removed, issue #613)";
     assert assertMsg (!(harness.packages ? run)) "packages.run must not exist (removed, issue #613)";
     pkgs.runCommand "run-build-aliases-removed" { } "touch $out";
+
+  # A custom roster entry (the AC4 path) omitting both `promptFile` and
+  # `prompt` must degrade gracefully -- not throw a cryptic missing-attribute
+  # eval error -- since both Driver templates (claude.nix's agentsJsonTemplate,
+  # opencode.nix's agentFilesTemplate) already tolerate the omission via `or`.
+  # mkHarness's own agentsPromptFilesJson/customRosterPromptFiles must match
+  # that tolerance (issue #264 review finding). Forcing `.spindrift` to a
+  # string realizes the whole image-input graph, including the roster-derived
+  # JSON map, so a bare `e.promptFile`/`e.prompt` read (no `or` default) would
+  # throw here.
+  mkharness-roster-custom-entry-missing-prompt-fields =
+    let
+      minimalRoster = [
+        {
+          name = "auditor";
+          model = "claude-sonnet-5";
+          description = "";
+          tools = [ ];
+          mode = "subagent";
+        }
+      ];
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        roster = minimalRoster;
+      };
+      result = builtins.tryEval (builtins.toString direct.spindrift);
+    in
+    assert pkgs.lib.assertMsg result.success
+      "mkHarness must not throw when a custom roster entry omits promptFile/prompt (issue #264 review finding)";
+    pkgs.runCommand "mkharness-roster-custom-entry-missing-prompt-fields" { } "touch $out";
 }
