@@ -979,11 +979,31 @@ emit_outcome_backstop() {
     # note free of any push artifact.
     note="${note}; branch relayed via outbox bundle (read-only Box)"
   else
-    local push_log
+    local push_log attempts backoff jitter attempt
     push_log="$(mktemp)"
-    if ! git push --force-with-lease origin "$BRANCH" 2>"$push_log"; then
-      note="${note}; push failed: $(tail -1 "$push_log")"
-    fi
+    # Bounded retry-with-backoff on a transient push failure (issue #2095):
+    # reuse the same retry-count / linear-backoff / jitter knobs settle's own
+    # rebase-push loop does (MAX_REBASE_ATTEMPTS / TRANSIENT_BACKOFF_SECS /
+    # HOLD_JITTER_SECS), defaulting to their env-schema defaults since these
+    # knobs are not forwarded into the Box. A persistent 403 still gives up
+    # after the cap rather than looping forever, and the original error is
+    # surfaced in the note unchanged.
+    attempts="${MAX_REBASE_ATTEMPTS:-3}"
+    backoff="${TRANSIENT_BACKOFF_SECS:-30}"
+    jitter="${HOLD_JITTER_SECS:-5}"
+    [ "$attempts" -lt 1 ] && attempts=1
+    attempt=1
+    while true; do
+      if git push --force-with-lease origin "$BRANCH" 2>"$push_log"; then
+        break
+      fi
+      if [ "$attempt" -ge "$attempts" ]; then
+        note="${note}; push failed after ${attempt} attempt(s): $(tail -1 "$push_log")"
+        break
+      fi
+      sleep "$(( backoff * attempt + jitter ))"
+      attempt=$(( attempt + 1 ))
+    done
     rm -f "$push_log"
   fi
 

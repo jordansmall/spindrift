@@ -92,10 +92,60 @@ EOF
   # short-circuit before ever reaching this shimmed push.
   export FAKE_CLAUDE_COMMIT=1
   export FAKE_CLAUDE_NO_OUTCOME=1
+  # This shim fails every push attempt, so the backstop's bounded retry loop
+  # (issue #2095) runs to exhaustion -- zero these out so the test doesn't
+  # actually sleep through the linear backoff.
+  export TRANSIENT_BACKOFF_SECS=0
+  export HOLD_JITTER_SECS=0
+  export MAX_REBASE_ATTEMPTS=2
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*push failed.*simulated push failure' <<<"$output"
+}
+
+# A push that fails once but succeeds on retry (a transient 403/5xx/network
+# blip) must not be treated as a terminal failure (issue #2095): the backstop
+# retries within its bounded attempt cap, the retried push reaches the
+# remote, and the outcome note carries no "push failed" text at all.
+@test "transient push failure recovers on retry during the backstop -> pushed, no failure note" {
+  local real_git
+  real_git="$(command -v git)"
+  local shim="$BATS_TEST_TMPDIR/gitshim"
+  mkdir -p "$shim"
+  local counter="$BATS_TEST_TMPDIR/push-attempts"
+  # Shebang is this running bash's own absolute path ($BASH), not
+  # /usr/bin/env -- a sandboxed nix build has no /usr/bin/env (same reason
+  # bats.nix rewrites tests/fakes/* shebangs at build time), and this shim is
+  # generated at test run time so nix substitution never sees it.
+  cat >"$shim/git" <<EOF
+#!$BASH
+if [ "\$1" = "push" ] && [ "\$2" = "--force-with-lease" ] && [ "\$3" = "origin" ]; then
+  count=0
+  [ -f "$counter" ] && count="\$(cat "$counter")"
+  count=\$(( count + 1 ))
+  echo "\$count" >"$counter"
+  if [ "\$count" -eq 1 ]; then
+    echo "! [rejected] simulated transient push failure" >&2
+    exit 1
+  fi
+fi
+exec "$real_git" "\$@"
+EOF
+  chmod +x "$shim/git"
+  export PATH="$shim:$PATH"
+
+  export FAKE_CLAUDE_COMMIT=1
+  export FAKE_CLAUDE_NO_OUTCOME=1
+  export TRANSIENT_BACKOFF_SECS=0
+  export HOLD_JITTER_SECS=0
+  export MAX_REBASE_ATTEMPTS=3
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
+  ! grep -q 'push failed' <<<"$output"
+  git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
 
 # A driver killed by a transient infrastructure failure (rate limit,
