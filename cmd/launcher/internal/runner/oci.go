@@ -198,14 +198,34 @@ func (a *ociAdapter) loadImage(archive string) error {
 	if err := load.Run(); err != nil {
 		return fmt.Errorf("load failed: %w", err)
 	}
-	tag := exec.Command(a.cli, "tag", "spindrift:latest", a.imageTag)
+	// The archive's buildLayeredImage name+tag is "<repo>:latest" where repo
+	// matches a.imageTag's own repo (default "spindrift", or a driver-scoped
+	// repo like "spindrift-opencode") — re-tag from that same source, not a
+	// hardcoded "spindrift:latest", so a driver-scoped archive is found.
+	sourceTag := imageRepo(a.imageTag) + ":latest"
+	tag := exec.Command(a.cli, "tag", sourceTag, a.imageTag)
 	tag.Stdout = os.Stdout
 	tag.Stderr = os.Stderr
 	if err := tag.Run(); err != nil {
 		return fmt.Errorf("tag failed: %w", err)
 	}
-	fmt.Printf("==> done: spindrift:latest + %s\n", a.imageTag)
+	fmt.Printf("==> done: %s + %s\n", sourceTag, a.imageTag)
 	return nil
+}
+
+// imageRepo derives the repo portion of an "<repo>:<tag>" image reference —
+// everything before the LAST colon, since a repo can itself contain a colon
+// (e.g. a registry host:port prefix). Falls back to the default "spindrift"
+// repo when imageTag has no colon at all (a degenerate/empty tag), rather
+// than deriving an empty or nonsensical repo. Mirrors
+// internal/freshness.imageRepo, which derives the same repo from the same
+// kind of tag for the freshness probe's own tip-tag comparison.
+func imageRepo(imageTag string) string {
+	i := strings.LastIndex(imageTag, ":")
+	if i < 0 {
+		return "spindrift"
+	}
+	return imageTag[:i]
 }
 
 func (a *ociAdapter) buildInContainer() error {
