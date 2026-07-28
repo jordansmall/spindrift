@@ -76,7 +76,13 @@
   # mkHarness.nix) but always returns "", meaning no --agents-equivalent flag
   # is ever rendered.
   agentsJsonTemplate =
-    { scoutModel, reviewModel, filerModel, workerModel }: "";
+    {
+      scoutModel,
+      reviewModel,
+      filerModel,
+      workerModel,
+    }:
+    "";
 
   # opencode has no --agents JSON flag; it discovers subagents by scanning
   # HOME-relative markdown files under .config/opencode/agents/, each with a
