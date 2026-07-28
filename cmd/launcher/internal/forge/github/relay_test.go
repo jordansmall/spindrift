@@ -1,6 +1,7 @@
 package github
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -128,8 +129,12 @@ func TestReadOnlyCodeForge_RelayBundle_MissingBundleErrors(t *testing.T) {
 	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	br := cf.(forge.BundleRelay)
 
-	if err := br.RelayBundle(outbox, "agent/issue-1918"); err == nil {
+	err := br.RelayBundle(outbox, "agent/issue-1918")
+	if err == nil {
 		t.Fatal("RelayBundle with no bundle file present: got nil error, want one")
+	}
+	if !errors.Is(err, forge.ErrBundleNotFound) {
+		t.Errorf("RelayBundle with no bundle file present: err = %v, want errors.Is(err, forge.ErrBundleNotFound)", err)
 	}
 }
 
@@ -146,8 +151,12 @@ func TestReadOnlyCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	br := cf.(forge.BundleRelay)
 
-	if err := br.RelayBundle(outbox, "agent/issue-1918"); err == nil {
+	err := br.RelayBundle(outbox, "agent/issue-1918")
+	if err == nil {
 		t.Fatal("RelayBundle with a malformed bundle file: got nil error, want one")
+	}
+	if errors.Is(err, forge.ErrBundleNotFound) {
+		t.Errorf("RelayBundle with a malformed bundle file: err = %v, want a generic error, not forge.ErrBundleNotFound", err)
 	}
 }
 
