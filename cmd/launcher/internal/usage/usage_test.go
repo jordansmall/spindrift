@@ -32,7 +32,7 @@ func TestFormatDuration(t *testing.T) {
 
 func TestModelUsage_Fields(t *testing.T) {
 	mu := usage.ModelUsage{
-		Model:                "opus",
+		Model:                "claude-opus-4-8",
 		UncachedInputTokens:  1,
 		OutputTokens:         2,
 		CacheReadInputTokens: 3,
@@ -45,8 +45,8 @@ func TestModelUsage_Fields(t *testing.T) {
 		t.Fatalf("len(report.Models) = %d, want 1", len(report.Models))
 	}
 	got := report.Models[0]
-	if got.Model != "opus" {
-		t.Errorf("Model = %q, want %q", got.Model, "opus")
+	if got.Model != "claude-opus-4-8" {
+		t.Errorf("Model = %q, want %q", got.Model, "claude-opus-4-8")
 	}
 	if got.UncachedInputTokens != 1 {
 		t.Errorf("UncachedInputTokens = %d, want 1", got.UncachedInputTokens)

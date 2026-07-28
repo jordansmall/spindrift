@@ -100,6 +100,11 @@ func (w *Writer) parseLine(line string) {
 
 			// Resolve acting role from parent_tool_use_id.
 			role := ResolveRole(ev, w.taskRole, w.topLevelRole)
+			// The live heartbeat deliberately groups by family, not exact
+			// model id: it's a coarse in-flight signal, so collapsing minor
+			// ids into one family row keeps it readable. The final per-model
+			// token table (usage.go) intentionally diverges — it keys on the
+			// exact id (issue #2110).
 			model := ModelFamily(ev.Message.Model)
 
 			// On (role, model) change, flush the departing role's pending counts.
