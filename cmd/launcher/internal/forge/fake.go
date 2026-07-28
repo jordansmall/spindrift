@@ -198,6 +198,13 @@ type Fake struct {
 	// BranchMergedIntoIntegration invocation in order.
 	BranchMergedIntoIntegrationCalls []BranchMergedIntoIntegrationCall
 
+	// integrationContainsLandingResults scripts IntegrationContainsLanding's
+	// result per (landing, parent) pair, defaulting to contained=false, nil
+	// when unscripted — the same "not contained" default
+	// branchMergedIntoIntegrationResults uses. Only reachable through
+	// AsLocal(), the only wrapper implementing forge.LandingContainmentQuery.
+	integrationContainsLandingResults map[branchParentKey]branchIntegrationResult
+
 	// integrationTipResults scripts IntegrationTip's success result per
 	// parent. Only reachable through AsLocal().
 	integrationTipResults map[string]string
@@ -1052,6 +1059,31 @@ func (f *Fake) branchMergedIntoIntegration(branch, parent string) (bool, error) 
 	return res.merged, res.err
 }
 
+// SetIntegrationContainsLanding scripts IntegrationContainsLanding(landing,
+// parent)'s result — contained, or a genuine error distinct from the normal
+// "not contained" outcome, which callers script as contained=false, err=nil
+// instead.
+func (f *Fake) SetIntegrationContainsLanding(landing, parent string, contained bool, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.integrationContainsLandingResults == nil {
+		f.integrationContainsLandingResults = map[branchParentKey]branchIntegrationResult{}
+	}
+	f.integrationContainsLandingResults[branchParentKey{landing, parent}] = branchIntegrationResult{merged: contained, err: err}
+}
+
+// integrationContainsLanding backs the optional LandingContainmentQuery
+// surface (issue #2129, issue #2130), the same AsLocal()-only restriction as
+// relayBundle above. An unscripted (landing, parent) pair defaults to
+// contained=false, nil — the same posture as an unscripted
+// BranchMergedIntoIntegration call.
+func (f *Fake) integrationContainsLanding(landing, parent string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	res := f.integrationContainsLandingResults[branchParentKey{landing, parent}]
+	return res.merged, res.err
+}
+
 // SetIntegrationTip scripts IntegrationTip(parent)'s success result — the
 // resolved landing-ready "<branch>@<sha>" reference IntegrationTipErr's
 // precedence overrides for every call, mirroring LandingRefErr over
@@ -1213,6 +1245,9 @@ func (l localForge) BranchMergedIntoIntegration(branch, parent string) (bool, er
 	return l.f.branchMergedIntoIntegration(branch, parent)
 }
 func (l localForge) IntegrationTip(parent string) (string, error) { return l.f.integrationTip(parent) }
+func (l localForge) IntegrationContainsLanding(landing, parent string) (bool, error) {
+	return l.f.integrationContainsLanding(landing, parent)
+}
 
 var _ CodeForge = localForge{}
 var _ BundleRelay = localForge{}
@@ -1244,3 +1279,4 @@ var _ DraftPRCreator = githubReadOnlyForge{}
 var _ LandingRef = localForge{}
 var _ LandingVerifier = localForge{}
 var _ LandingRepair = localForge{}
+var _ LandingContainmentQuery = localForge{}

@@ -65,3 +65,33 @@ func TestFake_IntegrationTip_ScriptsPerParent(t *testing.T) {
 		t.Errorf("IntegrationTip error = %v, want %v", err, wantErr)
 	}
 }
+
+// TestFake_IntegrationContainsLanding_ScriptsPerLandingAndParent verifies
+// SetIntegrationContainsLanding scripts a result keyed by the (landing,
+// parent) pair, defaulting to contained=false, nil when unscripted — the
+// same "not contained" default SetBranchMergedIntoIntegration uses.
+func TestFake_IntegrationContainsLanding_ScriptsPerLandingAndParent(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIntegrationContainsLanding("agent/issue-42@abc123", "1694", true, nil)
+	cf := f.AsLocal()
+	query, ok := cf.(forge.LandingContainmentQuery)
+	if !ok {
+		t.Fatal("AsLocal() does not implement forge.LandingContainmentQuery")
+	}
+
+	contained, err := query.IntegrationContainsLanding("agent/issue-42@abc123", "1694")
+	if err != nil {
+		t.Fatalf("IntegrationContainsLanding: %v", err)
+	}
+	if !contained {
+		t.Error("IntegrationContainsLanding(scripted true) = false, want true")
+	}
+
+	contained, err = query.IntegrationContainsLanding("agent/issue-99@def456", "9999")
+	if err != nil {
+		t.Fatalf("IntegrationContainsLanding: %v", err)
+	}
+	if contained {
+		t.Error("IntegrationContainsLanding(unscripted landing/parent) = true, want false (default)")
+	}
+}
