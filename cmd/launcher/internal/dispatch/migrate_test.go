@@ -87,6 +87,27 @@ func TestMigrateLegacyLogDir_NoOpWhenLegacyAbsent(t *testing.T) {
 	}
 }
 
+// TestMigrateLegacyLogDir_EmptyLegacyRemovedWithoutDest verifies that an
+// empty legacy logs/ dir is removed without creating an empty dest.
+func TestMigrateLegacyLogDir_EmptyLegacyRemovedWithoutDest(t *testing.T) {
+	pwd := t.TempDir()
+	legacy := filepath.Join(pwd, "logs")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MigrateLegacyLogDir(pwd); err != nil {
+		t.Fatalf("MigrateLegacyLogDir: %v", err)
+	}
+
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Errorf("legacy dir stat err = %v, want IsNotExist", err)
+	}
+	if _, err := os.Stat(HostLogDirFor(pwd)); !os.IsNotExist(err) {
+		t.Errorf("dest stat err = %v, want IsNotExist (dest not created)", err)
+	}
+}
+
 // TestMigrateLegacyLogDir_MovesClaudeSubdirWholesale verifies the stray
 // .claude subdirectory that can appear under a legacy logs/ dir is treated
 // as an ordinary entry: moved wholesale (with its contents) to dest/.claude

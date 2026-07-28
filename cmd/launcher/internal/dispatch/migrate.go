@@ -11,7 +11,8 @@ import (
 // one-time relocation for issue #2138.
 //
 // If legacy does not exist, or exists but is not a directory, MigrateLegacyLogDir
-// is a no-op and returns nil. Otherwise it creates dest (MkdirAll) and, for
+// is a no-op and returns nil. An empty legacy dir is simply removed without
+// creating dest. Otherwise it creates dest (MkdirAll) and, for
 // each direct entry of legacy -- including the stray .claude subdirectory
 // that can appear under a legacy logs/ dir, treated here as an ordinary
 // entry -- renames it to dest/<name> only if dest/<name> does not already
@@ -35,14 +36,21 @@ func MigrateLegacyLogDir(pwd string) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		return err
-	}
-
 	entries, err := os.ReadDir(legacy)
 	if err != nil {
 		return err
 	}
+	if len(entries) == 0 {
+		// Nothing to relocate -- drop the empty legacy dir without
+		// creating an empty dest.
+		_ = os.Remove(legacy)
+		return nil
+	}
+
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return err
+	}
+
 	for _, entry := range entries {
 		destPath := filepath.Join(dest, entry.Name())
 		if _, err := os.Stat(destPath); err == nil {
