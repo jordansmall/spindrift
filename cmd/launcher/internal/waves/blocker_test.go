@@ -244,7 +244,7 @@ func TestUnreadyBlockers_Pending(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"}) // no complete label, still open
 	edges := map[string][]string{"10": {"11"}}
-	got := unreadyBlockers(fc, fc, "10", edges)
+	got := unreadyBlockers(fc, fc, "10", edges, nil)
 	if !reflect.DeepEqual(got, []string{"11"}) {
 		t.Errorf("expected [11], got %v", got)
 	}
@@ -259,7 +259,7 @@ func TestUnreadyBlockers_MergedAndClosedAreReady(t *testing.T) {
 	// #12: issue closed with no PR — fallback satisfied.
 	fc.SetIssue(forge.Issue{Number: "12", State: "CLOSED"})
 	edges := map[string][]string{"10": {"11", "12"}}
-	if got := unreadyBlockers(fc, fc, "10", edges); len(got) != 0 {
+	if got := unreadyBlockers(fc, fc, "10", edges, nil); len(got) != 0 {
 		t.Errorf("expected no unready blockers, got %v", got)
 	}
 }
@@ -273,7 +273,7 @@ func TestUnreadyBlockers_Mixed(t *testing.T) {
 	// #12: still open with no merged PR — blocking.
 	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN"})
 	edges := map[string][]string{"10": {"11", "12"}}
-	if got := unreadyBlockers(fc, fc, "10", edges); !reflect.DeepEqual(got, []string{"12"}) {
+	if got := unreadyBlockers(fc, fc, "10", edges, nil); !reflect.DeepEqual(got, []string{"12"}) {
 		t.Errorf("expected [12], got %v", got)
 	}
 }
@@ -285,7 +285,7 @@ func TestReadinessReady_MergedPR(t *testing.T) {
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
 	fc.SetPRState("https://github.com/owner/repo/pull/99", forge.PRMerged)
 
-	if !(Readiness{}).Ready(fc, fc, "99") {
+	if !(Readiness{}).Ready(fc, fc, "99", "") {
 		t.Error("Readiness.Ready: want true for merged PR, got false")
 	}
 }
@@ -299,7 +299,7 @@ func TestReadinessReady_OpenPRWithCompleteLabel(t *testing.T) {
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
 	// state defaults to OPEN when SetPR is called without SetPRState override
 
-	if (Readiness{}).Ready(fc, fc, "99") {
+	if (Readiness{}).Ready(fc, fc, "99", "") {
 		t.Error("Readiness.Ready: want false for open PR with agent-complete label, got true")
 	}
 }
@@ -309,7 +309,7 @@ func TestReadinessReady_ClosedIssueFallback(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "99", State: "CLOSED"})
 	// No PR registered — simulates human-handled work absorbed outside spindrift.
 
-	if !(Readiness{}).Ready(fc, fc, "99") {
+	if !(Readiness{}).Ready(fc, fc, "99", "") {
 		t.Error("Readiness.Ready: want true for closed issue with no PR, got false")
 	}
 }
@@ -319,7 +319,7 @@ func TestReadinessReady_LocalLandingVerifiedMerged(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: "agent/issue-99@abc123"})
 	fc.SetVerifyLanding("agent/issue-99@abc123", true, nil)
 
-	if !(Readiness{}).Ready(fc, fc.AsLocal(), "99") {
+	if !(Readiness{}).Ready(fc, fc.AsLocal(), "99", "") {
 		t.Error("Readiness.Ready: want true for blocker whose landing verifies merged, got false")
 	}
 }
@@ -329,7 +329,7 @@ func TestReadinessReady_LocalLandingNotYetMerged(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: "agent/issue-99@abc123"})
 	fc.SetVerifyLanding("agent/issue-99@abc123", false, nil)
 
-	if (Readiness{}).Ready(fc, fc.AsLocal(), "99") {
+	if (Readiness{}).Ready(fc, fc.AsLocal(), "99", "") {
 		t.Error("Readiness.Ready: want false for blocker whose landing is not yet merged, got true")
 	}
 }
@@ -342,7 +342,7 @@ func TestReadinessReady_LocalLandingBranchRefStaysHeld(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: "agent/issue-99"})
 	fc.SetVerifyLanding("agent/issue-99", true, nil)
 
-	if (Readiness{}).Ready(fc, fc.AsLocal(), "99") {
+	if (Readiness{}).Ready(fc, fc.AsLocal(), "99", "") {
 		t.Error("Readiness.Ready: want false for unmerged LandingBranchRef, got true")
 	}
 }
@@ -353,7 +353,7 @@ func TestReadinessReady_MergedIssueFallback(t *testing.T) {
 	// back to it.Issue(ref), which returns MERGED for a merged PR.
 	fc.SetIssue(forge.Issue{Number: "99", State: "MERGED"})
 
-	if !(Readiness{}).Ready(fc, fc, "99") {
+	if !(Readiness{}).Ready(fc, fc, "99", "") {
 		t.Error("Readiness.Ready: want true for merged issue fallback, got false")
 	}
 }
@@ -364,7 +364,7 @@ func TestReadinessReady_OpenIssueFallback(t *testing.T) {
 	// still-OPEN — must keep blocking.
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN"})
 
-	if (Readiness{}).Ready(fc, fc, "99") {
+	if (Readiness{}).Ready(fc, fc, "99", "") {
 		t.Error("Readiness.Ready: want false for open issue fallback, got true")
 	}
 }
@@ -462,5 +462,108 @@ func TestReadinessStatus_MultipleBlockersOneFetchEach(t *testing.T) {
 
 	if len(fc.IssueCalls) != 2 {
 		t.Errorf("IssueCalls = %v, want exactly 2 (one per blocker)", fc.IssueCalls)
+	}
+}
+
+// --- dependent seed-branch blocker gate tests (#2130) ---
+
+// TestBlockerStatus_SeedBranchGate_NotContainedOnDependentParentHolds verifies
+// a blocker whose landing has NOT reached the dependent's own
+// integration/<parent> seed branch stays unready even though the blocker
+// issue itself is still open — the gate must check the dependent's own seed
+// branch, not the blocker's.
+func TestBlockerStatus_SeedBranchGate_NotContainedOnDependentParentHolds(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake()
+	landing := "integration/999@shaXYZ"
+	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN", Landing: landing})
+	fc.SetIntegrationContainsLanding(landing, "dependent-parent", false, nil)
+	cf := fc.AsLocal()
+	cfg := c
+	cfg.ParentOf = func(string) string { return "dependent-parent" }
+	edges := map[string][]string{"10": {"12"}}
+
+	ready, _, unready := (Readiness{Edges: edges}).Status(cfg, fc, cf, "10")
+
+	if ready {
+		t.Error("Status: want ready=false when blocker's landing has not reached the dependent's seed branch, got true")
+	}
+	if !reflect.DeepEqual(unready, []string{"12"}) {
+		t.Errorf("Status: want unready=[12], got %v", unready)
+	}
+	// The blocker issue is still open with no PR -- it must be the seed-branch
+	// containment check (not a closed/merged fallback) that held it.
+	found := false
+	for _, n := range fc.IssueCalls {
+		if n == "12" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected blocker #12 to be fetched at least once, got %v", fc.IssueCalls)
+	}
+}
+
+// TestBlockerStatus_SeedBranchGate_ContainedOnDependentParentReady verifies a
+// blocker whose landing HAS reached the dependent's own integration/<parent>
+// seed branch is treated as satisfied.
+func TestBlockerStatus_SeedBranchGate_ContainedOnDependentParentReady(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake()
+	landing := "integration/999@shaXYZ"
+	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN", Landing: landing})
+	fc.SetIntegrationContainsLanding(landing, "dependent-parent", true, nil)
+	cf := fc.AsLocal()
+	cfg := c
+	cfg.ParentOf = func(string) string { return "dependent-parent" }
+	edges := map[string][]string{"10": {"12"}}
+
+	ready, _, unready := (Readiness{Edges: edges}).Status(cfg, fc, cf, "10")
+
+	if !ready {
+		t.Error("Status: want ready=true when blocker's landing is contained in the dependent's seed branch, got false")
+	}
+	if len(unready) != 0 {
+		t.Errorf("Status: want unready=[], got %v", unready)
+	}
+}
+
+// TestBlockerStatus_SeedBranchGate_ClosedBlockerReadyRegardlessOfContainment
+// verifies a closed blocker still satisfies the gate regardless of seed-branch
+// containment -- the IssueClosed fallback runs before the containment check
+// and must not be short-circuited by it.
+func TestBlockerStatus_SeedBranchGate_ClosedBlockerReadyRegardlessOfContainment(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake()
+	landing := "integration/999@shaXYZ"
+	fc.SetIssue(forge.Issue{Number: "12", State: "CLOSED", Landing: landing})
+	fc.SetIntegrationContainsLanding(landing, "dependent-parent", false, nil)
+	cf := fc.AsLocal()
+	cfg := c
+	cfg.ParentOf = func(string) string { return "dependent-parent" }
+	edges := map[string][]string{"10": {"12"}}
+
+	ready, _, unready := (Readiness{Edges: edges}).Status(cfg, fc, cf, "10")
+
+	if !ready {
+		t.Error("Status: want ready=true for a closed blocker regardless of seed-branch containment, got false")
+	}
+	if len(unready) != 0 {
+		t.Errorf("Status: want unready=[], got %v", unready)
+	}
+}
+
+// TestReadinessReady_SeedBranchGate_EmptySeedParentFallsBackToLandingVerifier
+// verifies the pre-#2130 legacy path: an empty seedParent (nil ParentOf)
+// keeps falling back to LandingVerifier.VerifyLanding, not the seed-branch
+// containment gate, so a legacy caller sees no regression.
+func TestReadinessReady_SeedBranchGate_EmptySeedParentFallsBackToLandingVerifier(t *testing.T) {
+	fc := forge.NewFake()
+	landing := "agent/issue-99@abc123"
+	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: landing})
+	fc.SetVerifyLanding(landing, true, nil)
+
+	if !(Readiness{}).Ready(fc, fc.AsLocal(), "99", "") {
+		t.Error("Ready: want true for legacy landing-verified blocker with empty seedParent, got false")
 	}
 }
