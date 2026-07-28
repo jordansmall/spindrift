@@ -175,8 +175,9 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 // needsOutbox reports whether cfg's dispatch needs a writable per-issue
 // outbox directory at all: CODE_FORGE=local unconditionally (ADR 0033), or
 // CODE_FORGE=github under BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue
-// #1918) — the Box writes its finished branch as seam.bundle there instead
-// of pushing it, for the launcher's BundleRelay to pick up.
+// #1918) — the harness bundles the Box's finished branch to seam.bundle
+// there post-driver (issue #2082) instead of the Box pushing it, for the
+// launcher's BundleRelay to pick up.
 func needsOutbox(cfg Config) bool {
 	return cfg.CodeForge == "local" ||
 		(cfg.CodeForge == "github" && cfg.BoxForgeAndIssueAccess == "read-only")

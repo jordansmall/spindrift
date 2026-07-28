@@ -637,8 +637,9 @@ phase_prompt_assembly() {
 
   # The OPEN A PULL REQUEST push step gate (issue #1918,
   # open-pr-push-git.md/open-pr-push-outbox.md registry rows): read-only
-  # holds no push-capable token, so the step writes seam.bundle to the
-  # outbox instead of running git push directly. Computed independently of
+  # holds no push-capable token, so the step leaves the branch committed for
+  # the harness to bundle to the outbox post-driver (issue #2082) instead of
+  # the agent running git push directly. Computed independently of
   # ISSUE_TRACKER_GITHUB above (not nested under it, unlike the write-step
   # gates just above) -- CODE_FORGE and ISSUE_TRACKER are independent axes,
   # so a github push step must reflect BOX_WRITE_ENABLED regardless of which
