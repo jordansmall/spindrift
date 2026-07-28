@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -91,6 +92,33 @@ func testWired(it forge.IssueTracker) *localloop.Wired {
 
 // boxErr is a non-nil error that stands in for a non-zero box exit.
 var boxErr = errors.New("exit 1")
+
+// captureStdout redirects os.Stdout for the duration of fn and returns
+// everything fn wrote to it (e.g. via fmt.Printf), restoring the original
+// os.Stdout via t.Cleanup regardless of how fn exits -- used by tests that
+// assert on a diagnostic printed straight to stdout rather than returned
+// through an error or logger.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = orig })
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing stdout pipe writer: %v", err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading captured stdout: %v", err)
+	}
+	return string(out)
+}
 
 // testFactory builds a dispatch.Factory wired to dir and r, using the real
 // claude Driver (its ClassifyTransient degrades to Terminal/TaskFailed on a

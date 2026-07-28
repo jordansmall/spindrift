@@ -1535,7 +1535,8 @@ func TestDispatchConfig_PRForge_WiresOpenPRForIssue(t *testing.T) {
 	cf := forge.NewFake()
 	cf.SetPR(cf.AgentBranch("42"), forge.PR{URL: "https://github.com/o/r/pull/1"})
 
-	cfg := dispatchConfig(minimalValidConfig(), testWired(forge.NewFake()), cf)
+	it := forge.NewFake()
+	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), cf)
 
 	if cfg.OpenPRForIssue == nil {
 		t.Fatal("want OpenPRForIssue set for a PRForge-implementing Code Forge")
@@ -1570,7 +1571,8 @@ func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testin
 		t.Fatal("test setup: expected a non-PRForge Code Forge")
 	}
 
-	cfg := dispatchConfig(c, testWired(forge.NewFake()), cf)
+	it := forge.NewFake()
+	cfg := dispatchConfig(c, it, testWired(it), cf)
 
 	if cfg.OpenPRForIssue == nil {
 		t.Fatal("want OpenPRForIssue set for a non-PRForge Code Forge")
@@ -1600,7 +1602,7 @@ func TestDispatchConfig_Local_ResolveEnv_ForwardsIntegrationBranchAsBaseBranch(t
 	fc.SetBranchExists("integration/42", true)
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, testWired(fc), cf)
+	cfg := dispatchConfig(c, fc, testWired(fc), cf)
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "integration/42" {
 		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "integration/42")
@@ -1622,7 +1624,7 @@ func TestDispatchConfig_Local_ResolveEnv_UsesEachIssuesOwnParent(t *testing.T) {
 	fc.SetBranchExists("integration/render-pipeline", true)
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, testWired(fc), cf)
+	cfg := dispatchConfig(c, fc, testWired(fc), cf)
 
 	if got := cfg.ResolveEnv("10", "BASE_BRANCH"); got != "integration/calc-engine" {
 		t.Errorf("ResolveEnv(10, BASE_BRANCH) = %q, want %q", got, "integration/calc-engine")
@@ -1651,10 +1653,74 @@ func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchBeforeFirstLand(t 
 	fc.SetBranchExists("integration/42", false)
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, testWired(fc), cf)
+	cfg := dispatchConfig(c, fc, testWired(fc), cf)
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "main" {
 		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "main")
+	}
+}
+
+// TestDispatchConfig_Local_ResolveEnv_LoudlyFallsBackWhenBlockedSeamMissesIntegrationBranch
+// verifies the complementary hardening half of issue #2130: a seam that
+// DepsOf reports has blockers should never reach the resolver with its own
+// Integration branch still missing -- the #2130 readiness gate is supposed
+// to hold it until its blocker's work lands onto that very branch. If one
+// slips through anyway, ResolveEnv still falls back to the operator's real
+// base branch (the Box must clone something), but it must say so loudly on
+// stdout rather than silently seeding bare base the way a genuinely
+// blocker-free seam does.
+func TestDispatchConfig_Local_ResolveEnv_LoudlyFallsBackWhenBlockedSeamMissesIntegrationBranch(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.baseBranch = "main"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "42"})
+	fc.SetBranchExists("integration/42", false)
+	fc.NativeDeps = map[string][]string{"42": {"41"}}
+	cf := fc.AsLocal()
+
+	cfg := dispatchConfig(c, fc, testWired(fc), cf)
+
+	var got string
+	out := captureStdout(t, func() {
+		got = cfg.ResolveEnv("42", "BASE_BRANCH")
+	})
+
+	if got != "main" {
+		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "main")
+	}
+	if !strings.Contains(out, "blocker(s)") {
+		t.Errorf("stdout = %q, want a loud blocker diagnostic mentioning %q", out, "blocker(s)")
+	}
+}
+
+// TestDispatchConfig_Local_ResolveEnv_SilentlyFallsBackWhenBlockerFreeSeamMissesIntegrationBranch
+// verifies the other half stays exactly as before this hardening: a
+// blocker-free (or wholly independent) seam's first dispatch, before its own
+// Integration branch has ever been created, still seeds silently from the
+// operator's real base branch -- no loud diagnostic, since there is nothing
+// wrong to report.
+func TestDispatchConfig_Local_ResolveEnv_SilentlyFallsBackWhenBlockerFreeSeamMissesIntegrationBranch(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.baseBranch = "main"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "42"})
+	fc.SetBranchExists("integration/42", false)
+	cf := fc.AsLocal()
+
+	cfg := dispatchConfig(c, fc, testWired(fc), cf)
+
+	var got string
+	out := captureStdout(t, func() {
+		got = cfg.ResolveEnv("42", "BASE_BRANCH")
+	})
+
+	if got != "main" {
+		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "main")
+	}
+	if out != "" {
+		t.Errorf("stdout = %q, want no diagnostic for a blocker-free seam", out)
 	}
 }
 
@@ -1668,7 +1734,7 @@ func TestDispatchConfig_NonLocal_ResolveEnv_PassesThroughUnchanged(t *testing.T)
 	cf := forge.NewFake()
 
 	t.Setenv("BASE_BRANCH", "release")
-	cfg := dispatchConfig(c, testWired(forge.NewFake()), cf)
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf)
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "release" {
 		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "release")
@@ -1687,7 +1753,7 @@ func TestDispatchConfig_ResolveEnv_BoxGHTokenOverridesGHToken(t *testing.T) {
 	t.Setenv("BOX_GH_TOKEN", "box-token")
 	cf := forge.NewFake()
 
-	cfg := dispatchConfig(c, testWired(forge.NewFake()), cf)
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf)
 
 	if got := cfg.ResolveEnv("42", "GH_TOKEN"); got != "box-token" {
 		t.Errorf("ResolveEnv(42, GH_TOKEN) = %q, want %q", got, "box-token")
@@ -1707,7 +1773,7 @@ func TestDispatchConfig_ResolveEnv_GHTokenPassthroughWhenBoxGHTokenUnset(t *test
 	t.Setenv("GH_TOKEN", "launcher-token")
 	cf := forge.NewFake()
 
-	cfg := dispatchConfig(c, testWired(forge.NewFake()), cf)
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf)
 
 	if got := cfg.ResolveEnv("42", "GH_TOKEN"); got != "launcher-token" {
 		t.Errorf("ResolveEnv(42, GH_TOKEN) = %q, want %q", got, "launcher-token")
@@ -1728,7 +1794,7 @@ func TestDispatchConfig_Local_ResolveEnv_BoxGHTokenOverridesGHToken(t *testing.T
 	fc.SetIssue(forge.Issue{Number: "42"})
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, testWired(fc), cf)
+	cfg := dispatchConfig(c, fc, testWired(fc), cf)
 
 	if got := cfg.ResolveEnv("42", "GH_TOKEN"); got != "box-token" {
 		t.Errorf("ResolveEnv(42, GH_TOKEN) = %q, want %q", got, "box-token")
@@ -1750,7 +1816,7 @@ func TestDispatchConfig_Local_ResolveEnv_FallsBackToBaseBranchOnBranchExistsErro
 	fc.BranchExistsErr = errors.New("repo path unreadable")
 	cf := fc.AsLocal()
 
-	cfg := dispatchConfig(c, testWired(fc), cf)
+	cfg := dispatchConfig(c, fc, testWired(fc), cf)
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "main" {
 		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "main")
@@ -2461,5 +2527,38 @@ func TestEngageAliasRemoved(t *testing.T) {
 	}
 	if strings.Contains(string(data), `args[0] == "engage"`) {
 		t.Error(`main.go still dispatches the deprecated "engage" subcommand; remove the handler`)
+	}
+}
+
+// TestSeedParentResolver_NonLocalForge_ReturnsNil verifies that under any
+// forge that doesn't implement forge.LandingContainmentQuery (i.e. every
+// forge but local), seedParentResolver returns nil -- keeping
+// waves.Config.ParentOf nil, so the blocker gate's seed-branch check (#2130)
+// never fires and the gate retains its pre-#2130 landing-verification
+// behavior.
+func TestSeedParentResolver_NonLocalForge_ReturnsNil(t *testing.T) {
+	fc := forge.NewFake()
+
+	if got := seedParentResolver(fc, fc); got != nil {
+		t.Error("seedParentResolver(non-containment forge) returned non-nil, want nil")
+	}
+}
+
+// TestSeedParentResolver_LocalForge_ResolvesDependentsParent verifies that
+// under CODE_FORGE=local (forge.LandingContainmentQuery), seedParentResolver
+// returns a non-nil resolver that maps a dependent issue's own num to its
+// sanitized parent: frontmatter token via localloop.ResolveParent -- the
+// same token keying that dependent's integration/<parent> seed branch.
+func TestSeedParentResolver_LocalForge_ResolvesDependentsParent(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "11", Parent: "Render Pipeline"})
+	cf := fc.AsLocal()
+
+	resolve := seedParentResolver(fc, cf)
+	if resolve == nil {
+		t.Fatal("seedParentResolver(local forge) = nil, want a non-nil resolver")
+	}
+	if got := resolve("11"); got != "render-pipeline" {
+		t.Errorf("resolve(11) = %q, want %q", got, "render-pipeline")
 	}
 }
