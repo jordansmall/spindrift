@@ -368,6 +368,16 @@ _is_research_kind() {
   [ "${DISPATCH_KIND:-work}" = "research" ]
 }
 
+# _is_readonly_github reports (via exit status) whether this is a read-only
+# github Box: BOX_WRITE_ENABLED is unset (no push-capable token was ever
+# issued, so a force-push can only 403) and the Code Forge is github. Such a
+# Box hands its branch off through the harness-owned outbox bundle seam rather
+# than a push (issue #2094). The github default mirrors every other
+# ${CODE_FORGE:-github} read in this file.
+_is_readonly_github() {
+  [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ]
+}
+
 # A SPINDRIFT_PROMPT_DIR mount replaces the whole prompt dir, so a rendered
 # prompt that dropped a shared block (issue #419, extended to COMMS/CHECK by
 # #455) never gets the build-time injection; append the canonical block here,
@@ -960,7 +970,7 @@ emit_outcome_backstop() {
     # already sitting in this Box's own clone regardless, unlike git/github
     # where a push is the only way work survives the container exiting.
     note="${note}; no bundle was ever emitted (no writable remote under CODE_FORGE=local)"
-  elif [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ]; then
+  elif _is_readonly_github; then
     # A read-only github Box holds no push token by design (BOX_WRITE_ENABLED
     # unset), so a force-push here can only ever 403 -- a structural failure,
     # not a transient one (issue #2094). main() instead falls through to the
@@ -1149,7 +1159,7 @@ main() {
     # writable github and git already force-pushed in the backstop, local never
     # had a writable remote, and research cuts no branch -- so they exit now,
     # behaviour unchanged.
-    if ! { [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ] && ! _is_research_kind; }; then
+    if ! _is_readonly_github || _is_research_kind; then
       exit 0
     fi
   fi
@@ -1176,7 +1186,7 @@ main() {
   # why a status=blocked run couldn't reach status=ready), and a bare
   # grep across the full line would false-positive on that.
   local _outcome_fields_before_note="${_last_outcome_line%% note=*}"
-  if [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ] \
+  if _is_readonly_github \
     && [[ " $_outcome_fields_before_note " == *" status=ready "* ]]; then
     # Carries this run's nonce (so the resumed pass can emit a line
     # _scan_pr_intent_in_log will actually match) and repeats the exact
@@ -1246,7 +1256,7 @@ main() {
   # exit here, rather than a caught-and-noted best-effort step.
   if ! _is_research_kind \
     && { [ "${CODE_FORGE:-github}" = "local" ] \
-      || { [ -z "${BOX_WRITE_ENABLED:-}" ] && [ "${CODE_FORGE:-github}" = "github" ]; }; }; then
+      || _is_readonly_github; }; then
     driver-exec bundle-out \
       --repo "$WORK_DIR" \
       --base "origin/${BASE_BRANCH:-}" \
