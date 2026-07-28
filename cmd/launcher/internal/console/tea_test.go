@@ -91,10 +91,16 @@ func waitFinished(t *testing.T, tm *teatest.TestModel) {
 // that only becomes available after the first window elapses (as CPU
 // contention on a loaded CI runner can delay a render past one window, per
 // issue #1981) still succeeds within a later attempt, rather than the
-// caller seeing a spurious timeout.
+// caller seeing a spurious timeout. The first window (10ms) is deliberately
+// shorter than the 15ms content delay so retry — not the first attempt — is
+// what lands the read. Give it several retry windows rather than one: on an
+// emulated/contended aarch64 runner a single over-long checkInterval sleep
+// can burn a whole 10ms window observing only pre-deadline EOF, so a lone
+// second window is too tight a margin and flakes (the same #1981 contention
+// this helper exists to absorb).
 func TestWaitForOutputRetry_SucceedsWhenDelayedContentArrivesInARetryWindow(t *testing.T) {
 	r := newDelayedReader(15*time.Millisecond, "ready")
-	if err := waitForOutputRetry(r, []string{"ready"}, 10*time.Millisecond, time.Millisecond, 2); err != nil {
+	if err := waitForOutputRetry(r, []string{"ready"}, 10*time.Millisecond, time.Millisecond, 5); err != nil {
 		t.Fatalf("waitForOutputRetry() = %v, want nil once the delayed content lands within the retry window", err)
 	}
 }
