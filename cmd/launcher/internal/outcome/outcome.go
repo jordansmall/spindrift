@@ -154,13 +154,20 @@ func ParseAnywhere(line string) (Outcome, bool) {
 // for callers with no per-run nonce to check against. skipped reports
 // whether at least one line was excluded solely for failing this gate, so
 // a caller can warn that a spoof attempt or misconfigured run occurred even
-// when a valid outcome was ultimately found (or wasn't).
+// when a valid outcome was ultimately found (or wasn't). A line excluded by
+// the gate that is also a recognizable template/placeholder line — the
+// prompt's own example OUTCOME line with unsubstituted ${...} fields, or an
+// empty nonce= field — never sets skipped (issue #2088): such a line is
+// never a plausible spoof, so warning about it would be noise. It is still
+// excluded from candidacy either way; only the warning is suppressed.
 func LastInLog(path string, expectedNonce string) (o Outcome, found bool, skipped bool, err error) {
 	var lastLeading, lastMention string
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
 		if _, ok := stripToken(strings.TrimSpace(line), Token); ok {
 			if expectedNonce != "" && !LineHasNonce(line, expectedNonce) {
-				skipped = true
+				if !isTemplatePlaceholder(line) {
+					skipped = true
+				}
 				return
 			}
 			lastLeading = line
@@ -168,7 +175,9 @@ func LastInLog(path string, expectedNonce string) (o Outcome, found bool, skippe
 		}
 		if containsToken(line, Token) && looksLikeAttempt(line) {
 			if expectedNonce != "" && !LineHasNonce(line, expectedNonce) {
-				skipped = true
+				if !isTemplatePlaceholder(line) {
+					skipped = true
+				}
 				return
 			}
 			lastMention = line
@@ -457,6 +466,26 @@ func looksLikeAttempt(line string) bool {
 		tokenField(line, "landing") != "" ||
 		tokenField(line, "status") != "" ||
 		noteField(line) != ""
+}
+
+// isTemplatePlaceholder reports whether line is a recognizable prompt
+// template/example line rather than a genuine (or spoofed) attempt (issue
+// #2088): either it contains an unsubstituted `${...}` substitution field —
+// the prompt's own grammar example, never a real value a Box or an untrusted
+// echo would produce — or it carries a standalone `nonce=` field token with
+// no value at all. Used only to decide whether an excluded nonce-gate line
+// is worth warning about; it never affects candidacy, since a line that
+// fails the nonce gate is excluded from candidacy either way.
+func isTemplatePlaceholder(line string) bool {
+	if strings.Contains(line, "${") {
+		return true
+	}
+	for _, tok := range strings.Fields(line) {
+		if tok == "nonce=" {
+			return true
+		}
+	}
+	return false
 }
 
 // stripToken reports whether line begins with token followed by a space or a
