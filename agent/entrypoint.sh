@@ -12,9 +12,16 @@
 # clone with a scoped token and no host access.
 set -euo pipefail
 
-: "${REPO_SLUG:?REPO_SLUG (owner/repo) is required}"
+# Fully-local mode (CODE_FORGE=local AND ISSUE_TRACKER=local) talks to no real
+# forge, so REPO_SLUG and GH_TOKEN have nothing to resolve against — mirrors
+# the launcher's own validate() (cmd/launcher/main.go).
+fully_local=false
+if [ "${CODE_FORGE:-}" = local ] && [ "${ISSUE_TRACKER:-}" = local ]; then
+  fully_local=true
+fi
+[ "$fully_local" = true ] || : "${REPO_SLUG:?REPO_SLUG (owner/repo) is required}"
 : "${ISSUE_NUMBER:?ISSUE_NUMBER is required}"
-: "${GH_TOKEN:?GH_TOKEN is required}"
+[ "$fully_local" = true ] || : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${GIT_USER_NAME:?GIT_USER_NAME is required}"
 : "${GIT_USER_EMAIL:?GIT_USER_EMAIL is required}"
 
