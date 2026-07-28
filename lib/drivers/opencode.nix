@@ -72,76 +72,39 @@
   # opencode composes subagents from on-disk agents/*.md files
   # (agentFilesTemplate below), not a CLI flag like claude's --agents JSON, so
   # this template correctly declines that mechanism: it accepts the same
-  # model-knob args as claude.nix's template (for a uniform call site in
-  # mkHarness.nix) but always returns "", meaning no --agents-equivalent flag
-  # is ever rendered.
-  agentsJsonTemplate =
-    {
-      scoutModel,
-      reviewModel,
-      filerModel,
-      workerModel,
-    }:
-    "";
+  # roster arg as claude.nix's template (issue #264, for a uniform call site
+  # in mkHarness.nix) but always returns "", meaning no --agents-equivalent
+  # flag is ever rendered.
+  agentsJsonTemplate = { roster }: "";
 
   # opencode has no --agents JSON flag; it discovers subagents by scanning
   # HOME-relative markdown files under .config/opencode/agents/, each with a
   # YAML frontmatter block (description/mode/model) plus a body that seeds
-  # the subagent's system prompt. Composed independently per agent, mirroring
-  # claude.nix's agentsJsonTemplate: each file is baked only when its model
-  # knob is non-empty (lib.optionalAttrs), so an empty model omits that
-  # agent's file entirely rather than baking a modelless stub. The
-  # description strings are the same ones claude.nix's agentsJsonTemplate
-  # uses for the same agent, so the two Drivers present identical subagent
-  # framing regardless of which composes via JSON and which via files. The
-  # model is passed VERBATIM (never string-processed) -- the operator
-  # supplies the full provider-prefixed model id, matching driver-exec's
-  # unprefixed `-m <model>` invocation.
+  # the subagent's system prompt. Takes the same first-class roster (issue
+  # #264, lib/roster.nix) as claude.nix's agentsJsonTemplate: each roster
+  # entry with a non-empty model becomes one file, so an arbitrary N-agent
+  # roster -- including a custom agent beyond the historical
+  # scout/reviewer/filer/worker set -- renders the same way; an entry with an
+  # empty model is dropped entirely (#392 semantics) rather than baking a
+  # modelless stub. The model is passed VERBATIM (never string-processed) --
+  # the operator supplies the full provider-prefixed model id, matching
+  # driver-exec's unprefixed `-m <model>` invocation.
   agentFilesTemplate =
-    {
-      scoutModel,
-      reviewModel,
-      filerModel,
-      workerModel,
-    }:
-    lib.optionalAttrs (scoutModel != "") {
-      ".config/opencode/agents/scout.md" = ''
-        ---
-        description: Map relevant files, seams, and tests; return a structured brief
-        mode: subagent
-        model: ${scoutModel}
-        ---
-        Map relevant files, seams, and tests; return a structured brief
-      '';
-    }
-    // lib.optionalAttrs (reviewModel != "") {
-      ".config/opencode/agents/reviewer.md" = ''
-        ---
-        description: Review the branch diff for spec compliance and coding standards
-        mode: subagent
-        model: ${reviewModel}
-        ---
-        Review the branch diff for spec compliance and coding standards
-      '';
-    }
-    // lib.optionalAttrs (filerModel != "") {
-      ".config/opencode/agents/filer.md" = ''
-        ---
-        description: File issues from a review's non-blocking findings, best-effort
-        mode: subagent
-        model: ${filerModel}
-        ---
-        File issues from a review's non-blocking findings, best-effort
-      '';
-    }
-    // lib.optionalAttrs (workerModel != "") {
-      ".config/opencode/agents/worker.md" = ''
-        ---
-        description: Implement a scoped slice of work delegated to it, with full implement-capable tools
-        mode: subagent
-        model: ${workerModel}
-        ---
-        Implement a scoped slice of work delegated to it, with full implement-capable tools
-      '';
-    };
+    { roster }:
+    let
+      present = lib.filter (e: (e.model or "") != "") roster;
+    in
+    lib.listToAttrs (
+      map (e: {
+        name = ".config/opencode/agents/${e.name}.md";
+        value = ''
+          ---
+          description: ${e.description or ""}
+          mode: ${e.mode or "subagent"}
+          model: ${e.model}
+          ---
+          ${e.description or ""}
+        '';
+      }) present
+    );
 }

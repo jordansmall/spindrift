@@ -741,46 +741,35 @@ phase_prompt_assembly() {
   # whichever agents it actually carries and forward the completed JSON;
   # otherwise omit the flag entirely.
   if [ -n "${AGENTS_JSON_TEMPLATE:-}" ]; then
-    local scout_prompt filer_prompt worker_prompt
-    scout_prompt="$(_subst "${PROMPTS_DIR}/scout-prompt.md")"
-    filer_prompt=""
-    if printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("filer")' >/dev/null 2>&1; then
-      filer_prompt="$(_subst "${PROMPTS_DIR}/filer-prompt.md")"
-    fi
-    worker_prompt=""
-    if printf '%s' "$AGENTS_JSON_TEMPLATE" | jq -e 'has("worker")' >/dev/null 2>&1; then
-      worker_prompt="$(_subst "${PROMPTS_DIR}/worker-prompt.md")"
-    fi
+    agents_json="$AGENTS_JSON_TEMPLATE"
     if [ -n "$ORCHESTRATOR" ]; then
       # The code-owned review pass replaces the implementor's own inline
       # reviewer subagent entirely on this path (issue #2037) -- drop it
       # from the template so it's never provisioned into --agents at all,
       # not merely muted; verdict authority moves fully to the review pass.
-      agents_json="$(jq -n \
-        --argjson template "$AGENTS_JSON_TEMPLATE" \
-        --arg scout_prompt "$scout_prompt" \
-        --arg filer_prompt "$filer_prompt" \
-        --arg worker_prompt "$worker_prompt" \
-        '$template
-         | del(.reviewer)
-         | if has("scout") then .scout.prompt = $scout_prompt else . end
-         | if has("filer") then .filer.prompt = $filer_prompt else . end
-         | if has("worker") then .worker.prompt = $worker_prompt else . end')"
+      agents_json="$(printf '%s' "$agents_json" | jq 'del(.reviewer)')"
     else
-      local review_prompt
-      review_prompt="$(_subst "${PROMPTS_DIR}/review-prompt.md")"
-      agents_json="$(jq -n \
-        --argjson template "$AGENTS_JSON_TEMPLATE" \
-        --arg scout_prompt "$scout_prompt" \
-        --arg review_prompt "$review_prompt" \
-        --arg filer_prompt "$filer_prompt" \
-        --arg worker_prompt "$worker_prompt" \
-        '$template
-         | if has("scout") then .scout.prompt = $scout_prompt else . end
-         | if has("reviewer") then .reviewer.prompt = $review_prompt else . end
-         | if has("filer") then .filer.prompt = $filer_prompt else . end
-         | if has("worker") then .worker.prompt = $worker_prompt else . end')"
+      # Off-row (orchestrator-fork-well-formed, issue #2047): no reviewer
+      # drop -- the generic injection loop below still provisions reviewer
+      # like any other roster entry when the orchestrator is off.
+      :
     fi
+    # Inject each present agent's runtime-substituted prompt. The prompt file
+    # for an agent is AGENTS_PROMPT_FILES[name] (nix-baked from the roster),
+    # falling back to "<name>-prompt.md". Generic over the roster: a custom
+    # Nth agent's prompt is injected the same way, no per-name branch (#264).
+    local _agent_name _pf _p
+    while IFS= read -r _agent_name; do
+      [ -n "$_agent_name" ] || continue
+      _pf=""
+      if [ -n "${AGENTS_PROMPT_FILES:-}" ]; then
+        _pf="$(printf '%s' "$AGENTS_PROMPT_FILES" | jq -r --arg n "$_agent_name" '.[$n] // empty')"
+      fi
+      [ -n "$_pf" ] || _pf="${_agent_name}-prompt.md"
+      [ -f "${PROMPTS_DIR}/${_pf}" ] || continue
+      _p="$(_subst "${PROMPTS_DIR}/${_pf}")"
+      agents_json="$(printf '%s' "$agents_json" | jq --arg n "$_agent_name" --arg p "$_p" '.[$n].prompt = $p')"
+    done < <(printf '%s' "$agents_json" | jq -r 'keys[]')
   else
     agents_json=""
   fi

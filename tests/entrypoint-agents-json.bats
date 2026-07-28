@@ -105,3 +105,27 @@ setup() {
   jq -e '.worker.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
 }
 
+# A custom Nth agent (issue #264, roster) must get its prompt injected the same
+# generic way as the four built-in names -- no per-name branch in the
+# entrypoint. AGENTS_PROMPT_FILES (nix-baked from the roster) maps each agent
+# name to its prompt file under PROMPTS_DIR; here it names a custom
+# "auditor-prompt.md" that lives only in this test's own prompt dir. Copied
+# from the real PROMPTS_DIR (rather than a bare empty dir) so every other
+# fragment/prompt file phase_prompt_assembly reads along the way still
+# resolves -- only the extra auditor-prompt.md is genuinely new.
+@test "entrypoint injects a custom agent's prompt generically via AGENTS_PROMPT_FILES" {
+  local prompt_dir="$BATS_TEST_TMPDIR/custom-prompts"
+  cp -r "$PROMPTS_DIR" "$prompt_dir"
+  chmod -R u+w "$prompt_dir"
+  printf 'audit stub\n' >"$prompt_dir/auditor-prompt.md"
+  export PROMPTS_DIR="$prompt_dir"
+  export AGENTS_JSON_TEMPLATE='{"scout":{"description":"scout","model":"opus","prompt":"","tools":["Read"]},"auditor":{"description":"audit","model":"haiku","prompt":"","tools":["Read"]}}'
+  export AGENTS_PROMPT_FILES='{"scout":"scout-prompt.md","auditor":"auditor-prompt.md"}'
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -s "$CLAUDE_AGENTS_FILE" ]
+  jq -e 'has("scout") and has("auditor")' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.scout.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+  jq -e '.auditor.prompt | length > 0' "$CLAUDE_AGENTS_FILE" >/dev/null
+}
+
