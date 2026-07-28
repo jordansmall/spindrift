@@ -1069,6 +1069,32 @@ func TestFormatSpindriftOpPassStart(t *testing.T) {
 	}
 }
 
+// TestWriterTopLevelRoleAppliesToTopLevelMessage verifies a Writer built via
+// NewWithTopLevelRole attributes a top-level (no parent_tool_use_id)
+// assistant event to the given topLevelRole — both the switch header and the
+// buffered per-role count line bucket under it (issue #2092).
+func TestWriterTopLevelRoleAppliesToTopLevelMessage(t *testing.T) {
+	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
+	var status bytes.Buffer
+	w := claude.NewWithTopLevelRole(&bytes.Buffer{}, "2092", &status, "reviewer")
+
+	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
+	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reviewing the change."}]}}` + "\n"
+	fmt.Fprint(w, toolEv)
+	fmt.Fprint(w, narEv)
+
+	out := status.String()
+	if !strings.Contains(out, rule+" reviewer ") {
+		t.Errorf("missing reviewer switch header: %q", out)
+	}
+	if !strings.Contains(out, "1 read") {
+		t.Errorf("count line missing '1 read' bucketed under reviewer: %q", out)
+	}
+	if strings.Contains(out, rule+" implementor ") {
+		t.Errorf("top-level message with topLevelRole set must not emit an implementor header: %q", out)
+	}
+}
+
 // TestFormatSpindriftOpPassStartWithRole verifies FormatSpindriftOp names the
 // pass's role (issue #2037: "implement", "review", "fix") inline when Role is
 // set, so #2027's telemetry can tell a code-owned review pass's pass_start

@@ -18,6 +18,9 @@ type Writer struct {
 	raw   io.Writer
 	issue string
 	out   io.Writer
+	// topLevelRole is the role for top-level (empty parent_tool_use_id)
+	// messages; empty means the ImplementorRole default (issue #2092).
+	topLevelRole string
 
 	mu              sync.Mutex
 	buf             []byte
@@ -34,13 +37,23 @@ type Writer struct {
 // New returns a Writer that passes all bytes to raw unchanged and emits
 // heartbeat lines to out at natural boundaries (narration, phase change, result).
 func New(raw io.Writer, issue string, out io.Writer) *Writer {
+	return NewWithTopLevelRole(raw, issue, out, "")
+}
+
+// NewWithTopLevelRole is like New, but attributes every top-level (empty
+// parent_tool_use_id) message to topLevelRole instead of the ImplementorRole
+// default — for a top-level pass the orchestrator owns as something other
+// than implementation, e.g. a review pass (issue #2092). An empty
+// topLevelRole preserves New's ImplementorRole default.
+func NewWithTopLevelRole(raw io.Writer, issue string, out io.Writer, topLevelRole string) *Writer {
 	return &Writer{
-		raw:        raw,
-		issue:      issue,
-		out:        out,
-		taskRole:   make(map[string]string),
-		roleCounts: make(map[string]map[string]int),
-		rolePhase:  make(map[string]string),
+		raw:          raw,
+		issue:        issue,
+		out:          out,
+		topLevelRole: topLevelRole,
+		taskRole:     make(map[string]string),
+		roleCounts:   make(map[string]map[string]int),
+		rolePhase:    make(map[string]string),
 	}
 }
 
@@ -86,7 +99,7 @@ func (w *Writer) parseLine(line string) {
 			CollectTaskRoles(ev, w.taskRole)
 
 			// Resolve acting role from parent_tool_use_id.
-			role := ResolveRole(ev, w.taskRole)
+			role := ResolveRole(ev, w.taskRole, w.topLevelRole)
 			model := ModelFamily(ev.Message.Model)
 
 			// On (role, model) change, flush the departing role's pending counts.

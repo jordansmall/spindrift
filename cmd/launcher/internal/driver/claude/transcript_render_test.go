@@ -159,6 +159,23 @@ func TestRenderTranscript_NestedSubagent_PrefixesOwnRole(t *testing.T) {
 	}
 }
 
+func TestRenderTranscriptWithRole_TopLevelEventsUseGivenRole(t *testing.T) {
+	lines := []string{
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Looks good overall."}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok, file updated"}]}}`,
+	}
+	path := claude.WriteLog(t, lines...)
+
+	got, err := claude.RenderTranscriptWithRole(path, "reviewer")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "[reviewer] Looks good overall.\n[reviewer]   -> ok, file updated\n"
+	if got != want {
+		t.Errorf("RenderTranscriptWithRole = %q, want %q", got, want)
+	}
+}
+
 func TestRenderTranscript_MissingFile_ReturnsEmpty(t *testing.T) {
 	got, err := claude.RenderTranscript(filepath.Join(t.TempDir(), "missing.log"))
 	if err != nil {

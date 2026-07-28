@@ -107,6 +107,10 @@ func EncodeSpindriftOp(op SpindriftOp) string {
 // parent_tool_use_id — the main agent loop, as opposed to a Task subagent.
 const ImplementorRole = "implementor"
 
+// ReviewerRole is the role attributed to a top-level orchestrator-owned
+// review pass (issue #2092).
+const ReviewerRole = "reviewer"
+
 // DefaultRole is the role attributed to a Task whose input carries no (or
 // empty) subagent_type, and to any message whose parent_tool_use_id does not
 // match a Task ID collected so far.
@@ -148,11 +152,18 @@ func CollectTaskRoles(ev Event, taskRole map[string]string) {
 	}
 }
 
-// ResolveRole returns the acting role for ev: ImplementorRole when it has no
-// parent_tool_use_id, otherwise the role recorded in taskRole for its parent
-// Task ID, defaulting to DefaultRole when the parent is unknown.
-func ResolveRole(ev Event, taskRole map[string]string) string {
+// ResolveRole returns the acting role for ev: when it has no
+// parent_tool_use_id (a top-level pass), topLevelRole if non-empty,
+// otherwise ImplementorRole — so an empty topLevelRole preserves the
+// long-standing ImplementorRole default (issue #2092). Otherwise it returns
+// the role recorded in taskRole for its parent Task ID, defaulting to
+// DefaultRole when the parent is unknown; a real (non-empty)
+// parent_tool_use_id is unaffected by topLevelRole.
+func ResolveRole(ev Event, taskRole map[string]string, topLevelRole string) string {
 	if ev.ParentToolUseID == "" {
+		if topLevelRole != "" {
+			return topLevelRole
+		}
 		return ImplementorRole
 	}
 	if role, ok := taskRole[ev.ParentToolUseID]; ok {
