@@ -12,6 +12,7 @@
     AB_REPO_SLUG="acme/mirror" \
     AB_MODEL="claude-sonnet-5" \
     AB_ORCH="" \
+    AB_OUTDIR="$BATS_TEST_TMPDIR/ab-out" \
     bash "${AB_ORCHESTRATOR_SH:-$BATS_TEST_DIRNAME/../ab-orchestrator.sh}" 123
   [ "$status" -eq 0 ]
   # off arm: --worker-model empty

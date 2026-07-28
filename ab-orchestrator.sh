@@ -390,7 +390,7 @@ main() {
     die "AB_REPO_SLUG ('$AB_REPO_SLUG') does not match the repo in AB_REMOTE ('$remote_slug') -- these must be the same repo, or the experiment targets a different tracker than it pushes to. Fix AB_REPO_SLUG, or set AB_ALLOW_SLUG_MISMATCH=1 if that split is deliberate."
   fi
 
-  tracker="${ISSUE_TRACKER:-github}"
+  local tracker="${ISSUE_TRACKER:-github}"
 
   # --------------------------------------------------------- confirmation gate ----
   cat >&2 <<EOF
@@ -422,7 +422,7 @@ EOF
   fi
 
   mkdir -p "$AB_OUTDIR/logs" "$AB_OUTDIR/judging"
-  summary_tsv="$AB_OUTDIR/metrics.tsv"
+  local summary_tsv="$AB_OUTDIR/metrics.tsv"
   printf 'issue\tarm\toutcome\tcost_usd\tin_tok\tout_tok\tcache_read\tcache_create\tturns\tduration_ms\tpasses\tverdicts\tdecision\n' >"$summary_tsv"
 
   # ------------------------------------------------------- build once, then run ----
