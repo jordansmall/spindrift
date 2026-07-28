@@ -12,11 +12,23 @@ import (
 // RenderTranscript scans the box log at logPath and returns a readable
 // rendering of its assistant turns and tool calls — the claude Driver's
 // transcript-rendering strategy (ADR 0009), used by a Console drill-in to
-// show the work instead of raw stream-json.
+// show the work instead of raw stream-json. It is a thin wrapper around
+// RenderTranscriptWithRole with an empty topLevelRole (the ImplementorRole
+// default).
 //
 // Returns ("", nil) when logPath does not exist, matching lastInLog and
 // breakdownByModelFile's not-found contract.
 func RenderTranscript(logPath string) (string, error) {
+	return RenderTranscriptWithRole(logPath, "")
+}
+
+// RenderTranscriptWithRole is like RenderTranscript, but attributes every
+// top-level (empty parent_tool_use_id) event to topLevelRole instead of the
+// ImplementorRole default — for rendering a top-level pass the orchestrator
+// owns as something other than implementation, e.g. a review pass (issue
+// #2092). An empty topLevelRole preserves RenderTranscript's ImplementorRole
+// default.
+func RenderTranscriptWithRole(logPath, topLevelRole string) (string, error) {
 	var lines []string
 	taskRole := make(map[string]string)
 	err := logscan.ForEachLine(logPath, logscan.SkipOversized, func(line string) {
@@ -34,7 +46,7 @@ func RenderTranscript(logPath string) (string, error) {
 		switch ev.Type {
 		case "assistant":
 			CollectTaskRoles(ev, taskRole)
-			role := ResolveRole(ev, taskRole)
+			role := ResolveRole(ev, taskRole, topLevelRole)
 			for _, block := range ev.Message.Content {
 				switch block.Type {
 				case "text":
@@ -46,7 +58,7 @@ func RenderTranscript(logPath string) (string, error) {
 				}
 			}
 		case "user":
-			role := ResolveRole(ev, taskRole)
+			role := ResolveRole(ev, taskRole, topLevelRole)
 			for _, block := range ev.Message.Content {
 				if block.Type != "tool_result" {
 					continue

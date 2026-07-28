@@ -8,7 +8,7 @@ import (
 func TestResolveRole_ImplementorHasNoParent(t *testing.T) {
 	ev := Event{Type: "assistant", ParentToolUseID: ""}
 	taskRole := map[string]string{}
-	got := ResolveRole(ev, taskRole)
+	got := ResolveRole(ev, taskRole, "")
 	if got != ImplementorRole {
 		t.Errorf("ResolveRole() = %q, want %q", got, ImplementorRole)
 	}
@@ -17,7 +17,7 @@ func TestResolveRole_ImplementorHasNoParent(t *testing.T) {
 func TestResolveRole_UnknownParentDefaultsToSubagent(t *testing.T) {
 	ev := Event{Type: "assistant", ParentToolUseID: "toolu_unknown"}
 	taskRole := map[string]string{}
-	got := ResolveRole(ev, taskRole)
+	got := ResolveRole(ev, taskRole, "")
 	if got != DefaultRole {
 		t.Errorf("ResolveRole() = %q, want %q", got, DefaultRole)
 	}
@@ -26,7 +26,34 @@ func TestResolveRole_UnknownParentDefaultsToSubagent(t *testing.T) {
 func TestResolveRole_KnownParentReturnsRecordedRole(t *testing.T) {
 	ev := Event{Type: "assistant", ParentToolUseID: "toolu_1"}
 	taskRole := map[string]string{"toolu_1": "scout"}
-	got := ResolveRole(ev, taskRole)
+	got := ResolveRole(ev, taskRole, "")
+	if got != "scout" {
+		t.Errorf("ResolveRole() = %q, want %q", got, "scout")
+	}
+}
+
+func TestResolveRole_TopLevelRoleAppliesWhenParentEmpty(t *testing.T) {
+	ev := Event{Type: "assistant", ParentToolUseID: ""}
+	taskRole := map[string]string{}
+	got := ResolveRole(ev, taskRole, "reviewer")
+	if got != ReviewerRole {
+		t.Errorf("ResolveRole() = %q, want %q", got, ReviewerRole)
+	}
+}
+
+func TestResolveRole_EmptyTopLevelRoleFallsBackToImplementor(t *testing.T) {
+	ev := Event{Type: "assistant", ParentToolUseID: ""}
+	taskRole := map[string]string{}
+	got := ResolveRole(ev, taskRole, "")
+	if got != ImplementorRole {
+		t.Errorf("ResolveRole() = %q, want %q", got, ImplementorRole)
+	}
+}
+
+func TestResolveRole_TopLevelRoleDoesNotAffectRealParent(t *testing.T) {
+	ev := Event{Type: "assistant", ParentToolUseID: "toolu_1"}
+	taskRole := map[string]string{"toolu_1": "scout"}
+	got := ResolveRole(ev, taskRole, "reviewer")
 	if got != "scout" {
 		t.Errorf("ResolveRole() = %q, want %q", got, "scout")
 	}
